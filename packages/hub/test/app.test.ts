@@ -778,6 +778,58 @@ describe('createHubApp', () => {
     expect(await app.post['/dock/select']!({ rowKey: row.key })).toEqual({ status: 200, body: { selected: false, voice: 'Open its window to talk to it.' } });
   });
 
+  it("gives a Code Mode row a Persona menu with the session's persona checked, which pins through /action, and none with voice off (architecture.md § Personas)", async () => {
+    const personas = [
+      { id: 'nova', name: 'Nova', personality: 'Warm.' },
+      { id: 'orion', name: 'Orion' },
+    ];
+
+    writeSettings({ sessions: { installHooks: false, codeMode: true }, sources: { adhoc: { repoRoot: 'D:/scratch' } }, voice: { enabled: true, personas } });
+    const app = await start(() => {});
+
+    app.runtime.send({ type: 'adhoc', prompt: 'Primary', repoRoot: 'D:/scratch', start: true });
+    await app.runtime.settled();
+
+    type Control = { label: string; action: Record<string, unknown>; group?: string; checked?: boolean };
+    const menu = () => (app.dock() as { groups: { rows: { controls: Control[] }[] }[] }).groups.flatMap((group) => group.rows)[0]!.controls.filter((control) => control.group === 'Persona');
+    const sessionId = app.runtime.snapshot().workItems[0]!.sessions.at(-1)!.id;
+
+    expect(menu().map((control) => [control.label, control.checked])).toEqual([
+      ['Nova', true],
+      ['Orion', false],
+    ]);
+    expect(menu()[1]!.action).toEqual({ type: 'persona', sessionId, personaId: 'orion' });
+
+    expect(await app.post['/action']!(menu()[1]!.action)).toEqual({ status: 200, body: { done: true } });
+    expect(menu().map((control) => [control.label, control.checked])).toEqual([
+      ['Nova', false],
+      ['Orion (pinned)', true],
+      ['Clear pin', false],
+    ]);
+    expect(await app.post['/action']!(menu()[2]!.action)).toEqual({ status: 200, body: { done: true } });
+    expect(menu().map((control) => control.label)).toEqual(['Nova', 'Orion']);
+    expect(await app.post['/action']!({ type: 'persona', sessionId, personaId: 'vega' })).toEqual({ status: 409, body: { error: 'No persona vega in voice.personas.' } });
+    expect(await app.post['/action']!({ type: 'persona', sessionId, personaId: 3 })).toEqual({ status: 400, body: { error: 'Unknown action.' } });
+
+    // Personas are part of voice.
+    writeSettings({ sessions: { installHooks: false, codeMode: true }, sources: { adhoc: { repoRoot: 'D:/scratch' } }, voice: { enabled: false, personas } });
+    await until(() => (menu().length === 0 ? true : null));
+    expect(await app.post['/action']!({ type: 'persona', sessionId, personaId: 'orion' })).toEqual({ status: 409, body: { error: 'Voice is off (voice.enabled).' } });
+  });
+
+  it('gives a row no Persona menu with an empty roster', async () => {
+    writeSettings({ sessions: { installHooks: false, codeMode: true }, sources: { adhoc: { repoRoot: 'D:/scratch' } }, voice: { enabled: true } });
+    const app = await start(() => {});
+
+    app.runtime.send({ type: 'adhoc', prompt: 'Primary', repoRoot: 'D:/scratch', start: true });
+    await app.runtime.settled();
+
+    const controls = (app.dock() as { groups: { rows: { controls: Array<{ group?: string }> }[] }[] }).groups.flatMap((group) => group.rows)[0]!.controls;
+
+    expect(controls.length).toBeGreaterThan(0);
+    expect(controls.some((control) => control.group !== undefined)).toBe(false);
+  });
+
   it('opens a folder-hosted session only in a folder window on that folder, never in an item window that holds the folder (architecture.md § Window scope)', async () => {
     writeSettings({ sessions: { installHooks: false } });
     const app = await start(() => {});

@@ -2,11 +2,11 @@ import { appendFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { PERMISSION_PROMPT, Store, windowFileKey } from '@switchboard/core';
+import { PERMISSION_PROMPT, Store, toneSection, toneVersion, windowFileKey } from '@switchboard/core';
 import type { Session as StoredSession } from '@switchboard/core';
 import { projectSlug } from '@switchboard/claude';
 import { ConversationService, sessionView } from '../src/conversation.js';
-import type { ConversationVoice } from '../src/conversation.js';
+import type { ConversationServiceDeps, ConversationVoice, PersonaView } from '../src/conversation.js';
 import { windowOf } from '../src/dock.js';
 import { canonicalFolder, WindowScopes } from '../src/windows.js';
 import { NOW, item, session, snapshot } from './views.js';
@@ -879,7 +879,7 @@ describe('ConversationService', () => {
 });
 
 describe('ConversationService send', () => {
-  function setupSend(held = new FakeHeld(), holderAnswerMs?: number, voice?: ConversationVoice) {
+  function setupSend(held = new FakeHeld(), holderAnswerMs?: number, voice?: ConversationVoice, extra: Partial<ConversationServiceDeps> = {}) {
     const store = Store.open(':memory:');
     const view = world();
     let keys = 0;
@@ -906,6 +906,7 @@ describe('ConversationService send', () => {
         newId: () => String(++id),
         ...(voice === undefined ? {} : { voice }),
         log: (line) => logs.push(line),
+        ...extra,
       });
     const service = make();
 
@@ -996,6 +997,53 @@ describe('ConversationService send', () => {
     await vi.waitFor(() => expect(store.message('m-2')?.delivery).toBe('sent'));
     expect(held.writes[2]).toBe('\u001b[200~/compact\u001b[201~');
     expect(calls.filter((call) => call.startsWith('spokenFor'))).toEqual(['spokenFor s2 false', 'spokenFor s2 true']);
+  });
+
+  it("lists the personas and pins one to the window's session only, with the header showing it at once (architecture.md § Personas)", () => {
+    const nova = { id: 'nova', name: 'Nova', voice: 'cedar', style: 'pair', personality: 'Warm.' } as const;
+    let personas: PersonaView = { enabled: true, personas: [nova], playbookPersonas: {} };
+    const pins: string[] = [];
+    let store!: Store;
+    const { service, open, view, ...rest } = setupSend(new FakeHeld(), undefined, undefined, {
+      personas: () => personas,
+      pinPersona: (sessionId, personaId) => {
+        if (personaId === 'vega') {
+          return 'No persona vega in voice.personas.';
+        }
+
+        pins.push(`${sessionId} ${personaId}`);
+        store.updateSession(sessionId, { personaId, personaPinned: personaId !== null });
+        return null;
+      },
+    });
+
+    store = rest.store;
+
+    const mine = open(view.file);
+    const theirs = open(view.otherFile);
+    let op = 0;
+    const command = (name: 'persona' | 'personas', patch: Record<string, unknown> = {}, window = mine.key) => service.personaCommand(name, { window, scopeGen: 1, opId: `o${++op}`, ...patch });
+
+    expect(mine.frames[0]).toMatchObject({ type: 'hello', sessions: [{ id: 's2', persona: null }] });
+    expect(command('personas')).toEqual({ status: 200, body: { personas: [{ id: 'nova', name: 'Nova' }] } });
+    expect(command('persona', { sessionId: 's2', personaId: 'nova' })).toEqual({ status: 200, body: { persona: { id: 'nova', name: 'Nova', pinned: true, tonePending: true } } });
+    expect(mine.frames.at(-1)).toMatchObject({ type: 'session', session: { id: 's2', persona: { name: 'Nova', pinned: true } } });
+    expect(theirs.frames.filter((frame) => frame.type === 'session')).toMatchObject([{ session: { id: 's3', persona: null } }]);
+    expect(command('persona', { sessionId: 's2', personaId: null })).toMatchObject({ status: 200, body: { persona: null } });
+    // A repeated opId answers the first result and pins nothing again.
+    expect(command('persona', { sessionId: 's2', personaId: 'nova', opId: 'o2' })).toEqual({ status: 200, body: { persona: { id: 'nova', name: 'Nova', pinned: true, tonePending: true } } });
+    expect(store.session('s2')).toMatchObject({ personaId: null, personaPinned: false });
+
+    // Another window's session, a stale generation, an unknown persona, a malformed body and voice off are refused.
+    expect(command('persona', { sessionId: 's3', personaId: 'nova' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(command('persona', { sessionId: 's3', personaId: 'nova' }, theirs.key)).toMatchObject({ status: 200 });
+    expect(command('persona', { sessionId: 's2', personaId: 'nova', scopeGen: 0 })).toEqual({ status: 409, body: { error: "The window's conversation changed." } });
+    expect(command('persona', { sessionId: 's2', personaId: 'vega' })).toEqual({ status: 409, body: { error: 'No persona vega in voice.personas.' } });
+    expect(command('persona', { sessionId: 's2' })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, personaId}.' } });
+    personas = { ...personas, enabled: false };
+    expect(command('personas')).toEqual({ status: 200, body: { personas: [] } });
+    expect(command('persona', { sessionId: 's2', personaId: 'nova' })).toEqual({ status: 409, body: { error: 'Voice is off (voice.enabled).' } });
+    expect(pins).toEqual(['s2 nova', 's2 null', 's3 nova']);
   });
 
   it('runs the voice commands for the window only: Talk here, Stop speaking, Speak replies and Replay, with their refusals', () => {
@@ -1292,6 +1340,22 @@ describe('sessionView', () => {
     expect(sessionView(session({ codeMode: true, state: 'idle' }), true, false)).toMatchObject({ conversation: 'read-only', reason: 'Switchboard cannot follow this session while sessions.installHooks is off.' });
     expect(sessionView(session({ state: 'waiting', stateDetail: null }), false, true)).toMatchObject({ waitingFor: 'question', conversation: 'none', current: false });
     expect(sessionView(session({ codeMode: true, state: 'failed' }), true, true)).toMatchObject({ state: 'idle', conversation: 'full' });
+  });
+
+  it("shows the session's persona while voice is on, and its tone section pending until the prompt has the current one (architecture.md § Personas)", () => {
+    const nova = { id: 'nova', name: 'Nova', voice: 'cedar', style: 'pair', personality: 'Warm.' } as const;
+    const settings: PersonaView = { enabled: true, personas: [nova], playbookPersonas: {} };
+    const delivered = toneVersion(toneSection(nova));
+
+    expect(sessionView(session({ codeMode: true, personaId: 'nova', personaVersion: delivered }), true, true, settings).persona).toEqual({ id: 'nova', name: 'Nova', pinned: false, tonePending: false });
+    expect(sessionView(session({ codeMode: true, personaId: 'nova', personaVersion: null, personaPinned: true }), true, true, settings).persona).toEqual({ id: 'nova', name: 'Nova', pinned: true, tonePending: true });
+    // An ended session gets the current section when it resumes.
+    expect(sessionView(session({ codeMode: true, state: 'ended', personaId: 'nova', personaVersion: null }), true, true, settings).persona?.tonePending).toBe(false);
+    // None with voice off, no persona, one gone from the roster, or no settings.
+    expect(sessionView(session({ codeMode: true, personaId: 'nova' }), true, true, { ...settings, enabled: false }).persona).toBeNull();
+    expect(sessionView(session({ codeMode: true, personaId: null }), true, true, settings).persona).toBeNull();
+    expect(sessionView(session({ codeMode: true, personaId: 'vega' }), true, true, settings).persona).toBeNull();
+    expect(sessionView(session({ codeMode: true, personaId: 'nova' }), true, true).persona).toBeNull();
   });
 });
 

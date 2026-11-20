@@ -211,7 +211,16 @@ export interface DockRow {
    * enters as the action's `field`, such as Start with guidance… (PRD R77), and with `choice`, a changed choice as the action's `choice.field`,
    * such as Start with guidance…'s playbook (PRD R35).
    */
-  controls: { label: string; glyph: string; action: Record<string, unknown>; confirm?: { question: string; detail: string; action: string }; input?: NonNullable<Control['input']> }[];
+  controls: {
+    label: string;
+    glyph: string;
+    action: Record<string, unknown>;
+    confirm?: { question: string; detail: string; action: string };
+    input?: NonNullable<Control['input']>;
+    /** The submenu it is listed in, such as `Persona`, and whether it is checked there (architecture.md § Personas). */
+    group?: string;
+    checked?: boolean;
+  }[];
   /** The label of the control the row shows as a button, or null (PRD R27). */
   main: string | null;
   /** The main control's codicon glyph, shown before its label, or null. */

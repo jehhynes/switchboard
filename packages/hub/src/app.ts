@@ -13,7 +13,7 @@ import { forumSource } from '@switchboard/forum';
 import { findBash } from './bash.js';
 import { cardsOf } from './cards.js';
 import { dockView, windowOf, windowsDir, writeWorkspaceFile } from './dock.js';
-import type { DockTerminal } from './dock.js';
+import type { DockRow, DockTerminal } from './dock.js';
 import { isPastePath } from './report.js';
 import { codeModeTerminal, rowKeyOf } from './rows.js';
 import { DEBRIEF_SCAN_MS, Debriefs } from './debriefs.js';
@@ -38,7 +38,7 @@ const RELOAD_DEBOUNCE_MS = 300;
 export const VOICE_GLYPH = '\u{ec12}';
 
 /** Operator events the dock may send (PRD R27). */
-const OPERATOR_EVENTS = new Set(['adhoc', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retry', 'stop', 'delete', 'open-question', 'pick', 'retriage-pool', 'snooze', 'restore', 'comment', 'move', 'reset-position']);
+const OPERATOR_EVENTS = new Set(['adhoc', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retry', 'stop', 'delete', 'open-question', 'pick', 'retriage-pool', 'snooze', 'restore', 'comment', 'move', 'reset-position', 'persona']);
 
 const REPORT_KINDS = new Set(['stage', 'worktree', 'done', 'approval', 'link', 'playbook', 'paste', 'task', 'question']);
 
@@ -153,6 +153,13 @@ export function parseAction(body: unknown): FlowEvent | null {
 
   if ((body['type'] === 'start' || body['type'] === 'pick') && ((body['guidance'] != null && typeof body['guidance'] !== 'string') || (body['playbook'] != null && typeof body['playbook'] !== 'string') || (body['prompt'] != null && typeof body['prompt'] !== 'string'))) {
     return null;
+  }
+
+  // A dock row's Persona menu pins a persona to the row's session, or clears the pin (architecture.md § Personas).
+  if (body['type'] === 'persona') {
+    const { sessionId, personaId } = body;
+
+    return typeof sessionId === 'string' && (personaId === null || typeof personaId === 'string') ? { type: 'persona', sessionId, personaId } : null;
   }
 
   if (body['type'] === 'run-schedule') {
@@ -366,6 +373,8 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       selected: (key) => voice.selected(key),
       expressive: () => config.settings.voice.expressive,
     },
+    personas: () => config.settings.voice,
+    pinPersona: (sessionId, personaId) => runtime.send({ type: 'persona', sessionId, personaId }).refused,
     ...claudePaths(claudeRoot, homedir(), Boolean(process.env['CLAUDE_CONFIG_DIR'])),
     screen: (session, scrollback) => runtime.heldScreen(session, scrollback),
     input: { reserve: (sessionId, launch) => runtime.reserveInput(sessionId, launch), write: (session, data) => runtime.writeHeld(session, data), cannotType: () => runtime.heldCannotType() },
@@ -459,11 +468,40 @@ const dockWithRuns = () => {
           open: row.open?.type === 'terminal' ? { ...executable(row.open), type: 'terminal' as const } : row.open,
           terminal: row.terminal === null ? null : executable(row.terminal),
           voice: row.key === activeRow ? { glyph: VOICE_GLYPH, title: 'The voice speaks for this session.' } : null,
+          controls: [...row.controls, ...personaControls(row.key)],
         })),
       })),
     };
   };
   const dockRows = () => dockWithRuns().groups.flatMap((group) => group.rows);
+
+  /**
+   * A row's Persona menu (architecture.md § Personas): with `voice.enabled` on and a roster, each persona for the work item's current Code Mode
+   * session, the session's own checked, and Clear pin while one is pinned.
+   */
+  function personaControls(rowKey: string): DockRow['controls'] {
+    const voiceSettings = config.settings.voice;
+    const workItemId = rowKey.startsWith('item:') ? Number(rowKey.slice(5)) : null;
+    const session = workItemId === null ? null : (store.sessionsFor(workItemId).at(-1) ?? null);
+
+    if (!voiceSettings.enabled || voiceSettings.personas.length === 0 || session === null || session.codeMode !== true) {
+      return [];
+    }
+
+    const pinned = session.personaPinned === true;
+    const action = (personaId: string | null) => ({ type: 'persona', sessionId: session.id, personaId });
+
+    return [
+      ...voiceSettings.personas.map((persona) => ({
+        label: pinned && session.personaId === persona.id ? `${persona.name} (pinned)` : persona.name,
+        glyph: '',
+        action: action(persona.id),
+        group: 'Persona',
+        checked: session.personaId === persona.id,
+      })),
+      ...(pinned ? [{ label: 'Clear pin', glyph: '', action: action(null), group: 'Persona', checked: false }] : []),
+    ];
+  }
 
   runtime.onChange(() => builder.schedule());
 
@@ -652,6 +690,8 @@ const dockWithRuns = () => {
       '/v1/conversation/stop-speaking': async (body) => (isRecord(body) ? conversation.voiceCommand('stop-speaking', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId}.' } }),
       '/v1/conversation/speak-replies': async (body) => (isRecord(body) ? conversation.voiceCommand('speak-replies', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, on}.' } }),
       '/v1/conversation/replay': async (body) => (isRecord(body) ? conversation.voiceCommand('replay', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, replyId}.' } }),
+      '/v1/conversation/personas': async (body) => (isRecord(body) ? conversation.personaCommand('personas', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId}.' } }),
+      '/v1/conversation/persona': async (body) => (isRecord(body) ? conversation.personaCommand('persona', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, personaId}.' } }),
       '/claim': async (body) => {
         if (!isRecord(body) || typeof body['folder'] !== 'string' || !optionalString(body['workspace']) || !(body['focused'] === undefined || typeof body['focused'] === 'boolean') || !optionalString(body['window'])) {
           return { status: 400, body: { error: 'Expected {folder, workspace?, focused?, window?}.' } };

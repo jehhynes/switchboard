@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { countsUnread, inTranscript } from '@switchboard/core';
 import type { ConversationMessage, ConversationReply, ConversationStatus, Session, SpokenState, Store } from '@switchboard/core';
-import { artifactsDir, hostKey, PERMISSION_PROMPT, START_PROMPT } from '@switchboard/core';
+import { artifactsDir, hostKey, PERMISSION_PROMPT, personaById, sessionTone, START_PROMPT, toneVersion } from '@switchboard/core';
+import type { PersonaSettings } from '@switchboard/core';
 import { findTranscript } from '@switchboard/claude';
 import { ArtifactFolder, MAX_MESSAGE_CHARS, NotWritten, SNAPSHOT_SCROLLBACK, SessionCommands, SessionConversation, SessionInput, messageTags, pasteText, readSnapshot } from '@switchboard/conversation';
 import type { Artifact, ConversationChange, InputOutcome, SlashCommand } from '@switchboard/conversation';
@@ -34,7 +35,15 @@ export interface SessionView {
   /** `full`: a live, observed Code Mode session; `read-only`: one that ended or is unobserved; `none`: a background session. */
   conversation: 'full' | 'read-only' | 'none';
   reason: string | null;
+  /**
+   * The session's persona while `voice.enabled` is on (architecture.md § Personas), else null. `pinned`: the operator pinned it; `tonePending`:
+   * the live session's prompt has another tone section until its next resume or compaction.
+   */
+  persona: { id: string; name: string; pinned: boolean; tonePending: boolean } | null;
 }
+
+/** The voice settings a session's persona is read from. */
+export type PersonaView = PersonaSettings & { enabled: boolean };
 
 /** A message names its work item, so a window that hears one was not sent puts it back in that conversation's draft only. */
 export type MessageView = { type: 'message' } & Omit<ConversationMessage, 'transcriptUuid' | 'opId' | 'pastedAt' | 'launch'>;
@@ -76,7 +85,7 @@ export function statusView(status: ConversationStatus): StatusView {
   return { id: status.id, sessionId: status.sessionId, at: status.at, markdown: status.markdown, fallback: false, unread: status.seenAt === null };
 }
 
-export function sessionView(session: Session, current: boolean, hooks: boolean): SessionView {
+export function sessionView(session: Session, current: boolean, hooks: boolean, personas: PersonaView | null = null): SessionView {
   const state = session.state === 'failed' ? 'idle' : session.state;
   const waitingFor = session.state !== 'waiting' ? null : session.stateDetail === PERMISSION_PROMPT ? 'permission' : session.stateDetail === START_PROMPT ? 'start-prompt' : 'question';
   const conversation = session.codeMode !== true ? 'none' : session.state === 'ended' || !hooks ? 'read-only' : 'full';
@@ -99,7 +108,21 @@ export function sessionView(session: Session, current: boolean, hooks: boolean):
     current,
     conversation,
     reason,
+    persona: personaOf(session, personas),
   };
+}
+
+/** A session's persona as its view shows it, or null with voice off, an empty roster or a persona no longer in it. */
+function personaOf(session: Session, settings: PersonaView | null): SessionView['persona'] {
+  const persona = settings === null || !settings.enabled ? null : personaById(settings, session.personaId);
+
+  if (persona === null || settings === null) {
+    return null;
+  }
+
+  const tonePending = session.state !== 'ended' && toneVersion(sessionTone(settings, session)) !== (session.personaVersion ?? null);
+
+  return { id: persona.id, name: persona.name, pinned: session.personaPinned === true, tonePending };
 }
 
 export function itemView(item: ({ type: 'message' } & ConversationMessage) | ({ type: 'reply' } & ConversationReply)): ItemView {
@@ -175,6 +198,10 @@ export interface ConversationServiceDeps {
   messageAdded?(workItemId: number, text: string): void;
   /** Speech out (architecture.md § Voice); without it no window has voice. */
   voice?: ConversationVoice;
+  /** The voice settings personas are read from (architecture.md § Personas); without them no session has a persona. */
+  personas?(): PersonaView;
+  /** Pins a persona to a session, or clears its pin with null; why not, or null. */
+  pinPersona?(sessionId: string, personaId: string | null): string | null;
   log(line: string): void;
 }
 
@@ -466,7 +493,7 @@ export class ConversationService {
       }
 
       const session = this.deps.store.sessionsFor(item.id).at(-1) ?? null;
-      const view = session === null ? null : sessionView(session, true, this.deps.hooks());
+      const view = session === null ? null : sessionView(session, true, this.deps.hooks(), this.deps.personas?.() ?? null);
 
       return [{ workItemId: item.id, title: ticket.title, primary: ref.primary, sessionId: session?.id ?? null, state: view?.state ?? null, conversation: view?.conversation ?? null, unread: session === null ? 0 : this.deps.store.unreadCount(session.id) }];
     });
@@ -625,7 +652,7 @@ export class ConversationService {
     return {
       protocol: CONVERSATION_PROTOCOL,
       scope: view,
-      sessions: current === null ? [] : [sessionView(current, true, this.deps.hooks())],
+      sessions: current === null ? [] : [sessionView(current, true, this.deps.hooks(), this.deps.personas?.() ?? null)],
       items: page.items.filter((item) => !item.withdrawn).map(itemView),
       more: page.more,
       status,
@@ -782,7 +809,7 @@ export class ConversationService {
         continue;
       }
 
-      const view = sessionView(session, true, this.deps.hooks());
+      const view = sessionView(session, true, this.deps.hooks(), this.deps.personas?.() ?? null);
       const text = JSON.stringify(view);
 
       if (this.#shown.get(key) !== text) {
@@ -853,7 +880,7 @@ export class ConversationService {
       return { status: 403, body: { error: 'Not in this window.' } };
     }
 
-    const view = sessionView(session, true, this.deps.hooks());
+    const view = sessionView(session, true, this.deps.hooks(), this.deps.personas?.() ?? null);
 
     if (view.conversation !== 'full') {
       return { status: 409, body: { error: view.reason ?? SESSION_ENDED } };
@@ -1061,6 +1088,66 @@ export class ConversationService {
     const why = name === 'talk-here' ? voice.talkHere(window) : name === 'stop-speaking' ? voice.stopSpeaking(window) : voice.replay(window, replyId as string);
 
     return why === null ? { status: 200, body: { done: true } } : { status: why === 'Not in this window.' ? 403 : 409, body: { error: why } };
+  }
+
+  /**
+   * `personas` (architecture.md § Personas): the roster the header offers, `[{id, name}]`, empty while `voice.enabled` is off. `persona
+   * {sessionId, personaId | null}` pins a persona to the window's selected conversation's current session, or clears its pin; refused with 403
+   * outside the scope, 409 for a stale `scopeGen`, while voice is off and with the flow's refusal.
+   */
+  /** Each `persona` command's answer, by window key and `opId`. */
+  readonly #pinned = new Map<string, { status: number; body: unknown }>();
+
+  personaCommand(name: 'personas' | 'persona', body: Record<string, unknown>): { status: number; body: unknown } {
+    const { window, scopeGen, opId, sessionId, personaId } = body;
+
+    if (typeof window !== 'string' || typeof scopeGen !== 'number' || typeof opId !== 'string' || (name === 'persona' && (typeof sessionId !== 'string' || !(personaId === null || typeof personaId === 'string')))) {
+      return { status: 400, body: { error: name === 'persona' ? 'Expected {window, scopeGen, opId, sessionId, personaId}.' : 'Expected {window, scopeGen, opId}.' } };
+    }
+
+    const refused = refusal(this.deps.windows.scope(window), scopeGen, name === 'persona' ? (sessionId as string) : null);
+
+    if (refused !== null) {
+      return refused;
+    }
+
+    const settings = this.deps.personas?.() ?? null;
+
+    if (name === 'personas') {
+      return { status: 200, body: { personas: settings === null || !settings.enabled ? [] : settings.personas.map((persona) => ({ id: persona.id, name: persona.name })) } };
+    }
+
+    if (settings === null || !settings.enabled || this.deps.pinPersona === undefined) {
+      return { status: 409, body: { error: 'Voice is off (voice.enabled).' } };
+    }
+
+    // A repeated opId answers the first result and pins nothing again, so a retried Clear pin cannot resolve another persona.
+    const done = `${window} ${opId}`;
+    const first = this.#pinned.get(done);
+
+    if (first !== undefined) {
+      return first;
+    }
+
+    const why = this.deps.pinPersona(sessionId as string, personaId as string | null);
+    let answer: { status: number; body: unknown };
+
+    if (why !== null) {
+      answer = { status: 409, body: { error: why } };
+    } else {
+      // The header shows the pin at once, before the next snapshot.
+      this.sessionsChanged();
+      answer = { status: 200, body: { persona: sessionView(this.deps.store.session(sessionId as string)!, true, this.deps.hooks(), settings).persona } };
+    }
+
+    this.#pinned.set(done, answer);
+
+    // Kept for the newest commands only.
+    if (this.#pinned.size > 200) {
+      this.#pinned.delete(this.#pinned.keys().next().value!);
+    }
+
+    return answer;
   }
 
   /** The conversations made by `new-conversation`, by window file and `opId`, so a repeated command answers the first work item. */
