@@ -10,6 +10,28 @@ public sealed class SwitcherTests
     readonly FakeVsCode vsCode = new();
     readonly List<TimeSpan> waits = [];
 
+    /// <summary>The canonical folder as a hub on this platform could send it: with backslashes on Windows only, where it is one folder.</summary>
+    static string HubSpelling(string folder) => OperatingSystem.IsWindows() ? folder.Replace('/', '\\') : folder;
+
+    [Fact]
+    public void FolderKey_Spellings_MatchTheHubsHostKey()
+    {
+        Assert.Equal(Switching.Switcher.FolderKey("/"), Switching.Switcher.FolderKey("//"));
+
+        if (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS())
+        {
+            Assert.Equal("d:/git/étage", Switching.Switcher.FolderKey("D:\\git\\Étage\\"));
+            Assert.Equal(Switching.Switcher.FolderKey("/tmp/a/b"), Switching.Switcher.FolderKey("/tmp/a\\b"));
+        }
+        else
+        {
+            // A backslash is part of a POSIX folder's name, and case tells two folders apart.
+            Assert.NotEqual(Switching.Switcher.FolderKey("/tmp/a/b"), Switching.Switcher.FolderKey("/tmp/a\\b"));
+            Assert.NotEqual(Switching.Switcher.FolderKey("/tmp/A"), Switching.Switcher.FolderKey("/tmp/a"));
+            Assert.Equal("/tmp/a", Switching.Switcher.FolderKey("/tmp/a//"));
+        }
+    }
+
     Switcher Switcher() => new(hub, windows, vsCode, (span) =>
     {
         waits.Add(span);
@@ -64,7 +86,7 @@ public sealed class SwitcherTests
         // An item window whose name matches the row's window is never the destination: a folder window is found by no title. The click is done
         // once the hub lists a folder window on that folder, with either separator.
         windows.Open["support"] = (42, 0);
-        hub.Ended = Fixtures.View with { Windows = new OpenWindows([], null, 1, ["D:\\git\\support"]) };
+        hub.Ended = Fixtures.View with { Windows = new OpenWindows([], null, 1, [HubSpelling("D:/git/support")]) };
 
         Assert.Null(await Switcher().Click(hosted, TestContext.Current.CancellationToken));
         Assert.Equal(["select item:7", "open aaaa1111-native D:/git/widgets/.worktrees/107-fix support", "until 20s"], hub.Calls);
@@ -79,7 +101,7 @@ public sealed class SwitcherTests
         // The hub stored New session's conversation as the folder's selection, so nothing is selected or left for the window; an item window
         // named like the folder is never the destination.
         windows.Open["support"] = (42, 0);
-        hub.Ended = Fixtures.View with { Windows = new OpenWindows([], null, 1, ["D:\\git\\support"]) };
+        hub.Ended = Fixtures.View with { Windows = new OpenWindows([], null, 1, [HubSpelling("D:/git/support")]) };
 
         Assert.Null(await Switcher().OpenFolder("D:/git/support", TestContext.Current.CancellationToken));
         Assert.Equal(["until 20s"], hub.Calls);

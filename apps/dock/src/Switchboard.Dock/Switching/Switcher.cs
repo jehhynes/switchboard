@@ -131,9 +131,24 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
         return await until is null ? $"VS Code did not open a window on {folder} within {OpenWait.TotalSeconds:0} seconds." : null;
     }
 
-    /// <summary>Whether two canonical folders from the hub are one, by its spelling: separators and, on Windows and macOS, case aside.</summary>
-    static bool SameFolder(string a, string b) =>
-        string.Equals(a.Replace('\\', '/').TrimEnd('/'), b.Replace('\\', '/').TrimEnd('/'), OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
+    /// <summary>Whether two canonical folders from the hub are one, by the hub's <c>hostKey</c> (architecture.md § Window scope).</summary>
+    static bool SameFolder(string a, string b) => FolderKey(a) == FolderKey(b);
+
+    /// <summary>
+    /// A folder as the hub's <c>hostKey</c> compares it: on Windows and macOS with <c>/</c> for <c>\</c> and lower case; elsewhere as it is, since a POSIX folder name
+    /// may hold a backslash and differ from another only in case; with no trailing separator, except for a root.
+    /// </summary>
+    internal static string FolderKey(string folder)
+    {
+        if (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS())
+        {
+            return folder.Replace('\\', '/').TrimEnd('/').ToLowerInvariant();
+        }
+
+        var trimmed = folder.TrimEnd('/');
+
+        return trimmed.Length == 0 && folder.Length > 0 ? "/" : trimmed;
+    }
 
     /// <summary>Leaves the session to open for the item window, then brings the window forward or opens it; returns why not, or null.</summary>
     async Task<string?> ItemWindow(DockWindow window, DockOpen? open, CancellationToken cancel)
