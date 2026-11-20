@@ -214,6 +214,37 @@ describe('the Conversation view page', () => {
     expect([...root.querySelector('li[data-id="t1"]')!.children].map((child) => child.className)).toEqual(['box', 'stamp-line', 'delivery uncertain']);
   });
 
+  it('shows a time only where the minute changes from the item before, never repeating it under a message and over its reply', () => {
+    const at = (minute: number, second = 0) => new Date(2026, 10, 19, 13, minute, second).getTime();
+    const root = document.createElement('div');
+
+    root.innerHTML = renderConversation(
+      state([
+        message('m1', at(47, 5), '/support-process #453696'),
+        reply('r1', at(47, 40)),
+        reply('n1', at(48), { kind: 'note', opening: 'Conversation continued from another session.' }),
+        reply('r2', at(47, 50)),
+        reply('r3', at(59)),
+        message('m2', at(59, 30), 'Thanks'),
+        reply('r4', at(60)),
+      ]),
+      new Set(),
+      at(61),
+    );
+
+    const stamps = (id: string) => root.querySelector(`li[data-id="${id}"] > .stamp-line .stamp`)?.textContent ?? null;
+
+    // A note has no time and is not the item before; the minute after it is compared with the reply before it.
+    expect(['m1', 'r1', 'n1', 'r2', 'r3', 'm2', 'r4'].map(stamps)).toEqual(['1:47 PM', null, null, null, '1:59 PM', null, '2:00 PM']);
+    // A reply with no time takes no room for one.
+    expect(root.querySelector('li[data-id="r1"] > .stamp-line')).toBeNull();
+    expect([...root.querySelector('li[data-id="m2"]')!.children].map((child) => child.className)).toEqual(['box']);
+  });
+
+  it('leaves a reply with no text out of the timeline', () => {
+    expect(timeline([reply('r1', T0, { opening: ' \n ' }), reply('r2', T0 + 1)]).map((entry) => idOf(entry))).toEqual(['r2']);
+  });
+
   it('stamps each message and reply with its time, not a note, and puts a divider before a turn that starts on another day', () => {
     const at = (day: number, hour: number, minute: number) => new Date(2026, 10, day, hour, minute).getTime();
     const root = document.createElement('div');

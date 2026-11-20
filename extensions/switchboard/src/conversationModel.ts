@@ -195,8 +195,8 @@ function conversationEntries(items: ItemView[]): Entry[] {
       continue;
     }
 
-    // A reply that is only a status shows on the Status tab, not in the timeline.
-    if (item.withdrawn || placed.has(item.id) || (item.kind === 'reply' && item.opening === '' && item.rewrittenBy === null)) {
+    // A reply that is only a status shows on the Status tab, not in the timeline, and one with no text at all shows nothing.
+    if (item.withdrawn || placed.has(item.id) || (item.kind === 'reply' && item.opening.trim() === '' && item.rewrittenBy === null)) {
       continue;
     }
 

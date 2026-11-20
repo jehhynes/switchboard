@@ -110,7 +110,7 @@ export function renderMarkdown(text: string): string {
 }
 
 /** One of our messages: its bubble with its time under it, and for one typed in the composer, whether it went and why not. */
-function message(item: MessageView): string {
+function message(item: MessageView, stamped: boolean): string {
   const delivery =
     item.origin !== 'typed' || item.delivery === null
       ? ''
@@ -119,10 +119,10 @@ function message(item: MessageView): string {
   // A message sent in the terminal while the session was busy waits, dimmed, until Claude reads it; a typed message's line says where it is.
   const queued = item.provisional && item.origin === 'terminal';
 
-  return `<li class="message${item.provisional ? ' provisional' : ''}" data-id="${escape(item.id)}" tabindex="-1"${queued ? ' title="Sent; Claude has not read it yet"' : ''}><div class="box${COMMAND.test(item.text) ? ' command' : ''}">${escape(item.text)}</div>${stamp(item.at)}${delivery}</li>`;
+  return `<li class="message${item.provisional ? ' provisional' : ''}" data-id="${escape(item.id)}" tabindex="-1"${queued ? ' title="Sent; Claude has not read it yet"' : ''}><div class="box${COMMAND.test(item.text) ? ' command' : ''}">${escape(item.text)}</div>${stamped ? stamp(item.at) : ''}${delivery}</li>`;
 }
 
-function reply(item: ReplyView, earlier: ReplyView | null, open: ReadonlySet<string>): string {
+function reply(item: ReplyView, earlier: ReplyView | null, open: ReadonlySet<string>, stamped: boolean): string {
   if (item.kind === 'note') {
     return `<li class="note" data-id="${escape(item.id)}" tabindex="-1">${escape(item.opening)}</li>`;
   }
@@ -139,7 +139,7 @@ function reply(item: ReplyView, earlier: ReplyView | null, open: ReadonlySet<str
   const unread = item.unread ? ` unread" data-unread="${escape(item.id)}` : '';
   const dot = item.unread ? '<span class="dot" title="Unread"><span class="unread-label">Unread</span></span>' : '<span class="dot"></span>';
 
-  return `<li class="reply ${item.kind}${unread}" data-id="${escape(item.id)}" tabindex="-1">${stamp(item.at)}${dot}<div class="body">${renderMarkdown(item.opening)}${rewritten}</div>${actions}</li>`;
+  return `<li class="reply ${item.kind}${unread}" data-id="${escape(item.id)}" tabindex="-1">${stamped ? stamp(item.at) : ''}${dot}<div class="body">${renderMarkdown(item.opening)}${rewritten}</div>${actions}</li>`;
 }
 
 /** An artifact as a one-line row where it was written: it opens, it does not expand (architecture.md § Conversation view). */
@@ -303,6 +303,8 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
   const spinner = `<li class="working" title="Working on a reply"><span role="status">Working on a reply</span><span class="codicon codicon-loading${spin}" aria-hidden="true"></span></li>`;
   // A turn starts at each message; one that starts on another day than the turn before it has a divider, as in Claude Code's panel.
   let turnDay: string | null = null;
+  // A time shows only where the minute changes from the item before, so a message and the reply to it in the same minute read as one exchange.
+  let lastMinute: string | null = null;
   const entries = shown.map((entry, index) => {
     if (entry.type === 'artifact') {
       return artifactRow(entry.artifact) + (index === waiting ? spinner : '');
@@ -317,7 +319,16 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
       turnDay = day;
     }
 
-    return divider + (entry.type === 'message' ? message(entry.item) : reply(entry.item, entry.earlier, open)) + (index === waiting ? spinner : '');
+    // A note has no time, and does not count as the item before.
+    const timed = entry.type === 'message' || entry.item.kind !== 'note';
+    const minute = `${dayOf(entry.item.at)} ${STAMP.format(entry.item.at)}`;
+    const stamped = timed && (minute !== lastMinute || divider !== '');
+
+    if (timed) {
+      lastMinute = minute;
+    }
+
+    return divider + (entry.type === 'message' ? message(entry.item, stamped) : reply(entry.item, entry.earlier, open, stamped)) + (index === waiting ? spinner : '');
   });
   const earlier = state.more ? '<button class="earlier-items" data-action="earlier">Show earlier messages</button>' : '';
   const body = state.session === null ? '<p class="empty">No session has started yet.</p>' : entries.length === 0 ? '<p class="empty">No messages yet.</p>' : `<ol class="timeline" tabindex="0" aria-label="Conversation">${entries.join('')}</ol>`;
