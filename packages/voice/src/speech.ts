@@ -61,6 +61,10 @@ export class Speech {
   #bargedTurn: string | null = null;
   /** When the last reply or needs-you sound stopped playing. */
   #quietSince = -Infinity;
+  #muted = false;
+  /** The needs-you sound's playback while it plays, and a count that muting raises so a sound still opening never plays. */
+  #chimePlayback: Playback | null = null;
+  #chimeRun = 0;
 
   constructor(private readonly deps: SpeechDeps) {}
 
@@ -83,6 +87,11 @@ export class Speech {
   }
 
   speak(item: SpeechItem): void {
+    if (this.#muted) {
+      this.#unplayed(item, 'skipped');
+      return;
+    }
+
     if (this.#bargedTurn !== null && item.turn === this.#bargedTurn) {
       this.#report(item, 'skipped', null, null);
       return;
@@ -164,8 +173,27 @@ export class Speech {
     this.#next();
   }
 
+  /**
+   * Nothing plays while muted, as while the operator is away from the computer (architecture.md § Dictation): muting stops as Stop speaking does
+   * and drops a waiting needs-you sound; a reply offered while muted is `skipped` and a needs-you sound dropped.
+   */
+  mute(on: boolean): void {
+    this.#muted = on;
+
+    if (on) {
+      this.#chimePending = false;
+      this.#chimeRun++;
+      this.#chimePlayback?.stop();
+      this.#stop();
+    }
+  }
+
   /** The needs-you sound: now, or after the reply playing now. */
   earcon(): void {
+    if (this.#muted) {
+      return;
+    }
+
     this.#chimePending = true;
     this.#next();
   }
@@ -200,16 +228,23 @@ export class Speech {
   async #chime(): Promise<void> {
     this.#chiming = true;
 
+    const run = this.#chimeRun;
+
     try {
       const playback = await this.deps.output.open(this.deps.device());
 
-      await playback.write(needsYouChime());
-      await playback.drain();
+      if (run === this.#chimeRun) {
+        this.#chimePlayback = playback;
+        await playback.write(needsYouChime());
+        await playback.drain();
+      }
+
       playback.stop();
     } catch (error) {
       this.deps.log(`the needs-you sound did not play: ${(error as Error).message}`);
       this.deps.failed((error as Error).message);
     } finally {
+      this.#chimePlayback = null;
       this.#chiming = false;
       this.#quietSince = this.deps.now();
       this.#next();

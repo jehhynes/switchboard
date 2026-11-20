@@ -15,6 +15,9 @@ describe('parseRemote', () => {
 describe('voice protocol', () => {
   it('reads the dictation messages and a target\'s repository, and refuses malformed ones', () => {
     expect(parseHubMessage('{"type":"mic","on":true}')).toEqual({ type: 'mic', on: true });
+    expect(parseHubMessage('{"type":"mic","on":true,"restore":true}')).toEqual({ type: 'mic', on: true, restore: true });
+    expect(parseHubMessage('{"type":"mic","on":true,"restore":false}')).toEqual({ type: 'mic', on: true });
+    expect(parseHubMessage('{"type":"mic","on":true,"restore":1}')).toEqual({ error: 'Invalid mic message.' });
     expect(parseHubMessage('{"type":"typing","on":false}')).toEqual({ type: 'typing', on: false });
     expect(parseHubMessage('{"type":"mic","on":"yes"}')).toEqual({ error: 'Invalid mic message.' });
     expect(parseHubMessage('{"type":"context","sessionId":"s1","lastReply":"Done."}')).toEqual({ type: 'context', sessionId: 's1', lastReply: 'Done.' });

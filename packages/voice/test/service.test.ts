@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from '@switchboard/core/settings';
+import type { LockEvent } from '../src/lockWatch.js';
 import type { VoiceMessage } from '../src/protocol.js';
 import { FOCUS_DEBOUNCE_MS } from '../src/routing.js';
 import { VoiceService } from '../src/service.js';
@@ -112,6 +113,117 @@ describe('VoiceService', () => {
     expect(referenced()).toBe(480 + 48_000);
     service.close();
     expect(calls.at(-1)).toBe('close');
+  });
+
+  it('turns the mic off and silences speech while the computer is locked, asleep or disconnected, and leaves the mic off after', async () => {
+    const clock = new Clock();
+    const tts = new FakeTts();
+    const output = new FakeOutput();
+    const sent: VoiceMessage[] = [];
+    const logs: string[] = [];
+    const calls: string[] = [];
+    let lock!: (event: LockEvent) => void;
+    let watchClosed = false;
+    const service = new VoiceService({
+      tts,
+      output,
+      send: (message) => sent.push(message),
+      watchLock: (changed) => {
+        lock = changed;
+        return { close: () => void (watchClosed = true) };
+      },
+      dictation: () =>
+        ({
+          state: 'off',
+          halfDuplex: null,
+          error: null,
+          recognizer: null,
+          mic: (on: boolean) => calls.push(`mic ${on}`),
+          enroll: (action: string) => calls.push(`enroll ${action}`),
+          target: () => undefined,
+          settingsChanged: () => undefined,
+          reference: () => undefined,
+          close: () => undefined,
+        }) as unknown as import('../src/dictation.js').Dictation,
+      now: clock.now,
+      log: (line) => logs.push(line),
+      setTimer: clock.setTimer,
+      clearTimer: clock.clearTimer,
+      every: clock.every,
+    });
+    const speak = (replyId: string, gen: number): void => service.receive({ type: 'speak', gen, replyId, sessionId: 's1', text: 'One.', tone: null, turn: replyId, ...VOICE });
+    const speechOf = (replyId: string) => sent.filter((one) => one.type === 'speech' && one.replyId === replyId).map((one) => (one as { state: string }).state);
+
+    service.receive({ type: 'settings', settings: { ...DEFAULT_SETTINGS.voice, enabled: true } });
+    service.receive({ type: 'mic', on: true });
+    service.receive({ type: 'targets', targets: [{ sessionId: 's1', workItemId: 1 }], focus: null });
+    service.receive({ type: 'talk-here', sessionId: 's1' });
+    speak('r1', 1);
+    tts.requests[0]!.audio(4800);
+    await settle();
+    expect(speechOf('r1')).toEqual(['playing']);
+    // A needs-you sound waiting for the reply to end is dropped with it.
+    service.receive({ type: 'earcon', kind: 'needs-you' });
+
+    lock('locked');
+    expect(calls).toEqual(['mic true', 'enroll cancel', 'mic false']);
+    expect(speechOf('r1')).toEqual(['playing', 'interrupted']);
+    expect(output.playbacks[0]!.stopped).toBe(true);
+    expect(sent.at(-1)).toEqual({ type: 'mic-off', reason: 'locked' });
+    expect(logs).toContain('mic off: computer locked');
+
+    // While away nothing plays, and the mic and enrolment stay off.
+    speak('r2', 1);
+    expect(speechOf('r2')).toEqual(['skipped']);
+    expect(tts.requests).toHaveLength(1);
+    service.receive({ type: 'earcon', kind: 'needs-you' });
+    await settle();
+    expect(output.playbacks).toHaveLength(1);
+    service.receive({ type: 'mic', on: true });
+    expect(calls).toHaveLength(3);
+    expect(sent.at(-1)).toEqual({ type: 'mic-off', reason: 'locked' });
+    expect(logs.at(-1)).toBe('mic stays off: computer locked');
+    service.receive({ type: 'enroll', action: 'start' });
+    expect(sent.at(-1)).toEqual({ type: 'enrollment', state: 'failed', error: 'The computer is locked.' });
+
+    lock('asleep');
+    expect(sent.at(-1)).toEqual({ type: 'mic-off', reason: 'asleep' });
+    expect(logs.at(-1)).toBe('mic off: computer going to sleep');
+    lock('awake');
+    expect(logs.at(-1)).toBe('computer awake: still computer locked');
+    speak('r3', 1);
+    expect(speechOf('r3')).toEqual(['skipped']);
+
+    // Unlocking ends every reason: speech plays again, but the mic stays off until the operator turns it on.
+    lock('unlocked');
+    expect(logs.at(-1)).toBe('computer unlocked: speech resumes; the mic stays off until it is turned on');
+    expect(calls.filter((call) => call === 'mic true')).toHaveLength(1);
+    speak('r4', 1);
+    expect(tts.requests).toHaveLength(2);
+    service.receive({ type: 'mic', on: true });
+    expect(calls.at(-1)).toBe('mic true');
+
+    // A disconnected session ends with its reconnection; a repeated event changes nothing.
+    lock('disconnected');
+    lock('disconnected');
+    expect(sent.filter((one) => one.type === 'mic-off')).toHaveLength(4);
+    expect(logs.filter((line) => line === 'mic off: session disconnected')).toHaveLength(1);
+    lock('connected');
+    lock('awake');
+    expect(logs.at(-1)).toBe('session connected: speech resumes; the mic stays off until it is turned on');
+
+    // A hub that connects after a lock and unlock it did not hear restores its mic: it stays off until the operator turns it on.
+    const mics = (): number => calls.filter((call) => call === 'mic true').length;
+    const before = mics();
+
+    service.receive({ type: 'mic', on: true, restore: true });
+    expect(mics()).toBe(before);
+    expect(sent.at(-1)).toEqual({ type: 'mic-off', reason: 'disconnected' });
+    service.receive({ type: 'mic', on: true });
+    service.receive({ type: 'mic', on: true, restore: true });
+    expect(mics()).toBe(before + 2);
+    service.close();
+    expect(watchClosed).toBe(true);
   });
 
   it('greets a hub with the target and playback state, and configures speech from the settings', () => {

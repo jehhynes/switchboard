@@ -42,6 +42,9 @@ export const ENROLL_SECONDS = 60;
 /** Where voiceprint enrolment stands: recording, ended with a print saved, failed with why, or cancelled. */
 export type EnrollmentState = 'recording' | 'enrolled' | 'failed' | 'cancelled';
 
+/** Why the voice process turned the mic off on its own: the session locked, the computer went to sleep, or the session disconnected. */
+export type AwayReason = 'locked' | 'asleep' | 'disconnected';
+
 /** Why the voice target changed: the focus after its debounce, Talk here, or the target dropped (away timeout, or no longer a target). */
 export type ActiveReason = 'focus' | 'talk-here' | 'gone';
 
@@ -60,8 +63,11 @@ export type HubMessage =
   /** Stop speaking: the playing reply is `interrupted` where it stopped, and the queued ones `skipped`. */
   | { type: 'stop' }
   | { type: 'earcon'; kind: 'needs-you' }
-  /** Capture on or off, as the operator set it (architecture.md § Dictation). */
-  | { type: 'mic'; on: boolean }
+  /**
+   * Capture on or off, as the operator set it (architecture.md § Dictation). `restore` marks the hub sending its mic again to a process it
+   * connected to, which turns the mic on only if the process has not turned it off on its own since the operator last set it.
+   */
+  | { type: 'mic'; on: boolean; restore?: boolean }
   /** The here window's composer has the focus: recognition in flight is finished, nothing is sent, and listening pauses until it is off. */
   | { type: 'typing'; on: boolean }
   /** The target's latest reply, which the turn model reads with the operator's words. */
@@ -95,7 +101,12 @@ export type VoiceMessage =
    */
   | { type: 'utterance'; gen: number; utteranceId: string; sessionId: string; text: string; final: boolean; interrupted: Interrupted | null }
   /** Voiceprint enrolment changed state; `error` says why it failed. */
-  | { type: 'enrollment'; state: EnrollmentState; error: string | null };
+  | { type: 'enrollment'; state: EnrollmentState; error: string | null }
+  /**
+   * The operator left the computer, so the process turned the mic off and stopped speech; the mic stays off until the operator turns it on, and
+   * a `mic {on: true}` while they are still away is answered with this again (architecture.md § Dictation).
+   */
+  | { type: 'mic-off'; reason: AwayReason };
 
 /** Splits a byte stream into lines; a line over the limit is an error, since the peer is not following the protocol. */
 export class LineReader {
@@ -207,8 +218,9 @@ export function parseHubMessage(line: string): HubMessage | { error: string } {
     case 'earcon':
       return m.kind === 'needs-you' ? { type: 'earcon', kind: 'needs-you' } : invalid;
     case 'mic':
+      return typeof m.on === 'boolean' && (m.restore === undefined || typeof m.restore === 'boolean') ? { type: 'mic', on: m.on, ...(m.restore === true ? { restore: true } : {}) } : invalid;
     case 'typing':
-      return typeof m.on === 'boolean' ? { type: m.type, on: m.on } : invalid;
+      return typeof m.on === 'boolean' ? { type: 'typing', on: m.on } : invalid;
     case 'context':
       return isId(m.sessionId) && isText(m.lastReply) ? { type: 'context', sessionId: m.sessionId, lastReply: m.lastReply } : invalid;
     case 'enroll':

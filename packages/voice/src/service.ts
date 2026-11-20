@@ -3,7 +3,8 @@ import { DEFAULT_SETTINGS } from '@switchboard/core/settings';
 import { pcm24to16, splitSaid } from './barge.js';
 import type { Dictation } from './dictation.js';
 import type { Output } from './output.js';
-import type { HubMessage, Interrupted, VoiceMessage, VoiceTarget } from './protocol.js';
+import type { LockEvent, LockWatch } from './lockWatch.js';
+import type { AwayReason, HubMessage, Interrupted, VoiceMessage, VoiceTarget } from './protocol.js';
 import { PlayedReference } from './reference.js';
 import { Router } from './routing.js';
 import { Speech } from './speech.js';
@@ -13,6 +14,11 @@ import type { Voiceprint } from './voiceprint.js';
 
 /** The first 3 s of each reply's audio teach barge-in that reply voice's print. */
 const LEARN_BYTES = 3_000 * BYTES_PER_MS;
+
+/** What `voice.log` says when the operator leaves the computer, and when each reason ends. */
+const AWAY_TEXT: Record<AwayReason, string> = { locked: 'computer locked', asleep: 'computer going to sleep', disconnected: 'session disconnected' };
+const AWAY_ERROR: Record<AwayReason, string> = { locked: 'The computer is locked.', asleep: 'The computer is going to sleep.', disconnected: 'The session is disconnected.' };
+const BACK_TEXT: Record<'unlocked' | 'awake' | 'connected', string> = { unlocked: 'computer unlocked', awake: 'computer awake', connected: 'session connected' };
 
 export interface VoiceServiceDeps {
   tts: { configure(settings: TtsVoiceSettings): void; warm(): void; speak(text: string, tone: string | null, onAudio: (pcm: Buffer) => void, as?: SpeechVoice): Speaking; close(): void };
@@ -30,6 +36,8 @@ export interface VoiceServiceDeps {
   voiceprint?: Voiceprint;
   /** A reply's heard tag, for the glossary. */
   heard?(heard: string, meant: string): void;
+  /** Starts watching for the operator leaving the computer: a lock, sleep or a disconnected session; null or left out where nothing watches. */
+  watchLock?(changed: (event: LockEvent) => void): LockWatch | null;
   send(message: VoiceMessage): void;
   now(): number;
   log(line: string): void;
@@ -51,6 +59,11 @@ export class VoiceService {
   #targets = new Map<string, VoiceTarget>();
   /** The audio of the reply playing, kept until there is enough to learn its voice from. */
   #learning: { replyId: string; voice: string; chunks: Buffer[]; bytes: number } | null = null;
+  /** Why the operator is away from the computer; while any holds, the mic stays off and nothing plays. */
+  readonly #away = new Set<AwayReason>();
+  /** Why the process last turned the mic off on its own, until the operator sets the mic again; a restored mic stays off meanwhile. */
+  #turnedOff: AwayReason | null = null;
+  readonly #lockWatch: LockWatch | null;
 
   constructor(private readonly deps: VoiceServiceDeps) {
     this.#dictation =
@@ -121,6 +134,7 @@ export class VoiceService {
       ...(deps.setTimer === undefined ? {} : { setTimer: deps.setTimer }),
       ...(deps.clearTimer === undefined ? {} : { clearTimer: deps.clearTimer }),
     });
+    this.#lockWatch = deps.watchLock?.((event) => this.#lockChanged(event)) ?? null;
   }
 
   /** What a newly connected hub is told: the target and the playback state. */
@@ -155,6 +169,18 @@ export class VoiceService {
 
         return;
       case 'mic':
+        if (message.on && (this.#away.size > 0 || (message.restore === true && this.#turnedOff !== null))) {
+          const reason = [...this.#away][0] ?? this.#turnedOff!;
+
+          this.deps.log(`mic stays off: ${AWAY_TEXT[reason]}`);
+          this.deps.send({ type: 'mic-off', reason });
+          return;
+        }
+
+        if (message.restore !== true) {
+          this.#turnedOff = null;
+        }
+
         this.#dictation?.mic(message.on);
         return;
       case 'typing':
@@ -167,6 +193,11 @@ export class VoiceService {
         this.deps.heard?.(message.heard, message.meant);
         return;
       case 'enroll':
+        if (message.action === 'start' && this.#away.size > 0) {
+          this.deps.send({ type: 'enrollment', state: 'failed', error: AWAY_ERROR[[...this.#away][0]!] });
+          return;
+        }
+
         if (this.#dictation === null) {
           if (message.action === 'start') {
             this.deps.send({ type: 'enrollment', state: 'failed', error: 'Capture is not available.' });
@@ -204,6 +235,7 @@ export class VoiceService {
   }
 
   close(): void {
+    this.#lockWatch?.close();
     this.#dictation?.close();
     this.#router.close();
     this.#speech.halt();
@@ -234,6 +266,46 @@ export class VoiceService {
     if (learning.bytes >= LEARN_BYTES) {
       this.deps.voiceprint.learnVoice(learning.voice, pcm24to16(Buffer.concat(learning.chunks).subarray(0, LEARN_BYTES)));
       learning.chunks = [];
+    }
+  }
+
+  /**
+   * The operator left the computer (architecture.md § Dictation): the mic goes off, with any enrolment, and speech stops and stays silent until
+   * every reason has ended; an unlock ends them all, since the operator is back at an unlocked session. The mic stays off until they turn it on.
+   */
+  #lockChanged(event: LockEvent): void {
+    if (event === 'locked' || event === 'asleep' || event === 'disconnected') {
+      if (this.#away.has(event)) {
+        return;
+      }
+
+      this.#away.add(event);
+      this.#turnedOff = event;
+      this.deps.log(`mic off: ${AWAY_TEXT[event]}`);
+      this.#dictation?.enroll('cancel');
+      this.#dictation?.mic(false);
+      this.#speech.mute(true);
+      this.deps.send({ type: 'mic-off', reason: event });
+      return;
+    }
+
+    const size = this.#away.size;
+
+    if (event === 'unlocked') {
+      this.#away.clear();
+    } else {
+      this.#away.delete(event === 'awake' ? 'asleep' : 'disconnected');
+    }
+
+    if (this.#away.size === size) {
+      return;
+    }
+
+    if (this.#away.size === 0) {
+      this.#speech.mute(false);
+      this.deps.log(`${BACK_TEXT[event]}: speech resumes; the mic stays off until it is turned on`);
+    } else {
+      this.deps.log(`${BACK_TEXT[event]}: still ${[...this.#away].map((reason) => AWAY_TEXT[reason]).join(', ')}`);
     }
   }
 

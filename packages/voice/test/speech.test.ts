@@ -21,6 +21,41 @@ function setup() {
 const item = (replyId: string, turn: string | null = 'm1', text = 'Fixed the badge.'): SpeechItem => ({ gen: 3, replyId, sessionId: 's1', text, tone: null, turn });
 
 describe('Speech', () => {
+  it('stops a needs-you sound that plays when muted, never plays one still opening, and skips replies until unmuted', async () => {
+    const { tts, output, speech, states } = setup();
+
+    speech.earcon();
+    await settle();
+    expect(output.playbacks).toHaveLength(1);
+    output.playbacks[0]!.hold = new Promise(() => undefined);
+    speech.mute(true);
+    expect(output.playbacks[0]!.stopped).toBe(true);
+
+    // A sound whose device is still opening when muted never writes.
+    let open!: () => void;
+    const opened = new Promise<void>((resolve) => (open = resolve));
+    const slow = new FakeOutput();
+    const held = { engine: 'held', open: async (device: string | null) => { await opened; return slow.open(device); } };
+    const second = new Speech({ tts, output: held, device: () => null, report: () => undefined, failed: () => undefined, now: () => 0, log: () => undefined });
+
+    second.earcon();
+    second.mute(true);
+    open();
+    await settle();
+    expect(slow.playbacks[0]!.written).toHaveLength(0);
+    expect(slow.playbacks[0]!.stopped).toBe(true);
+    second.earcon();
+    await settle();
+    expect(slow.playbacks).toHaveLength(1);
+
+    speech.speak(item('r1'));
+    expect(states()).toEqual(['r1 skipped']);
+    expect(tts.requests).toHaveLength(0);
+    speech.mute(false);
+    speech.speak(item('r2'));
+    expect(tts.requests).toHaveLength(1);
+  });
+
   it('logs each reply whose speech ended: played, cut off, skipped, failed or stopped by a move, with its session, voice and duration', async () => {
     const { clock, tts, speech, logs } = setup();
     const said = (line: string): boolean => line.startsWith('speech: ');

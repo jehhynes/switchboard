@@ -60,6 +60,7 @@ const voice = {
             copyRecognition();
             fs.copyFileSync('../../packages/voice/assets/micuse.ps1', 'dist/voice/micuse.ps1');
             fs.copyFileSync('../../packages/voice/assets/commcapture.ps1', 'dist/voice/commcapture.ps1');
+            fs.copyFileSync('../../packages/voice/assets/lockwatch.ps1', 'dist/voice/lockwatch.ps1');
             writeManifest('dist/voice');
           }
         }),

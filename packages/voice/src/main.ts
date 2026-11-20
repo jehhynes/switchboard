@@ -8,6 +8,7 @@ import { decibriCapture, decibriOutput } from './decibri.js';
 import { windowsCapture, withFallback } from './windowsCapture.js';
 import { Dictation } from './dictation.js';
 import { writeHotwords } from './hotwords.js';
+import { watchLock } from './lockWatch.js';
 import { watchMicUse } from './micUse.js';
 import { TURN_MODEL, turnModel } from './turn.js';
 import { Vocabulary } from './vocabulary.js';
@@ -119,6 +120,7 @@ async function main(): Promise<void> {
     output: await decibriOutput(SAMPLE_RATE),
     send: (message) => server.send(message),
     heard: (heard, meant) => void vocabulary.heard(heard, meant),
+    watchLock: (changed) => watchLock({ script: join(scripts, 'lockwatch.ps1'), changed, log }),
     voiceprint,
     dictation: (hooks) =>
       new Dictation({
