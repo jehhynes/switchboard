@@ -14,7 +14,7 @@ import { drawDiagrams, mermaidTheme } from '../src/webview/mermaidPreview.js';
 
 const T0 = Date.UTC(2026, 10, 19, 12);
 const SCOPE: WindowScope = { kind: 'item', workItemId: 2, key: 'k1', title: 'Fix the badge', cwd: 'D:/w', scopeGen: 1, sessionId: 's2' };
-const SESSION: SessionView = { id: 's2', kind: 'task', title: 'Task session aaaa', state: 'idle', waitingFor: null, launch: 'l', current: true, conversation: 'full', reason: null, rules: 'current' };
+const SESSION: SessionView = { id: 's2', kind: 'task', title: 'Task session aaaa', state: 'idle', waitingFor: null, launch: 'l', current: true, conversation: 'full', reason: null };
 const artifact = (path: string, updatedAt: number, patch: Partial<ArtifactView> = {}): ArtifactView => ({ path, owner: path.split('/')[0]!, kind: 'comparison', title: `Title of ${path}`, ext: 'md', type: 'markdown', updatedAt, ...patch });
 const reply = (id: string, at: number): ReplyView => ({ type: 'reply', id, sessionId: 's2', at, ord: at, provisional: false, kind: 'reply', answers: null, opening: `Reply ${id}`, source: 'transcript', replaces: null, rewrittenBy: null, withdrawn: false, unread: false });
 const message = (id: string, at: number): ItemView => ({ type: 'message', id, sessionId: 's2', at, ord: at, origin: 'terminal', text: `Message ${id}`, provisional: false, withdrawn: false, delivery: null, error: null });

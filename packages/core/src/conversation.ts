@@ -1,10 +1,4 @@
 /**
- * The version of the conversation rules a Code Mode session's prompt carries (architecture.md § Conversation). Raised whenever the rules change,
- * so the view can tell a session that started with older rules, or none, and show its replies whole. Version 4 added the artifact rules.
- */
-export const CONVERSATION_RULES_VERSION = 4;
-
-/**
  * What became of a message typed from the view (architecture.md § Typing a message): `open` while it waits or is being typed, `sent` once the
  * transcript has it, `uncertain` when it was typed but the transcript does not show it, and `not-sent` when nothing was typed.
  */

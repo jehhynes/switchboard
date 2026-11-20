@@ -11,16 +11,12 @@ describe('reply tags', () => {
     expect(splitRewrite('Use [rewrite] then.').rewrite).toBe(false);
   });
 
-  it('parses a reply into its kind, rewrite, text and status, keeps any other bracketed word as text, and reads only the tags its rules version explained', () => {
-    expect(parseReply('[rewrite] Both done.\n\n- a\n- b', 3)).toEqual({ kind: 'reply', rewrite: true, opening: 'Both done.\n\n- a\n- b', status: null });
-    expect(parseReply('Done.\n[details]\nx', 3)).toEqual({ kind: 'reply', rewrite: false, opening: 'Done.\n[details]\nx', status: null });
-    expect(parseReply('[aside] Reading files.', 3)).toEqual({ kind: 'aside', rewrite: false, opening: 'Reading files.', status: null });
-    expect(parseReply('[rewrite] Fixed.\n\n[status]\n## Done\n- the badge', 3)).toEqual({ kind: 'reply', rewrite: true, opening: 'Fixed.', status: '## Done\n- the badge' });
-    expect(parseReply('[status]\nAll green.', 3)).toEqual({ kind: 'reply', rewrite: false, opening: '', status: 'All green.' });
-    // Versions 1 and 2 explained the aside and rewrite tags, not the status tag; with none, a reply is whole.
-    expect(parseReply('[aside] x\n[status]\ny', 2)).toEqual({ kind: 'aside', rewrite: false, opening: 'x\n[status]\ny', status: null });
-    expect(parseReply('[aside] Done.', null)).toEqual({ kind: 'reply', rewrite: false, opening: '[aside] Done.', status: null });
-    expect(parseReply('[aside] Done.\n[status]\nx', 1)).toEqual({ kind: 'aside', rewrite: false, opening: 'Done.\n[status]\nx', status: null });
+  it('parses a reply into its kind, rewrite, text and status, keeps any other bracketed word as text', () => {
+    expect(parseReply('[rewrite] Both done.\n\n- a\n- b')).toEqual({ kind: 'reply', rewrite: true, opening: 'Both done.\n\n- a\n- b', status: null });
+    expect(parseReply('Done.\n[details]\nx')).toEqual({ kind: 'reply', rewrite: false, opening: 'Done.\n[details]\nx', status: null });
+    expect(parseReply('[aside] Reading files.')).toEqual({ kind: 'aside', rewrite: false, opening: 'Reading files.', status: null });
+    expect(parseReply('[rewrite] Fixed.\n\n[status]\n## Done\n- the badge')).toEqual({ kind: 'reply', rewrite: true, opening: 'Fixed.', status: '## Done\n- the badge' });
+    expect(parseReply('[status]\nAll green.')).toEqual({ kind: 'reply', rewrite: false, opening: '', status: 'All green.' });
   });
 
   it('splits a status at its own [status] line outside fenced code, never at a quoted or indented tag', () => {

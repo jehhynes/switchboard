@@ -6,7 +6,7 @@ import { classify, ClaudeRunner, CodeModeRunner, conversationRules, HOOKS_REQUIR
 import { classifyCodex, CodexRunner } from '@switchboard/codex';
 import type { Exec } from '@switchboard/claude';
 import type { FlowAction, FlowEvent, FlowResult, HandledWork, MarkerReading, ObservedFork, ObservedSession, PolledTicket, Provider, Session, SessionRunner, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, Worktree } from '@switchboard/core';
-import { activeSession, ADHOC_SOURCE, artifactsDir, awaitsRecheck, CONVERSATION_RULES_VERSION, RESUME_PROMPT, executableDirOnPath, handle, launchOptions, nothingNew, PROVIDERS, recordRefusal, homeRepo, repoOf, sessionName, ticketRoot, sessionContract, switchboardHome, triageModel } from '@switchboard/core';
+import { activeSession, ADHOC_SOURCE, artifactsDir, awaitsRecheck, RESUME_PROMPT, executableDirOnPath, handle, launchOptions, nothingNew, PROVIDERS, recordRefusal, homeRepo, repoOf, sessionName, ticketRoot, sessionContract, switchboardHome, triageModel } from '@switchboard/core';
 import { noKind } from './config.js';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
@@ -954,11 +954,6 @@ export class Runtime {
     // A resume keeps the prompt the session started with, contract included; only a Code Mode session gets the current conversation rules.
     if (session === null || (source === 'resume' && session.codeMode !== true)) {
       return null;
-    }
-
-    if (session.codeMode === true && session.rulesVersion !== CONVERSATION_RULES_VERSION) {
-      this.deps.store.updateSession(session.id, { rulesVersion: CONVERSATION_RULES_VERSION });
-      this.changed();
     }
 
     if (source === 'resume') {

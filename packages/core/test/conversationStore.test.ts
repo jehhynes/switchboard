@@ -256,11 +256,13 @@ describe('conversation store', () => {
     const db = new DatabaseSync(path);
 
     // The schema as it was before seenAt, with a reply and a status.
+    const before = MIGRATIONS.findIndex((migration) => migration.includes('ADD COLUMN seenAt'));
+
     db.exec('BEGIN');
-    for (const migration of MIGRATIONS.slice(0, -1)) {
+    for (const migration of MIGRATIONS.slice(0, before)) {
       db.exec(migration);
     }
-    db.exec(`PRAGMA user_version = ${MIGRATIONS.length - 1}`);
+    db.exec(`PRAGMA user_version = ${before}`);
     db.exec("INSERT INTO replies (ord, id, sessionId, workItemId, at, kind, answers, opening, source, replaces, rewrittenBy, withdrawn, transcriptUuid) VALUES (1, 'r1', 's1', 1, 10, 'reply', NULL, 'Old.', 'transcript', NULL, NULL, 0, NULL)");
     db.exec("INSERT INTO statuses (id, sessionId, workItemId, replyId, at, markdown) VALUES ('st1', 's1', 1, 'r1', 10, 'Old.')");
     db.exec('COMMIT');

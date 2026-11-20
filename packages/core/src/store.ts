@@ -418,6 +418,8 @@ export const MIGRATIONS = [
   ALTER TABLE statuses ADD COLUMN seenAt INTEGER;
   UPDATE replies SET seenAt = at;
   UPDATE statuses SET seenAt = at;`,
+  // Every session is read as if it carries the current conversation rules, so no version is kept.
+  `ALTER TABLE sessions DROP COLUMN rulesVersion;`,
 ];
 
 /**
@@ -579,7 +581,7 @@ const UNLOGGED: Record<string, ReadonlySet<string>> = {
   // The register event names an external session, and its end already shows when it was cleared.
   // The background event and its result name a move (PRD R89); its fields are bookkeeping.
   // The session-started event names a Code Mode session; its launch and last process tree are bookkeeping (PRD R93, R95).
-  sessions: new Set(['stateAt', 'releasing', 'question', 'retiredIds', 'external', 'move', 'movedAt', 'codeMode', 'launchId', 'lastTree', 'rulesVersion']),
+  sessions: new Set(['stateAt', 'releasing', 'question', 'retiredIds', 'external', 'move', 'movedAt', 'codeMode', 'launchId', 'lastTree']),
   triages: new Set(),
   worktrees: new Set(),
   links: new Set(['reportedAt']),

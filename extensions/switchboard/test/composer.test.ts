@@ -11,7 +11,7 @@ import { startConversation } from '../src/webview/conversationMain.js';
 
 const T0 = Date.UTC(2026, 10, 19, 12);
 const SCOPE: WindowScope = { kind: 'item', workItemId: 2, key: 'k1', title: 'Fix the badge', cwd: 'D:\\w', scopeGen: 1, sessionId: 's2' };
-const SESSION: SessionView = { id: 's2', kind: 'task', title: 'Task session aaaa', state: 'idle', waitingFor: null, launch: 'l', current: true, conversation: 'full', reason: null, rules: 'current' };
+const SESSION: SessionView = { id: 's2', kind: 'task', title: 'Task session aaaa', state: 'idle', waitingFor: null, launch: 'l', current: true, conversation: 'full', reason: null };
 const message = (id: string, text: string, patch: Partial<MessageView> = {}): MessageView => ({ type: 'message', id, sessionId: 's2', at: T0, ord: T0, origin: 'terminal', text, provisional: false, withdrawn: false, delivery: null, error: null, ...patch });
 const state = (patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, ...patch });
 const COMMANDS = [

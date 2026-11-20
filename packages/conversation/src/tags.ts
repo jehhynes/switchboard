@@ -65,10 +65,6 @@ export function splitStatus(text: string): { reply: string; status: string | nul
   return { reply: text, status: null };
 }
 
-/** The rules version that first explained each tag (`CONVERSATION_RULES_VERSION`); a session is read only for the tags its rules told it about. */
-export const ASIDE_REWRITE_SINCE = 1;
-export const STATUS_SINCE = 3;
-
 /** A reply's parts: an aside or a reply, whether it rewrites the previous reply, its text without the tags, and the status it carries. */
 export interface ParsedReply {
   kind: 'reply' | 'aside';
@@ -78,16 +74,9 @@ export interface ParsedReply {
   status: string | null;
 }
 
-/**
- * Splits a reply's text into its parts, reading only the tags the session's rules version (`rules`) explained, since a session was never told to
- * write the others; a session with rules older than `ASIDE_REWRITE_SINCE`, or none, gets its replies whole.
- */
-export function parseReply(text: string, rules: number | null): ParsedReply {
-  if (rules === null || rules < ASIDE_REWRITE_SINCE) {
-    return { kind: 'reply', rewrite: false, opening: text.trim(), status: null };
-  }
-
-  const { reply, status } = rules >= STATUS_SINCE ? splitStatus(text) : { reply: text, status: null };
+/** Splits a reply's text into its parts. Every session is read as if it carries the current conversation rules. */
+export function parseReply(text: string): ParsedReply {
+  const { reply, status } = splitStatus(text);
   const { aside, text: unaside } = stripAside(reply);
   const { rewrite, text: body } = splitRewrite(unaside);
 

@@ -15,7 +15,7 @@ const on = (tab: Tab, unopened: string[] = []) => ({ tab, unopened: new Set(unop
 
 const T0 = Date.UTC(2026, 10, 19, 12);
 const SCOPE: WindowScope = { kind: 'item', workItemId: 2, key: 'k1', title: 'Fix the <inbox> badge', cwd: 'D:/w', scopeGen: 1, sessionId: 's2' };
-const SESSION: SessionView = { id: 's2', kind: 'task', title: 'Task session aaaa', state: 'running', waitingFor: null, launch: 'l', current: true, conversation: 'full', reason: null, rules: 'current' };
+const SESSION: SessionView = { id: 's2', kind: 'task', title: 'Task session aaaa', state: 'running', waitingFor: null, launch: 'l', current: true, conversation: 'full', reason: null };
 
 // Each item's ord is its time unless a test gives it another.
 const reply = (id: string, at: number, patch: Partial<ReplyView> = {}): ReplyView => ({ type: 'reply', id, sessionId: 's2', at, ord: at, provisional: false, kind: 'reply', answers: null, opening: `Reply ${id}`, source: 'transcript', replaces: null, rewrittenBy: null, withdrawn: false, unread: false, ...patch });
@@ -183,11 +183,12 @@ describe('the Conversation view page', () => {
     expect(root.querySelector('.reply.aside')?.textContent).toContain('<script>');
   });
 
-  it('says why the view cannot talk to a session, that it shows a session without the rules whole, and when there is nothing to show', () => {
-    const ended = renderConversation(state([], { session: { ...SESSION, state: 'ended', conversation: 'read-only', reason: 'The session has ended. Open it in the terminal to resume it.', rules: 'none' } }));
+  it('says why the view cannot talk to a session, and when there is nothing to show', () => {
+    const ended = renderConversation(state([], { session: { ...SESSION, state: 'ended', conversation: 'read-only', reason: 'The session has ended. Open it in the terminal to resume it.' } }));
 
     expect(ended).toContain('The session has ended. Open it in the terminal to resume it.');
-    expect(ended).toContain('its replies show whole');
+    // Every session is read with the current rules, so no rules note shows.
+    expect(ended).not.toContain('conversation rules');
     expect(ended).toContain('No messages yet.');
     expect(renderConversation(state([], { session: { ...SESSION, conversation: 'none', reason: 'background' } }))).not.toContain('data-action="terminal"');
     expect(renderConversation({ ...EMPTY_CONVERSATION, connected: true })).toContain('This window has no Switchboard session.');
@@ -842,13 +843,6 @@ describe('the Status tab', () => {
     expect(previewLinks('[a](a.ts)', null)).toBe('[a](a.ts)');
   });
 
-  it('says what the view reads of a session with older rules or none', () => {
-    const notice = (rules: SessionView['rules']) => renderConversation(state({ session: { ...SESSION, rules } }), new Set(), T0);
-
-    expect(notice('older')).toContain('This session started with older conversation rules, so the view reads only the tags they explained. Resume it to give it the current ones.');
-    expect(notice('none')).toContain('This session started without the conversation rules, so its replies show whole.');
-    expect(notice('current')).not.toContain('class="notice"');
-  });
 
   it('leaves a reply that is only a status out of the timeline', () => {
     expect(timeline([reply('r1', T0, { opening: '' }), reply('r2', T0 + 1)]).map((entry) => idOf(entry))).toEqual(['r2']);

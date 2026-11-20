@@ -4,7 +4,7 @@ import { delimiter, join } from 'node:path';
 import { ClaudeRunner, conversationRules } from '@switchboard/claude';
 import { CodexRunner } from '@switchboard/codex';
 import type { Exec, ExecResult } from '@switchboard/claude';
-import { CONVERSATION_RULES_VERSION, DEFAULT_SETTINGS, parsePlaybook, Store, UNCONFIRMED_DONE } from '@switchboard/core';
+import { DEFAULT_SETTINGS, parsePlaybook, Store, UNCONFIRMED_DONE } from '@switchboard/core';
 import { recordPath } from '@switchboard/holder';
 import type { SessionEntry } from '@switchboard/holder';
 import { NotWritten } from '@switchboard/conversation';
@@ -2642,12 +2642,12 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
     const [{ action, stored }] = seen as [(typeof seen)[number]];
     expect(action).toMatchObject({ provider: 'claude', codeMode: true, nativeSessionId: expect.stringMatching(UUID), launchId: expect.stringMatching(UUID) });
     expect(action.nativeSessionId).not.toBe(action.launchId);
-    expect(stored).toMatchObject({ state: 'starting', codeMode: true, nativeSessionId: action.nativeSessionId, launchId: action.launchId, rulesVersion: CONVERSATION_RULES_VERSION });
+    expect(stored).toMatchObject({ state: 'starting', codeMode: true, nativeSessionId: action.nativeSessionId, launchId: action.launchId });
     expect(context.store.session(action.sessionId)).toMatchObject({ state: 'running', shortId: action.nativeSessionId!.slice(0, 8) });
     context.runtime.stop();
   });
 
-  it('gives a Code Mode session the conversation rules after a resume and with its contract after a compaction, and records their version', async () => {
+  it('gives a Code Mode session the conversation rules after a resume and with its contract after a compaction', async () => {
     const codeMode = fakeRunner();
     const context = setup(config({ codeMode: true }), () => T0, { codeMode });
 
@@ -2657,11 +2657,8 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
 
     const session = context.store.activeSessions()[0]!;
 
-    // A session started before the rules existed.
-    context.store.updateSession(session.id, { rulesVersion: null });
     expect(context.runtime.contract(session.nativeSessionId!, 'resume')).toBe(conversationRules(join(session.cwd, '.wip', 'artifacts', `w${session.workItemId}`)));
     expect(context.runtime.contract(session.nativeSessionId!, 'resume')).toContain(`artifact folder, \`${join(session.cwd, '.wip', 'artifacts', `w${session.workItemId}`)}\``);
-    expect(context.store.session(session.id)?.rulesVersion).toBe(CONVERSATION_RULES_VERSION);
     expect(context.runtime.contract(session.nativeSessionId!, 'compact')).toMatch(/^Report to Switchboard with these commands:\n[\s\S]*\n\n## Conversation view\n/);
     context.runtime.stop();
   });
@@ -2677,7 +2674,6 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
 
     expect(runtime.contract(native, 'resume')).toBeNull();
     expect(runtime.contract(native, 'compact')).not.toContain('## Conversation view');
-    expect(store.session('s1')?.rulesVersion ?? null).toBeNull();
     runtime.stop();
   });
 

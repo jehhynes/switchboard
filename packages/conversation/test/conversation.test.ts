@@ -2,7 +2,7 @@ import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { CONVERSATION_RULES_VERSION, Store } from '@switchboard/core';
+import { Store } from '@switchboard/core';
 import { SessionConversation } from '../src/conversation.js';
 import type { ConversationDeps } from '../src/conversation.js';
 import type { ConversationChange } from '../src/conversation.js';
@@ -41,14 +41,14 @@ const queued = (uuid: string, at: number, prompt: string, commandMode = 'prompt'
   });
 
 /** A fake clock and timers for the screen hold. */
-function setup(rules: number | null = CONVERSATION_RULES_VERSION) {
+function setup() {
   const store = Store.open(':memory:');
   const clock = { t: T0 };
   const timers: Array<{ run: () => void; at: number; cleared: boolean }> = [];
   const changes: ConversationChange[] = [];
   const logs: string[] = [];
   let id = 0;
-  const conversation = new SessionConversation('s1', 7, () => rules, {
+  const conversation = new SessionConversation('s1', 7, {
     store,
     now: () => clock.t,
     newId: () => String(++id),
@@ -412,7 +412,7 @@ describe('SessionConversation', () => {
     append(lines[0]!, lines[1]!);
     conversation.readTranscript(path);
 
-    const restarted = new SessionConversation('s1', 7, () => CONVERSATION_RULES_VERSION, { store, now: () => T0, newId: (() => { let n = 0; return () => `x${++n}`; })(), onChange: () => {}, log: () => {} });
+    const restarted = new SessionConversation('s1', 7, { store, now: () => T0, newId: (() => { let n = 0; return () => `x${++n}`; })(), onChange: () => {}, log: () => {} });
 
     append(lines[2]!);
     restarted.readTranscript(path);
@@ -430,7 +430,7 @@ describe('SessionConversation', () => {
     // A reader after another restart does not take the screen's drawing of either line for a new reply.
     let clock = T0;
     const timers: Array<() => void> = [];
-    const again = new SessionConversation('s1', 7, () => CONVERSATION_RULES_VERSION, {
+    const again = new SessionConversation('s1', 7, {
       store,
       now: () => clock,
       newId: (() => { let n = 0; return () => `y${++n}`; })(),
@@ -481,7 +481,7 @@ describe('SessionConversation', () => {
     conversation.readTranscript(path);
 
     const deps = (prefix: string): ConversationDeps => ({ store, now: () => T0, newId: (() => { let n = 0; return () => `${prefix}${++n}`; })(), onChange: () => {}, log: () => {} });
-    const other = new SessionConversation('s2', 8, () => CONVERSATION_RULES_VERSION, deps('o'));
+    const other = new SessionConversation('s2', 8, deps('o'));
     const otherPath = join(dir, 'native-2.jsonl');
 
     writeFileSync(otherPath, `${enqueue(T0 + 1, 'Second?')}\n`);
@@ -489,7 +489,7 @@ describe('SessionConversation', () => {
     expect(store.provisionalMessages('s2')).toHaveLength(1);
 
     // A new reader after a restart: m1 was read before it, and its reply's chain reaches it.
-    const restarted = new SessionConversation('s1', 7, () => CONVERSATION_RULES_VERSION, deps('x'));
+    const restarted = new SessionConversation('s1', 7, deps('x'));
 
     append(chained(queued('m2', T0 + 2, 'Second?'), 'm1'), chained(assistant('t1', T0 + 3, 'Tool step.'), 'm2'), chained(assistant('r1', T0 + 4, 'About both.'), 't1'));
     restarted.readTranscript(path);
@@ -500,7 +500,7 @@ describe('SessionConversation', () => {
     expect(r1).toMatchObject({ opening: 'About both.', answers: m2!.id });
 
     // A reply whose chain reaches only a message read before the restart answers that message, not the latest.
-    const again = new SessionConversation('s1', 7, () => CONVERSATION_RULES_VERSION, deps('y'));
+    const again = new SessionConversation('s1', 7, deps('y'));
 
     append(chained(assistant('r2', T0 + 5, 'Back to the first.'), 'm1'));
     again.readTranscript(path);
@@ -594,23 +594,6 @@ describe('SessionConversation', () => {
     expect(store.statuses('s1', null, 10).statuses).toHaveLength(1);
   });
 
-  it('reads no status from a session whose rules predate the status tag, and still reads its asides', () => {
-    const { store, conversation, path, append, items } = setup(2);
-
-    append(assistant('b1', T0, '[aside] Checking.\n[status]\nx'));
-    conversation.readTranscript(path);
-    expect(items()).toMatchObject([{ kind: 'aside', opening: 'Checking.\n[status]\nx' }]);
-    expect(store.latestStatus('s1')).toBeNull();
-  });
-
-  it("shows a reply whole for a session whose prompt lacks the current rules", () => {
-    const { conversation, path, append, items } = setup(null);
-
-    append(assistant('a1', T0, '[aside] Done.'));
-    conversation.readTranscript(path);
-    expect(items()).toMatchObject([{ kind: 'reply', opening: '[aside] Done.' }]);
-  });
-
   it('resumes at its checkpoint after a hub restart and imports nothing twice', () => {
     const first = setup();
 
@@ -618,7 +601,7 @@ describe('SessionConversation', () => {
     first.conversation.readTranscript(first.path);
 
     let id = 100;
-    const again = new SessionConversation('s1', 7, () => CONVERSATION_RULES_VERSION, { store: first.store, now: () => T0, newId: () => String(++id), onChange: () => undefined, log: () => undefined });
+    const again = new SessionConversation('s1', 7, { store: first.store, now: () => T0, newId: () => String(++id), onChange: () => undefined, log: () => undefined });
 
     first.append(assistant('a2', T0 + 1, 'Two.'));
     again.readTranscript(first.path);
@@ -634,7 +617,7 @@ describe('SessionConversation', () => {
     first.conversation.readTranscript(first.path);
 
     let id = 100;
-    const again = new SessionConversation('s1', 7, () => CONVERSATION_RULES_VERSION, { store: first.store, now: () => T0, newId: () => String(++id), onChange: () => undefined, log: () => undefined });
+    const again = new SessionConversation('s1', 7, { store: first.store, now: () => T0, newId: () => String(++id), onChange: () => undefined, log: () => undefined });
 
     writeFileSync(first.path, `${assistant('a1', T0 + 1, 'One.')}\n${assistant('a2', T0 + 2, 'Two.')}\n`);
     again.readTranscript(first.path);

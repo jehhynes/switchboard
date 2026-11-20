@@ -92,8 +92,6 @@ export class SessionConversation {
   constructor(
     readonly sessionId: string,
     readonly workItemId: number | null,
-    /** The conversation rules version the session's prompt carries, or null for none, read at each reply (`parseReply`). */
-    private readonly rules: () => number | null,
     private readonly deps: ConversationDeps,
   ) {
     this.#hold = new ScreenHold((text, at, aside, via, replaces) => this.#publish(text, at, aside, via, replaces), deps.hold);
@@ -456,7 +454,7 @@ export class SessionConversation {
 
   /** Publishes a copy: a new reply, or a later copy of one in place (`replaces`). */
   #publish(text: string, at: number, _aside: boolean, via: Via, replaces: string | undefined, move = true): string {
-    const parsed = parseReply(text, this.rules());
+    const parsed = parseReply(text);
 
     // A reply that is only a status rewrites nothing: the view shows it on its Status tab, not in the timeline.
     parsed.rewrite &&= parsed.opening !== '';

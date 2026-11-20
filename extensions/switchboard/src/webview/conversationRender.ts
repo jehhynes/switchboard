@@ -264,12 +264,7 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
   const { icon, text } = stateIcon(state.session);
   const [name, modifier] = icon.split('~');
   const header = `<header class="header"><span class="codicon codicon-${name}${modifier === undefined ? '' : ` codicon-modifier-${modifier}`}" title="${escape(text)}" aria-label="${escape(text)}"></span><span class="title" title="${escape(state.scope.title)}">${escape(state.scope.title)}</span>${state.session?.conversation === 'none' ? '' : '<button class="icon" data-action="terminal" title="Open in terminal" aria-label="Open in terminal"><span class="codicon codicon-terminal"></span></button>'}</header>`;
-  const notes = [
-    ...(state.session?.reason == null ? [] : [state.session.reason]),
-    ...(state.session === null || state.session.conversation === 'none' || state.session.rules === 'current'
-      ? []
-      : [state.session.rules === 'none' ? 'This session started without the conversation rules, so its replies show whole.' : 'This session started with older conversation rules, so the view reads only the tags they explained. Resume it to give it the current ones.']),
-  ];
+  const notes = state.session?.reason == null ? [] : [state.session.reason];
   const shown = timeline(state.items, state.artifacts);
   const waiting = awaitingReply(state.items, shown, state.session);
   // While the session works on a reply, a spinner under the operator's latest message; it has no data-id, so the keys skip it.

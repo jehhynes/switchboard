@@ -2,7 +2,7 @@ import { appendFileSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CONVERSATION_RULES_VERSION, PERMISSION_PROMPT, Store } from '@switchboard/core';
+import { PERMISSION_PROMPT, Store } from '@switchboard/core';
 import type { Session as StoredSession } from '@switchboard/core';
 import { projectSlug } from '@switchboard/claude';
 import { ConversationService, sessionView } from '../src/conversation.js';
@@ -26,8 +26,8 @@ const worktree = (path: string) => ({ id: 1, ticketId: 1, path, branch: null, li
 /** Work items 1 (done) and 2 share a worktree, so one item window; 3 has its own. */
 function world() {
   const done = item(1, { status: 'done', worktree: worktree('D:/w12'), sessions: [session({ id: 's1', workItemId: 1, cwd: 'D:/w12', state: 'ended' })] });
-  const current = item(2, { ticketId: 1, ticket: { ...done.ticket }, worktree: worktree('D:/w12'), status: 'blocked', sessions: [session({ id: 's2', workItemId: 2, cwd: 'D:/w12', codeMode: true, nativeSessionId: 'n2', rulesVersion: CONVERSATION_RULES_VERSION })] });
-  const other = item(3, { worktree: worktree('D:/w3'), sessions: [session({ id: 's3', workItemId: 3, cwd: 'D:/w3', codeMode: true, nativeSessionId: 'n3', rulesVersion: CONVERSATION_RULES_VERSION })] });
+  const current = item(2, { ticketId: 1, ticket: { ...done.ticket }, worktree: worktree('D:/w12'), status: 'blocked', sessions: [session({ id: 's2', workItemId: 2, cwd: 'D:/w12', codeMode: true, nativeSessionId: 'n2' })] });
+  const other = item(3, { worktree: worktree('D:/w3'), sessions: [session({ id: 's3', workItemId: 3, cwd: 'D:/w3', codeMode: true, nativeSessionId: 'n3' })] });
   const file = windowOf(current, WINDOWS)!.file;
   const otherFile = windowOf(other, WINDOWS)!.file;
 
@@ -298,7 +298,7 @@ describe('ConversationService', () => {
     const mine = open(view.file);
     const theirs = open(view.otherFile);
 
-    expect(mine.frames).toMatchObject([{ v: 1, seq: 1, type: 'hello', protocol: 1, scope: { workItemId: 2, sessionId: 's2', scopeGen: 1 }, sessions: [{ id: 's2', state: 'running', conversation: 'full', rules: 'current' }], items: [], more: false }]);
+    expect(mine.frames).toMatchObject([{ v: 1, seq: 1, type: 'hello', protocol: 1, scope: { workItemId: 2, sessionId: 's2', scopeGen: 1 }, sessions: [{ id: 's2', state: 'running', conversation: 'full' }], items: [], more: false }]);
     await service.poll();
     expect(mine.frames.slice(1)).toMatchObject([{ type: 'reply', reply: { sessionId: 's2', opening: 'Mine.', kind: 'reply', source: 'transcript' } }, { type: 'unread', count: 1 }]);
     expect(theirs.frames.slice(1)).toMatchObject([{ type: 'reply', reply: { sessionId: 's3', opening: 'Not yours.' } }, { type: 'unread', count: 1 }]);
@@ -672,8 +672,8 @@ describe('ConversationService send', () => {
 
 describe('sessionView', () => {
   it('names what the view can do with each kind of session', () => {
-    expect(sessionView(session({ codeMode: true, state: 'ended', rulesVersion: 0 }), true, true)).toMatchObject({ state: 'ended', conversation: 'read-only', reason: 'The session has ended. Open it in the terminal to resume it.', rules: 'older' });
-    expect(sessionView(session({ codeMode: true, state: 'idle' }), true, false)).toMatchObject({ conversation: 'read-only', reason: 'Switchboard cannot follow this session while sessions.installHooks is off.', rules: 'none' });
+    expect(sessionView(session({ codeMode: true, state: 'ended' }), true, true)).toMatchObject({ state: 'ended', conversation: 'read-only', reason: 'The session has ended. Open it in the terminal to resume it.' });
+    expect(sessionView(session({ codeMode: true, state: 'idle' }), true, false)).toMatchObject({ conversation: 'read-only', reason: 'Switchboard cannot follow this session while sessions.installHooks is off.' });
     expect(sessionView(session({ state: 'waiting', stateDetail: null }), false, true)).toMatchObject({ waitingFor: 'question', conversation: 'none', current: false });
     expect(sessionView(session({ codeMode: true, state: 'failed' }), true, true)).toMatchObject({ state: 'idle', conversation: 'full' });
   });
@@ -685,8 +685,8 @@ describe('ConversationService artifacts', () => {
     const w12 = join(dir, 'w12');
     const w3 = join(dir, 'w3');
     const done = item(1, { status: 'done', worktree: worktree(w12), sessions: [session({ id: 's1', workItemId: 1, cwd: w12, state: 'ended' })] });
-    const current = item(2, { ticketId: 1, ticket: { ...done.ticket }, worktree: worktree(w12), status: 'blocked', sessions: [session({ id: 's2', workItemId: 2, cwd: w12, codeMode: true, nativeSessionId: 'n2', rulesVersion: CONVERSATION_RULES_VERSION })] });
-    const other = item(3, { worktree: worktree(w3), sessions: [session({ id: 's3', workItemId: 3, cwd: w3, codeMode: true, nativeSessionId: 'n3', rulesVersion: CONVERSATION_RULES_VERSION })] });
+    const current = item(2, { ticketId: 1, ticket: { ...done.ticket }, worktree: worktree(w12), status: 'blocked', sessions: [session({ id: 's2', workItemId: 2, cwd: w12, codeMode: true, nativeSessionId: 'n2' })] });
+    const other = item(3, { worktree: worktree(w3), sessions: [session({ id: 's3', workItemId: 3, cwd: w3, codeMode: true, nativeSessionId: 'n3' })] });
     const view = { done, current, other, file: windowOf(current, WINDOWS)!.file, otherFile: windowOf(other, WINDOWS)!.file, view: snapshot([done, current, other]) };
     const store = Store.open(':memory:');
     let keys = 0;

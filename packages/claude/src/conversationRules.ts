@@ -1,10 +1,10 @@
-import { ARTIFACTS_ENV, CONVERSATION_RULES_VERSION } from '@switchboard/core';
+import { ARTIFACTS_ENV } from '@switchboard/core';
 
 /**
- * The conversation rules of a Code Mode session's prompt, version {@link CONVERSATION_RULES_VERSION} (architecture.md § Conversation): the tags
+ * The conversation rules of a Code Mode session's prompt (architecture.md § Conversation): the tags
  * the Conversation view reads, from claude-collab's `instructions/live-collaboration.md`. They never change how a session writes, its length,
- * format or verbosity (voice-design decision 21). Each slice of the view adds the rules for what it shows and raises the version, so a session is
- * never told to write what nothing reads. `artifactsDir` is the session's artifact folder (architecture.md § Artifacts), which its environment
+ * format or verbosity (voice-design decision 21). Each slice of the view adds the rules for what it shows, so a session is never told to write
+ * what nothing reads; the contract hook gives a resumed or compacted session the current rules. `artifactsDir` is the session's artifact folder (architecture.md § Artifacts), which its environment
  * also names; the artifact rules say only where and how to write an artifact, not when or how much.
  */
 export function conversationRules(artifactsDir: string): string {

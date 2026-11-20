@@ -21,7 +21,7 @@ async function until(what, why, within = 30_000) {
 
 const tabs = () => vscode.window.tabGroups.all.flatMap((group) => group.tabs);
 const scope = { kind: 'item', workItemId: 2, key: 'k-artifacts', title: 'Artifacts', cwd: null, scopeGen: 1, sessionId: 's2' };
-const session = { id: 's2', kind: 'task', title: 'Task session aaaa', state: 'idle', waitingFor: null, launch: 'l', current: true, conversation: 'full', reason: null, rules: 'current' };
+const session = { id: 's2', kind: 'task', title: 'Task session aaaa', state: 'idle', waitingFor: null, launch: 'l', current: true, conversation: 'full', reason: null };
 const artifact = (path, type, updatedAt, title) => ({ path, owner: 'chat', kind: 'comparison', title, ext: path.split('.').pop(), type, updatedAt });
 
 /**

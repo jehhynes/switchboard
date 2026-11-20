@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { countsUnread, inTranscript } from '@switchboard/core';
 import type { ConversationMessage, ConversationReply, ConversationStatus, Session, Store } from '@switchboard/core';
-import { artifactsDir, CONVERSATION_RULES_VERSION, PERMISSION_PROMPT, START_PROMPT } from '@switchboard/core';
+import { artifactsDir, PERMISSION_PROMPT, START_PROMPT } from '@switchboard/core';
 import { findTranscript } from '@switchboard/claude';
 import { ArtifactFolder, MAX_MESSAGE_CHARS, NotWritten, SNAPSHOT_SCROLLBACK, SessionCommands, SessionConversation, SessionInput, readSnapshot } from '@switchboard/conversation';
 import type { Artifact, ConversationChange, InputOutcome, SlashCommand } from '@switchboard/conversation';
@@ -32,8 +32,6 @@ export interface SessionView {
   /** `full`: a live, observed Code Mode session; `read-only`: one that ended or is unobserved; `none`: a background session. */
   conversation: 'full' | 'read-only' | 'none';
   reason: string | null;
-  /** Whether its prompt carries the current conversation rules; a session without them shows its replies whole. */
-  rules: 'current' | 'older' | 'none';
 }
 
 export type MessageView = { type: 'message' } & Omit<ConversationMessage, 'workItemId' | 'transcriptUuid' | 'opId' | 'pastedAt'>;
@@ -88,7 +86,6 @@ export function sessionView(session: Session, current: boolean, hooks: boolean):
     current,
     conversation,
     reason,
-    rules: session.rulesVersion === CONVERSATION_RULES_VERSION ? 'current' : session.rulesVersion == null ? 'none' : 'older',
   };
 }
 
@@ -248,7 +245,7 @@ export class ConversationService {
 
     if (reader === undefined) {
       reader = {
-        conversation: new SessionConversation(session.id, session.workItemId, () => this.deps.store.session(session.id)?.rulesVersion ?? null, {
+        conversation: new SessionConversation(session.id, session.workItemId, {
           store: this.deps.store,
           now: this.deps.now,
           newId: this.deps.newId,
