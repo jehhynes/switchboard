@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyEvent, awaitingReply, EMPTY, mentionOf, mentionQuery, commandQuery, shortTitle, timeline, withEarlier } from '../src/model.js';
 import { answerText, answersIn, complete, parseQuestions } from '@switchboard/conversation/questions';
-import { artifactUrl, newView, renderArtifactView, renderList, renderTimeline, renderVoice, markdownBody } from '../src/render.js';
+import { artifactUrl, newView, renderArtifactView, renderHeader, renderList, renderTimeline, renderVoice, markdownBody } from '../src/render.js';
 import { renderMarkdown } from '../src/markdown.js';
 import { startPage } from '../src/main.js';
 import type { ArtifactView, MessageView, ReplyView, SessionView } from '../src/types.js';
@@ -114,6 +114,14 @@ describe('drawing', () => {
     // A working session spins the same loading codicon as the Thinking row and the dock's running mark.
     expect(html).toContain('class="codicon codicon-loading codicon-modifier-spin" title="Working"');
     expect(html).toContain('<span class="count" title="2 unread">2</span>');
+  });
+
+  it("puts the session's state codicon inside the dropdown's button, before the title, as each option has it", () => {
+    const root = document.createElement('div');
+
+    root.innerHTML = renderHeader({ ...EMPTY, connected: true, scope, session: session({ state: 'running' }) }, newView());
+    expect([...root.querySelector('button.picker')!.children].map((child) => child.className)).toEqual(['codicon codicon-loading codicon-modifier-spin', 'title', 'codicon codicon-chevron-down']);
+    expect(root.querySelector('.header > .codicon')).toBeNull();
   });
 
   it("shows only the page's own voice state, with Talk here when the voice is elsewhere", () => {

@@ -500,8 +500,8 @@ function codicon({ icon, text }: { icon: string; text: string }): string {
 }
 
 /**
- * The header's conversation dropdown (architecture.md § Conversation view): the selected conversation's title, which opens the list of the
- * window's conversations, the primary work item first, each with its session's state and its unread count.
+ * The header's conversation dropdown (architecture.md § Conversation view): the selected session's state codicon and its conversation's title,
+ * laid out as an option is, which opens the list of the window's conversations, the primary work item first, each with its session's state and its unread count.
  */
 function picker(state: ConversationState, open: boolean): string {
   const scope = state.scope!;
@@ -516,7 +516,7 @@ function picker(state: ConversationState, open: boolean): string {
     })
     .join('');
 
-  return `<button type="button" class="picker" data-action="picker" aria-haspopup="listbox" aria-expanded="${open}" title="${escape(title)}"><span class="title">${escape(title)}</span><span class="codicon codicon-chevron-down" aria-hidden="true"></span></button>${open ? `<ul class="conversation-list" role="listbox" aria-label="Conversations">${options}</ul>` : ''}`;
+  return `<button type="button" class="picker" data-action="picker" aria-haspopup="listbox" aria-expanded="${open}" title="${escape(title)}">${codicon(stateIcon(state.session))}<span class="title">${escape(title)}</span><span class="codicon codicon-chevron-down" aria-hidden="true"></span></button>${open ? `<ul class="conversation-list" role="listbox" aria-label="Conversations">${options}</ul>` : ''}`;
 }
 
 /**
@@ -550,7 +550,7 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
   }
 
   const provider = state.session?.provider === undefined ? '' : `<span class="provider" title="Session provider">${state.session.provider === 'codex' ? 'Codex' : 'Claude'}</span>`;
-  const header = `<header class="header">${codicon(stateIcon(state.session))}${picker(state, open.has(PICKER))}${provider}${personaButton(state.session?.persona)}${plus}${state.session?.conversation === 'none' ? '' : '<button class="icon" data-action="terminal" title="Open in terminal" aria-label="Open in terminal"><span class="codicon codicon-terminal"></span></button>'}</header>`;
+  const header = `<header class="header">${picker(state, open.has(PICKER))}${provider}${personaButton(state.session?.persona)}${plus}${state.session?.conversation === 'none' ? '' : '<button class="icon" data-action="terminal" title="Open in terminal" aria-label="Open in terminal"><span class="codicon codicon-terminal"></span></button>'}</header>`;
   const notes = state.session?.reason == null ? [] : [state.session.reason];
   const shown = timeline(state.items, state.artifacts);
   // A card's answer is the first message after the reply or status that asks it, sent with Submit or typed (voice-design § 5).

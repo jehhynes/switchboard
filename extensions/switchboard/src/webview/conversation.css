@@ -208,9 +208,9 @@ body.vscode-reduce-motion .codicon-modifier-spin { animation: none; }
 
 /* The header's conversation dropdown: the selected conversation's title as a button that opens the list of the window's conversations. */
 .header { position: relative; }
-button.picker { flex: 1; min-width: 0; display: flex; align-items: center; gap: 2px; border: none; background: transparent; color: inherit; padding: 0; border-radius: var(--vscode-cornerRadius-small, 4px); cursor: pointer; text-align: left; font: inherit; }
+button.picker { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; border: none; background: transparent; color: inherit; padding: 0 4px; border-radius: var(--vscode-cornerRadius-small, 4px); cursor: pointer; text-align: left; font: inherit; }
 button.picker:hover { background: var(--vscode-toolbar-hoverBackground); }
-button.picker .title { flex: 0 1 auto; }
+button.picker .title { flex: 0 1 auto; padding: 6px 0; }
 /* The session's persona (architecture.md § Personas); dimmed while its tone change waits for a resume or compaction. */
 button.persona { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap: 4px; border: none; background: transparent; color: var(--vscode-descriptionForeground); padding: 2px 6px; border-radius: var(--vscode-cornerRadius-small, 4px); cursor: pointer; font: inherit; font-size: 12px; }
 button.persona:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }

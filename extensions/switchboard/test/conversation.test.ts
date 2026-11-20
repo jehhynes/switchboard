@@ -250,7 +250,9 @@ describe('the Conversation view page', () => {
     const root = document.createElement('div');
 
     root.innerHTML = html;
-    expect(root.querySelector('.header .codicon')?.className).toBe('codicon codicon-loading codicon-modifier-spin');
+    // The dropdown's button holds the state codicon and the title, as each of its options does.
+    expect([...root.querySelector('.header button.picker')!.children].map((child) => child.className)).toEqual(['codicon codicon-loading codicon-modifier-spin', 'title', 'codicon codicon-chevron-down']);
+    expect(root.querySelector('.header > .codicon')).toBeNull();
     expect(root.querySelector('.header .title')?.textContent).toBe('Fix the <inbox> badge');
     expect(root.querySelector('.message .box')?.textContent).toBe('Is <b>it</b> fixed?');
     root.innerHTML = renderConversation(state([message('m1', T0, 'Sent', { provisional: true })]));

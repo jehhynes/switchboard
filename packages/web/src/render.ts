@@ -79,7 +79,7 @@ export function renderList(groups: readonly PageGroup[], selected: number | null
   return `<ul class="work-list" aria-label="Work items">${html.join('')}</ul>`;
 }
 
-/** The header: the session's state, the dropdown of the selected work item's conversations, and its persona. */
+/** The header: the dropdown of the selected work item's conversations, showing the session's state as its options do, and its persona. */
 export function renderHeader(state: PageState, view: View): string {
   const scope = state.scope!;
   const title = selectedEntry(state)?.title ?? scope.title;
@@ -96,9 +96,9 @@ export function renderHeader(state: PageState, view: View): string {
     persona == null
       ? ''
       : `<button type="button" class="persona${persona.tonePending ? ' pending' : ''}" data-action="persona" title="${escape(`Persona: ${persona.name}${persona.pinned ? ', pinned' : ''}. Click to choose another.`)}"><span class="codicon codicon-${persona.pinned ? 'pinned' : 'person'}" aria-hidden="true"></span><span class="name">${escape(persona.name)}</span></button>`;
-  const picker = `<button type="button" class="picker" data-action="picker" aria-haspopup="listbox" aria-expanded="${view.picker}" title="${escape(title)}"><span class="title">${escape(title)}</span><span class="codicon codicon-chevron-down" aria-hidden="true"></span></button>${view.picker ? `<ul class="conversation-list" role="listbox" aria-label="Conversations">${options}</ul>` : ''}`;
+  const picker = `<button type="button" class="picker" data-action="picker" aria-haspopup="listbox" aria-expanded="${view.picker}" title="${escape(title)}">${codicon(stateIcon(state.session?.state, state.session?.waitingFor))}<span class="title">${escape(title)}</span><span class="codicon codicon-chevron-down" aria-hidden="true"></span></button>${view.picker ? `<ul class="conversation-list" role="listbox" aria-label="Conversations">${options}</ul>` : ''}`;
 
-  return `<header class="header">${codicon(stateIcon(state.session?.state, state.session?.waitingFor))}${picker}${personaButton}</header>`;
+  return `<header class="header">${picker}${personaButton}</header>`;
 }
 
 export function renderTabs(view: View, state: PageState): string {
