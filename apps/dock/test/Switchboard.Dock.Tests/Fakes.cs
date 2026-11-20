@@ -123,6 +123,17 @@ sealed class FakeHub : IHub
         return HoldNewConversation is { } held ? held.Task : Task.FromResult(NewConversationReplies.Count > 0 ? NewConversationReplies.Dequeue() : new NewConversationReply("Switchboard is not running.", null, null));
     }
 
+    /// <summary>When each focus report said it happened.</summary>
+    public List<long> FocusTimes { get; } = [];
+
+    public Task<string?> Focus(string? sessionId, long at)
+    {
+        Calls.Add($"focus {sessionId ?? "none"}");
+        FocusTimes.Add(at);
+
+        return Task.FromResult<string?>(null);
+    }
+
     public string? StopReply { get; set; }
 
     public Task<string?> StopHeld(string session)

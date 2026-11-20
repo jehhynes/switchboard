@@ -381,6 +381,14 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
         return null;
     }
 
+    /// <summary>
+    /// The Switchboard session ID of the Code Mode session whose attach terminal has the window name, among the rows and the held sessions, or
+    /// null for any other window (architecture.md § Voice).
+    /// </summary>
+    public string? TerminalSession(string name) =>
+        Groups.SelectMany((group) => group.AllRows).SelectMany((row) => new[] { row.Row.Terminal, row.Row.Open?.Terminal }).Concat(Held.Select((one) => one.Terminal))
+            .FirstOrDefault((terminal) => terminal is { CodeMode: true } && terminal.Name == name)?.SessionId;
+
     /// <summary>Clears the selection when the selected row's item window closed.</summary>
     public void WindowClosed(string name)
     {

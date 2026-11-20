@@ -177,6 +177,20 @@ public sealed class GnomeShell : IShell, IDisposable
         watches.Add(Wait(Task.Run(async () => await connection.WatchSignalAsync(Service, ObjectPath, Service, "TerminalFocused", read, handle, ObserverFlags.None, false, null))));
     }
 
+    public void WatchTerminalUnfocused(Action left)
+    {
+        MessageValueReader<bool> read = static (_, _) => true;
+        Action<Notification<bool>> handle = (notification) =>
+        {
+            if (notification.HasValue)
+            {
+                left();
+            }
+        };
+
+        watches.Add(Wait(Task.Run(async () => await connection.WatchSignalAsync(Service, ObjectPath, Service, "TerminalUnfocused", read, handle, ObserverFlags.None, false, null))));
+    }
+
     static T Wait<T>(Task<T> call)
     {
         try

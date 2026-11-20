@@ -35,6 +35,14 @@ public interface IShell
     void WatchTerminalFocused(Action<string> focused)
     {
     }
+
+    /// <summary>
+    /// Calls <paramref name="left"/>, on another thread, each time the focus moves from a terminal window to a window that is not one, or to none;
+    /// an extension older than this signal never calls it.
+    /// </summary>
+    void WatchTerminalUnfocused(Action left)
+    {
+    }
 }
 
 /// <summary>A window as the shell names it: Mutter's window ID and its title.</summary>

@@ -119,6 +119,65 @@ public sealed class ForegroundTests
         Assert.True(model.Row("item:8")!.IsSelected);
     }
 
+    [Fact]
+    public void TerminalSession_CodeModeAttachTerminal_NamesItsSessionAndNoOtherWindow()
+    {
+        var row = Fixtures.Row("item:8");
+        var attach = new DockTerminal("claude", "s8", "D:/git/widgets", ["attach", "s8"], "gh-108-widgets-655280-s8", "Issue <8> · sb:gh-108-widgets-655280-s8", CodeMode: true);
+        var resume = new DockTerminal("claude", "aaaa1111-native", "D:/git/widgets", ["--resume", "aaaa1111-native"], "gh-108-widgets-655280-aaaa1111", "Issue <8> · sb:gh-108-widgets-655280-aaaa1111");
+        var view = Fixtures.View with
+        {
+            Groups = [new DockGroup("blocked", "Blocked on you", null, [row with { Terminal = attach }, Fixtures.Row("item:7") with { Key = "item:70", Terminal = resume }])],
+        };
+        var model = Model(view);
+
+        Assert.Equal("s8", model.TerminalSession("gh-108-widgets-655280-s8"));
+        // A held session's attach terminal, from the held list.
+        Assert.Equal("cm15", model.TerminalSession(view.Held![1].Terminal!.Name));
+        // A resume terminal cannot be typed into through the holder, and an item window is no terminal.
+        Assert.Null(model.TerminalSession("gh-108-widgets-655280-aaaa1111"));
+        Assert.Null(model.TerminalSession("gh-108-widgets-655280"));
+    }
+
+    [Fact]
+    public async Task TerminalFocus_Reports_PostsEachChangeOnceInOrderAndAgainAfterAReconnect()
+    {
+        var hub = new FakeHub();
+        var clock = 1000L;
+        var focus = new TerminalFocus(hub, () => clock++);
+
+        await focus.Resend();
+        await focus.Report("cm15");
+        await focus.Report("cm15");
+        await focus.Report(null);
+        await focus.Report(null);
+        await focus.Resend();
+
+        Assert.Equal(["focus cm15", "focus none", "focus none"], hub.Calls);
+        // A resend carries when the focus changed, so the hub orders it against window reports.
+        Assert.Equal([1000L, 1001L, 1001L], hub.FocusTimes);
+    }
+
+    [AvaloniaFact]
+    public void ShowForeground_SessionTerminalThenAnotherApp_TellsTheHubWhichSessionsTerminalIsInFront()
+    {
+        var model = new DockViewModel(new DockSettings(), (_) => { });
+        var hub = new FakeHub();
+        var window = new MainWindow(model, null, hub, new FakeActions(), docked: false);
+
+        model.Show(Fixtures.View);
+        window.Show();
+        window.ShowForeground("Issue <15> · sb:gh-115-widgets-655280-cm15");
+        window.ShowForeground("Issue <15> · sb:gh-115-widgets-655280-cm15");
+        window.ShowForeground("Inbox - Outlook");
+        window.TerminalLeft();
+        window.ShowForeground("Issue <15> · sb:gh-115-widgets-655280-cm15");
+        window.TerminalLeft();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(["focus cm15", "focus none", "focus cm15", "focus none"], hub.Calls);
+    }
+
     [AvaloniaFact]
     public void ShowForeground_ItemWindowTitle_SelectsItsRowInTheDock()
     {

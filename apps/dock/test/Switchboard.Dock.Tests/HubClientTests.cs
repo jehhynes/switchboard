@@ -241,6 +241,19 @@ public sealed class HubClientTests
     }
 
     [Fact]
+    public async Task Focus_SessionOrNone_PostsTheSessionIdOrNullAndReturnsTheRefusal()
+    {
+        using var server = new LoopbackHub((_, body, stream) => body.Contains("\"nope\"", StringComparison.Ordinal) ? LoopbackHub.Reply(stream, 404, "{\"error\":\"No session has that ID.\"}") : LoopbackHub.Reply(stream, 200, "{\"focus\":null}"));
+        using var client = new HubClient(HomeFor(server));
+
+        Assert.Null(await client.Focus("cm15", 5));
+        Assert.Null(await client.Focus(null, 6));
+        Assert.Equal("No session has that ID.", await client.Focus("nope", 7));
+        Assert.Contains("POST /dock/focus HTTP/1.1 {\"sessionId\":\"cm15\",\"at\":5}", server.Requests);
+        Assert.Contains("POST /dock/focus HTTP/1.1 {\"sessionId\":null,\"at\":6}", server.Requests);
+    }
+
+    [Fact]
     public async Task Act_NoHub_SaysSwitchboardIsNotRunning()
     {
         using var client = new HubClient(Fixtures.TempFolder());

@@ -71,6 +71,8 @@ public sealed class App : Application
                             window.ShowFullScreen(shell.FullScreen());
                             // VS Code windows report their focus through the hub; a terminal's comes from the shell (PRD R71).
                             shell.WatchTerminalFocused((title) => Dispatcher.UIThread.Post(() => window.ShowForeground(title)));
+                            // The voice follows a session's terminal window only while it is in front (architecture.md § Voice).
+                            shell.WatchTerminalUnfocused(() => Dispatcher.UIThread.Post(window.TerminalLeft));
                         }
                         catch (ShellException)
                         {

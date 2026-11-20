@@ -40,6 +40,12 @@ public interface IHub
     /// </summary>
     Task<NewConversationReply> NewConversation(string folder, string opId);
 
+    /// <summary>
+    /// Reports the session whose terminal window came to the front, or null when the window in front is no session's terminal, and
+    /// <paramref name="at"/>, when, in epoch milliseconds (architecture.md § Voice).
+    /// </summary>
+    Task<string?> Focus(string? sessionId, long at);
+
     /// <summary>Stops a held session by its Switchboard session ID (PRD R94).</summary>
     Task<string?> StopHeld(string session);
 

@@ -283,6 +283,8 @@ public sealed class HubClient(string switchboardHome, HubStarter? starter = null
         return new NewConversationReply(null, workItemId, hosted);
     }
 
+    public Task<string?> Focus(string? sessionId, long at) => Post("/dock/focus", new JsonObject { ["sessionId"] = sessionId, ["at"] = at });
+
     public Task<string?> StopHeld(string session) => Post("/holder/stop", new JsonObject { ["id"] = session });
 
     public async Task<WindowReply> Open(string sessionId, string cwd, string workspace)

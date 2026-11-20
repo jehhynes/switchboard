@@ -24,6 +24,7 @@ public sealed partial class MainWindow : Window
     readonly DockViewModel model;
     readonly HubClient? stream;
     readonly IHub hub;
+    readonly TerminalFocus terminalFocus;
     readonly IDockActions actions;
     readonly bool docked;
     readonly IConfigHub? config;
@@ -106,6 +107,7 @@ public sealed partial class MainWindow : Window
         this.model = model;
         this.stream = stream;
         this.hub = hub;
+        terminalFocus = new TerminalFocus(hub);
         this.actions = actions;
         this.docked = docked;
         DataContext = model;
@@ -237,6 +239,8 @@ public sealed partial class MainWindow : Window
             });
             // Open in Switchboard, or a VS Code click on a row that opens a terminal (PRD R65, R69, R71).
             stream.ClickRequested += (key) => Dispatcher.UIThread.Post(() => ClickForwarded(key));
+            // A hub that started since the last report does not know which terminal is in front.
+            stream.Connected += () => Dispatcher.UIThread.Post(() => _ = terminalFocus.Resend());
             // A work item that starts needing the operator, which the VS Code windows no longer toast (PRD R65).
             stream.NeedsYou += (key, message) => Dispatcher.UIThread.Post(() => ShowNeedsYou(key, message));
         }
@@ -899,14 +903,24 @@ public sealed partial class MainWindow : Window
         x11?.Focus();
     }
 
-    /// <summary>Selects and scrolls to the row of an item window that came to the front by any means; other windows change nothing (PRD R71).</summary>
+    /// <summary>
+    /// Selects and scrolls to the row of an item window or session terminal that came to the front by any means; other windows change nothing
+    /// (PRD R71). The hub hears whether it is a Code Mode session's terminal window, which the voice follows (architecture.md § Voice).
+    /// </summary>
     public void ShowForeground(string title)
     {
-        if (DockWindow.NameOf(title) is { } name)
+        var name = DockWindow.NameOf(title);
+
+        _ = terminalFocus.Report(name is null ? null : model.TerminalSession(name));
+
+        if (name is not null)
         {
             ShowItemWindow(name);
         }
     }
+
+    /// <summary>A session's terminal window lost the focus to a window that is no terminal, as GNOME Shell reports it (PRD R71).</summary>
+    public void TerminalLeft() => _ = terminalFocus.Report(null);
 
     /// <summary>Selects and scrolls to the row of the named item window, which came to the front.</summary>
     public void ShowItemWindow(string name)
@@ -1982,6 +1996,8 @@ public sealed partial class MainWindow : Window
         public Task<string?> Select(string rowKey) => Task.FromResult<string?>(null);
 
         public Task<string?> StopHeld(string session) => Task.FromResult<string?>(null);
+
+        public Task<string?> Focus(string? sessionId, long at) => Task.FromResult<string?>(null);
 
         public Task<NewConversationReply> NewConversation(string folder, string opId) => Task.FromResult(new NewConversationReply(null, null, folder));
 
