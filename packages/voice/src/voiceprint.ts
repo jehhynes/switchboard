@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { join } from 'node:path';
+import type { SherpaRuntime } from './sherpa.js';
 
 /** The speaker model, WeSpeaker's ResNet34 trained on VoxCeleb (256-dimensional embeddings), in `<voice home>/models`, as claude-collab used it. */
 export const SPEAKER_MODEL = 'wespeaker_en_voxceleb_resnet34_LM.onnx';
@@ -407,14 +407,23 @@ interface SherpaSpeakerModule {
   };
 }
 
-/** sherpa-onnx's speaker embedding extractor on the CPU with one thread, about 60 ms per 2 s of audio; an error says why it cannot run. */
-export function sherpaEmbedder(modelFile: string, requireFrom: string): Embedder | { error: string } {
+/**
+ * sherpa-onnx's speaker embedding extractor on the CPU with one thread, about 60 ms per 2 s of audio, through the build recognition uses
+ * (`SherpaRuntime`), as claude-collab ran it; an error says why it cannot run.
+ */
+export function sherpaEmbedder(modelFile: string, runtime: SherpaRuntime): Embedder | { error: string } {
   if (!existsSync(modelFile)) {
     return { error: `No speaker model at ${modelFile}.` };
   }
 
+  const loaded = runtime.get();
+
+  if ('error' in loaded) {
+    return { error: `The speaker model could not load: ${loaded.error}` };
+  }
+
   try {
-    const sherpa = createRequire(requireFrom)('sherpa-onnx-node') as SherpaSpeakerModule;
+    const sherpa = loaded.module as SherpaSpeakerModule;
     const extractor = new sherpa.SpeakerEmbeddingExtractor({ model: modelFile, numThreads: 1, debug: false });
 
     return {

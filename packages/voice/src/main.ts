@@ -1,9 +1,9 @@
 import { createConnection, createServer } from 'node:net';
 import type { Server } from 'node:net';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { ASR_MODEL, ASR_RATE, sherpaEngine } from './asr.js';
+import { ASR_RATE, sherpaRecognizer } from './asr.js';
 import { decibriCapture, decibriOutput } from './decibri.js';
 import { windowsCapture, withFallback } from './windowsCapture.js';
 import { Dictation } from './dictation.js';
@@ -17,6 +17,7 @@ import { VoiceServer } from './server.js';
 import { VoiceService } from './service.js';
 import { readKey, SAMPLE_RATE, Tts } from './tts.js';
 import { SPEAKER_MODEL, sherpaEmbedder, Voiceprint } from './voiceprint.js';
+import { gpuCheck, SherpaRuntime } from './sherpa.js';
 
 /** How long the voice process stays up with no hub connected; the hub stops it sooner when the demand ends. */
 const IDLE_EXIT_MS = 10 * 60_000;
@@ -109,8 +110,10 @@ async function main(): Promise<void> {
   // On Windows, Windows' own echo cancellation in communications mode; decibri's canceller when its helper fails (mechanics.md M94).
   const capture =
     process.platform === 'win32' ? withFallback(windowsCapture({ script: join(scripts, 'commcapture.ps1'), speakers: () => service.settings.outputDevice, log }), decibri, log, "decibri with its tau echo canceller") : decibri;
+  // sherpa-onnx's build, CUDA or CPU, is chosen when recognition or the voice check first loads, and both use it (architecture.md § Dictation).
+  const sherpa = new SherpaRuntime({ models: join(voiceHome, 'models'), requireFrom: process.argv[1]!, check: gpuCheck(join(scripts, 'gpucheck.js')), log });
   // The speaker model loads at its first use, the first piece or enrolment.
-  const voiceprint = new Voiceprint({ dir: voiceHome, embedder: () => sherpaEmbedder(join(voiceHome, 'models', SPEAKER_MODEL), process.argv[1]!), log });
+  const voiceprint = new Voiceprint({ dir: voiceHome, embedder: () => sherpaEmbedder(join(voiceHome, 'models', SPEAKER_MODEL), sherpa), log });
   const service: VoiceService = new VoiceService({
     tts,
     output: await decibriOutput(SAMPLE_RATE),
@@ -120,11 +123,7 @@ async function main(): Promise<void> {
     dictation: (hooks) =>
       new Dictation({
         capture,
-        recognizer: (terms) => {
-          const modelDir = join(voiceHome, 'models', ASR_MODEL);
-
-          return existsSync(join(modelDir, 'tokens.txt')) ? sherpaEngine(modelDir, writeHotwords(voiceHome, modelDir, terms), process.argv[1]!) : { error: `No speech recognition model in ${modelDir}.` };
-        },
+        recognizer: (terms) => sherpaRecognizer(sherpa, (modelDir) => writeHotwords(voiceHome, modelDir, terms), log),
         vocabulary,
         turn: turnModel(join(voiceHome, 'models', TURN_MODEL), join(scripts, 'turn.js'), log),
         watchMicUse: (changed, failed) => watchMicUse({ script: join(scripts, 'micuse.ps1'), changed, failed, log }),

@@ -1,11 +1,10 @@
 import { existsSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { CPU_MODEL } from './sherpa.js';
+import type { AsrDevice, SherpaRuntime } from './sherpa.js';
 
 /** Capture and recognition run at 16 kHz mono. */
 export const ASR_RATE = 16_000;
-/** The recogniser's model, the int8 build of NVIDIA's Nemotron Speech Streaming 0.6B with 160 ms chunks, in `<voice home>/models`. */
-export const ASR_MODEL = 'sherpa-onnx-nemotron-speech-streaming-en-0.6b-160ms-int8-2026-04-25';
 /** The audio kept for the preroll of the next message. */
 const KEEP = 8 * ASR_RATE;
 const PREROLL = ASR_RATE / 2;
@@ -23,6 +22,7 @@ export interface AsrStream {
 }
 
 export interface AsrEngine {
+  readonly device: AsrDevice;
   stream(): AsrStream;
 }
 
@@ -214,42 +214,50 @@ interface SherpaModule {
   };
 }
 
+export interface Hotwords {
+  bpeVocab: string;
+  hotwordsFile: string | null;
+}
+
 /**
- * The sherpa-onnx recogniser (prebuilt N-API, CPU), which only the voice process loads: decoding settings tuned in claude-collab on saved clips,
- * modified beam search with 4 paths and hotwords at 1.5 (claude-collab `docs/findings.md`). Loading the model takes about 2 seconds and blocks.
- * An error says why it cannot run: sherpa-onnx is not installed, or the model is not in `modelDir`.
+ * The sherpa-onnx recogniser (prebuilt N-API) on `device`, which only the voice process loads: the fp32 model on CUDA, the int8 model on the CPU,
+ * since CUDA with the int8 model is slower than the CPU; decoding settings tuned in claude-collab on saved clips, modified beam search with 4
+ * paths and hotwords at 1.5 (claude-collab `docs/findings.md`). Loading the model blocks for seconds. An error says why it cannot run: the
+ * model is not in `modelDir`, or the recogniser could not be created. `hotwords` writes the hotword files from the model's tokens.
  */
-export function sherpaEngine(modelDir: string, hotwords: { bpeVocab: string; hotwordsFile: string | null }, requireFrom: string): AsrEngine | { error: string } {
-  if (!existsSync(join(modelDir, 'encoder.int8.onnx'))) {
+export function sherpaEngine(module: unknown, device: AsrDevice, modelDir: string, hotwords: () => Hotwords): AsrEngine | { error: string } {
+  const suffix = device === 'gpu' ? '' : '.int8';
+  const file = (name: string): string => join(modelDir, name);
+
+  if (!existsSync(file(`encoder${suffix}.onnx`)) || !existsSync(file('tokens.txt'))) {
     return { error: `No speech recognition model in ${modelDir}.` };
   }
 
-  let sherpa: SherpaModule;
+  const words = hotwords();
+  let recognizer: InstanceType<SherpaModule['OnlineRecognizer']>;
 
   try {
-    sherpa = createRequire(requireFrom)('sherpa-onnx-node') as SherpaModule;
+    recognizer = new (module as SherpaModule).OnlineRecognizer({
+      featConfig: { sampleRate: ASR_RATE, featureDim: 80 },
+      modelConfig: {
+        transducer: { encoder: file(`encoder${suffix}.onnx`), decoder: file(`decoder${suffix}.onnx`), joiner: file(`joiner${suffix}.onnx`) },
+        tokens: file('tokens.txt'),
+        numThreads: 4,
+        provider: device === 'gpu' ? 'cuda' : 'cpu',
+        debug: 0,
+        modelingUnit: 'bpe',
+        bpeVocab: words.bpeVocab,
+      },
+      decodingMethod: 'modified_beam_search',
+      maxActivePaths: 4,
+      ...(words.hotwordsFile === null ? {} : { hotwordsFile: words.hotwordsFile, hotwordsScore: 1.5 }),
+    });
   } catch (error) {
-    return { error: `Speech recognition is not available: ${(error as Error).message}` };
+    return { error: `The speech recognition model could not load: ${(error as Error).message}` };
   }
 
-  const file = (name: string): string => join(modelDir, name);
-  const recognizer = new sherpa.OnlineRecognizer({
-    featConfig: { sampleRate: ASR_RATE, featureDim: 80 },
-    modelConfig: {
-      transducer: { encoder: file('encoder.int8.onnx'), decoder: file('decoder.int8.onnx'), joiner: file('joiner.int8.onnx') },
-      tokens: file('tokens.txt'),
-      numThreads: 4,
-      provider: 'cpu',
-      debug: 0,
-      modelingUnit: 'bpe',
-      bpeVocab: hotwords.bpeVocab,
-    },
-    decodingMethod: 'modified_beam_search',
-    maxActivePaths: 4,
-    ...(hotwords.hotwordsFile === null ? {} : { hotwordsFile: hotwords.hotwordsFile, hotwordsScore: 1.5 }),
-  });
-
   return {
+    device,
     stream: () => {
       const stream = recognizer.createStream();
       const decode = (): void => {
@@ -271,4 +279,30 @@ export function sherpaEngine(modelDir: string, hotwords: { bpeVocab: string; hot
       };
     },
   };
+}
+
+/**
+ * The recogniser on the device `runtime` chose (architecture.md § Dictation): on the GPU when it can, else, or when the GPU's recogniser fails
+ * to load, on the CPU with the int8 model through the same build, with why logged. `hotwords` writes the hotword files from a model folder.
+ */
+export function sherpaRecognizer(runtime: SherpaRuntime, hotwords: (modelDir: string) => Hotwords, log: (line: string) => void): AsrEngine | { error: string } {
+  const sherpa = runtime.get();
+
+  if ('error' in sherpa) {
+    return { error: `Speech recognition is not available: ${sherpa.error}` };
+  }
+
+  if (sherpa.device === 'gpu') {
+    const engine = sherpaEngine(sherpa.module, 'gpu', sherpa.model, () => hotwords(sherpa.model));
+
+    if (!('error' in engine)) {
+      return engine;
+    }
+
+    log(`Speech recognition runs on the CPU, the int8 model: the GPU's recogniser did not load: ${engine.error}`);
+  }
+
+  const cpuModel = join(dirname(sherpa.model), CPU_MODEL);
+
+  return sherpaEngine(sherpa.module, 'cpu', cpuModel, () => hotwords(cpuModel));
 }

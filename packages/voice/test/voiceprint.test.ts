@@ -2,7 +2,8 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { loudness, normalize, pitch, pitchTooHigh, TTS_PRINTS_FILE, VOICEPRINT_FILE, Voiceprint } from '../src/voiceprint.js';
+import { loudness, normalize, pitch, pitchTooHigh, sherpaEmbedder, TTS_PRINTS_FILE, VOICEPRINT_FILE, Voiceprint } from '../src/voiceprint.js';
+import type { SherpaRuntime } from '../src/sherpa.js';
 import type { Embedder } from '../src/voiceprint.js';
 
 const RATE = 16_000;
@@ -161,5 +162,43 @@ describe('Voiceprint', () => {
 
     expect([saved['marin']!.windows, saved['cedar']!.windows]).toEqual([2, 20]);
     expect(new Voiceprint({ dir, embedder: () => fakeEmbedder(), log: () => undefined }).voicePrint('cedar')).not.toBeNull();
+  });
+});
+
+describe('sherpaEmbedder', () => {
+  it('runs the speaker model on the CPU through the build recognition uses, and says why when it cannot', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'embedder-'));
+    const model = join(dir, 'speaker.onnx');
+    const configs: unknown[] = [];
+    const module = {
+      SpeakerEmbeddingExtractor: class {
+        constructor(config: unknown) {
+          configs.push(config);
+        }
+
+        createStream() {
+          return { acceptWaveform: () => undefined, inputFinished: () => undefined };
+        }
+
+        isReady() {
+          return true;
+        }
+
+        compute() {
+          return new Float32Array([3, 4]);
+        }
+      },
+    };
+    const runtime = (loaded: unknown) => ({ get: () => loaded }) as unknown as SherpaRuntime;
+
+    expect(sherpaEmbedder(model, runtime({ device: 'gpu', module }))).toEqual({ error: `No speaker model at ${model}.` });
+    writeFileSync(model, '');
+    expect(sherpaEmbedder(model, runtime({ error: 'sherpa-onnx did not load: gone' }))).toEqual({ error: 'The speaker model could not load: sherpa-onnx did not load: gone' });
+
+    const embedder = sherpaEmbedder(model, runtime({ device: 'gpu', module }));
+
+    // No provider: the extractor runs on the CPU, even in the CUDA build.
+    expect(configs).toEqual([{ model, numThreads: 1, debug: false }]);
+    expect([...(embedder as Embedder).embed(new Float32Array(16_000))!]).toEqual([0.6000000238418579, 0.800000011920929]);
   });
 });

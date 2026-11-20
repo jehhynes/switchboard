@@ -180,6 +180,9 @@ describe('the packaged voice process (architecture.md § Voice)', () => {
     expect(manifest.files.some((file) => file.includes('/browser/'))).toBe(false);
     // Dictation (architecture.md § Dictation): the turn model's process, the other-app watcher, recognition and onnxruntime for this platform only.
     expect(manifest.files).toContain('turn.js');
+    // The GPU check sherpa-onnx's CUDA build runs before it loads; the CUDA build itself is machine data in <home>/voice/models.
+    expect(manifest.files).toContain('gpucheck.js');
+    expect(manifest.files.some((file) => file.includes('onnxruntime_providers_cuda'))).toBe(false);
     expect(manifest.files).toContain('micuse.ps1');
     expect(manifest.files).toContain('commcapture.ps1');
     expect(manifest.files).toContain('node_modules/sherpa-onnx-node/package.json');

@@ -251,6 +251,7 @@ export class FakeCapture implements Capture {
 
 /** A recogniser whose words the test sets: each stream reads `text` as it stood when audio came, and `held` once finished. */
 export class FakeEngine implements AsrEngine {
+  device: 'gpu' | 'cpu' = 'cpu';
   text = '';
   held = '';
   streams = 0;

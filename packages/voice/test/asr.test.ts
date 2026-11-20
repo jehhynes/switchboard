@@ -1,8 +1,11 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { pcmToSamples, sherpaEngine, Transcriber } from '../src/asr.js';
+import { pcmToSamples, sherpaEngine, sherpaRecognizer, Transcriber } from '../src/asr.js';
+import type { AsrEngine } from '../src/asr.js';
+import { CPU_MODEL, GPU_MODEL } from '../src/sherpa.js';
+import type { Sherpa, SherpaRuntime } from '../src/sherpa.js';
 import { FakeEngine } from './fakes.js';
 
 const CHUNK = new Float32Array(1600);
@@ -100,16 +103,109 @@ describe('Transcriber', () => {
   });
 });
 
+/** A sherpa-onnx module whose recogniser records its config, or throws `fail` when created with that provider. */
+function fakeSherpa(fail: string | null = null) {
+  const configs: Array<Record<string, any>> = [];
+  const module = {
+    OnlineRecognizer: class {
+      constructor(config: Record<string, any>) {
+        configs.push(config);
+
+        if (config['modelConfig'].provider === fail) {
+          throw new Error(`no ${fail}`);
+        }
+      }
+
+      createStream() {
+        return { acceptWaveform: () => undefined, inputFinished: () => undefined };
+      }
+
+      isReady() {
+        return false;
+      }
+
+      decode() {}
+
+      getResult() {
+        return { text: 'hello' };
+      }
+    },
+  };
+
+  return { module, configs };
+}
+
+function models(files: string[]) {
+  const dir = mkdtempSync(join(tmpdir(), 'asr-'));
+
+  for (const file of files) {
+    mkdirSync(join(dir, file, '..'), { recursive: true });
+    writeFileSync(join(dir, file), '');
+  }
+
+  return dir;
+}
+
+const HOT = { bpeVocab: 'v', hotwordsFile: 'h.txt' };
+
 describe('sherpaEngine', () => {
-  it('says why it cannot run: no model in the folder', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'asr-'));
+  it('runs the fp32 model on CUDA and the int8 model on the CPU, with hotwords at 1.5', () => {
+    const dir = models(['encoder.onnx', 'encoder.int8.onnx', 'tokens.txt']);
+    const { module, configs } = fakeSherpa();
 
     try {
-      expect(sherpaEngine(dir, { bpeVocab: 'x', hotwordsFile: null }, join(dir, 'x.js'))).toEqual({ error: `No speech recognition model in ${dir}.` });
-      writeFileSync(join(dir, 'encoder.int8.onnx'), '');
-      expect(sherpaEngine(dir, { bpeVocab: 'x', hotwordsFile: null }, join(dir, 'x.js'))).toMatchObject({ error: expect.stringMatching(/^Speech recognition is not available: /) });
+      const gpu = sherpaEngine(module, 'gpu', dir, () => HOT);
+      const cpu = sherpaEngine(module, 'cpu', dir, () => ({ bpeVocab: 'v', hotwordsFile: null }));
+
+      expect([(gpu as AsrEngine).device, (cpu as AsrEngine).device]).toEqual(['gpu', 'cpu']);
+      expect(configs[0]).toMatchObject({ modelConfig: { provider: 'cuda', transducer: { encoder: join(dir, 'encoder.onnx'), joiner: join(dir, 'joiner.onnx') }, bpeVocab: 'v' }, hotwordsFile: 'h.txt', hotwordsScore: 1.5 });
+      expect(configs[1]).toMatchObject({ modelConfig: { provider: 'cpu', transducer: { encoder: join(dir, 'encoder.int8.onnx'), decoder: join(dir, 'decoder.int8.onnx') } } });
+      expect(configs[1]).not.toHaveProperty('hotwordsFile');
+      expect((gpu as AsrEngine).stream().text()).toBe('hello');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it('says why it cannot run: no model for the device in the folder, or a recogniser that does not load', () => {
+    const dir = models(['encoder.int8.onnx', 'tokens.txt']);
+    let written = 0;
+
+    try {
+      expect(sherpaEngine(fakeSherpa().module, 'gpu', dir, () => (written++, HOT))).toEqual({ error: `No speech recognition model in ${dir}.` });
+      expect(written).toBe(0);
+      expect(sherpaEngine(fakeSherpa('cpu').module, 'cpu', dir, () => HOT)).toEqual({ error: 'The speech recognition model could not load: no cpu' });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('sherpaRecognizer', () => {
+  const runtime = (loaded: Sherpa | { error: string }) => ({ get: () => loaded }) as unknown as SherpaRuntime;
+
+  it('runs on the GPU when the runtime chose it, and on the CPU with the int8 model when the GPU recogniser does not load', () => {
+    const dir = models([join(GPU_MODEL, 'encoder.onnx'), join(GPU_MODEL, 'tokens.txt'), join(CPU_MODEL, 'encoder.int8.onnx'), join(CPU_MODEL, 'tokens.txt')]);
+    const logs: string[] = [];
+    const hotwords: string[] = [];
+
+    try {
+      const good = fakeSherpa();
+
+      expect(sherpaRecognizer(runtime({ device: 'gpu', module: good.module, model: join(dir, GPU_MODEL), why: null }), (model) => (hotwords.push(model), HOT), (line) => logs.push(line))).toMatchObject({ device: 'gpu' });
+
+      const failing = fakeSherpa('cuda');
+
+      expect(sherpaRecognizer(runtime({ device: 'gpu', module: failing.module, model: join(dir, GPU_MODEL), why: null }), (model) => (hotwords.push(model), HOT), (line) => logs.push(line))).toMatchObject({ device: 'cpu' });
+      expect(hotwords).toEqual([join(dir, GPU_MODEL), join(dir, GPU_MODEL), join(dir, CPU_MODEL)]);
+      expect(logs).toEqual(["Speech recognition runs on the CPU, the int8 model: the GPU's recogniser did not load: The speech recognition model could not load: no cuda"]);
+      expect(sherpaRecognizer(runtime({ device: 'cpu', module: good.module, model: join(dir, CPU_MODEL), why: 'x' }), () => HOT, () => undefined)).toMatchObject({ device: 'cpu' });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('says why when sherpa-onnx does not load', () => {
+    expect(sherpaRecognizer(runtime({ error: 'sherpa-onnx did not load: gone' }), () => HOT, () => undefined)).toEqual({ error: 'Speech recognition is not available: sherpa-onnx did not load: gone' });
   });
 });

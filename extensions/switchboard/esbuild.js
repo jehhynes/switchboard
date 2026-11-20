@@ -38,10 +38,11 @@ const holder = {
 };
 
 // The voice process runs on the operator's Node.js too, since decibri (capture and playback) and sherpa-onnx (recognition) are native modules
-// (architecture.md § Voice, § Dictation); turn.js is its turn model's process, which loads onnxruntime apart from sherpa-onnx's own runtime.
+// (architecture.md § Voice, § Dictation); turn.js is its turn model's process, which loads onnxruntime apart from sherpa-onnx's own runtime, and
+// gpucheck.js checks sherpa-onnx's CUDA build in a child process before the voice process loads it.
 // The native modules stay outside the bundle: each loads its binary from its own or its platform package.
 const voice = {
-  entryPoints: { voice: '../../packages/voice/src/main.ts', turn: '../../packages/voice/src/turnWorker.ts' },
+  entryPoints: { voice: '../../packages/voice/src/main.ts', turn: '../../packages/voice/src/turnWorker.ts', gpucheck: '../../packages/voice/src/gpuCheck.ts' },
   bundle: true,
   format: 'cjs',
   platform: 'node',
