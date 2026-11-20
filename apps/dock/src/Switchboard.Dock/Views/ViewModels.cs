@@ -746,6 +746,13 @@ public sealed class RowViewModel(DockRow row) : Observable
 
     public string UnreadTitle => row.Unread == 1 ? "1 unread reply or status in its Conversation view" : $"{row.Unread} unread replies and statuses in its Conversation view";
 
+    /// <summary>The mic mark on the row whose session the voice speaks for (architecture.md § Voice), before the unread count.</summary>
+    public bool HasVoice => row.Voice is not null;
+
+    public string VoiceGlyph => row.Voice?.Glyph ?? "";
+
+    public string? VoiceTitle => row.Voice?.Title;
+
     /// <summary>The operator's comments (PRD R87), as an icon on line 2 with the comments as its tooltip.</summary>
     public bool HasComment => row.Comment is not null;
 

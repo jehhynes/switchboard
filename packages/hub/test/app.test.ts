@@ -763,10 +763,11 @@ describe('createHubApp', () => {
     app.runtime.send({ type: 'adhoc', prompt: 'Primary', repoRoot: 'D:/scratch', start: true });
     await app.runtime.settled();
 
-    const rows = () => (app.dock() as { notes: string[]; groups: { rows: { key: string; window: { file: string } | null; voice: { active: boolean } }[] }[] }).groups.flatMap((group) => group.rows);
+    const rows = () => (app.dock() as { notes: string[]; groups: { rows: { key: string; window: { file: string } | null; voice: { glyph: string; title: string } | null }[] }[] }).groups.flatMap((group) => group.rows);
     const row = rows()[0]!;
 
-    expect(row.voice).toEqual({ active: false });
+    // No session is the voice target, so no row has the mic mark.
+    expect(row.voice).toBeNull();
     const key = app.windowOpened!(row.window!.file);
 
     // No voice build is installed in this home, so the process cannot start: the dock says so, no window does.

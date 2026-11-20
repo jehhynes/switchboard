@@ -85,12 +85,16 @@ public sealed record DockRow(
     bool Movable = false,
     DockTerminal? Terminal = null,
     RowComment? Comment = null,
-    int Unread = 0)
+    int Unread = 0,
+    RowVoice? Voice = null)
 {
     /// <summary>The work item ID of an <c>item:&lt;id&gt;</c> row, or null for a pool row.</summary>
     [JsonIgnore]
     public int? WorkItemId => Key.StartsWith("item:", StringComparison.Ordinal) && int.TryParse(Key.AsSpan(5), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var id) ? id : null;
 }
+
+/// <summary>The mic mark of the row whose session the voice speaks for (architecture.md § Voice), with its codicon glyph and tooltip.</summary>
+public sealed record RowVoice(string Glyph, string Title);
 
 /// <summary>A ticket's link, named as <c>PR #19002</c>, <c>gh 18941</c> or by its label (PRD R52); <c>Mentioned</c> when the ticket's text names it (PRD R61).</summary>
 public sealed record DockLink(string Label, string Url, string Kind = "url", string? Badge = null, string? Glyph = null, bool Mentioned = false)

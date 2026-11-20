@@ -20,6 +20,21 @@ public sealed class DockViewTests
     }
 
     [Fact]
+    public void Parse_RowTheVoiceSpeaksFor_ReadsItsMicMark()
+    {
+        var json = JsonNode.Parse(Fixtures.DockJson)!;
+
+        json["groups"]![0]!["rows"]![0]!["voice"] = new JsonObject { ["glyph"] = "\uec12", ["title"] = "The voice speaks for this session." };
+        json["groups"]![0]!["rows"]![1]!["voice"] = null;
+
+        var rows = DockView.Parse(json.ToJsonString()).Groups[0].Rows;
+
+        Assert.Equal(new RowVoice("\uec12", "The voice speaks for this session."), rows[0].Voice);
+        Assert.Null(rows[1].Voice);
+        Assert.Null(Fixtures.View.Groups[0].Rows[0].Voice);
+    }
+
+    [Fact]
     public void Parse_HostedWindow_ReadsItsHostedMark()
     {
         var json = JsonNode.Parse(Fixtures.DockJson)!;

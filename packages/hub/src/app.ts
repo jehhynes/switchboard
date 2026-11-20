@@ -34,6 +34,8 @@ import { needsMessage, newlyNeeding, rowFor, targetForUrl } from './needs.js';
 import { volumeReply } from './volume.js';
 
 const RELOAD_DEBOUNCE_MS = 300;
+/** The mic codicon in codicon.ttf, which marks the voice target's dock row (architecture.md § Voice). */
+export const VOICE_GLYPH = '\u{ec12}';
 
 /** Operator events the dock may send (PRD R27). */
 const OPERATOR_EVENTS = new Set(['adhoc', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retry', 'stop', 'delete', 'open-question', 'pick', 'retriage-pool', 'snooze', 'restore', 'comment', 'move', 'reset-position']);
@@ -455,7 +457,7 @@ const dockWithRuns = () => {
           ...row,
           open: row.open?.type === 'terminal' ? { ...executable(row.open), type: 'terminal' as const } : row.open,
           terminal: row.terminal === null ? null : executable(row.terminal),
-          voice: { active: row.key === activeRow },
+          voice: row.key === activeRow ? { glyph: VOICE_GLYPH, title: 'The voice speaks for this session.' } : null,
         })),
       })),
     };
