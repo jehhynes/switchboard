@@ -2660,6 +2660,14 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
     expect(context.runtime.contract(session.nativeSessionId!, 'resume')).toBe(conversationRules(join(session.cwd, '.wip', 'artifacts', `w${session.workItemId}`)));
     expect(context.runtime.contract(session.nativeSessionId!, 'resume')).toContain(`artifact folder, \`${join(session.cwd, '.wip', 'artifacts', `w${session.workItemId}`)}\``);
     expect(context.runtime.contract(session.nativeSessionId!, 'compact')).toMatch(/^Report to Switchboard with these commands:\n[\s\S]*\n\n## Conversation view\n/);
+    expect(context.runtime.contract(session.nativeSessionId!, 'resume')).not.toContain('## Spoken replies');
+
+    // With voice on, the rules carry the spoken-reply section, after a resume and after a compaction.
+    const voiced = config({ codeMode: true });
+
+    context.runtime.reload({ ...voiced, settings: { ...voiced.settings, voice: { ...voiced.settings.voice, enabled: true } } });
+    expect(context.runtime.contract(session.nativeSessionId!, 'resume')).toBe(conversationRules(join(session.cwd, '.wip', 'artifacts', `w${session.workItemId}`), true));
+    expect(context.runtime.contract(session.nativeSessionId!, 'compact')).toContain('## Spoken replies');
     context.runtime.stop();
   });
 

@@ -78,8 +78,8 @@ export const LINK_PROMPT = `## Links in this terminal
 Start each relative file link target with "./", as in [filename.ts:42](./src/filename.ts#L42), so VS Code's terminal makes it clickable.`;
 
 /** The panel's sections, then Switchboard's link section and the conversation rules, appended to every Code Mode start and resume. */
-export function codeModePrompt(artifacts: string): string {
-  return `${PANEL_PROMPT}\n\n${LINK_PROMPT}\n\n${conversationRules(artifacts)}`;
+export function codeModePrompt(artifacts: string, voice = false): string {
+  return `${PANEL_PROMPT}\n\n${LINK_PROMPT}\n\n${conversationRules(artifacts, voice)}`;
 }
 
 /**
@@ -96,7 +96,7 @@ export function codeModeSettings(): string {
  * An interactive `claude` with a known session ID; the prompt is one argument and runs as the first turn (mechanics M63). An empty prompt is left
  * out, so the session waits for the operator's first message (mechanics M87).
  */
-export function codeModeStartArgs(action: Pick<StartAction, 'permissionMode' | 'name' | 'model' | 'contract' | 'prompt' | 'cwd' | 'workItemId'>, nativeSessionId: string): string[] {
+export function codeModeStartArgs(action: Pick<StartAction, 'permissionMode' | 'name' | 'model' | 'contract' | 'prompt' | 'cwd' | 'workItemId'>, nativeSessionId: string, voice = false): string[] {
   return [
     '--session-id',
     nativeSessionId,
@@ -106,7 +106,7 @@ export function codeModeStartArgs(action: Pick<StartAction, 'permissionMode' | '
     action.name,
     ...(action.model === null ? [] : ['--model', action.model]),
     '--append-system-prompt',
-    `${action.contract}\n\n${codeModePrompt(artifactsDir(action.cwd, action.workItemId))}`,
+    `${action.contract}\n\n${codeModePrompt(artifactsDir(action.cwd, action.workItemId), voice)}`,
     '--settings',
     codeModeSettings(),
     ...(action.prompt === '' ? [] : [action.prompt]),
@@ -118,8 +118,8 @@ export function codeModeStartArgs(action: Pick<StartAction, 'permissionMode' | '
  * compaction, which renders it again from this process's flags (mechanics M30), so the resume appends `codeModePrompt`; the contract hook
  * restores the contract after a compaction.
  */
-export function codeModeResumeArgs(nativeSessionId: string, permissionMode: PermissionMode, model: string | null, artifacts: string): string[] {
-  return ['--resume', nativeSessionId, '--permission-mode', permissionMode, ...(model === null ? [] : ['--model', model]), '--append-system-prompt', codeModePrompt(artifacts), '--settings', codeModeSettings()];
+export function codeModeResumeArgs(nativeSessionId: string, permissionMode: PermissionMode, model: string | null, artifacts: string, voice = false): string[] {
+  return ['--resume', nativeSessionId, '--permission-mode', permissionMode, ...(model === null ? [] : ['--model', model]), '--append-system-prompt', codeModePrompt(artifacts, voice), '--settings', codeModeSettings()];
 }
 
 /**
@@ -229,6 +229,8 @@ export interface CodeModeRunnerDeps {
   transcriptExists?(cwd: string, nativeSessionId: string): boolean;
   /** Makes a work item's artifact folder before its session starts; `makeArtifactsDir` by default. */
   makeArtifactsDir?(dir: string): void;
+  /** Whether the conversation rules carry the spoken-reply section (`voice.enabled`), read at each start and resume; off when left out. */
+  voice?(): boolean;
 }
 
 /** The members of a tree the table lists with the same pid and creation time, so a reused pid does not match. */
@@ -335,7 +337,7 @@ export class CodeModeRunner implements SessionRunner {
 
     const nativeSessionId = action.nativeSessionId ?? this.newId();
     const launchId = action.launchId ?? this.newId();
-    const spawned = await this.spawn(action.sessionId, `${action.name} ${nativeSessionId}`, codeModeStartArgs(action, nativeSessionId), action.cwd, launchId, artifactsDir(action.cwd, action.workItemId));
+    const spawned = await this.spawn(action.sessionId, `${action.name} ${nativeSessionId}`, codeModeStartArgs(action, nativeSessionId, this.deps.voice?.() === true), action.cwd, launchId, artifactsDir(action.cwd, action.workItemId));
 
     if ('error' in spawned) {
       return spawned;
@@ -369,8 +371,8 @@ export class CodeModeRunner implements SessionRunner {
     const artifacts = artifactsDir(session.cwd, session.workItemId);
     const again = fresh !== undefined && this.deps.transcriptExists?.(session.cwd, session.nativeSessionId) === false;
     const args = again
-      ? codeModeStartArgs({ permissionMode, name: fresh.name, model, contract: fresh.contract, prompt: '', cwd: session.cwd, workItemId: session.workItemId }, session.nativeSessionId)
-      : codeModeResumeArgs(session.nativeSessionId, permissionMode, model, artifacts);
+      ? codeModeStartArgs({ permissionMode, name: fresh.name, model, contract: fresh.contract, prompt: '', cwd: session.cwd, workItemId: session.workItemId }, session.nativeSessionId, this.deps.voice?.() === true)
+      : codeModeResumeArgs(session.nativeSessionId, permissionMode, model, artifacts, this.deps.voice?.() === true);
     const spawned = await this.spawn(session.id, label, args, session.cwd, launchId, artifacts);
 
     return 'error' in spawned ? spawned : { launchId };

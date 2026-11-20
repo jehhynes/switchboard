@@ -100,6 +100,22 @@ describe('Code Mode command', () => {
     expect(RULES).toContain("Ask in a reply instead; the answer comes as the operator's next message.");
   });
 
+  it('adds the spoken-reply section only with voice on: [spoken], the [speak] passage and the tone line, setting no reply length or shape', () => {
+    const voiced = conversationRules(ARTIFACTS, true);
+
+    expect(RULES).not.toContain('[speak]');
+    expect(RULES).not.toContain('## Spoken replies');
+    expect(voiced).toContain(`${RULES.slice(0, RULES.indexOf('## Artifacts'))}## Spoken replies\n`);
+    expect(voiced).toContain('A message from the operator that starts with `[spoken]` will have its reply heard. Write that reply exactly as you would otherwise');
+    expect(voiced).toContain('putting `[speak]` before it and `[/speak]` after it');
+    expect(voiced).toContain('they are read in the order you write them');
+    expect(voiced).toContain('A reply with no marked passage is not read aloud.');
+    expect(voiced).toContain('`[tone: …]` alone on its first line');
+    expect(voiced.endsWith(RULES.slice(RULES.indexOf('## Artifacts')))).toBe(true);
+    expect(codeModePrompt(ARTIFACTS, true).endsWith(voiced)).toBe(true);
+    expect(codeModeResumeArgs(NATIVE, 'auto', null, ARTIFACTS, true)).toContain(codeModePrompt(ARTIFACTS, true));
+  });
+
   it('explains where and how to write an artifact, naming the folder and its variable, and not when to write one', () => {
     expect(RULES).toMatch(/\n\n## Artifacts\n/);
     expect(RULES).toContain(`artifact folder, \`${ARTIFACTS}\` (also in the \`CLAUDE_ARTIFACTS_DIR\` environment variable)`);
@@ -637,6 +653,12 @@ describe('CodeModeRunner stop, resume and reconcile', () => {
     expect(holder.spawned[0]).toMatchObject({ session: 'sb-1', label: 'label', args: codeModeResumeArgs(NATIVE, 'auto', 'haiku', join('D:/work', '.wip', 'artifacts', 'w1')), env: { SWITCHBOARD_LAUNCH: 'new-id', CLAUDE_ARTIFACTS_DIR: join('D:/work', '.wip', 'artifacts', 'w1') } });
     expect(made).toEqual([join('D:/work', '.wip', 'artifacts', 'w1')]);
     expect(await runner().resumeHeld(session({ nativeSessionId: null }), 'auto', null, 'label')).toEqual({ error: 'The session never started, so it cannot be resumed.' });
+
+    // With voice on, a resume appends the rules with their spoken-reply section.
+    holder.spawned.length = 0;
+    expect(await runner({ voice: () => true }).resumeHeld(session(), 'auto', 'haiku', 'label', 'l9')).toEqual({ launchId: 'l9' });
+    expect(holder.spawned[0]!.args).toEqual(codeModeResumeArgs(NATIVE, 'auto', 'haiku', join('D:/work', '.wip', 'artifacts', 'w1'), true));
+    expect(holder.spawned[0]!.args.join(' ')).toContain('## Spoken replies');
   });
 
   it('settles sessions a stopped hub left starting with the same check', async () => {

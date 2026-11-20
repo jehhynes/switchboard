@@ -5,9 +5,10 @@ import { ARTIFACTS_ENV } from '@switchboard/core';
  * the Conversation view reads, from claude-collab's `instructions/live-collaboration.md`, and why to ask in a reply rather than with AskUserQuestion. They never change how a session writes, its length,
  * format or verbosity (voice-design decision 21). Each slice of the view adds the rules for what it shows, so a session is never told to write
  * what nothing reads; the contract hook gives a resumed or compacted session the current rules. `artifactsDir` is the session's artifact folder (architecture.md § Artifacts), which its environment
- * also names; the artifact rules say only where and how to write an artifact, not when or how much.
+ * also names; the artifact rules say only where and how to write an artifact, not when or how much. With `voice` (`voice.enabled`) the rules add the
+ * spoken-reply section, which says only how to mark the passage read aloud and the tone line, never how to write the reply (decision 21).
  */
-export function conversationRules(artifactsDir: string): string {
+export function conversationRules(artifactsDir: string, voice = false): string {
   return `## Conversation view
 The operator reads this session in a conversation view beside the terminal. It shows the operator's messages and your replies, not your tool calls, which the terminal shows. These rules only explain the tags the view reads; they do not change how you write. Keep the length, format and verbosity you would use without them.
 
@@ -26,8 +27,18 @@ The operator reads this session in a conversation view beside the terminal. It s
   The card sends the answer as an ordinary message, such as "1A, 2B" or "2 Other: use port 8800"; the operator may also type an answer or ignore the card.
 - Don't ask the operator with AskUserQuestion in this session, even where the report contract or a skill says to: its menu holds the whole session until it is answered in the terminal, so the operator's messages wait behind it, and the view cannot show it. Ask in a reply instead; the answer comes as the operator's next message.
 
-${artifactRules(artifactsDir)}`;
+${voice ? `${SPOKEN_RULES}\n\n` : ''}${artifactRules(artifactsDir)}`;
 }
+
+/** How to mark the part of a reply read aloud (architecture.md § Voice), from claude-collab's `instructions/live-collaboration.md`. */
+export const SPOKEN_RULES = `## Spoken replies
+The operator may hear some replies read aloud. A message from the operator that starts with \`[spoken]\` will have its reply heard. Write that reply exactly as you would otherwise, and mark the part to read aloud by putting \`[speak]\` before it and \`[/speak]\` after it.
+
+- Mark a few plain sentences inside the reply, usually its opening, that make sense heard on their own: no lists, tables, code, file paths, commit hashes or URLs.
+- Each text you write in the turn, between tool calls, may mark its own passage; they are read in the order you write them.
+- The view shows the reply whole, without the markers. A reply with no marked passage is not read aloud. Don't mark a passage in a reply to a message without \`[spoken]\`.
+- When the message also carries \`[expressive]\`, start the reply with a tone line, \`[tone: …]\` alone on its first line, saying in a few words how the reply sounds when spoken, such as \`[tone: calm, slightly amused]\`. It is never read aloud or shown.
+- \`[spoken]\` and \`[expressive]\` are Switchboard's tags, not the operator's words.`;
 
 /** Where and how to write an artifact, from claude-collab's `instructions/artifacts.md`, without its rules on when to write one or how to reply. */
 function artifactRules(dir: string): string {

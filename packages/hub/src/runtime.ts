@@ -212,6 +212,7 @@ export class Runtime {
           hooks,
           holder: (start) => this.holder.find(start),
           transcriptExists: (cwd, nativeSessionId) => findTranscript(join(dirname(deps.claudeSettings), 'projects'), cwd, nativeSessionId) !== null,
+          voice: () => this.config.settings.voice.enabled,
           now: deps.now,
           sleep: deps.sleep,
           ...(deps.codeModeIdleMs === undefined ? {} : { idleMs: deps.codeModeIdleMs }),
@@ -960,14 +961,14 @@ export class Runtime {
     if (source === 'resume') {
       this.deps.log(`gave session ${session.id} the conversation rules on resume`);
 
-      return conversationRules(artifactsDir(session.cwd, session.workItemId));
+      return conversationRules(artifactsDir(session.cwd, session.workItemId), this.config.settings.voice.enabled);
     }
 
     this.deps.log(`restored the report contract of session ${session.id} after compaction`);
 
     const contract = sessionContract(session.id, this.reportCommand, session.reports, session.provider);
 
-    return session.codeMode === true ? `${contract}\n\n${conversationRules(artifactsDir(session.cwd, session.workItemId))}` : contract;
+    return session.codeMode === true ? `${contract}\n\n${conversationRules(artifactsDir(session.cwd, session.workItemId), this.config.settings.voice.enabled)}` : contract;
   }
 
   /**
