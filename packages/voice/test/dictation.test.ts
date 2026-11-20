@@ -252,6 +252,42 @@ describe('Dictation', () => {
     expect(kinds(dangling.sent).at(-1)).toBe('utterance "fix it and" final');
   });
 
+  it('sends an end by turn detection with when its last word, decision and end were, logs that line, and sends a cut with none', async () => {
+    const model = setup({ turn: () => 0.6 });
+
+    await model.listening();
+    model.say('use 8799', 100);
+    const lastWordAt = model.clock.now() - 100;
+    model.quiet(400);
+    await settle();
+    model.quiet(200);
+
+    const ended = model.sent.at(-1);
+
+    expect(ended).toMatchObject({ type: 'utterance', final: true, timing: { lastWordAt, endedBy: 'turn model' } });
+    const timing = (ended as Extract<Sent, { type: 'utterance' }>).timing!;
+    expect(timing.decidedAt - timing.lastWordAt).toBeGreaterThanOrEqual(500);
+    expect(timing.endedAt).toBeGreaterThanOrEqual(timing.decidedAt);
+    expect(model.logs.at(-1)).toMatch(/^utterance id\d+ ended by the turn model: last word → decision \d+ ms \(turn model p 0\.600 in \d+ ms, earned quiet 500 ms\), decision → sent \d+ ms \(the last piece's voice check\)$/);
+
+    const paused = setup();
+
+    await paused.listening();
+    paused.say('fix the login', 100);
+    paused.quiet(3_100);
+    expect(paused.sent.at(-1)).toMatchObject({ type: 'utterance', final: true, timing: { endedBy: 'pause' } });
+    expect(paused.logs.at(-1)).toMatch(/^utterance id\d+ ended by the pause: last word → decision 3\d{3} ms \(no turn model answer\)/);
+
+    const cut = setup();
+
+    await cut.listening();
+    cut.say('fix the login', 100);
+    cut.dictation.typing(true);
+    expect(cut.sent.at(-1)).toMatchObject({ type: 'utterance', final: false });
+    expect(cut.sent.at(-1)).not.toHaveProperty('timing');
+    expect(cut.logs.some((line) => line.includes(' ended by '))).toBe(false);
+  });
+
   it('reports an utterance cut by another app\'s recording even before its first piece settled', async () => {
     const { dictation, say, sent, watch, listening } = setup();
 

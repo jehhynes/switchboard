@@ -39,6 +39,20 @@ export interface Interrupted {
 /** A spoken command (architecture.md § Dictation): "stop listening" or "pause listening", and "start listening" or "resume listening". */
 export type SpokenCommand = 'stop-listening' | 'start-listening';
 
+/** What ended an utterance: the turn model's early close, or the end-of-message pause. */
+export type EndedBy = 'turn model' | 'pause';
+
+/**
+ * When turn detection ended an utterance, in epoch milliseconds, for the hub's timing line of the message it sends: its last recognised word, the
+ * end decision, and the end being sent, after the last piece's voice check.
+ */
+export interface UtteranceTiming {
+  lastWordAt: number;
+  decidedAt: number;
+  endedAt: number;
+  endedBy: EndedBy;
+}
+
 /** How long voiceprint enrolment records (voice-design § 3.2). */
 export const ENROLL_SECONDS = 60;
 
@@ -102,9 +116,9 @@ export type VoiceMessage =
   /**
    * An utterance ended: `final` when turn detection ended it, so the hub may send it; false when it was cut off (the composer took the focus,
    * the mic went off, another app started recording, the voice moved), so the hub sends nothing. `text` is its kept pieces' words; `interrupted`
-   * the reply it spoke over (barge-in), or null.
+   * the reply it spoke over (barge-in), or null; `timing`, when turn detection ended it, when its steps happened.
    */
-  | { type: 'utterance'; gen: number; utteranceId: string; sessionId: string; text: string; final: boolean; interrupted: Interrupted | null }
+  | { type: 'utterance'; gen: number; utteranceId: string; sessionId: string; text: string; final: boolean; interrupted: Interrupted | null; timing?: UtteranceTiming }
   /**
    * A spoken command was heard alone, as a whole utterance that passed the voice check, and done; it goes to no session. `sessionId` is the
    * voice target then, or null; `utteranceId` the utterance it was, or null when heard while listening was paused by voice.

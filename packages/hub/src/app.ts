@@ -410,6 +410,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       interruption: (key, sessionId) => voice.interruption(key, sessionId),
       heard: (tags) => voice.heard(tags),
       delivered: (message) => voice.delivered(message),
+      timing: (messageId) => voice.timing(messageId),
       mic: (key, on) => voice.mic(key, on),
       composer: (key, focused, draft) => voice.composer(key, focused, draft),
     },

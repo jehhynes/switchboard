@@ -359,6 +359,48 @@ export class NotWritten extends Error {}
  */
 export type InputOutcome = { delivery: 'sent' } | { delivery: 'not-sent'; error: string };
 
+/** When each step of one input transaction happened, in epoch milliseconds, for its timing line (architecture.md § Typing a message). */
+export interface InputSteps {
+  /** The message was queued. */
+  queuedAt: number;
+  /** Its turn in the session's queue came. */
+  startedAt: number;
+  /** The guards passed and the input reservation was held; null when it never was. */
+  readyAt: number | null;
+  /** The first guard that held it back, such as "a menu is open"; null when none did. */
+  waited: string | null;
+  /** Screen reads (holder snapshots), and the time spent in them. */
+  reads: number;
+  readMs: number;
+  /** The paste was written. */
+  pastedAt: number | null;
+  /** The paste first showed in the input box; null when the first Enter went without seeing it. */
+  echoAt: number | null;
+  /** Why the paste was not seen before the first Enter, from the last screen read: a menu, no input box, or an empty box; null when it was. */
+  missed: string | null;
+  /** The first Enter was written, and how many were. */
+  enterAt: number | null;
+  enters: number;
+  /** The transcript had the message; null when it never did. */
+  confirmedAt: number | null;
+}
+
+/** One line of an input transaction's step durations, ending at `endAt`, such as "queue 0 ms, guards 48 ms, paste→echo 92 ms, …". */
+export function stepsText(steps: InputSteps, endAt: number): string {
+  const span = (from: number | null, to: number | null): string => (from === null || to === null ? '-' : `${Math.max(0, to - from)} ms`);
+  const parts = [
+    `queue ${span(steps.queuedAt, steps.startedAt)}`,
+    `guards ${span(steps.startedAt, steps.readyAt)}${steps.waited === null ? '' : ` (waited: ${steps.waited})`}`,
+    `paste→echo ${steps.echoAt === null ? `not seen${steps.missed === null ? '' : ` (${steps.missed})`}` : span(steps.pastedAt, steps.echoAt)}`,
+    `paste→Enter ${span(steps.pastedAt, steps.enterAt)}${steps.enters > 1 ? ` (${steps.enters} Enters)` : ''}`,
+    `Enter→transcript ${steps.confirmedAt === null ? 'not seen' : span(steps.enterAt, steps.confirmedAt)}`,
+    `${steps.reads} screen reads in ${steps.readMs} ms`,
+    `${span(steps.queuedAt, endAt)} in all`,
+  ];
+
+  return parts.join(', ');
+}
+
 export interface SessionInputDeps {
   /** The session's visible screen from the holder, with its revision and when a terminal last typed. */
   snapshot(): Promise<{ data: string; cols: number; rows: number; rev: number; keyAt: number | null }>;
@@ -409,17 +451,27 @@ export class SessionInput {
 
   /**
    * Queues a message; `done` gets what became of it. `guard` replaces the check and reservation for this message, such as for the launch it names,
-   * `pasting` is told when the paste is about to be written, and `command` types a slash command chosen from the composer's list as it is.
+   * `pasting` is told when the paste is about to be written, `command` types a slash command chosen from the composer's list as it is, and
+   * `steps` gets when each step happened, just before `done`.
    */
-  send(text: string, done: (outcome: InputOutcome) => void, guard: Partial<Pick<SessionInputDeps, 'check' | 'reserve'>> & { pasting?(at: number): void; command?: boolean } = {}): Promise<void> {
+  send(
+    text: string,
+    done: (outcome: InputOutcome) => void,
+    guard: Partial<Pick<SessionInputDeps, 'check' | 'reserve'>> & { pasting?(at: number): void; command?: boolean; steps?(steps: InputSteps): void } = {},
+  ): Promise<void> {
     const check = guard.check ?? this.deps.check;
     const reserve = guard.reserve ?? this.deps.reserve;
+    const steps: InputSteps = { queuedAt: this.deps.now(), startedAt: 0, readyAt: null, waited: null, reads: 0, readMs: 0, pastedAt: null, echoAt: null, missed: null, enterAt: null, enters: 0, confirmedAt: null };
+    const report = (outcome: InputOutcome): void => {
+      guard.steps?.(steps);
+      done(outcome);
+    };
 
     this.#pending++;
 
     const run = this.#tail
-      .then(() => this.#type(text, check, reserve, guard.pasting ?? (() => undefined), guard.command === true))
-      .then(done, (error: unknown) => done({ delivery: 'not-sent', error: String(error) }))
+      .then(() => this.#type(text, check, reserve, guard.pasting ?? (() => undefined), guard.command === true, steps))
+      .then(report, (error: unknown) => report({ delivery: 'not-sent', error: String(error) }))
       .finally(() => void this.#pending--);
 
     this.#tail = run;
@@ -493,17 +545,26 @@ export class SessionInput {
    * with more, or one a terminal typed into, is left as it is, and the message is not sent. The transcript is read again before and after each
    * key and after any failure, so a message Claude takes late is sent. A screen that cannot be read leaves it not sent, with `unreadable`.
    */
-  async #settle(pasted: string, since: number, check: () => string | null, unreadable: string): Promise<InputOutcome> {
-    const outcome = (error: string): InputOutcome => (this.#sent(pasted, since) ? { delivery: 'sent' } : { delivery: 'not-sent', error });
+  async #settle(pasted: string, since: number, check: () => string | null, unreadable: string, steps?: InputSteps): Promise<InputOutcome> {
+    const sent = (): boolean => {
+      const found = this.#sent(pasted, since);
 
-    if (this.#sent(pasted, since)) {
+      if (found && steps !== undefined) {
+        steps.confirmedAt ??= this.deps.now();
+      }
+
+      return found;
+    };
+    const outcome = (error: string): InputOutcome => (sent() ? { delivery: 'sent' } : { delivery: 'not-sent', error });
+
+    if (sent()) {
       return { delivery: 'sent' };
     }
 
     let shown: { screen: InputScreen; keyAt: number | null };
 
     try {
-      shown = await this.#screen();
+      shown = await this.#screen(steps);
     } catch {
       return outcome(unreadable);
     }
@@ -531,20 +592,20 @@ export class SessionInput {
         return outcome(why);
       }
 
-      if (this.#sent(pasted, since)) {
+      if (sent()) {
         return { delivery: 'sent' };
       }
 
       try {
         await this.deps.write(CLEAR_LINE);
         await this.deps.sleep(CLEAR_SETTLE_MS);
-        shown = await this.#screen();
+        shown = await this.#screen(steps);
       } catch (error) {
         return outcome((error as Error).message);
       }
 
       // Taken while it was being cleared, so the transcript has it.
-      if (this.#sent(pasted, since)) {
+      if (sent()) {
         return { delivery: 'sent' };
       }
 
@@ -561,7 +622,8 @@ export class SessionInput {
     return outcome(left === '' ? NOT_TAKEN : NOT_CLEARED);
   }
 
-  async #screen(): Promise<{ screen: InputScreen; rev: number; keyAt: number | null }> {
+  async #screen(steps?: InputSteps): Promise<{ screen: InputScreen; rev: number; keyAt: number | null }> {
+    const from = this.deps.now();
     const snapshot = await this.deps.snapshot();
     const last = this.#lastScreen;
 
@@ -569,11 +631,16 @@ export class SessionInput {
       this.#lastScreen = { data: snapshot.data, cols: snapshot.cols, rows: snapshot.rows, screen: await readInputScreen(snapshot) };
     }
 
+    if (steps !== undefined) {
+      steps.reads++;
+      steps.readMs += this.deps.now() - from;
+    }
+
     return { screen: this.#lastScreen!.screen, rev: snapshot.rev, keyAt: snapshot.keyAt };
   }
 
   /** Waits until typing would disturb nothing, then holds the reservation; a refusal or an ended session means nothing was typed. */
-  async #ready(check: () => string | null, reserve: SessionInputDeps['reserve']): Promise<{ release(): void } | { refused: string }> {
+  async #ready(check: () => string | null, reserve: SessionInputDeps['reserve'], steps: InputSteps): Promise<{ release(): void } | { refused: string }> {
     let logged: string | null = null;
 
     for (;;) {
@@ -583,7 +650,7 @@ export class SessionInput {
         return { refused: why };
       }
 
-      const { screen, keyAt } = await this.#screen();
+      const { screen, keyAt } = await this.#screen(steps);
       const blocked = blockedBy(screen, keyAt, this.deps.now());
 
       if (blocked === null) {
@@ -597,7 +664,7 @@ export class SessionInput {
         let still: string | null;
 
         try {
-          const again = await this.#screen();
+          const again = await this.#screen(steps);
 
           still = check() ?? blockedBy(again.screen, again.keyAt, this.deps.now());
         } catch (error) {
@@ -609,9 +676,11 @@ export class SessionInput {
           return reservation;
         }
 
+        steps.waited ??= still;
         reservation.release();
       } else if (blocked !== logged) {
         logged = blocked;
+        steps.waited ??= blocked;
         this.deps.log(`session ${this.sessionId}: a message waits, ${blocked}`);
       }
 
@@ -619,11 +688,13 @@ export class SessionInput {
     }
   }
 
-  async #type(text: string, check: () => string | null, reserve: SessionInputDeps['reserve'], pasting: (at: number) => void, command: boolean): Promise<InputOutcome> {
+  async #type(text: string, check: () => string | null, reserve: SessionInputDeps['reserve'], pasting: (at: number) => void, command: boolean, steps: InputSteps): Promise<InputOutcome> {
     let ready: { release(): void } | { refused: string };
 
+    steps.startedAt = this.deps.now();
+
     try {
-      ready = await this.#ready(check, reserve);
+      ready = await this.#ready(check, reserve, steps);
     } catch (error) {
       return { delivery: 'not-sent', error: (error as Error).message };
     }
@@ -632,11 +703,23 @@ export class SessionInput {
       return { delivery: 'not-sent', error: ready.refused };
     }
 
+    steps.readyAt = this.deps.now();
+
     const pasted = pasteText(text, command);
     const since = this.deps.now();
-    const sent = (): boolean => this.#sent(pasted, since);
+    const sent = (): boolean => {
+      const found = this.#sent(pasted, since);
+
+      if (found) {
+        steps.confirmedAt ??= this.deps.now();
+      }
+
+      return found;
+    };
     // Once a write is sent, the session may have it, unless the holder refused it.
     let attempted = false;
+    // What the last screen read showed, for why a paste was not seen before the first Enter.
+    let shown = '';
 
     try {
       const result = await pasteAndSubmit(
@@ -654,8 +737,20 @@ export class SessionInput {
               pasting(this.deps.now());
             }
 
+            if (data === '\r' && steps.enters === 0 && steps.echoAt === null) {
+              steps.missed = shown;
+            }
+
             try {
               const { rev } = await this.deps.write(data);
+              const at = this.deps.now();
+
+              if (data === '\r') {
+                steps.enterAt ??= at;
+                steps.enters++;
+              } else {
+                steps.pastedAt ??= at;
+              }
 
               attempted = true;
               return rev;
@@ -665,9 +760,16 @@ export class SessionInput {
             }
           },
           read: async () => {
-            const { screen, rev } = await this.#screen();
+            const { screen, rev } = await this.#screen(steps);
+            const unsent = !screen.menu && screen.draft !== '';
 
-            return { unsent: !screen.menu && screen.draft !== '', box: screen.box, rev };
+            shown = screen.menu ? 'a menu is open' : screen.box === '' ? 'no input box on the screen' : 'the input box is empty';
+
+            if (unsent && steps.enterAt === null) {
+              steps.echoAt ??= this.deps.now();
+            }
+
+            return { unsent, box: screen.box, rev };
           },
           sent,
           now: this.deps.now,
@@ -686,10 +788,10 @@ export class SessionInput {
 
       this.deps.log(`session ${this.sessionId}: a typed message is not in the transcript after ${result.enterAttempts} Enter${result.enterAttempts === 1 ? '' : 's'}${result.submitted ? '' : '; it is still in the input box'}`);
 
-      return await this.#settle(pasted, since, check, UNREADABLE);
+      return await this.#settle(pasted, since, check, UNREADABLE, steps);
     } catch (error) {
       // Something was written, so the screen says whether the message went.
-      return attempted ? await this.#settle(pasted, since, check, (error as Error).message) : { delivery: 'not-sent', error: (error as Error).message };
+      return attempted ? await this.#settle(pasted, since, check, (error as Error).message, steps) : { delivery: 'not-sent', error: (error as Error).message };
     } finally {
       ready.release();
     }

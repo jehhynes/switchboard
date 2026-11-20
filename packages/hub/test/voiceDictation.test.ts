@@ -225,6 +225,22 @@ describe('VoiceControl dictation', () => {
     expect(control.dictated('k1', 's1')).toBeNull();
   });
 
+  it('keeps the voice\'s steps of a message turn detection ended for its timing line, once, and none for one ended without them', async () => {
+    const { control, connection, advance, piece } = await setup();
+
+    piece('fix the build');
+    advance(5);
+    const at = Date.UTC(2026, 10, 20, 12) + 5;
+
+    connection.receive({ type: 'utterance', gen: 1, utteranceId: 'u1', sessionId: 's1', text: 'fix the build', final: true, interrupted: null, timing: { lastWordAt: at - 900, decidedAt: at - 300, endedAt: at - 20, endedBy: 'turn model' } });
+    expect(control.timing('m1')).toBe('last word → turn model decision 600 ms, decision → voice sent 280 ms, voice → hub 20 ms');
+    expect(control.timing('m1')).toBeNull();
+
+    piece('and the tests', 'u2');
+    connection.receive({ type: 'utterance', gen: 1, utteranceId: 'u2', sessionId: 's1', text: 'and the tests', final: true, interrupted: null });
+    expect(control.timing('m2')).toBeNull();
+  });
+
   it('shows live words in every window and page showing the target session, while the draft goes to the one window dictation picked', async () => {
     const { connection, windows, notified, piece } = await setup();
 

@@ -1114,6 +1114,44 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     await vi.waitFor(() => expect(calls).toContain(`delivered ${dictatedId} sent`));
   });
 
+  it('logs one timing line per typed message, with the voice\'s steps for a dictated one', async () => {
+    const { voice, calls } = fakeVoice({ spoken: false, expressive: false });
+    const held = new FakeHeld();
+    const pieces = [{ text: 'fix the build', score: null, f0: null, dropped: false }];
+    let dictatedId = '';
+
+    voice.delivered = (message) => void calls.push(`delivered ${message.id} ${message.delivery}`);
+    voice.timing = (id) => (id === dictatedId ? 'last word → turn model decision 600 ms, decision → voice sent 200 ms, voice → hub 2 ms' : null);
+
+    const { service, open, body, view, store, logs } = setupSend(held, undefined, voice);
+    const mine = open(view.file);
+    const write = held.write.bind(held);
+
+    // The transcript reader confirms the dictated message as its Enter goes in, before its typing ends.
+    held.write = async (session, data) => {
+      const result = await write(session, data);
+
+      if (data === '\r' && dictatedId !== '') {
+        store.updateMessage(dictatedId, { delivery: 'sent' });
+      }
+
+      return result;
+    };
+
+    const sent = service.dictate(mine.key, 's2', 'fix the build', pieces, false);
+
+    dictatedId = 'message' in sent ? sent.message.id : '';
+    await vi.waitFor(() => expect(calls).toContain(`delivered ${dictatedId} sent`));
+    expect(logs.filter((line) => line.includes(`message ${dictatedId}`))).toEqual([
+      expect.stringMatching(new RegExp(`^session s2: message ${dictatedId} sent: last word → turn model decision 600 ms, decision → voice sent 200 ms, voice → hub 2 ms, queue 0 ms, guards \\d+ ms, paste→echo \\d+ ms, paste→Enter \\d+ ms, Enter→transcript \\d+ ms, \\d+ screen reads in \\d+ ms, \\d+ ms in all$`)),
+    ]);
+
+    // A typed message's line has the input steps only.
+    dictatedId = '';
+    expect(service.send(body(mine.key, { text: 'Typed', opId: 'op-typed' }))).toMatchObject({ status: 200 });
+    await vi.waitFor(() => expect(logs.some((line) => /^session s2: message m-\d+ sent: queue \d+ ms, guards/.test(line))).toBe(true));
+  });
+
   it('types a draft that holds dictation as a [voice] message with its pieces, and the voice\'s turns and [partial] parts with their tags (architecture.md § Dictation)', async () => {
     const { voice, calls } = fakeVoice({ spoken: true, expressive: false });
     const pieces = [{ text: 'fix the build', score: null, f0: null, dropped: false }];

@@ -4,7 +4,7 @@ import type { ConversationMessage, ConversationReply, Interruption, Persona, Pie
 import { spokenText } from '@switchboard/conversation';
 import type { HeardTag } from '@switchboard/conversation';
 import { ENROLL_SECONDS } from '@switchboard/voice';
-import type { AwayReason, EnrollmentState, HubMessage, MicState, VoiceMessage, VoiceTarget } from '@switchboard/voice';
+import type { AwayReason, EnrollmentState, HubMessage, MicState, UtteranceTiming, VoiceMessage, VoiceTarget } from '@switchboard/voice';
 import type { VoiceConnection } from './voiceLink.js';
 import type { WindowScope } from './windows.js';
 
@@ -97,6 +97,8 @@ export interface Fragment {
   error?: string | null;
 }
 
+/** How many dictated messages' voice steps are kept for their timing lines. */
+const TIMINGS_KEPT = 50;
 /** How long the voice process runs on after the last demand ends. */
 export const VOICE_LINGER_MS = 10 * 60_000;
 /** A crashed voice process is started again at most this often. */
@@ -200,6 +202,8 @@ export class VoiceControl {
   #fullDuplex: string | null = null;
   readonly #composers = new Map<string, Composer>();
   readonly #heard = new Map<string, Heard>();
+  /** A dictated message's steps before it was queued for typing, by message ID, until its timing line is written. */
+  readonly #timings = new Map<string, UtteranceTiming & { receivedAt: number }>();
   /** The window the voice last moved to by its own command, which hears dictation when no focused window shows the target. */
   #talkedFrom: string | null = null;
   #typingSent: boolean | null = null;
@@ -612,6 +616,22 @@ export class VoiceControl {
     }
   }
 
+  /**
+   * The voice's steps of a dictated message, for its timing line in the hub log (architecture.md § Dictation): from the last recognised word to
+   * the end decision, to the end sent after the last piece's voice check, and to the hub; null for a message turn detection did not end.
+   */
+  timing(messageId: string): string | null {
+    const timing = this.#timings.get(messageId);
+
+    this.#timings.delete(messageId);
+
+    if (timing === undefined) {
+      return null;
+    }
+
+    return `last word → ${timing.endedBy} decision ${timing.decidedAt - timing.lastWordAt} ms, decision → voice sent ${timing.endedAt - timing.decidedAt} ms, voice → hub ${Math.max(0, timing.receivedAt - timing.endedAt)} ms`;
+  }
+
   /** A dictated message settled: its pieces go to the fragments log with its delivery. */
   delivered(message: ConversationMessage): void {
     if (message.origin !== 'voice' || (message.delivery !== 'sent' && message.delivery !== 'not-sent')) {
@@ -763,7 +783,7 @@ export class VoiceControl {
       return;
     }
 
-    this.#submit(heard, composer, false);
+    this.#submit(heard, composer, false, message.timing === undefined ? null : { ...message.timing, receivedAt: this.deps.now() });
   }
 
   /**
@@ -789,8 +809,11 @@ export class VoiceControl {
     this.#notify(heard.key, 'held', { sessionId: heard.sessionId, note: this.#roomHeld() ? HELD_NOTE : HELD_AFTER_NOTE });
   }
 
-  /** Types the window's draft as a dictated message or a `[partial]` part, and empties the draft once it was taken; false when refused. */
-  #submit(heard: Heard, composer: Composer, partial: boolean): boolean {
+  /**
+   * Types the window's draft as a dictated message or a `[partial]` part, and empties the draft once it was taken; false when refused. `timing`
+   * is kept for the message's timing line.
+   */
+  #submit(heard: Heard, composer: Composer, partial: boolean, timing: (UtteranceTiming & { receivedAt: number }) | null = null): boolean {
     let text = composer.draft.trim();
     let pieces = composer.pieces;
     // A [partial] part leaves the last settled piece in the draft, so the message that ends the utterance always has words to carry.
@@ -826,6 +849,15 @@ export class VoiceControl {
 
     for (const piece of pieces) {
       this.#fragment({ event: 'submitted', sessionId: heard.sessionId, utteranceId: null, pieceId: null, messageId: sent.message.id, text: piece.text });
+    }
+
+    if (timing !== null) {
+      this.#timings.set(sent.message.id, timing);
+
+      // A message can settle before this, as a refused Codex one does at once; its steps are then never taken, so only the latest are kept.
+      for (const id of [...this.#timings.keys()].slice(0, -TIMINGS_KEPT)) {
+        this.#timings.delete(id);
+      }
     }
 
     composer.draft = kept?.text ?? '';

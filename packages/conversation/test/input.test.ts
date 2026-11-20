@@ -2,8 +2,8 @@ import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CLEAR_LINE, NOT_CLEARED, NOT_TAKEN, NotWritten, SessionInput, UNREADABLE, blockedBy, boxHolds, isMessage, leftOfMessage, pasteAndSubmit, pasteText, readInputScreen, sentInTranscript } from '../src/input.js';
-import type { InputOutcome, SubmitScreen } from '../src/input.js';
+import { CLEAR_LINE, NOT_CLEARED, NOT_TAKEN, NotWritten, SessionInput, UNREADABLE, blockedBy, stepsText, boxHolds, isMessage, leftOfMessage, pasteAndSubmit, pasteText, readInputScreen, sentInTranscript } from '../src/input.js';
+import type { InputOutcome, InputSteps, SubmitScreen } from '../src/input.js';
 
 let dir: string;
 
@@ -199,6 +199,79 @@ describe('SessionInput', () => {
 
     expect(session.writes).toEqual(['\u001b[200~/compact keep the plan\u001b[201~', '\r', '\u001b[200~\\/compact is what I meant\u001b[201~', '\r']);
     expect(outcomes).toEqual([{ delivery: 'sent' }, { delivery: 'sent' }]);
+  });
+
+  it('reports when each step happened: the queue, the guards, the paste, its echo, the Enter and the transcript', async () => {
+    const session = new FakeSession();
+    const { deps } = session.deps();
+    const outcomes: InputOutcome[] = [];
+    let steps: InputSteps | null = null;
+
+    await new SessionInput('s1', deps).send('Fix the build', (outcome) => outcomes.push(outcome), { steps: (reported) => void (steps = reported) });
+
+    expect(outcomes).toEqual([{ delivery: 'sent' }]);
+    // Two guard reads, one after the settle, which shows the paste, and the screen check 400 ms after the Enter, when the transcript is read.
+    expect(steps).toEqual({ queuedAt: T0, startedAt: T0, readyAt: T0, waited: null, reads: 4, readMs: 0, pastedAt: T0, echoAt: T0 + 60, missed: null, enterAt: T0 + 60, enters: 1, confirmedAt: T0 + 460 });
+    expect(session.clock).toBe(T0 + 460);
+    expect(stepsText(steps!, session.clock)).toBe('queue 0 ms, guards 0 ms, paste→echo 60 ms, paste→Enter 60 ms, Enter→transcript 400 ms, 4 screen reads in 0 ms, 460 ms in all');
+  });
+
+  it('reports a paste never seen in the input box with what the screen showed, and the guard that held the message back', async () => {
+    const session = new FakeSession();
+    // The holder's screen lags: the box never shows the paste, though Claude Code has it.
+    const { deps } = session.deps({ snapshot: async () => ({ data: drawn(''), cols: 40, rows: 8, rev: session.rev, keyAt: session.keyAt }) });
+    let steps: InputSteps | null = null;
+
+    session.keyAt = T0 - 1_000;
+    await new SessionInput('s1', deps).send('Fix the build', () => undefined, { steps: (reported) => void (steps = reported) });
+
+    expect(steps!.waited).toBe('a key was typed in a terminal');
+    expect(steps!.echoAt).toBeNull();
+    expect(steps!.missed).toBe('the input box is empty');
+    expect(steps!.enterAt! - steps!.pastedAt!).toBeGreaterThanOrEqual(1_000);
+    expect(stepsText(steps!, session.clock)).toMatch(/^queue 0 ms, guards [5-9]\d{2} ms \(waited: a key was typed in a terminal\), paste→echo not seen \(the input box is empty\), paste→Enter 1\d{3} ms, Enter→transcript \d+ ms, \d+ screen reads in 0 ms, \d+ ms in all$/);
+
+    const menu = new FakeSession();
+    const shown = menu.deps({ snapshot: async () => ({ data: drawn('', menu.writes.length > 0), cols: 40, rows: 8, rev: menu.rev, keyAt: null }) });
+
+    await new SessionInput('s1', shown.deps).send('Fix the build', () => undefined, { steps: (reported) => void (steps = reported) });
+    expect(steps!.missed).toBe('a menu is open');
+  });
+
+  it('counts the screen reads and the transcript of a message settled from the input box, and a guard met under the reservation', async () => {
+    const late = new FakeSession();
+    let snapshots = 0;
+    const counted = late.deps();
+    const deps = { ...counted.deps, snapshot: () => (snapshots++, counted.deps.snapshot()) };
+    let steps: InputSteps | null = null;
+
+    // Claude takes the message and never saves it, so the box settles it.
+    late.saves = false;
+    await new SessionInput('s1', deps).send('Fix the build', () => undefined, { steps: (reported) => void (steps = reported) });
+    // The settlement's read of the box counts with the others.
+    expect(steps!.reads).toBe(snapshots);
+    expect(steps!.confirmedAt).toBeNull();
+
+    const menu = new FakeSession();
+    let first = true;
+    const guarded = menu.deps({
+      reserve: async () => {
+        if (first) {
+          first = false;
+          menu.menu = true;
+        }
+
+        return { release: () => undefined };
+      },
+      sleep: async (ms: number) => {
+        menu.clock += ms;
+        menu.menu = false;
+        await Promise.resolve();
+      },
+    });
+
+    await new SessionInput('s1', guarded.deps).send('Fix the build', () => undefined, { steps: (reported) => void (steps = reported) });
+    expect(steps!.waited).toBe('a menu is open');
   });
 
   it('waits for the pause after a key typed in a terminal, pastes, presses Enter separately, and counts the message sent from the transcript', async () => {

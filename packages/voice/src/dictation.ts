@@ -9,7 +9,7 @@ import type { AsrDevice } from './sherpa.js';
 import type { AudioDevices, MicUse } from './micUse.js';
 import type { Capture, CaptureStream } from './output.js';
 import { ENROLL_SECONDS } from './protocol.js';
-import type { Interrupted, MicState, SpokenCommand, VoiceMessage } from './protocol.js';
+import type { EndedBy, Interrupted, MicState, SpokenCommand, UtteranceTiming, VoiceMessage } from './protocol.js';
 import { hotwordList } from './hotwords.js';
 import { pauseWait, textWait } from './turn.js';
 import type { TurnModel } from './turn.js';
@@ -105,6 +105,8 @@ interface Utterance {
   /** The words judged finished at `lastActivity`, and the quiet that earned; null while not judged so. */
   completeAt: number | null;
   waitMs: number;
+  /** The turn model's last answer for it and how long it took, for the end's timing line; null before one. */
+  turn: { p: number; ms: number } | null;
   /** Words shown and not settled yet. */
   words: string;
   /** The reply it spoke over, when a barge-in opened it. */
@@ -1051,7 +1053,7 @@ export class Dictation {
 
   #open(): Utterance | null {
     if (this.#utterance === null && this.#target !== null) {
-      this.#utterance = { id: this.deps.newId(), gen: this.#target.gen, sessionId: this.#target.sessionId, pieces: [], lastActivity: this.deps.now(), completeAt: null, waitMs: 0, words: '', interrupted: null, pending: [] };
+      this.#utterance = { id: this.deps.newId(), gen: this.#target.gen, sessionId: this.#target.sessionId, pieces: [], lastActivity: this.deps.now(), completeAt: null, waitMs: 0, turn: null, words: '', interrupted: null, pending: [] };
       this.#report();
     }
 
@@ -1074,6 +1076,7 @@ export class Dictation {
 
     const check = ++this.#checks;
     const at = utterance.lastActivity;
+    const asked = this.deps.now();
     let p: number;
 
     try {
@@ -1090,6 +1093,7 @@ export class Dictation {
       return;
     }
 
+    utterance.turn = { p, ms: this.deps.now() - asked };
     utterance.waitMs = textWait(words, p, this.deps.turn.threshold, this.deps.settings().endPauseMs);
     utterance.completeAt = utterance.waitMs > 0 ? at : null;
   }
@@ -1123,6 +1127,7 @@ export class Dictation {
     const quiet = this.deps.now() - utterance.lastActivity;
 
     if (utterance.completeAt === utterance.lastActivity && quiet >= utterance.waitMs) {
+      const decidedAt = this.deps.now();
       // The words the turn model judged finished are checked first: when they fail the voice check, the turn is judged again without them.
       const rest = this.#transcriber?.take() ?? null;
       const kept = rest === null || this.#piece(rest.text, rest.audio);
@@ -1136,17 +1141,18 @@ export class Dictation {
         return;
       }
 
-      this.#close(true);
+      this.#close(true, false, { by: 'turn model', at: decidedAt });
     } else if (quiet >= pauseWait(this.#said(), this.deps.settings().endPauseMs)) {
-      this.#close(true);
+      this.#close(true, false, { by: 'pause', at: this.deps.now() });
     }
   }
 
   /**
-   * Ends the open utterance: its last words become a piece and the utterance is reported, `final` when turn detection ended it. After a stop
-   * (`drain`), the recogniser first gives up the words it held back, and the next message starts with no preroll.
+   * Ends the open utterance: its last words become a piece and the utterance is reported, `final` when turn detection ended it, by `ended`,
+   * with a timing line in the voice log. After a stop (`drain`), the recogniser first gives up the words it held back, and the next message
+   * starts with no preroll.
    */
-  #close(final: boolean, drain = false): void {
+  #close(final: boolean, drain = false, ended: { by: EndedBy; at: number } | null = null): void {
     const utterance = this.#utterance;
     const transcriber = this.#transcriber;
 
@@ -1179,8 +1185,24 @@ export class Dictation {
         this.deps.send({ type: 'words', gen: utterance.gen, utteranceId: utterance.id, sessionId: utterance.sessionId, text: '' });
       }
 
+      const endedAt = this.deps.now();
+      const timing = ended === null ? undefined : { lastWordAt: utterance.lastActivity, decidedAt: ended.at, endedAt, endedBy: ended.by };
+
+      if (timing !== undefined) {
+        this.deps.log(`utterance ${utterance.id} ended ${endTiming(timing, utterance)}`);
+      }
+
       // An utterance that kept nothing, all of it dropped by the voice check, ends as cut, so the hub sends nothing and forgets it.
-      this.deps.send({ type: 'utterance', gen: utterance.gen, utteranceId: utterance.id, sessionId: utterance.sessionId, text: utterance.pieces.join(' '), final: final && utterance.pieces.length > 0, interrupted: utterance.interrupted });
+      this.deps.send({
+        type: 'utterance',
+        gen: utterance.gen,
+        utteranceId: utterance.id,
+        sessionId: utterance.sessionId,
+        text: utterance.pieces.join(' '),
+        final: final && utterance.pieces.length > 0,
+        interrupted: utterance.interrupted,
+        ...(timing === undefined ? {} : { timing }),
+      });
     }
 
     transcriber?.end(!drain);
@@ -1346,6 +1368,17 @@ function outputHint(devices: AudioDevices | null): OutputHint | null {
   }
 
   return { headphones: devices.formFactor === 'headphones' || devices.formFactor === 'headset', why: `form factor ${devices.formFactor} of "${devices.output}"` };
+}
+
+/**
+ * An utterance end's timing line: what ended it, the quiet since the last recognised word, the turn model's answer, and the time the last piece's
+ * voice check took, which runs before the end is sent.
+ */
+function endTiming(timing: UtteranceTiming, utterance: Utterance): string {
+  const model = utterance.turn === null ? 'no turn model answer' : `turn model p ${utterance.turn.p.toFixed(3)} in ${utterance.turn.ms} ms`;
+  const wait = timing.endedBy === 'turn model' ? `, earned quiet ${utterance.waitMs} ms` : '';
+
+  return `by the ${timing.endedBy}: last word → decision ${timing.decidedAt - timing.lastWordAt} ms (${model}${wait}), decision → sent ${timing.endedAt - timing.decidedAt} ms (the last piece's voice check)`;
 }
 
 function every(run: () => void, ms: number): { stop(): void } {

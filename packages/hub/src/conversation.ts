@@ -3,7 +3,8 @@ import type { ConversationMessage, ConversationReply, ConversationStatus, Interr
 import { artifactsDir, hostKey, PERMISSION_PROMPT, personaById, sessionTone, START_PROMPT, toneVersion } from '@switchboard/core';
 import type { PersonaSettings } from '@switchboard/core';
 import { ArtifactFolder, MAX_MESSAGE_CHARS, NotWritten, interruptNote, messageTags, pasteText } from '@switchboard/conversation';
-import type { Artifact, ConversationChange, HeardTag, InputOutcome, SlashCommand } from '@switchboard/conversation';
+import { stepsText } from '@switchboard/conversation';
+import type { Artifact, ConversationChange, HeardTag, InputOutcome, InputSteps, SlashCommand } from '@switchboard/conversation';
 import { SESSION_ENDED, SESSION_RELAUNCHED } from './runtime.js';
 import { canonicalFolder } from './windows.js';
 import { artifactFile, findFiles } from './page.js';
@@ -246,6 +247,8 @@ export interface ConversationVoice {
   heard?(tags: HeardTag[]): void;
   /** A dictated message settled, for the fragments log. */
   delivered?(message: ConversationMessage): void;
+  /** The voice's steps of a dictated message, for its timing line, taken once; null for a message turn detection did not end. */
+  timing?(messageId: string): string | null;
   /** The mic command: why it was refused, or null. */
   mic?(key: string, on: boolean): string | null;
   /** The composer command: the window's composer gained or lost the focus, or its draft changed. */
@@ -1002,6 +1005,7 @@ export class ConversationService {
       reserve: () => this.deps.input.reserve(sessionId, toLaunch),
       pasting: (at) => this.deps.store.updateMessage(message.id, { pastedAt: at }),
       command: options.command,
+      steps: (steps) => this.#steps.set(message.id, steps),
     });
 
     if (session.state !== 'ended') {
@@ -1098,6 +1102,7 @@ export class ConversationService {
     this.#senders.delete(id);
     // A message the voice sent itself has no composer waiting on it, so one not sent returns its text to the draft of every window showing it.
     giveBack ||= this.#spoken.delete(id);
+    this.#logTiming(id, message, outcome);
 
     if (message === null) {
       return;
@@ -1145,6 +1150,26 @@ export class ConversationService {
     this.deps.store.updateMessage(id, { delivery: 'sent', error: null });
     this.#changed(message.sessionId, { type: 'message', message: this.deps.store.message(id)! });
     this.deps.voice?.delivered?.(this.deps.store.message(id)!);
+  }
+
+  /** Each typed message's input steps, from its typing's end until its outcome is logged. */
+  readonly #steps = new Map<string, InputSteps>();
+
+  /**
+   * One hub log line per typed message with the duration of each step (architecture.md § Typing a message): the voice's, for a dictated message,
+   * then the input transaction's.
+   */
+  #logTiming(id: string, message: ConversationMessage | null, outcome: DeliveryOutcome): void {
+    const steps = this.#steps.get(id);
+    const voice = this.deps.voice?.timing?.(id) ?? null;
+
+    this.#steps.delete(id);
+
+    if (steps === undefined || message === null) {
+      return;
+    }
+
+    this.deps.log(`session ${message.sessionId}: message ${id} ${message.delivery === 'sent' ? 'sent' : outcome.delivery}: ${voice === null ? '' : `${voice}, `}${stepsText(steps, this.deps.now())}`);
   }
 
   /**
