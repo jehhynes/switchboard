@@ -357,9 +357,9 @@ export function stateIcon(session: SessionView | null): { icon: string; text: st
     case undefined:
       return { icon: 'circle-slash', text: 'No session' };
     case 'starting':
-      return { icon: 'sync~spin', text: 'Starting' };
+      return { icon: 'loading~spin', text: 'Starting' };
     case 'running':
-      return { icon: 'sync~spin', text: 'Working' };
+      return { icon: 'loading~spin', text: 'Working' };
     case 'waiting':
       return session.waitingFor === 'permission' ? { icon: 'shield', text: 'Waiting for permission' } : { icon: 'question', text: 'Waiting for your answer' };
     case 'idle':

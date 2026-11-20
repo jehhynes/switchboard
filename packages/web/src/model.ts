@@ -181,9 +181,9 @@ export function awaitingReply(items: readonly ItemView[], session: SessionView |
 export function stateIcon(state: SessionView['state'] | null | undefined, waitingFor: SessionView['waitingFor'] = null): { icon: string; text: string } {
   switch (state) {
     case 'starting':
-      return { icon: 'sync~spin', text: 'Starting' };
+      return { icon: 'loading~spin', text: 'Starting' };
     case 'running':
-      return { icon: 'sync~spin', text: 'Working' };
+      return { icon: 'loading~spin', text: 'Working' };
     case 'waiting':
       return waitingFor === 'permission' ? { icon: 'shield', text: 'Waiting for permission' } : { icon: 'question', text: 'Waiting for your answer' };
     case 'idle':

@@ -195,12 +195,12 @@ describe('the conversation state', () => {
   });
 
   it("names the header's codicon for each state", () => {
-    expect(stateIcon(SESSION)).toEqual({ icon: 'sync~spin', text: 'Working' });
+    expect(stateIcon(SESSION)).toEqual({ icon: 'loading~spin', text: 'Working' });
     expect(stateIcon({ ...SESSION, state: 'waiting', waitingFor: 'question' }).icon).toBe('question');
     expect(stateIcon({ ...SESSION, state: 'waiting', waitingFor: 'permission' }).icon).toBe('shield');
     expect(stateIcon({ ...SESSION, state: 'idle' }).icon).toBe('check');
     expect(stateIcon({ ...SESSION, state: 'ended' }).icon).toBe('circle-slash');
-    expect(stateIcon({ ...SESSION, state: 'starting' }).icon).toBe('sync~spin');
+    expect(stateIcon({ ...SESSION, state: 'starting' }).icon).toBe('loading~spin');
     expect(stateIcon(null).icon).toBe('circle-slash');
   });
 
@@ -210,7 +210,7 @@ describe('the conversation state', () => {
     for (const state of ['starting', 'running', 'waiting', 'idle', 'ended'] as const) {
       const session = { ...SESSION, state };
 
-      expect(isWorking(session)).toBe(stateIcon(session).icon === 'sync~spin');
+      expect(isWorking(session)).toBe(stateIcon(session).icon === 'loading~spin');
       expect(awaitingReply(items, session)).toBe(isWorking(session) || state === 'waiting');
     }
 
@@ -250,7 +250,7 @@ describe('the Conversation view page', () => {
     const root = document.createElement('div');
 
     root.innerHTML = html;
-    expect(root.querySelector('.header .codicon')?.className).toBe('codicon codicon-sync codicon-modifier-spin');
+    expect(root.querySelector('.header .codicon')?.className).toBe('codicon codicon-loading codicon-modifier-spin');
     expect(root.querySelector('.header .title')?.textContent).toBe('Fix the <inbox> badge');
     expect(root.querySelector('.message .box')?.textContent).toBe('Is <b>it</b> fixed?');
     root.innerHTML = renderConversation(state([message('m1', T0, 'Sent', { provisional: true })]));

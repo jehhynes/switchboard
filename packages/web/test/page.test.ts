@@ -111,6 +111,8 @@ describe('drawing', () => {
 
     expect(html).toMatch(/class="list-item hosted selected" data-action="select" data-work-item="4"/);
     expect(html).toContain('codicon-folder');
+    // A working session spins the same loading codicon as the Thinking row and the dock's running mark.
+    expect(html).toContain('class="codicon codicon-loading codicon-modifier-spin" title="Working"');
     expect(html).toContain('<span class="count" title="2 unread">2</span>');
   });
 
