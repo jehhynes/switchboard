@@ -293,6 +293,63 @@ describe('startPane (PRD R92)', () => {
     expect(postMessage).not.toHaveBeenCalled();
   });
 
+  it('redraws in place, so a focused button keeps its focus when a model adds a work item before it', () => {
+    const div = document.createElement('div');
+    const block = (key: string, label: string) => ({ key, links: [{ text: key, glyph: null, url: null, kind: 'ticket' as const, mentioned: false, title: key }], report: null, main: { label, glyph: null, title: label } });
+    const show = (items: ReturnType<typeof block>[]) => window.dispatchEvent(new MessageEvent('message', { data: { type: 'model', model: { items, needs: 0 } } }));
+
+    document.body.replaceChildren(div);
+    startPane(div, { postMessage: vi.fn() });
+    show([block('item:7', 'Approve')]);
+
+    const button = div.querySelector<HTMLButtonElement>('[data-main="item:7"]')!;
+
+    button.focus();
+    show([block('item:8', 'Start'), block('item:7', 'Retry')]);
+
+    expect(div.querySelector('[data-main="item:7"]')).toBe(button);
+    expect(button.textContent).toBe('Retry');
+    expect(document.activeElement).toBe(button);
+    expect([...div.querySelectorAll('[data-main]')].map((main) => main.textContent)).toEqual(['Start', 'Retry']);
+  });
+
+  it('keys link pills by their target, so two pills with the same text keep their own buttons', () => {
+    const div = document.createElement('div');
+    const link = (url: string) => ({ text: '42', glyph: null, url, kind: 'pr' as const, mentioned: false, title: url });
+    const show = () => window.dispatchEvent(new MessageEvent('message', { data: { type: 'model', model: { items: [{ key: 'item:7', links: [link('https://github.com/a/r/pull/42'), link('https://github.com/b/r/pull/42')], report: null, main: null }], needs: 0 } } }));
+
+    document.body.replaceChildren(div);
+    startPane(div, { postMessage: vi.fn() });
+    show();
+
+    const second = div.querySelectorAll<HTMLButtonElement>('[data-open]')[1]!;
+
+    second.focus();
+    show();
+
+    expect(div.querySelectorAll('[data-open]')[1]).toBe(second);
+    expect(document.activeElement).toBe(second);
+  });
+
+  it('keeps the focused main control on its own button when a Report button appears before it', () => {
+    const div = document.createElement('div');
+    const model = (report: string | null) => ({ items: [{ key: 'item:7', links: [], report, main: { label: 'Approve', glyph: null, title: 'Approve' } }], needs: 0 });
+    const show = (report: string | null) => window.dispatchEvent(new MessageEvent('message', { data: { type: 'model', model: model(report) } }));
+
+    document.body.replaceChildren(div);
+    startPane(div, { postMessage: vi.fn() });
+    show(null);
+
+    const main = div.querySelector<HTMLButtonElement>('[data-main]')!;
+
+    main.focus();
+    show(REPORT);
+
+    expect(div.querySelector('[data-main]')).toBe(main);
+    expect(document.activeElement).toBe(main);
+    expect(div.querySelector('[data-open]')!.textContent).toBe('Report');
+  });
+
   it("posts its width and the window's every quarter second and when it resizes (PRD R91)", () => {
     const observed: (() => void)[] = [];
     const postMessage = vi.fn();

@@ -23,18 +23,18 @@ export function renderPane(model: PaneModel): string {
           const kind = `pill ${link.kind}${link.mentioned ? ' mentioned' : ''}`;
 
           return link.url === null
-            ? `<span class="${kind}" title="${escape(link.title)}">${glyph}${escape(link.text)}</span>`
-            : `<button class="${kind}" data-open="${escape(link.url)}" title="${escape(link.title)}">${glyph}${escape(link.text)}</button>`;
+            ? `<span class="${kind}" data-key="link:${escape(link.url ?? link.text)}" title="${escape(link.title)}">${glyph}${escape(link.text)}</span>`
+            : `<button class="${kind}" data-key="link:${escape(link.url ?? link.text)}" data-open="${escape(link.url)}" title="${escape(link.title)}">${glyph}${escape(link.text)}</button>`;
         })
         .join('');
-      const report = item.report === null ? '' : `<button data-open="${escape(item.report)}" title="${escape(item.report)}"><span class="codicon codicon-file"></span>Report</button>`;
+      const report = item.report === null ? '' : `<button data-key="report" data-open="${escape(item.report)}" title="${escape(item.report)}"><span class="codicon codicon-file"></span>Report</button>`;
       const main =
         item.main === null
           ? ''
-          : `<button class="main" data-main="${escape(item.key)}" title="${escape(item.main.title)}">${item.main.glyph === null ? '' : `<span class="codicon">${escape(item.main.glyph)}</span>`}${escape(item.main.label)}</button>`;
+          : `<button class="main" data-key="main" data-main="${escape(item.key)}" title="${escape(item.main.title)}">${item.main.glyph === null ? '' : `<span class="codicon">${escape(item.main.glyph)}</span>`}${escape(item.main.label)}</button>`;
       const actions = report === '' && main === '' ? '' : `<div class="actions">${report}${main}</div>`;
 
-      return `<section class="item"><div class="pills">${pills}</div>${actions}</section>`;
+      return `<section class="item" data-key="${escape(item.key)}"><div class="pills">${pills}</div>${actions}</section>`;
     })
     .join('');
 }

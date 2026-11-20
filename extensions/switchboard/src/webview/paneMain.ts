@@ -1,4 +1,5 @@
 import type { PaneModel } from '../paneModel.js';
+import { morph } from './morph.js';
 import { clickMessage, renderPane } from './paneRender.js';
 
 interface VsCodeApi {
@@ -25,7 +26,8 @@ export function startPane(root: HTMLElement, vscode: VsCodeApi): void {
   setInterval(size, SIZE_MS);
   window.addEventListener('message', (event: MessageEvent<{ type: string; model?: PaneModel }>) => {
     if (event.data.type === 'model' && event.data.model !== undefined) {
-      root.innerHTML = renderPane(event.data.model);
+      // In place, so a focused button keeps its focus across the model each state sends.
+      morph(root, renderPane(event.data.model));
     }
   });
   root.addEventListener('click', (event) => {
