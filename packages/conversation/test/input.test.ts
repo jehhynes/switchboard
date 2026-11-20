@@ -176,7 +176,8 @@ class FakeSession {
         now: () => this.clock,
         sleep: async (ms: number) => {
           this.clock += ms;
-          await Promise.resolve();
+          // A macrotask, as a real sleep is, so a loop that polls an unchanged screen lets the test's own timers run.
+          await new Promise((resolve) => setImmediate(resolve));
         },
         log: (line: string) => logs.push(line),
         ...overrides,
@@ -395,9 +396,9 @@ describe('SessionInput', () => {
 
     const waiting = new SessionInput('s1', draftDeps.deps).send('Hello', (outcome) => draftOutcomes.push(outcome));
 
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    // The log comes after the first screen read, which replays the screen on a real timer.
+    await vi.waitFor(() => expect(draftDeps.logs).toEqual(['session s1: a message waits, the input box holds a draft']), { timeout: 4_000 });
     expect(drafted.writes).toEqual([]);
-    expect(draftDeps.logs).toEqual(['session s1: a message waits, the input box holds a draft']);
     drafted.box = '';
     await waiting;
     expect(draftOutcomes).toEqual([{ delivery: 'sent' }]);
@@ -555,7 +556,18 @@ describe('SessionInput against a session that changes', () => {
   it('presses no further Enter once the session was resumed under another launch, and says when it pastes', async () => {
     const session = new FakeSession();
     let launch = 'launch-1';
-    const { deps } = session.deps();
+    // The session is resumed under another launch just after the first Enter.
+    const { deps } = session.deps({
+      write: async (data: string) => {
+        const answer = session.write(data);
+
+        if (data === '\r') {
+          launch = 'launch-2';
+        }
+
+        return answer;
+      },
+    });
     const outcomes: InputOutcome[] = [];
     const pastes: number[] = [];
 
@@ -566,8 +578,6 @@ describe('SessionInput against a session that changes', () => {
       pasting: (at) => pastes.push(at),
     });
 
-    await vi.waitFor(() => expect(session.writes).toEqual(['\u001b[200~Hello\u001b[201~', '\r']));
-    launch = 'launch-2';
     await sending;
     expect(session.writes).toEqual(['\u001b[200~Hello\u001b[201~', '\r']);
     // The text it left in the box is not cleared from a session resumed under another launch.

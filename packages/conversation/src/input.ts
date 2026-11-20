@@ -392,6 +392,8 @@ export function blockedBy(screen: InputScreen, keyAt: number | null, now: number
 /** One session's typed messages, typed one at a time in the order they came. */
 export class SessionInput {
   #tail: Promise<void> = Promise.resolve();
+  /** The last screen read and what it showed, since polling while a message waits mostly reads an unchanged screen, and each replay waits on a timer. */
+  #lastScreen: { data: string; cols: number; rows: number; screen: InputScreen } | null = null;
 
   constructor(
     readonly sessionId: string,
@@ -561,8 +563,13 @@ export class SessionInput {
 
   async #screen(): Promise<{ screen: InputScreen; rev: number; keyAt: number | null }> {
     const snapshot = await this.deps.snapshot();
+    const last = this.#lastScreen;
 
-    return { screen: await readInputScreen(snapshot), rev: snapshot.rev, keyAt: snapshot.keyAt };
+    if (last === null || last.data !== snapshot.data || last.cols !== snapshot.cols || last.rows !== snapshot.rows) {
+      this.#lastScreen = { data: snapshot.data, cols: snapshot.cols, rows: snapshot.rows, screen: await readInputScreen(snapshot) };
+    }
+
+    return { screen: this.#lastScreen!.screen, rev: snapshot.rev, keyAt: snapshot.keyAt };
   }
 
   /** Waits until typing would disturb nothing, then holds the reservation; a refusal or an ended session means nothing was typed. */
