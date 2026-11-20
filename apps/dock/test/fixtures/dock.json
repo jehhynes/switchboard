@@ -1306,19 +1306,14 @@
       "until": 1791266400000
     },
     {
-      "label": "Next week",
-      "description": "Mon, Oct 5, 6:00 AM",
-      "until": 1791180000000
-    },
-    {
       "label": "In 2 weeks",
-      "description": "Mon, Oct 12, 6:00 AM",
-      "until": 1791784800000
+      "description": "Sat, Oct 17, 6:00 AM",
+      "until": 1792216800000
     },
     {
       "label": "In 4 weeks",
-      "description": "Mon, Oct 26, 6:00 AM",
-      "until": 1792994400000
+      "description": "Sat, Oct 31, 6:00 AM",
+      "until": 1793426400000
     },
     {
       "label": "Indefinitely",

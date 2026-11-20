@@ -27,12 +27,11 @@ export function daysFrom(now: Date, days: number): Date {
   return new Date(start.getFullYear(), start.getMonth(), start.getDate() + days, DAY_START_HOUR);
 }
 
-/** 6am on the first Monday after the current day, plus `weeks - 1` weeks. */
-export function mondaysFrom(now: Date, weeks: number): Date {
+/** 6am on the first Monday after the current day. */
+export function nextMonday(now: Date): Date {
   const start = dayStart(now);
-  const untilMonday = ((8 - start.getDay()) % 7) || 7;
 
-  return daysFrom(now, untilMonday + 7 * (weeks - 1));
+  return daysFrom(now, ((8 - start.getDay()) % 7) || 7);
 }
 
 /** The wake time as the snooze choices and the dock show it, such as `Mon, Oct 12, 6:00 AM`. */
@@ -40,17 +39,21 @@ export function wakeText(time: number): string {
   return new Date(time).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
-/** The snooze picker's choices: days wake at 6am that many days on, weeks on a Monday at 6am, and Indefinitely never (PRD R49). */
+/**
+ * The snooze picker's choices (PRD R49): days wake at 6am that many days on, Next week on the first Monday after the current day,
+ * In 2 weeks and In 4 weeks 14 and 28 days on, and Indefinitely never. A choice that wakes when an earlier one does is left out, as
+ * Next week is on a Saturday, where In 2 days is that Monday.
+ */
 export function snoozeChoices(now: Date): SnoozeChoice[] {
   const timed = (label: string, date: Date): SnoozeChoice => ({ label, description: wakeText(date.getTime()), until: date.getTime() });
-
-  return [
+  const choices = [
     timed('Tomorrow', daysFrom(now, 1)),
     timed('In 2 days', daysFrom(now, 2)),
     timed('In 3 days', daysFrom(now, 3)),
-    timed('Next week', mondaysFrom(now, 1)),
-    timed('In 2 weeks', mondaysFrom(now, 2)),
-    timed('In 4 weeks', mondaysFrom(now, 4)),
-    { label: 'Indefinitely', description: '', until: null },
+    timed('Next week', nextMonday(now)),
+    timed('In 2 weeks', daysFrom(now, 14)),
+    timed('In 4 weeks', daysFrom(now, 28)),
   ];
+
+  return [...choices.filter((choice, index) => choices.findIndex((other) => other.until === choice.until) === index), { label: 'Indefinitely', description: '', until: null }];
 }

@@ -1243,7 +1243,7 @@ public sealed class MainWindowTests
         hub.ActReplies.Enqueue(null);
         snooze.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         Dispatcher.UIThread.RunJobs();
-        Named<RadioButton>("SnoozeChoice6").IsChecked = true;
+        Named<RadioButton>($"SnoozeChoice{Fixtures.View.Snooze.Count - 1}").IsChecked = true;
         Named<TextBox>("SnoozeComment").Text = "  Waiting for the release.\nThen retry.  ";
         Press("SnoozeAction");
         Dispatcher.UIThread.RunJobs();

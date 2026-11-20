@@ -14,7 +14,7 @@ public sealed class DockViewTests
         Assert.Equal(["review", "blocked", "progress", "unstarted", "done"], view.Groups.Select((group) => group.Key));
         Assert.Equal(["item:13", "item:7", "item:10"], view.Groups[0].Rows.Select((row) => row.Key));
         Assert.Equal(["item:14", "item:8", "item:15"], view.Groups[1].Rows.Select((row) => row.Key));
-        Assert.Equal(7, view.Snooze.Count);
+        Assert.Equal(6, view.Snooze.Count);
         Assert.Equal(new SnoozeChoice("Indefinitely", "", null), view.Snooze[^1]);
         Assert.Equal(1791093600000, view.Snooze[0].Until);
     }
