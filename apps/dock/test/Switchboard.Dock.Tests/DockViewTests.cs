@@ -182,6 +182,8 @@ public sealed class DockViewTests
         Assert.Equal(("Open in terminal", "Open in terminal: attaches to the Code Mode session"), (row.Main, row.MainTitle));
         Assert.Equal(("cm15", true), (terminal["sessionId"]!.GetValue<string>(), terminal["codeMode"]!.GetValue<bool>()));
         Assert.DoesNotContain(row.Controls, (control) => control.Label == "Open in Claude");
+        Assert.Equal(2, row.Unread);
+        Assert.Equal(0, Fixtures.Row("item:8").Unread);
     }
 
     [Fact]

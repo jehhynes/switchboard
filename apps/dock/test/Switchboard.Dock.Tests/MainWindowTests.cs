@@ -1318,6 +1318,27 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public void Show_RowWithUnreadItems_ShowsTheCountAfterTheTitleAndNoneWithoutThem()
+    {
+        var (window, model) = Open();
+
+        model.Show(Fixtures.View with { Groups = [new DockGroup("progress", "In progress", null, [Fixtures.Row("item:15"), Fixtures.Row("item:8"), Fixtures.Row("item:13") with { Unread = 1 }])] });
+        Dispatcher.UIThread.RunJobs();
+        Border BadgeOf(string key) => window.GetVisualDescendants().OfType<Border>().Single((border) => border.Name == "UnreadBadge" && border.DataContext is RowViewModel row && row.Key == key);
+
+        Assert.True(BadgeOf("item:15").IsVisible);
+        Assert.Equal("2", BadgeOf("item:15").GetVisualDescendants().OfType<TextBlock>().Single().Text);
+        Assert.Equal("2 unread replies and statuses in its Conversation view", ToolTip.GetTip(BadgeOf("item:15")));
+        Assert.Equal("1 unread reply or status in its Conversation view", ToolTip.GetTip(BadgeOf("item:13")));
+        Assert.False(BadgeOf("item:8").IsVisible);
+
+        // The count goes once the window's view showed them.
+        model.Show(Fixtures.View with { Groups = [new DockGroup("progress", "In progress", null, [Fixtures.Row("item:15") with { Unread = 0 }])] });
+        Dispatcher.UIThread.RunJobs();
+        Assert.False(BadgeOf("item:15").IsVisible);
+    }
+
+    [AvaloniaFact]
     public void Show_NarrowDockWithALongPlaybook_KeepsTheCommentIconInView()
     {
         var (window, model) = Open(new DockSettings { Width = 200 });

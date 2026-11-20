@@ -436,11 +436,16 @@
                               <Border Classes="stripe" Classes.warning="{Binding StripeWarning}" Classes.error="{Binding StripeError}" Classes.turn="{Binding StripeTurn}" />
                               <!-- The row's buttons sit beside lines 2 and 3, so they never shorten the title or hide the time. -->
                               <Grid Grid.Column="1" Classes="content" Margin="8,5,8,6" RowDefinitions="Auto,Auto" ColumnDefinitions="*,Auto">
-                                <Grid Grid.ColumnSpan="2" ColumnDefinitions="Auto,*,Auto">
+                                <Grid Grid.ColumnSpan="2" ColumnDefinitions="Auto,*,Auto,Auto">
                                   <Ellipse Width="8" Height="8" Margin="0,0,6,0" VerticalAlignment="Center" Fill="{DynamicResource DockPriority}"
                                            IsVisible="{Binding IsPriority}" ToolTip.Tip="{Binding PriorityTitle}" />
                                   <TextBlock Grid.Column="1" Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Title}" />
-                                  <TextBlock Grid.Column="2" Text="{Binding Time}" ToolTip.Tip="{Binding TimeTitle}" Classes="muted" Margin="8,0,0,0" />
+                                  <!-- The Conversation view's unread count (PRD R100), in the group count's badge colours, before the time. -->
+                                  <Border Name="UnreadBadge" Grid.Column="2" Classes="badge" Margin="8,0,0,0" IsVisible="{Binding HasUnread}" ToolTip.Tip="{Binding UnreadTitle}"
+                                          AutomationProperties.Name="{Binding UnreadTitle}">
+                                    <TextBlock Text="{Binding UnreadText}" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                                  </Border>
+                                  <TextBlock Grid.Column="3" Text="{Binding Time}" ToolTip.Tip="{Binding TimeTitle}" Classes="muted" Margin="8,0,0,0" />
                                 </Grid>
                                 <StackPanel Grid.Row="1" Margin="0,3,0,0" Spacing="3">
                                 <StackPanel Orientation="Horizontal" Spacing="6" ClipToBounds="True">

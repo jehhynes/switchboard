@@ -83,7 +83,8 @@ public sealed record DockRow(
     bool Dim = false,
     bool Movable = false,
     DockTerminal? Terminal = null,
-    RowComment? Comment = null)
+    RowComment? Comment = null,
+    int Unread = 0)
 {
     /// <summary>The work item ID of an <c>item:&lt;id&gt;</c> row, or null for a pool row.</summary>
     [JsonIgnore]

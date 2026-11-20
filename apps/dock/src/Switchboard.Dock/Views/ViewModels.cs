@@ -735,6 +735,16 @@ public sealed class RowViewModel(DockRow row) : Observable
 
     public bool HasReturned => row.Returned > 0;
 
+    /// <summary>
+    /// Unread replies and statuses of the work item's current session in its Conversation view (PRD R100), as a count after the title; a hub from
+    /// before unread counts sends none.
+    /// </summary>
+    public bool HasUnread => row.Unread > 0;
+
+    public string UnreadText => row.Unread > 0 ? $"{row.Unread}" : "";
+
+    public string UnreadTitle => row.Unread == 1 ? "1 unread reply or status in its Conversation view" : $"{row.Unread} unread replies and statuses in its Conversation view";
+
     /// <summary>The operator's comments (PRD R87), as an icon on line 2 with the comments as its tooltip.</summary>
     public bool HasComment => row.Comment is not null;
 
