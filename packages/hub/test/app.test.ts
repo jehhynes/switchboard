@@ -756,6 +756,27 @@ describe('createHubApp', () => {
     expect(app.runtime.snapshot().workItems).toHaveLength(1);
   });
 
+  it('shows the dock the voice target\'s mic mark and a voice problem as a note, and answers a row click with why the voice did not move (architecture.md § Voice)', async () => {
+    writeSettings({ sessions: { installHooks: false }, sources: { adhoc: { repoRoot: 'D:/scratch' } }, voice: { enabled: true } });
+    const app = await start(() => {});
+
+    app.runtime.send({ type: 'adhoc', prompt: 'Primary', repoRoot: 'D:/scratch', start: true });
+    await app.runtime.settled();
+
+    const rows = () => (app.dock() as { notes: string[]; groups: { rows: { key: string; window: { file: string } | null; voice: { active: boolean } }[] }[] }).groups.flatMap((group) => group.rows);
+    const row = rows()[0]!;
+
+    expect(row.voice).toEqual({ active: false });
+    const key = app.windowOpened!(row.window!.file);
+
+    // No voice build is installed in this home, so the process cannot start: the dock says so, no window does.
+    await until(() => ((app.dock() as { notes: string[] }).notes.some((note) => note.startsWith('Voice: The voice process is not installed')) ? true : null));
+    // Its session is not a live, observed one, since hooks are off; with its window closed there is none to talk to.
+    expect(await app.post['/dock/select']!({ rowKey: row.key })).toEqual({ status: 200, body: { selected: true, voice: 'The voice speaks only for a live session.' } });
+    app.windowClosed!(key);
+    expect(await app.post['/dock/select']!({ rowKey: row.key })).toEqual({ status: 200, body: { selected: false, voice: 'Open its window to talk to it.' } });
+  });
+
   it('opens a folder-hosted session only in a folder window on that folder, never in an item window that holds the folder (architecture.md § Window scope)', async () => {
     writeSettings({ sessions: { installHooks: false } });
     const app = await start(() => {});

@@ -6,6 +6,7 @@ import { PERMISSION_PROMPT, Store, windowFileKey } from '@switchboard/core';
 import type { Session as StoredSession } from '@switchboard/core';
 import { projectSlug } from '@switchboard/claude';
 import { ConversationService, sessionView } from '../src/conversation.js';
+import type { ConversationVoice } from '../src/conversation.js';
 import { windowOf } from '../src/dock.js';
 import { canonicalFolder, WindowScopes } from '../src/windows.js';
 import { NOW, item, session, snapshot } from './views.js';
@@ -878,7 +879,7 @@ describe('ConversationService', () => {
 });
 
 describe('ConversationService send', () => {
-  function setupSend(held = new FakeHeld(), holderAnswerMs?: number) {
+  function setupSend(held = new FakeHeld(), holderAnswerMs?: number, voice?: ConversationVoice) {
     const store = Store.open(':memory:');
     const view = world();
     let keys = 0;
@@ -903,6 +904,7 @@ describe('ConversationService send', () => {
           await new Promise((resolve) => setImmediate(resolve));
         },
         newId: () => String(++id),
+        ...(voice === undefined ? {} : { voice }),
         log: (line) => logs.push(line),
       });
     const service = make();
@@ -952,6 +954,101 @@ describe('ConversationService send', () => {
     expect(held.writes).toHaveLength(2);
     expect(store.message('m-1')?.pastedAt).toEqual(expect.any(Number));
     expect(JSON.stringify(mine.frames)).not.toContain('pastedAt');
+  });
+
+  /** A voice that records what the conversation layer asks of it. */
+  function fakeVoice(spoken = { spoken: true, expressive: false }) {
+    const calls: string[] = [];
+    const voice: ConversationVoice = {
+      shown: (key) => ({ enabled: true, here: key === 'k1', mic: 'off', speaking: null, speakReplies: true, error: null }),
+      settings: () => ({ expandReplies: true }),
+      spokenFor: (sessionId, command) => {
+        calls.push(`spokenFor ${sessionId} ${command}`);
+        return command ? { spoken: false, expressive: false } : spoken;
+      },
+      replyChanged: (reply) => void calls.push(`reply ${reply.opening}`),
+      talkHere: (key) => (key === 'k1' ? null : 'Voice is off (voice.enabled).'),
+      stopSpeaking: () => 'Voice is not in this window.',
+      setSpeakReplies: (on) => void calls.push(`speak-replies ${on}`),
+      replay: (_key, replyId) => (replyId === 'r-x' ? 'Not in this window.' : null),
+      update: () => void calls.push('update'),
+      selected: (key) => void calls.push(`selected ${key}`),
+      expressive: () => true,
+    };
+
+    return { voice, calls };
+  }
+
+  it('types [spoken] before a message whose reply will be heard, keeps the text without it, and confirms it by its tagged line (architecture.md § Voice)', async () => {
+    const { voice, calls } = fakeVoice({ spoken: true, expressive: true });
+    const { service, held, open, body, view, store } = setupSend(new FakeHeld(), undefined, voice);
+    const mine = open(view.file);
+
+    expect(mine.frames[0]).toMatchObject({ type: 'hello', voice: { enabled: true, here: true, mic: 'off' }, settings: { expandReplies: true } });
+    expect(service.send(body(mine.key, { text: '/x why' }))).toMatchObject({ status: 200, body: { message: { id: 'm-1', text: '/x why', spokenRequested: true } } });
+    await vi.waitFor(() => expect(store.message('m-1')?.delivery).toBe('sent'));
+    expect(held.writes[0]).toBe('\u001b[200~[spoken] [expressive] \\/x why\u001b[201~');
+    await service.poll();
+    expect(store.conversation('s2', null, 10).items).toMatchObject([{ id: 'm-1', text: '/x why', transcriptUuid: 'typed-2', spokenRequested: true }]);
+
+    // A slash command chosen from the list goes untagged.
+    expect(service.send(body(mine.key, { opId: 'op-2', text: '/compact', command: true }))).toMatchObject({ status: 200, body: { message: { spokenRequested: false } } });
+    await vi.waitFor(() => expect(store.message('m-2')?.delivery).toBe('sent'));
+    expect(held.writes[2]).toBe('\u001b[200~/compact\u001b[201~');
+    expect(calls.filter((call) => call.startsWith('spokenFor'))).toEqual(['spokenFor s2 false', 'spokenFor s2 true']);
+  });
+
+  it('runs the voice commands for the window only: Talk here, Stop speaking, Speak replies and Replay, with their refusals', () => {
+    const { voice, calls } = fakeVoice();
+    const { service, open, view } = setupSend(new FakeHeld(), undefined, voice);
+    const mine = open(view.file);
+    const theirs = open(view.otherFile);
+    const command = (name: Parameters<typeof service.voiceCommand>[0], patch: Record<string, unknown> = {}, window = mine.key) => service.voiceCommand(name, { window, scopeGen: 1, opId: 'o', ...patch });
+
+    expect(command('talk-here')).toEqual({ status: 200, body: { done: true } });
+    expect(command('talk-here', {}, theirs.key)).toEqual({ status: 409, body: { error: 'Voice is off (voice.enabled).' } });
+    expect(command('talk-here', {}, 'forged')).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(command('talk-here', { scopeGen: 0 })).toEqual({ status: 409, body: { error: "The window's conversation changed." } });
+    expect(command('stop-speaking')).toEqual({ status: 409, body: { error: 'Voice is not in this window.' } });
+    expect(command('speak-replies', { on: false })).toEqual({ status: 200, body: { on: false } });
+    expect(command('speak-replies')).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, on}.' } });
+    expect(command('replay', { replyId: 'r-1' })).toEqual({ status: 200, body: { done: true } });
+    expect(command('replay', { replyId: 'r-x' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(command('replay')).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, replyId}.' } });
+    expect(service.voiceCommand('talk-here', { window: mine.key, scopeGen: 1 })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId}.' } });
+    expect(calls).toContain('speak-replies false');
+    // Selecting a conversation tells the voice, which moves at once when the window has the focus.
+    expect(service.select({ window: mine.key, scopeGen: 1, opId: 'sel', workItemId: 2 }).status).toBe(200);
+    expect(calls).toContain(`selected ${mine.key}`);
+
+    // Without voice, the commands are not part of the hub.
+    const plain = setupSend();
+    const key = plain.open(plain.view.file).key;
+
+    expect(plain.service.voiceCommand('talk-here', { window: key, scopeGen: plain.scopes.scope(key)!.scopeGen, opId: 'o' })).toEqual({ status: 404, body: { error: 'This hub has no voice.' } });
+  });
+
+  it('tells the voice of each reply, sends a reply again when its speech changed, and sends voice events to one window', async () => {
+    const { voice, calls } = fakeVoice();
+    const { service, open, view, store } = setupSend(new FakeHeld(), undefined, voice);
+    const mine = open(view.file);
+    const theirs = open(view.otherFile);
+
+    writeFileSync(join(dir, 'projects', projectSlug('D:/w12'), 'n2.jsonl'), `${JSON.stringify({ type: 'assistant', uuid: 'a1', timestamp: new Date(NOW).toISOString(), message: { role: 'assistant', content: [{ type: 'text', text: '[speak]Done.[/speak] More.' }] } })}\n`);
+    await service.poll();
+    expect(calls).toContain('reply Done. More.');
+
+    const reply = store.conversation('s2', null, 10).items[0]!;
+
+    expect(mine.frames.filter((frame) => frame.type === 'reply').at(-1)).toMatchObject({ reply: { speak: 'Done.', tone: null, spoken: { state: 'none', atMs: null, saidChars: null } } });
+    expect(mine.frames.filter((frame) => frame.type === 'reply').at(-1)!['reply']).not.toHaveProperty('spokenState');
+    store.updateReply(reply.id, { spokenState: 'playing', spokenAtMs: 0, saidChars: 0 });
+    service.replyUpdated(reply.id);
+    service.replyUpdated('gone');
+    expect(mine.frames.filter((frame) => frame.type === 'reply').at(-1)).toMatchObject({ reply: { id: reply.id, spoken: { state: 'playing', atMs: 0 } } });
+    service.notify(mine.key, 'progress', { replyId: reply.id, chars: 3, atMs: 150 });
+    expect(mine.frames.at(-1)).toMatchObject({ type: 'progress', replyId: reply.id, chars: 3, atMs: 150 });
+    expect(theirs.frames.some((frame) => frame.type === 'progress' || JSON.stringify(frame).includes('Done.'))).toBe(false);
   });
 
   it('refuses a malformed command, another window, a forged session, a stale scope, an empty or long text, and a session that cannot take it', async () => {
@@ -1088,6 +1185,23 @@ describe('ConversationService send', () => {
     held.menu = false;
     await vi.waitFor(() => expect(store.message('m-2')?.delivery).toBe('sent'));
     expect(held.writes).toEqual(['\u001b[200~Fix the build\u001b[201~', '\r', '\u001b[200~Second\u001b[201~', '\r']);
+  });
+
+  it('settles a spoken message a stopped hub left open by the text it typed, tags included', async () => {
+    const { voice } = fakeVoice();
+    const { store, make, held, scopes, view } = setupSend(new FakeHeld(), undefined, voice);
+
+    store.addMessage({ id: 'm-spoken', sessionId: 's2', workItemId: 2, at: NOW, origin: 'typed', text: 'half typed', transcriptUuid: null, provisional: true, withdrawn: false, delivery: 'open', error: null, opId: 'op-s', pastedAt: NOW, launch: 'launch-1', spokenRequested: true });
+    held.box = '[spoken] [expressive] half typed';
+
+    const service = make();
+
+    service.open(scopes.open(view.file, view.view), () => undefined);
+    await vi.waitFor(() => expect(store.message('m-spoken')).toBeNull());
+    service.stop();
+    // The box held exactly what was typed, so it was cleared.
+    expect(held.writes).toEqual(['\u0015']);
+    expect(held.box).toBe('');
   });
 
   it('settles messages a stopped hub left open once a window shows their session: never typed again, cleared only in their launch, and given back to its composer', async () => {

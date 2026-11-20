@@ -4,6 +4,29 @@ import { createConnection, createServer } from 'node:net';
 import type { Server } from 'node:net';
 import { join, resolve, win32 } from 'node:path';
 import { parseHolderRecord, recordPath } from '@switchboard/holder';
+import { parseVoiceRecord, voiceRecordPath } from '@switchboard/voice';
+
+/**
+ * A program installed per build in its own folder of the home, as the terminal holder is and the voice process (architecture.md § Voice): its
+ * folder, its entry script, and the build its running process loaded, read from its record.
+ */
+export interface InstallKind {
+  name: 'holder' | 'voice';
+  entry: string;
+  running(home: string): { build: string; pid: number } | null;
+}
+
+export const HOLDER_INSTALL: InstallKind = {
+  name: 'holder',
+  entry: 'holder.js',
+  running: (home) => parseHolderRecord(readFileSync(recordPath(home), 'utf8')),
+};
+
+export const VOICE_INSTALL: InstallKind = {
+  name: 'voice',
+  entry: 'voice.js',
+  running: (home) => parseVoiceRecord(readFileSync(voiceRecordPath(home), 'utf8')),
+};
 
 /** The holder build the extension carries, written by its build: a hash of every file's path and content, and the files, relative to its folder. */
 export interface HolderManifest {
@@ -39,12 +62,12 @@ function complete(dir: string, build: string): boolean {
   return manifest?.build === build && manifest.files.every((file) => existsSync(join(dir, file)));
 }
 
-/** The holder build a hub starts, or null when none is installed. */
-export function currentHolderBuild(home: string): string | null {
+/** The holder build a hub starts, or with `kind` the voice process's, or null when none is installed. */
+export function currentHolderBuild(home: string, kind: InstallKind = HOLDER_INSTALL): string | null {
   try {
-    const raw = JSON.parse(readFileSync(join(home, 'holder', CURRENT_FILE), 'utf8')) as { build?: unknown };
+    const raw = JSON.parse(readFileSync(join(home, kind.name, CURRENT_FILE), 'utf8')) as { build?: unknown };
 
-    return typeof raw.build === 'string' && /^[0-9a-f]{16}$/.test(raw.build) && existsSync(join(home, 'holder', raw.build, 'holder.js')) ? raw.build : null;
+    return typeof raw.build === 'string' && /^[0-9a-f]{16}$/.test(raw.build) && existsSync(join(home, kind.name, raw.build, kind.entry)) ? raw.build : null;
   } catch {
     return null;
   }
@@ -54,9 +77,9 @@ export function currentHolderBuild(home: string): string | null {
  * Marks a complete build as in use before a holder starts from it, under the install lock, so an install in another window keeps its folder.
  * False when the build is not installed whole.
  */
-export async function reserveHolderBuild(home: string, build: string): Promise<boolean> {
-  const reserved = await withInstallLock(home, () => {
-    const dir = join(home, 'holder', build);
+export async function reserveHolderBuild(home: string, build: string, kind: InstallKind = HOLDER_INSTALL): Promise<boolean> {
+  const reserved = await withInstallLock(home, kind, () => {
+    const dir = join(home, kind.name, build);
 
     if (!complete(dir, build)) {
       return false;
@@ -87,12 +110,12 @@ function alive(pid: number): boolean {
 }
 
 /** The install lock of a home: a named pipe on Windows, a socket file elsewhere, which the system releases when its process ends. */
-export function installLockAddress(home: string, platform: NodeJS.Platform = process.platform): string {
+export function installLockAddress(home: string, platform: NodeJS.Platform = process.platform, kind: InstallKind = HOLDER_INSTALL): string {
   if (platform === 'win32') {
-    return `\\\\.\\pipe\\switchboard-holder-install-${createHash('sha256').update(win32.resolve(home).toLowerCase()).digest('hex').slice(0, 16)}`;
+    return `\\\\.\\pipe\\switchboard-${kind.name}-install-${createHash('sha256').update(win32.resolve(home).toLowerCase()).digest('hex').slice(0, 16)}`;
   }
 
-  return join(resolve(home), 'holder', 'install.sock');
+  return join(resolve(home), kind.name, 'install.sock');
 }
 
 function listen(address: string): Promise<Server | null> {
@@ -116,13 +139,13 @@ function answers(address: string): Promise<boolean> {
 }
 
 /** Runs `work` while holding the install lock of the home, so windows activating at once and a hub reserving a build take turns. */
-async function withInstallLock<T>(home: string, work: () => T, waitMs = LOCK_WAIT_MS): Promise<T | { error: string }> {
-  const address = installLockAddress(home);
+async function withInstallLock<T>(home: string, kind: InstallKind, work: () => T, waitMs = LOCK_WAIT_MS): Promise<T | { error: string }> {
+  const address = installLockAddress(home, process.platform, kind);
   const deadline = Date.now() + waitMs;
   let server: Server | null = null;
 
   try {
-    mkdirSync(join(home, 'holder'), { recursive: true });
+    mkdirSync(join(home, kind.name), { recursive: true });
 
     while (server === null) {
       server = await listen(address);
@@ -135,7 +158,7 @@ async function withInstallLock<T>(home: string, work: () => T, waitMs = LOCK_WAI
 
       if (server === null) {
         if (Date.now() > deadline) {
-          return { error: 'Another window is installing the terminal holder.' };
+          return { error: `Another window is installing ${kind.name === 'holder' ? 'the terminal holder' : 'the voice process'}.` };
         }
 
         await new Promise((done) => setTimeout(done, 50));
@@ -144,7 +167,7 @@ async function withInstallLock<T>(home: string, work: () => T, waitMs = LOCK_WAI
 
     return work();
   } catch (error) {
-    return { error: `The terminal holder's install lock could not be taken: ${(error as Error).message}` };
+    return { error: `The ${kind.name === 'holder' ? "terminal holder's" : "voice process's"} install lock could not be taken: ${(error as Error).message}` };
   } finally {
     const held = server;
 
@@ -160,17 +183,18 @@ async function withInstallLock<T>(home: string, work: () => T, waitMs = LOCK_WAI
  * incomplete one is moved aside and copied again. Other build folders are removed, except the running holder's and one a hub reserved in the last
  * 10 minutes. Returns the build, or the error; a failure affects only Code Mode starts.
  */
-export async function installHolder(source: string, home: string, running: (pid: number) => boolean = alive, now: () => number = Date.now): Promise<{ build: string } | { error: string }> {
+export async function installHolder(source: string, home: string, running: (pid: number) => boolean = alive, now: () => number = Date.now, kind: InstallKind = HOLDER_INSTALL): Promise<{ build: string } | { error: string }> {
   const manifest = readManifest(source);
 
   if (manifest === null) {
     return { error: `${join(source, MANIFEST_FILE)} is missing or invalid.` };
   }
 
-  const root = join(home, 'holder');
+  const root = join(home, kind.name);
   const target = join(root, manifest.build);
+  const what = kind.name === 'holder' ? 'The terminal holder' : 'The voice process';
 
-  return withInstallLock(home, () => {
+  return withInstallLock(home, kind, () => {
       try {
         if (!complete(target, manifest.build)) {
           const temporary = `${target}.${process.pid}.tmp`;
@@ -205,11 +229,11 @@ export async function installHolder(source: string, home: string, running: (pid:
         writeFileSync(`${pointer}.${process.pid}.tmp`, JSON.stringify({ build: manifest.build }));
         renameSync(`${pointer}.${process.pid}.tmp`, pointer);
       } catch (error) {
-        return { error: `The terminal holder could not be installed in ${target}: ${(error as Error).message}` };
+        return { error: `${what} could not be installed in ${target}: ${(error as Error).message}` };
       }
 
       try {
-        removeOldBuilds(home, manifest.build, running, now);
+        removeOldBuilds(home, manifest.build, running, now, kind);
       } catch {
         // A folder that cannot be listed is left for a later install.
       }
@@ -226,13 +250,18 @@ function recentlyUsed(dir: string, now: () => number): boolean {
   }
 }
 
+/** Installs the voice process's build the extension carries into `<home>/voice/<build>/`, as `installHolder` installs the holder's. */
+export function installVoice(source: string, home: string, running: (pid: number) => boolean = alive, now: () => number = Date.now): Promise<{ build: string } | { error: string }> {
+  return installHolder(source, home, running, now, VOICE_INSTALL);
+}
+
 /** Removes build folders other than `keep`, the running holder's and recent ones; a folder a process has loaded stays until a later install. */
-function removeOldBuilds(home: string, keep: string, running: (pid: number) => boolean, now: () => number): void {
-  const root = join(home, 'holder');
+function removeOldBuilds(home: string, keep: string, running: (pid: number) => boolean, now: () => number, kind: InstallKind): void {
+  const root = join(home, kind.name);
   let inUse: string | null = null;
 
   try {
-    const record = parseHolderRecord(readFileSync(recordPath(home), 'utf8'));
+    const record = kind.running(home);
 
     inUse = record !== null && running(record.pid) ? record.build : null;
   } catch {

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createServer } from 'node:net';
-import { currentHolderBuild, installHolder, installLockAddress, reserveHolderBuild } from '../src/holderInstall.js';
+import { currentHolderBuild, installHolder, installLockAddress, installVoice, reserveHolderBuild, VOICE_INSTALL } from '../src/holderInstall.js';
 
 const temps: string[] = [];
 
@@ -35,6 +35,33 @@ function carried(build: string, text = 'holder'): string {
 
 const BUILD_A = 'aaaaaaaaaaaaaaaa';
 const BUILD_B = 'bbbbbbbbbbbbbbbb';
+
+describe('installVoice', () => {
+  it("installs the voice process's build in its own folder beside the holder's, keeping the build its running process loaded", async () => {
+    const home = temp();
+    const voiceBuild = (build: string) => {
+      const dir = temp();
+
+      writeFileSync(join(dir, 'voice.js'), 'voice');
+      writeFileSync(join(dir, 'manifest.json'), JSON.stringify({ build, files: ['voice.js'] }));
+
+      return dir;
+    };
+
+    expect(await installVoice(voiceBuild(BUILD_A), home)).toEqual({ build: BUILD_A });
+    expect(readFileSync(join(home, 'voice', BUILD_A, 'voice.js'), 'utf8')).toBe('voice');
+    expect(currentHolderBuild(home, VOICE_INSTALL)).toBe(BUILD_A);
+    expect(currentHolderBuild(home)).toBeNull();
+    expect(await reserveHolderBuild(home, BUILD_A, VOICE_INSTALL)).toBe(true);
+    writeFileSync(join(home, 'voice.json'), JSON.stringify({ protocol: 1, build: BUILD_A, port: 5000, token: 't', pid: 4242, startedAt: 'x' }));
+    expect(await installVoice(voiceBuild(BUILD_B), home, (pid) => pid === 4242, () => Date.now() + 3_600_000)).toEqual({ build: BUILD_B });
+    expect(existsSync(join(home, 'voice', BUILD_A, 'voice.js'))).toBe(true);
+    await installVoice(voiceBuild(BUILD_B), home, () => false, () => Date.now() + 3_600_000);
+    expect(existsSync(join(home, 'voice', BUILD_A))).toBe(false);
+    expect(installLockAddress('C:/h', 'win32', VOICE_INSTALL)).toMatch(/switchboard-voice-install-[0-9a-f]{16}$/);
+    expect(installLockAddress('C:/h', 'win32')).toMatch(/switchboard-holder-install-[0-9a-f]{16}$/);
+  });
+});
 
 describe('installHolder', () => {
   it('copies the build into its own folder and names it current', async () => {

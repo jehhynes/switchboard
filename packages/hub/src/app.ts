@@ -22,7 +22,9 @@ import type { HubApp } from './serve.js';
 import { Runtime } from './runtime.js';
 import type { ReportBody, RuntimeDeps } from './runtime.js';
 import { WindowQueue } from './windowQueue.js';
-import { ConversationService, claudePaths } from './conversation.js';
+import { ConversationService, claudePaths, sessionView } from './conversation.js';
+import { VoiceControl } from './voice.js';
+import { VoiceLink } from './voiceLink.js';
 import { buildSnapshot } from './snapshot.js';
 import type { Snapshot, WorkItemView } from './snapshot.js';
 import { SnapshotBuilder } from './snapshotBuilder.js';
@@ -298,6 +300,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     pending = setTimeout(() => {
       config = loadConfig(configDir, config, store.homeRepos());
       runtime.reload(config);
+      voice.settingsChanged();
       // The dock's Settings window reads the file again (PRD R54).
       sendDock('config', {});
     }, RELOAD_DEBOUNCE_MS);
@@ -319,9 +322,47 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     now: deps.now,
     log: deps.log,
   });
+  // The window in front, which the voice follows (architecture.md § Voice).
+  let focusedWindow: string | null = null;
+  const builtNow = (): void => {
+    for (const listener of builtListeners) {
+      listener();
+    }
+  };
+  const voice = new VoiceControl({
+    link: new VoiceLink({ home, nodePath: () => config.settings.sessions.nodePath, log: (line) => deps.log(line), now: deps.now, sleep: deps.sleep }),
+    settings: () => config.settings.voice,
+    store,
+    windows: { keys: () => scopes.keys(), scope: (key) => scopes.scope(key) },
+    focusedWindow: () => focusedWindow,
+    full: (sessionId) => {
+      const session = store.session(sessionId);
+
+      return session !== null && sessionView(session, true, config.settings.sessions.installHooks).conversation === 'full';
+    },
+    replyChanged: (replyId) => conversation.replyUpdated(replyId),
+    notify: (key, type, payload) => conversation.notify(key, type, payload),
+    // The dock's mic mark and voice note are added to its view as it is sent.
+    dockChanged: builtNow,
+    now: deps.now,
+    log: deps.log,
+  });
   const conversation = new ConversationService({
     store,
     windows: scopes,
+    voice: {
+      shown: (key) => voice.shown(key),
+      settings: () => ({ expandReplies: config.settings.voice.expandReplies }),
+      spokenFor: (sessionId, command) => voice.spokenFor(sessionId, command),
+      replyChanged: (reply) => voice.replyChanged(reply),
+      talkHere: (key) => voice.talkHere(key),
+      stopSpeaking: (key) => voice.stopSpeaking(key),
+      setSpeakReplies: (on) => voice.setSpeakReplies(on),
+      replay: (key, replyId) => voice.replay(key, replyId),
+      update: () => voice.update(),
+      selected: (key) => voice.selected(key),
+      expressive: () => config.settings.voice.expressive,
+    },
     ...claudePaths(claudeRoot, homedir(), Boolean(process.env['CLAUDE_CONFIG_DIR'])),
     screen: (session, scrollback) => runtime.heldScreen(session, scrollback),
     input: { reserve: (sessionId, launch) => runtime.reserveInput(sessionId, launch), write: (session, data) => runtime.writeHeld(session, data), cannotType: () => runtime.heldCannotType() },
@@ -354,7 +395,9 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     conversation.sessionsChanged();
 
     // The dock says when a work item starts needing the operator, which the windows no longer see (PRD R65).
-    const needing = newlyNeeding(announced, built.snapshot).flatMap((item) => {
+    const newly = newlyNeeding(announced, built.snapshot);
+    const newlyNeedingIds = newly.map((item) => item.id);
+    const needing = newly.flatMap((item) => {
       const rowKey = rowFor(built.snapshot, { workItemId: item.id });
 
       return rowKey === null ? [] : [{ rowKey, message: needsMessage(item) }];
@@ -365,6 +408,14 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     if (needing.length > 0) {
       sendDock('needs', { items: needing });
     }
+
+    // The needs-you sound, for a work item other than the voice target's (architecture.md § Voice).
+    const targetSession = voice.target === null ? null : store.session(voice.target);
+
+    voice.needsYou(
+      newlyNeedingIds,
+      targetSession?.workItemId ?? null,
+    );
 
     for (const listener of builtListeners) {
       listener();
@@ -389,12 +440,23 @@ const dockWithRuns = () => {
 
     const executable = (terminal: DockTerminal): DockTerminal => ({ ...terminal, ...terminalRun(terminal) });
 
+    // The voice target's row has the mic mark, and a voice problem is a note: no window shows another's or a global one (architecture.md § Voice).
+    const targetSession = voice.target === null ? null : store.session(voice.target);
+    const activeRow = targetSession === null ? null : `item:${targetSession.workItemId}`;
+    const voiceError = voice.dockError();
+
     return {
       ...view,
+      notes: voiceError === null ? view.notes : [...view.notes, `Voice: ${voiceError}`],
       ...(view.held === undefined ? {} : { held: view.held.map((one) => (one.terminal === null ? one : { ...one, terminal: executable(one.terminal) })) }),
       groups: view.groups.map((group) => ({
         ...group,
-        rows: group.rows.map((row) => ({ ...row, open: row.open?.type === 'terminal' ? { ...executable(row.open), type: 'terminal' as const } : row.open, terminal: row.terminal === null ? null : executable(row.terminal) })),
+        rows: group.rows.map((row) => ({
+          ...row,
+          open: row.open?.type === 'terminal' ? { ...executable(row.open), type: 'terminal' as const } : row.open,
+          terminal: row.terminal === null ? null : executable(row.terminal),
+          voice: { active: row.key === activeRow },
+        })),
       })),
     };
   };
@@ -583,6 +645,10 @@ const dockWithRuns = () => {
       '/v1/conversation/new-conversation': async (body) => (isRecord(body) ? conversation.newConversation(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId}.' } }),
       '/v1/conversation/statuses': async (body) => (isRecord(body) ? conversation.statuses(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, before, limit?}.' } }),
       '/v1/conversation/commands': async (body) => (isRecord(body) ? conversation.commands(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } }),
+      '/v1/conversation/talk-here': async (body) => (isRecord(body) ? conversation.voiceCommand('talk-here', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId}.' } }),
+      '/v1/conversation/stop-speaking': async (body) => (isRecord(body) ? conversation.voiceCommand('stop-speaking', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId}.' } }),
+      '/v1/conversation/speak-replies': async (body) => (isRecord(body) ? conversation.voiceCommand('speak-replies', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, on}.' } }),
+      '/v1/conversation/replay': async (body) => (isRecord(body) ? conversation.voiceCommand('replay', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, replyId}.' } }),
       '/claim': async (body) => {
         if (!isRecord(body) || typeof body['folder'] !== 'string' || !optionalString(body['workspace']) || !(body['focused'] === undefined || typeof body['focused'] === 'boolean') || !optionalString(body['window'])) {
           return { status: 400, body: { error: 'Expected {folder, workspace?, focused?, window?}.' } };
@@ -729,7 +795,10 @@ const dockWithRuns = () => {
         conversation.scopesChanged(keys);
         conversation.conversationsChanged();
 
-        return { status: 200, body: { selected } };
+        // From slice 9 a row click is also Talk here for its work item's session, when one of its windows is connected (architecture.md § Voice).
+        const voiceRefused = config.settings.voice.enabled ? voice.dockSelect(item.id) : null;
+
+        return { status: 200, body: { selected, ...(voiceRefused === null ? {} : { voice: voiceRefused }) } };
       },
       // The dock's New session (architecture.md § Hosted conversations): a conversation hosted by a folder, selected there before its window opens.
       '/dock/new-conversation': async (body) => (isRecord(body) ? conversation.dockConversation(body) : { status: 400, body: { error: 'Expected {folder, opId}.' } }),
@@ -782,11 +851,23 @@ const dockWithRuns = () => {
       },
     },
     snapshot: () => runtime.snapshot(),
-    windowOpened: (workspace, folder = null) => scopes.open(workspace, builder.latest()?.snapshot ?? null, folder),
+    windowOpened: (workspace, folder = null) => {
+      const key = scopes.open(workspace, builder.latest()?.snapshot ?? null, folder);
+
+      // After the stream registers it, so the voice sees the window.
+      setImmediate(() => voice.update());
+
+      return key;
+    },
+    windowFocused: (key) => {
+      focusedWindow = key;
+      voice.update();
+    },
     windowFolder: (key) => scopes.folderOf(key),
     windowClosed: (key) => {
       scopes.close(key);
       conversation.windowClosed();
+      voice.windowClosed(key);
     },
     windowState: (key) => scopes.scoped(key, views().snapshot),
     conversation: (key, write) => conversation.open(key, write),
@@ -817,6 +898,7 @@ const dockWithRuns = () => {
     close: () => {
       clearTimeout(pending);
       clearInterval(debriefTimer);
+      voice.close();
       conversation.stop();
       builder.close();
       runtime.stop();

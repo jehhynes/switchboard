@@ -34,6 +34,8 @@ export interface HubServerOptions {
    * changes focus, with `windows` added (PRD R71).
    */
   dock?: () => object;
+  /** The window in front changed: its key, or null while no window with a key has the focus (architecture.md § Voice). */
+  focusChanged?: (key: string | null) => void;
   heartbeatMs?: number;
   now?: () => number;
 }
@@ -177,7 +179,19 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     return built === undefined ? null : `event: ${event}\ndata: ${JSON.stringify(built)}\n\n`;
   };
 
+  // The key of the window in front as last reported, so a change is reported once.
+  let focusedKey: string | null = null;
+  const focusMoved = (): void => {
+    const key = front === null ? null : (keys.get(front) ?? null);
+
+    if (key !== focusedKey) {
+      focusedKey = key;
+      options.focusChanged?.(key);
+    }
+  };
   const windowsChanged = (): void => {
+    focusMoved();
+
     const sent = message('dock');
 
     if (sent === null) {

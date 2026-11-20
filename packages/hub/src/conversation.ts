@@ -1,14 +1,15 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { countsUnread, inTranscript } from '@switchboard/core';
-import type { ConversationMessage, ConversationReply, ConversationStatus, Session, Store } from '@switchboard/core';
+import type { ConversationMessage, ConversationReply, ConversationStatus, Session, SpokenState, Store } from '@switchboard/core';
 import { artifactsDir, hostKey, PERMISSION_PROMPT, START_PROMPT } from '@switchboard/core';
 import { findTranscript } from '@switchboard/claude';
-import { ArtifactFolder, MAX_MESSAGE_CHARS, NotWritten, SNAPSHOT_SCROLLBACK, SessionCommands, SessionConversation, SessionInput, readSnapshot } from '@switchboard/conversation';
+import { ArtifactFolder, MAX_MESSAGE_CHARS, NotWritten, SNAPSHOT_SCROLLBACK, SessionCommands, SessionConversation, SessionInput, messageTags, pasteText, readSnapshot } from '@switchboard/conversation';
 import type { Artifact, ConversationChange, InputOutcome, SlashCommand } from '@switchboard/conversation';
 import { SESSION_ENDED, SESSION_RELAUNCHED } from './runtime.js';
 import { canonicalFolder } from './windows.js';
 import type { ConversationRef, WindowScope, WindowScopes } from './windows.js';
+import type { VoiceView } from './voice.js';
 
 /** Conversation API version (architecture.md § Conversation API). */
 export const CONVERSATION_PROTOCOL = 1;
@@ -41,7 +42,17 @@ export type MessageView = { type: 'message' } & Omit<ConversationMessage, 'trans
  * `provisional`: not in the transcript yet, so placed by when it was first seen (`inTranscript`); `unread`: it counts as unread and the operator
  * has not seen it (architecture.md § Unread).
  */
-export type ReplyView = { type: 'reply'; provisional: boolean; unread: boolean } & Omit<ConversationReply, 'workItemId' | 'transcriptUuid' | 'seenAt'>;
+export type ReplyView = { type: 'reply'; provisional: boolean; unread: boolean; speak: string | null; tone: string | null; spoken: SpokenView } & Omit<
+  ConversationReply,
+  'workItemId' | 'transcriptUuid' | 'seenAt' | 'speak' | 'tone' | 'spokenState' | 'spokenAtMs' | 'saidChars'
+>;
+
+/** What became of a reply's speech (architecture.md § Voice): its state, and where playback stopped or stands. */
+export interface SpokenView {
+  state: SpokenState;
+  atMs: number | null;
+  saidChars: number | null;
+}
 export type ItemView = MessageView | ReplyView;
 
 /**
@@ -102,9 +113,9 @@ export function itemView(item: ({ type: 'message' } & ConversationMessage) | ({ 
     return { ...view, provisional: !inTranscript(item) } as ItemView;
   }
 
-  const { seenAt, workItemId: _workItemId, ...reply } = view;
+  const { seenAt, workItemId: _workItemId, speak, tone, spokenState, spokenAtMs, saidChars, ...reply } = view;
 
-  return { ...reply, provisional: !inTranscript(item), unread: seenAt === null && countsUnread(reply) };
+  return { ...reply, speak: speak ?? null, tone: tone ?? null, spoken: { state: spokenState ?? 'none', atMs: spokenAtMs ?? null, saidChars: saidChars ?? null }, provisional: !inTranscript(item), unread: seenAt === null && countsUnread(reply) };
 }
 
 /** A screen read of a held session from the holder; null when the holder is not connected or does not serve snapshots. */
@@ -162,7 +173,29 @@ export interface ConversationServiceDeps {
   newConversation?(hostWindow: string, folder: string): { workItemId: number } | { refused: string };
   /** A message was added to a work item's conversation, whose first titles a hosted conversation. */
   messageAdded?(workItemId: number, text: string): void;
+  /** Speech out (architecture.md § Voice); without it no window has voice. */
+  voice?: ConversationVoice;
   log(line: string): void;
+}
+
+/** What the conversation layer asks of the hub's voice (`VoiceControl`). */
+export interface ConversationVoice {
+  /** A window's voice state for its `hello`; later changes come as `voice` events. */
+  shown(key: string): VoiceView;
+  /** The one setting the view reads. */
+  settings(): { expandReplies: boolean };
+  spokenFor(sessionId: string, command: boolean): { spoken: boolean; expressive: boolean };
+  replyChanged(reply: ConversationReply): void;
+  talkHere(key: string): string | null;
+  stopSpeaking(key: string): string | null;
+  setSpeakReplies(on: boolean): void;
+  replay(key: string, replyId: string): string | null;
+  /** A window's selection or a session changed, which can change the voice's targets. */
+  update(): void;
+  /** The window selected another conversation: while it has the focus, the voice moves there at once (voice-design § 2.3). */
+  selected(key: string): void;
+  /** Whether `[expressive]` goes with `[spoken]` (`voice.expressive`). */
+  expressive(): boolean;
 }
 
 /** The most IDs one `seen` command marks. */
@@ -236,8 +269,10 @@ export class ConversationService {
     }
 
     const launch = message.launch;
+    // The input box holds the message as it was typed, with its tags.
+    const typed = message.spokenRequested === true ? `${messageTags(true, this.deps.voice?.expressive() ?? false)}${pasteText(message.text)}` : message.text;
 
-    void this.#input(session).resolve(message.text, message.pastedAt, giveBack, RESTARTED, {
+    void this.#input(session).resolve(typed, message.pastedAt, giveBack, RESTARTED, {
       check: () => this.#check(message.sessionId, launch),
       reserve: () => this.deps.input.reserve(message.sessionId, launch),
     });
@@ -382,6 +417,10 @@ export class ConversationService {
       this.#send(key, change.type, change.type === 'message' ? { message: item, ...extra } : { reply: item, ...extra });
     }
 
+    if (change.type === 'reply') {
+      this.deps.voice?.replyChanged(change.reply);
+    }
+
     // A new message can push an unread reply past the retention limit, so every change counts again.
     this.#unreadChanged(sessionId);
   }
@@ -460,6 +499,26 @@ export class ConversationService {
     }
   }
 
+  /** Sends an event to a window's conversation streams, as the voice's `voice`, `progress` and `settings`. */
+  notify(key: string, type: string, payload: Record<string, unknown>): void {
+    this.#send(key, type, payload);
+  }
+
+  /** Sends the windows showing a reply's session the reply again, as after its speech changed. */
+  replyUpdated(replyId: string): void {
+    const reply = this.deps.store.reply(replyId);
+
+    if (reply !== null) {
+      const item = itemView({ type: 'reply', ...reply });
+
+      for (const key of this.deps.windows.showing(reply.sessionId)) {
+        this.#send(key, 'reply', { reply: item });
+      }
+
+      this.#unreadChanged(reply.sessionId);
+    }
+  }
+
   #send(key: string, type: string, payload: Record<string, unknown>): void {
     for (const send of this.#streams.get(key) ?? []) {
       send(type, payload);
@@ -533,7 +592,7 @@ export class ConversationService {
     if (scope === null) {
       this.#statusShown.delete(key);
       this.#conversationsShown.delete(key);
-      return { protocol: CONVERSATION_PROTOCOL, scope: null, sessions: [], items: [], more: false, status: null, unread: 0, artifactsDir: null, artifacts: [] };
+      return { protocol: CONVERSATION_PROTOCOL, scope: null, sessions: [], items: [], more: false, status: null, unread: 0, artifactsDir: null, artifacts: [], ...this.#voiceHello(key) };
     }
 
     const current = scope.sessionId === null ? null : this.deps.store.session(scope.sessionId);
@@ -573,7 +632,15 @@ export class ConversationService {
       unread,
       artifactsDir: folder?.dir ?? null,
       artifacts: folder?.list() ?? [],
+      ...this.#voiceHello(key),
     };
+  }
+
+  /** The voice state and the setting the view reads, which a `hello` carries with voice (architecture.md § Voice). */
+  #voiceHello(key: string): Record<string, unknown> {
+    const voice = this.deps.voice;
+
+    return voice === undefined ? {} : { voice: voice.shown(key), settings: voice.settings() };
   }
 
   /**
@@ -695,6 +762,7 @@ export class ConversationService {
 
     if (keys.length > 0) {
       this.#followArtifacts();
+      this.deps.voice?.update();
     }
   }
 
@@ -726,6 +794,7 @@ export class ConversationService {
     // A stage reported before the session's first status.
     this.#statusChanged(this.#streams.keys());
     this.conversationsChanged();
+    this.deps.voice?.update();
   }
 
   /**
@@ -800,8 +869,11 @@ export class ConversationService {
       return { status: 409, body: { error: cannotType } };
     }
 
+    // A message whose reply will be heard goes with [spoken], so Claude marks the passage to read (architecture.md § Voice); a slash command never.
+    const { spoken, expressive } = this.deps.voice?.spokenFor(sessionId, command === true) ?? { spoken: false, expressive: false };
+    const typed = spoken ? `${messageTags(true, expressive)}${pasteText(text)}` : text;
     // Not in the transcript until Claude receives it, so it waits after the items that are (`inTranscript`).
-    const added: Omit<ConversationMessage, 'ord'> = { id: `m-${this.deps.newId()}`, sessionId, workItemId: session.workItemId, at: this.deps.now(), origin: 'typed', text, transcriptUuid: null, provisional: true, withdrawn: false, delivery: 'open', error: null, opId, pastedAt: null, launch };
+    const added: Omit<ConversationMessage, 'ord'> = { id: `m-${this.deps.newId()}`, sessionId, workItemId: session.workItemId, at: this.deps.now(), origin: 'typed', text, transcriptUuid: null, provisional: true, withdrawn: false, delivery: 'open', error: null, opId, pastedAt: null, launch, spokenRequested: spoken };
 
     this.deps.store.addMessage(added);
     this.#senders.set(added.id, window);
@@ -809,7 +881,7 @@ export class ConversationService {
     const message = this.deps.store.message(added.id)!;
 
     this.#changed(sessionId, { type: 'message', message });
-    void this.#input(session).send(text, (outcome) => this.#delivered(message.id, outcome), {
+    void this.#input(session).send(typed, (outcome) => this.#delivered(message.id, outcome), {
       check: () => this.#check(sessionId, launch),
       reserve: () => this.deps.input.reserve(sessionId, launch),
       pasting: (at) => this.deps.store.updateMessage(message.id, { pastedAt: at }),
@@ -955,6 +1027,42 @@ export class ConversationService {
     return { status: 200, body: { unread: this.deps.store.unreadCount(sessionId) } };
   }
 
+  /**
+   * The voice commands (architecture.md § Voice): `talk-here` moves the voice to the window's selected conversation's session, `stop-speaking`
+   * and `replay {replyId}` work only while the voice is here, `speak-replies {on}` turns Speak replies on or off. Refused with 403 outside the
+   * window's scope, 409 for a stale `scopeGen` and with the voice's refusal, and 404 while voice is not part of this hub.
+   */
+  voiceCommand(name: 'talk-here' | 'stop-speaking' | 'speak-replies' | 'replay', body: Record<string, unknown>): { status: number; body: unknown } {
+    const { window, scopeGen, opId, on, replyId } = body;
+
+    if (typeof window !== 'string' || typeof scopeGen !== 'number' || typeof opId !== 'string' || (name === 'speak-replies' && typeof on !== 'boolean') || (name === 'replay' && typeof replyId !== 'string')) {
+      const fields = name === 'speak-replies' ? ', on' : name === 'replay' ? ', replyId' : '';
+
+      return { status: 400, body: { error: `Expected {window, scopeGen, opId${fields}}.` } };
+    }
+
+    const refused = refusal(this.deps.windows.scope(window), scopeGen, null);
+
+    if (refused !== null) {
+      return refused;
+    }
+
+    const voice = this.deps.voice;
+
+    if (voice === undefined) {
+      return { status: 404, body: { error: 'This hub has no voice.' } };
+    }
+
+    if (name === 'speak-replies') {
+      voice.setSpeakReplies(on as boolean);
+      return { status: 200, body: { on } };
+    }
+
+    const why = name === 'talk-here' ? voice.talkHere(window) : name === 'stop-speaking' ? voice.stopSpeaking(window) : voice.replay(window, replyId as string);
+
+    return why === null ? { status: 200, body: { done: true } } : { status: why === 'Not in this window.' ? 403 : 409, body: { error: why } };
+  }
+
   /** The conversations made by `new-conversation`, by window file and `opId`, so a repeated command answers the first work item. */
   readonly #created = new Map<string, number>();
 
@@ -974,6 +1082,7 @@ export class ConversationService {
     }
 
     this.scopesChanged([window]);
+    this.deps.voice?.selected(window);
 
     return { status: 200, body: { scopeGen: this.deps.windows.scope(window)?.scopeGen ?? null } };
   }

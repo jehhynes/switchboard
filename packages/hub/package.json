@@ -34,6 +34,7 @@
     "@switchboard/forum": "*",
     "@switchboard/github": "*",
     "@switchboard/holder": "*",
+    "@switchboard/voice": "*",
     "@switchboard/zoho": "*"
   },
   "devDependencies": {

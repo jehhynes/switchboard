@@ -462,11 +462,13 @@ describe('listenHub routes and state', () => {
 
   it("hands a folder window's folder to the app, and tells two folder windows' focus apart by their keys", async () => {
     const opened: Array<[string | null, string | null]> = [];
+    const fronts: Array<string | null> = [];
     server = await listenHub({
       identity,
       onShutdown: () => {},
       snapshot: () => ({}),
       dock: () => ({ d: 1 }),
+      focusChanged: (key) => fronts.push(key),
       windowOpened: (workspace, folder) => {
         opened.push([workspace, folder]);
         return `key-${opened.length}`;
@@ -519,6 +521,8 @@ describe('listenHub routes and state', () => {
     await focus({ window: 'key-2', focused: true });
     await focus({ window: 'key-2', focused: false });
     expect(server.focusedWindow()).toBeNull();
+    // The app hears each change of the window in front once, which the voice follows.
+    expect(fronts).toEqual(['key-1', 'key-2', 'key-3', 'key-2', null]);
 
     // A key no stream holds brings no window to the front, and a key that is not a string is refused.
     await focus({ window: 'forged', focused: true });

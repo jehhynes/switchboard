@@ -21,6 +21,8 @@ export interface HubApp {
   windowState?(key: string): unknown;
   /** Opens a window's conversation stream; null for a key no window holds. */
   conversation?(key: string, write: (frame: string) => void): { close(): void } | null;
+  /** The window in front changed: its key, or null. */
+  windowFocused?(key: string | null): void;
   /** The dock view (PRD R71). */
   dock(): object;
   /** URLs of snoozed tickets, for the Chrome extension (PRD R56). */
@@ -127,6 +129,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
           ...(app.windowFolder === undefined ? {} : { windowFolder: (key: string) => app.windowFolder!(key) }),
           ...(app.windowClosed === undefined ? {} : { windowClosed: (key: string) => app.windowClosed!(key) }),
           ...(app.conversation === undefined ? {} : { conversation: (key: string, write: (frame: string) => void) => app.conversation!(key, write) }),
+          ...(app.windowFocused === undefined ? {} : { focusChanged: (key: string | null) => app.windowFocused!(key) }),
         }),
   });
 
