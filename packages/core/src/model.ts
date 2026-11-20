@@ -226,6 +226,12 @@ export interface Session {
   movedAt: number | null;
   /** Runs in Claude Code's Code Mode in the terminal holder, as `sessions.codeMode` said at its start; its resumes keep it (PRD R93). Absent reads as false. */
   codeMode?: boolean;
+  /** Codex app-server; null or absent preserves the existing exec/holder session. */
+  execution?: 'app-server' | null;
+  /** Hash of the complete developer instructions delivered to a Codex app-server thread. */
+  instructionsHash?: string | null;
+  /** Last native compaction followed by delivery of the developer instructions. */
+  instructionsCompactionId?: string | null;
   /** The launch of a Code Mode session's current process, passed as `SWITCHBOARD_LAUNCH`; only markers of this launch count (PRD R93). */
   launchId?: string | null;
   /** The process tree the holder last listed for a Code Mode session, pids with creation times; the resume guard checks it (PRD R95). */

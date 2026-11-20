@@ -1893,7 +1893,7 @@ describe('agents (PRD R22)', () => {
     expect(h.store.session('s1')).toMatchObject({ provider: 'codex' });
 
     h.started(start);
-    expect(h.act({ type: 'stop', workItemId: 1 })).toEqual([{ type: 'stop-session', sessionId: 's1', provider: 'codex', shortId: 'abc12345', reason: 'operator' }]);
+    expect(h.act({ type: 'stop', workItemId: 1 })).toEqual([{ type: 'stop-session', sessionId: 's1', provider: 'codex', shortId: 'abc12345', reason: 'operator', execution: 'app-server' }]);
   });
 
   it("takes sessions.provider for a playbook that names none and for an ad-hoc prompt, and a playbook's own mode and model over the provider's", () => {

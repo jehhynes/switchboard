@@ -1,7 +1,8 @@
 import { appendFileSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { DEBRIEF_ENV, debriefRange, failureOf, findTranscript, frictionOf, rosterState, runDebrief, scopeOf, subagentTranscripts } from '@switchboard/claude';
 import type { DebriefCache, DebriefRange, DebriefResult, Exec, ExecResult, FrictionEntry, RosterResult } from '@switchboard/claude';
-import { codexDebriefRange, codexScopeOf, findRollout, runCodexDebrief } from '@switchboard/codex';
+import { codexDebriefRange, codexScopeOf, findRollout, runCodexDebrief, appServerDebriefRange } from '@switchboard/codex';
+import type { Json } from '@switchboard/codex';
 import type { CodexDebriefRange } from '@switchboard/codex';
 import type { Session } from '@switchboard/core';
 
@@ -155,6 +156,7 @@ function appendLog(dir: string, entry: DebriefLogEntry): boolean {
 }
 
 export interface DebriefDeps {
+  appServer?: { history(threadId: string): Promise<Json[]>; run(threadId: string, prompt: string, timeoutMs: number): Promise<{ text: string } | { error: string }> };
   /** Holds `state.json` and `log/`. */
   dir: string;
   /** The debrief prompt; `{{scope}}` names the work it covers and `{{subagents}}` the subagents the fork may message. */
@@ -283,7 +285,7 @@ export class Debriefs {
 
       this.said = '';
 
-      const next = this.deps.enabled() ? this.next(state, tried) : null;
+      const next = this.deps.enabled() ? await this.next(state, tried) : null;
 
       if (next === null) {
         return;
@@ -328,7 +330,7 @@ export class Debriefs {
   }
 
   /** The due session nearest cache expiry, with the range its debrief covers. */
-  private next(state: DebriefState, tried: ReadonlySet<string>): Candidate | null {
+  private async next(state: DebriefState, tried: ReadonlySet<string>): Promise<Candidate | null> {
     const now = this.deps.now();
     const candidates: Candidate[] = [];
 
@@ -352,6 +354,15 @@ export class Debriefs {
       const held = state.sessions[session.nativeSessionId];
 
       if (session.provider === 'codex') {
+        if (session.execution === 'app-server' && this.deps.appServer !== undefined) {
+          if (now - (session.endedAt ?? session.stateAt) >= DEBRIEF_EXPIRY_MS) continue;
+          try {
+            const found = appServerDebriefRange(await this.deps.appServer.history(session.nativeSessionId), held?.throughMessageUuid ?? null);
+            const age = found === null ? -1 : now - found.writtenAt;
+            if (found !== null && age >= (this.deps.workItemDone(session.workItemId) ? 0 : DEBRIEF_IDLE_MS) && age < DEBRIEF_EXPIRY_MS && rangeDue({ throughMessageUuid: found.range.throughTurnId, toolCalls: found.range.toolCalls }, held)) candidates.push({ provider: 'codex', session: session as Candidate['session'], transcript: '', ...found });
+          } catch (error) { this.deps.log(`debrief: Codex history unavailable: ${String(error)}`); }
+          continue;
+        }
         const candidate = this.codexCandidate(session as Candidate['session'], held, now);
 
         if (candidate !== null) {
@@ -418,7 +429,10 @@ export class Debriefs {
 
     this.deps.log(`debrief: Codex session ${thread}, ${candidate.range.toolCalls} tool calls since ${held?.throughMessageUuid ?? 'the start'}`);
 
-    const result = await runCodexDebrief(
+    const rendered = prompt.replaceAll('{{scope}}', () => codexScopeOf(candidate.range)).replaceAll('{{subagents}}', 'none');
+    const result = await (candidate.session.execution === 'app-server' && this.deps.appServer !== undefined
+      ? this.deps.appServer.run(thread, rendered, DEBRIEF_TIMEOUT_MS)
+      : runCodexDebrief(
       {
         codexPath: this.deps.codexPath(),
         threadId: thread,
@@ -429,7 +443,7 @@ export class Debriefs {
         timeoutMs: DEBRIEF_TIMEOUT_MS,
       },
       this.deps.exec,
-    ).catch((error: unknown) => ({ error: `The debrief failed: ${String(error)}` }));
+    )).catch((error: unknown) => ({ error: `The debrief failed: ${String(error)}` }));
     const at = new Date(this.deps.now()).toISOString();
     let friction: FrictionEntry[] | null = null;
 

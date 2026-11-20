@@ -103,6 +103,14 @@ Run it with an isolated home (`hub.js --home=<repo>/.wip/acceptance-home`, so th
 
 Record each run in [mechanics.md](mechanics.md) with the date, the Claude CLI, VS Code and Claude extension versions, and the result of each step. A failed step is a defect or a new mechanics finding, not a skipped check.
 
+## Codex app-server
+
+R107 tests inject an app-server transport or recorded-protocol peer. They never start the operator's daemon or call a live model. Fixtures recorded under an isolated Codex home cover native user/reply items and a replayed question, with paths and IDs scrubbed. Verify the Claude adapter extraction against the existing transcript, screen, input and hub suites.
+
+Cover handshake ordering, connection loss, refusals and unknown delivery; pending starts, native state and failure recovery; one-thread Stop and release refusing to interrupt a new turn; history pagination, replay order and identity; subscription revisions; persisted instructions and recovery after live or missed compaction; scoped question and permission answers; commands and image/skill inputs; unread, artifacts and speech from authoritative entries; paginated-thread debriefs in ephemeral read-only forks. Check sidebar requests and unknown-delivery text in DOM tests and focus/terminal wiring in the real VS Code host.
+
+Live acceptance uses a scratch repository and separate CODEX_HOME with a temporary sign-in copy, removed afterwards. Start threads through the built hub, send follow-ups through its conversation route, restart the hub during a tool call, confirm replay without duplicate messages, answer a native request before and after reconnect, connect the same thread in the native terminal, stop one of two threads, and verify the other continues. Verify a report and artifact. Never stop or update the operator's daemon; stop only the isolated acceptance daemon afterwards. Record CLI versions and results in mechanics.md.
+
 ## Fixtures and isolation
 
 - Record and scrub source payloads and Claude and Codex CLI output (`claude agents --json`, `--bg` output, classifier JSON, `codex exec --json` output and stderr, rollout records, the process query's answer). Never call GitHub, Zoho, the Forum database or a real Claude session from a test.

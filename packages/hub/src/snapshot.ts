@@ -156,7 +156,7 @@ const leftoversOf = (latest: Session | undefined): { leftovers?: number[] } => {
 
     return items.filter((item) => item.playbook !== null && counted.has(item.playbook) && started(item)).length;
   };
-  const unreadOf = (latest: Session | undefined): number => (latest?.codeMode === true ? store.unreadCount(latest.id) : 0);
+  const unreadOf = (latest: Session | undefined): number => (latest?.codeMode === true || latest?.execution === 'app-server' ? store.unreadCount(latest.id) : 0);
   const used = heldSlots(store);
   const held = inputs.held;
 

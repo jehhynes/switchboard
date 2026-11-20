@@ -424,6 +424,32 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
     }
   }
 
+  async answerRequest(requestId: string, shown: SeenTarget): Promise<void> {
+    const target = this.#target;
+    const request = this.#state.session?.id === shown.sessionId ? this.#state.session.requests?.find(r => r.id === requestId) : undefined;
+    if (target === null || request === undefined) return;
+    if (request.kind === 'unsupported') { await this.deps.openTerminal(); return; }
+    let answer: unknown;
+    if (request.kind === 'permission') {
+      const labels: Record<string, string> = { accept: 'Allow once', acceptForSession: 'Allow for session', decline: 'Decline', cancel: 'Cancel' };
+      const offered = request.decisions.map(decision => ({ title: labels[decision] ?? decision, decision }));
+      const picked = await vscode.window.showWarningMessage('Codex requests permission', { modal: true, detail: request.title }, ...offered);
+      if (picked === undefined) return;
+      answer = picked.decision;
+    } else {
+      const answers: Record<string, string> = {};
+      for (const question of request.questions) {
+        let picked = question.options.length === 0 ? 'Type an answer…' : await vscode.window.showQuickPick([...question.options, 'Type an answer…'], { title: question.question });
+        if (picked === 'Type an answer…') picked = await vscode.window.showInputBox({ prompt: question.question, ignoreFocusOut: true, password: question.secret === true });
+        if (picked === undefined || picked.trim() === '') return;
+        answers[question.id] = picked;
+      }
+      answer = answers;
+    }
+    const reply = await postToHub(target.record, '/v1/conversation/answer', { window: target.key, scopeGen: shown.scopeGen, sessionId: shown.sessionId, requestId, answer }, HISTORY_TIMEOUT_MS);
+    if (reply?.status !== 200) void vscode.window.showWarningMessage(`Switchboard: ${reply?.error ?? 'Codex did not confirm the answer. Check its terminal.'}`);
+  }
+
   /** Draws the voice's status bar item from this window's voice state. */
   #showVoice(): void {
     const shown = voiceStatus(this.#state.voice);
@@ -729,6 +755,8 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
             return this.open(String(message.href));
           case 'terminal':
             return this.deps.openTerminal();
+          case 'answer-request':
+            return this.answerRequest(String(message.requestId), message.target);
           case 'select':
             return this.select(Number(message.workItemId));
           case 'talk-here':

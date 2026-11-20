@@ -7,3 +7,6 @@ export * from './screenHold.js';
 export * from './screenReader.js';
 export * from './tags.js';
 export * from './transcript.js';
+
+export * from './log.js';
+export * from './rules.js';

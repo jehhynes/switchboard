@@ -24,14 +24,14 @@ function conversation(h: Harness): string {
 
 describe('hosted conversations (architecture.md § Hosted conversations)', () => {
   it('makes an ad hoc work item hosted by the window and starts its Code Mode session at once with no prompt, without waiting for a slot', () => {
-    const h = new Harness({ settings: settings({ sessions: { codeMode: true, provider: 'codex', concurrency: 1 } }) });
+    const h = new Harness({ settings: settings({ sessions: { codeMode: true, provider: 'claude', concurrency: 1 } }) });
 
     h.act({ type: 'adhoc', prompt: 'Busy work', repoRoot: 'D:/scratch', start: true });
     expect(heldSlots(h.store)).toBe(1);
 
     const start = only(h.act({ type: 'new-conversation', hostWindow: 'C:\\Users\\me\\.switchboard\\windows\\GH-7-widgets-655280.code-workspace', folder: 'D:/git/support' }), 'start-session');
 
-    expect(start).toMatchObject({ kind: 'task', provider: 'claude', cwd: 'D:/git/support', prompt: '', codeMode: true, nativeSessionId: 'uuid-1', launchId: 'uuid-2' });
+    expect(start).toMatchObject({ kind: 'task', provider: 'claude', cwd: 'D:/git/support', prompt: '', codeMode: true, nativeSessionId: 'uuid-3', launchId: 'uuid-4' });
     expect(start.contract).not.toContain(' done ');
     expect(start.contract).not.toContain(' approval ');
     expect(h.store.ticket(h.item(2).ticketId)).toMatchObject({ source: 'adhoc', title: NEW_CONVERSATION_TITLE, repoRoot: 'D:/git/support', hostWindow: 'C:\\Users\\me\\.switchboard\\windows\\GH-7-widgets-655280.code-workspace' });

@@ -16,6 +16,9 @@
     },
     {
       "path": "../holder"
+    },
+    {
+      "path": "../conversation"
     }
   ]
 }

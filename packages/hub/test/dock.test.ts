@@ -727,6 +727,15 @@ describe('CONTROL_GLYPHS', () => {
 });
 
 describe('windowOf', () => {
+  it('shows an idle folder-hosted Codex conversation with the Idle mark and no turn', () => {
+    const host = 'D:\\git\\switchboard';
+    const hosted = item(22, { ticket: { ...item(22).ticket, source: 'adhoc', sourceKey: '22', url: '', hostWindow: host }, focus: null, sessions: [session({ provider: 'codex', execution: 'app-server', promptless: true, state: 'idle', cwd: host })] });
+    const row = dockView(snapshot([hosted]), NOW, W).groups.flatMap(group => group.rows)[0]!;
+    expect(row.mark).toEqual({ kind: 'idle', glyph: '\u{ebb5}', title: 'Idle' });
+    expect(row.turn).toBeNull();
+    expect(row.window).toEqual({ name: 'switchboard', title: hosted.ticket.title, folders: [host], file: null, hosted: true, folder: host });
+    expect(row.open).toMatchObject({ type: 'session', provider: 'codex' });
+  });
   it('opens a hosted conversation in its host window, which is not its own, and leaves it out of the window items (architecture.md § Hosted conversations)', () => {
     const host = 'C:/sb/windows/GH-7-widgets-655280.code-workspace';
     const hosted = item(9, { ticket: { ...item(9).ticket, source: 'adhoc', sourceKey: '4', url: '', hostWindow: host }, focus: null, sessions: [session({ cwd: 'D:/git/support' })] });

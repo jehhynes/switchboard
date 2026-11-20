@@ -27,6 +27,26 @@ const hello = (items: ItemView[] = [], patch: Partial<{ scope: ScopeView | null;
 const idOf = (entry: Entry): string => (entry.type === 'artifact' ? entry.artifact.path : entry.item.id);
 
 describe('the conversation state', () => {
+  it('renders native Codex requests and unknown delivery without exposing a request as a chat answer', () => {
+    const uncertain = message('m-unknown', T0, 'Check delivery', { origin: 'typed', delivery: 'uncertain', error: 'Check the terminal before resending.' });
+    const native = { ...SESSION, provider: 'codex' as const, state: 'waiting' as const, waitingFor: 'question' as const, requests: [{id:'1:0',kind:'question' as const,title:'Choose <red> or blue',questions:[{id:'color',question:'Which color?',options:['Red','Blue']}],decisions:[]}] };
+    const state = applyEvent(EMPTY_CONVERSATION, hello([uncertain], { sessions: [native] }));
+    const html = renderConversation(state);
+    expect(html).toContain('data-action="answer-request" data-request="1:0"');
+    expect(html).toContain('Choose &#60;red&#62; or blue');
+    expect(html).toContain('delivery unknown; check before resending');
+    expect(html).not.toContain('Claude is waiting');
+    expect(state.items).toHaveLength(1);
+  });
+  it('posts a native request click with the session and scope shown by that page', () => {
+    const root=document.createElement('div');const live=document.createElement('div');const posted:unknown[]=[];
+    document.body.replaceChildren(root,live);
+    startConversation(root,live,{postMessage:(message:unknown)=>posted.push(message),getState:()=>null,setState:()=>{}});
+    const native={...SESSION,provider:'codex' as const,requests:[{id:'1:0',kind:'permission' as const,title:'Approve command',questions:[],decisions:['accept','decline']}]};
+    window.dispatchEvent(new MessageEvent('message',{data:{type:'state',state:applyEvent(EMPTY_CONVERSATION,hello([],{sessions:[native]}))}}));
+    root.querySelector<HTMLElement>('[data-action="answer-request"]')!.click();
+    expect(posted.at(-1)).toEqual({type:'answer-request',requestId:'1:0',target:{sessionId:'s2',scopeGen:1}});
+  });
   it('starts from each hello, adds and replaces items in time order, and takes only its current session\'s state', () => {
     let state = applyEvent(EMPTY_CONVERSATION, hello([message('m1', T0, 'Why?')]));
 

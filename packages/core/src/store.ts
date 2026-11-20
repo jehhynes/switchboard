@@ -444,6 +444,11 @@ export const MIGRATIONS = [
   `ALTER TABLE sessions ADD COLUMN personaId TEXT;
   ALTER TABLE sessions ADD COLUMN personaVersion TEXT;
   ALTER TABLE sessions ADD COLUMN personaPinned INTEGER NOT NULL DEFAULT 0;`,
+  `ALTER TABLE sessions ADD COLUMN execution TEXT;
+  CREATE INDEX sessionsByNativeId ON sessions (nativeSessionId);`,
+  `ALTER TABLE sessions ADD COLUMN instructionsHash TEXT;`,
+  `ALTER TABLE sessions ADD COLUMN instructionsCompactionId TEXT;
+  CREATE INDEX IF NOT EXISTS sessionsByNativeId ON sessions (nativeSessionId);`,
 ];
 
 /**
@@ -606,7 +611,7 @@ const UNLOGGED: Record<string, ReadonlySet<string>> = {
   // The background event and its result name a move (PRD R89); its fields are bookkeeping.
   // The session-started event names a Code Mode session; its launch and last process tree are bookkeeping (PRD R93, R95).
   // The persona event names a pin; the version of the tone section a prompt got is bookkeeping (architecture.md § Personas).
-  sessions: new Set(['stateAt', 'releasing', 'question', 'retiredIds', 'external', 'move', 'movedAt', 'codeMode', 'launchId', 'lastTree', 'promptless', 'personaVersion', 'personaPinned']),
+  sessions: new Set(['stateAt', 'releasing', 'question', 'retiredIds', 'external', 'move', 'movedAt', 'codeMode', 'launchId', 'lastTree', 'promptless', 'personaVersion', 'personaPinned', 'instructionsHash', 'instructionsCompactionId']),
   triages: new Set(),
   worktrees: new Set(),
   links: new Set(['reportedAt']),
@@ -1380,7 +1385,7 @@ export class Store {
 
   /** Typed messages a stopped hub left `open`, which the hub settles from the transcript and the screen. */
   openMessages(): ConversationMessage[] {
-    return this.#messageRows("SELECT * FROM messages WHERE delivery = 'open' ORDER BY ord");
+    return this.#messageRows("SELECT * FROM messages WHERE delivery IN ('open', 'uncertain') ORDER BY ord");
   }
 
   /** Adds a reply to a session's conversation, outside the activity log, keeping the newest `CONVERSATION_RETENTION` items. */

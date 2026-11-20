@@ -171,7 +171,7 @@ export function controlsOf(item: WorkItemView, mode: OpenVSCode = 'always'): Con
   }
 
   // Processes an ended Code Mode session left can keep it from resuming, so Stop ends them (PRD R95).
-  if (isBackground(session) || (session === null && (item.leftovers?.length ?? 0) > 0)) {
+  if (isBackground(session) || (session?.execution === 'app-server' && session.nativeSessionId !== null) || (session === null && (item.leftovers?.length ?? 0) > 0)) {
     controls.push({ label: 'Stop', icon: 'debug-stop', message: action('stop') });
   }
 
@@ -204,7 +204,7 @@ export function controlsOf(item: WorkItemView, mode: OpenVSCode = 'always'): Con
   }
 
   // A starting session has no short ID to stop yet, except a Code Mode one, which the hub ends in the terminal holder (PRD R76).
-  const heldStart = session?.codeMode === true && session.state === 'starting';
+  const heldStart = session?.state === 'starting' && (session.codeMode === true || (session.execution === 'app-server' && session.nativeSessionId !== null));
 
   if (session?.state !== 'starting' || heldStart) {
     controls.push({ label: 'Delete', icon: 'trash', message: action('delete'), confirm: deleteConfirm(item, heldStart || isBackground(session)) });
@@ -236,6 +236,9 @@ export function terminalCommand(item: WorkItemView): Record<string, unknown> | n
 
   if (latest?.codeMode === true) {
     return codeModeTerminal(item.ticket, latest);
+  }
+  if (latest?.execution === 'app-server' && latest.nativeSessionId !== null) {
+    return { type: 'terminal', provider: 'codex', sessionId: latest.nativeSessionId, cwd: latest.cwd, name, shortId: null, active: false, execution: 'app-server' };
   }
 
   if (isBackground(session)) {
@@ -335,7 +338,7 @@ function waitsInBackground(session: SessionView | null): session is SessionView 
  * any wait of a Code Mode session, because the Claude view refuses Code Mode (PRD R95).
  */
 function waitsInTerminal(session: SessionView | null): boolean {
-  return waitsToStart(session) || waitsOnPermission(session) || (session?.codeMode === true && session.state === 'waiting');
+  return waitsToStart(session) || waitsOnPermission(session) || ((session?.codeMode === true || session?.execution === 'app-server') && session.state === 'waiting');
 }
 
 /**

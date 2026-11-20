@@ -4,10 +4,11 @@ import { ScreenHold } from './screenHold.js';
 import type { HoldOptions, Via } from './screenHold.js';
 import { ScreenReader } from './screenReader.js';
 import { pasteText } from './input.js';
-import { keyOf, parseReply, stripAside } from './tags.js';
+import { keyOf, stripAside } from './tags.js';
 import { parseLine, readLines } from './transcript.js';
 import type { TranscriptEntry } from './transcript.js';
 import type { ScreenRead } from './screen.js';
+import { ConversationLog } from './log.js';
 
 /** The store calls the conversation layer makes; the hub's store provides them. */
 export interface ConversationStore {
@@ -80,25 +81,25 @@ export interface TranscriptState {
  * One Code Mode session's conversation (architecture.md § Conversation): its messages and replies from its transcript, the authority, with the
  * screen as an early copy held `TRANSCRIPT_WAIT_MS` for the transcript's, and withdrawn when no transcript copy comes.
  */
-export class SessionConversation {
+export class SessionConversation extends ConversationLog {
   readonly #reader: ScreenReader;
   readonly #hold: ScreenHold;
-  #lastMessage: string | null = null;
   #lastAssistantAt = 0;
   #screenSize: string | null = null;
   #resizedAt: number | null = null;
   readonly #seen = new Set<string>();
 
   constructor(
-    readonly sessionId: string,
-    readonly workItemId: number | null,
-    private readonly deps: ConversationDeps,
+    sessionId: string,
+    workItemId: number | null,
+    deps: ConversationDeps,
   ) {
-    this.#hold = new ScreenHold((text, at, aside, via, replaces) => this.#publish(text, at, aside, via, replaces), deps.hold);
+    super(sessionId, workItemId, deps);
+    this.#hold = new ScreenHold((text, at, aside, via, replaces) => this.publish(text, at, aside, via, replaces), deps.hold);
     this.#reader = new ScreenReader((text, aside, replaces) => this.#hold.screen(text, aside, replaces), deps.now);
 
     // A reply read after a hub restart answers the last message stored before it.
-    this.#lastMessage = deps.store.latestMessageId(sessionId);
+    this.lastMessage = deps.store.latestMessageId(sessionId);
 
     for (const reply of deps.store.latestReplies(sessionId, SEED_REPLIES)) {
       this.#reader.sent.add(keyOf(reply.opening));
@@ -161,9 +162,9 @@ export class SessionConversation {
           this.#seen.add(entry.uuid);
         }
 
-        this.#answers = entry.kind === 'reply' ? this.#answered(parent) : null;
+        this.answers = entry.kind === 'reply' ? this.#answered(parent) : null;
         this.#entry(entry);
-        this.#answers = null;
+        this.answers = null;
       } else if (entry === null && received !== null) {
         this.#withdrawSent(received);
       }
@@ -198,7 +199,7 @@ export class SessionConversation {
 
       if (copied) {
         offset = read.offset;
-        this.#note('Conversation continued from another session.');
+        this.note('Conversation continued from another session.');
       }
 
       this.deps.log(`session ${this.sessionId} transcript moved to ${path}${copied ? ', after copied history' : ''}`);
@@ -254,7 +255,7 @@ export class SessionConversation {
       const id = this.#hold.withdraw(handle);
 
       if (id !== null) {
-        this.#withdraw(id);
+        this.withdraw(id);
       }
     }
   }
@@ -268,7 +269,7 @@ export class SessionConversation {
       const id = this.#hold.withdraw(handle);
 
       if (id !== null) {
-        this.#withdraw(id);
+        this.withdraw(id);
       }
     }
 
@@ -315,7 +316,6 @@ export class SessionConversation {
   readonly #parents = new Map<string, string | null>();
   readonly #messageLines = new Map<string, string>();
   #indexed = false;
-  #answers: string | null = null;
 
   /** The oldest sent message with `text` that Claude has not received yet, typed in a terminal; a typed message is matched by `#typed`. */
   #sent(text: string): ConversationMessage | undefined {
@@ -375,7 +375,7 @@ export class SessionConversation {
       if (typed !== undefined) {
         this.deps.store.updateMessage(typed.id, { at: entry.at, transcriptUuid: entry.uuid, provisional: false, delivery: 'sent', error: null });
         this.deps.store.placeLast(typed.id);
-        this.#lastMessage = typed.id;
+        this.lastMessage = typed.id;
 
         if (entry.uuid !== null) {
           this.#messageLines.set(entry.uuid, typed.id);
@@ -396,7 +396,7 @@ export class SessionConversation {
         this.deps.store.placeLast(id);
       }
 
-      this.#lastMessage = id;
+      this.lastMessage = id;
 
       if (entry.uuid !== null) {
         this.#messageLines.set(entry.uuid, id);
@@ -406,7 +406,7 @@ export class SessionConversation {
       return;
     }
 
-    this.#transcriptUuid = entry.uuid;
+    this.transcriptUuid = entry.uuid;
 
     const { text, aside } = stripAside(entry.text);
     const key = keyOf(text);
@@ -427,7 +427,7 @@ export class SessionConversation {
       const copy = handle === undefined ? null : this.#hold.withdraw(handle);
 
       if (copy !== null) {
-        this.#withdraw(copy);
+        this.withdraw(copy);
       }
 
       // The reply's text is always its blocks joined, so a block that was recorded before a crash kept its text is written again.
@@ -435,10 +435,10 @@ export class SessionConversation {
       const blocks = read ? joined.blocks : [...joined.blocks, { uuid: entry.uuid, text: entry.text }];
       const first = this.deps.store.reply(joined.replyId);
 
-      this.#answers = first?.answers ?? this.#answers;
-      this.#transcriptUuid = null;
+      this.answers = first?.answers ?? this.answers;
+      this.transcriptUuid = null;
       this.deps.store.setApiMessage(joined.replyId, entry.messageId, blocks);
-      this.#publish(blocks.map((block) => block.text).join('\n\n'), first?.at ?? entry.at, stripAside(blocks[0]!.text).aside, 'transcript', joined.replyId, false);
+      this.publish(blocks.map((block) => block.text).join('\n\n'), first?.at ?? entry.at, stripAside(blocks[0]!.text).aside, 'transcript', joined.replyId, false);
     } else {
       const id = this.#hold.transcript(handle, entry.text, entry.at, aside);
 
@@ -447,142 +447,8 @@ export class SessionConversation {
       }
     }
 
-    this.#transcriptUuid = null;
+    this.transcriptUuid = null;
   }
 
-  #transcriptUuid: string | null = null;
 
-  /** Publishes a copy: a new reply, or a later copy of one in place (`replaces`). */
-  #publish(text: string, at: number, _aside: boolean, via: Via, replaces: string | undefined, move = true): string {
-    const parsed = parseReply(text);
-
-    // A reply that is only a status rewrites nothing: the view shows it on its Status tab, not in the timeline.
-    parsed.rewrite &&= parsed.opening !== '';
-    const existing = replaces === undefined ? null : this.deps.store.reply(replaces);
-
-    if (existing !== null) {
-      const patch = {
-        at: via === 'transcript' ? at : existing.at,
-        kind: parsed.kind,
-        opening: parsed.opening,
-        speak: parsed.speak,
-        tone: parsed.tone,
-        source: via,
-        transcriptUuid: this.#transcriptUuid ?? existing.transcriptUuid,
-        // A screen copy answered the latest message when it was seen; its transcript line says which message it answers.
-        answers: via === 'transcript' ? (this.#answers ?? this.#lastMessage) : existing.answers,
-      };
-
-      this.deps.store.updateReply(existing.id, patch);
-      this.#status(existing.id, via, parsed.status, patch.at);
-
-      // A screen copy takes its transcript line's place once that is read.
-      if (via === 'transcript' && move) {
-        this.deps.store.placeLast(existing.id);
-      }
-
-      // A transcript copy can show a rewrite tag its screen copy had not drawn yet, and, now in its place, rewrites the reply before that place,
-      // which may not be the one its screen copy rewrote.
-      if (parsed.rewrite && (existing.replaces === null || (via === 'transcript' && move))) {
-        if (existing.replaces !== null) {
-          this.deps.store.updateReply(existing.replaces, { rewrittenBy: null });
-          this.deps.store.updateReply(existing.id, { replaces: null });
-          this.deps.onChange({ type: 'reply', reply: this.deps.store.reply(existing.replaces)! });
-        }
-
-        this.#rewrite(existing.id);
-      }
-
-      this.deps.onChange({ type: 'reply', reply: this.deps.store.reply(existing.id)! });
-      return existing.id;
-    }
-
-    const reply: Omit<ConversationReply, 'ord' | 'seenAt' | 'spokenState' | 'spokenAtMs' | 'saidChars'> = {
-      id: `r-${this.deps.newId()}`,
-      sessionId: this.sessionId,
-      workItemId: this.workItemId,
-      at,
-      kind: parsed.kind,
-      answers: this.#answers ?? this.#lastMessage,
-      opening: parsed.opening,
-      speak: parsed.speak,
-      tone: parsed.tone,
-      source: via,
-      replaces: null,
-      rewrittenBy: null,
-      withdrawn: false,
-      transcriptUuid: this.#transcriptUuid,
-    };
-
-    this.deps.store.addReply(reply);
-    this.#status(reply.id, via, parsed.status, at);
-
-    if (parsed.rewrite) {
-      this.#rewrite(reply.id);
-    }
-
-    this.deps.onChange({ type: 'reply', reply: this.deps.store.reply(reply.id)! });
-    return reply.id;
-  }
-
-  /**
-   * The status a reply's transcript copy carries, stored as the reply's own, so a later line of the same reply updates it in place. A screen copy's
-   * status is never published: it may be withdrawn, and is still being drawn.
-   */
-  #status(replyId: string, via: Via, markdown: string | null, at: number): void {
-    if (via !== 'transcript' || markdown === null) {
-      return;
-    }
-
-    const id = `st-${replyId}`;
-    const stored = this.deps.store.status(id);
-
-    if (stored?.markdown === markdown) {
-      return;
-    }
-
-    this.deps.store.setStatus({ id, sessionId: this.sessionId, workItemId: this.workItemId, replyId, at: stored?.at ?? at, markdown });
-    this.deps.onChange({ type: 'status', status: this.deps.store.status(id)! });
-  }
-
-  /** A rewrite: it replaces the newest earlier reply that is not an aside, only a status, withdrawn, rewritten already or itself. */
-  #rewrite(id: string): void {
-    const target = this.deps.store
-      .latestReplies(this.sessionId, SEED_REPLIES, id)
-      .find((reply) => reply.id !== id && reply.kind === 'reply' && reply.opening !== '' && !reply.withdrawn && reply.rewrittenBy === null && reply.replaces !== id);
-
-    if (target === undefined) {
-      return;
-    }
-
-    this.deps.store.updateReply(target.id, { rewrittenBy: id });
-    this.deps.store.updateReply(id, { replaces: target.id });
-    this.deps.onChange({ type: 'reply', reply: this.deps.store.reply(target.id)! });
-  }
-
-  /** A screen copy that was never a reply; a rewrite that was not one frees the reply it replaced. */
-  #withdraw(id: string): void {
-    const reply = this.deps.store.reply(id);
-
-    if (reply === null) {
-      return;
-    }
-
-    this.deps.store.updateReply(id, { withdrawn: true, replaces: null });
-    this.deps.log(`session ${this.sessionId} reply ${id} withdrawn: no transcript copy came`);
-    this.deps.onChange({ type: 'reply', reply: this.deps.store.reply(id)! });
-
-    if (reply.replaces !== null) {
-      this.deps.store.updateReply(reply.replaces, { rewrittenBy: null });
-      this.deps.onChange({ type: 'reply', reply: this.deps.store.reply(reply.replaces)! });
-    }
-  }
-
-  #note(text: string): void {
-    const id = `r-${this.deps.newId()}`;
-
-    this.deps.store.addReply({ id, sessionId: this.sessionId, workItemId: this.workItemId, at: this.deps.now(), kind: 'note', answers: null, opening: text, source: 'transcript', replaces: null, rewrittenBy: null, withdrawn: false, transcriptUuid: null });
-    this.deps.onChange({ type: 'reply', reply: this.deps.store.reply(id)! });
-  }
 }
-

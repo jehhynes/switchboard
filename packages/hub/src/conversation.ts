@@ -1,23 +1,22 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { countsUnread, inTranscript } from '@switchboard/core';
 import type { ConversationMessage, ConversationReply, ConversationStatus, Session, SpokenState, Store } from '@switchboard/core';
 import { artifactsDir, hostKey, PERMISSION_PROMPT, personaById, sessionTone, START_PROMPT, toneVersion } from '@switchboard/core';
 import type { PersonaSettings } from '@switchboard/core';
-import { findTranscript } from '@switchboard/claude';
-import { ArtifactFolder, MAX_MESSAGE_CHARS, NotWritten, SNAPSHOT_SCROLLBACK, SessionCommands, SessionConversation, SessionInput, messageTags, pasteText, readSnapshot } from '@switchboard/conversation';
+import { ArtifactFolder, MAX_MESSAGE_CHARS, NotWritten, messageTags, pasteText } from '@switchboard/conversation';
 import type { Artifact, ConversationChange, InputOutcome, SlashCommand } from '@switchboard/conversation';
 import { SESSION_ENDED, SESSION_RELAUNCHED } from './runtime.js';
 import { canonicalFolder } from './windows.js';
 import type { ConversationRef, WindowScope, WindowScopes } from './windows.js';
 import type { VoiceView } from './voice.js';
+import { ClaudeConversationAdapter } from './claudeConversation.js';
+import type { ConversationAdapter, ConversationChanged, DeliveryOutcome, NativeRequest } from './conversationAdapter.js';
+export { ansiTheme, claudePaths } from './claudeConversation.js';
 
 /** Conversation API version (architecture.md § Conversation API). */
 export const CONVERSATION_PROTOCOL = 1;
-/** How often the hub reads each live Code Mode session's transcript, and its screen while it works. */
+/** How often the hub polls provider adapters for conversation changes. */
 export const CONVERSATION_POLL_MS = 300;
-/** The screen is read this long after the session last worked, so a reply drawn as its turn ends is read. */
-const SCREEN_AFTER_MS = 5_000;
+
 /** Items a window's `hello` and each `history` page carry. */
 export const PAGE_ITEMS = 100;
 /** Statuses each `statuses` page carries. */
@@ -25,6 +24,7 @@ export const PAGE_STATUSES = 50;
 
 /** How a session shows in a window's Conversation view. */
 export interface SessionView {
+  provider?: 'claude' | 'codex';
   id: string;
   kind: 'setup' | 'task';
   title: string;
@@ -32,9 +32,10 @@ export interface SessionView {
   waitingFor: 'question' | 'permission' | 'start-prompt' | null;
   launch: string | null;
   current: boolean;
-  /** `full`: a live, observed Code Mode session; `read-only`: one that ended or is unobserved; `none`: a background session. */
+  /** `full`: a live conversation; `read-only`: ended or unobserved; `none`: no adapter. */
   conversation: 'full' | 'read-only' | 'none';
   reason: string | null;
+  requests?: NativeRequest[];
   /**
    * The session's persona while `voice.enabled` is on (architecture.md § Personas), else null. `pinned`: the operator pinned it; `tonePending`:
    * the live session's prompt has another tone section until its next resume or compaction.
@@ -88,10 +89,10 @@ export function statusView(status: ConversationStatus): StatusView {
 export function sessionView(session: Session, current: boolean, hooks: boolean, personas: PersonaView | null = null): SessionView {
   const state = session.state === 'failed' ? 'idle' : session.state;
   const waitingFor = session.state !== 'waiting' ? null : session.stateDetail === PERMISSION_PROMPT ? 'permission' : session.stateDetail === START_PROMPT ? 'start-prompt' : 'question';
-  const conversation = session.codeMode !== true ? 'none' : session.state === 'ended' || !hooks ? 'read-only' : 'full';
+  const conversation = session.codeMode !== true && session.execution !== 'app-server' ? 'none' : session.state === 'ended' || (session.codeMode === true && !hooks) ? 'read-only' : 'full';
   const reason =
     conversation === 'none'
-      ? 'This session runs in the background; open it in Claude to talk to it.'
+      ? `This session runs in the background; open it in ${session.provider === 'codex' ? 'Codex' : 'Claude'} to talk to it.`
       : session.state === 'ended'
         ? 'The session has ended. Open it in the terminal to resume it.'
         : conversation === 'read-only'
@@ -172,6 +173,7 @@ const RESTARTED = 'Switchboard restarted while the message was being typed and c
 const RESTARTED_UNTYPED = 'Switchboard restarted before typing the message. Send it again.';
 
 export interface ConversationServiceDeps {
+  adapters?(changed: ConversationChanged): ConversationAdapter[];
   store: Store;
   windows: WindowScopes;
   /** Claude's `projects` folder, under `CLAUDE_CONFIG_DIR` or `~/.claude`. */
@@ -230,35 +232,22 @@ export const SEEN_MAX_IDS = 200;
 
 type Send = (type: string, payload: Record<string, unknown>) => void;
 
-/** Reads with a clock: when each event was sent, for the latency check of architecture.md § Conversation. */
-interface Reader {
-  conversation: SessionConversation;
-  workItemId: number;
-  lastBusy: number;
-  rev: number | null;
-  /** The transcript file found for a Claude session ID. */
-  path: { nativeSessionId: string; path: string } | null;
-}
-
 /**
  * The conversation layer in the hub (architecture.md § Conversation): it follows every live Code Mode session's transcript, and its screen while it
  * works, keeps the conversation in the store, and serves each window the conversation of its own work item's current session only.
  */
 export class ConversationService {
-  readonly #readers = new Map<string, Reader>();
-  readonly #inputs = new Map<string, SessionInput>();
-  /** Each session's slash commands, read from its transcript as `commands` asks for them. */
-  readonly #commands = new Map<string, SessionCommands>();
+  readonly #adapters: ConversationAdapter[];
   readonly #streams = new Map<string, Set<Send>>();
   /** The artifact folder each shown work item's windows follow, by work item. */
   readonly #artifacts = new Map<number, ArtifactFolder>();
   #timer: NodeJS.Timeout | null = null;
-  #polling = false;
+  readonly #polling = new Set<ConversationAdapter>();
   #seq = 0;
-  readonly #ansiTheme: boolean;
+  #closed = false;
 
   constructor(private readonly deps: ConversationServiceDeps) {
-    this.#ansiTheme = ansiTheme(deps.claudeConfig);
+    this.#adapters = [new ClaudeConversationAdapter(deps, (id, change) => this.#changed(id, change)), ...(deps.adapters?.((id, change) => this.#changed(id, change)) ?? [])];
 
     for (const message of deps.store.openMessages()) {
       this.#leftOpen.set(message.sessionId, [...(this.#leftOpen.get(message.sessionId) ?? []), message]);
@@ -286,26 +275,20 @@ export class ConversationService {
    */
   #settleLeftOpen(message: ConversationMessage): void {
     const session = this.deps.store.session(message.sessionId);
-    const giveBack = (outcome: InputOutcome): void => this.#delivered(message.id, outcome, true);
+    const giveBack = (outcome: DeliveryOutcome): void => this.#delivered(message.id, outcome, true);
 
     this.deps.log(`session ${message.sessionId}: message ${message.id} left open by a stopped hub is settled from the transcript and the screen`);
 
-    if (session === null || message.pastedAt === null || message.launch == null) {
-      giveBack({ delivery: 'not-sent', error: message.pastedAt === null ? RESTARTED_UNTYPED : RESTARTED });
-      return;
-    }
-
-    const launch = message.launch;
-    // The input box holds the message as it was typed, with its tags.
-    const typed = message.spokenRequested === true ? `${messageTags(true, this.deps.voice?.expressive() ?? false)}${pasteText(message.text)}` : message.text;
-
-    void this.#input(session).resolve(typed, message.pastedAt, giveBack, RESTARTED, {
-      check: () => this.#check(message.sessionId, launch),
-      reserve: () => this.deps.input.reserve(message.sessionId, launch),
+    if (session === null) { giveBack({delivery:'not-sent',error:RESTARTED_UNTYPED}); return; }
+    const typed = message.spokenRequested === true ? `${messageTags(true, this.deps.voice?.expressive() ?? false)}${session.codeMode === true ? pasteText(message.text) : message.text}` : message.text;
+    this.#adapter(session)?.resolve(message, typed, giveBack, {
+      check: () => this.#check(message.sessionId, message.launch ?? null),
+      reserve: () => this.deps.input.reserve(message.sessionId, message.launch ?? null),
     });
   }
 
   stop(): void {
+    this.#closed = true;
     if (this.#timer !== null) {
       clearInterval(this.#timer);
       this.#timer = null;
@@ -316,113 +299,47 @@ export class ConversationService {
     }
 
     this.#artifacts.clear();
+    for (const adapter of this.#adapters) adapter.close();
   }
 
-  /** One read of every live Code Mode session; a read still running skips the next. */
+  /** Polls each provider independently; an unfinished poll skips its next tick. */
   async poll(): Promise<void> {
-    if (this.#polling) {
-      return;
-    }
+    await Promise.all(this.#adapters.map(async adapter => {
+      if (this.#polling.has(adapter)) return;
+      this.#polling.add(adapter);
+      try { await adapter.poll(this.deps.store.activeSessions()); }
+      catch (error) { this.deps.log(`conversation read failed: ${String(error)}`); }
+      finally { this.#polling.delete(adapter); }
+    }));
+  }
 
-    this.#polling = true;
+  #adapter(session: Session): ConversationAdapter | undefined { return this.#adapters.find(adapter => adapter.supports(session)); }
 
+  #view(session: Session, current: boolean, hooks: boolean, personas: PersonaView | null = null): SessionView {
+    const view = sessionView(session, current, hooks, personas);
+    if (session.execution !== 'app-server') return view;
+    const adapter = this.#adapter(session);
+    return { ...view, provider: 'codex', requests: adapter?.requests?.(session) ?? [], reason: adapter?.cannotSend(session) ?? view.reason };
+  }
+
+  async answer(body: Record<string, unknown>): Promise<{ status: number; body: unknown }> {
+    const { window, scopeGen, sessionId, requestId, answer } = body;
+    if (typeof window !== 'string' || typeof scopeGen !== 'number' || typeof sessionId !== 'string' || typeof requestId !== 'string') return { status: 400, body: { error: 'Expected {window, scopeGen, sessionId, requestId, answer}.' } };
+    const refused = refusal(this.deps.windows.scope(window), scopeGen, sessionId);
+    if (refused !== null) return refused;
+    const session = this.deps.store.session(sessionId);
+    const adapter = session === null ? undefined : this.#adapter(session);
+    if (session === null || session.state === 'ended' || adapter?.answer === undefined) return { status: 409, body: { error: 'This session has no pending request.' } };
     try {
-      const live = this.deps.store.activeSessions().filter((session) => session.codeMode === true && session.nativeSessionId !== null && session.state !== 'starting');
-
-      for (const session of live) {
-        await this.#read(session);
-      }
-
-      for (const id of [...this.#readers.keys()].filter((id) => !live.some((session) => session.id === id))) {
-        // The last lines a session wrote before it ended.
-        const ended = this.deps.store.session(id);
-
-        const reader = this.#readers.get(id)!;
-
-        if (ended !== null) {
-          this.#readTranscript(reader, ended);
-        }
-
-        reader.conversation.end();
-        this.#readers.delete(id);
-        this.#commands.delete(id);
-      }
-
-      // A queue is kept while it holds a message, so a session's messages are never typed by two queues at once.
-      for (const id of [...this.#inputs.keys()].filter((id) => !live.some((session) => session.id === id) && !this.#readers.has(id) && this.#inputs.get(id)!.pending === 0)) {
-        this.#inputs.delete(id);
-      }
-    } catch (error) {
-      this.deps.log(`conversation read failed: ${String(error)}`);
-    } finally {
-      this.#polling = false;
-    }
-  }
-
-  #reader(session: Session): Reader {
-    let reader = this.#readers.get(session.id);
-
-    if (reader === undefined) {
-      reader = {
-        conversation: new SessionConversation(session.id, session.workItemId, {
-          store: this.deps.store,
-          now: this.deps.now,
-          newId: this.deps.newId,
-          onChange: (change) => this.#changed(session.id, change),
-          log: this.deps.log,
-        }),
-        workItemId: session.workItemId,
-        lastBusy: 0,
-        rev: null,
-        path: null,
-      };
-      this.#readers.set(session.id, reader);
-    }
-
-    return reader;
-  }
-
-  #readTranscript(reader: Reader, session: Session): void {
-    const native = session.nativeSessionId;
-
-    if (native === null) {
-      return;
-    }
-
-    if (reader.path?.nativeSessionId !== native) {
-      const found = findTranscript(this.deps.projectsDir, session.cwd, native);
-
-      reader.path = found === null ? null : { nativeSessionId: native, path: found.path };
-    }
-
-    reader.conversation.readTranscript(reader.path?.path ?? null);
-  }
-
-  async #read(session: Session): Promise<void> {
-    const reader = this.#reader(session);
-    const busy = session.state === 'running';
-    const now = this.deps.now();
-
-    if (busy) {
-      reader.lastBusy = now;
-    }
-
-    // The screen first, so a reply drawn just before its transcript line was written is held for it, not published from the screen after it.
-    if (now - reader.lastBusy < SCREEN_AFTER_MS) {
-      const screen = await this.deps.screen(session.id, SNAPSHOT_SCROLLBACK).catch(() => null);
-
-      if (screen !== null && screen.rev !== reader.rev) {
-        reader.rev = screen.rev;
-        reader.conversation.readScreen(await readSnapshot(screen, this.#ansiTheme));
-      }
-    }
-
-    this.#readTranscript(reader, session);
-    reader.conversation.tick(busy);
+      await adapter.answer(session, requestId, answer);
+      this.sessionsChanged();
+      return { status: 200, body: { answered: true } };
+    } catch (error) { return { status: 409, body: { error: String(error) } }; }
   }
 
   /** Sends a change to the windows showing its session, and to `also`, a window that must hear it wherever its scope moved, with `extra` fields. */
   #changed(sessionId: string, change: ConversationChange, also?: string, extra: Record<string, unknown> = {}): void {
+    if (this.#closed) return;
     if (change.type === 'status') {
       this.#statusChanged(this.deps.windows.showing(sessionId));
       this.#unreadChanged(sessionId);
@@ -493,7 +410,7 @@ export class ConversationService {
       }
 
       const session = this.deps.store.sessionsFor(item.id).at(-1) ?? null;
-      const view = session === null ? null : sessionView(session, true, this.deps.hooks(), this.deps.personas?.() ?? null);
+      const view = session === null ? null : this.#view(session, true, this.deps.hooks(), this.deps.personas?.() ?? null);
 
       return [{ workItemId: item.id, title: ticket.title, primary: ref.primary, sessionId: session?.id ?? null, state: view?.state ?? null, conversation: view?.conversation ?? null, unread: session === null ? 0 : this.deps.store.unreadCount(session.id) }];
     });
@@ -624,14 +541,7 @@ export class ConversationService {
 
     const current = scope.sessionId === null ? null : this.deps.store.session(scope.sessionId);
 
-    if (current !== null && current.codeMode === true && current.state === 'ended' && !this.#readers.has(current.id)) {
-      // An ended session the hub did not follow to its end, such as one that ended while the hub was down.
-      const reader = this.#reader(current);
-
-      this.#readTranscript(reader, current);
-      reader.conversation.end();
-      this.#readers.delete(current.id);
-    }
+    if (current !== null) this.#adapter(current)?.readEnded(current);
 
     const page = scope.sessionId === null ? { items: [], more: false } : this.deps.store.conversation(scope.sessionId, null, PAGE_ITEMS, false);
     const status = this.status(scope);
@@ -652,7 +562,7 @@ export class ConversationService {
     return {
       protocol: CONVERSATION_PROTOCOL,
       scope: view,
-      sessions: current === null ? [] : [sessionView(current, true, this.deps.hooks(), this.deps.personas?.() ?? null)],
+      sessions: current === null ? [] : [this.#view(current, true, this.deps.hooks(), this.deps.personas?.() ?? null)],
       items: page.items.filter((item) => !item.withdrawn).map(itemView),
       more: page.more,
       status,
@@ -809,7 +719,7 @@ export class ConversationService {
         continue;
       }
 
-      const view = sessionView(session, true, this.deps.hooks(), this.deps.personas?.() ?? null);
+      const view = this.#view(session, true, this.deps.hooks(), this.deps.personas?.() ?? null);
       const text = JSON.stringify(view);
 
       if (this.#shown.get(key) !== text) {
@@ -880,7 +790,7 @@ export class ConversationService {
       return { status: 403, body: { error: 'Not in this window.' } };
     }
 
-    const view = sessionView(session, true, this.deps.hooks(), this.deps.personas?.() ?? null);
+    const view = this.#view(session, true, this.deps.hooks(), this.deps.personas?.() ?? null);
 
     if (view.conversation !== 'full') {
       return { status: 409, body: { error: view.reason ?? SESSION_ENDED } };
@@ -890,7 +800,7 @@ export class ConversationService {
       return { status: 409, body: { error: SESSION_RELAUNCHED } };
     }
 
-    const cannotType = this.deps.input.cannotType();
+    const cannotType = this.#adapter(session)?.cannotSend(session) ?? null;
 
     if (cannotType !== null) {
       return { status: 409, body: { error: cannotType } };
@@ -898,7 +808,7 @@ export class ConversationService {
 
     // A message whose reply will be heard goes with [spoken], so Claude marks the passage to read (architecture.md § Voice); a slash command never.
     const { spoken, expressive } = this.deps.voice?.spokenFor(sessionId, command === true) ?? { spoken: false, expressive: false };
-    const typed = spoken ? `${messageTags(true, expressive)}${pasteText(text)}` : text;
+    const typed = spoken ? `${messageTags(true, expressive)}${session.codeMode === true ? pasteText(text) : text}` : text;
     // Not in the transcript until Claude receives it, so it waits after the items that are (`inTranscript`).
     const added: Omit<ConversationMessage, 'ord'> = { id: `m-${this.deps.newId()}`, sessionId, workItemId: session.workItemId, at: this.deps.now(), origin: 'typed', text, transcriptUuid: null, provisional: true, withdrawn: false, delivery: 'open', error: null, opId, pastedAt: null, launch, spokenRequested: spoken };
 
@@ -908,7 +818,7 @@ export class ConversationService {
     const message = this.deps.store.message(added.id)!;
 
     this.#changed(sessionId, { type: 'message', message });
-    void this.#input(session).send(typed, (outcome) => this.#delivered(message.id, outcome), {
+    this.#adapter(session)?.send(session, message, typed, (outcome) => this.#delivered(message.id, outcome), {
       check: () => this.#check(sessionId, launch),
       reserve: () => this.deps.input.reserve(sessionId, launch),
       pasting: (at) => this.deps.store.updateMessage(message.id, { pastedAt: at }),
@@ -916,36 +826,6 @@ export class ConversationService {
     });
 
     return { status: 200, body: { message: itemView({ type: 'message', ...message }) } };
-  }
-
-  #input(session: Session): SessionInput {
-    let input = this.#inputs.get(session.id);
-
-    if (input === undefined) {
-      const id = session.id;
-
-      input = new SessionInput(id, {
-        snapshot: async () => {
-          const screen = await answered(this.deps.screen(id, 0), this.deps.holderAnswerMs);
-
-          if (screen === null) {
-            throw new Error('The terminal holder is not connected.');
-          }
-
-          return { ...screen, keyAt: screen.keyAt ?? null };
-        },
-        write: (data) => answered(this.deps.input.write(id, data), this.deps.holderAnswerMs),
-        transcriptPath: () => transcriptOf(this.#readers.get(id), this.deps.projectsDir, this.deps.store.session(id)),
-        check: () => this.#check(id, this.deps.store.session(id)?.launchId ?? null),
-        reserve: () => this.deps.input.reserve(id, this.deps.store.session(id)?.launchId ?? null),
-        now: this.deps.now,
-        sleep: this.deps.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
-        log: this.deps.log,
-      });
-      this.#inputs.set(id, input);
-    }
-
-    return input;
   }
 
   /** Why a message for this session and launch can no longer be typed; null while it can. */
@@ -967,7 +847,8 @@ export class ConversationService {
    * A typed message's outcome; a message its transcript entry already confirmed stays sent. `giveBack` asks every window showing the session to
    * put a message that was not sent back in its composer, for one whose sender this hub does not know.
    */
-  #delivered(id: string, outcome: InputOutcome, giveBack = false): void {
+  #delivered(id: string, outcome: DeliveryOutcome, giveBack = false): void {
+    if (this.#closed) return;
     const message = this.deps.store.message(id);
 
     const sender = this.#senders.get(id);
@@ -1003,7 +884,13 @@ export class ConversationService {
       return;
     }
 
-    // A sent message waits for the line where Claude received it.
+    if (outcome.delivery === 'uncertain') {
+      this.deps.store.updateMessage(id, { delivery: 'uncertain', error: outcome.error });
+      this.#changed(message.sessionId, { type: 'message', message: this.deps.store.message(id)! });
+      return;
+    }
+
+    // A sent message waits for its provider confirmation.
     this.deps.store.updateMessage(id, { delivery: 'sent', error: null });
     this.#changed(message.sessionId, { type: 'message', message: this.deps.store.message(id)! });
   }
@@ -1137,7 +1024,7 @@ export class ConversationService {
     } else {
       // The header shows the pin at once, before the next snapshot.
       this.sessionsChanged();
-      answer = { status: 200, body: { persona: sessionView(this.deps.store.session(sessionId as string)!, true, this.deps.hooks(), settings).persona } };
+      answer = { status: 200, body: { persona: this.#view(this.deps.store.session(sessionId as string)!, true, this.deps.hooks(), settings).persona } };
     }
 
     this.#pinned.set(done, answer);
@@ -1331,14 +1218,8 @@ export class ConversationService {
       return refused;
     }
 
-    let commands = this.#commands.get(sessionId);
-
-    if (commands === undefined) {
-      commands = new SessionCommands();
-      this.#commands.set(sessionId, commands);
-    }
-
-    const list: SlashCommand[] = commands.list(transcriptOf(this.#readers.get(sessionId), this.deps.projectsDir, this.deps.store.session(sessionId)));
+    const session = this.deps.store.session(sessionId);
+    const list = session === null ? [] : this.#adapter(session)?.commands(session) ?? [];
 
     return { status: 200, body: { commands: list } };
   }
@@ -1356,22 +1237,6 @@ const SLASH_COMMAND = /^\/[\w:.-]+(?: [^\n]*)?$/;
 /** How long a typed message waits for the holder to answer a screen read or a write. */
 export const HOLDER_ANSWER_MS = 5_000;
 
-/** The holder's answer, or a failure once it has not answered in `HOLDER_ANSWER_MS`, so a typed message never waits on it for ever. */
-function answered<T>(request: Promise<T>, ms = HOLDER_ANSWER_MS): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
-
-  return Promise.race([request, new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error('The terminal holder did not answer.')), ms)))]).finally(() => clearTimeout(timer));
-}
-
-/** The transcript file of a session's current Claude session ID, from its reader's lookup when it has one. */
-function transcriptOf(reader: Reader | undefined, projectsDir: string, session: Session | null): string | null {
-  if (session?.nativeSessionId == null) {
-    return null;
-  }
-
-  return reader?.path?.nativeSessionId === session.nativeSessionId ? reader.path.path : (findTranscript(projectsDir, session.cwd, session.nativeSessionId)?.path ?? null);
-}
-
 /** Why a command is refused: a session outside the window's scope, or a scope generation that is no longer the window's. */
 export function refusal(scope: WindowScope | null, scopeGen: number, sessionId: string | null): { status: number; body: { error: string } } | null {
   if (scope === null || (sessionId !== null && scope.sessionId !== sessionId)) {
@@ -1379,18 +1244,4 @@ export function refusal(scope: WindowScope | null, scopeGen: number, sessionId: 
   }
 
   return scope.scopeGen === scopeGen ? null : { status: 409, body: { error: CONVERSATION_CHANGED } };
-}
-
-/** Whether Claude Code draws in one of its ANSI themes, from the global config the session reads (claude-collab `session.js`). */
-export function ansiTheme(claudeConfig: string): boolean {
-  try {
-    return /ansi/i.test(String((JSON.parse(readFileSync(claudeConfig, 'utf8')) as { theme?: unknown }).theme ?? ''));
-  } catch {
-    return false;
-  }
-}
-
-/** Claude's projects folder and global config for a settings path under `CLAUDE_CONFIG_DIR` or `~/.claude`. */
-export function claudePaths(claudeRoot: string, home: string, configDirSet: boolean): { projectsDir: string; claudeConfig: string } {
-  return { projectsDir: join(claudeRoot, 'projects'), claudeConfig: configDirSet ? join(claudeRoot, '.claude.json') : join(home, '.claude.json') };
 }

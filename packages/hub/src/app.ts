@@ -23,6 +23,8 @@ import { Runtime } from './runtime.js';
 import type { ReportBody, RuntimeDeps } from './runtime.js';
 import { WindowQueue } from './windowQueue.js';
 import { ConversationService, claudePaths, sessionView } from './conversation.js';
+import { CodexConversationAdapter } from './codexConversation.js';
+import { runAppServerDebrief } from '@switchboard/codex';
 import { VoiceControl } from './voice.js';
 import { VoiceLink } from './voiceLink.js';
 import { buildSnapshot } from './snapshot.js';
@@ -226,6 +228,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   const windowQueue = WindowQueue.load(join(home, 'window-queue.json'), deps.now, deps.log);
   const claudeRoot = dirname(deps.claudeSettings).replaceAll('\\', '/');
   const debriefs = new Debriefs({
+    appServer: { history: id => runtime.codexAppServer.history(id), run: (id, prompt, timeoutMs) => runAppServerDebrief(runtime.codexServer, id, prompt, timeoutMs) },
     dir: `${claudeRoot}/.wip/debrief`,
     promptPath: `${claudeRoot}/skills/friction-review/prompt.md`,
     projectsDir: `${claudeRoot}/projects`,
@@ -255,11 +258,15 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
    * What a terminal runs, from the settings as they are when the window or dock takes it: the agent's CLI from `sessions.claudePath` or
    * `sessions.codexPath` (PRD R28), or for a Code Mode session `hub.js attach <Switchboard session ID>` with `sessions.nodePath` (PRD R95).
    */
-  const terminalRun = (terminal: { provider?: unknown; codeMode?: unknown; sessionId?: unknown }): { executable: string; args?: string[] } => {
+  const terminalRun = (terminal: { provider?: unknown; codeMode?: unknown; execution?: unknown; sessionId?: unknown }): { executable: string; args?: string[] } => {
     const sessions = config.settings.sessions;
 
     if (terminal.codeMode === true) {
       return { executable: sessions.nodePath, args: [hubBundlePath(options.home), 'attach', String(terminal.sessionId)] };
+    }
+    if (terminal.execution === 'app-server') {
+      const codexHome = runtime.codexHome;
+      return { executable: sessions.codexPath, args: ['resume', '--remote', `unix://${join(codexHome, 'app-server-control', 'app-server-control.sock').replaceAll('\\', '/')}`, String(terminal.sessionId)] };
     }
 
     return { executable: terminal.provider === 'codex' ? sessions.codexPath : sessions.claudePath };
@@ -283,6 +290,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   /** The attach terminal command for a claimed open of a Code Mode session, which the Claude view refuses (PRD R95); null for any other session. */
   const codeModeOpen = (sessionId: string): Record<string, unknown> | null => {
     const session = store.session(sessionId) ?? store.sessionByNativeId(sessionId);
+    if (session?.execution === 'app-server') return { type: 'conversation' };
     const item = session?.codeMode === true ? store.workItem(session.workItemId) : null;
     const ticket = item === null ? null : store.ticket(item.ticketId);
 
@@ -358,6 +366,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     log: deps.log,
   });
   const conversation = new ConversationService({
+    adapters: changed => [new CodexConversationAdapter({ server: runtime.codexServer, runner: runtime.codexAppServer, store, now: deps.now, newId: randomUUID, log: deps.log, requestsChanged: () => conversation.sessionsChanged() }, changed)],
     store,
     windows: scopes,
     voice: {
@@ -484,7 +493,7 @@ const dockWithRuns = () => {
     const workItemId = rowKey.startsWith('item:') ? Number(rowKey.slice(5)) : null;
     const session = workItemId === null ? null : (store.sessionsFor(workItemId).at(-1) ?? null);
 
-    if (!voiceSettings.enabled || voiceSettings.personas.length === 0 || session === null || session.codeMode !== true) {
+    if (!voiceSettings.enabled || voiceSettings.personas.length === 0 || session === null || (session.codeMode !== true && session.execution !== 'app-server')) {
       return [];
     }
 
@@ -680,6 +689,7 @@ const dockWithRuns = () => {
       },
       '/volume': async (body) => volumeReply(store, deps.now(), body),
       '/v1/conversation/send': async (body) => (isRecord(body) ? conversation.send(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, text, command?}.' } }),
+        '/v1/conversation/answer': async (body) => isRecord(body) ? conversation.answer(body) : { status: 400, body: { error: 'Expected a request answer.' } },
       '/v1/conversation/history': async (body) => (isRecord(body) ? conversation.history(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, before, limit?}.' } }),
       '/v1/conversation/seen': async (body) => (isRecord(body) ? conversation.seen(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, ids}.' } }),
       '/v1/conversation/select': async (body) => (isRecord(body) ? conversation.select(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId}.' } }),

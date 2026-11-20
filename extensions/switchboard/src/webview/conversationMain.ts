@@ -670,7 +670,9 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     const button = target.closest<HTMLElement>('[data-action]');
     const action = button?.dataset['action'];
 
-    if (action === 'terminal' || action === 'earlier' || action === 'statuses' || action === 'new' || action === 'persona') {
+    if (action === 'answer-request' && state.scope !== null && state.session !== null) {
+      vscode.postMessage({ type: 'answer-request', requestId: button?.dataset['request'] ?? '', target: { sessionId: state.session.id, scopeGen: state.scope.scopeGen } });
+    } else if (action === 'terminal' || action === 'earlier' || action === 'statuses' || action === 'new' || action === 'persona') {
       vscode.postMessage({ type: action });
     } else if (action === 'picker') {
       if (!open.delete(PICKER)) {

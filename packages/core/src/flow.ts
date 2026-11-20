@@ -191,6 +191,7 @@ export type FlowEvent =
   /** `checked` lists the sessions the read looked for, so a session whose start completed during the read is not ended; all when absent. */
   | { type: 'roster'; sessions: ObservedSession[]; checked?: string[]; forks?: ObservedFork[] }
   | { type: 'marker'; sessionId: string; state: LiveState; detail: string | null }
+  | { type: 'release-cancelled'; sessionId: string }
   /** The terminal holder that held this Code Mode session is gone (PRD R94). */
   | { type: 'holder-lost'; sessionId: string }
   /** The holder lists this Code Mode session with no terminal attached and no input or output for the idle limit (PRD R95). */
@@ -214,7 +215,7 @@ export type FlowEvent =
   | { type: 'adhoc'; prompt: string; repoRoot: string; start?: boolean }
   /**
    * A hosted conversation (architecture.md § Hosted conversations): an ad hoc work item hosted by the window binding `hostWindow`, run in
-   * `folder`, whose Code Mode session starts at once with no prompt.
+   * `folder`, whose session starts at once with no prompt.
    */
   | { type: 'new-conversation'; hostWindow: string; folder: string }
   /** A hosted conversation's first message, whose first line titles it while it is still titled `NEW_CONVERSATION_TITLE`. */
@@ -303,6 +304,7 @@ export type FlowAction =
       launchId?: string;
       /** Runs in Code Mode in the terminal holder (PRD R93). */
       codeMode?: true;
+      execution?: 'app-server';
       /** A Code Mode session's tone section, appended after its conversation rules (architecture.md § Personas). */
       tone?: string;
     }
@@ -310,7 +312,7 @@ export type FlowAction =
    * The provider travels with the action, because Delete removes the session's row before its stop runs. `leftovers`: ends the processes of an ended
    * Code Mode session's last process tree that still run (PRD R95).
    */
-  | { type: 'stop-session'; sessionId: string; provider: Provider; shortId: string | null; reason: StopReason; codeMode?: true; leftovers?: true }
+  | { type: 'stop-session'; sessionId: string; provider: Provider; shortId: string | null; reason: StopReason; codeMode?: true; execution?: 'app-server'; leftovers?: true }
   /** Waits for the tab's process `pid` to exit, then resumes the session in its background process with `prompt` (PRD R89). */
   | { type: 'resume-session'; sessionId: string; moveId: string; provider: Provider; nativeSessionId: string; cwd: string; pid: number; prompt: string };
 
@@ -411,8 +413,12 @@ function actorOf(type: FlowEvent['type']): Actor {
 }
 
 /** The flag a Code Mode session's actions carry, because Delete removes the session's row before its stop runs. */
-function codeModeOf(session: Pick<Session, 'codeMode'>): { codeMode?: true } {
-  return session.codeMode === true ? { codeMode: true } : {};
+function codeModeOf(session: Pick<Session, 'codeMode' | 'execution'>): { codeMode?: true; execution?: 'app-server' } {
+  return session.codeMode === true ? { codeMode: true } : session.execution === 'app-server' ? { execution: 'app-server' } : {};
+}
+
+function persistent(session: Pick<Session, 'codeMode' | 'execution'>): boolean {
+  return session.codeMode === true || session.execution === 'app-server';
 }
 
 /** A stop result for a copy that a fork retired after the stop was sent. */
@@ -655,6 +661,9 @@ class Flow {
         return this.stopSucceeded(event.sessionId, event.reason, event.shortId, event.leftovers === true);
       case 'stop-failed':
         return this.stopFailed(event.sessionId, event.reason, event.message, event.shortId, event.leftovers === true);
+      case 'release-cancelled':
+        if (this.store.session(event.sessionId) !== null) this.store.updateSession(event.sessionId, { releasing: false });
+        return;
       case 'worktree-found':
         return this.worktreeFound(event.source, event.sourceKey, event.path, event.branch);
       case 'adhoc':
@@ -952,16 +961,16 @@ class Flow {
 
   /**
    * A hosted conversation (architecture.md § Hosted conversations): an ad hoc work item in the window's folder, hosted by its window binding,
-   * whose Code Mode session starts at once at an empty prompt, without waiting for a free slot, since the operator is there to use it.
+   * whose session starts at once at an empty prompt, without waiting for a free slot, since the operator is there to use it.
    */
   private newConversation(hostWindow: string, folder: string): void {
     const sessions = this.context.settings.sessions;
 
-    if (!sessions.codeMode) {
+    if (sessions.provider !== 'codex' && !sessions.codeMode) {
       throw new Refusal(NEEDS_CODE_MODE);
     }
 
-    if (!sessions.installHooks) {
+    if (sessions.provider !== 'codex' && !sessions.installHooks) {
       throw new Refusal('Code Mode sessions need sessions.installHooks.');
     }
 
@@ -1504,6 +1513,7 @@ class Flow {
 
       this.store.updateSession(sessionId, { nativeSessionId, shortId, ...state, stateAt: this.now, ...(launchId === undefined ? {} : { launchId }) });
       const item = this.store.workItem(session.workItemId)!;
+      if (session.execution === 'app-server' && item.error !== null) this.store.updateWorkItem(item.id, { error: null });
 
       // The started task session's prompt holds the guidance (PRD R77).
       if (session.kind === 'task' && item.guidance !== null) {
@@ -1572,7 +1582,11 @@ class Flow {
     }
 
     for (const entry of listed.values()) {
-      const session = this.store.session(entry.sessionId);
+      let session = this.store.session(entry.sessionId);
+      if (session?.execution === 'app-server' && session.state === 'ended' && (entry.state === 'running' || entry.state === 'waiting')) {
+        this.store.updateSession(session.id, { released: false, releasing: false, endedAt: null, launchId: this.context.newUuid() });
+        session = this.store.session(session.id);
+      }
 
       // A moving session's tab process is going and its background one not confirmed, so no listing decides it (PRD R89).
       if (session !== null && session.state !== 'starting' && session.move === null) {
@@ -1660,7 +1674,7 @@ class Flow {
     const resumed = (state === 'running' || state === 'waiting') && (session.state === 'ended' || TURN_ENDED.includes(session.state));
 
     if (TURN_ENDED.includes(state)) {
-      if (current.codeMode === true) {
+      if (persistent(current)) {
         this.endHeld(current);
       } else {
         this.release(current);
@@ -1777,7 +1791,7 @@ class Flow {
   private setupState(item: WorkItem, session: Session, state: LiveState, resumed: boolean): void {
     if (resumed && item.status === 'failed' && item.error === MESSAGES.setupWithoutWorktree) {
       this.setStatus(item.id, { status: 'setup', error: null });
-    } else if (TURN_ENDED.includes(state) && (session.codeMode === true || (session.released && !session.releasing)) && item.status === 'setup' && (item.unassignedAt !== null || this.store.worktreeFor(item.ticketId) !== null)) {
+    } else if (TURN_ENDED.includes(state) && (persistent(session) || (session.released && !session.releasing)) && item.status === 'setup' && (item.unassignedAt !== null || this.store.worktreeFor(item.ticketId) !== null)) {
       this.finishSetup(item, session);
     }
   }
@@ -1805,11 +1819,11 @@ class Flow {
    * its exit, so no observation takes a pending end for an ended session (PRD R95).
    */
   private release(session: Session): void {
-    if (session.released || (session.codeMode === true && session.releasing)) {
+    if (session.released || (persistent(session) && session.releasing)) {
       return;
     }
 
-    this.store.updateSession(session.id, session.codeMode === true ? { releasing: true } : { released: true, releasing: true });
+    this.store.updateSession(session.id, persistent(session) ? { releasing: true } : { released: true, releasing: true });
     this.actions.push({ type: 'stop-session', sessionId: session.id, provider: session.provider, shortId: session.shortId, reason: 'release', ...codeModeOf(session) });
   }
 
@@ -1832,7 +1846,7 @@ class Flow {
   /** Applies the end rule to the work item's held Code Mode sessions whose turn has ended, as when it becomes done or a newer session starts. */
   private endHeldSessions(workItemId: number): void {
     for (const session of this.store.sessionsFor(workItemId)) {
-      if (session.codeMode === true && TURN_ENDED.includes(session.state)) {
+      if (persistent(session) && TURN_ENDED.includes(session.state)) {
         this.endHeld(session);
       }
     }
@@ -1914,7 +1928,7 @@ class Flow {
   private livePersonas(except: string | null): Array<string | null | undefined> {
     return this.store
       .activeSessions()
-      .filter((session) => session.codeMode === true && session.id !== except)
+      .filter((session) => persistent(session) && session.id !== except)
       .map((session) => session.personaId);
   }
 
@@ -1926,7 +1940,7 @@ class Flow {
     const session = this.session(sessionId);
     const voice = this.context.settings.voice;
 
-    if (session.codeMode !== true) {
+    if (!persistent(session)) {
       throw new Refusal('Only a Code Mode session has a persona.');
     }
 
@@ -1952,7 +1966,7 @@ class Flow {
   private personaDelivered(sessionId: string): void {
     const session = this.store.session(sessionId);
 
-    if (session?.codeMode === true) {
+    if (session !== null && persistent(session)) {
       this.store.updateSession(sessionId, { personaVersion: toneVersion(sessionTone(this.context.settings.voice, session)) });
     }
   }
@@ -2114,13 +2128,13 @@ class Flow {
     const session = this.activeSession(item);
 
     // A starting Code Mode session is held under its Switchboard session ID, so the holder can end it (PRD R95).
-    if (session?.state === 'starting' && session.codeMode !== true) {
+    if (session?.state === 'starting' && session.codeMode !== true && !(session.execution === 'app-server' && session.nativeSessionId !== null)) {
       throw new Refusal('The session is starting. Delete the work item once it has started.');
     }
 
     // A session whose release stop has not finished may still run in its background process.
     if (session !== null && session.codeMode !== true && (!session.released || session.releasing)) {
-      this.actions.push({ type: 'stop-session', sessionId: session.id, provider: session.provider, shortId: session.shortId, reason: 'operator' });
+      this.actions.push({ type: 'stop-session', sessionId: session.id, provider: session.provider, shortId: session.shortId, reason: 'operator', ...codeModeOf(session) });
     }
 
     // The holder keeps every Code Mode session of the work item running until it is ended, including older ones whose end waits on a terminal.
@@ -2211,7 +2225,7 @@ class Flow {
     }
 
     // A held session whose end failed is still held, so a later turn end or the idle limit can end it.
-    if (session.codeMode === true && reason === 'release') {
+    if (persistent(session) && reason === 'release') {
       this.store.updateSession(sessionId, { releasing: false });
     }
   }
@@ -2367,7 +2381,7 @@ class Flow {
 
   /** Stops the background session, so the window can open it in a Claude tab, which asks the question again (PRD R70). */
   private openQuestion(item: WorkItem, nativeSessionId: string): void {
-    if (this.activeSession(item)?.codeMode === true) {
+    if (this.activeSession(item)?.codeMode === true || this.activeSession(item)?.execution === 'app-server') {
       throw new Refusal(MESSAGES.codeModeQuestion);
     }
 
@@ -2835,20 +2849,20 @@ class Flow {
       prompt = rendered.text;
     }
 
-    // Every session of a work item runs in its playbook's agent, so a setup or an approved prompt runs where the playbook's skills do. A hosted
-    // conversation is Claude in Code Mode whatever sessions.provider names, and offers no done or approval report.
+    // Setup and approved sessions keep the playbook's provider. Hosted conversations use the default provider and offer no done or approval report.
     const hosted = ticket.hostWindow != null;
-    const provider = hosted ? 'claude' : (playbook?.provider ?? sessions.provider);
+    const provider = playbook?.provider ?? sessions.provider;
     const reports = sessionReports(kind, approved, playbook, provider).filter((report) => !hosted || (report !== 'done' && report !== 'approval'));
     // The setting applies at the start; resumes keep the session's mode (PRD R93). The Claude session ID and launch are stored before the
     // start, so a hub restarted during it finds the process in the holder.
     const held = provider === 'claude' && sessions.codeMode ? { codeMode: true as const, nativeSessionId: this.context.newUuid(), launchId: this.context.newUuid() } : null;
+    const appServer = provider === 'codex';
     // The guidance waits through a setup session and a failed start for the task session, and an approved prompt does not take it (PRD R77).
     const guided = kind === 'task' && !approved;
     const full = sessionPrompt(prompt, id, guided ? item.guidance : null);
     // A Code Mode session's persona is resolved once, here, and kept for its life (architecture.md § Personas).
-    const persona = held === null ? null : resolvePersona(this.context.settings.voice, item.playbook, this.livePersonas(null));
-    const tone = held === null ? null : sessionTone(this.context.settings.voice, { personaId: persona?.id ?? null });
+    const persona = held === null && !appServer ? null : resolvePersona(this.context.settings.voice, item.playbook, this.livePersonas(null));
+    const tone = held === null && !appServer ? null : sessionTone(this.context.settings.voice, { personaId: persona?.id ?? null });
 
     if (kind === 'task' && playbook !== null) {
       this.store.updateWorkItem(item.id, { taskPrompt: full });
@@ -2880,7 +2894,8 @@ class Flow {
       move: null,
       movedAt: null,
       codeMode: held !== null,
-      launchId: held?.launchId ?? null,
+      ...(appServer ? { execution: 'app-server' as const } : {}),
+      launchId: held?.launchId ?? (appServer ? this.context.newUuid() : null),
       promptless: hosted,
       personaId: persona?.id ?? null,
       personaVersion: toneVersion(tone),
@@ -2902,6 +2917,7 @@ class Flow {
       name: sessionName(kind, item, ticket),
       ...launchOptions(this.context.settings, playbook, kind, provider),
       ...(held ?? {}),
+      ...(appServer ? { execution: 'app-server' as const } : {}),
       ...(tone === null ? {} : { tone }),
     });
   }

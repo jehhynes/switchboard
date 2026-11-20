@@ -6,15 +6,17 @@ import type { PermissionMode } from './settings.js';
 export type CopyRelation = 'newer' | 'older' | 'unrelated';
 
 export type StartAction = Extract<FlowAction, { type: 'start-session' }>;
+export interface StopFailure { error: string; cancelled?: true }
 
 /** `startPrompt`: the session runs but waits on a prompt before it starts, which the operator answers through Open in terminal (PRD R41). */
 /** `launchId`: the launch of a Code Mode session's process (PRD R93). */
-export type StartResult = { shortId: string; nativeSessionId: string; startPrompt?: true; launchId?: string } | { error: string };
+export type StartResult = { shortId: string; nativeSessionId: string; startPrompt?: true; launchId?: string; pending?: string } | { error: string };
 
 /** The session a stop acts on; a deleted session's row is gone, so the action carries what the runner needs. */
 export interface SessionTarget {
   sessionId: string;
   shortId: string | null;
+  execution?: 'app-server' | null;
   /** The Code Mode runner only: ends these processes of the ended session's last tree that still run, instead of the session (PRD R95). */
   lastTree?: Array<{ pid: number; created: string }>;
 }
@@ -89,7 +91,7 @@ export interface SessionRunner {
   leftovers?(tree: Array<{ pid: number; created: string }>): Promise<Array<{ pid: number; created: string }> | { error: string }>;
   /** Whether the session runs in Switchboard's background process, so a release may stop it (PRD R39). */
   isBackground(target: SessionTarget): Promise<boolean>;
-  stop(target: SessionTarget, reason: StopReason): Promise<{ error: string } | null>;
+  stop(target: SessionTarget, reason: StopReason): Promise<StopFailure | null>;
   /** Settles the sessions a hub that stopped left `starting`, after a restart (PRD R43). */
   reconcile(sessions: Session[]): Promise<Reconciled[]>;
   /** Installs Switchboard's hooks for the provider, and has the provider trust them when it must; returns the error to show, or null. */

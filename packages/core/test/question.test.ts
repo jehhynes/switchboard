@@ -173,6 +173,8 @@ describe('Codex questions (PRD R70)', () => {
     const start = h.act({ type: 'start', workItemId: item })[0] as Extract<FlowAction, { type: 'start-session' }>;
 
     expect(start.provider).toBe('codex');
+    // A persisted exec session keeps the original question handoff.
+    h.store.updateSession(start.sessionId, { execution: null });
     h.act({ type: 'session-started', sessionId: start.sessionId, nativeSessionId: 'thread-1', shortId: 'thread-1' });
 
     return { item, session: start.sessionId };

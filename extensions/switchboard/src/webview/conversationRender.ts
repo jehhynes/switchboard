@@ -11,6 +11,7 @@ export type ConversationMessage =
   | { type: 'earlier' }
   | { type: 'open'; href: string }
   | { type: 'terminal' }
+  | { type: 'answer-request'; requestId: string; target: SeenTarget }
   | { type: 'select'; workItemId: number }
   | { type: 'talk-here' }
   | { type: 'stop-speaking' }
@@ -48,7 +49,7 @@ function statusAnswer(items: readonly ItemView[], status: StatusView): string | 
 }
 
 /** What a typed message's line under its box says (architecture.md § Conversation view). */
-const DELIVERY = { open: 'sending', sent: 'sent', 'not-sent': 'not sent' } as const;
+const DELIVERY = { open: 'sending', sent: 'sent', 'not-sent': 'not sent', uncertain: 'delivery unknown; check before resending' } as const;
 
 /** A stamp's time, as Claude Code's panel shows it: "1:46 PM". */
 const STAMP = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', hourCycle: 'h12' });
@@ -134,7 +135,7 @@ export function renderMarkdown(text: string): string {
  */
 function message(item: MessageView, stamped: boolean): string {
   // Only an error state shows: a message sent or still sending shows only its time; one not sent has left the conversation.
-  const state = item.origin === 'typed' && item.delivery === 'not-sent' ? item.delivery : null;
+  const state = item.origin === 'typed' && (item.delivery === 'not-sent' || item.delivery === 'uncertain') ? item.delivery : null;
   const why = item.error === null ? '' : ` · ${item.error}`;
   const delivery =
     state === null ? '' : `<span class="delivery ${state}" title="${escape(`${DELIVERY[state]}${why}`)}">${DELIVERY[state]}</span>`;
@@ -537,9 +538,11 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
   const status = state.status;
   const statusCard = status === null || status.fallback ? '' : cardOf(cardKey('status', status.id), status.markdown, statusAnswer(state.items, status));
   // While an AskUserQuestion menu holds the session, the view says so: the menu is answered in the terminal (voice-design § 5).
-  const asking =
-    state.session?.state === 'waiting' && state.session.waitingFor === 'question'
-      ? '<div class="terminal-question" role="status"><span class="codicon codicon-question" aria-hidden="true"></span><span class="terminal-question-text">Claude is waiting for an answer in the terminal</span><button type="button" class="terminal-question-open" data-action="terminal">Open in terminal</button></div>'
+  const requests = state.session?.requests ?? [];
+  const asking = requests.length > 0
+    ? requests.map(request => `<div class="terminal-question" role="status"><span class="terminal-question-text">${escape(request.title)}</span><button type="button" data-action="answer-request" data-request="${escape(request.id)}">${request.kind === 'unsupported' ? 'Open in terminal' : request.kind === 'permission' ? 'Review permission' : 'Answer'}</button></div>`).join('')
+    : state.session?.state === 'waiting' && state.session.waitingFor === 'question'
+      ? `<div class="terminal-question" role="status"><span class="codicon codicon-question" aria-hidden="true"></span><span class="terminal-question-text">${state.session.provider === 'codex' ? 'Codex' : 'Claude'} is waiting for an answer in the terminal</span><button type="button" class="terminal-question-open" data-action="terminal">Open in terminal</button></div>`
       : '';
   const panel =
     page.tab === 'status'

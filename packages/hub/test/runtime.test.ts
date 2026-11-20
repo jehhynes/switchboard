@@ -1499,6 +1499,8 @@ describe('Runtime', () => {
 
     expect(codex.spawned[0]!.slice(0, 2)).toEqual(['exec', '--json']);
     expect(codex.spawned[0]!.at(-1)).toBe('$sb-plan 1');
+    // Existing exec sessions keep their release behavior after upgrading.
+    store.updateSession('s1', { execution: null });
     expect(store.session('s1')).toMatchObject({ provider: 'codex', nativeSessionId: 'thread-1', shortId: 'thread-1', state: 'running' });
 
     await runtime.readRoster();
@@ -1582,6 +1584,7 @@ describe('Runtime', () => {
 
     runtime.send({ type: 'adhoc', prompt: 'Work', repoRoot: 'D:/git/widgets', start: true });
     await runtime.settled();
+    store.updateSession('s1', { execution: null });
     expect(await runtime.report({ sessionId: 's1', kind: 'question', text: 'Which tree?' })).toEqual({ refused: null });
     expect(store.session('s1')!.question).toEqual({ id: 's2', text: 'Which tree?' });
 

@@ -78,13 +78,13 @@ describe('sessions.codeMode (PRD R93)', () => {
     expect(h.item(1)).toMatchObject({ status: 'failed', error: 'Code Mode sessions need sessions.installHooks.' });
   });
 
-  it('leaves Codex sessions as they are', () => {
+  it('starts Codex through app-server independently of Claude Code Mode', () => {
     const h = new Harness({ settings: settings({ sessions: { codeMode: true, provider: 'codex' } }) });
     const start = adhoc(h);
 
     expect(start.provider).toBe('codex');
     expect(start.codeMode).toBeUndefined();
-    expect(h.store.session(start.sessionId)).toMatchObject({ codeMode: false, nativeSessionId: null, launchId: null });
+    expect(h.store.session(start.sessionId)).toMatchObject({ codeMode: false, execution: 'app-server', nativeSessionId: null, launchId: 'uuid-1' });
   });
 
   it('changes only later starts, so a session keeps the mode it started in', () => {

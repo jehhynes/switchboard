@@ -56,6 +56,20 @@ describe('groupOf', () => {
 });
 
 describe('turnOf', () => {
+  it('leaves an idle hosted conversation open without a running mark or an agent turn', () => {
+    for (const state of ['idle', 'ended'] as const) {
+      const hosted = { ...item('running', state), sessions: [{ state, outcome: null, promptless: true }], doneReason: null, approvalSends: false, ticket: { snoozed: false } };
+      expect(groupOf(hosted)).toBe('progress');
+      expect(markOf(hosted)).toBe('idle');
+      expect(turnOf(hosted)).toBeNull();
+      expect(markOf({ ...hosted, sessions: [{ state: 'running', outcome: null, promptless: true }] })).toBe('running');
+      expect(turnOf({ ...hosted, sessions: [{ state: 'running', outcome: null, promptless: true }] })).toBe('agent');
+      expect(markOf({ ...hosted, sessions: [{ state: 'waiting', outcome: null, promptless: true }] })).toBe('question');
+      expect(markOf({ ...hosted, status: 'blocked' })).toBe('blocked');
+      expect(markOf({ ...hosted, status: 'done' })).toBe('done-session');
+      expect(markOf({ ...hosted, sessions: [{ state, outcome: null, promptless: false }] })).toBe('running');
+    }
+  });
   it("is the operator's in Blocked on you and on work awaiting review, else the agent's, and none outside the active groups (PRD R27)", () => {
     expect(turnOf(item('failed'))).toBe('operator');
     expect(turnOf(item('running', 'waiting'))).toBe('operator');

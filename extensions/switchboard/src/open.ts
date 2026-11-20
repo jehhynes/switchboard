@@ -160,7 +160,7 @@ export async function openTerminal(record: HubRecord | null, command: TerminalCo
       return;
     }
 
-    const args = provider === 'codex' ? ['resume', sessionId] : shortId === null ? ['--resume', sessionId] : ['attach', shortId];
+    const args = command.args ?? (provider === 'codex' ? ['resume', sessionId] : shortId === null ? ['--resume', sessionId] : ['attach', shortId]);
 
     show(key, name, command.executable ?? provider, args, cwd);
   });

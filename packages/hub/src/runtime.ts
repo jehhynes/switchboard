@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, statSync, watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { classify, ClaudeRunner, findTranscript, CodeModeRunner, conversationRules, HOOKS_REQUIRED, readRoster } from '@switchboard/claude';
-import { classifyCodex, CodexRunner } from '@switchboard/codex';
+import { classifyCodex, CodexRunner, AppServer, AppServerRunner } from '@switchboard/codex';
 import type { Exec } from '@switchboard/claude';
 import type { FlowAction, FlowEvent, FlowResult, HandledWork, MarkerReading, ObservedFork, ObservedSession, PolledTicket, Provider, Session, SessionRunner, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, Worktree } from '@switchboard/core';
 import { activeSession, ADHOC_SOURCE, artifactsDir, awaitsRecheck, RESUME_PROMPT, executableDirOnPath, handle, launchOptions, nothingNew, PROVIDERS, recordRefusal, homeRepo, repoOf, sessionName, deliveredTone, ticketRoot, sessionContract, switchboardHome, triageModel } from '@switchboard/core';
@@ -66,11 +66,11 @@ export const ATTACH_RESERVATION_MS = 15_000;
 export type AttachResult = { port: number; token: string; session: string } | { refused: string; status: 404 | 409 };
 
 /** A runner per agent, and the Code Mode runner for Claude sessions held in the terminal holder (PRD R93). */
-export type RunnerKey = Provider | 'codeMode';
-const RUNNER_KEYS: readonly RunnerKey[] = [...PROVIDERS, 'codeMode'];
+export type RunnerKey = Provider | 'codeMode' | 'codexAppServer';
+const RUNNER_KEYS: readonly RunnerKey[] = [...PROVIDERS, 'codeMode', 'codexAppServer'];
 
-function runnerKey(session: { provider: Provider; codeMode?: boolean }): RunnerKey {
-  return session.codeMode === true ? 'codeMode' : session.provider;
+function runnerKey(session: { provider: Provider; codeMode?: boolean; execution?: 'app-server' | null }): RunnerKey {
+  return session.execution === 'app-server' ? 'codexAppServer' : session.codeMode === true ? 'codeMode' : session.provider;
 }
 
 export interface RuntimeDeps {
@@ -123,6 +123,9 @@ export type ReportBody =
 
 /** Runs the core: turns timers, source reads, CLI results and requests into events, and runs the actions they decide. */
 export class Runtime {
+  readonly codexServer: AppServer;
+  readonly codexAppServer: AppServerRunner;
+  readonly codexHome: string;
   private config: Config;
   private sources = new Map<string, Source>();
   private sourceErrors: Record<string, string> = {};
@@ -193,9 +196,27 @@ export class Runtime {
 
     const hooks = () => this.config.settings.sessions.installHooks;
     const codex = deps.codex ?? { home: join(deps.home, '.codex'), env: {} };
+    this.codexHome = codex.home;
     const claudePath = () => this.config.settings.sessions.claudePath;
     const nodePath = () => this.config.settings.sessions.nodePath;
     const codexPath = () => this.config.settings.sessions.codexPath;
+
+    this.codexServer = new AppServer({ codexPath, codexHome: codex.home, env: codex.env, log: deps.log });
+    this.codexAppServer = new AppServerRunner({
+      server: this.codexServer,
+      session: id => deps.store.session(id),
+      sessions: () => deps.store.startedSessions(),
+      sessionByNative: id => deps.store.sessionByNativeId(id),
+      canRevive: session => deps.store.workItem(session.workItemId)?.status !== 'done' && deps.store.sessionsFor(session.workItemId).at(-1)?.id === session.id,
+      currentInstructions: session => this.contract(session.nativeSessionId!, 'resume') ?? '',
+      configured: session => { this.send({ type: 'persona-delivered', sessionId: session.id }); },
+      instructionsDelivered: (id, hash, compactionId) => { if (deps.store.session(id) !== null) deps.store.updateSession(id, { instructionsHash: hash, instructionsCompactionId: compactionId }); },
+      log: deps.log,
+      created: (id, threadId) => { if (deps.store.session(id) !== null) deps.store.updateSession(id, { nativeSessionId: threadId, shortId: threadId }); },
+      instructions: action => `${action.contract}\n\n${conversationRules(artifactsDir(action.cwd, action.workItemId), this.config.settings.voice.enabled, 'codex')}${action.tone == null ? '' : `\n\n${action.tone}`}`,
+      state: (sessionId, state, detail) => { this.send({ type: 'marker', sessionId, state, detail }); },
+      now: deps.now,
+    });
 
     this.runners = {
       claude:
@@ -204,6 +225,7 @@ export class Runtime {
       codex:
         deps.runners?.codex ??
         new CodexRunner({ codexPath, nodePath, exec: deps.exec, sleep: deps.sleep, now: deps.now, home: this.home, codexHome: codex.home, env: codex.env, hooks }),
+      codexAppServer: deps.runners?.codexAppServer ?? deps.runners?.codex ?? this.codexAppServer,
       codeMode:
         deps.runners?.codeMode ??
         new CodeModeRunner({
@@ -455,6 +477,7 @@ export class Runtime {
     clearTimeout(this.markerWatchRetry ?? undefined);
     this.markerWatchRetry = null;
     this.holder.close();
+    this.codexServer.close();
   }
 
   /** Reads the markers soon after a hook writes one; the `MARKER_MS` timer stays as a fallback. */
@@ -955,13 +978,13 @@ export class Runtime {
     const session = this.deps.store.sessionByNativeId(nativeSessionId) ?? this.runners.claude.forkOf?.(nativeSessionId, this.deps.store.startedSessions().filter((one) => one.codeMode !== true)) ?? null;
 
     // A resume keeps the prompt the session started with, contract included; only a Code Mode session gets the current conversation rules.
-    if (session === null || (source === 'resume' && session.codeMode !== true)) {
+    if (session === null || (source === 'resume' && session.codeMode !== true && session.execution !== 'app-server')) {
       return null;
     }
 
     // A Code Mode session's persona tone section comes last, as the settings have it now (architecture.md § Personas).
-    const tone = session.codeMode === true ? deliveredTone(this.config.settings.voice, session) : null;
-    const rules = (): string => `${conversationRules(artifactsDir(session.cwd, session.workItemId), this.config.settings.voice.enabled)}${tone === null ? '' : `\n\n${tone}`}`;
+    const tone = session.codeMode === true || session.execution === 'app-server' ? deliveredTone(this.config.settings.voice, session) : null;
+    const rules = (): string => `${conversationRules(artifactsDir(session.cwd, session.workItemId), this.config.settings.voice.enabled, session.provider)}${tone === null ? '' : `\n\n${tone}`}`;
 
     if (session.codeMode === true) {
       this.send({ type: 'persona-delivered', sessionId: session.id });
@@ -970,14 +993,14 @@ export class Runtime {
     if (source === 'resume') {
       this.deps.log(`gave session ${session.id} the conversation rules on resume`);
 
-      return rules();
+      return session.execution === 'app-server' ? `${sessionContract(session.id, this.reportCommand, session.reports, session.provider)}\n\n${rules()}` : rules();
     }
 
     this.deps.log(`restored the report contract of session ${session.id} after compaction`);
 
     const contract = sessionContract(session.id, this.reportCommand, session.reports, session.provider);
 
-    return session.codeMode === true ? `${contract}\n\n${rules()}` : contract;
+    return session.codeMode === true || session.execution === 'app-server' ? `${contract}\n\n${rules()}` : contract;
   }
 
   /**
@@ -2131,9 +2154,15 @@ export class Runtime {
 
         const runner = this.runners[runnerKey(action)];
         const result = await runner.start(action);
+        if (!('error' in result) && result.pending !== undefined && this.deps.store.session(action.sessionId) !== null) {
+          this.unreconciled.add(action.sessionId);
+          this.deps.store.updateWorkItem(action.workItemId, { error: result.pending });
+          this.changed();
+          return;
+        }
 
         // Delete during a Code Mode start removes the row while the holder spawns, so the process is ended here (PRD R76, R95).
-        if (!('error' in result) && action.codeMode === true && this.deps.store.session(action.sessionId) === null) {
+        if (!('error' in result) && (action.codeMode === true || action.execution === 'app-server') && this.deps.store.session(action.sessionId) === null) {
           const failure = await runner.stop({ sessionId: action.sessionId, shortId: result.shortId }, 'operator');
 
           this.deps.log(`session ${action.sessionId} started after its work item was deleted; ${failure === null ? 'ended it' : `ending it failed, so it may still be running: ${failure.error}`}`);
@@ -2207,6 +2236,10 @@ export class Runtime {
   private async stopSession(action: Extract<FlowAction, { type: 'stop-session' }>): Promise<void> {
     const { leftovers, ...target } = action;
     const failure = await this.runners[runnerKey(action)].stop(leftovers === true ? { ...target, lastTree: this.deps.store.session(action.sessionId)?.lastTree ?? [] } : target, action.reason);
+    if (failure?.cancelled === true) {
+      this.send({ type: 'release-cancelled', sessionId: action.sessionId });
+      return;
+    }
 
     if (failure === null) {
       if (leftovers === true) {

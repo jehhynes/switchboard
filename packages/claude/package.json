@@ -20,7 +20,8 @@
   },
   "dependencies": {
     "@switchboard/core": "*",
-    "@switchboard/holder": "*"
+    "@switchboard/holder": "*",
+    "@switchboard/conversation": "*"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

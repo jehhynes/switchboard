@@ -22,7 +22,13 @@ export function waitsOnPermission(session: { state: Session['state']; stateDetai
 }
 
 /** `triage` is the work item's latest triage, or null when it has none. A caller without `stateDetail` gets no permission mark. */
-type Grouped = Pick<WorkItem, 'status' | 'readyAt'> & { sessions: (Pick<Session, 'state' | 'outcome'> & { stateDetail?: string | null })[]; triage: Pick<Triage, 'error'> | null };
+type Grouped = Pick<WorkItem, 'status' | 'readyAt'> & { sessions: (Pick<Session, 'state' | 'outcome' | 'promptless'> & { stateDetail?: string | null })[]; triage: Pick<Triage, 'error'> | null };
+
+/** Hosted conversations remain open while their session waits for another message. */
+function idleConversation(item: Grouped): boolean {
+  const latest = item.sessions.at(-1);
+  return item.status === 'running' && latest?.promptless === true && (latest.state === 'idle' || latest.state === 'ended');
+}
 
 /** The work item failed because its latest triage failed, so Retry triages it again and it waits in Unstarted (PRD R27, R34). */
 export function failedAtTriage(item: Pick<WorkItem, 'status'> & { triage: Pick<Triage, 'error'> | null }): boolean {
@@ -78,8 +84,9 @@ export function groupOf(item: Grouped): Group {
   return item.status === 'queued' ? 'unstarted' : 'progress';
 }
 
-/** Whose turn it is in the three active groups (PRD R27): the operator's on work blocked on them or ready for their review, else the agent's. */
+/** Whose turn it is (PRD R27): idle hosted conversations have none; blocked work and review wait on the operator. */
 export function turnOf(item: Grouped): 'operator' | 'agent' | null {
+  if (idleConversation(item)) return null;
   switch (groupOf(item)) {
     case 'blocked':
       return 'operator';
@@ -113,7 +120,7 @@ export function reviewOrder(a: Pick<WorkItem, 'id' | 'readyAt' | 'orderAt'>, b: 
 }
 
 /** What differs between rows of one group (PRD R27): what the operator must do, the working phase, or how the work ended. */
-export type Mark = 'question' | 'permission' | 'send' | 'review' | 'finished' | 'blocked' | 'failed' | 'queued' | 'setup' | 'running' | 'triaging' | 'done-session' | 'done-operator' | 'done-unassigned';
+export type Mark = 'question' | 'permission' | 'send' | 'review' | 'finished' | 'blocked' | 'failed' | 'queued' | 'setup' | 'running' | 'idle' | 'triaging' | 'done-session' | 'done-operator' | 'done-unassigned';
 
 export const DONE_WORDS: Record<DoneReason, string> = { session: 'Finished by the session', operator: 'Marked done', unassigned: 'Left the assigned state' };
 
@@ -129,6 +136,7 @@ export const MARK_TITLES: Record<Mark, string> = {
   queued: 'Queued',
   setup: 'Setting up',
   running: 'Running',
+  idle: 'Idle',
   triaging: 'Triaging',
   'done-session': DONE_WORDS.session,
   'done-operator': DONE_WORDS.operator,
@@ -147,6 +155,7 @@ export const MARK_GLYPHS: Record<Mark, string> = {
   queued: '\u{ea82}', // clock
   setup: '\u{eb6d}', // tools
   running: '\u{eb19}', // loading
+  idle: '\u{ebb5}', // circle-large-outline
   triaging: '\u{eb19}', // loading
   'done-session': '\u{eab2}', // check
   'done-operator': '\u{eb99}', // account
@@ -171,6 +180,8 @@ export function markOf(item: Grouped & Pick<WorkItem, 'doneReason'> & { approval
       if (item.status === 'awaiting-approval') {
         return item.approvalSends ? 'send' : 'review';
       }
+
+      if (idleConversation(item)) return 'idle';
 
       return item.status === 'finished' ? 'finished' : item.status === 'queued' ? 'queued' : item.status === 'setup' ? 'setup' : 'running';
     case 'unstarted':

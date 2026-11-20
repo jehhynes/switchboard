@@ -154,6 +154,17 @@ describe('Debriefs', () => {
       .split('\n')
       .map((line) => JSON.parse(line) as Record<string, unknown>);
 
+  it('debriefs paginated app-server history without a rollout or exec process, and skips expired sessions before reading', async () => {
+    sessions=[session({provider:'codex',execution:'app-server',nativeSessionId:'native-thread',shortId:'native-thread',state:'idle',stateAt:WRITTEN,endedAt:null})];
+    const calls:string[]=[];
+    const appServer={history:async(thread:string)=>{calls.push(`history:${thread}`);return [{id:'native-turn',status:'completed',completedAt:WRITTEN/1000,items:Array.from({length:10},()=>({type:'commandExecution'}))}];},run:async(thread:string,prompt:string)=>{calls.push(`run:${thread}`);expect(prompt).toBe('Report friction in the whole conversation. Subagents: none');return {text:JSON.stringify({friction:[]})};}};
+    await debriefs({appServer}).scan();
+    expect(calls).toEqual(['history:native-thread','run:native-thread']);
+    expect(codexForks).toEqual([]);expect(forks).toEqual([]);
+    expect(readDebriefState(dir)?.sessions['native-thread']?.throughMessageUuid).toBe('native-turn');
+    now=WRITTEN+61*MINUTE;calls.length=0;await debriefs({appServer}).scan();expect(calls).toEqual([]);
+  });
+
   it('forks a session 45 minutes after its last turn, logs the answer, and records the range so a restarted hub does not repeat it', async () => {
     await debriefs().scan();
 

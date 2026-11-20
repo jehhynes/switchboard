@@ -203,6 +203,8 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
         return history.open(command as unknown as HistoryMessage);
       case 'terminal':
         return openTerminal(keeper.current(), terminalCommandOf(command));
+      case 'conversation':
+        return vscode.commands.executeCommand('switchboard.conversation.focus');
       case 'openUrl':
         return openLink(String(command['url']));
       case 'openTabs':

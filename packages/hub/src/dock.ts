@@ -137,6 +137,7 @@ export interface DockTerminal {
   active: boolean;
   /** A Code Mode session's attach terminal (PRD R95); the hub runs `hub.js` with `sessions.nodePath`. */
   codeMode?: true;
+  execution?: 'app-server';
   executable?: string;
 }
 
@@ -192,7 +193,7 @@ export interface DockRow {
   details: DockText[];
   /** The left stripe's colour (PRD R27): failed, blocked or asking, the operator's turn, or none on the agent's turn. */
   stripe: 'error' | 'warning' | 'turn' | null;
-  /** Whose turn it is on an unsnoozed row in Blocked on you, Ready for review or In progress; null elsewhere. F8 visits `operator` rows (PRD R73). */
+  /** Whose turn it is on an unsnoozed active row; null for idle hosted conversations and other groups. F8 visits `operator` rows (PRD R73). */
   turn: 'operator' | 'agent' | null;
   /** A Ready for review row on the agent's turn, which the dock dims (PRD R27). */
   dim: boolean;
@@ -606,6 +607,8 @@ export function openOf(item: WorkItemView, windows: string): DockOpen | null {
   const latest = item.sessions.at(-1) ?? null;
   const active = activeSession(item);
 
+  if (latest?.execution === 'app-server' && latest.nativeSessionId !== null) return { type: 'session', sessionId: latest.id, cwd: latest.cwd, provider: 'codex' };
+
   // A Code Mode session opens its attach terminal, which the hub sends the item window for this open, except during a turn that does not wait
   // on the operator (PRD R28, R95).
   if (latest?.codeMode === true) {
@@ -629,6 +632,11 @@ export function openOf(item: WorkItemView, windows: string): DockOpen | null {
 export function reviewOpenOf(item: WorkItemView, windows: string): DockOpen | null {
   const session = activeSession(item);
   const latest = item.sessions.at(-1) ?? null;
+  if (latest?.execution === 'app-server') {
+    if (item.status === 'awaiting-approval' || item.status === 'finished') return openOf(item, windows);
+    const command = menuTerminal(item, windows);
+    return command === null ? openOf(item, windows) : { type: 'terminal', ...command };
+  }
   const focus: DockOpen = item.focus === null ? { type: 'select' } : { type: 'url', url: item.focus };
   const terminal = (command: DockTerminal | null): DockOpen => (command === null ? focus : { type: 'terminal', ...command });
 
@@ -684,7 +692,7 @@ function menuTerminal(item: WorkItemView, windows: string): DockTerminal | null 
   const shortId = command['shortId'] as string | null;
   const args = shortId !== null ? ['attach', shortId] : provider === 'codex' ? ['resume', sessionId] : ['--resume', sessionId];
 
-  return { provider, sessionId, cwd: String(command['cwd']), args, ...terminalName(item, windows, sessionId.slice(0, 8)), handoff: null, active: command['active'] === true };
+  return { provider, sessionId, cwd: String(command['cwd']), args, ...terminalName(item, windows, sessionId.slice(0, 8)), handoff: null, active: command['active'] === true, ...(command['execution'] === 'app-server' ? { execution: 'app-server' as const } : {}) };
 }
 
 /** A Code Mode session's attach terminal, named by its Switchboard session ID (PRD R95). */

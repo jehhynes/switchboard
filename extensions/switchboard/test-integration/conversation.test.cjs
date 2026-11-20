@@ -22,6 +22,18 @@ async function until(what, why, within = 30_000) {
  * Code accepts the container, resolves the view in it and that the view follows this window's conversation stream.
  */
 describe('the Conversation view', () => {
+  it('focuses the shared view for a claimed Codex conversation and keeps native requests in its session model', async () => {
+    const extension = await vscode.extensions.getExtension('switchboard.switchboard').activate();
+    await extension.run({ type: 'conversation' });
+    await until(() => extension.conversation().connected, 'the claimed conversation did not connect');
+    const previous = extension.conversation();
+    const scope = { kind:'folder', key:'test-codex', folder:vscode.workspace.workspaceFolders[0].uri.fsPath, title:'Codex test', scopeGen:1, conversations:[{workItemId:41,title:'Codex test',primary:false,sessionId:'codex-test',state:'waiting',conversation:'full',unread:0}], workItemId:41,cwd:vscode.workspace.workspaceFolders[0].uri.fsPath,sessionId:'codex-test' };
+    const session = { id:'codex-test',kind:'task',title:'Codex test',provider:'codex',state:'waiting',waitingFor:'question',launch:'launch',current:true,conversation:'full',reason:null,persona:null,requests:[{id:'1:0',title:'Choose a color',kind:'question',questions:[{id:'color',question:'Which color?',options:['Red','Blue']}],decisions:[]}] };
+    extension.receiveConversation({type:'hello',scope,sessions:[session],items:[],more:false,status:null,unread:0,artifactsDir:null,artifacts:[]});
+    assert.deepStrictEqual(extension.conversation().session.requests, session.requests);
+    assert.strictEqual(extension.conversation().session.provider, 'codex');
+    extension.receiveConversation({type:'hello',scope:previous.scope,sessions:previous.session === null ? [] : [previous.session],items:previous.items,more:previous.more,status:previous.status,unread:previous.unread,artifactsDir:previous.artifactsDir,artifacts:previous.artifacts,voice:previous.voice,settings:previous.settings});
+  });
   it("is in the secondary side bar on this VS Code, resolves there, and shows this folder window's empty folder scope", async () => {
     const extension = await vscode.extensions.getExtension('switchboard.switchboard').activate();
     const [major, minor] = vscode.version.split('.').map(Number);

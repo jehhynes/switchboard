@@ -2,7 +2,7 @@
  * What became of a message typed from the view (architecture.md § Typing a message): `open` while it waits or is being typed, `sent` once the
  * transcript has it or Claude Code's input box no longer holds it, and `not-sent` when nothing was typed or Claude Code did not take it.
  */
-export type MessageDelivery = 'open' | 'sent' | 'not-sent';
+export type MessageDelivery = 'open' | 'sent' | 'not-sent' | 'uncertain';
 
 /** A message to a session: typed in its terminal and read from the transcript, or typed from the view (architecture.md § Conversation). */
 export interface ConversationMessage {
