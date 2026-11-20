@@ -252,6 +252,7 @@ export class VoiceService {
       mic: this.#dictation?.state ?? 'off',
       engine: this.deps.output.engine,
       device: this.#dictation === null ? this.#settings.outputDevice : this.#settings.inputDevice,
+      recognizer: this.#dictation?.recognizer ?? null,
       error: this.#dictation?.error ?? this.#error,
       ...(halfDuplex === null ? {} : { halfDuplex }),
     };

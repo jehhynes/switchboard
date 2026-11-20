@@ -2,6 +2,7 @@ import type { VoiceSettings } from '@switchboard/core/settings';
 import { ASR_RATE, pcmToSamples, Transcriber } from './asr.js';
 import { BargeIn, gate } from './barge.js';
 import type { AsrEngine } from './asr.js';
+import type { AsrDevice } from './sherpa.js';
 import type { MicUse } from './micUse.js';
 import type { Capture, CaptureStream } from './output.js';
 import { ENROLL_SECONDS } from './protocol.js';
@@ -162,6 +163,11 @@ export class Dictation {
   /** Why capture or recognition cannot run; null while they can. */
   get error(): string | null {
     return this.#error;
+  }
+
+  /** Where the recogniser loaded last runs, or null before one loads. */
+  get recognizer(): AsrDevice | null {
+    return this.#engine?.engine.device ?? null;
   }
 
   /** The operator turned the mic on or off. Turning it on starts again after the idle timeout or an error. */
@@ -379,7 +385,7 @@ export class Dictation {
   }
 
   #report(): void {
-    const text = `${this.state} ${this.#error ?? ''} ${this.halfDuplex ?? ''}`;
+    const text = `${this.state} ${this.recognizer ?? ''} ${this.#error ?? ''} ${this.halfDuplex ?? ''}`;
 
     if (text !== this.#reported) {
       this.#reported = text;

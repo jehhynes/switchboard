@@ -79,7 +79,7 @@ describe('the conversation state', () => {
   });
 
   it('keeps the voice state and the setting from hello and their events, and shows a playing reply\'s progress (architecture.md § Voice)', () => {
-    const voice = { enabled: true, here: true, mic: 'off' as const, speaking: null, speakReplies: true, error: null };
+    const voice = { enabled: true, here: true, mic: 'off' as const, speaking: null, speakReplies: true, error: null, recognizer: null };
     let state = applyEvent(EMPTY_CONVERSATION, hello([reply('r1', T0, { speak: 'Done.' })], { voice, settings: { expandReplies: true } }));
 
     expect(state.voice).toEqual(voice);
@@ -96,7 +96,7 @@ describe('the conversation state', () => {
   });
 
   it('shows the voice in the status bar only as this window sees it, and finds the reply Replay speaks again', () => {
-    const voice = { enabled: true, here: true, mic: 'off' as const, speaking: null, speakReplies: true, error: null };
+    const voice = { enabled: true, here: true, mic: 'off' as const, speaking: null, speakReplies: true, error: null, recognizer: null };
 
     expect(voiceStatus(null)).toBeNull();
     expect(voiceStatus({ ...voice, enabled: false })).toBeNull();
@@ -700,7 +700,7 @@ describe('unread replies and statuses', () => {
 });
 
 describe('speech in the view (architecture.md § Voice)', () => {
-  const VOICE = { enabled: true, here: true, mic: 'off' as const, speaking: null, speakReplies: true, error: null };
+  const VOICE = { enabled: true, here: true, mic: 'off' as const, speaking: null, speakReplies: true, error: null, recognizer: null };
   const state = (items: ItemView[], patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items, more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, voice: VOICE, settings: { expandReplies: false }, ...patch });
 
   function page() {
@@ -889,6 +889,10 @@ describe('speech in the view (architecture.md § Voice)', () => {
     const halfDuplex = { ...VOICE, halfDuplex: 'no echo cancellation on Remote Audio' };
     expect(renderMicButton({ ...halfDuplex, mic: 'listening' })).toContain('title="Mic on: listening. Dictation sends when you stop talking. Listening pauses while a reply plays (no echo cancellation on Remote Audio), so talking over it does not stop it. Click to turn the mic off."');
     expect(renderMicButton({ ...halfDuplex, mic: 'hearing' })).toContain('title="Mic on: hearing you. Listening pauses while a reply plays (no echo cancellation on Remote Audio), so talking over it does not stop it. Click to turn the mic off."');
+    // Where recognition runs, once the recogniser loaded.
+    expect(renderMicButton({ ...VOICE, mic: 'listening', recognizer: 'gpu' })).toContain('title="Mic on: listening. Dictation sends when you stop talking. Speech recognition runs on the GPU. Click to turn the mic off."');
+    expect(renderMicButton({ ...VOICE, mic: 'hearing', recognizer: 'cpu' })).toContain('Speech recognition runs on the CPU.');
+    expect(renderMicButton({ ...VOICE, mic: 'listening' })).not.toContain('Speech recognition');
   });
 });
 
@@ -929,7 +933,7 @@ describe('the composer', () => {
 
     try {
       const { input, posted, show, press, sent, host } = page();
-      const voice = { enabled: true, here: true, mic: 'listening' as const, speaking: null, speakReplies: true, error: null };
+      const voice = { enabled: true, here: true, mic: 'listening' as const, speaking: null, speakReplies: true, error: null, recognizer: null };
       const post = (data: Record<string, unknown>) => window.dispatchEvent(new MessageEvent('message', { data }));
       const composerPosts = () => posted.filter((message) => message.type === 'composer');
 

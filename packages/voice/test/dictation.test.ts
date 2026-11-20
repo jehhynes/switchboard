@@ -142,9 +142,10 @@ const kinds = (sent: Sent[]): string[] =>
 
 describe('Dictation', () => {
   it('captures only once the watcher says no other app records, and loads the recogniser with the target repository\'s terms', async () => {
-    const { capture, dictation, watch, termsAsked, loads } = setup();
+    const { capture, dictation, watch, termsAsked, loads, engine, changed } = setup();
 
-    expect(dictation.state).toBe('off');
+    engine.device = 'gpu';
+    expect([dictation.state, dictation.recognizer]).toEqual(['off', null]);
     dictation.target(1, 's1', 'acme/app');
     dictation.mic(true);
     await settle();
@@ -157,6 +158,9 @@ describe('Dictation', () => {
     expect(termsAsked).toEqual(['acme/app']);
     expect(loads).toEqual([['Switchboard', 'acme/app']]);
     expect(dictation.state).toBe('listening');
+    // Where the loaded recogniser runs, for the audio report.
+    expect(dictation.recognizer).toBe('gpu');
+    expect(changed()).toBeGreaterThan(0);
   });
 
   it('turns live words into pieces after their pause and ends the utterance after the end-of-message pause, as final', async () => {

@@ -211,7 +211,7 @@ describe('the packaged voice process (architecture.md § Voice)', () => {
     await until(() => (messages.length >= 2 ? true : null), 'greeting');
     expect(messages).toEqual([
       { type: 'active', gen: 0, sessionId: null, reason: 'gone' },
-      { type: 'audio', mic: 'off', engine: 'decibri', device: null, error: null },
+      { type: 'audio', mic: 'off', engine: 'decibri', device: null, recognizer: null, error: null },
     ]);
 
     const closed = new Promise((resolve) => client.onClose(resolve));

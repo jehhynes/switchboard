@@ -57,7 +57,7 @@ describe('voice server and client', () => {
     client.send({ type: 'talk-here', sessionId: 's1' });
     await until(() => received.length === 2);
     expect(received).toEqual([{ type: 'stop' }, { type: 'talk-here', sessionId: 's1' }]);
-    server.send({ type: 'audio', mic: 'off', engine: 'decibri', device: null, error: null });
+    server.send({ type: 'audio', mic: 'off', engine: 'decibri', device: null, recognizer: null, error: null });
     await until(() => messages.length === 2);
 
     const closed: Error[] = [];

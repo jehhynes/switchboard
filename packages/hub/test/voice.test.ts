@@ -312,7 +312,7 @@ describe('VoiceControl', () => {
     off.control.update();
     await off.settle();
     expect(off.connections).toEqual([]);
-    expect(off.control.view('k1')).toEqual({ enabled: false, here: false, mic: 'off', speaking: null, speakReplies: true, error: null });
+    expect(off.control.view('k1')).toEqual({ enabled: false, here: false, mic: 'off', speaking: null, speakReplies: true, error: null, recognizer: null });
 
     const failing = setup();
 
@@ -520,11 +520,15 @@ describe('VoiceControl', () => {
     control.update();
     await settle();
     connections[0]!.receive({ type: 'active', gen: 1, sessionId: 's1', reason: 'focus' });
-    connections[0]!.receive({ type: 'audio', mic: 'off', engine: 'decibri', device: null, error: 'no device' });
+    connections[0]!.receive({ type: 'audio', mic: 'off', engine: 'decibri', device: null, recognizer: null, error: 'no device' });
     // Playback trouble is the voice's: the dock shows it, no window does.
     expect(control.view('k1').error).toBeNull();
     expect(control.view('k2').error).toBeNull();
     expect(control.dockError()).toBe('no device');
+    // Where recognition runs goes only to the window the voice is in.
+    connections[0]!.receive({ type: 'audio', mic: 'listening', engine: 'decibri', device: null, recognizer: 'gpu', error: 'no device' });
+    expect([control.view('k1').recognizer, control.view('k2').recognizer]).toEqual(['gpu', null]);
+    expect(notified.filter((one) => one.type === 'voice' && one.key === 'k1').at(-1)).toMatchObject({ payload: { voice: { recognizer: 'gpu' } } });
 
     setSettings({ expandReplies: true, voice: 'cedar' });
     control.settingsChanged();

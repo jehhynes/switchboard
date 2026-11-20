@@ -254,20 +254,21 @@ export function renderMicButton(voice: VoiceView | null): string {
     return button('off', 'Mic off: the voice is not in this window. Click to talk here with the mic on.', true, 'elsewhere');
   }
 
-  // Half-duplex capture (architecture.md § Dictation) does not listen while the voice speaks.
+  // Where recognition runs, once the recogniser loaded, and half-duplex capture, which does not listen while the voice speaks (architecture.md § Dictation).
+  const where = voice.recognizer === null ? '' : ` Speech recognition runs on the ${voice.recognizer === 'gpu' ? 'GPU' : 'CPU'}.`;
   const halfDuplex = voice.halfDuplex === undefined ? '' : ` Listening pauses while a reply plays (${voice.halfDuplex}), so talking over it does not stop it.`;
 
   switch (voice.mic) {
     case 'listening':
-      return button('on', `Mic on: listening. Dictation sends when you stop talking.${halfDuplex} Click to turn the mic off.`, false, 'listening');
+      return button('on', `Mic on: listening. Dictation sends when you stop talking.${where}${halfDuplex} Click to turn the mic off.`, false, 'listening');
     case 'hearing':
-      return button('filled', `Mic on: hearing you.${halfDuplex} Click to turn the mic off.`, false, 'hearing');
+      return button('filled', `Mic on: hearing you.${where}${halfDuplex} Click to turn the mic off.`, false, 'hearing');
     case 'typing':
-      return button('paused', 'Mic paused while you type: dictation goes on when you send or leave the box. Click to turn the mic off.', false, 'paused');
+      return button('paused', `Mic paused while you type: dictation goes on when you send or leave the box.${where} Click to turn the mic off.`, false, 'paused');
     case 'starting':
       return button('on', 'Mic starting. Click to turn it off.', false, 'starting');
     case 'paused-other-app':
-      return button('paused', 'Mic paused: another app is using the microphone. Click to turn the mic off.', false, 'paused');
+      return button('paused', `Mic paused: another app is using the microphone.${where} Click to turn the mic off.`, false, 'paused');
     case 'unavailable':
       // The mic is on but cannot run: a click turns it off, and turning it on again tries again.
       return button('off', `Mic on but unavailable: ${voice.error ?? 'unknown error'} Click to turn the mic off.`, false, 'unavailable');

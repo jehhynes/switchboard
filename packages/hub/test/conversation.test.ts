@@ -997,7 +997,7 @@ describe('ConversationService send', () => {
   function fakeVoice(spoken = { spoken: true, expressive: false }) {
     const calls: string[] = [];
     const voice: ConversationVoice = {
-      shown: (key) => ({ enabled: true, here: key === 'k1', mic: 'off', speaking: null, speakReplies: true, error: null }),
+      shown: (key) => ({ enabled: true, here: key === 'k1', mic: 'off', speaking: null, speakReplies: true, error: null, recognizer: null }),
       settings: () => ({ expandReplies: true }),
       spokenFor: (sessionId, command) => {
         calls.push(`spokenFor ${sessionId} ${command}`);

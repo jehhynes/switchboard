@@ -76,10 +76,10 @@ describe('VoiceService', () => {
 
     state = 'listening';
     hooks.changed();
-    expect(sent.at(-1)).toEqual({ type: 'audio', mic: 'listening', engine: 'fake', device: 'Headset', error: null });
+    expect(sent.at(-1)).toEqual({ type: 'audio', mic: 'listening', engine: 'fake', device: 'Headset', recognizer: null, error: null });
     halfDuplex = 'no echo cancellation on Remote Audio';
     hooks.changed();
-    expect(sent.at(-1)).toEqual({ type: 'audio', mic: 'listening', engine: 'fake', device: 'Headset', error: null, halfDuplex: 'no echo cancellation on Remote Audio' });
+    expect(sent.at(-1)).toEqual({ type: 'audio', mic: 'listening', engine: 'fake', device: 'Headset', recognizer: null, error: null, halfDuplex: 'no echo cancellation on Remote Audio' });
     hooks.send({ type: 'words', gen: 1, utteranceId: 'u', sessionId: 's1', text: 'hi' });
     expect(sent.at(-1)).toMatchObject({ type: 'words', text: 'hi' });
 
@@ -119,7 +119,7 @@ describe('VoiceService', () => {
 
     expect(service.greeting()).toEqual([
       { type: 'active', gen: 0, sessionId: null, reason: 'gone' },
-      { type: 'audio', mic: 'off', engine: 'fake', device: null, error: null },
+      { type: 'audio', mic: 'off', engine: 'fake', device: null, recognizer: null, error: null },
     ]);
     service.receive({ type: 'settings', settings: { ...DEFAULT_SETTINGS.voice, enabled: true, voice: 'cedar', speed: 1.5, outputDevice: 'USB' } });
     expect(tts.configured).toEqual([{ voice: 'cedar', style: 'none', speed: 1.5, expressive: false }]);

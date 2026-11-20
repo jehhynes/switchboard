@@ -258,7 +258,7 @@ describe('VoiceControl dictation', () => {
     busy.add('s1');
     piece('one');
     piece('two');
-    connection.receive({ type: 'audio', mic: 'paused-other-app', engine: 'decibri', device: null, error: null });
+    connection.receive({ type: 'audio', mic: 'paused-other-app', engine: 'decibri', device: null, recognizer: null, error: null });
     advance(FRAGMENT_FLUSH_MS + 2_000);
     expect(dictated).toEqual([]);
     expect(control.dictated('k1', 's2')).toBeNull();
@@ -287,7 +287,7 @@ describe('VoiceControl dictation', () => {
     control.delivered({ id: 'm1', sessionId: 's1', origin: 'voice', delivery: 'sent', error: null, pieces: [{ text: 'hi', score: null, f0: null, dropped: false }] } as ConversationMessage);
     control.delivered({ id: 'm2', sessionId: 's1', origin: 'typed', delivery: 'sent', error: null } as ConversationMessage);
     expect(fragments()).toEqual([expect.objectContaining({ event: 'sent', messageId: 'm1', text: 'hi' })]);
-    connection.receive({ type: 'audio', mic: 'unavailable', engine: 'decibri', device: null, error: 'No speech recognition model in m.' });
+    connection.receive({ type: 'audio', mic: 'unavailable', engine: 'decibri', device: null, recognizer: null, error: 'No speech recognition model in m.' });
     expect(control.view('k1')).toMatchObject({ here: true, mic: 'unavailable', error: 'No speech recognition model in m.' });
     expect(control.view('k2')).toMatchObject({ here: false, mic: 'off', error: null });
     expect(control.view('k1')).not.toHaveProperty('halfDuplex');
@@ -295,11 +295,11 @@ describe('VoiceControl dictation', () => {
     // Half-duplex capture says why only in the window the voice is in, and the window hears of it when it changes.
     const sent = notified.length;
 
-    connection.receive({ type: 'audio', mic: 'listening', engine: 'decibri', device: null, error: null, halfDuplex: 'no echo cancellation on Remote Audio' });
+    connection.receive({ type: 'audio', mic: 'listening', engine: 'decibri', device: null, recognizer: null, error: null, halfDuplex: 'no echo cancellation on Remote Audio' });
     expect(control.view('k1')).toMatchObject({ here: true, mic: 'listening', halfDuplex: 'no echo cancellation on Remote Audio' });
     expect(control.view('k2')).not.toHaveProperty('halfDuplex');
     expect(notified.slice(sent)).toEqual([expect.objectContaining({ key: 'k1', type: 'voice', payload: { voice: expect.objectContaining({ halfDuplex: 'no echo cancellation on Remote Audio' }) } })]);
-    connection.receive({ type: 'audio', mic: 'listening', engine: 'decibri', device: null, error: null });
+    connection.receive({ type: 'audio', mic: 'listening', engine: 'decibri', device: null, recognizer: null, error: null });
     expect(control.view('k1')).not.toHaveProperty('halfDuplex');
     expect(notified.at(-1)).toMatchObject({ key: 'k1', type: 'voice' });
     expect(notified.at(-1)!.payload.voice).not.toHaveProperty('halfDuplex');

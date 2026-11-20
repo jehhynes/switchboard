@@ -25,6 +25,8 @@ export interface VoiceView {
    * while the voice plays, and talking over a reply does not stop it (architecture.md § Dictation).
    */
   halfDuplex?: string;
+  /** Where speech recognition runs, here once the recogniser loaded, else null (architecture.md § Dictation). */
+  recognizer: 'gpu' | 'cpu' | null;
 }
 
 /** The key dictation uses for the target's session terminal window, which no window key can equal (architecture.md § Voice). */
@@ -177,6 +179,8 @@ export class VoiceControl {
   #mic: MicState = 'off';
   /** Why the open capture cancels no echo, as the process last said; null while it does or nothing captures. */
   #halfDuplex: string | null = null;
+  /** Where speech recognition runs, as the process last said. */
+  #recognizer: 'gpu' | 'cpu' | null = null;
   readonly #composers = new Map<string, Composer>();
   readonly #heard = new Map<string, Heard>();
   /** The window the voice last moved to by its own command, which hears dictation when no focused window shows the target. */
@@ -227,6 +231,7 @@ export class VoiceControl {
       speaking: session === null ? null : (this.#playing.get(session) ?? null),
       speakReplies: this.speakReplies,
       error: here && this.#mic === 'unavailable' ? this.#audioError : null,
+      recognizer: here ? this.#recognizer : null,
       ...(here && this.#halfDuplex !== null ? { halfDuplex: this.#halfDuplex } : {}),
     };
   }
@@ -1110,9 +1115,10 @@ export class VoiceControl {
         this.#enrollmentChanged(message.state, message.error);
         return;
       case 'audio':
-        if (message.mic !== this.#mic || (message.halfDuplex ?? null) !== this.#halfDuplex) {
+        if (message.mic !== this.#mic || (message.halfDuplex ?? null) !== this.#halfDuplex || message.recognizer !== this.#recognizer) {
           this.#mic = message.mic;
           this.#halfDuplex = message.halfDuplex ?? null;
+          this.#recognizer = message.recognizer;
           this.viewsChanged();
         }
 
@@ -1250,6 +1256,7 @@ export class VoiceControl {
     this.#stopFlush();
     this.#mic = 'off';
     this.#halfDuplex = null;
+    this.#recognizer = null;
     this.#target = { gen: this.#target.gen, sessionId: null };
     this.viewsChanged();
   }
