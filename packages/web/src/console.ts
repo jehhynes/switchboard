@@ -132,8 +132,11 @@ export function mountConsole(host: HTMLElement, createTerm: (options: TermOption
   let sizeWanted = false;
   let sending = false;
   let resizeTimer: ReturnType<typeof setTimeout> | null = null;
-  /** A cell's size at `CONSOLE_FONT_PX`, measured from the drawn screen once it has one. */
+  /** A cell's size at `CONSOLE_FONT_PX`, measured from the drawn screen while it is drawn at that size. */
   let cell: { width: number; height: number } | null = null;
+  /** The drawing area the console last fitted to, and the size it last gave the session. */
+  let fitted: { width: number; height: number } | null = null;
+  let sentSize: { cols: number; rows: number } | null = null;
 
   term.open(screen);
 
@@ -205,23 +208,50 @@ export function mountConsole(host: HTMLElement, createTerm: (options: TermOption
     reconnect.hidden = !ended;
   };
 
-  /** Measures a cell at the console's own font from the drawn screen, or estimates it before the screen is drawn. */
+  /**
+   * Measures a cell at the console's own font from the drawn screen, or estimates it before the screen is drawn. It measures only while the
+   * screen is drawn at `CONSOLE_FONT_PX`: a smaller font's cells do not scale exactly, and a cell measured at the font the last fit chose
+   * could choose another font at the next fit, and back again.
+   */
   const measure = (): { width: number; height: number } => {
     const drawn = term.element?.querySelector<HTMLElement>('.xterm-screen')?.getBoundingClientRect();
-    const font = term.options.fontSize ?? CONSOLE_FONT_PX;
 
-    if (drawn !== undefined && drawn.width > 0 && drawn.height > 0) {
-      cell = { width: ((drawn.width / term.cols) * CONSOLE_FONT_PX) / font, height: ((drawn.height / term.rows) * CONSOLE_FONT_PX) / font };
+    if ((term.options.fontSize ?? CONSOLE_FONT_PX) === CONSOLE_FONT_PX && drawn !== undefined && drawn.width > 0 && drawn.height > 0) {
+      cell = { width: drawn.width / term.cols, height: drawn.height / term.rows };
     }
 
     return cell ?? { width: CONSOLE_FONT_PX * 0.6, height: Math.ceil(CONSOLE_FONT_PX * 1.2) };
   };
 
-  /** Scales the font so the session's columns fit the pane, never above the console's own size. */
+  /**
+   * The pane's drawing area: the screen less its padding and its scrollbars. The screen keeps the side scrollbar's gutter whether or not
+   * it shows (`scrollbar-gutter: stable` in page.css), and the bottom scrollbar's height is counted in, so neither scrollbar coming and
+   * going as the console redraws changes the area it fits to.
+   */
+  const area = (): { width: number; height: number } => {
+    const style = getComputedStyle(screen);
+    const px = (value: string): number => Number.parseFloat(value) || 0;
+
+    return {
+      width: Math.max(0, screen.clientWidth - px(style.paddingLeft) - px(style.paddingRight)),
+      height: Math.max(0, screen.offsetHeight - px(style.borderTopWidth) - px(style.borderBottomWidth) - px(style.paddingTop) - px(style.paddingBottom)),
+    };
+  };
+
+  /**
+   * Scales the font so the session's columns fit the pane, never above the console's own size. A smaller font's cells can be wider than
+   * the 13 px cell scaled down, so it steps down from the scaled font while the drawn screen is still wider than the pane.
+   */
   const fit = (): void => {
-    const font = fittedFont(screen.clientWidth, term.cols, measure().width);
+    const width = area().width;
+    let font = fittedFont(width, term.cols, measure().width);
 
     if (term.options.fontSize !== font) {
+      term.options.fontSize = font;
+    }
+
+    while (font > CONSOLE_MIN_FONT_PX && width > 0 && (term.element?.querySelector<HTMLElement>('.xterm-screen')?.getBoundingClientRect().width ?? 0) > width) {
+      font--;
       term.options.fontSize = font;
     }
 
@@ -229,7 +259,11 @@ export function mountConsole(host: HTMLElement, createTerm: (options: TermOption
   };
 
   /** The size the session takes while the console types: the cells that fill the pane at the console's own font. */
-  const ownSize = (): { cols: number; rows: number } => fittedSize(screen.clientWidth, screen.clientHeight, measure());
+  const ownSize = (): { cols: number; rows: number } => {
+    const { width, height } = area();
+
+    return fittedSize(width, height, measure());
+  };
 
   async function flush(): Promise<void> {
     if (sending || disposed || (pending === '' && !sizeWanted)) {
@@ -250,9 +284,14 @@ export function mountConsole(host: HTMLElement, createTerm: (options: TermOption
     pending = pending.slice(cut);
     sizeWanted = false;
 
-    const why = await options.type(data, ownSize());
+    const size = ownSize();
+    const why = await options.type(data, size);
 
     sending = false;
+
+    if (why === null) {
+      sentSize = size;
+    }
 
     if (why !== null) {
       // Keys after refused ones are not typed either, so the session never gets part of what the operator typed out of order.
@@ -284,25 +323,76 @@ export function mountConsole(host: HTMLElement, createTerm: (options: TermOption
   term.textarea?.addEventListener('focus', onFocus);
   term.textarea?.addEventListener('blur', onBlur);
 
+  /** Gives the session the console's size `CONSOLE_RESIZE_MS` after the pane changes, while it types, if the pane now holds other cells. */
+  const resizeLater = (): void => {
+    if (!typing) {
+      return;
+    }
+
+    if (resizeTimer !== null) {
+      clearTimeout(resizeTimer);
+    }
+
+    resizeTimer = setTimeout(() => {
+      resizeTimer = null;
+
+      const size = ownSize();
+
+      // The session is resized only when the pane, shown, now holds other cells than it was given.
+      if (typing && area().width > 0 && (sentSize === null || size.cols !== sentSize.cols || size.rows !== sentSize.rows)) {
+        sizeWanted = true;
+        void flush();
+      }
+    }, CONSOLE_RESIZE_MS);
+  };
+
   const resized =
     typeof ResizeObserver === 'function'
       ? new ResizeObserver(() => {
-          fit();
+          // The observer also reports the console's own redraws, such as a scrollbar showing; only a new drawing area refits it.
+          const now = area();
 
-          if (typing) {
-            if (resizeTimer !== null) {
-              clearTimeout(resizeTimer);
-            }
-
-            resizeTimer = setTimeout(() => {
-              sizeWanted = true;
-              void flush();
-            }, CONSOLE_RESIZE_MS);
+          if (fitted !== null && now.width === fitted.width && now.height === fitted.height) {
+            return;
           }
+
+          fitted = now;
+          fit();
+          resizeLater();
         })
       : null;
 
   resized?.observe(screen);
+
+  // A new display scale changes xterm.js's cells but not the pane, which the observer would not report. Once xterm.js has measured the new
+  // scale, the console measures a cell at its own font again, without drawing in between, and refits.
+  let scale: MediaQueryList | null = null;
+  let scaleTimer: ReturnType<typeof setTimeout> | null = null;
+  const watchScale = (): void => {
+    scale?.removeEventListener('change', rescaled);
+    scale = typeof matchMedia === 'function' ? matchMedia(`(resolution: ${devicePixelRatio}dppx)`) : null;
+    scale?.addEventListener('change', rescaled);
+  };
+  function rescaled(): void {
+    watchScale();
+
+    if (scaleTimer !== null) {
+      clearTimeout(scaleTimer);
+    }
+
+    scaleTimer = setTimeout(() => {
+      scaleTimer = null;
+
+      if (!disposed) {
+        term.options.fontSize = CONSOLE_FONT_PX;
+        measure();
+        fit();
+        resizeLater();
+      }
+    }, 0);
+  }
+
+  watchScale();
 
   const end = (why: string | null): void => {
     if (ended) {
@@ -355,6 +445,11 @@ export function mountConsole(host: HTMLElement, createTerm: (options: TermOption
       disposed = true;
       source?.close();
       resized?.disconnect();
+      scale?.removeEventListener('change', rescaled);
+
+      if (scaleTimer !== null) {
+        clearTimeout(scaleTimer);
+      }
 
       if (resizeTimer !== null) {
         clearTimeout(resizeTimer);

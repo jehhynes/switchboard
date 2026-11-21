@@ -543,5 +543,6 @@ button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }
 .console.typing .console-state { color: var(--vscode-foreground); }
 .console-size { margin-left: auto; font-variant-numeric: tabular-nums; }
 .console-reconnect { padding: 2px 8px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 2px; color: var(--vscode-button-secondaryForeground, var(--vscode-foreground)); background: var(--vscode-button-secondaryBackground, #313131); font: inherit; cursor: pointer; }
-.console-screen { flex: 1; min-height: 0; overflow: auto; padding: 4px 8px; }
+/* The side scrollbar's gutter stays whether or not it shows, so the console's own redraws never change the width it fits to. */
+.console-screen { flex: 1; min-height: 0; overflow: auto; scrollbar-gutter: stable; padding: 4px 8px; }
 .console-note { margin: 0; padding: 6px 10px; font-size: 12px; color: var(--vscode-errorForeground, #f85149); }

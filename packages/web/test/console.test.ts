@@ -324,6 +324,208 @@ describe('the console', () => {
   });
 });
 
+/**
+ * A browser's layout of the console's screen, enough to show a resize loop: its padding and gutter come from page.css, the side scrollbar
+ * shows while the drawn screen is taller than the pane, the bottom one while it is wider, and the observer reports each change of the
+ * screen's content box, as a browser's does, including the changes the console's own redraws cause.
+ */
+function laidOut(box: { width: number; height: number }) {
+  const style = document.createElement('style');
+
+  style.textContent = PAGE_ASSETS['page.css']!.body;
+  document.head.replaceChildren(style);
+
+  let report: (() => void) | null = null;
+  const scaled: Array<() => void> = [];
+  const display = { scale: 1 };
+
+  vi.stubGlobal('matchMedia', () => ({ addEventListener: (_type: string, listener: () => void) => scaled.push(listener), removeEventListener: (_type: string, listener: () => void) => scaled.splice(scaled.indexOf(listener), 1) }));
+
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      constructor(callback: () => void) {
+        report = callback;
+      }
+
+      observe(): void {}
+
+      disconnect(): void {
+        report = null;
+      }
+    },
+  );
+
+  const refusals = { left: 0 };
+  const type: ConsoleOptions['type'] = async (_data, size) => {
+    if (refusals.left > 0) {
+      refusals.left--;
+      return 'The session is busy.';
+    }
+
+    queueMicrotask(() => source().emit('size', size));
+    return null;
+  };
+  const { host, term, typed, source, console } = mounted(type);
+  const screen = host.querySelector<HTMLElement>('.console-screen')!;
+  const drawn = document.createElement('div');
+  const SCROLLBAR = 15;
+  // A cell does not scale exactly with the font, as hinted fonts do.
+  const cellWidth = (): number => Math.floor((term.options.fontSize ?? CONSOLE_FONT_PX) * 0.55 * 2 * display.scale) / 2;
+  const cellHeight = (): number => Math.ceil((term.options.fontSize ?? CONSOLE_FONT_PX) * 1.2);
+  const layout = () => {
+    const css = getComputedStyle(screen);
+    const padX = parseFloat(css.paddingLeft) + parseFloat(css.paddingRight);
+    const padY = parseFloat(css.paddingTop) + parseFloat(css.paddingBottom);
+    const width = term.cols * cellWidth();
+    const height = term.rows * cellHeight();
+    const side = height > box.height - padY;
+    const clientWidth = box.width - (side || css.scrollbarGutter === 'stable' ? SCROLLBAR : 0);
+    const bottom = width > clientWidth - padX;
+
+    return { clientWidth, clientHeight: box.height - (bottom ? SCROLLBAR : 0), padX, padY, width, height };
+  };
+
+  drawn.className = 'xterm-screen';
+  term.element!.append(drawn);
+  drawn.getBoundingClientRect = () => ({ width: term.cols * cellWidth(), height: term.rows * cellHeight() }) as DOMRect;
+  Object.defineProperty(screen, 'clientWidth', { get: () => layout().clientWidth });
+  Object.defineProperty(screen, 'clientHeight', { get: () => layout().clientHeight });
+  Object.defineProperty(screen, 'offsetHeight', { get: () => box.height });
+
+  let reported = '';
+  let reports = 0;
+  /** Delivers the observer's reports until the content box stops changing, at most 50. */
+  const settle = (): void => {
+    for (let index = 0; index < 50; index++) {
+      const now = layout();
+      const content = `${now.clientWidth - now.padX}x${now.clientHeight - now.padY}`;
+
+      if (content === reported) {
+        return;
+      }
+
+      reported = content;
+      reports++;
+      report?.();
+    }
+  };
+
+  /** Moves the page to a display that draws cells `by` times as wide, as xterm.js does, without changing the pane. */
+  const rescale = (by: number): void => {
+    display.scale = by;
+    [...scaled].forEach((listener) => listener());
+  };
+
+  return { term, typed, source, console, settle, refusals, rescale, listeners: () => scaled.length, reports: () => reports, fits: () => layout().width <= layout().clientWidth - layout().padX,
+    /** The pixels the pane can grow by before it holds another column. */
+    spare: () => Math.max(0, cellWidth() - 1 - ((layout().clientWidth - layout().padX) % cellWidth())),
+  };
+}
+
+describe('the console in a laid-out pane', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    document.head.replaceChildren();
+  });
+
+  /** Runs the page for `ms`, delivering the observer's reports and the session's answers as they come. */
+  const run = async (settle: () => void, ms: number): Promise<void> => {
+    for (let elapsed = 0; elapsed < ms; elapsed += 20) {
+      settle();
+      await vi.advanceTimersByTimeAsync(20);
+    }
+
+    settle();
+  };
+
+  it('settles on one font while it watches, whatever the side scrollbar its redraws show or hide', async () => {
+    for (let width = 600; width <= 760; width += 5) {
+      for (const height of [420, 460, 500, 540]) {
+        const pane = laidOut({ width, height });
+        const fonts: number[] = [];
+        const options = pane.term.options;
+
+        pane.term.options = new Proxy(options, { set: (target, key, value) => (key === 'fontSize' && fonts.push(value as number), Reflect.set(target, key, value)) });
+        pane.source().emit('size', { cols: 120, rows: 40 });
+        await run(pane.settle, 600);
+
+        const settled = fonts.length;
+
+        await run(pane.settle, 600);
+        expect({ width, height, fonts: fonts.length }).toEqual({ width, height, fonts: settled });
+        // The columns fit whenever a font above the minimum fits them, though a smaller font's cells do not scale exactly.
+        expect(pane.term.options.fontSize === CONSOLE_MIN_FONT_PX || pane.fits()).toBe(true);
+        expect(pane.reports()).toBeLessThan(5);
+        expect(pane.typed).toEqual([]);
+        pane.console.dispose();
+        vi.unstubAllGlobals();
+      }
+    }
+  }, 30_000);
+
+  it("gives the session its size once while it types, and again only when the pane's cells change", async () => {
+    for (let width = 600; width <= 760; width += 11) {
+      for (const height of [400, 450, 490, 540]) {
+        const box = { width, height };
+        const pane = laidOut(box);
+
+        pane.source().emit('size', { cols: 120, rows: 40 });
+        await run(pane.settle, 500);
+        pane.term.textarea!.dispatchEvent(new Event('focus'));
+        await run(pane.settle, 3000);
+        expect({ width, height, sent: pane.typed.length }).toEqual({ width, height, sent: 1 });
+        expect(pane.term.options.fontSize).toBe(CONSOLE_FONT_PX);
+        expect(pane.fits()).toBe(true);
+
+        // A pane that grows short of another column keeps the session's size; one that grows by more gives it the new one, once.
+        box.width += pane.spare();
+        await run(pane.settle, 1000);
+        expect(pane.typed).toHaveLength(1);
+        box.width += 40;
+        await run(pane.settle, 1000);
+        expect(pane.typed).toHaveLength(2);
+        expect(pane.typed[1]!.size.cols).toBeGreaterThan(pane.typed[0]!.size.cols);
+
+        // A refused size is not taken as given: the pane's next change sends it again, though it holds the same cells.
+        pane.refusals.left = 1;
+        box.width += 40;
+        await run(pane.settle, 1000);
+        expect(pane.typed).toHaveLength(3);
+        box.width += Math.max(1, pane.spare());
+        await run(pane.settle, 1000);
+        expect(pane.typed).toHaveLength(4);
+        expect(pane.typed[3]!.size).toEqual(pane.typed[2]!.size);
+        pane.console.dispose();
+        vi.unstubAllGlobals();
+      }
+    }
+  }, 30_000);
+
+  it('refits to a display whose cells are another width, though the pane keeps its size', async () => {
+    const pane = laidOut({ width: 640, height: 500 });
+
+    pane.source().emit('size', { cols: 120, rows: 40 });
+    await run(pane.settle, 500);
+    expect(pane.term.options.fontSize).toBe(9);
+    pane.rescale(0.8);
+    await run(pane.settle, 500);
+    expect(pane.term.options.fontSize).toBe(11);
+    expect(pane.fits()).toBe(true);
+    pane.rescale(1);
+    await run(pane.settle, 500);
+    expect(pane.term.options.fontSize).toBe(9);
+    expect(pane.listeners()).toBe(1);
+    pane.console.dispose();
+    expect(pane.listeners()).toBe(0);
+  });
+});
+
 const session = (patch: Partial<SessionView> = {}): SessionView => ({ id: 's', title: 'Task session s', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, persona: null, ...patch });
 const scope = { kind: 'page' as const, key: 'pk', folder: 'D:/w', title: 'Fix it', scopeGen: 3, conversations: [{ workItemId: 1, title: 'Fix it', primary: true, sessionId: 's', state: 'idle' as const, conversation: 'full' as const, unread: 0 }], workItemId: 1, cwd: 'D:/w', sessionId: 's' };
 
