@@ -1758,8 +1758,12 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
         commands.push([workItemId, label]);
         return label === 'Open changes' ? null : 'The work item no longer offers this.';
       },
-      rowOpen: (workItemId, url) => {
-        opens.push([workItemId, url]);
+      poolAction: (ticketId, label, extra) => {
+        pools.push([ticketId, label, extra]);
+        return label === 'Start' ? null : 'The ticket no longer offers this.';
+      },
+      rowOpen: (rowKey, url) => {
+        opens.push([rowKey, url]);
         return url === 'https://gone.test/' ? 'The work item no longer links to this.' : null;
       },
       resumeSession: async (sessionId) => {
@@ -1776,7 +1780,8 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     const refusePoll = (why: string | null) => void (pollRefusal = why);
     let header: PageHeader = { sources: [{ kind: 'github', enabled: true, title: 'gh: polled\nClick to stop polling gh', sources: [{ name: 'gh', enabled: true }] }], repoRoots: ['D:/w1'], folders: ['D:/w1', dir], schedules: [{ name: 'nightly', playbook: 'dev:sweep' }] };
     const setHeader = (next: typeof header) => void (header = next);
-    const opens: Array<[number, string]> = [];
+    const opens: Array<[string, string]> = [];
+    const pools: Array<[number, string, unknown]> = [];
     const commands: Array<[number, string]> = [];
     const resumed: string[] = [];
     let resumeRefusal: string | null = null;
@@ -1794,7 +1799,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
       return { key, frames };
     };
 
-    return { store, view, scopes, service, openPage, focus, actions, opens, commands, resumed, refuseResume, held, sourceCalls, setHeader, events, made, refusePoll };
+    return { store, view, scopes, service, openPage, focus, actions, opens, commands, pools, resumed, refuseResume, held, sourceCalls, setHeader, events, made, refusePoll };
   }
 
   it("runs More Actions' Refresh sources, New ad-hoc session and New conversation in a folder for a page key, in folders and schedules the header offers only", () => {
@@ -2023,7 +2028,28 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     expect(service.rowOpen({ window: page.key, opId: 'a', workItemId: 2, url: 'https://x.test/' })).toEqual({ status: 200, body: { opened: true } });
     expect(service.rowOpen({ window: page.key, opId: 'a', workItemId: 2, url: 'https://x.test/' })).toEqual({ status: 200, body: { opened: true } });
     expect(service.rowOpen({ window: page.key, opId: 'b', workItemId: 3, url: 'https://gone.test/' })).toEqual({ status: 409, body: { error: 'The work item no longer links to this.' } });
-    expect(opens).toEqual([[2, 'https://x.test/'], [3, 'https://gone.test/']]);
+    // A pool ticket's row, by its ticket.
+    expect(service.rowOpen({ window: page.key, opId: 'c', ticketId: 9, url: 'https://x.test/9' }).status).toBe(200);
+    expect(service.rowOpen({ window: page.key, opId: 'd', ticketId: 9, workItemId: 2, url: 'https://x.test/9' }).status).toBe(400);
+    expect(opens).toEqual([['item:2', 'https://x.test/'], ['item:3', 'https://gone.test/'], ['ticket:9', 'https://x.test/9']]);
+  });
+
+  it("runs a pool ticket's control for a page key without a selection, once per opId, and says why not", () => {
+    const { scopes, service, openPage, view, pools } = setup();
+    const page = openPage();
+    const window = scopes.open(view.file, view.view);
+
+    expect(service.poolAction({ window, opId: 'a', ticketId: 9, label: 'Start' }).status).toBe(403);
+    expect(service.poolAction({ window: page.key, opId: 'a', ticketId: '9', label: 'Start' }).status).toBe(400);
+    expect(service.poolAction({ window: page.key, opId: 'a', ticketId: 9, label: 'Start', text: 7 }).status).toBe(400);
+    expect(pools).toEqual([]);
+    expect(service.poolAction({ window: page.key, opId: 'a', ticketId: 9, label: 'Start' })).toEqual({ status: 200, body: { done: true } });
+    expect(service.poolAction({ window: page.key, opId: 'a', ticketId: 9, label: 'Start' })).toEqual({ status: 200, body: { done: true } });
+    expect(service.poolAction({ window: page.key, opId: 'b', ticketId: 9, label: 'Start with guidance…', text: 'Use staging', choice: 'dev:fix' })).toEqual({ status: 409, body: { error: 'The ticket no longer offers this.' } });
+    expect(pools).toEqual([
+      [9, 'Start', { until: null, comment: null, text: null, choice: null }],
+      [9, 'Start with guidance…', { until: null, comment: null, text: 'Use staging', choice: 'dev:fix' }],
+    ]);
   });
 
   it("resumes the page's own current session once it has ended, and only that", async () => {

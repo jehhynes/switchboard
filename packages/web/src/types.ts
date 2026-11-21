@@ -132,7 +132,9 @@ export interface VoiceView {
 
 /** A row of the page's list: the dock row's three lines, mark and stripe (`PageRow` in the hub's `page.ts`). */
 export interface PageRow {
-  workItemId: number;
+  /** The work item's ID, or null on a pool ticket's row, which has no conversation and carries its ticket's ID instead. */
+  workItemId: number | null;
+  ticketId?: number | null;
   title: string;
   /** Line 1: the priority dot's tooltip, or null, and the time at its end. */
   priority: string | null;

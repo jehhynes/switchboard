@@ -35,7 +35,7 @@ import type { Snapshot, WorkItemView } from './snapshot.js';
 import { SnapshotBuilder } from './snapshotBuilder.js';
 import type { Built } from './snapshotBuilder.js';
 import { WindowScopes } from './windows.js';
-import { dockRowOf, PageAccess, pageActionEvent, pageCommandOf, pageHeader, pageList, pageRow, pasteText, rowOpenUrl } from './page.js';
+import { dockRowOf, PageAccess, pageActionEvent, pageCommandOf, pageHeader, pageList, pageRow, pasteText, poolRowOf, rowOpenUrl } from './page.js';
 import { launcher } from './launch.js';
 import type { Launcher } from './launch.js';
 import { pageAsset } from './pageAssets.js';
@@ -536,6 +536,19 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
       return session?.execution === 'app-server' ? runtime.resumeThread(sessionId) : 'This session resumes only in Claude.';
     },
+    // A pool ticket's controls, which the page runs from its row's menu, rechecked against the row as it is now (architecture.md § Web page).
+    poolAction: (ticketId, label, extra) => {
+      const row = poolRowOf(views().dock, ticketId);
+      const built = row === null ? { refused: 'The ticket is no longer in the pool.' } : pageActionEvent(row, label, extra);
+
+      if ('refused' in built) {
+        return built.refused;
+      }
+
+      const parsed = parseAction(built.event);
+
+      return parsed === null ? 'The ticket no longer offers this.' : runtime.send(parsed).refused;
+    },
     // The page's VS Code controls: the dock's command left for the row's window, which VS Code opens or brings forward (architecture.md § Web page).
     rowCommand: (workItemId, label) => {
       const row = dockRowOf(views().dock, workItemId);
@@ -566,8 +579,8 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       return null;
     },
     // The installed page's link, opened in the default browser only when its row holds it now (architecture.md § Web page).
-    rowOpen: (workItemId, url) => {
-      const row = dockRowOf(views().dock, workItemId);
+    rowOpen: (rowKey, url) => {
+      const row = views().dock.groups.flatMap((group) => group.rows).find((one) => one.key === rowKey) ?? null;
       const target = row === null ? null : rowOpenUrl(row, url);
 
       if (target === null) {
@@ -922,6 +935,7 @@ const dockWithRuns = () => {
       '/v1/conversation/prompt-key': async (body) => (isRecord(body) ? conversation.promptKey(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, prompt, key}.' } }),
       '/v1/conversation/page-conversation': async (body) => (isRecord(body) ? conversation.pageConversation(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, provider?}.' } }),
       '/v1/conversation/resume': async (body) => (isRecord(body) ? conversation.resume(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } }),
+      '/v1/conversation/pool-action': async (body) => (isRecord(body) ? conversation.poolAction(body) : { status: 400, body: { error: 'Expected {window, opId, ticketId, label}.' } }),
       '/v1/conversation/row-command': async (body) => (isRecord(body) ? conversation.rowCommand(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId, label}.' } }),
       '/v1/conversation/row-open': async (body) => (isRecord(body) ? conversation.rowOpen(body) : { status: 400, body: { error: 'Expected {window, opId, workItemId, url}.' } }),
       '/v1/conversation/row-paste': async (body) => (isRecord(body) ? conversation.rowPaste(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId, label}.' } }),

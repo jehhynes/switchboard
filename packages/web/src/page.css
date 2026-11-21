@@ -186,6 +186,8 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 .conversation-row > .codicon:first-child { width: 28px; text-align: center; }
 .conversation-row[aria-checked="true"]:not(:hover):not(:focus) { background: var(--vscode-list-inactiveSelectionBackground, rgba(127, 127, 127, 0.2)); }
 .menu-row.submenu-row { padding-left: 16px; }
+.pool-row { position: relative; }
+.pool-row > .row-menu { top: calc(100% - 4px); right: 8px; }
 .sheet-input { box-sizing: border-box; width: 100%; min-height: 90px; max-height: 300px; resize: vertical; font: inherit; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, var(--vscode-widget-border, transparent)); border-radius: 2px; padding: 4px 6px; }
 .sheet-input.tall { min-height: 150px; max-height: 400px; }
 .sheet-select { width: 100%; font: inherit; color: var(--vscode-dropdown-foreground); background: var(--vscode-dropdown-background); border: 1px solid var(--vscode-dropdown-border, transparent); padding: 2px 4px; }

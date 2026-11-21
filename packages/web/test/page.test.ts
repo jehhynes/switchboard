@@ -1543,6 +1543,73 @@ describe('the page in use', () => {
     page.close();
   });
 
+  it("lists a pool ticket with a menu under its row instead of a conversation, and runs its Start, Start with guidance and Snooze through pool-action", async () => {
+    const { page, source, opened } = start();
+    const actions = [
+      { label: 'Start', action: 'pick', icon: 'play', group: 'main' as const, confirm: null, input: null },
+      { label: 'Start with guidance…', action: 'pick', icon: 'comment', group: 'work' as const, confirm: null, input: { question: 'Start with guidance', detail: 'It ends the prompt.', action: 'Start', text: null, choice: null } },
+      { label: 'Snooze…', action: 'snooze', icon: 'clockface', group: 'state' as const, confirm: null, input: null },
+    ];
+    const pool = listRow(0, { workItemId: null, ticketId: 9, title: 'Pool ticket', ticket: 'gh 9', url: 'https://github.com/o/r/issues/9', actions, main: 'Start' });
+
+    hello(source, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it' })]), listGroup('unstarted', [pool])] });
+    posts = [];
+    const row = () => root.querySelector<HTMLElement>('#list [data-action="pool-menu"][data-row="ticket:9"]')!;
+
+    expect(row().getAttribute('aria-expanded')).toBe('false');
+    const shown = vi.fn();
+
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { value: shown, configurable: true });
+    row().click();
+    expect(shown).toHaveBeenCalledWith({ block: 'nearest' });
+    expect(shown.mock.contexts[0]).toBe(root.querySelector('#list .row-menu'));
+    delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    expect(row().getAttribute('aria-expanded')).toBe('true');
+    expect([...root.querySelectorAll('#list .row-menu .menu-row')].map((one) => one.textContent)).toEqual(['Start', 'Start with guidance…', 'Snooze…', 'Open ticket']);
+    // Its click selects nothing: a pool ticket has no conversation.
+    expect(posts).toEqual([]);
+
+    answers['/pool-action'] = { status: 200, body: { done: true } };
+    click('#list .row-menu [data-label="Start"]');
+    await flush();
+    expect(posts.find((post) => post.url.endsWith('/pool-action'))?.body).toMatchObject({ window: 'pk', ticketId: 9, label: 'Start' });
+    expect(posts.find((post) => post.url.endsWith('/pool-action'))?.body).not.toHaveProperty('workItemId');
+    expect(root.querySelector('#list .row-menu')).toBeNull();
+
+    row().click();
+    click('#list .row-menu [data-label="Start with guidance…"]');
+    root.querySelector<HTMLTextAreaElement>('.sheet-input')!.value = 'Use staging';
+    root.querySelector('.sheet-input')!.dispatchEvent(new Event('input', { bubbles: true }));
+    posts = [];
+    answers['/pool-action'] = { status: 409, body: { error: 'The ticket is no longer in the pool.' } };
+    click('.sheet [data-action="sheet-go"]');
+    await flush();
+    expect(posts.find((post) => post.url.endsWith('/pool-action'))?.body).toMatchObject({ ticketId: 9, label: 'Start with guidance…', text: 'Use staging' });
+    // With no conversation, the refusal shows over the list.
+    expect(root.querySelector('#list .list-error')!.textContent).toBe('The ticket is no longer in the pool.');
+
+    row().click();
+    click('#list .row-menu [data-label="Snooze…"]');
+    expect(root.querySelector('.sheet-title')!.textContent).toBe('Snooze Pool ticket');
+    answers['/pool-action'] = { status: 200, body: { done: true } };
+    posts = [];
+    click('.sheet [data-action="sheet-go"]');
+    await flush();
+    expect(posts.find((post) => post.url.endsWith('/pool-action'))?.body).toMatchObject({ ticketId: 9, label: 'Snooze…', until: expect.any(Number) });
+
+    // The menu closes on Escape and on a press outside it, and its pill opens the ticket without opening the menu.
+    row().click();
+    root.querySelector('#list .row-menu .menu-row')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(root.querySelector('#list .row-menu')).toBeNull();
+    row().click();
+    document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    expect(root.querySelector('#list .row-menu')).toBeNull();
+    click('#list [data-row="ticket:9"].pill.ticket');
+    expect(opened).toEqual(['https://github.com/o/r/issues/9#switchboard-tab']);
+    expect(root.querySelector('#list .row-menu')).toBeNull();
+    page.close();
+  });
+
   it("opens a row's ticket and link pills in a new tab, marked as the dock marks them, without selecting the row, and only http or https links", async () => {
     const { page, source, opened } = start();
     const links = [

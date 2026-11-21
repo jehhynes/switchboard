@@ -8,11 +8,11 @@ import { listenHub } from '../src/server.js';
 import type { HubServer, PageRoutes } from '../src/server.js';
 import { createHash } from 'node:crypto';
 import { Store } from '@switchboard/core';
-import { artifactFile, cookieValue, dockRowOf, findFiles, knownFolder, pageHeader, loopbackHost, PageAccess, pageCookie, PUBLIC_PAGE_FILES, PAGE_LINK_MS, PAGE_SESSION_MS, PAGE_SESSIONS_KEPT, pageActionEvent, pageActions, pageCommandOf, pageGroups, pageList, pageOpens, pasteText, rowOpenUrl, tabUrl } from '../src/page.js';
+import { artifactFile, cookieValue, dockRowOf, findFiles, knownFolder, pageHeader, loopbackHost, PageAccess, pageCookie, PUBLIC_PAGE_FILES, PAGE_LINK_MS, PAGE_SESSION_MS, PAGE_SESSIONS_KEPT, pageActionEvent, pageActions, pageCommandOf, pageGroups, pageList, pageOpens, pasteText, poolRowOf, rowOpenUrl, tabUrl } from '../src/page.js';
 import { dockView } from '../src/dock.js';
 import type { DockView } from '../src/dock.js';
 import { pageAsset } from '../src/pageAssets.js';
-import { item, NOW, session, snapshot } from './views.js';
+import { item, NOW, session, snapshot, triage } from './views.js';
 import { until } from './helpers.js';
 
 let dir: string;
@@ -144,7 +144,7 @@ describe('pageList', () => {
     const ownRow = dock.groups.flatMap((group) => group.rows).find((row) => row.key === 'item:1')!;
 
     expect(list.map((group) => [group.key, group.title, group.glyph])).toEqual(dock.groups.map((group) => [group.key, group.title, group.glyph]));
-    expect(list.flatMap((group) => group.rows).find((row) => row.workItemId === 1)).toEqual({ workItemId: 1, title: 'Fix the badge', priority: ownRow.priority, time: ownRow.time, ticket: ownRow.ticket, sourceKind: ownRow.sourceKind, url: ownRow.url, playbook: ownRow.playbook, links: [], returned: ownRow.returned, comment: ownRow.comment, mark: ownRow.mark, details: ownRow.details, stripe: ownRow.stripe, dim: ownRow.dim, host: null, actions: pageActions(ownRow), main: null, pastes: [], opens: pageOpens(ownRow), search: ownRow.search });
+    expect(list.flatMap((group) => group.rows).find((row) => row.workItemId === 1)).toEqual({ workItemId: 1, ticketId: null, title: 'Fix the badge', priority: ownRow.priority, time: ownRow.time, ticket: ownRow.ticket, sourceKind: ownRow.sourceKind, url: ownRow.url, playbook: ownRow.playbook, links: [], returned: ownRow.returned, comment: ownRow.comment, mark: ownRow.mark, details: ownRow.details, stripe: ownRow.stripe, dim: ownRow.dim, host: null, actions: pageActions(ownRow), main: null, pastes: [], opens: pageOpens(ownRow), search: ownRow.search });
     expect(pageOpens(ownRow).map((one) => one.label)).toEqual(['Open in VS Code']);
     // Each row in the dock's group, in the dock's order, a hosted conversation with its host's name.
     expect(list.map((group) => group.rows.map((row) => row.workItemId))).toEqual(dock.groups.map((group) => group.rows.map((row) => Number(row.key.slice('item:'.length)))));
@@ -152,7 +152,7 @@ describe('pageList', () => {
     expect(list.some((group) => (group.key as string) === 'conversations')).toBe(false);
   });
 
-  it('leaves out pool tickets and rows of work items the snapshot lacks, and keeps a done hosted conversation in Done', () => {
+  it('leaves out rows whose work item or pool ticket the snapshot lacks, and keeps a done hosted conversation in Done', () => {
     const doneHosted = item(6, { status: 'done', ticket: { ...item(6).ticket, title: 'Old chat', hostWindow: 'D:/git/support' } });
     const row = (key: string) => ({ key, title: key, ticket: 'gh 1', sourceKind: 'github', playbook: 'dev', links: [], details: [], mark: null, stripe: null, dim: false, controls: [], main: null, pastes: [] }) as unknown as DockView['groups'][number]['rows'][number];
     const dock = { groups: [{ key: 'unstarted', title: 'Unstarted', glyph: 'u', empty: 'Nothing waits to be started.', rows: [row('ticket:9'), row('item:77')] }, { key: 'done', title: 'Done', glyph: 'd', empty: null, rows: [row('item:6')] }] } as Pick<DockView, 'groups'>;
@@ -177,6 +177,25 @@ describe('pageHeader', () => {
     expect(header).toEqual({ sources, repoRoots: ['D:/w1'], folders: ['D:/w1', 'D:/git/support'], schedules: [{ name: 'nightly', playbook: 'dev:sweep' }] });
     expect(knownFolder(header.folders, 'd:/git/support')).toBe('D:/git/support');
     expect(knownFolder(header.folders, 'D:/git')).toBeNull();
+  });
+});
+
+describe('pageList pool rows', () => {
+  it("lists a pool ticket's row where the dock puts it, by its ticket, with Start or Triage again and its menu's other controls", () => {
+    const ticket = { ...item(9).ticket, id: 9, pool: true, assigned: false, url: 'https://github.com/o/r/issues/9' };
+    const picked = { ticket, triage: triage({ ticketId: 9, workItemId: null, playbook: 'dev:build' }), focus: null, links: [], returned: 0, playbookChoices: ['dev:build', 'dev:fix'] };
+    const failed = { ...picked, ticket: { ...ticket, id: 10 }, triage: triage({ ticketId: 10, workItemId: null, playbook: null, error: 'Triage failed' } as never) };
+    const view = snapshot([], { pool: [picked, failed] } as never);
+    const dock = dockView(view, NOW, 'C:/sb/windows');
+    const rows = pageList(dock, view).flatMap((group) => group.rows);
+    const nine = rows.find((row) => row.ticketId === 9)!;
+
+    expect(nine).toMatchObject({ workItemId: null, ticketId: 9, title: ticket.title, url: 'https://github.com/o/r/issues/9', main: 'Start', opens: [], host: null });
+    expect(nine.actions.map((one) => [one.label, one.group])).toEqual([['Start', 'main'], ['Start with guidance…', 'work'], ['Snooze…', 'state']]);
+    expect(pageActionEvent(poolRowOf(dock, 9)!, 'Start', { until: null, comment: null })).toEqual({ event: { type: 'pick', ticketId: 9 } });
+    expect(pageActionEvent(poolRowOf(dock, 9)!, 'Start with guidance…', { until: null, comment: null, text: 'Use staging', choice: 'dev:fix' })).toEqual({ event: { type: 'pick', ticketId: 9, guidance: 'Use staging', playbook: 'dev:fix' } });
+    expect(poolRowOf(dock, 1)).toBeNull();
+    expect(rows.find((row) => row.ticketId === 10)?.actions.map((one) => one.label)).toEqual(['Triage again', 'Snooze…']);
   });
 });
 

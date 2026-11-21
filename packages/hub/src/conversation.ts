@@ -268,8 +268,13 @@ export interface ConversationServiceDeps {
   uploads?: string;
   /** Runs a VS Code control of a work item's row by its label (Open in VS Code, Open changes, Open report), after checking its dock row offers it now: why not, or null. */
   rowCommand?(workItemId: number, label: string): string | null;
-  /** Opens a work item row's ticket URL or link in the default browser, after checking that its dock row holds it now: why not, or null. */
-  rowOpen?(workItemId: number, url: string): string | null;
+  /**
+   * Opens a row's ticket URL or link in the default browser, the row named by its dock key (`item:<id>` or a pool ticket's `ticket:<id>`), after
+   * checking that it holds the URL now: why not, or null.
+   */
+  rowOpen?(rowKey: string, url: string): string | null;
+  /** Runs one of a pool ticket's row controls, by its label, after checking that its dock row still offers it: why not, or null. */
+  poolAction?(ticketId: number, label: string, extra: PageActionExtra): string | null;
   log(line: string): void;
 }
 
@@ -639,6 +644,52 @@ export class ConversationService {
   }
 
   /**
+   * `pool-action {window, opId, ticketId, label, until?, comment?, text?, choice?}` (architecture.md § Web page): one of a pool ticket's row
+   * controls (Start, Start with guidance…, Triage again, Snooze…, Unsnooze), for any pool ticket the page lists, since a pool ticket has no
+   * conversation to select; rechecked against its row when it runs. 403 for a key that is not a page's, 409 with why not. A repeated `opId` answers
+   * the first result.
+   */
+  poolAction(body: Record<string, unknown>): { status: number; body: unknown } {
+    const { window, opId, ticketId, label, until, comment, text, choice } = body;
+
+    if (
+      typeof window !== 'string' ||
+      typeof opId !== 'string' ||
+      opId === '' ||
+      !Number.isInteger(ticketId) ||
+      typeof label !== 'string' ||
+      !(until === undefined || until === null || (typeof until === 'number' && Number.isFinite(until))) ||
+      !(comment === undefined || comment === null || (typeof comment === 'string' && comment.length <= MAX_MESSAGE_CHARS)) ||
+      !(text === undefined || text === null || (typeof text === 'string' && text.length <= MAX_INPUT_CHARS)) ||
+      !(choice === undefined || choice === null || typeof choice === 'string')
+    ) {
+      return { status: 400, body: { error: 'Expected {window, opId, ticketId, label, until?, comment?, text?, choice?}.' } };
+    }
+
+    if (!this.deps.windows.isPage(window)) {
+      return { status: 403, body: { error: 'Not in this window.' } };
+    }
+
+    const done = this.#rowActions.get(`${window} ${opId}`);
+
+    if (done !== undefined) {
+      return done;
+    }
+
+    const extra = { until: (until as number | null | undefined) ?? null, comment: typeof comment === 'string' && comment.trim() !== '' ? comment.trim() : null, text: (text as string | null | undefined) ?? null, choice: (choice as string | null | undefined) ?? null };
+    const why = this.deps.poolAction === undefined ? 'This hub runs no actions from the page.' : this.deps.poolAction(ticketId as number, label, extra);
+    const answer = why === null ? { status: 200, body: { done: true } } : { status: 409, body: { error: why } };
+
+    this.#rowActions.set(`${window} ${opId}`, answer);
+
+    for (const old of [...this.#rowActions.keys()].slice(0, -100)) {
+      this.#rowActions.delete(old);
+    }
+
+    return answer;
+  }
+
+  /**
    * `row-command {window, scopeGen, opId, workItemId, label}` (architecture.md § Web page): one of the row's VS Code controls on the page's
    * selected work item, which opens its window in VS Code through the hub; refused as `row-action` is. A repeated `opId` answers the first result.
    */
@@ -680,15 +731,15 @@ export class ConversationService {
   }
 
   /**
-   * `row-open {window, opId, workItemId, url}` (architecture.md § Web page): the installed page's link, opened by the hub in the default browser,
-   * for any work item the page lists, since its list already holds every row's links; 403 for a key that is not a page's, 409 with why not, such
-   * as a URL the row no longer holds. A repeated `opId` answers the first result.
+   * `row-open {window, opId, workItemId | ticketId, url}` (architecture.md § Web page): the installed page's link, opened by the hub in the default
+   * browser, for any work item or pool ticket the page lists, since its list already holds every row's links; 403 for a key that is not a page's,
+   * 409 with why not, such as a URL the row no longer holds. A repeated `opId` answers the first result.
    */
   rowOpen(body: Record<string, unknown>): { status: number; body: unknown } {
-    const { window, opId, workItemId, url } = body;
+    const { window, opId, workItemId, ticketId, url } = body;
 
-    if (typeof window !== 'string' || typeof opId !== 'string' || opId === '' || !Number.isInteger(workItemId) || typeof url !== 'string') {
-      return { status: 400, body: { error: 'Expected {window, opId, workItemId, url}.' } };
+    if (typeof window !== 'string' || typeof opId !== 'string' || opId === '' || Number.isInteger(workItemId) === Number.isInteger(ticketId) || typeof url !== 'string') {
+      return { status: 400, body: { error: 'Expected {window, opId, workItemId or ticketId, url}.' } };
     }
 
     if (!this.deps.windows.isPage(window)) {
@@ -701,7 +752,7 @@ export class ConversationService {
       return done;
     }
 
-    const why = this.deps.rowOpen === undefined ? 'This hub opens no links for the page.' : this.deps.rowOpen(workItemId as number, url);
+    const why = this.deps.rowOpen === undefined ? 'This hub opens no links for the page.' : this.deps.rowOpen(Number.isInteger(workItemId) ? `item:${workItemId}` : `ticket:${ticketId}`, url);
     const answer = why === null ? { status: 200, body: { opened: true } } : { status: 409, body: { error: why } };
 
     this.#rowActions.set(`${window} ${opId}`, answer);

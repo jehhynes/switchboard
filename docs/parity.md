@@ -17,14 +17,14 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 
 ## Open gaps, by value
 
-1. Row controls the page lacks (C8, C9, C15, R12): Open in Claude or terminal (Open in terminal follows the Console tab, branch `web-terminal`), History (the page has no History view), pool tickets' Start and Triage again, and Enter on a pill.
+1. Row controls the page lacks (C8, C9, R12): Open in Claude or terminal (Open in terminal follows the Console tab, branch `web-terminal`), History (the page has no History view), and Enter on a pill.
 2. More Actions' dock windows (H2): Held sessions, Ticket volume report, Show hub log and Open Settings only say to use the dock, and New ad-hoc session and New conversation in a folder cannot choose a folder the hub does not know.
 3. Problems the page never shows (H3, H4, H5): settings, source and voice errors, orphan held sessions, and the needs-you message.
 4. Done's date bands and group state (G5, G6, G8): Done is one flat list, Snoozed starts open, and open or closed choices do not survive a reload.
 5. Mark colours (M3): the dock and the web page colour marks by different rules; one of them should change.
 6. Keyboard (K2, K4, K5, O3, O4): no arrow-key walk, F8, menu key, drag or Alt+arrow reordering.
 7. Voice mark (R3): the page does not show which row the voice speaks for.
-8. Pool tickets (R20): left out by architecture.md § Web page; the operator approves that as Differs, or the page adds them.
+8. Pool row click (R20): a pool ticket's click opens its menu on the page and its triage focus in the dock; the operator approves that as Differs, or one side changes.
 9. Web-only behaviours the dock lacks (R8, C13, G10, H7): a hosted conversation's host on line 2, Stop asking first, the selected row kept in a collapsed group.
 
 ## Groups
@@ -48,7 +48,7 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 | # | Behaviour | Dock evidence | Web | Web evidence and note |
 |---|---|---|---|---|
 | O1 | Blocked on you oldest wait first; Ready for review by the operator's position, else `readyAt`; In progress oldest run first; Done newest first | `listGroups` rows.ts:812 | Present | Same hub order through `pageList` |
-| O2 | Unstarted work items and pool tickets together, by importance rank then oldest | `unstartedOrder` rows.ts:755 | Partly | Pool tickets are left out (see R20), so only work items |
+| O2 | Unstarted work items and pool tickets together, by importance rank then oldest | `unstartedOrder` rows.ts:755 | Present | Same hub order through `pageList`, pool rows included |
 | O3 | Drag a Ready for review row to a new place, with a drop line; Escape or lost capture cancels | `OnListPressed`…`ShowDrop` MainWindow.axaml.cs:1121-1269 | Missing | |
 | O4 | Alt+Up and Alt+Down move the selected Ready for review row | `OnKey` MainWindow.axaml.cs:1010 | Missing | |
 | O5 | Move to top, Move up, Move down and Reset position in the row's menu | `moveControls` rows.ts:272, `OrderActions` MainWindow.axaml.cs:1431 | Present | `pageActions` page.ts puts them in the order group; `row-action` names each by its label |
@@ -77,7 +77,7 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 | R17 | Line 3 shows the mark's title when the row has no details, and is absent with neither | `orMarkTitle` dock.ts:411, `HasThirdLine` ViewModels.cs:1133 | Present | render.ts:256 |
 | R18 | Line 3 texts from the hub: wait reasons, rate limit (`Rate limited · resumes…`), blockers in the warning tone, wake time and snooze comment, warning and error, `From <key>`, approval summary or stage with its age, stale stage in the warning tone | `itemRow` dock.ts:386-393, `limitTexts` rows.ts:666, `wake` dock.ts:487 | Present | Same `details` through `pageList` |
 | R19 | Row separator rule above each row but the first in its band | MainWindow.axaml:169-177 | Partly | page.css:34-35: the first in its group, since Done has no bands (G8) |
-| R20 | Pool tickets (Unstarted, Snoozed) show as rows with Start or Triage again | `poolRow` dock.ts:415 | Missing | Left out because a pool ticket has no conversation (architecture.md § Web page, `pageList` page.ts:305-321); Differs once the operator approves |
+| R20 | Pool tickets (Unstarted, Snoozed) show as rows with Start or Triage again | `poolRow` dock.ts:415 | Partly | Listed with the dock's three lines by `pageList` page.ts (`ticketId`, no `workItemId`); a pool ticket has no conversation, so a click opens its menu under the row, where the dock's click opens its triage focus in the browser (`.wip/web-row-controls-notes.md`, pending the operator) |
 | R21 | No unread count on rows | (dropped in `a7274f7`) | Present | `PageRow` page.ts:205 carries none and `listRow` render.ts:225 draws none |
 | R22 | The selected row's buttons beside lines 2 and 3: main control (Approve in the accent colour, its prompt in the tooltip), Copy, Open report; hidden on other rows and on rows with none | MainWindow.axaml:577-591, 126-134, `mainTitle` rows.ts:139 | Partly | The main control is a button in the conversation header, not on the row (`renderActions` render.ts:94-95); Copy and Open report are in the actions menu |
 
@@ -124,7 +124,7 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 | C12 | Delete asks first with the hub's question and detail; the focus starts on Cancel and Enter never deletes | `Act` MainWindow.axaml.cs:1630, `ConfirmDialog`, `deleteConfirm` rows.ts:218 | Partly | the sheet asks (render.ts:155-157) but does not put the focus on Cancel |
 | C13 | Stop asks first | none: Stop runs at once | Web only | `pageActions` page.ts:258 |
 | C14 | Snooze… dialog: the hub's choices, a date from the earliest timed choice waking at its time of day, a comment; Cancel posts nothing | `Snooze` MainWindow.axaml.cs:1610, `SnoozeDialog` | Present | `renderSheet` render.ts:163-170, `snoozeDateUntil` :131 |
-| C15 | Triage again and Start on a pool row | `poolControls` rows.ts:301 | Missing | follows R20 |
+| C15 | Triage again and Start on a pool row | `poolControls` rows.ts:301 | Present | In the pool row's menu with Start with guidance… and Snooze… or Unsnooze, run through `pool-action` |
 | C16 | A control acts only on the hub's current view; with no hub the dock refuses it | `Act` MainWindow.axaml.cs:1662 | Present | the hub checks the row still offers it (`pageActionEvent` page.ts:275) |
 | C17 | A refusal or failure shows in the toast in the warning colours | `Status` ViewModels.cs:438 | Partly | shows over the composer (`runAction` main.ts:1416) |
 

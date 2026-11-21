@@ -2,10 +2,10 @@ import { applyEvent, commandQuery, EMPTY, mentionOf, mentionQuery, pageTitle, ro
 import { snoozeChoices } from '@switchboard/core/snooze';
 import type { PageState } from './model.js';
 import { escape, renderMarkdown } from './markdown.js';
-import { answerText, artifactUrl, complete, firstSnoozeDay, inputReady, renderEndedNote, renderMicButton, markdownBody, newView, parseQuestions, renderArtifacts, renderArtifactView, renderHeader, renderList, renderSheet, renderSideSwitch, renderStatus, renderTabs, renderTimeline, renderVoice, snoozeDateUntil, TABS, consoleNote, SIDE_TABS } from './render.js';
+import { answerText, artifactUrl, complete, firstSnoozeDay, inputReady, renderEndedNote, renderMicButton, markdownBody, newView, parseQuestions, renderArtifacts, renderArtifactView, renderHeader, menuRows, renderList, renderSheet, rowKey, renderSideSwitch, renderStatus, renderTabs, renderTimeline, renderVoice, snoozeDateUntil, TABS, consoleNote, SIDE_TABS } from './render.js';
 import type { CardDraft, SideTab, Tab, View } from './render.js';
 import type { ConsoleOptions, MountedConsole } from './console.js';
-import type { ItemView, ScreenPrompt } from './types.js';
+import type { ItemView, PageRow, ScreenPrompt } from './types.js';
 import { morph } from './morph.js';
 import { listHeader } from './listHeader.js';
 import { reconnector } from './reconnect.js';
@@ -1085,6 +1085,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   resized?.observe(panel);
 
   /** Draws the state by changing only what differs (`morph`), so the focus, a selection, the scroll position and open menus stay. */
+  /** The pool ticket row whose menu is open, with the menu's rows, while the list still has that row. */
+  const poolMenu = (): { row: string; rows: string } | null => {
+    const row = view.rowMenu === null ? undefined : state.groups.flatMap((group) => group.rows).find((one) => rowKey(one) === view.rowMenu);
+
+    return row === undefined ? null : { row: rowKey(row), rows: menuRows(row, view) };
+  };
   const draw = (): void => {
     // On a narrow screen the list and the conversation are each a full-width view (page.css); the list shows until a work item is opened.
     root.classList.toggle('listing', view.list || wanted === null);
@@ -1093,7 +1099,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // A search shows only the rows that match, in every group, open (PRD R63).
     const listed = header.list(state.groups);
     morph(sheetHost, renderSheet(view.sheet, view.acting));
-    morph(list, expired ? '<p class="empty">This page\'s link is no longer valid. Open a new one with Switchboard: Open Web Page in VS Code, or hub.js web.</p>' : (listError === null ? '' : `<p class="list-error" role="alert">${escape(listError)}</p>`) + renderList(listed.groups, state.scope?.workItemId ?? null, view.collapsed, listed.filtering) + header.end(listed.groups));
+    morph(list, expired ? '<p class="empty">This page\'s link is no longer valid. Open a new one with Switchboard: Open Web Page in VS Code, or hub.js web.</p>' : (listError === null ? '' : `<p class="list-error" role="alert">${escape(listError)}</p>`) + renderList(listed.groups, state.scope?.workItemId ?? null, view.collapsed, listed.filtering, poolMenu()) + header.end(listed.groups));
     fitLines();
 
     // An ended session's note sits just above the composer on every tab, with Resume, as in the Conversation view; the page resumes it in the
@@ -1522,13 +1528,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       case 'actions':
         view.actions = !view.actions;
         view.linkMenu = false;
+        view.rowMenu = null;
         view.picker = false;
         view.personas = null;
         view.textMenu = false;
         draw();
         break;
       case 'row-action':
-        chooseAction(button!.dataset['label'] ?? '');
+        chooseAction(button!.dataset['row'] ?? '', button!.dataset['label'] ?? '');
         break;
       case 'row-paste':
         void copyPaste(button!.dataset['label'] ?? '');
@@ -1538,8 +1545,21 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         break;
       case 'open-link':
         // A pill's link opens without selecting its row; the menu's closes the menu.
-        openLink(Number(button!.dataset['workItem']), button!.dataset['link'] ?? '');
+        openLink(button!.dataset['row'] ?? '', button!.dataset['link'] ?? '');
         break;
+      case 'pool-menu': {
+        const key = button!.dataset['row'] ?? '';
+        const open = view.rowMenu === key;
+
+        closeMenus();
+        view.picker = false;
+        view.personas = null;
+        view.rowMenu = open ? null : key;
+        draw();
+        // A row near the list's end keeps its menu in view.
+        list.querySelector<HTMLElement>('.row-menu')?.scrollIntoView?.({ block: 'nearest' });
+        break;
+      }
       case 'link-menu':
         view.linkMenu = !view.linkMenu;
         draw();
@@ -1725,6 +1745,13 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   });
   // The dropdown closes on a press outside the header and on Escape, which gives the focus back to its button.
   document.addEventListener('pointerdown', (event) => {
+    // A pool row's menu closes on a press outside it and its row, which toggles it itself.
+    if (view.rowMenu !== null && !(event.target instanceof Element && event.target.closest('.pool-row') !== null)) {
+      view.rowMenu = null;
+      view.linkMenu = false;
+      draw();
+    }
+
     if ((view.picker || view.personas !== null || view.actions || view.providers !== null || view.textMenu) && !(event.target instanceof Node && head.querySelector('.header')?.contains(event.target) === true)) {
       view.providers = null;
       view.picker = false;
@@ -1746,6 +1773,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       view.sheet = null;
       draw();
       event.stopImmediatePropagation();
+    } else if (event.key === 'Escape' && view.rowMenu !== null) {
+      const opener = view.rowMenu;
+
+      view.rowMenu = null;
+      view.linkMenu = false;
+      draw();
+      list.querySelector<HTMLElement>(`[data-action="pool-menu"][data-row="${opener}"]`)?.focus();
+      event.stopImmediatePropagation();
     } else if (event.key === 'Escape' && (view.picker || view.personas !== null || view.actions || view.providers !== null || view.textMenu)) {
       const opener = view.picker || view.providers !== null ? 'button.picker' : view.actions ? 'button.actions' : view.textMenu ? 'button.text-size' : 'button.persona';
 
@@ -1758,9 +1793,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       draw();
       head.querySelector<HTMLElement>(opener)?.focus();
       event.stopImmediatePropagation();
-    } else if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && (view.picker || view.personas !== null || view.actions || view.providers !== null || view.textMenu)) {
-      // Up and Down move between a header menu's rows, as in a VS Code menu.
-      const rows = [...head.querySelectorAll<HTMLElement>('.header .menu .menu-row')];
+    } else if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && (view.picker || view.personas !== null || view.actions || view.providers !== null || view.textMenu || view.rowMenu !== null)) {
+      // Up and Down move between a header menu's rows, or a pool row's menu's, as in a VS Code menu.
+      const rows = [...(view.rowMenu !== null ? list.querySelectorAll<HTMLElement>('.row-menu .menu-row') : head.querySelectorAll<HTMLElement>('.header .menu .menu-row'))];
       const at = rows.indexOf(document.activeElement as HTMLElement);
 
       if (rows.length > 0) {
@@ -1952,55 +1987,79 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   };
 
   // ---- Row actions (architecture.md § Web page) ----
+  /** The list's row with this key, `item:<id>` or a pool ticket's `ticket:<id>`, or null. */
+  const rowByKey = (key: string): PageRow | null => state.groups.flatMap((group) => group.rows).find((one) => rowKey(one) === key) ?? null;
+  /** The hub's request fields that name a row: a work item's ID, or a pool ticket's. */
+  const rowTarget = (row: PageRow): Record<string, number> => (row.workItemId !== null ? { workItemId: row.workItemId } : { ticketId: row.ticketId ?? -1 });
+  /** Why a row's control did not run: over the composer for the open work item, over the list for a pool ticket, which has no conversation. */
+  const refusedFor = (row: PageRow | null, why: string | null): void => {
+    if (row !== null && row.workItemId === null) {
+      listError = why;
+      draw();
+    } else {
+      showError(why);
+    }
+  };
+  /** Closes the header's actions menu and a pool row's menu. */
+  const closeMenus = (): void => {
+    view.actions = false;
+    view.rowMenu = null;
+    view.linkMenu = false;
+  };
   /**
    * Opens a row's ticket or link, an http or https URL from the hub's row, in a new tab, marked as the dock marks it; the installed app asks the
    * hub, which opens it in the default browser, since a link it opened itself would stay in the browser that installed it.
    */
-  const openLink = (workItemId: number, which: string): void => {
-    const url = rowLink(state, workItemId, which);
+  const openLink = (key: string, which: string): void => {
+    const row = rowByKey(key);
+    const url = row === null ? null : rowLink(row, which);
     const target = url === null ? null : tabUrl(url);
 
-    if (view.actions) {
-      view.actions = false;
+    if (view.actions || view.rowMenu !== null) {
+      closeMenus();
       draw();
     }
 
-    if (target === null) {
+    if (row === null || target === null) {
       return;
     }
 
     if (deps.standalone?.() ?? (typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches)) {
-      void post('row-open', { workItemId, url }).then((answer) => answer.status === 200 || showError(String(answer.body['error'] ?? `The link did not open (status ${answer.status}).`)));
+      void post('row-open', { ...rowTarget(row), url }).then((answer) => answer.status === 200 || refusedFor(row, String(answer.body['error'] ?? `The link did not open (status ${answer.status}).`)));
       return;
     }
 
     (deps.openUrl ?? ((one: string) => void window.open(one, '_blank', 'noopener,noreferrer')))(target);
   };
-  /** A control of the header's actions: Snooze… opens its choices, one that asks first its question, any other runs at once. */
-  const chooseAction = (label: string): void => {
-    const row = selectedRow(state);
+  /**
+   * A control of a row's menu, the header's for the open work item or a pool ticket's in the list: Snooze… opens its choices, one that asks first
+   * its question, one with an input its text, any other runs at once.
+   */
+  const chooseAction = (key: string, label: string): void => {
+    const row = rowByKey(key);
     const action = row?.actions?.find((one) => one.label === label);
 
-    view.actions = false;
+    closeMenus();
 
-    if (row === null || action === undefined || view.acting) {
+    // A work item's controls run only on the open one, as the hub checks.
+    if (row === null || action === undefined || view.acting || (row.workItemId !== null && row.workItemId !== selectedRow(state)?.workItemId)) {
       draw();
       return;
     }
 
     if (action.input !== null && action.input !== undefined) {
-      view.sheet = { kind: 'input', workItemId: row.workItemId, label: action.label, input: action.input, text: action.input.text ?? '', picked: action.input.choice?.value ?? '' };
+      view.sheet = { kind: 'input', row: key, label: action.label, input: action.input, text: action.input.text ?? '', picked: action.input.choice?.value ?? '' };
       draw();
       sheetHost.querySelector<HTMLTextAreaElement>('.sheet-input')?.focus();
       return;
     }
 
     if (action.action === 'snooze') {
-      view.sheet = { kind: 'snooze', workItemId: row.workItemId, label: action.label, title: row.title, choices: snoozeChoices(new Date(deps.now())), picked: '0', date: '', comment: '' };
+      view.sheet = { kind: 'snooze', row: key, label: action.label, title: row.title, choices: snoozeChoices(new Date(deps.now())), picked: '0', date: '', comment: '' };
     } else if (action.confirm !== null) {
-      view.sheet = { kind: 'confirm', workItemId: row.workItemId, action };
+      view.sheet = { kind: 'confirm', row: key, action };
     } else {
-      void runAction(row.workItemId, action.label, {});
+      void runAction(key, action.label, {});
     }
 
     draw();
@@ -2009,7 +2068,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const runCommand = async (label: string): Promise<void> => {
     const row = selectedRow(state);
 
-    view.actions = false;
+    closeMenus();
 
     if (row === null || view.acting) {
       draw();
@@ -2025,16 +2084,21 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     showError(answer.status === 200 ? null : String(answer.body['error'] ?? `Not done (status ${answer.status}).`));
     draw();
   };
-  /** Runs a row action, named by its label, on the selected work item; the hub checks again that its row still offers it. */
-  const runAction = async (workItemId: number, label: string, extra: Record<string, unknown>): Promise<void> => {
+  /**
+   * Runs a row's control, named by its label: `row-action` on the selected work item, or `pool-action` on a pool ticket; the hub checks again that
+   * its row still offers it.
+   */
+  const runAction = async (key: string, label: string, extra: Record<string, unknown>): Promise<void> => {
+    const row = rowByKey(key);
+
     view.acting = true;
     draw();
 
-    const answer = await command('row-action', { workItemId, label, ...extra });
+    const answer = row === null ? { status: 409, body: { error: 'The row is gone.' } } : row.workItemId !== null ? await command('row-action', { workItemId: row.workItemId, label, ...extra }) : await post('pool-action', { ticketId: row.ticketId, label, ...extra });
 
     view.acting = false;
     view.sheet = null;
-    showError(answer.status === 200 ? null : String(answer.body['error'] ?? `Not done (status ${answer.status}).`));
+    refusedFor(row, answer.status === 200 ? null : String(answer.body['error'] ?? `Not done (status ${answer.status}).`));
     draw();
   };
   const sheetGo = async (): Promise<void> => {
@@ -2045,7 +2109,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
 
     if (sheet.kind === 'confirm') {
-      await runAction(sheet.workItemId, sheet.action.label, {});
+      await runAction(sheet.row, sheet.action.label, {});
     } else if (sheet.kind === 'input') {
       if (!inputReady(sheet)) {
         sheetHost.querySelector<HTMLTextAreaElement>('.sheet-input')?.focus();
@@ -2054,7 +2118,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
       const choice = sheet.input.choice !== null && sheet.picked !== sheet.input.choice.value ? sheet.picked : null;
 
-      await runAction(sheet.workItemId, sheet.label, { text: sheet.text.trim(), ...(choice === null ? {} : { choice }) });
+      await runAction(sheet.row, sheet.label, { text: sheet.text.trim(), ...(choice === null ? {} : { choice }) });
     } else if (sheet.kind === 'snooze') {
       const picked = sheet.picked;
       const until = picked === 'date' ? snoozeDateUntil(sheet.date, sheet.choices) : (sheet.choices[Number(picked)]?.until ?? null);
@@ -2067,7 +2131,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
       const comment = sheet.comment.trim();
 
-      await runAction(sheet.workItemId, sheet.label, { until, ...(comment === '' ? {} : { comment }) });
+      await runAction(sheet.row, sheet.label, { until, ...(comment === '' ? {} : { comment }) });
     } else {
       view.sheet = null;
       draw();

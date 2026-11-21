@@ -153,14 +153,8 @@ export function tabUrl(url: string): string | null {
   return `${target}${target.includes('?') ? '&' : '?'}${TAB_PARAMETER}${href.slice(hash)}`;
 }
 
-/** The URL of a row's ticket (`ticket`) or of its link by index, or null when the list has no such row or link. */
-export function rowLink(state: PageState, workItemId: number, which: string): string | null {
-  const row = state.groups.flatMap((group) => group.rows).find((one) => one.workItemId === workItemId);
-
-  if (row === undefined) {
-    return null;
-  }
-
+/** The URL of a row's ticket (`ticket`) or of its link by index, or null when the row has no such link. */
+export function rowLink(row: PageRow, which: string): string | null {
   if (which === 'ticket') {
     return row.url === '' ? null : row.url;
   }

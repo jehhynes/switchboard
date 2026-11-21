@@ -205,9 +205,13 @@ export function pageGroups(snapshot: Snapshot, windows: string, keep: number | n
   return [...groups.values()].sort((a, b) => b.newest - a.newest).map(({ kind, title, ids }) => ({ kind, title, ids }));
 }
 
-/** A row of the page's list: the dock row's three lines, its mark and its stripe, as the dock built them (architecture.md § Web page). */
+/**
+ * A row of the page's list: the dock row's three lines, its mark and its stripe, as the dock built them (architecture.md § Web page); a work item's
+ * with its ID, or a pool ticket's, which has no conversation, with its ticket's ID and no work item.
+ */
 export interface PageRow {
-  workItemId: number;
+  workItemId: number | null;
+  ticketId: number | null;
   title: string;
   /** Line 1: the priority dot's tooltip, or null, and the time at its end. */
   priority: DockRow['priority'];
@@ -242,7 +246,7 @@ export interface PageRow {
 }
 
 /** The dock's actions the page may run through `row-action`, each on one work item. */
-export const PAGE_ACTIONS = ['start', 'approve', 'retry', 'stop', 'mark-done', 'reopen', 'snooze', 'restore', 'comment', 'move', 'reset-position', 'delete'] as const;
+export const PAGE_ACTIONS = ['start', 'pick', 'retriage-pool', 'approve', 'retry', 'stop', 'mark-done', 'reopen', 'snooze', 'restore', 'comment', 'move', 'reset-position', 'delete'] as const;
 export type PageActionType = (typeof PAGE_ACTIONS)[number];
 
 /** The groups of the dock's row menu (`MenuOf`), in its order, with a separator between them; what the row opens comes before `asking`. */
@@ -457,20 +461,25 @@ function hostTitle(host: string): string {
 
 /**
  * The page's list (architecture.md § Web page): the dock's groups in the dock's order, with its titles, glyphs and empty texts, holding the
- * dock's work item rows where the dock puts them, hosted conversations included (every conversation is a work item); pool tickets, which have
- * no conversation, are left out.
+ * dock's rows where the dock puts them: the work items', hosted conversations included (every conversation is a work item), and the pool
+ * tickets' in Unstarted and Snoozed.
  */
-export function pageList(dock: Pick<DockView, 'groups'>, snapshot: Pick<Snapshot, 'workItems'>): PageListGroup[] {
+export function pageList(dock: Pick<DockView, 'groups'>, snapshot: Pick<Snapshot, 'workItems' | 'pool'>): PageListGroup[] {
   const items = new Map(snapshot.workItems.map((item) => [item.id, item]));
+  const pool = new Set(snapshot.pool.map((entry) => entry.ticket.id));
+
   return dock.groups.map((group) => {
     const rows: PageRow[] = [];
 
     for (const row of group.rows) {
       const id = /^item:(\d+)$/.exec(row.key)?.[1];
       const item = id === undefined ? undefined : items.get(Number(id));
+      const ticketId = Number(/^ticket:(\d+)$/.exec(row.key)?.[1] ?? NaN);
 
       if (item !== undefined) {
         rows.push(pageRow(row, item.id, item.ticket.hostWindow ?? null));
+      } else if (pool.has(ticketId)) {
+        rows.push(pageRow(row, null, null, ticketId));
       }
     }
 
@@ -478,12 +487,13 @@ export function pageList(dock: Pick<DockView, 'groups'>, snapshot: Pick<Snapshot
   });
 }
 
-/** A work item's dock row as the page's list shows it; `host` is its ticket's host window, or null. */
-export function pageRow(row: DockRow, workItemId: number, host: string | null): PageRow {
+/** A work item's dock row as the page's list shows it, `host` being its ticket's host window or null; a pool ticket's with no work item and its `ticketId`. */
+export function pageRow(row: DockRow, workItemId: number | null, host: string | null, ticketId: number | null = null): PageRow {
   const actions = pageActions(row);
 
   return {
     workItemId,
+    ticketId,
     title: row.title,
     priority: row.priority,
     time: row.time,
@@ -538,6 +548,11 @@ export function pageHeader(dock: Pick<DockView, 'sources' | 'repoRoots' | 'sched
 /** The folder of `folders` that names the same folder as `folder`, in any spelling `hostKey` treats as one, or null. */
 export function knownFolder(folders: readonly string[], folder: string): string | null {
   return folders.find((one) => hostKey(one) === hostKey(folder)) ?? null;
+}
+
+/** A pool ticket's row in the dock's view, or null when no group lists it. */
+export function poolRowOf(dock: Pick<DockView, 'groups'>, ticketId: number): DockRow | null {
+  return dock.groups.flatMap((group) => group.rows).find((row) => row.key === `ticket:${ticketId}`) ?? null;
 }
 
 /** A work item's row in the dock's view, or null when no group lists it. */

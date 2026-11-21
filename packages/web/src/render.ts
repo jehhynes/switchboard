@@ -67,6 +67,8 @@ export interface View {
   /** Whether the header's actions menu is open, and in it the Open link submenu. */
   actions: boolean;
   linkMenu: boolean;
+  /** The pool ticket row whose menu is open in the list, by its key, or null. */
+  rowMenu: string | null;
   /** The sheet over the page that asks before an action, picks a snooze, or shows a draft to copy by hand. */
   sheet: Sheet | null;
   /** A row action is running, so its controls wait. */
@@ -86,12 +88,12 @@ export interface View {
 
 /** A sheet: Delete's or Stop's question, Snooze…'s choices, a control's text (and choice) as the dock's input dialog asks for it, or a drafted text the clipboard refused. */
 export type Sheet =
-  | { kind: 'input'; workItemId: number; label: string; input: NonNullable<PageAction['input']>; text: string; picked: string }
-  | { kind: 'confirm'; workItemId: number; action: PageAction }
-  | { kind: 'snooze'; workItemId: number; label: string; title: string; choices: SnoozeChoice[]; picked: string; date: string; comment: string }
+  | { kind: 'input'; row: string; label: string; input: NonNullable<PageAction['input']>; text: string; picked: string }
+  | { kind: 'confirm'; row: string; action: PageAction }
+  | { kind: 'snooze'; row: string; label: string; title: string; choices: SnoozeChoice[]; picked: string; date: string; comment: string }
   | { kind: 'text'; title: string; text: string };
 
-export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), list: false, actions: false, linkMenu: false, sheet: null, acting: false, prompt: null, providers: null, side: 'status', textScale: 1, textMenu: false, details: false });
+export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), list: false, actions: false, linkMenu: false, rowMenu: null, sheet: null, acting: false, prompt: null, providers: null, side: 'status', textScale: 1, textMenu: false, details: false });
 
 /** The most links the menu lists by themselves; more go in its Open link submenu, as the dock's `MenuLinks`. */
 const MENU_LINKS = 2;
@@ -103,29 +105,30 @@ function clipLabel(label: string): string {
   return label.length > LINK_LABEL_MAX ? `${label.slice(0, LINK_LABEL_MAX - 1).trimEnd()}…` : label;
 }
 
+/** A row's key in the list: `item:<work item ID>`, or a pool ticket's `ticket:<ticket ID>`, as the dock keys its rows. */
+export function rowKey(row: Pick<PageRow, 'workItemId' | 'ticketId'>): string {
+  return row.workItemId !== null ? `item:${row.workItemId}` : `ticket:${row.ticketId ?? ''}`;
+}
+
 /**
- * The header's row actions (architecture.md § Web page): the dock's main control as a button, then every control in a menu under an
- * ellipsis, grouped as the dock's row menu is: the main control, the work controls, the state controls, Add comment…, the order controls, what the row opens
- * (Copy, Open in VS Code, Open changes and Open report, Open ticket and its links, more than two of them in an Open link submenu), then the controls that ask first; empty when the row offers
- * none.
+ * A row's menu, as rows of a `menu` list (architecture.md § Web page), grouped as the dock's row menu is: the main control, the work controls, the
+ * state controls, Add comment…, the order controls, what the row opens (Copy, Open in VS Code, Open changes and Open report, Open ticket and its
+ * links, more than two of them in an Open link submenu), then the controls that ask first; empty when the row offers none. Each item names its
+ * row, so a pool ticket's menu in the list runs as the header's does.
  */
-export function renderActions(row: PageRow | null, view: View): string {
-  const actions = row?.actions ?? [];
-  const pastes = row?.pastes ?? [];
-  const commands = row?.opens ?? [];
-
-  if (row === null || (actions.length === 0 && pastes.length === 0 && commands.length === 0 && row.url === '' && row.links.length === 0)) {
-    return '';
-  }
-
+export function menuRows(row: PageRow, view: Pick<View, 'acting' | 'linkMenu'>): string {
+  const actions = row.actions ?? [];
+  const pastes = row.pastes ?? [];
+  const commands = row.opens ?? [];
+  const key = escape(rowKey(row));
   const disabled = view.acting ? ' disabled' : '';
   const item = (attrs: string, icon: string | null, label: string, after = '', classes = ''): string =>
-    `<li role="none"><button type="button" class="menu-row${classes === '' ? '' : ` ${classes}`}" role="menuitem" ${attrs}${disabled}><span class="menu-gutter" aria-hidden="true">${icon === null ? '' : `<span class="codicon codicon-${icon}"></span>`}</span><span class="title">${escape(label)}</span>${after}</button></li>`;
+    `<li role="none"><button type="button" class="menu-row${classes === '' ? '' : ` ${classes}`}" role="menuitem" data-row="${key}" ${attrs}${disabled}><span class="menu-gutter" aria-hidden="true">${icon === null ? '' : `<span class="codicon codicon-${icon}"></span>`}</span><span class="title">${escape(label)}</span>${after}</button></li>`;
   const act = (action: PageAction): string => item(`data-action="row-action" data-label="${escape(action.label)}"`, action.icon, action.label);
   const grouped = (group: PageAction['group']): string[] => actions.filter((one) => one.group === group).map(act);
   // A link's label can be free text a session reported, so a long one is cut, whole in its tooltip, as in the dock's menu.
   const link = (which: string, label: string, icon: string | null, classes = ''): string =>
-    item(`data-action="open-link" data-work-item="${row.workItemId}" data-link="${which}"${label.length > LINK_LABEL_MAX ? ` title="${escape(label)}"` : ''}`, icon, clipLabel(label), '', classes);
+    item(`data-action="open-link" data-link="${which}"${label.length > LINK_LABEL_MAX ? ` title="${escape(label)}"` : ''}`, icon, clipLabel(label), '', classes);
   const submenu =
     item(`data-action="link-menu" aria-haspopup="true" aria-expanded="${view.linkMenu}"`, 'link-external', 'Open link', `<span class="codicon codicon-chevron-${view.linkMenu ? 'down' : 'right'}" aria-hidden="true"></span>`) +
     (view.linkMenu ? row.links.map((one, index) => link(String(index), one.label, null, 'submenu-row')).join('') : '');
@@ -136,9 +139,24 @@ export function renderActions(row: PageRow | null, view: View): string {
     ...(row.links.length > MENU_LINKS ? [submenu] : row.links.map((one, index) => link(String(index), `Open ${one.label}`, 'link-external'))),
   ];
   const groups = [grouped('main'), grouped('work'), grouped('state'), grouped('notes'), grouped('order'), opens, grouped('asking')].filter((group) => group.length > 0);
-  const rows = groups.map((group) => group.join('')).join('<li class="menu-separator" role="separator"></li>');
-  const main = actions.find((one) => one.group === 'main');
-  const mainButton = main === undefined ? '' : `<button type="button" class="row-main" data-action="row-action" data-label="${escape(main.label)}"${disabled}><span class="codicon codicon-${escape(main.icon)}" aria-hidden="true"></span><span>${escape(main.label)}</span></button>`;
+
+  return groups.map((group) => group.join('')).join('<li class="menu-separator" role="separator"></li>');
+}
+
+/**
+ * The header's row actions (architecture.md § Web page): the dock's main control as a button, then the row's menu (`menuRows`) under an
+ * ellipsis; empty when the row offers none.
+ */
+export function renderActions(row: PageRow | null, view: View): string {
+  const rows = row === null ? '' : menuRows(row, view);
+
+  if (row === null || rows === '') {
+    return '';
+  }
+
+  const disabled = view.acting ? ' disabled' : '';
+  const main = (row.actions ?? []).find((one) => one.group === 'main');
+  const mainButton = main === undefined ? '' : `<button type="button" class="row-main" data-action="row-action" data-row="${escape(rowKey(row))}" data-label="${escape(main.label)}"${disabled}><span class="codicon codicon-${escape(main.icon)}" aria-hidden="true"></span><span>${escape(main.label)}</span></button>`;
   const menu = view.actions ? `<ul class="glass menu actions-menu align-right" role="menu" aria-label="Actions">${rows}</ul>` : '';
 
   return `${mainButton}<div class="menu-anchor actions-anchor"><button type="button" class="actions" data-action="actions" aria-haspopup="menu" aria-expanded="${view.actions}" title="Actions" aria-label="Actions"><span class="codicon codicon-ellipsis" aria-hidden="true"></span></button>${menu}</div>`;
@@ -282,7 +300,7 @@ function pill(classes: string, glyph: string | null, text: string, title: string
  * comment icon, the playbook with its namespace muted (or a hosted conversation's host), the ticket key as a pill in its source's colour, the
  * link pills and Returned, which shrink to their icons when the line is too narrow (`fitPills`, applied by the page); line 3 the mark and the details, a muted " · " between them, in their tones. The dock's stripe is on its left edge.
  */
-function listRow(row: PageRow, selected: boolean): string {
+function listRow(row: PageRow, selected: boolean, menu: string | null): string {
   const kind = row.mark?.kind;
   const mark =
     row.mark === null || kind === undefined
@@ -300,7 +318,7 @@ function listRow(row: PageRow, selected: boolean): string {
   const time = row.time === null ? '' : `<span class="row-time" title="${escape(row.time.title)}">${escape(row.time.text)}</span>`;
   const comment = row.comment === null ? '' : `<span class="codicon comment" role="img" title="${escape(row.comment.title)}" aria-label="Comments">${escape(row.comment.glyph)}</span>`;
   // A pill with a link opens it instead of the row's click, as the dock's `OnPillTapped` (PRD R52).
-  const opens = (which: string): string => ` data-action="open-link" data-work-item="${row.workItemId}" data-link="${which}"`;
+  const opens = (which: string): string => ` data-action="open-link" data-row="${escape(rowKey(row))}" data-link="${which}"`;
   const ticket = pill(`ticket source-${escape(row.sourceKind)}`, null, row.ticket, row.url === '' ? row.ticket : `${row.ticket}\n${row.url}`, row.sourceKind === 'github' ? 'github' : 'tag', row.url === '' ? '' : opens('ticket'));
   const links = row.links
     .map((link, index) => pill(`link ${link.kind}${link.mentioned ? ' mentioned' : ''}`, link.glyph, link.badge, `${link.label}${link.mentioned ? ', named in the ticket' : ''}\n${link.url}`, undefined, opens(String(index))))
@@ -311,28 +329,37 @@ function listRow(row: PageRow, selected: boolean): string {
     .map((detail, index) => `${index > 0 ? '<span class="row-detail-separator" aria-hidden="true">·</span>' : ''}<span class="row-detail${detail.tone === null ? '' : ` ${detail.tone}`}"${detail.title === null ? '' : ` title="${escape(detail.title)}"`}>${escape(detail.text)}</span>`)
     .join('');
 
+  // A pool ticket has no conversation to open, so its click opens its menu under it.
+  const click =
+    row.workItemId === null
+      ? `data-action="pool-menu" data-row="${escape(rowKey(row))}" aria-haspopup="menu" aria-expanded="${menu !== null}"`
+      : `data-action="select" data-work-item="${row.workItemId}" aria-current="${selected}"`;
+
   return (
-    `<li><button type="button" class="${classes}" data-action="select" data-work-item="${row.workItemId}" aria-current="${selected}" title="${escape(row.title)}">` +
+    `<li${row.workItemId === null ? ' class="pool-row"' : ''}><button type="button" class="${classes}" ${click} title="${escape(row.title)}">` +
     `<span class="row-head">${priority}<span class="row-title">${escape(row.title)}</span>${time}</span>` +
     `<span class="row-line">${comment}${playbook}${ticket}${linkPills}${returned}</span>` +
     (mark === '' && details === '' ? '' : `<span class="row-line row-details">${mark}${details}</span>`) +
-    '</button></li>'
+    '</button>' +
+    (menu === null ? '' : `<ul class="glass menu row-menu align-right" role="menu" aria-label="${escape(`Actions for ${row.ticket}`)}">${menu}</ul>`) +
+    '</li>'
   );
 }
 
 /**
  * The page's list (architecture.md § Web page): the dock's groups in its order, each a header with its codicon, title and count that opens or
  * collapses it, then its rows; a collapsed group still shows the selected row, so the selection is never hidden. While a search `filtering` it,
- * only the groups with rows show, every one open, and the search's end says when none matched.
+ * only the groups with rows show, every one open, and the search's end says when none matched. `menu` is the pool ticket row whose menu is
+ * open, by its key, with the menu's rows.
  */
-export function renderList(groups: readonly PageGroup[], selected: number | null, collapsed: ReadonlySet<string>, filtering = false): string {
+export function renderList(groups: readonly PageGroup[], selected: number | null, collapsed: ReadonlySet<string>, filtering = false, menu: { row: string; rows: string } | null = null): string {
   if (groups.every((group) => group.rows.length === 0)) {
     return filtering ? '' : '<p class="empty">No work items yet. They appear here when Switchboard starts one.</p>';
   }
 
   const html = groups.map((group) => {
     const open = filtering || !collapsed.has(group.key);
-    const rows = (open ? group.rows : group.rows.filter((row) => row.workItemId === selected)).map((row) => listRow(row, row.workItemId === selected)).join('');
+    const rows = (open ? group.rows : group.rows.filter((row) => row.workItemId === selected)).map((row) => listRow(row, row.workItemId !== null && row.workItemId === selected, menu !== null && menu.row === rowKey(row) ? menu.rows : null)).join('');
     const empty = open && group.rows.length === 0 && group.empty !== null ? `<p class="group-empty">${escape(group.empty)}</p>` : '';
     const head =
       `<button type="button" class="group-head" data-action="group" data-group="${escape(group.key)}" aria-expanded="${open}">` +
