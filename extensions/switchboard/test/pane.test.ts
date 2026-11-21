@@ -5,7 +5,7 @@ import { mainTerminal, paneModel, windowRows } from '../src/paneModel.js';
 import type { PaneItem } from '../src/paneModel.js';
 
 /** A pane item's fields the pane draws beside its links and actions. */
-const EXTRA: Omit<PaneItem, 'key' | 'links' | 'report' | 'main'> = { sourceKind: 'github', playbook: 'dev:develop', mark: null, stripe: null, progress: [], status: null, alerts: [], unread: 0 };
+const EXTRA: Omit<PaneItem, 'key' | 'links' | 'report' | 'main'> = { sourceKind: 'github', playbook: 'dev:develop', mark: null, stripe: null, progress: [], status: null, alerts: [] };
 import { SIZE_MS, startPane } from '../src/webview/paneMain.js';
 import { clickMessage, renderPane } from '../src/webview/paneRender.js';
 
@@ -62,7 +62,6 @@ function item(patch: Partial<WorkItemView> = {}): WorkItemView {
     worktree: { id: 1, ticketId: 7, path: WORKTREE, branch: '107-fix', linkedBy: 'report' },
     links: [],
     returned: 0,
-    unread: 0,
     ...patch,
   };
 }
@@ -281,16 +280,6 @@ describe('renderPane (PRD R92)', () => {
 
     expect(div.querySelector('.actions')).toBeNull();
     expect(div.querySelectorAll('button')).toHaveLength(1);
-  });
-
-  it("draws the work item's unread count with the unread mark, and none at 0", () => {
-    const div = root();
-
-    div.innerHTML = renderPane(paneModel(snapshot([item({ unread: 3 })]), FILE, WINDOWS, NOW));
-    expect(div.querySelector('.pills .unread-count')!.textContent).toBe('3');
-    expect(div.querySelector('.pills .unread-count')!.getAttribute('title')).toBe('3 unread replies and statuses');
-    div.innerHTML = renderPane(paneModel(snapshot([item()]), FILE, WINDOWS, NOW));
-    expect(div.querySelector('.unread-count')).toBeNull();
   });
 
   it('draws a pill with no link as text that sends nothing', () => {

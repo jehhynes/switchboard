@@ -299,8 +299,16 @@ describe('drawing', () => {
     expect(root.querySelector('[data-work-item="9"] .playbook')!.textContent).toBe('support');
     expect(root.querySelector('[data-work-item="9"] .playbook')!.classList.contains('host')).toBe(true);
     expect(root.querySelector('.count')).toBeNull();
-    // The dropdown shows none either.
+    // The dropdown shows no count, and no dot for the selected conversation's own unread items.
     expect(html(renderHeader({ ...EMPTY, connected: true, scope: { ...scope, conversations: [{ ...scope.conversations[0]!, unread: 3 }] }, session: session(), unread: 3 }, { ...newView(), picker: true }))).not.toContain('class="count"');
+    expect(html(renderHeader({ ...EMPTY, connected: true, scope: { ...scope, conversations: [{ ...scope.conversations[0]!, unread: 3 }] }, session: session(), unread: 3 }, { ...newView(), picker: true }))).not.toContain('unread-dot');
+    // Another conversation with unseen items has the dot on its row, and the button carries it.
+    const other = { ...scope.conversations[0]!, workItemId: 77, primary: false, title: 'Older', unread: 2 };
+    const header = document.createElement('div');
+
+    header.innerHTML = html(renderHeader({ ...EMPTY, connected: true, scope: { ...scope, conversations: [scope.conversations[0]!, other] }, session: session() }, { ...newView(), picker: true }));
+    expect([...header.querySelectorAll('.conversation-row')].map((row) => row.querySelector('.unread-dot') !== null)).toEqual([false, true]);
+    expect(header.querySelector('button.picker .unread-dot')?.getAttribute('title')).toBe('Unread replies or status');
   });
 
   it("draws a row's three lines from the dock row: priority, title and time; comment, playbook, ticket, links and Returned; mark and details", () => {

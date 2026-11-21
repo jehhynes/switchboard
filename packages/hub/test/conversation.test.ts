@@ -658,7 +658,6 @@ describe('ConversationService', () => {
     const projects = join(dir, 'projects');
     const logs: string[] = [];
     let id = 0;
-    const unreadChanges = { count: 0 };
     const service = new ConversationService({
       store,
       windows: scopes,
@@ -673,7 +672,6 @@ describe('ConversationService', () => {
         await new Promise((resolve) => setImmediate(resolve));
       },
       newId: () => String(++id),
-      unreadChanged: () => unreadChanges.count++,
       log: (line) => logs.push(line),
     });
 
@@ -694,11 +692,11 @@ describe('ConversationService', () => {
       return { key, frames, stream };
     };
 
-    return { store, view, scopes, service, transcript, reply, open, logs, held, unreadChanges };
+    return { store, view, scopes, service, transcript, reply, open, logs, held };
   }
 
-  it("counts its session's unread replies and status, marks each seen on its own, and tells its own windows and the dock", async () => {
-    const { view, service, transcript, reply, open, store, unreadChanges } = setup();
+  it("counts its session's unread replies and status, marks each seen on its own, and tells its own windows", async () => {
+    const { view, service, transcript, reply, open, store } = setup();
 
     const mine = open(view.file);
     const theirs = open(view.otherFile);
@@ -713,12 +711,10 @@ describe('ConversationService', () => {
     expect(mine.frames.filter((frame) => frame.type === 'status')).toMatchObject([{ status: { markdown: 'Done.', unread: true } }]);
     expect(mine.frames.filter((frame) => frame.type === 'unread').at(-1)).toMatchObject({ count: 3 });
     expect(theirs.frames.filter((frame) => frame.type === 'unread').at(-1)).toMatchObject({ count: 1 });
-    // Each session's count changed, so the dock's rows are built again.
-    expect(unreadChanges.count).toBeGreaterThanOrEqual(2);
 
     const [one, two] = store.conversation('s2', null, 10).items.map((item) => item.id);
     const statusId = store.latestStatus('s2')!.id;
-    const before = { mine: mine.frames.length, theirs: theirs.frames.length, changes: unreadChanges.count };
+    const before = { mine: mine.frames.length, theirs: theirs.frames.length };
 
     // Another window's item, an unknown ID, another session, a stale scope and a malformed body mark nothing.
     expect(service.seen({ window: mine.key, scopeGen: 1, opId: 'o1', sessionId: 's2', ids: [two, store.conversation('s3', null, 10).items[0]!.id] })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
@@ -739,22 +735,19 @@ describe('ConversationService', () => {
     expect(after.filter((frame) => frame.type === 'status')).toMatchObject([{ status: { id: statusId, unread: false } }]);
     expect(after.filter((frame) => frame.type === 'unread')).toMatchObject([{ count: 1 }]);
     expect(theirs.frames.length).toBe(before.theirs);
-    expect(unreadChanges.count).toBe(before.changes + 1);
     expect(store.reply(one!)?.seenAt).toBeNull();
 
-    // Marking again sends nothing new and leaves the dock alone.
+    // Marking again sends nothing new.
     const again = mine.frames.length;
 
     expect(service.seen({ window: mine.key, scopeGen: 1, opId: 'o8', sessionId: 's2', ids: [two] })).toEqual({ status: 200, body: { unread: 1 } });
     expect(mine.frames.length).toBe(again);
-    expect(unreadChanges.count).toBe(before.changes + 1);
 
     // Any change counts again, as a message that pushes an unread reply past the retention limit.
     store.markSeen('s2', [one!], NOW);
     transcript('D:/w12', 'n2', [reply('a1', 'One.'), reply('a2', 'Two.\n[status]\nDone.'), JSON.stringify({ type: 'user', uuid: 'u3', timestamp: new Date(NOW).toISOString(), message: { role: 'user', content: 'Next?' } })]);
     await service.poll();
     expect(mine.frames.filter((frame) => frame.type === 'unread').at(-1)).toMatchObject({ count: 0 });
-    expect(unreadChanges.count).toBe(before.changes + 2);
     store.updateReply(one!, { seenAt: null });
 
     // A reconnect's hello carries the count and each item's state.

@@ -481,15 +481,18 @@ const SEPARATOR = '<li class="menu-separator" role="separator"></li>';
 
 /**
  * A conversation as the dropdown's button and each of its rows draw it, from this one renderer so they never differ (architecture.md §
- * Conversation view): its session's state codicon, its title and its provider's mark; no unread count, as on the web page and the dock.
+ * Conversation view): its session's state codicon, its title, the unread dot when `unread`, and its provider's mark.
  */
-export function conversationLabel(entry: ConversationEntry, state: ConversationState): string {
+export function conversationLabel(entry: ConversationEntry, state: ConversationState, unread = false): string {
   const selected = entry.workItemId === state.scope?.workItemId;
   // The selected conversation's state and provider come from its current session, which the view follows more closely than the entry.
   const icon = selected ? stateIcon(state.session) : stateIcon(entry.state === null ? null : ({ state: entry.state, waitingFor: null } as never));
 
-  return `${codicon(icon)}<span class="title">${escape(entry.title)}</span>${providerMark(selected ? (state.session?.provider ?? entry.provider) : entry.provider)}`;
+  return `${codicon(icon)}<span class="title">${escape(entry.title)}</span>${unread ? UNREAD_DOT : ''}${providerMark(selected ? (state.session?.provider ?? entry.provider) : entry.provider)}`;
 }
+
+/** The unread mark's dot on a conversation of the dropdown with unseen replies or status (architecture.md § Unread). */
+const UNREAD_DOT = '<span class="unread-dot" role="img" title="Unread replies or status" aria-label="Unread replies or status"></span>';
 
 /**
  * The header's conversation dropdown (architecture.md § Conversation view): a button that shows the selected conversation as its rows do, then
@@ -504,11 +507,13 @@ function picker(state: ConversationState, open: boolean, menu: HeaderMenu | null
   const rows = scope.conversations.map((entry) => {
     const chosen = entry.workItemId === scope.workItemId;
 
-    return `<li role="none"><button type="button" class="menu-row conversation-row" role="menuitemradio" aria-checked="${chosen}" data-action="select" data-work-item="${entry.workItemId}">${conversationLabel(entry, state)}</button></li>`;
+    return `<li role="none"><button type="button" class="menu-row conversation-row" role="menuitemradio" aria-checked="${chosen}" data-action="select" data-work-item="${entry.workItemId}">${conversationLabel(entry, state, !chosen && entry.unread > 0)}</button></li>`;
   });
+  // The button carries the dot while a conversation the operator is not looking at has unseen items.
+  const othersUnread = scope.conversations.some((entry) => entry.workItemId !== scope.workItemId && entry.unread > 0);
   const create = `<li role="none"><button type="button" class="menu-row" role="menuitem" data-action="new" aria-haspopup="menu">${gutter('add')}<span class="title">New conversation…</span></button></li>`;
   const list = open ? `<ul class="glass menu conversation-menu" data-key="menu-conversations" role="menu" aria-label="Conversations">${rows.join('')}${rows.length > 0 ? SEPARATOR : ''}${create}</ul>` : '';
-  const label = selected === null ? `<span class="codicon codicon-folder" aria-hidden="true"></span><span class="title">${escape(title)}</span>` : conversationLabel(selected, state);
+  const label = selected === null ? `<span class="codicon codicon-folder" aria-hidden="true"></span><span class="title">${escape(title)}</span>` : conversationLabel(selected, state, othersUnread);
   const button = `<button type="button" class="picker" data-action="picker" aria-haspopup="menu" aria-expanded="${open}" title="${escape(title)}">${label}<span class="codicon codicon-chevron-down" aria-hidden="true"></span></button>`;
 
   return `<div class="menu-anchor picker-anchor">${button}${list}${menu?.kind === 'provider' ? headerMenu(menu) : ''}</div>`;

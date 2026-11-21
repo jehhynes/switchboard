@@ -516,8 +516,6 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     hooks: () => config.settings.sessions.installHooks,
     now: deps.now,
     newId: randomUUID,
-    // The dock's rows count each work item's unread items, so a change builds the views again.
-    unreadChanged: () => builder.schedule(),
     resume: (sessionId) => runtime.resumeThread(sessionId),
     newConversation: (hostWindow, folder, provider) => {
       const { refused } = runtime.send({ type: 'new-conversation', hostWindow, folder, ...(provider === undefined ? {} : { provider }) });

@@ -8,8 +8,6 @@ button.main:hover { background: var(--vscode-button-hoverBackground); }
 .codicon { font: normal normal normal 14px/1 codicon; }
 .item + .item { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--vscode-widget-border, transparent); }
 .pills, .actions { display: flex; flex-wrap: wrap; gap: 4px; }
-/* The unread mark, as everywhere in Switchboard: a filled round badge in the activity bar badge colours (architecture.md § Unread). */
-.unread-count { box-sizing: border-box; align-self: center; min-width: 16px; height: 16px; padding: 0 5px; border-radius: 8px; text-align: center; font-size: 11px; line-height: 16px; color: var(--vscode-activityBarBadge-foreground); background: var(--vscode-activityBarBadge-background); }
 .actions { margin-top: 6px; }
 .pill { box-sizing: border-box; border: 1px solid; border-radius: 10px; padding: 0 7px; font-size: 12px; background: color-mix(in srgb, var(--vscode-badge-background) 35%, transparent); color: var(--vscode-foreground); border-color: var(--vscode-badge-background); }
 .pill.pr { background: color-mix(in srgb, var(--vscode-charts-purple, #a371f7) 20%, transparent); border-color: var(--vscode-charts-purple, #a371f7); }

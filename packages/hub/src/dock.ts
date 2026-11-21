@@ -244,8 +244,6 @@ export interface DockRow {
   links: { label: string; url: string; kind: 'pr' | 'issue' | 'url'; badge: string; glyph: string | null; mentioned: boolean; pr?: PullRequestStatus }[];
   /** How many earlier work items with the same playbook, or one it is a return of, were done, for the return icon and count on line 2 (PRD R51); 0 when it is not marked. */
   returned: number;
-  /** Unread replies and statuses of the work item's current session in its Conversation view, as a count after the title (PRD R100); 0 on a pool row. */
-  unread: number;
   /** The comment icon on line 2, with the work item's comments, oldest first, as its tooltip (PRD R87); null without comments. */
   comment: { glyph: string; title: string } | null;
   /** A Done row's date band, such as `Today` or `Last week` (PRD R27); null in the other groups. */
@@ -339,7 +337,7 @@ export function dockRow(snapshot: Snapshot, entry: WorkItemView | PoolView, grou
   const kind = snapshot.sourceStates.find((source) => source.name === entry.ticket.source)?.kind;
   const shown = 'status' in entry ? itemRow(entry, now, snapshot.namespaces, windows, order, snapshot.openVSCode, snapshot.openTerminal, snapshot.repoKeys) : poolRow(entry, now, snapshot.namespaces);
 
-  return { ...shown, ticket: shownKey(entry.ticket, snapshot.repoKeys), sourceKind: kind ?? entry.ticket.source, search: searchText(entry, group, snapshot), links: linksOf(entry, snapshot.repoKeys, snapshot.pullRequests), returned: entry.returned, unread: 'status' in entry ? entry.unread : 0, comment: 'status' in entry ? commentOf(entry) : null, band };
+  return { ...shown, ticket: shownKey(entry.ticket, snapshot.repoKeys), sourceKind: kind ?? entry.ticket.source, search: searchText(entry, group, snapshot), links: linksOf(entry, snapshot.repoKeys, snapshot.pullRequests), returned: entry.returned, comment: 'status' in entry ? commentOf(entry) : null, band };
 }
 
 function heldRow(snapshot: Snapshot, one: HeldSession, now: number, windows: string): DockHeld {
@@ -439,7 +437,7 @@ export function sourceGroups(states: Snapshot['sourceStates']): DockSourceGroup[
 }
 
 /** A work item's row; `order` is Ready for review's IDs in list order when the row is in that group, for its Move controls. */
-function itemRow(item: WorkItemView, now: number, namespaces: Record<string, string>, windows: string, order: number[] | null, mode: OpenVSCode, terminalIn: OpenTerminal, keys: RepoKeys | undefined): Omit<DockRow, 'sourceKind' | 'search' | 'links' | 'returned' | 'unread' | 'comment' | 'band'> {
+function itemRow(item: WorkItemView, now: number, namespaces: Record<string, string>, windows: string, order: number[] | null, mode: OpenVSCode, terminalIn: OpenTerminal, keys: RepoKeys | undefined): Omit<DockRow, 'sourceKind' | 'search' | 'links' | 'returned' | 'comment' | 'band'> {
   const kind = markOf(item);
   const controls = order === null ? controlsOf(item, mode) : [...controlsOf(item, mode), ...moveControls(item, order)];
   const turn = item.ticket.snoozed ? null : turnOf(item);
@@ -488,7 +486,7 @@ function orMarkTitle(kind: Mark | null, details: DockText[]): DockText[] {
   return kind !== null && details.length === 0 ? [{ text: MARK_TITLES[kind], title: null, tone: null }] : details;
 }
 
-function poolRow(entry: PoolView, now: number, namespaces: Record<string, string>): Omit<DockRow, 'sourceKind' | 'search' | 'links' | 'returned' | 'unread' | 'comment' | 'band'> {
+function poolRow(entry: PoolView, now: number, namespaces: Record<string, string>): Omit<DockRow, 'sourceKind' | 'search' | 'links' | 'returned' | 'comment' | 'band'> {
   const { ticket, triage } = entry;
   const { main, controls } = poolControls(entry);
   const triaging = triage !== null && triage.endedAt === null;

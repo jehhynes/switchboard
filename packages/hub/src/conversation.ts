@@ -221,8 +221,6 @@ export interface ConversationServiceDeps {
   /** Waits between screen reads while a message is typed; a timer by default. */
   sleep?(ms: number): Promise<void>;
   newId(): string;
-  /** A session's unread count changed, which the dock's rows show; the hub builds its views again. */
-  unreadChanged?(): void;
   /**
    * Makes a hosted conversation (architecture.md § Hosted conversations) for the window binding `hostWindow` in `folder` and starts its session;
    * its work item, or why it was refused.
@@ -481,14 +479,11 @@ export class ConversationService {
     this.#unreadChanged(sessionId);
   }
 
-  /** Each session's unread count when it last changed, so the dock hears of a change once. */
-  readonly #unread = new Map<string, number>();
   /** The unread count each window was last sent, by window key and work item. */
   readonly #unreadShown = new Map<string, number>();
 
   /**
-   * Sends each window that lists the session's work item, while it is that work item's current session, its unread count when it changed, and
-   * tells the hub when the session's count changed.
+   * Sends each window that lists the session's work item, while it is that work item's current session, its unread count when it changed.
    */
   #unreadChanged(sessionId: string): void {
     const count = this.deps.store.unreadCount(sessionId);
@@ -503,11 +498,6 @@ export class ConversationService {
           this.#send(key, 'unread', { workItemId: session.workItemId, count });
         }
       }
-    }
-
-    if (this.#unread.get(sessionId) !== count) {
-      this.#unread.set(sessionId, count);
-      this.deps.unreadChanged?.();
     }
   }
 

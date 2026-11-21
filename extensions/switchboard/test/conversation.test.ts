@@ -1872,12 +1872,20 @@ describe('several conversations in a window (architecture.md § Conversation vie
     expect(menu.querySelector('.conversation-row [aria-checked="true"]')).toBeNull();
     expect(menu.querySelector('.conversation-row[aria-checked="true"]')?.querySelectorAll('.codicon-check')).toHaveLength(0);
     expect(renderConversation({ ...base({ scope: { ...TWO, workItemId: 9, sessionId: 's9' } }), unread: 2 }, new Set([PICKER]), T0)).not.toContain('class="count"');
+    // The unread dot marks only a conversation not selected, and the button while one has it; the selected one's own unread items mark nothing here.
+    expect(menu.querySelector('.unread-dot')).toBeNull();
+    menu.innerHTML = renderConversation({ ...base(), unread: 4 }, new Set([PICKER]), T0);
+    expect([...menu.querySelectorAll('.conversation-row')].map((row) => row.querySelector('.unread-dot') !== null)).toEqual([false, true]);
+    expect(menu.querySelector('.conversation-row .unread-dot')?.getAttribute('aria-label')).toBe('Unread replies or status');
+    expect(menu.querySelector('button.picker .unread-dot')).not.toBeNull();
+    menu.innerHTML = renderConversation(base({ scope: { ...TWO, conversations: [SCOPE.conversations[0]!, { ...HOSTED, unread: 0 }] } }), new Set([PICKER]), T0);
+    expect(menu.querySelector('.unread-dot')).toBeNull();
     // A separator, then New conversation… last.
     expect([...menu.querySelectorAll('.conversation-menu > li')].slice(-2).map((li) => li.className || li.textContent)).toEqual(['menu-separator', 'New conversation…']);
     expect(menu.querySelector('.conversation-menu > li:last-child button')?.getAttribute('data-action')).toBe('new');
 
     // Each option shows its session's provider mark after its title; an entry with no provider shows none.
-    const marked = renderConversation(base({ scope: { ...TWO, conversations: [{ ...SCOPE.conversations[0]!, provider: 'claude' }, { ...HOSTED, provider: 'codex' }] } }), new Set([PICKER]), T0);
+    const marked = renderConversation(base({ scope: { ...TWO, conversations: [{ ...SCOPE.conversations[0]!, provider: 'claude' }, { ...HOSTED, provider: 'codex', unread: 0 }] } }), new Set([PICKER]), T0);
     const list = document.createElement('div');
 
     list.innerHTML = marked;

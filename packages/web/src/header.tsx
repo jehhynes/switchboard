@@ -112,9 +112,9 @@ type Entry = NonNullable<PageState['scope']>['conversations'][number];
 
 /**
  * A conversation as the dropdown's button and each of its rows draw it, from this one renderer so they never differ: its session's state
- * codicon, title and provider's mark. The page shows no unread counts.
+ * codicon, title, the unread dot when `unread` (architecture.md § Unread), and provider's mark.
  */
-function ConversationLabel({ entry, state }: { entry: Entry; state: PageState }) {
+function ConversationLabel({ entry, state, unread = false }: { entry: Entry; state: PageState; unread?: boolean }) {
   const selected = entry.workItemId === state.scope?.workItemId;
   const icon = selected ? stateIcon(state.session?.state, state.session?.waitingFor, state.session?.limit) : stateIcon(entry.state);
 
@@ -122,6 +122,7 @@ function ConversationLabel({ entry, state }: { entry: Entry; state: PageState })
     <>
       <Codicon {...icon} />
       <span class="title">{entry.title}</span>
+      {unread ? <span class="unread-dot" role="img" title="Unread replies or status" aria-label="Unread replies or status"></span> : null}
       {trusted(providerMark(selected ? (state.session?.provider ?? entry.provider) : entry.provider))}
     </>
   );
@@ -209,6 +210,8 @@ export function renderHeader(state: PageState, view: View): VNode {
   const scope = state.scope!;
   const selected = selectedEntry(state);
   const title = selected?.title ?? scope.title;
+  // The button carries the dot while a conversation the operator is not looking at has unseen items.
+  const othersUnread = scope.conversations.some((entry) => entry.workItemId !== scope.workItemId && entry.unread > 0);
   const persona = state.session?.persona;
   const personaLabel = persona == null ? '' : `Persona: ${persona.name}${persona.pinned ? ', pinned' : ''}`;
   const personaButton =
@@ -251,7 +254,7 @@ export function renderHeader(state: PageState, view: View): VNode {
         {scope.conversations.map((entry) => (
           <li role="none" key={entry.workItemId}>
             <button type="button" class="menu-row conversation-row" role="menuitemradio" aria-checked={entry.workItemId === scope.workItemId} data-action="select" data-work-item={String(entry.workItemId)}>
-              <ConversationLabel entry={entry} state={state} />
+              <ConversationLabel entry={entry} state={state} unread={entry.workItemId !== scope.workItemId && entry.unread > 0} />
             </button>
           </li>
         ))}
@@ -309,7 +312,7 @@ export function renderHeader(state: PageState, view: View): VNode {
               <span class="title">{title}</span>
             </>
           ) : (
-            <ConversationLabel entry={selected} state={state} />
+            <ConversationLabel entry={selected} state={state} unread={othersUnread} />
           )}
           <span class="codicon codicon-chevron-down" aria-hidden="true"></span>
         </button>

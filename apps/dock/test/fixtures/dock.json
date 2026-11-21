@@ -147,7 +147,6 @@
           "search": "Issue <13> · gh 113 · dev:develop · Ready for review",
           "links": [],
           "returned": 0,
-          "unread": 0,
           "comment": null,
           "band": null
         },
@@ -325,7 +324,6 @@
             }
           ],
           "returned": 2,
-          "unread": 0,
           "comment": null,
           "band": null
         },
@@ -488,7 +486,6 @@
           "search": "Issue <10> · gh 110 · dev:develop · Ready for review",
           "links": [],
           "returned": 0,
-          "unread": 0,
           "comment": null,
           "band": null
         }
@@ -606,7 +603,6 @@
           "search": "Issue <14> · gh 114 · dev:develop · Blocked on you",
           "links": [],
           "returned": 0,
-          "unread": 0,
           "comment": null,
           "band": null
         },
@@ -739,7 +735,6 @@
           "search": "Issue <8> · gh 108 · dev:develop · Blocked on you",
           "links": [],
           "returned": 0,
-          "unread": 0,
           "comment": null,
           "band": null
         },
@@ -872,7 +867,6 @@
           "search": "Issue <15> · gh 115 · dev:develop · Blocked on you",
           "links": [],
           "returned": 0,
-          "unread": 2,
           "comment": null,
           "band": null
         }
@@ -1010,7 +1004,6 @@
           "search": "Issue <9> · gh 109 · dev:develop · Unstarted",
           "links": [],
           "returned": 0,
-          "unread": 0,
           "comment": null,
           "band": null
         },
@@ -1086,7 +1079,6 @@
           "search": "Issue <4> · gh 104 · dev:develop · Unstarted",
           "links": [],
           "returned": 0,
-          "unread": 0,
           "comment": null,
           "band": null
         }
@@ -1188,7 +1180,6 @@
           "search": "Issue <11> · gh 111 · dev:develop · Done",
           "links": [],
           "returned": 0,
-          "unread": 0,
           "comment": null,
           "band": "Today"
         },
@@ -1282,7 +1273,6 @@
           "search": "Issue <12> · gh 112 · dev:develop · Done",
           "links": [],
           "returned": 0,
-          "unread": 0,
           "comment": null,
           "band": "Two weeks ago"
         }

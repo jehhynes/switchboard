@@ -11,4 +11,6 @@ button.picker { background: var(--sb-picker-background); border-radius: 6px; }
 button.picker:hover, button.picker[aria-expanded="true"] { background: var(--sb-picker-hover); }
 body.vscode-high-contrast button.picker, body.vscode-high-contrast-light button.picker { background: transparent; outline: 1px solid var(--vscode-contrastBorder, transparent); outline-offset: -1px; }
 .conversation-menu .menu-row:hover, .conversation-menu .menu-row:focus { background: var(--vscode-list-hoverBackground, rgba(127, 127, 127, 0.15)); color: inherit; }
+/* The unread mark's 7 px dot (architecture.md § Unread) on a conversation the operator is not looking at, and on the button while any has one. */
+.picker .unread-dot, .conversation-row .unread-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--vscode-activityBarBadge-background); }
 .conversation-row[aria-checked="true"], .conversation-row[aria-checked="true"]:hover, .conversation-row[aria-checked="true"]:focus { background: var(--sb-picker-selected); color: var(--vscode-list-activeSelectionForeground, inherit); }

@@ -71,7 +71,6 @@ function item(id: number, status: WorkItemView['status'], patch: Partial<WorkIte
     worktree: null,
     links: [],
     returned: 0,
-    unread: 0,
     ...patch,
   };
 }

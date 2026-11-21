@@ -475,7 +475,7 @@ describe('dockView', () => {
           }),
           item(13, { status: 'running', readyAt: NOW - 5 * 3_600_000, orderAt: NOW - 6 * 3_600_000, stage: 'posting', stageAt: NOW - 60_000, sessions: [session({ cwd: 'D:/git/widgets' })] }),
           item(14, { status: 'failed', error: 'Setup ended without a worktree.', statusAt: NOW - 600_000 }),
-          item(15, { sessions: [session({ id: 'cm15', workItemId: 15, codeMode: true, state: 'waiting', nativeSessionId: 'eeee5555-native', shortId: 'eeee5555', cwd: 'D:/git/widgets' })], unread: 2 }),
+          item(15, { sessions: [session({ id: 'cm15', workItemId: 15, codeMode: true, state: 'waiting', nativeSessionId: 'eeee5555-native', shortId: 'eeee5555', cwd: 'D:/git/widgets' })] }),
           // Done rows carry their date band; 12:00 UTC less a minute is the same local day in any zone within ±11 hours.
           item(11, { status: 'done', doneAt: NOW - 60_000 }),
           item(12, { status: 'done', doneAt: NOW - 30 * 86_400_000 }),
