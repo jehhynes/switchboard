@@ -238,7 +238,7 @@ function publishPaneHelper() {
     return;
   }
 
-  const project = path.join('..', '..', 'apps', 'dock', 'src', 'Switchboard.PaneHelper', 'Switchboard.PaneHelper.csproj');
+  const project = path.join('..', '..', 'apps', 'pane-helper', 'src', 'Switchboard.PaneHelper', 'Switchboard.PaneHelper.csproj');
   const result = require('node:child_process').spawnSync('dotnet', ['publish', project, '-c', 'Release', '--nologo', '-v', 'q', '-p:DebugType=none', '-o', 'dist/pane-helper'], { stdio: 'inherit' });
 
   if (result.status !== 0) {

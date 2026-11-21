@@ -66,7 +66,7 @@ Run commands from the repository root:
 | Command | Purpose |
 |---|---|
 | `npm run verify:staged` | Build, typecheck and test the workspaces the staged files touch and their dependents; the pre-commit hook runs it |
-| `npm run verify` | Build, typecheck, tests, coverage, and the dock's `dotnet build` and `dotnet test`; run before merging into `main` |
+| `npm run verify` | Build, typecheck, tests, coverage, and the dock's and the pane helper's `dotnet build` and `dotnet test`; run before merging into `main` |
 | `npm run verify:full` | Verify plus VS Code integration tests |
 | `npm run test:integration` | Build and run VS Code integration tests |
 
@@ -85,7 +85,7 @@ Package with `vsce package --no-dependencies`; the workspace script includes the
 
 Confirm the installed bundle under `%USERPROFILE%/.vscode/extensions/switchboard.switchboard-0.0.0/dist/` (`~/.vscode/extensions/…` on Linux) contains the change. `hub.js install` copies the hub, holder, voice and pane helper builds into the Switchboard home, as a window's activation does, and the running hub restarts onto the new hub build once it is quiet, so a change to the hub or a bundled package needs no reload; `node ~/.switchboard/hub.js restart` waits for the restart and prints the new build. For a change to the extension's own UI, report that the developer can reload when ready. Do not reload their window.
 
-The Chrome pane helper (`apps/dock/src/Switchboard.PaneHelper`) ships in the VS Code extension, not with the dock: for changes to it, rebuild, package and install the extension as above.
+The Chrome pane helper (`apps/pane-helper`) ships in the VS Code extension, not with the dock: for changes to it, rebuild, package and install the extension as above.
 
 For changes to the dock, close the running dock (it holds its files open), then run `npm run publish --workspace @switchboard/dock`, which publishes it to `~/.switchboard/dock/` (`%USERPROFILE%` on Windows), and report that the operator can start `Switchboard.Dock.exe`, or `Switchboard.Dock` on Linux, there.
 

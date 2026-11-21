@@ -20,6 +20,7 @@
     "packages/hub",
     "apps/hub",
     "apps/dock",
+    "apps/pane-helper",
     "extensions/switchboard",
     "extensions/chrome",
     "extensions/firefox",

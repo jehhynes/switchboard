@@ -1,0 +1,10 @@
+{
+  "name": "@switchboard/pane-helper",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The Chrome pane helper (PRD R113): a .NET program for Windows that the hub runs to keep the Chrome pane over the installed web page's Browser tab. The VS Code extension's build publishes and carries it; it needs no dock.",
+  "scripts": {
+    "build": "dotnet build Switchboard.PaneHelper.slnx --nologo -v q",
+    "test": "dotnet test Switchboard.PaneHelper.slnx --nologo -v q"
+  }
+}

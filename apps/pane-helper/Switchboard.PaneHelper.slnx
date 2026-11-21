@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/Switchboard.PaneHelper/Switchboard.PaneHelper.csproj" />
+  <Project Path="test/Switchboard.PaneHelper.Tests/Switchboard.PaneHelper.Tests.csproj" />
+</Solution>
