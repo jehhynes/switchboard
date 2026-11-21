@@ -45,8 +45,8 @@ export interface SwitchboardApi {
   state(): unknown;
   /** Shows a state as if the hub sent it, so the integration suite can use recorded snapshots. */
   show(state: string): void;
-  /** The status bar item's text and tooltip (PRD R64). */
-  status(): { text: string; tooltip: string | undefined };
+  /** The status bar item's text, tooltip and screen reader label (PRD R64). */
+  status(): { text: string; tooltip: string | undefined; label: string | undefined };
   /** What each open History tab shows (PRD R59). */
   historyTabs(): { ticketId: number; title: string; shown: string | null; error: string | null }[];
   /** Restores a History tab from a page's saved state, as VS Code does after a reload. */
@@ -436,6 +436,8 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
   const showStatus = (): void => {
     status.text = '$(switchboard-logo)';
     status.tooltip = 'Switchboard: click to show the dock.';
+    // The text is only an icon, so a screen reader needs a name for it.
+    status.accessibilityInformation = { label: 'Switchboard, show the dock', role: 'button' };
   };
 
   const windowStateChanged = (focused: boolean): Promise<unknown> => {
@@ -606,7 +608,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
       showStatus();
       pane.changed();
     },
-    status: () => ({ text: status.text, tooltip: typeof status.tooltip === 'string' ? status.tooltip : undefined }),
+    status: () => ({ text: status.text, tooltip: typeof status.tooltip === 'string' ? status.tooltip : undefined, label: status.accessibilityInformation?.label }),
     historyTabs: () => history.shown(),
     restoreHistory: (saved) => history.restore(saved),
     openUri: (uri) => openUri(opening(), uri),

@@ -143,7 +143,7 @@ describe('the conversation state', () => {
     expect(voiceStatus({ ...voice, mic: 'hearing' })).toMatchObject({ text: '$(mic-filled) Listening' });
     expect(voiceStatus({ ...voice, mic: 'typing' })).toMatchObject({ text: '$(mic-filled) Typing' });
     expect(voiceStatus({ ...voice, mic: 'starting' })).toMatchObject({ text: '$(mic-filled) Mic starting' });
-    expect(voiceStatus({ ...voice, mic: 'paused-other-app' })).toEqual({ text: '$(mic) Mic paused', tooltip: 'Paused: another app is using the microphone.', command: null, warning: false });
+    expect(voiceStatus({ ...voice, mic: 'paused-other-app' })).toEqual({ text: '$(mic) Mic paused', tooltip: 'Paused: another app is using the microphone. Click to show the voice log.', command: 'switchboard.showVoiceLog', warning: false });
     expect(voiceStatus({ ...voice, mic: 'listening', speaking: 'r1' })).toMatchObject({ text: '$(unmute) Speaking', tooltip: 'Click to stop speaking.' });
     expect(voiceStatus({ ...voice, mic: 'listening' })).toMatchObject({ tooltip: 'Dictation sends when you stop talking. Click to turn the mic off.' });
     // Half-duplex capture: the tooltip says listening pauses while a reply plays, and why.

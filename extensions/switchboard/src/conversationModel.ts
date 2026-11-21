@@ -348,7 +348,7 @@ export function voiceStatus(voice: VoiceView | null): { text: string; tooltip: s
     case 'starting':
       return { text: '$(mic-filled) Mic starting', tooltip: 'The mic is starting. Click to turn it off.', command: 'switchboard.toggleMicrophone', warning: false };
     case 'paused-other-app':
-      return { text: '$(mic) Mic paused', tooltip: 'Paused: another app is using the microphone.', command: null, warning: false };
+      return { text: '$(mic) Mic paused', tooltip: 'Paused: another app is using the microphone. Click to show the voice log.', command: 'switchboard.showVoiceLog', warning: false };
     case 'paused-by-voice':
       return { text: '$(mic) Mic paused', tooltip: PAUSED_BY_VOICE_TIP, command: 'switchboard.toggleMicrophone', warning: false };
     default:
