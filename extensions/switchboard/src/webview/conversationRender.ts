@@ -5,6 +5,7 @@ import type { ArtifactView, ConversationEntry, ItemView, MessageView, ReplyView,
 type NativeRequest = NonNullable<SessionView['requests']>[number];
 import { providerMark } from '@switchboard/conversation/providerIcons';
 import { fullTime, metaLine, stamped, toneMark, voiceMark } from '@switchboard/conversation/messageMeta';
+import { hasUnspokenText, spokenBody } from '@switchboard/conversation/spokenBubble';
 import { artifactIcon, awaitingReply, selectedEntry, stateIcon, statusLine, timeline } from '../conversationModel.js';
 import type { ConversationState } from '../conversationModel.js';
 import { answers, answersIn, answerText, cardOutcome, complete, parseQuestions, questionSegments } from '@switchboard/conversation/questions';
@@ -156,17 +157,6 @@ export function spokenMark(item: ReplyView): string {
     : '';
 }
 
-/** The passage read aloud; after the operator spoke over it, the part not heard is dimmed, as plain text. */
-function passageHtml(item: ReplyView, passage: string): string {
-  const said = item.spoken.saidChars;
-
-  if (item.spoken.state !== 'interrupted' || said === null) {
-    return renderMarkdown(passage);
-  }
-
-  return `<p class="passage">${escape(passage.slice(0, said))}<span class="unheard">${escape(passage.slice(said))}</span></p>`;
-}
-
 // The voice controls are drawn by one renderer with the web page's (architecture.md § Voice).
 export { renderMicButton, renderVoiceControls } from '@switchboard/conversation/voiceControls';
 
@@ -178,11 +168,15 @@ function reply(item: ReplyView, earlier: ReplyView | null, open: ReadonlySet<str
     return `<li class="note" data-id="${escape(item.id)}" tabindex="-1">${escape(item.opening)}</li>`;
   }
 
-  // Focused mode (voice-design decision 21): a reply with a [speak] passage shows the passage first, the whole reply behind Show more.
+  // Focused mode (voice-design decision 21): a reply with a [speak] passage shows the passage first, the whole reply behind Show more. The
+  // passage is a bubble on the left, in its place when the whole reply shows; after the operator spoke over it, the part not heard is dimmed.
   const passage = item.kind === 'reply' && item.speak !== null && item.speak.trim() !== '' ? item.speak : null;
-  const folded = passage !== null && passage.trim() !== item.opening.trim();
+  const folded = passage !== null && hasUnspokenText(item.opening, passage);
   const expanded = !folded || expandReplies !== open.has(moreKey(item.id));
-  const shown = passage !== null && !expanded ? passageHtml(item, passage) : card === '' ? renderMarkdown(item.opening) : withoutQuestions(item.opening, `reply:${item.id}`, open);
+  // Only the text that ends the reply can end in the card's questions, which it leaves out; questions before a passage fold into one line.
+  const markdownPart = (text: string, last: boolean): string => (card === '' ? renderMarkdown(text) : withoutQuestions(text, last ? `reply:${item.id}` : `reply:${item.id}:before`, open, last));
+  const said = item.spoken.state === 'interrupted' ? item.spoken.saidChars : null;
+  const shown = passage === null ? markdownPart(item.opening, true) : spokenBody(item.opening, passage, said, !expanded, { markdown: markdownPart, escape });
   const more = folded
     ? `<button class="show-more" type="button" data-action="more" data-reply="${escape(item.id)}" aria-expanded="${expanded}">${expanded ? 'Show less' : 'Show more'}</button>`
     : '';
@@ -207,9 +201,9 @@ function reply(item: ReplyView, earlier: ReplyView | null, open: ReadonlySet<str
 /**
  * A reply's or a status's Markdown when its card draws its questions (architecture.md § Conversation view): questions that end it, as the rules
  * ask, are left out, so the text does not repeat them cut up; questions with text after them, against the rules, stay in place folded into one
- * line, "2 questions — answer below", that opens them.
+ * line, "2 questions — answer below", that opens them. `ends` is false for text a spoken passage follows, whose questions all fold.
  */
-export function withoutQuestions(markdown: string, key: string, open: ReadonlySet<string>): string {
+export function withoutQuestions(markdown: string, key: string, open: ReadonlySet<string>, ends = true): string {
   const segments = questionSegments(markdown);
 
   if (segments === null) {
@@ -218,7 +212,7 @@ export function withoutQuestions(markdown: string, key: string, open: ReadonlySe
 
   // The last run of questions, when only blank lines follow it, ends the message as the rules ask, and the card alone shows it.
   const last = segments.reduce((found, segment, index) => (segment.questions > 0 ? index : found), -1);
-  const ending = segments.slice(last + 1).every((segment) => segment.text.trim() === '');
+  const ending = ends && segments.slice(last + 1).every((segment) => segment.text.trim() === '');
 
   return segments
     .map((segment, index) => {

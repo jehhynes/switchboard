@@ -896,6 +896,33 @@ describe('speech in the view (architecture.md § Voice)', () => {
     expect(expanded).toContain('aria-expanded="true">Show less</button>');
   });
 
+  it('draws a passage as a bubble on the left, once, in its place when the whole reply shows, and a reply that is all passage as only its bubble', () => {
+    const { root, show } = page();
+    const bodyOf = (id: string) => root.querySelector(`li[data-id="${id}"] > .body`)!;
+    const kinds = (id: string) => [...bodyOf(id).children].map((child) => (child.classList.contains('speech-bubble') ? `bubble:${child.textContent!.trim()}` : child.tagName.toLowerCase()));
+
+    show(state([reply('r1', T0, { opening: 'Before.\n\nFixed it.\n\n- one', speak: 'Fixed it.' }), reply('r2', T0 + 1, { opening: 'Same.', speak: 'Same.' }), reply('r3', T0 + 2, { opening: 'Plain.' })]));
+
+    expect(kinds('r1')).toEqual(['bubble:Fixed it.', 'button']);
+    expect(kinds('r2')).toEqual(['bubble:Same.']);
+    expect(bodyOf('r3').querySelector('.speech-bubble')).toBeNull();
+    root.querySelector<HTMLButtonElement>('li[data-id="r1"] .show-more')!.click();
+    // The text around the passage stays plain, and the passage is not shown a second time.
+    expect(kinds('r1')).toEqual(['p', 'bubble:Fixed it.', 'ul', 'button']);
+    expect(bodyOf('r1').textContent!.match(/Fixed it\./g)).toHaveLength(1);
+    // The metadata line stays one line under the whole reply.
+    expect([...root.querySelector('li[data-id="r1"]')!.children].map((child) => child.className)).toEqual(['dot', 'body', 'meta']);
+
+    const css = readFileSync(require.resolve('@switchboard/conversation/bubbles.css'), 'utf8');
+    const rule = (selector: string) => css.split('\n').find((line) => line.startsWith(`${selector} {`)) ?? '';
+
+    expect(rule('.speech-bubble')).toContain('max-width: 80%;');
+    expect(rule('.speech-bubble')).toContain('border-radius: 12px 12px 12px 4px;');
+    expect(rule('.speech-bubble')).toContain('background: var(--sb-speech-bubble);');
+    expect(css).toContain('--sb-speech-bubble: var(--vscode-editor-inactiveSelectionBackground, rgba(127, 127, 127, 0.2));');
+    expect(rule('body.vscode-high-contrast .speech-bubble, body.vscode-high-contrast-light .speech-bubble')).toContain('background: transparent;');
+  });
+
   it("puts all of a reply's metadata on one line under it: the copy button first, the tone and Not spoken, and the time at the right", () => {
     const root = document.createElement('div');
 
@@ -912,7 +939,7 @@ describe('speech in the view (architecture.md § Voice)', () => {
     const spoken = (state_: ReplyView['spoken']['state'], atMs: number | null = null, saidChars: number | null = null) =>
       renderConversation(state([reply('r1', T0, { opening: 'Fixed it. More.', speak: 'Fixed it.', spoken: { state: state_, atMs, saidChars } })]));
 
-    expect(spoken('interrupted', 7_400, 3)).toContain('<p class="passage">Fix<span class="unheard">ed it.</span></p>');
+    expect(spoken('interrupted', 7_400, 3)).toContain('<div class="speech-bubble"><p class="passage">Fix<span class="unheard">ed it.</span></p></div>');
     expect(spoken('interrupted', 7_400, 3)).not.toContain('0:07');
     expect(spoken('failed')).toContain('<span>Not spoken</span>');
     // Routine states show nothing: no line under the reply, and a playing passage is not dimmed.
