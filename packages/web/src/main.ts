@@ -1,6 +1,7 @@
 import { applyEvent, commandQuery, EMPTY, mentionOf, mentionQuery, pageTitle, rowLink, selectedEntry, selectedRow, sentTexts, shortTitle, tabUrl, withEarlier } from './model.js';
 import { snoozeChoices } from '@switchboard/core/snooze';
 import type { PageState } from './model.js';
+import { placeMenus } from '@switchboard/conversation/menuPlace';
 import { escape, renderMarkdown } from './markdown.js';
 import { answerText, artifactUrl, complete, firstSnoozeDay, inputReady, renderMicButton, markdownBody, newView, parseQuestions, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, SIDE_TABS } from './render.js';
 import type { CardDraft, PaneView, SideTab, Tab, View } from './render.js';
@@ -1017,7 +1018,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
   };
   /** Draws the state; Preact changes only what differs, so the focus, a selection, the scroll position and open menus stay. */
-  const draw = (): void => {
+  const drawRegions = (): void => {
     // On a narrow screen the list and the conversation are each a full-width view (page.css); the list shows until a work item is opened.
     root.classList.toggle('listing', view.list || wanted === null);
     // The dock finds this window by the marker until it has found it (architecture.md § Pane state).
@@ -1135,6 +1136,13 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     checkSeen();
     dropConsoles();
   };
+  /** Opens each open menu down and to the right of its button, or the other way where the page has no room (`placeMenus`, architecture.md § Menus). */
+  const fitMenus = (): void => placeMenus(root, { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight });
+  const draw = (): void => {
+    drawRegions();
+    fitMenus();
+  };
+
 
   // ---- The console ----
   /** A pane's one line, for the console's host, which the console module draws into itself. */
@@ -2252,6 +2260,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
   paneColumn?.observe(detail);
   window.addEventListener('resize', () => reportPane());
+  window.addEventListener('resize', fitMenus, { signal: listening.signal });
+  // A scroll moves a menu's anchor; a menu's own scrolling does not.
+  document.addEventListener('scroll', (event) => (event.target instanceof Element && event.target.closest('.menu') !== null ? undefined : fitMenus()), { capture: true, signal: listening.signal });
   // A move to a monitor of another scale changes devicePixelRatio without a resize of the column in CSS pixels.
   const watchScale = (): void => {
     if (typeof window.matchMedia === 'function') {

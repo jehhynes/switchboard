@@ -92,7 +92,7 @@ function copyAssets() {
   fs.copyFileSync('src/webview/history.css', 'dist/history.css');
   fs.copyFileSync('src/webview/pane.css', 'dist/pane.css');
   // The bubbles' and the composer's styles the web page shares come first, so the view's own rules can build on them.
-  const shared = ['@switchboard/conversation/bubbles.css', '@switchboard/conversation/composer.css', '@switchboard/conversation/picker.css'].map((name) => fs.readFileSync(require.resolve(name), 'utf8')).join('');
+  const shared = ['@switchboard/conversation/bubbles.css', '@switchboard/conversation/composer.css', '@switchboard/conversation/picker.css', '@switchboard/conversation/menu.css'].map((name) => fs.readFileSync(require.resolve(name), 'utf8')).join('');
   fs.writeFileSync('dist/conversation.css', shared + fs.readFileSync('src/webview/conversation.css', 'utf8'));
   fs.copyFileSync('src/webview/mermaidPreview.css', 'dist/mermaidPreview.css');
 

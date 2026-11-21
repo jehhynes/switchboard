@@ -179,6 +179,14 @@ describe('the installable page', () => {
     expect(css.indexOf(picker)).toBeGreaterThanOrEqual(0);
     expect(css.indexOf(picker)).toBeLessThan(css.indexOf(own));
     expect(own).not.toMatch(/button\.picker:hover|\.conversation-row\[aria-checked="true"\]/);
+
+    // Where a menu opens comes from menu.css, shared too: under its button, left edges lined up, unless placeMenus flips it.
+    const menu = readFileSync(createRequire(import.meta.url).resolve('@switchboard/conversation/menu.css'), 'utf8');
+
+    expect(css.indexOf(menu)).toBeGreaterThanOrEqual(0);
+    expect(css.indexOf(menu)).toBeLessThan(css.indexOf(own));
+    expect(menu).toMatch(/\n\.menu \{[^}]*top: calc\(100% \+ 2px\); left: 0;/);
+    expect(own).not.toMatch(/(^|\n)\.menu \{|align-right/);
   });
 
   it('links the manifest from the page and the offline page, with the theme colour, and serves every file the worker keeps', () => {

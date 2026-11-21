@@ -4,6 +4,7 @@ import { ago, moreKey, PICKER, renderConversation, renderMicButton, renderVoiceC
 import type { CardDraft, EarlierStatuses, HeaderMenu } from './conversationRender.js';
 import type { StatusView } from '@switchboard/hub';
 import { answerText, complete, parseQuestions } from '@switchboard/conversation/questions';
+import { placeMenus } from '@switchboard/conversation/menuPlace';
 import { selectedEntry, statusLine } from '../conversationModel.js';
 import type { ConversationMessage, SendTarget, Tab } from './conversationRender.js';
 import { startComposerExtras } from './composerExtras.js';
@@ -69,17 +70,9 @@ export function shortTitle(title: string): string {
   return (space > PLACEHOLDER_TITLE_CHARS / 2 ? cut.slice(0, space) : cut.slice(0, PLACEHOLDER_TITLE_CHARS)).trimEnd();
 }
 
-/**
- * Keeps each open menu inside the view (architecture.md § Conversation view): a menu as wide as its content, at most 360 px, and never past the
- * view's edge less 8 px from the side its button anchors it to.
- */
+/** Opens each open menu down and to the right of its button, or the other way where the view has no room (`placeMenus`, architecture.md § Menus). */
 function fitMenus(root: HTMLElement): void {
-  for (const menu of root.querySelectorAll<HTMLElement>('.menu')) {
-    const anchor = (menu.parentElement ?? menu).getBoundingClientRect();
-    const room = menu.classList.contains('align-right') ? anchor.right - 8 : document.documentElement.clientWidth - anchor.left - 8;
-
-    menu.style.maxWidth = `${Math.max(160, Math.min(360, Math.floor(room)))}px`;
-  }
+  placeMenus(root, { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight });
 }
 
 /** Sets an element's HTML only when it changed, so a button under the pointer survives a redraw with the same state. */
@@ -1261,6 +1254,9 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     true,
   );
   window.addEventListener('resize', checkSeen);
+  window.addEventListener('resize', () => fitMenus(root));
+  // A scroll moves a menu's anchor; a menu's own scrolling does not.
+  document.addEventListener('scroll', (event) => (event.target instanceof Element && event.target.closest('.menu') !== null ? undefined : fitMenus(root)), true);
   document.addEventListener('visibilitychange', () => {
     // A New status that came while the page was hidden starts its minute once the page shows it.
     startFreshClock();

@@ -2318,6 +2318,51 @@ describe('inline menus and lists instead of quick picks (architecture.md § Conv
     expect(root.querySelector('.earlier-menu')).toBeNull();
     expect(posted.some((message) => message.type === 'stop-speaking')).toBe(false);
   });
+  it("opens a menu down and to the right of its button, and to the left only where the view has no room, from the menu.css it shares with the web page", () => {
+    const css = readFileSync(join(__dirname, '../src/webview/conversation.css'), 'utf8');
+    const shared = readFileSync(require.resolve('@switchboard/conversation/menu.css'), 'utf8');
+    let anchorLeft = 40;
+
+    expect(shared).toMatch(/\n\.menu \{[^}]*top: calc\(100% \+ 2px\); left: 0;/);
+    expect(css).not.toMatch(/(^|\n)\.menu \{|align-right/);
+    expect(readFileSync(join(__dirname, '../esbuild.js'), 'utf8')).toContain("'@switchboard/conversation/menu.css'");
+    vi.spyOn(document.documentElement, 'clientWidth', 'get').mockReturnValue(800);
+    vi.spyOn(document.documentElement, 'clientHeight', 'get').mockReturnValue(600);
+    const rect = (element: HTMLElement): DOMRect => {
+      // A menu in its default place: under its anchor, left edges lined up.
+      const anchor = element.classList.contains('menu') ? rect(element.parentElement!) : null;
+      const left = anchor?.left ?? anchorLeft;
+      const top = anchor === null ? 8 : anchor.bottom + 2;
+      const [width, height] = anchor === null ? [24, 24] : [200, 120];
+
+      return { left, top, right: left + width, bottom: top + height, width, height, x: left, y: top, toJSON: () => ({}) } as DOMRect;
+    };
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return rect(this);
+    });
+
+    try {
+      const { root, send } = start();
+
+      send({ type: 'state', state: applyEvent(EMPTY_CONVERSATION, hello([], { status: { id: 'st-9', sessionId: 's2', at: T0, markdown: 'Now.', fallback: false, unread: false } })) });
+      root.querySelector<HTMLElement>('[role="tab"][data-tab="status"]')!.click();
+      root.querySelector<HTMLElement>('[data-action="statuses"]')!.click();
+      expect(root.querySelector('.earlier-menu')!.className).toBe('glass menu earlier-menu');
+      expect(root.querySelector<HTMLElement>('.earlier-menu')!.style.maxWidth).toBe('360px');
+      anchorLeft = 770;
+      window.dispatchEvent(new Event('resize'));
+      expect(root.querySelector('.earlier-menu')!.className).toBe('glass menu earlier-menu flip-x');
+      // A scroll that moves the button is followed; the menu's own scrolling is not.
+      anchorLeft = 40;
+      root.querySelector('.earlier-menu')!.dispatchEvent(new Event('scroll'));
+      expect(root.querySelector('.earlier-menu')!.className).toBe('glass menu earlier-menu flip-x');
+      root.dispatchEvent(new Event('scroll'));
+      expect(root.querySelector('.earlier-menu')!.className).toBe('glass menu earlier-menu');
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
 });
 
 describe('review round 1 (cross-check)', () => {

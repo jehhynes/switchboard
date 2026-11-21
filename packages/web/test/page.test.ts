@@ -1164,6 +1164,41 @@ describe('the page in use', () => {
     page.close();
   });
 
+  it("opens the header's menus down and to the right of their buttons, and the other way only where the page has no room", () => {
+    vi.spyOn(document.documentElement, 'clientWidth', 'get').mockReturnValue(800);
+    vi.spyOn(document.documentElement, 'clientHeight', 'get').mockReturnValue(600);
+    let gear = 770;
+    const rect = (element: HTMLElement): DOMRect => {
+      // A menu in its default place: under its anchor, left edges lined up.
+      const anchor = element.classList.contains('menu') ? rect(element.parentElement!) : null;
+      const left = anchor?.left ?? (element.classList.contains('text-size-anchor') ? gear : 40);
+      const top = anchor === null ? 8 : anchor.bottom + 2;
+      const [width, height] = anchor === null ? [24, 24] : [200, 120];
+
+      return { left, top, right: left + width, bottom: top + height, width, height, x: left, y: top, toJSON: () => ({}) } as DOMRect;
+    };
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return rect(this);
+    });
+
+    const { page, source } = start();
+
+    hello(source);
+    click('.header button.picker');
+    expect(root.querySelector('.conversation-menu')!.className).toBe('glass menu conversation-menu');
+    expect(root.querySelector<HTMLElement>('.conversation-menu')!.style.maxWidth).toBe('360px');
+    click('.header button.text-size');
+    expect(root.querySelector('.text-size-menu')!.className).toBe('glass menu text-size-menu flip-x');
+    // A scroll that moves the button is followed; the menu's own scrolling is not.
+    gear = 40;
+    root.querySelector('.text-size-menu')!.dispatchEvent(new Event('scroll'));
+    expect(root.querySelector('.text-size-menu')!.className).toBe('glass menu text-size-menu flip-x');
+    root.querySelector('#panel')!.dispatchEvent(new Event('scroll'));
+    expect(root.querySelector('.text-size-menu')!.className).toBe('glass menu text-size-menu');
+    page.close();
+  });
+
   it("sets the conversation's text size from the header's menu and Ctrl+=, Ctrl+- and Ctrl+0, keeps it, and leaves the rest of the page alone", () => {
     localStorage.setItem('switchboard.textScale', '1.25');
 

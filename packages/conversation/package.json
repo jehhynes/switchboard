@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "The conversation layer: reads a Code Mode session's replies and messages from its transcript, with the screen as an early copy. Runs in the hub; imports no native module and must not import vscode. `./questions`, `./providerIcons`, `./voiceControls`, `./messageMeta` and `./spokenBubble` import nothing, for browser bundles, and `./bubbles.css` is the bubbles' styles both front ends share.",
+  "description": "The conversation layer: reads a Code Mode session's replies and messages from its transcript, with the screen as an early copy. Runs in the hub; imports no native module and must not import vscode. `./questions`, `./providerIcons`, `./voiceControls`, `./messageMeta`, `./spokenBubble` and `./menuPlace` import nothing, for browser bundles, and `./bubbles.css` is the bubbles' styles both front ends share.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -31,9 +31,14 @@
       "types": "./dist/spokenBubble.d.ts",
       "default": "./dist/spokenBubble.js"
     },
+    "./menuPlace": {
+      "types": "./dist/menuPlace.d.ts",
+      "default": "./dist/menuPlace.js"
+    },
     "./bubbles.css": "./src/bubbles.css",
     "./composer.css": "./src/composer.css",
-    "./picker.css": "./src/picker.css"
+    "./picker.css": "./src/picker.css",
+    "./menu.css": "./src/menu.css"
   },
   "scripts": {
     "build": "tsc -b",

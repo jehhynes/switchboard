@@ -99,7 +99,7 @@ function Actions({ row, view }: { row: PageRow | null; view: View }) {
           <span class="codicon codicon-ellipsis" aria-hidden="true"></span>
         </button>
         {view.actions ? (
-          <ul class="glass menu actions-menu align-right" role="menu" aria-label="Actions">
+          <ul class="glass menu actions-menu" role="menu" aria-label="Actions">
             {rows}
           </ul>
         ) : null}
@@ -170,7 +170,7 @@ function TextSize({ view }: { view: View }) {
         <span class="codicon codicon-settings" aria-hidden="true"></span>
       </button>
       {view.textMenu ? (
-        <div class="glass menu text-size-menu align-right" role="menu" aria-label="View options">
+        <div class="glass menu text-size-menu" role="menu" aria-label="View options">
           <div class="text-size-row">
             <button type="button" class="icon menu-row" role="menuitem" data-action="text-smaller" title="Smaller (Ctrl+-)" aria-label="Smaller text">
               A−
@@ -323,7 +323,7 @@ export function renderHeader(state: PageState, view: View): VNode {
         <div class="menu-anchor persona-anchor">
           {personaButton}
           {menu === null ? null : (
-            <ul class="glass menu persona-menu align-right" role="menu" aria-label="Persona">
+            <ul class="glass menu persona-menu" role="menu" aria-label="Persona">
               {personaRows}
             </ul>
           )}

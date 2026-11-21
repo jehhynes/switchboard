@@ -86,7 +86,7 @@ function Row({ row, selected, menu }: { row: PageRow; selected: boolean; menu: C
         )}
       </button>
       {menu === null ? null : (
-        <ul class="glass menu row-menu align-right" role="menu" aria-label={`Actions for ${row.ticket}`}>
+        <ul class="glass menu row-menu" role="menu" aria-label={`Actions for ${row.ticket}`}>
           {menu}
         </ul>
       )}

@@ -422,7 +422,7 @@ function earlierStatuses(earlier: EarlierStatuses | null): string {
             ? `${SEPARATOR}<li role="none"><button type="button" class="menu-row" role="menuitem" data-action="statuses-more">${gutter(null)}<span class="title">Older statuses</span></button></li>`
             : '';
 
-  return `<ul class="glass menu earlier-menu align-right" id="earlier-statuses" data-key="menu-earlier" role="menu" aria-label="Earlier statuses">${rows}${foot}</ul>`;
+  return `<ul class="glass menu earlier-menu" id="earlier-statuses" data-key="menu-earlier" role="menu" aria-label="Earlier statuses">${rows}${foot}</ul>`;
 }
 
 /**
@@ -570,7 +570,7 @@ function headerMenu(menu: HeaderMenu): string {
               })
               .join('');
 
-  return `<ul class="glass menu header-menu${menu.kind === 'persona' ? ' align-right' : ''}" data-key="menu-${menu.kind}" role="menu" aria-label="${menu.kind === 'persona' ? 'Persona' : 'New conversation'}">${rows}</ul>`;
+  return `<ul class="glass menu header-menu" data-key="menu-${menu.kind}" role="menu" aria-label="${menu.kind === 'persona' ? 'Persona' : 'New conversation'}">${rows}</ul>`;
 }
 
 const DECISIONS: Record<string, string> = { accept: 'Allow once', acceptForSession: 'Allow for session', decline: 'Decline', cancel: 'Cancel' };

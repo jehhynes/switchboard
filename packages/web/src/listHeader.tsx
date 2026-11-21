@@ -349,7 +349,7 @@ export function renderMoreMenu(header: PageHeader | null): VNode {
   const volume = (header?.sources ?? []).some((group) => group.kind === 'zoho' || group.kind === 'forum');
 
   return (
-    <ul class="glass menu more-menu align-right" role="menu" aria-label="More Actions">
+    <ul class="glass menu more-menu" role="menu" aria-label="More Actions">
       {sources.length === 0 ? null : [...sources, <Separator classes="menu-separator more-source" />]}
       <MoreRow action="list-adhoc" icon="add" label="New ad-hoc session…" />
       <MoreRow action="list-folder" icon="folder" label="New conversation in a folder…" />
