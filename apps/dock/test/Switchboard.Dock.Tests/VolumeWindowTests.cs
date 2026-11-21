@@ -44,7 +44,27 @@ public sealed class VolumeWindowTests
         var link = window.GetVisualDescendants().OfType<Button>().Single(b => b.Content is "zoho #12");
         link.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         Assert.Equal(["https://example.test/12"], actions.Urls);
-        Assert.False(window.GetVisualDescendants().OfType<Button>().Single(b => (string?)b.Tag == "2026-09-28:seen").IsEnabled);
+        Assert.DoesNotContain(window.GetVisualDescendants().OfType<Button>(), b => (string?)b.Tag == "2026-09-28:seen");
+        Assert.Equal("—", window.GetVisualDescendants().OfType<TextBlock>().Single(t => (string?)t.Tag == "2026-09-28:seen").Text);
+        window.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task VolumeWindow_Opened_LabelsTheSourceAndStretchesTheWeeksToTheWindow()
+    {
+        var window = new VolumeWindow(new VolumeHub(), new FakeActions()) { Width = 1600 };
+        window.Show();
+        await window.Load();
+        Dispatcher.UIThread.RunJobs();
+        var texts = window.GetVisualDescendants().OfType<TextBlock>().Select(t => t.Text).ToList();
+        Assert.Contains("Active queue by week", texts);
+        Assert.Contains("Source", texts);
+        Assert.Equal(["All sources", "Zoho", "Forum"], window.GetVisualDescendants().OfType<ComboBox>().Single().Items.Select(item => item!.ToString()));
+        var count = window.GetVisualDescendants().OfType<Button>().Single(b => (string?)b.Tag == "2026-10-05:seen");
+        Assert.True(count.Bounds.Width > 160, $"The count is {count.Bounds.Width} pixels wide.");
+        window.Width = 900;
+        Dispatcher.UIThread.RunJobs();
+        Assert.True(count.Bounds.Width >= 125, $"The count is {count.Bounds.Width} pixels wide.");
         window.Close();
     }
 

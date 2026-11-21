@@ -11,9 +11,15 @@ namespace Switchboard.Dock.Views;
 public sealed class VolumeWindow : Window
 {
     static readonly (string Key, string Label)[] Metrics = [("seen", "Seen in queue"), ("entered", "Entered / returned"), ("left", "Left active queue"), ("open", "Open at end"), ("assigned", "Assigned to you"), ("worked", "Worked by you"), ("mine", "Yours at end")];
+    /// <summary>A source filter: the query's ID and the name shown.</summary>
+    sealed record SourceOption(string Id, string Label)
+    {
+        public override string ToString() => Label;
+    }
+
     readonly IVolumeHub hub;
     readonly IDockActions actions;
-    readonly ComboBox source = new() { Name = "VolumeSource", ItemsSource = new[] { "all", "zoho", "forum" }, SelectedIndex = 0, Width = 130 };
+    readonly ComboBox source = new() { Name = "VolumeSource", ItemsSource = new SourceOption[] { new("all", "All sources"), new("zoho", "Zoho"), new("forum", "Forum") }, SelectedIndex = 0, Width = 140 };
     readonly TextBlock status = new() { Name = "VolumeStatus", TextWrapping = TextWrapping.Wrap };
     readonly StackPanel weeks = new() { Name = "VolumeWeeks", Spacing = 4 };
     readonly StackPanel details = new() { Name = "VolumeDetails", Spacing = 4 };
@@ -35,13 +41,14 @@ public sealed class VolumeWindow : Window
         var refresh = new Button { Content = "Refresh", Name = "RefreshVolume" };
         refresh.Click += async (_, _) => await Load();
         source.SelectionChanged += async (_, _) => await Load();
-        var page = new StackPanel { Margin = new Thickness(20, 18, 20, 20), Spacing = 12, Width = 1100, HorizontalAlignment = HorizontalAlignment.Left };
+        // The weeks stretch to the window; below their least width the page scrolls sideways.
+        var page = new StackPanel { Margin = new Thickness(20, 18, 20, 20), Spacing = 12 };
         var hint = new TextBlock { Text = "Observed active queue, Monday to Sunday. Select a count to list its tickets." };
 
         hint.Bind(TextBlock.ForegroundProperty, this.GetResourceObservable("DockMuted"));
-        page.Children.Add(new TextBlock { Text = "Ticket volume report", FontSize = 16, FontWeight = FontWeight.SemiBold });
+        page.Children.Add(new TextBlock { Text = "Active queue by week", FontSize = 16, FontWeight = FontWeight.SemiBold });
         page.Children.Add(hint);
-        page.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, Children = { source, refresh } });
+        page.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { new TextBlock { Text = "Source", FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center }, source, refresh } });
         page.Children.Add(status);
         page.Children.Add(new TextBlock { Text = "Left does not mean resolved: Deferred and other deferrals can leave and return. Worked means a task started in Switchboard. Week-end counts use the last observed state; activity between polls or while Switchboard is off can be missed.", TextWrapping = TextWrapping.Wrap });
         page.Children.Add(weeks);
@@ -53,7 +60,7 @@ public sealed class VolumeWindow : Window
     public async Task Load()
     {
         var request = ++generation;
-        var selected = source.SelectedItem?.ToString() ?? "all";
+        var selected = (source.SelectedItem as SourceOption)?.Id ?? "all";
         details.Children.Clear();
         weeks.Children.Clear();
         status.Text = "Loading…";
@@ -70,19 +77,30 @@ public sealed class VolumeWindow : Window
         var found = TimeZoneInfo.TryFindSystemTimeZoneById(timezone, out var zone);
         displayZone = zone ?? TimeZoneInfo.Utc;
         status.Text = $"Weeks: {timezone}. " + (found ? "" : "Times shown in UTC; this system cannot resolve the reporting timezone. ") + (sources.Count == 0 ? "Tracking has not started." : string.Join(" · ", sources.Select(s => $"{s!["source"]}: tracking since {Time(s["startedAt"])}, last poll {Time(s["lastAt"])}")));
-        var header = Row();
-        header.Children.Add(Cell("Week / coverage", 190));
-        foreach (var metric in Metrics) header.Children.Add(Cell(metric.Label, 125));
+        var header = WeekRow();
+        header.Children.Add(Cell("Week / coverage", 0));
+        foreach (var (metric, column) in Metrics.Select((metric, index) => (metric, index + 1))) header.Children.Add(Cell(metric.Label, column));
         weeks.Children.Add(header);
         foreach (var week in body["weeks"]?.AsArray() ?? [])
         {
             var key = week!["week"]!.GetValue<string>();
             var coverage = week["coverage"]!.GetValue<string>();
-            var row = Row();
-            row.Children.Add(Cell($"{key} · {coverage}", 190));
-            foreach (var metric in Metrics)
+            var row = WeekRow();
+            row.Children.Add(Cell($"{key} · {coverage}", 0));
+            foreach (var (metric, column) in Metrics.Select((metric, index) => (metric, index + 1)))
             {
-                var button = new Button { Content = coverage == "unavailable" ? "—" : week["counts"]![metric.Key]!.GetValue<int>().ToString(), Width = 125, IsEnabled = coverage != "unavailable", Tag = $"{key}:{metric.Key}" };
+                // A week with no observations has no counts to open, so its cells are plain muted text.
+                if (coverage == "unavailable")
+                {
+                    var none = Cell("—", column);
+                    none.Tag = $"{key}:{metric.Key}";
+                    none.HorizontalAlignment = HorizontalAlignment.Center;
+                    none.Bind(TextBlock.ForegroundProperty, this.GetResourceObservable("DockMuted"));
+                    row.Children.Add(none);
+                    continue;
+                }
+                var button = new Button { Content = week["counts"]![metric.Key]!.GetValue<int>().ToString(), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Center, Tag = $"{key}:{metric.Key}" };
+                Grid.SetColumn(button, column);
                 button.Click += async (_, _) => await ShowTickets(selected, key, metric.Key, metric.Label, 0);
                 row.Children.Add(button);
             }
@@ -122,6 +140,20 @@ public sealed class VolumeWindow : Window
     }
 
     static StackPanel Row() => new() { Orientation = Orientation.Horizontal, Spacing = 4 };
-    static TextBlock Cell(string text, double width) => new() { Text = text, Width = width, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
+    /// <summary>A week's row: the week and its coverage, then a column per metric that shares the width left, at least 125 pixels each.</summary>
+    static Grid WeekRow()
+    {
+        var grid = new Grid { ColumnSpacing = 4 };
+        grid.ColumnDefinitions.Add(new ColumnDefinition(190, GridUnitType.Pixel));
+        foreach (var _ in Metrics) grid.ColumnDefinitions.Add(new ColumnDefinition(1, GridUnitType.Star) { MinWidth = 125 });
+        return grid;
+    }
+
+    static TextBlock Cell(string text, int column)
+    {
+        var cell = new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
+        Grid.SetColumn(cell, column);
+        return cell;
+    }
     string Time(JsonNode? value) => value is null ? "unknown" : TimeZoneInfo.ConvertTime(DateTimeOffset.FromUnixTimeMilliseconds(value.GetValue<long>()), displayZone).ToString("yyyy-MM-dd HH:mm zzz");
 }
