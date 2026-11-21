@@ -47,23 +47,24 @@ button:focus-visible, a:focus-visible, .tab:focus-visible { outline: 1px solid v
 .row-head .priority { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #e8820c; }
 .row-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .row-time { flex: none; margin-left: 2px; font-size: 12px; color: var(--vscode-descriptionForeground); }
-/*
- * Lines 2 and 3 stay one line each and clip their end. On line 2 the playbook gives way first, then the link pills, which are left out whole,
- * the last first, by wrapping onto a hidden second line, as the dock leaves out pills that do not fit; the ticket key, Returned and the comment
- * icon keep their place.
- */
+/* Lines 2 and 3 stay one line each and clip their end; line 2's pills shrink to their icons as the dock's do (below). */
 .row-line { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; font-size: 12px; line-height: 18px; }
 .row-line .mark, .row-line .comment { flex: none; }
 .row-line .comment { color: var(--vscode-descriptionForeground); }
-.row-line .playbook { flex: 0 4 auto; min-width: 3em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-line .playbook { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-line .namespace, .row-line .host { color: var(--vscode-descriptionForeground); }
 .row.selected .row-line .namespace, .row.selected .row-line .host, .row.selected .row-time, .row.selected .row-line .comment, .row.selected .row-detail:not(.warning, .error), .row.selected .row-detail-separator { color: inherit; opacity: 0.75; }
 /* Ticket keys, link badges and Returned as the dock's and the Switchboard pane's pills: the key in its source's colour, GitHub in the foreground, Zoho and Forum green, a pull request purple, a link the ticket's text names grey, Returned in the warning colour. */
-.row-line .pill { flex: none; display: inline-flex; align-items: center; gap: 3px; box-sizing: border-box; max-width: 50%; overflow: hidden; white-space: nowrap; border: 1px solid var(--vscode-descriptionForeground); border-radius: 9px; padding: 0 6px; font-size: 12px; line-height: 16px; background: color-mix(in srgb, var(--vscode-foreground) 12%, transparent); color: var(--vscode-foreground); }
+.row-line .pill { flex: none; display: inline-flex; align-items: center; gap: 3px; box-sizing: border-box; overflow: hidden; white-space: nowrap; border: 1px solid var(--vscode-descriptionForeground); border-radius: 9px; padding: 0 6px; font-size: 12px; line-height: 16px; background: color-mix(in srgb, var(--vscode-foreground) 12%, transparent); color: var(--vscode-foreground); }
 .row-line .pill .codicon { flex: none; font-size: 12px; }
-.row-line .pill-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.row-line .row-links { flex: 0 1 auto; min-width: 0; display: flex; flex-wrap: wrap; gap: 0 6px; height: 18px; overflow: hidden; }
-.row-line .row-links .pill { max-width: none; }
+/* A pill's label is never cut: when the line is too narrow the page shrinks a pill to its icon (.compact) or leaves it out (.omitted), as the
+   dock does (fitPills in fit.ts); its tooltip keeps its name and URL. */
+.row-line .pill-text { white-space: nowrap; }
+.row-line .pill .pill-icon, .row-line .pill.compact .pill-text { display: none; }
+.row-line .pill.compact .pill-icon { display: inline-block; }
+.row-line .pill.omitted { display: none; }
+.row-line .row-links { flex: none; display: flex; gap: 6px; }
+.row-line .row-links:not(:has(.pill:not(.omitted))) { display: none; }
 .row-line .pill.ticket.source-github, .row-line .pill.link.issue { border-color: var(--vscode-foreground); background: color-mix(in srgb, var(--vscode-foreground) 18%, transparent); }
 .row-line .pill.ticket.source-zoho { border-color: #089949; background: color-mix(in srgb, #089949 18%, transparent); }
 .row-line .pill.ticket.source-forum { border-color: #57ae57; background: color-mix(in srgb, #57ae57 18%, transparent); }

@@ -7,6 +7,7 @@ import type { CardDraft, Tab, View } from './render.js';
 import type { ItemView, ScreenPrompt } from './types.js';
 import { morph } from './morph.js';
 import { reconnector } from './reconnect.js';
+import { fitPills } from './fit.js';
 
 /** The stream's event types the page reads. */
 export const EVENTS = ['hello', 'list', 'scope', 'conversations', 'session', 'message', 'reply', 'status', 'artifact', 'unread', 'voice', 'settings', 'progress', 'words', 'draft'];
@@ -26,6 +27,9 @@ export const SIDE_MAX = 600;
 export const CHAT_MIN = 480;
 export const CHAT_MAX = 1600;
 const SASH_STEP = 16;
+/** A pill shrunk to its icon: its 1 px borders, 6 px padding each side and a 12 px codicon; and the space between line 2's items. */
+const COMPACT_PILL = 26;
+const PILL_GAP = 6;
 const SIDE_WIDTH = 'switchboard.sideWidth';
 const CHAT_WIDTH = 'switchboard.chatWidth';
 /** From this width Status and Artifacts are a column beside the conversation rather than tabs. */
@@ -98,6 +102,40 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   // conversation's between it and the Status and Artifacts column, which takes the rest of the width.
   resizer(root, root.querySelector<HTMLElement>('.side-sash')!, root.querySelector<HTMLElement>('.side')!, { property: '--side-width', key: SIDE_WIDTH, min: SIDE_MIN, max: SIDE_MAX });
   resizer(root, root.querySelector<HTMLElement>('.chat-sash')!, root.querySelector<HTMLElement>('.main')!, { property: '--chat-width', key: CHAT_WIDTH, min: CHAT_MIN, max: CHAT_MAX });
+  // Line 2's pills shrink to their icons when a row is too narrow, as the dock's do: one pass over every row once a frame at most, after a
+  // redraw of the list or a change of its width, which reads every width before it changes any class, so the layout is computed once.
+  let fitting = false;
+  const fitLines = (): void => {
+    if (fitting) {
+      return;
+    }
+
+    fitting = true;
+    (typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (run: () => void) => setTimeout(run, 0))(() => {
+      fitting = false;
+
+      const lines = [...list.querySelectorAll<HTMLElement>('.row-line:not(.row-details)')];
+
+      for (const line of lines) {
+        line.querySelectorAll('.pill.compact, .pill.omitted').forEach((pill) => pill.classList.remove('compact', 'omitted'));
+      }
+
+      const plans = lines.map((line) => {
+        const pills = [...line.querySelectorAll<HTMLElement>('.pill')];
+        const playbook = line.querySelector<HTMLElement>('.playbook');
+        const others = [...line.children].filter((child) => child !== playbook && !child.classList.contains('pill') && !child.classList.contains('row-links')).map((child) => (child as HTMLElement).offsetWidth);
+
+        return { pills, fit: fitPills(line.clientWidth, others, playbook?.scrollWidth ?? 0, pills.map((pill) => ({ width: pill.offsetWidth, compact: COMPACT_PILL, returned: pill.classList.contains('returned') })), PILL_GAP) };
+      });
+
+      for (const { pills, fit } of plans) {
+        pills.forEach((pill, index) => fit[index] !== 'full' && pill.classList.add(fit[index]!));
+      }
+    });
+  };
+  const listWidth = typeof ResizeObserver === 'function' ? new ResizeObserver(() => fitLines()) : null;
+
+  listWidth?.observe(list);
   /** The tab the conversation's pane shows: always the conversation while Status and Artifacts have their own column. */
   const mainTab = (): Tab => (wide() ? 'conversation' : view.tab);
 
@@ -1004,6 +1042,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     document.title = pageTitle(state.groups);
     morph(sheetHost, renderSheet(view.sheet, view.acting));
     morph(list, expired ? '<p class="empty">This page\'s link is no longer valid. Open a new one with Switchboard: Open Web Page in VS Code, or hub.js web.</p>' : (listError === null ? '' : `<p class="list-error" role="alert">${escape(listError)}</p>`) + renderList(state.groups, state.scope?.workItemId ?? null, view.collapsed));
+    fitLines();
 
     // An ended session's note sits just above the composer on every tab, with Resume, as in the Conversation view; the page resumes it in the
     // terminal holder, or a Codex thread in its daemon, without a terminal.
@@ -1979,6 +2018,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       clearInterval(seenTimer);
       clearInterval(promptTimer);
       listening.abort();
+      listWidth?.disconnect();
       source.close();
     },
   };

@@ -221,9 +221,12 @@ describe('drawing', () => {
     expect(first.querySelector('.mark')!.className).toBe('codicon codicon-eye mark state-icon tone-muted');
     expect(first.querySelector('.mark')!.getAttribute('aria-label')).toBe('Review, then approve');
     expect(first.querySelector('.pill')!.className).toBe('pill ticket source-github');
+    // The ticket key's icon shows only when the pill shrinks to it: GitHub's mark, or a tag for a source without one.
+    expect(first.querySelector('.pill .pill-icon')!.className).toBe('codicon codicon-github pill-icon');
     expect(first.querySelector('.playbook')!.innerHTML).toBe('<span class="namespace">dev:</span>build');
     expect(root.querySelector('[data-work-item="2"]')!.className).toBe('row stripe-warning dim');
     expect(root.querySelector('[data-work-item="2"] .pill')!.className).toBe('pill ticket source-zoho');
+    expect(root.querySelector('[data-work-item="2"] .pill .pill-icon')!.className).toBe('codicon codicon-tag pill-icon');
     expect(root.querySelector('[data-work-item="2"] .playbook')!.innerHTML).toBe('triage');
     // A running mark spins, muted, as the dock's does; a failed one takes the error tone.
     expect(root.querySelector('[data-work-item="3"] .mark')!.className).toBe('codicon codicon-loading mark state-icon tone-muted codicon-modifier-spin');
@@ -1053,6 +1056,35 @@ describe('the page in use', () => {
     expect(root.querySelector('iframe')!.getAttribute('sandbox')).toBe('allow-scripts');
     click('[data-tab="conversation"]');
     expect(root.querySelector('#composer')!.hasAttribute('hidden')).toBe(false);
+    page.close();
+  });
+
+  it("shrinks line 2's pills to their icons when a row is too narrow, after a redraw of the list, and whole again when it widens", async () => {
+    const { page, source } = start();
+    let line = 150;
+    const width = (element: HTMLElement): number => (element.classList.contains('row-line') ? line : element.classList.contains('pill') ? 80 : element.classList.contains('comment') ? 16 : 0);
+
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return width(this);
+    });
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return width(this);
+    });
+    vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('playbook') ? 100 : 0;
+    });
+    hello(source, { groups: [listGroup('progress', [listRow(1, { links: [{ kind: 'pr', badge: '#12', label: 'Pull request 12', url: 'https://x/12', glyph: '\u{ea64}', mentioned: false }] })])] });
+    await flush();
+
+    const pills = (): string[] => [...root.querySelectorAll('[data-work-item="1"] .pill')].map((one) => one.className.replace(/^pill /, ''));
+
+    // 100 px playbook + two 80 px pills + 2 gaps is 272: both pills shrink, the playbook gives way to 60 px.
+    expect(pills()).toEqual(['ticket source-github compact', 'link pr compact']);
+    expect(root.querySelector('[data-work-item="1"] .pill.ticket')!.getAttribute('title')).toBe('gh 1');
+    line = 400;
+    source.emit('list', { groups: [listGroup('progress', [listRow(1, { title: 'Renamed', links: [{ kind: 'pr', badge: '#12', label: 'Pull request 12', url: 'https://x/12', glyph: '\u{ea64}', mentioned: false }] })])] });
+    await flush();
+    expect(pills()).toEqual(['ticket source-github', 'link pr']);
     page.close();
   });
 

@@ -212,15 +212,20 @@ export const COLLAPSED_GROUPS: readonly string[] = ['done'];
 /** The codicon Returned shows, as the dock's pill does. */
 const RETURNED_GLYPH = '\u{eae2}';
 
-/** A pill on line 2: its codicon glyph, if any, then its text, the full name in its tooltip. */
-function pill(classes: string, glyph: string | null, text: string, title: string): string {
-  return `<span class="pill ${classes}" title="${escape(title)}">${glyph === null ? '' : `<span class="codicon" aria-hidden="true">${escape(glyph)}</span>`}<span class="pill-text">${escape(text)}</span></span>`;
+/**
+ * A pill on line 2: its codicon glyph, if any, then its text, the full name in its tooltip. `icon` names a codicon shown only when the pill
+ * shrinks to its icon (`fitPills`), for a pill that has no glyph whole: the ticket key's source, GitHub's mark or a tag.
+ */
+function pill(classes: string, glyph: string | null, text: string, title: string, icon?: string): string {
+  const shown = glyph === null ? (icon === undefined ? '' : `<span class="codicon codicon-${icon} pill-icon" aria-hidden="true"></span>`) : `<span class="codicon" aria-hidden="true">${escape(glyph)}</span>`;
+
+  return `<span class="pill ${classes}" title="${escape(title)}">${shown}<span class="pill-text">${escape(text)}</span></span>`;
 }
 
 /**
  * A row of the list, drawn as the dock's three lines from the hub's dock row: line 1 the priority dot, the title and the time; line 2 the
  * comment icon, the playbook with its namespace muted (or a hosted conversation's host), the ticket key as a pill in its source's colour, the
- * link pills and Returned; line 3 the mark and the details, a muted " · " between them, in their tones. The dock's stripe is on its left edge.
+ * link pills and Returned, which shrink to their icons when the line is too narrow (`fitPills`, applied by the page); line 3 the mark and the details, a muted " · " between them, in their tones. The dock's stripe is on its left edge.
  */
 function listRow(row: PageRow, selected: boolean): string {
   const kind = row.mark?.kind;
@@ -239,7 +244,7 @@ function listRow(row: PageRow, selected: boolean): string {
   const priority = row.priority === null ? '' : `<span class="priority" role="img" title="${escape(row.priority)}" aria-label="${escape(row.priority)}"></span>`;
   const time = row.time === null ? '' : `<span class="row-time" title="${escape(row.time.title)}">${escape(row.time.text)}</span>`;
   const comment = row.comment === null ? '' : `<span class="codicon comment" role="img" title="${escape(row.comment.title)}" aria-label="Comments">${escape(row.comment.glyph)}</span>`;
-  const ticket = pill(`ticket source-${escape(row.sourceKind)}`, null, row.ticket, row.url === '' ? row.ticket : `${row.ticket}\n${row.url}`);
+  const ticket = pill(`ticket source-${escape(row.sourceKind)}`, null, row.ticket, row.url === '' ? row.ticket : `${row.ticket}\n${row.url}`, row.sourceKind === 'github' ? 'github' : 'tag');
   const links = row.links
     .map((link) => pill(`link ${link.kind}${link.mentioned ? ' mentioned' : ''}`, link.glyph, link.badge, `${link.label}${link.mentioned ? ', named in the ticket' : ''}\n${link.url}`))
     .join('');
