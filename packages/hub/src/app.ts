@@ -798,7 +798,7 @@ const dockWithRuns = () => {
         return 'refused' in result ? { status: result.status, body: { error: result.refused } } : { status: 200, body: result };
       },
       // hub.js holder list and stop (PRD R94).
-      '/holder/list': async () => ({ status: 200, body: { sessions: await runtime.listHeld(), holder: runtime.heldHolder() } }),
+      '/holder/list': async () => ({ status: 200, body: { sessions: await runtime.listHeld(), holder: runtime.heldHolder(), installed: runtime.holderInstalled() } }),
       '/holder/stop': async (body) => {
         if (!isRecord(body) || typeof body['id'] !== 'string' || body['id'] === '') {
           return { status: 400, body: { error: 'Expected {id}.' } };

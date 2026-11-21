@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { switchboardHome } from '@switchboard/core';
-import { ATTACH_TIMEOUT_MS, buildOf, bundleHome, killProcessTree, connectHolder, createHubApp, findHub, gitBashRoot, handledBody, isSnapshotWorker, postToHub, recordedHubPid, registerTitle, reportBody, runAttach, runHolder, runSnapshotWorker, serveHub, stopHub, ticketBody } from '@switchboard/hub';
+import { ATTACH_TIMEOUT_MS, buildOf, bundleHome, killProcessTree, connectHolder, currentHolderBuild, createHubApp, findHub, gitBashRoot, handledBody, isSnapshotWorker, postToHub, recordedHubPid, registerTitle, reportBody, runAttach, runHolder, runSnapshotWorker, serveHub, stopHub, ticketBody } from '@switchboard/hub';
 
 declare const __SWITCHBOARD_VERSION__: string | undefined;
 
@@ -198,6 +198,7 @@ function holder(home: string, argv: readonly string[]): Promise<number> {
       return reply ?? noHub(home);
     },
     holder: () => connectHolder(switchboardHome(home)),
+    installed: () => currentHolderBuild(switchboardHome(home)),
     now: () => Date.now(),
     alive: (pid) => {
       try {

@@ -106,6 +106,11 @@ export class HolderLink {
     return this.#client?.holder ?? null;
   }
 
+  /** The holder build installed in the home, which the next start runs; null when none is. */
+  installed(): string | null {
+    return currentHolderBuild(this.deps.home);
+  }
+
   /** Closes the connection; the holder and its sessions keep running. */
   close(): void {
     this.#client?.holder.close();

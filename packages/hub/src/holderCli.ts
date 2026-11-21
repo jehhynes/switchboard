@@ -43,6 +43,8 @@ export interface HolderCliDeps {
   post(path: '/holder/list' | '/holder/stop', body: unknown): Promise<{ status: number; error: string | null; body: unknown } | string>;
   /** The holder `holder.json` names, or null when there is none or it does not answer. */
   holder(): Promise<HolderControl | null>;
+  /** The holder build installed in the home (`<home>/holder/current.json`), or null when none is. */
+  installed(): string | null;
   now(): number;
   /** Whether a process runs with this pid. */
   alive(pid: number): boolean;
@@ -85,15 +87,21 @@ export async function connectHolder(switchboardHome: string): Promise<HolderCont
 export { idleText } from './held.js';
 export { killTree as killProcessTree } from '@switchboard/holder';
 
-/** Whether a holder lacks a request this build sends, as one from an older build does. */
-export function olderHolder(welcome: HolderIdentity): boolean {
-  return welcome.protocol !== PROTOCOL || FEATURES.some((feature) => !(welcome.features ?? []).includes(feature));
+/**
+ * Whether a holder is from an older build (architecture.md § Terminal holder): its build is not the installed one, `installed`, null when none is
+ * installed, or it lacks the protocol or a request this build sends. A build ID is a hash of the holder's own bundle, so it changes only when the
+ * holder's code changes.
+ */
+export function olderHolder(welcome: HolderIdentity, installed: string | null): boolean {
+  return (installed !== null && welcome.build !== installed) || welcome.protocol !== PROTOCOL || FEATURES.some((feature) => !(welcome.features ?? []).includes(feature));
 }
 
-/** A line naming the holder, marked when it is from an older build. */
-export function holderLine(welcome: HolderIdentity): string {
-  const lacks = welcome.protocol === PROTOCOL && (welcome.features ?? []).includes('write') ? 'cannot show its sessions in the web page\'s console' : 'cannot type into sessions';
-  const older = olderHolder(welcome) ? `; it is from an older build and ${lacks}, and \`holder stop --all\` ends it so the next session starts this build` : '';
+/** A line naming the holder, marked when it is from an older build, with what it cannot do. */
+export function holderLine(welcome: HolderIdentity, installed: string | null): string {
+  const features = welcome.protocol === PROTOCOL ? (welcome.features ?? []) : [];
+  const lacks = !features.includes('write') ? ' and cannot type into sessions' : !features.includes('view') ? " and cannot show its sessions in the web page's console" : '';
+  const than = installed !== null && installed !== welcome.build ? ` than the installed ${installed}` : '';
+  const older = olderHolder(welcome, installed) ? `; it is from an older build${than}${lacks}, and \`holder stop --all\` ends it so the next session starts the installed build` : '';
 
   return `Terminal holder: pid ${welcome.pid}, build ${welcome.build}, protocol ${welcome.protocol}${older}.\n`;
 }
@@ -143,8 +151,9 @@ export async function runHolder(argv: readonly string[], deps: HolderCliDeps): P
     }
 
     if (command === 'list') {
-      const body = reply.body as { sessions: HeldSession[]; holder?: HolderIdentity | null };
-      const older = body.holder != null && olderHolder(body.holder) ? holderLine(body.holder) : '';
+      const body = reply.body as { sessions: HeldSession[]; holder?: HolderIdentity | null; installed?: string | null };
+      const installed = body.installed !== undefined ? body.installed : deps.installed();
+      const older = body.holder != null && olderHolder(body.holder, installed) ? holderLine(body.holder, installed) : '';
 
       deps.out(older + heldTable(body.sessions, deps.now()));
     } else {
@@ -170,7 +179,9 @@ export async function runHolder(argv: readonly string[], deps: HolderCliDeps): P
     const held = (await answered(holder.list(), HOLDER_ANSWER_MS)).map(heldFromHolder);
 
     if (command === 'list') {
-      deps.out(`${reply}, so this is the terminal holder's own list.\n${olderHolder(holder.welcome) ? holderLine(holder.welcome) : ''}${heldTable(held, deps.now())}`);
+      const installed = deps.installed();
+
+      deps.out(`${reply}, so this is the terminal holder's own list.\n${olderHolder(holder.welcome, installed) ? holderLine(holder.welcome, installed) : ''}${heldTable(held, deps.now())}`);
       return 0;
     }
 
@@ -223,7 +234,9 @@ async function stopAll(confirmed: boolean, deps: HolderCliDeps): Promise<number>
     const held = hub ? (reply.body as { sessions: HeldSession[] }).sessions : (await answered(holder.list(), HOLDER_ANSWER_MS)).map(heldFromHolder);
     const live = held.filter((one) => one.exitedAt === null);
 
-    deps.out(holderLine(holder.welcome));
+    const told = hub ? (reply.body as { installed?: string | null }).installed : undefined;
+
+    deps.out(holderLine(holder.welcome, told !== undefined ? told : deps.installed()));
     deps.out(live.length === 0 ? 'It holds no live session.\n' : `${live.length === 1 ? 'This held session ends' : `These ${live.length} held sessions end`} with it; each can be resumed afterwards:\n${heldTable(live, deps.now())}`);
 
     if (!confirmed) {

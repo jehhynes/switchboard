@@ -311,6 +311,11 @@ export class Runtime {
     return this.holder.connected()?.welcome ?? null;
   }
 
+  /** The holder build installed in the home, which the next holder start runs; null when none is. */
+  holderInstalled(): string | null {
+    return this.holder.installed();
+  }
+
   onChange(listener: () => void): () => void {
     this.listeners.add(listener);
 

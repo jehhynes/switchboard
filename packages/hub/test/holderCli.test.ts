@@ -28,7 +28,7 @@ const CURRENT = { protocol: 1, build: 'aaaaaaaaaaaaaaaa', pid: 34000, features: 
 const OLDER = { protocol: 1, build: '61663226176fa458', pid: 34000, features: ['snapshot'] };
 
 /** A hub that answers with `reply` (per path when a function), or none when it is a string, and a holder that lists `entries`, or none when null. */
-function cli(reply: Reply | ((path: string, body: unknown) => Reply), entries: SessionEntry[] | null, kill: (session: string) => Promise<number | null> = async () => 0, welcome = CURRENT) {
+function cli(reply: Reply | ((path: string, body: unknown) => Reply), entries: SessionEntry[] | null, kill: (session: string) => Promise<number | null> = async () => 0, welcome = CURRENT, installed: string | null = CURRENT.build) {
   const state = { out: '', err: '', posts: [] as unknown[], kills: [] as string[], closed: false, shutdowns: 0, alive: true, exitsOnShutdown: true, shutdownRefused: false, shutdownHangs: false, killedTrees: [] as number[], treeError: null as string | null };
   const holder: HolderControl = {
     welcome,
@@ -58,6 +58,7 @@ function cli(reply: Reply | ((path: string, body: unknown) => Reply), entries: S
       return typeof reply === 'function' ? reply(path, body) : reply;
     },
     holder: async () => (entries === null ? null : holder),
+    installed: () => installed,
     alive: () => state.alive,
     killTree: async (pid) => {
       state.killedTrees.push(pid);
@@ -206,13 +207,14 @@ describe('hub.js holder (architecture.md § Visibility of held sessions)', () =>
 
     expect(await fromHub.run('list')).toBe(0);
     expect(fromHub.state.out).toBe(
-      'Terminal holder: pid 34000, build 61663226176fa458, protocol 1; it is from an older build and cannot type into sessions, and `holder stop --all` ends it so the next session starts this build.\nNo held sessions.\n',
+      'Terminal holder: pid 34000, build 61663226176fa458, protocol 1; it is from an older build than the installed aaaaaaaaaaaaaaaa and cannot type into sessions, and `holder stop --all` ends it so the next session starts the installed build.\nNo held sessions.\n',
     );
 
     const noView = cli({ status: 200, error: null, body: { sessions: [], holder: { ...CURRENT, features: ['snapshot', 'write'] } } }, null);
 
     expect(await noView.run('list')).toBe(0);
     expect(noView.state.out).toContain("it is from an older build and cannot show its sessions in the web page's console, and");
+    expect(noView.state.out).not.toContain('than the installed');
 
     const current = cli({ status: 200, error: null, body: { sessions: [], holder: CURRENT } }, null);
 
@@ -223,6 +225,32 @@ describe('hub.js holder (architecture.md § Visibility of held sessions)', () =>
 
     expect(await down.run('list')).toBe(0);
     expect(down.state.out).toMatch(/^The Switchboard hub is not running, so this is the terminal holder's own list\.\nTerminal holder: pid 34000, build 61663226176fa458, protocol 1; it is from an older build .*\nWork item +Switchboard ID/);
+  });
+
+  it('marks a holder whose build is not the installed one, by the hub\'s installed build or its own, and none when no build is installed', async () => {
+    const otherBuild = { ...CURRENT, build: 'bbbbbbbbbbbbbbbb' };
+    const fromHub = cli({ status: 200, error: null, body: { sessions: [], holder: otherBuild, installed: CURRENT.build } }, null, undefined, CURRENT, null);
+
+    expect(await fromHub.run('list')).toBe(0);
+    expect(fromHub.state.out).toBe(
+      'Terminal holder: pid 34000, build bbbbbbbbbbbbbbbb, protocol 1; it is from an older build than the installed aaaaaaaaaaaaaaaa, and `holder stop --all` ends it so the next session starts the installed build.\nNo held sessions.\n',
+    );
+
+    // A hub from before `installed` sends none, so the CLI reads the home's.
+    const local = cli({ status: 200, error: null, body: { sessions: [], holder: otherBuild } }, null);
+
+    expect(await local.run('list')).toBe(0);
+    expect(local.state.out).toContain('build bbbbbbbbbbbbbbbb, protocol 1; it is from an older build than the installed aaaaaaaaaaaaaaaa,');
+
+    const down = cli('The Switchboard hub is not running', [], undefined, otherBuild);
+
+    expect(await down.run('list')).toBe(0);
+    expect(down.state.out).toContain('it is from an older build than the installed aaaaaaaaaaaaaaaa,');
+
+    const notInstalled = cli({ status: 200, error: null, body: { sessions: [], holder: otherBuild, installed: null } }, null);
+
+    expect(await notInstalled.run('list')).toBe(0);
+    expect(notInstalled.state.out).toBe('No held sessions.\n');
   });
 
   it('stop --all names the holder and the live sessions that end with it, and ends nothing without --yes', async () => {
