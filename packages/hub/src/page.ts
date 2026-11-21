@@ -234,6 +234,8 @@ export interface PageRow {
   main: string | null;
   /** The labels of the drafted texts Copy offers (PRD R60); the files stay in the hub. */
   pastes: string[];
+  /** What the list's search matches, as the dock's search box does: the title, key, linked pull requests and issues, playbook, group and branch (PRD R63). */
+  search: string;
 }
 
 /** The dock's actions the page may run through `row-action`, each on one work item. */
@@ -319,39 +321,41 @@ export function pageList(dock: Pick<DockView, 'groups'>, snapshot: Pick<Snapshot
       const id = /^item:(\d+)$/.exec(row.key)?.[1];
       const item = id === undefined ? undefined : items.get(Number(id));
 
-      if (item === undefined) {
-        continue;
+      if (item !== undefined) {
+        rows.push(pageRow(row, item.id, item.ticket.hostWindow ?? null));
       }
-
-      const host = item.ticket.hostWindow ?? null;
-      const actions = pageActions(row);
-      const shown: PageRow = {
-        workItemId: item.id,
-        title: row.title,
-        priority: row.priority,
-        time: row.time,
-        ticket: row.ticket,
-        sourceKind: row.sourceKind,
-        url: row.url,
-        playbook: row.playbook,
-        links: row.links.map(({ label, url, kind, badge, glyph, mentioned }) => ({ label, url, kind, badge, glyph, mentioned })),
-        returned: row.returned,
-        comment: row.comment,
-        mark: row.mark,
-        details: row.details,
-        stripe: row.stripe,
-        dim: row.dim,
-        host: host === null ? null : hostTitle(host),
-        actions,
-        main: actions.some((one) => one.label === row.main && one.confirm === null) ? row.main : null,
-        pastes: row.pastes.map((paste) => paste.label),
-      };
-
-      rows.push(shown);
     }
 
     return { key: group.key, title: group.title, glyph: group.glyph, empty: group.empty, rows };
   });
+}
+
+/** A work item's dock row as the page's list shows it; `host` is its ticket's host window, or null. */
+export function pageRow(row: DockRow, workItemId: number, host: string | null): PageRow {
+  const actions = pageActions(row);
+
+  return {
+    workItemId,
+    title: row.title,
+    priority: row.priority,
+    time: row.time,
+    ticket: row.ticket,
+    sourceKind: row.sourceKind,
+    url: row.url,
+    playbook: row.playbook,
+    links: row.links.map(({ label, url, kind, badge, glyph, mentioned }) => ({ label, url, kind, badge, glyph, mentioned })),
+    returned: row.returned,
+    comment: row.comment,
+    mark: row.mark,
+    details: row.details,
+    stripe: row.stripe,
+    dim: row.dim,
+    host: host === null ? null : hostTitle(host),
+    actions,
+    main: actions.some((one) => one.label === row.main && one.confirm === null) ? row.main : null,
+    pastes: row.pastes.map((paste) => paste.label),
+    search: row.search,
+  };
 }
 
 /** What the page's list header shows besides the list (architecture.md § Web page): the dock header's source icons. */

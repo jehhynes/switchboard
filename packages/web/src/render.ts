@@ -283,15 +283,16 @@ function listRow(row: PageRow, selected: boolean): string {
 
 /**
  * The page's list (architecture.md § Web page): the dock's groups in its order, each a header with its codicon, title and count that opens or
- * collapses it, then its rows; a collapsed group still shows the selected row, so the selection is never hidden.
+ * collapses it, then its rows; a collapsed group still shows the selected row, so the selection is never hidden. While a search `filtering` it,
+ * only the groups with rows show, every one open, and the search's end says when none matched.
  */
-export function renderList(groups: readonly PageGroup[], selected: number | null, collapsed: ReadonlySet<string>): string {
+export function renderList(groups: readonly PageGroup[], selected: number | null, collapsed: ReadonlySet<string>, filtering = false): string {
   if (groups.every((group) => group.rows.length === 0)) {
-    return '<p class="empty">No work items yet. They appear here when Switchboard starts one.</p>';
+    return filtering ? '' : '<p class="empty">No work items yet. They appear here when Switchboard starts one.</p>';
   }
 
   const html = groups.map((group) => {
-    const open = !collapsed.has(group.key);
+    const open = filtering || !collapsed.has(group.key);
     const rows = (open ? group.rows : group.rows.filter((row) => row.workItemId === selected)).map((row) => listRow(row, row.workItemId === selected)).join('');
     const empty = open && group.rows.length === 0 && group.empty !== null ? `<p class="group-empty">${escape(group.empty)}</p>` : '';
     const head =

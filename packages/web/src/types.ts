@@ -159,6 +159,8 @@ export interface PageRow {
   main?: string | null;
   /** The labels of the drafted texts Copy offers. */
   pastes?: string[];
+  /** What the list's search matches: the title, key, linked pull requests and issues, playbook, group and branch. */
+  search?: string;
 }
 
 /** One header icon: the configured sources of one kind (`DockSourceGroup` in the hub's `dock.ts`). */

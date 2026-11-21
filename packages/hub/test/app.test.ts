@@ -763,6 +763,13 @@ describe('createHubApp', () => {
     expect(await app.post['/dock/select']!({ rowKey: 'item:1' })).toMatchObject({ status: 200 });
     expect(await app.post['/dock/select']!({ rowKey: 'item:9' })).toEqual({ status: 404, body: { error: 'No work item has that row.' } });
 
+    // The web page's search further back finds the same rows, as the page's rows, for a page key only.
+    const page = app.page!.opened();
+
+    expect(await app.post['/v1/conversation/page-search']!({ window: page, text: 'signing KEY', since: 0 })).toMatchObject({ status: 200, body: { more: false, rows: [{ workItemId: 1, title: 'Rotate the signing key', host: null, search: expect.stringContaining('Rotate the signing key') }] } });
+    expect((await app.post['/v1/conversation/page-search']!({ window: 'nobody', text: 'signing', since: 0 })).status).toBe(403);
+    expect((await app.post['/v1/conversation/page-search']!({ window: page, text: 'signing' })).status).toBe(400);
+
     for (const body of [{}, { text: 'x' }, { text: 3, since: 0 }, { text: 'x', since: 'now' }, { text: 'x', since: Number.NaN }]) {
       expect(await app.post['/dock/search']!(body)).toEqual({ status: 400, body: { error: 'Expected {text, since}, the search text and the epoch milliseconds to search from.' } });
     }

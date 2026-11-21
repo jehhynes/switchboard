@@ -218,7 +218,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
   };
   // The list's header: the dock header's source icons (architecture.md § Web page).
-  const header = listHeader(root.querySelector<HTMLElement>('.side-head')!, { post: (name, body) => post(name, body), redraw: () => draw() });
+  const header = listHeader(root.querySelector<HTMLElement>('.side-head')!, list, { post: (name, body) => post(name, body), redraw: () => draw(), now: () => deps.now() });
   /** A command for the conversation the page shows, refused by the hub when the page has moved on since. */
   const command = (name: string, body: Record<string, unknown> = {}): Promise<Answer> => post(name, { scopeGen: state.scope?.scopeGen ?? -1, ...body });
 
@@ -1100,9 +1100,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // On a narrow screen the list and the conversation are each a full-width view (page.css); the list shows until a work item is opened.
     root.classList.toggle('listing', view.list || wanted === null);
     document.title = pageTitle(state.groups);
-    header.draw(state.header);
+    header.draw(state.header, state.groups);
+    // A search shows only the rows that match, in every group, open (PRD R63).
+    const listed = header.list(state.groups);
     morph(sheetHost, renderSheet(view.sheet, view.acting));
-    morph(list, expired ? '<p class="empty">This page\'s link is no longer valid. Open a new one with Switchboard: Open Web Page in VS Code, or hub.js web.</p>' : (listError === null ? '' : `<p class="list-error" role="alert">${escape(listError)}</p>`) + renderList(state.groups, state.scope?.workItemId ?? null, view.collapsed));
+    morph(list, expired ? '<p class="empty">This page\'s link is no longer valid. Open a new one with Switchboard: Open Web Page in VS Code, or hub.js web.</p>' : (listError === null ? '' : `<p class="list-error" role="alert">${escape(listError)}</p>`) + renderList(listed.groups, state.scope?.workItemId ?? null, view.collapsed, listed.filtering) + header.end(listed.groups));
     fitLines();
 
     // An ended session's note sits just above the composer on every tab, with Resume, as in the Conversation view; the page resumes it in the

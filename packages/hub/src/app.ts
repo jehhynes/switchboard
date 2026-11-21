@@ -35,7 +35,7 @@ import type { Snapshot, WorkItemView } from './snapshot.js';
 import { SnapshotBuilder } from './snapshotBuilder.js';
 import type { Built } from './snapshotBuilder.js';
 import { WindowScopes } from './windows.js';
-import { dockRowOf, PageAccess, pageActionEvent, pageHeader, pageList, pasteText } from './page.js';
+import { dockRowOf, PageAccess, pageActionEvent, pageHeader, pageList, pageRow, pasteText } from './page.js';
 import { pageAsset } from './pageAssets.js';
 import { needsMessage, newlyNeeding, rowFor, targetForUrl } from './needs.js';
 import { volumeReply } from './volume.js';
@@ -473,6 +473,18 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       return pageList(built.dock, built.snapshot);
     },
     pageHeader: () => pageHeader(views().dock),
+    // The list's search further back, as the dock's (PRD R63); a row whose work item is gone meanwhile is left out.
+    searchDone: (text, since) => {
+      const found = doneSearch.search(store, views().snapshot, runtime.snapshotInputs(), text, since, windows);
+      const rows = found.rows.flatMap((row) => {
+        const item = store.workItem(Number(/^item:(\d+)$/.exec(row.key)?.[1]));
+        const ticket = item === null ? null : store.ticket(item.ticketId);
+
+        return item === null ? [] : [pageRow(row, item.id, ticket?.hostWindow ?? null)];
+      });
+
+      return { rows, more: found.more };
+    },
     // The page's source icons turn a source on or off as the dock's do (architecture.md § Web page).
     setSource: (name, enabled) => {
       const error = runtime.setSourceEnabled(name, enabled);
@@ -849,6 +861,7 @@ const dockWithRuns = () => {
       '/v1/conversation/page-conversation': async (body) => (isRecord(body) ? conversation.pageConversation(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, provider?}.' } }),
       '/v1/conversation/resume': async (body) => (isRecord(body) ? conversation.resume(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } }),
       '/v1/conversation/row-paste': async (body) => (isRecord(body) ? conversation.rowPaste(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId, label}.' } }),
+      '/v1/conversation/page-search': async (body) => (isRecord(body) ? conversation.pageSearch(body) : { status: 400, body: { error: 'Expected {window, text, since}.' } }),
       '/v1/conversation/page-source': async (body) => (isRecord(body) ? conversation.pageSource(body) : { status: 400, body: { error: 'Expected {window, name, enabled}.' } }),
       '/v1/conversation/page-focus': async (body) => (isRecord(body) ? conversation.pageFocus(body) : { status: 400, body: { error: 'Expected {window, focused}.' } }),
       '/v1/conversation/persona': async (body) => (isRecord(body) ? conversation.personaCommand('persona', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, personaId}.' } }),

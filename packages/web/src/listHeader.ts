@@ -1,6 +1,6 @@
 import { escape } from './markdown.js';
 import { morph } from './morph.js';
-import type { PageHeader, SourceGroup } from './types.js';
+import type { PageGroup, PageHeader, PageRow, SourceGroup } from './types.js';
 
 type Answer = { status: number; body: Record<string, unknown> };
 
@@ -9,6 +9,90 @@ export interface ListHeaderDeps {
   post(name: string, body: Record<string, unknown>): Promise<Answer>;
   /** Draws the page again after the header changed what it shows. */
   redraw(): void;
+  now(): number;
+}
+
+/** The search box searches once it holds this many characters (PRD R63), as the dock's. */
+export const SEARCH_MINIMUM = 3;
+/** And this long after the last key. */
+export const SEARCH_DELAY_MS = 250;
+/** The searched ranges, as the dock's range menu names them; the first is the Done list's two weeks, which the page has, the others ask the hub. */
+export const RANGES = ['Last 2 weeks', 'Last month', 'Last 3 months', 'All time'] as const;
+
+/** A key without `gh`, `PR` or `#`, in lower case, so `#107` and `PR #107` name the row whose key is `gh 107`. */
+export function bareKey(key: string): string {
+  let bare = key.trim().toLowerCase();
+
+  for (const prefix of ['gh ', 'pr ']) {
+    if (bare.startsWith(prefix)) {
+      bare = bare.slice(prefix.length).trimStart();
+    }
+  }
+
+  return bare.replace(/^#+/, '');
+}
+
+/** Whether the text is a number, or a shown row's ticket key or link key, older Done rows the hub found included, which the search takes at once rather than after the delay. */
+export function isKey(text: string, groups: readonly PageGroup[]): boolean {
+  const bare = bareKey(text);
+
+  return (bare !== '' && /^[0-9]+$/.test(bare)) || groups.some((group) => group.rows.some((row) => bareKey(row.ticket) === bare || row.links.some((link) => bareKey(link.label) === bare)));
+}
+
+/** Whether a row's search text holds every word of the filter, ignoring case. */
+export function matches(search: string, filter: string): boolean {
+  const text = search.toLocaleLowerCase();
+
+  return filter.toLocaleLowerCase().split(/\s+/).filter((word) => word !== '').every((word) => text.includes(word));
+}
+
+/** The epoch milliseconds a range searches from: a month or three months back, or 0 for all time. */
+export function rangeSince(range: number, now: number): number {
+  if (range >= RANGES.length - 1) {
+    return 0;
+  }
+
+  // As .NET's AddMonths: a day the target month lacks becomes its last day, so March 31 less a month is February 28, not March 3.
+  const since = new Date(now);
+  const day = since.getDate();
+
+  since.setDate(1);
+  since.setMonth(since.getMonth() - (range === 1 ? 1 : 3));
+  since.setDate(Math.min(day, new Date(since.getFullYear(), since.getMonth() + 1, 0).getDate()));
+  return since.getTime();
+}
+
+/**
+ * The list a search shows (PRD R63): Done's rows, then those the hub found before them, and in every group only the rows that match, groups with
+ * none left out. Without a search, the list as it is.
+ */
+export function filterGroups(groups: readonly PageGroup[], filter: string, older: readonly PageRow[]): PageGroup[] {
+  if (filter.trim() === '') {
+    return [...groups];
+  }
+
+  return groups.flatMap((group) => {
+    const listed = new Set(group.rows.map((row) => row.workItemId));
+    const all = group.key === 'done' ? [...group.rows, ...older.filter((row) => !listed.has(row.workItemId))] : group.rows;
+    const rows = all.filter((row) => matches(row.search ?? '', filter));
+
+    return rows.length === 0 ? [] : [{ ...group, rows }];
+  });
+}
+
+/** The search's state: the box, what it applied, its range, and the rows the hub found before the Done list. */
+export interface SearchView {
+  open: boolean;
+  /** The box's text. */
+  query: string;
+  /** The text the list is filtered by; empty for none. */
+  filter: string;
+  /** An index of `RANGES`. */
+  range: number;
+  older: PageRow[];
+  more: boolean;
+  pending: boolean;
+  error: string | null;
 }
 
 /**
@@ -55,9 +139,10 @@ function gutter(checked: boolean): string {
   return `<span class="menu-gutter" aria-hidden="true">${checked ? '<span class="codicon codicon-check"></span>' : ''}</span>`;
 }
 
-/** What the header has open: a source kind's menu by its kind, or nothing. */
+/** What the header has open: a source kind's menu (`source:<kind>`), the range menu (`range`), or nothing. */
 export interface HeaderView {
   menu: string | null;
+  search: SearchView;
   /** A refusal the header's last action got, shown under it until dismissed or the next action. */
   notice: string | null;
 }
@@ -87,32 +172,85 @@ function sourceButton(group: SourceGroup, view: HeaderView): string {
  */
 export function renderListHeader(header: PageHeader | null, view: HeaderView): string {
   const sources = header?.sources ?? [];
-  const icons = sources.length === 0 ? '' : `<div class="header-sources">${sources.map((group) => sourceButton(group, view)).join('')}</div>`;
+  const icons = sources.length === 0 ? '' : `<div class="header-sources">${sources.map((group) => sourceButton(group, view)).join('')}</div><span class="header-separator" aria-hidden="true"></span>`;
+  const search = view.search;
+  const searchButton = `<button type="button" class="icon search-toggle" data-action="list-search" aria-pressed="${search.open}" title="Search" aria-label="Search"><span class="codicon codicon-search" aria-hidden="true"></span></button>`;
+  const rangeMenu =
+    view.menu === 'range'
+      ? `<ul class="glass menu range-menu" role="menu" aria-label="Search range">${RANGES.map((label, index) => `<li role="none"><button type="button" class="menu-row" role="menuitemradio" aria-checked="${index === search.range}" data-action="list-range-pick" data-range="${index}">${gutter(index === search.range)}<span class="title">${label}</span></button></li>`).join('')}</ul>`
+      : '';
+  // The box and the searched range under the title row while the search is open, as the dock's.
+  const box = search.open
+    ? `<div class="search-row"><div class="search-field"><input type="search" class="search-box" placeholder="Search title, key, PR, playbook, branch" aria-label="Search" value="${escape(search.query)}" autocomplete="off" spellcheck="false"><button type="button" class="icon" data-action="list-search-clear" title="Clear search" aria-label="Clear search"><span class="codicon codicon-close" aria-hidden="true"></span></button></div>` +
+      `<div class="menu-anchor"><button type="button" class="search-range" data-action="list-range" aria-haspopup="menu" aria-expanded="${view.menu === 'range'}" title="Choose how far back to search" aria-label="Search range: ${RANGES[search.range]}"><span>${RANGES[search.range]}</span><span class="codicon codicon-chevron-down" aria-hidden="true"></span></button>${rangeMenu}</div></div>`
+    : '';
   const notice =
     view.notice === null
       ? ''
       : `<p class="list-notice" role="alert"><span class="list-notice-text">${escape(view.notice)}</span><button type="button" class="icon dismiss" data-action="list-dismiss" title="Dismiss" aria-label="Dismiss"><span class="codicon codicon-close" aria-hidden="true"></span></button></p>`;
 
-  return `<div class="list-header"><span class="list-title">Switchboard</span>${icons}</div>${notice}`;
+  return `<div class="list-header"><span class="list-title">Switchboard</span>${icons}${searchButton}</div>${box}${notice}`;
 }
 
 /**
- * The list's header (architecture.md § Web page): the dock header's source icons, drawn into `host` and run from its own clicks and keys. The
- * page calls `draw` with each state it draws.
+ * The end of a search's results (PRD R63), after the list while the search filters it: what found nothing, Searching… or the hub's refusal, and
+ * how to search further back.
  */
-export function listHeader(host: HTMLElement, deps: ListHeaderDeps): { draw(header: PageHeader | null): void; close(): void } {
-  const view: HeaderView = { menu: null, notice: null };
+export function renderSearchEnd(search: SearchView, empty: boolean): string {
+  const filter = search.filter.trim();
+
+  if (!search.open || filter === '') {
+    return '';
+  }
+
+  const last = RANGES.length - 1;
+  const none = empty && !search.pending;
+  const noneText = search.range === last ? `No matches for “${filter}”.` : `No matches for “${filter}” in the ${RANGES[search.range]!.toLowerCase()}.`;
+  const note = search.error ?? (search.pending ? 'Searching…' : search.more ? `Showing the newest ${search.older.length} matches from before the last 2 weeks. Add words to narrow the search.` : null);
+  const links = [
+    search.range < last ? '<button type="button" class="link" data-action="list-search-further">Search further back</button>' : '',
+    none && search.range < last - 1 ? '<button type="button" class="link" data-action="list-search-all">All time</button>' : '',
+    none ? '<button type="button" class="link" data-action="list-search-clear">Clear search</button>' : '',
+  ].join('');
+
+  return `<div class="search-end" data-key="search-end">${none ? `<p class="search-none">${escape(noneText)}</p>` : ''}${note === null ? '' : `<p class="search-note" role="status">${escape(note)}</p>`}${links === '' ? '' : `<div class="search-links">${links}</div>`}</div>`;
+}
+
+/** The list header's controls, as the page uses them. */
+export interface ListHeader {
+  /** Draws the header for the hub's latest header and list. */
+  draw(header: PageHeader | null, groups: readonly PageGroup[]): void;
+  /** The list to draw: filtered while a search applies, with the rows the hub found before the Done list. */
+  list(groups: readonly PageGroup[]): { groups: PageGroup[]; filtering: boolean };
+  /** The end of the search's results, drawn after the list; empty without a search. */
+  end(shown: readonly PageGroup[]): string;
+  close(): void;
+}
+
+/**
+ * The list's header (architecture.md § Web page): the dock header's source icons and search, drawn into `host` and run from its own clicks and
+ * keys, and the search's end, which the page draws in `list`. The page calls `draw` with each state it draws.
+ */
+export function listHeader(host: HTMLElement, list: HTMLElement, deps: ListHeaderDeps): ListHeader {
+  const search: SearchView = { open: false, query: '', filter: '', range: 0, older: [], more: false, pending: false, error: null };
+  const view: HeaderView = { menu: null, search, notice: null };
   let shown: PageHeader | null = null;
+  let groups: readonly PageGroup[] = [];
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  // Each search asked of the hub, so a newer search or range drops an older answer (F7).
+  let searchRun = 0;
 
   const redraw = (): void => deps.redraw();
   const closeMenu = (focusOpener: boolean): void => {
-    const kind = view.menu?.startsWith('source:') === true ? view.menu.slice('source:'.length) : null;
+    const menu = view.menu;
 
     view.menu = null;
     redraw();
 
-    if (focusOpener && kind !== null) {
-      [...host.querySelectorAll<HTMLElement>('[data-action="list-source"]')].find((one) => one.dataset['kind'] === kind)?.focus();
+    if (focusOpener && menu !== null) {
+      const opener = menu === 'range' ? host.querySelector<HTMLElement>('.search-range') : [...host.querySelectorAll<HTMLElement>('[data-action="list-source"]')].find((one) => `source:${one.dataset['kind']}` === menu);
+
+      opener?.focus();
     }
   };
   /** Turns one source on or off; the hub's next list shows the change, and a refusal shows under the header. */
@@ -128,7 +266,117 @@ export function listHeader(host: HTMLElement, deps: ListHeaderDeps): { draw(head
     }
   };
 
-  host.addEventListener('click', (event) => {
+  // ---- Search (PRD R63), as the dock's ----
+  const dropOlder = (): void => {
+    searchRun++;
+    search.pending = false;
+    search.error = null;
+    search.more = false;
+    search.older = [];
+  };
+  /** Asks the hub for the Done rows before the Done list, when the range reaches past it. */
+  const searchOlder = async (): Promise<void> => {
+    if (search.filter.trim() === '' || search.range === 0) {
+      return;
+    }
+
+    const run = ++searchRun;
+
+    search.pending = true;
+    redraw();
+
+    const answer = await deps.post('page-search', { text: search.filter.trim(), since: rangeSince(search.range, deps.now()) });
+
+    if (run !== searchRun) {
+      return;
+    }
+
+    search.pending = false;
+    search.error = answer.status === 200 ? null : `The hub could not search further back: ${String(answer.body['error'] ?? 'no answer')}`;
+    search.older = answer.status === 200 ? ((answer.body['rows'] as PageRow[] | undefined) ?? []) : [];
+    search.more = answer.status === 200 && answer.body['more'] === true;
+    redraw();
+  };
+  const apply = (text: string): void => {
+    if (search.filter === text) {
+      return;
+    }
+
+    search.filter = text;
+    dropOlder();
+    void searchOlder();
+    redraw();
+  };
+  const cancelTimer = (): void => {
+    if (timer !== null) {
+      clearTimeout(timer);
+      timer = null;
+    }
+  };
+  /** The box's text: searched 250 ms after the last key from 3 characters, at once for a key; shorter text shows every row. */
+  const typed = (query: string): void => {
+    search.query = query;
+    cancelTimer();
+
+    const text = query.trim();
+
+    if (text === '') {
+      apply('');
+    } else if (isKey(text, [...groups, { key: 'older', title: '', glyph: '', empty: null, rows: search.older }])) {
+      apply(bareKey(text));
+    } else if (text.length < SEARCH_MINIMUM) {
+      apply('');
+    } else {
+      timer = setTimeout(() => {
+        timer = null;
+        apply(query);
+      }, SEARCH_DELAY_MS);
+    }
+  };
+  const setFilter = (text: string): void => {
+    cancelTimer();
+    search.query = text;
+
+    const box = host.querySelector<HTMLInputElement>('.search-box');
+
+    if (box !== null) {
+      box.value = text;
+    }
+
+    apply(text);
+  };
+  const setRange = (range: number): void => {
+    const next = Math.max(0, Math.min(RANGES.length - 1, range));
+
+    if (next === search.range) {
+      return;
+    }
+
+    search.range = next;
+    dropOlder();
+    void searchOlder();
+    redraw();
+  };
+  /** Shows or hides the box; hiding it clears the search and its range. */
+  const setOpen = (open: boolean): void => {
+    search.open = open;
+    view.menu = null;
+
+    if (!open) {
+      search.range = 0;
+      setFilter('');
+    }
+
+    redraw();
+
+    if (open) {
+      host.querySelector<HTMLInputElement>('.search-box')?.focus();
+    } else {
+      host.querySelector<HTMLElement>('.search-toggle')?.focus();
+    }
+  };
+
+  const clicked = (event: Event): void => {
     const button = (event.target as HTMLElement).closest<HTMLElement>('[data-action]');
 
     switch (button?.dataset['action']) {
@@ -163,10 +411,46 @@ export function listHeader(host: HTMLElement, deps: ListHeaderDeps): { draw(head
         view.notice = null;
         redraw();
         break;
+      case 'list-search':
+        setOpen(!search.open);
+        break;
+      case 'list-search-clear':
+        setFilter('');
+        host.querySelector<HTMLInputElement>('.search-box')?.focus();
+        break;
+      case 'list-range':
+        view.menu = view.menu === 'range' ? null : 'range';
+        redraw();
+        break;
+      case 'list-range-pick':
+        view.menu = null;
+        setRange(Number(button.dataset['range']));
+        host.querySelector<HTMLElement>('.search-range')?.focus();
+        break;
+      case 'list-search-further':
+        setRange(search.range + 1);
+        break;
+      case 'list-search-all':
+        setRange(RANGES.length - 1);
+        break;
+    }
+  };
+
+  host.addEventListener('click', clicked);
+  list.addEventListener('click', clicked);
+  host.addEventListener('input', (event) => {
+    if ((event.target as HTMLElement).classList.contains('search-box')) {
+      typed((event.target as HTMLInputElement).value);
     }
   });
   host.addEventListener('keydown', (event) => {
     if (view.menu === null) {
+      // Escape in the box closes the search, as the dock's.
+      if (event.key === 'Escape' && (event.target as HTMLElement).classList.contains('search-box')) {
+        event.stopPropagation();
+        setOpen(false);
+      }
+
       return;
     }
 
@@ -195,8 +479,9 @@ export function listHeader(host: HTMLElement, deps: ListHeaderDeps): { draw(head
   document.addEventListener('pointerdown', outside);
 
   return {
-    draw: (header) => {
+    draw: (header, listed) => {
       shown = header;
+      groups = listed;
 
       // A kind whose menu is open and that is gone, or now has one source, has no menu.
       if (view.menu?.startsWith('source:') === true && (header?.sources.find((one) => `source:${one.kind}` === view.menu)?.sources.length ?? 0) < 2) {
@@ -205,6 +490,11 @@ export function listHeader(host: HTMLElement, deps: ListHeaderDeps): { draw(head
 
       morph(host, renderListHeader(header, view));
     },
-    close: () => document.removeEventListener('pointerdown', outside),
+    list: (listed) => ({ groups: filterGroups(listed, search.filter, search.older), filtering: search.filter.trim() !== '' }),
+    end: (filtered) => renderSearchEnd(search, filtered.every((group) => group.rows.length === 0)),
+    close: () => {
+      cancelTimer();
+      document.removeEventListener('pointerdown', outside);
+    },
   };
 }

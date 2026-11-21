@@ -35,6 +35,20 @@ svg.source-logo.github { color: #f0f6fc; }
 svg.source-logo.zoho { color: #089949; }
 svg.source-logo.forum { color: #57ae57; }
 .source-logo.off, svg.source-logo.off { color: #7a7a7a; }
+.header-separator { flex: none; width: 1px; height: 16px; margin: 0 4px; background: var(--vscode-panel-border); }
+/* The search box and its range under the title row while the search is open (PRD R63). */
+.search-row { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 0 8px 8px 8px; }
+.search-field { display: flex; align-items: center; box-sizing: border-box; width: 100%; border: 1px solid var(--vscode-input-border, transparent); border-radius: 2px; background: var(--vscode-input-background); }
+.search-field:focus-within { border-color: var(--vscode-focusBorder); }
+.search-box { flex: 1; min-width: 0; box-sizing: border-box; height: 26px; padding: 0 6px; border: none; outline: none; background: transparent; color: var(--vscode-input-foreground); font: inherit; font-size: 13px; }
+.search-box::placeholder { color: var(--vscode-input-placeholderForeground); }
+.search-box::-webkit-search-cancel-button { display: none; }
+.search-range, .search-end button.link { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: none; background: transparent; color: var(--vscode-textLink-foreground); cursor: pointer; }
+.search-range:hover, .search-end button.link:hover { color: var(--vscode-textLink-activeForeground); text-decoration: underline; }
+.search-end { padding: 0 8px 8px 11px; }
+.search-none, .search-note { margin: 0 0 4px; color: var(--vscode-descriptionForeground); }
+.search-links { display: flex; flex-wrap: wrap; gap: 12px; }
+@media (hover: none), (pointer: coarse) { .search-box { height: 44px; } .search-range, .search-end button.link { min-height: 44px; } }
 .list-notice { display: flex; align-items: flex-start; gap: 4px; margin: 0; padding: 4px 4px 4px 20px; color: var(--vscode-editorWarning-foreground); }
 .list-notice-text { flex: 1; min-width: 0; }
 @media (hover: none), (pointer: coarse) { .list-header button.icon { min-width: 44px; min-height: 44px; } .list-header { min-height: 44px; } }

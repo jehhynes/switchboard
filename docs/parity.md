@@ -17,15 +17,14 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 
 ## Open gaps, by value
 
-1. Search (F1-F7): the web page cannot find a work item by key, title or branch, nor reach Done work older than two weeks.
-2. Row controls the page lacks (C4-C6, C8-C10, C15, O5, R12): Reopen, Start with guidance or prompt, Add comment, Open ticket and links, Open in Claude or Codex and a Codex terminal, Open changes, History, Open report, Move, and pool tickets' Start and Triage again.
-3. Problems the page never shows (H3, H4, H5): settings, source and voice errors, orphan held sessions, and the needs-you message.
-4. Done's date bands and group state (G5, G6, G8): Done is one flat list, Snoozed starts open, and open or closed choices do not survive a reload.
-5. Mark colours (M3): the dock and the web page colour marks by different rules; one of them should change.
-6. Keyboard (K2, K4, K5, O3, O4): no arrow-key walk, F8, menu key, drag or Alt+arrow reordering.
-7. Voice mark (R3): the page does not show which row the voice speaks for.
-8. Pool tickets (R20): left out by architecture.md § Web page; the operator approves that as Differs, or the page adds them.
-9. Web-only behaviours the dock lacks (R8, C13, G10, H7): a hosted conversation's host on line 2, Stop asking first, the selected row kept in a collapsed group.
+1. Row controls the page lacks (C4-C6, C8-C10, C15, O5, R12): Reopen, Start with guidance or prompt, Add comment, Open ticket and links, Open in Claude or Codex and a Codex terminal, Open changes, History, Open report, Move, and pool tickets' Start and Triage again.
+2. Problems the page never shows (H3, H4, H5): settings, source and voice errors, orphan held sessions, and the needs-you message.
+3. Done's date bands and group state (G5, G6, G8): Done is one flat list, Snoozed starts open, and open or closed choices do not survive a reload.
+4. Mark colours (M3): the dock and the web page colour marks by different rules; one of them should change.
+5. Keyboard (K2, K4, K5, O3, O4): no arrow-key walk, F8, menu key, drag or Alt+arrow reordering.
+6. Voice mark (R3): the page does not show which row the voice speaks for.
+7. Pool tickets (R20): left out by architecture.md § Web page; the operator approves that as Differs, or the page adds them.
+8. Web-only behaviours the dock lacks (R8, C13, G10, H7): a hosted conversation's host on line 2, Stop asking first, the selected row kept in a collapsed group.
 
 ## Groups
 
@@ -103,7 +102,7 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 | S3 | A failed click says why in the status toast | `ShowFailure` MainWindow.axaml.cs:1369 | Partly | A refused select shows over the composer, or over the list with no conversation (main.ts:880-893) |
 | S4 | The row of the VS Code window or session terminal that comes to the front is selected, its group opened and scrolled into view | `SelectWindow` ViewModels.cs:649, `ShowItemWindow` MainWindow.axaml.cs:968 | Differs | The page selects only on its own clicks, as decision 19 has it; the selection is kept in the URL (`#w=`, main.ts:87, 847) |
 | S7 | The selection clears when the selected row's item window closes | `WindowClosed` ViewModels.cs:674 | Differs | The page keeps its selection, which is its open conversation, until another is clicked (decision 19) |
-| S5 | Selecting a row hidden by the search clears the search; a closed group or band opens | `Reveal` ViewModels.cs:713 | Missing | No search; a closed group shows the selected row (G10) |
+| S5 | Selecting a row hidden by the search clears the search; a closed group or band opens | `Reveal` ViewModels.cs:713 | Partly | The page selects only rows it shows, so none is hidden by the search; with no search a closed group shows the selected row (G10) |
 | S6 | A focus refresh between press and release does not lose the click | `HoldView` ViewModels.cs:513 | Partly | `morph` keeps unchanged nodes, but no test covers a list redraw between press and release |
 
 ## Controls, menus and confirmations
@@ -132,13 +131,13 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 
 | # | Behaviour | Dock evidence | Web | Web evidence and note |
 |---|---|---|---|---|
-| F1 | Search button shows or hides the search box; hiding clears the search and its range; Escape closes it | `OnSearchClicked` MainWindow.axaml.cs:2176, `SearchOpen` ViewModels.cs:403 | Missing | |
-| F2 | Matches title, key, linked PRs and issues, playbook, group and branch; every word, any case | `Matches` ViewModels.cs:986, `searchText` dock.ts:313 | Missing | |
-| F3 | Searches 250 ms after the last key from 3 characters; at once for a ticket or link key (`18941`, `gh 18941`, `PR #19002`, `#107`) | `Query` ViewModels.cs:193, `IsKey` :240 | Missing | |
-| F4 | Groups with matches show open; groups without are hidden; bands open while filtering | `IsShown` ViewModels.cs:890, `ShowsRows` :762 | Missing | |
-| F5 | Range menu: Last 2 weeks, Last month, Last 3 months, All time; older Done rows from the hub under their month | `Ranges` ViewModels.cs:36, `SearchOlder` :319 | Missing | |
-| F6 | Search further back, and All time when nothing matched; "No matches for … in the …"; Clear search; Searching…; "Showing the newest N matches…"; the hub's refusal | MainWindow.axaml:608-617, ViewModels.cs:379-389 | Missing | |
-| F7 | A newer search or range drops an older answer | ViewModels.cs:334 | Missing | |
+| F1 | Search button shows or hides the search box; hiding clears the search and its range; Escape closes it | `OnSearchClicked` MainWindow.axaml.cs:2176, `SearchOpen` ViewModels.cs:403 | Present | `setOpen` listHeader.ts |
+| F2 | Matches title, key, linked PRs and issues, playbook, group and branch; every word, any case | `Matches` ViewModels.cs:986, `searchText` dock.ts:313 | Present | `matches` listHeader.ts on `PageRow.search`, the dock row's `search` (`pageRow` page.ts) |
+| F3 | Searches 250 ms after the last key from 3 characters; at once for a ticket or link key (`18941`, `gh 18941`, `PR #19002`, `#107`) | `Query` ViewModels.cs:193, `IsKey` :240 | Present | `typed`, `isKey` listHeader.ts |
+| F4 | Groups with matches show open; groups without are hidden; bands open while filtering | `IsShown` ViewModels.cs:890, `ShowsRows` :762 | Present | `filterGroups` listHeader.ts, `renderList` render.ts with `filtering`; the page has no bands (G8) |
+| F5 | Range menu: Last 2 weeks, Last month, Last 3 months, All time; older Done rows from the hub under their month | `Ranges` ViewModels.cs:36, `SearchOlder` :319 | Partly | `page-search` (conversation.ts) answers the dock's `DoneSearch` rows; the page adds them after Done's own rows, not under month bands (G8) |
+| F6 | Search further back, and All time when nothing matched; "No matches for … in the …"; Clear search; Searching…; "Showing the newest N matches…"; the hub's refusal | MainWindow.axaml:608-617, ViewModels.cs:379-389 | Present | `renderSearchEnd` listHeader.ts |
+| F7 | A newer search or range drops an older answer | ViewModels.cs:334 | Present | `searchRun` in `listHeader` listHeader.ts |
 
 ## Header, notes and messages
 

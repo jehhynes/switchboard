@@ -9,7 +9,7 @@ import { SESSION_ENDED, SESSION_RELAUNCHED } from './runtime.js';
 import { canonicalFolder } from './windows.js';
 import { artifactFile, findFiles } from './page.js';
 import { writeUpload } from './uploads.js';
-import type { PageFile, PageHeader, PageListGroup } from './page.js';
+import type { PageFile, PageHeader, PageListGroup, PageRow } from './page.js';
 import type { ConversationRef, WindowScope, WindowScopes } from './windows.js';
 import type { VoiceView } from './voice.js';
 import { ClaudeConversationAdapter } from './claudeConversation.js';
@@ -244,6 +244,8 @@ export interface ConversationServiceDeps {
   pageHeader?(): PageHeader;
   /** Turns one source on or off, as the dock's source icons do: why not, or null. */
   setSource?(name: string, enabled: boolean): string | null;
+  /** The Done rows from `since` up to the Done list whose search text holds every word of `text`, as the dock's search further back (PRD R63). */
+  searchDone?(text: string, since: number): { rows: PageRow[]; more: boolean };
   /** A page's focus changed: a focused, visible page counts as a focused window for the voice. */
   pageFocused?(key: string, focused: boolean): void;
   /**
@@ -1044,6 +1046,25 @@ export class ConversationService {
       ...this.#voiceHello(key),
       ...pageHello,
     };
+  }
+
+  /**
+   * `page-search {window, text, since}` (architecture.md § Web page): the list's search further back, the Done rows from `since`, in epoch
+   * milliseconds, up to the Done list, whose search text holds every word of `text`, answered as `{rows, more}` as the dock's `/dock/search`
+   * answers it. 403 for a key that is not a page's.
+   */
+  pageSearch(body: Record<string, unknown>): { status: number; body: unknown } {
+    const { window, text, since } = body;
+
+    if (typeof window !== 'string' || typeof text !== 'string' || text.length > MAX_MESSAGE_CHARS || typeof since !== 'number' || !Number.isFinite(since)) {
+      return { status: 400, body: { error: 'Expected {window, text, since}, the search text and the epoch milliseconds to search from.' } };
+    }
+
+    if (!this.deps.windows.isPage(window)) {
+      return { status: 403, body: { error: 'Not in this window.' } };
+    }
+
+    return { status: 200, body: this.deps.searchDone?.(text, since) ?? { rows: [], more: false } };
   }
 
   #pageHello(key: string): Record<string, unknown> {
