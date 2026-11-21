@@ -52,6 +52,8 @@ import { spawnEnvironment } from './spawn.js';
 const RELOAD_DEBOUNCE_MS = 300;
 /** The mic codicon in codicon.ttf, which marks the voice target's dock row (architecture.md § Voice). */
 export const VOICE_GLYPH = '\u{ec12}';
+/** The mic mark's tooltip. */
+const VOICE_TITLE = 'The voice speaks for this session.';
 
 /** Operator events the dock may send (PRD R27). */
 const OPERATOR_EVENTS = new Set(['adhoc', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retry', 'stop', 'delete', 'open-question', 'pick', 'retriage-pool', 'snooze', 'restore', 'comment', 'move', 'reset-position', 'persona']);
@@ -550,8 +552,9 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     },
     pageList: () => {
       const built = views();
+      const row = voiceRow();
 
-      return pageList(built.dock, built.snapshot);
+      return pageList(built.dock, built.snapshot, row === null ? null : { row, glyph: VOICE_GLYPH, title: VOICE_TITLE });
     },
     pageHeader: () => {
       const built = views();
@@ -781,8 +784,7 @@ const dockWithRuns = () => {
     const executable = (terminal: DockTerminal): DockTerminal => ({ ...terminal, ...terminalRun(terminal) });
 
     // The voice target's row has the mic mark, and a voice problem is a note: no window shows another's or a global one (architecture.md § Voice).
-    const targetSession = voice.target === null ? null : store.session(voice.target);
-    const activeRow = targetSession === null ? null : `item:${targetSession.workItemId}`;
+    const activeRow = voiceRow();
 
     return {
       ...view,
@@ -794,13 +796,20 @@ const dockWithRuns = () => {
           ...row,
           open: row.open?.type === 'terminal' ? { ...executable(row.open), type: 'terminal' as const } : row.open,
           terminal: row.terminal === null ? null : executable(row.terminal),
-          voice: row.key === activeRow ? { glyph: VOICE_GLYPH, title: 'The voice speaks for this session.' } : null,
+          voice: row.key === activeRow ? { glyph: VOICE_GLYPH, title: VOICE_TITLE } : null,
           controls: [...row.controls, ...personaControls(row.key)],
         })),
       })),
     };
   };
   const dockRows = () => dockWithRuns().groups.flatMap((group) => group.rows);
+
+  /** The row of the voice target's work item, which has the mic mark in the dock and on the page (architecture.md § Voice), or null. */
+  function voiceRow(): string | null {
+    const targetSession = voice.target === null ? null : store.session(voice.target);
+
+    return targetSession === null ? null : `item:${targetSession.workItemId}`;
+  }
 
   /** The dock's notes with the voice's problem last, as the dock and the page show them (architecture.md § Voice). */
   function withVoiceNote(notes: string[]): string[] {

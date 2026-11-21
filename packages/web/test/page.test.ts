@@ -286,6 +286,7 @@ describe('drawing', () => {
     expect(first.querySelector('.pill .pill-icon')!.className).toBe('codicon codicon-github pill-icon');
     expect(first.querySelector('.playbook')!.innerHTML).toBe('<span class="namespace">dev:</span>build');
     expect(root.querySelector('[data-work-item="2"]')!.className).toBe('row stripe-warning dim');
+    expect(root.querySelectorAll('.voice-mark')).toHaveLength(0);
     expect(root.querySelector('[data-work-item="2"] .pill')!.className).toBe('pill ticket source-zoho');
     expect(root.querySelector('[data-work-item="2"] .pill .pill-icon')!.className).toBe('codicon codicon-tag pill-icon');
     expect(root.querySelector('[data-work-item="2"] .playbook')!.innerHTML).toBe('triage');
@@ -378,6 +379,16 @@ describe('drawing', () => {
     root.innerHTML = html(renderList(groups, 6, newView().collapsed));
     expect([...root.querySelectorAll('[data-group="done"] .row')].map((row) => row.getAttribute('data-work-item'))).toEqual(['6']);
     expect(html(renderList([listGroup('progress', [])], null, new Set()))).toBe('<p class="empty">No work items yet. They appear here when Switchboard starts one.</p>');
+  });
+
+  it("puts the mic mark before the time on the voice target's row only, with its tooltip", () => {
+    const root = document.createElement('div');
+
+    root.innerHTML = html(renderList([listGroup('progress', [listRow(1, { time: { text: '2h', title: 'In queue' }, voice: { glyph: '\u{ec12}', title: 'The voice speaks for this session.' } }), listRow(2, { voice: null })])], null, new Set()));
+    expect([...root.querySelector('[data-work-item="1"] .row-head')!.children].map((child) => child.className)).toEqual(['row-title', 'codicon voice-mark', 'row-time']);
+    expect(root.querySelector('[data-work-item="1"] .voice-mark')!.getAttribute('aria-label')).toBe('The voice speaks for this session.');
+    expect(root.querySelector('[data-work-item="1"] .voice-mark')!.textContent).toBe('\u{ec12}');
+    expect(root.querySelector('[data-work-item="2"] .voice-mark')).toBeNull();
   });
 
   it("draws Done's rows under their date bands, Today and Yesterday open and the older ones closed, each with its count and a rule", () => {

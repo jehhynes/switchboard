@@ -125,6 +125,8 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 .row-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .row-head .priority { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #e8820c; }
 .row-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+/* The mic mark before the time on the voice target's row, as the dock's. */
+.row-head .voice-mark { flex: none; }
 .row-time { flex: none; margin-left: 2px; font-size: 12px; color: var(--vscode-descriptionForeground); }
 /* Lines 2 and 3 stay one line each and clip their end; line 2's pills shrink to their icons as the dock's do (below). */
 .row-line { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; font-size: 12px; line-height: 18px; }

@@ -247,6 +247,15 @@ export interface PageRow {
   band: string | null;
   /** Whether the dock's menu has Open in terminal for the row, which the page's menu offers as its Console tab. */
   terminal: boolean;
+  /** Line 1's mic mark, before the time, on the voice target's row, as the dock shows it; null on the others. */
+  voice: { glyph: string; title: string } | null;
+}
+
+/** The mic mark of the voice target's row: its key, `item:<work item ID>`, the codicon glyph and the tooltip. */
+export interface PageVoiceMark {
+  row: string;
+  glyph: string;
+  title: string;
 }
 
 /** The dock's actions the page may run through `row-action`, each on one work item. */
@@ -466,9 +475,9 @@ function hostTitle(host: string): string {
 /**
  * The page's list (architecture.md § Web page): the dock's groups in the dock's order, with its titles, glyphs and empty texts, holding the
  * dock's rows where the dock puts them: the work items', hosted conversations included (every conversation is a work item), and the pool
- * tickets' in Unstarted and Snoozed.
+ * tickets' in Unstarted and Snoozed; `voice` names the voice target's row, which gets the mic mark.
  */
-export function pageList(dock: Pick<DockView, 'groups'>, snapshot: Pick<Snapshot, 'workItems' | 'pool'>): PageListGroup[] {
+export function pageList(dock: Pick<DockView, 'groups'>, snapshot: Pick<Snapshot, 'workItems' | 'pool'>, voice: PageVoiceMark | null = null): PageListGroup[] {
   const items = new Map(snapshot.workItems.map((item) => [item.id, item]));
   const pool = new Set(snapshot.pool.map((entry) => entry.ticket.id));
 
@@ -481,7 +490,7 @@ export function pageList(dock: Pick<DockView, 'groups'>, snapshot: Pick<Snapshot
       const ticketId = Number(/^ticket:(\d+)$/.exec(row.key)?.[1] ?? NaN);
 
       if (item !== undefined) {
-        rows.push(pageRow(row, item.id, item.ticket.hostWindow ?? null));
+        rows.push({ ...pageRow(row, item.id, item.ticket.hostWindow ?? null), voice: row.key === voice?.row ? { glyph: voice.glyph, title: voice.title } : null });
       } else if (pool.has(ticketId)) {
         rows.push(pageRow(row, null, null, ticketId));
       }
@@ -520,6 +529,7 @@ export function pageRow(row: DockRow, workItemId: number | null, host: string | 
     terminal: workItemId !== null && (row.terminal !== null || row.commands.some((command) => command.command['type'] === 'terminal')),
     search: row.search,
     band: row.band,
+    voice: null,
   };
 }
 

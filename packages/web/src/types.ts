@@ -172,6 +172,8 @@ export interface PageRow {
   terminal?: boolean;
   /** A Done row's date band, such as `Today`, or an older Done row's month, such as `October 2026`; null in the other groups. */
   band?: string | null;
+  /** Line 1's mic mark before the time on the voice target's row: its codicon glyph and tooltip; null on the others. */
+  voice?: { glyph: string; title: string } | null;
 }
 
 /** One header icon: the configured sources of one kind (`DockSourceGroup` in the hub's `dock.ts`). */

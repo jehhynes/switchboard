@@ -63,6 +63,11 @@ function Row({ row, selected, menu }: { row: PageRow; selected: boolean; menu: C
         <span class="row-head">
           {row.priority === null ? null : <span class="priority" role="img" title={row.priority} aria-label={row.priority}></span>}
           <span class="row-title">{row.title}</span>
+          {row.voice == null ? null : (
+            <span class="codicon voice-mark" role="img" title={row.voice.title} aria-label={row.voice.title}>
+              {row.voice.glyph}
+            </span>
+          )}
           {row.time === null ? null : <span class="row-time" title={row.time.title}>{row.time.text}</span>}
         </span>
         <span class="row-line">
