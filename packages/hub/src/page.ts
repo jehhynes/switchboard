@@ -249,6 +249,8 @@ export interface PageRow {
   terminal: boolean;
   /** Line 1's mic mark, before the time, on the voice target's row, as the dock shows it; null on the others. */
   voice: { glyph: string; title: string } | null;
+  /** The ticket whose History the row's menu opens, as the dock's History command names it: its ID and key; null when the dock offers none. */
+  history: { ticketId: number; key: string } | null;
 }
 
 /** The mic mark of the voice target's row: its key, `item:<work item ID>`, the codicon glyph and the tooltip. */
@@ -381,7 +383,7 @@ export interface PageOpen {
 /** The label of the page's counterpart of the dock row's click, which opens its VS Code window. */
 export const OPEN_IN_VSCODE = 'Open in VS Code';
 
-/** Whether a dock row command is one the page runs in VS Code: Open changes and Open report (History and Open in terminal are not on the page). */
+/** Whether a dock row command is one the page runs in VS Code: Open changes and Open report; the page shows History and Open in terminal itself. */
 function pageCommand(command: DockRow['commands'][number]): boolean {
   return command.command['type'] === 'changes' || (command.command['type'] === 'openUrl' && command.label === 'Open report');
 }
@@ -530,7 +532,15 @@ export function pageRow(row: DockRow, workItemId: number | null, host: string | 
     search: row.search,
     band: row.band,
     voice: null,
+    history: historyOf(row),
   };
+}
+
+/** The ticket the dock row's History command opens, or null without one. */
+function historyOf(row: Pick<DockRow, 'commands'>): PageRow['history'] {
+  const command = row.commands.find((one) => one.command['type'] === 'history')?.command;
+
+  return command === undefined || typeof command['ticketId'] !== 'number' ? null : { ticketId: command['ticketId'], key: String(command['key'] ?? '') };
 }
 
 /** What the page's list header shows besides the list (architecture.md § Web page): the dock header's source icons and what its More Actions offer. */

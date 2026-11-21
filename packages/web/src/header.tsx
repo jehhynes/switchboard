@@ -33,7 +33,7 @@ const Separator = () => <li class="menu-separator" role="separator"></li>;
 
 /**
  * A row's menu, as rows of a `menu` list (architecture.md § Web page), grouped as the dock's row menu is: the main control, the work controls, the
- * state controls, Add comment…, the order controls, what the row opens (Copy, Open in VS Code, Open changes and Open report, Open ticket and its
+ * state controls, Add comment…, the order controls, what the row opens (Copy, Open in VS Code, Open changes and Open report, History, Open ticket and its
  * links, more than two of them in an Open link submenu), then the controls that ask first; empty when the row offers none. Each item names its
  * row, so a pool ticket's menu in the list runs as the header's does.
  */
@@ -65,6 +65,8 @@ export function menuRows(row: PageRow, view: Pick<View, 'acting' | 'linkMenu'>):
     // The dock's Open in terminal: the open work item's session on the Console tab.
     ...(row.terminal === true ? [item({ 'data-action': 'open-console' }, 'terminal', 'Open in terminal')] : []),
     ...commands.map((one) => item({ 'data-action': 'row-command', 'data-label': one.label }, one.icon, one.label)),
+    // The dock's History, which the page shows in the conversation's place.
+    ...(row.history == null ? [] : [item({ 'data-action': 'row-history' }, 'history', 'History')]),
     ...(row.url === '' ? [] : [link('ticket', 'Open ticket', 'link-external')]),
     ...(row.links.length > MENU_LINKS ? submenu : row.links.map((one, index) => link(String(index), `Open ${one.label}`, 'link-external'))),
   ];

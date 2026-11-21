@@ -174,6 +174,64 @@ export interface PageRow {
   band?: string | null;
   /** Line 1's mic mark before the time on the voice target's row: its codicon glyph and tooltip; null on the others. */
   voice?: { glyph: string; title: string } | null;
+  /** The ticket whose History the row's menu opens: its ID and key; null when the dock offers none. */
+  history?: { ticketId: number; key: string } | null;
+}
+
+/** A History filter chip's category (`CATEGORIES` in the hub's `history.ts`). */
+export interface HistoryCategory {
+  key: string;
+  label: string;
+  icon: string;
+}
+
+/** Something a History entry names: `open` is what the VS Code History tab runs, of which the page opens only an http or https `openUrl`. */
+export interface HistoryLink {
+  label: string;
+  icon: string;
+  title: string;
+  open: { type: string; url?: string; [key: string]: unknown };
+}
+
+/** One History entry (`Entry` in the hub's `history.ts`). */
+export interface HistoryEntry {
+  key: string;
+  at: number;
+  category: string;
+  icon: string;
+  text: string;
+  lines: string[];
+  detail: string | null;
+  shortId: string | null;
+  links: HistoryLink[];
+  tone: 'error' | 'warning' | 'success' | 'accent' | null;
+  reconstructed: boolean;
+  refused: string | null;
+  stateChange: boolean;
+}
+
+/** One History section: a work item's, or the ticket's (`Section` in the hub's `history.ts`). */
+export interface HistorySection {
+  key: string;
+  workItemId: number | null;
+  title: string;
+  status: string;
+  tone: HistoryEntry['tone'];
+  facts: string[];
+  prompt: string | null;
+  entries: HistoryEntry[];
+}
+
+/** A ticket's History as the hub builds it (`HistoryView` in the hub's `history.ts`). */
+export interface HistoryView {
+  key: string;
+  title: string;
+  url: string;
+  facts: Array<{ label: string; value: string }>;
+  links: HistoryLink[];
+  reconstructed: boolean;
+  recordedSince: number | null;
+  sections: HistorySection[];
 }
 
 /** One header icon: the configured sources of one kind (`DockSourceGroup` in the hub's `dock.ts`). */

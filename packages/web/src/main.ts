@@ -23,6 +23,9 @@ import { reconnector } from './reconnect.js';
 import { fitPills } from './fit.js';
 import { renderContextMeter } from '@switchboard/conversation/contextMeter';
 import type { ContextMenuState } from '@switchboard/conversation/contextMeter';
+import { EMPTY_HISTORY_UI, renderHistory } from './history.js';
+import type { HistoryOpen, HistoryUi } from './history.js';
+import type { HistoryCategory, HistoryView } from './types.js';
 
 /** The stream's event types the page reads. */
 export const EVENTS = ['hello', 'list', 'scope', 'conversations', 'session', 'message', 'reply', 'status', 'artifact', 'unread', 'voice', 'settings', 'progress', 'words', 'draft', 'pane', 'needs'];
@@ -63,6 +66,9 @@ export function stepScale(scale: number, step: 1 | -1): number {
 const CHAT_WIDTH = 'switchboard.chatWidth';
 /** From this width Status and Artifacts are a column beside the conversation rather than tabs. */
 export const WIDE_QUERY = '(min-width: 1200px)';
+/** How often an open History reads the hub again, so its times stay current, and how soon after a list change. */
+export const HISTORY_REFRESH_MS = 30_000;
+const HISTORY_CHANGE_MS = 1_000;
 /** Where the page keeps each work item's draft, over a reload. */
 const DRAFTS = 'switchboard.drafts';
 
@@ -113,6 +119,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const sheetHost = root.querySelector<HTMLElement>('#sheet')!;
   const detailHead = root.querySelector<HTMLElement>('#detail .detail-head')!;
   const detailBody = root.querySelector<HTMLElement>('#detail .detail-body')!;
+  const historyHost = root.querySelector<HTMLElement>('#history')!;
   // On a wide screen Status and Artifacts leave the tabs for a column of their own beside the conversation (architecture.md § Web page).
   const wideQuery = typeof window.matchMedia === 'function' ? window.matchMedia(WIDE_QUERY) : null;
   // The side columns show whenever the width allows, with no toggle: the list from 768 px, Status and Artifacts from 1200 px. A choice an
@@ -1140,7 +1147,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /** Draws the state; Preact changes only what differs, so the focus, a selection, the scroll position and open menus stay. */
   const drawRegions = (): void => {
     // On a narrow screen the list and the conversation are each a full-width view (page.css); the list shows until a work item is opened.
-    root.classList.toggle('listing', view.list || wanted === null);
+    root.classList.toggle('listing', shownHistory === null && (view.list || wanted === null));
+    // A ticket's History shows in the conversation's place, over its column and the side column (architecture.md § Web page).
+    root.classList.toggle('history', shownHistory !== null);
+    mount(historyHost, shownHistory === null ? null : renderHistory(shownHistory));
     // The pane helper finds this window by the marker until it has found it (architecture.md § Pane state).
     document.title = pageTitle(state.groups) + (view.pane?.marker == null ? '' : ` [sb-pane ${view.pane.marker}]`);
     header.draw(state.header, state.groups);
@@ -1448,8 +1458,121 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
   };
 
+  // ---- History ----
+  /** The History shown in the conversation's place, or null; each ticket's settings last while the page is open. */
+  let shownHistory: HistoryOpen | null = null;
+  const historyUis = new Map<number, HistoryUi>();
+  let historyTick: ReturnType<typeof setInterval> | null = null;
+  let historyChange: ReturnType<typeof setTimeout> | null = null;
+  // Each read of the hub, so an answer that a later read overtook is dropped.
+  let historyRead = 0;
+  // What had the focus before History opened, given it back when History closes.
+  let historyReturn: (() => HTMLElement | null) | null = null;
+  /** Reads the open History from the hub; a failed read keeps what it shows and says why. */
+  const readHistory = async (): Promise<void> => {
+    const asked = shownHistory;
+
+    if (asked === null) {
+      return;
+    }
+
+    const read = ++historyRead;
+    const answer = await post('page-history', { ticketId: asked.ticketId });
+
+    if (shownHistory !== asked || read !== historyRead) {
+      return;
+    }
+
+    if (answer.status === 200) {
+      asked.view = answer.body['view'] as HistoryView;
+      asked.categories = (answer.body['categories'] as HistoryCategory[] | undefined) ?? [];
+      asked.error = null;
+    } else {
+      asked.error = String(answer.body['error'] ?? `Switchboard did not answer (status ${answer.status}).`);
+    }
+
+    draw();
+  };
+  const openHistory = (ticketId: number, key: string, returnTo: () => HTMLElement | null): void => {
+    historyReturn = returnTo;
+    closeMenus();
+    shownHistory = { ticketId, key, view: null, categories: [], error: null, ui: historyUis.get(ticketId) ?? { ...EMPTY_HISTORY_UI } };
+    historyTick ??= setInterval(() => void readHistory(), HISTORY_REFRESH_MS);
+    draw();
+    historyHost.querySelector<HTMLElement>('.hist-close')?.focus();
+    void readHistory();
+  };
+  /** Closes History; with `focusBack`, as from Close or Escape, the control that opened it takes the focus again. */
+  const closeHistory = (focusBack = false): void => {
+    if (shownHistory === null) {
+      return;
+    }
+
+    const back = historyReturn;
+
+    shownHistory = null;
+    historyReturn = null;
+    historyRead++;
+    clearInterval(historyTick ?? undefined);
+    clearTimeout(historyChange ?? undefined);
+    historyTick = null;
+    historyChange = null;
+    draw();
+
+    if (focusBack) {
+      back?.()?.focus();
+    }
+  };
+  /** The operator changed the open History's chips, filter, sections or runs: kept for the ticket while the page is open. */
+  const setHistoryUi = (ui: HistoryUi): void => {
+    if (shownHistory !== null) {
+      shownHistory.ui = ui;
+      historyUis.set(shownHistory.ticketId, ui);
+    }
+  };
+
+  historyHost.addEventListener('input', (event) => {
+    const field = event.target as HTMLInputElement;
+
+    if (shownHistory !== null && field.classList.contains('hist-filter')) {
+      setHistoryUi({ ...shownHistory.ui, query: field.value });
+      draw();
+    }
+  });
+  // A section or run the operator opened or closed stays so across redraws.
+  historyHost.addEventListener(
+    'toggle',
+    (event) => {
+      const details = event.target as HTMLDetailsElement;
+      const section = details.dataset?.['section'];
+      const run = details.dataset?.['run'];
+
+      if (shownHistory === null) {
+        return;
+      }
+
+      // Drawn again, so the next drawing compares against what the page shows, and Expand all opens a section the operator closed.
+      if (section !== undefined && (shownHistory.ui.sections[section] ?? null) !== details.open) {
+        setHistoryUi({ ...shownHistory.ui, sections: { ...shownHistory.ui.sections, [section]: details.open } });
+        draw();
+      } else if (run !== undefined && shownHistory.ui.runs.includes(run) !== details.open) {
+        setHistoryUi({ ...shownHistory.ui, runs: details.open ? [...shownHistory.ui.runs, run] : shownHistory.ui.runs.filter((one) => one !== run) });
+        draw();
+      }
+    },
+    true,
+  );
+  historyHost.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && shownHistory !== null) {
+      event.stopPropagation();
+      closeHistory(true);
+    }
+  });
+
   // ---- Selecting ----
   const select = async (workItemId: number): Promise<void> => {
+    // A work item opened from the list shows its conversation in History's place.
+    closeHistory();
     wanted = workItemId;
     listError = null;
     view.list = false;
@@ -1657,6 +1780,49 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         // A pill's link opens without selecting its row; the menu's closes the menu.
         openLink(button!.dataset['row'] ?? '', button!.dataset['link'] ?? '');
         break;
+      case 'row-history': {
+        const key = button!.dataset['row'] ?? '';
+        const shown = rowByKey(key)?.history ?? null;
+        // Back to the menu's opener: the header's actions button, or the pool ticket's row in the list.
+        const opener = button!.closest('.row-menu') === null ? (): HTMLElement | null => root.querySelector<HTMLElement>('.header [data-action="actions"]') : (): HTMLElement | null => [...list.querySelectorAll<HTMLElement>('[data-action="pool-menu"]')].find((one) => one.dataset['row'] === key) ?? null;
+
+        if (shown !== null) {
+          openHistory(shown.ticketId, shown.key, opener);
+        }
+
+        break;
+      }
+      case 'history-close':
+        closeHistory(true);
+        break;
+      case 'history-chip':
+        if (shownHistory !== null) {
+          const category = button!.dataset['category'] ?? '';
+          const hidden = shownHistory.ui.hidden.includes(category) ? shownHistory.ui.hidden.filter((one) => one !== category) : [...shownHistory.ui.hidden, category];
+
+          setHistoryUi({ ...shownHistory.ui, hidden });
+          draw();
+        }
+
+        break;
+      case 'history-all':
+        if (shownHistory?.view != null) {
+          const open = button!.dataset['all'] === 'open';
+
+          setHistoryUi({ ...shownHistory.ui, sections: Object.fromEntries(shownHistory.view.sections.map((section) => [section.key, open])) });
+          draw();
+        }
+
+        break;
+      case 'history-open': {
+        const target = tabUrl(button!.dataset['url'] ?? '');
+
+        if (target !== null) {
+          (deps.openUrl ?? ((one: string) => void window.open(one, '_blank', 'noopener,noreferrer')))(target);
+        }
+
+        break;
+      }
       case 'pool-menu': {
         const key = button!.dataset['row'] ?? '';
         const open = view.rowMenu === key;
@@ -2492,6 +2658,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       }
 
       // Dictation (architecture.md § Dictation): live words show dimmed after the box's text; the hub's draft fills the box unless the operator typed over it.
+      // An open History reads again soon after the list changed, as the History tab does after a stream state.
+      if (type === 'list' && shownHistory !== null && historyChange === null) {
+        historyChange = setTimeout(() => {
+          historyChange = null;
+          void readHistory();
+        }, HISTORY_CHANGE_MS);
+      }
+
       if (type === 'needs') {
         // A work item started needing the operator: the message shows under the list's header, as in the dock's toast (PRD R65).
         header.needs(Array.isArray(data['items']) ? (data['items'] as Array<{ workItemId: number; message: string }>) : []);
@@ -2562,6 +2736,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     state: () => state,
     close: () => {
       clearInterval(seenTimer);
+      clearInterval(historyTick ?? undefined);
+      clearTimeout(historyChange ?? undefined);
       clearInterval(paneWake);
       paneColumn?.disconnect();
       clearInterval(promptTimer);

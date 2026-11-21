@@ -1938,6 +1938,20 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     expect(sourceCalls).toEqual([['gh', true], ['gone', true]]);
   });
 
+  it("answers a page's History of a ticket the store knows, with the chips' categories, for a page key only", () => {
+    const { service, openPage, scopes, view, store } = setup();
+    const page = openPage();
+    const window = scopes.open(view.file, view.view);
+    const ticketId = view.view.workItems[0]!.ticket.id;
+    const answer = service.pageHistory({ window: page.key, ticketId });
+
+    expect(answer.status).toBe(200);
+    expect(answer.body).toMatchObject({ view: { key: expect.any(String), title: store.ticket(ticketId)!.title, sections: expect.any(Array) }, categories: expect.arrayContaining([{ key: 'you', label: 'You', icon: 'account' }]) });
+    expect(service.pageHistory({ window: page.key, ticketId: 999 })).toEqual({ status: 409, body: { error: 'Unknown ticket 999.' } });
+    expect(service.pageHistory({ window: page.key, ticketId: 'one' }).status).toBe(400);
+    expect(service.pageHistory({ window, ticketId }).status).toBe(403);
+  });
+
   it("sends each page, and no window, the work items that started needing the operator with the dock's message (PRD R65)", () => {
     const { service, openPage, scopes, view } = setup();
     const page = openPage();

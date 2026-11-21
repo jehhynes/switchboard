@@ -569,3 +569,97 @@ button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }
 .console-foot { flex: none; display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 12px; }
 .console-foot[hidden] { display: none; }
 .console-note { flex: 1; min-width: 0; margin: 0; color: var(--vscode-errorForeground, #f85149); }
+
+/* A ticket's History in the conversation's place (architecture.md § Web page), drawn as the VS Code History tab, its classes prefixed with
+   hist- so the conversation's rules do not reach it. It covers the conversation's and the side column. */
+#history { display: none; }
+#root.history > .main, #root.history > .chat-sash, #root.history > .detail { display: none; }
+#root.history > #history { display: flex; flex: 1; min-width: 0; flex-direction: column; background: var(--vscode-editor-background); }
+.hist-bar { flex: none; display: flex; align-items: center; gap: 6px; min-height: 35px; padding: 0 8px; border-bottom: 1px solid var(--vscode-panel-border); background: var(--vscode-sideBar-background); }
+.hist-bar-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.hist-bar button.icon { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 26px; padding: 0; border: none; border-radius: 4px; background: transparent; color: var(--vscode-foreground); cursor: pointer; }
+.hist-bar button.icon:hover { background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)); }
+.hist-body { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 24px 48px; }
+.hist-body > * { max-width: 1100px; margin-left: auto; margin-right: auto; }
+.history-view button:not(.icon) { display: inline-flex; align-items: center; gap: 5px; font: inherit; cursor: pointer; border: 1px solid var(--vscode-button-border, transparent); border-radius: 4px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); padding: 2px 8px; line-height: 18px; }
+.history-view button:not(.icon):hover { background: var(--vscode-button-secondaryHoverBackground); }
+.history-view summary:focus-visible, .history-view input:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+.hist-hero { padding-bottom: 16px; border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-panel-border, transparent)); }
+.hist-headline { display: flex; align-items: baseline; gap: 10px; }
+.hist-key { flex-shrink: 0; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
+.hist-headline h1 { margin: 0; font-size: 20px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+.hist-facts { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 0; }
+.hist-facts > div { min-width: 110px; padding: 6px 12px; border-radius: 6px; background: color-mix(in srgb, var(--vscode-foreground) 6%, transparent); }
+.hist-facts dt { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--vscode-descriptionForeground); }
+.hist-facts dd { margin: 2px 0 0; font-weight: 600; }
+.hist-hero-links, .hist-entry-links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.hist-entry-links { margin-top: 4px; }
+.history-view button.hist-link, .hist-link.off { display: inline-flex; align-items: center; gap: 5px; padding: 0 6px; font-size: 12px; background: transparent; color: var(--vscode-textLink-foreground); border-color: transparent; }
+.history-view button.hist-link:hover { background: var(--vscode-list-hoverBackground); text-decoration: underline; }
+.hist-link.off { color: var(--vscode-descriptionForeground); cursor: default; }
+.hist-hero-links .hist-link { padding: 2px 8px; }
+.hist-toolbar { position: sticky; top: -16px; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 0; background: var(--vscode-editor-background); border-bottom: 1px solid var(--vscode-widget-border, transparent); }
+.hist-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.history-view button.hist-chip { border-radius: 12px; padding: 2px 10px; background: transparent; color: var(--vscode-descriptionForeground); border-color: var(--vscode-widget-border, var(--vscode-descriptionForeground)); }
+.history-view button.hist-chip.on { background: color-mix(in srgb, var(--vscode-focusBorder) 22%, transparent); color: var(--vscode-foreground); border-color: var(--vscode-focusBorder); }
+.hist-filter { flex: 1 1 180px; min-width: 120px; padding: 3px 8px; font: inherit; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); border-radius: 4px; }
+.hist-toolbar button.icon { display: inline-flex; align-items: center; justify-content: center; padding: 3px 5px; border: none; border-radius: 4px; background: transparent; color: var(--vscode-foreground); cursor: pointer; }
+.hist-toolbar button.icon:hover { background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)); }
+.hist-banner, .hist-error { display: flex; gap: 8px; align-items: flex-start; margin: 14px 0 0; padding: 8px 12px; border-radius: 6px; line-height: 18px; }
+.hist-banner { background: color-mix(in srgb, var(--vscode-editorInfo-foreground, var(--vscode-focusBorder)) 12%, transparent); }
+.hist-error { color: var(--vscode-errorForeground); background: color-mix(in srgb, var(--vscode-errorForeground) 10%, transparent); }
+.hist-banner .codicon, .hist-error .codicon { line-height: 18px; }
+.hist-section { margin-top: 16px; border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border, transparent)); border-radius: 6px; overflow: hidden; }
+.hist-section > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; list-style: none; background: color-mix(in srgb, var(--vscode-focusBorder) 10%, transparent); }
+.hist-section > summary::-webkit-details-marker { display: none; }
+.hist-section > summary::before { font-family: codicon; content: '\eab6'; font-size: 14px; transition: transform 0.1s; }
+.hist-section[open] > summary::before { transform: rotate(90deg); }
+.hist-section > summary:hover { background: color-mix(in srgb, var(--vscode-focusBorder) 18%, transparent); }
+.hist-section-title { font-weight: 600; font-size: 14px; }
+.hist-status { padding: 0 8px; border-radius: 10px; font-size: 12px; line-height: 18px; background: color-mix(in srgb, var(--vscode-foreground) 12%, transparent); }
+.hist-count { font-size: 12px; color: var(--vscode-descriptionForeground); }
+.hist-section-facts { flex-basis: 100%; padding-left: 22px; font-size: 12px; color: var(--vscode-descriptionForeground); }
+.hist-prompt { margin: 8px 12px 0; padding: 6px 10px; border-radius: 4px; background: color-mix(in srgb, var(--vscode-foreground) 6%, transparent); }
+.hist-prompt-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--vscode-descriptionForeground); }
+.hist-prompt-text { margin-top: 2px; font-family: var(--vscode-editor-font-family); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.hist-empty { margin: 0; padding: 12px 16px; color: var(--vscode-descriptionForeground); }
+ol.hist-timeline { list-style: none; margin: 0; padding: 4px 12px 10px; }
+.hist-day { margin: 10px 0 4px; padding-left: 74px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--vscode-descriptionForeground); }
+.hist-entry { position: relative; display: grid; grid-template-columns: 62px 24px minmax(0, 1fr) auto; column-gap: 8px; padding: 4px 0; border-radius: 4px; }
+.hist-entry:hover { background: var(--vscode-list-hoverBackground); }
+.hist-entry::before { content: ''; position: absolute; left: 81px; top: 0; bottom: 0; border-left: 2px solid color-mix(in srgb, var(--vscode-foreground) 15%, transparent); }
+.hist-entry time { padding-top: 2px; text-align: right; font-family: var(--vscode-editor-font-family); font-size: 12px; color: var(--vscode-descriptionForeground); }
+.hist-dot { position: relative; z-index: 1; display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: var(--vscode-editor-background); box-shadow: 0 0 0 2px color-mix(in srgb, var(--vscode-foreground) 25%, transparent); }
+.hist-entry-body { min-width: 0; padding-top: 2px; }
+.hist-text { line-height: 18px; overflow-wrap: anywhere; }
+.hist-gap { padding-top: 2px; font-size: 11px; color: var(--vscode-descriptionForeground); white-space: nowrap; }
+.hist-sid { margin-left: 8px; padding: 0 6px; border-radius: 8px; font-family: var(--vscode-editor-font-family); font-size: 11px; background: color-mix(in srgb, var(--vscode-foreground) 10%, transparent); color: var(--vscode-descriptionForeground); }
+.hist-mark { margin-left: 8px; font-size: 11px; font-style: italic; color: var(--vscode-descriptionForeground); }
+.hist-mark.refused-mark { font-style: normal; font-weight: 600; color: var(--vscode-errorForeground); }
+.hist-detail { margin-top: 3px; padding: 4px 8px; border-left: 2px solid color-mix(in srgb, var(--vscode-foreground) 25%, transparent); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--vscode-descriptionForeground); }
+.hist-lines { margin: 3px 0 0; padding-left: 16px; color: var(--vscode-descriptionForeground); }
+.hist-lines li { line-height: 18px; overflow-wrap: anywhere; }
+.hist-entry.reconstructed .hist-text { color: var(--vscode-descriptionForeground); }
+.hist-entry.reconstructed .hist-dot { box-shadow: 0 0 0 2px color-mix(in srgb, var(--vscode-foreground) 15%, transparent); border: 1px dashed color-mix(in srgb, var(--vscode-foreground) 35%, transparent); }
+/* Category and tone colours: the dot takes the category, a tone overrides it. */
+.hist-entry.cat-you .hist-dot { color: var(--vscode-charts-blue, var(--vscode-focusBorder)); }
+.hist-entry.cat-session .hist-dot { color: var(--vscode-charts-purple, var(--vscode-foreground)); }
+.hist-entry.cat-report .hist-dot { color: var(--vscode-charts-green, var(--vscode-foreground)); }
+.hist-entry.cat-triage .hist-dot { color: var(--vscode-charts-orange, var(--vscode-foreground)); }
+.hist-entry.cat-ticket .hist-dot { color: var(--vscode-descriptionForeground); }
+.hist-entry.tone-error .hist-dot, .hist-status.tone-error { color: var(--vscode-errorForeground); }
+.hist-entry.tone-warning .hist-dot, .hist-status.tone-warning { color: var(--vscode-editorWarning-foreground); }
+.hist-entry.tone-success .hist-dot, .hist-status.tone-success { color: var(--vscode-testing-iconPassed, var(--vscode-charts-green)); }
+.hist-entry.tone-accent .hist-dot { box-shadow: 0 0 0 2px var(--vscode-focusBorder); }
+.hist-status.tone-accent { color: var(--vscode-textLink-foreground); }
+.hist-entry.tone-error .hist-text, .hist-entry.refused .hist-text { color: var(--vscode-errorForeground); }
+.hist-run > details > summary { display: flex; align-items: center; gap: 6px; margin: 2px 0; padding: 3px 0 3px 74px; cursor: pointer; font-size: 12px; color: var(--vscode-descriptionForeground); }
+.hist-run > details > summary:hover { color: var(--vscode-foreground); }
+.hist-run ol.hist-timeline { padding: 0; }
+/* The time column keeps its width, which "09:00:00" needs; only the gap column goes. */
+@media (max-width: 560px) {
+  .hist-body { padding: 12px 12px 48px; }
+  .hist-entry { grid-template-columns: 62px 24px minmax(0, 1fr); }
+  .hist-gap { display: none; }
+}
+@media (hover: none), (pointer: coarse) { .hist-bar button.icon, .hist-toolbar button.icon, .history-view button.hist-chip, .history-view button.hist-link { min-height: 44px; } .hist-bar button.icon { min-width: 44px; } }

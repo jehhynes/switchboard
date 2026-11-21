@@ -144,7 +144,7 @@ describe('pageList', () => {
     const ownRow = dock.groups.flatMap((group) => group.rows).find((row) => row.key === 'item:1')!;
 
     expect(list.map((group) => [group.key, group.title, group.glyph])).toEqual(dock.groups.map((group) => [group.key, group.title, group.glyph]));
-    expect(list.flatMap((group) => group.rows).find((row) => row.workItemId === 1)).toEqual({ workItemId: 1, ticketId: null, title: 'Fix the badge', priority: ownRow.priority, time: ownRow.time, ticket: ownRow.ticket, sourceKind: ownRow.sourceKind, url: ownRow.url, playbook: ownRow.playbook, links: [], returned: ownRow.returned, comment: ownRow.comment, mark: ownRow.mark, details: ownRow.details, stripe: ownRow.stripe, dim: ownRow.dim, host: null, actions: pageActions(ownRow), main: null, pastes: [], opens: pageOpens(ownRow), terminal: expect.any(Boolean), search: ownRow.search, band: null, voice: null });
+    expect(list.flatMap((group) => group.rows).find((row) => row.workItemId === 1)).toEqual({ workItemId: 1, ticketId: null, title: 'Fix the badge', priority: ownRow.priority, time: ownRow.time, ticket: ownRow.ticket, sourceKind: ownRow.sourceKind, url: ownRow.url, playbook: ownRow.playbook, links: [], returned: ownRow.returned, comment: ownRow.comment, mark: ownRow.mark, details: ownRow.details, stripe: ownRow.stripe, dim: ownRow.dim, host: null, actions: pageActions(ownRow), main: null, pastes: [], opens: pageOpens(ownRow), terminal: expect.any(Boolean), search: ownRow.search, band: null, voice: null, history: { ticketId: own.ticket.id, key: ownRow.ticket } });
     // The voice target's row alone has the mic mark, as the dock's.
     const marked = pageList(dock, view, { row: 'item:1', glyph: '\u{ec12}', title: 'The voice speaks for this session.' }).flatMap((group) => group.rows);
 
@@ -166,7 +166,7 @@ describe('pageList', () => {
 
   it('leaves out rows whose work item or pool ticket the snapshot lacks, and keeps a done hosted conversation in Done', () => {
     const doneHosted = item(6, { status: 'done', ticket: { ...item(6).ticket, title: 'Old chat', hostWindow: 'D:/git/support' } });
-    const row = (key: string) => ({ key, title: key, ticket: 'gh 1', sourceKind: 'github', playbook: 'dev', links: [], details: [], mark: null, stripe: null, dim: false, controls: [], main: null, pastes: [] }) as unknown as DockView['groups'][number]['rows'][number];
+    const row = (key: string) => ({ key, title: key, ticket: 'gh 1', sourceKind: 'github', playbook: 'dev', links: [], details: [], mark: null, stripe: null, dim: false, controls: [], main: null, pastes: [], commands: [] }) as unknown as DockView['groups'][number]['rows'][number];
     const dock = { groups: [{ key: 'unstarted', title: 'Unstarted', glyph: 'u', empty: 'Nothing waits to be started.', rows: [row('ticket:9'), row('item:77')] }, { key: 'done', title: 'Done', glyph: 'd', empty: null, rows: [row('item:6')] }] } as Pick<DockView, 'groups'>;
     const list = pageList(dock, snapshot([doneHosted]));
 
@@ -224,7 +224,7 @@ describe('pageList pool rows', () => {
     const rows = pageList(dock, view).flatMap((group) => group.rows);
     const nine = rows.find((row) => row.ticketId === 9)!;
 
-    expect(nine).toMatchObject({ workItemId: null, ticketId: 9, title: ticket.title, url: 'https://github.com/o/r/issues/9', main: 'Start', opens: [], host: null, terminal: false });
+    expect(nine).toMatchObject({ workItemId: null, ticketId: 9, title: ticket.title, url: 'https://github.com/o/r/issues/9', main: 'Start', opens: [], host: null, terminal: false, history: { ticketId: 9, key: poolRowOf(dock, 9)!.ticket } });
     expect(nine.actions.map((one) => [one.label, one.group])).toEqual([['Start', 'main'], ['Start with guidance…', 'work'], ['Snooze…', 'state']]);
     expect(pageActionEvent(poolRowOf(dock, 9)!, 'Start', { until: null, comment: null })).toEqual({ event: { type: 'pick', ticketId: 9 } });
     expect(pageActionEvent(poolRowOf(dock, 9)!, 'Start with guidance…', { until: null, comment: null, text: 'Use staging', choice: 'dev:fix' })).toEqual({ event: { type: 'pick', ticketId: 9, guidance: 'Use staging', playbook: 'dev:fix' } });
@@ -240,7 +240,7 @@ describe('pageList rows', () => {
       links: [{ label: 'PR #9', url: 'https://github.com/o/r/pull/9', kind: 'pr', badge: '9', glyph: '\u{ea64}', mentioned: false, pr: { state: 'open' } }],
       returned: 2, comment: { glyph: 'c', title: 'Nov 20\nWaits on Sam' }, mark: { kind: 'limited', glyph: 'w', title: 'Rate limited' },
       details: [{ text: 'Rate limited · resumes 1:20 PM', title: 'Resets at 1:20 PM', tone: 'warning' }, { text: 'Post the reply', title: null, tone: null }],
-      stripe: null, dim: false, controls: [], main: null, pastes: [], search: 'Fix it · gh 3 · PR #9 · dev:build', band: 'Yesterday',
+      stripe: null, dim: false, controls: [], main: null, pastes: [], commands: [], search: 'Fix it · gh 3 · PR #9 · dev:build', band: 'Yesterday',
     } as unknown as DockView['groups'][number]['rows'][number];
     const dock = { groups: [{ key: 'progress', title: 'In progress', glyph: 'p', empty: null, rows: [dockRow] }] } as Pick<DockView, 'groups'>;
     const [shown] = pageList(dock, snapshot([item(3)]))[0]!.rows;
@@ -567,6 +567,10 @@ describe('the web page routes', () => {
           posted.push(body);
           return { status: 200, body: {} };
         },
+        '/v1/conversation/page-history': async (body) => {
+          posted.push(body);
+          return { status: 200, body: {} };
+        },
       },
     });
 
@@ -616,10 +620,13 @@ describe('the web page routes', () => {
     expect((await post('/v1/conversation/page-source', `http://127.0.0.1:${port}`)).status).toBe(200);
     expect((await post('/v1/conversation/page-source', `http://127.0.0.1:${server.port}`)).status).toBe(403);
     expect((await post('/v1/conversation/page-source', `http://127.0.0.1:${port}`, {})).status).toBe(404);
+    // History is a page command too.
+    expect((await post('/v1/conversation/page-history', `http://127.0.0.1:${port}`)).status).toBe(200);
+    expect((await post('/v1/conversation/page-history', `http://127.0.0.1:${server.port}`)).status).toBe(403);
     expect((await post('/v1/conversation/resume', `http://127.0.0.1:${server.port}`)).status).toBe(403);
     expect((await post('/v1/conversation/resume', `http://127.0.0.1:${port}`, {})).status).toBe(404);
     expect((await post('/v1/conversation/resume', `http://127.0.0.1:${port}`, { Cookie: 'sb_page=forged' })).status).toBe(401);
-    expect(posted).toHaveLength(3);
+    expect(posted).toHaveLength(4);
     stream.destroy();
   });
 

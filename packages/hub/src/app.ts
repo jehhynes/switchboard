@@ -1059,6 +1059,7 @@ const dockWithRuns = () => {
       '/v1/conversation/row-command': async (body) => (isRecord(body) ? conversation.rowCommand(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId, label}.' } }),
       '/v1/conversation/row-open': async (body) => (isRecord(body) ? conversation.rowOpen(body) : { status: 400, body: { error: 'Expected {window, opId, workItemId, url}.' } }),
       '/v1/conversation/row-paste': async (body) => (isRecord(body) ? conversation.rowPaste(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId, label}.' } }),
+      '/v1/conversation/page-history': async (body) => (isRecord(body) ? conversation.pageHistory(body) : { status: 400, body: { error: 'Expected {window, ticketId}.' } }),
       '/v1/conversation/page-poll': async (body) => (isRecord(body) ? conversation.pagePoll(body) : { status: 400, body: { error: 'Expected {window}.' } }),
       '/v1/conversation/page-holder-restart': async (body) => (isRecord(body) ? conversation.pageHolderRestart(body) : { status: 400, body: { error: 'Expected {window}.' } }),
       '/v1/conversation/page-adhoc': async (body) => (isRecord(body) ? conversation.pageAdhoc(body) : { status: 400, body: { error: 'Expected {window, opId, prompt, repoRoot, start, provider}.' } }),

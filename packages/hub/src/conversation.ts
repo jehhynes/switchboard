@@ -9,6 +9,7 @@ import { SESSION_ENDED, SESSION_RELAUNCHED } from './runtime.js';
 import { canonicalFolder } from './windows.js';
 import { artifactFile, findFiles, knownFolder, MAX_INPUT_CHARS } from './page.js';
 import { writeUpload } from './uploads.js';
+import { CATEGORIES, historyView } from './history.js';
 import type { PageActionExtra, PageFile, PageHeader, PageListGroup, PageRow } from './page.js';
 import type { ConversationRef, WindowScope, WindowScopes } from './windows.js';
 import type { VoiceView } from './voice.js';
@@ -1235,6 +1236,27 @@ export class ConversationService {
     }
 
     return { status: 200, body: this.deps.searchDone?.(text, since) ?? { rows: [], more: false } };
+  }
+
+  /**
+   * `page-history {window, ticketId}` (architecture.md § Web page): a ticket's History as the VS Code History tab shows it, built by the hub
+   * (`historyView`), with the filter chips' categories: `{view, categories}`. 403 for a key that is not a page's, 409 for a ticket the store
+   * does not know.
+   */
+  pageHistory(body: Record<string, unknown>): { status: number; body: unknown } {
+    const { window, ticketId } = body;
+
+    if (typeof window !== 'string' || !Number.isInteger(ticketId)) {
+      return { status: 400, body: { error: 'Expected {window, ticketId}.' } };
+    }
+
+    if (!this.deps.windows.isPage(window)) {
+      return { status: 403, body: { error: 'Not in this window.' } };
+    }
+
+    const history = this.deps.store.ticketHistory(ticketId as number);
+
+    return history === null ? { status: 409, body: { error: `Unknown ticket ${String(ticketId)}.` } } : { status: 200, body: { view: historyView(history, this.deps.now()), categories: CATEGORIES } };
   }
 
   /**
