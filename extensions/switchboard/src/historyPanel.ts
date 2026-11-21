@@ -189,7 +189,8 @@ export class HistoryPanels implements vscode.WebviewPanelSerializer {
 
     if (reply === null || reply.status !== 200) {
       tab.stale = true;
-      tab.error = reply === null ? 'Switchboard: the hub did not answer.' : `Switchboard: ${reply.error ?? `the hub answered ${reply.status}.`}`;
+      // Shown in the page, so it reads as page text rather than a notification; `connected` reads the tab again when the hub says hello.
+      tab.error = reply === null ? 'Switchboard is not running. The history reloads when it starts.' : (reply.error ?? `The hub answered ${reply.status}.`);
 
       // A page already showing a history keeps it; a restored page with nothing yet says why.
       if (tab.revision === null) {

@@ -130,10 +130,10 @@ ${entries.length === 0 ? `<p class="empty">${section.entries.length === 0 ? 'Not
 
 /** The History page (PRD R59). */
 export function renderHistory(view: HistoryView, ui: HistoryUi): string {
-  const all = view.sections.flatMap((section) => section.entries);
+  // Chips are filters without counts: a category's entries spread over the sections, whose own counts are what the page shows.
   const chips = CATEGORIES.map(({ key, label, icon }) => {
     const on = !ui.hidden.includes(key);
-    return `<button class="chip${on ? ' on' : ''}" data-category="${key}" aria-pressed="${on}"><span class="codicon codicon-${icon}"></span>${label}<span class="n">${all.filter((entry) => entry.category === key).length}</span></button>`;
+    return `<button class="chip${on ? ' on' : ''}" data-category="${key}" aria-pressed="${on}"><span class="codicon codicon-${icon}"></span>${label}</button>`;
   }).join('');
   const banner =
     view.reconstructed && view.recordedSince !== null

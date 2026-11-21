@@ -171,7 +171,7 @@ describe('a row\'s History', () => {
 
     await until(refused, 'the hub kept listening after its shutdown');
     await extension.run({ type: 'history', ticketId: TICKET, key: 'gh 77' });
-    await until(() => tabs()[0]?.error?.startsWith('Switchboard: '), `the tab did not report the missing hub: ${JSON.stringify(tabs())}`);
+    await until(() => tabs()[0]?.error === 'Switchboard is not running. The history reloads when it starts.', `the tab did not report the missing hub: ${JSON.stringify(tabs())}`);
     await until(() => extension.hub() !== null && extension.hub().pid !== before.pid, 'the window did not reconnect to a new hub', 60_000);
     // The new hub's hello gives the window its key there; a claim with the old one would grant nothing.
     await until(() => extension.windowKey() !== null && extension.windowKey() !== oldKey, 'the new hub gave the window no key', 60_000);

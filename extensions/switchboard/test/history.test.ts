@@ -583,14 +583,14 @@ describe('History model', () => {
 });
 
 describe('History page', () => {
-  it('renders the header, chips with counts, day headings, gaps and the newest section open', () => {
+  it('renders the header, chips without counts, day headings, gaps and the newest section open', () => {
     const run = approvedRun();
     const root = document.createElement('div');
 
     root.innerHTML = renderHistory(historyView(run.history(), run.now), EMPTY_UI);
 
     expect(root.querySelector('h1')?.textContent).toBe('Inbox badge');
-    expect([...root.querySelectorAll('.chip')].map((chip) => chip.textContent)).toEqual(['You2', 'Sessions3', 'Reports2', 'Triage1', 'Ticket2']);
+    expect([...root.querySelectorAll('.chip')].map((chip) => chip.textContent)).toEqual(['You', 'Sessions', 'Reports', 'Triage', 'Ticket']);
     expect([...root.querySelectorAll<HTMLDetailsElement>('details.section')].map((section) => section.open)).toEqual([true, false]);
     expect(root.querySelectorAll('.day')).toHaveLength(2);
     expect([...root.querySelectorAll('.entry .gap')].map((gap) => gap.textContent).filter(Boolean)).toEqual(['+1m', '+2m', '+1m', '+10m', '+2h 0m']);
