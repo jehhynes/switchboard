@@ -12,7 +12,6 @@ import { attachments, drawChips } from './attachments.js';
 import type { Attached } from './attachments.js';
 import { reconnector } from './reconnect.js';
 import { fitPills } from './fit.js';
-import { overlayScrollbars } from './scrollbars.js';
 
 /** The stream's event types the page reads. */
 export const EVENTS = ['hello', 'list', 'scope', 'conversations', 'session', 'message', 'reply', 'status', 'artifact', 'unread', 'voice', 'settings', 'progress', 'words', 'draft'];
@@ -141,7 +140,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     });
   };
   const listWidth = typeof ResizeObserver === 'function' ? new ResizeObserver(() => fitLines()) : null;
-  const stopScrollbars = overlayScrollbars(root);
   /** The conversation's text size, a share of the theme's (--chat-scale), kept in local storage and set before the first draw. */
   const setTextScale = (scale: number, keep = true): void => {
     view.textScale = scale;
@@ -2219,7 +2217,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       clearInterval(promptTimer);
       listening.abort();
       listWidth?.disconnect();
-      stopScrollbars();
       header.close();
       source.close();
 

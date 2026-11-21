@@ -66,6 +66,7 @@
   --vscode-chat-requestBubbleBackground: #264F784D;
   --vscode-scrollbarSlider-background: rgba(121, 121, 121, 0.4);
   --vscode-scrollbarSlider-hoverBackground: rgba(100, 100, 100, 0.7);
+  --vscode-scrollbarSlider-activeBackground: rgba(191, 191, 191, 0.4);
   --vscode-font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", system-ui, "Ubuntu", "Droid Sans", sans-serif;
   --vscode-font-size: 13px;
   --vscode-editor-font-family: Consolas, "Courier New", monospace;

@@ -93,6 +93,7 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 | M6 | Selected row in the selection colour | MainWindow.axaml:181-183 | Present | `.row.selected` page.css; the focus ring shows only on a keyboard focus (`button:focus-visible`), as the dock's |
 | M7 | Row hover background | MainWindow.axaml:178-180 | Present | page.css:40 |
 | M8 | Colours from VS Code's Light Modern or Dark Modern, chosen by the dock theme setting (system, VS Code, light, dark) | `ApplyTheme` MainWindow.axaml.cs:1938 | Partly | Dark Modern only (theme.css) |
+| M9 | The list's scroll bar shows only while the pointer is over the list | MainWindow.axaml:69-74 | Differs | The operator's decision: the browser's own scrollbar, always shown, thin and in the theme's slider colours (page.css), since a page-drawn overlay thumb dragged and resized badly |
 
 ## Selection and click
 
@@ -187,7 +188,6 @@ Window management with no counterpart in a browser page. These rows are outside 
 | D2 | The inner-edge grip sets the width, 200 to 800 | `OnGripMoved` MainWindow.axaml.cs:2193 |
 | D3 | Auto-hide pin, and the hidden dock's sliver of row stripes | `OnAutoHideClicked`, `SliverBars` MainWindow.axaml.cs:766, 717 |
 | D4 | Stays above windows except a full-screen one on its monitor | `UpdateTopmost` MainWindow.axaml.cs:600 |
-| D5 | The list's scroll bar shows only while the pointer is over the list | MainWindow.axaml:69-74 |
 | D6 | Close the dock | `OnCloseClicked` MainWindow.axaml.cs:1272 |
 | D7 | Held sessions, Ticket volume report and Settings open in windows of their own | `OpenHeld`, `OpenVolume`, `OpenSettings` MainWindow.axaml.cs:1918, 2105, 2063 |
 | D8 | Tooltips and menus open at the pointer or button, away from the dock's edge and kept on its monitor | `PlaceTip`, `MenuPlacement` MainWindow.axaml.cs:1397, 1409 |
