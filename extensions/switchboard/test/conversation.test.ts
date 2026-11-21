@@ -31,15 +31,16 @@ describe('the conversation state', () => {
     const root = document.createElement('div');
     const first = applyEvent(EMPTY_CONVERSATION, hello([], { sessions: [{ ...SESSION, provider: 'codex' }] }));
     root.innerHTML = renderConversation(first);
-    // The provider's own mark in the text colour, its name as the tooltip and the accessible name.
-    expect(root.querySelector('.header > .provider')?.getAttribute('aria-label')).toBe('Codex');
-    expect(root.querySelector('.header > .provider')?.getAttribute('title')).toBe('Codex');
-    expect(root.querySelector('.header > .provider svg path')?.getAttribute('fill')).toBe('currentColor');
-    const codexMark = root.querySelector('.header > .provider svg path')?.getAttribute('d');
+    // The provider's own mark in the text colour, inside the dropdown's button, its name as the tooltip and the accessible name.
+    expect(root.querySelector('.header button.picker > .provider')?.getAttribute('aria-label')).toBe('Codex');
+    expect(root.querySelector('.header button.picker > .provider')?.getAttribute('title')).toBe('Codex');
+    expect(root.querySelector('.header button.picker > .provider svg path')?.getAttribute('fill')).toBe('currentColor');
+    expect(root.querySelector('.header > .provider')).toBeNull();
+    const codexMark = root.querySelector('.header button.picker > .provider svg path')?.getAttribute('d');
     const next = applyEvent(first, hello([], { sessions: [{ ...SESSION, id: 'claude-session', provider: 'claude' }] }));
     root.innerHTML = renderConversation(next);
-    expect(root.querySelector('.header > .provider')?.getAttribute('aria-label')).toBe('Claude');
-    expect(root.querySelector('.header > .provider svg path')?.getAttribute('d')).not.toBe(codexMark);
+    expect(root.querySelector('.header button.picker > .provider')?.getAttribute('aria-label')).toBe('Claude');
+    expect(root.querySelector('.header button.picker > .provider svg path')?.getAttribute('d')).not.toBe(codexMark);
     root.innerHTML = renderConversation(applyEvent(next, hello([], { sessions: [] })));
     expect(root.querySelector('.provider')).toBeNull();
   });
@@ -325,11 +326,14 @@ describe('the Conversation view page', () => {
     const button = root.querySelector<HTMLButtonElement>('header button.persona')!;
 
     expect(button.dataset['action']).toBe('persona');
-    expect(button.textContent).toBe('Nova <N>');
+    // An icon only, at every width: the name is in its tooltip and accessible name.
+    expect(button.textContent).toBe('');
     expect(button.title).toBe('Persona: Nova <N>. Click to choose another.');
+    expect(button.getAttribute('aria-label')).toBe('Persona: Nova <N>. Click to choose another.');
     expect(button.querySelector('.codicon-person')).not.toBeNull();
-    // After the conversation dropdown, before the plus.
-    expect(button.previousElementSibling?.classList.contains('picker')).toBe(true);
+    // After the conversation dropdown, before Open in terminal.
+    expect(button.parentElement?.previousElementSibling?.classList.contains('picker-anchor')).toBe(true);
+    expect(button.parentElement?.nextElementSibling?.getAttribute('data-action')).toBe('terminal');
 
     const pinned = personaButton({ id: 'nova', name: 'Nova', pinned: true, tonePending: true });
 
@@ -871,22 +875,27 @@ describe('speech in the view (architecture.md § Voice)', () => {
     expect(controls().innerHTML).toBe('');
 
     show(state([reply('r1', T0, { opening: 'Done. More.', speak: 'Done.' })], { voice: { ...VOICE, here: false } }));
-    // Talk here is the only text; Speak replies is a speaker toggle that says its state in its tooltip.
+    // While the voice is elsewhere, one Talk here takes the whole cluster's place: no speaker, no Stop, no mic.
     expect(controls().textContent).toBe('Talk here');
+    expect(controls().querySelector('[data-voice="speak-replies"]')).toBeNull();
+    expect(host.querySelector('[data-voice="mic"]')).toBeNull();
+    // The cluster sits beside Send, after the message tools.
+    expect(controls().parentElement?.classList.contains('composer-footer')).toBe(true);
+    expect(controls().nextElementSibling?.classList.contains('mic-slot')).toBe(true);
+    controls().querySelector<HTMLButtonElement>('[data-voice="talk-here"]')!.click();
+
+    show(state([reply('r1', T0, { opening: 'Done. More.', speak: 'Done.' })], { voice: VOICE }));
+    // Here: Speak replies is a speaker toggle that says its state in its tooltip, and the mic follows it.
     expect(controls().querySelector('[data-voice="speak-replies"]')!.getAttribute('title')).toBe('Speak replies: on. Click to stop speaking replies.');
     expect(controls().querySelector('[data-voice="speak-replies"]')!.getAttribute('aria-pressed')).toBe('true');
     expect(controls().querySelector('[data-voice="speak-replies"] .codicon-unmute')).not.toBeNull();
-    expect(controls().querySelector('.codicon-circle-slash')).toBeNull();
-    // One mic control: the mic button, with a slash, whose tooltip says why.
     expect(host.querySelectorAll('[data-voice="mic"]')).toHaveLength(1);
-    expect(host.querySelector('.mic-slot .mic-glyph.off')).not.toBeNull();
-    controls().querySelector<HTMLButtonElement>('[data-voice="talk-here"]')!.click();
     controls().querySelector<HTMLButtonElement>('[data-voice="speak-replies"]')!.click();
 
     // A session the voice cannot speak for, such as an ended one, offers no Talk here, which the hub would refuse.
     show(state([reply('r1', T0, { opening: 'Done. More.', speak: 'Done.' })], { session: { ...SESSION, state: 'ended', conversation: 'read-only', reason: 'The session has ended.' }, voice: { ...VOICE, here: false } }));
     expect(controls().querySelector('[data-voice="talk-here"]')).toBeNull();
-    expect(controls().querySelector('[data-voice="speak-replies"]')).not.toBeNull();
+    expect(controls().innerHTML).toBe('');
     expect(host.querySelector('[data-voice="mic"]')).toBeNull();
 
     show(state([reply('r1', T0, { opening: 'Done. More.', speak: 'Done.' })], { voice: { ...VOICE, speaking: 'r1', speakReplies: false } }));
@@ -952,11 +961,8 @@ describe('speech in the view (architecture.md § Voice)', () => {
 
     expect(renderMicButton(null)).toBe('');
     expect(renderMicButton({ ...VOICE, enabled: false })).toBe('');
-    // Off, after the idle timeout, unavailable and elsewhere: a mic with a slash, never a bare ban icon.
-    expect(renderMicButton({ ...VOICE, here: false })).not.toContain('circle-slash');
-    expect(glyph({ ...VOICE, here: false })).toMatch(/^off .*codicon-mic"/);
-    expect(renderMicButton({ ...VOICE, here: false })).toContain('data-on="true"');
-    expect(renderMicButton({ ...VOICE, here: false })).toContain('title="Mic off: the voice is not in this window. Click to talk here with the mic on."');
+    // Elsewhere: no mic, since Talk here takes the cluster's place; off, after the idle timeout and unavailable: a mic with a slash.
+    expect(renderMicButton({ ...VOICE, here: false })).toBe('');
     expect(renderMicButton(VOICE)).toMatch(/class="mic off".*data-on="true".*aria-pressed="false"/);
     expect(glyph(VOICE)).toMatch(/^off /);
     // After the idle timeout: an outlined mic, apart from off.
@@ -1714,32 +1720,44 @@ describe('several conversations in a window (architecture.md § Conversation vie
     expect(applyEvent(EMPTY_CONVERSATION, { type: 'conversations', conversations: [HOSTED] })).toBe(EMPTY_CONVERSATION);
   });
 
-  it('draws the selected title as a dropdown that lists every conversation with its state and unread count, and a plus button', () => {
+  it('draws the selected conversation as a dropdown that lists every conversation with its state and unread count, then New conversation…', () => {
     const closed = renderConversation(base(), new Set(), T0);
 
-    expect(closed).toContain('data-action="new" title="New conversation" aria-label="New conversation"');
-    expect(closed).toContain('class="picker" data-action="picker" aria-haspopup="listbox" aria-expanded="false" title="Fix the &#60;inbox&#62; badge"');
-    expect(closed).not.toContain('role="listbox"');
+    // The plus left the header: New conversation… is in the dropdown.
+    expect(closed).not.toContain('data-action="new" title="New conversation" aria-label="New conversation"');
+    expect(closed).toContain('class="picker" data-action="picker" aria-haspopup="menu" aria-expanded="false" title="Fix the &#60;inbox&#62; badge"');
+    expect(closed).not.toContain('role="menu"');
 
     const opened = renderConversation(base({ scope: { ...TWO, workItemId: 9, sessionId: 's9' } }), new Set([PICKER]), T0);
+    const menu = document.createElement('div');
 
-    expect(opened).toContain('aria-expanded="true" title="New session"');
-    expect(opened.match(/role="option"/g)).toHaveLength(2);
-    expect(opened).toContain('<li role="option" aria-selected="true"><button type="button" data-action="select" data-work-item="9" class="selected">');
-    expect(opened).toContain('<span class="count" title="2 unread">2</span>');
-    expect(opened).toContain('codicon-check');
+    menu.innerHTML = opened;
+    expect(menu.querySelectorAll('.conversation-menu [role="menuitemradio"]')).toHaveLength(2);
+    expect(menu.querySelector('.conversation-menu [aria-checked="true"]')?.getAttribute('data-work-item')).toBe('9');
+    expect(menu.querySelector('.conversation-menu [aria-checked="true"] .menu-gutter .codicon-check')).not.toBeNull();
+    expect(menu.querySelector('.conversation-menu [aria-checked="false"] .menu-gutter')?.innerHTML).toBe('');
+    // The selected conversation's count is its current session's, which the view keeps.
+    expect(renderConversation({ ...base({ scope: { ...TWO, workItemId: 9, sessionId: 's9' } }), unread: 2 }, new Set([PICKER]), T0)).toContain('<span class="count" title="2 unread">2</span>');
+    // A separator, then New conversation… last.
+    expect([...menu.querySelectorAll('.conversation-menu > li')].slice(-2).map((li) => li.className || li.textContent)).toEqual(['menu-separator', 'New conversation…']);
+    expect(menu.querySelector('.conversation-menu > li:last-child button')?.getAttribute('data-action')).toBe('new');
 
     // Each option shows its session's provider mark after its title; an entry with no provider shows none.
     const marked = renderConversation(base({ scope: { ...TWO, conversations: [{ ...SCOPE.conversations[0]!, provider: 'claude' }, { ...HOSTED, provider: 'codex' }] } }), new Set([PICKER]), T0);
     const list = document.createElement('div');
 
     list.innerHTML = marked;
-    expect([...list.querySelectorAll('.conversation-list button')].map((button) => [...button.children].map((child) => child.getAttribute('aria-label') ?? child.className))).toEqual([
-      ['Working', 'title', 'Claude'],
-      [expect.any(String), 'title', 'Codex', 'count'],
+    expect([...list.querySelectorAll('.conversation-menu [role="menuitemradio"]')].map((button) => [...button.children].map((child) => child.getAttribute('aria-label') ?? child.className))).toEqual([
+      ['menu-gutter', 'Working', 'title', 'Claude'],
+      ['menu-gutter', expect.any(String), 'title', 'Codex', 'count'],
     ]);
+    // The button shows the selected conversation from the same renderer as its row, then the chevron.
+    const row = list.querySelector('.conversation-menu [aria-checked="true"]')!;
+    const button = list.querySelector('button.picker')!;
+
+    expect(button.innerHTML).toBe(`${[...row.children].slice(1).map((child) => child.outerHTML).join('')}<span class="codicon codicon-chevron-down" aria-hidden="true"></span>`);
     list.innerHTML = opened;
-    expect(list.querySelector('.conversation-list .provider')).toBeNull();
+    expect(list.querySelector('.conversation-menu .provider')).toBeNull();
   });
 
   it('draws a folder window with no conversation as its folder name, the plus and a note, with no composer', () => {
@@ -1750,10 +1768,10 @@ describe('several conversations in a window (architecture.md § Conversation vie
     const empty = base({ scope: { ...SCOPE, kind: 'folder', title: 'support<3>', workItemId: null, sessionId: null, cwd: null, conversations: [] }, session: null });
     const html = renderConversation(empty, new Set(), T0);
 
-    expect(html).toContain('<span class="title" title="support&#60;3&#62;">support&#60;3&#62;</span>');
-    expect(html).toContain('data-action="new"');
-    expect(html).toContain('No conversation in this folder yet. Start one with the + button above.');
-    expect(html).not.toContain('data-action="picker"');
+    // The dropdown with the folder's name, whose menu holds New conversation….
+    expect(html).toContain('title="support&#60;3&#62;"><span class="codicon codicon-folder" aria-hidden="true"></span><span class="title">support&#60;3&#62;</span>');
+    expect(renderConversation(empty, new Set([PICKER]), T0)).toContain('data-action="new"');
+    expect(html).toContain('No conversation in this folder yet. Start one with New conversation… in the menu above.');
     expect(html).not.toContain('data-action="terminal"');
 
     const root = document.createElement('div');
@@ -1765,6 +1783,7 @@ describe('several conversations in a window (architecture.md § Conversation vie
     startConversation(root, live, { postMessage: (message: { type: string }) => posted.push(message), getState: () => null, setState: () => {} }, host);
     window.dispatchEvent(new MessageEvent('message', { data: { type: 'state', state: empty } }));
     expect(host.hidden).toBe(true);
+    root.querySelector<HTMLButtonElement>('button.picker')!.click();
     root.querySelector<HTMLButtonElement>('button[data-action="new"]')!.click();
     expect(posted.filter((message) => message.type === 'providers')).toHaveLength(1);
 
@@ -1797,9 +1816,11 @@ describe('several conversations in a window (architecture.md § Conversation vie
     root.querySelector<HTMLButtonElement>('button.picker')!.click();
     root.querySelector<HTMLButtonElement>('button[data-work-item="9"]')!.click();
     expect(posted.filter((message) => message.type === 'select')).toEqual([{ type: 'select', workItemId: 9 }]);
-    expect(root.querySelector('[role="listbox"]')).toBeNull();
-    // The plus opens a menu of providers in the header; a choice posts new with it.
+    expect(root.querySelector('.conversation-menu')).toBeNull();
+    // New conversation… in the dropdown opens a menu of providers under it; a choice posts new with it.
+    root.querySelector<HTMLButtonElement>('button.picker')!.click();
     root.querySelector<HTMLButtonElement>('button[data-action="new"]')!.click();
+    expect(root.querySelector('.conversation-menu')).toBeNull();
 
     const asked = posted.find((message) => message.type === 'providers')!;
 
@@ -1987,14 +2008,14 @@ describe('the conversation dropdown (architecture.md § Conversation view)', () 
     const press = (element: Element) => element.dispatchEvent(new Event('pointerdown', { bubbles: true }));
 
     toggle();
-    expect(root.querySelector('.conversation-list')).not.toBeNull();
-    press(root.querySelector('.conversation-list')!);
-    expect(root.querySelector('.conversation-list')).not.toBeNull();
+    expect(root.querySelector('.conversation-menu')).not.toBeNull();
+    press(root.querySelector('.conversation-menu')!);
+    expect(root.querySelector('.conversation-menu')).not.toBeNull();
     press(root.querySelector('.timeline')!);
-    expect(root.querySelector('.conversation-list')).toBeNull();
+    expect(root.querySelector('.conversation-menu')).toBeNull();
     toggle();
     (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    expect(root.querySelector('.conversation-list')).toBeNull();
+    expect(root.querySelector('.conversation-menu')).toBeNull();
     expect(document.activeElement?.classList.contains('picker')).toBe(true);
   });
 });
@@ -2151,7 +2172,7 @@ describe('review round 1 (cross-check)', () => {
     show({ session: waiting });
     root.querySelector<HTMLElement>('[data-action="persona"]')!.click();
     root.querySelector<HTMLElement>('[data-action="picker"]')!.click();
-    expect(root.querySelectorAll('.conversation-list')).toHaveLength(1);
+    expect(root.querySelectorAll('.conversation-menu')).toHaveLength(1);
     expect(root.querySelector('.header-menu')).toBeNull();
   });
 

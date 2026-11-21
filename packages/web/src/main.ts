@@ -66,7 +66,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     '<div class="composer-sent" role="status" hidden><span class="codicon codicon-check" aria-hidden="true"></span><span>Sent. Its reply shows on the Conversation tab.</span></div>' +
     '<div class="composer-error" role="alert" hidden><span class="composer-error-text"></span><button class="dismiss" type="button" aria-label="Dismiss"><span class="codicon codicon-close"></span></button></div>' +
     '<div class="composer"><div class="composer-menu" role="listbox" hidden></div><div class="composer-input"><div class="live-mirror"><span class="mirror-text" aria-hidden="true"></span><span class="live-words" aria-live="polite" hidden></span></div><textarea rows="1" aria-label="Message"></textarea></div><div class="composer-footer"><div class="composer-controls">' +
-    '<button class="composer-tool slash" type="button" title="Show slash commands (/)" aria-label="Show slash commands"><span class="slash-glyph">/</span></button><div class="voice-controls"></div></div>' +
+    '<button class="composer-tool slash" type="button" title="Show slash commands (/)" aria-label="Show slash commands"><span class="slash-glyph">/</span></button></div><div class="voice-controls"></div>' +
     // The microphone's place, for dictation in a later slice.
     '<span class="composer-mic" hidden></span><button class="send" type="button" title="Send (Enter)" aria-label="Send" disabled><span class="codicon codicon-arrow-up"></span></button></div></div>';
 
@@ -982,6 +982,15 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       draw();
       head.querySelector<HTMLElement>(opener)?.focus();
       event.stopImmediatePropagation();
+    } else if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && (view.picker || view.personas !== null)) {
+      // Up and Down move between a header menu's rows, as in a VS Code menu.
+      const rows = [...head.querySelectorAll<HTMLElement>('.header .menu .menu-row')];
+      const at = rows.indexOf(document.activeElement as HTMLElement);
+
+      if (rows.length > 0) {
+        rows[at === -1 ? (event.key === 'ArrowDown' ? 0 : rows.length - 1) : Math.max(0, Math.min(rows.length - 1, at + (event.key === 'ArrowDown' ? 1 : -1)))]!.focus();
+        event.preventDefault();
+      }
     }
   });
   root.addEventListener('keydown', (event) => {

@@ -190,10 +190,12 @@ describe('drawing', () => {
     root.innerHTML = renderHeader({ ...EMPTY, connected: true, scope, session: session({ state: 'running' }) }, newView());
     expect([...root.querySelector('button.picker')!.children].map((child) => child.className)).toEqual(['codicon codicon-loading codicon-modifier-spin', 'title', 'codicon codicon-chevron-down']);
     expect(root.querySelector('.header > .codicon')).toBeNull();
-    // The session's provider as its mark beside the button, and on each option that names one.
+    // The session's provider as its mark inside the button, as on each option that names one, from the same renderer.
     root.innerHTML = renderHeader({ ...EMPTY, connected: true, scope: { ...scope, conversations: [{ ...scope.conversations[0]!, provider: 'codex' }] }, session: session({ provider: 'codex' }) }, { ...newView(), picker: true });
-    expect(root.querySelector('.header > .provider')?.getAttribute('aria-label')).toBe('Codex');
-    expect(root.querySelector('.conversation-list .provider')?.getAttribute('aria-label')).toBe('Codex');
+    expect(root.querySelector('.header > .provider')).toBeNull();
+    expect(root.querySelector('button.picker > .provider')?.getAttribute('aria-label')).toBe('Codex');
+    expect(root.querySelector('.conversation-menu .provider')?.getAttribute('aria-label')).toBe('Codex');
+    expect(root.querySelector('button.picker')!.innerHTML).toBe(`${[...root.querySelector('.conversation-menu [aria-checked="true"]')!.children].slice(1).map((child) => child.outerHTML).join('')}<span class="codicon codicon-chevron-down" aria-hidden="true"></span>`);
     root.innerHTML = renderHeader({ ...EMPTY, connected: true, scope, session: session() }, newView());
     expect(root.querySelector('.provider')).toBeNull();
   });
@@ -347,15 +349,15 @@ describe('the page', () => {
 
     source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: { id: 'nova', name: 'Nova', pinned: true, tonePending: false } })], items: [], more: false, status: null, artifacts: [] });
     root.querySelector<HTMLElement>('button.persona')!.click();
-    expect(root.querySelector('.persona-list')?.textContent).toBe('Loading…');
+    expect(root.querySelector('.persona-menu')?.textContent).toBe('Loading…');
     await flush();
     await flush();
     source.emit('reply', { reply: reply('r1', 1) });
-    expect([...root.querySelectorAll('.persona-list button')].map((one) => one.textContent)).toEqual(['Nova', 'Iris', 'Clear pin']);
-    root.querySelector<HTMLElement>('.persona-list button[data-persona="iris"]')!.click();
+    expect([...root.querySelectorAll('.persona-menu .menu-row')].map((one) => one.textContent)).toEqual(['Nova', 'Iris', 'Clear pin']);
+    root.querySelector<HTMLElement>('.persona-menu button[data-persona="iris"]')!.click();
     await flush();
     expect(posts.find((post) => post.url.endsWith('/persona'))?.body).toMatchObject({ sessionId: 's', personaId: 'iris' });
-    expect(root.querySelector('.persona-list')).toBeNull();
+    expect(root.querySelector('.persona-menu')).toBeNull();
     page.close();
   });
 
@@ -408,8 +410,8 @@ describe('the page', () => {
     expect(document.activeElement).toBe(control);
     root.querySelector<HTMLElement>('button.persona')!.click();
     root.querySelector<HTMLElement>('button.picker')!.click();
-    expect(root.querySelectorAll('.conversation-list')).toHaveLength(1);
-    expect(root.querySelector('.persona-list')).toBeNull();
+    expect(root.querySelectorAll('.conversation-menu')).toHaveLength(1);
+    expect(root.querySelector('.persona-menu')).toBeNull();
     page.close();
   });
 
@@ -418,14 +420,14 @@ describe('the page', () => {
 
     source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [reply('r1', 1)], more: false, status: null, artifacts: [] });
     root.querySelector<HTMLElement>('button.picker')!.click();
-    expect(root.querySelector('.conversation-list')).not.toBeNull();
-    root.querySelector('.conversation-list')!.dispatchEvent(new Event('pointerdown', { bubbles: true }));
-    expect(root.querySelector('.conversation-list')).not.toBeNull();
+    expect(root.querySelector('.conversation-menu')).not.toBeNull();
+    root.querySelector('.conversation-menu')!.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    expect(root.querySelector('.conversation-menu')).not.toBeNull();
     root.querySelector('.timeline')!.dispatchEvent(new Event('pointerdown', { bubbles: true }));
-    expect(root.querySelector('.conversation-list')).toBeNull();
+    expect(root.querySelector('.conversation-menu')).toBeNull();
     root.querySelector<HTMLElement>('button.picker')!.click();
     root.querySelector<HTMLElement>('button.picker')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    expect(root.querySelector('.conversation-list')).toBeNull();
+    expect(root.querySelector('.conversation-menu')).toBeNull();
     page.close();
   });
 
@@ -642,8 +644,8 @@ describe('the page in use', () => {
     click('[data-action="more"]');
     expect(root.querySelector('#panel')!.textContent).toContain('Whole reply.');
     click('[data-action="picker"]');
-    expect(root.querySelectorAll('.conversation-list button')).toHaveLength(2);
-    click('.conversation-list [data-work-item="2"]');
+    expect(root.querySelectorAll('.conversation-menu .menu-row')).toHaveLength(2);
+    click('.conversation-menu [data-work-item="2"]');
     await flush();
     expect(posts.find((post) => post.url.endsWith('/select'))?.body['workItemId']).toBe(2);
     expect(location.hash).toBe('#w=2');
@@ -705,11 +707,15 @@ describe('the page in use', () => {
     source.emit('message', { message: message('m8', 8, { delivery: 'not-sent', error: 'x', text: 'not mine' }) });
     expect(root.querySelector('textarea')!.value).toBe('lost words');
     expect(root.querySelector('.composer-error-text')!.textContent).toBe('The holder did not answer.');
+    // While the voice is elsewhere, one Talk here takes the cluster's place; here, Stop and Speak replies.
+    expect(root.querySelector('[data-voice="speak-replies"]')).toBeNull();
     click('[data-voice="talk-here"]');
+    source.emit('voice', { voice: { enabled: true, here: true, speaking: 'r1', speakReplies: true, error: null } });
+    expect(root.querySelector('.composer-footer > .voice-controls ~ .send')).not.toBeNull();
+    expect(root.querySelector('.composer-controls .voice-controls')).toBeNull();
     click('[data-voice="speak-replies"]');
     await flush();
     expect(posts.filter((post) => /talk-here|speak-replies/.test(post.url)).map((post) => post.body['on'] ?? 'talk')).toEqual(['talk', false]);
-    source.emit('voice', { voice: { enabled: true, here: true, speaking: 'r1', speakReplies: true, error: null } });
     click('[data-voice="stop"]');
     await flush();
     expect(posts.some((post) => post.url.endsWith('/stop-speaking'))).toBe(true);
@@ -827,9 +833,9 @@ describe('the page against late answers', () => {
 
     helloFor(source, 1, 3);
     root.querySelector<HTMLElement>('[data-action="picker"]')!.click();
-    root.querySelector<HTMLElement>('.conversation-list [data-work-item="2"]')!.click();
+    root.querySelector<HTMLElement>('.conversation-menu [data-work-item="2"]')!.click();
     root.querySelector<HTMLElement>('[data-action="picker"]')!.click();
-    root.querySelector<HTMLElement>('.conversation-list [data-work-item="1"]')!.click();
+    root.querySelector<HTMLElement>('.conversation-menu [data-work-item="1"]')!.click();
     expect(pending).toHaveLength(1);
     source.emit('scope', { scope: scopeOf(2, 4, 's2') });
     helloFor(source, 2, 4);

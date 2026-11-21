@@ -521,7 +521,7 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
 
     return {
       items: [
-        ...personas.map((persona) => ({ value: persona.id, label: persona.name, note: current?.id === persona.id ? (current.pinned ? 'Pinned' : 'Current') : '', current: current?.id === persona.id })),
+        ...personas.map((persona) => ({ value: persona.id, label: persona.name, note: '', current: current?.id === persona.id })),
         ...(current?.pinned === true && personas.length > 0 ? [{ value: '', label: 'Clear pin', note: "The playbook's persona or a free one", current: false }] : []),
       ],
       error: null,

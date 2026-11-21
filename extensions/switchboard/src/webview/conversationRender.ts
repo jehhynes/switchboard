@@ -1,5 +1,5 @@
 import MarkdownIt from 'markdown-it';
-import type { ArtifactView, ItemView, MessageView, ReplyView, SessionView, StatusView, VoiceView } from '@switchboard/hub';
+import type { ArtifactView, ConversationEntry, ItemView, MessageView, ReplyView, SessionView, StatusView, VoiceView } from '@switchboard/hub';
 
 /** A Codex session's pending question or approval, as the hub sends it. */
 type NativeRequest = NonNullable<SessionView['requests']>[number];
@@ -205,9 +205,9 @@ function passageHtml(item: ReplyView, passage: string): string {
 }
 
 /**
- * The composer footer's voice controls (architecture.md § Voice), ghost icon buttons as in Claude Code's footer: Speak replies as a speaker
- * toggle, Stop while this window's session speaks, and Talk here only in a window the voice is not in whose session it can speak for (`live`).
- * Nothing while voice is off.
+ * The composer footer's voice controls (architecture.md § Voice), ghost icon buttons as in Claude Code's footer, in one cluster with the mic
+ * beside Send: Stop while this window's session speaks and Speak replies as a speaker toggle while the voice is here; one Talk here in their
+ * place while it is elsewhere, only for a session it can speak for (`live`). Nothing while voice is off.
  */
 export function renderVoiceControls(voice: VoiceView | null, live = true): string {
   if (voice === null || !voice.enabled) {
@@ -228,7 +228,7 @@ export function renderVoiceControls(voice: VoiceView | null, live = true): strin
       ? '<button class="ghost talk-here" type="button" data-voice="talk-here" title="The voice is not in this window. Click to move it here.">Talk here</button>'
       : '';
 
-  return `${speakReplies}${stop}${talkHere}`;
+  return voice.here ? `${stop}${speakReplies}` : talkHere;
 }
 
 /** A mic glyph: slashed while off, outlined, or filled; with a badge while paused, or while half-duplex capture holds it for a reply playing. */
@@ -254,8 +254,9 @@ export function renderMicButton(voice: VoiceView | null): string {
   const button = (glyph: string, title: string, on: boolean, kind: string): string =>
     `<button class="mic ${kind}" type="button" data-voice="mic" data-on="${on}" title="${escape(title)}" aria-label="${escape(title)}" aria-pressed="${!on}">${glyph}</button>`;
 
+  // While the voice is elsewhere, Talk here takes the cluster's place (renderVoiceControls).
   if (!voice.here) {
-    return button(micGlyph('off'), 'Mic off: the voice is not in this window. Click to talk here with the mic on.', true, 'elsewhere');
+    return '';
   }
 
   // Where recognition runs, once the recogniser loaded; half-duplex capture does not listen while the voice speaks, and full duplex with no echo
@@ -588,29 +589,53 @@ function codicon({ icon, text }: { icon: string; text: string }): string {
   return `<span class="codicon codicon-${name}${modifier === undefined ? '' : ` codicon-modifier-${modifier}`}" title="${escape(text)}" aria-label="${escape(text)}"></span>`;
 }
 
+/** A menu row's left gutter: a check mark for the chosen row, or another codicon, or nothing, so every row's text starts in one column. */
+function gutter(icon: string | null): string {
+  return `<span class="menu-gutter" aria-hidden="true">${icon === null ? '' : `<span class="codicon codicon-${icon}"></span>`}</span>`;
+}
+
+/** A thin line between groups of a menu's rows. */
+const SEPARATOR = '<li class="menu-separator" role="separator"></li>';
+
 /**
- * The header's conversation dropdown (architecture.md § Conversation view): the selected session's state codicon and its conversation's title,
- * laid out as an option is, which opens the list of the window's conversations, the primary work item first, each with its session's state and its unread count.
+ * A conversation as the dropdown's button and each of its rows draw it, from this one renderer so they never differ (architecture.md §
+ * Conversation view): its session's state codicon, its title, its provider's mark and its unread count with the unread mark.
  */
-function picker(state: ConversationState, open: boolean): string {
-  const scope = state.scope!;
-  const title = selectedEntry(state)?.title ?? scope.title;
-  const options = scope.conversations
-    .map((entry) => {
-      const selected = entry.workItemId === scope.workItemId;
-      const unread = entry.unread > 0 ? `<span class="count" title="${entry.unread} unread">${entry.unread}</span>` : '';
-      const icon = codicon(stateIcon(entry.state === null ? null : ({ state: entry.state, waitingFor: null } as never)));
+export function conversationLabel(entry: ConversationEntry, state: ConversationState): string {
+  const selected = entry.workItemId === state.scope?.workItemId;
+  // The selected conversation's state, provider and count come from its current session, which the view follows more closely than the entry.
+  const icon = selected ? stateIcon(state.session) : stateIcon(entry.state === null ? null : ({ state: entry.state, waitingFor: null } as never));
+  const unread = selected ? state.unread : entry.unread;
+  const count = unread > 0 ? `<span class="count" title="${unread} unread">${unread}</span>` : '';
 
-      return `<li role="option" aria-selected="${selected}"><button type="button" data-action="select" data-work-item="${entry.workItemId}"${selected ? ' class="selected"' : ''}>${icon}<span class="title">${escape(entry.title)}</span>${providerMark(entry.provider)}${unread}</button></li>`;
-    })
-    .join('');
-
-  return `<button type="button" class="picker" data-action="picker" aria-haspopup="listbox" aria-expanded="${open}" title="${escape(title)}">${codicon(stateIcon(state.session))}<span class="title">${escape(title)}</span><span class="codicon codicon-chevron-down" aria-hidden="true"></span></button>${open ? `<ul class="conversation-list" role="listbox" aria-label="Conversations">${options}</ul>` : ''}`;
+  return `${codicon(icon)}<span class="title">${escape(entry.title)}</span>${providerMark(selected ? (state.session?.provider ?? entry.provider) : entry.provider)}${count}`;
 }
 
 /**
- * The header's persona button (architecture.md § Personas): the session's persona's name, which opens the list to pin another; nothing for a
- * session with none.
+ * The header's conversation dropdown (architecture.md § Conversation view): a button that shows the selected conversation as its rows do, then
+ * a chevron, and opens the menu of the window's conversations, the primary work item first, the selected one checked, then New conversation…,
+ * which opens the providers' menu under the same button. A folder window with no conversation yet shows its folder's name.
+ */
+function picker(state: ConversationState, open: boolean, menu: HeaderMenu | null): string {
+  const scope = state.scope!;
+  const selected = selectedEntry(state);
+  const title = selected?.title ?? scope.title;
+  const rows = scope.conversations.map((entry) => {
+    const chosen = entry.workItemId === scope.workItemId;
+
+    return `<li role="none"><button type="button" class="menu-row" role="menuitemradio" aria-checked="${chosen}" data-action="select" data-work-item="${entry.workItemId}">${gutter(chosen ? 'check' : null)}${conversationLabel(entry, state)}</button></li>`;
+  });
+  const create = `<li role="none"><button type="button" class="menu-row" role="menuitem" data-action="new" aria-haspopup="menu">${gutter('add')}<span class="title">New conversation…</span></button></li>`;
+  const list = open ? `<ul class="menu conversation-menu" data-key="menu-conversations" role="menu" aria-label="Conversations">${rows.join('')}${rows.length > 0 ? SEPARATOR : ''}${create}</ul>` : '';
+  const label = selected === null ? `<span class="codicon codicon-folder" aria-hidden="true"></span><span class="title">${escape(title)}</span>` : conversationLabel(selected, state);
+  const button = `<button type="button" class="picker" data-action="picker" aria-haspopup="menu" aria-expanded="${open}" title="${escape(title)}">${label}<span class="codicon codicon-chevron-down" aria-hidden="true"></span></button>`;
+
+  return `<div class="menu-anchor picker-anchor">${button}${list}${menu?.kind === 'provider' ? headerMenu(menu) : ''}</div>`;
+}
+
+/**
+ * The header's persona button (architecture.md § Personas): an icon, `pinned` or `person`, with the persona's name in its tooltip and accessible
+ * name, which opens the list to pin another; nothing for a session with none.
  */
 export function personaButton(persona: SessionView['persona'] | undefined, expanded = false): string {
   if (persona == null) {
@@ -619,10 +644,10 @@ export function personaButton(persona: SessionView['persona'] | undefined, expan
 
   const title = [`Persona: ${persona.name}${persona.pinned ? ', pinned to this session' : ''}.`, persona.tonePending ? 'Its tone changes when the session next resumes or compacts.' : '', 'Click to choose another.'].filter((part) => part !== '').join(' ');
 
-  return `<button type="button" class="persona${persona.tonePending ? ' pending' : ''}" data-action="persona" aria-haspopup="menu" aria-expanded="${expanded}" title="${escape(title)}" aria-label="${escape(title)}"><span class="codicon codicon-${persona.pinned ? 'pinned' : 'person'}" aria-hidden="true"></span><span class="name">${escape(persona.name)}</span></button>`;
+  return `<button type="button" class="persona${persona.tonePending ? ' pending' : ''}" data-action="persona" aria-haspopup="menu" aria-expanded="${expanded}" title="${escape(title)}" aria-label="${escape(title)}"><span class="codicon codicon-${persona.pinned ? 'pinned' : 'person'}" aria-hidden="true"></span></button>`;
 }
 
-/** An inline menu the header opens (architecture.md § Conversation view): the persona roster to pin from, or the providers a new session can use. */
+/** A menu the header opens (architecture.md § Conversation view): the persona roster to pin from, or the providers a new conversation can use. */
 export interface HeaderMenu {
   kind: 'persona' | 'provider';
   /** Null while the extension fetches them. */
@@ -630,9 +655,12 @@ export interface HeaderMenu {
   error: string | null;
 }
 
-/** A header menu as a list under the header, drawn as the conversation dropdown is, one button per choice. */
+/**
+ * A header menu under its button, drawn as the conversation dropdown is: one row per choice, the current one checked, a choice's note muted at
+ * the right; Clear pin after a separator, with what it does in its tooltip.
+ */
 function headerMenu(menu: HeaderMenu): string {
-  const note = (text: string): string => `<li class="menu-note" role="none">${escape(text)}</li>`;
+  const note = (text: string): string => `<li class="menu-message" role="none">${escape(text)}</li>`;
   const rows =
     menu.error !== null
       ? note(menu.error)
@@ -641,19 +669,20 @@ function headerMenu(menu: HeaderMenu): string {
         : menu.items.length === 0
           ? note(menu.kind === 'persona' ? 'No personas. Add them to voice.personas in settings.json, with voice.enabled on.' : 'No providers.')
           : menu.items
-              .map(
-                (item) =>
-                  `<li role="none"><button type="button" role="menuitem" data-action="menu-pick" data-menu="${menu.kind}" data-value="${escape(item.value)}"${item.current ? ' class="selected" aria-current="true"' : ''}>` +
-                  `<span class="title">${escape(item.label)}</span>${item.note === '' ? '' : `<span class="menu-item-note">${escape(item.note)}</span>`}</button></li>`,
-              )
+              .map((item) => {
+                // Clearing a pin is no persona: it follows the roster after a separator, and says what it does in its tooltip.
+                const clear = menu.kind === 'persona' && item.value === '';
+                const aside = item.note === '' ? '' : clear ? ` title="${escape(item.note)}"` : '';
+                const shown = item.note === '' || clear ? '' : `<span class="menu-note">${escape(item.note)}</span>`;
+
+                return (
+                  `${clear ? SEPARATOR : ''}<li role="none"><button type="button" class="menu-row" role="${clear ? 'menuitem' : 'menuitemradio'}"${clear ? '' : ` aria-checked="${item.current}"`} data-action="menu-pick" data-menu="${menu.kind}" data-value="${escape(item.value)}"${aside}>` +
+                  `${gutter(item.current ? 'check' : null)}<span class="title">${escape(item.label)}</span>${shown}</button></li>`
+                );
+              })
               .join('');
 
-  return `<ul class="conversation-list header-menu" data-key="menu-${menu.kind}" role="menu" aria-label="${menu.kind === 'persona' ? 'Persona' : 'New conversation'}">${rows}</ul>`;
-}
-
-/** The plus, which opens the menu of providers for a new session. */
-function plusButton(open: boolean): string {
-  return `<button class="icon" type="button" data-action="new" title="New conversation" aria-label="New conversation" aria-haspopup="menu" aria-expanded="${open}"><span class="codicon codicon-add" aria-hidden="true"></span></button>`;
+  return `<ul class="menu header-menu${menu.kind === 'persona' ? ' align-right' : ''}" data-key="menu-${menu.kind}" role="menu" aria-label="${menu.kind === 'persona' ? 'Persona' : 'New conversation'}">${rows}</ul>`;
 }
 
 const DECISIONS: Record<string, string> = { accept: 'Allow once', acceptForSession: 'Allow for session', decline: 'Decline', cancel: 'Cancel' };
@@ -744,15 +773,15 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
   }
 
   const menu = page.menu ?? null;
-  const plus = `${plusButton(menu?.kind === 'provider')}${menu?.kind === 'provider' ? headerMenu(menu) : ''}`;
 
-  // A folder window with no conversation yet: the folder's name and the plus, which starts one (architecture.md § Conversation view).
+  // A folder window with no conversation yet: the dropdown with the folder's name, whose New conversation… starts one (architecture.md § Conversation view).
   if (state.scope.workItemId === null) {
-    return `<header class="header"><span class="title" title="${escape(state.scope.title)}">${escape(state.scope.title)}</span>${plus}</header><p class="empty">No conversation in this folder yet. Start one with the + button above.</p>`;
+    return `<header class="header">${picker(state, open.has(PICKER), menu)}</header><p class="empty">No conversation in this folder yet. Start one with New conversation… in the menu above.</p>`;
   }
 
-  const provider = providerMark(state.session?.provider);
-  const header = `<header class="header">${picker(state, open.has(PICKER))}${provider}${personaButton(state.session?.persona, menu?.kind === 'persona')}${menu?.kind === 'persona' ? headerMenu(menu) : ''}${plus}${state.session?.conversation === 'none' ? '' : '<button class="icon" data-action="terminal" title="Open in terminal" aria-label="Open in terminal"><span class="codicon codicon-terminal"></span></button>'}</header>`;
+  // The header: the dropdown, the persona as an icon, and Open in terminal (voice-design report IA-1).
+  const persona = state.session?.persona == null ? '' : `<div class="menu-anchor persona-anchor">${personaButton(state.session.persona, menu?.kind === 'persona')}${menu?.kind === 'persona' ? headerMenu(menu) : ''}</div>`;
+  const header = `<header class="header">${picker(state, open.has(PICKER), menu)}${persona}${state.session?.conversation === 'none' ? '' : '<button class="icon" data-action="terminal" title="Open in terminal" aria-label="Open in terminal"><span class="codicon codicon-terminal"></span></button>'}</header>`;
   // An ended session's reason sits just above the composer it disables, on every tab, with Resume; any other reason heads the conversation.
   // A Codex session that ended has no reason, since a message resumes it, but gets the note and Resume too.
   const ended = state.session?.state === 'ended';

@@ -282,11 +282,12 @@ function startComposer(
     grow();
     refresh();
   }, (text) => showError(text));
-  // The voice's controls on the footer's left (architecture.md § Voice): Speak replies, Stop while speaking, and Talk here while the voice is elsewhere.
+  // The voice's controls in one cluster with the mic beside Send (architecture.md § Voice): Stop while speaking and Speak replies, or Talk here
+  // in their place while the voice is elsewhere; the message tools stay on the footer's left.
   const voiceControls = document.createElement('div');
 
   voiceControls.className = 'voice-controls';
-  host.querySelector<HTMLElement>('.composer-controls')!.appendChild(voiceControls);
+  micSlot.before(voiceControls);
   voiceControls.addEventListener('click', (event) => {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-voice]');
 
@@ -564,7 +565,7 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     draw();
 
     if (refocus) {
-      root.querySelector<HTMLElement>(kind === 'persona' ? 'button.persona' : '[data-action="new"]')?.focus();
+      root.querySelector<HTMLElement>(kind === 'persona' ? 'button.persona' : 'button.picker')?.focus();
     }
   };
   /** Asks the extension for the statuses before one, adding them to those listed. */
@@ -946,7 +947,7 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
       }
 
       draw();
-      root.querySelector<HTMLElement>(open.has(PICKER) ? '.conversation-list button.selected, .conversation-list button' : 'button.picker')?.focus();
+      root.querySelector<HTMLElement>(open.has(PICKER) ? '.conversation-menu .menu-row[aria-checked="true"], .conversation-menu .menu-row' : 'button.picker')?.focus();
     } else if (action === 'select') {
       open.delete(PICKER);
       draw();
@@ -1102,7 +1103,7 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
       return;
     }
 
-    const options = [...root.querySelectorAll<HTMLElement>('.conversation-list button')];
+    const options = [...root.querySelectorAll<HTMLElement>('.header .menu .menu-row')];
     const at = options.indexOf(document.activeElement as HTMLElement);
 
     if (event.key === 'Escape') {
@@ -1229,13 +1230,14 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     } else if (event.data.type === 'menu') {
       // The header menu's choices, only for the menu still open that asked.
       if (menu?.id === event.data.id) {
-        const opener = document.activeElement?.closest('button.persona, [data-action="new"]') ?? null;
+        // The menu takes the focus when its button had it, or when New conversation… in the closed dropdown had it.
+        const opener = document.activeElement === null || document.activeElement === document.body ? document.body : (document.activeElement.closest('.header') ?? null);
 
         menu = { ...menu, items: event.data.items, error: event.data.error };
         draw();
 
         if (opener !== null) {
-          root.querySelector<HTMLElement>('.header-menu button')?.focus();
+          root.querySelector<HTMLElement>('.header-menu .menu-row')?.focus();
         }
       }
     } else if (event.data.type === 'statuses') {

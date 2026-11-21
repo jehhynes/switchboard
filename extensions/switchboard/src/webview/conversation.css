@@ -7,7 +7,6 @@ body { display: flex; flex-direction: column; margin: 0; padding: 0; color: var(
 .header { display: flex; align-items: center; gap: 4px; padding: 6px 6px 6px 12px; border-bottom: 1px solid var(--vscode-sideBarActivityBarTop-border, var(--vscode-panel-border, transparent)); user-select: none; }
 .header .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 6px; font-size: var(--vscode-chat-font-size, 13px); font-weight: 500; }
 .provider { flex: none; display: inline-flex; align-items: center; white-space: nowrap; color: var(--vscode-foreground); font-size: 16px; }
-.header > .provider { padding: 0 4px; }
 button.icon { display: inline-flex; align-items: center; border: none; background: transparent; color: var(--vscode-icon-foreground); padding: 2px; border-radius: var(--vscode-cornerRadius-small, 4px); cursor: pointer; }
 button.icon:hover { background: var(--vscode-toolbar-hoverBackground); }
 button:focus-visible, li:focus-visible, .timeline:focus-visible, summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
@@ -223,29 +222,38 @@ body.vscode-reduce-motion .codicon-modifier-spin { animation: none; }
 
 /* The header's conversation dropdown: the selected conversation's title as a button that opens the list of the window's conversations. */
 .header { position: relative; }
-/* The title keeps the room: the dropdown takes the free width and gives way last, with an ellipsis; the persona shrinks first, and under 360 px it
-   and the provider show as icons only. Nothing overlaps: every other header control keeps its own width. */
-button.picker { flex: 1 1 0; min-width: 6em; overflow: hidden; display: flex; align-items: center; gap: 6px; border: none; background: transparent; color: inherit; padding: 0 4px; border-radius: var(--vscode-cornerRadius-small, 4px); cursor: pointer; text-align: left; font: inherit; }
+/* The dropdown takes the free width, with an ellipsis on its title; the persona and Open in terminal are icons that keep their width. */
+.picker-anchor { flex: 1 1 0; min-width: 6em; }
+button.picker { flex: 1 1 auto; min-width: 0; overflow: hidden; display: flex; align-items: center; gap: 6px; border: none; background: transparent; color: inherit; padding: 0 4px; border-radius: var(--vscode-cornerRadius-small, 4px); cursor: pointer; text-align: left; font: inherit; }
 button.picker:hover { background: var(--vscode-toolbar-hoverBackground); }
-button.picker .title { flex: 0 1 auto; padding: 6px 0; }
-button.picker > .codicon { flex: none; }
-.header > button.icon, .header > .provider { flex: none; }
+button.picker .title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 6px 0; }
+button.picker > .codicon, button.picker > .provider, button.picker > .count { flex: none; }
+button.picker .count { box-sizing: border-box; min-width: 16px; height: 16px; padding: 0 5px; border-radius: 8px; text-align: center; font-size: 11px; line-height: 16px; color: var(--vscode-activityBarBadge-foreground); background: var(--vscode-activityBarBadge-background); }
+.header > button.icon, .persona-anchor { flex: none; }
 /* The session's persona (architecture.md § Personas); dimmed while its tone change waits for a resume or compaction. */
-button.persona { flex: 0 100 auto; max-width: 40%; min-width: 0; display: flex; align-items: center; gap: 4px; border: none; background: transparent; color: var(--vscode-descriptionForeground); padding: 2px 6px; border-radius: var(--vscode-cornerRadius-small, 4px); cursor: pointer; font: inherit; font-size: 12px; }
+button.persona { display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: none; background: transparent; color: var(--vscode-descriptionForeground); padding: 0; border-radius: var(--vscode-cornerRadius-small, 4px); cursor: pointer; }
 button.persona:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
-button.persona .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-button.persona.pending .name { font-style: italic; }
+button.persona.pending .codicon { opacity: 0.6; }
 button.persona .codicon { flex: none; }
-@media (max-width: 360px) {
-  button.persona { flex: none; max-width: none; }
-  button.persona .name { display: none; }
-}
-.conversation-list { position: absolute; top: 100%; left: 6px; right: 6px; z-index: 2; margin: 0; padding: 4px 0; list-style: none; max-height: 50vh; overflow-y: auto; background: var(--vscode-quickInput-background, var(--vscode-editorWidget-background)); color: var(--vscode-quickInput-foreground, var(--vscode-foreground)); border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border, transparent)); border-radius: 6px; box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.3)); }
-.conversation-list button { display: flex; align-items: center; gap: 6px; width: 100%; border: none; background: transparent; color: inherit; padding: 4px 10px; font: inherit; text-align: left; cursor: pointer; }
-.conversation-list button:hover, .conversation-list button:focus-visible { background: var(--vscode-list-hoverBackground); }
-.conversation-list button.selected { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
-.conversation-list .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.conversation-list .count { box-sizing: border-box; min-width: 16px; height: 16px; padding: 0 5px; border-radius: 8px; text-align: center; font-size: 11px; line-height: 16px; color: var(--vscode-activityBarBadge-foreground); background: var(--vscode-activityBarBadge-background); }
+/* Menus (architecture.md § Conversation view), drawn as VS Code's context menus from its menu colours: a panel as wide as its content, at least
+   160 px and never wider than the view, anchored under the button that opens it and overlapping what is below; 13 px single-line rows in normal
+   weight with a gutter for a check mark, a muted note at the right, a rounded highlight inset from the edges, and separators inset from both. */
+.menu-anchor { position: relative; display: flex; min-width: 0; }
+.menu { position: absolute; z-index: 20; top: calc(100% + 2px); left: 0; box-sizing: border-box; width: max-content; min-width: 160px; max-width: min(360px, calc(100vw - 16px)); max-height: min(60vh, 420px); overflow-y: auto; margin: 0; padding: 4px; list-style: none; border: 1px solid var(--vscode-menu-border, var(--vscode-widget-border, transparent)); border-radius: 8px; background: var(--vscode-menu-background, var(--vscode-editorWidget-background)); color: var(--vscode-menu-foreground, var(--vscode-foreground)); box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36)); font-size: 13px; font-weight: normal; line-height: 1.4; text-transform: none; }
+.menu.align-right { left: auto; right: 0; }
+.menu-row { display: flex; align-items: center; gap: 6px; box-sizing: border-box; width: 100%; height: 28px; margin: 0; padding: 0 16px 0 0; border: none; border-radius: 4px; background: transparent; color: inherit; font: inherit; font-weight: normal; text-align: left; white-space: nowrap; cursor: pointer; }
+.menu-row:hover, .menu-row:focus { outline: none; background: var(--vscode-menu-selectionBackground, var(--vscode-list-activeSelectionBackground)); color: var(--vscode-menu-selectionForeground, var(--vscode-list-activeSelectionForeground)); }
+body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu-row:focus { outline: 1px solid var(--vscode-menu-selectionBorder, var(--vscode-contrastActiveBorder, transparent)); outline-offset: -1px; }
+.menu-row:disabled { cursor: default; opacity: 0.5; }
+.menu-gutter { display: flex; flex: none; align-items: center; justify-content: center; width: 28px; }
+.menu-gutter .codicon { font-size: 14px; }
+.menu-row .title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; padding: 0; font-size: inherit; font-weight: normal; }
+.menu-row > .codicon, .menu-row > .provider, .menu-row > .count { flex: none; }
+.menu-row .count { box-sizing: border-box; min-width: 16px; height: 16px; padding: 0 5px; border-radius: 8px; text-align: center; font-size: 11px; line-height: 16px; color: var(--vscode-activityBarBadge-foreground); background: var(--vscode-activityBarBadge-background); }
+.menu-note { flex: none; margin-left: 24px; color: var(--vscode-descriptionForeground); }
+.menu-row:hover .menu-note, .menu-row:focus .menu-note { color: inherit; opacity: 0.8; }
+.menu-separator { height: 1px; margin: 4px 10px; background: var(--vscode-menu-separatorBackground, var(--vscode-widget-border, rgba(127, 127, 127, 0.35))); }
+.menu-message { max-width: 320px; padding: 5px 16px 5px 34px; color: var(--vscode-descriptionForeground); white-space: normal; }
 
 /* A question card (architecture.md § Conversation view), measured from Claude Code's question form: a box in the input colours with the input
    border and an 8 px radius, questions 16 px apart in the foreground, options as 4 px rows with a 16 px radio mark, or a checkbox where a question
@@ -308,10 +316,6 @@ button.persona .codicon { flex: none; }
 .voice-controls .ghost:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
 .voice-controls .ghost[aria-pressed="true"] { color: var(--vscode-foreground); }
 
-/* The header's inline menus, the persona roster and the providers of a new session, drawn as the conversation dropdown. */
-.header-menu .menu-item-note { flex: none; color: var(--vscode-descriptionForeground); font-size: 0.9em; }
-.header-menu button.selected .menu-item-note { color: inherit; opacity: 0.8; }
-.header-menu .menu-note { padding: 4px 10px; color: var(--vscode-descriptionForeground); }
 /* The Status tab's earlier statuses, listed under the status by its history button. */
 .status-actions .icon.pressed { background: var(--vscode-toolbar-activeBackground, var(--vscode-toolbar-hoverBackground)); }
 .earlier-statuses { margin-top: 16px; padding-top: 8px; border-top: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, transparent)); }

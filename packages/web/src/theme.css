@@ -46,6 +46,10 @@
   --vscode-quickInput-foreground: #CCCCCC;
   --vscode-menu-background: #1F1F1F;
   --vscode-menu-foreground: #CCCCCC;
+  --vscode-menu-selectionBackground: #0078D4;
+  --vscode-menu-selectionForeground: #FFFFFF;
+  --vscode-menu-separatorBackground: #454545;
+  --vscode-menu-border: #454545;
   --vscode-dropdown-background: #313131;
   --vscode-dropdown-border: #3C3C3C;
   --vscode-list-hoverBackground: #2A2D2E;

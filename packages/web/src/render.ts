@@ -97,37 +97,60 @@ export function renderList(groups: readonly PageGroup[], selected: number | null
   return `<ul class="work-list" aria-label="Work items">${html.join('')}</ul>`;
 }
 
-/** The header: the dropdown of the selected work item's conversations, showing the session's state as its options do, its provider, and its persona. */
+/** A menu row's left gutter: a check mark for the chosen row, or nothing, so every row's text starts in one column. */
+function gutter(checked: boolean): string {
+  return `<span class="menu-gutter" aria-hidden="true">${checked ? '<span class="codicon codicon-check"></span>' : ''}</span>`;
+}
+
+/**
+ * A conversation as the dropdown's button and each of its rows draw it, from this one renderer so they never differ: its session's state
+ * codicon, title, provider's mark and unread count.
+ */
+export function conversationLabel(entry: PageState['scope'] extends infer S ? (S extends { conversations: Array<infer E> } ? E : never) : never, state: PageState): string {
+  const selected = entry.workItemId === state.scope?.workItemId;
+  const icon = selected ? stateIcon(state.session?.state, state.session?.waitingFor, state.session?.limit) : stateIcon(entry.state);
+  const unread = selected ? state.unread : entry.unread;
+  const count = unread > 0 ? `<span class="count" title="${unread} unread">${unread}</span>` : '';
+
+  return `${codicon(icon)}<span class="title">${escape(entry.title)}</span>${providerMark(selected ? (state.session?.provider ?? entry.provider) : entry.provider)}${count}`;
+}
+
+/** The header: the dropdown of the selected work item's conversations, its button drawn as its rows are, and the persona as an icon. */
 export function renderHeader(state: PageState, view: View): string {
   const scope = state.scope!;
-  const title = selectedEntry(state)?.title ?? scope.title;
+  const selected = selectedEntry(state);
+  const title = selected?.title ?? scope.title;
   const options = scope.conversations
     .map((entry) => {
-      const selected = entry.workItemId === scope.workItemId;
-      const unread = entry.unread > 0 ? `<span class="count">${entry.unread}</span>` : '';
+      const chosen = entry.workItemId === scope.workItemId;
 
-      return `<li role="option" aria-selected="${selected}"><button type="button" data-action="select" data-work-item="${entry.workItemId}"${selected ? ' class="selected"' : ''}>${codicon(stateIcon(entry.state))}<span class="title">${escape(entry.title)}</span>${providerMark(entry.provider)}${unread}</button></li>`;
+      return `<li role="none"><button type="button" class="menu-row" role="menuitemradio" aria-checked="${chosen}" data-action="select" data-work-item="${entry.workItemId}">${gutter(chosen)}${conversationLabel(entry, state)}</button></li>`;
     })
     .join('');
   const persona = state.session?.persona;
   const personaButton =
     persona == null
       ? ''
-      : `<button type="button" class="persona${persona.tonePending ? ' pending' : ''}" data-action="persona" aria-haspopup="menu" aria-expanded="${view.personas !== null}" title="${escape(`Persona: ${persona.name}${persona.pinned ? ', pinned' : ''}. Click to choose another.`)}"><span class="codicon codicon-${persona.pinned ? 'pinned' : 'person'}" aria-hidden="true"></span><span class="name">${escape(persona.name)}</span></button>`;
-  const picker = `<button type="button" class="picker" data-action="picker" aria-haspopup="listbox" aria-expanded="${view.picker}" title="${escape(title)}">${codicon(stateIcon(state.session?.state, state.session?.waitingFor, state.session?.limit))}<span class="title">${escape(title)}</span><span class="codicon codicon-chevron-down" aria-hidden="true"></span></button>${view.picker ? `<ul class="conversation-list" role="listbox" aria-label="Conversations">${options}</ul>` : ''}`;
+      : `<button type="button" class="persona${persona.tonePending ? ' pending' : ''}" data-action="persona" aria-haspopup="menu" aria-expanded="${view.personas !== null}" title="${escape(`Persona: ${persona.name}${persona.pinned ? ', pinned' : ''}. Click to choose another.`)}" aria-label="${escape(`Persona: ${persona.name}${persona.pinned ? ', pinned' : ''}`)}"><span class="codicon codicon-${persona.pinned ? 'pinned' : 'person'}" aria-hidden="true"></span></button>`;
+  const label = selected === null ? `${codicon(stateIcon(state.session?.state, state.session?.waitingFor, state.session?.limit))}<span class="title">${escape(title)}</span>` : conversationLabel(selected, state);
+  const picker = `<div class="menu-anchor picker-anchor"><button type="button" class="picker" data-action="picker" aria-haspopup="menu" aria-expanded="${view.picker}" title="${escape(title)}">${label}<span class="codicon codicon-chevron-down" aria-hidden="true"></span></button>${view.picker ? `<ul class="menu conversation-menu" role="menu" aria-label="Conversations">${options}</ul>` : ''}</div>`;
 
   const menu = view.personas;
   const rows =
     menu === null
       ? ''
       : menu.error !== null
-        ? `<li class="menu-note">${escape(menu.error)}</li>`
+        ? `<li class="menu-message" role="none">${escape(menu.error)}</li>`
         : menu.items === null
-          ? '<li class="menu-note">Loading…</li>'
-          : [...menu.items.map((one) => `<li><button type="button" role="menuitem" data-action="persona-pick" data-persona="${escape(one.id)}"${persona?.id === one.id ? ' class="selected"' : ''}>${escape(one.name)}</button></li>`), persona?.pinned === true ? '<li><button type="button" role="menuitem" data-action="persona-pick" data-persona="">Clear pin</button></li>' : ''].join('');
-  const personaMenu = menu === null ? '' : `<ul class="conversation-list persona-list" role="menu" aria-label="Persona">${rows}</ul>`;
+          ? '<li class="menu-message" role="none">Loading…</li>'
+          : [
+              ...menu.items.map((one) => `<li role="none"><button type="button" class="menu-row" role="menuitemradio" aria-checked="${persona?.id === one.id}" data-action="persona-pick" data-persona="${escape(one.id)}">${gutter(persona?.id === one.id)}<span class="title">${escape(one.name)}</span></button></li>`),
+              persona?.pinned === true ? `<li class="menu-separator" role="separator"></li><li role="none"><button type="button" class="menu-row" role="menuitem" data-action="persona-pick" data-persona="">${gutter(false)}<span class="title">Clear pin</span></button></li>` : '',
+            ].join('');
+  const personaMenu = menu === null ? '' : `<ul class="menu persona-menu align-right" role="menu" aria-label="Persona">${rows}</ul>`;
+  const personaPart = personaButton === '' ? '' : `<div class="menu-anchor persona-anchor">${personaButton}${personaMenu}</div>`;
 
-  return `<header class="header">${picker}${providerMark(state.session?.provider)}${personaButton}${personaMenu}</header>`;
+  return `<header class="header">${picker}${personaPart}</header>`;
 }
 
 export function renderTabs(view: View, state: PageState): string {
@@ -448,11 +471,16 @@ export function renderVoice(voice: VoiceView | null): string {
     return '';
   }
 
-  const speak = `<button class="ghost" type="button" data-key="speak-replies" data-voice="speak-replies" aria-pressed="${voice.speakReplies}" title="Speak replies: ${voice.speakReplies ? 'on' : 'off'}"><span class="codicon codicon-${voice.speakReplies ? 'unmute' : 'mute'}" aria-hidden="true"></span><span>Speak replies</span></button>`;
-  const stop = voice.here && voice.speaking !== null ? '<button class="ghost" type="button" data-key="stop" data-voice="stop" title="Stop speaking (Escape)"><span class="codicon codicon-debug-stop" aria-hidden="true"></span><span>Stop</span></button>' : '';
-  const where = voice.here ? '<span class="voice-state" data-key="here">Voice here</span>' : '<button class="ghost" type="button" data-key="talk-here" data-voice="talk-here" title="Voice is not on this page. Click to talk here."><span class="codicon codicon-circle-slash" aria-hidden="true"></span><span>Voice is not on this page</span></button>';
+  // One cluster beside Send: Stop while this page's session speaks and Speak replies while the voice is here; one Talk here in their place while it is elsewhere.
+  if (!voice.here) {
+    return '<button class="ghost talk-here" type="button" data-key="talk-here" data-voice="talk-here" title="The voice is not on this page. Click to move it here.">Talk here</button>';
+  }
 
-  return `${speak}${stop}${where}`;
+  const speakTitle = voice.speakReplies ? 'Speak replies: on. Click to stop speaking replies.' : 'Speak replies: off. Click to speak replies.';
+  const speak = `<button class="ghost icon" type="button" data-key="speak-replies" data-voice="speak-replies" aria-pressed="${voice.speakReplies}" title="${speakTitle}" aria-label="${speakTitle}"><span class="codicon codicon-${voice.speakReplies ? 'unmute' : 'mute'}" aria-hidden="true"></span></button>`;
+  const stop = voice.speaking !== null ? '<button class="ghost icon" type="button" data-key="stop" data-voice="stop" title="Stop speaking (Escape)" aria-label="Stop speaking (Escape)"><span class="codicon codicon-debug-stop" aria-hidden="true"></span></button>' : '';
+
+  return `${stop}${speak}`;
 }
 
 export { answerText, complete, parseQuestions };
