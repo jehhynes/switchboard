@@ -65,7 +65,11 @@ public interface IHub
 /// <summary>The hub's answer to New conversation in a folder: the refusal or failure, or the new work item and the canonical folder that hosts it.</summary>
 public sealed record NewConversationReply(string? Error, int? WorkItemId, string? Folder);
 
-public sealed record SessionProviderReply(string? Error, string? DefaultProvider);
+/// <summary>
+/// The configured default provider, or why the hub did not name one; &lt;paramref name="Installed"/&gt; lists the providers whose CLI the hub finds,
+/// null from a hub that does not say.
+/// </summary>
+public sealed record SessionProviderReply(string? Error, string? DefaultProvider, IReadOnlyList<string>? Installed = null);
 
 /// <summary>The hub's answer to a window command: the refusal or failure, or the command's ID for withdrawing it.</summary>
 public sealed record WindowReply(string? Error, int? Id);

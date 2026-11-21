@@ -110,6 +110,27 @@ public sealed class ControlsTests
     }
 
     [AvaloniaFact]
+    public void NewSessionInAFolder_OneProviderInstalled_StartsInItWithoutAsking()
+    {
+        hub.DefaultProvider = "claude";
+        hub.Installed = ["codex"];
+        var (window, _) = Open();
+        var asked = 0;
+        window.PickFolder = (_) => Task.FromResult<string?>("D:/git/support");
+        window.PickProvider = (_, preferred, _) => { asked++; return Task.FromResult<string?>(preferred); };
+        hub.NewConversationReplies.Enqueue(new NewConversationReply(null, 3, "D:/git/support"));
+        Choose(window, "New conversation in a folder…");
+        Assert.Equal(0, asked);
+        Assert.Matches("^new-conversation D:/git/support [0-9a-f-]{36} codex$", Assert.Single(hub.Calls));
+
+        // With both installed it asks.
+        hub.Installed = ["claude", "codex"];
+        hub.NewConversationReplies.Enqueue(new NewConversationReply(null, 4, "D:/git/support"));
+        Choose(window, "New conversation in a folder…");
+        Assert.Equal(1, asked);
+    }
+
+    [AvaloniaFact]
     public void NewSessionInAFolder_RowClickedWhileTheHubAnswers_LeavesThatClickAndOpensNoFolder()
     {
         var (window, model) = Open();

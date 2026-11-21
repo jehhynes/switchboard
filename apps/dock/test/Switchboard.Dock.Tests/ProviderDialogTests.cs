@@ -26,6 +26,20 @@ public sealed class ProviderDialogTests
     }
 
     [AvaloniaFact]
+    public async Task Ask_FolderGiven_TitlesTheDialogAsTheMenuItemAndNamesTheFolderAboveTheProvider()
+    {
+        var owner = new Window(); owner.Show();
+        var answer = ProviderDialog.Ask(owner, "claude", "D:\\git\\support");
+        var dialog = Assert.Single(owner.OwnedWindows);
+        var texts = dialog.GetVisualDescendants().OfType<TextBlock>().Select(text => text.Text).ToList();
+        Assert.Equal("New conversation in a folder", dialog.Title);
+        Assert.True(texts.IndexOf("D:\\git\\support") is >= 0 and var folder && folder < texts.IndexOf("Provider"), string.Join(" | ", texts));
+        Click(dialog.GetVisualDescendants().OfType<Button>().Single(button => button.Name == "SessionCancel"));
+        Assert.Null(await answer);
+        owner.Close();
+    }
+
+    [AvaloniaFact]
     public async Task Ask_Cancelled_ReturnsNoChoice()
     {
         var owner = new Window(); owner.Show();

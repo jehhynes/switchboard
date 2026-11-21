@@ -118,7 +118,8 @@ sealed class FakeHub : IHub
 
     public string DefaultProvider { get; set; } = "claude";
     public string? ProviderError { get; set; }
-    public Task<SessionProviderReply> SessionProvider() => Task.FromResult(new SessionProviderReply(ProviderError, ProviderError is null ? DefaultProvider : null));
+    public IReadOnlyList<string>? Installed { get; set; }
+    public Task<SessionProviderReply> SessionProvider() => Task.FromResult(new SessionProviderReply(ProviderError, ProviderError is null ? DefaultProvider : null, Installed));
 
     public Task<NewConversationReply> NewConversation(string folder, string opId, string? provider = null)
     {

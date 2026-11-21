@@ -38,6 +38,7 @@ import { PageAccess, pageGroups } from './page.js';
 import { pageAsset } from './pageAssets.js';
 import { needsMessage, newlyNeeding, rowFor, targetForUrl } from './needs.js';
 import { volumeReply } from './volume.js';
+import { installedProviders } from './installed.js';
 
 const RELOAD_DEBOUNCE_MS = 300;
 /** The mic codicon in codicon.ttf, which marks the voice target's dock row (architecture.md § Voice). */
@@ -749,7 +750,8 @@ const dockWithRuns = () => {
       },
       '/volume': async (body) => volumeReply(store, deps.now(), body),
       '/v1/conversation/send': async (body) => (isRecord(body) ? conversation.send(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, text, command?}.' } }),
-      '/v1/conversation/providers': async () => ({ status: 200, body: { defaultProvider: config.settings.sessions.provider } }),
+      // `installed` lets the dock skip its provider choice when only one CLI is found (PRD R104).
+      '/v1/conversation/providers': async () => ({ status: 200, body: { defaultProvider: config.settings.sessions.provider, installed: await installedProviders(config.settings.sessions) } }),
         '/v1/conversation/answer': async (body) => isRecord(body) ? conversation.answer(body) : { status: 400, body: { error: 'Expected a request answer.' } },
       '/v1/conversation/history': async (body) => (isRecord(body) ? conversation.history(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, before, limit?}.' } }),
       '/v1/conversation/seen': async (body) => (isRecord(body) ? conversation.seen(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, ids}.' } }),

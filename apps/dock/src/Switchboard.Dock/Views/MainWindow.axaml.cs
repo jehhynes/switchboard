@@ -1950,7 +1950,9 @@ public sealed partial class MainWindow : Window
             var settings = await hub.SessionProvider();
             if (settings.Error is not null) { model.Status = settings.Error; return; }
             knownProvider = settings.DefaultProvider;
-            if (await PickProvider(ShownForDialog(), settings.DefaultProvider!, folder) is not { } provider) return;
+            // With one provider installed there is nothing to choose.
+            var provider = settings.Installed is [var only] ? only : await PickProvider(ShownForDialog(), settings.DefaultProvider!, folder);
+            if (provider is null) return;
 
             // Run as a click is, so a row clicked while the hub answers replaces it and its window is not opened over that row's.
             await Running(async (cancel) =>

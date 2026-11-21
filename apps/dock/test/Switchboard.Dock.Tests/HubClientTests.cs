@@ -210,6 +210,8 @@ public sealed class HubClientTests
         using var server = new LoopbackHub((_, _, stream) => LoopbackHub.Reply(stream, 200, body));
         using var client = new HubClient(HomeFor(server));
         Assert.Equal(new SessionProviderReply(null, "codex"), await client.SessionProvider());
+        body = "{\"defaultProvider\":\"codex\",\"installed\":[\"codex\",7,\"other\"]}";
+        Assert.Equal(["codex"], (await client.SessionProvider()).Installed);
         body = "{\"defaultProvider\":7}";
         Assert.NotNull((await client.SessionProvider()).Error);
         Assert.Contains("POST /v1/conversation/providers HTTP/1.1 {}", server.Requests);
