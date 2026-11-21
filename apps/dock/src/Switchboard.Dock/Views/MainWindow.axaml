@@ -499,11 +499,6 @@
                                   <!-- The mic mark of the row the voice speaks for (architecture.md § Voice). -->
                                   <TextBlock Name="VoiceMark" Grid.Column="2" Classes="icon" Text="{Binding VoiceGlyph}" IsVisible="{Binding HasVoice}" ToolTip.Tip="{Binding VoiceTitle}"
                                              AutomationProperties.Name="{Binding VoiceTitle}" Margin="8,0,0,0" VerticalAlignment="Center" />
-                                  <!-- The Conversation view's unread count (PRD R100), in the group count's badge colours, before the time. -->
-                                  <Border Name="UnreadBadge" Grid.Column="3" Classes="badge" Margin="8,0,0,0" IsVisible="{Binding HasUnread}" ToolTip.Tip="{Binding UnreadTitle}"
-                                          AutomationProperties.Name="{Binding UnreadTitle}">
-                                    <TextBlock Text="{Binding UnreadText}" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" />
-                                  </Border>
                                   <TextBlock Grid.Column="4" Text="{Binding Time}" ToolTip.Tip="{Binding TimeTitle}" Classes="muted" Margin="8,0,0,0" />
                                 </Grid>
                                 <StackPanel Grid.Row="1" Margin="0,3,0,0" Spacing="3">

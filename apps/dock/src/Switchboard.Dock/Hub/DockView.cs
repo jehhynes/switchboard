@@ -94,7 +94,6 @@ public sealed record DockRow(
     bool Movable = false,
     DockTerminal? Terminal = null,
     RowComment? Comment = null,
-    int Unread = 0,
     RowVoice? Voice = null)
 {
     /// <summary>The work item ID of an <c>item:&lt;id&gt;</c> row, or null for a pool row.</summary>

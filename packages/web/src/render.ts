@@ -74,8 +74,8 @@ export function ago(at: number, now: number): string {
 }
 
 /**
- * The page's list (architecture.md § Web page): each group's work items, a hosted conversation under its host, each with its session's state
- * and unread count; a folder's or window's group under its name.
+ * The page's list (architecture.md § Web page): each group's work items, a hosted conversation under its host, each with its session's state;
+ * a folder's or window's group under its name.
  */
 export function renderList(groups: readonly PageGroup[], selected: number | null): string {
   if (groups.length === 0) {
@@ -83,9 +83,7 @@ export function renderList(groups: readonly PageGroup[], selected: number | null
   }
 
   const row = (entry: PageGroup['conversations'][number], hosted: boolean): string => {
-    const unread = entry.unread > 0 ? `<span class="count" title="${entry.unread} unread">${entry.unread}</span>` : '';
-
-    return `<li><button type="button" class="list-item${hosted ? ' hosted' : ''}${entry.workItemId === selected ? ' selected' : ''}" data-action="select" data-work-item="${entry.workItemId}" aria-current="${entry.workItemId === selected}">${codicon(stateIcon(entry.state))}<span class="title" title="${escape(entry.title)}">${escape(entry.title)}</span>${unread}</button></li>`;
+    return `<li><button type="button" class="list-item${hosted ? ' hosted' : ''}${entry.workItemId === selected ? ' selected' : ''}" data-action="select" data-work-item="${entry.workItemId}" aria-current="${entry.workItemId === selected}">${codicon(stateIcon(entry.state))}<span class="title" title="${escape(entry.title)}">${escape(entry.title)}</span></button></li>`;
   };
   const html = groups.map((group) => {
     const rows = group.conversations.map((entry, index) => row(entry, group.kind !== 'item' || index > 0)).join('');
@@ -104,15 +102,13 @@ function gutter(checked: boolean): string {
 
 /**
  * A conversation as the dropdown's button and each of its rows draw it, from this one renderer so they never differ: its session's state
- * codicon, title, provider's mark and unread count.
+ * codicon, title and provider's mark. The page shows no unread counts.
  */
 export function conversationLabel(entry: PageState['scope'] extends infer S ? (S extends { conversations: Array<infer E> } ? E : never) : never, state: PageState): string {
   const selected = entry.workItemId === state.scope?.workItemId;
   const icon = selected ? stateIcon(state.session?.state, state.session?.waitingFor, state.session?.limit) : stateIcon(entry.state);
-  const unread = selected ? state.unread : entry.unread;
-  const count = unread > 0 ? `<span class="count" title="${unread} unread">${unread}</span>` : '';
 
-  return `${codicon(icon)}<span class="title">${escape(entry.title)}</span>${providerMark(selected ? (state.session?.provider ?? entry.provider) : entry.provider)}${count}`;
+  return `${codicon(icon)}<span class="title">${escape(entry.title)}</span>${providerMark(selected ? (state.session?.provider ?? entry.provider) : entry.provider)}`;
 }
 
 /** The header: the dropdown of the selected work item's conversations, its button drawn as its rows are, and the persona as an icon. */
@@ -155,7 +151,8 @@ export function renderHeader(state: PageState, view: View): string {
 
 export function renderTabs(view: View, state: PageState): string {
   const fresh = state.status?.unread === true;
-  const badges: Record<Tab, string> = { conversation: state.unread > 0 && !fresh ? String(state.unread) : '', status: fresh ? 'New' : '', artifacts: '' };
+  // As in the VS Code view: Status has its New badge; the page shows no unread counts.
+  const badges: Record<Tab, string> = { conversation: '', status: fresh ? 'New' : '', artifacts: '' };
 
   return `<nav class="tabs" role="tablist">${TABS.map(({ tab, label }) => `<button class="tab${tab === view.tab ? ' selected' : ''}" type="button" role="tab" data-tab="${tab}" aria-selected="${tab === view.tab}" tabindex="${tab === view.tab ? 0 : -1}">${label}${badges[tab] === '' ? '' : `<span class="tab-badge">${badges[tab]}</span>`}</button>`).join('')}</nav>`;
 }

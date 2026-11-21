@@ -181,7 +181,9 @@ describe('drawing', () => {
     expect(html).toContain('codicon-folder');
     // A working session spins the same loading codicon as the Thinking row and the dock's running mark.
     expect(html).toContain('class="codicon codicon-loading codicon-modifier-spin" title="Working"');
-    expect(html).toContain('<span class="count" title="2 unread">2</span>');
+    // The page shows no unread counts, in its list, its dropdown or its tabs.
+    expect(html).not.toContain('class="count"');
+    expect(renderHeader({ ...EMPTY, connected: true, scope: { ...scope, conversations: [{ ...scope.conversations[0]!, unread: 3 }] }, session: session(), unread: 3 }, { ...newView(), picker: true })).not.toContain('class="count"');
   });
 
   it("puts the session's state codicon inside the dropdown's button, before the title, as each option has it", () => {
