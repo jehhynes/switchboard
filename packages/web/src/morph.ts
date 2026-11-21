@@ -1,7 +1,10 @@
+import { ISLAND, unmount } from './island.js';
+
 /**
  * Brings an element's children in line with new HTML by changing only what differs (architecture.md § Web page), so a redraw keeps the
  * nodes it does not change, and with them the focus, a text selection, the caret, scroll positions and open menus. Children are matched by
- * `data-key`, `data-id` or `id` where they have one, else by position and tag; a field's value is left alone while it has the focus.
+ * `data-key`, `data-id` or `id` where they have one, else by position and tag; a field's value is left alone while it has the focus. An
+ * element with `data-island` keeps its children, which a Preact part draws (`island.ts`).
  */
 export function morph(target: Element, html: string): void {
   const doc = target.ownerDocument;
@@ -27,6 +30,21 @@ export function morph(target: Element, html: string): void {
       selection.setBaseAndExtent(...ends);
     } catch {
       // An end's offset no longer fits its node's changed text.
+    }
+  }
+}
+
+/** Unmounts the Preact parts in a node morph removes, so their cleanups run. */
+function release(node: Node): void {
+  if (node.nodeType !== 1) {
+    return;
+  }
+
+  const element = node as Element;
+
+  for (const island of [element, ...element.querySelectorAll(`[${ISLAND}]`)]) {
+    if (island.hasAttribute(ISLAND)) {
+      unmount(island);
     }
   }
 }
@@ -64,6 +82,7 @@ function patchChildren(from: Node, to: Node): void {
     const key = keyOf(child);
 
     if (key !== null && (!wanted.has(key) || keyed.has(key))) {
+      release(child);
       from.removeChild(child);
     } else if (key !== null) {
       keyed.set(key, child);
@@ -108,6 +127,7 @@ function patchChildren(from: Node, to: Node): void {
   while (cursor !== null) {
     const after: ChildNode | null = cursor.nextSibling;
 
+    release(cursor);
     from.removeChild(cursor);
     cursor = after;
   }
@@ -124,6 +144,7 @@ function patch(from: Node, to: Node): void {
 
   const element = from as Element;
   const next = to as Element;
+  const wasIsland = element.hasAttribute(ISLAND);
 
   for (const name of element.getAttributeNames()) {
     if (!next.hasAttribute(name)) {
@@ -137,6 +158,20 @@ function patch(from: Node, to: Node): void {
     if (element.getAttribute(name) !== value) {
       element.setAttribute(name, value);
     }
+  }
+
+  // An island's children are Preact's, drawn after the morph: an element that becomes one starts empty, and one that is no longer one is
+  // unmounted before its children follow the HTML.
+  if (next.hasAttribute(ISLAND)) {
+    if (!wasIsland) {
+      element.replaceChildren();
+    }
+
+    return;
+  }
+
+  if (wasIsland) {
+    unmount(element);
   }
 
   // A field keeps what the operator is typing; one without the focus shows the value drawn.

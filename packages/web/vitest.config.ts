@@ -3,13 +3,15 @@ import { testTemp } from '../../tools/vitest-temp.js';
 
 // The page's model and DOM run in jsdom; the hub's routes are tested in packages/hub.
 export default defineConfig({
+  // The page's .tsx parts are Preact components, compiled as build.mjs compiles them.
+  esbuild: { jsx: 'automatic', jsxImportSource: 'preact' },
   test: {
     env: testTemp(),
     environment: 'jsdom',
-    include: ['test/**/*.test.ts'],
+    include: ['test/**/*.test.{ts,tsx}'],
     coverage: {
       provider: 'v8',
-      include: ['src/**/*.ts'],
+      include: ['src/**/*.{ts,tsx}'],
       // The browser's entry points and the protocol's types have nothing to run.
       exclude: ['src/entry.ts', 'src/swEntry.ts', 'src/offlineEntry.ts', 'src/consoleEntry.ts', 'src/types.ts'],
       thresholds: { lines: 80, branches: 75, functions: 80, statements: 80 },

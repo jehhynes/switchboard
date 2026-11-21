@@ -7,7 +7,21 @@ import esbuild from 'esbuild';
 
 const require = createRequire(import.meta.url);
 const bundle = async (entry) =>
-  (await esbuild.build({ entryPoints: [entry], bundle: true, format: 'iife', platform: 'browser', target: 'es2022', minify: true, write: false, logLevel: 'info' })).outputFiles[0].text;
+  (
+    await esbuild.build({
+      entryPoints: [entry],
+      bundle: true,
+      format: 'iife',
+      platform: 'browser',
+      target: 'es2022',
+      minify: true,
+      write: false,
+      logLevel: 'info',
+      // The page's .tsx parts are Preact components (architecture.md § Web page).
+      jsx: 'automatic',
+      jsxImportSource: 'preact',
+    })
+  ).outputFiles[0].text;
 const codicons = dirname(require.resolve('@vscode/codicons/dist/codicon.css'));
 const theme = readFileSync('src/theme.css', 'utf8');
 // The installed page's window and splash take the colour of the page's side bar and header.
