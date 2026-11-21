@@ -3,8 +3,9 @@
 :root {
   /* Our messages, on the right: a 15% tint of the theme's button blue, #0078D426 in Dark Modern, light enough for the theme's foreground. */
   --sb-message-bubble: color-mix(in srgb, var(--vscode-button-background, #0078d4) 15%, transparent);
-  /* A reply's spoken passage, on the left: the editor's inactive selection colour, a neutral grey in every theme, clearly apart from the blue. */
-  --sb-speech-bubble: var(--vscode-editor-inactiveSelectionBackground, rgba(127, 127, 127, 0.2));
+  /* A reply's spoken passage, on the left: the editor's inactive selection colour, a neutral grey in every theme, clearly apart from the blue,
+     taken a quarter of the way to the side bar, #323437 in Dark Modern, so it sits quieter than the text. */
+  --sb-speech-bubble: color-mix(in srgb, var(--vscode-editor-inactiveSelectionBackground, rgba(127, 127, 127, 0.2)) 75%, var(--vscode-sideBar-background));
 }
 
 /* A reply's spoken passage as a bubble on the left, as a messaging app draws what it receives: at most 80% of the reply's width, with a smaller

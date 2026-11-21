@@ -935,7 +935,7 @@ describe('speech in the view (architecture.md § Voice)', () => {
     expect(rule('.speech-bubble')).toContain('max-width: 80%;');
     expect(rule('.speech-bubble')).toContain('border-radius: 12px 12px 12px 4px;');
     expect(rule('.speech-bubble')).toContain('background: var(--sb-speech-bubble);');
-    expect(css).toContain('--sb-speech-bubble: var(--vscode-editor-inactiveSelectionBackground, rgba(127, 127, 127, 0.2));');
+    expect(css).toContain('--sb-speech-bubble: color-mix(in srgb, var(--vscode-editor-inactiveSelectionBackground, rgba(127, 127, 127, 0.2)) 75%, var(--vscode-sideBar-background));');
     expect(rule('body.vscode-high-contrast .speech-bubble, body.vscode-high-contrast-light .speech-bubble')).toContain('background: transparent;');
   });
 
