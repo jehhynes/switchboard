@@ -159,34 +159,15 @@ function PaneRows({ view }: { view: View }) {
   );
 }
 
-/**
- * The header's view options button and its menu: the conversation's text size (smaller, the size, larger, and Reset), Show message details,
- * and the Chrome pane's state and pairing while it is on.
- */
-function TextSize({ view }: { view: View }) {
-  const percent = `${Math.round(view.textScale * 100)}%`;
-
+/** The header's view options button and its menu: Show message details, and the Chrome pane's state and pairing while it is on. */
+function ViewOptions({ view }: { view: View }) {
   return (
-    <div class="menu-anchor text-size-anchor">
-      <button type="button" class="icon text-size" data-action="text-menu" aria-haspopup="menu" aria-expanded={view.textMenu} title={`View options: text size ${percent}`} aria-label="View options">
+    <div class="menu-anchor view-options-anchor">
+      <button type="button" class="icon view-options" data-action="view-menu" aria-haspopup="menu" aria-expanded={view.viewMenu} title="View options" aria-label="View options">
         <span class="codicon codicon-settings" aria-hidden="true"></span>
       </button>
-      {view.textMenu ? (
-        <div class="glass menu text-size-menu" role="menu" aria-label="View options">
-          <div class="text-size-row">
-            <button type="button" class="icon menu-row" role="menuitem" data-action="text-smaller" title="Smaller (Ctrl+-)" aria-label="Smaller text">
-              A−
-            </button>
-            <span class="text-size-value" aria-live="polite">{percent}</span>
-            <button type="button" class="icon menu-row" role="menuitem" data-action="text-larger" title="Larger (Ctrl+=)" aria-label="Larger text">
-              A+
-            </button>
-          </div>
-          <button type="button" class="menu-row" role="menuitem" data-action="text-reset">
-            <span class="menu-gutter" aria-hidden="true"></span>
-            <span class="title">Reset text size (Ctrl+0)</span>
-          </button>
-          <div class="menu-separator" role="separator"></div>
+      {view.viewMenu ? (
+        <div class="glass menu view-options-menu" role="menu" aria-label="View options">
           <button type="button" class="menu-row" role="menuitemcheckbox" aria-checked={view.details} data-action="toggle-details">
             <Gutter checked={view.details} />
             <span class="title">Show message details</span>
@@ -334,7 +315,7 @@ export function renderHeader(state: PageState, view: View): VNode {
           )}
         </div>
       )}
-      <TextSize view={view} />
+      <ViewOptions view={view} />
     </header>
   );
 }

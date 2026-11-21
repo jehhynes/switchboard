@@ -12,7 +12,7 @@ import { renderList } from '../src/list.js';
 import { html } from './html.js';
 import { renderMicButton as viewMicButton } from '@switchboard/conversation/voiceControls';
 import { renderMarkdown } from '../src/markdown.js';
-import { CHAT_MAX, CHAT_MIN, DRAWER_HIDE_MS, DRAWER_QUERY, DRAWER_REVEAL_MS, loadMermaid, SENT_NOTE_MS, SHOW_MARKER_MS, SIDE_MAX, SIDE_MIN, startPage, stepScale, WIDE_QUERY } from '../src/main.js';
+import { CHAT_MAX, CHAT_MIN, DRAWER_HIDE_MS, DRAWER_QUERY, DRAWER_REVEAL_MS, loadMermaid, SENT_NOTE_MS, SHOW_MARKER_MS, SIDE_MAX, SIDE_MIN, startPage, WIDE_QUERY } from '../src/main.js';
 import type { ArtifactView, MessageView, PageGroup, PageRow, ReplyView, SessionView } from '../src/types.js';
 
 const message = (id: string, ord: number, patch: Partial<MessageView> = {}): MessageView => ({ type: 'message', id, sessionId: 's', workItemId: 1, at: 1_000 + ord, ord, provisional: false, withdrawn: false, origin: 'typed', text: `text ${id}`, delivery: 'sent', error: null, ...patch });
@@ -1388,7 +1388,7 @@ describe('the page in use', () => {
     const rect = (element: HTMLElement): DOMRect => {
       // A menu in its default place: under its anchor, left edges lined up.
       const anchor = element.classList.contains('menu') ? rect(element.parentElement!) : null;
-      const left = anchor?.left ?? (element.classList.contains('text-size-anchor') ? gear : 40);
+      const left = anchor?.left ?? (element.classList.contains('view-options-anchor') ? gear : 40);
       const top = anchor === null ? 8 : anchor.bottom + 2;
       const [width, height] = anchor === null ? [24, 24] : [200, 120];
 
@@ -1405,62 +1405,53 @@ describe('the page in use', () => {
     click('.header button.picker');
     expect(root.querySelector('.conversation-menu')!.className).toBe('glass menu conversation-menu');
     expect(root.querySelector<HTMLElement>('.conversation-menu')!.style.maxWidth).toBe('360px');
-    click('.header button.text-size');
-    expect(root.querySelector('.text-size-menu')!.className).toBe('glass menu text-size-menu flip-x');
+    click('.header button.view-options');
+    expect(root.querySelector('.view-options-menu')!.className).toBe('glass menu view-options-menu flip-x');
     // A scroll that moves the button is followed; the menu's own scrolling is not.
     gear = 40;
-    root.querySelector('.text-size-menu')!.dispatchEvent(new Event('scroll'));
-    expect(root.querySelector('.text-size-menu')!.className).toBe('glass menu text-size-menu flip-x');
+    root.querySelector('.view-options-menu')!.dispatchEvent(new Event('scroll'));
+    expect(root.querySelector('.view-options-menu')!.className).toBe('glass menu view-options-menu flip-x');
     root.querySelector('#panel')!.dispatchEvent(new Event('scroll'));
-    expect(root.querySelector('.text-size-menu')!.className).toBe('glass menu text-size-menu');
+    expect(root.querySelector('.view-options-menu')!.className).toBe('glass menu view-options-menu');
     page.close();
   });
 
-  it("sets the conversation's text size from the header's menu and Ctrl+=, Ctrl+- and Ctrl+0, keeps it, and leaves the rest of the page alone", () => {
+  it("keeps the conversation's text at fixed sizes: drops the old text size key, leaves Ctrl+=, Ctrl+- and Ctrl+0 to the browser, and offers no text size in View options", () => {
     localStorage.setItem('switchboard.textScale', '1.25');
 
     const { page, source } = start();
-    const scale = (): string => root.style.getPropertyValue('--chat-scale');
 
-    // Set before the first draw, so the conversation does not change size after it shows.
-    expect(scale()).toBe('1.25');
-    hello(source);
-    expect(root.querySelector('.text-size-menu')).toBeNull();
-    click('.header button.text-size');
-    expect(root.querySelector('.text-size-value')!.textContent).toBe('125%');
-    click('.text-size-menu [data-action="text-larger"]');
-    expect(scale()).toBe('1.5');
-    expect(localStorage.getItem('switchboard.textScale')).toBe('1.5');
-    click('.text-size-menu [data-action="text-larger"]');
-    expect(scale()).toBe('1.5');
-    expect(root.querySelector('.text-size-value')!.textContent).toBe('150%');
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: '-', ctrlKey: true, bubbles: true, cancelable: true }));
-    expect(scale()).toBe('1.25');
-    const zero = new KeyboardEvent('keydown', { key: '0', ctrlKey: true, bubbles: true, cancelable: true });
-
-    document.dispatchEvent(zero);
-    expect(zero.defaultPrevented).toBe(true);
-    expect(scale()).toBe('1');
     expect(localStorage.getItem('switchboard.textScale')).toBeNull();
-    // Without Ctrl, or with Alt, the keys type as usual.
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: '=', bubbles: true }));
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: '=', ctrlKey: true, altKey: true, bubbles: true }));
-    expect(scale()).toBe('1');
+    expect(root.style.getPropertyValue('--chat-scale')).toBe('');
+    hello(source);
+
+    for (const key of ['=', '+', '-', '0']) {
+      const event = new KeyboardEvent('keydown', { key, ctrlKey: true, bubbles: true, cancelable: true });
+
+      document.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(false);
+    }
+
+    expect(root.querySelector('.view-options-menu')).toBeNull();
+    click('.header button.view-options');
+    expect(root.querySelector('.header button.view-options')!.getAttribute('title')).toBe('View options');
+    expect([...root.querySelectorAll('.view-options-menu .menu-row')].map((row) => row.textContent!.trim())).toEqual(['Show message details']);
+    expect(root.querySelector('.view-options-menu .menu-separator')).toBeNull();
     root.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    expect(root.querySelector('.text-size-menu')).toBeNull();
-    expect(document.activeElement).toBe(root.querySelector('.header button.text-size'));
+    expect(root.querySelector('.view-options-menu')).toBeNull();
+    expect(document.activeElement).toBe(root.querySelector('.header button.view-options'));
 
     // One header menu at a time: View options closes the dropdown, and the dropdown View options.
     click('.header button.picker');
-    click('.header button.text-size');
+    click('.header button.view-options');
     expect(root.querySelector('.header button.picker')!.getAttribute('aria-expanded')).toBe('false');
-    expect(root.querySelector('.text-size-menu')).not.toBeNull();
+    expect(root.querySelector('.view-options-menu')).not.toBeNull();
     click('.header button.picker');
-    expect(root.querySelector('.text-size-menu')).toBeNull();
+    expect(root.querySelector('.view-options-menu')).toBeNull();
     click('.header button.picker');
 
     // Show message details, in the same menu, kept.
-    click('.header button.text-size');
+    click('.header button.view-options');
     expect(root.querySelector('[data-action="toggle-details"]')!.getAttribute('aria-checked')).toBe('false');
     click('[data-action="toggle-details"]');
     expect(localStorage.getItem('switchboard.messageDetails')).toBe('1');
@@ -1470,7 +1461,7 @@ describe('the page in use', () => {
     const again = start();
 
     hello(again.source);
-    click('.header button.text-size');
+    click('.header button.view-options');
     expect(root.querySelector('[data-action="toggle-details"]')!.getAttribute('aria-checked')).toBe('true');
     click('[data-action="toggle-details"]');
     expect(localStorage.getItem('switchboard.messageDetails')).toBeNull();
@@ -2211,13 +2202,13 @@ describe('the page in use', () => {
     expect(posts.filter((post) => post.url.endsWith('/pane-rect')).at(-1)?.body).toMatchObject({ rect: { left: 1300, top: 40, width: 600, height: 900, dpr: expect.any(Number) } });
     expect(root.querySelector('#detail .status-tab')).not.toBeNull();
 
-    click('[data-action="text-menu"]');
-    expect(root.querySelector('.text-size-menu .pane-note')!.textContent).toBe('Chrome pane: the Switchboard Chrome extension is not connected.');
+    click('[data-action="view-menu"]');
+    expect(root.querySelector('.view-options-menu .pane-note')!.textContent).toBe('Chrome pane: the Switchboard Chrome extension is not connected.');
     click('[data-action="pane-pair"]');
     await flush();
     await flush();
     expect(sent.at(-1)).toEqual(['ext', { type: 'pair', token: 'tok' }]);
-    expect(root.querySelector('.text-size-menu [role="status"]')!.textContent).toBe('Sent to the Chrome extension.');
+    expect(root.querySelector('.view-options-menu [role="status"]')!.textContent).toBe('Sent to the Chrome extension.');
 
     source.emit('pane', { pane: { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: true, error: null } });
     await flush();
@@ -2235,7 +2226,7 @@ describe('the page in use', () => {
     expect(root.querySelector('#panel .timeline')).not.toBeNull();
 
     source.emit('pane', { pane: { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: 'The pane would not fit the column.' } });
-    expect(root.querySelector('.text-size-menu .pane-note')!.textContent).toBe('Chrome pane stopped: The pane would not fit the column.');
+    expect(root.querySelector('.view-options-menu .pane-note')!.textContent).toBe('Chrome pane stopped: The pane would not fit the column.');
     expect(root.querySelector('#detail .status-tab')).not.toBeNull();
 
     // Narrower than the column: the page reports none.
@@ -2690,16 +2681,6 @@ describe('the page against late answers', () => {
   });
 });
 
-describe('stepScale', () => {
-  it('steps through the text sizes and stays at the ends, from 100% for a size not in the list', () => {
-    expect(stepScale(1, 1)).toBe(1.1);
-    expect(stepScale(1, -1)).toBe(0.9);
-    expect(stepScale(1.5, 1)).toBe(1.5);
-    expect(stepScale(0.85, -1)).toBe(0.85);
-    expect(stepScale(1.07, 1)).toBe(1.1);
-  });
-});
-
 describe("the list's CSS", () => {
   const css = readFileSync(join(__dirname, '../src/page.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
   /** The declarations of every rule with a selector the test picks. */
@@ -2765,8 +2746,17 @@ describe("the list's CSS", () => {
     expect(wide).toContain('.work-list { --group-head-height: 32px; }');
   });
 
-  it("scales only the conversation's text by --chat-scale", () => {
-    expect([...css.matchAll(/([^{}]+)\{[^{}]*var\(--chat-scale/g)].map(([, selector]) => selector!.trim())).toEqual(['.timeline, .composer textarea, .composer .live-mirror']);
+  it("draws replies, our messages and the composer at the theme's text size, with no size of their own, and spoken bubbles at 110% from the shared bubbles.css", () => {
+    expect(css).not.toContain('--chat-scale');
+    // The bubble's 110% is of the reply's size, so the reply and the message around it keep the theme's.
+    for (const parent of [".timeline",".timeline > li",".reply",".reply .body",".message",".message .bubble",".message .box"]) {
+      expect(declarationsOf((selector) => selector === parent).join(' ')).not.toContain('font-size');
+    }
+    expect(declarationsOf((selector) => selector === '.composer textarea').join(' ')).toContain('font: inherit');
+    expect(declarationsOf((selector) => selector === '.composer textarea').join(' ')).not.toContain('font-size');
+    const bubbles = readFileSync(createRequire(import.meta.url).resolve('@switchboard/conversation/bubbles.css'), 'utf8');
+
+    expect(bubbles).toMatch(/\n\.speech-bubble \{[^}]*font-size: 110%;/);
   });
 
   it('makes the list a drawer with its sliver and button from 768 px until 1300 px while a work item is open, sliding in and hiding at once', () => {

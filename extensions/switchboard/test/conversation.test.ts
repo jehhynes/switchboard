@@ -952,6 +952,16 @@ describe('speech in the view (architecture.md § Voice)', () => {
     expect(rule('.speech-bubble')).toContain('max-width: 80%;');
     expect(rule('.speech-bubble')).toContain('border-radius: 12px 12px 12px 4px;');
     expect(rule('.speech-bubble')).toContain('background: var(--sb-speech-bubble);');
+    // The spoken passage reads at 110% of the reply's text, and the dot moves down by half of what that adds to the first line.
+    expect(rule('.speech-bubble')).toContain('font-size: 110%;');
+    expect(rule('.reply:has(> .body > .speech-bubble:first-child)')).toContain('--dot-shift: calc(7px + 0.075em);');
+    // That 110% is of the theme's size only while the reply and the message around a bubble keep it.
+    const view = readFileSync(join(__dirname, '../src/webview/conversation.css'), 'utf8');
+
+    expect(view).toMatch(/\nbody \{[^}]*font-size: var\(--vscode-font-size\);/);
+    for (const parent of [".timeline",".timeline > li",".reply",".reply .body",".message",".message .bubble",".message .box"]) {
+      expect(view.split('\n').filter((line) => line.startsWith(`${parent} {`)).join(' ')).not.toContain('font-size');
+    }
     expect(css).toContain('--sb-speech-bubble: color-mix(in srgb, var(--vscode-editor-inactiveSelectionBackground, rgba(127, 127, 127, 0.2)) 75%, var(--vscode-sideBar-background));');
     expect(rule('body.vscode-high-contrast .speech-bubble, body.vscode-high-contrast-light .speech-bubble')).toContain('background: transparent;');
   });

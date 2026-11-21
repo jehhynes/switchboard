@@ -77,9 +77,8 @@ export interface View {
   acting: boolean;
   /** What the Status and Artifacts column shows on a wide screen. */
   side: SideTab;
-  /** The conversation's text size, a share of the theme's, and whether its menu is open. */
-  textScale: number;
-  textMenu: boolean;
+  /** Whether the view options menu is open. */
+  viewMenu: boolean;
   /** Whether each message's line shows its time and its optional marks (dictated, tone), kept in local storage. */
   details: boolean;
   /** New conversation…'s provider menu under the dropdown: the providers, null while they load, or why not. */
@@ -121,7 +120,7 @@ export type Sheet =
   | { kind: 'snooze'; row: string; label: string; title: string; choices: SnoozeChoice[]; picked: string; date: string; comment: string }
   | { kind: 'text'; title: string; text: string };
 
-export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), bands: new Map(), list: false, drawer: null, actions: false, linkMenu: false, rowMenu: null, sheet: null, acting: false, prompt: null, providers: null, side: 'status', textScale: 1, textMenu: false, details: false, pane: null, paneNote: null });
+export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), bands: new Map(), list: false, drawer: null, actions: false, linkMenu: false, rowMenu: null, sheet: null, acting: false, prompt: null, providers: null, side: 'status', viewMenu: false, details: false, pane: null, paneNote: null });
 
 /** The longest menu label for a link, as the dock's `LinkLabelMax`; a longer one is cut with an ellipsis and shown whole in its tooltip. */
 export const LINK_LABEL_MAX = 48;

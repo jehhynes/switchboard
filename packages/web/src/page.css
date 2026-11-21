@@ -271,8 +271,6 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 
 /* The timeline. */
 /* The conversation is as wide as the width set on its sash (--chat-width), 940 px by default, less the pane's padding. */
-/* The conversation's text takes the size chosen in the header (--chat-scale); the rest of the page keeps the theme's. */
-.timeline, .composer textarea, .composer .live-mirror { font-size: calc(var(--vscode-font-size) * var(--chat-scale, 1)); }
 .timeline { list-style: none; margin: 0 auto; padding: 0; max-width: calc(var(--chat-width, 940px) - 40px); }
 .timeline > li { --pad-top: 8px; position: relative; padding-top: var(--pad-top); padding-bottom: 8px; }
 .timeline > li:first-child { --pad-top: 0px; }
@@ -577,11 +575,7 @@ button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }
 @media (min-width: 768px) {
   .header > .back-toggle { display: none; }
 }
-/* The Text size menu: smaller, the size and larger on one row, then Reset. */
-.text-size-anchor { flex: none; }
-.text-size-row { display: flex; align-items: center; justify-content: space-between; gap: 4px; padding: 2px 4px; }
-.text-size-row .menu-row { justify-content: center; width: 36px; padding: 0; }
-.text-size-value { min-width: 4ch; text-align: center; font-variant-numeric: tabular-nums; }
+.view-options-anchor { flex: none; }
 
 /* The console (architecture.md § Web page): the held session's terminal, with no bar above it: the focus border shows that it types. It fills its pane and
    nothing round it scrolls: the font fits the screen to the pane, so xterm.js's scrollback is the only scroller. */

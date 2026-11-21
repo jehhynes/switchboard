@@ -9,12 +9,13 @@
 }
 
 /* A reply's spoken passage as a bubble on the left, as a messaging app draws what it receives: at most 80% of the reply's width, with a smaller
-   bottom-left corner as the tail, in the reply's own font size. High contrast themes get only the contrast border, as our messages do. */
-.speech-bubble { box-sizing: border-box; width: fit-content; max-width: 80%; margin: 2px 0 4px; padding: 6px 12px; border: 1px solid var(--vscode-contrastBorder, transparent); border-radius: 12px 12px 12px 4px; background: var(--sb-speech-bubble); color: var(--vscode-foreground); overflow-wrap: anywhere; }
+   bottom-left corner as the tail, its text at 110% of the reply's. High contrast themes get only the contrast border, as our messages do. */
+.speech-bubble { box-sizing: border-box; font-size: 110%; width: fit-content; max-width: 80%; margin: 2px 0 4px; padding: 6px 12px; border: 1px solid var(--vscode-contrastBorder, transparent); border-radius: 12px 12px 12px 4px; background: var(--sb-speech-bubble); color: var(--vscode-foreground); overflow-wrap: anywhere; }
 .speech-bubble > :first-child { margin-top: 0; }
 .speech-bubble > :last-child { margin-bottom: 0; }
 body.vscode-high-contrast .speech-bubble, body.vscode-high-contrast-light .speech-bubble { background: transparent; }
 /* After the operator spoke over the passage, the part not heard. */
 .speech-bubble .unheard { color: var(--vscode-descriptionForeground); opacity: 0.7; }
-/* A reply that starts with a bubble moves its dot down by the bubble's border and padding, level with the bubble's first line. */
-.reply:has(> .body > .speech-bubble:first-child) { --dot-shift: 7px; }
+/* A reply that starts with a bubble moves its dot down by the bubble's border and padding, and by half of what its larger text adds to the
+   first line's height (1.5 × 10% / 2 of the reply's size), level with the bubble's first line. */
+.reply:has(> .body > .speech-bubble:first-child) { --dot-shift: calc(7px + 0.075em); }
