@@ -1052,6 +1052,11 @@ export class ConversationService {
     this.#listChanged();
   }
 
+  /** The keys of the pages with an open stream. */
+  pages(): string[] {
+    return [...this.#streams.keys()].filter((key) => this.deps.windows.isPage(key));
+  }
+
   /** Sends an event to a window's conversation streams, as the voice's `voice`, `progress` and `settings`. */
   notify(key: string, type: string, payload: Record<string, unknown>): void {
     this.#send(key, type, payload);

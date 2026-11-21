@@ -312,6 +312,20 @@ describe('createHubApp', () => {
     expect(paired).toMatchObject({ status: 200, body: { extensionId: PANE_EXTENSION_ID, token: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/) } });
     expect(await app.post['/v1/conversation/pane-pair']!({ window: 'nobody' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
     expect(await app.post['/v1/conversation/pane-pair']!({})).toEqual({ status: 400, body: { error: 'Expected {window}.' } });
+
+    // The page's column and the dock's reports drive the pane; the dock hears nothing until it says it is ready.
+    const dock: Array<[string, unknown]> = [];
+
+    app.attachDock!((event, data) => (dock.push([event, data]), 1));
+    expect(await app.post['/v1/conversation/pane-rect']!({ window: page, rect: { left: 1300, top: 40, width: 600, height: 900, dpr: 1, innerWidth: 1900, innerHeight: 1000 } })).toEqual({ status: 200, body: { done: true } });
+    expect(await app.post['/v1/conversation/pane-rect']!({ window: 'nobody', rect: null })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(await app.post['/v1/conversation/pane-rect']!({ window: page, rect: 'wide' })).toEqual({ status: 400, body: { error: 'Expected {window, rect}.' } });
+    expect(await app.post['/dock/pane']!({ state: 'ready' })).toEqual({ status: 200, body: { done: true } });
+    expect(await app.post['/dock/pane']!({ state: 'found', marker: '0123456789ab' })).toEqual({ status: 409, body: { error: 'The pane has another marker now.' } });
+    expect(await app.post['/dock/pane']!({ state: 'moved', marker: null })).toEqual({ status: 400, body: { error: 'Expected {state, marker?, focused?, reason?}.' } });
+    expect(await app.post['/dock/pane']!({ state: 'failed', marker: null, reason: 'x'.repeat(501) })).toEqual({ status: 400, body: { error: 'Expected {state, marker?, focused?, reason?}.' } });
+    // No extension is paired, so the dock is told there is no pane.
+    expect(dock.filter(([event]) => event === 'pane').at(-1)).toEqual(['pane', { marker: null, rect: null }]);
   });
 
   it('refuses Continue in Background with a bad body, and answers the roster’s refusal (PRD R89)', async () => {

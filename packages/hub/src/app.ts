@@ -43,6 +43,7 @@ import { needsMessage, newlyNeeding, rowFor, targetForUrl } from './needs.js';
 import { volumeReply } from './volume.js';
 import { installedProviders } from './installed.js';
 import { PaneLink } from './paneLink.js';
+import { PaneState, paneRect, paneTabs } from './pane.js';
 
 const RELOAD_DEBOUNCE_MS = 300;
 /** The mic codicon in codicon.ttf, which marks the voice target's dock row (architecture.md § Voice). */
@@ -335,6 +336,8 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         paneLink.closeAll();
       }
 
+      pane.update();
+
       // The dock's Settings window reads the file again (PRD R54).
       sendDock('config', {});
     }, RELOAD_DEBOUNCE_MS);
@@ -348,8 +351,41 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     enabled: () => config.settings.web.chromePane,
     now: deps.now,
     log: deps.log,
-    message: () => undefined,
-    changed: () => undefined,
+    message: (message) => pane.extensionMessage(message),
+    changed: () => pane.update(),
+  });
+  // Pages whose own focus is on, and the page whose pane window has the focus, which counts as the page's (architecture.md § Pane state).
+  const focusedPages = new Set<string>();
+  let paneFocusedFor: string | null = null;
+  const pane: PaneState = new PaneState({
+    enabled: () => config.settings.web.chromePane,
+    extension: () => paneLink.state(),
+    toExtension: (message) => paneLink.send(message),
+    toDock: (data) => sendDock('pane', data),
+    toPage: (key, view) => conversation.notify(key, 'pane', { pane: view }),
+    pages: () => conversation.pages(),
+    tabsOf: (key) => {
+      const workItemId = scopes.scope(key)?.workItemId ?? null;
+      const dock = views().dock;
+      const row = workItemId === null ? null : dockRowOf(dock, workItemId);
+
+      const tabs = row === null ? null : paneTabs(row, dock.groups.find((group) => group.rows.includes(row))?.key ?? null);
+
+      return tabs === null ? null : { workItemId: workItemId!, ...tabs };
+    },
+    focused: (key, focused) => {
+      paneFocusedFor = focused ? key : paneFocusedFor === key ? null : paneFocusedFor;
+
+      if (focused) {
+        focusedWindow = key;
+        voice.windowGained(deps.now());
+      } else if (focusedWindow === key && !focusedPages.has(key)) {
+        focusedWindow = null;
+      }
+
+      voice.update();
+    },
+    log: deps.log,
   });
 
   // Each window sees only its own work item (architecture.md § Window scope); views are built off the main thread and published whole.
@@ -620,10 +656,17 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     // A focused, visible page counts as a focused window for the voice (architecture.md § Web page).
     pageFocused: (key, focused) => {
       if (focused) {
+        focusedPages.add(key);
+        pane.pageFocused(key);
         focusedWindow = key;
         voice.windowGained(deps.now());
-      } else if (focusedWindow === key) {
-        focusedWindow = null;
+      } else {
+        focusedPages.delete(key);
+
+        // Focus in the page's pane window is the page's own (architecture.md § Pane state).
+        if (focusedWindow === key && paneFocusedFor !== key) {
+          focusedWindow = null;
+        }
       }
 
       voice.update();
@@ -644,6 +687,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   const published = (built: Built): void => {
     conversation.scopesChanged(scopes.update(built.snapshot));
     conversation.sessionsChanged();
+    pane.update();
 
     // The dock says when a work item starts needing the operator, which the windows no longer see (PRD R65).
     const newly = newlyNeeding(announced, built.snapshot);
@@ -996,6 +1040,19 @@ const dockWithRuns = () => {
 
         return { status: 200, body: { token: paneLink.pairingToken(), extensionId: PANE_EXTENSION_ID } };
       },
+      // The page's right column for the Chrome pane, or null (architecture.md § Pane state).
+      '/v1/conversation/pane-rect': async (body) => {
+        if (!isRecord(body) || typeof body['window'] !== 'string' || !(body['rect'] === null || isRecord(body['rect']))) {
+          return { status: 400, body: { error: 'Expected {window, rect}.' } };
+        }
+
+        if (!scopes.isPage(body['window'])) {
+          return { status: 403, body: { error: 'Not in this window.' } };
+        }
+
+        pane.pageRect(body['window'], paneRect(body['rect']));
+        return { status: 200, body: { done: true } };
+      },
       '/v1/conversation/page-focus': async (body) => (isRecord(body) ? conversation.pageFocus(body) : { status: 400, body: { error: 'Expected {window, focused}.' } }),
       '/v1/conversation/persona': async (body) => (isRecord(body) ? conversation.personaCommand('persona', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, personaId}.' } }),
       '/v1/conversation/mic': async (body) => (isRecord(body) ? conversation.voiceCommand('mic', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, on}.' } }),
@@ -1178,6 +1235,26 @@ const dockWithRuns = () => {
         voice.terminalFocused(sessionId, at);
         return { status: 200, body: { focus: sessionId } };
       },
+      // The dock's Chrome pane reports (architecture.md § Pane state): ready on connecting, then found, shown, hidden, lost or failed for a marker.
+      '/dock/pane': async (body) => {
+        const state = isRecord(body) ? body['state'] : undefined;
+        const marker = isRecord(body) ? (body['marker'] ?? null) : undefined;
+        const focused = isRecord(body) ? body['focused'] : undefined;
+        const reason = isRecord(body) ? body['reason'] : undefined;
+
+        if (
+          !['ready', 'found', 'shown', 'hidden', 'lost', 'failed'].includes(String(state)) ||
+          !(marker === null || typeof marker === 'string') ||
+          !(focused === undefined || typeof focused === 'boolean') ||
+          !(reason === undefined || (typeof reason === 'string' && reason.length <= 500))
+        ) {
+          return { status: 400, body: { error: 'Expected {state, marker?, focused?, reason?}.' } };
+        }
+
+        return pane.dockReport({ state: state as string, marker: marker as string | null, ...(focused === undefined ? {} : { focused: focused as boolean }), ...(reason === undefined ? {} : { reason: reason as string }) })
+          ? { status: 200, body: { done: true } }
+          : { status: 409, body: { error: 'The pane has another marker now.' } };
+      },
       // The dock's New conversation in a folder (architecture.md § Hosted conversations): a conversation hosted by a folder, selected there before its window opens.
       '/dock/new-conversation': async (body) => (isRecord(body) ? conversation.dockConversation(body) : { status: 400, body: { error: 'Expected {folder, opId}.' } }),
       '/dock/show': async () =>
@@ -1270,6 +1347,9 @@ const dockWithRuns = () => {
         focusedWindow = null;
       }
 
+      focusedPages.delete(key);
+      paneFocusedFor = paneFocusedFor === key ? null : paneFocusedFor;
+      pane.pageClosed(key);
       scopes.close(key);
       conversation.windowClosed();
       voice.windowClosed(key);
@@ -1282,7 +1362,10 @@ const dockWithRuns = () => {
       opened: () => {
         const key = scopes.openPage();
 
-        setImmediate(() => voice.update());
+        setImmediate(() => {
+          voice.update();
+          pane.update();
+        });
         return key;
       },
       isPage: (key) => scopes.isPage(key),
