@@ -434,7 +434,11 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   });
   // The window in front, which the voice follows (architecture.md § Voice).
   let focusedWindow: string | null = null;
+  // The page's list and header, sent again when the voice changes the dock's view; set once the conversation service exists.
+  let pageListChanged = (): void => {};
   const builtNow = (): void => {
+    pageListChanged();
+
     for (const listener of builtListeners) {
       listener();
     }
@@ -552,7 +556,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     pageHeader: () => {
       const built = views();
 
-      return pageHeader(built.dock, built.snapshot);
+      return pageHeader({ ...built.dock, notes: withVoiceNote(built.dock.notes) }, built.snapshot);
     },
     pollSources: () => runtime.pollNow(),
     restartHolder: (detail) => restartHolder(detail),
@@ -701,6 +705,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     },
     log: deps.log,
   });
+  pageListChanged = () => conversation.pageListChanged();
   /** A finished build: windows bound to a new work item start from empty, and every stream gets the new views. */
   let announced: Snapshot | null = null;
   const published = (built: Built): void => {
@@ -776,11 +781,10 @@ const dockWithRuns = () => {
     // The voice target's row has the mic mark, and a voice problem is a note: no window shows another's or a global one (architecture.md § Voice).
     const targetSession = voice.target === null ? null : store.session(voice.target);
     const activeRow = targetSession === null ? null : `item:${targetSession.workItemId}`;
-    const voiceError = voice.dockError();
 
     return {
       ...view,
-      notes: voiceError === null ? view.notes : [...view.notes, `Voice: ${voiceError}`],
+      notes: withVoiceNote(view.notes),
       ...(view.held === undefined ? {} : { held: view.held.map((one) => (one.terminal === null ? one : { ...one, terminal: executable(one.terminal) })) }),
       groups: view.groups.map((group) => ({
         ...group,
@@ -795,6 +799,13 @@ const dockWithRuns = () => {
     };
   };
   const dockRows = () => dockWithRuns().groups.flatMap((group) => group.rows);
+
+  /** The dock's notes with the voice's problem last, as the dock and the page show them (architecture.md § Voice). */
+  function withVoiceNote(notes: string[]): string[] {
+    const voiceError = voice.dockError();
+
+    return voiceError === null ? notes : [...notes, `Voice: ${voiceError}`];
+  }
 
   /**
    * A row's Persona menu (architecture.md § Personas): with `voice.enabled` on and a roster, each persona for the work item's current Code Mode

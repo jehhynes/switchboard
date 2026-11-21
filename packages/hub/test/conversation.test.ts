@@ -1826,7 +1826,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     let pollRefusal: string | null = null;
     const refusePoll = (why: string | null) => void (pollRefusal = why);
     const restarts: Array<string | undefined> = [];
-    let header: PageHeader = { sources: [{ kind: 'github', enabled: true, title: 'gh: polled\nClick to stop polling gh', sources: [{ name: 'gh', enabled: true }] }], repoRoots: ['D:/w1'], folders: ['D:/w1', dir], schedules: [{ name: 'nightly', playbook: 'dev:sweep' }] };
+    let header: PageHeader = { notes: [], sources: [{ kind: 'github', enabled: true, title: 'gh: polled\nClick to stop polling gh', sources: [{ name: 'gh', enabled: true }] }], repoRoots: ['D:/w1'], folders: ['D:/w1', dir], schedules: [{ name: 'nightly', playbook: 'dev:sweep' }] };
     const setHeader = (next: typeof header) => void (header = next);
     const opens: Array<[string, string]> = [];
     const pools: Array<[number, string, unknown]> = [];
@@ -1913,10 +1913,19 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     expect(page.frames.filter((frame) => frame.type === 'list')).toEqual([]);
 
     // A source turned off changes only the header, which still reaches the page.
-    setHeader({ sources: [{ kind: 'github', enabled: false, title: 'gh: not polled', sources: [{ name: 'gh', enabled: false }] }], repoRoots: [], folders: [], schedules: [] });
+    setHeader({ notes: [], sources: [{ kind: 'github', enabled: false, title: 'gh: not polled', sources: [{ name: 'gh', enabled: false }] }], repoRoots: [], folders: [], schedules: [] });
     service.conversationsChanged();
     expect(page.frames.at(-1)).toMatchObject({ type: 'list', header: { sources: [{ enabled: false }] } });
     expect(page.frames.at(-1)!['groups']).toBeInstanceOf(Array);
+
+    // A voice problem changes the dock's notes outside a build; `pageListChanged` sends it, and nothing when nothing changed.
+    setHeader({ notes: ['Voice: the voice process stopped.'], heldNote: '1 held session without a work item', sources: [], repoRoots: [], folders: [], schedules: [] });
+    service.pageListChanged();
+    expect(page.frames.at(-1)).toMatchObject({ type: 'list', header: { notes: ['Voice: the voice process stopped.'], heldNote: '1 held session without a work item' } });
+    const sent = page.frames.length;
+
+    service.pageListChanged();
+    expect(page.frames).toHaveLength(sent);
 
     expect(service.pageSource({ window: page.key, name: 'gh', enabled: true })).toEqual({ status: 200, body: { done: true } });
     expect(service.pageSource({ window: page.key, name: 'gone', enabled: true })).toEqual({ status: 409, body: { error: 'No source is named gone.' } });

@@ -342,6 +342,21 @@ describe('the list header (architecture.md § Web page)', () => {
     page.close();
   });
 
+  it("shows the dock's notes under the header in the warning colour, and the held-session note, which opens what Held sessions opens", () => {
+    const { source } = start();
+
+    hello(source);
+    expect(root.querySelector('.list-note')).toBeNull();
+    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ notes: ['Settings: settings.json is not valid JSON.', 'Voice: the voice process stopped.'], heldNote: '1 held session without a work item' }) });
+    expect([...root.querySelectorAll('p.list-note')].map((note) => note.textContent)).toEqual(['Settings: settings.json is not valid JSON.', 'Voice: the voice process stopped.']);
+    expect(root.querySelector('button.held-note')?.textContent).toBe('1 held session without a work item');
+    click('button.held-note');
+    expect(root.querySelector('#list-sheet .sheet-title')?.textContent).toBe('Held sessions');
+    // The notes leave with the hub's next list that has none.
+    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header() });
+    expect(root.querySelector('.list-note')).toBeNull();
+  });
+
   it('shows the holder notice under the header, asks before Restart and resume, and shows the result until dismissed (architecture.md § Restarting the holder)', async () => {
     const { page, source } = start();
     const confirm = { question: 'Restart the terminal holder?', detail: 'This session is not idle, so the restart interrupts its turn: Issue <8> (gh 108).', action: 'Restart and resume' };

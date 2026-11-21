@@ -522,6 +522,10 @@ export function pageRow(row: DockRow, workItemId: number | null, host: string | 
 
 /** What the page's list header shows besides the list (architecture.md § Web page): the dock header's source icons and what its More Actions offer. */
 export interface PageHeader {
+  /** The dock's notes above its groups: settings, playbook, hook, source and voice errors, then what an unconfigured home lacks (PRD R42). */
+  notes: string[];
+  /** The dock's note while a held session has no work item, "N held sessions without a work item" (PRD R94); absent otherwise. */
+  heldNote?: string;
   /** The configured sources but ad-hoc, by kind, as the dock's header icons show them. */
   sources: DockSourceGroup[];
   /** The repos an ad-hoc prompt can run in, the first being the default (PRD R6). */
@@ -539,7 +543,7 @@ export interface PageHeader {
  * The page's list header, from the built dock view, so the page and the dock show the same sources. A page cannot browse this computer's
  * folders, so its folder choices are the ones the hub knows: the repo roots, then each folder a conversation is hosted by, once each.
  */
-export function pageHeader(dock: Pick<DockView, 'sources' | 'repoRoots' | 'schedules' | 'holderNotice' | 'holderResult'>, snapshot: Pick<Snapshot, 'workItems'>): PageHeader {
+export function pageHeader(dock: Pick<DockView, 'notes' | 'heldNote' | 'sources' | 'repoRoots' | 'schedules' | 'holderNotice' | 'holderResult'>, snapshot: Pick<Snapshot, 'workItems'>): PageHeader {
   const folders = new Map<string, string>();
 
   for (const folder of [...dock.repoRoots, ...snapshot.workItems.flatMap((item) => (item.ticket.hostWindow != null && isFolderHost(item.ticket.hostWindow) ? [item.ticket.hostWindow] : []))]) {
@@ -549,6 +553,8 @@ export function pageHeader(dock: Pick<DockView, 'sources' | 'repoRoots' | 'sched
   }
 
   return {
+    notes: dock.notes,
+    ...(dock.heldNote === undefined ? {} : { heldNote: dock.heldNote }),
     sources: dock.sources,
     repoRoots: dock.repoRoots,
     folders: [...folders.values()],

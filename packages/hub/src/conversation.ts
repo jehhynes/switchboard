@@ -562,6 +562,11 @@ export class ConversationService {
     return { groups: this.pageList(), ...(header === undefined ? {} : { header }) };
   }
 
+  /** Sends each page its list when it or its header changed, as after the voice changed the dock's view. */
+  pageListChanged(): void {
+    this.#listChanged();
+  }
+
   /** Sends each page its list when it or its header changed. */
   #listChanged(): void {
     const pages = [...this.#streams.keys()].filter((key) => this.deps.windows.isPage(key));

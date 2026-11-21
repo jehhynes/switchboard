@@ -184,6 +184,10 @@ export interface SourceGroup {
 
 /** What the list's header shows besides the list (`PageHeader` in the hub's `page.ts`). */
 export interface PageHeader {
+  /** The dock's notes above its groups: settings, playbook, hook, source and voice errors, then what an unconfigured home lacks. */
+  notes?: string[];
+  /** "N held sessions without a work item", while a held session has none. */
+  heldNote?: string;
   sources: SourceGroup[];
   /** The repos an ad-hoc prompt can run in, the first being the default. */
   repoRoots: string[];

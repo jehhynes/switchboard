@@ -178,6 +178,27 @@ export interface HeaderView {
 }
 
 /**
+ * The dock's notes above its groups, in the warning colour: settings, playbook, hook, source and voice errors and setup notes, then the held
+ * sessions without a work item, whose click opens what Held sessions in More Actions opens.
+ */
+function HeaderNotes({ header }: { header: PageHeader | null }) {
+  return (
+    <>
+      {(header?.notes ?? []).map((note) => (
+        <p class="list-note" role="status">
+          {note}
+        </p>
+      ))}
+      {header?.heldNote === undefined ? null : (
+        <button type="button" class="list-note held-note" data-action="list-later-held" title="Open held sessions">
+          {header.heldNote}
+        </button>
+      )}
+    </>
+  );
+}
+
+/**
  * The terminal holder's notice under the header while it is from an older build or restarting, with Restart and resume, and the last restart's
  * result until dismissed (architecture.md § Restarting the holder), as the dock shows them above its groups.
  */
@@ -308,6 +329,7 @@ export function renderListHeader(header: PageHeader | null, view: HeaderView): V
           </button>
         </p>
       )}
+      <HeaderNotes header={header} />
       <HolderNotices header={header} view={view} />
     </>
   );

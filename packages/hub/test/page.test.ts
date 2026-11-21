@@ -180,9 +180,9 @@ describe('pageHeader', () => {
     const byWindow = item(6, { ticket: { ...item(6).ticket, hostWindow: 'C:/sb/windows/x.code-workspace' } });
     const root = item(7, { ticket: { ...item(7).ticket, hostWindow: 'D:/w1' } });
     const sources = [{ kind: 'github', enabled: true, title: 'gh: polled', sources: [{ name: 'gh', enabled: true }] }];
-    const header = pageHeader({ sources, repoRoots: ['D:/w1'], schedules: [{ name: 'nightly', playbook: 'dev:sweep' }] }, snapshot([byFolder, again, byWindow, root]));
+    const header = pageHeader({ notes: [], sources, repoRoots: ['D:/w1'], schedules: [{ name: 'nightly', playbook: 'dev:sweep' }] }, snapshot([byFolder, again, byWindow, root]));
 
-    expect(header).toEqual({ sources, repoRoots: ['D:/w1'], folders: ['D:/w1', 'D:/git/support'], schedules: [{ name: 'nightly', playbook: 'dev:sweep' }] });
+    expect(header).toEqual({ notes: [], sources, repoRoots: ['D:/w1'], folders: ['D:/w1', 'D:/git/support'], schedules: [{ name: 'nightly', playbook: 'dev:sweep' }] });
     expect(knownFolder(header.folders, 'd:/git/support')).toBe('D:/git/support');
     expect(knownFolder(header.folders, 'D:/git')).toBeNull();
   });
@@ -190,10 +190,23 @@ describe('pageHeader', () => {
   it("carries the dock's holder notice and restart result", () => {
     const holderNotice = { text: 'The terminal holder is from an older build. Restart it to update.', confirm: { question: 'Restart the terminal holder?', detail: 'd', action: 'Restart and resume' } };
     const holderResult = { at: 5, text: 'The terminal holder restarted.', failed: false };
-    const header = pageHeader({ sources: [], repoRoots: [], schedules: [], holderNotice, holderResult }, snapshot([]));
+    const header = pageHeader({ notes: [], sources: [], repoRoots: [], schedules: [], holderNotice, holderResult }, snapshot([]));
 
     expect(header).toMatchObject({ holderNotice, holderResult });
-    expect(pageHeader({ sources: [], repoRoots: [], schedules: [] }, snapshot([]))).not.toHaveProperty('holderNotice');
+    expect(pageHeader({ notes: [], sources: [], repoRoots: [], schedules: [] }, snapshot([]))).not.toHaveProperty('holderNotice');
+  });
+
+  it("carries the dock's notes and its held-session note, which is absent while every held session has a work item", () => {
+    const notes = ['Settings: settings.json is not valid JSON.', 'Voice: the voice process stopped.'];
+    const header = pageHeader({ notes, heldNote: '2 held sessions without a work item', sources: [], repoRoots: [], schedules: [] }, snapshot([]));
+
+    expect(header).toMatchObject({ notes, heldNote: '2 held sessions without a work item' });
+    expect(pageHeader({ notes: [], sources: [], repoRoots: [], schedules: [] }, snapshot([]))).not.toHaveProperty('heldNote');
+    // From the dock view itself: a settings error is the dock's note, and the page's.
+    const view = snapshot([]);
+    const broken = { ...view, errors: { ...view.errors, settings: 'settings.json is not valid JSON.' } };
+
+    expect(pageHeader(dockView(broken, NOW, 'C:/sb/windows'), broken).notes).toContain('Settings: settings.json is not valid JSON.');
   });
 });
 
