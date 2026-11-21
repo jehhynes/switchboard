@@ -170,6 +170,8 @@ export interface PageRow {
   opens?: Array<{ label: string; icon: string }>;
   /** Whether the dock offers Open in terminal for the row, which opens the page's Console tab. */
   terminal?: boolean;
+  /** A Done row's date band, such as `Today`, or an older Done row's month, such as `October 2026`; null in the other groups. */
+  band?: string | null;
 }
 
 /** One header icon: the configured sources of one kind (`DockSourceGroup` in the hub's `dock.ts`). */

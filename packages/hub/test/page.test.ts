@@ -144,7 +144,7 @@ describe('pageList', () => {
     const ownRow = dock.groups.flatMap((group) => group.rows).find((row) => row.key === 'item:1')!;
 
     expect(list.map((group) => [group.key, group.title, group.glyph])).toEqual(dock.groups.map((group) => [group.key, group.title, group.glyph]));
-    expect(list.flatMap((group) => group.rows).find((row) => row.workItemId === 1)).toEqual({ workItemId: 1, ticketId: null, title: 'Fix the badge', priority: ownRow.priority, time: ownRow.time, ticket: ownRow.ticket, sourceKind: ownRow.sourceKind, url: ownRow.url, playbook: ownRow.playbook, links: [], returned: ownRow.returned, comment: ownRow.comment, mark: ownRow.mark, details: ownRow.details, stripe: ownRow.stripe, dim: ownRow.dim, host: null, actions: pageActions(ownRow), main: null, pastes: [], opens: pageOpens(ownRow), terminal: expect.any(Boolean), search: ownRow.search });
+    expect(list.flatMap((group) => group.rows).find((row) => row.workItemId === 1)).toEqual({ workItemId: 1, ticketId: null, title: 'Fix the badge', priority: ownRow.priority, time: ownRow.time, ticket: ownRow.ticket, sourceKind: ownRow.sourceKind, url: ownRow.url, playbook: ownRow.playbook, links: [], returned: ownRow.returned, comment: ownRow.comment, mark: ownRow.mark, details: ownRow.details, stripe: ownRow.stripe, dim: ownRow.dim, host: null, actions: pageActions(ownRow), main: null, pastes: [], opens: pageOpens(ownRow), terminal: expect.any(Boolean), search: ownRow.search, band: null });
     expect(pageOpens(ownRow).map((one) => one.label)).toEqual(['Open in VS Code']);
     // The dock's menu has Open in terminal for a session it can attach to or resume, and the page's opens its Console tab for it.
     expect(list.flatMap((group) => group.rows).find((row) => row.workItemId === 1)?.terminal).toBe(ownRow.terminal !== null || ownRow.commands.some((one) => one.command['type'] === 'terminal'));
@@ -236,7 +236,7 @@ describe('pageList rows', () => {
       links: [{ label: 'PR #9', url: 'https://github.com/o/r/pull/9', kind: 'pr', badge: '9', glyph: '\u{ea64}', mentioned: false, pr: { state: 'open' } }],
       returned: 2, comment: { glyph: 'c', title: 'Nov 20\nWaits on Sam' }, mark: { kind: 'limited', glyph: 'w', title: 'Rate limited' },
       details: [{ text: 'Rate limited · resumes 1:20 PM', title: 'Resets at 1:20 PM', tone: 'warning' }, { text: 'Post the reply', title: null, tone: null }],
-      stripe: null, dim: false, controls: [], main: null, pastes: [], search: 'Fix it · gh 3 · PR #9 · dev:build',
+      stripe: null, dim: false, controls: [], main: null, pastes: [], search: 'Fix it · gh 3 · PR #9 · dev:build', band: 'Yesterday',
     } as unknown as DockView['groups'][number]['rows'][number];
     const dock = { groups: [{ key: 'progress', title: 'In progress', glyph: 'p', empty: null, rows: [dockRow] }] } as Pick<DockView, 'groups'>;
     const [shown] = pageList(dock, snapshot([item(3)]))[0]!.rows;
@@ -245,6 +245,8 @@ describe('pageList rows', () => {
     expect(shown!.links).toEqual([{ label: 'PR #9', url: 'https://github.com/o/r/pull/9', kind: 'pr', badge: '9', glyph: '\u{ea64}', mentioned: false }]);
     // The list's search matches what the dock's search box matches.
     expect(shown!.search).toBe('Fix it · gh 3 · PR #9 · dev:build');
+    // A Done row's date band, under which the page draws it as the dock does.
+    expect(shown!.band).toBe('Yesterday');
   });
 });
 

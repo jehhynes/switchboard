@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyEvent, awaitingReply, EMPTY, mentionOf, mentionQuery, commandQuery, shortTitle, timeline, withEarlier } from '../src/model.js';
 import { answerText, answersIn, complete, parseQuestions } from '@switchboard/conversation/questions';
-import { artifactUrl, newView, renderMicButton, renderVoice, markdownBody } from '../src/render.js';
+import { artifactUrl, collapsedGroups, newView, renderMicButton, renderVoice, markdownBody } from '../src/render.js';
 import { renderArtifactView } from '../src/side.js';
 import { renderTimeline, turnRow } from '../src/timeline.js';
 import { renderHeader } from '../src/header.js';
@@ -362,11 +362,14 @@ describe('drawing', () => {
     expect(bare.querySelector('.ticket')!.getAttribute('title')).toBe('gh 2');
   });
 
-  it('collapses Done by default, still showing the selected row of a collapsed group, and says when there is nothing', () => {
+  it('collapses Done and Snoozed by default, still showing the selected row of a collapsed group, and says when there is nothing', () => {
     const root = document.createElement('div');
-    const groups = [listGroup('progress', [listRow(1)]), listGroup('done', [listRow(5), listRow(6)])];
+    const groups = [listGroup('progress', [listRow(1)]), listGroup('snoozed', [listRow(4)]), listGroup('done', [listRow(5), listRow(6)])];
 
-    expect(newView().collapsed).toEqual(new Set(['done']));
+    expect(newView().collapsed).toEqual(new Set(['done', 'snoozed']));
+    root.innerHTML = html(renderList(groups, 1, newView().collapsed));
+    expect(root.querySelector('[data-group="snoozed"] .group-head')!.getAttribute('aria-expanded')).toBe('false');
+    expect(root.querySelectorAll('[data-group="snoozed"] .row')).toHaveLength(0);
     root.innerHTML = html(renderList(groups, 1, newView().collapsed));
     expect(root.querySelector('[data-group="done"] .group-head')!.getAttribute('aria-expanded')).toBe('false');
     expect(root.querySelector('[data-group="done"] .codicon-chevron-right')).not.toBeNull();
@@ -375,6 +378,33 @@ describe('drawing', () => {
     root.innerHTML = html(renderList(groups, 6, newView().collapsed));
     expect([...root.querySelectorAll('[data-group="done"] .row')].map((row) => row.getAttribute('data-work-item'))).toEqual(['6']);
     expect(html(renderList([listGroup('progress', [])], null, new Set()))).toBe('<p class="empty">No work items yet. They appear here when Switchboard starts one.</p>');
+  });
+
+  it("draws Done's rows under their date bands, Today and Yesterday open and the older ones closed, each with its count and a rule", () => {
+    const root = document.createElement('div');
+    const done = listGroup('done', [listRow(5, { band: 'Today' }), listRow(6, { band: 'Today' }), listRow(7, { band: 'Yesterday' }), listRow(8, { band: 'Last week' }), listRow(9, { band: 'Last week' })]);
+    const bands = () => [...root.querySelectorAll('[data-group="done"] .band')].map((band) => [band.querySelector('.band-title')!.textContent, band.querySelector('.band-count')!.textContent, band.querySelector('.band-head')!.getAttribute('aria-expanded'), [...band.querySelectorAll('.row')].map((row) => row.getAttribute('data-work-item'))]);
+
+    root.innerHTML = html(renderList([done], null, new Set()));
+    expect(bands()).toEqual([
+      ['Today', '2', 'true', ['5', '6']],
+      ['Yesterday', '1', 'true', ['7']],
+      ['Last week', '2', 'false', []],
+    ]);
+    // Each band's rows are a list of their own, so its first row has no rule above it.
+    expect(root.querySelectorAll('[data-group="done"] .band > ul.rows')).toHaveLength(2);
+    expect(root.querySelector('.band-head[data-band="done:Last week"] .band-rule')).not.toBeNull();
+    // A closed band still shows the selected row; the operator's choice opens or closes a band; a search opens every band.
+    root.innerHTML = html(renderList([done], 9, new Set()));
+    expect(bands()[2]![3]).toEqual(['9']);
+    root.innerHTML = html(renderList([done], null, new Set(), false, null, new Map([['done:Today', false], ['done:Last week', true]])));
+    expect(bands().map((band) => band[2])).toEqual(['false', 'true', 'true']);
+    root.innerHTML = html(renderList([done], null, new Set(), true));
+    expect(bands().map((band) => band[3])).toEqual([['5', '6'], ['7'], ['8', '9']]);
+    // Rows without a band, in any other group, have no band heading.
+    root.innerHTML = html(renderList([listGroup('progress', [listRow(1), listRow(2)])], null, new Set()));
+    expect(root.querySelector('.band')).toBeNull();
+    expect(root.querySelectorAll('ul.rows .row')).toHaveLength(2);
   });
 
   it("puts the session's state codicon inside the dropdown's button, before the title, as each option has it", () => {
@@ -753,6 +783,34 @@ describe('the page', () => {
     done.click();
     expect(root.querySelector('[data-work-item="5"]')).toBeNull();
     page.close();
+  });
+
+  it("keeps each group's open or closed choice across a reload, and a band's only until then", () => {
+    const groups = [listGroup('progress', [listRow(1)]), listGroup('snoozed', [listRow(4)]), listGroup('done', [listRow(5, { band: 'Today' }), listRow(6, { band: 'Two weeks ago' })])];
+    const first = start();
+
+    first.source.emit('hello', { key: 'pk', groups, scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    root.querySelector<HTMLElement>('[data-group="done"] .group-head')!.click();
+    root.querySelector<HTMLElement>('[data-group="progress"] .group-head')!.click();
+    root.querySelector<HTMLElement>('.band-head[data-band="done:Two weeks ago"]')!.click();
+    expect(root.querySelector('[data-work-item="6"]')).not.toBeNull();
+    expect(JSON.parse(localStorage.getItem('switchboard.groups')!)).toEqual({ done: true, progress: false });
+    first.page.close();
+
+    const second = start();
+
+    second.source.emit('hello', { key: 'pk', groups, scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    const open = () => [...root.querySelectorAll('.group-head')].map((head) => [head.getAttribute('data-group'), head.getAttribute('aria-expanded')]);
+
+    expect(open()).toEqual([['progress', 'false'], ['snoozed', 'false'], ['done', 'true']]);
+    // The band the operator opened starts closed again after the reload, as the dock's do after it restarts.
+    expect(root.querySelector('[data-work-item="6"]')).toBeNull();
+    expect(root.querySelector('[data-work-item="5"]')).not.toBeNull();
+    second.page.close();
+    // A kept value that does not read leaves the defaults.
+    expect(collapsedGroups('not json')).toEqual(new Set(['done', 'snoozed']));
+    expect(collapsedGroups('["done"]')).toEqual(new Set(['done', 'snoozed']));
+    expect(collapsedGroups('{"snoozed":true,"review":false,"done":"yes"}')).toEqual(new Set(['done', 'review']));
   });
 
   it('sends the composer\'s text to the session it shows, with its scope generation and launch, and keeps a draft per work item', async () => {

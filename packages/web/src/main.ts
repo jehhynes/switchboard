@@ -3,7 +3,7 @@ import { snoozeChoices } from '@switchboard/core/snooze';
 import type { PageState } from './model.js';
 import { placeMenus } from '@switchboard/conversation/menuPlace';
 import { escape, renderMarkdown } from './markdown.js';
-import { answerText, artifactUrl, complete, firstSnoozeDay, inputReady, renderMicButton, markdownBody, newView, parseQuestions, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, SIDE_TABS } from './render.js';
+import { answerText, artifactUrl, bandOpen, collapsedGroups, complete, firstSnoozeDay, GROUPS_KEY, inputReady, renderMicButton, markdownBody, newView, parseQuestions, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, SIDE_TABS } from './render.js';
 import type { CardDraft, PaneView, SideTab, Tab, View } from './render.js';
 import type { ConsoleOptions, MountedConsole } from './console.js';
 import { LIGHT_SCHEME } from './console.js';
@@ -183,6 +183,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   wideQuery?.addEventListener?.('change', () => draw());
   let state: PageState = EMPTY;
   const view: View = newView();
+
+  // The groups the operator opened or closed on an earlier load, as the dock keeps them across runs.
+  view.collapsed = collapsedGroups(localStorage.getItem(GROUPS_KEY));
 
   try {
     view.details = localStorage.getItem(DETAILS) === '1';
@@ -1144,7 +1147,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // A search shows only the rows that match, in every group, open (PRD R63).
     const listed = header.list(state.groups);
     mount(sheetHost, renderSheet(view.sheet, view.acting));
-    mount(list, renderListPane(expired, listError, renderList(listed.groups, state.scope?.workItemId ?? null, view.collapsed, listed.filtering, poolMenu()), header.end(listed.groups)));
+    mount(list, renderListPane(expired, listError, renderList(listed.groups, state.scope?.workItemId ?? null, view.collapsed, listed.filtering, poolMenu(), view.bands), header.end(listed.groups)));
     // Each draw shows line 2's pills whole until `fitLines` fits them again after the redraw, as a list drawn afresh would.
     list.querySelectorAll('.pill.compact, .pill.omitted').forEach((pill) => pill.classList.remove('compact', 'omitted'));
     fitLines();
@@ -1426,6 +1429,25 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   window.addEventListener('blur', () => reportFocus());
   document.addEventListener('visibilitychange', () => reportFocus());
 
+  /** Keeps a group's open or closed choice for the next load; a page whose storage refuses keeps it until it reloads. */
+  const keepGroup = (group: string, open: boolean): void => {
+    let kept: Record<string, boolean> = {};
+
+    try {
+      const read: unknown = JSON.parse(localStorage.getItem(GROUPS_KEY) ?? '{}');
+
+      kept = read !== null && typeof read === 'object' && !Array.isArray(read) ? (read as Record<string, boolean>) : {};
+    } catch {
+      kept = {};
+    }
+
+    try {
+      localStorage.setItem(GROUPS_KEY, JSON.stringify({ ...kept, [group]: open }));
+    } catch {
+      // Storage full or refused: the choice lasts this load.
+    }
+  };
+
   // ---- Selecting ----
   const select = async (workItemId: number): Promise<void> => {
     wanted = workItemId;
@@ -1581,6 +1603,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
           view.collapsed.add(group);
         }
 
+        keepGroup(group, !view.collapsed.has(group));
+        draw();
+        break;
+      }
+      case 'band': {
+        const band = button!.dataset['band']!;
+
+        view.bands.set(band, !bandOpen(band, view.bands));
         draw();
         break;
       }

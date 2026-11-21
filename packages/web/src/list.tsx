@@ -1,7 +1,7 @@
 // The page's list of work items (architecture.md § Web page), drawn as the dock's.
 import type { ComponentChildren, VNode } from 'preact';
 import { MARK_ICONS, MARK_TONES, SPINNING_MARKS } from '@switchboard/core/group';
-import { rowKey } from './render.js';
+import { bandOpen, rowKey } from './render.js';
 import type { PageGroup, PageRow } from './types.js';
 
 /** The codicon Returned shows, as the dock's pill does. */
@@ -94,13 +94,32 @@ function Row({ row, selected, menu }: { row: PageRow; selected: boolean; menu: C
   );
 }
 
+/** A group's rows in runs of one band each, in their order; a row without a band is in a run with no heading. */
+export function bandRuns(rows: readonly PageRow[]): Array<{ band: string | null; rows: PageRow[] }> {
+  const runs: Array<{ band: string | null; rows: PageRow[] }> = [];
+
+  for (const row of rows) {
+    const band = row.band ?? null;
+    const last = runs.at(-1);
+
+    if (last !== undefined && last.band === band) {
+      last.rows.push(row);
+    } else {
+      runs.push({ band, rows: [row] });
+    }
+  }
+
+  return runs;
+}
+
 /**
  * The page's list (architecture.md § Web page): the dock's groups in its order, each a header with its codicon, title and count that opens or
  * collapses it, then its rows; a collapsed group still shows the selected row, so the selection is never hidden. While a search `filtering` it,
  * only the groups with rows show, every one open, and the search's end says when none matched. `menu` is the pool ticket row whose menu is
- * open, by its key, with the menu's rows.
+ * open, by its key, with the menu's rows. An open group's rows with a band, Done's, sit under their band's heading, a muted label with its count
+ * and a rule that opens or closes it (`bands`, else `OPEN_BANDS`); a closed band still shows the selected row, and a search opens every band.
  */
-export function renderList(groups: readonly PageGroup[], selected: number | null, collapsed: ReadonlySet<string>, filtering = false, menu: { row: string; rows: ComponentChildren } | null = null): VNode | null {
+export function renderList(groups: readonly PageGroup[], selected: number | null, collapsed: ReadonlySet<string>, filtering = false, menu: { row: string; rows: ComponentChildren } | null = null, bands: ReadonlyMap<string, boolean> = new Map()): VNode | null {
   if (groups.every((group) => group.rows.length === 0)) {
     return filtering ? null : <p class="empty">No work items yet. They appear here when Switchboard starts one.</p>;
   }
@@ -110,6 +129,15 @@ export function renderList(groups: readonly PageGroup[], selected: number | null
       {groups.map((group) => {
         const open = filtering || !collapsed.has(group.key);
         const rows = open ? group.rows : group.rows.filter((row) => row.workItemId === selected);
+        const rowList = (shown: readonly PageRow[]) =>
+          shown.length === 0 ? null : (
+            <ul class="rows">
+              {shown.map((row) => (
+                <Row key={rowKey(row)} row={row} selected={row.workItemId !== null && row.workItemId === selected} menu={menu !== null && menu.row === rowKey(row) ? menu.rows : null} />
+              ))}
+            </ul>
+          );
+        const banded = open && rows.some((row) => (row.band ?? null) !== null);
 
         return (
           <section class="group" data-group={group.key} key={group.key}>
@@ -119,13 +147,30 @@ export function renderList(groups: readonly PageGroup[], selected: number | null
               <span class="group-title">{group.title}</span>
               <span class={`group-count${group.rows.length === 0 ? ' zero' : ''}`} aria-label={`${group.rows.length} work items`}>{group.rows.length}</span>
             </button>
-            {rows.length === 0 ? null : (
-              <ul class="rows">
-                {rows.map((row) => (
-                  <Row key={rowKey(row)} row={row} selected={row.workItemId !== null && row.workItemId === selected} menu={menu !== null && menu.row === rowKey(row) ? menu.rows : null} />
-                ))}
-              </ul>
-            )}
+            {!banded
+              ? rowList(rows)
+              : bandRuns(rows).map((run) => {
+                  if (run.band === null) {
+                    return rowList(run.rows);
+                  }
+
+                  const key = `${group.key}:${run.band}`;
+                  const shown = filtering || bandOpen(key, bands);
+
+                  return (
+                    <div class="band" key={key}>
+                      <button type="button" class="band-head" data-action="band" data-band={key} aria-expanded={shown}>
+                        <span class={`codicon codicon-chevron-${shown ? 'down' : 'right'}`} aria-hidden="true"></span>
+                        <span class="band-title">{run.band}</span>
+                        <span class="band-count" aria-label={`${run.rows.length} work items`}>
+                          {run.rows.length}
+                        </span>
+                        <span class="band-rule" aria-hidden="true"></span>
+                      </button>
+                      {rowList(shown ? run.rows : run.rows.filter((row) => row.workItemId !== null && row.workItemId === selected))}
+                    </div>
+                  );
+                })}
             {open && group.rows.length === 0 && group.empty !== null ? <p class="group-empty">{group.empty}</p> : null}
           </section>
         );

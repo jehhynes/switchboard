@@ -243,6 +243,8 @@ export interface PageRow {
   search: string;
   /** What the row opens in VS Code, run with `row-command`. */
   opens: PageOpen[];
+  /** A Done row's date band, such as `Today`, or an older Done row's month, such as `October 2026` (PRD R27); null in the other groups. */
+  band: string | null;
   /** Whether the dock's menu has Open in terminal for the row, which the page's menu offers as its Console tab. */
   terminal: boolean;
 }
@@ -517,6 +519,7 @@ export function pageRow(row: DockRow, workItemId: number | null, host: string | 
     opens: pageOpens(row),
     terminal: workItemId !== null && (row.terminal !== null || row.commands.some((command) => command.command['type'] === 'terminal')),
     search: row.search,
+    band: row.band,
   };
 }
 

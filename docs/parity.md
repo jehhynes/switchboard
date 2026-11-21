@@ -20,11 +20,10 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 1. Row controls the page lacks (C8, C9, R12): Open in Claude or Codex and Answer in terminal, History (the page has no History view), and Enter on a pill.
 2. More Actions' dock windows (H2): Held sessions, Ticket volume report, Show hub log and Open Settings only say to use the dock, and New ad-hoc session and New conversation in a folder cannot choose a folder the hub does not know.
 3. Held sessions (H4): the held-session note shows, but the page has no Held sessions window to open.
-4. Done's date bands and group state (G5, G6, G8): Done is one flat list, Snoozed starts open, and open or closed choices do not survive a reload.
-5. Mark colours (M3): the dock and the web page colour marks by different rules; one of them should change.
-6. Keyboard (K2, K4, K5, O3, O4): no arrow-key walk, F8, menu key, drag or Alt+arrow reordering.
-7. Voice mark (R3): the page does not show which row the voice speaks for.
-8. Web-only behaviours the dock lacks (R8, C13, G10, H7): a hosted conversation's host on line 2, Stop asking first, the selected row kept in a collapsed group.
+4. Mark colours (M3): the dock and the web page colour marks by different rules; one of them should change.
+5. Keyboard (K2, K4, K5, O3, O4): no arrow-key walk, F8, menu key, drag or Alt+arrow reordering.
+6. Voice mark (R3): the page does not show which row the voice speaks for.
+7. Web-only behaviours the dock lacks (R8, C13, G10, H7): a hosted conversation's host on line 2, Stop asking first, the selected row kept in a collapsed group.
 
 ## Groups
 
@@ -34,12 +33,12 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 | G2 | Group heading: chevron, group codicon, title, row count badge; a zero count muted | MainWindow.axaml:468-476, `IsZero` ViewModels.cs:913 | Present | `renderList` render.ts:274-277, page.css:30-31 |
 | G3 | Heading is a tinted bar of the focus blue, lighter on hover | MainWindow.axaml:137-144 | Present | page.css:26-27 |
 | G4 | Click on a heading opens or closes the group; quick second clicks toggle each time | `OnGroupTapped` MainWindow.axaml.cs:1282 | Present | `case 'group'` main.ts:984 |
-| G5 | Blocked on you, Ready for review, In progress and Unstarted start open; Done and Snoozed start closed | `OpenByDefault` ViewModels.cs:42 | Partly | Only Done starts collapsed (`COLLAPSED_GROUPS` render.ts:210); Snoozed starts open |
-| G6 | The operator's open or closed choice per group is kept across runs (`dock.json` `groups`) | `Toggled` ViewModels.cs:622 | Missing | `view.collapsed` lives only in memory (render.ts:64); a reload resets it |
+| G5 | Blocked on you, Ready for review, In progress and Unstarted start open; Done and Snoozed start closed | `OpenByDefault` ViewModels.cs:42 | Present | `COLLAPSED_GROUPS` render.ts: Done and Snoozed start collapsed until the operator's choice (G6) |
+| G6 | The operator's open or closed choice per group is kept across runs (`dock.json` `groups`) | `Toggled` ViewModels.cs:622 | Present | Kept in local storage under `switchboard.groups`, `{<group>: open}`, for the groups the operator toggled (`collapsedGroups` render.ts, `keepGroup` main.ts) |
 | G7 | Empty group text in italics, muted, aligned with a row's text (Ready for review, In progress, Unstarted), also when every group is empty | MainWindow.axaml:479, `GROUP_EMPTY` rows.ts:797 | Partly | render.ts:273, page.css:32; with no rows at all the page shows one message instead of the groups (G11) |
-| G8 | Done's date bands (Today, Yesterday, Earlier this week, Last week, Two weeks ago), each a muted label with count and rule that opens or closes; Today and Yesterday open, the others closed each run | `BandViewModel` ViewModels.cs:740, MainWindow.axaml:485-492, `doneBand` rows.ts:475 | Missing | `listRow` ignores `band`; Done shows one flat list |
-| G9 | Done draws only the rows in view, so hundreds of rows stay fast | MainWindow.axaml:18-24 | Missing | Not needed until G8 and search bring older rows |
-| G10 | A collapsed group still shows the selected row | none: a closed group hides every row | Web only | `renderList` render.ts:272 |
+| G8 | Done's date bands (Today, Yesterday, Earlier this week, Last week, Two weeks ago), each a muted label with count and rule that opens or closes; Today and Yesterday open, the others closed each run | `BandViewModel` ViewModels.cs:740, MainWindow.axaml:485-492, `doneBand` rows.ts:475 | Present | `PageRow.band` (`pageRow` page.ts); `renderList` list.tsx draws each run of a band under its heading (`band-head`), Today and Yesterday open, the others closed until the page reloads (`OPEN_BANDS`, `view.bands`); a closed band still shows the selected row, which the dock's hides (G10, Web only) |
+| G9 | Done draws only the rows in view, so hundreds of rows stay fast | MainWindow.axaml:18-24 | Missing | The page draws every row of an open band; older bands start closed (G8) |
+| G10 | A collapsed group or closed Done band still shows the selected row | none: a closed group or band hides every row | Web only | `renderList` list.tsx |
 | G11 | A list with no rows at all says so | none: each group shows its empty text | Web only | "No work items yet…" render.ts:267 |
 | G12 | The heading of the group at the list's top stays pinned there, on an opaque bar and keeping its toggle and count, while the group's rows scroll under it, until the next group's heading pushes it up; a row scrolled into view by the keyboard or a selection lands below it | `PinGroupHeads`, `Reveal` MainWindow.axaml.cs | Present | `.group-head` `position: sticky` page.css, the gap after a group inside its section (`.group::after`), `scroll-margin-top` on rows and the pool row menu |
 
@@ -76,7 +75,7 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 | R16 | Line 3: the mark, then the details with a muted `·` between them, each in its tone, the last cut with an ellipsis; tooltips hold whole texts | MainWindow.axaml:556-574, `DetailViewModel` ViewModels.cs:1214 | Present | render.ts:248-256, page.css:73-79 |
 | R17 | Line 3 shows the mark's title when the row has no details, and is absent with neither | `orMarkTitle` dock.ts:411, `HasThirdLine` ViewModels.cs:1133 | Present | render.ts:256 |
 | R18 | Line 3 texts from the hub: wait reasons, rate limit (`Rate limited · resumes…`), blockers in the warning tone, wake time and snooze comment, warning and error, `From <key>`, approval summary or stage with its age, stale stage in the warning tone | `itemRow` dock.ts:386-393, `limitTexts` rows.ts:666, `wake` dock.ts:487 | Present | Same `details` through `pageList` |
-| R19 | Row separator rule above each row but the first in its band | MainWindow.axaml:169-177 | Partly | page.css:34-35: the first in its group, since Done has no bands (G8) |
+| R19 | Row separator rule above each row but the first in its band | MainWindow.axaml:169-177 | Present | Each band's rows are a list of their own, so `.rows > li:first-child` has no rule (page.css) |
 | R20 | Pool tickets (Unstarted, Snoozed) show as rows with Start or Triage again | `poolRow` dock.ts:415 | Differs | Listed with the dock's three lines by `pageList` page.ts (`ticketId`, no `workItemId`); a pool ticket has no conversation, so a click opens its menu under the row (Start, Triage again …), 8 px inside the row's left edge, and against its right edge or above it only where the page has no room (architecture.md § Menus), where the dock's click opens its triage focus in the browser; operator approved 2026-11-21 |
 | R21 | No unread count on rows: no work item list shows unread (architecture.md § Unread) | (dropped in `a7274f7`) | Present | `PageRow` page.ts:205 carries none and `listRow` render.ts:225 draws none |
 | R22 | The selected row's buttons beside lines 2 and 3: main control (Approve in the accent colour, its prompt in the tooltip), Copy, Open report; hidden on other rows and on rows with none | MainWindow.axaml:577-591, 126-134, `mainTitle` rows.ts:139 | Partly | The main control is a button in the conversation header, not on the row (`renderActions` render.ts:94-95); Copy and Open report are in the actions menu |
@@ -137,8 +136,8 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 | F1 | Search button shows or hides the search box; hiding clears the search and its range; Escape closes it | `OnSearchClicked` MainWindow.axaml.cs:2176, `SearchOpen` ViewModels.cs:403 | Present | `setOpen` listHeader.ts |
 | F2 | Matches title, key, linked PRs and issues, playbook, group and branch; every word, any case | `Matches` ViewModels.cs:986, `searchText` dock.ts:313 | Present | `matches` listHeader.ts on `PageRow.search`, the dock row's `search` (`pageRow` page.ts) |
 | F3 | Searches 250 ms after the last key from 3 characters; at once for a ticket or link key (`18941`, `gh 18941`, `PR #19002`, `#107`) | `Query` ViewModels.cs:193, `IsKey` :240 | Present | `typed`, `isKey` listHeader.ts |
-| F4 | Groups with matches show open; groups without are hidden; bands open while filtering | `IsShown` ViewModels.cs:890, `ShowsRows` :762 | Present | `filterGroups` listHeader.ts, `renderList` render.ts with `filtering`; the page has no bands (G8) |
-| F5 | Range menu: Last 2 weeks, Last month, Last 3 months, All time; older Done rows from the hub under their month | `Ranges` ViewModels.cs:36, `SearchOlder` :319 | Partly | `page-search` (conversation.ts) answers the dock's `DoneSearch` rows; the page adds them after Done's own rows, not under month bands (G8) |
+| F4 | Groups with matches show open; groups without are hidden; bands open while filtering | `IsShown` ViewModels.cs:890, `ShowsRows` :762 | Present | `filterGroups` listHeader.ts, `renderList` list.tsx with `filtering`, which opens every band |
+| F5 | Range menu: Last 2 weeks, Last month, Last 3 months, All time; older Done rows from the hub under their month | `Ranges` ViewModels.cs:36, `SearchOlder` :319 | Present | `page-search` (conversation.ts) answers the dock's `DoneSearch` rows with their month as `band`; the page adds them after Done's own rows, under their month's band heading |
 | F6 | Search further back, and All time when nothing matched; "No matches for … in the …"; Clear search; Searching…; "Showing the newest N matches…"; the hub's refusal | MainWindow.axaml:608-617, ViewModels.cs:379-389 | Present | `renderSearchEnd` listHeader.ts |
 | F7 | A newer search or range drops an older answer | ViewModels.cs:334 | Present | `searchRun` in `listHeader` listHeader.ts |
 
@@ -169,7 +168,7 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 
 | # | Behaviour | Dock evidence | Web | Web evidence and note |
 |---|---|---|---|---|
-| K1 | Rows, group and band headings and link pills take the focus, shown as a focus-blue ring | MainWindow.axaml:344-356 | Partly | rows and group headings are buttons with a 1 px outline (page.css:13); pills do not take the focus |
+| K1 | Rows, group and band headings and link pills take the focus, shown as a focus-blue ring | MainWindow.axaml:344-356 | Partly | rows, group and band headings are buttons with a 1 px outline (page.css:13); pills do not take the focus |
 | K2 | Up and Down move the focus along rows and headings; a row reached by keyboard is selected and scrolled into view | `ListKey`, `MoveFocus`, `OnRowGotFocus` MainWindow.axaml.cs:1023-1107 | Missing | Tab moves between rows; focusing does not select |
 | K3 | Enter on a row runs its click; Enter or Space on a heading toggles it | `ListKey` MainWindow.axaml.cs:1050-1078 | Present | native button keys |
 | K4 | Menu key or Shift+F10 opens a row's menu | MainWindow.axaml.cs:1057 | Missing | |

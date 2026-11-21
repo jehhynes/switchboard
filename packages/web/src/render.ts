@@ -60,6 +60,8 @@ export interface View {
   personas: { items: Array<{ id: string; name: string }> | null; error: string | null } | null;
   /** The list's collapsed groups, by key. */
   collapsed: Set<string>;
+  /** The Done bands the operator opened or closed, by `<group>:<band>`; the rest follow `OPEN_BANDS`. Kept until the page reloads, as the dock keeps them until it exits. */
+  bands: Map<string, boolean>;
   /** Whether a narrow screen shows the list rather than the conversation: after Back, or before a work item is opened. */
   list: boolean;
   /** Whether the header's actions menu is open, and in it the Open link submenu. */
@@ -117,7 +119,7 @@ export type Sheet =
   | { kind: 'snooze'; row: string; label: string; title: string; choices: SnoozeChoice[]; picked: string; date: string; comment: string }
   | { kind: 'text'; title: string; text: string };
 
-export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), list: false, actions: false, linkMenu: false, rowMenu: null, sheet: null, acting: false, prompt: null, providers: null, side: 'status', textScale: 1, textMenu: false, details: false, pane: null, paneNote: null });
+export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), bands: new Map(), list: false, actions: false, linkMenu: false, rowMenu: null, sheet: null, acting: false, prompt: null, providers: null, side: 'status', textScale: 1, textMenu: false, details: false, pane: null, paneNote: null });
 
 /** The longest menu label for a link, as the dock's `LinkLabelMax`; a longer one is cut with an ellipsis and shown whole in its tooltip. */
 export const LINK_LABEL_MAX = 48;
@@ -180,7 +182,41 @@ export function ago(at: number, now: number): string {
 }
 
 /** The groups the list shows collapsed until the operator opens them, as the dock does. */
-export const COLLAPSED_GROUPS: readonly string[] = ['done'];
+export const COLLAPSED_GROUPS: readonly string[] = ['done', 'snoozed'];
+/** Where the page keeps the operator's open or closed choice per group, as the dock keeps `groups` in `dock.json`. */
+export const GROUPS_KEY = 'switchboard.groups';
+
+/** The collapsed groups: `COLLAPSED_GROUPS`, then each choice kept under `GROUPS_KEY`, `{<group>: open}`; a kept value that does not read is ignored. */
+export function collapsedGroups(kept: string | null): Set<string> {
+  const collapsed = new Set(COLLAPSED_GROUPS);
+  let choices: unknown = null;
+
+  try {
+    choices = JSON.parse(kept ?? 'null');
+  } catch {
+    choices = null;
+  }
+
+  if (choices !== null && typeof choices === 'object' && !Array.isArray(choices)) {
+    for (const [group, open] of Object.entries(choices)) {
+      if (open === true) {
+        collapsed.delete(group);
+      } else if (open === false) {
+        collapsed.add(group);
+      }
+    }
+  }
+
+  return collapsed;
+}
+
+/** The Done bands open until the operator closes them, as the dock's: Today and Yesterday; the older bands start closed. */
+export const OPEN_BANDS: readonly string[] = ['done:Today', 'done:Yesterday'];
+
+/** Whether a band shows its rows: the operator's choice this page load, else `OPEN_BANDS`. */
+export function bandOpen(key: string, bands: ReadonlyMap<string, boolean>): boolean {
+  return bands.get(key) ?? OPEN_BANDS.includes(key);
+}
 
 /**
  * A reply's or a status's Markdown when its card draws its questions: questions that end it are left out; questions with text after them stay
