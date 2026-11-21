@@ -571,6 +571,10 @@ describe('the web page routes', () => {
           posted.push(body);
           return { status: 200, body: {} };
         },
+        '/v1/conversation/page-holder-restart': async (body) => {
+          posted.push(body);
+          return { status: 200, body: { started: true } };
+        },
       },
     });
 
@@ -623,10 +627,14 @@ describe('the web page routes', () => {
     // History is a page command too.
     expect((await post('/v1/conversation/page-history', `http://127.0.0.1:${port}`)).status).toBe(200);
     expect((await post('/v1/conversation/page-history', `http://127.0.0.1:${server.port}`)).status).toBe(403);
+    // Restart and resume from the list header passes the page's cookie and origin checks.
+    expect((await post('/v1/conversation/page-holder-restart', `http://127.0.0.1:${port}`)).status).toBe(200);
+    expect((await post('/v1/conversation/page-holder-restart', `http://127.0.0.1:${server.port}`)).status).toBe(403);
+    expect((await post('/v1/conversation/page-holder-restart', `http://127.0.0.1:${port}`, { Cookie: 'sb_page=forged' })).status).toBe(401);
     expect((await post('/v1/conversation/resume', `http://127.0.0.1:${server.port}`)).status).toBe(403);
     expect((await post('/v1/conversation/resume', `http://127.0.0.1:${port}`, {})).status).toBe(404);
     expect((await post('/v1/conversation/resume', `http://127.0.0.1:${port}`, { Cookie: 'sb_page=forged' })).status).toBe(401);
-    expect(posted).toHaveLength(4);
+    expect(posted).toHaveLength(5);
     stream.destroy();
   });
 
