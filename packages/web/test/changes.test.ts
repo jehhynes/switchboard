@@ -257,7 +257,8 @@ describe('the Changes list', () => {
     expect(root.querySelector('.diff-tab')!.classList.contains('selected')).toBe(true);
     expect(root.querySelector('.diff-title')!.textContent).toBe('docs/a.md');
     expect(root.querySelector('.diff-host')!.textContent).toBe('diff of docs/a.md');
-    expect(mounts).toMatchObject([{ path: 'docs/a.md', layout: 'split', wrap: false }]);
+    // A phone's width (test/setup.ts): stacked and wrapped.
+    expect(mounts).toMatchObject([{ path: 'docs/a.md', layout: 'stacked', wrap: true }]);
 
     // A second file opens its own tab; the first keeps its tab.
     await openRow(1);
@@ -375,14 +376,15 @@ describe('the Changes list', () => {
 
     const pane = root.querySelector<HTMLElement>('.diff-pane')!;
 
-    Object.defineProperty(pane, 'clientWidth', { configurable: true, value: 500 });
-    observers.forEach((callback) => callback([{ target: pane }]));
-    expect(mounts[0]!.sets.at(-1)).toBe('stacked true');
     Object.defineProperty(pane, 'clientWidth', { configurable: true, value: 1200 });
     observers.forEach((callback) => callback([{ target: pane }]));
     expect(mounts[0]!.sets.at(-1)).toBe('split false');
+    Object.defineProperty(pane, 'clientWidth', { configurable: true, value: 500 });
+    observers.forEach((callback) => callback([{ target: pane }]));
+    expect(mounts[0]!.sets.at(-1)).toBe('stacked true');
 
     // A file view wraps as its pane narrows, and stays stacked.
+    Object.defineProperty(pane, 'clientWidth', { configurable: true, value: 1200 });
     mounts[0]!.onLine!('new', 2);
     await flush();
     await flush();
