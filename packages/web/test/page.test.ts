@@ -12,7 +12,8 @@ import { renderList } from '../src/list.js';
 import { html } from './html.js';
 import { renderMicButton as viewMicButton } from '@switchboard/conversation/voiceControls';
 import { renderMarkdown } from '../src/markdown.js';
-import { CHAT_MAX, CHAT_MIN, DRAWER_HIDE_MS, DRAWER_QUERY, DRAWER_REVEAL_MS, loadMermaid, SENT_NOTE_MS, SHOW_MARKER_MS, SIDE_MAX, SIDE_MIN, startPage, WIDE_QUERY } from '../src/main.js';
+import { CHAT_MAX, CHAT_MIN, DRAWER_HIDE_MS, DRAWER_REVEAL_MS, loadMermaid, SENT_NOTE_MS, SHOW_MARKER_MS, SIDE_MAX, SIDE_MIN, startPage } from '../src/main.js';
+import { DETAIL_MIN } from '../src/layout.js';
 import type { ArtifactView, MessageView, PageGroup, PageRow, ReplyView, SessionView } from '../src/types.js';
 
 const message = (id: string, ord: number, patch: Partial<MessageView> = {}): MessageView => ({ type: 'message', id, sessionId: 's', workItemId: 1, at: 1_000 + ord, ord, provisional: false, withdrawn: false, origin: 'typed', text: `text ${id}`, delivery: 'sent', error: null, ...patch });
@@ -22,6 +23,11 @@ const scope = { kind: 'page' as const, key: 'k', folder: 'D:/w', title: 'Fix it'
 const listRow = (workItemId: number, patch: Partial<PageRow> = {}): PageRow => ({ workItemId, title: `Item ${workItemId}`, priority: null, time: null, ticket: `gh ${workItemId}`, sourceKind: 'github', url: '', playbook: 'dev:build', links: [], returned: 0, comment: null, mark: null, details: [], stripe: null, dim: false, host: null, ...patch });
 const listGroup = (key: string, rows: PageRow[], patch: Partial<PageGroup> = {}): PageGroup => ({ key, title: key, glyph: '\u{ea70}', empty: null, rows, ...patch });
 const artifact = (path: string, type: ArtifactView['type'], ext: string): ArtifactView => ({ path, owner: 'chat', kind: 'page', title: path, ext, type, updatedAt: 1_500 });
+/** Sets the page's width and tells the page, as a window resize does. */
+const resizeTo = (width: number): void => {
+  window.innerWidth = width;
+  window.dispatchEvent(new Event('resize'));
+};
 
 describe('the page model', () => {
   it('orders items by transcript place, drops not-sent messages, and starts from empty at hello', () => {
@@ -1345,9 +1351,7 @@ describe('the page in use', () => {
   });
 
   it('fits the artifact tabs to the strip, newest first, and lists every artifact in the Artifacts menu with those in tabs dimmed', async () => {
-    const query = { matches: true, addEventListener: () => {} };
-
-    vi.stubGlobal('matchMedia', vi.fn(() => query));
+    window.innerWidth = 1920;
     onTestFinished(() => {
       vi.unstubAllGlobals();
     });
@@ -2288,9 +2292,7 @@ describe('the page in use', () => {
   });
 
   it('opens each work item on Browser when it has no session and links the paired pane can show, else on Status, keeping a choice only within the work item', async () => {
-    const query = { matches: true, addEventListener: () => {} };
-
-    vi.stubGlobal('matchMedia', vi.fn(() => query));
+    window.innerWidth = 1920;
     onTestFinished(() => {
       vi.unstubAllGlobals();
     });
@@ -2326,7 +2328,7 @@ describe('the page in use', () => {
     expect(chosen()).toBe('status');
 
     // Narrower: Browser among the conversation's tabs, else the conversation.
-    query.matches = false;
+    resizeTo(900);
     source.emit('pane', { pane: paired });
     hello(source, { sessions: [], groups: linked(5), scope: { ...scope, workItemId: 5 } });
     expect(root.querySelector<HTMLElement>('#head .tab.selected')!.dataset['tab']).toBe('browser');
@@ -2334,7 +2336,7 @@ describe('the page in use', () => {
     expect(root.querySelector<HTMLElement>('#head .tab.selected')!.dataset['tab']).toBe('conversation');
 
     // A tab the hub kept for a work item comes back when it opens, while it still applies; otherwise the same rule as a first opening.
-    query.matches = true;
+    resizeTo(1920);
     hello(source, { groups: linked(7), scope: { ...scope, workItemId: 7 }, tabs: { tab: 'console', closed: [] } });
     expect(chosen()).toBe('console');
     hello(source, { groups: linked(8), scope: { ...scope, workItemId: 8 }, tabs: { tab: 'artifact:chat/p.html', closed: [] } });
@@ -2367,9 +2369,7 @@ describe('the page in use', () => {
   });
 
   it('keeps the pane in step with the tab shown: sends its state again on a tab change, focus and visibility, hides it as the page goes, and shows it after a reload only on Browser', async () => {
-    const query = { matches: true, addEventListener: () => {} };
-
-    vi.stubGlobal('matchMedia', vi.fn(() => query));
+    window.innerWidth = 1920;
     onTestFinished(() => {
       vi.unstubAllGlobals();
     });
@@ -2461,9 +2461,7 @@ describe('the page in use', () => {
   });
 
   it('adds a Browser tab for the Chrome pane, reports its area under the tab strip only while it is chosen, marks the title, and wakes and pairs the extension (PRD R113)', async () => {
-    const query = { matches: true, addEventListener: () => {} };
-
-    vi.stubGlobal('matchMedia', vi.fn(() => query));
+    window.innerWidth = 1920;
 
     const sent: Array<[string, Record<string, unknown>]> = [];
     const fetch = vi.fn(async (url: string, init?: { body?: string }) => {
@@ -2534,8 +2532,7 @@ describe('the page in use', () => {
     expect(root.querySelector('.view-options-menu .pane-note')!.textContent).toBe('Chrome pane stopped: The pane would not fit the column.');
 
     // Narrow: the tabs are the conversation's, Browser among them and still chosen, and its area is the conversation's pane.
-    query.matches = false;
-    // The stubbed media query does not report its change, so another event draws the narrow layout.
+    resizeTo(900);
     source.emit('pane', { pane: { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: null } });
     expect([...root.querySelectorAll<HTMLElement>('#head [data-tab]')].map((tab) => tab.dataset['tab'])).toEqual(['conversation', 'status', 'console', 'browser']);
     expect(root.querySelector('#head [aria-selected="true"]')!.textContent).toBe('Browser');
@@ -2543,7 +2540,7 @@ describe('the page in use', () => {
     click('#head [data-tab="status"]');
     expect(rects().at(-1)).toBeNull();
     // Status chosen while narrow is the column's choice when wide again.
-    query.matches = true;
+    resizeTo(1920);
     source.emit('pane', { pane: { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: null } });
     expect(root.querySelector<HTMLElement>('#detail .side-switch [aria-selected="true"]')!.dataset['side']).toBe('status');
     expect(rects().at(-1)).toBeNull();
@@ -2564,7 +2561,7 @@ describe('the page in use', () => {
     click('[data-action="list-settings"]');
     await flush();
     expect(rects().at(-1)).toBeNull();
-    query.matches = false;
+    resizeTo(900);
     source.emit('pane', { pane: { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: null } });
 
     // Turned off: the Browser tab goes, and the conversation shows in its place.
@@ -2580,10 +2577,7 @@ describe('the page in use', () => {
 
   it('hides the list in a drawer at tablet widths while a work item is open, shown by its button or a resting pointer and hidden as the dock auto-hides', () => {
     vi.useFakeTimers();
-
-    const query = { matches: true, addEventListener: () => {} };
-
-    vi.stubGlobal('matchMedia', vi.fn((text: string) => (text === DRAWER_QUERY ? query : { matches: false, addEventListener: () => {} })));
+    window.innerWidth = 1024;
     history.replaceState(null, '', '#w=1');
 
     const { page, source } = start();
@@ -2676,9 +2670,8 @@ describe('the page in use', () => {
     // Where the list is a column, or a phone's view, there is no drawer; narrowed to a phone, which hides the list, the focus goes to Back.
     toggle().click();
     expect(side.contains(document.activeElement)).toBe(true);
-    query.matches = false;
     vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => ({ display: element === side ? 'none' : 'block' }) as CSSStyleDeclaration);
-    source.emit('unread', { workItemId: 1, count: 0 });
+    resizeTo(700);
     expect(isOpen()).toBe(false);
     expect(document.activeElement).toBe(root.querySelector('.header > .back-toggle'));
     vi.mocked(window.getComputedStyle).mockRestore();
@@ -2690,10 +2683,7 @@ describe('the page in use', () => {
   });
 
   it('puts Status and Artifacts in a column beside the conversation on a wide screen, with their own switch and no toggle, and keeps the tabs otherwise', async () => {
-    const listeners: Array<() => void> = [];
-    const query = { matches: true, addEventListener: (_type: string, listener: () => void) => listeners.push(listener) };
-
-    vi.stubGlobal('matchMedia', vi.fn(() => query));
+    window.innerWidth = 1920;
 
     const { page, source } = start();
 
@@ -2717,11 +2707,95 @@ describe('the page in use', () => {
     expect(root.classList.contains('wide')).toBe(true);
     expect(root.querySelector('#head .tabs')).toBeNull();
 
-    query.matches = false;
-    listeners.forEach((listener) => listener());
+    resizeTo(900);
     expect(root.querySelector('#head .tabs')).not.toBeNull();
     expect(root.querySelector('#detail .detail-body')!.innerHTML).toBe('');
     vi.unstubAllGlobals();
+    page.close();
+  });
+
+  it('shows the list as a column only while it, the conversation and the column fit, and brings a column back only past its need', () => {
+    window.innerWidth = 1440;
+
+    const { page, source } = start();
+    const columns = (): string => `${root.classList.contains('drawers') ? 'drawer' : 'list'} + ${root.classList.contains('wide') ? 'column' : 'tabs'}`;
+
+    hello(source);
+    // The list's default 340 px, the conversation's 640 and the column's 360 fit 1440 px.
+    expect(columns()).toBe('list + column');
+    // Under 1340 px they do not: the list leaves first, and the conversation and the column keep the room.
+    resizeTo(1339);
+    expect(columns()).toBe('drawer + column');
+    // The list comes back only 40 px past its need, so a width at the edge does not flap; then it stays until it no longer fits.
+    resizeTo(1360);
+    expect(columns()).toBe('drawer + column');
+    resizeTo(1380);
+    expect(columns()).toBe('list + column');
+    resizeTo(1340);
+    expect(columns()).toBe('list + column');
+    // Under 1000 px the column folds into the tabs, and comes back from 1040 px.
+    resizeTo(999);
+    expect(columns()).toBe('drawer + tabs');
+    expect(root.querySelector('#head .tabs')).not.toBeNull();
+    resizeTo(1020);
+    expect(columns()).toBe('drawer + tabs');
+    resizeTo(1040);
+    expect(columns()).toBe('drawer + column');
+    expect(root.querySelector('#head .tabs')).toBeNull();
+    // A phone has separate views, with neither.
+    resizeTo(700);
+    expect(root.classList.contains('drawers')).toBe(false);
+    expect(root.classList.contains('wide')).toBe(false);
+    page.close();
+  });
+
+  it("counts the list's kept width, and stops its sash where the list would no longer fit", () => {
+    localStorage.setItem('switchboard.sideWidth', '400');
+    window.innerWidth = 1366;
+
+    const { page, source } = start();
+    const sash = root.querySelector<HTMLElement>('.side-sash')!;
+
+    hello(source);
+    // 400 + 640 + 360 is more than 1366 px, which the default 340 px list would fit.
+    expect(root.classList.contains('drawers')).toBe(true);
+    resizeTo(1440);
+    expect(root.classList.contains('drawers')).toBe(false);
+    // End stops at 1440 - 640 - 360 px rather than SIDE_MAX, so the list stays a column.
+    sash.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+    expect(localStorage.getItem('switchboard.sideWidth')).toBe('440');
+    expect(root.classList.contains('drawers')).toBe(false);
+    // Reset to the default 340 px at 1300 px, a list kept at 200 px no longer fits: the list becomes a drawer at once, with its sliver drawn,
+    // and the focus leaves the hidden sash for the Work items button.
+    localStorage.setItem('switchboard.sideWidth', '200');
+    page.close();
+    history.replaceState(null, '', '#w=1');
+    window.innerWidth = 1300;
+    const again = start();
+
+    hello(again.source);
+    expect(root.classList.contains('drawers')).toBe(false);
+    const reset = root.querySelector<HTMLElement>('.side-sash')!;
+
+    reset.focus();
+    reset.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    expect(root.classList.contains('drawers')).toBe(true);
+    expect(document.activeElement).toBe(root.querySelector('.header > .list-toggle'));
+    again.page.close();
+  });
+
+  it('takes a list width kept elsewhere as it is', () => {
+    localStorage.setItem('switchboard.sideWidth', '440');
+    window.innerWidth = 1440;
+
+    const { page, source } = start();
+
+    hello(source);
+    expect(root.classList.contains('drawers')).toBe(false);
+    // A width kept elsewhere is taken as it is, and a narrower page then makes the list a drawer.
+    resizeTo(1400);
+    expect(root.style.getPropertyValue('--side-width')).toBe('440px');
+    expect(root.classList.contains('drawers')).toBe(true);
     page.close();
   });
 
@@ -3140,27 +3214,26 @@ describe("the list's CSS", () => {
     expect(bubbles).toMatch(/\n\.speech-bubble \{[^}]*font-size: 110%;/);
   });
 
-  it('makes the list a drawer with its sliver and button from 768 px until 1300 px while a work item is open, sliding in and hiding at once', () => {
-    expect(DRAWER_QUERY).toBe('(768px <= width < 1300px)');
+  it('makes the list a drawer with its sliver and button from 768 px where #root.drawers says it does not fit, while a work item is open, sliding in and hiding at once', () => {
     expect(declarationsOf((selector) => selector === '.header > .list-toggle')).toEqual(['display: none;']);
-    const drawer = css.split(`@media ${DRAWER_QUERY} {`)[1]!;
-    const block = drawer.slice(0, drawer.indexOf('\n}'));
+    // No fixed width decides it: a phone never gets the drawer, and from 768 px only the class the layout sets does.
+    expect(css).not.toMatch(/@media \(\d+px <= width < /);
+    const block = css.split('@media (min-width: 768px) {').slice(1).map((one) => one.slice(0, one.indexOf('\n}'))).find((one) => one.includes('#root.drawers'))!;
 
-    for (const rule of ['#root:not(.listing):not(.history) > .side-sash { display: none; }', '#root:not(.listing):not(.history):not(.drawer-open) > .sliver { display: block; }', '#root:not(.listing):not(.history) .header > .list-toggle { display: inline-flex; }']) {
+    for (const rule of ['#root.drawers:not(.listing):not(.history) > .side-sash { display: none; }', '#root.drawers:not(.listing):not(.history):not(.drawer-open) > .sliver { display: block; }', '#root.drawers:not(.listing):not(.history) .header > .list-toggle { display: inline-flex; }']) {
       expect(block).toContain(rule);
     }
 
     // Hidden, the list keeps its layout off the left edge, so its rows can be measured for the sliver.
-    expect(block).toMatch(/#root:not\(\.listing\):not\(\.history\) > \.side \{[^}]*position: fixed;[^}]*visibility: hidden; transform: translateX\(-100%\);/);
+    expect(block).toMatch(/#root\.drawers:not\(\.listing\):not\(\.history\) > \.side \{[^}]*position: fixed;[^}]*visibility: hidden; transform: translateX\(-100%\);/);
     // Only the shown drawer has a transition, so it slides in and hides at once, as the dock does.
-    expect(declarationsOf((selector) => selector === '#root:not(.listing):not(.history) > .side').join(' ')).not.toContain('transition');
-    expect(declarationsOf((selector) => selector === '#root.drawer-open:not(.listing):not(.history) > .side').join(' ')).toContain('transition: transform 0.15s ease-out');
+    expect(declarationsOf((selector) => selector === '#root.drawers:not(.listing):not(.history) > .side').join(' ')).not.toContain('transition');
+    expect(declarationsOf((selector) => selector === '#root.drawers.drawer-open:not(.listing):not(.history) > .side').join(' ')).toContain('transition: transform 0.15s ease-out');
     expect(declarationsOf((selector) => selector === '.sliver').join(' ')).toMatch(/position: fixed;.*left: 0;.*width: 3px;/);
   });
 
-  it('puts Status and Artifacts beside the conversation from 900 px', () => {
-    expect(WIDE_QUERY).toBe('(min-width: 900px)');
-    expect(css).toContain(`@media ${WIDE_QUERY} {\n  #root.wide > .main`);
+  it('puts Status and Artifacts beside the conversation only where #root.wide says they fit, never on a phone', () => {
+    expect(css).toContain('@media (min-width: 768px) {\n  #root.wide > .main');
   });
 
   it('caps the conversation on a wide screen and gives the Status and Artifacts column the rest of the width, with no cap of its own', () => {
@@ -3170,7 +3243,8 @@ describe("the list's CSS", () => {
     expect(declarationsOf((selector) => selector === '#composer').join(' ')).toContain('max-width: var(--chat-width, 940px)');
     const detail = declarationsOf((selector) => selector.startsWith('#root.wide > .detail') || selector === '.detail' || selector.startsWith('.detail .'));
 
-    expect(detail.join(' ')).toContain('flex: 1 1 320px');
+    expect(detail.join(' ')).toContain(`flex: 1 1 ${DETAIL_MIN}px`);
+    expect(detail.join(' ')).toContain(`min-width: ${DETAIL_MIN}px`);
     expect(detail.join(' ')).not.toMatch(/(?<![-\w])width:|clamp\(|max-width: (?!none)/);
     expect(declarationsOf((selector) => ['.detail .status-tab', '.detail .artifact-list', '.detail .artifact-doc'].includes(selector))).toEqual(['max-width: none;']);
   });

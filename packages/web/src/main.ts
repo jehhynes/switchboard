@@ -12,6 +12,7 @@ import { mount, unmount } from './island.js';
 import type { ComponentChild, VNode } from 'preact';
 import { renderList, renderListPane } from './list.js';
 import { menuRows, renderHeader, renderSideSwitch, renderTabs } from './header.js';
+import { CHAT_FIT, DETAIL_MIN, fitLayout, sideWidth, TABLET_MIN, type Layout } from './layout.js';
 import { renderTimeline } from './timeline.js';
 import { renderArtifacts, renderArtifactView, renderEmpty, renderStatus } from './side.js';
 import { renderSheet } from './sheet.js';
@@ -50,7 +51,8 @@ export const COMPOSER_DRAFT_MS = 300;
 /** The widths the sashes allow for the work items and the conversation, in pixels, their arrow-key step, and where the page keeps them. */
 export const SIDE_MIN = 200;
 export const SIDE_MAX = 600;
-export const CHAT_MIN = 480;
+/** The conversation's sash keeps it at least as wide as the layout lets it be beside the column, so a width kept on a cramped page cannot narrow it. */
+export const CHAT_MIN = CHAT_FIT;
 export const CHAT_MAX = 1600;
 const SASH_STEP = 16;
 /** A pill shrunk to its icon, as the dock's: its 1 px borders and 6 px padding each side round a 14 px codicon, or the key's 12 px logo; and the space between line 2's items. */
@@ -63,13 +65,6 @@ const DETAILS = 'switchboard.messageDetails';
 /** Where an earlier page kept the conversation's text size, which is now fixed; removed on load. */
 const OLD_TEXT_SCALE = 'switchboard.textScale';
 const CHAT_WIDTH = 'switchboard.chatWidth';
-/** From this width Status and Artifacts are a column beside the conversation rather than tabs. */
-export const WIDE_QUERY = '(min-width: 900px)';
-/**
- * The widths at which an open work item's conversation takes the room of the work items, which are then a drawer at the left edge; from 1300 px
- * they are a column, and under 768 px the list and the conversation are separate views (page.css).
- */
-export const DRAWER_QUERY = '(768px <= width < 1300px)';
 /**
  * The drawer's timing, as the dock's auto-hide: a pointer resting on the sliver this long shows it, and a drawer shown that way hides once
  * nothing has kept it open for `DRAWER_HIDE_MS`, checked every `DRAWER_TICK_MS`.
@@ -133,20 +128,54 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const detailHead = root.querySelector<HTMLElement>('#detail .detail-head')!;
   const detailBody = root.querySelector<HTMLElement>('#detail .detail-body')!;
   const historyHost = root.querySelector<HTMLElement>('#history')!;
-  // On a wide screen Status and Artifacts leave the tabs for a column of their own beside the conversation (architecture.md § Web page).
-  const wideQuery = typeof window.matchMedia === 'function' ? window.matchMedia(WIDE_QUERY) : null;
-  const drawerQuery = typeof window.matchMedia === 'function' ? window.matchMedia(DRAWER_QUERY) : null;
-  // The open work item takes the room first: Status and Artifacts are a column from 900 px and the list from 1300 px, with no kept toggle; in
-  // between the list is a drawer. A choice an earlier page kept is dropped.
+  // The open work item takes the room first (layout.ts): the list is a column only while it, the conversation and the Status and Artifacts
+  // column all fit, and a drawer otherwise; Status and Artifacts are a column only while they and the conversation fit, and tabs otherwise. No
+  // toggle is kept; a choice an earlier page kept is dropped.
   localStorage.removeItem('switchboard.layout');
-  const wide = (): boolean => wideQuery?.matches === true;
+  let layout: Layout | null = null;
+  const wide = (): boolean => layout?.wide === true;
   // The installed page, as Chrome opens it from its own window; only it reports a column for the Chrome pane (architecture.md § Web page).
   const standalone = (): boolean => deps.standalone?.() ?? (typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches);
 
   // The work items' and the conversation's widths (architecture.md § Web page), each set on a sash: the work items' on their edge, the
   // conversation's between it and the Status and Artifacts column, which takes the rest of the width.
-  resizer(root, root.querySelector<HTMLElement>('.side-sash')!, root.querySelector<HTMLElement>('.side')!, { property: '--side-width', key: SIDE_WIDTH, min: SIDE_MIN, max: SIDE_MAX });
+  // The list's sash stops where the list would leave the conversation and the column less than they need, so a drag never turns it into a drawer.
+  const sideSashElement = root.querySelector<HTMLElement>('.side-sash')!;
+  const sideSash = resizer(root, sideSashElement, root.querySelector<HTMLElement>('.side')!, {
+    property: '--side-width',
+    key: SIDE_WIDTH,
+    min: SIDE_MIN,
+    max: SIDE_MAX,
+    limit: () => (layout?.list === true ? window.innerWidth - CHAT_FIT - DETAIL_MIN : SIDE_MAX),
+    changed: () => {
+      if (!relayout()) {
+        return;
+      }
+
+      const focused = document.activeElement === sideSashElement;
+
+      draw();
+
+      // A reset that makes the list a drawer hides the sash the focus is on; the focus goes to the button that shows the list.
+      if (focused && drawerMode()) {
+        head.querySelector<HTMLElement>('.list-toggle')?.focus();
+      }
+    },
+  });
   resizer(root, root.querySelector<HTMLElement>('.chat-sash')!, root.querySelector<HTMLElement>('.main')!, { property: '--chat-width', key: CHAT_WIDTH, min: CHAT_MIN, max: CHAT_MAX });
+  /** Works out the columns again from the page's width and the list's kept width, and sets the root's classes; true when they changed. */
+  const relayout = (): boolean => {
+    const next = fitLayout(window.innerWidth, sideWidth(sideSash.width(), window.innerWidth), layout);
+    const changed = layout === null || next.list !== layout.list || next.wide !== layout.wide;
+
+    layout = next;
+    // From tablet width, while the list does not fit, it is a drawer (page.css), shown only with a work item open.
+    root.classList.toggle('drawers', window.innerWidth >= TABLET_MIN && !next.list);
+
+    return changed;
+  };
+
+  relayout();
   // Line 2's pills shrink to their icons when a row is too narrow, as the dock's do: one pass over every row once a frame at most, after a
   // redraw of the list or a change of its width, which reads every width before it changes any class, so the layout is computed once.
   let fitting = false;
@@ -298,8 +327,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   let reportBrowser = (): void => {};
   let forcePane = false;
 
-  wideQuery?.addEventListener?.('change', () => draw());
-  drawerQuery?.addEventListener?.('change', () => draw());
   let state: PageState = EMPTY;
   const view: View = newView();
   // The Changes list, its menu and the session state it was last drawn at, so a turn's end reads it again (architecture.md § Web page).
@@ -1265,8 +1292,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   // ---- The work items' drawer (architecture.md § Web page), shown and hidden as the dock's auto-hide ----
   const drawer = root.querySelector<HTMLElement>('.side')!;
   const sliver = root.querySelector<HTMLElement>('.sliver')!;
-  /** Whether the list is a drawer: at tablet widths while a work item's conversation is open; History, opened from the list, keeps it a column. */
-  const drawerMode = (): boolean => drawerQuery?.matches === true && !(view.list || wanted === null) && shownHistory === null;
+  /** Whether the list is a drawer: from tablet width while it does not fit and a work item's conversation is open; History, opened from the list, keeps it a column. */
+  const drawerMode = (): boolean => root.classList.contains('drawers') && !(view.list || wanted === null) && shownHistory === null;
   let revealTimer: ReturnType<typeof setTimeout> | null = null;
   let drawerTick: ReturnType<typeof setInterval> | null = null;
   let overDrawer = false;
@@ -1419,6 +1446,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
   list.addEventListener('scroll', fitSliver, { passive: true, signal: listening.signal });
   window.addEventListener('resize', fitSliver, { signal: listening.signal });
+  // The columns follow the width as it changes; a draw moves each pane to its place only when they change.
+  window.addEventListener('resize', () => relayout() && draw(), { signal: listening.signal });
 
   /** Draws the state; Preact changes only what differs, so the focus, a selection, the scroll position and open menus stay. */
   const drawRegions = (): void => {
@@ -1428,7 +1457,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     root.classList.toggle('history', shownHistory !== null);
     mount(historyHost, shownHistory === null ? null : renderHistory(shownHistory));
 
-    // The drawer is only at tablet widths, with a work item open; the focus leaves a list that a phone's width now hides for Back.
+    // The drawer is only from tablet width while the list does not fit, with a work item open; the focus leaves a list that a phone's width now
+    // hides for Back.
     const dropped = view.drawer !== null && !drawerMode();
 
     if (dropped) {
@@ -3321,13 +3351,24 @@ export function loadMermaid(): Promise<boolean> {
  * and End while it has the focus; the width goes into a CSS property on the root, kept in local storage under `key` and set before the page
  * is first drawn, so the page does not jump. A double-click returns to the default and forgets it.
  */
-function resizer(root: HTMLElement, sash: HTMLElement, pane: HTMLElement, { property, key, min, max }: { property: string; key: string; min: number; max: number }): void {
+/**
+ * Lets a sash set its pane's width, between `min` and `max`, kept in local storage under `key`; a drag or a key stops at `limit()` too, though
+ * never below `min`, while a kept width is taken as it is. `changed` runs after each width kept. Returns the width set, or null for the default.
+ */
+function resizer(
+  root: HTMLElement,
+  sash: HTMLElement,
+  pane: HTMLElement,
+  { property, key, min, max, limit, changed }: { property: string; key: string; min: number; max: number; limit?: () => number; changed?: () => void },
+): { width(): number | null } {
   /** The width set, or null for the default. */
   let width: number | null = null;
   /** The pane's width as drawn, without its border, which the page's width can hold below the width set. */
   const drawn = (): number => pane.clientWidth || (width ?? pane.getBoundingClientRect().width);
-  const set = (next: number | null, keep: boolean): void => {
-    width = next === null ? null : Math.round(Math.min(max, Math.max(min, next)));
+  /** The most a drag or a key may set now. */
+  const most = (): number => Math.max(min, Math.min(max, limit?.() ?? max));
+  const set = (next: number | null, keep: boolean, cap = max): void => {
+    width = next === null ? null : Math.round(Math.min(cap, Math.max(min, next)));
 
     if (width === null) {
       root.style.removeProperty(property);
@@ -3347,6 +3388,8 @@ function resizer(root: HTMLElement, sash: HTMLElement, pane: HTMLElement, { prop
       } catch {
         // A page without local storage keeps the width until it reloads.
       }
+
+      changed?.();
     }
   };
 
@@ -3371,14 +3414,15 @@ function resizer(root: HTMLElement, sash: HTMLElement, pane: HTMLElement, { prop
     root.classList.add('resizing');
 
     const left = pane.getBoundingClientRect().left;
-    const move = (next: PointerEvent): void => set(next.clientX - left, false);
+    const cap = most();
+    const move = (next: PointerEvent): void => set(next.clientX - left, false, cap);
     const end = (): void => {
       sash.removeEventListener('pointermove', move);
       sash.removeEventListener('pointerup', end);
       sash.removeEventListener('pointercancel', end);
       sash.classList.remove('dragging');
       root.classList.remove('resizing');
-      set(drawn(), true);
+      set(drawn(), true, cap);
     };
 
     sash.addEventListener('pointermove', move);
@@ -3389,12 +3433,15 @@ function resizer(root: HTMLElement, sash: HTMLElement, pane: HTMLElement, { prop
   sash.addEventListener('keydown', (event) => {
     const step = event.shiftKey ? SASH_STEP * 4 : SASH_STEP;
     const now = drawn();
-    const next = { ArrowLeft: now - step, ArrowRight: now + step, Home: min, End: max }[event.key];
+    const cap = most();
+    const next = { ArrowLeft: now - step, ArrowRight: now + step, Home: min, End: cap }[event.key];
 
     if (next !== undefined) {
       event.preventDefault();
       event.stopPropagation();
-      set(next, true);
+      set(next, true, Math.max(cap, Math.min(max, now)));
     }
   });
+
+  return { width: () => width };
 }

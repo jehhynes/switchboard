@@ -203,9 +203,10 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 /*
  * Phone first: under 768 px the list and the conversation are each a full-width view, the list until a work item is opened, the conversation
  * with a Back button at the start of its header; touch targets are at least 44 px tall. From 768 px the open work item takes the room first:
- * until 1300 px the list is a drawer over the conversation's left edge (below), shown by the header's Work items button in Back's place, and
- * from 1300 px it is the side column. With no work item open it is the side column from 768 px. Every switch is by the page's width alone, so
- * a desktop window narrowed to a phone's width gets the phone's layout.
+ * the list is the side column only while it, the conversation and the Status and Artifacts column all fit (`fitLayout` in layout.ts, which
+ * sets #root.drawers otherwise), and a drawer over the conversation's left edge (below) otherwise, shown by the header's Work items button in
+ * Back's place. With no work item open it is the side column from 768 px. Every switch is by the page's width and the list's kept width alone,
+ * so a desktop window narrowed to a phone's width gets the phone's layout.
  */
 #root.listing > .main, #root:not(.listing) > .side { display: none; }
 /* A sash resizes the pane before it (resizer in main.ts, which keeps the width in --side-width or --chat-width), drawn as VS Code's:
@@ -232,14 +233,14 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 .sliver > .stripe-warning { background: var(--vscode-editorWarning-foreground); }
 .sliver > .stripe-error { background: var(--vscode-testing-iconFailed); }
 .sliver > .stripe-turn { background: var(--vscode-focusBorder); }
-@media (768px <= width < 1300px) {
-  #root:not(.listing):not(.history) > .side { position: fixed; top: 0; bottom: 0; left: 0; z-index: 30; visibility: hidden; transform: translateX(-100%); }
-  #root:not(.listing):not(.history) > .side-sash { display: none; }
-  #root.drawer-open:not(.listing):not(.history) > .side { visibility: visible; transform: none; transition: transform 0.15s ease-out; box-shadow: 0 0 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36)); }
-  #root:not(.listing):not(.history):not(.drawer-open) > .sliver { display: block; }
-  #root:not(.listing):not(.history) .header > .list-toggle { display: inline-flex; }
+@media (min-width: 768px) {
+  #root.drawers:not(.listing):not(.history) > .side { position: fixed; top: 0; bottom: 0; left: 0; z-index: 30; visibility: hidden; transform: translateX(-100%); }
+  #root.drawers:not(.listing):not(.history) > .side-sash { display: none; }
+  #root.drawers.drawer-open:not(.listing):not(.history) > .side { visibility: visible; transform: none; transition: transform 0.15s ease-out; box-shadow: 0 0 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36)); }
+  #root.drawers:not(.listing):not(.history):not(.drawer-open) > .sliver { display: block; }
+  #root.drawers:not(.listing):not(.history) .header > .list-toggle { display: inline-flex; }
 }
-@media (prefers-reduced-motion: reduce) { #root.drawer-open:not(.listing):not(.history) > .side { transition: none; } }
+@media (prefers-reduced-motion: reduce) { #root.drawers.drawer-open:not(.listing):not(.history) > .side { transition: none; } }
 /* With a mouse, the group headers can be as compact as the dock's. */
 @media (min-width: 768px) and (pointer: fine) {
   .work-list { --group-head-height: 32px; }
@@ -602,15 +603,15 @@ button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }
 @media (prefers-reduced-motion: reduce) { .composer .mic .codicon { animation: none; } }
 @media (hover: none), (pointer: coarse) { .composer .mic { min-width: 44px; min-height: 44px; } }
 
-/* From 900 px Status and Artifacts leave the tabs for a column beside the conversation, with its own Status and Artifacts switch; narrower
-   screens keep the tabs. The composer stays with the conversation. The conversation's pane keeps the width set on its sash, 940 px by
-   default, its timeline and composer as wide as with the column hidden, and the column, at least 320 px, takes the rest of the width, so a
-   wide screen gives the status and artifacts the room. */
+/* Where the conversation and the column both fit (#root.wide, set by fitLayout in layout.ts), Status and Artifacts leave the tabs for a column
+   beside the conversation, with its own Status and Artifacts switch; narrower screens keep the tabs. The composer stays with the conversation.
+   The conversation's pane keeps the width set on its sash, 940 px by default, its timeline and composer as wide as with the column hidden, and
+   the column, at least 360 px (DETAIL_MIN), takes the rest of the width, so a wide screen gives the status and artifacts the room. */
 .detail { display: none; }
-@media (min-width: 900px) {
+@media (min-width: 768px) {
   #root.wide > .main { flex: 0 1 var(--chat-width, 940px); }
   #root.wide > .chat-sash { display: block; }
-  #root.wide > .detail { display: flex; flex: 1 1 320px; flex-direction: column; min-width: 320px; background: var(--vscode-sideBar-background); border-left: 1px solid var(--vscode-panel-border); }
+  #root.wide > .detail { display: flex; flex: 1 1 360px; flex-direction: column; min-width: 360px; background: var(--vscode-sideBar-background); border-left: 1px solid var(--vscode-panel-border); }
   .detail-head { flex: none; min-height: 45px; display: flex; align-items: flex-end; border-bottom: 1px solid var(--vscode-panel-border); }
   .detail-head { background: var(--sb-tab-strip); }
   .detail-head .tabs { flex: 1; min-width: 0; border-bottom: none; }
