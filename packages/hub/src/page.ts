@@ -127,6 +127,9 @@ export class PageAccess {
   }
 }
 
+/** The page's files a browser fetches without its cookie, for installing the page and for the offline page; none holds anything private. */
+export const PUBLIC_PAGE_FILES = new Set(['manifest.webmanifest', 'sw.js', 'offline.html', 'offline.js', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png']);
+
 /** What `/page/` answers a browser that is not signed in. */
 export const SIGNED_OUT_HTML = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Switchboard</title><style>body{margin:0;display:grid;place-items:center;min-height:100vh;background:#1f1f1f;color:#cccccc;font:14px system-ui,sans-serif}main{max-width:28rem;padding:24px}h1{font-size:18px;font-weight:600;margin:0 0 8px}</style></head><body><main><h1>Not signed in</h1><p>This browser is not signed in to Switchboard. Open the page with Switchboard: Open Web Page in VS Code, or <code>hub.js web</code>.</p></main></body></html>';
 

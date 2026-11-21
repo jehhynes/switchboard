@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { pipeline } from 'node:stream';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import type { HubIdentity } from '@switchboard/core';
-import { ARTIFACT_CSP, cookieValue, loopbackHost, PAGE_COOKIE, PAGE_CSP, pageCookie, SIGNED_OUT_HTML } from './page.js';
+import { ARTIFACT_CSP, cookieValue, loopbackHost, PAGE_COOKIE, PAGE_CSP, pageCookie, PUBLIC_PAGE_FILES, SIGNED_OUT_HTML } from './page.js';
 import type { PageAccess } from './page.js';
 
 export interface Reply {
@@ -42,6 +42,8 @@ export interface HubServerOptions {
   focusChanged?: (key: string | null, at: number) => void;
   /** The web page (architecture.md § Web page); without it the hub serves none. */
   page?: PageRoutes;
+  /** The hub's build, which `/page/ping` answers, so a page can tell a hub that serves another page. */
+  build?: string;
   heartbeatMs?: number;
   now?: () => number;
 }
@@ -448,6 +450,31 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       return true;
     }
 
+    /** A file of the page, under the page's own headers. */
+    const sendAsset = (name: string, headers: Record<string, string> = {}): void => {
+      const asset = page.asset(name);
+
+      if (asset === null) {
+        json(response, 404, { error: 'not found' });
+        return;
+      }
+
+      response.writeHead(200, { 'Content-Type': asset.mime, 'Cache-Control': 'no-cache', 'X-Frame-Options': 'DENY', 'Content-Security-Policy': PAGE_CSP, ...headers });
+      response.end(asset.body);
+    };
+
+    // The installed page's manifest, icons, service worker and offline page, which a browser fetches without the cookie.
+    if (request.method === 'GET' && path.startsWith('/page/') && PUBLIC_PAGE_FILES.has(path.slice('/page/'.length))) {
+      sendAsset(path.slice('/page/'.length));
+      return true;
+    }
+
+    // Whether the hub answers, and which build, for the offline page and a page that lost its stream.
+    if (request.method === 'GET' && path === '/page/ping') {
+      json(response, 200, { build: options.build ?? '' });
+      return true;
+    }
+
     if (!page.access.allows(request.headers.cookie)) {
       if (request.method === 'GET' && path === '/page/') {
         response.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Frame-Options': 'DENY', 'Content-Security-Policy': PAGE_CSP });
@@ -460,18 +487,8 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     }
 
     if (request.method === 'GET' && path.startsWith('/page/')) {
-      const asset = page.asset(path === '/page/' ? 'index.html' : path.slice('/page/'.length));
-
-      if (asset === null) {
-        json(response, 404, { error: 'not found' });
-        return true;
-      }
-
       // Loading the page renews its sign-in's cookie, so a computer in use stays signed in.
-      const renew = path === '/page/' ? { 'Set-Cookie': pageCookie(cookieValue(request.headers.cookie, PAGE_COOKIE)!) } : {};
-
-      response.writeHead(200, { 'Content-Type': asset.mime, 'Cache-Control': 'no-cache', 'X-Frame-Options': 'DENY', 'Content-Security-Policy': PAGE_CSP, ...renew });
-      response.end(asset.body);
+      sendAsset(path === '/page/' ? 'index.html' : path.slice('/page/'.length), path === '/page/' ? { 'Set-Cookie': pageCookie(cookieValue(request.headers.cookie, PAGE_COOKIE)!) } : {});
       return true;
     }
 

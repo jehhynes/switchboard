@@ -8,7 +8,7 @@ import { listenHub } from '../src/server.js';
 import type { HubServer, PageRoutes } from '../src/server.js';
 import { createHash } from 'node:crypto';
 import { Store } from '@switchboard/core';
-import { artifactFile, cookieValue, dockRowOf, findFiles, loopbackHost, PageAccess, pageCookie, PAGE_LINK_MS, PAGE_SESSION_MS, PAGE_SESSIONS_KEPT, pageActionEvent, pageActions, pageGroups, pageList, pasteText } from '../src/page.js';
+import { artifactFile, cookieValue, dockRowOf, findFiles, loopbackHost, PageAccess, pageCookie, PUBLIC_PAGE_FILES, PAGE_LINK_MS, PAGE_SESSION_MS, PAGE_SESSIONS_KEPT, pageActionEvent, pageActions, pageGroups, pageList, pasteText } from '../src/page.js';
 import { dockView } from '../src/dock.js';
 import type { DockView } from '../src/dock.js';
 import { pageAsset } from '../src/pageAssets.js';
@@ -265,6 +265,8 @@ describe('pageAsset', () => {
   it("serves the page's own files and Mermaid from the home, and nothing else", () => {
     expect(pageAsset('index.html', dir)?.mime).toBe('text/html; charset=utf-8');
     expect(Buffer.isBuffer(pageAsset('codicon.ttf', dir)?.body)).toBe(true);
+    // Every file served without a sign-in is one of the page's own.
+    expect([...PUBLIC_PAGE_FILES].filter((name) => pageAsset(name, dir) === null)).toEqual([]);
     expect(pageAsset('mermaid.min.js', dir)).toBeNull();
     mkdirSync(join(dir, 'web'));
     writeFileSync(join(dir, 'web', 'mermaid.min.js'), 'mermaid');
@@ -327,7 +329,7 @@ describe('the web page routes', () => {
 
     const page: PageRoutes = {
       access: new PageAccess(store),
-      asset: (name) => (name === 'index.html' ? { mime: 'text/html; charset=utf-8', body: '<html>page</html>' } : null),
+      asset: (name) => (name === 'index.html' ? { mime: 'text/html; charset=utf-8', body: '<html>page</html>' } : ['manifest.webmanifest', 'sw.js', 'page.js'].includes(name) ? { mime: 'text/plain', body: name } : null),
       opened: () => {
         const key = `page-${++keys}`;
 
@@ -344,6 +346,7 @@ describe('the web page routes', () => {
       identity: { hub: 'switchboard', protocol: 1, version: '0', pid: 1 },
       onShutdown: () => {},
       page,
+      build: 'b7',
       windowClosed: (key) => closed.push(key),
       conversation: (key, write) => {
         write(`event: hello\ndata: {"key":"${key}"}\n\n`);
@@ -494,6 +497,22 @@ describe('the web page routes', () => {
     expect(otherStream.ended).toBe(false);
     expect((await send(server.port, 'GET', '/v1/page/list', { Cookie: first })).status).toBe(401);
     expect((await send(server.port, 'GET', '/v1/page/list', { Cookie: renewed })).status).toBe(200);
+  });
+
+  it("serves the installed page's public files and ping without a sign-in, but the page's own files only with one", async () => {
+    await serve();
+
+    const manifest = await send(server.port, 'GET', '/page/manifest.webmanifest', {});
+
+    expect(manifest).toMatchObject({ status: 200, body: 'manifest.webmanifest' });
+    expect(manifest.headers['content-security-policy']).toContain("frame-ancestors 'none'");
+    expect((await send(server.port, 'GET', '/page/sw.js', {})).body).toBe('sw.js');
+    // A public name the page lacks is not found.
+    expect((await send(server.port, 'GET', '/page/offline.js', {})).status).toBe(404);
+    expect((await send(server.port, 'GET', '/page/page.js', {})).status).toBe(401);
+    expect(JSON.parse((await send(server.port, 'GET', '/page/ping', {})).body)).toEqual({ build: 'b7' });
+    expect((await send(server.port, 'GET', '/page/ping', { Host: `evil.example:${server.port}` })).status).toBe(403);
+    expect((await send(server.port, 'GET', '/page/manifest.webmanifest', { Host: `evil.example:${server.port}` })).status).toBe(403);
   });
 
   it('revokes every sign-in only with the hub token and ends the open pages\' streams', async () => {

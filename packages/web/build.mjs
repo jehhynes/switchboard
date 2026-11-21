@@ -6,15 +6,45 @@ import { dirname, join } from 'node:path';
 import esbuild from 'esbuild';
 
 const require = createRequire(import.meta.url);
-const built = await esbuild.build({ entryPoints: ['src/entry.ts'], bundle: true, format: 'iife', platform: 'browser', target: 'es2022', minify: true, write: false, logLevel: 'info' });
+const bundle = async (entry) =>
+  (await esbuild.build({ entryPoints: [entry], bundle: true, format: 'iife', platform: 'browser', target: 'es2022', minify: true, write: false, logLevel: 'info' })).outputFiles[0].text;
 const codicons = dirname(require.resolve('@vscode/codicons/dist/codicon.css'));
+const theme = readFileSync('src/theme.css', 'utf8');
+// The installed page's window and splash take the colour of the page's side bar and header.
+const themeColor = /--vscode-sideBar-background:\s*(#[0-9a-fA-F]{6})/.exec(theme)[1];
+const html = (file) => readFileSync(file, 'utf8').replaceAll('{{themeColor}}', themeColor);
+const text = (mime, body) => ({ mime, body, base64: false });
+const binary = (mime, file) => ({ mime, body: readFileSync(file).toString('base64'), base64: true });
+const manifest = {
+  id: '/page/',
+  name: 'Switchboard',
+  short_name: 'Switchboard',
+  description: "Switchboard's work items and conversations.",
+  start_url: '/page/',
+  scope: '/page/',
+  display: 'standalone',
+  background_color: themeColor,
+  theme_color: themeColor,
+  icons: [
+    { src: 'icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+    { src: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+    { src: 'icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+  ],
+};
 const assets = {
-  'index.html': { mime: 'text/html; charset=utf-8', body: readFileSync('src/index.html', 'utf8'), base64: false },
-  'page.js': { mime: 'text/javascript; charset=utf-8', body: built.outputFiles[0].text, base64: false },
-  'page.css': { mime: 'text/css; charset=utf-8', body: readFileSync('src/page.css', 'utf8'), base64: false },
-  'theme.css': { mime: 'text/css; charset=utf-8', body: readFileSync('src/theme.css', 'utf8'), base64: false },
-  'codicon.css': { mime: 'text/css; charset=utf-8', body: readFileSync(join(codicons, 'codicon.css'), 'utf8'), base64: false },
-  'codicon.ttf': { mime: 'font/ttf', body: readFileSync(join(codicons, 'codicon.ttf')).toString('base64'), base64: true },
+  'index.html': text('text/html; charset=utf-8', html('src/index.html')),
+  'page.js': text('text/javascript; charset=utf-8', await bundle('src/entry.ts')),
+  'page.css': text('text/css; charset=utf-8', readFileSync('src/page.css', 'utf8')),
+  'theme.css': text('text/css; charset=utf-8', theme),
+  'codicon.css': text('text/css; charset=utf-8', readFileSync(join(codicons, 'codicon.css'), 'utf8')),
+  'codicon.ttf': binary('font/ttf', join(codicons, 'codicon.ttf')),
+  'manifest.webmanifest': text('application/manifest+json', JSON.stringify(manifest)),
+  'sw.js': text('text/javascript; charset=utf-8', await bundle('src/swEntry.ts')),
+  'offline.html': text('text/html; charset=utf-8', html('src/offline.html')),
+  'offline.js': text('text/javascript; charset=utf-8', await bundle('src/offlineEntry.ts')),
+  'icon-192.png': binary('image/png', 'src/icon-192.png'),
+  'icon-512.png': binary('image/png', 'src/icon-512.png'),
+  'icon-maskable-512.png': binary('image/png', 'src/icon-maskable-512.png'),
 };
 
 mkdirSync('dist', { recursive: true });

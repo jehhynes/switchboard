@@ -124,6 +124,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
   const app = options.app === undefined ? undefined : await options.app();
   const server = await listenHub({
     identity: { hub: HUB_NAME, protocol: PROTOCOL, version, pid: process.pid },
+    build,
     onShutdown: () => void stop('a client asked it to stop').then(() => exit(0)),
     ...(app === undefined
       ? {}
