@@ -12,7 +12,7 @@ describe('parseSettings', () => {
         dock: { openVSCode: 'always', openTerminal: 'vscode', openIn: 'vscode' },
         alerts: { surface: 'auto' },
         voice: { enabled: false, voice: 'marin', style: 'none', speed: 1, expressive: false, expandReplies: false, awayMinutes: 2, needsYouSound: true, outputDevice: null, micIdleMinutes: 10, endPauseMs: 3000, inputDevice: null, halfDuplexTailMs: 800, duplex: { local: 'auto', remote: 'auto' }, matchThreshold: 0.6, pitchLowFactor: 1.22, pitchMinLowShare: 0.2, roomHold: true, roomHoldSeconds: 60, personas: [], playbookPersonas: {}, spokenAlerts: true, alertOn: { finished: true, question: true, permission: true }, alertAnswerSeconds: 10, operatorName: '' },
-        web: { port: 47616, chromePane: false },
+        web: { port: 47616, chromePane: false, remoteHosts: [], remoteLogins: [], tailscale: false },
       },
     });
   });
@@ -28,7 +28,7 @@ describe('parseSettings', () => {
         dock: { openVSCode: 'review', openTerminal: 'auto', openIn: 'web' },
         alerts: { surface: 'dock' },
         voice: { enabled: true, voice: 'cedar', style: 'pair', speed: 1.25, expressive: true, expandReplies: true, awayMinutes: 5, needsYouSound: false, outputDevice: 'Speakers', micIdleMinutes: 0, endPauseMs: 2500, inputDevice: 'Headset', halfDuplexTailMs: 450, duplex: { local: 'full', remote: 'half' }, matchThreshold: 0.7, pitchLowFactor: 1.5, pitchMinLowShare: 0, roomHold: false, roomHoldSeconds: 120, spokenAlerts: false, alertOn: { finished: false, question: true, permission: false }, alertAnswerSeconds: 20, operatorName: ' Alex ' },
-        web: { port: 0, chromePane: true },
+        web: { port: 0, chromePane: true, remoteHosts: ['PC.tailnet.ts.net', 'pc.tailnet.ts.net '], remoteLogins: ['alex@example.com'], tailscale: true },
       }),
     );
 
@@ -51,7 +51,7 @@ describe('parseSettings', () => {
         dock: { openVSCode: 'review', openTerminal: 'auto', openIn: 'web' },
         alerts: { surface: 'dock' },
         voice: { enabled: true, voice: 'cedar', style: 'pair', speed: 1.25, expressive: true, expandReplies: true, awayMinutes: 5, needsYouSound: false, outputDevice: 'Speakers', micIdleMinutes: 0, endPauseMs: 2500, inputDevice: 'Headset', halfDuplexTailMs: 450, duplex: { local: 'full', remote: 'half' }, matchThreshold: 0.7, pitchLowFactor: 1.5, pitchMinLowShare: 0, roomHold: false, roomHoldSeconds: 120, personas: [], playbookPersonas: {}, spokenAlerts: false, alertOn: { finished: false, question: true, permission: false }, alertAnswerSeconds: 20, operatorName: 'Alex' },
-        web: { port: 0, chromePane: true },
+        web: { port: 0, chromePane: true, remoteHosts: ['pc.tailnet.ts.net'], remoteLogins: ['alex@example.com'], tailscale: true },
       },
     });
   });
@@ -60,6 +60,18 @@ describe('parseSettings', () => {
     expect(parseSettings('{"web":{"port":65536,"host":"0.0.0.0"}}')).toEqual({ errors: ['web.host is not a setting.', 'web.port must be a whole number from 0 to 65535.'] });
     expect(parseSettings('{"web":{"port":1.5}}')).toEqual({ errors: ['web.port must be a whole number from 0 to 65535.'] });
     expect(parseSettings('{"web":{"chromePane":"yes"}}')).toEqual({ errors: ['web.chromePane must be true or false.'] });
+  });
+
+  it('refuses a remote host with a port, a scheme, an IP address or one label, a login with spaces, and a tailscale that is not true or false', () => {
+    const hosts = 'web.remoteHosts must be a list of host names such as pc.tailnet.ts.net, without a port.';
+
+    for (const host of ['pc.tailnet.ts.net:443', 'https://pc.tailnet.ts.net', '100.64.0.1', 'localhost', '', '*.ts.net', 'pc..ts.net']) {
+      expect(parseSettings(JSON.stringify({ web: { remoteHosts: [host] } }))).toEqual({ errors: [hosts] });
+    }
+
+    expect(parseSettings('{"web":{"remoteHosts":"pc.tailnet.ts.net"}}')).toEqual({ errors: [hosts] });
+    expect(parseSettings('{"web":{"remoteLogins":["alex example"]}}')).toEqual({ errors: ['web.remoteLogins must be a list of logins without spaces.'] });
+    expect(parseSettings('{"web":{"tailscale":"yes"}}')).toEqual({ errors: ['web.tailscale must be true or false.'] });
   });
 
   it('refuses voice values outside their choices and ranges, and other voice keys', () => {

@@ -135,7 +135,19 @@ export interface WebSettings {
    * column. Experimental and Windows only; off by default.
    */
   chromePane: boolean;
+  /**
+   * Names the page also answers as when a request comes through a local HTTPS proxy, `tailscale serve` (architecture.md § Remote access), such as
+   * `pc.tailnet.ts.net`; read at hub start. Empty by default, so the page answers only on this computer.
+   */
+  remoteHosts: string[];
+  /** The `Tailscale-User-Login` values a remote request must carry, such as the operator's Tailscale login; read at hub start. */
+  remoteLogins: string[];
+  /** At hub start, adds this machine's Tailscale name to `remoteHosts` and its owner's login to `remoteLogins`, from `tailscale status --json`. */
+  tailscale: boolean;
 }
+
+/** A DNS name with at least two labels, lowercase, that is not an IP address: the form a remote host takes. */
+export const REMOTE_HOST = /^(?=.{1,253}$)(?!\d+(\.\d+)*$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/;
 
 /** The voices of OpenAI's realtime speech models (voice-design § 4.8); OpenAI recommends marin and cedar. */
 export const TTS_VOICES = ['marin', 'cedar', 'alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse'] as const;
@@ -249,7 +261,7 @@ export const DEFAULT_SETTINGS: Settings = {
   dock: { openVSCode: 'always', openTerminal: 'vscode', openIn: 'vscode' },
   alerts: { surface: 'auto' },
   voice: { enabled: false, voice: 'marin', style: 'none', speed: 1, expressive: false, expandReplies: false, awayMinutes: 2, needsYouSound: true, outputDevice: null, micIdleMinutes: 10, endPauseMs: 3000, inputDevice: null, halfDuplexTailMs: 800, duplex: { local: 'auto', remote: 'auto' }, matchThreshold: 0.6, pitchLowFactor: 1.22, pitchMinLowShare: 0.2, roomHold: true, roomHoldSeconds: 60, personas: [], playbookPersonas: {}, spokenAlerts: true, alertOn: { finished: true, question: true, permission: true }, alertAnswerSeconds: 10, operatorName: '' },
-  web: { port: 47616, chromePane: false },
+  web: { port: 47616, chromePane: false, remoteHosts: [], remoteLogins: [], tailscale: false },
 };
 
 /** A source's or schedule's name: it keys tickets in the store and History. */
@@ -353,6 +365,22 @@ class Reader {
     }
 
     return value;
+  }
+
+  /** A list of strings, each matching `pattern` once lowercased, without repeats; `what` names one in the error. */
+  names(section: Json, key: string, path: string, pattern: RegExp, what: string): string[] {
+    const value = section[key];
+
+    if (value === undefined) {
+      return [];
+    }
+
+    if (!Array.isArray(value) || value.some((one) => typeof one !== 'string' || !pattern.test(one.trim().toLowerCase()))) {
+      this.errors.push(`${path}.${key} must be a list of ${what}.`);
+      return [];
+    }
+
+    return [...new Set(value.map((one: string) => one.trim().toLowerCase()))];
   }
 
   /** A non-empty string, or null. */
@@ -581,8 +609,14 @@ export function parseSettings(text: string): SettingsResult {
   voice.playbookPersonas = parsePlaybookPersonas(read, voiceIn['playbookPersonas'], voice.personas);
 
   const webIn = read.section(root, 'web', 'web');
-  read.unknown(webIn, ['port', 'chromePane'], 'web');
-  const web: WebSettings = { port: read.integer(webIn, 'port', 'web', defaults.web.port, 0, 65535), chromePane: read.boolean(webIn, 'chromePane', 'web', defaults.web.chromePane) };
+  read.unknown(webIn, ['port', 'chromePane', 'remoteHosts', 'remoteLogins', 'tailscale'], 'web');
+  const web: WebSettings = {
+    port: read.integer(webIn, 'port', 'web', defaults.web.port, 0, 65535),
+    chromePane: read.boolean(webIn, 'chromePane', 'web', defaults.web.chromePane),
+    remoteHosts: read.names(webIn, 'remoteHosts', 'web', REMOTE_HOST, 'host names such as pc.tailnet.ts.net, without a port'),
+    remoteLogins: read.names(webIn, 'remoteLogins', 'web', /^[^\s,;]+$/, 'logins without spaces'),
+    tailscale: read.boolean(webIn, 'tailscale', 'web', defaults.web.tailscale),
+  };
 
   return read.errors.length > 0 ? { errors: read.errors } : { settings: { sessions, triage, sources, schedules, dock, alerts, voice, web } };
 }
