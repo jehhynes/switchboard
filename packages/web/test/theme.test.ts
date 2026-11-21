@@ -81,7 +81,11 @@ describe('the theme copy', () => {
     expect(css).toMatch(/\.main \{[^}]*background: var\(--sb-chat-background\)/);
     expect(css).toMatch(/\.row\.selected \{[^}]*background: var\(--sb-row-selected\)/);
     expect(css).toMatch(/\.header \{[^}]*background: var\(--sb-bar-background\)/);
-    expect(css).toMatch(/\.tabs \{[^}]*background: var\(--sb-bar-background\)/);
+    // The tab strip is a shade of the surface under it, in both schemes, and the chosen tab is that surface.
+    expect(css).toMatch(/\.tabs \{[^}]*background: var\(--sb-tab-strip\)/);
+    expect(css).toMatch(/--sb-tab-strip: color-mix\(in srgb, var\(--sb-tab-surface\), #000 var\(--sb-tab-shade\)\)/);
+    expect(css).toMatch(/\.tab\.selected \{[^}]*background: var\(--sb-tab-surface\)/);
+    expect(light).toContain('--sb-tab-shade:');
   });
 
   it('gives light its Light Modern surfaces: the conversation white, its bars and the side bar grey, and a selected row that shows and stays readable', () => {

@@ -7,9 +7,9 @@ html, body { height: 100%; margin: 0; }
    editor tabs do, and the selected row takes the dock's light selection colour (#E4E6F1, Light Modern's selected activity bar item), since
    Light Modern's list selection (#E8E8E8) barely shows on the side bar. The list's muted texts take the dock's grey (DockMuted), which in
    Light Modern is #717171, not the theme's description colour. */
-:root { --sb-github: #f0f6fc; --sb-pull-request: #a371f7; --sb-source-off: #7a7a7a; --sb-chat-background: var(--vscode-sideBar-background); --sb-bar-background: transparent; --sb-row-selected: var(--vscode-list-activeSelectionBackground); --sb-row-muted: var(--vscode-descriptionForeground); }
+:root { --sb-github: #f0f6fc; --sb-pull-request: #a371f7; --sb-source-off: #7a7a7a; --sb-chat-background: var(--vscode-sideBar-background); --sb-bar-background: transparent; --sb-row-selected: var(--vscode-list-activeSelectionBackground); --sb-row-muted: var(--vscode-descriptionForeground); --sb-tab-shade: 25%; }
 @media (prefers-color-scheme: light) {
-  :root { --sb-github: #1f2328; --sb-pull-request: #8250df; --sb-source-off: #8a8a8a; --sb-composer-background: color-mix(in srgb, var(--vscode-input-background) 50%, var(--vscode-sideBar-background)); --sb-chat-background: var(--vscode-editor-background); --sb-bar-background: var(--vscode-sideBar-background); --sb-row-selected: #E4E6F1; --sb-row-muted: #717171; }
+  :root { --sb-github: #1f2328; --sb-pull-request: #8250df; --sb-source-off: #8a8a8a; --sb-composer-background: color-mix(in srgb, var(--vscode-input-background) 50%, var(--vscode-sideBar-background)); --sb-chat-background: var(--vscode-editor-background); --sb-bar-background: var(--vscode-sideBar-background); --sb-row-selected: #E4E6F1; --sb-row-muted: #717171; --sb-tab-shade: 3.5%; }
 }
 body { color: var(--vscode-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); line-height: 1.5; }
 /* The installed app's title bar takes the page's colour, so a line along the page's top edge marks where the title bar ends. */
@@ -286,10 +286,15 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 .pane-note { max-width: 300px; margin: 4px 16px 4px 24px; color: var(--vscode-descriptionForeground); white-space: normal; }
 .menu-separator { height: 1px; margin: 4px 10px; background: var(--vscode-menu-separatorBackground, var(--vscode-widget-border, rgba(127, 127, 127, 0.35))); }
 .menu-message { max-width: 320px; padding: 5px 16px 5px 34px; color: var(--vscode-descriptionForeground); white-space: normal; }
-.tabs { display: flex; gap: 4px; padding: 0 8px; border-bottom: 1px solid var(--vscode-panel-border); background: var(--sb-bar-background); user-select: none; }
-.tab { display: flex; align-items: center; gap: 6px; padding: 0 6px; height: 35px; border: none; border-bottom: 1px solid transparent; background: transparent; color: var(--vscode-panelTitle-inactiveForeground); font-size: 11px; text-transform: uppercase; cursor: pointer; }
-.tab:hover, .tab.selected { color: var(--vscode-panelTitle-activeForeground); }
-.tab.selected { border-bottom-color: var(--vscode-panelTitle-activeBorder); }
+/* The tabs drawn as VS Code's editor tabs (style A): a cell each on a strip one shade darker than the surface under it, the chosen one filled with
+   that surface, its top edge in the accent colour and no bottom border, so it joins the content below. 13 px sentence-case labels, 35 px tall. */
+.tabs { display: flex; align-items: stretch; gap: 0; padding: 0; border-bottom: 1px solid var(--vscode-panel-border); background: var(--sb-tab-strip); user-select: none; }
+.tab { position: relative; display: flex; flex: none; align-items: center; gap: 6px; height: 35px; margin-bottom: -1px; padding: 0 14px; border: none; border-top: 1px solid transparent; border-right: 1px solid var(--vscode-panel-border); border-bottom: 1px solid transparent; background: var(--sb-tab-strip); color: var(--vscode-panelTitle-inactiveForeground); font-size: 13px; cursor: pointer; white-space: nowrap; }
+.tab:hover { color: var(--vscode-panelTitle-activeForeground); background: var(--sb-tab-surface); }
+.tab.selected { color: var(--vscode-panelTitle-activeForeground); background: var(--sb-tab-surface); border-top-color: var(--vscode-panelTitle-activeBorder); border-bottom-color: var(--sb-tab-surface); }
+.main { --sb-tab-surface: var(--sb-chat-background); }
+.detail { --sb-tab-surface: var(--vscode-sideBar-background); }
+.main, .detail { --sb-tab-strip: color-mix(in srgb, var(--sb-tab-surface), #000 var(--sb-tab-shade)); }
 .tab-badge { box-sizing: border-box; min-width: 16px; height: 16px; padding: 0 5px; border-radius: 8px; font-size: 11px; line-height: 16px; text-align: center; text-transform: none; color: var(--vscode-activityBarBadge-foreground); background: var(--vscode-activityBarBadge-background); }
 .scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 20px 20px 16px; }
 .scroll.framed { display: flex; flex-direction: column; padding: 0; }
@@ -586,7 +591,8 @@ button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }
   #root.wide > .chat-sash { display: block; }
   #root.wide > .detail { display: flex; flex: 1 1 320px; flex-direction: column; min-width: 320px; background: var(--vscode-sideBar-background); border-left: 1px solid var(--vscode-panel-border); }
   .detail-head { flex: none; min-height: 45px; display: flex; align-items: flex-end; border-bottom: 1px solid var(--vscode-panel-border); }
-  .detail-head .tabs { border-bottom: none; }
+  .detail-head { background: var(--sb-tab-strip); }
+  .detail-head .tabs { flex: 1; min-width: 0; border-bottom: none; }
   .detail .status-tab, .detail .artifact-list, .detail .artifact-doc { max-width: none; }
 }
 
