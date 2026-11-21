@@ -822,6 +822,7 @@ const dockWithRuns = () => {
       '/v1/conversation/row-action': async (body) => (isRecord(body) ? conversation.rowAction(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId, action}.' } }),
       '/v1/conversation/prompt': async (body) => (isRecord(body) ? conversation.prompt(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } }),
       '/v1/conversation/prompt-key': async (body) => (isRecord(body) ? conversation.promptKey(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, prompt, key}.' } }),
+      '/v1/conversation/page-conversation': async (body) => (isRecord(body) ? conversation.pageConversation(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, provider?}.' } }),
       '/v1/conversation/resume': async (body) => (isRecord(body) ? conversation.resume(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } }),
       '/v1/conversation/row-paste': async (body) => (isRecord(body) ? conversation.rowPaste(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId, label}.' } }),
       '/v1/conversation/page-focus': async (body) => (isRecord(body) ? conversation.pageFocus(body) : { status: 400, body: { error: 'Expected {window, focused}.' } }),

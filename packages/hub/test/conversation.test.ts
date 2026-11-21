@@ -1920,6 +1920,48 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     expect(held.writes).toHaveLength(2);
   });
 
+  it("starts a page's new conversation in the shown conversation's folder only, as the dock's New conversation in a folder does", () => {
+    const made: Array<[string, string, string | undefined]> = [];
+    const store = Store.open(':memory:');
+    const view = world();
+    const scopes = new WindowScopes({ store, windows: WINDOWS, now: () => NOW, newKey: () => 'pk' });
+    const service = new ConversationService({
+      store,
+      windows: scopes,
+      projectsDir: join(dir, 'projects'),
+      claudeConfig: join(dir, '.claude.json'),
+      screen: async () => null,
+      input: new FakeHeld(),
+      hooks: () => true,
+      now: () => NOW,
+      newId: () => 'id',
+      newConversation: (hostWindow, folder, provider) => {
+        made.push([hostWindow, folder, provider]);
+        return { workItemId: 41 };
+      },
+      log: () => {},
+    });
+
+    stored(store, view);
+    scopes.update(view.view);
+
+    const page = scopes.openPage();
+
+    expect(service.pageConversation({ window: page, scopeGen: 0, opId: 'n' }).status).toBe(403);
+    service.select({ window: page, opId: 'o', workItemId: 3 });
+
+    const folder = scopes.scope(page)!.folder;
+
+    expect(service.pageConversation({ window: page, scopeGen: 0, opId: 'n' }).status).toBe(409);
+    expect(service.pageConversation({ window: page, scopeGen: 1, opId: 'n', provider: 'gpt' }).status).toBe(400);
+    expect(made).toEqual([]);
+
+    // The folder is the shown conversation's, checked as the dock's is, never one the page names.
+    expect(folder).toBe('D:/w3');
+    expect(service.pageConversation({ window: page, scopeGen: 1, opId: 'n', provider: 'codex', folder: dir })).toEqual({ status: 400, body: { error: 'D:/w3 is not a folder a session can run in.' } });
+    expect(made).toEqual([]);
+  });
+
   it("unbinds a page whose work item was deleted, raising its scope generation", () => {
     const { store, scopes, service, openPage, view } = setup();
     const page = openPage();

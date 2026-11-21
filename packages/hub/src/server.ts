@@ -61,8 +61,11 @@ export interface PageRoutes {
   artifact(key: string, name: string): { path: string; mime: string; sandboxed: boolean } | null;
 }
 
-/** The conversation commands a page may post with its cookie; never `new-conversation`, since a page hosts none. `row-action`, `row-paste`, `resume`, `prompt` and `prompt-key` take only a page key. */
-export const PAGE_COMMANDS = new Set(['send', 'history', 'seen', 'select', 'statuses', 'commands', 'answer', 'talk-here', 'stop-speaking', 'speak-replies', 'replay', 'personas', 'persona', 'page-focus', 'row-action', 'row-paste', 'resume', 'prompt', 'prompt-key', 'mic', 'composer']);
+/**
+ * The conversation commands a page may post with its cookie; never `new-conversation`, since a page hosts none: its New conversation… is
+ * `page-conversation`, hosted by the shown conversation's folder. `row-action`, `row-paste`, `resume`, `prompt` and `prompt-key` take only a page key.
+ */
+export const PAGE_COMMANDS = new Set(['send', 'history', 'seen', 'select', 'statuses', 'commands', 'answer', 'talk-here', 'stop-speaking', 'speak-replies', 'replay', 'personas', 'persona', 'page-focus', 'row-action', 'row-paste', 'resume', 'prompt', 'prompt-key', 'mic', 'composer', 'providers', 'page-conversation']);
 
 export interface HubServer {
   port: number;

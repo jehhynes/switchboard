@@ -718,7 +718,7 @@ describe('the page', () => {
 describe('the page in use', () => {
   let posts: Array<{ url: string; body: Record<string, unknown> }>;
   let root: HTMLElement;
-  let answers: Record<string, { status: number; body: unknown; text?: string }>;
+  let answers: Record<string, { status: number; body: unknown; text?: string; wait?: Promise<void> }>;
 
   beforeEach(() => {
     posts = [];
@@ -741,6 +741,8 @@ describe('the page in use', () => {
 
       const name = Object.keys(answers).find((one) => url.includes(one));
       const answer = name === undefined ? { status: 200, body: {} } : answers[name]!;
+
+      await answer.wait;
 
       return { status: answer.status, ok: answer.status === 200, json: async () => answer.body, text: async () => answer.text ?? '' } as unknown as Response;
     });
@@ -888,6 +890,69 @@ describe('the page in use', () => {
     page.close();
   });
 
+  it("starts a new conversation in the shown conversation's folder from the dropdown, asking for the provider only when there is a choice", async () => {
+    const { page, source } = start();
+
+    answers['/providers'] = { status: 200, body: { defaultProvider: 'codex', installed: ['claude', 'codex'] } };
+    answers['/page-conversation'] = { status: 200, body: { workItemId: 9, folder: 'D:/w' } };
+    hello(source);
+    click('[data-action="picker"]');
+    click('[data-action="new-conversation"]');
+    await flush();
+    expect([...root.querySelectorAll('.conversation-menu .menu-row')].map((row) => row.textContent)).toEqual(['CodexDefault', 'Claude']);
+    click('[data-action="new-provider"][data-provider="claude"]');
+    await flush();
+    await flush();
+    expect(posts.find((post) => post.url.endsWith('/page-conversation'))?.body).toMatchObject({ window: 'pk', scopeGen: 3, provider: 'claude' });
+    expect(posts.find((post) => post.url.endsWith('/page-conversation'))?.body).not.toHaveProperty('folder');
+    expect(posts.filter((post) => post.url.endsWith('/select')).at(-1)?.body['workItemId']).toBe(9);
+    expect(root.querySelector('.conversation-menu')).toBeNull();
+
+    // A selection while the conversation is being made keeps the page where the operator went.
+    let release: () => void = () => {};
+
+    answers['/providers'] = { status: 200, body: { defaultProvider: 'claude', installed: ['claude'] } };
+    answers['/page-conversation'] = { status: 200, body: { workItemId: 11, folder: 'D:/w' }, wait: new Promise<void>((resolve) => void (release = resolve)) };
+    posts = [];
+    click('[data-action="picker"]');
+    click('[data-action="new-conversation"]');
+    await flush();
+    await flush();
+    expect(posts.some((post) => post.url.endsWith('/page-conversation'))).toBe(true);
+    click('#list [data-work-item="2"]');
+    release();
+    await flush();
+    await flush();
+    expect(posts.filter((post) => post.url.endsWith('/select')).map((post) => post.body['workItemId'])).not.toContain(11);
+    delete answers['/page-conversation'].wait;
+    answers['/providers'] = { status: 200, body: { defaultProvider: 'codex', installed: ['claude', 'codex'] } };
+    answers['/page-conversation'] = { status: 200, body: { workItemId: 9, folder: 'D:/w' } };
+    click('#list [data-work-item="1"]');
+    await flush();
+
+    // A selection while the providers load drops the choice, so nothing starts in the other conversation's folder.
+    posts = [];
+    click('[data-action="picker"]');
+    click('[data-action="new-conversation"]');
+    click('#list [data-work-item="2"]');
+    await flush();
+    await flush();
+    expect(root.querySelector('.conversation-menu')).toBeNull();
+    expect(posts.some((post) => post.url.endsWith('/page-conversation'))).toBe(false);
+
+    // One provider installed: no menu.
+    answers['/providers'] = { status: 200, body: { defaultProvider: 'claude', installed: ['codex'] } };
+    answers['/page-conversation'] = { status: 409, body: { error: 'New sessions need Code Mode (sessions.codeMode).' } };
+    posts = [];
+    click('[data-action="picker"]');
+    click('[data-action="new-conversation"]');
+    await flush();
+    await flush();
+    expect(posts.find((post) => post.url.endsWith('/page-conversation'))?.body).toMatchObject({ provider: 'codex' });
+    expect(root.querySelector('.composer-error-text')!.textContent).toBe('New sessions need Code Mode (sessions.codeMode).');
+    page.close();
+  });
+
   it('answers a card with Submit as an ordinary message, and shows a refusal on the card', async () => {
     const { page, source } = start();
 
@@ -917,7 +982,7 @@ describe('the page in use', () => {
     click('[data-action="more"]');
     expect(root.querySelector('#panel')!.textContent).toContain('Whole reply.');
     click('[data-action="picker"]');
-    expect(root.querySelectorAll('.conversation-menu .menu-row')).toHaveLength(2);
+    expect([...root.querySelectorAll('.conversation-menu .menu-row')].map((row) => row.textContent)).toEqual(['Fix it', 'Side', 'New conversation…']);
     click('.conversation-menu [data-work-item="2"]');
     await flush();
     expect(posts.find((post) => post.url.endsWith('/select'))?.body['workItemId']).toBe(2);

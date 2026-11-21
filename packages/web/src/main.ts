@@ -786,6 +786,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     view.picker = false;
     view.actions = false;
     view.sheet = null;
+    view.providers = null;
+    newFrom = null;
     view.artifact = null;
     history.replaceState(null, '', `#w=${workItemId}`);
 
@@ -925,7 +927,15 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         draw();
         break;
       }
+      case 'new-conversation':
+        void newConversation();
+        break;
+      case 'new-provider':
+        view.providers = null;
+        void createConversation(button!.dataset['provider'] ?? '');
+        break;
       case 'picker':
+        view.providers = null;
         view.picker = !view.picker;
         // One header menu at a time.
         view.personas = null;
@@ -1080,7 +1090,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   });
   // The dropdown closes on a press outside the header and on Escape, which gives the focus back to its button.
   document.addEventListener('pointerdown', (event) => {
-    if ((view.picker || view.personas !== null || view.actions) && !(event.target instanceof Node && head.querySelector('.header')?.contains(event.target) === true)) {
+    if ((view.picker || view.personas !== null || view.actions || view.providers !== null) && !(event.target instanceof Node && head.querySelector('.header')?.contains(event.target) === true)) {
+      view.providers = null;
       view.picker = false;
       view.personas = null;
       view.actions = false;
@@ -1092,8 +1103,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       view.sheet = null;
       draw();
       event.stopImmediatePropagation();
-    } else if (event.key === 'Escape' && (view.picker || view.personas !== null || view.actions)) {
-      const opener = view.picker ? 'button.picker' : view.actions ? 'button.actions' : 'button.persona';
+    } else if (event.key === 'Escape' && (view.picker || view.personas !== null || view.actions || view.providers !== null)) {
+      const opener = view.picker || view.providers !== null ? 'button.picker' : view.actions ? 'button.actions' : 'button.persona';
+
+      view.providers = null;
 
       view.picker = false;
       view.personas = null;
@@ -1101,7 +1114,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       draw();
       head.querySelector<HTMLElement>(opener)?.focus();
       event.stopImmediatePropagation();
-    } else if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && (view.picker || view.personas !== null || view.actions)) {
+    } else if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && (view.picker || view.personas !== null || view.actions || view.providers !== null)) {
       // Up and Down move between a header menu's rows, as in a VS Code menu.
       const rows = [...head.querySelectorAll<HTMLElement>('.header .menu .menu-row')];
       const at = rows.indexOf(document.activeElement as HTMLElement);
@@ -1149,6 +1162,65 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     if (reply.status !== 200) {
       showError(String(reply.body['error'] ?? 'Codex did not confirm the answer. Check its terminal.'));
+    }
+  };
+
+  // ---- New conversation… (architecture.md § Web page) ----
+  /** The dropdown's New conversation…: straight away with one provider installed, else the providers to pick from, the default first. */
+  /** The conversation New conversation… was chosen in, whose folder the new one runs in; another selection since drops the choice. */
+  let newFrom: { key: string | null; scopeGen: number; workItemId: number | null } | null = null;
+  const newConversation = async (): Promise<void> => {
+    view.picker = false;
+    view.providers = { items: null, error: null };
+    newFrom = { key: state.key, scopeGen: state.scope?.scopeGen ?? -1, workItemId: wanted };
+    draw();
+
+    const from = newFrom;
+    const answer = await post('providers', {});
+    const installed = (answer.body['installed'] as string[] | undefined) ?? [];
+    const preferred = String(answer.body['defaultProvider'] ?? 'claude');
+
+    if (view.providers === null || newFrom !== from || from.key !== state.key || from.scopeGen !== (state.scope?.scopeGen ?? -1)) {
+      return;
+    }
+
+    if (answer.status !== 200 || installed.length === 0) {
+      view.providers = { items: null, error: answer.status === 200 ? 'Neither Claude nor Codex is installed.' : String(answer.body['error'] ?? 'Switchboard did not answer.') };
+    } else if (installed.length === 1) {
+      view.providers = null;
+      void createConversation(installed[0]!);
+    } else {
+      const names: Record<string, string> = { claude: 'Claude', codex: 'Codex' };
+
+      view.providers = { items: [...installed].sort((a, b) => Number(b === preferred) - Number(a === preferred)).map((provider) => ({ provider, name: names[provider] ?? provider, default: provider === preferred })), error: null };
+    }
+
+    draw();
+    head.querySelector<HTMLElement>('.conversation-menu .menu-row')?.focus();
+  };
+  /** Makes the conversation in the shown conversation's folder, then opens it in the page. */
+  const createConversation = async (provider: string): Promise<void> => {
+    const from = newFrom;
+
+    newFrom = null;
+    draw();
+
+    if (from === null || from.key !== state.key) {
+      return;
+    }
+
+    // With the scope generation of the conversation it was chosen in, so the hub refuses it after another selection.
+    const answer = await post('page-conversation', { scopeGen: from.scopeGen, provider });
+
+    if (answer.status === 200 && typeof answer.body['workItemId'] === 'number') {
+      showError(null);
+
+      // Opened only while the operator is still on the conversation it was made from; the list shows it either way.
+      if (wanted === from.workItemId && state.key === from.key) {
+        void select(answer.body['workItemId']);
+      }
+    } else {
+      showError(String(answer.body['error'] ?? 'The conversation was not made.'));
     }
   };
 

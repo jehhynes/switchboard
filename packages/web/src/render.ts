@@ -47,6 +47,8 @@ export interface View {
   sheet: Sheet | null;
   /** A row action is running, so its controls wait. */
   acting: boolean;
+  /** New conversation…'s provider menu under the dropdown: the providers, null while they load, or why not. */
+  providers: { items: Array<{ provider: string; name: string; default: boolean }> | null; error: string | null } | null;
   /** The prompt the session waits on in its terminal, as last read, for the session it was read for; a key being sent waits. */
   prompt: { sessionId: string; prompt: ScreenPrompt | null; sending: boolean } | null;
 }
@@ -57,7 +59,7 @@ export type Sheet =
   | { kind: 'snooze'; workItemId: number; title: string; choices: SnoozeChoice[]; picked: string; date: string; comment: string }
   | { kind: 'text'; title: string; text: string };
 
-export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), list: false, actions: false, sheet: null, acting: false, prompt: null });
+export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), list: false, actions: false, sheet: null, acting: false, prompt: null, providers: null });
 
 /** Each row action's codicon, as the dock draws its controls. */
 const ACTION_ICONS: Record<string, string> = { start: 'play', approve: 'check', retry: 'refresh', stop: 'debug-stop', 'mark-done': 'pass', snooze: 'clockface', restore: 'debug-restart', delete: 'trash' };
@@ -290,7 +292,19 @@ export function renderHeader(state: PageState, view: View): string {
         : ''
       : `<button type="button" class="persona${persona.tonePending ? ' pending' : ''}" data-action="persona" aria-haspopup="menu" aria-expanded="${view.personas !== null}" title="${escape(`Persona: ${persona.name}${persona.pinned ? ', pinned' : ''}. Click to choose another.`)}" aria-label="${escape(`Persona: ${persona.name}${persona.pinned ? ', pinned' : ''}`)}"><span class="codicon codicon-${persona.pinned ? 'pinned' : 'person'}" aria-hidden="true"></span></button>`;
   const label = selected === null ? `${codicon(stateIcon(state.session?.state, state.session?.waitingFor, state.session?.limit))}<span class="title">${escape(title)}</span>` : conversationLabel(selected, state);
-  const picker = `<div class="menu-anchor picker-anchor"><button type="button" class="picker" data-action="picker" aria-haspopup="menu" aria-expanded="${view.picker}" title="${escape(title)}">${label}<span class="codicon codicon-chevron-down" aria-hidden="true"></span></button>${view.picker ? `<ul class="glass menu conversation-menu" role="menu" aria-label="Conversations">${options}</ul>` : ''}</div>`;
+  // After a separator, New conversation… as in the Conversation view; it opens the providers under the same button when there is a choice.
+  const providers = view.providers;
+  const newRow = `<li class="menu-separator" role="separator"></li><li role="none"><button type="button" class="menu-row new-row" role="menuitem" data-action="new-conversation">${'<span class="menu-gutter" aria-hidden="true"><span class="codicon codicon-add"></span></span>'}<span class="title">New conversation…</span></button></li>`;
+  const providerRows =
+    providers === null
+      ? ''
+      : providers.error !== null
+        ? `<li class="menu-message" role="none">${escape(providers.error)}</li>`
+        : providers.items === null
+          ? '<li class="menu-message" role="none">Loading…</li>'
+          : providers.items.map((one) => `<li role="none"><button type="button" class="menu-row" role="menuitem" data-action="new-provider" data-provider="${escape(one.provider)}">${gutter(false)}<span class="title">${escape(one.name)}</span>${one.default ? '<span class="menu-note">Default</span>' : ''}</button></li>`).join('');
+  const pickerMenu = providers !== null ? `<ul class="glass menu conversation-menu" role="menu" aria-label="Provider">${providerRows}</ul>` : view.picker ? `<ul class="glass menu conversation-menu" role="menu" aria-label="Conversations">${options}${newRow}</ul>` : '';
+  const picker = `<div class="menu-anchor picker-anchor"><button type="button" class="picker" data-action="picker" aria-haspopup="menu" aria-expanded="${view.picker || providers !== null}" title="${escape(title)}">${label}<span class="codicon codicon-chevron-down" aria-hidden="true"></span></button>${pickerMenu}</div>`;
 
   const menu = view.personas;
   const rows =

@@ -1754,6 +1754,33 @@ export class ConversationService {
     return { status: 200, body: { workItemId: made.workItemId, folder: host } };
   }
 
+  /**
+   * `page-conversation {window, scopeGen, opId, provider?}` (architecture.md § Web page): the dropdown's New conversation… on the page, which
+   * makes a folder-hosted conversation as the dock's New conversation in a folder does, in the folder of the conversation the page shows, never
+   * one the page names; answers `{workItemId, folder}`. 403 for a key that is not a page's or a page with no selection, 409 for a stale
+   * `scopeGen` and with the flow's refusal.
+   */
+  pageConversation(body: Record<string, unknown>): { status: number; body: unknown } {
+    const { window, scopeGen, opId, provider } = body;
+
+    if (typeof window !== 'string' || typeof scopeGen !== 'number' || typeof opId !== 'string') {
+      return { status: 400, body: { error: 'Expected {window, scopeGen, opId, provider?}.' } };
+    }
+
+    const scope = this.deps.windows.isPage(window) ? this.deps.windows.scope(window) : null;
+    const refused = refusal(scope?.workItemId == null ? null : scope, scopeGen, null);
+
+    if (refused !== null) {
+      return refused;
+    }
+
+    if (scope!.folder == null) {
+      return { status: 409, body: { error: 'This conversation has no folder to start another in.' } };
+    }
+
+    return this.dockConversation({ folder: scope!.folder, opId, ...(provider === undefined ? {} : { provider }) });
+  }
+
   /** Remembers the work item a `new-conversation` made, keeping the last `UNSENT_KEPT`. */
   #remember(done: string, workItemId: number): void {
     this.#created.set(done, workItemId);
