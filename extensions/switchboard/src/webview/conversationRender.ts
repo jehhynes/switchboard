@@ -649,12 +649,12 @@ function headerMenu(menu: HeaderMenu): string {
               )
               .join('');
 
-  return `<ul class="conversation-list header-menu" data-key="menu-${menu.kind}" role="menu" aria-label="${menu.kind === 'persona' ? 'Persona' : 'New session'}">${rows}</ul>`;
+  return `<ul class="conversation-list header-menu" data-key="menu-${menu.kind}" role="menu" aria-label="${menu.kind === 'persona' ? 'Persona' : 'New conversation'}">${rows}</ul>`;
 }
 
 /** The plus, which opens the menu of providers for a new session. */
 function plusButton(open: boolean): string {
-  return `<button class="icon" type="button" data-action="new" title="New session" aria-label="New session" aria-haspopup="menu" aria-expanded="${open}"><span class="codicon codicon-add" aria-hidden="true"></span></button>`;
+  return `<button class="icon" type="button" data-action="new" title="New conversation" aria-label="New conversation" aria-haspopup="menu" aria-expanded="${open}"><span class="codicon codicon-add" aria-hidden="true"></span></button>`;
 }
 
 const DECISIONS: Record<string, string> = { accept: 'Allow once', acceptForSession: 'Allow for session', decline: 'Decline', cancel: 'Cancel' };

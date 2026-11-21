@@ -1694,7 +1694,7 @@ describe('several conversations in a window (architecture.md § Conversation vie
   it('draws the selected title as a dropdown that lists every conversation with its state and unread count, and a plus button', () => {
     const closed = renderConversation(base(), new Set(), T0);
 
-    expect(closed).toContain('data-action="new"');
+    expect(closed).toContain('data-action="new" title="New conversation" aria-label="New conversation"');
     expect(closed).toContain('class="picker" data-action="picker" aria-haspopup="listbox" aria-expanded="false" title="Fix the &#60;inbox&#62; badge"');
     expect(closed).not.toContain('role="listbox"');
 

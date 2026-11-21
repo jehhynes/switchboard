@@ -1865,14 +1865,14 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// The header's More Actions menu in groups with a separator between each: New ad-hoc session and New Session in a Folder; Held sessions
+    /// The header's More Actions menu in groups with a separator between each: New ad-hoc session and New conversation in a folder; Held sessions
     /// (PRD R94) and Ticket volume report when a Zoho or Forum source is configured; Refresh sources, which polls each source that is on now, and
     /// Show hub log, which shows the hub log in the VS Code window used last; then Open Settings, last.
     /// </summary>
     internal List<Control> HeaderMenu() =>
     [
         Item("New ad-hoc session…", NewAdhoc, AddGlyph),
-        Item("New Session in a Folder…", NewSession, FolderGlyph),
+        Item("New conversation in a folder…", NewSession, FolderGlyph),
         new Separator(),
         Item("Held sessions", OpenHeld, TerminalGlyph),
         .. model.Sources.Any((source) => source.IsZoho || source.IsForum) ? [Item("Ticket volume report", OpenVolume, GraphGlyph)] : Array.Empty<Control>(),
@@ -1916,7 +1916,7 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// More Actions' New Session in a Folder (PRD R104): asks for a folder, has the hub make a conversation hosted by it and stored as its folder
+    /// More Actions' New conversation in a folder (PRD R104): asks for a folder, has the hub make a conversation hosted by it and stored as its folder
     /// window's selection, then opens that window, which shows it. A second click while the picker is open or the hub answers does nothing; a row
     /// clicked meanwhile replaces it, so the conversation is made but its window not opened.
     /// </summary>
@@ -1980,7 +1980,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>The New session attempt that holds the picker or waits for the hub, or null.</summary>
+    /// <summary>The New conversation in a folder attempt that holds the picker or waits for the hub, or null.</summary>
     object? creating;
 
     /// <summary>Asks for a folder to start a session in, or null when the operator cancels; tests replace it, as the headless platform has no picker.</summary>
@@ -1989,7 +1989,7 @@ public sealed partial class MainWindow : Window
 
     static async Task<string?> AskFolder(Window owner)
     {
-        var picked = await owner.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "New session in a folder", AllowMultiple = false });
+        var picked = await owner.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "New conversation in a folder", AllowMultiple = false });
 
         return picked.Count == 0 ? null : picked[0].TryGetLocalPath();
     }

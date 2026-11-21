@@ -22,11 +22,11 @@ static class ProviderDialog
 
     /// <summary>
     /// Asks which provider a new conversation starts in, with &lt;paramref name="preferred"/&gt; selected, naming &lt;paramref name="folder"/&gt; when given, as
-    /// New Session in a Folder does; returns the provider, or null on Cancel.
+    /// New conversation in a folder does; returns the provider, or null on Cancel.
     /// </summary>
     public static Task<string?> Ask(Window owner, string preferred, string? folder = null)
     {
-        var shell = new DialogShell(owner, "New Session in a Folder", 420, folder);
+        var shell = new DialogShell(owner, "New conversation in a folder", 420, folder);
         var choice = Box(preferred, "SessionProvider");
 
         shell.Body.Children.Add(DialogShell.Field("Provider", choice));

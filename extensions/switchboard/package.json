@@ -139,7 +139,7 @@
       },
       {
         "command": "switchboard.newSession",
-        "title": "New Session",
+        "title": "New Conversation…",
         "category": "Switchboard"
       },
       {

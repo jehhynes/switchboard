@@ -56,7 +56,7 @@ public sealed class DialogTests
         string? answer = "unset";
         var (owner, dialog) = Show(async (owner) => answer = await ProviderDialog.Ask(owner, "codex", "D:/git/widgets"));
 
-        Assert.Equal("New Session in a Folder", Named<TextBlock>(dialog, "DialogTitle").Text);
+        Assert.Equal("New conversation in a folder", Named<TextBlock>(dialog, "DialogTitle").Text);
         Assert.Equal("D:/git/widgets", Named<TextBlock>(dialog, "DialogSubtitle").Text);
         Assert.Same(Named<ComboBox>(dialog, "SessionProvider"), dialog.FocusManager!.GetFocusedElement());
 

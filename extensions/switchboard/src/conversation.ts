@@ -740,7 +740,7 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
 
   /**
    * Starts a new conversation hosted by this window (architecture.md § Hosted conversations) in the provider the plus button's menu gave, or, from
-   * Switchboard: New Session, the one picked in a quick pick, the default first. A command that got no answer is posted once more with the same
+   * Switchboard: New Conversation…, the one picked in a quick pick, the default first. A command that got no answer is posted once more with the same
    * `opId`, which the hub answers with the conversation it already made. Resolves why it was not made, or null; the command shows it as a warning.
    */
   async newConversation(provider?: Provider): Promise<string | null> {
@@ -760,7 +760,7 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
         const choices = await this.providerChoices();
 
         if (choices.error !== null) return this.#warn(provider, choices.error);
-        const picked = await vscode.window.showQuickPick(choices.items.map((item, index) => ({ label: item.label, description: item.note, provider: item.value as Provider, picked: index === 0 })), { title: 'New session', placeHolder: 'Choose a provider', ignoreFocusOut: true });
+        const picked = await vscode.window.showQuickPick(choices.items.map((item, index) => ({ label: item.label, description: item.note, provider: item.value as Provider, picked: index === 0 })), { title: 'New conversation', placeHolder: 'Choose a provider', ignoreFocusOut: true });
         if (picked === undefined || this.#target !== target) return null;
         chosen = picked.provider;
       }

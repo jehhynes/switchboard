@@ -44,7 +44,7 @@ describe('the Conversation view', () => {
 
     assert.ok(commands.includes('workbench.view.extension.switchboard-conversation'), 'VS Code registered no command for the secondary side bar container');
     assert.ok(commands.includes('switchboard.conversation.focus'), 'VS Code registered no focus command for the view');
-    assert.ok(commands.includes('switchboard.newSession'), 'the extension registered no Switchboard: New Session command');
+    assert.ok(commands.includes('switchboard.newSession'), 'the extension registered no Switchboard: New Conversation… command');
     await vscode.commands.executeCommand('switchboard.conversation.focus');
     // The suite's window is a folder window: the hub binds it to its folder's real path, with no work item and no conversation yet.
     await until(() => extension.conversation().connected, 'the view never received its hello');

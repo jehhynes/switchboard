@@ -35,7 +35,7 @@ public interface IHub
     Task<string?> Select(string rowKey);
 
     /// <summary>
-    /// The header's New session: makes a conversation hosted by <paramref name="folder"/> and stored as its folder window's selection, with no window
+    /// More Actions' New conversation in a folder: makes a conversation hosted by <paramref name="folder"/> and stored as its folder window's selection, with no window
     /// open (architecture.md § Hosted conversations). A retry with the same <paramref name="opId"/> answers the first conversation.
     /// </summary>
     Task<NewConversationReply> NewConversation(string folder, string opId, string? provider = null);
@@ -62,7 +62,7 @@ public interface IHub
     Task<DockView?> Until(Func<DockView, bool> test, TimeSpan within);
 }
 
-/// <summary>The hub's answer to New session: the refusal or failure, or the new work item and the canonical folder that hosts it.</summary>
+/// <summary>The hub's answer to New conversation in a folder: the refusal or failure, or the new work item and the canonical folder that hosts it.</summary>
 public sealed record NewConversationReply(string? Error, int? WorkItemId, string? Folder);
 
 public sealed record SessionProviderReply(string? Error, string? DefaultProvider);

@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const { createServer } = require('node:http');
 const vscode = require('vscode');
 
-describe('New Session provider choice', () => {
+describe('New Conversation… provider choice', () => {
   it('preselects the default, sends the explicit choice once on a lost response, and creates nothing on cancel', async () => {
     const extension = await vscode.extensions.getExtension('switchboard.switchboard').activate();
     const realRecord = extension.hub();
