@@ -19,13 +19,13 @@ public sealed class SettingsFieldsTests
                 "sessions.model", "sessions.permissionMode",
                 "sessions.codex.model", "sessions.codex.permissionMode",
                 "triage.concurrency", "triage.model", "triage.timeoutSeconds",
-                "dock.openVSCode", "dock.openTerminal",
+                "dock.openVSCode", "dock.openIn", "dock.openTerminal",
                 "web.chromePane",
                 "sessions.installHooks", "sessions.claudePath", "sessions.codexPath", "sessions.nodePath",
             ],
             sections.SelectMany((section) => section.Fields).Select((field) => field.Path));
         Assert.Equal(
-            ["Default agent", "Concurrency", "Code Mode (experimental)", "Friction debriefs", "Model", "Permission mode", "Model", "Permission mode", "Concurrency", "Model", "Timeout (seconds)", "Rows open in", "Terminal for \"Open in terminal\"", "Chrome pane (experimental)", "Install hooks", "Claude Code path", "Codex path", "Node.js path"],
+            ["Default agent", "Concurrency", "Code Mode (experimental)", "Friction debriefs", "Model", "Permission mode", "Model", "Permission mode", "Concurrency", "Model", "Timeout (seconds)", "Rows open in", "Row click opens", "Terminal for \"Open in terminal\"", "Chrome pane (experimental)", "Install hooks", "Claude Code path", "Codex path", "Node.js path"],
             sections.SelectMany((section) => section.Fields).Select((field) => field.Label));
         Assert.Equal(["claude", "codex"], fields["sessions.provider"].Options!.Select((option) => option.Value));
         Assert.Equal(["Claude", "Codex"], fields["sessions.provider"].Options!.Select((option) => option.Label));
@@ -38,6 +38,9 @@ public sealed class SettingsFieldsTests
         Assert.Equal("bypassPermissions", fields["sessions.codex.permissionMode"].Placeholder);
         Assert.Equal([("always", "Always"), ("review", "Only for review")], fields["dock.openVSCode"].Options!.Select((option) => (option.Value, option.Label)));
         Assert.Equal("always", fields["dock.openVSCode"].Placeholder);
+        Assert.Equal([("vscode", "VS Code"), ("web", "Web app")], fields["dock.openIn"].Options!.Select((option) => (option.Value, option.Label)));
+        Assert.Equal("vscode", fields["dock.openIn"].Placeholder);
+        Assert.Contains("Alt-click opens the other", fields["dock.openIn"].Help);
         Assert.Equal([("vscode", "VS Code"), ("app", "Terminal app"), ("auto", "VS Code when open")], fields["dock.openTerminal"].Options!.Select((option) => (option.Value, option.Label)));
         Assert.Equal("vscode", fields["dock.openTerminal"].Placeholder);
         Assert.Contains("when Rows open in is Always", fields["dock.openTerminal"].Help);

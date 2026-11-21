@@ -74,6 +74,9 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
 
     public string Theme => settings.Theme;
 
+    /// <summary>Whether a row's click opens its work item in the web page, <c>dock.openIn: web</c>, rather than VS Code (PRD R71).</summary>
+    public bool OpensInWeb { get; private set; }
+
     public bool SaveTheme(string theme)
     {
         var previous = settings.Theme;
@@ -576,6 +579,7 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
         }
 
         Show(Hub.Connection.Connected);
+        OpensInWeb = view.OpenIn == "web";
         Snooze = view.Snooze;
         Schedules = view.Schedules ?? [];
         Held = view.Held ?? [];

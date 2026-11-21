@@ -282,7 +282,8 @@ public sealed partial class MainWindow : Window
         {
             needsRow = null;
             model.Status = null;
-            ClickForwarded(needs.Key);
+
+            ClickForwarded(needs.Key, inWeb: null);
         }
     }
 
@@ -318,12 +319,15 @@ public sealed partial class MainWindow : Window
         }, DispatcherPriority.Loaded);
     }
 
-    /// <summary>Runs the click VS Code forwarded, as the operator's click on the row would.</summary>
-    internal async void ClickForwarded(string key)
+    /// <summary>
+    /// Runs a click on a row the dock does not show under the pointer, as the operator's click on the row would: one VS Code forwarded in VS Code,
+    /// whatever <c>dock.openIn</c> says, and the needs-you message's, with <paramref name="inWeb"/> null, where <c>dock.openIn</c> says.
+    /// </summary>
+    internal async void ClickForwarded(string key, bool? inWeb = false)
     {
         if (model.Row(key) is { } row)
         {
-            await Open(row);
+            await Open(row, inWeb);
         }
         else
         {
@@ -1376,11 +1380,15 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        await Open(row);
+        // Alt-click opens the work item where dock.openIn does not (PRD R71).
+        await Open(row, inWeb: model.OpensInWeb != e.KeyModifiers.HasFlag(KeyModifiers.Alt));
     }
 
-    /// <summary>The row's click (PRD R71): its session and its item window; a click on another row replaces a click still running.</summary>
-    async Task Open(RowViewModel row)
+    /// <summary>
+    /// The row's click (PRD R71): its session and its item window, or with <paramref name="inWeb"/>, <c>dock.openIn</c> when null, the web page;
+    /// a click on another row replaces a click still running.
+    /// </summary>
+    async Task Open(RowViewModel row, bool? inWeb = null)
     {
         if (!model.IsLive)
         {
@@ -1407,7 +1415,7 @@ public sealed partial class MainWindow : Window
 
         try
         {
-            status = await actions.Click(row.Row, cancel.Token);
+            status = inWeb ?? model.OpensInWeb ? await actions.OpenInPage(row.Row, cancel.Token) : await actions.Click(row.Row, cancel.Token);
         }
         catch (Exception error)
         {
@@ -1807,7 +1815,7 @@ public sealed partial class MainWindow : Window
         // click (PRD R70, R71).
         if (MainIsClick(row.Row))
         {
-            await Open(row);
+            await Open(row, inWeb: false);
         }
         else if (row.Row.Controls.FirstOrDefault((control) => control.Label == row.Main) is { } control)
         {
@@ -2355,6 +2363,8 @@ public sealed partial class MainWindow : Window
 
         public Task<string?> Click(DockRow row, CancellationToken cancel) => Task.FromResult<string?>(null);
 
+        public Task<string?> OpenInPage(DockRow row, CancellationToken cancel) => Task.FromResult<string?>(null);
+
         public Task<string?> Run(DockRow? row, JsonObject command, CancellationToken cancel) => Task.FromResult<string?>(null);
 
         public string? OpenUrl(string url) => null;
@@ -2381,6 +2391,8 @@ public sealed partial class MainWindow : Window
         public Task<string?> WithdrawOpen(int id) => Task.FromResult<string?>(null);
 
         public Task<string?> Select(string rowKey) => Task.FromResult<string?>(null);
+
+        public Task<PageReply> Page(string rowKey) => Task.FromResult(new PageReply(null, null, null));
 
         public Task<string?> StopHeld(string session) => Task.FromResult<string?>(null);
 

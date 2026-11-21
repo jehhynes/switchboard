@@ -501,6 +501,7 @@ describe('the web page routes', () => {
     const closed: string[] = [];
     const consoles: string[] = [];
     const pages = new Set<string>();
+    const installed: boolean[] = [];
     let keys = 0;
     const folder = join(dir, 'w1');
 
@@ -510,10 +511,11 @@ describe('the web page routes', () => {
     const page: PageRoutes = {
       access: new PageAccess(store),
       asset: (name) => (name === 'index.html' ? { mime: 'text/html; charset=utf-8', body: '<html>page {{build}}</html>' } : ['manifest.webmanifest', 'sw.js', 'page.js'].includes(name) ? { mime: 'text/plain', body: name } : null),
-      opened: () => {
+      opened: (app) => {
         const key = `page-${++keys}`;
 
         pages.add(key);
+        installed.push(app === true);
         return key;
       },
       isPage: (key) => pages.has(key),
@@ -575,17 +577,18 @@ describe('the web page routes', () => {
           posted.push(body);
           return { status: 200, body: { started: true } };
         },
+        '/dock/page': async (_body, context) => ({ status: 200, body: { url: await context!.pageUrl() } }),
       },
     });
 
     const link = await send(server.port, 'POST', '/page/link', { Authorization: `Bearer ${server.token}` });
     const url = new URL(JSON.parse(link.body).url as string);
 
-    return { posted, uploaded, closed, consoles, url, folder, open: () => page.opened() };
+    return { posted, uploaded, closed, consoles, url, folder, installed, open: () => page.opened() };
   }
 
   it("serves the page on its fixed port, which the link names, by that port's Host only, and nothing but the page there", async () => {
-    const { posted } = await serve();
+    const { posted, installed } = await serve();
 
     const port = await freePort();
 
@@ -610,11 +613,14 @@ describe('the web page routes', () => {
     expect((await send(port, 'GET', '/hub', {})).status).toBe(404);
 
     // The page's commands work there with the cookie and that port's own origin only.
-    const stream = request({ host: '127.0.0.1', port, path: '/v1/conversation/events?page=1', headers: { Host: `127.0.0.1:${port}`, Cookie: cookie } }, (response) => response.resume());
+    const stream = request({ host: '127.0.0.1', port, path: '/v1/conversation/events?page=1&installed=1', headers: { Host: `127.0.0.1:${port}`, Cookie: cookie } }, (response) => response.resume());
 
     stream.on('error', () => {});
     stream.end();
     await until(() => (server.clients() === 1 ? true : null));
+    // The installed app says so as it opens its stream; the dock's routes learn the page's address on its fixed port.
+    expect(installed).toEqual([true]);
+    expect(JSON.parse((await send(server.port, 'POST', '/dock/page', { Authorization: `Bearer ${server.token}`, 'Content-Type': 'application/json' }, {})).body)).toEqual({ url: `http://127.0.0.1:${port}/page/` });
 
     const post = (path: string, origin: string, headers: Record<string, string> = { Cookie: cookie }) => send(port, 'POST', path, { 'Content-Type': 'application/json', Origin: origin, ...headers }, { window: 'page-1', workItemId: 4 });
 
@@ -790,7 +796,7 @@ describe('the web page routes', () => {
   });
 
   it("gives a page stream a page key that dies with it, and takes a page's commands only from its origin, for its key and the commands a page may send", async () => {
-    const { url, posted, closed } = await serve();
+    const { url, posted, closed, installed } = await serve();
     const exchange = await send(server.port, 'GET', `${url.pathname}${url.search}`, {});
     const cookie = String(exchange.headers['set-cookie']).split(';')[0]!;
     const chunks: string[] = [];
@@ -802,6 +808,7 @@ describe('the web page routes', () => {
     stream.on('error', () => {});
     stream.end();
     await until(() => (chunks.join('').includes('page-1') ? true : null));
+    expect(installed).toEqual([false]);
 
     const origin = `http://127.0.0.1:${server.port}`;
     const post = (path: string, body: unknown, headers: Record<string, string> = { Cookie: cookie, Origin: origin }) => send(server.port, 'POST', path, { 'Content-Type': 'application/json', ...headers }, body);

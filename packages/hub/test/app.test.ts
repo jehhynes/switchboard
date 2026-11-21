@@ -860,6 +860,45 @@ describe('createHubApp', () => {
     expect(clicks).toHaveLength(1);
   });
 
+  it('shows a dock row in the installed page used last, or answers the page at its work item with none open (architecture.md § Dock)', async () => {
+    writeSettings({ sessions: { installHooks: false }, sources: { adhoc: { repoRoot: 'D:/scratch' } }, dock: { openIn: 'web' } });
+    const app = await start();
+
+    app.runtime.send({ type: 'adhoc', prompt: 'Fix the badge', repoRoot: 'D:/scratch', start: false });
+    await app.runtime.settled();
+
+    const id = (app.snapshot() as { workItems: { id: number }[] }).workItems[0]!.id;
+    const context = { pageUrl: async () => 'http://127.0.0.1:47616/page/' };
+    expect((app.dock() as { openIn?: string }).openIn).toBe('web');
+    // A browser tab is not the installed app, so the dock opens the page at the work item.
+    app.page!.opened(false);
+    expect(await app.post['/dock/page']!({ rowKey: `item:${id}` }, context)).toEqual({ status: 200, body: { url: `http://127.0.0.1:47616/page/#w=${id}` } });
+
+    const older = app.page!.opened(true);
+    const newer = app.page!.opened(true);
+    const olderFrames: string[] = [];
+    const newerFrames: string[] = [];
+
+    app.conversation!(older, (frame) => olderFrames.push(frame));
+    app.conversation!(newer, (frame) => newerFrames.push(frame));
+
+    const shown = await app.post['/dock/page']!({ rowKey: `item:${id}` }, context);
+    const marker = (shown.body as { marker: string }).marker;
+    const showsIn = (frames: string[]) => frames.filter((frame) => frame.includes('event: show\n')).map((frame) => JSON.parse(frame.slice(frame.indexOf('data: ') + 6)) as Record<string, unknown>);
+
+    expect(shown).toEqual({ status: 200, body: { marker: expect.stringMatching(/^[0-9a-f]{12}$/) } });
+    expect(showsIn(newerFrames)).toEqual([expect.objectContaining({ type: 'show', workItemId: id, marker })]);
+    expect(showsIn(olderFrames)).toEqual([]);
+    // The installed page that gained focus last takes over.
+    expect(await app.post['/v1/conversation/page-focus']!({ window: older, focused: true })).toMatchObject({ status: 200 });
+    await app.post['/dock/page']!({ rowKey: `item:${id}` }, context);
+    expect(showsIn(olderFrames)).toHaveLength(1);
+    expect(showsIn(newerFrames)).toHaveLength(1);
+
+    expect(await app.post['/dock/page']!({ rowKey: 'item:999' }, context)).toEqual({ status: 404, body: { error: 'No work item has that row.' } });
+    expect(await app.post['/dock/page']!({ rowKey: 3 }, context)).toEqual({ status: 400, body: { error: 'Expected {rowKey}.' } });
+  });
+
   it('refuses a conversation from a window with no work item or while the flow refuses it, and selects a dock row (architecture.md § Hosted conversations)', async () => {
     writeSettings({ sessions: { installHooks: false, codeMode: true }, sources: { adhoc: { repoRoot: 'D:/scratch' } } });
     const app = await start(() => {});

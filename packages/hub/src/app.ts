@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { mkdirSync, watch, writeFileSync } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { dirname, join, posix, win32 } from 'node:path';
@@ -48,6 +48,7 @@ import { PaneHelper, spawnPaneHelper } from './paneHelper.js';
 import type { PaneHelperDeps } from './paneHelper.js';
 import { currentHolderBuild, PANE_HELPER_INSTALL, paneHelperRecordPath, reserveHolderBuild } from './holderInstall.js';
 import { spawnEnvironment } from './spawn.js';
+import { PageTargets } from './pageTargets.js';
 
 const RELOAD_DEBOUNCE_MS = 300;
 /** The mic codicon in codicon.ttf, which marks the voice target's dock row (architecture.md § Voice). */
@@ -378,6 +379,8 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   });
   // Pages whose own focus is on, and the page whose pane window has the focus, which counts as the page's (architecture.md § Pane state).
   const focusedPages = new Set<string>();
+  // The installed page a dock click opens a work item in (architecture.md § Web page).
+  const pageTargets = new PageTargets();
   let paneFocusedFor: string | null = null;
   const pane: PaneState = new PaneState({
     enabled: () => config.settings.web.chromePane,
@@ -683,6 +686,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     pageFocused: (key, focused) => {
       if (focused) {
         focusedPages.add(key);
+        pageTargets.focused(key);
         pane.pageFocused(key);
         focusedWindow = key;
         voice.windowGained(deps.now());
@@ -788,6 +792,7 @@ const dockWithRuns = () => {
 
     return {
       ...view,
+      openIn: config.settings.dock.openIn,
       notes: withVoiceNote(view.notes),
       ...(view.held === undefined ? {} : { held: view.held.map((one) => (one.terminal === null ? one : { ...one, terminal: executable(one.terminal) })) }),
       groups: view.groups.map((group) => ({
@@ -1259,6 +1264,32 @@ const dockWithRuns = () => {
 
         return { status: 200, body: { selected, ...(voiceRefused === null ? {} : { voice: voiceRefused }) } };
       },
+      // A dock row's click with `dock.openIn: web`, or its Alt-click (architecture.md § Dock): the installed page used last shows the work item and
+      // puts the marker in its title, by which the dock brings its window forward; with no installed page open the dock opens the page at it.
+      '/dock/page': async (body, context) => {
+        if (!isRecord(body) || typeof body['rowKey'] !== 'string') {
+          return { status: 400, body: { error: 'Expected {rowKey}.' } };
+        }
+
+        const item = views().snapshot.workItems.find((one) => rowKeyOf(one) === body['rowKey']) ?? olderRow(body['rowKey']);
+
+        if (item === undefined) {
+          return { status: 404, body: { error: 'No work item has that row.' } };
+        }
+
+        const key = pageTargets.installed();
+
+        if (key !== null) {
+          const marker = randomBytes(6).toString('hex');
+
+          conversation.notify(key, 'show', { workItemId: item.id, marker });
+          return { status: 200, body: { marker } };
+        }
+
+        const page = (await context?.pageUrl()) ?? `http://127.0.0.1:${config.settings.web.port}/page/`;
+
+        return { status: 200, body: { url: `${page}#w=${item.id}` } };
+      },
       // The dock reports a session's terminal window coming to the front, or null when it left (architecture.md § Voice): the voice follows it as
       // it follows a window.
       '/dock/focus': async (body) => {
@@ -1370,6 +1401,7 @@ const dockWithRuns = () => {
       }
 
       focusedPages.delete(key);
+      pageTargets.closed(key);
       paneFocusedFor = paneFocusedFor === key ? null : paneFocusedFor;
       pane.pageClosed(key);
       scopes.close(key);
@@ -1381,8 +1413,10 @@ const dockWithRuns = () => {
     page: {
       access: new PageAccess(store, deps.now),
       asset: (name) => pageAsset(name, home),
-      opened: () => {
+      opened: (installed) => {
         const key = scopes.openPage();
+
+        pageTargets.opened(key, installed === true);
 
         setImmediate(() => {
           voice.update();

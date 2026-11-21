@@ -204,6 +204,23 @@ public sealed class HubClientTests
     }
 
     [Fact]
+    public async Task Page_MarkerUrlRefusalOrOlderHub_ReturnsWhatTheHubAnswered()
+    {
+        var (status, body) = (200, "{\"marker\":\"0123456789ab\"}");
+        using var server = new LoopbackHub((_, _, stream) => LoopbackHub.Reply(stream, status, body));
+        using var client = new HubClient(HomeFor(server));
+
+        Assert.Equal(new PageReply(null, "0123456789ab", null), await client.Page("item:7"));
+        Assert.Contains("POST /dock/page HTTP/1.1 {\"rowKey\":\"item:7\"}", server.Requests);
+        body = "{\"url\":\"http://127.0.0.1:47616/page/#w=7\"}";
+        Assert.Equal(new PageReply(null, null, "http://127.0.0.1:47616/page/#w=7"), await client.Page("item:7"));
+        (status, body) = (404, "{\"error\":\"No work item has that row.\"}");
+        Assert.Equal(new PageReply("No work item has that row.", null, null), await client.Page("item:7"));
+        (status, body) = (200, "{}");
+        Assert.StartsWith("The hub cannot open work items in the web page.", (await client.Page("item:7")).Error);
+    }
+
+    [Fact]
     public async Task SessionProvider_DefaultOrMalformedResponse_ReturnsTheProviderOrARefusal()
     {
         var body = "{\"defaultProvider\":\"codex\"}";

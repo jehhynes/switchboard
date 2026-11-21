@@ -7,7 +7,7 @@ namespace Switchboard.Dock.Hub;
 
 // The hub's dock view (architecture.md § Dock), built by `dockView` in packages/hub/src/dock.ts; the dock adds no rules of its own.
 
-public sealed record DockView(IReadOnlyList<string> Notes, IReadOnlyList<DockGroup> Groups, IReadOnlyList<SnoozeChoice> Snooze, IReadOnlyList<SourceGroup> Sources, IReadOnlyList<string> RepoRoots, IReadOnlyList<ScheduleEntry>? Schedules = null, OpenWindows? Windows = null, string? Theme = null, IReadOnlyList<DockHeld>? Held = null, string? HeldNote = null, DockHolderNotice? HolderNotice = null, DockHolderResult? HolderResult = null)
+public sealed record DockView(IReadOnlyList<string> Notes, IReadOnlyList<DockGroup> Groups, IReadOnlyList<SnoozeChoice> Snooze, IReadOnlyList<SourceGroup> Sources, IReadOnlyList<string> RepoRoots, IReadOnlyList<ScheduleEntry>? Schedules = null, OpenWindows? Windows = null, string? Theme = null, IReadOnlyList<DockHeld>? Held = null, string? HeldNote = null, DockHolderNotice? HolderNotice = null, DockHolderResult? HolderResult = null, string? OpenIn = null)
 {
     static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) } };
 

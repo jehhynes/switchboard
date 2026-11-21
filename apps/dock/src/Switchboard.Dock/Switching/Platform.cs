@@ -24,6 +24,15 @@ public interface IWindows
 
     /// <summary>The terminal window whose title names <paramref name="name"/> as <c>sb:&lt;name&gt;</c>, or 0.</summary>
     nint FindTerminal(string name) => 0;
+
+    /// <summary>Whether <see cref="FindPage"/> can find the installed web page's window; false on Linux, whose shell lists only VS Code and terminals.</summary>
+    bool FindsPages => false;
+
+    /// <summary>The visible browser window whose title holds <c>[sb-show &lt;marker&gt;]</c>, the installed web page showing a dock click, or 0.</summary>
+    nint FindPage(string marker) => 0;
+
+    /// <summary>Restores the window if minimized and brings it to the front, leaving its size and place; true when it is then the foreground window.</summary>
+    bool Raise(nint window) => false;
 }
 
 /// <summary>The terminal app sessions open in with <c>dock.openVSCode: review</c> (PRD R71): Ptyxis on Linux, Windows Terminal on Windows.</summary>

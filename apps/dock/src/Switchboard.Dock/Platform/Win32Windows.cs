@@ -103,6 +103,58 @@ public sealed class Win32Windows : IWindows, IDisposable
         return found;
     }
 
+    public bool FindsPages => true;
+
+    public nint FindPage(string marker)
+    {
+        nint found = 0;
+        var shown = $"[sb-show {marker}]";
+
+        Native.EnumWindows(
+            (window, _) =>
+            {
+                if (Native.IsWindowVisible(window) && Native.GetWindow(window, Native.GwOwner) == 0 && Native.Title(window).Contains(shown, StringComparison.Ordinal))
+                {
+                    found = window;
+                    return false;
+                }
+
+                return true;
+            },
+            0);
+
+        return found;
+    }
+
+    public bool Raise(nint window)
+    {
+        if (Native.IsIconic(window))
+        {
+            Native.ShowWindow(window, Native.SwRestore);
+        }
+
+        return Front(window);
+    }
+
+    /// <summary>Brings the window to the front, trying twice; true when it is then the foreground window.</summary>
+    static bool Front(nint window)
+    {
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            Native.SetForegroundWindow(window);
+
+            for (var check = Stopwatch.StartNew(); check.ElapsedMilliseconds < 100; Thread.Sleep(10))
+            {
+                if (Native.GetForegroundWindow() == window)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>The visible top-level VS Code windows whose titles name an item window, from the front.</summary>
     static List<(nint Window, string Name)> ItemWindows()
     {
@@ -141,20 +193,7 @@ public sealed class Win32Windows : IWindows, IDisposable
             Native.ShowWindow(window, Native.SwMaximize);
         }
 
-        for (var attempt = 0; attempt < 2; attempt++)
-        {
-            Native.SetForegroundWindow(window);
-
-            for (var check = Stopwatch.StartNew(); check.ElapsedMilliseconds < 100; Thread.Sleep(10))
-            {
-                if (Native.GetForegroundWindow() == window)
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
+        return Front(window);
     }
 
     /// <summary>

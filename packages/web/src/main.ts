@@ -28,7 +28,9 @@ import type { HistoryOpen, HistoryUi } from './history.js';
 import type { HistoryCategory, HistoryView } from './types.js';
 
 /** The stream's event types the page reads. */
-export const EVENTS = ['hello', 'list', 'scope', 'conversations', 'session', 'message', 'reply', 'status', 'artifact', 'unread', 'voice', 'settings', 'progress', 'words', 'draft', 'pane', 'needs'];
+export const EVENTS = ['hello', 'list', 'scope', 'conversations', 'session', 'message', 'reply', 'status', 'artifact', 'unread', 'voice', 'settings', 'progress', 'words', 'draft', 'pane', 'needs', 'show'];
+/** How long the page's title holds the marker the dock finds its window by after a `show` (architecture.md § Dock). */
+export const SHOW_MARKER_MS = 5_000;
 /** How often the page wakes the Chrome extension while the Chrome pane is on and no extension is connected. */
 export const PANE_WAKE_MS = 30_000;
 /** How long an unread reply or status must be visible on a focused page before it counts as seen (architecture.md § Unread). */
@@ -212,6 +214,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /** A select refused while no conversation was shown, which the list shows until the next select. */
   let listError: string | null = null;
   let wanted: number | null = Number(/^#w=(\d+)$/.exec(location.hash)?.[1] ?? NaN) || null;
+  /** The marker of the dock's latest `show`, in the title until the dock has found this window. */
+  let showMarker: string | null = null;
+  let showTimer: ReturnType<typeof setTimeout> | undefined;
   let expired = false;
   let opId = 0;
   const newOp = (): string => `${deps.now().toString(36)}-${(++opId).toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -1151,8 +1156,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // A ticket's History shows in the conversation's place, over its column and the side column (architecture.md § Web page).
     root.classList.toggle('history', shownHistory !== null);
     mount(historyHost, shownHistory === null ? null : renderHistory(shownHistory));
-    // The pane helper finds this window by the marker until it has found it (architecture.md § Pane state).
-    document.title = pageTitle(state.groups) + (view.pane?.marker == null ? '' : ` [sb-pane ${view.pane.marker}]`);
+    // The pane helper finds this window by the marker until it has found it (architecture.md § Pane state); the dock brings it forward by its
+    // `show` marker (architecture.md § Dock).
+    document.title = pageTitle(state.groups) + (view.pane?.marker == null ? '' : ` [sb-pane ${view.pane.marker}]`) + (showMarker === null ? '' : ` [sb-show ${showMarker}]`);
     header.draw(state.header, state.groups);
     // A search shows only the rows that match, in every group, open (PRD R63).
     const listed = header.list(state.groups);
@@ -2631,7 +2637,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   };
 
   // ---- The stream ----
-  const source = new deps.EventSource('/v1/conversation/events?page=1');
+  // The installed app says so, since a dock click with `dock.openIn: web` shows its work item there (architecture.md § Web page).
+  const installedApp = deps.standalone?.() ?? (typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches);
+  const source = new deps.EventSource(installedApp ? '/v1/conversation/events?page=1&installed=1' : '/v1/conversation/events?page=1');
 
   for (const type of EVENTS) {
     source.addEventListener(type, (event) => {
@@ -2678,6 +2686,17 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         // A new key or work item: the hub reads the column, and the work item's tabs, again.
         paneSent = view.pane?.enabled === true ? '' : 'null';
         setTimeout(reportPane, 0);
+      }
+
+      // A dock click shows its work item here, as a click on its row would (architecture.md § Dock).
+      if (type === 'show' && typeof data['workItemId'] === 'number') {
+        showMarker = typeof data['marker'] === 'string' ? data['marker'] : null;
+        clearTimeout(showTimer);
+        showTimer = setTimeout(() => {
+          showMarker = null;
+          draw();
+        }, SHOW_MARKER_MS);
+        void select(data['workItemId']);
       }
 
       if (type === 'words') {
@@ -2741,6 +2760,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       clearInterval(paneWake);
       paneColumn?.disconnect();
       clearInterval(promptTimer);
+      clearTimeout(showTimer);
       listening.abort();
       listWidth?.disconnect();
       header.close();

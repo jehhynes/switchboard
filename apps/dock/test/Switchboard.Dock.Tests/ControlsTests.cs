@@ -36,12 +36,12 @@ public sealed class ControlsTests
 
     static Button ButtonIn(Control scope, string className) => scope.GetVisualDescendants().OfType<Button>().Single((button) => button.Classes.Contains(className));
 
-    static void Tap(Window window, Control control)
+    static void Tap(Window window, Control control, RawInputModifiers modifiers = RawInputModifiers.None)
     {
         var point = control.TranslatePoint(new Point(Math.Min(20, control.Bounds.Width / 2), Math.Min(8, control.Bounds.Height / 2)), window)!.Value;
 
-        window.MouseDown(point, MouseButton.Left);
-        window.MouseUp(point, MouseButton.Left);
+        window.MouseDown(point, MouseButton.Left, modifiers);
+        window.MouseUp(point, MouseButton.Left, modifiers);
         Dispatcher.UIThread.RunJobs();
     }
 
@@ -1418,6 +1418,55 @@ public sealed class ControlsTests
         line.RaiseEvent(new TappedEventArgs(InputElement.TappedEvent, null!));
         Dispatcher.UIThread.RunJobs();
         Assert.Single(actions.Clicked);
+    }
+
+    [AvaloniaFact]
+    public async Task RowTap_OpenInWeb_OpensTheWorkItemInThePageAndAltTapInVsCode()
+    {
+        var (window, _) = Open(Fixtures.View with { OpenIn = "web" });
+
+        Tap(window, RowOf(window, "item:10"));
+        await Task.Yield();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(["item:10"], actions.InPage.Select((row) => row.Key));
+        Assert.Empty(actions.Clicked);
+
+        Tap(window, RowOf(window, "item:8"), RawInputModifiers.Alt);
+        await Task.Yield();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(["item:8"], actions.Clicked.Select((row) => row.Key));
+        Assert.Single(actions.InPage);
+    }
+
+    [AvaloniaFact]
+    public async Task RowTap_OpenInVsCode_AltTapOpensTheWorkItemInThePage()
+    {
+        var (window, _) = Open();
+
+        Tap(window, RowOf(window, "item:10"), RawInputModifiers.Alt);
+        await Task.Yield();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(["item:10"], actions.InPage.Select((row) => row.Key));
+        Assert.Empty(actions.Clicked);
+    }
+
+    [AvaloniaFact]
+    public async Task OpenInWeb_NeedsYouMessageAndForwardedClick_OpenThePageAndVsCode()
+    {
+        var (window, _) = Open(Fixtures.View with { OpenIn = "web" });
+
+        window.ShowNeedsYou("item:8", "Switchboard: Fix it — Answer a question");
+        Named<TextBlock>(window, "StatusLine").RaiseEvent(new TappedEventArgs(InputElement.TappedEvent, null!));
+        await Task.Yield();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(["item:8"], actions.InPage.Select((row) => row.Key));
+
+        // VS Code forwards a click to the work in VS Code (PRD R69).
+        window.ClickForwarded("item:10");
+        await Task.Yield();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(["item:10"], actions.Clicked.Select((row) => row.Key));
+        Assert.Single(actions.InPage);
     }
 
     [AvaloniaFact]

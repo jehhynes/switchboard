@@ -110,6 +110,16 @@ sealed class FakeHub : IHub
         return Task.FromResult(SelectReply);
     }
 
+    /// <summary>The answer to a click in the web page; by default the page showed it with marker <c>m1</c>.</summary>
+    public PageReply PageReply { get; set; } = new(null, "m1", null);
+
+    public Task<PageReply> Page(string rowKey)
+    {
+        Calls.Add($"page {rowKey}");
+
+        return Task.FromResult(PageReply);
+    }
+
     /// <summary>The answers to New session, in order; a request with none left fails, as a hub that is not running.</summary>
     public Queue<NewConversationReply> NewConversationReplies { get; } = new();
 
@@ -252,6 +262,29 @@ sealed class FakeWindows : IWindows
         return Front;
     }
 
+    public bool FindsPages { get; set; } = true;
+
+    /// <summary>The web page's window for each marker, appearing after that many finds.</summary>
+    public Dictionary<string, (nint Window, int After)> Pages { get; } = [];
+
+    readonly Dictionary<string, int> pageFinds = [];
+
+    public nint FindPage(string marker)
+    {
+        pageFinds[marker] = pageFinds.GetValueOrDefault(marker) + 1;
+
+        return Pages.TryGetValue(marker, out var found) && pageFinds[marker] > found.After ? found.Window : 0;
+    }
+
+    public int PageFinds(string marker) => pageFinds.GetValueOrDefault(marker);
+
+    public bool Raise(nint window)
+    {
+        Calls.Add($"raise {window}");
+
+        return Front;
+    }
+
     public void OpenUrl(string url)
     {
         Calls.Add($"url {url}");
@@ -373,6 +406,15 @@ sealed class FakeActions : IDockActions
         Cancels.Add(cancel);
 
         return Pending is { } first && Clicked.Count == 1 ? first.Task : Task.FromResult(ClickReply);
+    }
+
+    public List<DockRow> InPage { get; } = [];
+
+    public Task<string?> OpenInPage(DockRow row, CancellationToken cancel)
+    {
+        InPage.Add(row);
+
+        return Task.FromResult(ClickReply);
     }
 
     public List<CancellationToken> RunCancels { get; } = [];

@@ -16,8 +16,8 @@ export interface Reply {
 export interface HubServerOptions {
   identity: HubIdentity;
   onShutdown(): void;
-  /** Handlers for authorized `POST` paths, given the parsed JSON body. */
-  post?: Record<string, (body: unknown) => Promise<Reply>>;
+  /** Handlers for authorized `POST` paths, given the parsed JSON body and what only the server knows. */
+  post?: Record<string, (body: unknown, context?: PostContext) => Promise<Reply>>;
   /**
    * The snapshot a window's stream shows, sent as a `state` event when an `/events` stream opens and on each `update`: with window keys, the
    * window's scoped snapshot (architecture.md § Window scope). Undefined sends nothing, as before the first build.
@@ -49,13 +49,19 @@ export interface HubServerOptions {
   now?: () => number;
 }
 
+/** What a `POST` handler may ask the server. */
+export interface PostContext {
+  /** The web page's address, `http://127.0.0.1:<port>/page/`, on its fixed port once it is known whether the page listens there, else the hub's. */
+  pageUrl(): Promise<string>;
+}
+
 /** What the web page's routes read (architecture.md § Web page). */
 export interface PageRoutes {
   access: PageAccess;
   /** A file of the page itself, by its name under `/page/`, `index.html` for the page; null for none. */
   asset(name: string): { mime: string; body: Buffer | string } | null;
-  /** Registers a page's conversation stream and returns its page key. */
-  opened(): string;
+  /** Registers a page's conversation stream, `installed` when it runs as the installed app, and returns its page key. */
+  opened(installed?: boolean): string;
   isPage(key: string): boolean;
   list(): unknown;
   /** The `@` picker's files for a page key, or null with no selection. */
@@ -504,7 +510,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     }
 
     if (request.method === 'GET' && path === '/v1/conversation/events') {
-      let key: string | null = page.opened();
+      let key: string | null = page.opened(url.searchParams.get('installed') === '1');
 
       openConversation(request, response, key);
       pageStreams.set(response, page.access.sessionOf(request.headers.cookie));
@@ -747,7 +753,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
 
       readJson(request).then(
         (body) =>
-          handler(body).then(
+          handler(body, { pageUrl: () => pageReady.then(() => `http://127.0.0.1:${pagePort ?? ownPort}/page/`) }).then(
             (reply) => json(response, reply.status, reply.body),
             (error: unknown) => json(response, 500, { error: String(error) }),
           ),

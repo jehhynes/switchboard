@@ -39,6 +39,64 @@ public sealed class SwitcherTests
     });
 
     [Fact]
+    public async Task OpenInPage_InstalledPageShowsIt_RaisesItsWindowOnceFound()
+    {
+        windows.Pages["m1"] = (51, 2);
+
+        Assert.Null(await Switcher().OpenInPage(Fixtures.Row("item:7"), TestContext.Current.CancellationToken));
+        Assert.Equal(["page item:7"], hub.Calls);
+        Assert.Equal(["raise 51"], windows.Calls);
+        Assert.Equal(3, windows.PageFinds("m1"));
+        Assert.Empty(vsCode.Calls);
+    }
+
+    [Fact]
+    public async Task OpenInPage_WindowNotFoundOrNotRaised_SaysSo()
+    {
+        Assert.Equal("The web page shows it, but the dock did not find its window.", await Switcher().OpenInPage(Fixtures.Row("item:7"), TestContext.Current.CancellationToken));
+        Assert.Equal(Switching.Switcher.PageWait, TimeSpan.FromTicks(waits.Sum((wait) => wait.Ticks)));
+        Assert.Empty(windows.Calls);
+
+        windows.Pages["m1"] = (51, 0);
+        windows.Front = false;
+        Assert.Equal("The web page shows it, but Windows did not bring its window to the front.", await Switcher().OpenInPage(Fixtures.Row("item:7"), TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task OpenInPage_NoInstalledPage_OpensThePageAtTheWorkItemUnmarked()
+    {
+        hub.PageReply = new PageReply(null, null, "http://127.0.0.1:47616/page/#w=7");
+
+        Assert.Null(await Switcher().OpenInPage(Fixtures.Row("item:7"), TestContext.Current.CancellationToken));
+        Assert.Equal(["url http://127.0.0.1:47616/page/#w=7"], windows.Calls);
+
+        windows.UrlFails = new InvalidOperationException("No browser.");
+        Assert.Equal("The browser did not open the web page: No browser.", await Switcher().OpenInPage(Fixtures.Row("item:7"), TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task OpenInPage_RefusedOrWithoutPageWindows_LooksForNoWindow()
+    {
+        hub.PageReply = new PageReply("No work item has that row.", null, null);
+        Assert.Equal("No work item has that row.", await Switcher().OpenInPage(Fixtures.Row("item:7"), TestContext.Current.CancellationToken));
+
+        // On Linux the page shows the work item, but the dock cannot find its window.
+        hub.PageReply = new PageReply(null, "m1", null);
+        windows.FindsPages = false;
+        Assert.Null(await Switcher().OpenInPage(Fixtures.Row("item:7"), TestContext.Current.CancellationToken));
+        Assert.Equal(0, windows.PageFinds("m1"));
+        Assert.Empty(windows.Calls);
+    }
+
+    [Fact]
+    public async Task OpenInPage_PoolTicket_RunsItsOwnClick()
+    {
+        Assert.Null(await Switcher().OpenInPage(Fixtures.Row("ticket:4"), TestContext.Current.CancellationToken));
+        Assert.Equal(["url https://github.com/o/r/issues/104#switchboard-tab"], windows.Calls);
+        Assert.Empty(hub.Calls);
+    }
+
+    [Fact]
     public async Task Click_OpenWindowAndEndedSession_LeavesTheSessionThenBringsTheWindowForward()
     {
         windows.Open["gh-107-58c609"] = (42, 0);

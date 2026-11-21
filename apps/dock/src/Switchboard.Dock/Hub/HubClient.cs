@@ -275,6 +275,17 @@ public sealed class HubClient(string switchboardHome, HubStarter? starter = null
 
     public Task<string?> Select(string rowKey) => Post("/dock/select", new JsonObject { ["rowKey"] = rowKey });
 
+    public async Task<PageReply> Page(string rowKey)
+    {
+        var (error, body) = await PostFor("/dock/page", new JsonObject { ["rowKey"] = rowKey });
+        string? Text(string name) => body?[name] is JsonValue value && value.TryGetValue<string>(out var text) && text != "" ? text : null;
+
+        return error is not null ? new PageReply(error, null, null)
+            : Text("marker") is { } marker ? new PageReply(null, marker, null)
+            : Text("url") is { } url ? new PageReply(null, null, url)
+            : new PageReply("The hub cannot open work items in the web page. Reload a VS Code window to update it.", null, null);
+    }
+
     public async Task<SessionProviderReply> SessionProvider()
     {
         var (error, body) = await PostFor("/v1/conversation/providers", new JsonObject());

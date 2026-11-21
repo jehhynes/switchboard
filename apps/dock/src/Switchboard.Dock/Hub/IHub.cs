@@ -64,6 +64,12 @@ public interface IHub
     /// </summary>
     Task<string?> RestartHolder(string detail);
 
+    /// <summary>
+    /// A row's click with <c>dock.openIn: web</c> (architecture.md § Dock): the installed web page used last shows the row's work item and puts
+    /// the answered marker in its title, or, with none open, the answer is the page's address at the work item.
+    /// </summary>
+    Task<PageReply> Page(string rowKey);
+
     /// <summary>The first view, from the current one on, that passes <paramref name="test"/>, or null after <paramref name="within"/>.</summary>
     Task<DockView?> Until(Func<DockView, bool> test, TimeSpan within);
 }
@@ -76,6 +82,9 @@ public sealed record NewConversationReply(string? Error, int? WorkItemId, string
 /// null from a hub that does not say.
 /// </summary>
 public sealed record SessionProviderReply(string? Error, string? DefaultProvider, IReadOnlyList<string>? Installed = null);
+
+/// <summary>The hub's answer to a click in the web page: the refusal or failure, the marker of the page that shows it, or the page's address at it.</summary>
+public sealed record PageReply(string? Error, string? Marker, string? Url);
 
 /// <summary>The hub's answer to a window command: the refusal or failure, or the command's ID for withdrawing it.</summary>
 public sealed record WindowReply(string? Error, int? Id);

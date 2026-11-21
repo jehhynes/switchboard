@@ -103,9 +103,15 @@ export const OPEN_TERMINAL = ['vscode', 'app', 'auto'] as const;
 
 export type OpenTerminal = (typeof OPEN_TERMINAL)[number];
 
+/** Where a dock row's click opens its work item (PRD R71): `vscode` as `dock.openVSCode` says, `web` in the installed web page; Alt-click opens the other. */
+export const OPEN_IN = ['vscode', 'web'] as const;
+
+export type OpenIn = (typeof OPEN_IN)[number];
+
 export interface DockSettings {
   openVSCode: OpenVSCode;
   openTerminal: OpenTerminal;
+  openIn: OpenIn;
 }
 
 /** The web page (architecture.md § Web page). */
@@ -227,7 +233,7 @@ export const DEFAULT_SETTINGS: Settings = {
   triage: { model: '', concurrency: 2, timeoutSeconds: 180 },
   sources: {},
   schedules: {},
-  dock: { openVSCode: 'always', openTerminal: 'vscode' },
+  dock: { openVSCode: 'always', openTerminal: 'vscode', openIn: 'vscode' },
   voice: { enabled: false, voice: 'marin', style: 'none', speed: 1, expressive: false, expandReplies: false, awayMinutes: 2, needsYouSound: true, outputDevice: null, micIdleMinutes: 10, endPauseMs: 3000, inputDevice: null, halfDuplexTailMs: 800, duplex: { local: 'auto', remote: 'auto' }, matchThreshold: 0.6, pitchLowFactor: 1.22, pitchMinLowShare: 0.2, roomHold: true, roomHoldSeconds: 60, personas: [], playbookPersonas: {}, spokenAlerts: true, alertOn: { finished: true, question: true, permission: true }, alertAnswerSeconds: 10, operatorName: '' },
   web: { port: 47616, chromePane: false },
 };
@@ -499,10 +505,11 @@ export function parseSettings(text: string): SettingsResult {
   }
 
   const dockIn = read.section(root, 'dock', 'dock');
-  read.unknown(dockIn, ['openVSCode', 'openTerminal'], 'dock');
+  read.unknown(dockIn, ['openVSCode', 'openTerminal', 'openIn'], 'dock');
   const dock: DockSettings = {
     openVSCode: read.choice(dockIn, 'openVSCode', 'dock', OPEN_VSCODE, defaults.dock.openVSCode),
     openTerminal: read.choice(dockIn, 'openTerminal', 'dock', OPEN_TERMINAL, defaults.dock.openTerminal),
+    openIn: read.choice(dockIn, 'openIn', 'dock', OPEN_IN, defaults.dock.openIn),
   };
 
   const voiceIn = read.section(root, 'voice', 'voice');

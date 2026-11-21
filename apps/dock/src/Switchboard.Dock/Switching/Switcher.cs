@@ -87,6 +87,75 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
         return await Destination(window, open, cancel);
     }
 
+    /// <summary>How long the dock looks for the installed web page's window once the page shows the work item.</summary>
+    public static readonly TimeSpan PageWait = TimeSpan.FromSeconds(3);
+
+    /// <summary>
+    /// The row's click in the web page (PRD R71): the installed page used last shows the work item, and the dock brings its window to the front
+    /// where it can find it by the marker in its title; with no installed page open the browser opens the page at the work item. A pool ticket,
+    /// which has no conversation, runs its own click. Returns why not, or null.
+    /// </summary>
+    public async Task<string?> OpenInPage(DockRow row, CancellationToken cancel = default)
+    {
+        if (!row.Key.StartsWith("item:", StringComparison.Ordinal))
+        {
+            return await Click(row, cancel);
+        }
+
+        var reply = await hub.Page(row.Key);
+
+        if (cancel.IsCancellationRequested)
+        {
+            return null;
+        }
+
+        if (reply.Error is { } error)
+        {
+            return error;
+        }
+
+        if (reply.Url is { } url)
+        {
+            return OpenPage(url);
+        }
+
+        if (reply.Marker is not { } marker || !windows.FindsPages)
+        {
+            return null;
+        }
+
+        for (var waited = TimeSpan.Zero; waited < PageWait; waited += Poll)
+        {
+            if (windows.FindPage(marker) is var found && found != 0)
+            {
+                return windows.Raise(found) ? null : "The web page shows it, but Windows did not bring its window to the front.";
+            }
+
+            await wait(Poll);
+
+            if (cancel.IsCancellationRequested)
+            {
+                return null;
+            }
+        }
+
+        return "The web page shows it, but the dock did not find its window.";
+    }
+
+    /// <summary>Opens the web page at a work item in the browser, unmarked, since it is no ticket's tab; returns why it could not, or null.</summary>
+    string? OpenPage(string url)
+    {
+        try
+        {
+            windows.OpenUrl(url);
+            return null;
+        }
+        catch (Exception error) when (error is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            return $"The browser did not open the web page: {error.Message}";
+        }
+    }
+
     /// <summary>A folder window for New conversation in a folder, which leaves it nothing to open: the hub stored the conversation as its selection.</summary>
     public Task<string?> OpenFolder(string folder, CancellationToken cancel = default) => FolderWindow(folder, null, cancel);
 

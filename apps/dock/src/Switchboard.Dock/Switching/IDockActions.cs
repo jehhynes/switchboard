@@ -8,6 +8,9 @@ public interface IDockActions
 {
     Task<string?> Click(DockRow row, CancellationToken cancel);
 
+    /// <summary>The row's click in the web page (<c>dock.openIn: web</c>, or Alt-click otherwise, PRD R71); returns why not, or null.</summary>
+    Task<string?> OpenInPage(DockRow row, CancellationToken cancel);
+
     Task<string?> Run(DockRow? row, JsonObject command, CancellationToken cancel);
 
     /// <summary>Open in terminal (PRD R28): in the item window or the terminal app, as the row offers; returns why not, or null.</summary>

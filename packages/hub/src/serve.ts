@@ -9,11 +9,11 @@ import type { SnoozeByUrl, UnsnoozeByUrl } from './browserSnooze.js';
 import { findHub, readHubRecord } from './discover.js';
 import { holdLock, releaseLock } from './lock.js';
 import { listenHub } from './server.js';
-import type { PageRoutes, Reply } from './server.js';
+import type { PageRoutes, PostContext, Reply } from './server.js';
 
 /** What the hub serves beyond its lifecycle: the snapshot and the dock view, requests, and the sessions that keep it running. */
 export interface HubApp {
-  post: Record<string, (body: unknown) => Promise<Reply>>;
+  post: Record<string, (body: unknown, context?: PostContext) => Promise<Reply>>;
   snapshot(): unknown;
   /** Registers a window's `/events` stream and returns its window key (architecture.md § Window scope). */
   windowOpened?(workspace: string | null, folder?: string | null): string;

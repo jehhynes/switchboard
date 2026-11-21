@@ -12,7 +12,7 @@ import { renderList } from '../src/list.js';
 import { html } from './html.js';
 import { renderMicButton as viewMicButton } from '@switchboard/conversation/voiceControls';
 import { renderMarkdown } from '../src/markdown.js';
-import { CHAT_MAX, CHAT_MIN, loadMermaid, SENT_NOTE_MS, SIDE_MAX, SIDE_MIN, startPage, stepScale } from '../src/main.js';
+import { CHAT_MAX, CHAT_MIN, loadMermaid, SENT_NOTE_MS, SHOW_MARKER_MS, SIDE_MAX, SIDE_MIN, startPage, stepScale } from '../src/main.js';
 import type { ArtifactView, MessageView, PageGroup, PageRow, ReplyView, SessionView } from '../src/types.js';
 
 const message = (id: string, ord: number, patch: Partial<MessageView> = {}): MessageView => ({ type: 'message', id, sessionId: 's', workItemId: 1, at: 1_000 + ord, ord, provisional: false, withdrawn: false, origin: 'typed', text: `text ${id}`, delivery: 'sent', error: null, ...patch });
@@ -1942,6 +1942,26 @@ describe('the page in use', () => {
     // A row without a ticket URL, such as an ad-hoc one, has a ticket pill that opens nothing.
     expect(root.querySelector('#list [data-work-item="1"] .pill.ticket')!.hasAttribute('data-action')).toBe(false);
     page.close();
+  });
+
+  it('says it is the installed app as it opens its stream, and shows the work item a dock click sends with its marker in the title for a while', async () => {
+    vi.useFakeTimers();
+    installed = true;
+
+    const { page, source } = start();
+
+    expect(source.url).toBe('/v1/conversation/events?page=1&installed=1');
+    hello(source);
+    source.emit('show', { workItemId: 2, marker: '0123456789ab' });
+    expect(location.hash).toBe('#w=2');
+    expect(posts.filter((post) => post.url.endsWith('/select')).at(-1)?.body).toMatchObject({ workItemId: 2 });
+    expect(document.title).toMatch(/ \[sb-show 0123456789ab\]$/);
+    vi.advanceTimersByTime(SHOW_MARKER_MS);
+    expect(document.title).not.toContain('sb-show');
+    page.close();
+
+    installed = false;
+    expect(start().source.url).toBe('/v1/conversation/events?page=1');
   });
 
   it('asks the hub to open a link in the default browser when installed as an app, and shows its refusal', async () => {
