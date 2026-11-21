@@ -34,7 +34,7 @@ import type { Snapshot, WorkItemView } from './snapshot.js';
 import { SnapshotBuilder } from './snapshotBuilder.js';
 import type { Built } from './snapshotBuilder.js';
 import { WindowScopes } from './windows.js';
-import { PageAccess, pageGroups } from './page.js';
+import { PageAccess, pageList } from './page.js';
 import { pageAsset } from './pageAssets.js';
 import { needsMessage, newlyNeeding, rowFor, targetForUrl } from './needs.js';
 import { volumeReply } from './volume.js';
@@ -441,7 +441,11 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
       return made === undefined ? { refused: refused ?? 'The conversation was not made.' } : { workItemId: made.id };
     },
-    pageGroups: () => pageGroups(views().snapshot, windows),
+    pageList: () => {
+      const built = views();
+
+      return pageList(built.dock, built.snapshot);
+    },
     // A focused, visible page counts as a focused window for the voice (architecture.md § Web page).
     pageFocused: (key, focused) => {
       if (focused) {

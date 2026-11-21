@@ -8,7 +8,7 @@ import type { Artifact, ConversationChange, HeardTag, InputOutcome, InputSteps, 
 import { SESSION_ENDED, SESSION_RELAUNCHED } from './runtime.js';
 import { canonicalFolder } from './windows.js';
 import { artifactFile, findFiles } from './page.js';
-import type { PageFile, PageGroup } from './page.js';
+import type { PageFile, PageListGroup } from './page.js';
 import type { ConversationRef, WindowScope, WindowScopes } from './windows.js';
 import type { VoiceView } from './voice.js';
 import { ClaudeConversationAdapter } from './claudeConversation.js';
@@ -231,8 +231,8 @@ export interface ConversationServiceDeps {
   personas?(): PersonaView;
   /** Pins a persona to a session, or clears its pin with null; why not, or null. */
   pinPersona?(sessionId: string, personaId: string | null): string | null;
-  /** The web page's list, grouped by host (architecture.md § Web page); without it a page lists nothing. */
-  pageGroups?(): PageGroup[];
+  /** The web page's list, in the dock's groups (architecture.md § Web page); without it a page lists nothing. */
+  pageList?(): PageListGroup[];
   /** A page's focus changed: a focused, visible page counts as a focused window for the voice. */
   pageFocused?(key: string, focused: boolean): void;
   log(line: string): void;
@@ -496,16 +496,9 @@ export class ConversationService {
   /** The list each page was last sent. */
   readonly #listShown = new Map<string, string>();
 
-  /**
-   * The web page's list (architecture.md § Web page): each group's title and kind and, of each work item in it, only its title, its current
-   * session's state and its unread count.
-   */
-  pageList(): Array<{ kind: PageGroup['kind']; title: string; conversations: Array<{ workItemId: number; title: string; state: SessionView['state'] | null; unread: number }> }> {
-    return (this.deps.pageGroups?.() ?? []).map((group) => ({
-      kind: group.kind,
-      title: group.title,
-      conversations: this.entries(group.ids.map((id) => ({ workItemId: id, primary: false }))).map(({ workItemId, title, state, unread }) => ({ workItemId, title, state, unread })),
-    }));
+  /** The web page's list (architecture.md § Web page): the dock's groups and rows, as `pageList` in `page.ts` gives them. */
+  pageList(): PageListGroup[] {
+    return this.deps.pageList?.() ?? [];
   }
 
   /** Sends each page its list when it changed. */

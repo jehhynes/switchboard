@@ -5,9 +5,11 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { listenHub } from '../src/server.js';
 import type { HubServer, PageRoutes } from '../src/server.js';
-import { artifactFile, cookieValue, findFiles, loopbackHost, PageAccess, PAGE_LINK_MS, pageGroups } from '../src/page.js';
+import { artifactFile, cookieValue, findFiles, loopbackHost, PageAccess, PAGE_LINK_MS, pageGroups, pageList } from '../src/page.js';
+import { dockView } from '../src/dock.js';
+import type { DockView } from '../src/dock.js';
 import { pageAsset } from '../src/pageAssets.js';
-import { item, session, snapshot } from './views.js';
+import { item, NOW, session, snapshot } from './views.js';
 import { until } from './helpers.js';
 
 let dir: string;
@@ -66,6 +68,37 @@ describe('pageGroups', () => {
     expect(groups.find((group) => group.ids.includes(3))?.kind).toBe('window');
     expect(groups.find((group) => group.ids.includes(1))).toEqual({ kind: 'item', title: 'Fix the badge', ids: [1] });
     expect(view.workItems).toHaveLength(2);
+  });
+});
+
+describe('pageList', () => {
+  const WINDOWS = 'C:/sb/windows';
+
+  it("lists the dock's groups in the dock's order with its titles and rows, work items only, and the hosted conversations last", () => {
+    const own = item(1, { ticket: { ...item(1).ticket, title: 'Fix the badge' }, sessions: [session({ id: 's1', workItemId: 1, cwd: 'D:/w1' })] });
+    const byFolder = item(4, { ticket: { ...item(4).ticket, title: 'Folder chat', hostWindow: 'D:/git/support' } });
+    const byWindow = item(5, { ticket: { ...item(5).ticket, title: 'Aside', hostWindow: 'C:/sb/windows/x.code-workspace' } });
+    const view = snapshot([own, byFolder, byWindow]);
+    const dock = dockView(view, NOW, WINDOWS);
+    const list = pageList(dock, view);
+    const ownRow = dock.groups.flatMap((group) => group.rows).find((row) => row.key === 'item:1')!;
+
+    expect(list.slice(0, -1).map((group) => [group.key, group.title, group.glyph])).toEqual(dock.groups.map((group) => [group.key, group.title, group.glyph]));
+    expect(list.flatMap((group) => group.rows).find((row) => row.workItemId === 1)).toEqual({ workItemId: 1, title: 'Fix the badge', ticket: ownRow.ticket, sourceKind: ownRow.sourceKind, playbook: ownRow.playbook, mark: ownRow.mark, stripe: ownRow.stripe, dim: ownRow.dim, host: null });
+    expect(list.at(-1)).toMatchObject({ key: 'conversations', title: 'Conversations', glyph: '\u{eac7}', rows: [{ workItemId: 5, host: 'x' }, { workItemId: 4, host: 'support' }] });
+    expect(list.slice(0, -1).flatMap((group) => group.rows).map((row) => row.workItemId)).toEqual([1]);
+  });
+
+  it('leaves out pool tickets and rows of work items the snapshot lacks, keeps a done hosted conversation in Done, and has no Conversations group without one', () => {
+    const doneHosted = item(6, { status: 'done', ticket: { ...item(6).ticket, title: 'Old chat', hostWindow: 'D:/git/support' } });
+    const row = (key: string) => ({ key, title: key, ticket: 'gh 1', sourceKind: 'github', playbook: 'dev', mark: null, stripe: null, dim: false }) as unknown as DockView['groups'][number]['rows'][number];
+    const dock = { groups: [{ key: 'unstarted', title: 'Unstarted', glyph: 'u', empty: 'Nothing waits to be started.', rows: [row('ticket:9'), row('item:77')] }, { key: 'done', title: 'Done', glyph: 'd', empty: null, rows: [row('item:6')] }] } as Pick<DockView, 'groups'>;
+    const list = pageList(dock, snapshot([doneHosted]));
+
+    expect(list).toEqual([
+      { key: 'unstarted', title: 'Unstarted', glyph: 'u', empty: 'Nothing waits to be started.', rows: [] },
+      { key: 'done', title: 'Done', glyph: 'd', empty: null, rows: [expect.objectContaining({ workItemId: 6, host: 'support' })] },
+    ]);
   });
 });
 

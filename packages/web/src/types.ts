@@ -3,6 +3,8 @@
  * view, so it declares the fields it reads here rather than importing the hub.
  */
 
+import type { Mark } from '@switchboard/core/group';
+
 export type SessionState = 'starting' | 'running' | 'waiting' | 'idle' | 'ended';
 
 export interface SessionView {
@@ -116,9 +118,26 @@ export interface VoiceView {
   error: string | null;
 }
 
-/** One group of the page's list: a work item with the conversations its window hosts, or the conversations a folder or a window hosts. */
-export interface PageGroup {
-  kind: 'item' | 'folder' | 'window';
+/** A row of the page's list: the dock row's title, ticket key, playbook, mark and stripe (`PageRow` in the hub's `page.ts`). */
+export interface PageRow {
+  workItemId: number;
   title: string;
-  conversations: Array<{ workItemId: number; title: string; state: SessionState | null; unread: number }>;
+  ticket: string;
+  sourceKind: string;
+  playbook: string;
+  mark: { kind: Mark; glyph: string; title: string } | null;
+  stripe: 'error' | 'warning' | 'turn' | null;
+  dim: boolean;
+  /** A hosted conversation's host's name; null for other work items. */
+  host: string | null;
+}
+
+/** One group of the page's list: a dock group, in the dock's order, or `conversations`, the hosted conversations, last. */
+export interface PageGroup {
+  key: string;
+  title: string;
+  /** The group's codicon glyph, as the dock draws it. */
+  glyph: string;
+  empty: string | null;
+  rows: PageRow[];
 }

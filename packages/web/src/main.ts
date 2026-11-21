@@ -586,7 +586,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
   /** Draws the state by changing only what differs (`morph`), so the focus, a selection, the scroll position and open menus stay. */
   const draw = (): void => {
-    morph(list, expired ? '<p class="empty">This page\'s link is no longer valid. Open a new one with Switchboard: Open Web Page in VS Code, or hub.js web.</p>' : renderList(state.groups, state.scope?.workItemId ?? null));
+    morph(list, expired ? '<p class="empty">This page\'s link is no longer valid. Open a new one with Switchboard: Open Web Page in VS Code, or hub.js web.</p>' : renderList(state.groups, state.scope?.workItemId ?? null, view.collapsed));
 
     // An ended session's reason sits just above the composer it disables, on every tab; the page has no terminal to resume it in.
     morph(note, state.session?.state === 'ended' ? `<div class="session-note" role="status"><span class="codicon codicon-debug-stop" aria-hidden="true"></span><span class="session-note-text">${escape(state.session.reason ?? 'The session has ended. A message continues it.')}</span></div>` : '');
@@ -843,6 +843,16 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       case 'select':
         void select(Number(button!.dataset['workItem']));
         break;
+      case 'group': {
+        const group = button!.dataset['group']!;
+
+        if (!view.collapsed.delete(group)) {
+          view.collapsed.add(group);
+        }
+
+        draw();
+        break;
+      }
       case 'picker':
         view.picker = !view.picker;
         // One header menu at a time.

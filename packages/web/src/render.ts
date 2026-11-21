@@ -4,7 +4,8 @@ import type { PageState } from './model.js';
 import { copyButton, escape, renderInline, renderMarkdown } from './markdown.js';
 import { answers, answersIn, answerText, cardOutcome, complete, parseQuestions, questionSegments } from '@switchboard/conversation/questions';
 import type { Question, QuestionChoice } from '@switchboard/conversation/questions';
-import type { ArtifactView, MessageView, NativeRequest, PageGroup, ReplyView, StatusView, VoiceView } from './types.js';
+import type { ArtifactView, MessageView, NativeRequest, PageGroup, PageRow, ReplyView, StatusView, VoiceView } from './types.js';
+import { MARK_ICONS, SPINNING_MARKS } from '@switchboard/core/group';
 
 export type Tab = 'conversation' | 'status' | 'artifacts';
 export const TABS: Array<{ tab: Tab; label: string }> = [
@@ -34,9 +35,11 @@ export interface View {
   requestValues: Map<string, string>;
   /** The header's persona menu while open: the roster, null while it loads, or why it could not. */
   personas: { items: Array<{ id: string; name: string }> | null; error: string | null } | null;
+  /** The list's collapsed groups, by key. */
+  collapsed: Set<string>;
 }
 
-export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null });
+export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS) });
 
 const STAMP = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', hourCycle: 'h12' });
 /** A time's tooltip, as the VS Code view's: "2026-11-19 13:46:05 EST". */
@@ -73,26 +76,57 @@ export function ago(at: number, now: number): string {
   return minutes < 1 ? 'just now' : minutes < 60 ? `${minutes} min ago` : minutes < 1440 ? `${Math.floor(minutes / 60)} h ago` : `${Math.floor(minutes / 1440)} d ago`;
 }
 
+/** The groups the list shows collapsed until the operator opens them, as the dock does. */
+export const COLLAPSED_GROUPS: readonly string[] = ['done'];
+
 /**
- * The page's list (architecture.md § Web page): each group's work items, a hosted conversation under its host, each with its session's state;
- * a folder's or window's group under its name.
+ * A row of the list, drawn as the dock's: the title on line 1; on line 2 the mark, the ticket key as a pill in its source's colour and the
+ * playbook, its namespace muted, or a hosted conversation's host; the dock's stripe on its left edge.
  */
-export function renderList(groups: readonly PageGroup[], selected: number | null): string {
-  if (groups.length === 0) {
+function listRow(row: PageRow, selected: boolean): string {
+  const kind = row.mark?.kind;
+  const mark =
+    row.mark === null || kind === undefined
+      ? ''
+      : `<span class="codicon codicon-${MARK_ICONS[kind]} mark${SPINNING_MARKS.has(kind) ? ' codicon-modifier-spin' : ''}${kind === 'failed' ? ' failed' : ''}" role="img" title="${escape(row.mark.title)}" aria-label="${escape(row.mark.title)}"></span>`;
+  const colon = row.playbook.indexOf(':');
+  const playbook =
+    row.host !== null
+      ? `<span class="playbook host" title="${escape(`Hosted by ${row.host}`)}">${escape(row.host)}</span>`
+      : row.playbook === ''
+        ? ''
+        : `<span class="playbook" title="${escape(row.playbook)}">${colon === -1 ? '' : `<span class="namespace">${escape(row.playbook.slice(0, colon + 1))}</span>`}${escape(row.playbook.slice(colon + 1))}</span>`;
+  const classes = ['row', ...(row.stripe === null ? [] : [`stripe-${row.stripe}`]), ...(row.dim ? ['dim'] : []), ...(selected ? ['selected'] : [])].join(' ');
+
+  return (
+    `<li><button type="button" class="${classes}" data-action="select" data-work-item="${row.workItemId}" aria-current="${selected}" title="${escape(row.title)}">` +
+    `<span class="row-title">${escape(row.title)}</span>` +
+    `<span class="row-line">${mark}<span class="pill ticket source-${escape(row.sourceKind)}">${escape(row.ticket)}</span>${playbook}</span></button></li>`
+  );
+}
+
+/**
+ * The page's list (architecture.md § Web page): the dock's groups in its order, each a header with its codicon, title and count that opens or
+ * collapses it, then its rows; a collapsed group still shows the selected row, so the selection is never hidden.
+ */
+export function renderList(groups: readonly PageGroup[], selected: number | null, collapsed: ReadonlySet<string>): string {
+  if (groups.every((group) => group.rows.length === 0)) {
     return '<p class="empty">No work items yet. They appear here when Switchboard starts one.</p>';
   }
 
-  const row = (entry: PageGroup['conversations'][number], hosted: boolean): string => {
-    return `<li><button type="button" class="list-item${hosted ? ' hosted' : ''}${entry.workItemId === selected ? ' selected' : ''}" data-action="select" data-work-item="${entry.workItemId}" aria-current="${entry.workItemId === selected}">${codicon(stateIcon(entry.state))}<span class="title" title="${escape(entry.title)}">${escape(entry.title)}</span></button></li>`;
-  };
   const html = groups.map((group) => {
-    const rows = group.conversations.map((entry, index) => row(entry, group.kind !== 'item' || index > 0)).join('');
-    const label = group.kind === 'item' ? '' : `<div class="group-title"><span class="codicon codicon-${group.kind === 'folder' ? 'folder' : 'window'}" aria-hidden="true"></span>${escape(group.title)}</div>`;
+    const open = !collapsed.has(group.key);
+    const rows = (open ? group.rows : group.rows.filter((row) => row.workItemId === selected)).map((row) => listRow(row, row.workItemId === selected)).join('');
+    const empty = open && group.rows.length === 0 && group.empty !== null ? `<p class="group-empty">${escape(group.empty)}</p>` : '';
+    const head =
+      `<button type="button" class="group-head" data-action="group" data-group="${escape(group.key)}" aria-expanded="${open}">` +
+      `<span class="codicon codicon-chevron-${open ? 'down' : 'right'}" aria-hidden="true"></span><span class="codicon group-icon" aria-hidden="true">${escape(group.glyph)}</span>` +
+      `<span class="group-title">${escape(group.title)}</span><span class="group-count${group.rows.length === 0 ? ' zero' : ''}" aria-label="${group.rows.length} work items">${group.rows.length}</span></button>`;
 
-    return `<li class="group">${label}<ul>${rows}</ul></li>`;
+    return `<section class="group" data-group="${escape(group.key)}">${head}${rows === '' ? '' : `<ul class="rows">${rows}</ul>`}${empty}</section>`;
   });
 
-  return `<ul class="work-list" aria-label="Work items">${html.join('')}</ul>`;
+  return `<nav class="work-list" aria-label="Work items">${html.join('')}</nav>`;
 }
 
 /** A menu row's left gutter: a check mark for the chosen row, or nothing, so every row's text starts in one column. */

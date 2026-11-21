@@ -5,6 +5,8 @@ import { basename, isAbsolute, join, relative, sep } from 'node:path';
 import { hostKey, isFolderHost } from '@switchboard/core';
 import { artifactType } from '@switchboard/conversation';
 import { windowOf } from './dock.js';
+import type { DockRow, DockView } from './dock.js';
+import type { RowGroup } from './rows.js';
 import type { Snapshot } from './snapshot.js';
 
 /** The cookie a page holds once it exchanged its one-time link (architecture.md § Web page). */
@@ -143,6 +145,71 @@ export function pageGroups(snapshot: Snapshot, windows: string, keep: number | n
   }
 
   return [...groups.values()].sort((a, b) => b.newest - a.newest).map(({ kind, title, ids }) => ({ kind, title, ids }));
+}
+
+/** A row of the page's list: the dock row's line 1 and line 2, its mark and its stripe (architecture.md § Web page). */
+export interface PageRow {
+  workItemId: number;
+  title: string;
+  /** The ticket's key, such as `gh 18941`, and its source's plugin, which colours its pill as the dock's. */
+  ticket: string;
+  sourceKind: string;
+  playbook: string;
+  mark: DockRow['mark'];
+  stripe: DockRow['stripe'];
+  /** A Ready for review row on the agent's turn, dimmed as the dock dims it. */
+  dim: boolean;
+  /** A hosted conversation's host: its folder's or its window's name; null for other work items. */
+  host: string | null;
+}
+
+/** A group of the page's list: one of the dock's groups, with its codicon glyph, or `conversations`, the hosted conversations, last. */
+export interface PageListGroup {
+  key: RowGroup | 'conversations';
+  title: string;
+  glyph: string;
+  /** What the group says when it has no rows, or null. */
+  empty: string | null;
+  rows: PageRow[];
+}
+
+/** The Conversations group's codicon glyph, `comment-discussion`. */
+const CONVERSATIONS_GLYPH = '\u{eac7}';
+
+/** A host's name: a folder's last segment, or a workspace file's name without `.code-workspace`. */
+function hostTitle(host: string): string {
+  return isFolderHost(host) ? basename(host) || host : basename(host).replace(/\.code-workspace$/i, '');
+}
+
+/**
+ * The page's list (architecture.md § Web page): the dock's groups in the dock's order, with its titles, glyphs and empty texts, holding the
+ * dock's work item rows; pool tickets, which have no conversation, are left out. Hosted conversations that are not done leave their group for a
+ * last group, Conversations, newest first, shown only when it has rows.
+ */
+export function pageList(dock: Pick<DockView, 'groups'>, snapshot: Pick<Snapshot, 'workItems'>): PageListGroup[] {
+  const items = new Map(snapshot.workItems.map((item) => [item.id, item]));
+  const hosted: PageRow[] = [];
+  const groups: PageListGroup[] = dock.groups.map((group) => {
+    const rows: PageRow[] = [];
+
+    for (const row of group.rows) {
+      const id = /^item:(\d+)$/.exec(row.key)?.[1];
+      const item = id === undefined ? undefined : items.get(Number(id));
+
+      if (item === undefined) {
+        continue;
+      }
+
+      const host = item.ticket.hostWindow ?? null;
+      const shown: PageRow = { workItemId: item.id, title: row.title, ticket: row.ticket, sourceKind: row.sourceKind, playbook: row.playbook, mark: row.mark, stripe: row.stripe, dim: row.dim, host: host === null ? null : hostTitle(host) };
+
+      (host !== null && group.key !== 'done' ? hosted : rows).push(shown);
+    }
+
+    return { key: group.key, title: group.title, glyph: group.glyph, empty: group.empty, rows };
+  });
+
+  return hosted.length === 0 ? groups : [...groups, { key: 'conversations', title: 'Conversations', glyph: CONVERSATIONS_GLYPH, empty: null, rows: hosted.sort((a, b) => b.workItemId - a.workItemId) }];
 }
 
 /** An artifact's file, or a file an artifact uses, as the page names it: `<owner>/<file>` or deeper, no segment starting with a dot. */

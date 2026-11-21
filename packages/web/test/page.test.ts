@@ -4,12 +4,14 @@ import { answerText, answersIn, complete, parseQuestions } from '@switchboard/co
 import { artifactUrl, newView, renderArtifactView, turnRow, renderHeader, renderList, renderTimeline, renderVoice, markdownBody } from '../src/render.js';
 import { renderMarkdown } from '../src/markdown.js';
 import { SENT_NOTE_MS, startPage } from '../src/main.js';
-import type { ArtifactView, MessageView, ReplyView, SessionView } from '../src/types.js';
+import type { ArtifactView, MessageView, PageGroup, PageRow, ReplyView, SessionView } from '../src/types.js';
 
 const message = (id: string, ord: number, patch: Partial<MessageView> = {}): MessageView => ({ type: 'message', id, sessionId: 's', workItemId: 1, at: 1_000 + ord, ord, provisional: false, withdrawn: false, origin: 'typed', text: `text ${id}`, delivery: 'sent', error: null, ...patch });
 const reply = (id: string, ord: number, patch: Partial<ReplyView> = {}): ReplyView => ({ type: 'reply', id, sessionId: 's', at: 1_000 + ord, ord, provisional: false, kind: 'reply', answers: null, opening: `reply ${id}`, rewrittenBy: null, withdrawn: false, unread: false, speak: null, tone: null, spoken: { state: 'none', atMs: null, saidChars: null }, ...patch });
 const session = (patch: Partial<SessionView> = {}): SessionView => ({ id: 's', title: 'Task session s', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, persona: null, ...patch });
 const scope = { kind: 'page' as const, key: 'k', folder: 'D:/w', title: 'Fix it', scopeGen: 3, conversations: [{ workItemId: 1, title: 'Fix it', primary: true, sessionId: 's', state: 'idle' as const, conversation: 'full' as const, unread: 0 }], workItemId: 1, cwd: 'D:/w', sessionId: 's' };
+const listRow = (workItemId: number, patch: Partial<PageRow> = {}): PageRow => ({ workItemId, title: `Item ${workItemId}`, ticket: `gh ${workItemId}`, sourceKind: 'github', playbook: 'dev:build', mark: null, stripe: null, dim: false, host: null, ...patch });
+const listGroup = (key: string, rows: PageRow[], patch: Partial<PageGroup> = {}): PageGroup => ({ key, title: key, glyph: '\u{ea70}', empty: null, rows, ...patch });
 const artifact = (path: string, type: ArtifactView['type'], ext: string): ArtifactView => ({ path, owner: 'chat', kind: 'page', title: path, ext, type, updatedAt: 1_500 });
 
 describe('the page model', () => {
@@ -174,16 +176,65 @@ describe('drawing', () => {
     expect(markdownBody('---\ntitle: x\n---\n# Body')).toBe('# Body');
   });
 
-  it('lists hosted conversations under their host and marks the selected one', () => {
-    const html = renderList([{ kind: 'item', title: 'Fix', conversations: [{ workItemId: 1, title: 'Fix', state: 'idle', unread: 2 }, { workItemId: 4, title: 'Side', state: 'running', unread: 0 }] }, { kind: 'folder', title: 'support', conversations: [{ workItemId: 5, title: 'Chat', state: null, unread: 0 }] }], 4);
+  it("draws the dock's groups with their counts and rows as the dock's: title, mark, ticket pill and playbook, stripe and the selection", () => {
+    const root = document.createElement('div');
+    const groups = [
+      listGroup('review', [listRow(1, { title: 'Fix <the> badge', stripe: 'turn', mark: { kind: 'review', glyph: '\u{ea70}', title: 'Review, then approve' } }), listRow(2, { dim: true, stripe: 'warning', sourceKind: 'zoho', ticket: 'zd 7', playbook: 'triage' })], { title: 'Ready for review' }),
+      listGroup('progress', [listRow(3, { mark: { kind: 'running', glyph: '\u{eb19}', title: 'Running' } }), listRow(4, { stripe: 'error', mark: { kind: 'failed', glyph: '\u{ea87}', title: 'Failed' } })]),
+      listGroup('unstarted', [], { empty: 'Nothing waits to be started.' }),
+      listGroup('conversations', [listRow(9, { title: 'Side chat', host: 'support', playbook: 'conversation' })]),
+    ];
 
-    expect(html).toMatch(/class="list-item hosted selected" data-action="select" data-work-item="4"/);
-    expect(html).toContain('codicon-folder');
-    // A working session spins the same loading codicon as the Thinking row and the dock's running mark.
-    expect(html).toContain('class="codicon codicon-loading codicon-modifier-spin" title="Working"');
-    // The page shows no unread counts, in its list, its dropdown or its tabs.
-    expect(html).not.toContain('class="count"');
+    root.innerHTML = renderList(groups, 3, new Set());
+
+    expect([...root.querySelectorAll('.group-head')].map((head) => [head.querySelector('.group-title')!.textContent, head.querySelector('.group-count')!.textContent, head.getAttribute('aria-expanded')])).toEqual([
+      ['Ready for review', '2', 'true'],
+      ['progress', '2', 'true'],
+      ['unstarted', '0', 'true'],
+      ['conversations', '1', 'true'],
+    ]);
+    expect(root.querySelector('[data-group="unstarted"] .group-count')!.classList.contains('zero')).toBe(true);
+    expect(root.querySelector('[data-group="unstarted"] .group-empty')!.textContent).toBe('Nothing waits to be started.');
+
+    const first = root.querySelector<HTMLElement>('[data-work-item="1"]')!;
+
+    expect(first.querySelector('.row-title')!.textContent).toBe('Fix <the> badge');
+    expect(first.className).toBe('row stripe-turn');
+    // The mark by the shared icon name, the ticket key in its source's colour, the playbook's namespace muted.
+    expect(first.querySelector('.mark')!.className).toBe('codicon codicon-eye mark');
+    expect(first.querySelector('.mark')!.getAttribute('aria-label')).toBe('Review, then approve');
+    expect(first.querySelector('.pill')!.className).toBe('pill ticket source-github');
+    expect(first.querySelector('.playbook')!.innerHTML).toBe('<span class="namespace">dev:</span>build');
+    expect(root.querySelector('[data-work-item="2"]')!.className).toBe('row stripe-warning dim');
+    expect(root.querySelector('[data-work-item="2"] .pill')!.className).toBe('pill ticket source-zoho');
+    expect(root.querySelector('[data-work-item="2"] .playbook')!.innerHTML).toBe('triage');
+    // A running mark spins, as the dock's does; a failed one is red.
+    expect(root.querySelector('[data-work-item="3"] .mark')!.className).toBe('codicon codicon-loading mark codicon-modifier-spin');
+    expect(root.querySelector('[data-work-item="4"] .mark')!.className).toBe('codicon codicon-error mark failed');
+    expect(root.querySelector('[data-work-item="3"]')!.className).toBe('row selected');
+    expect(root.querySelector('[data-work-item="3"]')!.getAttribute('aria-current')).toBe('true');
+    expect(root.querySelectorAll('[aria-current="true"]')).toHaveLength(1);
+    // A hosted conversation shows its host in the playbook's place; no row shows an unread count.
+    expect(root.querySelector('[data-work-item="9"] .playbook')!.textContent).toBe('support');
+    expect(root.querySelector('[data-work-item="9"] .playbook')!.classList.contains('host')).toBe(true);
+    expect(root.querySelector('.count')).toBeNull();
+    // The dropdown shows none either.
     expect(renderHeader({ ...EMPTY, connected: true, scope: { ...scope, conversations: [{ ...scope.conversations[0]!, unread: 3 }] }, session: session(), unread: 3 }, { ...newView(), picker: true })).not.toContain('class="count"');
+  });
+
+  it('collapses Done by default, still showing the selected row of a collapsed group, and says when there is nothing', () => {
+    const root = document.createElement('div');
+    const groups = [listGroup('progress', [listRow(1)]), listGroup('done', [listRow(5), listRow(6)])];
+
+    expect(newView().collapsed).toEqual(new Set(['done']));
+    root.innerHTML = renderList(groups, 1, newView().collapsed);
+    expect(root.querySelector('[data-group="done"] .group-head')!.getAttribute('aria-expanded')).toBe('false');
+    expect(root.querySelector('[data-group="done"] .codicon-chevron-right')).not.toBeNull();
+    expect(root.querySelector('[data-group="done"] .group-count')!.textContent).toBe('2');
+    expect(root.querySelectorAll('[data-group="done"] .row')).toHaveLength(0);
+    root.innerHTML = renderList(groups, 6, newView().collapsed);
+    expect([...root.querySelectorAll('[data-group="done"] .row')].map((row) => row.getAttribute('data-work-item'))).toEqual(['6']);
+    expect(renderList([listGroup('progress', [])], null, new Set())).toBe('<p class="empty">No work items yet. They appear here when Switchboard starts one.</p>');
   });
 
   it("puts the session's state codicon inside the dropdown's button, before the title, as each option has it", () => {
@@ -292,16 +343,16 @@ describe('the page', () => {
       Object.defineProperty(panel, 'scrollHeight', { value: height, configurable: true });
       Object.defineProperty(panel, 'clientHeight', { value: 100, configurable: true });
     };
-    const groups = [{ kind: 'item', title: 'Fix it', conversations: [{ workItemId: 1, title: 'Fix it', state: 'idle', unread: 0 }] }];
+    const groups = [listGroup('progress', [listRow(1, { title: 'Fix it' })])];
 
     source.emit('hello', { key: 'pk', groups, scope, sessions: [session()], items: [reply('r1', 1)], more: false, status: null, artifacts: [] });
 
-    const row = root.querySelector<HTMLElement>('.list-item')!;
+    const row = root.querySelector<HTMLElement>('.row')!;
 
     row.focus();
     sized(300);
     source.emit('reply', { reply: reply('r2', 2) });
-    expect(root.querySelector('.list-item')).toBe(row);
+    expect(root.querySelector('.row')).toBe(row);
     expect(document.activeElement).toBe(row);
     expect(panel.scrollTop).toBe(300);
     // Scrolled up by the operator, the conversation stays where it is.
@@ -437,13 +488,33 @@ describe('the page', () => {
     const { page, source } = start();
 
     expect(source.url).toBe('/v1/conversation/events?page=1');
-    source.emit('hello', { key: 'pk', groups: [{ kind: 'item', title: 'Fix it', conversations: [{ workItemId: 1, title: 'Fix it', state: 'idle', unread: 0 }] }], scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1, { title: 'Fix it' })])], scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
     await flush();
     expect(posts.map((post) => [post.url, post.body['window']])).toEqual(expect.arrayContaining([['/v1/conversation/page-focus', 'pk'], ['/v1/conversation/select', 'pk']]));
     expect(posts.find((post) => post.url.endsWith('/select'))?.body['workItemId']).toBe(1);
     expect(root.querySelector('#list')!.textContent).toContain('Fix it');
     page.close();
     expect(source.closed).toBe(true);
+  });
+
+  it('opens and collapses a group from its header, keeping the focus on the header', () => {
+    const { source } = start();
+
+    source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)]), listGroup('done', [listRow(5)])], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+
+    const done = root.querySelector<HTMLElement>('[data-group="done"] .group-head')!;
+
+    expect(root.querySelector('[data-work-item="5"]')).toBeNull();
+    done.focus();
+    done.click();
+    expect(root.querySelector('[data-work-item="5"]')).not.toBeNull();
+    expect(done.getAttribute('aria-expanded')).toBe('true');
+    expect(document.activeElement).toBe(done);
+    root.querySelector<HTMLElement>('[data-group="progress"] .group-head')!.click();
+    // The selected row stays in its collapsed group.
+    expect([...root.querySelectorAll('[data-group="progress"] .row')].map((row) => row.getAttribute('data-work-item'))).toEqual(['1']);
+    done.click();
+    expect(root.querySelector('[data-work-item="5"]')).toBeNull();
   });
 
   it('sends the composer\'s text to the session it shows, with its scope generation and launch, and keeps a draft per work item', async () => {
@@ -588,7 +659,7 @@ describe('the page in use', () => {
   const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
   const click = (selector: string) => root.querySelector<HTMLElement>(selector)!.click();
   const hello = (source: FakeSource, patch: Record<string, unknown> = {}) =>
-    source.emit('hello', { key: 'pk', groups: [{ kind: 'item', title: 'Fix it', conversations: [{ workItemId: 1, title: 'Fix it', state: 'idle', unread: 1 }, { workItemId: 2, title: 'Side', state: 'idle', unread: 0 }] }], scope: { ...scope, conversations: [...scope.conversations, { ...scope.conversations[0]!, workItemId: 2, title: 'Side', primary: false }] }, sessions: [session()], items: [message('m1', 1), reply('r1', 2, { unread: true, opening: '1. Port?\n   - A) 1\n   - B) 2', answers: 'm1' })], more: true, status: { id: 'st-r1', sessionId: 's', at: 5_000, markdown: '**Working** on it\n\n```mermaid\ngraph TD; A-->B;\n```', fallback: false, unread: true }, artifacts: [artifact('chat/plan.md', 'markdown', 'md'), artifact('chat/p.html', 'html', 'html')], unread: 1, voice: { enabled: true, here: false, speaking: null, speakReplies: true, error: null }, ...patch });
+    source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1, { title: 'Fix it' })]), listGroup('conversations', [listRow(2, { title: 'Side', host: 'w' })])], scope: { ...scope, conversations: [...scope.conversations, { ...scope.conversations[0]!, workItemId: 2, title: 'Side', primary: false }] }, sessions: [session()], items: [message('m1', 1), reply('r1', 2, { unread: true, opening: '1. Port?\n   - A) 1\n   - B) 2', answers: 'm1' })], more: true, status: { id: 'st-r1', sessionId: 's', at: 5_000, markdown: '**Working** on it\n\n```mermaid\ngraph TD; A-->B;\n```', fallback: false, unread: true }, artifacts: [artifact('chat/plan.md', 'markdown', 'md'), artifact('chat/p.html', 'html', 'html')], unread: 1, voice: { enabled: true, here: false, speaking: null, speakReplies: true, error: null }, ...patch });
 
   it('switches tabs, opens artifacts in the page, and draws a Markdown artifact with its pictures from its own folder', async () => {
     const { page, source, mermaid } = start();

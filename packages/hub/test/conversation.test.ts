@@ -7,9 +7,9 @@ import type { Interruption, Session as StoredSession } from '@switchboard/core';
 import { projectSlug } from '@switchboard/claude';
 import { ConversationService, sessionView, typedText } from '../src/conversation.js';
 import type { ConversationServiceDeps, ConversationVoice, PersonaView } from '../src/conversation.js';
-import { windowOf } from '../src/dock.js';
+import { dockView, windowOf } from '../src/dock.js';
 import { canonicalFolder, WindowScopes } from '../src/windows.js';
-import { pageGroups } from '../src/page.js';
+import { pageList } from '../src/page.js';
 import { NOW, item, session, snapshot } from './views.js';
 
 let dir: string;
@@ -1707,7 +1707,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
       hooks: () => true,
       now: () => NOW,
       newId: () => String(++id),
-      pageGroups: () => pageGroups(view.view, WINDOWS),
+      pageList: () => pageList(dockView(view.view, NOW, WINDOWS), view.view),
       pageFocused: (key, focused) => focus.push([key, focused]),
       log: () => {},
     });
@@ -1732,7 +1732,14 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     const page = openPage();
 
     expect(scopes.isPage(page.key)).toBe(true);
-    expect(page.frames[0]).toMatchObject({ type: 'hello', scope: null, key: page.key, groups: [{ kind: 'item', title: 'Issue <3>', conversations: [{ workItemId: 3 }] }, { kind: 'item', conversations: [{ workItemId: 2 }] }] });
+    expect(page.frames[0]).toMatchObject({ type: 'hello', scope: null, key: page.key });
+    // The list is the dock's groups, with the dock's rows of the work items.
+    const listed = (page.frames[0]!['groups'] as Array<{ key: string; rows: Array<{ workItemId: number; title: string }> }>).flatMap((group) => group.rows);
+
+    expect(listed.map((row) => row.workItemId).sort()).toEqual([1, 2, 3]);
+    // A done work item is listed in Done, as the dock lists it.
+    expect((page.frames[0]!['groups'] as Array<{ key: string; rows: Array<{ workItemId: number }> }>).find((group) => group.key === 'done')?.rows.map((row) => row.workItemId)).toEqual([1]);
+    expect(listed.find((row) => row.workItemId === 3)?.title).toBe('Issue <3>');
     expect(service.send({ window: page.key, scopeGen: 0, opId: 'o', sessionId: 's2', launch: null, text: 'hi' }).status).toBe(403);
 
     // Any work item, where a window may select only its own conversations.
@@ -1762,7 +1769,9 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
 
     const page = openPage();
 
-    expect(service.pageList().find((group) => group.conversations.some((entry) => entry.workItemId === 2))?.conversations.map((entry) => entry.workItemId)).toEqual([2, hosted.id]);
+    // The hosted conversation is listed last, in Conversations, under its host's name; its host stays in its status group.
+    expect(service.pageList().at(-1)).toMatchObject({ key: 'conversations', rows: [{ workItemId: hosted.id, title: 'Side chat', host: expect.any(String) }] });
+    expect(service.pageList().find((group) => group.key !== 'conversations' && group.rows.some((row) => row.workItemId === 2))).toBeDefined();
     service.select({ window: page.key, opId: 'o', workItemId: hosted.id });
     expect(scopes.scope(page.key)?.conversations).toEqual([{ workItemId: 2, primary: true }, { workItemId: hosted.id, primary: false }]);
     // Done while selected, it stays in its host's group.
@@ -1772,7 +1781,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     view.view = done;
     scopes.update(done);
     expect(scopes.scope(page.key)?.conversations).toEqual([{ workItemId: 2, primary: true }, { workItemId: hosted.id, primary: false }]);
-    expect(service.pageList().flatMap((group) => group.conversations.map((entry) => entry.workItemId))).not.toContain(hosted.id);
+    expect(service.pageList().some((group) => group.key === 'conversations')).toBe(false);
     expect(service.select({ window: page.key, opId: 'o', workItemId: 2 }).status).toBe(200);
     expect(scopes.scope(page.key)).toMatchObject({ workItemId: 2, scopeGen: 2 });
   });
