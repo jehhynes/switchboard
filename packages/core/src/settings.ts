@@ -108,6 +108,12 @@ export interface DockSettings {
   openTerminal: OpenTerminal;
 }
 
+/** The web page (architecture.md § Web page). */
+export interface WebSettings {
+  /** The port the hub serves the page on, read at hub start, so an installed page keeps its address; 0 serves it only on the hub's own port. */
+  port: number;
+}
+
 /** The voices of OpenAI's realtime speech models (voice-design § 4.8); OpenAI recommends marin and cedar. */
 export const TTS_VOICES = ['marin', 'cedar', 'alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse'] as const;
 
@@ -207,6 +213,7 @@ export interface Settings {
   schedules: Record<string, ScheduleSettings>;
   dock: DockSettings;
   voice: VoiceSettings;
+  web: WebSettings;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -217,6 +224,7 @@ export const DEFAULT_SETTINGS: Settings = {
   schedules: {},
   dock: { openVSCode: 'always', openTerminal: 'vscode' },
   voice: { enabled: false, voice: 'marin', style: 'none', speed: 1, expressive: false, expandReplies: false, awayMinutes: 2, needsYouSound: true, outputDevice: null, micIdleMinutes: 10, endPauseMs: 3000, inputDevice: null, halfDuplexTailMs: 800, duplex: { local: 'auto', remote: 'auto' }, matchThreshold: 0.6, pitchLowFactor: 1.22, pitchMinLowShare: 0.2, roomHold: true, roomHoldSeconds: 60, personas: [], playbookPersonas: {}, spokenAlerts: true, alertOn: { finished: true, question: true, permission: true }, alertAnswerSeconds: 10, operatorName: '' },
+  web: { port: 47616 },
 };
 
 /** A source's or schedule's name: it keys tickets in the store and History. */
@@ -398,7 +406,7 @@ export function parseSettings(text: string): SettingsResult {
   }
 
   const read = new Reader();
-  read.unknown(root, ['sessions', 'triage', 'sources', 'schedules', 'dock', 'voice', 'playbooks'], 'settings');
+  read.unknown(root, ['sessions', 'triage', 'sources', 'schedules', 'dock', 'voice', 'web', 'playbooks'], 'settings');
   // Each playbook is checked on its own by `parsePlaybooks`, so an invalid one is left out rather than rejecting the file.
   read.section(root, 'playbooks', 'playbooks');
 
@@ -542,7 +550,11 @@ export function parseSettings(text: string): SettingsResult {
   voice.personas = parsePersonas(read, voiceIn['personas'], voice);
   voice.playbookPersonas = parsePlaybookPersonas(read, voiceIn['playbookPersonas'], voice.personas);
 
-  return read.errors.length > 0 ? { errors: read.errors } : { settings: { sessions, triage, sources, schedules, dock, voice } };
+  const webIn = read.section(root, 'web', 'web');
+  read.unknown(webIn, ['port'], 'web');
+  const web: WebSettings = { port: read.integer(webIn, 'port', 'web', defaults.web.port, 0, 65535) };
+
+  return read.errors.length > 0 ? { errors: read.errors } : { settings: { sessions, triage, sources, schedules, dock, voice, web } };
 }
 
 /** `voice.personas`: each persona's ID unique, its voice and style defaulting to the section's. */

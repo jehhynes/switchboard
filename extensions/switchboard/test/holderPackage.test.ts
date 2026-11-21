@@ -139,7 +139,7 @@ describe('the packaged terminal holder', () => {
 
     mkdirSync(home);
     // As the hub spawn tests do: its own Claude and Codex homes, and a PATH with no real Claude or Codex.
-    run(join(extracted, 'extension', 'dist', 'hub.js'), [`--home=${home}`, '--browser-port=0'], {
+    run(join(extracted, 'extension', 'dist', 'hub.js'), [`--home=${home}`, '--browser-port=0', '--page-port=0'], {
       ...process.env,
       PATH: [dirname(process.execPath), join(process.env['SystemRoot'] ?? 'C:\\Windows', 'System32')].join(delimiter),
       CLAUDE_CONFIG_DIR: join(home, '.claude'),

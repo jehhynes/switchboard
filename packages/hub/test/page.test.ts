@@ -1,4 +1,5 @@
 import { request } from 'node:http';
+import { createServer } from 'node:net';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -214,6 +215,18 @@ describe('pageAsset', () => {
   });
 });
 
+/** A port nothing listens on now. */
+async function freePort(): Promise<number> {
+  const probe = createServer();
+
+  await new Promise<void>((done) => probe.listen(0, '127.0.0.1', done));
+
+  const port = (probe.address() as { port: number }).port;
+
+  await new Promise((done) => probe.close(done));
+  return port;
+}
+
 /** A request with chosen headers, answering its status, headers and body. */
 function send(port: number, method: string, path: string, headers: Record<string, string>, body?: unknown): Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: string }> {
   return new Promise((resolve, reject) => {
@@ -277,6 +290,14 @@ describe('the web page routes', () => {
           return { status: 200, body: { scopeGen: 1 } };
         },
         '/v1/conversation/new-conversation': async () => ({ status: 200, body: {} }),
+        '/v1/conversation/resume': async (body) => {
+          posted.push(body);
+          return { status: 200, body: {} };
+        },
+        '/v1/conversation/row-action': async (body) => {
+          posted.push(body);
+          return { status: 200, body: {} };
+        },
       },
     });
 
@@ -285,6 +306,75 @@ describe('the web page routes', () => {
 
     return { posted, closed, url, folder, open: () => page.opened() };
   }
+
+  it("serves the page on its fixed port, which the link names, by that port's Host only, and nothing but the page there", async () => {
+    const { posted } = await serve();
+
+    const port = await freePort();
+
+    expect(await server.listenPage(port)).toBeNull();
+
+    const link = JSON.parse((await send(server.port, 'POST', '/page/link', { Authorization: `Bearer ${server.token}` })).body) as { url: string; notice?: string };
+    const url = new URL(link.url);
+
+    expect(url.host).toBe(`127.0.0.1:${port}`);
+    expect(link.notice).toBeUndefined();
+
+    const exchange = await send(port, 'GET', `${url.pathname}${url.search}`, {});
+    const cookie = String(exchange.headers['set-cookie']).split(';')[0]!;
+
+    expect(exchange.status).toBe(303);
+    expect((await send(port, 'GET', '/page/', { Cookie: cookie })).status).toBe(200);
+    expect((await send(port, 'GET', '/page/', { Cookie: cookie, Host: `localhost:${port}` })).status).toBe(200);
+    // The hub's own port is another address for the page listener.
+    expect((await send(port, 'GET', '/page/', { Cookie: cookie, Host: `127.0.0.1:${server.port}` })).status).toBe(403);
+    expect((await send(port, 'GET', '/status', { Authorization: `Bearer ${server.token}` })).status).toBe(404);
+    expect((await send(port, 'POST', '/page/link', { Authorization: `Bearer ${server.token}` })).status).toBe(404);
+    expect((await send(port, 'GET', '/hub', {})).status).toBe(404);
+
+    // The page's commands work there with the cookie and that port's own origin only.
+    const stream = request({ host: '127.0.0.1', port, path: '/v1/conversation/events?page=1', headers: { Host: `127.0.0.1:${port}`, Cookie: cookie } }, (response) => response.resume());
+
+    stream.on('error', () => {});
+    stream.end();
+    await until(() => (server.clients() === 1 ? true : null));
+
+    const post = (path: string, origin: string, headers: Record<string, string> = { Cookie: cookie }) => send(port, 'POST', path, { 'Content-Type': 'application/json', Origin: origin, ...headers }, { window: 'page-1', workItemId: 4 });
+
+    expect((await post('/v1/conversation/resume', `http://127.0.0.1:${port}`)).status).toBe(200);
+    expect((await post('/v1/conversation/row-action', `http://127.0.0.1:${port}`)).status).toBe(200);
+    expect((await post('/v1/conversation/resume', `http://127.0.0.1:${server.port}`)).status).toBe(403);
+    expect((await post('/v1/conversation/resume', `http://127.0.0.1:${port}`, {})).status).toBe(404);
+    expect((await post('/v1/conversation/resume', `http://127.0.0.1:${port}`, { Cookie: 'sb_page=forged' })).status).toBe(401);
+    expect(posted).toHaveLength(2);
+    stream.destroy();
+  });
+
+  it('links to the hub port with a notice once a taken fixed port stays taken, and takes one that frees up in time', async () => {
+    await serve();
+
+    const holder = createServer();
+
+    await new Promise<void>((done) => holder.listen(0, '127.0.0.1', done));
+
+    const port = (holder.address() as { port: number }).port;
+    const listening = server.listenPage(port, 300);
+    // A link asked for meanwhile waits for the answer.
+    const link = send(server.port, 'POST', '/page/link', { Authorization: `Bearer ${server.token}` });
+
+    expect(await listening).toMatch(/EADDRINUSE/);
+
+    const body = JSON.parse((await link).body) as { url: string; notice?: string };
+
+    expect(new URL(body.url).port).toBe(String(server.port));
+    expect(body.notice).toContain(`not on port ${port}`);
+
+    const freed = server.listenPage(port, 5_000);
+
+    setTimeout(() => holder.close(), 300);
+    expect(await freed).toBeNull();
+    expect(new URL((JSON.parse((await send(server.port, 'POST', '/page/link', { Authorization: `Bearer ${server.token}` })).body) as { url: string }).url).port).toBe(String(port));
+  });
 
   it('exchanges a one-time link for an HttpOnly, SameSite=Strict cookie and serves the page only with it, under its own CSP', async () => {
     const { url } = await serve();

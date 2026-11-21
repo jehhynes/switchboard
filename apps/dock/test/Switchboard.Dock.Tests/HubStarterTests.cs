@@ -254,7 +254,7 @@ public sealed class HubStarterTests
             environment[name] = Path.Combine(home, "profile", name);
         }
 
-        var starter = new HubStarter(Switchboard, () => now, extraArgs: ["--browser-port=0", "--idle-ms=60000"], environment: environment);
+        var starter = new HubStarter(Switchboard, () => now, extraArgs: ["--browser-port=0", "--page-port=0", "--idle-ms=60000"], environment: environment);
 
         starter.Remember(new HubRecord(1, "x", 1, config, node));
         Assert.Null(StartAfterGrace(starter));

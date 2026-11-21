@@ -232,6 +232,12 @@ async function web(home: string): Promise<number> {
     return 3;
   }
 
+  const notice = (reply.body as { notice?: unknown } | null)?.notice;
+
+  if (typeof notice === 'string') {
+    process.stderr.write(`${notice}\n`);
+  }
+
   process.stdout.write(`Open this link in a browser on this machine within two minutes; it works once:\n${url}\n`);
   return 0;
 }
@@ -270,12 +276,20 @@ async function main(argv: readonly string[]): Promise<number> {
     return 1;
   }
 
-  // --browser-port=0 serves no browser endpoint, for a second hub such as a test's.
+  // --browser-port=0 serves no browser endpoint, and --page-port=0 the web page only on the hub's port, for a second hub such as a test's.
   const browserPort = flag(argv, 'browser-port');
+  const pagePort = flag(argv, 'page-port');
+
+  if (pagePort !== null && !/^\d+$/.test(pagePort)) {
+    process.stderr.write(`--page-port takes a port number, not "${pagePort}".\n`);
+
+    return 1;
+  }
+
   const build = bundle === undefined ? 'unknown' : buildOf(bundle);
   const log = (line: string) => process.stdout.write(`${new Date().toISOString()} ${line}\n`);
   const configDir = resolve(flag(argv, 'config') || switchboardHome(home));
-  const result = await serveHub({ home, version: VERSION, build, configDir, log, app: () => createHubApp({ home, configDir, log, ...(codeModeIdle === null ? {} : { codeModeIdleMs: Number(codeModeIdle) }), ...(bundle === undefined ? {} : { snapshotWorker: resolve(bundle) }) }), ...(idle > 0 ? { idleMs: idle } : {}), ...(browserPort === null ? {} : { browserPort: Number(browserPort) || null }) });
+  const result = await serveHub({ home, version: VERSION, build, configDir, log, app: () => createHubApp({ home, configDir, log, ...(codeModeIdle === null ? {} : { codeModeIdleMs: Number(codeModeIdle) }), ...(bundle === undefined ? {} : { snapshotWorker: resolve(bundle) }) }), ...(idle > 0 ? { idleMs: idle } : {}), ...(browserPort === null ? {} : { browserPort: Number(browserPort) || null }), ...(pagePort === null ? {} : { pagePort: Number(pagePort) }) });
 
   if ('existing' in result) {
     process.stdout.write(`A hub is already running for this home on port ${result.existing.port}; pid ${process.pid} exiting.\n`);

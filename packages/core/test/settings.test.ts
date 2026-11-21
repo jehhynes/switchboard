@@ -11,6 +11,7 @@ describe('parseSettings', () => {
         schedules: {},
         dock: { openVSCode: 'always', openTerminal: 'vscode' },
         voice: { enabled: false, voice: 'marin', style: 'none', speed: 1, expressive: false, expandReplies: false, awayMinutes: 2, needsYouSound: true, outputDevice: null, micIdleMinutes: 10, endPauseMs: 3000, inputDevice: null, halfDuplexTailMs: 800, duplex: { local: 'auto', remote: 'auto' }, matchThreshold: 0.6, pitchLowFactor: 1.22, pitchMinLowShare: 0.2, roomHold: true, roomHoldSeconds: 60, personas: [], playbookPersonas: {}, spokenAlerts: true, alertOn: { finished: true, question: true, permission: true }, alertAnswerSeconds: 10, operatorName: '' },
+        web: { port: 47616 },
       },
     });
   });
@@ -25,6 +26,7 @@ describe('parseSettings', () => {
         },
         dock: { openVSCode: 'review', openTerminal: 'auto' },
         voice: { enabled: true, voice: 'cedar', style: 'pair', speed: 1.25, expressive: true, expandReplies: true, awayMinutes: 5, needsYouSound: false, outputDevice: 'Speakers', micIdleMinutes: 0, endPauseMs: 2500, inputDevice: 'Headset', halfDuplexTailMs: 450, duplex: { local: 'full', remote: 'half' }, matchThreshold: 0.7, pitchLowFactor: 1.5, pitchMinLowShare: 0, roomHold: false, roomHoldSeconds: 120, spokenAlerts: false, alertOn: { finished: false, question: true, permission: false }, alertAnswerSeconds: 20, operatorName: ' Alex ' },
+        web: { port: 0 },
       }),
     );
 
@@ -46,8 +48,14 @@ describe('parseSettings', () => {
         schedules: {},
         dock: { openVSCode: 'review', openTerminal: 'auto' },
         voice: { enabled: true, voice: 'cedar', style: 'pair', speed: 1.25, expressive: true, expandReplies: true, awayMinutes: 5, needsYouSound: false, outputDevice: 'Speakers', micIdleMinutes: 0, endPauseMs: 2500, inputDevice: 'Headset', halfDuplexTailMs: 450, duplex: { local: 'full', remote: 'half' }, matchThreshold: 0.7, pitchLowFactor: 1.5, pitchMinLowShare: 0, roomHold: false, roomHoldSeconds: 120, personas: [], playbookPersonas: {}, spokenAlerts: false, alertOn: { finished: false, question: true, permission: false }, alertAnswerSeconds: 20, operatorName: 'Alex' },
+        web: { port: 0 },
       },
     });
+  });
+
+  it('refuses a web port outside 0 to 65535 and other web keys', () => {
+    expect(parseSettings('{"web":{"port":65536,"host":"0.0.0.0"}}')).toEqual({ errors: ['web.host is not a setting.', 'web.port must be a whole number from 0 to 65535.'] });
+    expect(parseSettings('{"web":{"port":1.5}}')).toEqual({ errors: ['web.port must be a whole number from 0 to 65535.'] });
   });
 
   it('refuses voice values outside their choices and ranges, and other voice keys', () => {

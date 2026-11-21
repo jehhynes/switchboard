@@ -8,6 +8,7 @@ import { openEvents } from '../src/client.js';
 import { findHub } from '../src/discover.js';
 import { call } from '../src/http.js';
 import { holdLock, releaseLock } from '../src/lock.js';
+import { PageAccess } from '../src/page.js';
 import { serveHub } from '../src/serve.js';
 import type { HubApp, ServeResult, ServeOptions, Served } from '../src/serve.js';
 import { tempHome, until } from './helpers.js';
@@ -256,6 +257,24 @@ describe('serveHub', () => {
         ['snooze', 'https://github.com/o/r/issues/1', null],
         ['unsnooze', 'https://github.com/o/r/issues/1'],
       ]);
+    });
+
+    it("serves the web page on the app's web.port unless the options name another port, and stops serving it when stopped", async () => {
+      const pagePort = await freePort();
+      const log = vi.fn();
+      const page = { access: new PageAccess(), asset: () => null, opened: () => 'p', isPage: () => false, list: () => [], files: async () => null, artifact: () => null };
+      const hub = served(await serve({ browserPort: null, log, app: async () => ({ ...app([]), page, pagePort: () => pagePort }) }));
+
+      await until(() => (log.mock.calls.some(([line]) => line === `web page on http://127.0.0.1:${pagePort}/page/`) ? true : null));
+      expect((await call(pagePort, 'GET', '/page/', null))?.status).toBe(401);
+      await hub.stop('test');
+      expect(await call(pagePort, 'GET', '/page/', null, 500)).toBeNull();
+
+      const other = served(await serve({ browserPort: null, log, pagePort: 0, app: async () => ({ ...app([]), page, pagePort: () => pagePort }) }));
+
+      await new Promise((done) => setTimeout(done, 100));
+      expect(await call(pagePort, 'GET', '/page/', null, 500)).toBeNull();
+      await other.stop('test');
     });
 
     it('logs a taken browser port and serves the hub anyway', async () => {

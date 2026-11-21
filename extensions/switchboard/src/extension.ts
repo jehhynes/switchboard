@@ -499,6 +499,13 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
       }
 
       await vscode.env.openExternal(vscode.Uri.parse(url));
+
+      // The page is not on its fixed port, so an installed page cannot reach it.
+      const notice = (reply?.body as { notice?: unknown } | null)?.notice;
+
+      if (typeof notice === 'string') {
+        void vscode.window.showWarningMessage(notice);
+      }
     }),
     vscode.commands.registerCommand('switchboard.showDock', () => showDock(keeper.current(), home)),
     vscode.commands.registerCommand('switchboard.newClaudeTab', newClaudeTab),

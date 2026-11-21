@@ -2,7 +2,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { createServer } from 'node:http';
 import { pipeline } from 'node:stream';
-import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import type { HubIdentity } from '@switchboard/core';
 import { ARTIFACT_CSP, loopbackHost, PAGE_COOKIE, PAGE_CSP } from './page.js';
 import type { PageAccess } from './page.js';
@@ -87,6 +87,11 @@ export interface HubServer {
    * returns whether one was open.
    */
   clickDock(data: unknown): boolean;
+  /**
+   * Serves the web page on `port` too, its fixed port (architecture.md § Web page), trying again while the port is taken for up to `waitMs`, as by a
+   * hub that is stopping. Answers null once it listens, or why not; a page link waits for the answer and then names this port, or the hub's own.
+   */
+  listenPage(port: number, waitMs?: number): Promise<string | null>;
   /** Builds no more views, so nothing reads the app after it closes; streams that open get only `hello`. */
   stopViews(): void;
   close(): Promise<void>;
@@ -110,6 +115,8 @@ export interface OpenWindows {
 }
 
 const HEARTBEAT_MS = 15_000;
+/** How long the page's fixed port is tried again while taken. */
+const PAGE_PORT_WAIT_MS = 3_000;
 const BODY_LIMIT = 1024 * 1024;
 
 function readJson(request: IncomingMessage): Promise<unknown> {
@@ -367,8 +374,12 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     });
   };
 
-  // The web page's port, known once the server listens; its Host and Origin must name it.
+  // The hub's port, known once the server listens, and the page's fixed port once its listener listens, or why it does not.
   let ownPort = 0;
+  let pageServer: Server | null = null;
+  let pagePort: number | null = null;
+  let pageNotice: string | null = null;
+  let pageReady: Promise<unknown> = Promise.resolve();
   const page = options.page;
 
   /** The web page's routes (architecture.md § Web page); false for any other request. */
@@ -385,8 +396,8 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     response.setHeader('Referrer-Policy', 'no-referrer');
     response.setHeader('X-Content-Type-Options', 'nosniff');
 
-    // Another name for this machine, as a DNS rebinding attack uses, never reaches the page.
-    if (!loopbackHost(request.headers.host, ownPort)) {
+    // Another name for this machine, as a DNS rebinding attack uses, never reaches the page. The port is the one the request came in on.
+    if (!loopbackHost(request.headers.host, request.socket.localPort ?? 0)) {
       json(response, 403, { error: 'The page is served only as 127.0.0.1 or localhost.' });
       return true;
     }
@@ -512,6 +523,22 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     return true;
   };
 
+  /** A listener on the page's fixed port, which serves the page's routes and nothing else. */
+  const listenPageOnce = (port: number): Promise<Server> =>
+    new Promise((resolve, reject) => {
+      const one = createServer((request, response) => {
+        if (!servePage(request, response, new URL(request.url ?? '/', 'http://127.0.0.1'))) {
+          json(response, 404, { error: 'not found' });
+        }
+      });
+
+      one.once('error', reject);
+      one.listen(port, '127.0.0.1', () => {
+        one.off('error', reject);
+        resolve(one);
+      });
+    });
+
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? '/', 'http://127.0.0.1');
     const path = url.pathname;
@@ -578,8 +605,11 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
         (error: Error) => json(response, 400, { error: error.message }),
       );
     } else if (request.method === 'POST' && path === '/page/link' && page !== undefined) {
-      // A one-time link to the web page, which VS Code's Open Web Page and `hub.js web` hand out (architecture.md § Web page).
-      json(response, 200, { url: `http://127.0.0.1:${ownPort}/page?t=${page.access.token()}` });
+      // A one-time link to the web page, which VS Code's Open Web Page and `hub.js web` hand out (architecture.md § Web page), on the page's
+      // fixed port once it is known whether the page listens there.
+      void pageReady.then(() =>
+        json(response, 200, { url: `http://127.0.0.1:${pagePort ?? ownPort}/page?t=${page.access.token()}`, ...(pageNotice === null ? {} : { notice: pageNotice }) }),
+      );
     } else if (request.method === 'POST' && path === '/shutdown') {
       json(response, 200, { stopping: true });
       options.onShutdown();
@@ -665,6 +695,38 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
 
           return stream !== undefined;
         },
+        listenPage: (wanted, waitMs = PAGE_PORT_WAIT_MS) => {
+          const listened = (async (): Promise<string | null> => {
+            for (const deadline = Date.now() + waitMs; ; ) {
+              if (closing) {
+                return 'the hub is stopping';
+              }
+
+              try {
+                const one = await listenPageOnce(wanted);
+
+                if (closing) {
+                  one.close();
+                  return 'the hub is stopping';
+                }
+
+                pageServer = one;
+                pagePort = wanted;
+                return null;
+              } catch (error) {
+                if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE' || Date.now() >= deadline) {
+                  pageNotice = `The web page is not on port ${wanted} (${String(error)}), so this link names the hub's own port, which changes at each hub start, and an installed page cannot reach it. Free port ${wanted} or set web.port in settings.json, then restart the hub.`;
+                  return String(error);
+                }
+
+                await new Promise((done) => setTimeout(done, 250));
+              }
+            }
+          })();
+
+          pageReady = listened;
+          return listened;
+        },
         stopViews: () => {
           closing = true;
         },
@@ -677,8 +739,17 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
               stream.end();
             }
 
-            server.close(() => done());
+            let open = pageServer === null ? 1 : 2;
+            const closed = (): void => {
+              if (--open === 0) {
+                done();
+              }
+            };
+
+            server.close(closed);
             server.closeAllConnections();
+            pageServer?.close(closed);
+            pageServer?.closeAllConnections();
           }),
       });
     });

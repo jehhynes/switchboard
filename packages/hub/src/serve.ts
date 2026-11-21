@@ -25,6 +25,8 @@ export interface HubApp {
   windowFocused?(key: string | null, at: number): void;
   /** The web page's routes (architecture.md § Web page). */
   page?: PageRoutes;
+  /** The web page's fixed port, `web.port` as the hub started; 0 for none. */
+  pagePort?(): number;
   /** The dock view (PRD R71). */
   dock(): object;
   /** URLs of snoozed tickets, for the Chrome extension (PRD R56). */
@@ -56,6 +58,8 @@ export interface ServeOptions {
   idleMs?: number;
   /** The browser endpoint's port; null serves none. Defaults to `BROWSER_PORT`. */
   browserPort?: number | null;
+  /** The web page's fixed port in place of the app's `web.port`; 0 serves the page only on the hub's port. */
+  pagePort?: number;
   /** How long a hub that lost the lock waits for the holder's record. */
   waitMs?: number;
   exit?: (code: number) => void;
@@ -148,6 +152,15 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
   app?.attachDock?.((event, data) => server.notifyDock(event, data));
   app?.attachDockClick?.((data) => server.clickDock(data));
   app?.attachWindows?.((event, data, keys) => server.notifyWindows(event, data, keys));
+
+  const pagePort = options.pagePort ?? app?.pagePort?.() ?? 0;
+
+  if (app?.page !== undefined && pagePort > 0) {
+    // A taken port leaves the page on the hub's own port, whose links then say so.
+    void server.listenPage(pagePort).then((error) =>
+      log(error === null ? `web page on http://127.0.0.1:${pagePort}/page/` : `web page not served on 127.0.0.1:${pagePort}: ${error}; it is on the hub's port ${server.port}, which changes at each start`),
+    );
+  }
 
   const browserPort = options.browserPort === undefined ? BROWSER_PORT : options.browserPort;
   let browser: BrowserServer | null = null;

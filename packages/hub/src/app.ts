@@ -1119,6 +1119,7 @@ const dockWithRuns = () => {
       files: (key, query) => conversation.files(key, query),
       artifact: (key, name) => conversation.artifactFile(key, name),
     },
+    pagePort: () => config.settings.web.port,
     dock: () => dockWithRuns(),
     attachDock: (send) => {
       sendDock = send;

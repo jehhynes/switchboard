@@ -42,7 +42,7 @@ function startWith(extra: Record<string, string | undefined>, ...args: string[])
     delete env[key];
   }
 
-  const child = spawn(process.execPath, [main, ...args, `--home=${home}`, ...(['report', 'register', 'attach', 'holder'].includes(args[0] ?? '') ? [] : ['--browser-port=0'])], { windowsHide: true, env });
+  const child = spawn(process.execPath, [main, ...args, `--home=${home}`, ...(['report', 'register', 'attach', 'holder'].includes(args[0] ?? '') ? [] : ['--browser-port=0', '--page-port=0'])], { windowsHide: true, env });
   let stdout = '';
   let stderr = '';
 
