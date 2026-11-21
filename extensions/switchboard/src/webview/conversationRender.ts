@@ -505,10 +505,11 @@ function renderTabs(selected: Tab, badges: Record<Tab, string>): string {
 export const PICKER = 'conversations';
 
 /** A state's codicon with its text for a screen reader. */
-function codicon({ icon, text }: { icon: string; text: string }): string {
+/** A codicon with its words as tooltip and name; a session state's, with its tone, is drawn small and muted unless it needs attention. */
+function codicon({ icon, text, tone }: { icon: string; text: string; tone?: string }): string {
   const [name, modifier] = icon.split('~');
 
-  return `<span class="codicon codicon-${name}${modifier === undefined ? '' : ` codicon-modifier-${modifier}`}" title="${escape(text)}" aria-label="${escape(text)}"></span>`;
+  return `<span class="codicon codicon-${name}${modifier === undefined ? '' : ` codicon-modifier-${modifier}`}${tone === undefined ? '' : ` state-icon tone-${tone}`}" title="${escape(text)}" aria-label="${escape(text)}"></span>`;
 }
 
 /** A menu row's left gutter: a check mark for the chosen row, or another codicon, or nothing, so every row's text starts in one column. */
@@ -712,7 +713,7 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
   const notes = state.session?.reason == null || ended ? [] : [state.session.reason];
   const endedNote = !ended
     ? ''
-    : `<div class="session-note" role="status"><span class="codicon codicon-debug-stop" aria-hidden="true"></span><span class="session-note-text">${escape(state.session!.reason ?? 'The session has ended. A message or Resume continues it.')}</span>${state.session!.conversation === 'none' ? '' : '<button type="button" class="terminal-question-open" data-action="terminal" title="Resume the session in its terminal">Resume</button>'}</div>`;
+    : `<div class="session-note" role="status"><span class="codicon codicon-stop-circle state-icon tone-muted" aria-hidden="true"></span><span class="session-note-text">${escape(state.session!.reason ?? 'The session has ended. A message or Resume continues it.')}</span>${state.session!.conversation === 'none' ? '' : '<button type="button" class="terminal-question-open" data-action="terminal" title="Resume the session in its terminal">Resume</button>'}</div>`;
   const shown = timeline(state.items, state.artifacts);
   // A card's answer is the first message after the reply or status that asks it, sent with Submit or typed (voice-design § 5).
   const canAnswer = state.connected && state.session?.conversation === 'full';

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { activeSession, adhocLabel, failedAtTriage, groupOf, holdsSlot, MARK_ICONS, markOf, needsYou, QUESTION_CARD, reviewOrder, SESSION_ICONS, sessionIcon, triageLabel, turnOf, urlKey, waitsOnCard } from '../src/group.js';
+import { activeSession, adhocLabel, failedAtTriage, groupOf, holdsSlot, MARK_ICONS, MARK_TONES, markOf, needsYou, QUESTION_CARD, reviewOrder, SESSION_ICONS, SESSION_TONES, sessionIcon, triageLabel, turnOf, urlKey, waitsOnCard } from '../src/group.js';
 import type { DoneReason, SessionOutcome, SessionState, WorkItemStatus } from '../src/model.js';
 
 const item = (status: WorkItemStatus, ...states: SessionState[]) => ({
@@ -240,7 +240,10 @@ describe('sessionIcon', () => {
     expect(SESSION_ICONS[sessionIcon('idle')]).toBe(MARK_ICONS.idle);
     expect(SESSION_ICONS[sessionIcon('failed')]).toBe(MARK_ICONS.failed);
     expect(SESSION_ICONS[sessionIcon('idle', null, true)]).toBe(MARK_ICONS.limited);
-    expect(SESSION_ICONS[sessionIcon('ended')]).toBe('debug-stop');
+    expect(SESSION_ICONS[sessionIcon('ended')]).toBe('stop-circle');
+    // Colour only where the operator is needed, a limit holds the session, or it failed.
+    expect(Object.entries(SESSION_TONES).filter(([, tone]) => tone !== 'muted')).toEqual([['question', 'attention'], ['permission', 'attention'], ['limited', 'attention'], ['failed', 'error']]);
+    expect(Object.entries(MARK_TONES).filter(([, tone]) => tone !== 'muted').map(([mark]) => mark)).toEqual(['question', 'permission', 'send', 'blocked', 'failed', 'limited']);
     expect(SESSION_ICONS[sessionIcon(null)]).toBe('circle-slash');
     expect(Object.values(SESSION_ICONS)).not.toContain(MARK_ICONS['done-session']);
   });

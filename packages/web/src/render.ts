@@ -7,7 +7,7 @@ import { answers, answersIn, answerText, cardOutcome, complete, parseQuestions, 
 import type { Question, QuestionChoice } from '@switchboard/conversation/questions';
 import type { ArtifactView, MessageView, NativeRequest, PageAction, PageGroup, PageRow, ReplyView, ScreenPrompt, StatusView, VoiceView } from './types.js';
 import type { SnoozeChoice } from '@switchboard/core/snooze';
-import { MARK_ICONS, SPINNING_MARKS } from '@switchboard/core/group';
+import { MARK_ICONS, MARK_TONES, SPINNING_MARKS } from '@switchboard/core/group';
 
 export type Tab = 'conversation' | 'status' | 'artifacts';
 export const TABS: Array<{ tab: Tab; label: string }> = [
@@ -111,7 +111,7 @@ export function renderEndedNote(session: PageState['session'], resuming: boolean
   const text = resumable ? 'The session has ended. Resume continues it.' : (session.reason ?? 'The session has ended.');
   const button = resumable ? `<button type="button" class="session-resume" data-action="resume"${resuming ? ' disabled' : ''}>${resuming ? 'Resuming…' : 'Resume'}</button>` : '';
 
-  return `<div class="session-note" role="status"><span class="codicon codicon-debug-stop" aria-hidden="true"></span><span class="session-note-text">${escape(text)}</span>${button}</div>`;
+  return `<div class="session-note" role="status"><span class="codicon codicon-stop-circle state-icon tone-muted" aria-hidden="true"></span><span class="session-note-text">${escape(text)}</span>${button}</div>`;
 }
 
 /** The first day a snooze date can wake on: the day of the earliest timed choice, as `yyyy-mm-dd`; null with none. */
@@ -185,10 +185,11 @@ export function dayLabel(at: number, now: number): string {
   return days === 0 ? 'Today' : days === 1 ? 'Yesterday' : (new Date(at).getFullYear() === new Date(now).getFullYear() ? DAY : DAY_WITH_YEAR).format(at);
 }
 
-function codicon({ icon, text }: { icon: string; text: string }): string {
+/** A codicon with its words as tooltip and name; a session state's, with its tone, is drawn small and muted unless it needs attention. */
+function codicon({ icon, text, tone }: { icon: string; text: string; tone?: string }): string {
   const [name, modifier] = icon.split('~');
 
-  return `<span class="codicon codicon-${name}${modifier === undefined ? '' : ` codicon-modifier-${modifier}`}" title="${escape(text)}" role="img" aria-label="${escape(text)}"></span>`;
+  return `<span class="codicon codicon-${name}${modifier === undefined ? '' : ` codicon-modifier-${modifier}`}${tone === undefined ? '' : ` state-icon tone-${tone}`}" title="${escape(text)}" role="img" aria-label="${escape(text)}"></span>`;
 }
 
 function stampTime(at: number): string {
@@ -217,7 +218,7 @@ function listRow(row: PageRow, selected: boolean): string {
   const mark =
     row.mark === null || kind === undefined
       ? ''
-      : `<span class="codicon codicon-${MARK_ICONS[kind]} mark${SPINNING_MARKS.has(kind) ? ' codicon-modifier-spin' : ''}${kind === 'failed' ? ' failed' : ''}" role="img" title="${escape(row.mark.title)}" aria-label="${escape(row.mark.title)}"></span>`;
+      : `<span class="codicon codicon-${MARK_ICONS[kind]} mark state-icon tone-${MARK_TONES[kind]}${SPINNING_MARKS.has(kind) ? ' codicon-modifier-spin' : ''}${kind === 'failed' ? ' failed' : ''}" role="img" title="${escape(row.mark.title)}" aria-label="${escape(row.mark.title)}"></span>`;
   const colon = row.playbook.indexOf(':');
   const playbook =
     row.host !== null

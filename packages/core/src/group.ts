@@ -202,6 +202,32 @@ export const MARK_ICONS: Record<Mark, string> = {
   'done-unassigned': 'sign-out',
 };
 
+/**
+ * How strongly a mark or a session icon is drawn: `muted`, in the secondary text colour, for every state that needs nothing of the operator;
+ * `attention`, in the warning colour, for one that waits on the operator or on a usage limit; `error` for a failure. One rule for the web page
+ * and the Conversation view, so colour means the same everywhere.
+ */
+export type IconTone = 'muted' | 'attention' | 'error';
+
+export const MARK_TONES: Record<Mark, IconTone> = {
+  question: 'attention',
+  permission: 'attention',
+  send: 'attention',
+  review: 'muted',
+  finished: 'muted',
+  blocked: 'attention',
+  failed: 'error',
+  queued: 'muted',
+  setup: 'muted',
+  running: 'muted',
+  limited: 'attention',
+  idle: 'muted',
+  triaging: 'muted',
+  'done-session': 'muted',
+  'done-operator': 'muted',
+  'done-unassigned': 'muted',
+};
+
 /** The marks drawn spinning, as the dock spins them: a session at work. */
 export const SPINNING_MARKS: ReadonlySet<Mark> = new Set<Mark>(['running', 'triaging']);
 
@@ -220,8 +246,22 @@ export const SESSION_ICONS: Record<SessionIcon, string> = {
   idle: MARK_ICONS.idle,
   failed: MARK_ICONS.failed,
   starting: `${MARK_ICONS.running}~spin`,
-  ended: 'debug-stop',
+  // A small stop in a circle, of one weight with the other circle icons, rather than a heavy filled square.
+  ended: 'stop-circle',
   none: 'circle-slash',
+};
+
+/** Each session icon's tone (`IconTone`). */
+export const SESSION_TONES: Record<SessionIcon, IconTone> = {
+  question: MARK_TONES.question,
+  permission: MARK_TONES.permission,
+  running: 'muted',
+  limited: MARK_TONES.limited,
+  idle: 'muted',
+  failed: MARK_TONES.failed,
+  starting: 'muted',
+  ended: 'muted',
+  none: 'muted',
 };
 
 /** A session's icon by its state, what it waits for and whether it waits for a usage limit to reset; `none` without a session. */

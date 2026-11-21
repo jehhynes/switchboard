@@ -44,8 +44,7 @@ button:focus-visible, a:focus-visible, .tab:focus-visible { outline: 1px solid v
 .row.dim > * { opacity: 0.6; }
 .row-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .row-line { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; }
-.row-line .mark { flex: none; font-size: 14px; }
-.row-line .mark.failed { color: var(--vscode-testing-iconFailed); }
+.row-line .mark { flex: none; }
 .row-line .playbook { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-line .namespace, .row-line .host { color: var(--vscode-descriptionForeground); }
 .row.selected .row-line .namespace, .row.selected .row-line .host { color: inherit; opacity: 0.75; }
@@ -378,3 +377,11 @@ button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }
   .detail-head { flex: none; min-height: 45px; display: flex; align-items: flex-end; border-bottom: 1px solid var(--vscode-panel-border); }
   .detail-head .tabs { border-bottom: none; }
 }
+
+/* Session state icons (architecture.md § Conversation view): one size and weight, a 13 px glyph in a fixed 16 px column centred on the text,
+   muted unless the state needs the operator, a limit holds it, or it failed (IconTone in packages/core/src/group.ts); a smooth small spinner. */
+.codicon.state-icon { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; font-size: 13px; line-height: 1; color: var(--vscode-descriptionForeground); }
+.codicon.state-icon.tone-attention { color: var(--vscode-editorWarning-foreground); }
+.codicon.state-icon.tone-error { color: var(--vscode-errorForeground); }
+.codicon.state-icon.codicon-modifier-spin { animation: codicon-spin 1.1s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .codicon.state-icon.codicon-modifier-spin { animation: none; } }

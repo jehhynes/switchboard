@@ -1,5 +1,6 @@
 import { PAUSED_BY_VOICE_TIP, ROOM_HOLD_TIP } from '@switchboard/conversation/voiceControls';
-import { SESSION_ICONS, sessionIcon } from '@switchboard/core/group';
+import { SESSION_ICONS, SESSION_TONES, sessionIcon } from '@switchboard/core/group';
+import type { IconTone } from '@switchboard/core/group';
 import type { SessionIcon } from '@switchboard/core/group';
 import type { ArtifactView, ConversationEntry, ItemView, ReplyView, ScopeView, SessionView, StatusView, VoiceView } from '@switchboard/hub';
 
@@ -371,11 +372,11 @@ export function micOn(voice: VoiceView | null): boolean {
 }
 
 /** The header's codicon for the session's state (architecture.md § Conversation view). */
-export function stateIcon(session: SessionView | null): { icon: string; text: string } {
+export function stateIcon(session: SessionView | null): { icon: string; text: string; tone: IconTone } {
   const kind = sessionIcon(session?.state, session?.waitingFor ?? null, session?.limit != null);
 
   // A session waiting for a usage limit to reset (architecture.md § Rate limits).
-  return { icon: SESSION_ICONS[kind], text: kind === 'limited' ? limitText(session!.limit!) : SESSION_WORDS[kind] };
+  return { icon: SESSION_ICONS[kind], text: kind === 'limited' ? limitText(session!.limit!) : SESSION_WORDS[kind], tone: SESSION_TONES[kind] };
 }
 
 /** Each session icon in words. */

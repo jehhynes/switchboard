@@ -200,16 +200,16 @@ describe('drawing', () => {
     expect(first.querySelector('.row-title')!.textContent).toBe('Fix <the> badge');
     expect(first.className).toBe('row stripe-turn');
     // The mark by the shared icon name, the ticket key in its source's colour, the playbook's namespace muted.
-    expect(first.querySelector('.mark')!.className).toBe('codicon codicon-eye mark');
+    expect(first.querySelector('.mark')!.className).toBe('codicon codicon-eye mark state-icon tone-muted');
     expect(first.querySelector('.mark')!.getAttribute('aria-label')).toBe('Review, then approve');
     expect(first.querySelector('.pill')!.className).toBe('pill ticket source-github');
     expect(first.querySelector('.playbook')!.innerHTML).toBe('<span class="namespace">dev:</span>build');
     expect(root.querySelector('[data-work-item="2"]')!.className).toBe('row stripe-warning dim');
     expect(root.querySelector('[data-work-item="2"] .pill')!.className).toBe('pill ticket source-zoho');
     expect(root.querySelector('[data-work-item="2"] .playbook')!.innerHTML).toBe('triage');
-    // A running mark spins, as the dock's does; a failed one is red.
-    expect(root.querySelector('[data-work-item="3"] .mark')!.className).toBe('codicon codicon-loading mark codicon-modifier-spin');
-    expect(root.querySelector('[data-work-item="4"] .mark')!.className).toBe('codicon codicon-error mark failed');
+    // A running mark spins, muted, as the dock's does; a failed one takes the error tone.
+    expect(root.querySelector('[data-work-item="3"] .mark')!.className).toBe('codicon codicon-loading mark state-icon tone-muted codicon-modifier-spin');
+    expect(root.querySelector('[data-work-item="4"] .mark')!.className).toBe('codicon codicon-error mark state-icon tone-error failed');
     expect(root.querySelector('[data-work-item="3"]')!.className).toBe('row selected');
     expect(root.querySelector('[data-work-item="3"]')!.getAttribute('aria-current')).toBe('true');
     expect(root.querySelectorAll('[aria-current="true"]')).toHaveLength(1);
@@ -240,7 +240,7 @@ describe('drawing', () => {
     const root = document.createElement('div');
 
     root.innerHTML = renderHeader({ ...EMPTY, connected: true, scope, session: session({ state: 'running' }) }, newView());
-    expect([...root.querySelector('button.picker')!.children].map((child) => child.className)).toEqual(['codicon codicon-loading codicon-modifier-spin', 'title', 'codicon codicon-chevron-down']);
+    expect([...root.querySelector('button.picker')!.children].map((child) => child.className)).toEqual(['codicon codicon-loading codicon-modifier-spin state-icon tone-muted', 'title', 'codicon codicon-chevron-down']);
     expect(root.querySelector('.header > .codicon')).toBeNull();
     // The session's provider as its mark inside the button, as on each option that names one, from the same renderer.
     root.innerHTML = renderHeader({ ...EMPTY, connected: true, scope: { ...scope, conversations: [{ ...scope.conversations[0]!, provider: 'codex' }] }, session: session({ provider: 'codex' }) }, { ...newView(), picker: true });

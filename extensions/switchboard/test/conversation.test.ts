@@ -237,14 +237,15 @@ describe('the conversation state', () => {
   });
 
   it("names the header's codicon for each state", () => {
-    expect(stateIcon(SESSION)).toEqual({ icon: 'loading~spin', text: 'Working' });
+    expect(stateIcon(SESSION)).toMatchObject({ icon: 'loading~spin', text: 'Working' });
     expect(stateIcon({ ...SESSION, state: 'waiting', waitingFor: 'question' }).icon).toBe('question');
     expect(stateIcon({ ...SESSION, state: 'waiting', waitingFor: 'permission' }).icon).toBe('shield');
     // The dock's Idle mark; `check` is Done's.
-    expect(stateIcon({ ...SESSION, state: 'idle' })).toEqual({ icon: 'circle-large-outline', text: 'Idle' });
-    expect(stateIcon({ ...SESSION, state: 'ended' }).icon).toBe('debug-stop');
+    expect(stateIcon({ ...SESSION, state: 'idle' })).toMatchObject({ icon: 'circle-large-outline', text: 'Idle' });
+    expect(stateIcon({ ...SESSION, state: 'ended' })).toMatchObject({ icon: 'stop-circle', tone: 'muted' });
+    expect(stateIcon({ ...SESSION, state: 'waiting', waitingFor: 'permission' }).tone).toBe('attention');
     expect(stateIcon({ ...SESSION, state: 'starting' }).icon).toBe('loading~spin');
-    expect(stateIcon(null)).toEqual({ icon: 'circle-slash', text: 'No session' });
+    expect(stateIcon(null)).toMatchObject({ icon: 'circle-slash', text: 'No session' });
   });
 
   it('shows a session waiting for a usage limit to reset with a watch and when it resumes (architecture.md § Rate limits)', () => {
@@ -254,7 +255,7 @@ describe('the conversation state', () => {
     vi.useFakeTimers({ toFake: ['Date'], now: until - 3_600_000 });
 
     try {
-      expect(stateIcon({ ...SESSION, state: 'idle', limit: { until, retry: false } })).toEqual({ icon: 'watch', text: 'Rate limited · resumes 1:21 PM' });
+      expect(stateIcon({ ...SESSION, state: 'idle', limit: { until, retry: false } })).toMatchObject({ icon: 'watch', text: 'Rate limited · resumes 1:21 PM' });
     } finally {
       vi.useRealTimers();
     }
@@ -310,7 +311,7 @@ describe('the Conversation view page', () => {
 
     root.innerHTML = html;
     // The dropdown's button holds the state codicon and the title, as each of its options does.
-    expect([...root.querySelector('.header button.picker')!.children].map((child) => child.className)).toEqual(['codicon codicon-loading codicon-modifier-spin', 'title', 'codicon codicon-chevron-down']);
+    expect([...root.querySelector('.header button.picker')!.children].map((child) => child.className)).toEqual(['codicon codicon-loading codicon-modifier-spin state-icon tone-muted', 'title', 'codicon codicon-chevron-down']);
     expect(root.querySelector('.header > .codicon')).toBeNull();
     expect(root.querySelector('.header .title')?.textContent).toBe('Fix the <inbox> badge');
     expect(root.querySelector('.message .box')?.textContent).toBe('Is <b>it</b> fixed?');

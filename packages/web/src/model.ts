@@ -1,5 +1,5 @@
-import { SESSION_ICONS, sessionIcon } from '@switchboard/core/group';
-import type { SessionIcon } from '@switchboard/core/group';
+import { SESSION_ICONS, SESSION_TONES, sessionIcon } from '@switchboard/core/group';
+import type { IconTone, SessionIcon } from '@switchboard/core/group';
 import type { ArtifactView, ConversationEntry, ItemView, PageGroup, PageRow, ReplyView, ScopeView, SessionView, StatusView, VoiceView } from './types.js';
 
 /** What the page shows, kept from its conversation stream (architecture.md § Web page). */
@@ -194,19 +194,19 @@ export function awaitingReply(items: readonly ItemView[], session: SessionView |
 }
 
 /** The session state's codicon and its words. */
-export function stateIcon(state: SessionView['state'] | null | undefined, waitingFor: SessionView['waitingFor'] = null, limit: SessionView['limit'] = null): { icon: string; text: string } {
+export function stateIcon(state: SessionView['state'] | null | undefined, waitingFor: SessionView['waitingFor'] = null, limit: SessionView['limit'] = null): { icon: string; text: string; tone: IconTone } {
   // A session waiting for a usage limit to reset (architecture.md § Rate limits).
   if (limit != null) {
     const at = new Date(limit.until);
     const time = at.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
     const when = at.toDateString() === new Date().toDateString() ? time : `${at.toLocaleDateString('en-US', { weekday: 'short' })} ${time}`;
 
-    return { icon: SESSION_ICONS.limited, text: `Rate limited · ${limit.retry ? 'retries' : 'resumes'} ${when}` };
+    return { icon: SESSION_ICONS.limited, text: `Rate limited · ${limit.retry ? 'retries' : 'resumes'} ${when}`, tone: SESSION_TONES.limited };
   }
 
   const kind = sessionIcon(state, waitingFor);
 
-  return { icon: SESSION_ICONS[kind], text: SESSION_WORDS[kind] };
+  return { icon: SESSION_ICONS[kind], text: SESSION_WORDS[kind], tone: SESSION_TONES[kind] };
 }
 
 /** Each session icon in words, as the Conversation view says them. */
