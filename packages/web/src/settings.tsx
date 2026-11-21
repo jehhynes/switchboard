@@ -2,8 +2,8 @@
 // hub's config routes as page commands. Its state, fields and pages are the dock's, in settingsModel.ts.
 import type { VNode } from 'preact';
 import { mount } from './island.js';
-import { applyPlaybookCell, applyPlaybookField, bar, clone, COMMON_SOURCE_KEYS, EditorState, emptyNewPlaybook, getAt, nav, newPlaybookName, pageSections, pageView, parseConfig, playbookEntry, readField, readPlaybook, samePlaybook, setAt, sourceKind } from './settingsModel.js';
-import type { Field, FieldView, Json, JsonObject, NavEntry, NewNameView, PageButton, PageView, PlaybookFields, PlaybookTable, SectionView } from './settingsModel.js';
+import { applyPlaybookCell, applyPlaybookField, bar, enrollmentActive, enrollmentRow, parseEnrollment, clone, COMMON_SOURCE_KEYS, EditorState, emptyNewPlaybook, getAt, nav, newPlaybookName, pageSections, pageView, parseConfig, playbookEntry, readField, readPlaybook, samePlaybook, setAt, sourceKind } from './settingsModel.js';
+import type { Enrollment, Field, FieldOption, FieldView, Json, JsonObject, NavEntry, NewNameView, PageButton, PageView, PlaybookFields, PlaybookTable, SectionView } from './settingsModel.js';
 
 type Answer = { status: number; body: Record<string, unknown> };
 
@@ -16,6 +16,9 @@ export interface SettingsDeps {
 
 /** Whether the page is as narrow as a phone's, where the navigation and the page each take the screen (settings.css). */
 const phone = (): boolean => typeof matchMedia === 'function' && matchMedia('(max-width: 767px)').matches;
+
+/** How often Settings asks how a running enrolment stands. */
+export const ENROLL_POLL_MS = 1_000;
 
 /** The draft is checked this long after the last edit, as the dock's. */
 export const CHECK_DELAY_MS = 250;
@@ -41,6 +44,10 @@ interface View {
   /** The text typed in each field since the page was drawn, so a field shows what was typed, not the value read from it. */
   typing: Map<string, string>;
   ask: Ask | null;
+  /** Voiceprint enrolment as the hub last said, or null before the Voice page asked. */
+  enrollment: Enrollment | null;
+  /** Why the last enrolment request was refused or failed, or null. */
+  enrollError: string | null;
 }
 
 export interface Settings {
@@ -57,7 +64,7 @@ export interface Settings {
 
 /** Settings drawn into `host`: the navigation, the page and the bar, as the dock's window, and a phone's list that drills into each page. */
 export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
-  const view: View = { open: false, drill: 'nav', error: null, notice: null, opened: new Set(), help: new Set(), erred: new Set(), typing: new Map(), ask: null };
+  const view: View = { open: false, drill: 'nav', error: null, notice: null, opened: new Set(), help: new Set(), erred: new Set(), typing: new Map(), ask: null, enrollment: null, enrollError: null };
   let state: EditorState | null = null;
   let loads = 0;
   let seq = 0;
@@ -65,11 +72,74 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
   let checkedEdits = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let saving: Promise<boolean> | null = null;
+  let polling = false;
+  let asked = false;
+  // Each enrolment request, so an answer that a later request or a close overtook is dropped.
+  let enrollSeq = 0;
+
+  /** Enroll my voice: `start`, `cancel` or `status`; while enrolment starts or records, asks again every second until it ends. */
+  const enroll = async (action: string): Promise<void> => {
+    const ask = async (what: string): Promise<{ enrollment: Enrollment | null; error: string | null } | null> => {
+      const mine = ++enrollSeq;
+      const answer = await deps.post('page-voice-enroll', { action: what });
+
+      return mine !== enrollSeq ? null : { enrollment: parseEnrollment(answer.body['enrollment']), error: answer.status === 200 ? null : String(answer.body['error'] ?? 'Switchboard did not answer.') };
+    };
+    const reply = await ask(action);
+
+    if (reply === null) {
+      return;
+    }
+
+    view.enrollError = reply.error;
+    view.enrollment = reply.enrollment ?? view.enrollment;
+    draw();
+
+    if (polling || !enrollmentActive(view.enrollment)) {
+      return;
+    }
+
+    polling = true;
+
+    try {
+      while (view.open && enrollmentActive(view.enrollment)) {
+        await new Promise((resolve) => setTimeout(resolve, ENROLL_POLL_MS));
+
+        if (!view.open) {
+          break;
+        }
+
+        const status = await ask('status');
+
+        if (status === null) {
+          break;
+        }
+
+        // A hub that stopped answering leaves the last state shown, with why.
+        if (status.enrollment === null) {
+          view.enrollError = status.error;
+          draw();
+          break;
+        }
+
+        view.enrollment = status.enrollment;
+        draw();
+      }
+    } finally {
+      polling = false;
+    }
+  };
 
   const draw = (): void => {
     if (!view.open) {
       mount(host, null);
       return;
+    }
+
+    // The Voice page reads how enrolment stands when it first shows.
+    if (state?.page === 'voice' && !asked) {
+      asked = true;
+      void enroll('status');
     }
 
     mount(host, renderSettings(state, view, handlers));
@@ -267,6 +337,10 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
       view.typing.delete(`${schedule}.at`);
     }
 
+    if (field.path.startsWith('voice.')) {
+      next = tidy(current, next);
+    }
+
     current.setDraft(next);
     edited();
   };
@@ -314,6 +388,23 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
 
       current.newSource = { name: '', kind: '', touched: false };
       change(setAt(value, `sources.${name}`, kind === name ? {} : { kind }), `source:${name}`);
+      return;
+    }
+
+    if (current.page === 'new-persona') {
+      if (current.newPersonaError !== null) {
+        current.newPersona = { ...current.newPersona, touched: true };
+        draw();
+        return;
+      }
+
+      const id = current.newPersona.name.trim();
+      const index = current.personas.length;
+      const list = getAt(value, 'voice.personas');
+      const draft = setAt(value, 'voice.personas', [...(Array.isArray(list) ? list : []), { id }]);
+
+      current.newPersona = { name: '', touched: false };
+      change(draft, `persona:${index}`);
       return;
     }
 
@@ -382,6 +473,8 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
 
     if (state.page === 'new-source') {
       state.newSource = { ...state.newSource, [part]: text };
+    } else if (state.page === 'new-persona') {
+      state.newPersona = { ...state.newPersona, name: text };
     } else if (state.page === 'new-schedule') {
       state.newSchedule = { ...state.newSchedule, name: text };
     } else if (state.page === 'new-playbook') {
@@ -389,6 +482,46 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
     }
 
     draw();
+  };
+
+  /**
+   * Removes a persona from the draft, with the playbook assignments that name its ID unless another entry has that ID, since the hub refuses an
+   * assignment to a persona not in the roster. Discard restores it.
+   */
+  const removePersona = (index: number): void => {
+    const current = state;
+    const value = current?.value ?? null;
+
+    if (current === null || value === null || !(index >= 0 && index < current.personas.length)) {
+      return;
+    }
+
+    const id = current.personaId(index);
+    let next = setAt(value, `voice.personas[${index}]`, undefined);
+    const assigned = getAt(next, 'voice.playbookPersonas');
+
+    if (id !== null && !current.personas.some((_, at) => at !== index && current.personaId(at) === id) && typeof assigned === 'object' && assigned !== null && !Array.isArray(assigned)) {
+      for (const [playbook, persona] of Object.entries(assigned)) {
+        if (persona === id) {
+          next = setAt(next, `voice.playbookPersonas.${playbook}`, undefined);
+        }
+      }
+    }
+
+    change(tidy(current, next), 'voice');
+  };
+
+  /** Gives a playbook a persona on the Voice page; the playbook's row then offers None to remove it. */
+  const assignPersona = (playbook: string, persona: string): void => {
+    const current = state;
+    const value = current?.value ?? null;
+
+    if (current === null || value === null || playbook === '' || !current.personaIds.includes(persona)) {
+      return;
+    }
+
+    current.setDraft(setAt(value, `voice.playbookPersonas.${playbook}`, persona));
+    edited();
   };
 
   /** A page's header button: Create, or the remove of the page's own entry, which only changes the draft. */
@@ -405,6 +538,9 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
         break;
       case 'delete':
         void askDelete();
+        break;
+      case 'remove-persona':
+        removePersona(Number(pressed.argument));
         break;
       case 'remove-schedule':
         // Its work items stay, and Discard restores it.
@@ -507,6 +643,10 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
     view.ask = null;
     // The draft goes with Settings, as with the dock's window.
     state = null;
+    asked = false;
+    enrollSeq++;
+    view.enrollment = null;
+    view.enrollError = null;
     loads++;
     draw();
     deps.closed?.();
@@ -580,6 +720,8 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
     saveStay: () => void save(),
     discard: closeNow,
     editCell,
+    assignPersona,
+    enroll: (action) => void enroll(action),
     answer: async (choice) => {
       const asked = view.ask;
 
@@ -677,6 +819,8 @@ interface Handlers {
   discard(): void;
   answer(choice: 'save' | 'discard' | 'keep' | 'delete'): void;
   editCell(name: string, path: string, checked: boolean): void;
+  assignPersona(playbook: string, persona: string): void;
+  enroll(action: string): void;
 }
 
 /** Settings: its header, the navigation and the page side by side (on a phone, one of them), and the bar under both. */
@@ -703,7 +847,7 @@ export function renderSettings(state: EditorState | null, view: View, on: Handle
         </nav>
         <div class="settings-page">
           {view.notice === null ? null : <p class="settings-notice">{view.notice}</p>}
-          {page === null ? <p class="settings-message">{view.error ?? 'Reading the settings…'}</p> : <Page state={state!} page={page} view={view} on={on} />}
+          {page === null ? <p class="settings-message">{view.error ?? 'Reading the settings…'}</p> : <Page key={state!.page} state={state!} page={page} view={view} on={on} />}
         </div>
       </div>
       {state === null ? null : (
@@ -788,6 +932,8 @@ function Page({ state, page, view, on }: { state: EditorState; page: PageView; v
       {page.sections.map((section) => (
         <SectionBlock state={state} section={section} view={view} on={on} />
       ))}
+      {page.assign === undefined ? null : <AssignRow assign={page.assign} view={view} on={on} />}
+      {state.page === 'voice' && page.message === null ? <EnrollRow view={view} on={on} /> : null}
     </>
   );
 }
@@ -908,6 +1054,86 @@ function Table({ table, on }: { table: PlaybookTable; on: Handlers }) {
       </table>
     </div>
   );
+}
+
+/** The Voice page's row that gives a task playbook a persona, or a line saying why it cannot. */
+function AssignRow({ assign, view, on }: { assign: { playbooks: string[]; personas: FieldOption[] }; view: View; on: Handlers }) {
+  if (assign.personas.length === 0 || assign.playbooks.length === 0) {
+    return <p class="settings-assign-note">{assign.personas.length === 0 ? 'Add a persona under Personas to give a playbook its own.' : 'Every task playbook has a persona.'}</p>;
+  }
+
+  const field: Field = { path: 'assign', label: 'Assign', kind: 'select', help: 'The playbook’s sessions take this persona unless one is pinned to the session.' };
+
+  return (
+    <div class="settings-row" data-path="assign">
+      <div class="settings-caption">
+        <label for="settings-assign-playbook">Assign</label>
+        <Info field={field} on={on} />
+      </div>
+      <div class="settings-input settings-assign">
+        <select id="settings-assign-playbook" class="sheet-select settings-select" aria-label="Playbook">
+          {assign.playbooks.map((playbook) => (
+            <option value={playbook}>{playbook}</option>
+          ))}
+        </select>
+        <select id="settings-assign-persona" class="sheet-select settings-select" aria-label="Persona">
+          {assign.personas.map((persona) => (
+            <option value={persona.value}>{persona.label}</option>
+          ))}
+        </select>
+        <button
+          type="button"
+          class="sheet-button secondary"
+          onClick={(event) => {
+            const row = (event.currentTarget as HTMLElement).parentElement!;
+
+            on.assignPersona(row.querySelector<HTMLSelectElement>('#settings-assign-playbook')!.value, row.querySelector<HTMLSelectElement>('#settings-assign-persona')!.value);
+          }}
+        >
+          Assign
+        </button>
+        {view.help.has(field.path) ? <p class="settings-help settings-assign-help">{field.help}</p> : null}
+      </div>
+    </div>
+  );
+}
+
+/** The Voice page's enrolment (architecture.md § Voice check and barge-in): how it stands, its button, and the sentences to read. */
+function EnrollRow({ view, on }: { view: View; on: Handlers }) {
+  const row = enrollmentRow(view.enrollment, view.enrollError, Date.now());
+
+  return (
+    <section class="settings-section settings-enroll">
+      <h3 class="settings-section-heading">Your voice</h3>
+      <p class="settings-enroll-status">{row.status}</p>
+      <button type="button" class="sheet-button secondary" title="Records a minute of your speech through the voice process; nothing of it reaches a session." onClick={() => on.enroll(row.command)}>
+        {row.button}
+      </button>
+      {row.sentences.length === 0 ? null : (
+        <div class="settings-enroll-sentences">
+          {row.sentences.map((sentence) => (
+            <p>{sentence}</p>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** Drops the voice containers an edit emptied that the file does not have, so creating and removing a persona leaves no change. */
+function tidy(state: EditorState, next: JsonObject): JsonObject {
+  let tidied = next;
+
+  for (const path of ['voice.personas', 'voice.playbookPersonas', 'voice']) {
+    const value = getAt(tidied, path);
+    const empty = (Array.isArray(value) && value.length === 0) || (typeof value === 'object' && value !== null && !Array.isArray(value) && Object.keys(value).length === 0);
+
+    if (empty && getAt(state.config.settings.value, path) === undefined) {
+      tidied = setAt(tidied, path, undefined);
+    }
+  }
+
+  return tidied;
 }
 
 /** A copy of `root` with a playbook entry set, or removed when `entry` is undefined; an edited entry keeps its place. */
