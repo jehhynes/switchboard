@@ -380,7 +380,7 @@ public static partial class SettingsFields
             ]),
             new Section("Web page",
             [
-                new Field("web.chromePane", "Chrome pane (experimental)", FieldKind.Boolean, "Experimental, Windows only, and may break with Chrome updates. Shows the selected work item's ticket and pull request in a Chrome window that the dock keeps over the installed web page's right column. Needs the Switchboard Chrome extension, paired from the page's view options.", Fallback: false),
+                new Field("web.chromePane", "Chrome pane (experimental)", FieldKind.Boolean, "Experimental, Windows only, and may break with Chrome updates. Shows the selected work item's ticket and pull request in a Chrome window that Switchboard keeps over the installed web page's right column, without the dock. Needs the Switchboard Chrome extension, paired from the page's view options.", Fallback: false),
             ]),
             new Section("Advanced",
             [

@@ -77,9 +77,6 @@ public sealed class HubClient(string switchboardHome, HubStarter? starter = null
     /// </summary>
     public event Action<string, string>? NeedsYou;
 
-    /// <summary>Raised on the stream's thread with the hub's Chrome pane order (architecture.md § Pane state).</summary>
-    public event Action<Platform.PaneOrder>? PaneOrdered;
-
     /// <summary>Raised on the stream's thread with the first view of each connection, such as to a hub started on another config folder.</summary>
     public event Action? Connected;
 
@@ -178,10 +175,6 @@ public sealed class HubClient(string switchboardHome, HubStarter? starter = null
             {
                 ClickRequested?.Invoke(rowKey);
             }
-            else if (read is { Name: "pane" } && ParsePane(read.Data) is { } order)
-            {
-                PaneOrdered?.Invoke(order);
-            }
             else if (read is { Name: "needs" } && JsonNode.Parse(read.Data)?["items"] is JsonArray items)
             {
                 foreach (var item in items)
@@ -195,36 +188,6 @@ public sealed class HubClient(string switchboardHome, HubStarter? starter = null
         }
 
         return Connection.NotRunning;
-    }
-
-    /// <summary>The hub's <c>pane</c> event, or null when it is malformed; a malformed column hides the pane.</summary>
-    public static Platform.PaneOrder? ParsePane(string data)
-    {
-        try
-        {
-            if (JsonNode.Parse(data) is not JsonObject body)
-            {
-                return null;
-            }
-
-            var marker = body["marker"] is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
-            Platform.PaneRect? rect = null;
-
-            if (body["rect"] is JsonObject r)
-            {
-                double Read(string name) => r[name] is JsonValue number && number.TryGetValue<double>(out var read) && double.IsFinite(read) ? read : double.NaN;
-
-                var values = new[] { "left", "top", "width", "height", "dpr", "innerWidth", "innerHeight" }.Select(Read).ToArray();
-
-                rect = values.Any(double.IsNaN) || values[4] <= 0 ? null : new Platform.PaneRect(values[0], values[1], values[2], values[3], values[4], values[5], values[6]);
-            }
-
-            return new Platform.PaneOrder(marker, rect);
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
     }
 
     void SetConnection(Connection connection)
@@ -349,9 +312,6 @@ public sealed class HubClient(string switchboardHome, HubStarter? starter = null
     }
 
     public Task<string?> Focus(string? sessionId, long at) => Post("/dock/focus", new JsonObject { ["sessionId"] = sessionId, ["at"] = at });
-
-    /// <summary>Reports the Chrome pane's state (architecture.md § Pane state).</summary>
-    public Task<string?> Pane(JsonObject report) => Post("/dock/pane", report);
 
     public async Task<SearchReply> Search(string text, long since)
     {
