@@ -42,6 +42,8 @@
 textarea.settings-text { resize: vertical; }
 textarea.settings-text.prompt { font-family: var(--vscode-editor-font-family, monospace); }
 .settings-select { width: auto; min-width: 260px; max-width: 100%; }
+.settings-name { display: flex; align-items: center; gap: 4px; width: 100%; max-width: 640px; }
+.settings-name .settings-namespace { flex: none; width: 160px; }
 .settings-group { flex-direction: row; flex-wrap: wrap; gap: 4px 14px; }
 .settings-check { display: inline-flex; align-items: center; gap: 4px; }
 .settings-row input[type="checkbox"] { margin: 6px 0 0; }

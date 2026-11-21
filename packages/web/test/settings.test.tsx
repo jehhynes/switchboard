@@ -125,7 +125,7 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     await opened();
 
     expect(named('page-settings-read')).toHaveLength(1);
-    expect(texts('.settings-nav-entry .settings-nav-label')).toEqual(['General']);
+    expect(texts('.settings-nav-entry .settings-nav-label')).toEqual(['General', '+ New GitHub source', '+ New Zoho Desk source', '+ New Forum source', '+ New source']);
     expect(host.querySelector('.settings-nav-entry.current')?.textContent).toContain('General');
     expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('General');
     expect(host.querySelector('.settings-file')?.textContent).toBe('C:/home/.switchboard/settings.json');
@@ -328,6 +328,16 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     host.querySelector<HTMLButtonElement>('.settings-back')!.click();
     await settle();
     expect(host.querySelector('.settings')?.getAttribute('data-drill')).toBe('nav');
+    expect(document.activeElement?.textContent).toContain('General');
+
+    // At a phone's width the page's title takes the focus from the hidden navigation, also after an Add entry.
+    const media = vi.spyOn(window, 'matchMedia').mockReturnValue({ matches: true } as MediaQueryList);
+
+    [...host.querySelectorAll<HTMLButtonElement>('.settings-nav-entry')].find((one) => one.textContent?.includes('New GitHub source'))!.click();
+    await settle();
+    expect(document.activeElement).toBe(host.querySelector('.settings-page-title h2'));
+    expect(document.activeElement?.textContent).toBe('GitHub');
+    media.mockRestore();
   });
 
   it('shows a field\'s help under it when its info icon is tapped, as well as in its tooltip', async () => {
@@ -340,5 +350,152 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     await settle();
     expect(host.querySelector('[data-path="sessions.concurrency"] .settings-help')?.textContent).toBe('Sessions that run at once, 1 to 10. A start with no free slot waits as queued.');
     expect(host.querySelector('[data-path="triage.timeoutSeconds"] .settings-info')).toBeNull();
+  });
+});
+
+describe('Settings sources (architecture.md § Settings window)', () => {
+  let host: HTMLElement;
+  let posts: Array<{ name: string; body: Record<string, unknown> }>;
+  let answers: Record<string, Answer | ((body: Record<string, unknown>) => Answer)>;
+  const file = {
+    sessions: { installHooks: false },
+    sources: { github: { repo: 'o/r', logins: ['me'], requireAssignee: false }, personal: { kind: 'github', repo: 'me/p' } },
+    playbooks: { 'dev:triage': { description: 'T', kind: 'triage', template: 'x' }, 'dev:build': { description: 'B', template: 'y' } },
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    posts = [];
+    answers = { 'page-settings-read': { status: 200, body: config(file, { enabled: { github: true } }) }, 'page-settings-check': { status: 200, body: { errors: [] } } };
+    host = document.createElement('div');
+    document.body.replaceChildren(host);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const open = async () => {
+    const pane = settings(host, {
+      post: async (name, body) => {
+        posts.push({ name, body });
+        const answer = answers[name];
+        return typeof answer === 'function' ? answer(body) : (answer ?? { status: 404, body: {} });
+      },
+    });
+
+    pane.open();
+    await vi.advanceTimersByTimeAsync(0);
+    return pane;
+  };
+  const texts = (selector: string) => [...host.querySelectorAll(selector)].map((node) => node.textContent);
+  const entry = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('.settings-nav-entry')].find((one) => one.querySelector('.settings-nav-label')?.textContent === label)!;
+  const control = <T extends HTMLElement>(path: string) => host.querySelector<T>(`[data-path="${path}"] input, [data-path="${path}"] select, [data-path="${path}"] textarea`)!;
+  const settle = () => vi.advanceTimersByTimeAsync(0);
+
+  it("lists the sources in file order under Sources, noting one that is off, then New <kind> source for each kind without one and New source", async () => {
+    await open();
+
+    expect(texts('.settings-nav-heading')).toEqual(['Sources']);
+    expect(texts('.settings-nav-entry .settings-nav-label')).toEqual(['General', 'GitHub', 'personal (GitHub)', '+ New Zoho Desk source', '+ New Forum source', '+ New source']);
+    expect(entry('GitHub').querySelector('.settings-nav-note')).toBeNull();
+    expect(entry('personal (GitHub)').querySelector('.settings-nav-note')?.textContent).toBe('off');
+  });
+
+  it("draws a source page with the dock's fields: Kind, the common ones, its kind's own and a collapsed Advanced, and the triage playbooks to choose", async () => {
+    await open();
+    entry('GitHub').click();
+    await settle();
+
+    expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('GitHub');
+    expect(texts('.settings-section-heading')).toEqual(['Source', 'GitHub', 'Advanced']);
+    expect(texts('.settings-section:not(.advanced) .settings-caption label')).toEqual(['Kind', 'Poll interval (seconds)', 'Repo root', 'Namespace', 'Triage playbook', 'Setup prompt', 'Repository', 'Logins', 'Require assignee', 'Wait for blockers', 'Include closed issues', 'Project owner', 'Project number', 'Status field', 'Assigned statuses']);
+    expect([...control<HTMLSelectElement>('sources.github.kind').options].map((one) => one.textContent)).toEqual(['Same as the name (github)', 'GitHub', 'Zoho Desk', 'Forum']);
+    expect([...control<HTMLSelectElement>('sources.github.triagePlaybook').options].map((one) => one.value)).toEqual(['', 'dev:triage']);
+    expect([...control<HTMLSelectElement>('sources.github.namespace').options].map((one) => one.value)).toEqual(['', 'dev']);
+    expect(control<HTMLTextAreaElement>('sources.github.logins').value).toBe('me');
+    expect(control<HTMLInputElement>('sources.github.requireAssignee').checked).toBe(false);
+    expect(control<HTMLInputElement>('sources.github.waitForBlockers').checked).toBe(false);
+    expect([...host.querySelectorAll('.settings-buttons button')].map((one) => one.textContent)).toEqual(['Remove source']);
+  });
+
+  it("drops the old plugin's keys when the kind changes and draws the new kind's fields", async () => {
+    await open();
+    entry('personal (GitHub)').click();
+    await settle();
+
+    const kind = control<HTMLSelectElement>('sources.personal.kind');
+
+    kind.value = 'zoho';
+    kind.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('personal (Zoho Desk)');
+    expect(texts('.settings-section-heading')).toEqual(['Source', 'Zoho Desk', 'Advanced']);
+    await vi.advanceTimersByTimeAsync(CHECK_DELAY_MS);
+    expect((posts.at(-1)!.body['settings'] as { sources: unknown }).sources).toEqual({ github: file.sources.github, personal: { kind: 'zoho' } });
+    expect(entry('personal (Zoho Desk)').querySelector('.settings-dirty')).not.toBeNull();
+  });
+
+  it('adds a source of a missing kind, removes a source to General, and shows a source error on its field and its page', async () => {
+    answers['page-settings-check'] = (body) => ({ status: 200, body: { errors: getAt(body['settings'] as never, 'sources.zoho') === undefined ? [] : ['sources.zoho.orgId is required.'] } });
+    await open();
+
+    entry('+ New Zoho Desk source').click();
+    await vi.advanceTimersByTimeAsync(CHECK_DELAY_MS);
+    expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('Zoho Desk');
+    expect(host.querySelector('[data-path="sources.zoho.orgId"] .settings-field-error')?.textContent).toBe('sources.zoho.orgId is required.');
+    expect(entry('Zoho Desk').querySelector('.settings-errors')).not.toBeNull();
+    expect(entry('Zoho Desk').querySelector('.settings-nav-note')?.textContent).toBe('off');
+    expect(host.querySelector('.settings-page > .settings-error')).toBeNull();
+
+    [...host.querySelectorAll<HTMLButtonElement>('.settings-buttons button')][0]!.click();
+    await vi.advanceTimersByTimeAsync(CHECK_DELAY_MS);
+    expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('General');
+    expect(texts('.settings-nav-entry .settings-nav-label')).toContain('+ New Zoho Desk source');
+    expect(host.querySelector('.settings-status')?.textContent).toBe('Saved');
+
+    entry('GitHub').click();
+    await settle();
+    [...host.querySelectorAll<HTMLButtonElement>('.settings-buttons button')][0]!.click();
+    await settle();
+    expect(texts('.settings-nav-entry .settings-nav-label')).toEqual(['General', 'personal (GitHub)', '+ New GitHub source', '+ New Zoho Desk source', '+ New Forum source', '+ New source']);
+    expect(host.querySelector('.settings-status')?.textContent).toBe('Unsaved changes');
+  });
+
+  it('New source asks for a kind and a name, refuses an invalid or taken name on Create, and adds an entry of that kind', async () => {
+    await open();
+    entry('+ New source').click();
+    await settle();
+
+    expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('New source');
+    expect([...host.querySelectorAll<HTMLOptionElement>('#settings-new-kind option')].map((one) => one.value)).toEqual(['github', 'zoho', 'forum']);
+    expect(host.querySelector('[data-path="new-name"] .settings-field-error')).toBeNull();
+
+    const create = () => [...host.querySelectorAll<HTMLButtonElement>('.settings-buttons button')].find((one) => one.textContent === 'Create')!.click();
+    const name = (text: string) => {
+      const box = host.querySelector<HTMLInputElement>('#settings-new-name')!;
+
+      box.value = text;
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+
+    create();
+    await settle();
+    expect(host.querySelector('[data-path="new-name"] .settings-field-error')?.textContent).toBe('The name must be lowercase letters, digits and hyphens.');
+    name('personal');
+    expect(host.querySelector('[data-path="new-name"] .settings-field-error')?.textContent).toBe('A source named personal already exists.');
+    name('adhoc');
+    expect(host.querySelector('[data-path="new-name"] .settings-field-error')?.textContent).toBe("adhoc names Switchboard's own tickets; choose another name.");
+    name('widgets-dashboard');
+    expect(host.querySelector('.settings-status')?.textContent).toBe('Saved');
+
+    const kind = host.querySelector<HTMLSelectElement>('#settings-new-kind')!;
+
+    kind.value = 'forum';
+    kind.dispatchEvent(new Event('change', { bubbles: true }));
+    create();
+    await vi.advanceTimersByTimeAsync(CHECK_DELAY_MS);
+    expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('widgets-dashboard (Forum)');
+    expect((posts.at(-1)!.body['settings'] as { sources: Record<string, unknown> }).sources['widgets-dashboard']).toEqual({ kind: 'forum' });
   });
 });

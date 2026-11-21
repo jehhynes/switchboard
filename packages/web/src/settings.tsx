@@ -2,8 +2,8 @@
 // hub's config routes as page commands. Its state, fields and pages are the dock's, in settingsModel.ts.
 import type { VNode } from 'preact';
 import { mount } from './island.js';
-import { bar, clone, EditorState, nav, pageSections, pageView, parseConfig, readField, setAt } from './settingsModel.js';
-import type { Field, FieldView, NavEntry, PageButton, PageView, SectionView } from './settingsModel.js';
+import { bar, clone, COMMON_SOURCE_KEYS, EditorState, getAt, nav, pageSections, pageView, parseConfig, readField, setAt, sourceKind } from './settingsModel.js';
+import type { Field, FieldView, JsonObject, NavEntry, NewNameView, PageButton, PageView, SectionView } from './settingsModel.js';
 
 type Answer = { status: number; body: Record<string, unknown> };
 
@@ -180,9 +180,99 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
       return;
     }
 
-    view.typing.set(field.path, input);
-    current.setDraft(setAt(value, field.path, readField(field.kind, input, checked, field.listDefault !== undefined)));
+    let next = setAt(value, field.path, readField(field.kind, input, checked, field.listDefault !== undefined));
+    const source = /^sources\.([^.]+)\.kind$/.exec(field.path)?.[1];
+
+    // A source's new kind keeps only the common keys, because each plugin rejects another's keys, and draws the new kind's fields.
+    if (source !== undefined && sourceKind(next, source) !== sourceKind(value, source)) {
+      const entry = getAt(next, `sources.${source}`) as JsonObject;
+
+      next = setAt(next, `sources.${source}`, Object.fromEntries(Object.entries(entry).filter(([key]) => COMMON_SOURCE_KEYS.includes(key))));
+      view.typing.clear();
+    } else {
+      view.typing.set(field.path, input);
+    }
+
+    current.setDraft(next);
     edited();
+  };
+
+  /** Changes the draft from a page's button or an Add entry, and opens `page`. */
+  const change = (next: JsonObject, page: string): void => {
+    state!.setDraft(next);
+    state!.page = page;
+    view.drill = 'page';
+    view.typing.clear();
+    edited();
+
+    // On a phone the navigation, such as New <kind> source that made the change, is hidden now, so the page's title takes the focus.
+    if (phone()) {
+      host.querySelector<HTMLElement>('.settings-page-title h2')?.focus();
+    }
+  };
+
+  const addSource = (kind: string): void => {
+    const value = state?.value ?? null;
+
+    if (value !== null) {
+      change(setAt(value, `sources.${kind}`, {}), `source:${kind}`);
+    }
+  };
+
+  /** Create on a New page: refuses an invalid or taken name, showing why, and otherwise adds the entry to the draft and opens its page. */
+  const create = (): void => {
+    const current = state;
+    const value = current?.value ?? null;
+
+    if (current === null || value === null) {
+      return;
+    }
+
+    if (current.page === 'new-source') {
+      if (current.newSourceError !== null) {
+        current.newSource = { ...current.newSource, touched: true };
+        draw();
+        return;
+      }
+
+      const name = current.newSource.name.trim();
+      const kind = current.newSourceKind;
+
+      current.newSource = { name: '', kind: '', touched: false };
+      change(setAt(value, `sources.${name}`, kind === name ? {} : { kind }), `source:${name}`);
+    }
+  };
+
+  /** The New page's name or kind as typed. */
+  const editName = (part: 'name' | 'kind' | 'namespace', text: string): void => {
+    if (state === null) {
+      return;
+    }
+
+    if (state.page === 'new-source') {
+      state.newSource = { ...state.newSource, [part]: text };
+    }
+
+    draw();
+  };
+
+  /** A page's header button: Create, or the remove of the page's own entry, which only changes the draft. */
+  const button = (pressed: PageButton): void => {
+    const value = state?.value ?? null;
+
+    if (value === null) {
+      return;
+    }
+
+    switch (pressed.command) {
+      case 'create':
+        create();
+        break;
+      case 'remove-source':
+        // Its work items stay, and Discard restores it.
+        change(setAt(value, `sources.${pressed.argument!}`, undefined), 'general');
+        break;
+    }
   };
 
   const saveDraft = async (): Promise<boolean> => {
@@ -328,7 +418,9 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
 
       draw();
     },
-    button: (_button) => {},
+    button,
+    addSource,
+    editName,
     save: async () => {
       const ok = await save();
 
@@ -409,6 +501,8 @@ interface Handlers {
   toggleSection(key: string): void;
   toggleHelp(path: string): void;
   button(button: PageButton): void;
+  addSource(kind: string): void;
+  editName(part: 'name' | 'kind' | 'namespace', text: string): void;
   save(): void;
   saveStay(): void;
   discard(): void;
@@ -472,7 +566,7 @@ function NavRow({ entry, on }: { entry: NavEntry; on: Handlers }) {
   }
 
   return (
-    <button type="button" class={`settings-nav-entry ${entry.kind}${entry.current ? ' current' : ''}`} aria-current={entry.current ? 'page' : undefined} onClick={() => entry.page !== undefined && on.navigate(entry.page)}>
+    <button type="button" class={`settings-nav-entry ${entry.kind}${entry.current ? ' current' : ''}`} aria-current={entry.current ? 'page' : undefined} onClick={() => (entry.addSource !== undefined ? on.addSource(entry.addSource) : entry.page !== undefined && on.navigate(entry.page))}>
       <span class="settings-nav-label">{entry.kind === 'add' ? `+ ${entry.label}` : entry.label}</span>
       {entry.note === undefined ? null : <span class="settings-nav-note">{entry.note}</span>}
       {entry.dirty ? (
@@ -519,6 +613,7 @@ function Page({ state, page, view, on }: { state: EditorState; page: PageView; v
         </p>
       ))}
       {page.message === null ? null : <p class="settings-message">{page.message}</p>}
+      {page.newName === undefined ? null : <NameFields names={page.newName} view={view} on={on} />}
       {page.sections.map((section) => (
         <SectionBlock state={state} section={section} view={view} on={on} />
       ))}
@@ -695,6 +790,63 @@ function GroupRow({ views, on }: { views: FieldView[]; on: Handlers }) {
         ))}
       </div>
     </div>
+  );
+}
+
+const KIND_FIELD: Field = { path: 'new-kind', label: 'Kind', kind: 'select', help: 'The plugin that reads the source. A second source of one kind, such as another GitHub repository, needs a name of its own.' };
+
+/** A New page's name, with a source's kind or a playbook's namespace, and the name's error. */
+function NameFields({ names, view, on }: { names: NewNameView; view: View; on: Handlers }) {
+  const nameField: Field = { path: 'new-name', label: names.label, kind: 'text', help: names.help };
+  const name = (
+    <div class="settings-input">
+      <span class="settings-name">
+        {names.namespace === undefined ? null : (
+          <>
+            <input type="text" id="settings-new-namespace" class="settings-text settings-namespace" aria-label="Namespace" placeholder="dev" list="settings-namespaces" value={names.namespace} spellcheck={false} onInput={(event) => on.editName('namespace', (event.currentTarget as HTMLInputElement).value)} />
+            <datalist id="settings-namespaces">
+              {(names.namespaces ?? []).map((one) => (
+                <option value={one}></option>
+              ))}
+            </datalist>
+            <span>:</span>
+          </>
+        )}
+        <input type="text" id="settings-new-name" class="settings-text" placeholder={names.placeholder} value={names.name} spellcheck={false} onInput={(event) => on.editName('name', (event.currentTarget as HTMLInputElement).value)} />
+      </span>
+      {view.help.has(nameField.path) ? <p class="settings-help">{names.help}</p> : null}
+      <Errors errors={names.error === null ? [] : [names.error]} />
+    </div>
+  );
+
+  return (
+    <section class="settings-section">
+      {names.kinds === undefined ? null : (
+        <div class="settings-row" data-path="new-kind">
+          <div class="settings-caption">
+            <label for="settings-new-kind">Kind</label>
+            <Info field={KIND_FIELD} on={on} />
+          </div>
+          <div class="settings-input">
+            <select id="settings-new-kind" class="sheet-select settings-select" onChange={(event) => on.editName('kind', (event.currentTarget as HTMLSelectElement).value)}>
+              {names.kinds.map((kind) => (
+                <option value={kind.value} selected={kind.value === names.kind}>
+                  {kind.label}
+                </option>
+              ))}
+            </select>
+            {view.help.has(KIND_FIELD.path) ? <p class="settings-help">{KIND_FIELD.help}</p> : null}
+          </div>
+        </div>
+      )}
+      <div class="settings-row" data-path="new-name">
+        <div class="settings-caption">
+          <label for="settings-new-name">{names.label}</label>
+          <Info field={nameField} on={on} />
+        </div>
+        {name}
+      </div>
+    </section>
   );
 }
 

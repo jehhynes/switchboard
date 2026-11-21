@@ -227,8 +227,72 @@ export class EditorState {
   /** A refused save's errors, or the check errors that stopped a save; shown in the bar until the next edit, discard or successful save. */
   barErrors: string[] = [];
   saving = false;
+  /** The name typed and kind chosen on the New source page, empty for the first kind, and whether Create was pressed. */
+  newSource = { name: '', kind: '', touched: false };
 
   constructor(public config: EditorConfig) {}
+
+  /** The New source page's kind: the one chosen, else the first the hub offers. */
+  get newSourceKind(): string {
+    return this.newSource.kind !== '' ? this.newSource.kind : (this.config.sourceKinds[0] ?? '');
+  }
+
+  /** The playbook names in the settings being edited, sorted. */
+  get playbookNames(): string[] {
+    const playbooks = this.value?.['playbooks'];
+
+    return isObject(playbooks) ? Object.keys(playbooks).sort(ordinal) : [];
+  }
+
+  playbookEntry(name: string): Json | undefined {
+    const playbooks = this.value?.['playbooks'];
+
+    return isObject(playbooks) && Object.hasOwn(playbooks, name) ? playbooks[name] : undefined;
+  }
+
+  hasPlaybook(name: string): boolean {
+    const playbooks = this.value?.['playbooks'];
+
+    return isObject(playbooks) && Object.hasOwn(playbooks, name);
+  }
+
+  /** A playbook's fields, or null when it is absent or its entry cannot be read. */
+  playbookValue(name: string): PlaybookFields | null {
+    return this.hasPlaybook(name) ? readPlaybook(this.playbookEntry(name)).fields : null;
+  }
+
+  /** The namespaces of the playbooks, sorted. */
+  get namespaces(): string[] {
+    return [...new Set(this.playbookNames.map((name) => name.split(':')[0]!))];
+  }
+
+  /** The source names in the settings being edited, in file order. */
+  get sourceNames(): string[] {
+    const sources = this.value?.['sources'];
+
+    return isObject(sources) ? Object.keys(sources) : [];
+  }
+
+  /** Why the new source's name cannot be used, or null. */
+  get newSourceError(): string | null {
+    const name = this.newSource.name.trim();
+
+    if (!SEGMENT.test(name)) {
+      return 'The name must be lowercase letters, digits and hyphens.';
+    }
+
+    if (name === 'schedule' || name === 'adhoc') {
+      return `${name} names Switchboard's own tickets; choose another name.`;
+    }
+
+    const value = this.value;
+
+    if (value === null || (value['sources'] !== undefined && !isObject(value['sources']))) {
+      return 'settings.json must hold an object with a sources object.';
+    }
+
+    return this.sourceNames.includes(name) ? `A source named ${name} already exists.` : null;
+  }
 
   /** The settings being edited: the draft, else the file's object, else null when the file holds no object. */
   get value(): JsonObject | null {
@@ -284,6 +348,108 @@ export class EditorState {
   signature(): string {
     return [this.page, this.config.configDir, JSON.stringify(this.value), this.config.settings.path, this.config.settings.error].join('\n');
   }
+}
+
+/** Sorts as .NET's ordinal comparison does, by UTF-16 code unit. */
+export const ordinal = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+/** A playbook entry of settings.json's `playbooks` object, as the dock's `PlaybookFields`. */
+export interface PlaybookFields {
+  description: string;
+  kind: string;
+  autoStart: boolean;
+  requiresWorktree: boolean;
+  permissionMode: string | null;
+  model: string | null;
+  workdir: string;
+  reports: string[];
+  approvalSends: boolean;
+  rates: boolean;
+  returnOf: string[];
+  template: string;
+  provider: string | null;
+  focus: string | null;
+}
+
+/** The keys of a playbook entry, which the hub accepts and the page has fields for, in the order it writes them. */
+export const PLAYBOOK_KEYS = ['description', 'kind', 'autoStart', 'requiresWorktree', 'workdir', 'reports', 'approvalSends', 'returnOf', 'focus', 'rates', 'provider', 'permissionMode', 'model', 'template'];
+
+/**
+ * An entry's fields, or null and why it cannot be read: it is not an object, has a key the hub does not know, or a key has the wrong JSON type.
+ * Absent and null keys take their defaults.
+ */
+export function readPlaybook(node: Json | undefined): { fields: PlaybookFields | null; error: string | null } {
+  if (!isObject(node)) {
+    return { fields: null, error: 'A playbook must be an object.' };
+  }
+
+  const unknown = Object.keys(node).filter((key) => !PLAYBOOK_KEYS.includes(key));
+
+  if (unknown.length > 0) {
+    return { fields: null, error: `Unknown keys: ${unknown.join(', ')}.` };
+  }
+
+  let error: string | null = null;
+  const textOf = (key: string): string | null => {
+    const value = node[key];
+
+    if (value === undefined || value === null) {
+      return null;
+    }
+
+    if (typeof value === 'string') {
+      return value;
+    }
+
+    error ??= `${key} must be a string.`;
+    return null;
+  };
+  const flag = (key: string): boolean => {
+    const value = node[key];
+
+    if (value === undefined || value === null) {
+      return false;
+    }
+
+    if (typeof value === 'boolean') {
+      return value;
+    }
+
+    error ??= `${key} must be true or false.`;
+    return false;
+  };
+  const list = (key: string): string[] => {
+    const value = node[key];
+
+    if (value === undefined || value === null) {
+      return [];
+    }
+
+    if (Array.isArray(value) && value.every((entry) => typeof entry === 'string')) {
+      return value as string[];
+    }
+
+    error ??= `${key} must be a list of strings.`;
+    return [];
+  };
+  const fields: PlaybookFields = {
+    description: textOf('description') ?? '',
+    kind: textOf('kind') ?? 'task',
+    autoStart: flag('autoStart'),
+    requiresWorktree: flag('requiresWorktree'),
+    permissionMode: textOf('permissionMode'),
+    model: textOf('model'),
+    workdir: textOf('workdir') ?? 'worktree',
+    reports: list('reports'),
+    approvalSends: flag('approvalSends'),
+    rates: flag('rates'),
+    returnOf: list('returnOf'),
+    template: textOf('template') ?? '',
+    provider: textOf('provider'),
+    focus: textOf('focus'),
+  };
+
+  return error === null ? { fields, error: null } : { fields: null, error };
 }
 
 export function generalFields(state: EditorState): Section[] {
@@ -382,14 +548,126 @@ export function generalFields(state: EditorState): Section[] {
   ];
 }
 
+export const SOURCE_LABELS: Readonly<Record<string, string>> = { github: 'GitHub', zoho: 'Zoho Desk', forum: 'Forum' };
+
+export const sourceLabel = (kind: string): string => SOURCE_LABELS[kind] ?? kind;
+
+/** The settings every source has; a change of kind keeps only these, because each plugin rejects another's keys. */
+export const COMMON_SOURCE_KEYS = ['kind', 'pollIntervalSeconds', 'repoRoot', 'triagePlaybook', 'setupPrompt', 'namespace'];
+
+/** A source's `kind`, or its name when it sets none (PRD R3). */
+export function sourceKind(settings: Json | undefined | null, name: string): string {
+  const kind = getAt(settings ?? undefined, `sources.${name}.kind`);
+
+  return typeof kind === 'string' && kind !== '' ? kind : name;
+}
+
+/** A source's title: its kind's label, such as GitHub, or for a source named apart from its kind, the name and that label. */
+export function sourceTitle(state: EditorState, name: string): string {
+  const kind = sourceKind(state.value, name);
+
+  return kind === name ? sourceLabel(name) : `${name} (${sourceLabel(kind)})`;
+}
+
+type OptionField = { key: string; field: Omit<Field, 'path'>; advanced: boolean };
+
+const OPTION_FIELDS: Readonly<Record<string, readonly OptionField[]>> = {
+  github: [
+    { key: 'repo', field: { label: 'Repository', kind: 'text', help: '', placeholder: 'owner/name' }, advanced: false },
+    { key: 'logins', field: { label: 'Logins', kind: 'list', help: 'One per line. Your GitHub logins: comments and commits by them are yours, and with Require assignee on, an issue assigned to any of them is yours.' }, advanced: false },
+    { key: 'requireAssignee', field: { label: 'Require assignee', kind: 'boolean', help: 'Off, an issue in an assigned status is yours whoever is assigned.', fallback: true }, advanced: false },
+    { key: 'waitForBlockers', field: { label: 'Wait for blockers', kind: 'boolean', help: "On, an issue's work starts only once the issues blocking it close. Leave off to start stacked work from a blocker's branch.", fallback: false }, advanced: false },
+    { key: 'includeClosed', field: { label: 'Include closed issues', kind: 'boolean', help: 'On, a closed issue in an assigned status is still yours, for a team that closes issues before they merge.', fallback: false }, advanced: false },
+    { key: 'project.owner', field: { label: 'Project owner', kind: 'text', help: '' }, advanced: false },
+    { key: 'project.number', field: { label: 'Project number', kind: 'integer', help: '' }, advanced: false },
+    { key: 'project.statusField', field: { label: 'Status field', kind: 'text', help: '', placeholder: 'Status' }, advanced: false },
+    { key: 'assignedStatuses', field: { label: 'Assigned statuses', kind: 'list', help: 'One per line. An issue in one of these project statuses is yours. Empty, an issue in any status, or none, is yours.' }, advanced: false },
+    { key: 'rolesFile', field: { label: 'Roles file', kind: 'text', help: 'A JSON file of {"login": {"roles": ["tester"]}}. Triage shows each comment author\'s roles. Starts with ~ or is absolute.' }, advanced: true },
+    { key: 'branchPattern', field: { label: 'Branch pattern', kind: 'text', help: 'A regular expression whose first group is the issue number a worktree branch names.', placeholder: '^(\\d+)-' }, advanced: true },
+    { key: 'ghPath', field: { label: 'gh path', kind: 'text', help: '', placeholder: 'gh' }, advanced: true },
+    { key: 'maxPages', field: { label: 'Page limit', kind: 'integer', help: 'A poll that needs more pages of 100 issues fails.', placeholder: '5' }, advanced: true },
+  ],
+  zoho: [
+    { key: 'orgId', field: { label: 'Organization ID', kind: 'text', help: '' }, advanced: false },
+    { key: 'agentId', field: { label: 'Agent ID', kind: 'text', help: 'Your Zoho agent ID.' }, advanced: false },
+    { key: 'escalationField', field: { label: 'Escalation field', kind: 'text', help: 'The custom field that holds the escalation tier.', placeholder: 'cf_queue' }, advanced: true },
+    { key: 'escalationValue', field: { label: 'Escalation value', kind: 'text', help: 'The escalation tier that puts a ticket in scope.', placeholder: 'Support' }, advanced: true },
+    { key: 'automationAgentIds', field: { label: 'Automation agent IDs', kind: 'list', help: 'One per line. Agents whose hold on a ticket is not a claim. Empty means none.', listDefault: ['8000000000000000002', '8000000000000000003'] }, advanced: true },
+    { key: 'tokenCommand', field: { label: 'Token command', kind: 'text', help: 'Prints a Desk access token. Runs in Git Bash.', placeholder: 'bash ~/.claude/scripts/desk-token.sh' }, advanced: true },
+    { key: 'apiBase', field: { label: 'API base', kind: 'text', help: '', placeholder: 'https://desk.zoho.com/api/v1' }, advanced: true },
+    { key: 'maxPages', field: { label: 'Page limit', kind: 'integer', help: 'A poll that needs more pages fails.', placeholder: '20' }, advanced: true },
+  ],
+  forum: [
+    { key: 'userId', field: { label: 'User ID', kind: 'text', help: 'Your forum user ID.' }, advanced: false },
+    { key: 'forumId', field: { label: 'Forum ID', kind: 'integer', help: '', placeholder: '11' }, advanced: true },
+    { key: 'queryCommand', field: { label: 'Query command', kind: 'text', help: 'Runs SQL from stdin against the forum database. Runs in Git Bash.', placeholder: 'bash ~/.claude/scripts/run-forum-sql.sh' }, advanced: true },
+    { key: 'maxRows', field: { label: 'Row limit', kind: 'integer', help: 'A poll that returns this many open topics is incomplete.', placeholder: '500' }, advanced: true },
+    { key: 'auditDatabase', field: { label: 'Audit database', kind: 'text', help: 'The change-history database on the same host.', placeholder: 'audit' }, advanced: true },
+  ],
+};
+
+export function sourceFields(state: EditorState, name: string): Section[] {
+  const path = `sources.${name}`;
+  const value = state.value ?? undefined;
+  const triage = state.playbookNames.filter((entry) => state.playbookValue(entry)?.kind === 'triage').map((entry) => ({ value: entry, label: entry }));
+  const common: Field[] = [
+    { path: `${path}.pollIntervalSeconds`, label: 'Poll interval (seconds)', kind: 'integer', help: 'At least 10.', placeholder: '300' },
+    { path: `${path}.repoRoot`, label: 'Repo root', kind: 'text', help: 'The repository sessions run in when the ticket has no worktree.' },
+    {
+      path: `${path}.namespace`,
+      label: 'Namespace',
+      kind: 'select',
+      help: 'Triage chooses among this namespace’s task playbooks.',
+      options: withCurrent([{ value: '', label: 'Every namespace' }, ...state.namespaces.map((entry) => ({ value: entry, label: entry }))], getAt(value, `${path}.namespace`)),
+    },
+    { path: `${path}.triagePlaybook`, label: 'Triage playbook', kind: 'select', help: '', options: withCurrent([{ value: '', label: 'None' }, ...triage], getAt(value, `${path}.triagePlaybook`)) },
+    { path: `${path}.setupPrompt`, label: 'Setup prompt', kind: 'prompt', help: 'Runs before a playbook that requires a worktree, when the ticket has none.' },
+  ];
+
+  // adhoc holds only the ad-hoc repo root, so it has no plugin to choose.
+  if (name !== 'adhoc') {
+    common.unshift({
+      path: `${path}.kind`,
+      label: 'Kind',
+      kind: 'select',
+      help: "The plugin that reads the source. Changing it drops the old plugin's settings.",
+      options: withCurrent([{ value: '', label: `Same as the name (${name})` }, ...state.config.sourceKinds.map((entry) => ({ value: entry, label: sourceLabel(entry) }))], getAt(value, `${path}.kind`)),
+    });
+  }
+
+  const kind = sourceKind(value, name);
+  const options = (OPTION_FIELDS[kind] ?? []).map((entry) => ({ field: { ...entry.field, path: `${path}.${entry.key}` } as Field, advanced: entry.advanced }));
+  const sections: Section[] = [{ heading: 'Source', fields: common }];
+  const plain = options.filter((entry) => !entry.advanced).map((entry) => entry.field);
+  const advanced = options.filter((entry) => entry.advanced).map((entry) => entry.field);
+
+  if (plain.length > 0) {
+    sections.push({ heading: sourceLabel(kind), fields: plain });
+  }
+
+  if (advanced.length > 0) {
+    sections.push({ heading: 'Advanced', fields: advanced, advanced: true });
+  }
+
+  return sections;
+}
+
 /** The sections of a settings page, by its name; none for a page this file does not know. */
 export function pageSections(state: EditorState, page: string): Section[] {
-  return page === 'general' ? generalFields(state) : [];
+  if (page === 'general') {
+    return generalFields(state);
+  }
+
+  if (page.startsWith('source:')) {
+    return sourceFields(state, page.slice('source:'.length));
+  }
+
+  return [];
 }
 
 /** The settings pages the navigation offers, each of which owns the errors that name its fields. */
-export function settingsPages(_state: EditorState): string[] {
-  return ['general'];
+export function settingsPages(state: EditorState): string[] {
+  return ['general', ...state.sourceNames.map((name) => `source:${name}`)];
 }
 
 /** Every settings field path, with the page that shows it. */
@@ -436,10 +714,11 @@ export function errorPages(state: EditorState): Map<string, string | null> {
 
 /** The parts of settings.json a page edits, by which the navigation marks it unsaved. */
 export function pagePaths(page: string): string[] {
-  return page === 'general' ? ['sessions', 'triage', 'dock', 'web'] : [];
+  return page === 'general' ? ['sessions', 'triage', 'dock', 'web'] : page.startsWith('source:') ? [`sources.${page.slice('source:'.length)}`] : [];
 }
 
 export function pageDirty(state: EditorState, page: string): boolean {
+  // Text typed on a New page before Create is not a change to the file.
   return state.draft !== null && pagePaths(page).some((path) => json(getAt(state.draft!, path)) !== json(getAt(state.config.settings.value, path)));
 }
 
@@ -452,14 +731,33 @@ export interface NavEntry {
   kind: 'heading' | 'item' | 'add' | 'namespace';
   label: string;
   page?: string;
+  /** For an Add entry that adds rather than opens a page: the source kind New <kind> source adds. */
+  addSource?: string;
   note?: string;
   current: boolean;
   dirty: boolean;
   errors: boolean;
 }
 
+const heading = (label: string): NavEntry => ({ kind: 'heading', label, current: false, dirty: false, errors: false });
+
+const add = (state: EditorState, label: string, page: string): NavEntry => ({ kind: 'add', label, page, current: state.page === page, dirty: false, errors: false });
+
+/** The navigation, in the order a ticket takes: its source, its playbook, the schedules that start playbooks, then voice, an optional feature. */
 export function nav(state: EditorState): NavEntry[] {
-  return [item(state, 'general', 'General')];
+  const sources = state.sourceNames;
+  const entries: NavEntry[] = [item(state, 'general', 'General'), heading('Sources')];
+
+  for (const name of sources) {
+    entries.push(item(state, `source:${name}`, sourceTitle(state, name), state.config.enabled[name] === true ? undefined : 'off'));
+  }
+
+  for (const kind of state.config.sourceKinds.filter((entry) => !sources.includes(entry))) {
+    entries.push({ kind: 'add', label: `New ${sourceLabel(kind)} source`, addSource: kind, current: false, dirty: false, errors: false });
+  }
+
+  entries.push(add(state, 'New source', 'new-source'));
+  return entries;
 }
 
 function item(state: EditorState, page: string, label: string, note?: string): NavEntry {
@@ -512,7 +810,22 @@ export interface PageButton {
 }
 
 /** One page: its title, the file it edits, its buttons, notes, the errors that name no field, a message in place of fields, and the sections. */
+/** A New page's name fields and the name's error, shown once a name is typed or Create was pressed; a source's has a kind of `kinds` too. */
+export interface NewNameView {
+  label: string;
+  help: string;
+  placeholder: string;
+  name: string;
+  error: string | null;
+  kinds?: readonly FieldOption[];
+  kind?: string;
+  /** The New playbook page's namespace, and the namespaces to offer. */
+  namespace?: string;
+  namespaces?: readonly string[];
+}
+
 export interface PageView {
+  newName?: NewNameView;
   title: string;
   filePath: string | null;
   buttons: PageButton[];
@@ -525,6 +838,39 @@ export interface PageView {
 const FIX_BY_HAND = 'Fix the file in an editor; the page reads it again when it changes.';
 
 export function pageView(state: EditorState): PageView {
+  const page = state.page;
+
+  if (page.startsWith('source:')) {
+    const name = page.slice('source:'.length);
+    const kind = sourceKind(state.value, name);
+    const notes = state.config.sourceKinds.includes(kind) ? [] : [`Switchboard has no source kind ${kind}.`];
+
+    return settingsPage(state, sourceTitle(state, name), sourceFields(state, name), [{ command: 'remove-source', label: 'Remove source', argument: name }], notes);
+  }
+
+  if (page === 'new-source') {
+    const { name, touched } = state.newSource;
+
+    return {
+      title: 'New source',
+      filePath: null,
+      buttons: [{ command: 'create', label: 'Create', primary: true }],
+      notes: [],
+      errors: [],
+      message: null,
+      sections: [],
+      newName: {
+        label: 'Name',
+        help: "Lowercase letters, digits and hyphens. It names the source's tickets, such as widgets-dashboard 63. Create adds the source to settings.json when you save.",
+        placeholder: 'widgets-dashboard',
+        name,
+        error: name === '' && !touched ? null : state.newSourceError,
+        kinds: state.config.sourceKinds.map((kind) => ({ value: kind, label: sourceLabel(kind) })),
+        kind: state.newSourceKind,
+      },
+    };
+  }
+
   return settingsPage(state, 'General', generalFields(state), [], []);
 }
 
