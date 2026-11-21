@@ -12,7 +12,7 @@ import { renderList } from '../src/list.js';
 import { html } from './html.js';
 import { renderMicButton as viewMicButton } from '@switchboard/conversation/voiceControls';
 import { renderMarkdown } from '../src/markdown.js';
-import { CHAT_MAX, CHAT_MIN, DRAWER_HIDE_MS, DRAWER_REVEAL_MS, loadMermaid, SENT_NOTE_MS, SHOW_MARKER_MS, SIDE_MAX, SIDE_MIN, startPage } from '../src/main.js';
+import { CHAT_MAX, CHAT_MIN, DRAWER_HIDE_MS, DRAWER_REVEAL_MS, loadMermaid, PANE_SHOW_DELAY_MS, SENT_NOTE_MS, SHOW_MARKER_MS, SIDE_MAX, SIDE_MIN, startPage } from '../src/main.js';
 import { DETAIL_MIN } from '../src/layout.js';
 import type { ArtifactView, MessageView, PageGroup, PageRow, ReplyView, SessionView } from '@switchboard/protocol';
 
@@ -2326,10 +2326,61 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it('shows the Browser tab only for a work item with links and the Console tab only for an active held session, falling back to Status', async () => {
-    const query = { matches: true, addEventListener: () => {} };
+  it('hides the Chrome pane at once while a menu, the composer list or a sheet is open, and shows it again only once they have stayed closed a moment', async () => {
+    vi.useFakeTimers();
+    window.innerWidth = 1920;
+    onTestFinished(() => {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    });
 
-    vi.stubGlobal('matchMedia', vi.fn(() => query));
+    const page = startPage(root, { fetch: (async (url: string, init?: { body?: string }) => (posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) }), { status: 200, ok: true, json: async () => ({}), text: async () => '' })) as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, standalone: () => true, toExtension: async () => ({ ok: true }) });
+    const source = FakeSource.last!;
+    const rects = () => posts.filter((post) => post.url.endsWith('/pane-rect')).map((post) => post.body['rect']);
+    const turn = async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    };
+
+    vi.spyOn(root.querySelector('#detail .detail-body')!, 'getBoundingClientRect').mockReturnValue({ left: 1300, top: 85, width: 600, height: 855 } as DOMRect);
+    hello(source, { openOn: 'browser', groups: [listGroup('progress', [listRow(1, { title: 'Fix it', url: 'https://github.com/o/r/issues/1' })])] });
+    source.emit('pane', { pane: { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: true, error: null } });
+    expect(rects().at(-1)).toMatchObject({ width: 600 });
+
+    // The actions menu opens: hidden at once. It closes: still hidden, until the delay has passed with none open.
+    click('button.actions');
+    expect(rects().at(-1)).toBeNull();
+    const hidden = rects().length - 1;
+
+    click('button.actions');
+    await turn();
+    expect(rects().at(-1)).toBeNull();
+    vi.advanceTimersByTime(PANE_SHOW_DELAY_MS - 10);
+    // Opened again within the delay: it stays hidden, and nothing shows it in between.
+    click('button.actions');
+    click('button.actions');
+    await turn();
+    vi.advanceTimersByTime(PANE_SHOW_DELAY_MS - 10);
+    expect(rects().at(-1)).toBeNull();
+    expect(rects().slice(hidden).every((rect) => rect === null)).toBe(true);
+    vi.advanceTimersByTime(20);
+    expect(rects().at(-1)).toMatchObject({ width: 600 });
+
+    // The composer's list opens without a redraw: the page sees it all the same.
+    const list = root.querySelector<HTMLElement>('.composer-menu')!;
+
+    list.hidden = false;
+    await turn();
+    expect(rects().at(-1)).toBeNull();
+    list.hidden = true;
+    await turn();
+    vi.advanceTimersByTime(PANE_SHOW_DELAY_MS);
+    expect(rects().at(-1)).toMatchObject({ width: 600 });
+    page.close();
+  });
+
+  it('shows the Browser tab only for a work item with links and the Console tab only for an active held session, falling back to Status', async () => {
+    window.innerWidth = 1920;
     onTestFinished(() => {
       vi.unstubAllGlobals();
     });
@@ -2596,6 +2647,10 @@ describe('the page in use', () => {
     expect(root.querySelector('#detail .side-switch [aria-selected="true"]')!.textContent).toBe('Browser');
     expect(root.querySelector('#detail .detail-body')!.textContent).toBe('');
     expect(root.querySelector('[data-action="pane-pair"]')).toBeNull();
+    // The view options menu is still open, so the pane stays hidden until a moment after it closes.
+    expect(root.querySelector('.view-options-menu')).not.toBeNull();
+    click('[data-action="view-menu"]');
+    await new Promise((resolve) => setTimeout(resolve, PANE_SHOW_DELAY_MS + 20));
 
     // Another tab hides the pane; Browser again shows it.
     click('#detail [data-side="status"]');
@@ -2606,7 +2661,10 @@ describe('the page in use', () => {
 
     source.emit('pane', { pane: { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: 'The pane would not fit the column.' } });
     expect(root.querySelector('#detail .detail-body')!.textContent).toBe('The browser stopped: The pane would not fit the column.');
+    click('[data-action="view-menu"]');
     expect(root.querySelector('.view-options-menu .pane-note')!.textContent).toBe('Chrome pane stopped: The pane would not fit the column.');
+    click('[data-action="view-menu"]');
+    await new Promise((resolve) => setTimeout(resolve, PANE_SHOW_DELAY_MS + 20));
 
     // Narrow: the tabs are the conversation's, Browser among them and still chosen, and its area is the conversation's pane.
     resizeTo(900);
@@ -2632,6 +2690,9 @@ describe('the page in use', () => {
     click('#list-sheet .sheet-button');
     await flush();
     expect(root.querySelector('#list-sheet .sheet-backdrop')).toBeNull();
+    // Shown again a moment after the last layer closed.
+    expect(rects().at(-1)).toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, PANE_SHOW_DELAY_MS + 20));
     expect(rects().at(-1)).toMatchObject({ left: 1300, width: 600 });
     // Settings covers the page, and the pane window would stay above it: the area goes while Settings shows.
     click('.more-actions');

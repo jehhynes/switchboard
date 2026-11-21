@@ -75,6 +75,8 @@ export const DRAWER_HIDE_MS = 400;
 const DRAWER_TICK_MS = 100;
 /** How often an open History reads the hub again, so its times stay current, and how soon after a list change. */
 export const HISTORY_REFRESH_MS = 30_000;
+/** How long the Chrome pane stays hidden after the page's last floating layer closes, so a quick close and open does not flicker it. */
+export const PANE_SHOW_DELAY_MS = 100;
 const HISTORY_CHANGE_MS = 1_000;
 /** Where the page keeps each work item's draft, over a reload. */
 const DRAFTS = 'switchboard.drafts';
@@ -3014,13 +3016,43 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
    */
   // Numbers each report, so the hub drops one that a later one overtook.
   let paneSeq = 0;
+  /**
+   * Whether a floating layer of the page is open: a menu, a dropdown, the composer's list, a sheet, a dialog, Settings or the work items'
+   * drawer. The pane's window lies above the page, so it would cover the part of the layer over the Browser tab.
+   */
+  const floating = (): boolean => view.drawer !== null || contextMenu !== 'closed' || root.querySelector('.glass:not([hidden]), [role="menu"], [role="dialog"], [role="alertdialog"]') !== null;
+  let floatingShown = false;
+  let paneHold: ReturnType<typeof setTimeout> | null = null;
+  /** Whether the pane stays hidden for a floating layer: at once while one is open, and until PANE_SHOW_DELAY_MS after the last closes, so a quick close and open again does not flicker it. */
+  const paneCovered = (): boolean => {
+    if (floating()) {
+      floatingShown = true;
+
+      if (paneHold !== null) {
+        clearTimeout(paneHold);
+        paneHold = null;
+      }
+
+      return true;
+    }
+
+    if (floatingShown) {
+      floatingShown = false;
+      paneHold = setTimeout(() => {
+        paneHold = null;
+        reportPane(true);
+      }, PANE_SHOW_DELAY_MS);
+    }
+
+    return paneHold !== null;
+  };
   const reportPane = (force = false): void => {
     // A page on another device cannot drive the pane; the hub refuses its reports. A closed page reports nothing more.
     if (!paneLocal() || listening.signal.aborted) {
       return;
     }
 
-    const area = browserArea();
+    const area = paneCovered() ? null : browserArea();
     const box = area === null ? null : area.getBoundingClientRect();
     const rect = box === null || box.width === 0 ? null : { left: box.left, top: box.top, width: box.width, height: box.height, dpr: window.devicePixelRatio || 1, innerWidth: window.innerWidth, innerHeight: window.innerHeight };
     const text = JSON.stringify(rect);
@@ -3042,6 +3074,26 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
   paneColumn?.observe(detailBody);
   paneColumn?.observe(panel);
+  // A layer can open or close without a redraw, as the composer's list does, so the page's changes are watched too, once a turn at most.
+  let layersQueued = false;
+  const layers = typeof MutationObserver === 'function' ? new MutationObserver(() => {
+    if (!layersQueued) {
+      layersQueued = true;
+      queueMicrotask(() => {
+        layersQueued = false;
+        reportPane();
+      });
+    }
+  }) : null;
+
+  layers?.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden', 'class'] });
+  listening.signal.addEventListener('abort', () => {
+    layers?.disconnect();
+
+    if (paneHold !== null) {
+      clearTimeout(paneHold);
+    }
+  });
   // A strip that widens or narrows fits another number of artifact tabs.
   let stripWidth = -1;
   const strips = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
