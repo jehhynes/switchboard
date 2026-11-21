@@ -686,6 +686,12 @@ describe('dockView held sessions (PRD R94)', () => {
     expect(after).toBe(before);
     expect(after).toBe(`${base}-s1`);
   });
+
+  it("gives a Codex app-server session's terminal no attach command, which takes only Code Mode sessions", () => {
+    const codex = item(7, { sessions: [session({ provider: 'codex', execution: 'app-server', nativeSessionId: 'thread-1', state: 'idle' })] });
+
+    expect(dockView(snapshot([codex], { held: [entry({ nativeSessionId: 'thread-1' })] }), NOW, W).held?.[0]).toMatchObject({ session: 's1', orphan: false, terminal: null });
+  });
 });
 
 describe('dockView holder notice (architecture.md § Restarting the holder)', () => {

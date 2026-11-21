@@ -63,16 +63,12 @@ export function browserNote(pane: PaneView | null, width: number, hasLinks: bool
 }
 
 /**
- * Why the Console tab shows no console for the session (architecture.md § Web page), or null when the terminal holder may hold it: a Codex
- * session runs in Codex's app-server, and a session the page cannot talk to runs outside the holder.
+ * Why the Console tab shows no console for the session (architecture.md § Web page), or null when the terminal holder may hold it: a session the
+ * page cannot talk to runs outside the holder. A Code Mode session and a Codex app-server session have one; the hub says why when it cannot open.
  */
 export function consoleNote(session: PageState['session']): string | null {
   if (session === null) {
     return 'No session has started yet.';
-  }
-
-  if (session.provider === 'codex') {
-    return "This Codex session runs in Codex's app-server, not in Switchboard's terminal holder, so it has no console here. Open it in a terminal from VS Code or the dock.";
   }
 
   return session.conversation === 'none' ? "This session does not run in Switchboard's terminal holder, so it has no console here." : null;

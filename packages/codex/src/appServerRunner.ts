@@ -281,6 +281,18 @@ export class AppServerRunner implements SessionRunner {
     }
   }
 
+  /** Whether the thread has a turn; Codex keeps no rollout of a thread before its first, so no other client can resume it yet (mechanics M108). */
+  async hasTurns(threadId: string): Promise<boolean> {
+    try {
+      const page = await this.deps.server.request('thread/turns/list', { threadId, limit: 1, itemsView: 'notLoaded' });
+      return Array.isArray(page['data']) && page['data'].length > 0;
+    } catch (error) {
+      // "thread … is not materialized yet; thread/turns/list is unavailable before first user message"
+      if (error instanceof AppServerError && error.refused && /not materialized/i.test(error.message)) return false;
+      throw error;
+    }
+  }
+
   async history(threadId: string): Promise<Json[]> {
     const turns: Json[] = [];
     let cursor: string | undefined;

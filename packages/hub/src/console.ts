@@ -26,15 +26,16 @@ export interface PageConsoleDeps {
 /** Writes one SSE event to a console stream; false once the stream has more queued than `CONSOLE_QUEUE_BYTES` (`page.ts`). */
 export type ConsoleSend = (event: string, data: unknown) => boolean;
 
-/** Why a session has no console on the page, or null when the terminal holder holds it. */
+/**
+ * Why a session has no console on the page, or null when the terminal holder holds it: a Code Mode session, or Codex's terminal app on a Codex
+ * app-server session's thread, which the hub starts in the holder when a console opens.
+ */
 export function noConsole(session: Session): string | null {
-  if (session.codeMode === true) {
+  if (session.codeMode === true || (session.execution === 'app-server' && session.nativeSessionId !== null)) {
     return null;
   }
 
-  return session.execution === 'app-server'
-    ? "This Codex session runs in Codex's app-server, not in Switchboard's terminal holder, so it has no console here. Open it in a terminal from VS Code or the dock."
-    : "This session does not run in Switchboard's terminal holder, so it has no console here.";
+  return session.execution === 'app-server' ? 'This Codex session has no thread yet, so it has no console.' : "This session does not run in Switchboard's terminal holder, so it has no console here.";
 }
 
 const isSize = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 1000;

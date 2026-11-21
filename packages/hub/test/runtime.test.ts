@@ -4194,6 +4194,220 @@ describe('Codex app-server resume (PRD R107)', () => {
   });
 });
 
+describe("Codex terminals in the holder (architecture.md § Codex runner)", () => {
+  async function codexSession(stop: SessionRunner['stop'] = async () => null) {
+    const codexAppServer: SessionRunner = {
+      start: async (action) => ({ shortId: `${action.sessionId}-thread`, nativeSessionId: `${action.sessionId}-thread` }),
+      observe: async (sessions) => ({ sessions: sessions.map((session) => ({ sessionId: session.id, state: 'idle' as const, detail: null })) }),
+      markers: () => new Map(),
+      isBackground: async () => true,
+      stop,
+      reconcile: async () => [],
+      installHooks: async () => null,
+    };
+    const h = setup(config({ provider: 'codex' }), () => T0, { codexAppServer });
+
+    h.runtime.send({ type: 'adhoc', prompt: 'Do it', repoRoot: 'D:/repo', start: true });
+    await h.runtime.settled();
+    expect(h.store.session('s1')).toMatchObject({ execution: 'app-server', nativeSessionId: 's1-thread' });
+
+    const ends = vi.spyOn(h.runtime.codexTerminals, 'end').mockResolvedValue();
+    const ensures = vi.spyOn(h.runtime.codexTerminals, 'ensure').mockResolvedValue();
+
+    return { ...h, ends, ensures };
+  }
+
+  it("ends the session's terminal after a Stop, and not after a Stop that failed", async () => {
+    let failure: { error: string } | null = { error: 'Codex has not identified its running turn; try Stop again.' };
+    const h = await codexSession(async () => failure);
+
+    h.store.updateSession('s1', { state: 'running' });
+    h.runtime.send({ type: 'stop', workItemId: h.store.session('s1')!.workItemId, sessionId: 's1' });
+    await h.runtime.settled();
+    expect(h.ends).not.toHaveBeenCalled();
+
+    failure = null;
+    h.runtime.send({ type: 'stop', workItemId: h.store.session('s1')!.workItemId, sessionId: 's1' });
+    await h.runtime.settled();
+    expect(h.store.session('s1')).toMatchObject({ state: 'ended' });
+    expect(h.ends).toHaveBeenCalledWith('s1');
+    h.runtime.stop(); h.store.close();
+  });
+
+  it('ends it with an idle release, and keeps it when the thread started a turn and the release was cancelled', async () => {
+    let cancel = true;
+    const h = await codexSession(async () => (cancel ? { error: 'The Codex thread started a new turn; release was cancelled.', cancelled: true } : null));
+
+    h.runtime.send({ type: 'marker', sessionId: 's1', state: 'idle', detail: null });
+    h.runtime.send({ type: 'held-idle', sessionId: 's1' });
+    await h.runtime.settled();
+    expect(h.store.session('s1')).toMatchObject({ releasing: false, released: false });
+    expect(h.ends).not.toHaveBeenCalled();
+
+    cancel = false;
+    h.runtime.send({ type: 'marker', sessionId: 's1', state: 'idle', detail: null });
+    h.runtime.send({ type: 'held-idle', sessionId: 's1' });
+    await h.runtime.settled();
+    expect(h.store.session('s1')).toMatchObject({ state: 'ended', released: true });
+    expect(h.ends).toHaveBeenCalledWith('s1');
+    h.runtime.stop(); h.store.close();
+  });
+
+  it('ends it when its work item is deleted, even when the thread could not be left', async () => {
+    const h = await codexSession(async () => ({ error: 'Codex operator failed: closed' }));
+
+    h.runtime.send({ type: 'delete', workItemId: h.store.session('s1')!.workItemId });
+    await h.runtime.settled();
+    expect(h.store.session('s1')).toBeNull();
+    expect(h.ends).toHaveBeenCalledWith('s1');
+    h.runtime.stop(); h.store.close();
+  });
+
+  it("starts the terminal before a console views it, and lets the console's keys reserve the session", async () => {
+    const h = await codexSession();
+
+    await expect(h.runtime.viewHeld('s1', { onSize: () => {}, onData: () => {}, onReplayed: () => {}, onExit: () => {}, onClose: () => {} })).rejects.toThrow();
+    expect(h.ensures).toHaveBeenCalledWith('s1');
+
+    const reservation = await h.runtime.reserveInput('s1', h.store.session('s1')!.launchId ?? null);
+
+    expect('release' in reservation).toBe(true);
+    h.runtime.stop(); h.store.close();
+  });
+
+  it("stops only the terminal of a Codex session through holder stop, so the thread's turn runs on", async () => {
+    const codexAppServer: SessionRunner = {
+      start: async (action) => ({ shortId: `${action.sessionId}-thread`, nativeSessionId: `${action.sessionId}-thread` }),
+      observe: async (sessions) => ({ sessions: sessions.map((session) => ({ sessionId: session.id, state: 'running' as const, detail: null })) }),
+      markers: () => new Map(),
+      isBackground: async () => true,
+      stop: vi.fn(async () => null),
+      reconcile: async () => [],
+      installHooks: async () => null,
+    };
+    const entries: SessionEntry[] = [{ session: 's1', label: 'l', pid: 900, cwd: 'D:/repo', startedAt: T0, lastInputAt: null, lastOutputAt: null, exitedAt: null, exitCode: null, clients: 0, memoryBytes: null }];
+    const connection: HolderConnection = {
+      welcome: { protocol: 1, build: 'b', pid: 4243 },
+      compatible: true,
+      spawn: async () => ({ session: 's', pid: 1 }),
+      list: async () => entries,
+      kill: async () => 0,
+      screen: async () => ({ head: '', text: '' }),
+      shutdown: async () => {},
+      onClose: () => {},
+      close: () => {},
+    };
+
+    mkdirSync(join(home, '.switchboard'), { recursive: true });
+    writeFileSync(recordPath(join(home, '.switchboard')), JSON.stringify({ protocol: 1, build: 'b', port: 4100, token: 'holder-token', pid: 4243, startedAt: '2026-11-18T00:00:00.000Z' }));
+
+    const h = setup(config({ provider: 'codex' }), () => T0, { codexAppServer }, new FakeCodex(), {}, { holder: { connect: async () => connection, lockHeld: async () => true } });
+
+    h.runtime.send({ type: 'adhoc', prompt: 'Do it', repoRoot: 'D:/repo', start: true });
+    await h.runtime.settled();
+
+    const ends = vi.spyOn(h.runtime.codexTerminals, 'end').mockResolvedValue();
+
+    expect(await h.runtime.stopHeld('s1')).toEqual({ stopped: 's1' });
+    expect(ends).toHaveBeenCalledWith('s1');
+    expect(codexAppServer.stop).not.toHaveBeenCalled();
+    expect(h.store.session('s1')?.state).not.toBe('ended');
+    h.runtime.stop(); h.store.close();
+  });
+
+  it("counts keys typed in the session's Codex terminal as use, so the idle release waits for them", async () => {
+    let now = T0;
+    const codexAppServer: SessionRunner = {
+      start: async (action) => ({ shortId: `${action.sessionId}-thread`, nativeSessionId: `${action.sessionId}-thread` }),
+      observe: async (sessions) => ({ sessions: sessions.map((session) => ({ sessionId: session.id, state: 'idle' as const, detail: null })) }),
+      markers: () => new Map(),
+      isBackground: async () => true,
+      stop: async () => null,
+      reconcile: async () => [],
+      installHooks: async () => null,
+    };
+    const h = setup(config({ provider: 'codex' }), () => now, { codexAppServer });
+
+    h.runtime.send({ type: 'adhoc', prompt: 'Do it', repoRoot: 'D:/repo', start: true });
+    await h.runtime.settled();
+    h.runtime.send({ type: 'marker', sessionId: 's1', state: 'idle', detail: null });
+    vi.spyOn(h.runtime.codexTerminals, 'end').mockResolvedValue();
+    const entries: SessionEntry[] = [{ session: 's1', label: 'l', pid: 900, cwd: 'D:/repo', startedAt: T0, lastInputAt: null, lastOutputAt: null, exitedAt: null, exitCode: null, clients: 0, memoryBytes: null }];
+    const reads = { count: 0 };
+    const typedAt = { at: T0 + 30 * 60_000 };
+
+    // The holder's fresh list, read before a release, holds a key typed after the cached one.
+    (h.runtime as unknown as { heldEntries: SessionEntry[] }).heldEntries = entries;
+    (h.runtime as unknown as { readHeld(): Promise<void> }).readHeld = async () => {
+      reads.count++;
+      (h.runtime as unknown as { heldEntries: SessionEntry[] }).heldEntries = [{ ...entries[0]!, lastInputAt: typedAt.at }];
+    };
+
+    now = T0 + 3_600_000;
+    h.runtime.wake();
+    await h.runtime.settled();
+    expect(reads.count).toBe(1);
+    expect(h.store.session('s1')).toMatchObject({ state: 'idle', released: false });
+
+    now = T0 + 90 * 60_000;
+    h.runtime.wake();
+    await h.runtime.settled();
+    expect(h.store.session('s1')).toMatchObject({ state: 'ended', released: true });
+    h.runtime.stop(); h.store.close();
+  });
+
+  it('ends again at the next holder read a Codex terminal still held for an ended session, and leaves a live session\'s alone', async () => {
+    const codexAppServer: SessionRunner = {
+      start: async (action) => ({ shortId: `${action.sessionId}-thread`, nativeSessionId: `${action.sessionId}-thread` }),
+      observe: async (sessions) => ({ sessions: sessions.map((session) => ({ sessionId: session.id, state: 'running' as const, detail: null })) }),
+      markers: () => new Map(),
+      isBackground: async () => true,
+      stop: async () => null,
+      reconcile: async () => [],
+      installHooks: async () => null,
+    };
+    const live = (session: string): SessionEntry => ({ session, label: 'l', pid: 900, cwd: 'D:/repo', startedAt: T0, lastInputAt: null, lastOutputAt: null, exitedAt: null, exitCode: null, clients: 0, memoryBytes: null });
+    const connection: HolderConnection = {
+      welcome: { protocol: 1, build: 'b', pid: 4243 },
+      compatible: true,
+      spawn: async () => ({ session: 's', pid: 1 }),
+      list: async () => [live('s1'), live('s2'), live('s9')],
+      kill: async () => 0,
+      screen: async () => ({ head: '', text: '' }),
+      shutdown: async () => {},
+      onClose: () => {},
+      close: () => {},
+    };
+
+    mkdirSync(join(home, '.switchboard'), { recursive: true });
+    writeFileSync(recordPath(join(home, '.switchboard')), JSON.stringify({ protocol: 1, build: 'b', port: 4100, token: 'holder-token', pid: 4243, startedAt: '2026-11-18T00:00:00.000Z' }));
+
+    const h = setup(config({ provider: 'codex', concurrency: 3 }), () => T0, { codexAppServer }, new FakeCodex(), {}, { holder: { connect: async () => connection, lockHeld: async () => true } });
+
+    h.runtime.send({ type: 'adhoc', prompt: 'one', repoRoot: 'D:/repo', start: true });
+    h.runtime.send({ type: 'adhoc', prompt: 'two', repoRoot: 'D:/repo', start: true });
+    await h.runtime.settled();
+
+    const ends = vi.spyOn(h.runtime.codexTerminals, 'end').mockResolvedValue();
+
+    h.store.updateSession('s1', { state: 'ended', released: true });
+    // A release still running, as one a stopped hub left, is left to the release, which a new turn can cancel.
+    h.store.updateSession('s2', { releasing: true });
+    await h.runtime.listHeld();
+    await h.runtime.settled();
+    expect(ends.mock.calls).toEqual([['s1']]);
+
+    // A terminal whose end failed after Delete removed its session is ended again; another held entry with no session is not.
+    h.store.deleteWorkItem(h.store.session('s2')!.workItemId);
+    vi.spyOn(h.runtime.codexTerminals, 'unended').mockImplementation((id) => id === 's2');
+    ends.mockClear();
+    h.store.updateSession('s1', { state: 'idle', released: false });
+    await h.runtime.listHeld();
+    await h.runtime.settled();
+    expect(ends.mock.calls).toEqual([['s2']]);
+    h.runtime.stop(); h.store.close();
+  });
+});
 
 describe('rate limits (architecture.md § Rate limits)', () => {
   const RESET = T0 + 2 * 3_600_000;

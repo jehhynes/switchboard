@@ -172,20 +172,34 @@ describe('the page console stream', () => {
     expect(t.views).toEqual([]);
   });
 
-  it('says why a session has no console: not held, a Codex app-server thread, or a holder that cannot show it', async () => {
+  it('says why a session has no console: not held, a Codex app-server session with no thread, or a holder that cannot show it', async () => {
     const t = setup();
 
     current = t.pageConsole;
-    t.sessions.set('s1', held({ codeMode: false, execution: 'app-server' } as Partial<Session>));
+    t.sessions.set('s1', held({ codeMode: false, execution: 'app-server', nativeSessionId: null } as Partial<Session>));
 
     const codex = t.stream();
 
     t.pageConsole.open('page-1', 's1', codex.send, codex.end);
-    expect(codex.events).toEqual([['unavailable', { reason: noConsole(t.sessions.get('s1')!) }]]);
-    expect(String((codex.events[0]![1] as { reason: string }).reason)).toContain("Codex's app-server");
+    expect(codex.events).toEqual([['unavailable', { reason: 'This Codex session has no thread yet, so it has no console.' }]]);
     expect(codex.ended()).toBe(1);
+    expect(t.views).toEqual([]);
     expect(noConsole(held({ codeMode: false } as Partial<Session>))).toContain("does not run in Switchboard's terminal holder");
     expect(noConsole(held())).toBeNull();
+
+    // A Codex app-server session with a thread has its console: the view starts its Codex terminal.
+    t.sessions.set('s1', held({ codeMode: false, execution: 'app-server', nativeSessionId: 'thread-1' } as Partial<Session>));
+
+    const thread = t.stream();
+
+    t.pageConsole.open('page-1', 's1', thread.send, thread.end);
+    await tick();
+    expect(t.views.map((view) => view.session)).toEqual(['s1']);
+    t.views[0]!.handlers.onData('codex');
+    expect(thread.events).toEqual([['data', { data: 'codex' }]]);
+    t.scopes.set('page-1', { sessionId: 's2', scopeGen: 4 });
+    t.pageConsole.check();
+    t.scopes.set('page-1', { sessionId: 's1', scopeGen: 3 });
 
     t.sessions.set('s1', held());
     t.failView('The terminal holder is from an older build and cannot show its sessions here.');
@@ -312,7 +326,7 @@ describe('the page console keys', () => {
     expect(await t.pageConsole.input({ ...keys, opId: 'b', sessionId: 's2' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
     expect((await t.pageConsole.input({ ...keys, opId: 'c', scopeGen: 2 })).status).toBe(409);
     expect(await t.pageConsole.input({ ...keys, opId: 'd', launch: 'L0' })).toEqual({ status: 409, body: { error: SESSION_RELAUNCHED } });
-    t.sessions.set('s1', held({ codeMode: false, execution: 'app-server' } as Partial<Session>));
+    t.sessions.set('s1', held({ codeMode: false, execution: 'app-server', nativeSessionId: null } as Partial<Session>));
     expect((await t.pageConsole.input({ ...keys, opId: 'e' })).status).toBe(409);
     t.sessions.set('s1', held());
     t.refuseReserve('The session has ended.');

@@ -656,7 +656,7 @@ describe('the Console tab', () => {
 
   it('says why a session has no console without loading it', () => {
     expect(consoleNote(null)).toBe('No session has started yet.');
-    expect(consoleNote(session({ provider: 'codex' }))).toContain("Codex's app-server");
+    expect(consoleNote(session({ provider: 'codex' }))).toBeNull();
     expect(consoleNote(session({ conversation: 'none' }))).toContain("does not run in Switchboard's terminal holder");
     expect(consoleNote(session({ provider: 'claude' }))).toBeNull();
   });
@@ -712,7 +712,7 @@ describe('the Console tab', () => {
     expect(mounts[1]!.disposed).toBe(true);
   });
 
-  it("shows a Codex session's note in place of a console, and loads nothing", async () => {
+  it("loads the console for a Codex session as for a Claude one", async () => {
     const root = document.createElement('div');
     const loadConsole = vi.fn(async () => null);
 
@@ -723,8 +723,8 @@ describe('the Console tab', () => {
     FakeSource.all[0]!.emit('hello', { type: 'hello', key: 'pk', groups: [], scope, sessions: [session({ provider: 'codex' })], items: [], more: false, status: null, artifacts: [] });
     root.querySelector<HTMLElement>('[data-tab="console"]')!.click();
     await tick();
-    expect(root.querySelector('#panel')!.textContent).toContain("Codex's app-server");
-    expect(loadConsole).not.toHaveBeenCalled();
+    expect(root.querySelector('#panel')!.textContent).not.toContain("Codex's app-server");
+    expect(loadConsole).toHaveBeenCalledTimes(1);
     page.close();
   });
 });

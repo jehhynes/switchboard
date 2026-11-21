@@ -18,6 +18,7 @@ import { findHeld, heldFromHolder } from './held.js';
 import type { HeldSession, HolderRestartState, HolderState } from './held.js';
 import { olderHolder } from './holderCli.js';
 import { HolderLink } from './holder.js';
+import { CodexTerminals } from './codexTerminal.js';
 import type { HolderLinkDeps } from './holder.js';
 import { buildSnapshot } from './snapshot.js';
 import type { Snapshot, SnapshotInputs } from './snapshot.js';
@@ -151,6 +152,8 @@ export class Runtime {
   readonly codexServer: AppServer;
   readonly codexAppServer: AppServerRunner;
   readonly codexHome: string;
+  /** Codex's terminal app held per app-server session for the web page's console (architecture.md § Codex runner). */
+  readonly codexTerminals: CodexTerminals;
   private config: Config;
   private sources = new Map<string, Source>();
   private sourceErrors: Record<string, string> = {};
@@ -265,6 +268,23 @@ export class Runtime {
       now: deps.now,
     });
 
+    this.codexTerminals = new CodexTerminals({
+      holder: (start) => this.holder.find(start),
+      session: (id) => deps.store.session(id),
+      label: (session) => {
+        const item = deps.store.workItem(session.workItemId);
+        const ticket = item === null ? null : deps.store.ticket(item.ticketId);
+
+        return `${item === null || ticket === null ? 'switchboard' : sessionName(session.kind, item, ticket)} ${session.nativeSessionId ?? ''}`;
+      },
+      codexPath,
+      codexHome: codex.home,
+      env: codex.env,
+      hasTurns: (session) => this.codexAppServer.hasTurns(session.nativeSessionId!),
+      ending: (id) => this.ending.get(id),
+      log: deps.log,
+    });
+
     this.runners = {
       claude:
         deps.runners?.claude ??
@@ -377,7 +397,8 @@ export class Runtime {
         const live = this.heldSessions().filter((one) => one.exitedAt === null);
 
         for (const one of live) {
-          if (!one.orphan && store.session(one.session)?.state !== 'ended' && !keys.has(one.session)) {
+          // A Codex terminal ends without its session, and the console starts it again, so it needs no resume.
+          if (!one.orphan && store.session(one.session)?.state !== 'ended' && store.session(one.session)?.execution !== 'app-server' && !keys.has(one.session)) {
             keys.set(one.session, one.key);
           }
         }
@@ -547,16 +568,39 @@ export class Runtime {
   }
 
   /**
-   * Releases each Codex app-server thread whose turn ended the idle limit ago, as the holder's idle end does for a Code Mode session; a message
+   * Releases each Codex app-server thread whose turn ended, and whose Codex terminal was last typed in, the idle limit ago, as the holder's idle end
+   * does for a Code Mode session; a message
    * resumes it (PRD R107). The flow keeps a thread waiting on its usage limit.
    */
   private endIdleThreads(): void {
-    const now = this.deps.now();
+    const idle = (session: Session): boolean => {
+      // Keys typed in the session's Codex terminal, such as a draft or one of its commands, count as use, as for a held Code Mode session.
+      const typed = this.heldEntries.find((entry) => entry.session === session.id && entry.exitedAt === null)?.lastInputAt ?? 0;
 
-    for (const session of this.deps.store.activeSessions()) {
-      if (session.execution === 'app-server' && (session.state === 'idle' || session.state === 'failed') && !session.released && !session.releasing && now - session.stateAt >= (this.deps.codeModeIdleMs ?? CODE_MODE_IDLE_MS)) {
-        this.send({ type: 'held-idle', sessionId: session.id });
-      }
+      return session.execution === 'app-server' && (session.state === 'idle' || session.state === 'failed') && !session.released && !session.releasing && this.deps.now() - Math.max(session.stateAt, typed) >= (this.deps.codeModeIdleMs ?? CODE_MODE_IDLE_MS);
+    };
+    const due = this.deps.store.activeSessions().filter(idle);
+    const release = (session: Session): void => {
+      this.send({ type: 'held-idle', sessionId: session.id });
+    };
+
+    due.filter((session) => !this.heldEntries.some((entry) => entry.session === session.id && entry.exitedAt === null)).forEach(release);
+
+    const typedIn = due.filter((session) => this.heldEntries.some((entry) => entry.session === session.id && entry.exitedAt === null));
+
+    // The holder's last list can be 30 seconds old, so one with a terminal is released only once a fresh list still finds it idle.
+    if (typedIn.length > 0) {
+      this.track(
+        this.readHeld().then(() => {
+          for (const session of typedIn) {
+            const now = this.deps.store.session(session.id);
+
+            if (now !== null && idle(now)) {
+              release(now);
+            }
+          }
+        }),
+      );
     }
   }
 
@@ -1878,9 +1922,15 @@ export class Runtime {
 
   /**
    * Watches a held session for the web page's console (architecture.md § Web page) on a connection of its own, which never resizes the session;
-   * rejects with why when no holder runs, it is from an older build or it does not hold the session. It never starts a holder.
+   * rejects with why when no holder runs, it is from an older build or it does not hold the session. It starts a holder only for a Codex
+   * app-server session's terminal.
    */
   async viewHeld(session: string, handlers: HeldViewHandlers): Promise<{ close(): void }> {
+    // A Codex app-server session's terminal starts the first time a console asks for it, or again after it exited.
+    if (this.deps.store.session(session)?.execution === 'app-server') {
+      await this.codexTerminals.ensure(session);
+    }
+
     const found = await this.holder.find(false);
     const record = this.holder.record();
 
@@ -1963,7 +2013,7 @@ export class Runtime {
 
     const session = this.deps.store.session(sessionId);
 
-    if (session === null || session.codeMode !== true || session.state === 'ended') {
+    if (session === null || (session.codeMode !== true && session.execution !== 'app-server') || session.state === 'ended') {
       return { refused: SESSION_ENDED };
     }
 
@@ -2193,6 +2243,16 @@ export class Runtime {
     this.heldError = null;
     this.heldEntries = [...entries];
 
+    // A Codex terminal whose end failed, or that a stopped hub left, still keeps its ended session's thread loaded, so it is ended again; a session
+    // still releasing is left to its release, which a new turn can cancel.
+    for (const entry of entries.filter((one) => one.exitedAt === null && !this.ending.has(one.session))) {
+      const session = this.deps.store.session(entry.session);
+
+      if ((session?.execution === 'app-server' && (session.state === 'ended' || session.released)) || (session === null && this.codexTerminals.unended(entry.session))) {
+        this.track(this.codexTerminals.end(entry.session));
+      }
+    }
+
     for (const held of this.heldSessions().filter((one) => one.orphan && !this.orphansLogged.has(one.session))) {
       this.orphansLogged.add(held.session);
       this.deps.log(`held session ${held.session} has no work item: ${held.label}`);
@@ -2278,6 +2338,14 @@ export class Runtime {
     }
 
     const session = store.session(found.session);
+
+    // A Codex app-server session's held entry is only its terminal, which ends without stopping the thread's turn.
+    if (session?.execution === 'app-server') {
+      await this.codexTerminals.end(session.id);
+      await this.readHeld();
+
+      return { stopped: session.id };
+    }
 
     if (session !== null && session.state !== 'ended') {
       const result = this.send({ type: 'stop', workItemId: session.workItemId, sessionId: session.id });
@@ -2861,6 +2929,13 @@ export class Runtime {
   private async stopSession(action: Extract<FlowAction, { type: 'stop-session' }>): Promise<void> {
     const { leftovers, ...target } = action;
     const failure = await this.runners[runnerKey(action)].stop(leftovers === true ? { ...target, lastTree: this.deps.store.session(action.sessionId)?.lastTree ?? [] } : target, action.reason);
+
+    // A Codex terminal is a subscriber of the thread, which keeps a released thread loaded in the daemon, so it ends with the session; a cancelled
+    // release or a failed Stop leaves the session live, and its terminal with it.
+    if (action.execution === 'app-server' && (failure === null || this.deps.store.session(action.sessionId) === null)) {
+      await this.codexTerminals.end(action.sessionId);
+    }
+
     if (failure?.cancelled === true) {
       this.send({ type: 'release-cancelled', sessionId: action.sessionId });
       return;

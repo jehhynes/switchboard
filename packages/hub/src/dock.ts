@@ -344,7 +344,8 @@ function heldRow(snapshot: Snapshot, one: HeldSession, now: number, windows: str
   const { item, nativeSessionId, idle, memory } = heldTexts(one, now);
   const owner = one.workItemId === null ? undefined : snapshot.workItems.find((entry) => entry.id === one.workItemId);
   const session = owner?.sessions.find((entry) => entry.id === one.session);
-  const terminal = owner === undefined || session === undefined || one.orphan ? null : codeModeDockTerminal(owner, session, windows);
+  // A Codex terminal has no attach command yet, since `hub.js attach` takes only Code Mode sessions.
+  const terminal = owner === undefined || session === undefined || one.orphan || session.execution === 'app-server' ? null : codeModeDockTerminal(owner, session, windows);
 
   return { session: one.session, item, nativeSessionId, cwd: one.cwd, state: one.state, idle, memory, clients: one.clients, orphan: one.orphan, exited: one.exitedAt !== null, terminal };
 }

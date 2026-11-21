@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { appServerDebriefRange, runAppServerDebrief } from '../src/appServerDebrief.js';
-import { codexInput } from '../src/appServerRunner.js';
+import { AppServerRunner, codexInput } from '../src/appServerRunner.js';
+import { AppServerError } from '../src/appServer.js';
 import type { AppServer, Json } from '../src/appServer.js';
 
 const clean:Array<()=>void>=[];afterEach(()=>clean.splice(0).forEach(f=>f()));
@@ -52,5 +53,22 @@ describe('Codex structured inputs and debriefs',()=>{
     complete=false;expect(await runAppServerDebrief(server,'parent','prompt',20)).toEqual({error:'The Codex debrief timed out.'});
     const broken={request:async()=>{throw new Error('unavailable');}} as unknown as AppServer;
     expect(await runAppServerDebrief(broken,'parent','prompt',20)).toEqual({error:'Error: unavailable'});
+  });
+});
+
+describe('whether a thread has a turn (mechanics M108)', () => {
+  function runner(answer: (params: Json) => Json) {
+    const request = vi.fn(async (_method: string, params: Json) => answer(params));
+    const server = { request, listen: () => () => {}, generation: 0 } as unknown as AppServer;
+    return { request, runner: new AppServerRunner({ server, session: () => null, sessions: () => [], created: () => {}, instructions: () => '', state: () => {}, now: () => 0 }) };
+  }
+
+  it('reads one turn without its items, and counts a thread Codex has not materialized as having none', async () => {
+    const one = runner(() => ({ data: [{ id: 't1' }] }));
+    expect(await one.runner.hasTurns('thread-1')).toBe(true);
+    expect(one.request).toHaveBeenCalledWith('thread/turns/list', { threadId: 'thread-1', limit: 1, itemsView: 'notLoaded' });
+    expect(await runner(() => ({ data: [] })).runner.hasTurns('thread-1')).toBe(false);
+    expect(await runner(() => { throw new AppServerError('thread thread-1 is not materialized yet; thread/turns/list is unavailable before first user message', true); }).runner.hasTurns('thread-1')).toBe(false);
+    await expect(runner(() => { throw new AppServerError('The connection to Codex closed.'); }).runner.hasTurns('thread-1')).rejects.toThrow('The connection to Codex closed.');
   });
 });
