@@ -306,6 +306,9 @@ export function renderHeader(state: PageState, view: View): VNode {
       <button type="button" class="icon back-toggle" data-action="back" title="Back to work items" aria-label="Back to work items">
         <span class="codicon codicon-arrow-left" aria-hidden="true"></span>
       </button>
+      <button type="button" class="icon list-toggle" data-action="drawer" title="Work items" aria-label="Work items" aria-controls="list" aria-expanded={view.drawer !== null}>
+        <span class="codicon codicon-layout-sidebar-left" aria-hidden="true"></span>
+      </button>
       <div class="menu-anchor picker-anchor">
         <button type="button" class="picker" data-action="picker" aria-haspopup="menu" aria-expanded={view.picker || providers !== null} title={title}>
           {selected === null ? (

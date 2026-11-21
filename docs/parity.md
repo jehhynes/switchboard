@@ -154,6 +154,7 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 | H6 | The toast hides after 10 seconds shown with the pointer off it; Dismiss clears it | `CheckStatus` MainWindow.axaml.cs:544 | Partly | The needs-you message hides after 10 seconds shown on a visible page with the pointer off it, and Dismiss clears it (`NEEDS_SHOWN_MS` listHeader.tsx); refusals show where their action was taken instead (C17) |
 | H8 | Title row: Close, More Actions, Auto-hide, Search and the source icons keep their width from the right, the title takes the rest with an ellipsis, and a control that does not fit whole is hidden | `HeaderPanel`, MainWindow.axaml:378-418 | Partly | `renderListHeader` listHeader.ts: the icons keep their width at the right; nothing is hidden for want of room. The page has no "Switchboard" title, which the tab or app title already shows (operator's decision). Close and Auto-hide are Dock only (D3, D6) |
 | H7 | Page title counts Blocked on you, "(2) Switchboard" | none | Web only | `pageTitle` model.ts:107 |
+| H10 | Auto-hide: hidden, a 3 px sliver at the edge shows each row's stripe at its height, cut to the list's view and left out under a pinned heading; the pointer resting on it for 0.5 s shows the list over other content; it hides at once 0.4 s after nothing keeps it open (the pointer over it, an open menu or dialog, typing in its search box), and a row's click hides it | `SliverBars`, `HideDelay`, `Collapse`, `Expand` MainWindow.axaml.cs | Partly | the drawer, `openDrawer` and `fitSliver` main.ts, `.sliver` page.css: the same sliver, 500 ms reveal, 400 ms hide checked every 100 ms and hide on choosing a work item. It hides by the page's width, from 768 px until 1300 px with a work item open, with no pin, as the operator decided that the page's columns follow its width; the header's Work items button also shows it, staying until a work item is chosen, Escape or a click outside, and it slides in over 0.15 s where the dock shows at once, as the operator asked |
 
 ## Connection
 
@@ -186,7 +187,7 @@ Window management with no counterpart in a browser page. These rows are outside 
 |---|---|---|
 | D1 | Docks at a monitor's left or right edge, as an app bar on Windows or an X11 dock window on Linux, and moves there by dragging the title | `Dock`, `DockAtPointer` MainWindow.axaml.cs:387, 819 |
 | D2 | The inner-edge grip sets the width, 200 to 800 | `OnGripMoved` MainWindow.axaml.cs:2193 |
-| D3 | Auto-hide pin, and the hidden dock's sliver of row stripes | `OnAutoHideClicked`, `SliverBars` MainWindow.axaml.cs:766, 717 |
+| D3 | Auto-hide pin, and the app bar and window region that hide the dock; the page's list auto-hides by width (H10) | `OnAutoHideClicked` MainWindow.axaml.cs:766 |
 | D4 | Stays above windows except a full-screen one on its monitor | `UpdateTopmost` MainWindow.axaml.cs:600 |
 | D6 | Close the dock | `OnCloseClicked` MainWindow.axaml.cs:1272 |
 | D7 | Held sessions, Ticket volume report and Settings open in windows of their own | `OpenHeld`, `OpenVolume`, `OpenSettings` MainWindow.axaml.cs:1918, 2105, 2063 |

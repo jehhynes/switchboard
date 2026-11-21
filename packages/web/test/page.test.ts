@@ -12,7 +12,7 @@ import { renderList } from '../src/list.js';
 import { html } from './html.js';
 import { renderMicButton as viewMicButton } from '@switchboard/conversation/voiceControls';
 import { renderMarkdown } from '../src/markdown.js';
-import { CHAT_MAX, CHAT_MIN, loadMermaid, SENT_NOTE_MS, SHOW_MARKER_MS, SIDE_MAX, SIDE_MIN, startPage, stepScale } from '../src/main.js';
+import { CHAT_MAX, CHAT_MIN, DRAWER_HIDE_MS, DRAWER_QUERY, DRAWER_REVEAL_MS, loadMermaid, SENT_NOTE_MS, SHOW_MARKER_MS, SIDE_MAX, SIDE_MIN, startPage, stepScale, WIDE_QUERY } from '../src/main.js';
 import type { ArtifactView, MessageView, PageGroup, PageRow, ReplyView, SessionView } from '../src/types.js';
 
 const message = (id: string, ord: number, patch: Partial<MessageView> = {}): MessageView => ({ type: 'message', id, sessionId: 's', workItemId: 1, at: 1_000 + ord, ord, provisional: false, withdrawn: false, origin: 'typed', text: `text ${id}`, delivery: 'sent', error: null, ...patch });
@@ -739,12 +739,12 @@ describe('the page', () => {
     source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1), listRow(2)])], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
     expect(root.classList.contains('listing')).toBe(false);
 
-    // Back is the header's first button, which CSS hides from 768 px, where the list always shows; no bar of its own, and no list toggle.
+    // Back is the header's first button, which CSS hides from 768 px; the Work items button after it shows only where the list is a drawer.
     const back = root.querySelector<HTMLElement>('.header > button.back-toggle')!;
 
     expect(back.getAttribute('aria-label')).toBe('Back to work items');
     expect(back.previousElementSibling).toBeNull();
-    expect(root.querySelector('.list-toggle')).toBeNull();
+    expect(back.nextElementSibling!.classList.contains('list-toggle')).toBe(true);
     expect(root.querySelector('.back-bar')).toBeNull();
     back.click();
     expect(root.classList.contains('listing')).toBe(true);
@@ -2246,6 +2246,117 @@ describe('the page in use', () => {
     page.close();
   });
 
+  it('hides the list in a drawer at tablet widths while a work item is open, shown by its button or a resting pointer and hidden as the dock auto-hides', () => {
+    vi.useFakeTimers();
+
+    const query = { matches: true, addEventListener: () => {} };
+
+    vi.stubGlobal('matchMedia', vi.fn((text: string) => (text === DRAWER_QUERY ? query : { matches: false, addEventListener: () => {} })));
+    history.replaceState(null, '', '#w=1');
+
+    const { page, source } = start();
+    const isOpen = () => root.classList.contains('drawer-open');
+    const toggle = () => root.querySelector<HTMLElement>('.header > .list-toggle')!;
+    const sliver = root.querySelector<HTMLElement>('.sliver')!;
+    const side = root.querySelector<HTMLElement>('.side')!;
+
+    hello(source, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', stripe: 'turn' }), listRow(2, { title: 'Two' }), listRow(3, { title: 'Three', stripe: 'warning' })])] });
+    expect(root.classList.contains('listing')).toBe(false);
+    expect(isOpen()).toBe(false);
+    expect(toggle().getAttribute('aria-expanded')).toBe('false');
+
+    // Hidden, the sliver draws each striped row's stripe at its height, the selected row's the full height, cut to the list's view.
+    vi.spyOn(root.querySelector('#list')!, 'getBoundingClientRect').mockReturnValue({ top: 40, bottom: 200 } as DOMRect);
+    vi.spyOn(root.querySelector('[data-work-item="1"]')!, 'getBoundingClientRect').mockReturnValue({ top: 100, bottom: 160 } as DOMRect);
+    vi.spyOn(root.querySelector('[data-work-item="3"]')!, 'getBoundingClientRect').mockReturnValue({ top: 160, bottom: 220 } as DOMRect);
+    window.dispatchEvent(new Event('resize'));
+    vi.advanceTimersByTime(50);
+    expect([...sliver.children].map((bar) => [bar.className, (bar as HTMLElement).style.top, (bar as HTMLElement).style.height])).toEqual([
+      ['stripe-turn', '100px', '60px'],
+      ['stripe-warning', '168px', '32px'],
+    ]);
+
+    // The button shows it, with the focus on the open work item's row, and it stays while the pointer is elsewhere.
+    toggle().click();
+    expect(isOpen()).toBe(true);
+    expect(toggle().getAttribute('aria-expanded')).toBe('true');
+    expect(document.activeElement).toBe(root.querySelector('[data-work-item="1"]'));
+    vi.advanceTimersByTime(2_000);
+    expect(isOpen()).toBe(true);
+    // Shown, it has no sliver.
+    vi.advanceTimersByTime(50);
+    expect(sliver.children).toHaveLength(0);
+    // Escape hides it and gives the focus to the button.
+    document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(isOpen()).toBe(false);
+    expect(document.activeElement).toBe(toggle());
+
+    // A press inside keeps it; one outside hides it; the button toggles it.
+    toggle().click();
+    side.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    expect(isOpen()).toBe(true);
+    root.querySelector('#panel')!.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    expect(isOpen()).toBe(false);
+    toggle().click();
+    toggle().dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    toggle().click();
+    expect(isOpen()).toBe(false);
+
+    // Choosing a work item hides it.
+    toggle().click();
+    root.querySelector<HTMLElement>('[data-work-item="2"]')!.click();
+    expect(isOpen()).toBe(false);
+
+    // A pointer resting on the sliver for 0.5 s shows it; leaving sooner, or a touch, does not.
+    sliver.dispatchEvent(new Event('pointerenter'));
+    vi.advanceTimersByTime(DRAWER_REVEAL_MS - 100);
+    sliver.dispatchEvent(new Event('pointerleave'));
+    vi.advanceTimersByTime(1_000);
+    expect(isOpen()).toBe(false);
+    sliver.dispatchEvent(Object.assign(new Event('pointerenter'), { pointerType: 'touch' }));
+    vi.advanceTimersByTime(1_000);
+    expect(isOpen()).toBe(false);
+    sliver.dispatchEvent(new Event('pointerenter'));
+    vi.advanceTimersByTime(DRAWER_REVEAL_MS);
+    expect(isOpen()).toBe(true);
+    // Shown that way, it stays while the pointer is over it, and hides 0.4 s after the pointer leaves, unless the search box has the focus.
+    vi.advanceTimersByTime(2_000);
+    expect(isOpen()).toBe(true);
+    side.dispatchEvent(new Event('pointerleave'));
+    vi.advanceTimersByTime(DRAWER_HIDE_MS - 100);
+    expect(isOpen()).toBe(true);
+    vi.advanceTimersByTime(100);
+    expect(isOpen()).toBe(false);
+
+    const search = document.createElement('input');
+
+    side.append(search);
+    sliver.dispatchEvent(new Event('pointerenter'));
+    vi.advanceTimersByTime(DRAWER_REVEAL_MS);
+    search.focus();
+    side.dispatchEvent(new Event('pointerleave'));
+    vi.advanceTimersByTime(2_000);
+    expect(isOpen()).toBe(true);
+    search.blur();
+    vi.advanceTimersByTime(DRAWER_HIDE_MS);
+    expect(isOpen()).toBe(false);
+
+    // Where the list is a column, or a phone's view, there is no drawer; narrowed to a phone, which hides the list, the focus goes to Back.
+    toggle().click();
+    expect(side.contains(document.activeElement)).toBe(true);
+    query.matches = false;
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => ({ display: element === side ? 'none' : 'block' }) as CSSStyleDeclaration);
+    source.emit('unread', { workItemId: 1, count: 0 });
+    expect(isOpen()).toBe(false);
+    expect(document.activeElement).toBe(root.querySelector('.header > .back-toggle'));
+    vi.mocked(window.getComputedStyle).mockRestore();
+    toggle().click();
+    expect(isOpen()).toBe(false);
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    page.close();
+  });
+
   it('puts Status and Artifacts in a column beside the conversation on a wide screen, with their own switch and no toggle, and keeps the tabs otherwise', async () => {
     const listeners: Array<() => void> = [];
     const query = { matches: true, addEventListener: (_type: string, listener: () => void) => listeners.push(listener) };
@@ -2604,10 +2715,10 @@ describe("the list's CSS", () => {
     expect(declarationsOf((selector) => selector === 'button:focus-visible')).toEqual([expect.stringContaining('outline: 1px solid var(--vscode-focusBorder)')]);
   });
 
-  it('hides Back and shows the work items\' sash by the page\'s width alone, with no list toggle or hidden list', () => {
+  it('hides Back and shows the work items\' sash by the page\'s width alone, with no kept list toggle', () => {
     const narrow = css.slice(0, css.indexOf('@media (min-width: 768px)'));
 
-    expect(css).not.toMatch(/list-toggle|layout-toggle|list-hidden/);
+    expect(css).not.toMatch(/layout-toggle|list-hidden/);
     // A selector that outranks button.icon's display.
     expect(declarationsOf((selector) => selector === '.header > .back-toggle')).toEqual(['display: none;']);
     expect(declarationsOf((selector) => selector === '.side-sash')).toEqual(['display: block;']);
@@ -2656,6 +2767,29 @@ describe("the list's CSS", () => {
 
   it("scales only the conversation's text by --chat-scale", () => {
     expect([...css.matchAll(/([^{}]+)\{[^{}]*var\(--chat-scale/g)].map(([, selector]) => selector!.trim())).toEqual(['.timeline, .composer textarea, .composer .live-mirror']);
+  });
+
+  it('makes the list a drawer with its sliver and button from 768 px until 1300 px while a work item is open, sliding in and hiding at once', () => {
+    expect(DRAWER_QUERY).toBe('(768px <= width < 1300px)');
+    expect(declarationsOf((selector) => selector === '.header > .list-toggle')).toEqual(['display: none;']);
+    const drawer = css.split(`@media ${DRAWER_QUERY} {`)[1]!;
+    const block = drawer.slice(0, drawer.indexOf('\n}'));
+
+    for (const rule of ['#root:not(.listing):not(.history) > .side-sash { display: none; }', '#root:not(.listing):not(.history):not(.drawer-open) > .sliver { display: block; }', '#root:not(.listing):not(.history) .header > .list-toggle { display: inline-flex; }']) {
+      expect(block).toContain(rule);
+    }
+
+    // Hidden, the list keeps its layout off the left edge, so its rows can be measured for the sliver.
+    expect(block).toMatch(/#root:not\(\.listing\):not\(\.history\) > \.side \{[^}]*position: fixed;[^}]*visibility: hidden; transform: translateX\(-100%\);/);
+    // Only the shown drawer has a transition, so it slides in and hides at once, as the dock does.
+    expect(declarationsOf((selector) => selector === '#root:not(.listing):not(.history) > .side').join(' ')).not.toContain('transition');
+    expect(declarationsOf((selector) => selector === '#root.drawer-open:not(.listing):not(.history) > .side').join(' ')).toContain('transition: transform 0.15s ease-out');
+    expect(declarationsOf((selector) => selector === '.sliver').join(' ')).toMatch(/position: fixed;.*left: 0;.*width: 3px;/);
+  });
+
+  it('puts Status and Artifacts beside the conversation from 900 px', () => {
+    expect(WIDE_QUERY).toBe('(min-width: 900px)');
+    expect(css).toContain(`@media ${WIDE_QUERY} {\n  #root.wide > .main`);
   });
 
   it('caps the conversation on a wide screen and gives the Status and Artifacts column the rest of the width, with no cap of its own', () => {

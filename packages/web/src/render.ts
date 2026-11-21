@@ -64,6 +64,8 @@ export interface View {
   bands: Map<string, boolean>;
   /** Whether a narrow screen shows the list rather than the conversation: after Back, or before a work item is opened. */
   list: boolean;
+  /** The work items' drawer, from tablet width until the list column fits: shown by its button or a key ('open'), by a pointer resting on its sliver ('hover'), or hidden (null). Never kept. */
+  drawer: 'open' | 'hover' | null;
   /** Whether the header's actions menu is open, and in it the Open link submenu. */
   actions: boolean;
   linkMenu: boolean;
@@ -119,7 +121,7 @@ export type Sheet =
   | { kind: 'snooze'; row: string; label: string; title: string; choices: SnoozeChoice[]; picked: string; date: string; comment: string }
   | { kind: 'text'; title: string; text: string };
 
-export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), bands: new Map(), list: false, actions: false, linkMenu: false, rowMenu: null, sheet: null, acting: false, prompt: null, providers: null, side: 'status', textScale: 1, textMenu: false, details: false, pane: null, paneNote: null });
+export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), bands: new Map(), list: false, drawer: null, actions: false, linkMenu: false, rowMenu: null, sheet: null, acting: false, prompt: null, providers: null, side: 'status', textScale: 1, textMenu: false, details: false, pane: null, paneNote: null });
 
 /** The longest menu label for a link, as the dock's `LinkLabelMax`; a longer one is cut with an ellipsis and shown whole in its tooltip. */
 export const LINK_LABEL_MAX = 48;

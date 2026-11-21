@@ -69,7 +69,19 @@ export function stepScale(scale: number, step: 1 | -1): number {
 }
 const CHAT_WIDTH = 'switchboard.chatWidth';
 /** From this width Status and Artifacts are a column beside the conversation rather than tabs. */
-export const WIDE_QUERY = '(min-width: 1200px)';
+export const WIDE_QUERY = '(min-width: 900px)';
+/**
+ * The widths at which an open work item's conversation takes the room of the work items, which are then a drawer at the left edge; from 1300 px
+ * they are a column, and under 768 px the list and the conversation are separate views (page.css).
+ */
+export const DRAWER_QUERY = '(768px <= width < 1300px)';
+/**
+ * The drawer's timing, as the dock's auto-hide: a pointer resting on the sliver this long shows it, and a drawer shown that way hides once
+ * nothing has kept it open for `DRAWER_HIDE_MS`, checked every `DRAWER_TICK_MS`.
+ */
+export const DRAWER_REVEAL_MS = 500;
+export const DRAWER_HIDE_MS = 400;
+const DRAWER_TICK_MS = 100;
 /** How often an open History reads the hub again, so its times stay current, and how soon after a list change. */
 export const HISTORY_REFRESH_MS = 30_000;
 const HISTORY_CHANGE_MS = 1_000;
@@ -126,8 +138,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const historyHost = root.querySelector<HTMLElement>('#history')!;
   // On a wide screen Status and Artifacts leave the tabs for a column of their own beside the conversation (architecture.md § Web page).
   const wideQuery = typeof window.matchMedia === 'function' ? window.matchMedia(WIDE_QUERY) : null;
-  // The side columns show whenever the width allows, with no toggle: the list from 768 px, Status and Artifacts from 1200 px. A choice an
-  // earlier page kept is dropped.
+  const drawerQuery = typeof window.matchMedia === 'function' ? window.matchMedia(DRAWER_QUERY) : null;
+  // The open work item takes the room first: Status and Artifacts are a column from 900 px and the list from 1300 px, with no kept toggle; in
+  // between the list is a drawer. A choice an earlier page kept is dropped.
   localStorage.removeItem('switchboard.layout');
   const wide = (): boolean => wideQuery?.matches === true;
 
@@ -192,6 +205,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const mainTab = (): Tab => (wide() && view.pane?.shown !== true ? 'conversation' : view.tab);
 
   wideQuery?.addEventListener?.('change', () => draw());
+  drawerQuery?.addEventListener?.('change', () => draw());
   let state: PageState = EMPTY;
   const view: View = newView();
 
@@ -1151,6 +1165,164 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       unmount(pane);
     }
   };
+  // ---- The work items' drawer (architecture.md § Web page), shown and hidden as the dock's auto-hide ----
+  const drawer = root.querySelector<HTMLElement>('.side')!;
+  const sliver = root.querySelector<HTMLElement>('.sliver')!;
+  /** Whether the list is a drawer: at tablet widths while a work item's conversation is open; History, opened from the list, keeps it a column. */
+  const drawerMode = (): boolean => drawerQuery?.matches === true && !(view.list || wanted === null) && shownHistory === null;
+  let revealTimer: ReturnType<typeof setTimeout> | null = null;
+  let drawerTick: ReturnType<typeof setInterval> | null = null;
+  let overDrawer = false;
+  let idleMs = 0;
+  const cancelReveal = (): void => {
+    if (revealTimer !== null) {
+      clearTimeout(revealTimer);
+      revealTimer = null;
+    }
+  };
+  /** Forgets the drawer without drawing. */
+  const dropDrawer = (): void => {
+    view.drawer = null;
+    cancelReveal();
+
+    if (drawerTick !== null) {
+      clearInterval(drawerTick);
+      drawerTick = null;
+    }
+  };
+  const closeDrawer = (): void => {
+    if (view.drawer === null) {
+      return;
+    }
+
+    const inside = drawer.contains(document.activeElement);
+
+    dropDrawer();
+    draw();
+
+    // The focus leaves the hidden list for the button that opens it.
+    if (inside) {
+      head.querySelector<HTMLElement>('.list-toggle')?.focus();
+    }
+  };
+  /** What keeps a drawer shown by the pointer open, as the dock's `HideDelay`: the pointer over it, a menu or sheet of the list, or typing in its search box. */
+  const drawerKept = (): boolean => {
+    const focused = document.activeElement;
+
+    return overDrawer || view.rowMenu !== null || view.sheet !== null || drawer.querySelector('.menu, .sheet-backdrop') !== null || ((focused instanceof HTMLInputElement || focused instanceof HTMLTextAreaElement) && drawer.contains(focused));
+  };
+  const openDrawer = (how: 'open' | 'hover'): void => {
+    if (!drawerMode()) {
+      return;
+    }
+
+    dropDrawer();
+    view.drawer = how;
+    overDrawer = how === 'hover';
+    idleMs = 0;
+
+    if (how === 'hover') {
+      drawerTick = setInterval(() => {
+        idleMs = drawerKept() ? 0 : idleMs + DRAWER_TICK_MS;
+
+        if (idleMs >= DRAWER_HIDE_MS) {
+          closeDrawer();
+        }
+      }, DRAWER_TICK_MS);
+    }
+
+    draw();
+
+    // Opened by its button, the drawer takes the focus, on the open work item's row.
+    if (how === 'open') {
+      (list.querySelector<HTMLElement>('.row.selected') ?? list.querySelector<HTMLElement>('.row'))?.focus();
+    }
+  };
+
+  // A pointer resting on the sliver shows the drawer; touch has no hover, and uses the header's button.
+  sliver.addEventListener('pointerenter', (event) => {
+    if ((event as PointerEvent).pointerType === 'touch') {
+      return;
+    }
+
+    cancelReveal();
+    revealTimer = setTimeout(() => {
+      revealTimer = null;
+      openDrawer('hover');
+    }, DRAWER_REVEAL_MS);
+  });
+  sliver.addEventListener('pointerleave', cancelReveal);
+  drawer.addEventListener('pointerenter', () => {
+    overDrawer = true;
+  });
+  drawer.addEventListener('pointerleave', () => {
+    overDrawer = false;
+  });
+  // A press outside the drawer and its sheets hides it; the button toggles it itself.
+  document.addEventListener(
+    'pointerdown',
+    (event) => {
+      if (view.drawer !== null && event.target instanceof Node && !drawer.contains(event.target) && !sheetHost.contains(event.target) && head.querySelector('.list-toggle')?.contains(event.target) !== true) {
+        closeDrawer();
+      }
+    },
+    { signal: listening.signal },
+  );
+
+  /**
+   * Draws the hidden list's sliver, as the dock's `SliverBars`: each row's coloured stripe at its height, cut to the list's view and left out
+   * under a pinned group heading; once a frame at most.
+   */
+  let sliverQueued = false;
+  const fitSliver = (): void => {
+    if (sliverQueued) {
+      return;
+    }
+
+    sliverQueued = true;
+    (typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (run: () => void) => setTimeout(run, 0))(() => {
+      sliverQueued = false;
+
+      if (!drawerMode() || view.drawer !== null) {
+        sliver.replaceChildren();
+        return;
+      }
+
+      const box = list.getBoundingClientRect();
+      const heads = [...list.querySelectorAll('.group-head')].map((one) => one.getBoundingClientRect());
+      const bars: HTMLElement[] = [];
+
+      for (const row of list.querySelectorAll<HTMLElement>('.row[class*="stripe-"]')) {
+        const stripe = [...row.classList].find((name) => name.startsWith('stripe-'))!;
+        const at = row.getBoundingClientRect();
+        // The stripe's own ends (page.css .row::before): 8 px in, the selected row's the full height.
+        const inset = row.classList.contains('selected') ? 0 : 8;
+        let top = Math.max(at.top + inset, box.top);
+        const bottom = Math.min(at.bottom - inset, box.bottom);
+
+        for (const heading of heads) {
+          if (heading.top <= top && heading.bottom > top) {
+            top = heading.bottom;
+          }
+        }
+
+        if (bottom > top) {
+          const bar = document.createElement('i');
+
+          bar.className = stripe;
+          bar.style.top = `${top}px`;
+          bar.style.height = `${bottom - top}px`;
+          bars.push(bar);
+        }
+      }
+
+      sliver.replaceChildren(...bars);
+    });
+  };
+
+  list.addEventListener('scroll', fitSliver, { passive: true, signal: listening.signal });
+  window.addEventListener('resize', fitSliver, { signal: listening.signal });
+
   /** Draws the state; Preact changes only what differs, so the focus, a selection, the scroll position and open menus stay. */
   const drawRegions = (): void => {
     // On a narrow screen the list and the conversation are each a full-width view (page.css); the list shows until a work item is opened.
@@ -1158,6 +1330,20 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // A ticket's History shows in the conversation's place, over its column and the side column (architecture.md § Web page).
     root.classList.toggle('history', shownHistory !== null);
     mount(historyHost, shownHistory === null ? null : renderHistory(shownHistory));
+
+    // The drawer is only at tablet widths, with a work item open; the focus leaves a list that a phone's width now hides for Back.
+    const dropped = view.drawer !== null && !drawerMode();
+
+    if (dropped) {
+      dropDrawer();
+    }
+
+    root.classList.toggle('drawer-open', view.drawer !== null);
+    fitSliver();
+
+    if (dropped && drawer.contains(document.activeElement) && getComputedStyle(drawer).display === 'none') {
+      head.querySelector<HTMLElement>('.back-toggle')?.focus();
+    }
     // The pane helper finds this window by the marker until it has found it (architecture.md § Pane state); the dock brings it forward by its
     // `show` marker (architecture.md § Dock).
     document.title = pageTitle(state.groups) + (view.pane?.marker == null ? '' : ` [sb-pane ${view.pane.marker}]`) + (showMarker === null ? '' : ` [sb-show ${showMarker}]`);
@@ -1581,6 +1767,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const select = async (workItemId: number): Promise<void> => {
     // A work item opened from the list shows its conversation in History's place.
     closeHistory();
+    // Choosing a work item hides the drawer, as a row's click hides the auto-hidden dock.
+    closeDrawer();
     wanted = workItemId;
     listError = null;
     view.list = false;
@@ -1721,6 +1909,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     switch (action) {
       case 'select':
         void select(Number(button!.dataset['workItem']));
+        break;
+      case 'drawer':
+        if (view.drawer === null) {
+          openDrawer('open');
+        } else {
+          closeDrawer();
+        }
+
         break;
       case 'back':
         view.list = true;
@@ -2091,6 +2287,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       view.textMenu = false;
       draw();
       head.querySelector<HTMLElement>(opener)?.focus();
+      event.stopImmediatePropagation();
+    } else if (event.key === 'Escape' && view.drawer !== null) {
+      closeDrawer();
       event.stopImmediatePropagation();
     } else if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && (view.picker || view.personas !== null || view.actions || view.providers !== null || view.textMenu || view.rowMenu !== null)) {
       // Up and Down move between a header menu's rows, or a pool row's menu's, as in a VS Code menu.
@@ -2772,6 +2971,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       clearInterval(promptTimer);
       clearTimeout(showTimer);
       listening.abort();
+      dropDrawer();
       listWidth?.disconnect();
       header.close();
       source.close();
