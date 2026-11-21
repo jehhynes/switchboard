@@ -90,6 +90,10 @@ describe('the theme copy', () => {
     expect(css).toMatch(/\.detail-head \{[^}]*min-height: 45px;[^}]*align-items: stretch;/);
     expect(css).not.toMatch(/\.detail-head \{[^}]*align-items: flex-end/);
     expect(css).toMatch(/\.detail-head \.tab \{[^}]*height: auto;/);
+    // The console's typing border is drawn inside its own box, dimmed, on all four sides, above xterm.js's layers.
+    expect(css).toMatch(/\.console \{[^}]*position: relative;[^}]*isolation: isolate;/);
+    expect(css).toMatch(/\.console\.typing::after \{[^}]*inset: 0;[^}]*z-index: 50;[^}]*border: 1px solid color-mix\(in srgb, var\(--vscode-focusBorder\) 45%, transparent\);/);
+    expect(css).not.toMatch(/\.console\.typing \{[^}]*outline/);
   });
 
   it('gives light its Light Modern surfaces: the conversation white, its bars and the side bar grey, and a selected row that shows and stays readable', () => {

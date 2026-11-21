@@ -366,7 +366,7 @@ export function mountConsole(host: HTMLElement, createTerm: (options: TermOption
   const onFocus = (): void => {
     typing = true;
     sizeWanted = true;
-    // The focus border is an outline, which takes no room, so focusing never changes the pane's size and the session is resized once.
+    // The focus border is drawn over the console's box by a pseudo-element, which takes no room, so focusing never changes the pane's size and the session is resized once.
     drawState();
     void flush();
   };
