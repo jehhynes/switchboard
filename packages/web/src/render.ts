@@ -257,38 +257,6 @@ export function framed(artifact: ArtifactView): boolean {
   return artifact.type === 'html' || artifact.ext.toLowerCase() === 'svg' || artifact.ext.toLowerCase() === '.svg';
 }
 
-/**
- * An open artifact (architecture.md § Web page), in place in its pane: a page or an SVG in a sandboxed frame with an opaque origin, pictures,
- * audio and video in the page, Markdown drawn by the page into `.artifact-doc`, and anything else as a download. Its head has the kind as a
- * badge and the title, as claude-collab's viewer, then Open in new window and Download. Each version's files load afresh (`?v=`).
- */
-export function renderArtifactView(key: string, artifact: ArtifactView): string {
-  const file = artifactUrl(key, artifact.path);
-  const url = `${file}?v=${artifact.updatedAt}`;
-  const away =
-    artifact.type === 'markdown'
-      ? '<button class="icon" type="button" data-action="artifact-window" title="Open in new window" aria-label="Open in new window"><span class="codicon codicon-link-external"></span></button>'
-      : `<a class="icon" href="${escape(url)}" target="_blank" rel="noopener noreferrer" title="Open in new window" aria-label="Open in new window"><span class="codicon codicon-link-external"></span></a>`;
-  const head = `<div class="artifact-head"><button class="icon" type="button" data-action="close-artifact" title="Back to the list" aria-label="Back"><span class="codicon codicon-arrow-left"></span></button><span class="artifact-badge">${escape(artifact.kind)}</span><span class="artifact-title">${escape(artifact.title)}</span>${away}<a class="icon" href="${escape(file)}" download title="Download" aria-label="Download"><span class="codicon codicon-desktop-download"></span></a></div>`;
-  let body: string;
-
-  if (framed(artifact)) {
-    body = `<iframe class="artifact-frame" sandbox="allow-scripts" referrerpolicy="no-referrer" src="${escape(url)}" title="${escape(artifact.title)}"></iframe>`;
-  } else if (artifact.type === 'image') {
-    body = `<img class="media" alt="${escape(artifact.title)}" src="${escape(url)}">`;
-  } else if (artifact.type === 'audio') {
-    body = `<audio class="media" controls preload="metadata" src="${escape(url)}"></audio>`;
-  } else if (artifact.type === 'video') {
-    body = `<video class="media" controls preload="metadata" src="${escape(url)}"></video>`;
-  } else if (artifact.type === 'markdown') {
-    body = '<div class="artifact-doc body"><p class="empty">Loading…</p></div>';
-  } else {
-    body = `<p class="empty"><a href="${escape(file)}" download>Download ${escape(artifact.path.split('/').pop() ?? artifact.path)}</a></p>`;
-  }
-
-  return `<div class="artifact-view" data-artifact="${escape(artifact.path)}" data-version="${artifact.updatedAt}">${head}${body}</div>`;
-}
-
 /** Front matter dropped from an artifact's Markdown, as the VS Code preview does not show it either. */
 export function markdownBody(text: string): string {
   return text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');

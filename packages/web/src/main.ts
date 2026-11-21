@@ -2,17 +2,17 @@ import { applyEvent, commandQuery, EMPTY, mentionOf, mentionQuery, pageTitle, ro
 import { snoozeChoices } from '@switchboard/core/snooze';
 import type { PageState } from './model.js';
 import { escape, renderMarkdown } from './markdown.js';
-import { answerText, artifactUrl, complete, firstSnoozeDay, inputReady, renderMicButton, markdownBody, newView, parseQuestions, renderArtifactView, renderSheet, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, SIDE_TABS } from './render.js';
+import { answerText, artifactUrl, complete, firstSnoozeDay, inputReady, renderMicButton, markdownBody, newView, parseQuestions, renderSheet, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, SIDE_TABS } from './render.js';
 import type { CardDraft, SideTab, Tab, View } from './render.js';
 import type { ConsoleOptions, MountedConsole } from './console.js';
-import type { ItemView, PageRow, ScreenPrompt } from './types.js';
+import type { ArtifactView, ItemView, PageRow, ScreenPrompt } from './types.js';
 import { morph } from './morph.js';
 import { mount, unmount } from './island.js';
 import type { ComponentChild, VNode } from 'preact';
 import { renderList, renderListPane } from './list.js';
 import { menuRows, renderHeader, renderSideSwitch, renderTabs } from './header.js';
 import { renderTimeline } from './timeline.js';
-import { renderArtifacts, renderEmpty, renderStatus } from './side.js';
+import { renderArtifacts, renderArtifactView, renderEmpty, renderStatus } from './side.js';
 import { renderComposer, renderComposerMenu, renderEndedNote, renderFrame, renderShared } from './composer.js';
 import { listHeader } from './listHeader.js';
 import { attachments, drawChips } from './attachments.js';
@@ -804,19 +804,27 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       }
     });
   };
+  /** Each open Markdown artifact's drawn HTML by its path and version (null when it could not be read, undefined while it loads), and where it scrolls to once drawn. */
+  const artifactDocs = new Map<string, { updatedAt: number; html: string | null | undefined; top: number | null }>();
+  /** An open artifact's key in `artifactDocs`: the page key, the selection's work item and `scopeGen`, and the path, so another work item's artifact of the same path and time is never shown. */
+  const docKey = (path: string): string => `${state.key ?? ''} ${state.scope?.workItemId ?? ''} ${state.scope?.scopeGen ?? ''} ${path}`;
   /**
    * Draws an open Markdown artifact as claude-collab's viewer does: its text fetched by the page key, without its front matter, whose kind and
    * title the head shows; its relative pictures from its folder; a relative link to another artifact opening that one in place, and to another
-   * file in the folder opening the file in a new tab; Mermaid included. `top` is the scroll position to keep when a new version replaces it.
+   * file in the folder opening the file in a new tab; Mermaid included. Only an artifact's latest version is kept (`artifactDocs`), with `top`,
+   * the scroll position to keep when it replaces the version shown, which the next draw restores; an answer for a version replaced since is dropped.
    */
-  const fillArtifact = async (path: string, top = 0): Promise<void> => {
-    const doc = root.querySelector<HTMLElement>('.artifact-doc');
-
-    if (doc === null || state.key === null) {
+  const fillArtifact = async (artifact: ArtifactView, top: number): Promise<void> => {
+    if (state.key === null) {
       return;
     }
 
     const key = state.key;
+    const path = artifact.path;
+    const kept = docKey(path);
+    const entry = { updatedAt: artifact.updatedAt, html: undefined as string | null | undefined, top };
+
+    artifactDocs.set(kept, entry);
     const response = await deps.fetch(artifactUrl(key, path), { credentials: 'same-origin', cache: 'no-store' }).catch(() => null);
     const text = response?.ok === true ? await response.text() : null;
     const folder = path.split('/').slice(0, -1);
@@ -860,10 +868,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         : `href="${escape(artifactUrl(key, file))}" target="_blank" rel="noopener noreferrer"`;
     };
 
-    if (view.artifact === path && root.contains(doc)) {
-      doc.innerHTML = text === null ? '<p class="empty">This artifact could not be read.</p>' : renderMarkdown(markdownBody(text), base, link);
-      doc.scrollTop = top;
-      drawDiagrams(doc);
+    if (artifactDocs.get(kept) !== entry) {
+      return;
+    }
+
+    entry.html = text === null ? null : renderMarkdown(markdownBody(text), base, link);
+
+    if (view.artifact === path) {
+      draw();
     }
   };
   /** Opens the shown Markdown artifact, as drawn, in a window of its own, with the page's styles and without its buttons. */
@@ -891,10 +903,41 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       node.removeAttribute('data-action');
     });
 
-    const badge = shown.querySelector('.artifact-badge')?.outerHTML ?? '';
-    const title = shown.querySelector('.artifact-title')?.textContent ?? '';
-    const styles = ['theme.css', 'codicon.css', 'page.css'].map((name) => `<link rel="stylesheet" href="${location.origin}/page/${name}">`).join('');
-    const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><title>${escape(title)}</title>${styles}</head><body class="artifact-window"><div class="artifact-view"><div class="artifact-head">${badge}<span class="artifact-title">${escape(title)}</span></div>${copy.outerHTML}</div></body></html>`;
+    // The window's document is built from nodes, so the title and the copied Markdown go in as they are, escaped by the serializer.
+    const page = document.implementation.createHTMLDocument(shown.querySelector('.artifact-title')?.textContent ?? '');
+    const meta = (attributes: Record<string, string>): void => {
+      const node = page.createElement('meta');
+
+      Object.entries(attributes).forEach(([name, value]) => node.setAttribute(name, value));
+      page.head.append(node);
+    };
+
+    page.documentElement.lang = 'en';
+    meta({ charset: 'utf-8' });
+    meta({ name: 'referrer', content: 'no-referrer' });
+
+    for (const name of ['theme.css', 'codicon.css', 'page.css']) {
+      const link = page.createElement('link');
+
+      link.rel = 'stylesheet';
+      link.href = `${location.origin}/page/${name}`;
+      page.head.append(link);
+    }
+
+    const view = page.createElement('div');
+    const head = page.createElement('div');
+    const title = page.createElement('span');
+
+    page.body.className = 'artifact-window';
+    view.className = 'artifact-view';
+    head.className = 'artifact-head';
+    title.className = 'artifact-title';
+    title.textContent = page.title;
+    head.append(...[shown.querySelector('.artifact-badge')?.cloneNode(true)].filter((node): node is Node => node !== undefined), title);
+    view.append(head, page.importNode(copy, true));
+    page.body.append(view);
+
+    const html = `<!doctype html>${page.documentElement.outerHTML}`;
     const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
 
     window.open(url, '_blank', 'noopener');
@@ -1012,16 +1055,30 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       if (tab === 'console') {
         drawConsole(pane);
       } else if (tab === 'artifacts' && artifact !== undefined && state.key !== null) {
-        const open = pane.querySelector<HTMLElement>(':scope > .artifact-view');
+        const kept = artifactDocs.get(docKey(artifact.path));
 
         // A new version replaces the one shown, and a Markdown artifact keeps the reader's place.
-        if (open?.dataset['artifact'] !== artifact.path || open.dataset['version'] !== String(artifact.updatedAt)) {
-          const top = open?.dataset['artifact'] === artifact.path ? (open.querySelector<HTMLElement>('.artifact-doc')?.scrollTop ?? 0) : 0;
+        if (artifact.type === 'markdown' && kept?.updatedAt !== artifact.updatedAt) {
+          const open = pane.querySelector<HTMLElement>(':scope > .artifact-view');
 
-          takePane(pane);
-          pane.innerHTML = renderArtifactView(state.key, artifact);
-          void fillArtifact(artifact.path, top);
+          void fillArtifact(artifact, open?.dataset['artifact'] === artifact.path ? (open.querySelector<HTMLElement>('.artifact-doc')?.scrollTop ?? 0) : 0);
         }
+
+        const doc = artifactDocs.get(docKey(artifact.path));
+
+        drawPane(pane, renderArtifactView(state.key, artifact, doc?.updatedAt === artifact.updatedAt ? doc.html : undefined));
+
+        if (doc?.updatedAt === artifact.updatedAt && doc.html !== undefined && doc.top !== null) {
+          const shown = pane.querySelector<HTMLElement>('.artifact-doc');
+
+          if (shown !== null) {
+            shown.scrollTop = doc.top;
+          }
+
+          doc.top = null;
+        }
+
+        drawDiagrams(pane);
       } else {
         drawPane(pane, tab === 'status' ? renderStatus(state, view, now) : tab === 'artifacts' ? renderArtifacts(state, now) : renderTimeline(state, view));
         drawDiagrams(pane);
@@ -1069,6 +1126,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   };
 
   // ---- The console ----
+  /** A pane's one line, for the console's host, which the console module draws into itself. */
+  const emptyLine = (text: string): HTMLElement => {
+    const line = document.createElement('p');
+
+    line.className = 'empty';
+    line.textContent = text;
+    return line;
+  };
   // Each mounted console by its host, ended once its host leaves the page.
   const consoles = new Map<HTMLElement, MountedConsole>();
   let consoleLoad: Promise<ConsoleModule | null> | null = null;
@@ -1098,11 +1163,15 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
+    const host = document.createElement('div');
+
+    host.className = 'console';
+    host.dataset['console'] = id;
+    host.append(emptyLine('Loading the console…'));
     takePane(pane);
-    pane.innerHTML = `<div class="console" data-console="${escape(id)}"><p class="empty">Loading the console…</p></div>`;
+    pane.replaceChildren(host);
     dropConsoles();
 
-    const host = pane.firstElementChild as HTMLElement;
     const key = state.key;
     const sessionId = session.id;
     const launch = session.launch;
@@ -1114,12 +1183,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       }
 
       if (module === null) {
-        host.innerHTML = '<p class="empty">The console could not be loaded. Reload the page to try again.</p>';
+        host.replaceChildren(emptyLine('The console could not be loaded. Reload the page to try again.'));
         consoleLoad = null;
         return;
       }
 
-      host.innerHTML = '';
+      host.replaceChildren();
       consoles.set(
         host,
         module.mount(host, {

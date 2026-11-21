@@ -112,15 +112,26 @@ const INPUT_EVENTS = ['keydown', 'keypress', 'paste', 'input', 'compositionend']
 
 /** Mounts the console in `host` and opens its stream. */
 export function mountConsole(host: HTMLElement, createTerm: (options: TermOptions) => ConsoleTerm, options: ConsoleOptions): MountedConsole {
-  host.innerHTML =
-    '<div class="console-bar"><span class="console-state" role="status"></span><span class="console-size"></span>' +
-    '<button type="button" class="console-reconnect" hidden>Reconnect</button></div><div class="console-screen"></div><p class="console-note" role="alert" hidden></p>';
+  // Built from nodes rather than HTML: the console's bundle stays without Preact, and nothing it shows is markup.
+  const element = <K extends keyof HTMLElementTagNameMap>(tag: K, className: string, attributes: Record<string, string> = {}): HTMLElementTagNameMap[K] => {
+    const node = document.createElement(tag);
 
-  const stateText = host.querySelector<HTMLElement>('.console-state')!;
-  const sizeText = host.querySelector<HTMLElement>('.console-size')!;
-  const reconnect = host.querySelector<HTMLButtonElement>('.console-reconnect')!;
-  const screen = host.querySelector<HTMLElement>('.console-screen')!;
-  const note = host.querySelector<HTMLElement>('.console-note')!;
+    node.className = className;
+    Object.entries(attributes).forEach(([name, value]) => node.setAttribute(name, value));
+    return node;
+  };
+  const bar = element('div', 'console-bar');
+  const stateText = element('span', 'console-state', { role: 'status' });
+  const sizeText = element('span', 'console-size');
+  const reconnect = element('button', 'console-reconnect', { type: 'button' });
+  const screen = element('div', 'console-screen');
+  const note = element('p', 'console-note', { role: 'alert' });
+
+  reconnect.hidden = true;
+  reconnect.textContent = 'Reconnect';
+  note.hidden = true;
+  bar.append(stateText, sizeText, reconnect);
+  host.replaceChildren(bar, screen, note);
   const term = createTerm({ fontSize: CONSOLE_FONT_PX, fontFamily: FONT_FAMILY, scrollback: 10_000, cursorBlink: false, theme: CONSOLE_THEME });
   let source: EventSource | null = null;
   let ended = false;
@@ -463,7 +474,7 @@ export function mountConsole(host: HTMLElement, createTerm: (options: TermOption
       keys.dispose();
       modes.dispose();
       term.dispose();
-      host.innerHTML = '';
+      host.replaceChildren();
     },
   };
 }

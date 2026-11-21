@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyEvent, awaitingReply, EMPTY, mentionOf, mentionQuery, commandQuery, shortTitle, timeline, withEarlier } from '../src/model.js';
 import { answerText, answersIn, complete, parseQuestions } from '@switchboard/conversation/questions';
-import { artifactUrl, newView, renderArtifactView, renderMicButton, renderVoice, markdownBody } from '../src/render.js';
+import { artifactUrl, newView, renderMicButton, renderVoice, markdownBody } from '../src/render.js';
+import { renderArtifactView } from '../src/side.js';
 import { renderTimeline, turnRow } from '../src/timeline.js';
 import { renderHeader } from '../src/header.js';
 import { renderList } from '../src/list.js';
@@ -225,21 +226,21 @@ describe('drawing', () => {
   });
 
   it('opens a page or an SVG artifact in a sandboxed frame with an opaque origin, and media in the page', () => {
-    const page = renderArtifactView('key', artifact('chat/p.html', 'html', 'html'));
-    const svg = renderArtifactView('key', artifact('chat/p.svg', 'image', 'svg'));
+    const page = html(renderArtifactView('key', artifact('chat/p.html', 'html', 'html')));
+    const svg = html(renderArtifactView('key', artifact('chat/p.svg', 'image', 'svg')));
 
     expect(page).toContain('sandbox="allow-scripts"');
     expect(page).not.toContain('allow-same-origin');
     expect(page).toContain(`src="${artifactUrl('key', 'chat/p.html')}?v=1500"`);
     expect(svg).toContain('<iframe');
-    expect(renderArtifactView('key', artifact('chat/p.png', 'image', 'png'))).toContain('<img class="media"');
-    expect(renderArtifactView('key', artifact('chat/v.mp4', 'video', 'mp4'))).toContain('<video');
-    expect(renderArtifactView('key', artifact('chat/d.pdf', 'file', 'pdf'))).toContain('download');
+    expect(html(renderArtifactView('key', artifact('chat/p.png', 'image', 'png')))).toContain('<img class="media"');
+    expect(html(renderArtifactView('key', artifact('chat/v.mp4', 'video', 'mp4')))).toContain('<video');
+    expect(html(renderArtifactView('key', artifact('chat/d.pdf', 'file', 'pdf')))).toContain('download');
 
     // The head: the kind as a badge, the title, Open in new window and Download; each version's file loads afresh.
     const head = document.createElement('div');
 
-    head.innerHTML = renderArtifactView('key', { ...artifact('chat/v.mp4', 'video', 'mp4'), kind: 'demo', title: 'Demo' });
+    head.innerHTML = html(renderArtifactView('key', { ...artifact('chat/v.mp4', 'video', 'mp4'), kind: 'demo', title: 'Demo' }));
     expect(head.querySelector('.artifact-badge')!.textContent).toBe('demo');
     expect(head.querySelector('.artifact-head .artifact-title')!.textContent).toBe('Demo');
     expect(head.querySelector('.artifact-view')!.getAttribute('data-version')).toBe('1500');
@@ -248,7 +249,7 @@ describe('drawing', () => {
     expect(head.querySelector('a[title="Open in new window"]')!.getAttribute('href')).toBe('/v1/conversation/artifact/key/chat/v.mp4?v=1500');
     expect(head.querySelector('a[download]')!.getAttribute('href')).toBe('/v1/conversation/artifact/key/chat/v.mp4');
     // Markdown, which the page draws itself, opens as drawn rather than as its source text.
-    head.innerHTML = renderArtifactView('key', artifact('chat/a.md', 'markdown', 'md'));
+    head.innerHTML = html(renderArtifactView('key', artifact('chat/a.md', 'markdown', 'md')));
     expect(head.querySelector('a[title="Open in new window"]')).toBeNull();
     expect(head.querySelector('button[data-action="artifact-window"]')).not.toBeNull();
     expect(artifactUrl('k y', 'chat/a b.md')).toBe('/v1/conversation/artifact/k%20y/chat/a%20b.md');
@@ -1342,6 +1343,30 @@ describe('the page in use', () => {
     source.emit('unread', { unread: 0 });
     await flush();
     expect(posts.filter((post) => post.url.includes('/artifact/')).length).toBe(fetches + 1);
+
+    // An answer that comes after a newer version replaced its own is dropped.
+    let late: () => void = () => {};
+
+    answers['/artifact/'] = { status: 200, body: {}, text: '# Plan v3', wait: new Promise<void>((resolve) => (late = resolve)) };
+    source.emit('artifact', { artifact: { ...artifact('chat/plan.md', 'markdown', 'md'), updatedAt: 3_000 } });
+    await flush();
+    answers['/artifact/'] = { status: 200, body: {}, text: '# Plan v2\n\n![pic](plan/pic.png) [page](p.html)' };
+    source.emit('artifact', { artifact: { ...artifact('chat/plan.md', 'markdown', 'md'), updatedAt: 4_000 } });
+    await flush();
+    await flush();
+    late();
+    await flush();
+    await flush();
+    expect(root.querySelector('.artifact-view')!.getAttribute('data-version')).toBe('4000');
+    expect(root.querySelector('.artifact-doc h1')!.textContent).toBe('Plan v2');
+
+    // Another selection's artifact of the same path and time is fetched for it, never shown from the last one's.
+    const before = posts.filter((post) => post.url.includes('/artifact/')).length;
+
+    source.emit('scope', { scope: { ...scope, scopeGen: scope.scopeGen + 1 } });
+    await flush();
+    await flush();
+    expect(posts.filter((post) => post.url.includes('/artifact/')).length).toBe(before + 1);
 
     // Open in new window: the drawn document, without copy buttons, as a page of its own.
     const opened = vi.spyOn(window, 'open').mockReturnValue(null);
