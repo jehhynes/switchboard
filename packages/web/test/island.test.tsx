@@ -1,7 +1,6 @@
 import { useLayoutEffect } from 'preact/hooks';
 import { describe, expect, it } from 'vitest';
-import { ISLAND, mount, unmount } from '../src/island.js';
-import { morph } from '../src/morph.js';
+import { mount, unmount } from '../src/island.js';
 
 function Item({ name, gone }: { name: string; gone?: () => void }) {
   useLayoutEffect(() => gone, [gone]);
@@ -38,44 +37,4 @@ describe('Preact parts of the page', () => {
     expect(cleaned).toBe(1);
   });
 
-  it("keeps an island's Preact children when morph redraws the region around it, and still updates the island's attributes", () => {
-    const region = document.createElement('div');
-
-    morph(region, `<p class="before">1</p><ul class="list" ${ISLAND}></ul>`);
-    const island = region.querySelector('ul')!;
-
-    mount(island, <Item name="kept" />);
-    const item = island.querySelector('li')!;
-
-    morph(region, `<p class="before">2</p><ul class="list wide" ${ISLAND}></ul>`);
-    expect(region.querySelector('ul')).toBe(island);
-    expect(island.className).toBe('list wide');
-    expect(island.querySelector('li')).toBe(item);
-    expect(region.querySelector('p')!.textContent).toBe('2');
-
-    // Without the mark the same element's children follow the HTML.
-    morph(region, '<p class="before">2</p><ul class="list wide"></ul>');
-    expect(island.childNodes).toHaveLength(0);
-  });
-
-  it('unmounts an island when morph drops its mark or removes it, so its cleanups run and a later mount draws again', () => {
-    const region = document.createElement('div');
-    let cleaned = 0;
-
-    morph(region, `<ul class="list" ${ISLAND}></ul>`);
-    const island = region.querySelector('ul')!;
-
-    mount(island, <Item name="one" gone={() => void cleaned++} />);
-    morph(region, '<ul class="list"><li>plain</li></ul>');
-    expect(cleaned).toBe(1);
-    expect(island.textContent).toBe('plain');
-
-    morph(region, `<ul class="list" ${ISLAND}></ul>`);
-    mount(island, <Item name="two" gone={() => void cleaned++} />);
-    expect(island.textContent).toBe('two');
-
-    morph(region, `<p>gone</p>`);
-    expect(cleaned).toBe(2);
-    expect(region.querySelector('ul')).toBeNull();
-  });
 });

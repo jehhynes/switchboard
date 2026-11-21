@@ -15,7 +15,6 @@ const RULES: Array<[string, RegExp]> = [
   ['calls setHTMLUnsafe or parseHTMLUnsafe', /\b(setHTMLUnsafe|parseHTMLUnsafe)\b/],
   ['uses DOMParser', /\bDOMParser\b/],
   ['sets srcdoc', /\bsrcdoc\b/i],
-  ['draws with morph', /\bmorph\b/],
   ['imports escape', /import\s*\{[^}]*\bescape\b[^}]*\}\s*from/],
 ];
 
@@ -38,10 +37,9 @@ describe('escaping by default', () => {
       'calls insertAdjacentHTML',
       'uses dangerouslySetInnerHTML',
     ]);
-    expect(broken("range.createContextualFragment(x); document.writeln(x); morph(host, x); import { escape, renderMarkdown } from './markdown.js';")).toEqual([
+    expect(broken("range.createContextualFragment(x); document.writeln(x); import { escape, renderMarkdown } from './markdown.js';")).toEqual([
       'calls createContextualFragment',
       'calls document.write',
-      'draws with morph',
       'imports escape',
     ]);
     expect(broken("el.setHTMLUnsafe(x); new DOMParser().parseFromString(x, 'text/html'); <iframe srcDoc={x} />")).toEqual([

@@ -987,7 +987,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
   resized?.observe(panel);
 
-  /** Draws the state by changing only what differs (`morph`), so the focus, a selection, the scroll position and open menus stay. */
   /** The pool ticket row whose menu is open, with the menu's rows, while the list still has that row. */
   const poolMenu = (): { row: string; rows: VNode[] } | null => {
     const row = view.rowMenu === null ? undefined : state.groups.flatMap((group) => group.rows).find((one) => rowKey(one) === view.rowMenu);
@@ -1010,6 +1009,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       unmount(pane);
     }
   };
+  /** Draws the state; Preact changes only what differs, so the focus, a selection, the scroll position and open menus stay. */
   const draw = (): void => {
     // On a narrow screen the list and the conversation are each a full-width view (page.css); the list shows until a work item is opened.
     root.classList.toggle('listing', view.list || wanted === null);
