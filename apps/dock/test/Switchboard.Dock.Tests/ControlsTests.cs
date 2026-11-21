@@ -1278,18 +1278,32 @@ public sealed class ControlsTests
         var (window, _) = Open(Fixtures.View with { Groups = [new DockGroup("blocked", "Blocked on you", null, [review])] });
         var items = window.MenuOf(review);
 
-        Assert.Equal(["Answer in terminal", "", "Stop", "", "Mark done", "Snooze…", "", "Add comment…", "", "Open in terminal", "History", "Open ticket", "", "Delete"], items.Select((item) => item is MenuItem named ? (string)named.Header! : "").ToList());
+        // Answer in terminal opens the same terminal, so there is no Open in terminal beside it.
+        Assert.Equal(["Answer in terminal", "", "Stop", "", "Mark done", "Snooze…", "", "Add comment…", "", "History", "Open ticket", "", "Delete"], items.Select((item) => item is MenuItem named ? (string)named.Header! : "").ToList());
 
         Click(ButtonIn(RowOf(window, "item:8"), "main"));
         ((MenuItem)items[0]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
-        items.OfType<MenuItem>().Single((item) => (string?)item.Header == "Open in terminal").RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+
+        // Without the question, the menu's Open in terminal runs in the dock.
+        var answered = review with { Main = null };
+        window.MenuOf(answered).OfType<MenuItem>().Single((item) => (string?)item.Header == "Open in terminal").RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         await Task.Yield();
         Dispatcher.UIThread.RunJobs();
 
         Assert.Equal([review.Open, review.Open], actions.Clicked.Select((clicked) => clicked.Open));
-        Assert.Equal([review], actions.InTerminal);
+        Assert.Equal([answered], actions.InTerminal);
         Assert.Empty(actions.Runs);
         Assert.Empty(hub.Calls);
+    }
+
+    [AvaloniaFact]
+    public void MenuOf_AnswerInTerminalOpeningAnotherTerminal_KeepsOpenInTerminal()
+    {
+        var review = ReviewQuestion();
+        var other = review with { Open = review.Open! with { Name = "gh-108-widgets-655280-bbbb2222" } };
+        var (window, _) = Open(Fixtures.View with { Groups = [new DockGroup("blocked", "Blocked on you", null, [other])] });
+
+        Assert.Contains(window.MenuOf(other).OfType<MenuItem>(), (item) => (string?)item.Header == "Open in terminal");
     }
 
     [AvaloniaFact]

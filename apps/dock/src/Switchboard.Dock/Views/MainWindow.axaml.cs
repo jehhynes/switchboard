@@ -1451,6 +1451,8 @@ public sealed partial class MainWindow : Window
         if (MainIsClick(row) && model.Row(row.Key) is { } shown)
         {
             main.Add(Item(row.Main ?? "Open", () => Open(shown), row.MainGlyph));
+            // Answer in terminal opens the terminal Open in terminal would, so the menu lists it once.
+            terminalIsMain = row.Open?.Terminal is { } clicked && row.Terminal is { } own && clicked.Name == own.Name;
         }
         else if (row.Controls.FirstOrDefault((control) => control.Label == row.Main && control.Confirm is null && control.Group is null) is { } control)
         {
