@@ -1,4 +1,4 @@
-import { readSnoozed } from './hub.js';
+import { readPaneEnabled, readSnoozed } from './hub.js';
 import { PaneConnection, PaneWindow } from './pane.js';
 import type { KeyValue, PaneSocketLike } from './pane.js';
 import { readCards } from './pills.js';
@@ -138,6 +138,7 @@ if (!FIREFOX) {
   const markerPage = chrome.runtime.getURL('pane.html');
   const pane = new PaneConnection({
     socket: (url) => new WebSocket(url) as unknown as PaneSocketLike,
+    enabled: () => readPaneEnabled((url) => fetch(url, { cache: 'no-store' })),
     window: new PaneWindow(
       {
         markerUrl: (marker) => `${markerPage}#${marker}`,
@@ -154,6 +155,8 @@ if (!FIREFOX) {
       store(chrome.storage.session),
     ),
     local: store(chrome.storage.local),
+    session: store(chrome.storage.session),
+    now: () => Date.now(),
     setTimeout: (run, ms) => setTimeout(run, ms),
     clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
     setInterval: (run, ms) => setInterval(run, ms),

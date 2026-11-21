@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { MAX_TABS, PANE_SOCKET_URL, PING_MS, PaneConnection, PaneWindow, paneLinks, paneMarker } from '../src/pane.js';
+import { MAX_TABS, MAX_TRIES, PANE_SOCKET_URL, PING_MS, PaneConnection, PaneWindow, paneLinks, paneMarker, retryWait } from '../src/pane.js';
 import type { KeyValue, PaneBrowser, PaneSocketLike } from '../src/pane.js';
 
 const MARKER_PAGE = 'chrome-extension://hlbibnhgkgnjkbfledhgjblacloneije/pane.html';
@@ -187,12 +187,15 @@ class FakeSocket implements PaneSocketLike {
   }
 }
 
-function connection(initial: Record<string, unknown> = {}) {
+function connection(initial: Record<string, unknown> = {}, options: { enabled?: boolean | null } = {}) {
   const sockets: FakeSocket[] = [];
-  const timers: Array<{ run: () => void; ms: number }> = [];
+  const timers: Array<{ run: () => void; ms: number; cleared: boolean }> = [];
   const intervals: Array<{ run: () => void; ms: number }> = [];
   const local = memory(initial);
+  const session = memory();
   const window = { mark: vi.fn(async () => {}), show: vi.fn(async () => {}), removed: vi.fn(async () => true) };
+  const state = { enabled: options.enabled === undefined ? true : options.enabled, now: 1_000 };
+  const enabled = vi.fn(async () => state.enabled);
   const pane = new PaneConnection({
     socket: (url) => {
       const socket = new FakeSocket(url);
@@ -200,17 +203,35 @@ function connection(initial: Record<string, unknown> = {}) {
       sockets.push(socket);
       return socket;
     },
+    enabled,
     window: window as unknown as PaneWindow,
     local,
-    setTimeout: (run, ms) => timers.push({ run, ms }),
-    clearTimeout: () => {},
+    session,
+    now: () => state.now,
+    setTimeout: (run, ms) => timers.push({ run, ms, cleared: false }) - 1,
+    clearTimeout: (timer) => void (timers[timer as number]!.cleared = true),
     setInterval: (run, ms) => intervals.push({ run, ms }),
     clearInterval: () => {},
     log: () => {},
   });
-  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const settle = async () => {
+    for (let i = 0; i < 5; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  };
+  /** The waits of the timers still pending. */
+  const pending = () => timers.filter((timer) => !timer.cleared).map((timer) => timer.ms);
+  /** Runs the last pending timer. */
+  const fire = async () => {
+    const timer = timers.filter((each) => !each.cleared).at(-1)!;
 
-  return { pane, sockets, timers, intervals, local, window, settle };
+    timer.cleared = true;
+    state.now += timer.ms;
+    timer.run();
+    await settle();
+  };
+
+  return { pane, sockets, timers, intervals, local, session, window, settle, state, enabled, pending, fire };
 }
 
 describe('PaneConnection', () => {
@@ -218,6 +239,8 @@ describe('PaneConnection', () => {
     const { pane, sockets, intervals, local, settle } = connection({ paneCredential: 'kept' });
 
     pane.connect();
+    pane.connect();
+    await settle();
     pane.connect();
     expect(sockets).toHaveLength(1);
     expect(sockets[0]!.url).toBe(PANE_SOCKET_URL);
@@ -234,6 +257,132 @@ describe('PaneConnection', () => {
     expect(local.items['paneCredential']).toBe('fresh');
   });
 
+  it('asks the hub nothing and opens no socket before it was ever paired', async () => {
+    const { pane, sockets, enabled, pending, settle } = connection();
+
+    pane.connect();
+    expect(pane.external({ type: 'wake' }, 'http://127.0.0.1:47616')).toEqual({ ok: true });
+    await settle();
+    expect(enabled).not.toHaveBeenCalled();
+    expect(sockets).toHaveLength(0);
+    expect(pending()).toEqual([]);
+  });
+
+  it('opens no socket and sets no timer while the hub has the pane off, and asks again on each wake', async () => {
+    const { pane, sockets, enabled, pending, settle, state } = connection({ paneCredential: 'kept' }, { enabled: false });
+
+    pane.connect();
+    await settle();
+    pane.external({ type: 'wake' }, 'http://localhost:47616');
+    await settle();
+    expect(enabled).toHaveBeenCalledTimes(2);
+    expect(sockets).toHaveLength(0);
+    expect(pending()).toEqual([]);
+
+    state.enabled = true;
+    pane.external({ type: 'wake' }, 'http://localhost:47616');
+    await settle();
+    expect(sockets).toHaveLength(1);
+  });
+
+  it('asks again later, twice as long each time, while the hub does not answer, and then stops', async () => {
+    const { pane, sockets, enabled, pending, fire, settle } = connection({ paneCredential: 'kept' }, { enabled: null });
+
+    pane.connect();
+    await settle();
+
+    const waits: number[] = [];
+
+    while (pending().length > 0) {
+      waits.push(pending()[0]!);
+      await fire();
+    }
+
+    expect(waits).toEqual([5_000, 10_000, 20_000, 40_000, 80_000, 160_000]);
+    expect(enabled).toHaveBeenCalledTimes(7);
+    expect(sockets).toHaveLength(0);
+    expect(retryWait(6)).toBe(300_000);
+    expect(retryWait(20)).toBe(300_000);
+  });
+
+  it('backs off after a refused socket, keeping the wait through wakes and restarts, and stops after the last try until the page pairs', async () => {
+    const first = connection({ paneCredential: 'kept' });
+    const { pane, sockets, enabled, pending, fire, settle, session, state } = first;
+
+    pane.connect();
+    await settle();
+    // Refused with 403: the socket closes without a message from the hub.
+    sockets[0]!.close();
+    await settle();
+    expect(session.items['paneRefused']).toEqual({ count: 1, until: state.now + 5_000 });
+    expect(pending()).toEqual([5_000]);
+
+    // A wake inside the wait opens nothing and asks nothing.
+    pane.external({ type: 'wake' }, 'http://localhost:47616');
+    await settle();
+    expect(sockets).toHaveLength(1);
+    expect(enabled).toHaveBeenCalledTimes(1);
+
+    for (let n = 1; n < MAX_TRIES; n++) {
+      await fire();
+      expect(sockets).toHaveLength(n + 1);
+      sockets[n]!.close();
+      await settle();
+    }
+
+    expect(session.items['paneRefused']).toEqual({ count: MAX_TRIES, until: null });
+    expect(pending()).toEqual([]);
+    pane.connect();
+    await settle();
+    expect(sockets).toHaveLength(MAX_TRIES);
+    expect(enabled).toHaveBeenCalledTimes(MAX_TRIES);
+
+    // A pairing token from the page tries again, and pairing clears the refusals.
+    pane.external({ type: 'pair', token: 'tok' }, 'http://127.0.0.1:47616');
+    await settle();
+    expect(sockets).toHaveLength(MAX_TRIES + 1);
+    sockets.at(-1)!.open();
+    await settle();
+    expect(sockets.at(-1)!.sent).toEqual([{ type: 'pair', token: 'tok' }]);
+    sockets.at(-1)!.receive({ type: 'paired', credential: 'fresh' });
+    await settle();
+    expect(session.items['paneRefused']).toBeUndefined();
+  });
+
+  it('waits out a refusal kept from before the service worker restarted', async () => {
+    const { pane, sockets, enabled, session, pending, fire, settle, state } = connection({ paneCredential: 'kept' });
+
+    session.items['paneRefused'] = { count: 2, until: state.now + 7_000 };
+    pane.connect();
+    await settle();
+    expect(enabled).not.toHaveBeenCalled();
+    expect(pending()).toEqual([7_000]);
+    await fire();
+    expect(sockets).toHaveLength(1);
+  });
+
+  it('closes and stops when the hub does not know its credential, until the page pairs again', async () => {
+    const { pane, sockets, session, pending, settle } = connection({ paneCredential: 'stale' });
+
+    pane.connect();
+    await settle();
+    sockets[0]!.open();
+    await settle();
+    sockets[0]!.receive({ type: 'unpaired' });
+    await settle();
+    expect(sockets[0]!.readyState).toBe(3);
+    expect(session.items['paneRefused']).toEqual({ count: 1, until: null });
+    expect(pending()).toEqual([]);
+
+    pane.external({ type: 'wake' }, 'http://localhost:47616');
+    await settle();
+    expect(sockets).toHaveLength(1);
+
+    pane.external({ type: 'pair', token: 'tok' }, 'http://localhost:47616');
+    await settle();
+    expect(sockets).toHaveLength(2);
+  });
+
   it('pairs with a token from a loopback page only, connecting first when needed', async () => {
     const { pane, sockets, settle } = connection();
 
@@ -242,9 +391,11 @@ describe('PaneConnection', () => {
     expect(pane.external({ type: 'pair', token: 't' }, 'http://127.0.0.1.evil.test:47616')).toEqual({ error: 'Only the Switchboard page can ask this.' });
     expect(pane.external({ type: 'pair', token: 'x'.repeat(129) }, 'http://127.0.0.1:47616')).toEqual({ error: 'Unknown request.' });
     expect(pane.external({ type: 'open', url: 'https://a.test/' }, 'http://127.0.0.1:47616')).toEqual({ error: 'Unknown request.' });
+    await settle();
     expect(sockets).toHaveLength(0);
 
     expect(pane.external({ type: 'pair', token: 'tok' }, 'http://127.0.0.1:47616')).toEqual({ ok: true });
+    await settle();
     sockets[0]!.open();
     await settle();
     expect(sockets[0]!.sent).toEqual([{ type: 'pair', token: 'tok' }]);
@@ -253,15 +404,36 @@ describe('PaneConnection', () => {
     expect(pane.external({ type: 'pair', token: 'again' }, 'http://localhost:47616')).toEqual({ ok: true });
     expect(sockets[0]!.sent.at(-1)).toEqual({ type: 'pair', token: 'again' });
     expect(pane.external({ type: 'wake' }, 'http://localhost:47616')).toEqual({ ok: true });
+    await settle();
     expect(sockets).toHaveLength(1);
   });
 
-  it('carries out window and tabs only once paired, and answers window with its marker', async () => {
-    const { pane, sockets, window, settle } = connection();
+  it('waits for the answer to a token sent after hello, and closes and backs off when the hub refuses the token', async () => {
+    const { pane, sockets, session, pending, settle, state } = connection({ paneCredential: 'stale' });
 
     pane.connect();
+    await settle();
     sockets[0]!.open();
+    await settle();
+    pane.external({ type: 'pair', token: 'tok' }, 'http://localhost:47616');
+    // The answer to hello arrives after the token went.
     sockets[0]!.receive({ type: 'unpaired' });
+    await settle();
+    expect(sockets[0]!.readyState).toBe(1);
+
+    sockets[0]!.receive({ type: 'unpaired', error: 'The pairing token is unknown, used or expired. Pair again from the page.' });
+    await settle();
+    expect(sockets[0]!.readyState).toBe(3);
+    expect(session.items['paneRefused']).toEqual({ count: 1, until: state.now + 5_000 });
+    expect(pending()).toEqual([5_000]);
+  });
+
+  it('carries out window and tabs only once paired, and answers window with its marker', async () => {
+    const { pane, sockets, window, settle } = connection({ paneCredential: 'kept' });
+
+    pane.connect();
+    await settle();
+    sockets[0]!.open();
     sockets[0]!.receive({ type: 'window', marker: '0123456789ab' });
     sockets[0]!.receive({ type: 'tabs', urls: ['https://a.test/'], active: 'https://a.test/' });
     await settle();
@@ -275,16 +447,16 @@ describe('PaneConnection', () => {
     sockets[0]!.receive({ type: 'tabs', urls: ['https://a.test/'], active: 'https://a.test/' });
     sockets[0]!.onmessage?.({ data: 'not json' });
     await settle();
-    await settle();
     expect(window.mark.mock.calls).toEqual([['0123456789ab']]);
     expect(sockets[0]!.sent.at(-1)).toEqual({ type: 'window', marker: '0123456789ab' });
     expect(window.show.mock.calls).toEqual([[['https://a.test/'], 'https://a.test/']]);
   });
 
-  it('tells the hub its window closed, and connects again after a socket closes, waiting longer each time', async () => {
-    const { pane, sockets, timers, settle } = connection();
+  it('tells the hub its window closed, and after a paired socket drops asks the hub again, opening nothing once the pane is off', async () => {
+    const { pane, sockets, pending, fire, settle, state, session } = connection({ paneCredential: 'kept' });
 
     pane.connect();
+    await settle();
     sockets[0]!.open();
     sockets[0]!.receive({ type: 'paired' });
     await settle();
@@ -292,15 +464,63 @@ describe('PaneConnection', () => {
     expect(sockets[0]!.sent.at(-1)).toEqual({ type: 'closed' });
 
     sockets[0]!.close();
+    await settle();
     expect(pane.paired).toBe(false);
-    expect(timers.map((timer) => timer.ms)).toEqual([5_000]);
-    timers[0]!.run();
+    expect(pending()).toEqual([5_000]);
+    expect(session.items['paneRefused']).toBeUndefined();
+    await fire();
     expect(sockets).toHaveLength(2);
+
+    sockets[1]!.open();
+    sockets[1]!.receive({ type: 'paired' });
+    await settle();
     sockets[1]!.close();
-    timers[1]!.run();
-    sockets[2]!.close();
-    timers[2]!.run();
-    sockets[3]!.close();
-    expect(timers.map((timer) => timer.ms)).toEqual([5_000, 30_000, 60_000, 60_000]);
+    await settle();
+    state.enabled = false;
+    await fire();
+    expect(sockets).toHaveLength(2);
+    expect(pending()).toEqual([]);
+  });
+  it('connects for a pairing token that arrives while the hub is being asked', async () => {
+    const { pane, sockets, enabled, settle } = connection({ paneCredential: 'stale' }, { enabled: false });
+    let answer: (value: boolean) => void = () => {};
+
+    enabled.mockImplementationOnce(() => new Promise<boolean>((resolve) => (answer = resolve)));
+    pane.connect();
+    await settle();
+    pane.external({ type: 'pair', token: 'tok' }, 'http://127.0.0.1:47616');
+    answer(false);
+    await settle();
+    expect(sockets).toHaveLength(0);
+    expect(enabled).toHaveBeenCalledTimes(2);
+
+    enabled.mockImplementationOnce(() => new Promise<boolean>((resolve) => (answer = resolve)));
+    pane.connect();
+    await settle();
+    pane.external({ type: 'pair', token: 'tok' }, 'http://127.0.0.1:47616');
+    answer(true);
+    await settle();
+    expect(sockets).toHaveLength(1);
+    sockets[0]!.open();
+    await settle();
+    expect(sockets[0]!.sent).toEqual([{ type: 'pair', token: 'tok' }]);
+  });
+
+  it('sends nothing when the socket closed while its credential was read', async () => {
+    const { pane, sockets, local, intervals, settle } = connection({ paneCredential: 'kept' });
+
+    pane.connect();
+    await settle();
+
+    const read = local.get;
+    let release: () => void = () => {};
+
+    local.get = (key) => new Promise((resolve) => (release = () => void read(key).then(resolve)));
+    sockets[0]!.open();
+    sockets[0]!.close();
+    release();
+    await settle();
+    expect(sockets[0]!.sent).toEqual([]);
+    expect(intervals).toHaveLength(0);
   });
 });

@@ -70,6 +70,28 @@ describe('listenBrowser', () => {
     expect((await get(server.port, '/cards', undefined, 'POST')).status).toBe(404);
   });
 
+  it('answers whether the Chrome pane is on, off without a pane socket, with no CORS header', async () => {
+    let enabled = false;
+
+    server = await listenBrowser(0, () => [], () => [], undefined, undefined, (_request, socket) => void socket.destroy(), () => enabled);
+
+    const off = await get(server.port, '/pane');
+
+    expect(off.status).toBe(200);
+    expect(JSON.parse(off.body)).toEqual({ enabled: false });
+    expect(off.headers['access-control-allow-origin']).toBeUndefined();
+    expect(off.headers['cache-control']).toBe('no-store');
+
+    enabled = true;
+    expect(JSON.parse((await get(server.port, '/pane?x=1', `localhost:${server.port}`)).body)).toEqual({ enabled: true });
+    expect((await get(server.port, '/pane', `rebound.example:${server.port}`)).status).toBe(403);
+    expect((await get(server.port, '/pane', undefined, 'POST')).status).toBe(404);
+
+    await server.close();
+    server = await listenBrowser(0, () => [], () => [], undefined, undefined, undefined, () => true);
+    expect(JSON.parse((await get(server.port, '/pane')).body)).toEqual({ enabled: false });
+  });
+
   it('refuses another Host, another path and another method', async () => {
     server = await listenBrowser(0, () => ['https://github.com/o/r/issues/1'], () => []);
 

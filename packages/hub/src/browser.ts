@@ -14,9 +14,10 @@ export interface BrowserServer {
  * Loopback endpoint for the Chrome extension: `GET /snoozed` lists the URLs of snoozed tickets (PRD R56),
  * `GET /cards` each ticket's playbook and group (PRD R67), `POST /snooze` snoozes one and `POST /unsnooze` ends its snooze (PRD R66). A browser extension
  * cannot read `hub.json`, so the port is fixed. It sends no CORS headers, so web pages cannot read it, and it refuses a
- * Host other than the loopback address, against DNS rebinding. `/pane` upgrades to the Chrome pane's paired socket (PRD R113).
+ * Host other than the loopback address, against DNS rebinding. `/pane` upgrades to the Chrome pane's paired socket (PRD R113); a plain
+ * `GET /pane` answers whether the pane is on, so the extension opens no socket the hub would refuse.
  */
-export function listenBrowser(port: number, snoozed: () => string[], cards: () => Card[], snooze?: SnoozeByUrl, unsnooze?: UnsnoozeByUrl, pane?: (request: IncomingMessage, socket: Duplex, head: Buffer) => void): Promise<BrowserServer> {
+export function listenBrowser(port: number, snoozed: () => string[], cards: () => Card[], snooze?: SnoozeByUrl, unsnooze?: UnsnoozeByUrl, pane?: (request: IncomingMessage, socket: Duplex, head: Buffer) => void, paneEnabled?: () => boolean): Promise<BrowserServer> {
   const server: Server = createServer((request, response) => {
     const listening = (server.address() as { port: number }).port;
     const hosts = new Set([`127.0.0.1:${listening}`, `localhost:${listening}`]);
@@ -33,6 +34,8 @@ export function listenBrowser(port: number, snoozed: () => string[], cards: () =
       reply(200, { urls: snoozed() });
     } else if (request.method === 'GET' && path === '/cards') {
       reply(200, { cards: cards() });
+    } else if (request.method === 'GET' && path === '/pane') {
+      reply(200, { enabled: pane !== undefined && paneEnabled?.() === true });
     } else if (request.method === 'POST' && path === '/snooze' && snooze !== undefined) {
       void handleSnooze(request, snooze).then(({ status, body }) => reply(status, body));
     } else if (request.method === 'POST' && path === '/unsnooze' && unsnooze !== undefined) {

@@ -1394,6 +1394,7 @@ const dockWithRuns = () => {
       return ticket === null ? null : { refused: runtime.send({ type: 'snooze', ticketId: ticket.id, until }).refused };
     },
     paneUpgrade: (request, socket, head) => paneLink.upgrade(request, socket, head),
+    paneEnabled: () => config.settings.web.chromePane,
     unsnoozeUrl: (url) => {
       const ticket = store.ticketInScopeByUrl(url);
 
