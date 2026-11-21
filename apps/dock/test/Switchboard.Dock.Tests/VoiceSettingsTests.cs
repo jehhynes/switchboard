@@ -65,12 +65,12 @@ public sealed class VoiceSettingsTests
     {
         var sections = SettingsFields.VoiceFields(SettingsConfigs.State());
 
-        Assert.Equal(["Speech", "Dictation", "Voice check", "Playbook personas"], sections.Select((section) => section.Heading));
+        Assert.Equal(["Speech", "Spoken alerts", "Dictation", "Voice check", "Playbook personas"], sections.Select((section) => section.Heading));
         Assert.Equal(
             ["voice.enabled", "voice.voice", "voice.style", "voice.speed", "voice.expressive", "voice.expandReplies", "voice.awayMinutes", "voice.needsYouSound", "voice.outputDevice"],
             sections[0].Fields.Select((field) => field.Path));
-        Assert.Equal(["voice.micIdleMinutes", "voice.endPauseMs", "voice.inputDevice", "voice.halfDuplexTailMs", "voice.duplex.local", "voice.duplex.remote"], sections[1].Fields.Select((field) => field.Path));
-        Assert.Empty(sections[3].Fields);
+        Assert.Equal(["voice.micIdleMinutes", "voice.endPauseMs", "voice.inputDevice", "voice.halfDuplexTailMs", "voice.duplex.local", "voice.duplex.remote"], sections[2].Fields.Select((field) => field.Path));
+        Assert.Empty(sections[4].Fields);
 
         var fields = sections[0].Fields.ToDictionary((field) => field.Path);
 
@@ -82,7 +82,7 @@ public sealed class VoiceSettingsTests
         Assert.Equal((FieldKind.Number, "1"), (fields["voice.speed"].Kind, fields["voice.speed"].Placeholder));
         Assert.Equal((FieldKind.Integer, "2"), (fields["voice.awayMinutes"].Kind, fields["voice.awayMinutes"].Placeholder));
 
-        var dictation = sections[1].Fields.ToDictionary((field) => field.Path);
+        var dictation = sections[2].Fields.ToDictionary((field) => field.Path);
 
         Assert.Equal((FieldKind.Integer, "10"), (dictation["voice.micIdleMinutes"].Kind, dictation["voice.micIdleMinutes"].Placeholder));
         Assert.Equal((FieldKind.Integer, "3000"), (dictation["voice.endPauseMs"].Kind, dictation["voice.endPauseMs"].Placeholder));
@@ -541,6 +541,40 @@ public sealed class VoiceSettingsTests
         Assert.Equal("voice", editor.State.Page);
         Assert.Equal(2, editor.State.PersonaCount);
     }
+    [Fact]
+    public void VoiceFields_SpokenAlerts_OffersTheAlertSettingsOnByDefaultWithTheirDefaults()
+    {
+        var alerts = SettingsFields.VoiceFields(SettingsConfigs.State()).Single((section) => section.Heading == "Spoken alerts");
+
+        Assert.False(alerts.Advanced);
+        Assert.Equal(
+            [("voice.spokenAlerts", FieldKind.Boolean), ("voice.operatorName", FieldKind.Text), ("voice.alertOn.finished", FieldKind.Boolean), ("voice.alertOn.question", FieldKind.Boolean), ("voice.alertOn.permission", FieldKind.Boolean), ("voice.alertAnswerSeconds", FieldKind.Integer)],
+            alerts.Fields.Select((field) => (field.Path, field.Kind)));
+        Assert.All(alerts.Fields.Where((field) => field.Kind == FieldKind.Boolean), (field) => Assert.True(SettingsPages.FieldViewOf(field, null, []).Checked));
+        Assert.False(SettingsPages.FieldViewOf(alerts.Fields[3], false, []).Checked);
+        Assert.Equal(("No name", "10"), (alerts.Fields[1].Placeholder, alerts.Fields[5].Placeholder));
+    }
+
+    [Fact]
+    public async Task Save_SpokenAlertEdits_WritesThemUnderVoice()
+    {
+        var editor = await Loaded();
+        var fields = SettingsFields.VoiceFields(editor.State!);
+
+        editor.Navigate("voice");
+        editor.Edit(FieldOf(fields, "voice.operatorName"), "Alex");
+        editor.Edit(FieldOf(fields, "voice.alertOn.question"), "", false);
+        editor.Edit(FieldOf(fields, "voice.alertAnswerSeconds"), "15");
+
+        Assert.True(await editor.Save());
+
+        var saved = JsonNode.Parse(Assert.Single(hub.Saves)["save ".Length..])!["value"]!["voice"]!;
+
+        Assert.Equal("Alex", saved["operatorName"]!.GetValue<string>());
+        Assert.False(saved["alertOn"]!["question"]!.GetValue<bool>());
+        Assert.Equal(15, saved["alertAnswerSeconds"]!.GetValue<int>());
+    }
+
     [Fact]
     public void VoiceFields_VoiceCheck_IsAnAdvancedGroupOfTheThreeThresholdsWithTheirDefaults()
     {

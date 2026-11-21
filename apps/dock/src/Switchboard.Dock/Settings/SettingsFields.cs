@@ -431,6 +431,15 @@ public static partial class SettingsFields
                 new Field("voice.needsYouSound", "Needs-you sound", FieldKind.Boolean, "Play a short sound between spoken replies when another work item starts needing you.", Fallback: true),
                 new Field("voice.outputDevice", "Output device", FieldKind.Text, "Part of the playback device’s name, such as Speakers. Empty uses the system default.", "System default"),
             ]),
+            new Section("Spoken alerts",
+            [
+                new Field("voice.spokenAlerts", "Spoken alerts", FieldKind.Boolean, "When a session the voice is not speaking for finishes or waits on you, say so, as in “Hey Alex? Tinker finished Fix the badge.”, and read its reply if you answer “yes” or “tell me”.", Fallback: true),
+                new Field("voice.operatorName", "Your name", FieldKind.Text, "The name alerts call you by. Empty says only “Hey?”.", "No name"),
+                new Field("voice.alertOn.finished", "Alert when a turn finishes", FieldKind.Boolean, "", Fallback: true),
+                new Field("voice.alertOn.question", "Alert on a question", FieldKind.Boolean, "", Fallback: true),
+                new Field("voice.alertOn.permission", "Alert on a permission prompt", FieldKind.Boolean, "", Fallback: true),
+                new Field("voice.alertAnswerSeconds", "Answer window (seconds)", FieldKind.Integer, "3 to 60. How long the voice listens for your answer after an alert, even after the away or mic idle timeout; the mic must be on.", "10"),
+            ]),
             new Section("Dictation",
             [
                 new Field("voice.micIdleMinutes", "Mic idle timeout (minutes)", FieldKind.Integer, "0 to 1440. After this many minutes of silence the mic stops listening, even with the voice here; 0 never stops it.", "10"),
