@@ -47,7 +47,7 @@ function launch(entry: string, extra: Record<string, string | undefined>, args: 
     delete env[key];
   }
 
-  const child = spawn(process.execPath, [entry, ...args, `--home=${home}`, ...(['report', 'register', 'attach', 'holder', 'restart'].includes(args[0] ?? '') ? [] : ['--browser-port=0', '--page-port=0'])], { windowsHide: true, env });
+  const child = spawn(process.execPath, [entry, ...args, `--home=${home}`, ...(['report', 'register', 'attach', 'holder', 'restart', 'install'].includes(args[0] ?? '') ? [] : ['--browser-port=0', '--page-port=0'])], { windowsHide: true, env });
   let stdout = '';
   let stderr = '';
 
@@ -658,4 +658,35 @@ describe('hub entry point', () => {
       await start('--stop').exited;
     }
   }, 60_000);
+  it("installs the builds an extension's dist folder carries on hub.js install, and refuses to run from another folder", async () => {
+    const refused = await start('install').exited;
+
+    expect(refused.code).toBe(1);
+    expect(refused.stderr).toBe(`Run the hub.js in the Switchboard extension's dist folder; ${dirname(main)} carries no terminal holder build.\n`);
+
+    const dist = join(home, 'extension', 'dist');
+    const holderBuild = '0123456789abcdef';
+
+    mkdirSync(join(dist, 'holder'), { recursive: true });
+    mkdirSync(join(dist, 'voice'), { recursive: true });
+    writeFileSync(join(dist, 'hub.js'), `import(${JSON.stringify(pathToFileURL(main).href)});\n`);
+    writeFileSync(join(dist, 'holder', 'holder.js'), '');
+    writeFileSync(join(dist, 'holder', 'manifest.json'), JSON.stringify({ build: holderBuild, files: ['holder.js'] }));
+    writeFileSync(join(dist, 'voice', 'voice.js'), '');
+    writeFileSync(join(dist, 'voice', 'manifest.json'), JSON.stringify({ build: 'fedcba9876543210', files: ['voice.js'] }));
+
+    const installed = await launch(join(dist, 'hub.js'), {}, ['install']).exited;
+
+    expect(installed.stderr).toBe('');
+    expect(installed.code).toBe(0);
+    expect(installed.stdout).toBe(`Installed hub build ${buildOf(join(dist, 'hub.js'))} in ${hubBundlePath(home)}.\n`);
+    expect(readFileSync(hubBundlePath(home), 'utf8')).toBe(readFileSync(join(dist, 'hub.js'), 'utf8'));
+    expect(JSON.parse(readFileSync(join(switchboardHome(home), 'holder', 'current.json'), 'utf8'))).toEqual({ build: holderBuild });
+
+    const again = await launch(join(dist, 'hub.js'), {}, ['install']).exited;
+
+    expect(again.stdout).toBe(`Already installed: hub build ${buildOf(join(dist, 'hub.js'))} in ${hubBundlePath(home)}.\n`);
+    // The installed copy is not an extension's dist folder.
+    expect((await launch(hubBundlePath(home), {}, ['install']).exited).code).toBe(1);
+  });
 });

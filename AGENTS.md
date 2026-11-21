@@ -78,11 +78,12 @@ For executable changes to the VS Code extension, hub, or bundled packages:
 npm run build
 npm run package --workspace switchboard
 code --install-extension extensions/switchboard/switchboard-0.0.0.vsix --force
+node ~/.vscode/extensions/switchboard.switchboard-0.0.0/dist/hub.js install
 ```
 
 Package with `vsce package --no-dependencies`; the workspace script includes the flag. Build first, because packaging does not build. A repository build alone does not update the installed VSIX.
 
-Confirm the installed bundle under `%USERPROFILE%/.vscode/extensions/switchboard.switchboard-0.0.0/dist/` (`~/.vscode/extensions/…` on Linux) contains the change, then report that the developer can reload when ready. Do not reload their window. Activation copies the hub bundle to the Switchboard home and can replace a running hub.
+Confirm the installed bundle under `%USERPROFILE%/.vscode/extensions/switchboard.switchboard-0.0.0/dist/` (`~/.vscode/extensions/…` on Linux) contains the change. `hub.js install` copies the hub, holder, voice and pane helper builds into the Switchboard home, as a window's activation does, and the running hub restarts onto the new hub build once it is quiet, so a change to the hub or a bundled package needs no reload; `node ~/.switchboard/hub.js restart` waits for the restart and prints the new build. For a change to the extension's own UI, report that the developer can reload when ready. Do not reload their window.
 
 The Chrome pane helper (`apps/dock/src/Switchboard.PaneHelper`) ships in the VS Code extension, not with the dock: for changes to it, rebuild, package and install the extension as above.
 

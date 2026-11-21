@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { hubBundlePath, hubLogPath, switchboardHome } from '@switchboard/core';
-import { ATTACH_TIMEOUT_MS, buildOf, reportReady, startSuccessor, bundleHome, killProcessTree, connectHolder, currentHolderBuild, createHubApp, findHub, gitBashRoot, handledBody, isSnapshotWorker, postToHub, recordedHubPid, registerTitle, reportBody, runAttach, runHolder, runSnapshotWorker, serveHub, stopHub, ticketBody } from '@switchboard/hub';
+import { ATTACH_TIMEOUT_MS, buildOf, carriesBuilds, installCarried, reportReady, startSuccessor, bundleHome, killProcessTree, connectHolder, currentHolderBuild, createHubApp, findHub, gitBashRoot, handledBody, isSnapshotWorker, postToHub, recordedHubPid, registerTitle, reportBody, runAttach, runHolder, runSnapshotWorker, serveHub, stopHub, ticketBody } from '@switchboard/hub';
 
 declare const __SWITCHBOARD_VERSION__: string | undefined;
 
@@ -314,6 +314,43 @@ async function web(home: string, rest: readonly string[]): Promise<number> {
   return 0;
 }
 
+/**
+ * Installs the builds the extension's `dist` folder carries into the home, as activation does, so a new build takes over without a VS Code window
+ * (architecture.md § Hub lifecycle): the running hub restarts onto the hub bundle once quiet. Run as `<extension>/dist/hub.js install`. Exit
+ * codes: 0 installed, 1 usage or not an extension's `dist`, 3 a program that could not be installed.
+ */
+async function install(home: string, rest: readonly string[], bundle: string | undefined): Promise<number> {
+  const dist = bundle === undefined ? null : dirname(resolve(bundle));
+
+  if (rest.length > 0 || dist === null) {
+    process.stderr.write('Usage: <extension folder>/dist/hub.js install [--home=<dir>]\n');
+    return 1;
+  }
+
+  if (!carriesBuilds(dist) || resolve(dist, 'hub.js') === resolve(hubBundlePath(home))) {
+    process.stderr.write(`Run the hub.js in the Switchboard extension's dist folder; ${dist} carries no terminal holder build.\n`);
+    return 1;
+  }
+
+  const installed = installCarried(dist, home);
+  const errors = await installed.programs;
+  const build = buildOf(hubBundlePath(home));
+
+  process.stdout.write(`${installed.hub ? 'Installed' : 'Already installed:'} hub build ${build} in ${hubBundlePath(home)}.\n`);
+
+  for (const error of errors) {
+    process.stderr.write(`${error}\n`);
+  }
+
+  const running = await findHub(home);
+
+  if (running !== null && running.build !== build) {
+    process.stdout.write(`The running hub (pid ${running.pid}, build ${running.build}) restarts onto it once it is quiet; hub.js restart waits for that.\n`);
+  }
+
+  return errors.length > 0 ? 3 : 0;
+}
+
 /** How long `hub.js restart` waits for the new hub. */
 const RESTART_WAIT_MS = 60_000;
 
@@ -363,12 +400,12 @@ async function restart(home: string, rest: readonly string[]): Promise<number> {
 async function main(argv: readonly string[]): Promise<number> {
   const bundle = process.argv[1];
 
-  if (argv[0] === 'report' || argv[0] === 'register' || argv[0] === 'attach' || argv[0] === 'holder' || argv[0] === 'web' || argv[0] === 'restart') {
+  if (argv[0] === 'report' || argv[0] === 'register' || argv[0] === 'attach' || argv[0] === 'holder' || argv[0] === 'web' || argv[0] === 'restart' || argv[0] === 'install') {
     // A session runs `<home>/.switchboard/hub.js report …`, so the bundle's location names its home; the extension's own bundle names none.
     const home = flag(argv, 'home') || bundleHome(bundle, homedir());
     const rest = argv.slice(1).filter((argument) => !argument.startsWith('--home'));
 
-    const commands = { report, register, attach, holder, web, restart };
+    const commands = { report, register, attach, holder, web, restart, install: (home: string, rest: readonly string[]) => install(home, rest, bundle) };
 
     return commands[argv[0] as keyof typeof commands](home, rest);
   }
