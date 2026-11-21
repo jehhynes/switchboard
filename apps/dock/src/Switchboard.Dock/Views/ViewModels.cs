@@ -1064,9 +1064,11 @@ public sealed class RowViewModel(DockRow row) : Observable
     static readonly string[] Properties = typeof(RowViewModel).GetProperties().Select((property) => property.Name).Where((name) => name != nameof(IsSelected)).ToArray();
 
     bool isSelected;
-    IReadOnlyList<DetailViewModel> details = row.Details.Select((detail) => new DetailViewModel(detail)).ToList();
+    IReadOnlyList<DetailViewModel> details = DetailsOf(row);
 
     public DockRow Row => row;
+
+    static List<DetailViewModel> DetailsOf(DockRow row) => row.Details.Select((detail, index) => new DetailViewModel(detail, index > 0)).ToList();
 
     /// <summary>Takes the hub's newer view of the row and raises a change for each text; unchanged details and links keep their lists, so their controls stay.</summary>
     public RowViewModel Update(DockRow next)
@@ -1075,7 +1077,7 @@ public sealed class RowViewModel(DockRow row) : Observable
 
         if (!next.Details.SequenceEqual(row.Details))
         {
-            details = next.Details.Select((detail) => new DetailViewModel(detail)).ToList();
+            details = DetailsOf(next);
         }
 
         row = next with { Links = links };
@@ -1208,9 +1210,12 @@ public sealed class RowViewModel(DockRow row) : Observable
 }
 
 /// <summary>A piece of line 3, coloured by its tone.</summary>
-public sealed class DetailViewModel(DockText text)
+/// <summary>A detail on line 3; every one but the first follows a muted separator.</summary>
+public sealed class DetailViewModel(DockText text, bool separated = false)
 {
     public string Text => text.Text;
+
+    public bool HasSeparator => separated;
 
     public string? Title => text.Title;
 

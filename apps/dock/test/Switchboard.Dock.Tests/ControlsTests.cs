@@ -1182,6 +1182,18 @@ public sealed class ControlsTests
     }
 
     [AvaloniaFact]
+    public void LineThree_TwoDetails_SeparatesThemWithAMutedDot()
+    {
+        var snoozed = Fixtures.Row("item:8") with { Details = [new DockText("Wakes Oct 26", null, null), new DockText("Customer said they will reply", null, null)] };
+        var (window, _) = Open(Fixtures.View with { Groups = [new DockGroup("blocked", "Blocked on you", null, [snoozed, Fixtures.Row("item:7")])] });
+        var line = (string key) => RowOf(window, key).GetVisualDescendants().OfType<TextBlock>()
+            .Where((text) => (text.Classes.Contains("detail") || text.Classes.Contains("detail-separator")) && text.IsEffectivelyVisible).Select((text) => text.Text).ToList();
+
+        Assert.Equal(["Wakes Oct 26", "·", "Customer said they will reply"], line("item:8"));
+        Assert.Equal(["Review the finished turn"], line("item:7"));
+    }
+
+    [AvaloniaFact]
     public void MenuOf_QuestionAndApprovalRows_OfferOpenInClaudeCopyAndOpenReport()
     {
         var (window, _) = Open();

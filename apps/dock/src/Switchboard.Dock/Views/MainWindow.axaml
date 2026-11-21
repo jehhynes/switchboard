@@ -235,6 +235,12 @@
       <Setter Property="VerticalAlignment" Value="Center" />
       <Setter Property="Margin" Value="0,0,6,0" />
     </Style>
+    <!-- Between details, as the hub's " · " within one, so a wake time and a comment do not run together. -->
+    <Style Selector="TextBlock.detail-separator">
+      <Setter Property="Foreground" Value="{DynamicResource DockMuted}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Margin" Value="0,0,6,0" />
+    </Style>
     <Style Selector="TextBlock.detail.warning">
       <Setter Property="Foreground" Value="{DynamicResource DockWarning}" />
     </Style>
@@ -558,7 +564,10 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                       <DataTemplate x:DataType="views:DetailViewModel">
-                                        <TextBlock Classes="detail" Classes.warning="{Binding IsWarning}" Classes.error="{Binding IsError}" Text="{Binding Text}" ToolTip.Tip="{Binding Title}" />
+                                        <DockPanel>
+                                          <TextBlock DockPanel.Dock="Left" Classes="detail-separator" Text="·" IsVisible="{Binding HasSeparator}" />
+                                          <TextBlock Classes="detail" Classes.warning="{Binding IsWarning}" Classes.error="{Binding IsError}" Text="{Binding Text}" ToolTip.Tip="{Binding Title}" />
+                                        </DockPanel>
                                       </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                   </ItemsControl>
