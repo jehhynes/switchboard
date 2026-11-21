@@ -186,7 +186,7 @@ public static class SettingsPages
             return Json(SettingsFields.GetAt(state.Draft, path)) != Json(SettingsFields.GetAt(state.Config.Settings.Value, path));
         }
 
-        string[] paths = page == "general" ? ["sessions", "triage", "dock", "alerts"]
+        string[] paths = page == "general" ? ["sessions", "triage", "dock", "alerts", "web"]
             : page.StartsWith("schedule:", StringComparison.Ordinal) ? [$"schedules.{page["schedule:".Length..]}"]
             : [$"sources.{page["source:".Length..]}"];
 

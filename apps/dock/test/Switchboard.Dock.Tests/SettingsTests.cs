@@ -428,6 +428,7 @@ public sealed class SettingsPagesTests
     [InlineData("triage.model", "general")]
     [InlineData("dock.openVSCode", "general")]
     [InlineData("alerts.surface", "general")]
+    [InlineData("web.chromePane", "general")]
     [InlineData("sources.github.repo", "source:github")]
     [InlineData("sources.zoho.orgId", "source:zoho")]
     public void Nav_SettingEdited_MarksOnlyItsPage(string path, string page)

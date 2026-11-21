@@ -14,6 +14,9 @@ export interface SettingsDeps {
   closed?(): void;
 }
 
+/** Whether the page is as narrow as a phone's, where the navigation and the page each take the screen (settings.css). */
+const phone = (): boolean => typeof matchMedia === 'function' && matchMedia('(max-width: 767px)').matches;
+
 /** The draft is checked this long after the last edit, as the dock's. */
 export const CHECK_DELAY_MS = 250;
 
@@ -390,6 +393,11 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
     view.drill = 'page';
     redraw();
     host.querySelector<HTMLElement>('.settings-page')?.scrollTo?.({ top: 0 });
+
+    // On a phone the navigation, which had the focus, is hidden now, so the page's title takes it.
+    if (phone()) {
+      host.querySelector<HTMLElement>('.settings-page-title h2')?.focus();
+    }
   };
 
   const handlers: Handlers = {
@@ -397,6 +405,7 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
     back: () => {
       view.drill = 'nav';
       draw();
+      host.querySelector<HTMLElement>('.settings-nav-entry.current, .settings-nav-entry')?.focus();
     },
     close: requestClose,
     edit,
@@ -529,7 +538,7 @@ export function renderSettings(state: EditorState | null, view: View, on: Handle
       </div>
       <div class="settings-body">
         <nav class="settings-nav" aria-label="Settings pages">
-          {state === null ? null : nav(state).map((entry) => <NavRow entry={entry} on={on} />)}
+          {state === null ? <p class="settings-message settings-nav-message">{view.error ?? 'Reading the settings…'}</p> : nav(state).map((entry) => <NavRow entry={entry} on={on} />)}
         </nav>
         <div class="settings-page">
           {view.notice === null ? null : <p class="settings-notice">{view.notice}</p>}
@@ -589,7 +598,7 @@ function Page({ state, page, view, on }: { state: EditorState; page: PageView; v
     <>
       <div class="settings-page-head">
         <div class="settings-page-title">
-          <h2>{page.title}</h2>
+          <h2 tabIndex={-1}>{page.title}</h2>
           {page.filePath === null ? null : (
             <span class="settings-file" title={page.filePath}>
               {page.filePath}

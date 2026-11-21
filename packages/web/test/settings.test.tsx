@@ -318,6 +318,23 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     expect(pane.state()?.draft).toBeNull();
   });
 
+  it("leaves a playbook's errors off General, shows a null value as empty, and shows a failed read in the navigation for a phone", async () => {
+    answers['page-settings-read'] = { status: 200, body: config({ sessions: { installHooks: false, model: null }, playbooks: { 'dev:x': { description: 'X', template: '{{nope}}' } } }) };
+    answers['page-settings-check'] = { status: 200, body: { errors: ['playbooks.dev:x: Unknown template variable: nope.'] } };
+    await opened();
+
+    expect(host.querySelectorAll('.settings-page .settings-error')).toHaveLength(0);
+    expect(host.querySelector('.settings-nav-entry .settings-errors')).toBeNull();
+    expect(host.querySelector('.settings-status')?.textContent).toBe('Saved · 1 error');
+    expect(field<HTMLInputElement>('sessions.model').value).toBe('');
+
+    host = document.createElement('div');
+    document.body.replaceChildren(host);
+    answers['page-settings-read'] = { status: 0, body: { error: 'Switchboard did not answer: offline' } };
+    await opened();
+    expect(host.querySelector('.settings-nav .settings-nav-message')?.textContent).toBe('Switchboard did not answer: offline');
+  });
+
   it('on a phone shows the navigation first, drills into a page and goes back with Back', async () => {
     await opened();
 

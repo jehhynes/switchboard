@@ -232,6 +232,13 @@ export class EditorState {
 
   constructor(public config: EditorConfig) {}
 
+  /** The check errors that belong to no playbook in the draft, which the settings pages place. */
+  get settingsErrors(): string[] {
+    const prefixes = this.playbookNames.map((name) => `playbooks.${name}: `);
+
+    return this.errors.filter((error) => !prefixes.some((prefix) => error.startsWith(prefix)));
+  }
+
   /** The New source page's kind: the one chosen, else the first the hub offers. */
   get newSourceKind(): string {
     return this.newSource.kind !== '' ? this.newSource.kind : (this.config.sourceKinds[0] ?? '');
@@ -703,7 +710,7 @@ export function errorPages(state: EditorState): Map<string, string | null> {
   const paths = entries.map((entry) => entry.path);
   const pages = new Map<string, string | null>();
 
-  for (const error of state.errors) {
+  for (const error of state.settingsErrors) {
     const path = fieldOfError(error, paths);
 
     pages.set(error, path === null ? null : (entries.find((entry) => entry.path === path)?.page ?? null));
@@ -885,7 +892,8 @@ export function settingsPage(state: EditorState, title: string, sections: readon
   const paths = settingsPaths(state).map((entry) => entry.path);
   const pages = errorPages(state);
   // Errors on no page show on every page; one that names no field but belongs to this page shows here.
-  const loose = state.errors.filter((error) => {
+  const errors = state.settingsErrors;
+  const loose = errors.filter((error) => {
     const on = pages.get(error) ?? null;
 
     return on === null || (on === state.page && fieldOfError(error, paths) === null);
@@ -893,7 +901,7 @@ export function settingsPage(state: EditorState, title: string, sections: readon
   const views = sections.map((section) => ({
     heading: section.heading,
     advanced: section.advanced === true,
-    fields: section.fields.map((field) => fieldView(field, getAt(value, field.path), state.errors.filter((error) => fieldOfError(error, paths) === field.path))),
+    fields: section.fields.map((field) => fieldView(field, getAt(value, field.path), errors.filter((error) => fieldOfError(error, paths) === field.path))),
   }));
 
   return { title, filePath: settings.path, buttons, notes, errors: loose, message: null, sections: views };
@@ -905,9 +913,7 @@ export function fieldView(field: Field, value: Json | undefined, errors: string[
     value === undefined && field.listDefault !== undefined
       ? field.listDefault.join('\n')
       : value === undefined || value === null
-        ? value === null
-          ? 'null'
-          : ''
+        ? ''
         : Array.isArray(value)
           ? value.map((entry) => (typeof entry === 'string' ? entry : JSON.stringify(entry))).join('\n')
           : typeof value === 'string'
