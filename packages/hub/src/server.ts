@@ -1,6 +1,7 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { createServer } from 'node:http';
+import { gzipSync } from 'node:zlib';
 import { pipeline } from 'node:stream';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import type { HubIdentity } from '@switchboard/core';
@@ -79,7 +80,18 @@ export interface PageRoutes {
    * with no stream for a key that is not a page's or a session it does not show.
    */
   console?(key: string, sessionId: string, send: (event: string, data: unknown) => boolean, end: () => void): { close(): void } | { status: number; error: string };
+  /**
+   * A change route's answer for a page key (`CHANGE_ROUTES`, architecture.md § Web page), given the request's query and `If-None-Match`, with an
+   * `ETag` when it has one; without it the hub serves none.
+   */
+  changes?(route: string, key: string, query: URLSearchParams, ifNoneMatch: string | undefined): Promise<Reply & { etag?: string }>;
 }
+
+/** The page's read-only change routes, under `/v1/conversation/` (architecture.md § Web page). */
+export const CHANGE_ROUTES = new Set(['changes']);
+
+/** The least JSON body sent gzipped to a client that takes it. */
+const GZIP_MIN_BYTES = 1024;
 
 /**
  * The conversation commands a page may post with its cookie; never `new-conversation`, since a page hosts none: its New conversation… is
@@ -188,6 +200,23 @@ function readJson(request: IncomingMessage, emptyOk = false): Promise<unknown> {
 function json(response: ServerResponse, status: number, body: unknown): void {
   response.writeHead(status, { 'Content-Type': 'application/json' });
   response.end(JSON.stringify(body));
+}
+
+/** A JSON answer gzipped when the client takes gzip and it is large enough to gain, with its `ETag`, and 304 for a matching `If-None-Match`. */
+function jsonCompressed(request: IncomingMessage, response: ServerResponse, reply: Reply & { etag?: string }): void {
+  const etag = reply.etag === undefined ? {} : { ETag: `"${reply.etag}"` };
+
+  if (reply.etag !== undefined && reply.status === 200 && request.headers['if-none-match'] === `"${reply.etag}"`) {
+    response.writeHead(304, { ...etag, 'Cache-Control': 'no-cache' });
+    response.end();
+    return;
+  }
+
+  const text = JSON.stringify(reply.body);
+  const gzip = text.length >= GZIP_MIN_BYTES && /\bgzip\b/.test(String(request.headers['accept-encoding'] ?? ''));
+
+  response.writeHead(reply.status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache', Vary: 'Accept-Encoding', ...etag, ...(gzip ? { 'Content-Encoding': 'gzip' } : {}) });
+  response.end(gzip ? gzipSync(text) : text);
 }
 
 /**
@@ -493,7 +522,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
   /** The web page's routes (architecture.md § Web page); false for any other request. */
   const servePage = (request: IncomingMessage, response: ServerResponse, url: URL): boolean => {
     const path = url.pathname;
-    const isPageRoute = path === '/' || path === '/page' || path.startsWith('/page/') || path === '/v1/page/list' || path.startsWith('/v1/conversation/artifact/') || (path === '/v1/conversation/events' && url.searchParams.has('page')) || path === '/v1/conversation/files' || path === '/v1/conversation/console';
+    const isPageRoute = path === '/' || path === '/page' || path.startsWith('/page/') || path === '/v1/page/list' || path.startsWith('/v1/conversation/artifact/') || (path === '/v1/conversation/events' && url.searchParams.has('page')) || path === '/v1/conversation/files' || path === '/v1/conversation/console' || (path.startsWith('/v1/conversation/') && CHANGE_ROUTES.has(path.slice('/v1/conversation/'.length)));
     const bearer = request.headers.authorization !== undefined;
     const cookiePost = request.method === 'POST' && !bearer && path.startsWith('/v1/conversation/') && request.headers.cookie !== undefined;
 
@@ -703,6 +732,27 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
 
       void page.files(window, url.searchParams.get('q') ?? '').then(
         (files) => json(response, files === null ? 403 : 200, files === null ? { error: 'Not in this window.' } : { files }),
+        (error: unknown) => json(response, 500, { error: String(error) }),
+      );
+      return true;
+    }
+
+    // The selected conversation's worktree changes (architecture.md § Web page), read for a page key.
+    if (request.method === 'GET' && CHANGE_ROUTES.has(path.slice('/v1/conversation/'.length))) {
+      if (page.changes === undefined) {
+        json(response, 404, { error: 'not found' });
+        return true;
+      }
+
+      if (!page.isPage(window)) {
+        json(response, 403, { error: 'Not in this window.' });
+        return true;
+      }
+
+      const ifNoneMatch = request.headers['if-none-match'];
+
+      void page.changes(path.slice('/v1/conversation/'.length), window, url.searchParams, typeof ifNoneMatch === 'string' ? ifNoneMatch : undefined).then(
+        (reply) => jsonCompressed(request, response, reply),
         (error: unknown) => json(response, 500, { error: String(error) }),
       );
       return true;

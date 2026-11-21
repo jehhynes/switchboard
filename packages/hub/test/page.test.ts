@@ -647,6 +647,7 @@ describe('the web page routes', () => {
       isPage: (key) => pages.has(key),
       list: () => [{ kind: 'item', title: 'T', conversations: [] }],
       files: async (key) => (key === 'page-1' ? [{ path: 'a.ts', dir: false }] : null),
+      changes: async (route, key, query) => (route === 'changes' && key === 'page-1' ? { status: 200, body: { rows: 'x'.repeat(2000), q: query.get('q') }, etag: 'e1' } : { status: 403, body: { error: 'Not in this window.' } }),
       artifact: (key, name) => (key === 'page-1' ? artifactFile(folder, name) : null),
       upload: (key, scopeGen, name, bytes) => {
         uploaded.push({ key, scopeGen, name, bytes: Buffer.from(bytes).toString('utf8') });
@@ -1110,6 +1111,17 @@ describe('the web page routes', () => {
 
     expect(JSON.parse(files.body)).toEqual({ files: [{ path: 'a.ts', dir: false }] });
     expect((await send(server.port, 'GET', '/v1/conversation/files?window=page-2&q=a', { Cookie: cookie })).status).toBe(403);
+
+    // The change routes: for a page key only, with the cookie, gzipped when taken, and 304 for the ETag the page holds.
+    const changes = await send(server.port, 'GET', '/v1/conversation/changes?window=page-1&q=z', { Cookie: cookie });
+
+    expect(changes.status).toBe(200);
+    expect(changes.headers['etag']).toBe('"e1"');
+    expect(JSON.parse(changes.body)).toEqual({ rows: 'x'.repeat(2000), q: 'z' });
+    expect((await send(server.port, 'GET', '/v1/conversation/changes?window=page-1', { Cookie: cookie, 'Accept-Encoding': 'gzip' })).headers['content-encoding']).toBe('gzip');
+    expect((await send(server.port, 'GET', '/v1/conversation/changes?window=page-1', { Cookie: cookie, 'If-None-Match': '"e1"' })).status).toBe(304);
+    expect((await send(server.port, 'GET', '/v1/conversation/changes?window=page-2', { Cookie: cookie })).status).toBe(403);
+    expect((await send(server.port, 'GET', '/v1/conversation/changes?window=page-1', {})).status).toBe(401);
 
     stream.destroy();
     await until(() => (closed.includes('page-1') ? true : null));

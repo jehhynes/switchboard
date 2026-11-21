@@ -395,9 +395,9 @@ function artifactTabs(state: PageState, strip: ArtifactStrip): ComponentChildren
 
 /**
  * The tab strip atop the column right of the conversation on a wide screen: Status, Console and Browser, then a tab per artifact (`artifactTabs`);
- * the conversation keeps its own pane beside it.
+ * the conversation keeps its own pane beside it. `extra` follows them, as the Changes button does.
  */
-export function renderSideSwitch(side: SideTab, state: PageState, browser = false, strip: ArtifactStrip = { open: null, fit: 0, menu: false, now: 0 }): VNode {
+export function renderSideSwitch(side: SideTab, state: PageState, browser = false, strip: ArtifactStrip = { open: null, fit: 0, menu: false, now: 0 }, extra: ComponentChildren = null): VNode {
   const fresh = state.status?.unread === true;
   const tabs: Array<[SideTab, string, string]> = [
     ['status', 'Status', fresh ? 'New' : ''],
@@ -411,12 +411,13 @@ export function renderSideSwitch(side: SideTab, state: PageState, browser = fals
         <TabButton selected={tab === side} label={label} badge={badge} attrs={{ 'data-side': tab }} />
       ))}
       {artifactTabs(state, { ...strip, open: side === 'artifacts' ? strip.open : null, fit: strip.fit })}
+      {extra}
     </nav>
   );
 }
 
-/** The conversation's tab strip on a narrower screen: Conversation, Status, Console and Browser, then a tab per artifact as in the column. */
-export function renderTabs(view: View, state: PageState, browser = false, strip: ArtifactStrip = { open: null, fit: 0, menu: false, now: 0 }): VNode {
+/** The conversation's tab strip on a narrower screen: Conversation, Status, Console and Browser, then a tab per artifact as in the column, and `extra`, as the Changes button. */
+export function renderTabs(view: View, state: PageState, browser = false, strip: ArtifactStrip = { open: null, fit: 0, menu: false, now: 0 }, extra: ComponentChildren = null): VNode {
   const fresh = state.status?.unread === true;
   // As in the VS Code view: Status has its New badge; the page shows no unread counts.
   const badges: Record<Tab, string> = { conversation: '', status: fresh ? 'New' : '', artifacts: '', console: '', browser: '' };
@@ -427,6 +428,7 @@ export function renderTabs(view: View, state: PageState, browser = false, strip:
         <TabButton selected={tab === view.tab} label={label} badge={badges[tab]} attrs={{ 'data-tab': tab }} />
       ))}
       {artifactTabs(state, { ...strip, open: view.tab === 'artifacts' ? strip.open : null })}
+      {extra}
     </nav>
   );
 }

@@ -1,4 +1,4 @@
-// The rows of a worktree's changes from its merge base to disk (PRD R57, R117), for the VS Code window's Open changes and the web page's Changes list.
+// The rows of a worktree's changes from its merge base to disk (PRD R57, R118), for the VS Code window's Open changes and the web page's Changes list.
 /** Change type within one stage. */
 export type ChangeKind = 'added' | 'modified' | 'deleted';
 

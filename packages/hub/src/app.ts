@@ -41,6 +41,7 @@ import { dockRowOf, PageAccess, pageActionEvent, pageCommandOf, pageHeader, page
 import { launcher } from './launch.js';
 import type { Launcher } from './launch.js';
 import { pageAsset } from './pageAssets.js';
+import { PageChanges } from './changes.js';
 import { needsMessage, newlyNeeding, rowFor, targetForUrl } from './needs.js';
 import { volumeReply } from './volume.js';
 import { installedProviders } from './installed.js';
@@ -533,6 +534,8 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     log: deps.log,
   });
   // The web page's console of a held session (architecture.md § Web page).
+  // The web page's Changes list and diffs, read with git in the page's selected conversation's folder (architecture.md § Web page).
+  const pageChanges = new PageChanges({ isPage: (key) => scopes.isPage(key), scope: (key) => scopes.scope(key) });
   const pageConsole = new PageConsole({
     isPage: (key) => scopes.isPage(key),
     scope: (key) => scopes.scope(key),
@@ -1485,6 +1488,7 @@ const dockWithRuns = () => {
       artifact: (key, name) => conversation.artifactFile(key, name),
       upload: (key, scopeGen, name, bytes) => conversation.pageUpload(key, scopeGen, name, bytes),
       console: (key, sessionId, send, end) => pageConsole.open(key, sessionId, send, end),
+      changes: (route, key) => (route === 'changes' ? pageChanges.changes(key) : Promise.resolve({ status: 404, body: { error: 'not found' } })),
     },
     pagePort: () => config.settings.web.port,
     dock: () => dockWithRuns(),

@@ -28,6 +28,7 @@ import { EMPTY_HISTORY_UI, renderHistory } from './history.js';
 import type { HistoryOpen, HistoryUi } from './history.js';
 import type { HistoryCategory, HistoryView } from './types.js';
 import { askForNotifications, notificationsAllowed, notifyNeeds, playChime } from './alerts.js';
+import { ChangesController, changesButton, renderChangesMenu } from './changes.js';
 import type { NeedsItem } from './alerts.js';
 
 /** The stream's event types the page reads. */
@@ -301,6 +302,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   drawerQuery?.addEventListener?.('change', () => draw());
   let state: PageState = EMPTY;
   const view: View = newView();
+  // The Changes list, its menu and the session state it was last drawn at, so a turn's end reads it again (architecture.md § Web page).
+  const changes = new ChangesController({ fetch: (...args) => deps.fetch(...args), key: () => state.key, draw: () => draw() });
+  let changesSession: string | null = null;
 
   // The groups the operator opened or closed on an earlier load, as the dock keeps them across runs.
   view.collapsed = collapsedGroups(localStorage.getItem(GROUPS_KEY));
@@ -1463,6 +1467,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       drawPane(detailBody, null);
     }
 
+    const turnEnded = changesSession === 'running' && state.session?.state !== 'running';
+
+    changesSession = state.session?.state ?? null;
+    changes.follow(state.scope === null || state.key === null ? null : `${state.key} ${state.scope.scopeGen} ${state.scope.workItemId ?? ''}`, turnEnded);
+
     if (state.scope === null) {
       mount(head, null);
       drawPane(panel, renderEmpty(state.connected ? 'Choose a work item on the left.' : 'Connecting to Switchboard…'));
@@ -1473,7 +1482,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     const strip = { open: openArtifact(), fit: view.artifactFit, menu: view.artifactMenu, now: deps.now(), closed: closedNow() };
 
-    mount(head, [renderHeader(state, view), side ? null : renderTabs({ ...view, tab: mainTab() }, state, browserTab(), strip)]);
+    mount(head, [renderHeader(state, view), side ? null : renderTabs({ ...view, tab: mainTab() }, state, browserTab(), strip, changesButton(changes.view)), side ? null : renderChangesMenu(changes.view)]);
 
     const artifact = view.artifact === null ? undefined : state.artifacts.find((one) => one.path === view.artifact);
     const now = deps.now();
@@ -1526,7 +1535,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     drawTab(panel, mainTab());
 
     if (side) {
-      mount(detailHead, renderSideSwitch(sideTab(), state, browserTab(), strip));
+      mount(detailHead, [renderSideSwitch(sideTab(), state, browserTab(), strip, changesButton(changes.view)), renderChangesMenu(changes.view)]);
       drawTab(detailBody, sideTab());
     }
     // The composer first, so the conversation is scrolled against its final height.
@@ -2012,6 +2021,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   // ---- Clicks ----
   root.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
+
+    if (changes.click(target)) {
+      return;
+    }
     const sideTab = target.closest<HTMLElement>('[data-side]')?.dataset['side'];
 
     if (SIDE_TABS.includes(sideTab as SideTab)) {
@@ -2391,6 +2404,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   });
   // The dropdown closes on a press outside the header and on Escape, which gives the focus back to its button.
   document.addEventListener('pointerdown', (event) => {
+    if (changes.pointerDown(event.target)) {
+      draw();
+    }
+
     // A pool row's menu closes on a press outside it and its row, which toggles it itself.
     if (view.rowMenu !== null && !(event.target instanceof Element && event.target.closest('.pool-row') !== null)) {
       view.rowMenu = null;
@@ -2461,6 +2478,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       view.viewMenu = false;
       draw();
       head.querySelector<HTMLElement>(opener)?.focus();
+      event.stopImmediatePropagation();
+    } else if (event.key === 'Escape' && changes.escape()) {
+      draw();
+      root.querySelector<HTMLElement>('.changes-button')?.focus();
       event.stopImmediatePropagation();
     } else if (event.key === 'Escape' && view.drawer !== null) {
       closeDrawer();
