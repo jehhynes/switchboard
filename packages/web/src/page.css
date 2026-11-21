@@ -173,7 +173,7 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 .meta .stamp { flex: none; margin-left: auto; }
 .meta .codicon { font-size: 12px; }
 .meta .tone { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-style: italic; }
-.meta .spoken, .meta .delivery { display: inline-flex; flex: none; align-items: center; gap: 4px; white-space: nowrap; cursor: default; }
+.meta .spoken, .meta .voice-mark, .meta .delivery { display: inline-flex; flex: none; align-items: center; gap: 4px; white-space: nowrap; cursor: default; }
 .meta .copy { flex: none; width: 14px; height: 16px; padding: 0; margin: 0; }
 .meta .copy .codicon { font-size: 14px; }
 .timeline > li.reply:has(> .meta) { padding-bottom: 0; }
@@ -293,7 +293,9 @@ body.artifact-window > .artifact-view { height: 100%; }
 .request-button:hover { background: var(--vscode-button-secondaryHoverBackground); }
 
 /* An ended session's note and the composer's "Sent" line, just above the composer. */
-.session-note { display: flex; align-items: center; gap: 6px; box-sizing: border-box; width: calc(100% - 32px); max-width: 680px; margin: 0 auto 8px; padding: 6px 10px; border: 1px solid var(--vscode-input-border); border-radius: 6px; background: var(--vscode-input-background); }
+/* Notes above the composer share its edges and corners: #note has #composer's width and side padding, and each note fills it. */
+#note { box-sizing: border-box; width: 100%; max-width: var(--chat-width, 940px); margin: 0 auto; padding: 0 20px; }
+.session-note { display: flex; align-items: center; gap: 6px; box-sizing: border-box; margin: 0 0 8px; padding: 6px 6px 6px 10px; border: 1px solid var(--vscode-input-border); border-radius: 8px; background: var(--vscode-input-background); }
 .session-note-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .session-resume { flex: none; min-height: 26px; padding: 0 10px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 4px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); cursor: pointer; }
 .session-resume:hover { background: var(--vscode-button-hoverBackground); }
@@ -347,7 +349,7 @@ body.artifact-window > .artifact-view { height: 100%; }
 .menu-item.active { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
 .menu-description { font-size: 0.85em; color: var(--vscode-descriptionForeground); white-space: normal; }
 .menu-empty { padding: 8px; text-align: center; color: var(--vscode-descriptionForeground); }
-.composer-error { display: flex; align-items: flex-start; gap: 6px; margin: 0 0 6px; padding: 6px 4px 6px 10px; border: 1px solid var(--vscode-inputValidation-errorBorder); border-radius: 6px; background: var(--vscode-inputValidation-errorBackground); }
+.composer-error { display: flex; align-items: flex-start; gap: 6px; margin: 0 0 8px; padding: 6px 4px 6px 10px; border: 1px solid var(--vscode-inputValidation-errorBorder); border-radius: 8px; background: var(--vscode-inputValidation-errorBackground); }
 .composer-error[hidden] { display: none; }
 .composer-error-text { flex: 1; overflow-wrap: anywhere; }
 .composer-error .dismiss { border: none; background: transparent; color: inherit; cursor: pointer; }
@@ -377,6 +379,7 @@ body.artifact-window > .artifact-view { height: 100%; }
 @media (max-width: 600px) {
   .scroll { padding: 12px 12px 12px; }
   #composer { padding: 0 12px 12px; }
+  #note { padding: 0 12px; }
   .message .bubble { max-width: 92%; }
 }
 

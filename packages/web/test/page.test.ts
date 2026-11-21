@@ -1890,6 +1890,19 @@ describe("the list's CSS", () => {
     }
   });
 
+  it('gives the notes above the composer its edges, corners and an 8 px gap', () => {
+    const composer = declarationsOf((selector) => selector === '#composer').join(' ');
+    const note = declarationsOf((selector) => selector === '#note').join(' ');
+
+    expect(note).toContain('max-width: var(--chat-width, 940px)');
+    expect(composer).toContain('max-width: var(--chat-width, 940px)');
+    expect(note).toContain('padding: 0 20px');
+    expect(composer).toContain('padding: 0 20px 16px');
+    expect(declarationsOf((selector) => selector === '.session-note').join(' ')).toMatch(/margin: 0 0 8px;.*border-radius: 8px;/);
+    expect(declarationsOf((selector) => selector === '.composer').join(' ')).toContain('border-radius: 8px');
+    expect(declarationsOf((selector) => selector === '.composer-error').join(' ')).toMatch(/margin: 0 0 8px;.*border-radius: 8px;/);
+  });
+
   it("scales only the conversation's text by --chat-scale", () => {
     expect([...css.matchAll(/([^{}]+)\{[^{}]*var\(--chat-scale/g)].map(([, selector]) => selector!.trim())).toEqual(['.timeline, .composer textarea, .composer .live-mirror']);
   });
