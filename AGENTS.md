@@ -1,6 +1,6 @@
 # Switchboard
 
-Switchboard is a local software factory for one developer. It ingests tickets assigned to the operator from GitHub, Zoho Desk, Forum and ad-hoc prompts, triages each into a playbook, runs the playbook in a background Claude Code session, and shows the work in the dock, a native app beside VS Code that switches to each work item's VS Code window. See [prd.md](docs/prd.md).
+Switchboard is a local software factory for one developer. It ingests tickets assigned to the operator from GitHub, Zoho Desk, Forum and ad-hoc prompts, triages each into a playbook, runs the playbook in a background Claude Code session, and shows the work on the web page the hub serves, its primary interface (PRD R109). The dock, a native app beside VS Code that switches to each work item's VS Code window, and VS Code's Conversation view still run until the web page replaces them. See [prd.md](docs/prd.md).
 
 Switchboard replaces Ground Control (`D:\git\ground-control`), which no longer runs. Its session and triage mechanics come from there: read its code and [mechanics.md](../ground-control/docs/mechanics.md) before re-deriving a mechanism it already verified.
 
