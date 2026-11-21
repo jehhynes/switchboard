@@ -12,6 +12,8 @@ export interface ListHeaderDeps {
   redraw(): void;
   /** Opens a work item's conversation, as a click on its row does. */
   select(workItemId: number): void;
+  /** Opens Settings (architecture.md § Web page), as the dock's Open Settings opens its window. */
+  openSettings?(): void;
   now(): number;
   /** Whether the page is the one on this computer, which may pair devices (architecture.md § Remote access); false on a paired device. */
   local?: boolean;
@@ -431,13 +433,13 @@ export function renderMoreMenu(header: PageHeader | null, local = false): VNode 
       <MoreRow action="list-later-log" icon="output" label="Show hub log" />
       <Separator />
       {local ? <MoreRow action="list-devices" icon="device-mobile" label="Pair a device…" /> : null}
-      <MoreRow action="list-later-settings" icon="settings-gear" label="Open Settings" />
+      <MoreRow action="list-settings" icon="settings-gear" label="Open Settings" />
     </ul>
   );
 }
 
 /** The dock windows More Actions opens that the page does not have yet, by their row's action. */
-export const LATER: Record<string, string> = { 'list-later-held': 'Held sessions', 'list-later-volume': 'Ticket volume report', 'list-later-log': 'Show hub log', 'list-later-settings': 'Open Settings' };
+export const LATER: Record<string, string> = { 'list-later-held': 'Held sessions', 'list-later-volume': 'Ticket volume report', 'list-later-log': 'Show hub log' };
 
 /** A QR code of `text` as an SVG of dark modules on a light square with a quiet zone of 4 modules, which phone cameras read in either theme. */
 export function QrCode({ text }: { text: string }) {
@@ -1247,6 +1249,11 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
       case 'list-devices':
         view.menu = null;
         void openDevices();
+        break;
+      case 'list-settings':
+        view.menu = null;
+        redraw();
+        deps.openSettings?.();
         break;
       default: {
         const later = LATER[button?.dataset['action'] ?? ''];

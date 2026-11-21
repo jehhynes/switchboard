@@ -753,6 +753,12 @@ describe('createHubApp', () => {
       body: { errors: [`The config folder is now ${join(temp.home, '.switchboard')}, not D:/old. Settings reads it again; make your change there.`] },
     });
     expect(app.post['/config/delete']).toBeUndefined();
+    // The web page's Settings posts the same routes as page commands.
+    expect(app.post['/v1/conversation/page-settings-read']).toBe(app.post['/config/read']);
+    expect(app.post['/v1/conversation/page-settings-check']).toBe(app.post['/config/check']);
+    expect(app.post['/v1/conversation/page-settings-save']).toBe(app.post['/config/save']);
+    expect(app.post['/v1/conversation/page-voice-enroll']).toBe(app.post['/config/voice-enroll']);
+    expect(await app.post['/v1/conversation/page-settings-save']!({ window: 'page-1', opId: 'o', value: {}, version: 'stale' })).toMatchObject({ status: 409 });
   });
 
   it('writes each item window\'s workspace file when it builds the dock view', async () => {

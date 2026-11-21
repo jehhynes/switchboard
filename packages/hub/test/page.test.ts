@@ -704,6 +704,10 @@ describe('the web page routes', () => {
           return { status: 200, body: { started: true } };
         },
         '/dock/page': async (_body, context) => ({ status: 200, body: { url: await context!.pageUrl() } }),
+        '/v1/conversation/page-settings-save': async (body) => {
+          posted.push(body);
+          return { status: 200, body: {} };
+        },
       },
     });
 
@@ -756,6 +760,10 @@ describe('the web page routes', () => {
     expect((await post('/v1/conversation/page-source', `http://127.0.0.1:${port}`)).status).toBe(200);
     expect((await post('/v1/conversation/page-source', `http://127.0.0.1:${server.port}`)).status).toBe(403);
     expect((await post('/v1/conversation/page-source', `http://127.0.0.1:${port}`, {})).status).toBe(404);
+    // So are Settings' reads and saves of settings.json.
+    expect((await post('/v1/conversation/page-settings-save', `http://127.0.0.1:${port}`)).status).toBe(200);
+    expect((await post('/v1/conversation/page-settings-save', `http://127.0.0.1:${server.port}`)).status).toBe(403);
+    expect((await post('/v1/conversation/page-settings-save', `http://127.0.0.1:${port}`, {})).status).toBe(404);
     // History is a page command too.
     expect((await post('/v1/conversation/page-history', `http://127.0.0.1:${port}`)).status).toBe(200);
     expect((await post('/v1/conversation/page-history', `http://127.0.0.1:${server.port}`)).status).toBe(403);
@@ -766,7 +774,7 @@ describe('the web page routes', () => {
     expect((await post('/v1/conversation/resume', `http://127.0.0.1:${server.port}`)).status).toBe(403);
     expect((await post('/v1/conversation/resume', `http://127.0.0.1:${port}`, {})).status).toBe(404);
     expect((await post('/v1/conversation/resume', `http://127.0.0.1:${port}`, { Cookie: 'sb_page=forged' })).status).toBe(401);
-    expect(posted).toHaveLength(5);
+    expect(posted).toHaveLength(6);
     stream.destroy();
   });
 

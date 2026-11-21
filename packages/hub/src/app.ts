@@ -888,6 +888,56 @@ const dockWithRuns = () => {
   runtime.start();
   conversation.start();
 
+  // The Settings editor's routes (PRD R54): the dock posts them with the hub token, and the web page as page commands (architecture.md § Settings window).
+  const settingsRoutes = {
+    // settings.json with its version, and what the editor offers.
+    read: async () => ({
+      status: 200,
+      body: {
+        settings: readConfigFile(configDir),
+        configDir,
+        permissionModes: [...PERMISSION_MODES],
+        codexPermissionModes: [...CODEX_PERMISSION_MODES],
+        providers: [...PROVIDERS],
+        templateVariables: [...TEMPLATE_VARIABLES],
+        sourceKinds: [...SOURCE_KINDS],
+        inUse: openPlaybooks(runtime),
+        enabled: Object.fromEntries(Object.keys(config.settings.sources).map((name) => [name, runtime.enabledSources().has(name)])),
+      },
+    }),
+    // The Voice page's Enroll my voice (architecture.md § Voice check and barge-in): starts or cancels enrolment, or reads how it stands.
+    enroll: async (body: unknown) => {
+      const action = isRecord(body) ? body['action'] : undefined;
+
+      if (action !== 'start' && action !== 'cancel' && action !== 'status') {
+        return { status: 400, body: { error: "Expected {action: 'start' | 'cancel' | 'status'}." } };
+      }
+
+      const refused = action === 'status' ? null : voice.enroll(action);
+
+      return refused === null ? { status: 200, body: { enrollment: voice.enrollment() } } : { status: 409, body: { error: refused, enrollment: voice.enrollment() } };
+    },
+    check: async (body: unknown) =>
+      isRecord(body) && 'settings' in body ? { status: 200, body: { errors: checkSettings(body['settings'], runtime.enabledSources(), store.homeRepos()) } } : { status: 400, body: { error: 'Expected {settings}.' } },
+    save: async (body: unknown) => {
+      const version = isRecord(body) ? body['version'] : undefined;
+
+      if (!isRecord(body) || !('value' in body) || !(version === null || typeof version === 'string')) {
+        return { status: 400, body: { error: 'Expected {value, version}.' } };
+      }
+
+      const moved = movedFrom(body['configDir']);
+
+      if (moved !== null) {
+        return { status: 409, body: { errors: [moved] } };
+      }
+
+      const result = saveSettings(configDir, body['value'], version, runtime.enabledSources(), store.homeRepos());
+
+      return result.errors.length === 0 ? { status: 200, body: { saved: true, version: result.version } } : { status: 409, body: { errors: result.errors } };
+    },
+  };
+
   const debriefTimer = setInterval(() => void debriefs.scan(), DEBRIEF_SCAN_MS);
 
   return {
@@ -1342,52 +1392,16 @@ const dockWithRuns = () => {
       '/dock/new-conversation': async (body) => (isRecord(body) ? conversation.dockConversation(body) : { status: 400, body: { error: 'Expected {folder, opId}.' } }),
       '/dock/show': async () =>
         sendDock('show', {}) > 0 ? { status: 200, body: { shown: true } } : { status: 409, body: { error: 'The dock is not running.' } },
-      // The dock's Settings window (PRD R54): settings.json with its version, and what the editor offers.
-      '/config/read': async () => ({
-        status: 200,
-        body: {
-          settings: readConfigFile(configDir),
-          configDir,
-          permissionModes: [...PERMISSION_MODES],
-          codexPermissionModes: [...CODEX_PERMISSION_MODES],
-          providers: [...PROVIDERS],
-          templateVariables: [...TEMPLATE_VARIABLES],
-          sourceKinds: [...SOURCE_KINDS],
-          inUse: openPlaybooks(runtime),
-          enabled: Object.fromEntries(Object.keys(config.settings.sources).map((name) => [name, runtime.enabledSources().has(name)])),
-        },
-      }),
-      // The Voice page's Enroll my voice (architecture.md § Voice check and barge-in): starts or cancels enrolment, or reads how it stands.
-      '/config/voice-enroll': async (body) => {
-        const action = isRecord(body) ? body['action'] : undefined;
-
-        if (action !== 'start' && action !== 'cancel' && action !== 'status') {
-          return { status: 400, body: { error: "Expected {action: 'start' | 'cancel' | 'status'}." } };
-        }
-
-        const refused = action === 'status' ? null : voice.enroll(action);
-
-        return refused === null ? { status: 200, body: { enrollment: voice.enrollment() } } : { status: 409, body: { error: refused, enrollment: voice.enrollment() } };
-      },
-      '/config/check': async (body) =>
-        isRecord(body) && 'settings' in body ? { status: 200, body: { errors: checkSettings(body['settings'], runtime.enabledSources(), store.homeRepos()) } } : { status: 400, body: { error: 'Expected {settings}.' } },
-      '/config/save': async (body) => {
-        const version = isRecord(body) ? body['version'] : undefined;
-
-        if (!isRecord(body) || !('value' in body) || !(version === null || typeof version === 'string')) {
-          return { status: 400, body: { error: 'Expected {value, version}.' } };
-        }
-
-        const moved = movedFrom(body['configDir']);
-
-        if (moved !== null) {
-          return { status: 409, body: { errors: [moved] } };
-        }
-
-        const result = saveSettings(configDir, body['value'], version, runtime.enabledSources(), store.homeRepos());
-
-        return result.errors.length === 0 ? { status: 200, body: { saved: true, version: result.version } } : { status: 409, body: { errors: result.errors } };
-      },
+      // The dock's Settings window (PRD R54).
+      '/config/read': settingsRoutes.read,
+      '/config/voice-enroll': settingsRoutes.enroll,
+      '/config/check': settingsRoutes.check,
+      '/config/save': settingsRoutes.save,
+      // The web page's Settings (architecture.md § Web page): the same routes as page commands.
+      '/v1/conversation/page-settings-read': settingsRoutes.read,
+      '/v1/conversation/page-voice-enroll': settingsRoutes.enroll,
+      '/v1/conversation/page-settings-check': settingsRoutes.check,
+      '/v1/conversation/page-settings-save': settingsRoutes.save,
       '/action': async (body) => {
         const event = parseAction(body);
 

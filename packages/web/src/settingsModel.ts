@@ -1,0 +1,574 @@
+// The web page's Settings (architecture.md § Web page, PRD R54): the dock's Settings window's state, fields and pages, ported from
+// apps/dock/src/Switchboard.Dock/Settings, so the page edits settings.json as the dock does and shows the same pages, fields and errors.
+
+/** A JSON value as settings.json holds it. */
+export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
+export type JsonObject = { [key: string]: Json };
+
+export type FieldKind = 'text' | 'integer' | 'number' | 'boolean' | 'select' | 'list' | 'prompt';
+
+export interface FieldOption {
+  value: string;
+  label: string;
+}
+
+/**
+ * A setting or playbook field, as the dock's `Field`: `path` is a dotted path from the settings root, or a playbook field name; `help` explains
+ * it, empty for none; `placeholder` is the value that applies when it is empty; `fallback` a checkbox's value when the key is absent;
+ * `listDefault` a list whose default is not empty, so an absent key shows the default and an emptied list is saved as `[]`. Adjacent checkboxes
+ * with the same `group` share one row under that label.
+ */
+export interface Field {
+  path: string;
+  label: string;
+  kind: FieldKind;
+  help: string;
+  placeholder?: string;
+  options?: readonly FieldOption[];
+  fallback?: boolean;
+  listDefault?: readonly string[];
+  group?: string;
+}
+
+/** A page section; an `advanced` one starts collapsed. */
+export interface Section {
+  heading: string;
+  fields: readonly Field[];
+  advanced?: boolean;
+}
+
+/** settings.json as the hub read it: its value, or null and the error when it is not valid JSON. */
+export interface SettingsFile {
+  path: string;
+  version: string | null;
+  value: Json | undefined;
+  error: string | null;
+}
+
+/** What `page-settings-read` answers, as `/config/read` answers the dock. */
+export interface EditorConfig {
+  settings: SettingsFile;
+  permissionModes: readonly string[];
+  codexPermissionModes: readonly string[];
+  providers: readonly string[];
+  templateVariables: readonly string[];
+  sourceKinds: readonly string[];
+  inUse: Readonly<Record<string, number>>;
+  enabled: Readonly<Record<string, boolean>>;
+  configDir: string;
+}
+
+const strings = (value: unknown): string[] => (Array.isArray(value) ? value.map((entry) => (typeof entry === 'string' ? entry : '')) : []);
+const isObject = (value: unknown): value is JsonObject => typeof value === 'object' && value !== null && !Array.isArray(value);
+const text = (value: unknown): string | null => (typeof value === 'string' ? value : null);
+
+/** Reads the hub's answer, as the dock's `EditorConfig.Parse`. */
+export function parseConfig(body: Record<string, unknown>): EditorConfig {
+  const settings = isObject(body['settings']) ? body['settings'] : {};
+  const record = <T>(value: unknown, read: (entry: unknown) => T): Record<string, T> => (isObject(value) ? Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, read(entry)])) : {});
+
+  return {
+    settings: { path: text(settings['path']) ?? '', version: text(settings['version']), value: settings['value'] === undefined ? undefined : clone(settings['value']), error: text(settings['error']) },
+    permissionModes: strings(body['permissionModes']),
+    codexPermissionModes: strings(body['codexPermissionModes']),
+    providers: strings(body['providers']),
+    templateVariables: strings(body['templateVariables']),
+    sourceKinds: strings(body['sourceKinds']),
+    inUse: record(body['inUse'], (entry) => (typeof entry === 'number' ? entry : 0)),
+    enabled: record(body['enabled'], (entry) => entry === true),
+    configDir: text(body['configDir']) ?? '',
+  };
+}
+
+export function clone<T extends Json | undefined>(value: T): T {
+  return value === undefined ? value : (JSON.parse(JSON.stringify(value)) as T);
+}
+
+/** A value's JSON text, `undefined` for an absent one, to compare two values as the dock does. */
+export const json = (value: Json | undefined): string => (value === undefined ? 'undefined' : JSON.stringify(value));
+
+export const SEGMENT = /^[a-z0-9][a-z0-9-]*$/;
+
+const ASSIGNMENTS = 'voice.playbookPersonas.';
+
+/** A path's segments; a `voice.playbookPersonas` key is a playbook name, which may hold a dot, so it stays one segment. */
+function segments(path: string): string[] {
+  return path.startsWith(ASSIGNMENTS) && path.length > ASSIGNMENTS.length ? ['voice', 'playbookPersonas', path.slice(ASSIGNMENTS.length)] : path.split('.');
+}
+
+/** A path segment's key and, for a list entry such as `personas[0]`, its index. */
+function step(segment: string): { key: string; index: number | null } {
+  const match = /^(.+)\[(\d+)\]$/.exec(segment);
+
+  return match === null ? { key: segment, index: null } : { key: match[1]!, index: Number(match[2]) };
+}
+
+/** The value at a dotted path, whose segments may index a list, as in `voice.personas[0].name`; undefined when any part is missing. */
+export function getAt(root: Json | undefined, path: string): Json | undefined {
+  let node: Json | undefined = root;
+
+  for (const segment of segments(path)) {
+    const { key, index } = step(segment);
+
+    node = isObject(node) && Object.hasOwn(node, key) ? node[key] : undefined;
+
+    if (index !== null) {
+      node = Array.isArray(node) && index < node.length ? node[index] : undefined;
+    }
+  }
+
+  return node;
+}
+
+/**
+ * A copy of `root` with `path` set, or removed when `value` is undefined; intermediate objects are created. A list entry on the path, as in
+ * `voice.personas[0].name`, must exist and, when not last, be an object; otherwise nothing changes.
+ */
+export function setAt(root: JsonObject, path: string, value: Json | undefined): JsonObject {
+  const copy = clone(root);
+  const keys = segments(path);
+  let parent: JsonObject = copy;
+
+  for (const segment of keys.slice(0, -1)) {
+    const { key, index } = step(segment);
+
+    if (index !== null) {
+      const list = parent[key];
+      const entry = Array.isArray(list) && index < list.length ? list[index] : undefined;
+
+      if (!isObject(entry)) {
+        return clone(root);
+      }
+
+      parent = entry;
+      continue;
+    }
+
+    const child = parent[key];
+
+    if (isObject(child)) {
+      parent = child;
+    } else {
+      const created: JsonObject = {};
+
+      parent[key] = created;
+      parent = created;
+    }
+  }
+
+  const { key: last, index } = step(keys[keys.length - 1]!);
+
+  if (index !== null) {
+    const list = parent[last];
+
+    if (!Array.isArray(list) || index >= list.length) {
+      return clone(root);
+    }
+
+    if (value === undefined) {
+      list.splice(index, 1);
+    } else {
+      list[index] = clone(value);
+    }
+
+    return copy;
+  }
+
+  if (value === undefined) {
+    delete parent[last];
+  } else {
+    parent[last] = clone(value);
+  }
+
+  return copy;
+}
+
+/** Reads a settings field's input; undefined removes the key, so the default applies. Text that is not a number is kept, so the check names the field. */
+export function readField(kind: FieldKind, input: string, checked = false, keepEmpty = false): Json | undefined {
+  const trimmed = input.trim();
+
+  switch (kind) {
+    case 'boolean':
+      return checked;
+    case 'integer':
+      return trimmed === '' ? undefined : /^-?\d+$/.test(trimmed) && Number.isSafeInteger(Number(trimmed)) ? Number(trimmed) : input;
+    case 'number':
+      return trimmed === '' ? undefined : /^-?\d+(\.\d+)?$/.test(trimmed) ? Number(trimmed) : input;
+    case 'list': {
+      const lines = input.split('\n').map((line) => line.trim()).filter((line) => line !== '');
+
+      return lines.length === 0 && !keepEmpty ? undefined : lines;
+    }
+    default:
+      return input === '' ? undefined : input;
+  }
+}
+
+/** The choices for a select, keeping a configured value that is not among them. */
+export function withCurrent(options: readonly FieldOption[], current: Json | undefined): FieldOption[] {
+  return typeof current === 'string' && current !== '' && !options.some((option) => option.value === current) ? [...options, { value: current, label: `${current} (missing)` }] : [...options];
+}
+
+/** A provider's name on the page. */
+export const providerName = (provider: string): string => (provider === 'claude' ? 'Claude' : provider === 'codex' ? 'Codex' : provider);
+
+/**
+ * The Settings state, as the dock's `EditorState`: settings.json as read, one unsaved draft of the whole file with the version it started
+ * from, the page, and the errors. Pages are `general`, and those the later parts of this file add.
+ */
+export class EditorState {
+  page = 'general';
+  /** The unsaved settings.json, or null when there are no unsaved changes. */
+  draft: JsonObject | null = null;
+  /** The file version the draft started from, null for a missing file. */
+  draftVersion: string | null = null;
+  /** The last check's errors for the whole draft. */
+  errors: string[] = [];
+  /** A refused save's errors, or the check errors that stopped a save; shown in the bar until the next edit, discard or successful save. */
+  barErrors: string[] = [];
+  saving = false;
+
+  constructor(public config: EditorConfig) {}
+
+  /** The settings being edited: the draft, else the file's object, else null when the file holds no object. */
+  get value(): JsonObject | null {
+    return this.draft ?? (isObject(this.config.settings.value) ? this.config.settings.value : null);
+  }
+
+  /** Replaces the draft; the first change records the file version it starts from. */
+  setDraft(value: JsonObject): void {
+    if (this.draft === null) {
+      this.draftVersion = this.config.settings.version;
+    }
+
+    this.draft = value;
+  }
+
+  dropDraft(): void {
+    this.draft = null;
+    this.draftVersion = null;
+  }
+
+  get dirty(): boolean {
+    return this.draft !== null && JSON.stringify(this.draft) !== (this.config.settings.value === undefined ? 'null' : JSON.stringify(this.config.settings.value));
+  }
+
+  /** Whether settings.json changed on disk after the draft started, so the hub refuses to save the draft. */
+  get changedOnDisk(): boolean {
+    return this.draft !== null && this.draftVersion !== this.config.settings.version;
+  }
+
+  /** Takes a successful save of `sent` at `version`; a draft edited since continues from that version. */
+  wrote(sent: JsonObject, version: string): void {
+    this.config = { ...this.config, settings: { ...this.config.settings, version, value: clone(sent), error: null } };
+
+    if (this.draft !== null && JSON.stringify(this.draft) === JSON.stringify(sent)) {
+      this.dropDraft();
+    } else if (this.draft !== null) {
+      this.draftVersion = version;
+    }
+  }
+
+  /** Takes the file read again. A draft that matches the old or the new file holds no edit and is dropped; any other draft is kept, so no edit is lost. */
+  refresh(config: EditorConfig): void {
+    const unchanged = !this.dirty;
+
+    this.config = config;
+
+    if (unchanged || !this.dirty) {
+      this.dropDraft();
+    }
+  }
+
+  /** What the page shows from the file and draft; equal before and after a read that changes nothing there. */
+  signature(): string {
+    return [this.page, this.config.configDir, JSON.stringify(this.value), this.config.settings.path, this.config.settings.error].join('\n');
+  }
+}
+
+export function generalFields(state: EditorState): Section[] {
+  const modes = state.config.permissionModes.map((mode) => ({ value: mode, label: mode }));
+  const codexModes = state.config.codexPermissionModes.map((mode) => ({ value: mode, label: mode }));
+  const providers = state.config.providers.map((provider) => ({ value: provider, label: providerName(provider) }));
+
+  return [
+    {
+      heading: 'Sessions',
+      fields: [
+        { path: 'sessions.provider', label: 'Default agent', kind: 'select', help: 'The agent playbook and ad-hoc sessions run in. A playbook can name its own.', placeholder: 'claude', options: providers },
+        { path: 'sessions.concurrency', label: 'Concurrency', kind: 'integer', help: 'Sessions that run at once, 1 to 10. A start with no free slot waits as queued.', placeholder: '2' },
+        {
+          path: 'sessions.codeMode',
+          label: 'Code Mode (experimental)',
+          kind: 'boolean',
+          help: 'New Claude sessions run with Claude Code’s Code Mode, held by Switchboard’s terminal holder, and open in a terminal instead of the Claude view. They keep running between turns until you stop them or they sit idle for an hour. They skip the gateway in your Claude settings and use your Claude subscription sign-in. Sessions already started keep their mode. Needs Install hooks.',
+          fallback: false,
+        },
+        { path: 'sessions.debriefs', label: 'Friction debriefs', kind: 'boolean', help: 'Ask each session what slowed it down, once its work item is done or 45 minutes after its last turn. The answers go to ~/.claude/.wip/debrief for the friction-review skill.', fallback: false },
+      ],
+    },
+    {
+      heading: 'Claude sessions',
+      fields: [
+        { path: 'sessions.model', label: 'Model', kind: 'text', help: 'A playbook can set its own.', placeholder: "Claude's default" },
+        { path: 'sessions.permissionMode', label: 'Permission mode', kind: 'select', help: 'A playbook can set its own.', placeholder: 'auto', options: modes },
+      ],
+    },
+    {
+      heading: 'Codex sessions',
+      fields: [
+        { path: 'sessions.codex.model', label: 'Model', kind: 'text', help: 'A playbook can set its own.', placeholder: "Codex's default" },
+        { path: 'sessions.codex.permissionMode', label: 'Permission mode', kind: 'select', help: 'A playbook can set its own. Commands in Codex’s sandbox cannot use your sign-ins, such as gh’s, so skills that call them need bypassPermissions.', placeholder: 'bypassPermissions', options: codexModes },
+      ],
+    },
+    {
+      heading: 'Triage',
+      fields: [
+        { path: 'triage.concurrency', label: 'Concurrency', kind: 'integer', help: 'Triages that run at once.', placeholder: '2' },
+        { path: 'triage.model', label: 'Model', kind: 'text', help: 'Triage uses the default agent. A model from the other agent falls back to its default.', placeholder: "Agent's default" },
+        { path: 'triage.timeoutSeconds', label: 'Timeout (seconds)', kind: 'integer', help: '', placeholder: '180' },
+      ],
+    },
+    {
+      heading: 'Dock',
+      fields: [
+        {
+          path: 'dock.openVSCode',
+          label: 'Rows open in',
+          kind: 'select',
+          help: 'Where a row opens its work. Only for review opens the session in a terminal, Ptyxis on Linux or Windows Terminal on Windows, until its work awaits approval or is finished, so fewer VS Code windows stay open.',
+          placeholder: 'always',
+          options: [
+            { value: 'always', label: 'Always' },
+            { value: 'review', label: 'Only for review' },
+          ],
+        },
+        {
+          path: 'dock.openTerminal',
+          label: 'Terminal for "Open in terminal"',
+          kind: 'select',
+          help: "Where Open in terminal runs when Rows open in is Always. VS Code when open brings forward the session's terminal app window when there is one, else uses the item window's terminal while that window is open, else the terminal app: Ptyxis on Linux, Windows Terminal on Windows. On Linux without Switchboard's GNOME Shell extension it uses the item window. Only for review always uses the terminal app.",
+          placeholder: 'vscode',
+          options: [
+            { value: 'vscode', label: 'VS Code' },
+            { value: 'app', label: 'Terminal app' },
+            { value: 'auto', label: 'VS Code when open' },
+          ],
+        },
+      ],
+    },
+    {
+      heading: 'Web page',
+      fields: [
+        {
+          path: 'web.chromePane',
+          label: 'Chrome pane (experimental)',
+          kind: 'boolean',
+          help: "Experimental, Windows only, and may break with Chrome updates. Shows the selected work item's ticket and pull request in a Chrome window that the dock keeps over the installed web page's right column. Needs the Switchboard Chrome extension, paired from the page's view options.",
+          fallback: false,
+        },
+      ],
+    },
+    {
+      heading: 'Advanced',
+      advanced: true,
+      fields: [
+        { path: 'sessions.installHooks', label: 'Install hooks', kind: 'boolean', help: 'Add Switchboard’s hooks to your Claude and Codex settings, so the dock shows when a session waits for you or runs in VS Code. Off, the session list and Codex’s run output alone decide state.', fallback: true },
+        { path: 'sessions.claudePath', label: 'Claude Code path', kind: 'text', help: 'The Claude Code CLI the hub and Open in terminal run. Set its full path when their PATH does not include it.', placeholder: 'claude' },
+        { path: 'sessions.codexPath', label: 'Codex path', kind: 'text', help: 'The Codex CLI the hub and Open in terminal run. Set its full path when their PATH does not include it, such as a Codex installed through nvm.', placeholder: 'codex' },
+        { path: 'sessions.nodePath', label: 'Node.js path', kind: 'text', help: 'The Node.js that Switchboard’s hooks and session reports run. Set its full path, with no spaces, when the agents’ PATH does not include it, such as a Node.js installed through nvm.', placeholder: 'node' },
+      ],
+    },
+  ];
+}
+
+/** The sections of a settings page, by its name; none for a page this file does not know. */
+export function pageSections(state: EditorState, page: string): Section[] {
+  return page === 'general' ? generalFields(state) : [];
+}
+
+/** The settings pages the navigation offers, each of which owns the errors that name its fields. */
+export function settingsPages(_state: EditorState): string[] {
+  return ['general'];
+}
+
+/** Every settings field path, with the page that shows it. */
+export function settingsPaths(state: EditorState): Array<{ path: string; page: string }> {
+  return settingsPages(state).flatMap((page) => pageSections(state, page).flatMap((section) => section.fields.map((field) => ({ path: field.path, page }))));
+}
+
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** The field an error names, by the longest path it contains. Under `sources` and `schedules`, a parent path such as `sources.github` names its first field. */
+export function fieldOfError(error: string, paths: readonly string[]): string | null {
+  // The path stands alone: not part of a longer path, though a sentence's final period may follow it.
+  const names = (path: string): boolean => new RegExp(`(^|[^\\w.])${escapeRegExp(path)}($|[^\\w.]|\\.(\\s|$))`).test(error);
+  let best: { path: string; length: number } | null = null;
+
+  for (const path of paths) {
+    const parts = path.split('.');
+    const shortest = parts[0] === 'sources' || parts[0] === 'schedules' ? 2 : parts.length;
+
+    for (let length = parts.length; length >= shortest; length--) {
+      if (names(parts.slice(0, length).join('.')) && (best === null || length > best.length)) {
+        best = { path, length };
+      }
+    }
+  }
+
+  return best?.path ?? null;
+}
+
+/** The page that holds each error's field; an error with no field, or whose page the navigation does not offer, maps to null and shows on every page. */
+export function errorPages(state: EditorState): Map<string, string | null> {
+  const entries = settingsPaths(state);
+  const paths = entries.map((entry) => entry.path);
+  const pages = new Map<string, string | null>();
+
+  for (const error of state.errors) {
+    const path = fieldOfError(error, paths);
+
+    pages.set(error, path === null ? null : (entries.find((entry) => entry.path === path)?.page ?? null));
+  }
+
+  return pages;
+}
+
+/** The parts of settings.json a page edits, by which the navigation marks it unsaved. */
+export function pagePaths(page: string): string[] {
+  return page === 'general' ? ['sessions', 'triage', 'dock', 'web'] : [];
+}
+
+export function pageDirty(state: EditorState, page: string): boolean {
+  return state.draft !== null && pagePaths(page).some((path) => json(getAt(state.draft!, path)) !== json(getAt(state.config.settings.value, path)));
+}
+
+export function pageHasErrors(state: EditorState, page: string): boolean {
+  return [...errorPages(state).values()].includes(page);
+}
+
+/** A navigation entry: a heading, a page, or an Add entry. */
+export interface NavEntry {
+  kind: 'heading' | 'item' | 'add' | 'namespace';
+  label: string;
+  page?: string;
+  note?: string;
+  current: boolean;
+  dirty: boolean;
+  errors: boolean;
+}
+
+export function nav(state: EditorState): NavEntry[] {
+  return [item(state, 'general', 'General')];
+}
+
+function item(state: EditorState, page: string, label: string, note?: string): NavEntry {
+  return { kind: 'item', label, page, ...(note === undefined ? {} : { note }), current: state.page === page, dirty: pageDirty(state, page), errors: pageHasErrors(state, page) };
+}
+
+/** The bar: the file's status, a warning that settings.json changed on disk, the errors of a refused or blocked save, and whether Save and Discard are enabled. */
+export interface BarView {
+  status: string;
+  warning: string | null;
+  errors: readonly string[];
+  canSave: boolean;
+  canDiscard: boolean;
+}
+
+export function bar(state: EditorState): BarView {
+  const count = state.errors.length;
+  const status = state.saving
+    ? 'Saving…'
+    : state.value === null
+      ? 'settings.json cannot be read'
+      : [state.dirty ? 'Unsaved changes' : 'Saved', ...(count === 0 ? [] : [count === 1 ? '1 error' : `${count} errors`])].join(' · ');
+  const warning = state.changedOnDisk ? 'settings.json changed on disk, so your changes cannot be saved. Discard them and open Settings again to load it.' : null;
+
+  return { status, warning, errors: state.barErrors, canSave: state.dirty && !state.changedOnDisk && !state.saving, canDiscard: (state.dirty || state.changedOnDisk) && !state.saving };
+}
+
+/** A field with what it shows: its text or checked state, the option chosen, and the errors that name it. */
+export interface FieldView {
+  field: Field;
+  text: string;
+  checked: boolean;
+  selected: string;
+  errors: string[];
+}
+
+export interface SectionView {
+  heading: string;
+  advanced: boolean;
+  fields: FieldView[];
+}
+
+/** A header button. */
+export interface PageButton {
+  command: string;
+  label: string;
+  primary?: boolean;
+  argument?: string;
+  tip?: string;
+}
+
+/** One page: its title, the file it edits, its buttons, notes, the errors that name no field, a message in place of fields, and the sections. */
+export interface PageView {
+  title: string;
+  filePath: string | null;
+  buttons: PageButton[];
+  notes: string[];
+  errors: string[];
+  message: string | null;
+  sections: SectionView[];
+}
+
+const FIX_BY_HAND = 'Fix the file in an editor; the page reads it again when it changes.';
+
+export function pageView(state: EditorState): PageView {
+  return settingsPage(state, 'General', generalFields(state), [], []);
+}
+
+export function settingsPage(state: EditorState, title: string, sections: readonly Section[], buttons: PageButton[], notes: string[]): PageView {
+  const settings = state.config.settings;
+  const value = state.value;
+
+  if (value === null) {
+    return { title, filePath: settings.path, buttons: [], notes, errors: [settings.error ?? 'settings.json must contain an object.'], message: FIX_BY_HAND, sections: [] };
+  }
+
+  const paths = settingsPaths(state).map((entry) => entry.path);
+  const pages = errorPages(state);
+  // Errors on no page show on every page; one that names no field but belongs to this page shows here.
+  const loose = state.errors.filter((error) => {
+    const on = pages.get(error) ?? null;
+
+    return on === null || (on === state.page && fieldOfError(error, paths) === null);
+  });
+  const views = sections.map((section) => ({
+    heading: section.heading,
+    advanced: section.advanced === true,
+    fields: section.fields.map((field) => fieldView(field, getAt(value, field.path), state.errors.filter((error) => fieldOfError(error, paths) === field.path))),
+  }));
+
+  return { title, filePath: settings.path, buttons, notes, errors: loose, message: null, sections: views };
+}
+
+/** What a field shows for its value: an absent list with a default shows the default; a checkbox without a value shows its fallback. */
+export function fieldView(field: Field, value: Json | undefined, errors: string[]): FieldView {
+  const shown =
+    value === undefined && field.listDefault !== undefined
+      ? field.listDefault.join('\n')
+      : value === undefined || value === null
+        ? value === null
+          ? 'null'
+          : ''
+        : Array.isArray(value)
+          ? value.map((entry) => (typeof entry === 'string' ? entry : JSON.stringify(entry))).join('\n')
+          : typeof value === 'string'
+            ? value
+            : JSON.stringify(value);
+  const checked = typeof value === 'boolean' ? value : field.fallback === true;
+  const selected = typeof value === 'string' ? value : (field.placeholder ?? '');
+
+  return { field, text: shown, checked, selected, errors };
+}

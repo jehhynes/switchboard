@@ -330,7 +330,7 @@ describe('the list header (architecture.md § Web page)', () => {
     expect(root.querySelector('.list-notice')?.textContent).toBe('Every source is off.');
 
     // A dock window the page does not have yet says to use the dock.
-    for (const [action, title] of [['list-later-held', 'Held sessions'], ['list-later-log', 'Show hub log'], ['list-later-settings', 'Open Settings']]) {
+    for (const [action, title] of [['list-later-held', 'Held sessions'], ['list-later-log', 'Show hub log']]) {
       click('.more-actions');
       click(`.more-menu [data-action="${action}"]`);
       expect(root.querySelector('#list-sheet .sheet-title')?.textContent).toBe(title);
@@ -338,6 +338,14 @@ describe('the list header (architecture.md § Web page)', () => {
       click('#list-sheet .sheet-button');
       expect(root.querySelector('#list-sheet .sheet')).toBeNull();
     }
+
+    // Open Settings opens the page's Settings, which reads settings.json from the hub.
+    click('.more-actions');
+    click('.more-menu [data-action="list-settings"]');
+    await flush();
+    expect(root.querySelector('.more-menu')).toBeNull();
+    expect(root.querySelector('.settings')).not.toBeNull();
+    expect(posts.at(-1)?.url).toBe('/v1/conversation/page-settings-read');
 
     page.close();
   });
