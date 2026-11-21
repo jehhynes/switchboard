@@ -62,7 +62,7 @@ export interface PageRoutes {
 }
 
 /** The conversation commands a page may post with its cookie; never `new-conversation`, since a page hosts none. `row-action`, `row-paste`, `resume`, `prompt` and `prompt-key` take only a page key. */
-export const PAGE_COMMANDS = new Set(['send', 'history', 'seen', 'select', 'statuses', 'commands', 'answer', 'talk-here', 'stop-speaking', 'speak-replies', 'replay', 'personas', 'persona', 'page-focus', 'row-action', 'row-paste', 'resume', 'prompt', 'prompt-key']);
+export const PAGE_COMMANDS = new Set(['send', 'history', 'seen', 'select', 'statuses', 'commands', 'answer', 'talk-here', 'stop-speaking', 'speak-replies', 'replay', 'personas', 'persona', 'page-focus', 'row-action', 'row-paste', 'resume', 'prompt', 'prompt-key', 'mic', 'composer']);
 
 export interface HubServer {
   port: number;

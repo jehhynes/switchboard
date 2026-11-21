@@ -112,12 +112,18 @@ export interface ArtifactView {
   updatedAt: number;
 }
 
+/** The page's voice state, as a window's (`VoiceView` in the hub), which the shared voice controls draw. */
 export interface VoiceView {
   enabled: boolean;
   here: boolean;
+  mic?: string;
   speaking: string | null;
   speakReplies: boolean;
   error: string | null;
+  recognizer?: 'gpu' | 'cpu' | null;
+  halfDuplex?: string;
+  fullDuplex?: string;
+  roomHold?: boolean;
 }
 
 /** A row of the page's list: the dock row's title, ticket key, playbook, mark and stripe (`PageRow` in the hub's `page.ts`). */

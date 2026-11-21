@@ -2,7 +2,7 @@ import { applyEvent, commandQuery, EMPTY, mentionOf, mentionQuery, pageTitle, se
 import { snoozeChoices } from '@switchboard/core/snooze';
 import type { PageState } from './model.js';
 import { escape, renderMarkdown } from './markdown.js';
-import { answerText, artifactUrl, complete, firstSnoozeDay, renderEndedNote, markdownBody, newView, parseQuestions, renderArtifacts, renderArtifactView, renderHeader, renderList, renderSheet, renderStatus, renderTabs, renderTimeline, renderVoice, snoozeDateUntil, TABS } from './render.js';
+import { answerText, artifactUrl, complete, firstSnoozeDay, renderEndedNote, renderMicButton, markdownBody, newView, parseQuestions, renderArtifacts, renderArtifactView, renderHeader, renderList, renderSheet, renderStatus, renderTabs, renderTimeline, renderVoice, snoozeDateUntil, TABS } from './render.js';
 import type { CardDraft, Tab, View } from './render.js';
 import type { ItemView, ScreenPrompt } from './types.js';
 import { morph } from './morph.js';
@@ -17,6 +17,8 @@ const COMPOSER_MAX_PX = 200;
 export const SENT_NOTE_MS = 4_000;
 /** How often the page reads the prompt a session waits on in its terminal while it waits. */
 export const PROMPT_POLL_MS = 1_000;
+/** How long the box's draft waits before the hub hears it, as in the Conversation view. */
+export const COMPOSER_DRAFT_MS = 300;
 /** Where the page keeps each work item's draft, over a reload. */
 const DRAFTS = 'switchboard.drafts';
 
@@ -73,14 +75,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     '<div class="composer-error" role="alert" hidden><span class="composer-error-text"></span><button class="dismiss" type="button" aria-label="Dismiss"><span class="codicon codicon-close"></span></button></div>' +
     '<div class="composer"><div class="glass composer-menu" role="listbox" hidden></div><div class="composer-input"><div class="live-mirror"><span class="mirror-text" aria-hidden="true"></span><span class="live-words" aria-live="polite" hidden></span></div><textarea rows="1" aria-label="Message"></textarea></div><div class="composer-footer"><div class="composer-controls">' +
     '<button class="composer-tool slash" type="button" title="Show slash commands (/)" aria-label="Show slash commands"><span class="slash-glyph">/</span></button></div><div class="voice-controls"></div>' +
-    // The microphone's place, for dictation in a later slice.
-    '<span class="composer-mic" hidden></span><button class="send" type="button" title="Send (Enter)" aria-label="Send" disabled><span class="codicon codicon-arrow-up"></span></button></div></div>';
+    '<span class="composer-mic"></span><button class="send" type="button" title="Send (Enter)" aria-label="Send" disabled><span class="codicon codicon-arrow-up"></span></button></div></div>';
 
   const input = composerHost.querySelector('textarea')!;
   const send = composerHost.querySelector<HTMLButtonElement>('button.send')!;
   const errorBox = composerHost.querySelector<HTMLElement>('.composer-error')!;
   const menu = composerHost.querySelector<HTMLElement>('.composer-menu')!;
   const voiceControls = composerHost.querySelector<HTMLElement>('.voice-controls')!;
+  const micSlot = composerHost.querySelector<HTMLElement>('.composer-mic')!;
   const liveWords = composerHost.querySelector<HTMLElement>('.live-words')!;
   const mirror = composerHost.querySelector<HTMLElement>('.live-mirror')!;
   const mirrorText = composerHost.querySelector<HTMLElement>('.mirror-text')!;
@@ -287,7 +289,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     composerHost.classList.add('sending');
     refresh();
 
-    const answer = await command('send', { ...target, text, ...(asCommand ? { command: true } : {}) });
+    const sent = command('send', { ...target, text, ...(asCommand ? { command: true } : {}) });
+
+    // Sending hands the box back to the voice, so dictation resumes, as in the Conversation view (architecture.md § Dictation).
+    if (state.voice?.here === true && state.voice.mic !== undefined && !['off', 'idle-off', 'unavailable'].includes(state.voice.mic) && document.activeElement === input) {
+      input.blur();
+    }
+
+    const answer = await sent;
 
     sending = false;
     const dictated = heldDraft;
@@ -464,6 +473,30 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
   });
 
+  micSlot.addEventListener('click', (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-voice="mic"]');
+
+    if (button !== null) {
+      void command('mic', { on: button.dataset['on'] === 'true' }).then((answer) => answer.status === 200 || showError(String(answer.body['error'] ?? 'The mic did not change.')));
+    }
+  });
+  // The box's focus and draft, for the focus rule of dictation, as the Conversation view tells the hub (architecture.md § Dictation).
+  let composerTimer: ReturnType<typeof setTimeout> | undefined;
+  const tellHub = (): void => {
+    clearTimeout(composerTimer);
+
+    if (state.scope !== null && state.voice?.enabled === true) {
+      void command('composer', { focused: document.activeElement === input, draft: sending ? '' : input.value });
+    }
+  };
+
+  input.addEventListener('focus', tellHub);
+  input.addEventListener('blur', tellHub);
+  input.addEventListener('input', () => {
+    clearTimeout(composerTimer);
+    composerTimer = setTimeout(tellHub, COMPOSER_DRAFT_MS);
+  });
+
   /** The composer follows the selected work item: its own draft, enabled only for a session it can talk to. */
   const updateComposer = (): void => {
     const id = state.scope?.workItemId ?? null;
@@ -494,7 +527,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       : state.session?.state === 'ended' && state.session.conversation !== 'none'
         ? 'Resume the session to send a message.'
         : (state.session?.reason ?? (state.connected ? 'No session has started yet.' : 'Connecting to Switchboard…'));
-    morph(voiceControls, renderVoice(state.voice));
+    // The same controls as the Conversation view's, acting on this computer's voice process (architecture.md § Web page).
+    morph(voiceControls, renderVoice(state.voice, full));
+    morph(micSlot, full ? renderMicButton(state.voice) : '');
     grow();
     refresh();
   };

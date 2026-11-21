@@ -1,4 +1,5 @@
 import { providerMark } from '@switchboard/conversation/providerIcons';
+import { renderMicButton, renderVoiceControls } from '@switchboard/conversation/voiceControls';
 import { artifactIcon, awaitingReply, selectedEntry, selectedRow, stateIcon, timeline } from './model.js';
 import type { PageState } from './model.js';
 import { copyButton, escape, renderInline, renderMarkdown } from './markdown.js';
@@ -642,25 +643,11 @@ export function markdownBody(text: string): string {
   return text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
 }
 
-/**
- * The composer footer's voice controls: Speak replies, Stop while the page's session speaks, and whether the voice is here, with Talk here when
- * it is not; nothing while voice is off. The page shows only its own voice state.
- */
-export function renderVoice(voice: VoiceView | null): string {
-  if (voice === null || !voice.enabled) {
-    return '';
-  }
-
-  // One cluster beside Send: Stop while this page's session speaks and Speak replies while the voice is here; one Talk here in their place while it is elsewhere.
-  if (!voice.here) {
-    return '<button class="ghost talk-here" type="button" data-key="talk-here" data-voice="talk-here" title="The voice is not on this page. Click to move it here.">Talk here</button>';
-  }
-
-  const speakTitle = voice.speakReplies ? 'Speak replies: on. Click to stop speaking replies.' : 'Speak replies: off. Click to speak replies.';
-  const speak = `<button class="ghost icon" type="button" data-key="speak-replies" data-voice="speak-replies" aria-pressed="${voice.speakReplies}" title="${speakTitle}" aria-label="${speakTitle}"><span class="codicon codicon-${voice.speakReplies ? 'unmute' : 'mute'}" aria-hidden="true"></span></button>`;
-  const stop = voice.speaking !== null ? '<button class="ghost icon" type="button" data-key="stop" data-voice="stop" title="Stop speaking (Escape)" aria-label="Stop speaking (Escape)"><span class="codicon codicon-debug-stop" aria-hidden="true"></span></button>' : '';
-
-  return `${stop}${speak}`;
+/** The composer footer's voice controls and mic, drawn by the Conversation view's renderer, for the page (architecture.md § Web page). */
+export function renderVoice(voice: VoiceView | null, live = true): string {
+  return renderVoiceControls(voice, live, 'page');
 }
+
+export { renderMicButton };
 
 export { answerText, complete, parseQuestions };

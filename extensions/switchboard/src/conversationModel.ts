@@ -1,3 +1,4 @@
+import { PAUSED_BY_VOICE_TIP, ROOM_HOLD_TIP } from '@switchboard/conversation/voiceControls';
 import { SESSION_ICONS, sessionIcon } from '@switchboard/core/group';
 import type { SessionIcon } from '@switchboard/core/group';
 import type { ArtifactView, ConversationEntry, ItemView, ReplyView, ScopeView, SessionView, StatusView, VoiceView } from '@switchboard/hub';
@@ -358,11 +359,8 @@ export function voiceStatus(voice: VoiceView | null): { text: string; tooltip: s
   }
 }
 
-/** The mic's tooltips while "stop listening" paused it. */
-export const PAUSED_BY_VOICE_TIP = 'Paused: you said "stop listening". Say "start listening", or click to listen again.';
-
-/** The mic's tooltips during a room hold. */
-export const ROOM_HOLD_TIP = 'Held: someone else is talking in the room, so dictation stays in the box until you press Enter.';
+// The mic's tooltips while "stop listening" paused it and during a room hold, shared with the web page's mic button.
+export { PAUSED_BY_VOICE_TIP, ROOM_HOLD_TIP };
 
 /**
  * Whether the mic is on in this window, so Toggle Microphone turns it off; an idle stop counts as off, so the toggle starts it again, and so does

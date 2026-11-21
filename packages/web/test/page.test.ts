@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyEvent, awaitingReply, EMPTY, mentionOf, mentionQuery, commandQuery, shortTitle, timeline, withEarlier } from '../src/model.js';
 import { answerText, answersIn, complete, parseQuestions } from '@switchboard/conversation/questions';
-import { artifactUrl, newView, renderArtifactView, turnRow, renderHeader, renderList, renderTimeline, renderVoice, markdownBody } from '../src/render.js';
+import { artifactUrl, newView, renderArtifactView, turnRow, renderHeader, renderList, renderMicButton, renderTimeline, renderVoice, markdownBody } from '../src/render.js';
+import { renderMicButton as viewMicButton } from '@switchboard/conversation/voiceControls';
 import { renderMarkdown } from '../src/markdown.js';
 import { SENT_NOTE_MS, startPage } from '../src/main.js';
 import type { ArtifactView, MessageView, PageGroup, PageRow, ReplyView, SessionView } from '../src/types.js';
@@ -255,6 +256,11 @@ describe('drawing', () => {
     expect(renderVoice(null)).toBe('');
     expect(renderVoice({ enabled: true, here: false, speaking: null, speakReplies: true, error: null })).toContain('data-voice="talk-here"');
     expect(renderVoice({ enabled: true, here: true, speaking: 'r1', speakReplies: false, error: null })).toContain('data-voice="stop"');
+    expect(renderVoice({ enabled: true, here: false, speaking: null, speakReplies: true, error: null })).toContain('The voice is not on this page.');
+    // One renderer with the Conversation view: every mic state is drawn by the view's own button.
+    expect(renderMicButton).toBe(viewMicButton);
+    expect(renderMicButton({ enabled: true, here: true, mic: 'paused-by-voice', speaking: null, speakReplies: true, error: null })).toContain('data-on="true"');
+    expect(renderMicButton({ enabled: true, here: true, mic: 'hearing', speaking: 'r1', speakReplies: true, error: null, halfDuplex: 'no echo cancellation' })).toContain('class="mic held"');
   });
 
   it('draws the spinner after the newest item while the session works on a reply, so progress written mid-turn shows above it', () => {
@@ -986,6 +992,24 @@ describe('the page in use', () => {
     click('[data-voice="stop"]');
     await flush();
     expect(posts.some((post) => post.url.endsWith('/stop-speaking'))).toBe(true);
+
+    // The mic is the Conversation view's own button, and drives the computer's voice process as the view does.
+    expect(root.querySelector('.composer-mic')!.innerHTML).toBe(renderMicButton({ enabled: true, here: true, speaking: 'r1', speakReplies: true, error: null }));
+    click('.composer-mic [data-voice="mic"]');
+    await flush();
+    expect(posts.find((post) => post.url.endsWith('/mic'))?.body).toMatchObject({ on: true, scopeGen: 3 });
+    source.emit('voice', { voice: { enabled: true, here: true, mic: 'paused-other-app', speaking: null, speakReplies: true, error: null } });
+    expect(root.querySelector('.composer-mic .mic')!.getAttribute('title')).toContain('another app is using the microphone');
+    source.emit('voice', { voice: { enabled: true, here: true, mic: 'listening', speaking: null, speakReplies: true, error: null } });
+    expect(root.querySelector('.composer-mic .mic.listening')).not.toBeNull();
+
+    // Focusing the box and leaving it tell the hub, for the focus rule of dictation.
+    const box = root.querySelector('textarea')!;
+
+    box.focus();
+    box.blur();
+    await flush();
+    expect(posts.filter((post) => post.url.endsWith('/composer')).map((post) => post.body['focused'])).toEqual([true, false]);
     page.close();
   });
 

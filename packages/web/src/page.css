@@ -346,3 +346,26 @@ button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }
 .prompt-card .question-footer { flex-wrap: wrap; gap: 6px; }
 .prompt-note { color: var(--vscode-descriptionForeground); font-size: 12px; }
 @media (hover: none), (pointer: coarse) { .prompt-option { min-height: 44px; } }
+
+/* The mic button, drawn as the Conversation view's (architecture.md § Dictation): one ghost icon whose glyph is its state. */
+.composer-mic { display: flex; flex: none; }
+/* One mic button, a ghost icon whose glyph is its state, each drawn apart: slashed while off, outlined after the idle timeout, filled in the
+   accent colour and pulsing while it listens (faster while it hears, still while it starts), a pause badge while paused, a speaker badge while
+   half-duplex capture holds it for a reply. The slash is cut out of the glyph with the input's background, as a codicon mic-off would be; a
+   badge is a small disc in the input's background at the bottom right. */
+.composer .mic { display: flex; flex: none; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border: none; border-radius: 5px; cursor: pointer; color: var(--vscode-foreground); background: transparent; }
+.composer .mic:hover { background: var(--vscode-toolbar-hoverBackground); }
+.composer .mic.off, .composer .mic.elsewhere, .composer .mic.idle { color: var(--vscode-descriptionForeground); }
+.composer .mic.off:hover, .composer .mic.elsewhere:hover, .composer .mic.idle:hover { color: var(--vscode-foreground); }
+.composer .mic.listening, .composer .mic.hearing, .composer .mic.starting, .composer .mic.held { color: var(--vscode-focusBorder); }
+.composer .mic.starting, .composer .mic.held .codicon-mic-filled { opacity: 0.6; }
+.composer .mic.unavailable { color: var(--vscode-editorWarning-foreground); }
+.mic-glyph { position: relative; display: inline-flex; }
+.mic-glyph.off::after { content: ''; position: absolute; left: 50%; top: -1px; width: 1.5px; height: 18px; margin-left: -0.75px; background: currentColor; box-shadow: 0 0 0 1px var(--vscode-input-background); transform: rotate(-45deg); }
+.mic-badge { position: absolute; right: -5px; bottom: -4px; display: flex; align-items: center; justify-content: center; width: 11px; height: 11px; border-radius: 50%; color: var(--vscode-foreground); background: var(--vscode-input-background); box-shadow: 0 0 0 1px currentColor; }
+.mic-badge .codicon { font-size: 8px; }
+.composer .mic.listening .codicon-mic-filled { animation: mic-pulse 2s ease-in-out infinite; }
+.composer .mic.hearing .codicon-mic-filled { animation: mic-pulse 0.8s ease-in-out infinite; }
+@keyframes mic-pulse { 50% { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) { .composer .mic .codicon { animation: none; } }
+@media (hover: none), (pointer: coarse) { .composer .mic { min-width: 44px; min-height: 44px; } }
