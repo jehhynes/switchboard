@@ -91,7 +91,8 @@ function copyAssets() {
 
   fs.copyFileSync('src/webview/history.css', 'dist/history.css');
   fs.copyFileSync('src/webview/pane.css', 'dist/pane.css');
-  fs.copyFileSync('src/webview/conversation.css', 'dist/conversation.css');
+  // The bubbles' styles the web page shares come first, so the view's own rules can build on them.
+  fs.writeFileSync('dist/conversation.css', fs.readFileSync(require.resolve('@switchboard/conversation/bubbles.css'), 'utf8') + fs.readFileSync('src/webview/conversation.css', 'utf8'));
   fs.copyFileSync('src/webview/mermaidPreview.css', 'dist/mermaidPreview.css');
 
   // Mermaid's self-contained build, which sets `globalThis.mermaid`, so the Markdown preview draws diagrams offline.

@@ -37,7 +37,8 @@ const assets = {
   // The console's script and xterm.js's styles, loaded only when a console first shows.
   'console.js': text('text/javascript; charset=utf-8', await bundle('src/consoleEntry.ts')),
   'xterm.css': text('text/css; charset=utf-8', readFileSync(require.resolve('@xterm/xterm/css/xterm.css'), 'utf8')),
-  'page.css': text('text/css; charset=utf-8', readFileSync('src/page.css', 'utf8')),
+  // The bubbles' styles the Conversation view shares come first, so the page's own rules can build on them.
+  'page.css': text('text/css; charset=utf-8', readFileSync(require.resolve('@switchboard/conversation/bubbles.css'), 'utf8') + readFileSync('src/page.css', 'utf8')),
   'theme.css': text('text/css; charset=utf-8', theme),
   'codicon.css': text('text/css; charset=utf-8', readFileSync(join(codicons, 'codicon.css'), 'utf8')),
   'codicon.ttf': binary('font/ttf', join(codicons, 'codicon.ttf')),

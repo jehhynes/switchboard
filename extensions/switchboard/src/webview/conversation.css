@@ -55,15 +55,14 @@ button:focus-visible, li:focus-visible, .timeline:focus-visible, summary:focus-v
 .meta .spoken, .meta .voice-mark, .meta .delivery { display: inline-flex; flex: none; align-items: center; gap: 4px; white-space: nowrap; cursor: default; }
 .day { display: flex; align-items: center; gap: 10px; padding: 8px 0; color: var(--vscode-disabledForeground, var(--vscode-descriptionForeground)); font-size: 0.9em; white-space: nowrap; }
 .day::before, .day::after { content: ""; flex: 1; min-width: 32px; height: 1px; background: currentColor; opacity: 0.5; }
-/* Our messages as chat bubbles on the right: at most 85% wide, filled with VS Code's own colour for the user's request bubble in its Chat view
-   (`chat.requestBubbleBackground`, a light tint of the selection colour, so the theme's foreground stays readable on it), the inactive selection
-   colour on a VS Code without it, and a contrast border in high contrast themes, which define no bubble colour. A smaller bottom-right corner
-   is the tail; the line under it holds its marks at its left edge and its time at its right. */
+/* Our messages as chat bubbles on the right: at most 85% wide, filled with the shared message blue (`--sb-message-bubble`, bubbles.css), the
+   web page's, and a contrast border in high contrast themes. A smaller bottom-right corner is the tail; the line under it holds its marks at its
+   left edge and its time at its right. */
 .message { display: flex; flex-direction: column; align-items: flex-end; }
 .message .bubble { display: flex; flex-direction: column; align-items: flex-end; max-width: 85%; }
 .message .bubble > .meta { align-self: stretch; }
-.message .box { box-sizing: border-box; max-width: 100%; margin: 0; border: 1px solid var(--vscode-contrastBorder, transparent); border-radius: 12px 12px 4px 12px; background: var(--vscode-chat-requestBubbleBackground, var(--vscode-editor-inactiveSelectionBackground, rgba(127, 127, 127, 0.2))); color: var(--vscode-foreground); padding: 6px 12px; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
-/* High contrast themes define no bubble colour, and their inactive selection colour is too light for their text: only the contrast border. */
+.message .box { box-sizing: border-box; max-width: 100%; margin: 0; border: 1px solid var(--vscode-contrastBorder, transparent); border-radius: 12px 12px 4px 12px; background: var(--sb-message-bubble); color: var(--vscode-foreground); padding: 6px 12px; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
+/* In high contrast themes the bubble is only its contrast border, since a tint of their button colour is too strong for their text. */
 body.vscode-high-contrast .message .box, body.vscode-high-contrast-light .message .box { background: transparent; }
 .message .box.command { font-family: var(--vscode-editor-font-family, monospace); font-size: 0.9em; }
 .message.provisional .box { opacity: 0.7; }

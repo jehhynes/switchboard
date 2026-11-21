@@ -383,14 +383,16 @@ describe('the Conversation view page', () => {
     expect(renderConversation(state([reply('r1', T0)], { more: true }))).toContain('data-action="earlier"');
   });
 
-  it('draws our messages as bubbles on the right, at most 85% wide in the Chat view\'s request bubble colour with a smaller bottom-right corner, with its marks and time on one line under them', () => {
+  it('draws our messages as bubbles on the right, at most 85% wide in the web page\'s message blue with a smaller bottom-right corner, with its marks and time on one line under them', () => {
     const css = readFileSync(join(__dirname, '../src/webview/conversation.css'), 'utf8');
+    const shared = readFileSync(require.resolve('@switchboard/conversation/bubbles.css'), 'utf8');
     const rule = (selector: string) => css.split('\n').find((line) => line.startsWith(`${selector} {`)) ?? '';
 
     expect(rule('.message')).toContain('align-items: flex-end;');
     expect(rule('.message .bubble')).toContain('max-width: 85%;');
     expect(rule('.message .box')).toContain('border-radius: 12px 12px 4px 12px;');
-    expect(rule('.message .box')).toContain('background: var(--vscode-chat-requestBubbleBackground, var(--vscode-editor-inactiveSelectionBackground,');
+    expect(rule('.message .box')).toContain('background: var(--sb-message-bubble);');
+    expect(shared).toContain('--sb-message-bubble: color-mix(in srgb, var(--vscode-button-background, #0078d4) 15%, transparent);');
     expect(rule('.message .box')).toContain('border: 1px solid var(--vscode-contrastBorder, transparent);');
     expect(rule('.message .box')).toContain('color: var(--vscode-foreground);');
     expect(rule('body.vscode-high-contrast .message .box, body.vscode-high-contrast-light .message .box')).toContain('background: transparent;');

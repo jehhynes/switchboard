@@ -1,0 +1,6 @@
+/* The chat bubbles' colours and shapes, shared by the VS Code Conversation view and the web page, whose builds put this file before their own
+   styles (architecture.md § Conversation view). */
+:root {
+  /* Our messages, on the right: a 15% tint of the theme's button blue, #0078D426 in Dark Modern, light enough for the theme's foreground. */
+  --sb-message-bubble: color-mix(in srgb, var(--vscode-button-background, #0078d4) 15%, transparent);
+}

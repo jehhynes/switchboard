@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "The conversation layer: reads a Code Mode session's replies and messages from its transcript, with the screen as an early copy. Runs in the hub; imports no native module and must not import vscode. `./questions`, `./providerIcons`, `./voiceControls` and `./messageMeta` import nothing, for browser bundles.",
+  "description": "The conversation layer: reads a Code Mode session's replies and messages from its transcript, with the screen as an early copy. Runs in the hub; imports no native module and must not import vscode. `./questions`, `./providerIcons`, `./voiceControls` and `./messageMeta` import nothing, for browser bundles, and `./bubbles.css` is the bubbles' styles both front ends share.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -26,7 +26,8 @@
     "./messageMeta": {
       "types": "./dist/messageMeta.d.ts",
       "default": "./dist/messageMeta.js"
-    }
+    },
+    "./bubbles.css": "./src/bubbles.css"
   },
   "scripts": {
     "build": "tsc -b",
