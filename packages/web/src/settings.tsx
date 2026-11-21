@@ -154,6 +154,11 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
     }
 
     mount(host, renderSettings(state, view, handlers));
+
+    // While a question is open, the editor behind it takes no focus or clicks.
+    for (const part of host.querySelectorAll('.settings > .settings-head, .settings > .settings-body, .settings > .settings-bar')) {
+      part.toggleAttribute('inert', view.ask !== null);
+    }
   };
 
   /** Draws a page anew: the fields show the values read, not what was typed into the page before. */
@@ -663,8 +668,12 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
     deps.closed?.();
   };
 
+  // The control that had the focus when the close question opened, which Keep editing gives it back.
+  let askedFrom: HTMLElement | null = null;
+
   const requestClose = (): void => {
     if (state?.dirty === true) {
+      askedFrom = document.activeElement instanceof HTMLElement && host.contains(document.activeElement) ? document.activeElement : host.querySelector<HTMLElement>('.settings-close');
       view.ask = { kind: 'close' };
       draw();
       host.querySelector<HTMLElement>('.settings-ask .sheet-button.primary')?.focus();
@@ -770,6 +779,7 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
       }
 
       draw();
+      (askedFrom?.isConnected === true ? askedFrom : host.querySelector<HTMLElement>('.settings-close'))?.focus();
     },
   };
 
@@ -840,47 +850,50 @@ export function renderSettings(state: EditorState | null, view: View, on: Handle
   const shown = bar(state ?? new EditorState({ settings: { path: '', version: null, value: {}, error: null }, permissionModes: [], codexPermissionModes: [], providers: [], templateVariables: [], sourceKinds: [], inUse: {}, enabled: {}, configDir: '' }));
 
   return (
-    <div class="settings" data-drill={view.drill} role="dialog" aria-modal="true" aria-labelledby="settings-title">
-      <div class="settings-head">
-        <button type="button" class="icon settings-back" aria-label="All settings" title="All settings" onClick={on.back}>
-          <span class="codicon codicon-chevron-left" aria-hidden="true"></span>
-        </button>
-        <h1 id="settings-title" class="settings-title">
-          Settings
-        </h1>
-        <button type="button" class="icon settings-close" aria-label="Close settings" title="Close settings" onClick={on.close}>
-          <span class="codicon codicon-close" aria-hidden="true"></span>
-        </button>
-      </div>
-      <div class="settings-body">
-        <nav class="settings-nav" aria-label="Settings pages">
-          {state === null ? <p class="settings-message settings-nav-message">{view.error ?? 'Reading the settings…'}</p> : nav(state).map((entry) => <NavRow entry={entry} on={on} />)}
-        </nav>
-        <div class="settings-page">
-          {view.notice === null ? null : <p class="settings-notice">{view.notice}</p>}
-          {page === null ? <p class="settings-message">{view.error ?? 'Reading the settings…'}</p> : <Page key={state!.page} state={state!} page={page} view={view} on={on} />}
+    // A press on the backdrop, not on the dialog, closes Settings as Close does.
+    <div class="settings-backdrop" onClick={(event) => event.target === event.currentTarget && on.close()}>
+      <div class="settings" data-drill={view.drill} role="dialog" aria-modal="true" aria-labelledby="settings-title">
+        <div class="settings-head">
+          <button type="button" class="icon settings-back" aria-label="All settings" title="All settings" onClick={on.back}>
+            <span class="codicon codicon-chevron-left" aria-hidden="true"></span>
+          </button>
+          <h1 id="settings-title" class="settings-title">
+            Settings
+          </h1>
+          <button type="button" class="icon settings-close" aria-label="Close settings" title="Close settings" onClick={on.close}>
+            <span class="codicon codicon-close" aria-hidden="true"></span>
+          </button>
         </div>
-      </div>
-      {state === null ? null : (
-        <div class="settings-bar">
-          <div class="settings-bar-text">
-            <span class="settings-status">{shown.status}</span>
-            {shown.warning === null ? null : <span class="settings-warning">{shown.warning}</span>}
-            {shown.errors.map((error) => (
-              <span class="settings-error">{error}</span>
-            ))}
-          </div>
-          <div class="settings-bar-buttons">
-            <button type="button" class="sheet-button secondary" title="Drop every unsaved change and close settings" disabled={!shown.canDiscard} onClick={on.discard}>
-              Discard
-            </button>
-            <button type="button" class="sheet-button primary" title="Save settings and close (Ctrl+S saves and stays open)" disabled={!shown.canSave} onClick={on.save}>
-              Save
-            </button>
+        <div class="settings-body">
+          <nav class="settings-nav" aria-label="Settings pages">
+            {state === null ? <p class="settings-message settings-nav-message">{view.error ?? 'Reading the settings…'}</p> : nav(state).map((entry) => <NavRow entry={entry} on={on} />)}
+          </nav>
+          <div class="settings-page">
+            {view.notice === null ? null : <p class="settings-notice">{view.notice}</p>}
+            {page === null ? <p class="settings-message">{view.error ?? 'Reading the settings…'}</p> : <Page key={state!.page} state={state!} page={page} view={view} on={on} />}
           </div>
         </div>
-      )}
-      {view.ask === null ? null : <AskSheet ask={view.ask} on={on} />}
+        {state === null ? null : (
+          <div class="settings-bar">
+            <div class="settings-bar-text">
+              <span class="settings-status">{shown.status}</span>
+              {shown.warning === null ? null : <span class="settings-warning">{shown.warning}</span>}
+              {shown.errors.map((error) => (
+                <span class="settings-error">{error}</span>
+              ))}
+            </div>
+            <div class="settings-bar-buttons">
+              <button type="button" class="sheet-button secondary" title="Drop every unsaved change and close settings" disabled={!shown.canDiscard} onClick={on.discard}>
+                Discard
+              </button>
+              <button type="button" class="sheet-button primary" title="Save settings and close (Ctrl+S saves and stays open)" disabled={!shown.canSave} onClick={on.save}>
+                Save
+              </button>
+            </div>
+          </div>
+        )}
+        {view.ask === null ? null : <AskSheet ask={view.ask} on={on} />}
+      </div>
     </div>
   );
 }

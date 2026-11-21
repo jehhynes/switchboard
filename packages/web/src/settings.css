@@ -1,6 +1,7 @@
-/* Settings over the whole page, as the dock's Settings window (architecture.md § Web page): the navigation beside the page, and the bar under
-   both; on a phone, the navigation is a list that drills into each page, with Back to it. */
-.settings { position: fixed; inset: 0; z-index: 40; display: flex; flex-direction: column; background: var(--vscode-editor-background); color: var(--vscode-foreground); }
+/* Settings as a dialog over the dimmed page, as the dock's Settings window (architecture.md § Web page): the navigation beside the page, and the
+   bar under both; on a phone it takes the whole screen, and the navigation is a list that drills into each page, with Back to it. */
+.settings-backdrop { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(0, 0, 0, 0.45); }
+.settings { box-sizing: border-box; display: flex; flex-direction: column; width: min(960px, 100%); height: min(80vh, 100%); overflow: hidden; border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); border-radius: 8px; box-shadow: 0 8px 32px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.5)); background: var(--vscode-editor-background); color: var(--vscode-foreground); }
 .settings-head { flex: none; display: flex; align-items: center; gap: 4px; min-height: 35px; padding: 0 4px 0 12px; border-bottom: 1px solid var(--vscode-panel-border); background: var(--vscode-sideBar-background); }
 .settings-title { flex: 1; margin: 0; font-size: 13px; font-weight: 600; }
 .settings-head button.icon { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 26px; padding: 0; border: none; border-radius: 4px; background: transparent; color: var(--vscode-icon-foreground, var(--vscode-foreground)); cursor: pointer; }
@@ -69,13 +70,15 @@ textarea.settings-text.prompt { font-family: var(--vscode-editor-font-family, mo
 .settings-enroll-sentences { margin-left: 12px; font-size: 14px; }
 .settings-enroll-sentences p { margin: 4px 0; }
 .settings-bar { flex: none; display: flex; align-items: flex-start; gap: 12px; padding: 8px 16px; border-top: 1px solid var(--vscode-panel-border); background: var(--vscode-sideBar-background); }
-.settings-bar-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.settings-bar-text { flex: 1; min-width: 0; max-height: 25vh; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
 .settings-status { color: var(--vscode-descriptionForeground); }
 .settings-warning { color: var(--vscode-editorWarning-foreground); }
 .settings-bar-buttons { flex: none; display: flex; gap: 6px; }
-.settings .sheet-backdrop { z-index: 60; }
+.settings .sheet-backdrop { z-index: 70; }
 /* On a phone the navigation and the page are each the whole screen: the list first, a page after a tap, and Back to the list. */
 @media (max-width: 767px) {
+  .settings-backdrop { padding: 0; }
+  .settings { width: 100%; height: 100%; border: none; border-radius: 0; box-shadow: none; }
   .settings-nav { width: auto; flex: 1; border-right: none; }
   .settings[data-drill="nav"] .settings-page, .settings[data-drill="page"] .settings-nav { display: none; }
   .settings[data-drill="page"] .settings-back { display: inline-flex !important; }

@@ -271,6 +271,35 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     expect(pane.isOpen()).toBe(false);
   });
 
+  it('closes on a press on the dimmed backdrop as Close does, asking first over unsaved changes, and not on a press inside the dialog', async () => {
+    const { pane } = await opened();
+    const backdrop = host.querySelector<HTMLElement>('.settings-backdrop')!;
+
+    expect(backdrop.querySelector('.settings[role="dialog"]')).not.toBeNull();
+    host.querySelector<HTMLElement>('.settings-page')!.click();
+    expect(pane.isOpen()).toBe(true);
+
+    type('sessions.model', 'opus');
+    host.querySelector<HTMLElement>('.settings-backdrop')!.click();
+    await settle();
+    expect(host.querySelector('.settings-ask .sheet-title')?.textContent).toBe('Save changes to settings?');
+    // The editor behind the question takes no focus until it closes.
+    expect(host.querySelector('.settings > .settings-body')?.hasAttribute('inert')).toBe(true);
+    expect(host.querySelector('.settings > .settings-bar')?.hasAttribute('inert')).toBe(true);
+    button('Keep editing').click();
+    await settle();
+    expect(pane.isOpen()).toBe(true);
+    expect(host.querySelector('.settings > .settings-body')?.hasAttribute('inert')).toBe(false);
+    expect(document.activeElement).toBe(host.querySelector('.settings-close'));
+
+    button('Discard').click();
+    await settle();
+    pane.open();
+    await settle();
+    host.querySelector<HTMLElement>('.settings-backdrop')!.click();
+    expect(pane.isOpen()).toBe(false);
+  });
+
   it('Discard drops every unsaved change and closes, as the dock\'s', async () => {
     const { pane } = await opened();
 
