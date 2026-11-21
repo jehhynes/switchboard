@@ -188,12 +188,14 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 .composer-sent .codicon { color: var(--vscode-testing-iconPassed); }
 
 /* The composer, as Claude Code's input: at most 680 px wide and centred, an 8 px radius and a ring in the focus colour. */
-#composer { box-sizing: border-box; width: 100%; max-width: 712px; margin: 0 auto; padding: 0 16px 16px; }
+/* The composer's edges line up with the timeline's: the same 900 px at most inside the same 20 px of padding as the conversation's scroller. */
+#composer { box-sizing: border-box; width: 100%; max-width: 940px; margin: 0 auto; padding: 0 20px 16px; }
 #composer[hidden] { display: none; }
 .composer { position: relative; display: flex; flex-direction: column; border: 1px solid var(--vscode-input-border); border-radius: 8px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1); }
 .composer:focus-within { border-color: var(--vscode-focusBorder); box-shadow: 0 0 0 3px color-mix(in srgb, var(--vscode-focusBorder) 12%, transparent); }
 .composer textarea { position: relative; display: block; width: 100%; box-sizing: border-box; min-height: calc(1.5em + 20px); max-height: 200px; resize: none; border: none; outline: none; background: transparent; color: inherit; font: inherit; line-height: 1.5; padding: 10px 14px; scrollbar-gutter: stable; overflow-wrap: break-word; }
-.composer textarea::placeholder { color: var(--vscode-input-placeholderForeground); }
+/* The placeholder stays on one line, cut with an ellipsis on a narrow screen, rather than wrapping under itself. */
+.composer textarea::placeholder { color: var(--vscode-input-placeholderForeground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Live words sit dimmed right after the text: a copy of the text, laid out as the text area lays it out, lies under the transparent text area with
    the live words after it, so they continue the text's line and settle in place. */
 .composer-input { position: relative; }
