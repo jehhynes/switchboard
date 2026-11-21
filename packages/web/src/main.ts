@@ -1624,6 +1624,18 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         view.artifact = button!.dataset['path'] ?? null;
         draw();
         break;
+      case 'open-console':
+        closeMenus();
+        leaving('console');
+
+        if (wide()) {
+          view.side = 'console';
+        } else {
+          view.tab = 'console';
+        }
+
+        draw();
+        break;
       case 'close-artifact':
         view.artifact = null;
         draw();

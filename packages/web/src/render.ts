@@ -134,6 +134,8 @@ export function menuRows(row: PageRow, view: Pick<View, 'acting' | 'linkMenu'>):
     (view.linkMenu ? row.links.map((one, index) => link(String(index), one.label, null, 'submenu-row')).join('') : '');
   const opens = [
     ...pastes.map((label) => item(`data-action="row-paste" data-label="${escape(label)}"`, 'copy', `Copy ${label}`)),
+    // The dock's Open in terminal: the open work item's session on the Console tab.
+    ...(row.terminal === true ? [item('data-action="open-console"', 'terminal', 'Open in terminal')] : []),
     ...commands.map((one) => item(`data-action="row-command" data-label="${escape(one.label)}"`, one.icon, one.label)),
     ...(row.url === '' ? [] : [link('ticket', 'Open ticket', 'link-external')]),
     ...(row.links.length > MENU_LINKS ? [submenu] : row.links.map((one, index) => link(String(index), `Open ${one.label}`, 'link-external'))),

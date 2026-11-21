@@ -165,6 +165,8 @@ export interface PageRow {
   search?: string;
   /** What the row opens in VS Code through the hub, run with `row-command`: Open in VS Code, Open changes and Open report, each with its codicon's name. */
   opens?: Array<{ label: string; icon: string }>;
+  /** Whether the dock offers Open in terminal for the row, which opens the page's Console tab. */
+  terminal?: boolean;
 }
 
 /** One header icon: the configured sources of one kind (`DockSourceGroup` in the hub's `dock.ts`). */

@@ -1610,6 +1610,26 @@ describe('the page in use', () => {
     page.close();
   });
 
+  it("opens the Console tab for the dock's Open in terminal, after Copy in the opens group", async () => {
+    const { page, source } = start();
+
+    hello(source, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', pastes: ['Reply'], terminal: true, opens: [{ label: 'Open in VS Code', icon: 'vscode' }] })])] });
+    click('button.actions');
+    expect([...root.querySelectorAll('.actions-menu .menu-row')].map((row) => row.textContent)).toEqual(['Copy Reply', 'Open in terminal', 'Open in VS Code']);
+    posts = [];
+    click('.actions-menu [data-action="open-console"]');
+    expect(root.querySelector('[data-tab="console"]')!.getAttribute('aria-selected')).toBe('true');
+    expect(root.querySelector('.actions-menu')).toBeNull();
+    // It opens a tab of the page; nothing is posted for it.
+    expect(posts.filter((post) => post.url.includes('/row-'))).toEqual([]);
+
+    // A row the dock offers no terminal for has no such item.
+    source.emit('list', { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', pastes: ['Reply'] })])] });
+    click('button.actions');
+    expect(root.querySelector('.actions-menu [data-action="open-console"]')).toBeNull();
+    page.close();
+  });
+
   it("opens a row's ticket and link pills in a new tab, marked as the dock marks them, without selecting the row, and only http or https links", async () => {
     const { page, source, opened } = start();
     const links = [

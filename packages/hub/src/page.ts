@@ -243,6 +243,8 @@ export interface PageRow {
   search: string;
   /** What the row opens in VS Code, run with `row-command`. */
   opens: PageOpen[];
+  /** Whether the dock's menu has Open in terminal for the row, which the page's menu offers as its Console tab. */
+  terminal: boolean;
 }
 
 /** The dock's actions the page may run through `row-action`, each on one work item. */
@@ -513,6 +515,7 @@ export function pageRow(row: DockRow, workItemId: number | null, host: string | 
     main: actions.some((one) => one.label === row.main && one.confirm === null) ? row.main : null,
     pastes: row.pastes.map((paste) => paste.label),
     opens: pageOpens(row),
+    terminal: workItemId !== null && (row.terminal !== null || row.commands.some((command) => command.command['type'] === 'terminal')),
     search: row.search,
   };
 }

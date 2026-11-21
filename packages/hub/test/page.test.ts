@@ -144,8 +144,16 @@ describe('pageList', () => {
     const ownRow = dock.groups.flatMap((group) => group.rows).find((row) => row.key === 'item:1')!;
 
     expect(list.map((group) => [group.key, group.title, group.glyph])).toEqual(dock.groups.map((group) => [group.key, group.title, group.glyph]));
-    expect(list.flatMap((group) => group.rows).find((row) => row.workItemId === 1)).toEqual({ workItemId: 1, ticketId: null, title: 'Fix the badge', priority: ownRow.priority, time: ownRow.time, ticket: ownRow.ticket, sourceKind: ownRow.sourceKind, url: ownRow.url, playbook: ownRow.playbook, links: [], returned: ownRow.returned, comment: ownRow.comment, mark: ownRow.mark, details: ownRow.details, stripe: ownRow.stripe, dim: ownRow.dim, host: null, actions: pageActions(ownRow), main: null, pastes: [], opens: pageOpens(ownRow), search: ownRow.search });
+    expect(list.flatMap((group) => group.rows).find((row) => row.workItemId === 1)).toEqual({ workItemId: 1, ticketId: null, title: 'Fix the badge', priority: ownRow.priority, time: ownRow.time, ticket: ownRow.ticket, sourceKind: ownRow.sourceKind, url: ownRow.url, playbook: ownRow.playbook, links: [], returned: ownRow.returned, comment: ownRow.comment, mark: ownRow.mark, details: ownRow.details, stripe: ownRow.stripe, dim: ownRow.dim, host: null, actions: pageActions(ownRow), main: null, pastes: [], opens: pageOpens(ownRow), terminal: expect.any(Boolean), search: ownRow.search });
     expect(pageOpens(ownRow).map((one) => one.label)).toEqual(['Open in VS Code']);
+    // The dock's menu has Open in terminal for a session it can attach to or resume, and the page's opens its Console tab for it.
+    expect(list.flatMap((group) => group.rows).find((row) => row.workItemId === 1)?.terminal).toBe(ownRow.terminal !== null || ownRow.commands.some((one) => one.command['type'] === 'terminal'));
+    const codeMode = item(7, { status: 'running', sessions: [session({ id: 's7', workItemId: 7, codeMode: true, state: 'running' })] });
+    const fresh = item(8, { status: 'unstarted', sessions: [] });
+    const rows78 = pageList(dockView(snapshot([codeMode, fresh]), NOW, WINDOWS), snapshot([codeMode, fresh])).flatMap((group) => group.rows);
+
+    expect(rows78.find((row) => row.workItemId === 7)?.terminal).toBe(true);
+    expect(rows78.find((row) => row.workItemId === 8)?.terminal).toBe(false);
     // Each row in the dock's group, in the dock's order, a hosted conversation with its host's name.
     expect(list.map((group) => group.rows.map((row) => row.workItemId))).toEqual(dock.groups.map((group) => group.rows.map((row) => Number(row.key.slice('item:'.length)))));
     expect(list.flatMap((group) => group.rows).filter((row) => row.host !== null).map((row) => [row.workItemId, row.host]).sort()).toEqual([[4, 'support'], [5, 'x']]);
@@ -190,7 +198,7 @@ describe('pageList pool rows', () => {
     const rows = pageList(dock, view).flatMap((group) => group.rows);
     const nine = rows.find((row) => row.ticketId === 9)!;
 
-    expect(nine).toMatchObject({ workItemId: null, ticketId: 9, title: ticket.title, url: 'https://github.com/o/r/issues/9', main: 'Start', opens: [], host: null });
+    expect(nine).toMatchObject({ workItemId: null, ticketId: 9, title: ticket.title, url: 'https://github.com/o/r/issues/9', main: 'Start', opens: [], host: null, terminal: false });
     expect(nine.actions.map((one) => [one.label, one.group])).toEqual([['Start', 'main'], ['Start with guidance…', 'work'], ['Snooze…', 'state']]);
     expect(pageActionEvent(poolRowOf(dock, 9)!, 'Start', { until: null, comment: null })).toEqual({ event: { type: 'pick', ticketId: 9 } });
     expect(pageActionEvent(poolRowOf(dock, 9)!, 'Start with guidance…', { until: null, comment: null, text: 'Use staging', choice: 'dev:fix' })).toEqual({ event: { type: 'pick', ticketId: 9, guidance: 'Use staging', playbook: 'dev:fix' } });
