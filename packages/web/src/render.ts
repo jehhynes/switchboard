@@ -1,10 +1,11 @@
 import { providerMark } from '@switchboard/conversation/providerIcons';
-import { artifactIcon, awaitingReply, selectedEntry, stateIcon, timeline } from './model.js';
+import { artifactIcon, awaitingReply, selectedEntry, selectedRow, stateIcon, timeline } from './model.js';
 import type { PageState } from './model.js';
 import { copyButton, escape, renderInline, renderMarkdown } from './markdown.js';
 import { answers, answersIn, answerText, cardOutcome, complete, parseQuestions, questionSegments } from '@switchboard/conversation/questions';
 import type { Question, QuestionChoice } from '@switchboard/conversation/questions';
-import type { ArtifactView, MessageView, NativeRequest, PageGroup, PageRow, ReplyView, StatusView, VoiceView } from './types.js';
+import type { ArtifactView, MessageView, NativeRequest, PageAction, PageGroup, PageRow, ReplyView, StatusView, VoiceView } from './types.js';
+import type { SnoozeChoice } from '@switchboard/core/snooze';
 import { MARK_ICONS, SPINNING_MARKS } from '@switchboard/core/group';
 
 export type Tab = 'conversation' | 'status' | 'artifacts';
@@ -39,9 +40,112 @@ export interface View {
   collapsed: Set<string>;
   /** Whether a narrow screen shows the list rather than the conversation: after Back, or before a work item is opened. */
   list: boolean;
+  /** Whether the header's actions menu is open. */
+  actions: boolean;
+  /** The sheet over the page that asks before an action, picks a snooze, or shows a draft to copy by hand. */
+  sheet: Sheet | null;
+  /** A row action is running, so its controls wait. */
+  acting: boolean;
 }
 
-export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), list: false });
+/** A sheet: Delete's or Stop's question, Snooze…'s choices, or a drafted text the clipboard refused. */
+export type Sheet =
+  | { kind: 'confirm'; workItemId: number; action: PageAction }
+  | { kind: 'snooze'; workItemId: number; title: string; choices: SnoozeChoice[]; picked: string; date: string; comment: string }
+  | { kind: 'text'; title: string; text: string };
+
+export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), list: false, actions: false, sheet: null, acting: false });
+
+/** Each row action's codicon, as the dock draws its controls. */
+const ACTION_ICONS: Record<string, string> = { start: 'play', approve: 'check', retry: 'refresh', stop: 'debug-stop', 'mark-done': 'pass', snooze: 'clockface', restore: 'debug-restart', delete: 'trash' };
+/** The dock's state controls, listed after the work controls. */
+const STATE_ACTIONS = new Set(['mark-done', 'snooze', 'restore']);
+
+/**
+ * The header's row actions (architecture.md § Web page): the dock's main control as a button, then every control in a menu under an
+ * ellipsis, grouped as the dock's row menu is: the work controls, the state controls, Copy, then Delete; empty when the row offers none.
+ */
+export function renderActions(row: PageRow | null, view: View): string {
+  const actions = row?.actions ?? [];
+  const pastes = row?.pastes ?? [];
+
+  if (row === null || (actions.length === 0 && pastes.length === 0)) {
+    return '';
+  }
+
+  const disabled = view.acting ? ' disabled' : '';
+  const item = (attrs: string, icon: string, label: string): string =>
+    `<li role="none"><button type="button" class="menu-row" role="menuitem" ${attrs}${disabled}><span class="menu-gutter" aria-hidden="true"><span class="codicon codicon-${icon}"></span></span><span class="title">${escape(label)}</span></button></li>`;
+  const act = (action: PageAction): string => item(`data-action="row-action" data-row-action="${escape(action.action)}"`, ACTION_ICONS[action.action] ?? 'circle-outline', action.label);
+  const groups = [
+    actions.filter((one) => one.action !== 'delete' && !STATE_ACTIONS.has(one.action)).map(act),
+    actions.filter((one) => STATE_ACTIONS.has(one.action)).map(act),
+    pastes.map((label) => item(`data-action="row-paste" data-label="${escape(label)}"`, 'copy', `Copy ${label}`)),
+    actions.filter((one) => one.action === 'delete').map(act),
+  ].filter((group) => group.length > 0);
+  const rows = groups.map((group) => group.join('')).join('<li class="menu-separator" role="separator"></li>');
+  const main = actions.find((one) => one.label === row.main && row.main !== null);
+  const mainButton = main === undefined ? '' : `<button type="button" class="row-main" data-action="row-action" data-row-action="${escape(main.action)}"${disabled}><span class="codicon codicon-${ACTION_ICONS[main.action] ?? 'play'}" aria-hidden="true"></span><span>${escape(main.label)}</span></button>`;
+  const menu = view.actions ? `<ul class="glass menu actions-menu align-right" role="menu" aria-label="Actions">${rows}</ul>` : '';
+
+  return `${mainButton}<div class="menu-anchor actions-anchor"><button type="button" class="actions" data-action="actions" aria-haspopup="menu" aria-expanded="${view.actions}" title="Actions" aria-label="Actions"><span class="codicon codicon-ellipsis" aria-hidden="true"></span></button>${menu}</div>`;
+}
+
+/** The first day a snooze date can wake on: the day of the earliest timed choice, as `yyyy-mm-dd`; null with none. */
+export function firstSnoozeDay(choices: readonly SnoozeChoice[]): string | null {
+  const times = choices.flatMap((choice) => (choice.until === null ? [] : [choice.until]));
+
+  if (times.length === 0) {
+    return null;
+  }
+
+  const day = new Date(Math.min(...times));
+
+  return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+}
+
+/** A snooze date's wake time: that day at the time of day the timed choices wake at, which is when a day starts (PRD R49). */
+export function snoozeDateUntil(date: string, choices: readonly SnoozeChoice[]): number | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  const timed = choices.find((choice) => choice.until !== null);
+
+  if (match === null || timed === undefined) {
+    return null;
+  }
+
+  const wake = new Date(timed.until!);
+
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), wake.getHours(), wake.getMinutes()).getTime();
+}
+
+/** The sheet over the page, or empty: a question with Cancel and its action, Snooze…'s choices, date and comment, or a text to copy. */
+export function renderSheet(sheet: Sheet | null, acting: boolean): string {
+  if (sheet === null) {
+    return '';
+  }
+
+  const busy = acting ? ' disabled' : '';
+  const frame = (title: string, body: string, buttons: string): string =>
+    `<div class="sheet-backdrop" data-action="sheet-cancel"><div class="sheet glass" role="dialog" aria-modal="true" aria-labelledby="sheet-title"><h2 id="sheet-title" class="sheet-title">${escape(title)}</h2>${body}<div class="sheet-buttons">${buttons}</div></div></div>`;
+  const cancel = '<button type="button" class="sheet-button secondary" data-action="sheet-cancel">Cancel</button>';
+
+  if (sheet.kind === 'confirm') {
+    return frame(sheet.action.confirm?.question ?? sheet.action.label, `<p class="sheet-detail">${escape(sheet.action.confirm?.detail ?? '')}</p>`, `${cancel}<button type="button" class="sheet-button primary" data-action="sheet-go"${busy}>${escape(sheet.action.confirm?.action ?? sheet.action.label)}</button>`);
+  }
+
+  if (sheet.kind === 'text') {
+    return frame(sheet.title, `<p class="sheet-detail">The browser did not allow the clipboard. Select the text and copy it.</p><textarea class="sheet-text" readonly>${escape(sheet.text)}</textarea>`, '<button type="button" class="sheet-button primary" data-action="sheet-cancel">Close</button>');
+  }
+
+  const first = firstSnoozeDay(sheet.choices);
+  const radios = sheet.choices
+    .map((choice, index) => `<label class="sheet-choice"><input type="radio" name="snooze" value="${index}"${sheet.picked === String(index) ? ' checked' : ''}><span>${escape(choice.description === '' ? choice.label : `${choice.label} · ${choice.description}`)}</span></label>`)
+    .join('');
+  const onDate = `<label class="sheet-choice"><input type="radio" name="snooze" value="date"${first === null ? ' disabled' : ''}${sheet.picked === 'date' ? ' checked' : ''}><span>On</span><input type="date" class="snooze-date"${first === null ? ' disabled' : ` min="${first}"`} value="${escape(sheet.date)}" aria-label="Wake date"></label>`;
+  const body = `<fieldset class="sheet-field"><legend>Wake it</legend>${radios}${onDate}</fieldset><label class="sheet-field"><span class="sheet-label">Comment</span><textarea class="snooze-comment" rows="3" placeholder="Comment (optional)">${escape(sheet.comment)}</textarea></label>`;
+
+  return frame(`Snooze ${sheet.title}`, body, `${cancel}<button type="button" class="sheet-button primary" data-action="sheet-go"${busy}>Snooze</button>`);
+}
 
 const STAMP = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', hourCycle: 'h12' });
 /** A time's tooltip, as the VS Code view's: "2026-11-19 13:46:05 EST". */
@@ -184,7 +288,7 @@ export function renderHeader(state: PageState, view: View): string {
   const personaMenu = menu === null ? '' : `<ul class="glass menu persona-menu align-right" role="menu" aria-label="Persona">${rows}</ul>`;
   const personaPart = personaButton === '' ? '' : `<div class="menu-anchor persona-anchor">${personaButton}${personaMenu}</div>`;
 
-  return `<header class="header">${picker}${personaPart}</header>`;
+  return `<header class="header">${picker}${renderActions(selectedRow(state), view)}${personaPart}</header>`;
 }
 
 export function renderTabs(view: View, state: PageState): string {

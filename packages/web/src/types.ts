@@ -132,6 +132,19 @@ export interface PageRow {
   dim: boolean;
   /** A hosted conversation's host's name; null for other work items. */
   host: string | null;
+  /** The dock's controls the page offers, in the dock's menu order; older hubs send none. */
+  actions?: PageAction[];
+  /** The control the dock shows as the row's button, when the page offers it. */
+  main?: string | null;
+  /** The labels of the drafted texts Copy offers. */
+  pastes?: string[];
+}
+
+/** One of the dock's controls on the page (`PageAction` in the hub's `page.ts`), run with `row-action`. */
+export interface PageAction {
+  label: string;
+  action: string;
+  confirm: { question: string; detail: string; action: string } | null;
 }
 
 /** One group of the page's list: a dock group, in the dock's order, or `conversations`, the hosted conversations, last. */

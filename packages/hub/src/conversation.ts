@@ -241,6 +241,13 @@ export interface ConversationServiceDeps {
   pageList?(): PageListGroup[];
   /** A page's focus changed: a focused, visible page counts as a focused window for the voice. */
   pageFocused?(key: string, focused: boolean): void;
+  /**
+   * Runs one of the page's row actions (`PAGE_ACTIONS`) on a work item, after checking that its dock row still offers it: why not, or null
+   * (architecture.md § Web page).
+   */
+  rowAction?(workItemId: number, action: string, snooze: { until: number | null; comment: string | null }): string | null;
+  /** A drafted text of a work item's row that Copy offers, by its label; null when the row offers none by that label. */
+  rowPaste?(workItemId: number, label: string): Promise<string | null>;
   log(line: string): void;
 }
 
@@ -523,6 +530,89 @@ export class ConversationService {
         this.#listShown.set(key, text);
         this.#send(key, 'list', { groups });
       }
+    }
+  }
+
+  /** Each `row-action`'s answer, by page key and `opId`, so a retried one runs once; the last 100. */
+  readonly #rowActions = new Map<string, { status: number; body: unknown }>();
+
+  /**
+   * `row-action {window, scopeGen, opId, workItemId, action, until?, comment?}` (architecture.md § Web page): one of the dock's controls on the
+   * page's selected work item, rechecked against its row when it runs. 403 for a key that is not a page's or another work item, 409 for a stale
+   * `scopeGen` and with the refusal, such as a control the row no longer offers.
+   */
+  rowAction(body: Record<string, unknown>): { status: number; body: unknown } {
+    const { window, scopeGen, opId, workItemId, action, until, comment } = body;
+
+    if (
+      typeof window !== 'string' ||
+      typeof scopeGen !== 'number' ||
+      typeof opId !== 'string' ||
+      opId === '' ||
+      !Number.isInteger(workItemId) ||
+      typeof action !== 'string' ||
+      !(until === undefined || until === null || (typeof until === 'number' && Number.isFinite(until))) ||
+      !(comment === undefined || comment === null || (typeof comment === 'string' && comment.length <= MAX_MESSAGE_CHARS))
+    ) {
+      return { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId, action, until?, comment?}.' } };
+    }
+
+    const scope = this.deps.windows.isPage(window) ? this.deps.windows.scope(window) : null;
+
+    if (scope === null || scope.workItemId !== workItemId) {
+      return { status: 403, body: { error: 'Not in this window.' } };
+    }
+
+    const refused = refusal(scope, scopeGen, null);
+
+    if (refused !== null) {
+      return refused;
+    }
+
+    const done = this.#rowActions.get(`${window} ${opId}`);
+
+    if (done !== undefined) {
+      return done;
+    }
+
+    const why = this.deps.rowAction === undefined ? 'This hub runs no actions from the page.' : this.deps.rowAction(workItemId as number, action, { until: (until as number | null | undefined) ?? null, comment: typeof comment === 'string' && comment.trim() !== '' ? comment.trim() : null });
+    const answer = why === null ? { status: 200, body: { done: true } } : { status: 409, body: { error: why } };
+
+    this.#rowActions.set(`${window} ${opId}`, answer);
+
+    for (const old of [...this.#rowActions.keys()].slice(0, -100)) {
+      this.#rowActions.delete(old);
+    }
+
+    return answer;
+  }
+
+  /** `row-paste {window, scopeGen, opId, workItemId, label}`: the drafted text Copy offers on the page's selected work item, as `{text}`; it only reads. */
+  async rowPaste(body: Record<string, unknown>): Promise<{ status: number; body: unknown }> {
+    const { window, scopeGen, workItemId, label } = body;
+
+    if (typeof window !== 'string' || typeof scopeGen !== 'number' || !Number.isInteger(workItemId) || typeof label !== 'string') {
+      return { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId, label}.' } };
+    }
+
+    const scope = this.deps.windows.isPage(window) ? this.deps.windows.scope(window) : null;
+
+    if (scope === null || scope.workItemId !== workItemId) {
+      return { status: 403, body: { error: 'Not in this window.' } };
+    }
+
+    const refused = refusal(scope, scopeGen, null);
+
+    if (refused !== null) {
+      return refused;
+    }
+
+    try {
+      const text = (await this.deps.rowPaste?.(workItemId as number, label)) ?? null;
+
+      return text === null ? { status: 409, body: { error: `The work item has no draft named ${label}.` } } : { status: 200, body: { text } };
+    } catch (error) {
+      return { status: 409, body: { error: `${label} could not be read: ${(error as Error).message}` } };
     }
   }
 

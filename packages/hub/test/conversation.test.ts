@@ -1726,8 +1726,14 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
       newId: () => String(++id),
       pageList: () => pageList(dockView(view.view, NOW, WINDOWS), view.view),
       pageFocused: (key, focused) => focus.push([key, focused]),
+      rowAction: (workItemId, action, snooze) => {
+        actions.push([workItemId, action, snooze]);
+        return action === 'approve' ? 'The work item no longer offers this.' : null;
+      },
+      rowPaste: async (_workItemId, label) => (label === 'Reply' ? 'Dear Ana' : null),
       log: () => {},
     });
+    const actions: Array<[number, string, { until: number | null; comment: string | null }]> = [];
 
     stored(store, view);
     scopes.update(view.view);
@@ -1741,7 +1747,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
       return { key, frames };
     };
 
-    return { store, view, scopes, service, openPage, focus };
+    return { store, view, scopes, service, openPage, focus, actions };
   }
 
   it('starts a page unbound with its key and list, binds it to any work item it selects, and holds it to that work item', () => {
@@ -1816,6 +1822,30 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     scopes.close(page.key);
     expect(scopes.isPage(page.key)).toBe(false);
     expect(service.select({ window: page.key, opId: 'o', workItemId: 2 }).status).toBe(403);
+  });
+
+  it("runs a row action only on the page's selected work item, for a page key and its scope generation, once per opId", async () => {
+    const { scopes, service, openPage, view, actions } = setup();
+    const page = openPage();
+    const window = scopes.open(view.file, view.view);
+
+    expect(service.rowAction({ window: page.key, scopeGen: 0, opId: 'a', workItemId: 3, action: 'start' }).status).toBe(403);
+    service.select({ window: page.key, opId: 'o', workItemId: 3 });
+
+    expect(service.rowAction({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 2, action: 'start' }).status).toBe(403);
+    expect(service.rowAction({ window, scopeGen: scopes.scope(window)!.scopeGen, opId: 'a', workItemId: 2, action: 'start' }).status).toBe(403);
+    expect(service.rowAction({ window: page.key, scopeGen: 0, opId: 'a', workItemId: 3, action: 'start' })).toEqual({ status: 409, body: { error: "The window's conversation changed." } });
+    expect(service.rowAction({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 3, action: 'snooze', until: 'soon' }).status).toBe(400);
+    expect(actions).toEqual([]);
+
+    expect(service.rowAction({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 3, action: 'snooze', until: 5, comment: '  later ' })).toEqual({ status: 200, body: { done: true } });
+    expect(service.rowAction({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 3, action: 'snooze', until: 5 })).toEqual({ status: 200, body: { done: true } });
+    expect(service.rowAction({ window: page.key, scopeGen: 1, opId: 'b', workItemId: 3, action: 'approve' })).toEqual({ status: 409, body: { error: 'The work item no longer offers this.' } });
+    expect(actions).toEqual([[3, 'snooze', { until: 5, comment: 'later' }], [3, 'approve', { until: null, comment: null }]]);
+
+    expect(await service.rowPaste({ window: page.key, scopeGen: 1, opId: 'c', workItemId: 3, label: 'Reply' })).toEqual({ status: 200, body: { text: 'Dear Ana' } });
+    expect((await service.rowPaste({ window: page.key, scopeGen: 1, opId: 'c', workItemId: 3, label: 'Other' })).status).toBe(409);
+    expect((await service.rowPaste({ window: page.key, scopeGen: 1, opId: 'c', workItemId: 2, label: 'Reply' })).status).toBe(403);
   });
 
   it("unbinds a page whose work item was deleted, raising its scope generation", () => {

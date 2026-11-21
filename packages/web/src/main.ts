@@ -1,7 +1,8 @@
-import { applyEvent, commandQuery, EMPTY, mentionOf, mentionQuery, selectedEntry, sentTexts, shortTitle, withEarlier } from './model.js';
+import { applyEvent, commandQuery, EMPTY, mentionOf, mentionQuery, selectedEntry, selectedRow, sentTexts, shortTitle, withEarlier } from './model.js';
+import { snoozeChoices } from '@switchboard/core/snooze';
 import type { PageState } from './model.js';
 import { escape, renderMarkdown } from './markdown.js';
-import { answerText, artifactUrl, complete, markdownBody, newView, parseQuestions, renderArtifacts, renderArtifactView, renderHeader, renderList, renderStatus, renderTabs, renderTimeline, renderVoice, TABS } from './render.js';
+import { answerText, artifactUrl, complete, firstSnoozeDay, markdownBody, newView, parseQuestions, renderArtifacts, renderArtifactView, renderHeader, renderList, renderSheet, renderStatus, renderTabs, renderTimeline, renderVoice, snoozeDateUntil, TABS } from './render.js';
 import type { CardDraft, Tab, View } from './render.js';
 import type { ItemView } from './types.js';
 import { morph } from './morph.js';
@@ -34,13 +35,14 @@ type Answer = { status: number; body: Record<string, unknown> };
 export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageState; close(): void } {
   root.innerHTML =
     '<aside class="side"><div class="side-head">Switchboard</div><div id="list"></div></aside>' +
-    '<main class="main"><div class="back-bar"><button type="button" class="back" data-action="back" aria-label="Back to the work items"><span class="codicon codicon-arrow-left" aria-hidden="true"></span><span>Work items</span></button></div><div id="head"></div><div id="panel" class="scroll"></div><div id="note"></div><div id="composer" hidden></div></main><div class="live" aria-live="polite"></div>';
+    '<main class="main"><div class="back-bar"><button type="button" class="back" data-action="back" aria-label="Back to the work items"><span class="codicon codicon-arrow-left" aria-hidden="true"></span><span>Work items</span></button></div><div id="head"></div><div id="panel" class="scroll"></div><div id="note"></div><div id="composer" hidden></div></main><div id="sheet"></div><div class="live" aria-live="polite"></div>';
 
   const list = root.querySelector<HTMLElement>('#list')!;
   const head = root.querySelector<HTMLElement>('#head')!;
   const panel = root.querySelector<HTMLElement>('#panel')!;
   const composerHost = root.querySelector<HTMLElement>('#composer')!;
   const note = root.querySelector<HTMLElement>('#note')!;
+  const sheetHost = root.querySelector<HTMLElement>('#sheet')!;
   let state: PageState = EMPTY;
   const view: View = newView();
   /** A select refused while no conversation was shown, which the list shows until the next select. */
@@ -590,6 +592,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const draw = (): void => {
     // On a narrow screen the list and the conversation are each a full-width view (page.css); the list shows until a work item is opened.
     root.classList.toggle('listing', view.list || wanted === null);
+    morph(sheetHost, renderSheet(view.sheet, view.acting));
     morph(list, expired ? '<p class="empty">This page\'s link is no longer valid. Open a new one with Switchboard: Open Web Page in VS Code, or hub.js web.</p>' : (listError === null ? '' : `<p class="list-error" role="alert">${escape(listError)}</p>`) + renderList(state.groups, state.scope?.workItemId ?? null, view.collapsed));
 
     // An ended session's reason sits just above the composer it disables, on every tab; the page has no terminal to resume it in.
@@ -738,6 +741,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     listError = null;
     view.list = false;
     view.picker = false;
+    view.actions = false;
+    view.sheet = null;
     view.artifact = null;
     history.replaceState(null, '', `#w=${workItemId}`);
 
@@ -881,10 +886,35 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         view.picker = !view.picker;
         // One header menu at a time.
         view.personas = null;
+        view.actions = false;
         draw();
         break;
       case 'persona':
+        view.actions = false;
         void choosePersona();
+        break;
+      case 'actions':
+        view.actions = !view.actions;
+        view.picker = false;
+        view.personas = null;
+        draw();
+        break;
+      case 'row-action':
+        chooseAction(button!.dataset['rowAction'] ?? '');
+        break;
+      case 'row-paste':
+        void copyPaste(button!.dataset['label'] ?? '');
+        break;
+      case 'sheet-cancel':
+        // A press on the sheet itself is not one on its backdrop.
+        if (!button!.classList.contains('sheet-backdrop') || target === button) {
+          view.sheet = null;
+          draw();
+        }
+
+        break;
+      case 'sheet-go':
+        void sheetGo();
         break;
       case 'persona-pick':
         view.personas = null;
@@ -1001,22 +1031,28 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   });
   // The dropdown closes on a press outside the header and on Escape, which gives the focus back to its button.
   document.addEventListener('pointerdown', (event) => {
-    if ((view.picker || view.personas !== null) && !(event.target instanceof Node && head.querySelector('.header')?.contains(event.target) === true)) {
+    if ((view.picker || view.personas !== null || view.actions) && !(event.target instanceof Node && head.querySelector('.header')?.contains(event.target) === true)) {
       view.picker = false;
       view.personas = null;
+      view.actions = false;
       draw();
     }
   });
   root.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && (view.picker || view.personas !== null)) {
-      const opener = view.picker ? 'button.picker' : 'button.persona';
+    if (event.key === 'Escape' && view.sheet !== null) {
+      view.sheet = null;
+      draw();
+      event.stopImmediatePropagation();
+    } else if (event.key === 'Escape' && (view.picker || view.personas !== null || view.actions)) {
+      const opener = view.picker ? 'button.picker' : view.actions ? 'button.actions' : 'button.persona';
 
       view.picker = false;
       view.personas = null;
+      view.actions = false;
       draw();
       head.querySelector<HTMLElement>(opener)?.focus();
       event.stopImmediatePropagation();
-    } else if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && (view.picker || view.personas !== null)) {
+    } else if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && (view.picker || view.personas !== null || view.actions)) {
       // Up and Down move between a header menu's rows, as in a VS Code menu.
       const rows = [...head.querySelectorAll<HTMLElement>('.header .menu .menu-row')];
       const at = rows.indexOf(document.activeElement as HTMLElement);
@@ -1066,6 +1102,121 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       showError(String(reply.body['error'] ?? 'Codex did not confirm the answer. Check its terminal.'));
     }
   };
+
+  // ---- Row actions (architecture.md § Web page) ----
+  /** A control of the header's actions: Snooze… opens its choices, one that asks first its question, any other runs at once. */
+  const chooseAction = (type: string): void => {
+    const row = selectedRow(state);
+    const action = row?.actions?.find((one) => one.action === type);
+
+    view.actions = false;
+
+    if (row === null || action === undefined || view.acting) {
+      draw();
+      return;
+    }
+
+    if (action.action === 'snooze') {
+      view.sheet = { kind: 'snooze', workItemId: row.workItemId, title: row.title, choices: snoozeChoices(new Date(deps.now())), picked: '0', date: '', comment: '' };
+    } else if (action.confirm !== null) {
+      view.sheet = { kind: 'confirm', workItemId: row.workItemId, action };
+    } else {
+      void runAction(row.workItemId, action.action, {});
+    }
+
+    draw();
+  };
+  /** Runs a row action on the selected work item; the hub checks again that its row still offers it. */
+  const runAction = async (workItemId: number, action: string, extra: Record<string, unknown>): Promise<void> => {
+    view.acting = true;
+    draw();
+
+    const answer = await command('row-action', { workItemId, action, ...extra });
+
+    view.acting = false;
+    view.sheet = null;
+    showError(answer.status === 200 ? null : String(answer.body['error'] ?? `Not done (status ${answer.status}).`));
+    draw();
+  };
+  const sheetGo = async (): Promise<void> => {
+    const sheet = view.sheet;
+
+    if (sheet === null || view.acting) {
+      return;
+    }
+
+    if (sheet.kind === 'confirm') {
+      await runAction(sheet.workItemId, sheet.action.action, {});
+    } else if (sheet.kind === 'snooze') {
+      const picked = sheet.picked;
+      const until = picked === 'date' ? snoozeDateUntil(sheet.date, sheet.choices) : (sheet.choices[Number(picked)]?.until ?? null);
+      const first = firstSnoozeDay(sheet.choices);
+
+      if (picked === 'date' && (until === null || first === null || sheet.date < first)) {
+        sheetHost.querySelector<HTMLInputElement>('.snooze-date')?.focus();
+        return;
+      }
+
+      const comment = sheet.comment.trim();
+
+      await runAction(sheet.workItemId, 'snooze', { until, ...(comment === '' ? {} : { comment }) });
+    } else {
+      view.sheet = null;
+      draw();
+    }
+  };
+  /** Copy <draft>: the hub reads the drafted file as it is now; the clipboard takes it, or a sheet shows it to copy by hand. */
+  const copyPaste = async (label: string): Promise<void> => {
+    const row = selectedRow(state);
+
+    view.actions = false;
+    draw();
+
+    if (row === null) {
+      return;
+    }
+
+    const answer = await command('row-paste', { workItemId: row.workItemId, label });
+
+    if (answer.status !== 200) {
+      showError(String(answer.body['error'] ?? `${label} could not be read.`));
+      return;
+    }
+
+    const text = String(answer.body['text'] ?? '');
+    const copied = await (navigator.clipboard?.writeText(text).then(() => true, () => false) ?? Promise.resolve(false));
+
+    if (!copied) {
+      view.sheet = { kind: 'text', title: `Copy ${label}`, text };
+      draw();
+    } else {
+      showError(null);
+    }
+  };
+
+  // The Snooze sheet keeps what the operator chose in the view, so a redraw while it is open changes nothing of it.
+  const keepSheet = (event: Event): void => {
+    const field = event.target as HTMLInputElement | HTMLTextAreaElement;
+    const sheet = view.sheet;
+
+    if (sheet?.kind !== 'snooze') {
+      return;
+    }
+
+    if (field.name === 'snooze') {
+      sheet.picked = field.value;
+    } else if (field.classList.contains('snooze-date')) {
+      sheet.date = field.value;
+      // Picking a date chooses On, as in the dock's dialog.
+      sheet.picked = field.value === '' ? sheet.picked : 'date';
+      draw();
+    } else if (field.classList.contains('snooze-comment')) {
+      sheet.comment = field.value;
+    }
+  };
+
+  sheetHost.addEventListener('input', keepSheet);
+  sheetHost.addEventListener('change', keepSheet);
 
   const earlier = async (): Promise<void> => {
     const oldest = state.items[0];

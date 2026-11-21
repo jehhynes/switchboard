@@ -34,7 +34,7 @@ import type { Snapshot, WorkItemView } from './snapshot.js';
 import { SnapshotBuilder } from './snapshotBuilder.js';
 import type { Built } from './snapshotBuilder.js';
 import { WindowScopes } from './windows.js';
-import { PageAccess, pageList } from './page.js';
+import { dockRowOf, PageAccess, pageActionEvent, pageList, pasteText } from './page.js';
 import { pageAsset } from './pageAssets.js';
 import { needsMessage, newlyNeeding, rowFor, targetForUrl } from './needs.js';
 import { volumeReply } from './volume.js';
@@ -460,6 +460,23 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
       return pageList(built.dock, built.snapshot);
     },
+    // The page's row actions run as the dock's, rechecked against the row as it is now (architecture.md § Web page).
+    rowAction: (workItemId, action, snooze) => {
+      const row = dockRowOf(views().dock, workItemId);
+      const event = row === null ? null : pageActionEvent(row, action, snooze);
+      const parsed = event === null ? null : parseAction(event);
+
+      if (parsed === null) {
+        return row === null ? 'The work item is gone.' : 'The work item no longer offers this.';
+      }
+
+      return runtime.send(parsed).refused;
+    },
+    rowPaste: async (workItemId, label) => {
+      const paste = dockRowOf(views().dock, workItemId)?.pastes.find((one) => one.label === label);
+
+      return paste === undefined ? null : pasteText(paste.file);
+    },
     // A focused, visible page counts as a focused window for the voice (architecture.md § Web page).
     pageFocused: (key, focused) => {
       if (focused) {
@@ -790,6 +807,8 @@ const dockWithRuns = () => {
       '/v1/conversation/speak-replies': async (body) => (isRecord(body) ? conversation.voiceCommand('speak-replies', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, on}.' } }),
       '/v1/conversation/replay': async (body) => (isRecord(body) ? conversation.voiceCommand('replay', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, replyId}.' } }),
       '/v1/conversation/personas': async (body) => (isRecord(body) ? conversation.personaCommand('personas', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId}.' } }),
+      '/v1/conversation/row-action': async (body) => (isRecord(body) ? conversation.rowAction(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId, action}.' } }),
+      '/v1/conversation/row-paste': async (body) => (isRecord(body) ? conversation.rowPaste(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId, label}.' } }),
       '/v1/conversation/page-focus': async (body) => (isRecord(body) ? conversation.pageFocus(body) : { status: 400, body: { error: 'Expected {window, focused}.' } }),
       '/v1/conversation/persona': async (body) => (isRecord(body) ? conversation.personaCommand('persona', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, personaId}.' } }),
       '/v1/conversation/mic': async (body) => (isRecord(body) ? conversation.voiceCommand('mic', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, on}.' } }),

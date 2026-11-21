@@ -1,5 +1,5 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { readdir, realpath, stat } from 'node:fs/promises';
+import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { realpathSync, statSync } from 'node:fs';
 import { basename, isAbsolute, join, relative, sep } from 'node:path';
 import { hostKey, isFolderHost } from '@switchboard/core';
@@ -161,6 +161,66 @@ export interface PageRow {
   dim: boolean;
   /** A hosted conversation's host: its folder's or its window's name; null for other work items. */
   host: string | null;
+  /** The dock's controls the page offers for the row, in the dock's menu order (architecture.md § Web page). */
+  actions: PageAction[];
+  /** The label of the control the dock shows as the row's button, when the page offers it; else null. */
+  main: string | null;
+  /** The labels of the drafted texts Copy offers (PRD R60); the files stay in the hub. */
+  pastes: string[];
+}
+
+/** The dock's actions the page may run through `row-action`, each on one work item. */
+export const PAGE_ACTIONS = ['start', 'approve', 'retry', 'stop', 'mark-done', 'snooze', 'restore', 'delete'] as const;
+export type PageActionType = (typeof PAGE_ACTIONS)[number];
+
+/** One control the page offers: its dock label, the action it runs, and what the page asks first. */
+export interface PageAction {
+  label: string;
+  action: PageActionType;
+  confirm: { question: string; detail: string; action: string } | null;
+}
+
+/** The dock's state controls, which its menu lists after the work controls. */
+const STATE_ACTIONS = new Set<string>(['mark-done', 'snooze', 'restore']);
+
+/**
+ * The page's controls for a dock row: the dock's hub controls whose action is in `PAGE_ACTIONS` and that ask for no text, in the dock's menu
+ * order (the row's button, its work, its state, then the controls that ask first). Stop asks first on the page, as Delete does in the dock.
+ */
+export function pageActions(row: Pick<DockRow, 'controls' | 'main' | 'ticket'>): PageAction[] {
+  const offered = row.controls.filter((control) => (PAGE_ACTIONS as readonly string[]).includes(String(control.action['type'])) && control.input === undefined && control.group === undefined);
+  const shown = (control: DockRow['controls'][number]): PageAction => {
+    const action = String(control.action['type']) as PageActionType;
+    const confirm = control.confirm ?? (action === 'stop' ? { question: `Stop ${row.ticket}?`, detail: 'Switchboard stops its running session, and the work item waits for you as Stopped by you.', action: 'Stop' } : null);
+
+    return { label: control.label, action, confirm };
+  };
+  const main = offered.filter((control) => control.label === row.main && control.confirm === undefined);
+  const rest = offered.filter((control) => !main.includes(control));
+  const work = rest.filter((control) => control.confirm === undefined && !STATE_ACTIONS.has(String(control.action['type'])));
+  const state = rest.filter((control) => control.confirm === undefined && STATE_ACTIONS.has(String(control.action['type'])));
+  const asking = rest.filter((control) => control.confirm !== undefined);
+
+  return [...main, ...work, ...state, ...asking].map(shown);
+}
+
+/**
+ * The action `row-action` posts for a work item's dock row: the hub's own control's action, never the page's, with Snooze's `until` and
+ * `comment`; null when the row no longer offers it.
+ */
+export function pageActionEvent(row: Pick<DockRow, 'controls' | 'main' | 'ticket'>, action: string, snooze: { until: number | null; comment: string | null }): Record<string, unknown> | null {
+  if (!pageActions(row).some((one) => one.action === action)) {
+    return null;
+  }
+
+  const control = row.controls.find((one) => one.action['type'] === action && one.input === undefined && one.group === undefined)!;
+
+  return action === 'snooze' ? { ...control.action, until: snooze.until, ...(snooze.comment === null ? {} : { comment: snooze.comment }) } : { ...control.action };
+}
+
+/** A drafted text as Copy puts it on the clipboard: the file as it is now, without a byte order mark or trailing whitespace (PRD R60). */
+export async function pasteText(file: string): Promise<string> {
+  return (await readFile(file, 'utf8')).replace(/^\uFEFF/, '').trimEnd();
 }
 
 /** A group of the page's list: one of the dock's groups, with its codicon glyph, or `conversations`, the hosted conversations, last. */
@@ -201,7 +261,21 @@ export function pageList(dock: Pick<DockView, 'groups'>, snapshot: Pick<Snapshot
       }
 
       const host = item.ticket.hostWindow ?? null;
-      const shown: PageRow = { workItemId: item.id, title: row.title, ticket: row.ticket, sourceKind: row.sourceKind, playbook: row.playbook, mark: row.mark, stripe: row.stripe, dim: row.dim, host: host === null ? null : hostTitle(host) };
+      const actions = pageActions(row);
+      const shown: PageRow = {
+        workItemId: item.id,
+        title: row.title,
+        ticket: row.ticket,
+        sourceKind: row.sourceKind,
+        playbook: row.playbook,
+        mark: row.mark,
+        stripe: row.stripe,
+        dim: row.dim,
+        host: host === null ? null : hostTitle(host),
+        actions,
+        main: actions.some((one) => one.label === row.main && one.confirm === null) ? row.main : null,
+        pastes: row.pastes.map((paste) => paste.label),
+      };
 
       (host !== null && group.key !== 'done' ? hosted : rows).push(shown);
     }
@@ -210,6 +284,11 @@ export function pageList(dock: Pick<DockView, 'groups'>, snapshot: Pick<Snapshot
   });
 
   return hosted.length === 0 ? groups : [...groups, { key: 'conversations', title: 'Conversations', glyph: CONVERSATIONS_GLYPH, empty: null, rows: hosted.sort((a, b) => b.workItemId - a.workItemId) }];
+}
+
+/** A work item's row in the dock's view, or null when no group lists it. */
+export function dockRowOf(dock: Pick<DockView, 'groups'>, workItemId: number): DockRow | null {
+  return dock.groups.flatMap((group) => group.rows).find((row) => row.key === `item:${workItemId}`) ?? null;
 }
 
 /** An artifact's file, or a file an artifact uses, as the page names it: `<owner>/<file>` or deeper, no segment starting with a dot. */

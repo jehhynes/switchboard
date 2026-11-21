@@ -1,6 +1,6 @@
 import { SESSION_ICONS, sessionIcon } from '@switchboard/core/group';
 import type { SessionIcon } from '@switchboard/core/group';
-import type { ArtifactView, ConversationEntry, ItemView, PageGroup, ReplyView, ScopeView, SessionView, StatusView, VoiceView } from './types.js';
+import type { ArtifactView, ConversationEntry, ItemView, PageGroup, PageRow, ReplyView, ScopeView, SessionView, StatusView, VoiceView } from './types.js';
 
 /** What the page shows, kept from its conversation stream (architecture.md § Web page). */
 export interface PageState {
@@ -101,6 +101,13 @@ export function applyEvent(state: PageState, event: Event): PageState {
     default:
       return state;
   }
+}
+
+/** The list's row of the selected work item, which carries its actions; null before a select or while the list lacks it. */
+export function selectedRow(state: PageState): PageRow | null {
+  const id = state.scope?.workItemId ?? null;
+
+  return id === null ? null : (state.groups.flatMap((group) => group.rows).find((row) => row.workItemId === id) ?? null);
 }
 
 /** Older items a `history` page brought, before those shown. */

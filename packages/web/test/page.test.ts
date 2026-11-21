@@ -763,6 +763,78 @@ describe('the page in use', () => {
     page.close();
   });
 
+  it("runs the selected work item's row actions from the header: the main button, Stop and Delete after their question, Snooze with a choice, and Copy", async () => {
+    const { page, source } = start();
+    const actions = [
+      { label: 'Approve', action: 'approve', confirm: null },
+      { label: 'Stop', action: 'stop', confirm: { question: 'Stop gh 1?', detail: 'It stops.', action: 'Stop' } },
+      { label: 'Mark done', action: 'mark-done', confirm: null },
+      { label: 'Snooze…', action: 'snooze', confirm: null },
+      { label: 'Delete', action: 'delete', confirm: { question: 'Delete gh 1?', detail: 'Gone.', action: 'Delete' } },
+    ];
+    const clipboard = vi.fn(async () => undefined);
+
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText: clipboard }, configurable: true });
+    hello(source, { groups: [listGroup('review', [listRow(1, { title: 'Fix it', actions, main: 'Approve', pastes: ['Reply'] })])] });
+    expect(root.querySelector('.header .row-main')!.textContent).toBe('Approve');
+    click('.header .row-main');
+    await flush();
+    expect(posts.find((post) => post.url.endsWith('/row-action'))?.body).toMatchObject({ window: 'pk', scopeGen: 3, workItemId: 1, action: 'approve' });
+
+    click('button.actions');
+    expect([...root.querySelectorAll('.actions-menu .menu-row')].map((row) => row.textContent)).toEqual(['Approve', 'Stop', 'Mark done', 'Snooze…', 'Copy Reply', 'Delete']);
+    expect(root.querySelectorAll('.actions-menu .menu-separator')).toHaveLength(3);
+    click('.actions-menu [data-row-action="stop"]');
+    expect(root.querySelector('.sheet-title')!.textContent).toBe('Stop gh 1?');
+    posts = [];
+    click('.sheet [data-action="sheet-cancel"]');
+    expect(root.querySelector('.sheet')).toBeNull();
+    expect(posts).toEqual([]);
+
+    click('button.actions');
+    click('.actions-menu [data-row-action="delete"]');
+    answers['/row-action'] = { status: 409, body: { error: 'The work item no longer offers this.' } };
+    click('.sheet [data-action="sheet-go"]');
+    await flush();
+    expect(posts.find((post) => post.url.endsWith('/row-action'))?.body).toMatchObject({ action: 'delete', workItemId: 1 });
+    expect(root.querySelector('.composer-error-text')!.textContent).toBe('The work item no longer offers this.');
+    expect(root.querySelector('.sheet')).toBeNull();
+
+    answers['/row-action'] = { status: 200, body: { done: true } };
+    posts = [];
+    click('button.actions');
+    click('.actions-menu [data-row-action="snooze"]');
+    expect(root.querySelector('.sheet-title')!.textContent).toBe('Snooze Fix it');
+    const second = root.querySelectorAll<HTMLInputElement>('.sheet input[name="snooze"]')[1]!;
+    const note = root.querySelector<HTMLTextAreaElement>('.snooze-comment')!;
+
+    second.checked = true;
+    second.dispatchEvent(new Event('change', { bubbles: true }));
+    note.value = 'after the release';
+    note.dispatchEvent(new Event('input', { bubbles: true }));
+    // A stream event redraws the page; the choice and the comment stay.
+    source.emit('list', { groups: [listGroup('review', [listRow(1, { title: 'Fix it', actions, main: 'Approve', pastes: ['Reply'] })])] });
+    expect(root.querySelectorAll<HTMLInputElement>('.sheet input[name="snooze"]')[1]!.checked).toBe(true);
+    expect(root.querySelector<HTMLTextAreaElement>('.snooze-comment')!.value).toBe('after the release');
+    click('.sheet [data-action="sheet-go"]');
+    await flush();
+    expect(posts.find((post) => post.url.endsWith('/row-action'))?.body).toMatchObject({ action: 'snooze', until: expect.any(Number), comment: 'after the release' });
+
+    answers['/row-paste'] = { status: 200, body: { text: 'Dear Ana' } };
+    click('button.actions');
+    click('.actions-menu [data-action="row-paste"]');
+    await flush();
+    await flush();
+    expect(posts.find((post) => post.url.endsWith('/row-paste'))?.body).toMatchObject({ workItemId: 1, label: 'Reply' });
+    expect(clipboard).toHaveBeenCalledWith('Dear Ana');
+
+    // The menu belongs to the work item it was opened on.
+    click('button.actions');
+    click('#list [data-work-item="1"]');
+    expect(root.querySelector('.actions-menu')).toBeNull();
+    page.close();
+  });
+
   it('answers a card with Submit as an ordinary message, and shows a refusal on the card', async () => {
     const { page, source } = start();
 

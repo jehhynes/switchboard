@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { listenHub } from '../src/server.js';
 import type { HubServer, PageRoutes } from '../src/server.js';
-import { artifactFile, cookieValue, findFiles, loopbackHost, PageAccess, PAGE_LINK_MS, pageGroups, pageList } from '../src/page.js';
+import { artifactFile, cookieValue, dockRowOf, findFiles, loopbackHost, PageAccess, PAGE_LINK_MS, pageActionEvent, pageActions, pageGroups, pageList, pasteText } from '../src/page.js';
 import { dockView } from '../src/dock.js';
 import type { DockView } from '../src/dock.js';
 import { pageAsset } from '../src/pageAssets.js';
@@ -84,14 +84,14 @@ describe('pageList', () => {
     const ownRow = dock.groups.flatMap((group) => group.rows).find((row) => row.key === 'item:1')!;
 
     expect(list.slice(0, -1).map((group) => [group.key, group.title, group.glyph])).toEqual(dock.groups.map((group) => [group.key, group.title, group.glyph]));
-    expect(list.flatMap((group) => group.rows).find((row) => row.workItemId === 1)).toEqual({ workItemId: 1, title: 'Fix the badge', ticket: ownRow.ticket, sourceKind: ownRow.sourceKind, playbook: ownRow.playbook, mark: ownRow.mark, stripe: ownRow.stripe, dim: ownRow.dim, host: null });
+    expect(list.flatMap((group) => group.rows).find((row) => row.workItemId === 1)).toEqual({ workItemId: 1, title: 'Fix the badge', ticket: ownRow.ticket, sourceKind: ownRow.sourceKind, playbook: ownRow.playbook, mark: ownRow.mark, stripe: ownRow.stripe, dim: ownRow.dim, host: null, actions: pageActions(ownRow), main: null, pastes: [] });
     expect(list.at(-1)).toMatchObject({ key: 'conversations', title: 'Conversations', glyph: '\u{eac7}', rows: [{ workItemId: 5, host: 'x' }, { workItemId: 4, host: 'support' }] });
     expect(list.slice(0, -1).flatMap((group) => group.rows).map((row) => row.workItemId)).toEqual([1]);
   });
 
   it('leaves out pool tickets and rows of work items the snapshot lacks, keeps a done hosted conversation in Done, and has no Conversations group without one', () => {
     const doneHosted = item(6, { status: 'done', ticket: { ...item(6).ticket, title: 'Old chat', hostWindow: 'D:/git/support' } });
-    const row = (key: string) => ({ key, title: key, ticket: 'gh 1', sourceKind: 'github', playbook: 'dev', mark: null, stripe: null, dim: false }) as unknown as DockView['groups'][number]['rows'][number];
+    const row = (key: string) => ({ key, title: key, ticket: 'gh 1', sourceKind: 'github', playbook: 'dev', mark: null, stripe: null, dim: false, controls: [], main: null, pastes: [] }) as unknown as DockView['groups'][number]['rows'][number];
     const dock = { groups: [{ key: 'unstarted', title: 'Unstarted', glyph: 'u', empty: 'Nothing waits to be started.', rows: [row('ticket:9'), row('item:77')] }, { key: 'done', title: 'Done', glyph: 'd', empty: null, rows: [row('item:6')] }] } as Pick<DockView, 'groups'>;
     const list = pageList(dock, snapshot([doneHosted]));
 
@@ -99,6 +99,44 @@ describe('pageList', () => {
       { key: 'unstarted', title: 'Unstarted', glyph: 'u', empty: 'Nothing waits to be started.', rows: [] },
       { key: 'done', title: 'Done', glyph: 'd', empty: null, rows: [expect.objectContaining({ workItemId: 6, host: 'support' })] },
     ]);
+  });
+});
+
+describe('pageActions', () => {
+  const WINDOWS = 'C:/sb/windows';
+  const rowOf = (one: ReturnType<typeof item>) => dockRowOf(dockView(snapshot([one]), NOW, WINDOWS), one.id)!;
+
+  it("offers the dock's Start, Approve, Retry, state controls and Delete in its menu order, its main control, and asks before Stop and Delete", () => {
+    const unstarted = rowOf(item(1, { status: 'unstarted' }));
+
+    expect(pageActions(unstarted).map((one) => one.label)).toEqual(['Start', 'Mark done', 'Snooze…', 'Delete']);
+    expect(pageActions(unstarted).find((one) => one.action === 'delete')?.confirm).toEqual(unstarted.controls.find((one) => one.label === 'Delete')!.confirm);
+    // Start with guidance… asks for text, Add comment… is a note and History opens VS Code, so the page leaves them out.
+    expect(unstarted.controls.map((one) => one.label)).toEqual(expect.arrayContaining(['Start with guidance…', 'Add comment…']));
+    expect(pageActions(rowOf(item(2, { status: 'awaiting-approval' })))[0]).toEqual({ label: 'Approve', action: 'approve', confirm: null });
+    expect(pageActions(rowOf(item(3, { status: 'failed' }))).map((one) => one.action)).toContain('retry');
+
+    const running = rowOf(item(4, { status: 'running', sessions: [session({ id: 's4', workItemId: 4, codeMode: true, state: 'running' })] }));
+    const stop = pageActions(running).find((one) => one.action === 'stop');
+
+    expect(stop?.confirm).toMatchObject({ action: 'Stop', question: `Stop ${running.ticket}?` });
+    expect(pageActions(running).map((one) => one.action).at(-1)).toBe('delete');
+  });
+
+  it("builds the action from the row's own control, adds only Snooze's wake time and comment, and refuses one the row does not offer", () => {
+    const row = rowOf(item(1, { status: 'unstarted' }));
+
+    expect(pageActionEvent(row, 'start', { until: 5, comment: 'x' })).toEqual({ type: 'start', workItemId: 1 });
+    expect(pageActionEvent(row, 'snooze', { until: 5, comment: 'later' })).toEqual({ type: 'snooze', ticketId: row.controls.find((one) => one.label === 'Snooze…')!.action['ticketId'], until: 5, comment: 'later' });
+    expect(pageActionEvent(row, 'snooze', { until: null, comment: null })).not.toHaveProperty('comment');
+    expect(pageActionEvent(row, 'approve', { until: null, comment: null })).toBeNull();
+    expect(pageActionEvent(row, 'comment', { until: null, comment: null })).toBeNull();
+    expect(pageActionEvent(row, 'reopen', { until: null, comment: null })).toBeNull();
+  });
+
+  it('reads a drafted text as Copy pastes it, without a byte order mark or trailing whitespace', async () => {
+    writeFileSync(join(dir, 'reply.md'), '\uFEFFDear Ana,\n\nThanks.  \n\n');
+    expect(await pasteText(join(dir, 'reply.md'))).toBe('Dear Ana,\n\nThanks.');
   });
 });
 
