@@ -34,7 +34,7 @@ type Answer = { status: number; body: Record<string, unknown> };
 export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageState; close(): void } {
   root.innerHTML =
     '<aside class="side"><div class="side-head">Switchboard</div><div id="list"></div></aside>' +
-    '<main class="main"><div id="head"></div><div id="panel" class="scroll"></div><div id="note"></div><div id="composer" hidden></div></main><div class="live" aria-live="polite"></div>';
+    '<main class="main"><div class="back-bar"><button type="button" class="back" data-action="back" aria-label="Back to the work items"><span class="codicon codicon-arrow-left" aria-hidden="true"></span><span>Work items</span></button></div><div id="head"></div><div id="panel" class="scroll"></div><div id="note"></div><div id="composer" hidden></div></main><div class="live" aria-live="polite"></div>';
 
   const list = root.querySelector<HTMLElement>('#list')!;
   const head = root.querySelector<HTMLElement>('#head')!;
@@ -43,6 +43,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const note = root.querySelector<HTMLElement>('#note')!;
   let state: PageState = EMPTY;
   const view: View = newView();
+  /** A select refused while no conversation was shown, which the list shows until the next select. */
+  let listError: string | null = null;
   let wanted: number | null = Number(/^#w=(\d+)$/.exec(location.hash)?.[1] ?? NaN) || null;
   let expired = false;
   let opId = 0;
@@ -586,7 +588,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
   /** Draws the state by changing only what differs (`morph`), so the focus, a selection, the scroll position and open menus stay. */
   const draw = (): void => {
-    morph(list, expired ? '<p class="empty">This page\'s link is no longer valid. Open a new one with Switchboard: Open Web Page in VS Code, or hub.js web.</p>' : renderList(state.groups, state.scope?.workItemId ?? null, view.collapsed));
+    // On a narrow screen the list and the conversation are each a full-width view (page.css); the list shows until a work item is opened.
+    root.classList.toggle('listing', view.list || wanted === null);
+    morph(list, expired ? '<p class="empty">This page\'s link is no longer valid. Open a new one with Switchboard: Open Web Page in VS Code, or hub.js web.</p>' : (listError === null ? '' : `<p class="list-error" role="alert">${escape(listError)}</p>`) + renderList(state.groups, state.scope?.workItemId ?? null, view.collapsed));
 
     // An ended session's reason sits just above the composer it disables, on every tab; the page has no terminal to resume it in.
     morph(note, state.session?.state === 'ended' ? `<div class="session-note" role="status"><span class="codicon codicon-debug-stop" aria-hidden="true"></span><span class="session-note-text">${escape(state.session.reason ?? 'The session has ended. A message continues it.')}</span></div>` : '');
@@ -731,6 +735,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   // ---- Selecting ----
   const select = async (workItemId: number): Promise<void> => {
     wanted = workItemId;
+    listError = null;
+    view.list = false;
     view.picker = false;
     view.artifact = null;
     history.replaceState(null, '', `#w=${workItemId}`);
@@ -742,6 +748,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
 
     reconcile();
+    // A narrow screen leaves the list at once; the conversation follows with the select's scope.
+    draw();
   };
   // One select at a time; the latest work item asked for wins, whatever order the answers and scope events come in.
   let selectInFlight = false;
@@ -765,10 +773,21 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       if (answer.status === 200) {
         acked = asked;
       } else if (wanted === asked) {
-        showError(String(answer.body['error'] ?? 'The work item could not be opened.'));
+        const error = String(answer.body['error'] ?? 'The work item could not be opened.');
+
         wanted = state.scope?.workItemId ?? null;
         acked = wanted;
         history.replaceState(null, '', wanted === null ? '#' : `#w=${wanted}`);
+
+        // With no conversation shown, the composer that holds errors is hidden, so the refusal shows over the list, which a phone shows again.
+        if (wanted === null) {
+          listError = error;
+          view.list = true;
+        } else {
+          showError(error);
+        }
+
+        draw();
       }
 
       reconcile();
@@ -842,6 +861,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     switch (action) {
       case 'select':
         void select(Number(button!.dataset['workItem']));
+        break;
+      case 'back':
+        view.list = true;
+        draw();
+        list.querySelector<HTMLElement>('.row.selected')?.focus();
         break;
       case 'group': {
         const group = button!.dataset['group']!;

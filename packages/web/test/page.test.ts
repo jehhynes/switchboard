@@ -497,8 +497,54 @@ describe('the page', () => {
     expect(source.closed).toBe(true);
   });
 
+  it('shows the list as its own view on a narrow screen until a row is opened, and Back returns to it on the selected row', async () => {
+    history.replaceState(null, '', '#');
+
+    const { page, source } = start();
+
+    source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1), listRow(2)])], scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    expect(root.classList.contains('listing')).toBe(true);
+    root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
+    await flush();
+    expect(root.classList.contains('listing')).toBe(false);
+    expect(location.hash).toBe('#w=1');
+    source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1), listRow(2)])], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    expect(root.classList.contains('listing')).toBe(false);
+
+    const back = root.querySelector<HTMLElement>('.back-bar button.back')!;
+
+    expect(back.getAttribute('aria-label')).toBe('Back to the work items');
+    back.click();
+    expect(root.classList.contains('listing')).toBe(true);
+    expect(document.activeElement).toBe(root.querySelector('[data-work-item="1"]'));
+    // The selection stays while the list shows; opening another row leaves the list.
+    expect(root.querySelector('[data-work-item="1"]')!.classList.contains('selected')).toBe(true);
+    root.querySelector<HTMLElement>('[data-work-item="2"]')!.click();
+    expect(root.classList.contains('listing')).toBe(false);
+    page.close();
+  });
+
+  it('shows a refused first select over the list, which a phone shows again, and clears it on the next select', async () => {
+    history.replaceState(null, '', '#');
+
+    const fetch = vi.fn(async (url: string) => ({ status: url.endsWith('/select') ? 404 : 200, ok: !url.endsWith('/select'), json: async () => (url.endsWith('/select') ? { error: 'That work item is gone.' } : {}), text: async () => '' }) as unknown as Response);
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000 });
+
+    FakeSource.last!.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1), listRow(2)])], scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
+    expect(root.classList.contains('listing')).toBe(false);
+    await flush();
+    await flush();
+    expect(root.classList.contains('listing')).toBe(true);
+    expect(root.querySelector('#list .list-error')?.textContent).toBe('That work item is gone.');
+    expect(location.hash).toBe('');
+    root.querySelector<HTMLElement>('[data-work-item="2"]')!.click();
+    expect(root.querySelector('#list .list-error')).toBeNull();
+    page.close();
+  });
+
   it('opens and collapses a group from its header, keeping the focus on the header', () => {
-    const { source } = start();
+    const { page, source } = start();
 
     source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)]), listGroup('done', [listRow(5)])], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
 
@@ -515,6 +561,7 @@ describe('the page', () => {
     expect([...root.querySelectorAll('[data-group="progress"] .row')].map((row) => row.getAttribute('data-work-item'))).toEqual(['1']);
     done.click();
     expect(root.querySelector('[data-work-item="5"]')).toBeNull();
+    page.close();
   });
 
   it('sends the composer\'s text to the session it shows, with its scope generation and launch, and keeps a draft per work item', async () => {

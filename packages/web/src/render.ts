@@ -37,9 +37,11 @@ export interface View {
   personas: { items: Array<{ id: string; name: string }> | null; error: string | null } | null;
   /** The list's collapsed groups, by key. */
   collapsed: Set<string>;
+  /** Whether a narrow screen shows the list rather than the conversation: after Back, or before a work item is opened. */
+  list: boolean;
 }
 
-export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS) });
+export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), list: false });
 
 const STAMP = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', hourCycle: 'h12' });
 /** A time's tooltip, as the VS Code view's: "2026-11-19 13:46:05 EST". */
