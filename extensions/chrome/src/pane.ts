@@ -32,9 +32,13 @@ export function paneMarkerUrl(page: string, marker: string): string {
   return `${page}?marker=${marker}`;
 }
 
-/** The marker page's title for its `location.search`: `Switchboard pane <marker>`, which the pane helper finds the window by. */
-export function paneMarkerTitle(search: string): string {
-  const marker = paneMarker(new URLSearchParams(search).get('marker'));
+/**
+ * The marker page's title for its `location.search` and `location.hash`: `Switchboard pane <marker>`, which the pane helper finds the window by.
+ * The fragment form is what an extension's service worker from before the query form loads, while the rebuilt page script runs, until the
+ * extension is reloaded.
+ */
+export function paneMarkerTitle(search: string, hash = ''): string {
+  const marker = paneMarker(new URLSearchParams(search).get('marker')) ?? paneMarker(hash.replace(/^#/, ''));
 
   return marker === null ? 'Switchboard pane' : `Switchboard pane ${marker}`;
 }

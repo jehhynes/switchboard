@@ -97,6 +97,9 @@ describe('paneMarkerUrl and paneMarkerTitle', () => {
     expect(paneMarkerTitle('')).toBe('Switchboard pane');
     expect(paneMarkerTitle('?marker=XYZ')).toBe('Switchboard pane');
     expect(paneMarkerTitle('?marker=0123456789abc')).toBe('Switchboard pane');
+    expect(paneMarkerTitle('', '#0123456789ab')).toBe('Switchboard pane 0123456789ab');
+    expect(paneMarkerTitle('?marker=ba9876543210', '#0123456789ab')).toBe('Switchboard pane ba9876543210');
+    expect(paneMarkerTitle('', '#nothex')).toBe('Switchboard pane');
   });
 });
 
@@ -114,11 +117,11 @@ describe('the marker page', () => {
       expect(document.title).toBe(`Switchboard pane ${marker}`);
     }
 
-    // A fragment is not read: the old form titles no marker, so a tab left on it is found only after it loads a query URL.
+    // The fragment form, which a service worker from before the query form loads until the extension is reloaded, is read too.
     history.replaceState(null, '', '/#aaaaaaaaaaaa');
     vi.resetModules();
     await import('../src/panePage.js');
-    expect(document.title).toBe('Switchboard pane');
+    expect(document.title).toBe('Switchboard pane aaaaaaaaaaaa');
   });
 });
 
