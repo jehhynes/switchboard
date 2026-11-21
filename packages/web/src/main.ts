@@ -2169,7 +2169,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         void runCommand(button!.dataset['label'] ?? '');
         break;
       case 'open-link':
-        // A pill's link opens without selecting its row; the menu's closes the menu.
+        // An Open item of the header's or a pool row's menu; it closes the menu.
         openLink(button!.dataset['row'] ?? '', button!.dataset['link'] ?? '');
         break;
       case 'row-history': {

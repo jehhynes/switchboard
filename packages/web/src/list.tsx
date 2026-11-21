@@ -11,11 +11,11 @@ const RETURNED_GLYPH = '\u{eae2}';
 /**
  * A pill on line 2: its codicon glyph, if any, then its text, the full name in its tooltip. `icon` is shown only when the pill shrinks to its
  * icon (`fitPills`), for a pill that has no glyph whole: the ticket key's source logo, drawn as the dock's, or an issue's or a link's codicon.
- * `opens` makes a pill with a link open it.
+ * A pill is a label only: a click on it is the row's click, and its links open from the Browser tab and the row's menu.
  */
-function Pill({ classes, glyph, text, title, icon, opens }: { classes: string; glyph: string | null; text: string; title: string; icon?: ComponentChildren; opens?: Record<string, string> }) {
+function Pill({ classes, glyph, text, title, icon }: { classes: string; glyph: string | null; text: string; title: string; icon?: ComponentChildren }) {
   return (
-    <span class={`pill ${classes}`} title={title} {...opens}>
+    <span class={`pill ${classes}`} title={title}>
       {glyph === null ? (icon ?? null) : <span class="codicon" aria-hidden="true">{glyph}</span>}
       <span class="pill-text">{text}</span>
     </span>
@@ -46,8 +46,6 @@ function Row({ row, selected, menu }: { row: PageRow; selected: boolean; menu: C
     );
   const classes = ['row', ...(row.stripe === null ? [] : [`stripe-${row.stripe}`]), ...(row.dim ? ['dim'] : []), ...(selected ? ['selected'] : [])].join(' ');
   const key = rowKey(row);
-  // A pill with a link opens it instead of the row's click, as the dock's `OnPillTapped` (PRD R52).
-  const opens = (which: string): Record<string, string> => ({ 'data-action': 'open-link', 'data-row': key, 'data-link': which });
   const details = row.details.map((detail, index) => [
     index > 0 ? <span class="row-detail-separator" aria-hidden="true">·</span> : null,
     <span class={`row-detail${detail.tone === null ? '' : ` ${detail.tone}`}`} title={detail.title ?? undefined}>{detail.text}</span>,
@@ -74,11 +72,11 @@ function Row({ row, selected, menu }: { row: PageRow; selected: boolean; menu: C
         <span class="row-line">
           {row.comment === null ? null : <span class="codicon comment" role="img" title={row.comment.title} aria-label="Comments">{row.comment.glyph}</span>}
           {playbook}
-          <Pill classes={`ticket source-${row.sourceKind}`} glyph={null} text={row.ticket} title={row.url === '' ? row.ticket : `${row.ticket}\n${row.url}`} icon={<SourceLogo kind={row.sourceKind} enabled extra="pill-icon" />} opens={row.url === '' ? {} : opens('ticket')} />
+          <Pill classes={`ticket source-${row.sourceKind}`} glyph={null} text={row.ticket} title={row.url === '' ? row.ticket : `${row.ticket}\n${row.url}`} icon={<SourceLogo kind={row.sourceKind} enabled extra="pill-icon" />} />
           {row.links.length === 0 ? null : (
             <span class="row-links">
               {row.links.map((link, index) => (
-                <Pill classes={`link ${link.kind}${link.mentioned ? ' mentioned' : ''}`} glyph={link.glyph} text={link.badge} title={`${link.label}${link.mentioned ? ', named in the ticket' : ''}\n${link.url}`} icon={link.glyph === null ? <span class={`codicon codicon-${link.kind === 'issue' ? 'issues' : 'link-external'} pill-icon`} aria-hidden="true"></span> : undefined} opens={opens(String(index))} />
+                <Pill classes={`link ${link.kind}${link.mentioned ? ' mentioned' : ''}`} glyph={link.glyph} text={link.badge} title={`${link.label}${link.mentioned ? ', named in the ticket' : ''}\n${link.url}`} icon={link.glyph === null ? <span class={`codicon codicon-${link.kind === 'issue' ? 'issues' : 'link-external'} pill-icon`} aria-hidden="true"></span> : undefined} />
               ))}
             </span>
           )}

@@ -2033,16 +2033,17 @@ describe('the page in use', () => {
     await flush();
     expect(posts.find((post) => post.url.endsWith('/pool-action'))?.body).toMatchObject({ ticketId: 9, label: 'Snooze…', until: expect.any(Number) });
 
-    // The menu closes on Escape and on a press outside it, and its pill opens the ticket without opening the menu.
+    // The menu closes on Escape and on a press outside it; its pill is a label, a click on it the row's, which opens the menu.
     row().click();
     root.querySelector('#list .row-menu .menu-row')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     expect(root.querySelector('#list .row-menu')).toBeNull();
     row().click();
     document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
     expect(root.querySelector('#list .row-menu')).toBeNull();
-    click('#list [data-row="ticket:9"].pill.ticket');
-    expect(opened).toEqual(['https://github.com/o/r/issues/9']);
-    expect(root.querySelector('#list .row-menu')).toBeNull();
+    expect(root.querySelector('#list .pill[data-action]')).toBeNull();
+    row().querySelector<HTMLElement>('.pill.ticket')!.click();
+    expect(opened).toEqual([]);
+    expect(root.querySelector('#list .row-menu')).not.toBeNull();
     page.close();
   });
 
@@ -2073,27 +2074,22 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it("opens a row's ticket and link pills in a new tab without selecting the row, and only http or https links", async () => {
+  it("draws a row's ticket and link pills as labels with the name and URL in their tooltips, a click on one selecting the row and opening nothing", async () => {
     const { page, source, opened } = start();
     const links = [
       { label: 'PR #5', url: 'https://github.com/o/r/pull/5', kind: 'pr' as const, badge: '5', glyph: '\u{ea64}', mentioned: false },
       { label: 'Notes', url: 'https://example.test/a?b=1#top', kind: 'url' as const, badge: 'Notes', glyph: null, mentioned: false },
-      { label: 'Bad', url: 'javascript:alert(1)', kind: 'url' as const, badge: 'Bad', glyph: null, mentioned: false },
     ];
 
     hello(source, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it' }), listRow(2, { title: 'Other', url: 'https://github.com/o/r/issues/2', links })])] });
+    expect(root.querySelectorAll('#list .pill[data-action]')).toHaveLength(0);
+    expect(root.querySelector('#list [data-work-item="2"] .pill.link.pr')!.getAttribute('title')).toBe('PR #5\nhttps://github.com/o/r/pull/5');
+    expect(root.querySelector('#list [data-work-item="2"] .pill.ticket')!.getAttribute('title')).toContain('https://github.com/o/r/issues/2');
     posts = [];
-    click('#list [data-work-item="2"] .pill.ticket');
     click('#list [data-work-item="2"] .pill.link.pr');
-    click('#list [data-work-item="2"] .pill.link[title^="Notes"]');
-    click('#list [data-work-item="2"] .pill.link[title^="Bad"]');
     await flush();
-    expect(opened).toEqual(['https://github.com/o/r/issues/2', 'https://github.com/o/r/pull/5', 'https://example.test/a?b=1#top']);
-    // The pill's click is not the row's: nothing is selected.
-    expect(posts.filter((post) => post.url.endsWith('/select'))).toEqual([]);
-    expect(root.querySelector('#list .row.selected')?.getAttribute('data-work-item')).toBe('1');
-    // A row without a ticket URL, such as an ad-hoc one, has a ticket pill that opens nothing.
-    expect(root.querySelector('#list [data-work-item="1"] .pill.ticket')!.hasAttribute('data-action')).toBe(false);
+    expect(opened).toEqual([]);
+    expect(posts.find((post) => post.url.endsWith('/select'))?.body).toMatchObject({ workItemId: 2 });
     page.close();
   });
 
@@ -2196,18 +2192,19 @@ describe('the page in use', () => {
     const links = [{ label: 'PR #5', url: 'https://github.com/o/r/pull/5', kind: 'pr' as const, badge: '5', glyph: null, mentioned: false }, { label: 'Bad', url: 'file:///C:/x', kind: 'url' as const, badge: 'Bad', glyph: null, mentioned: false }];
 
     installed = true;
-    hello(source, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it' }), listRow(2, { links })])] });
+    hello(source, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', links })])] });
     posts = [];
-    click('#list [data-work-item="2"] .pill.link.pr');
-    click('#list [data-work-item="2"] .pill.link[title^="Bad"]');
+    click('button.actions');
+    click('.actions-menu [data-link="0"]');
     await flush();
     expect(opened).toEqual([]);
     expect(posts.map((post) => post.url)).toEqual(['/v1/conversation/row-open']);
     // The hub gets the row's own URL, unmarked, and checks it against the row itself.
-    expect(posts[0]!.body).toMatchObject({ window: 'pk', workItemId: 2, url: 'https://github.com/o/r/pull/5' });
+    expect(posts[0]!.body).toMatchObject({ window: 'pk', workItemId: 1, url: 'https://github.com/o/r/pull/5' });
 
     answers['/row-open'] = { status: 409, body: { error: 'The work item no longer links to this.' } };
-    click('#list [data-work-item="2"] .pill.link.pr');
+    click('button.actions');
+    click('.actions-menu [data-link="0"]');
     await flush();
     await flush();
     expect(root.querySelector('.composer-error-text')!.textContent).toBe('The work item no longer links to this.');
