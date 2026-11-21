@@ -6,7 +6,7 @@ import { answerText, answersIn, complete, parseQuestions } from '@switchboard/co
 import { artifactUrl, newView, renderArtifactView, turnRow, renderHeader, renderList, renderMicButton, renderTimeline, renderVoice, markdownBody } from '../src/render.js';
 import { renderMicButton as viewMicButton } from '@switchboard/conversation/voiceControls';
 import { renderMarkdown } from '../src/markdown.js';
-import { SENT_NOTE_MS, SIDE_MAX, SIDE_MIN, startPage } from '../src/main.js';
+import { CHAT_MAX, CHAT_MIN, SENT_NOTE_MS, SIDE_MAX, SIDE_MIN, startPage } from '../src/main.js';
 import type { ArtifactView, MessageView, PageGroup, PageRow, ReplyView, SessionView } from '../src/types.js';
 
 const message = (id: string, ord: number, patch: Partial<MessageView> = {}): MessageView => ({ type: 'message', id, sessionId: 's', workItemId: 1, at: 1_000 + ord, ord, provisional: false, withdrawn: false, origin: 'typed', text: `text ${id}`, delivery: 'sent', error: null, ...patch });
@@ -1113,6 +1113,38 @@ describe('the page in use', () => {
     page.close();
   });
 
+  it("keeps the conversation's width set on its sash beside the Status and Artifacts column, and forgets it on a double-click", () => {
+    localStorage.setItem('switchboard.chatWidth', '700');
+
+    const { page } = start();
+    const main = root.querySelector<HTMLElement>('.main')!;
+    const sash = root.querySelector<HTMLElement>('.chat-sash')!;
+    const width = (): string => root.style.getPropertyValue('--chat-width');
+
+    expect(width()).toBe('700px');
+    expect(root.style.getPropertyValue('--side-width')).toBe('');
+    // The sash sits between the conversation and the column, and sets the conversation's width, not the column's.
+    expect(sash.previousElementSibling).toBe(main);
+    expect(sash.nextElementSibling!.id).toBe('detail');
+    vi.spyOn(main, 'getBoundingClientRect').mockImplementation(() => ({ left: 300, width: parseFloat(width()) || 940 }) as DOMRect);
+    sash.dispatchEvent(new MouseEvent('pointerdown', { button: 0, clientX: 1_000, bubbles: true }));
+    sash.dispatchEvent(new MouseEvent('pointermove', { clientX: 1_200, bubbles: true }));
+    sash.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+    expect(width()).toBe('900px');
+    expect(localStorage.getItem('switchboard.chatWidth')).toBe('900');
+    expect(localStorage.getItem('switchboard.sideWidth')).toBeNull();
+    sash.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+    expect(width()).toBe(`${CHAT_MIN}px`);
+    sash.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', shiftKey: true, bubbles: true }));
+    expect(width()).toBe(`${CHAT_MIN + 64}px`);
+    sash.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+    expect(localStorage.getItem('switchboard.chatWidth')).toBe(String(CHAT_MAX));
+    sash.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    expect(width()).toBe('');
+    expect(localStorage.getItem('switchboard.chatWidth')).toBeNull();
+    page.close();
+  });
+
   it("draws a Markdown artifact's links as claude-collab does, redraws a new version in place, and opens it as drawn in a new window", async () => {
     const { page, source } = start();
 
@@ -1707,7 +1739,10 @@ describe("the list's CSS", () => {
   });
 
   it('caps the conversation on a wide screen and gives the Status and Artifacts column the rest of the width, with no cap of its own', () => {
-    expect(declarationsOf((selector) => selector === '#root.wide > .main')).toEqual(['flex: 0 1 940px;']);
+    expect(declarationsOf((selector) => selector === '#root.wide > .main')).toEqual(['flex: 0 1 var(--chat-width, 940px);']);
+    // With the column hidden the conversation keeps that width, centred.
+    expect(declarationsOf((selector) => selector === '.timeline')).toEqual([expect.stringContaining('max-width: calc(var(--chat-width, 940px) - 40px)')]);
+    expect(declarationsOf((selector) => selector === '#composer').join(' ')).toContain('max-width: var(--chat-width, 940px)');
     const detail = declarationsOf((selector) => selector.startsWith('#root.wide > .detail') || selector === '.detail' || selector.startsWith('.detail .'));
 
     expect(detail.join(' ')).toContain('flex: 1 1 320px');

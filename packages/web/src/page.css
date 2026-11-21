@@ -85,16 +85,17 @@ button:focus-visible, a:focus-visible, .tab:focus-visible { outline: 1px solid v
 .back-bar { flex: none; border-bottom: 1px solid var(--vscode-panel-border); }
 button.back { display: flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 14px 0 10px; border: none; background: transparent; color: var(--vscode-foreground); cursor: pointer; }
 button.back:hover { background: var(--vscode-toolbar-hoverBackground); }
-/* The sash on the work items' edge resizes them (main.ts keeps the width in --side-width), drawn as VS Code's: invisible until hovered,
-   dragged or focused, then a 4 px line in the sash colour over the edge, taking no width of its own. */
-.side-sash { display: none; }
+/* A sash resizes the pane before it (resizer in main.ts, which keeps the width in --side-width or --chat-width), drawn as VS Code's:
+   invisible until hovered, dragged or focused, then a 4 px line in the sash colour over the edge, taking no width of its own. The work
+   items' sash shows from 768 px, the conversation's only beside the Status and Artifacts column. */
+.sash { display: none; flex: none; position: relative; z-index: 5; width: 4px; margin: 0 -2px; cursor: col-resize; touch-action: none; transition: background-color 0.1s 0.3s; }
+.sash:hover, .sash.dragging, .sash:focus-visible { background: var(--vscode-sash-hoverBorder, var(--vscode-focusBorder)); outline: none; }
+.sash.dragging { transition: none; }
+#root.resizing { cursor: col-resize; user-select: none; }
+#root.resizing iframe { pointer-events: none; }
 @media (min-width: 768px) {
   .side { width: var(--side-width, clamp(260px, 30vw, 340px)); min-width: 200px; max-width: 50vw; }
-  .side-sash { display: block; flex: none; position: relative; z-index: 5; width: 4px; margin: 0 -2px; cursor: col-resize; touch-action: none; transition: background-color 0.1s 0.3s; }
-  .side-sash:hover, .side-sash.dragging, .side-sash:focus-visible { background: var(--vscode-sash-hoverBorder, var(--vscode-focusBorder)); outline: none; }
-  .side-sash.dragging { transition: none; }
-  #root.resizing { cursor: col-resize; user-select: none; }
-  #root.resizing iframe { pointer-events: none; }
+  .side-sash { display: block; }
   #root.list-hidden > .side-sash { display: none; }
   #root.listing > .main, #root:not(.listing) > .side { display: flex; }
   .back-bar { display: none; }
@@ -152,7 +153,8 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 .scroll.framed { display: flex; flex-direction: column; padding: 0; }
 
 /* The timeline. */
-.timeline { list-style: none; margin: 0 auto; padding: 0; max-width: 900px; }
+/* The conversation is as wide as the width set on its sash (--chat-width), 940 px by default, less the pane's padding. */
+.timeline { list-style: none; margin: 0 auto; padding: 0; max-width: calc(var(--chat-width, 940px) - 40px); }
 .timeline > li { --pad-top: 8px; position: relative; padding-top: var(--pad-top); padding-bottom: 8px; }
 .timeline > li:first-child { --pad-top: 0px; }
 .timeline > li.message { padding-bottom: 4px; }
@@ -275,7 +277,7 @@ body.artifact-window > .artifact-view { height: 100%; }
 .question-submit:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* A Codex session's pending question or approval. */
-.request { margin: 8px auto; max-width: 900px; padding: 8px; border: 1px solid var(--vscode-input-border); border-radius: 8px; background: var(--vscode-input-background); }
+.request { margin: 8px auto; max-width: calc(var(--chat-width, 940px) - 40px); padding: 8px; border: 1px solid var(--vscode-input-border); border-radius: 8px; background: var(--vscode-input-background); }
 .request-title { display: flex; align-items: center; gap: 6px; font-weight: 500; margin-bottom: 8px; }
 .request-title .codicon { color: var(--vscode-editorWarning-foreground); }
 .request-actions { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -295,7 +297,7 @@ body.artifact-window > .artifact-view { height: 100%; }
 
 /* The composer, as Claude Code's input: at most 680 px wide and centred, an 8 px radius and a ring in the focus colour. */
 /* The composer's edges line up with the timeline's: the same 900 px at most inside the same 20 px of padding as the conversation's scroller. */
-#composer { box-sizing: border-box; width: 100%; max-width: 940px; margin: 0 auto; padding: 0 20px 16px; }
+#composer { box-sizing: border-box; width: 100%; max-width: var(--chat-width, 940px); margin: 0 auto; padding: 0 20px 16px; }
 #composer[hidden] { display: none; }
 .composer { position: relative; display: flex; flex-direction: column; border: 1px solid var(--vscode-input-border); border-radius: 8px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1); }
 .composer:focus-within { border-color: var(--vscode-focusBorder); box-shadow: 0 0 0 3px color-mix(in srgb, var(--vscode-focusBorder) 12%, transparent); }
@@ -435,12 +437,13 @@ button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }
 @media (hover: none), (pointer: coarse) { .composer .mic { min-width: 44px; min-height: 44px; } }
 
 /* From 1200 px Status and Artifacts leave the tabs for a column beside the conversation, with its own Status and Artifacts switch; narrower
-   screens keep the tabs. The composer stays with the conversation. The conversation's pane is at most 940 px wide, its timeline and composer
-   900 px as with the column hidden, and the column, at least 320 px, takes the rest of the width, so a wide screen gives the status and
-   artifacts the room. */
+   screens keep the tabs. The composer stays with the conversation. The conversation's pane keeps the width set on its sash, 940 px by
+   default, its timeline and composer as wide as with the column hidden, and the column, at least 320 px, takes the rest of the width, so a
+   wide screen gives the status and artifacts the room. */
 .detail { display: none; }
 @media (min-width: 1200px) {
-  #root.wide > .main { flex: 0 1 940px; }
+  #root.wide > .main { flex: 0 1 var(--chat-width, 940px); }
+  #root.wide > .chat-sash { display: block; }
   #root.wide > .detail { display: flex; flex: 1 1 320px; flex-direction: column; min-width: 320px; background: var(--vscode-sideBar-background); border-left: 1px solid var(--vscode-panel-border); }
   .detail-head { flex: none; min-height: 45px; display: flex; align-items: flex-end; border-bottom: 1px solid var(--vscode-panel-border); }
   .detail-head .tabs { border-bottom: none; }
