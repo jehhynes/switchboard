@@ -1,8 +1,8 @@
 /**
  * The web page's console (architecture.md § Web page): a held session's terminal drawn with xterm.js from the hub's console stream. It shows the
- * session at the size the program draws, scaling its font to fit the pane down to `CONSOLE_MIN_FONT_PX` and scrolling past that, so a
- * console that only watches never re-wraps the screen or changes the session's size. Focusing it makes it type: the keys the operator presses go to
- * the session, and the session takes the console's size, so the program redraws for it; blurring it makes it watch again. Mouse reporting stays
+ * session at the size the program draws, scaling its font down until the screen fits the pane, so a console that only watches never
+ * re-wraps the screen or changes the session's size, and xterm.js's own scrollbar is its only scroller. Focusing it makes it type: the keys
+ * the operator presses go to the session, and the session takes the console's size, so the program redraws for it; blurring it makes it watch again. Mouse reporting stays
  * off, so a pointer over it never types (mechanics M101), and the terminal's own answers to the program's queries are never sent.
  */
 
@@ -48,9 +48,12 @@ export interface MountedConsole {
   dispose(): void;
 }
 
-/** The font size the console types at, and the smallest it scales a wider screen down to before it scrolls sideways. */
+/**
+ * The font size the console types at, and the smallest it scales a larger screen down to: small enough to fit a full-screen terminal into a
+ * narrow pane, since the pane never scrolls (a 3 px cell is about 1.7 px wide). A screen that does not fit even then is cut off at the pane's edge.
+ */
 export const CONSOLE_FONT_PX = 13;
-export const CONSOLE_MIN_FONT_PX = 8;
+export const CONSOLE_MIN_FONT_PX = 3;
 /** The most characters one `console-input` carries, as the hub takes; a longer paste goes in order in several. */
 export const CONSOLE_INPUT_CHARS = 64 * 1024;
 /** How long the console waits after its pane resizes before it gives the session its new size while it types. */
@@ -59,6 +62,8 @@ export const CONSOLE_RESIZE_MS = 200;
 export const REPORT_MODES: ReadonlySet<number> = new Set([9, 1000, 1001, 1002, 1003, 1004, 1005, 1006, 1015, 1016]);
 /** A mouse report, legacy or SGR, which the console never sends even if a mode slipped through. */
 const MOUSE_REPORT = /^\u001b\[(?:M[\s\S]{3}|<\d+;\d+;\d+[mM])$/;
+/** The width of xterm.js's own scrollbar, its `DEFAULT_SCROLL_BAR_WIDTH`, drawn over the right edge of its screen. */
+export const XTERM_SCROLLBAR_PX = 14;
 /** The fonts the console draws with: VS Code's editor font. */
 const FONT_FAMILY = 'Consolas, "Courier New", monospace';
 /**
@@ -228,6 +233,26 @@ export function mountConsole(host: HTMLElement, createTerm: (options: TermOption
   };
 
   /**
+   * Has xterm.js fit its scrollbar and its input textarea to the screen again after a font change. xterm.js 6.0 sizes the scrollbar only when
+   * its buffer resizes or scrolls, and places the textarea only when the cursor moves, so a smaller font left the old, taller scrollbar and the
+   * textarea past the screen, where the pane scrolled to show them (mechanics M107). Both are xterm.js's private parts, so this does nothing if
+   * an upgrade removes them, and `check-console.mjs` then fails.
+   */
+  const resync = (): void => {
+    const core = (term as unknown as { _core?: { _viewport?: { queueSync?(): void }; _syncTextArea?(): void } })._core;
+
+    core?._viewport?.queueSync?.();
+
+    if (core?._syncTextArea !== undefined && typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => {
+        if (!disposed) {
+          core._syncTextArea?.();
+        }
+      });
+    }
+  };
+
+  /**
    * Measures a cell at the console's own font from the drawn screen, or estimates it before the screen is drawn. It measures only while the
    * screen is drawn at `CONSOLE_FONT_PX`: a smaller font's cells do not scale exactly, and a cell measured at the font the last fit chose
    * could choose another font at the next fit, and back again.
@@ -243,16 +268,15 @@ export function mountConsole(host: HTMLElement, createTerm: (options: TermOption
   };
 
   /**
-   * The pane's drawing area: the screen less its padding and its scrollbars. The screen keeps the side scrollbar's gutter whether or not
-   * it shows (`scrollbar-gutter: stable` in page.css), and the bottom scrollbar's height is counted in, so neither scrollbar coming and
-   * going as the console redraws changes the area it fits to.
+   * The pane's drawing area: the screen less its padding and xterm.js's scrollbar, which xterm.js draws over the right edge of its screen, as
+   * xterm.js's fit addon counts it. The screen itself never scrolls (page.css), so it has no scrollbars of its own.
    */
   const area = (): { width: number; height: number } => {
     const style = getComputedStyle(screen);
     const px = (value: string): number => Number.parseFloat(value) || 0;
 
     return {
-      width: Math.max(0, screen.clientWidth - px(style.paddingLeft) - px(style.paddingRight)),
+      width: Math.max(0, screen.clientWidth - px(style.paddingLeft) - px(style.paddingRight) - XTERM_SCROLLBAR_PX),
       height: Math.max(0, screen.offsetHeight - px(style.borderTopWidth) - px(style.borderBottomWidth) - px(style.paddingTop) - px(style.paddingBottom)),
     };
   };
@@ -280,6 +304,7 @@ export function mountConsole(host: HTMLElement, createTerm: (options: TermOption
       term.options.fontSize = font;
     }
 
+    resync();
     drawState();
   };
 

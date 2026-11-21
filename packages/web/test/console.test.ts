@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CONSOLE_FONT_PX, CONSOLE_INPUT_CHARS, CONSOLE_MIN_FONT_PX, CONSOLE_THEME, fittedFont, fittedSize, keptModes, LIGHT_SCHEME, mountConsole } from '../src/console.js';
+import { CONSOLE_FONT_PX, CONSOLE_INPUT_CHARS, CONSOLE_MIN_FONT_PX, CONSOLE_THEME, fittedFont, fittedSize, keptModes, LIGHT_SCHEME, mountConsole, XTERM_SCROLLBAR_PX } from '../src/console.js';
 import type { ConsoleOptions, ConsoleTerm, MountedConsole, TermOptions } from '../src/console.js';
 import { startPage } from '../src/main.js';
 import type { ConsoleModule } from '../src/main.js';
@@ -351,9 +351,26 @@ describe('the console', () => {
   });
 });
 
+it("has xterm.js fit its scrollbar and input textarea to the screen after each fit, as a font change alone does not (mechanics M107)", async () => {
+  const { term, source, console } = mounted();
+  const core = { _viewport: { queueSync: vi.fn() }, _syncTextArea: vi.fn() };
+
+  Object.assign(term, { _core: core });
+  source().emit('size', { cols: 200, rows: 60 });
+  expect(core._viewport.queueSync).toHaveBeenCalledTimes(1);
+  await new Promise((done) => requestAnimationFrame(done));
+  expect(core._syncTextArea).toHaveBeenCalledTimes(1);
+  // A textarea placed after the console is gone would touch a disposed terminal.
+  source().emit('size', { cols: 100, rows: 30 });
+  console.dispose();
+  await new Promise((done) => requestAnimationFrame(done));
+  expect(core._syncTextArea).toHaveBeenCalledTimes(1);
+});
+
 /**
- * A browser's layout of the console's screen, enough to show a resize loop: its padding and gutter come from page.css, the side scrollbar
- * shows while the drawn screen is taller than the pane, the bottom one while it is wider, and the observer reports each change of the
+ * A browser's layout of the console's screen, enough to show a resize loop: its padding, overflow and gutter come from page.css; were the
+ * screen to scroll, the side scrollbar would show while the drawn screen is taller than the pane, the bottom one while it is wider; xterm.js's
+ * own scrollbar covers the right edge of its screen; and the observer reports each change of the
  * screen's content box, as a browser's does, including the changes the console's own redraws cause.
  */
 function laidOut(box: { width: number; height: number }) {
@@ -414,9 +431,10 @@ function laidOut(box: { width: number; height: number }) {
     const padY = parseFloat(css.paddingTop) + parseFloat(css.paddingBottom);
     const width = term.cols * cellWidth();
     const drawnHeight = term.rows * cellHeight();
-    const side = drawnHeight > height() - padY;
-    const clientWidth = box.width - (side || css.scrollbarGutter === 'stable' ? SCROLLBAR : 0);
-    const bottom = width > clientWidth - padX;
+    const scrolls = /auto|scroll/.test(css.overflowX + css.overflowY);
+    const side = scrolls && drawnHeight > height() - padY;
+    const clientWidth = box.width - (side || (scrolls && css.scrollbarGutter === 'stable') ? SCROLLBAR : 0);
+    const bottom = scrolls && width > clientWidth - padX;
 
     return { clientWidth, clientHeight: height() - (bottom ? SCROLLBAR : 0), padX, padY, width, height: drawnHeight, side };
   };
@@ -452,11 +470,11 @@ function laidOut(box: { width: number; height: number }) {
     [...scaled].forEach((listener) => listener());
   };
 
-  return { host, term, typed, source, console, settle, refusals, rescale, listeners: () => scaled.length, reports: () => reports, fits: () => layout().width <= layout().clientWidth - layout().padX,
-    /** Whether the drawn screen is no taller than the pane, so the pane shows no side scrollbar of its own. */
-    fitsHeight: () => !layout().side,
+  return { host, term, typed, source, console, settle, refusals, rescale, listeners: () => scaled.length, reports: () => reports, fits: () => layout().width <= layout().clientWidth - layout().padX - XTERM_SCROLLBAR_PX,
+    /** Whether the drawn screen is no taller than the pane. */
+    fitsHeight: () => layout().height <= layout().clientHeight - layout().padY,
     /** The pixels the pane can grow by before it holds another column. */
-    spare: () => Math.max(0, cellWidth() - 1 - ((layout().clientWidth - layout().padX) % cellWidth())),
+    spare: () => Math.max(0, cellWidth() - 1 - ((layout().clientWidth - layout().padX - XTERM_SCROLLBAR_PX) % cellWidth())),
   };
 }
 
@@ -595,7 +613,7 @@ it('scales a screen taller than the pane down until its rows fit, so only xterm.
     expect(pane.term.options.fontSize).toBe(9);
     pane.rescale(0.8);
     await run(pane.settle, 500);
-    expect(pane.term.options.fontSize).toBe(11);
+    expect(pane.term.options.fontSize).toBe(12);
     expect(pane.fits()).toBe(true);
     pane.rescale(1);
     await run(pane.settle, 500);

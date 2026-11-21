@@ -590,9 +590,9 @@ button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }
 .console.typing { outline-color: var(--vscode-focusBorder); }
 .console > .empty { padding: 20px; }
 .console-reconnect { flex: none; padding: 2px 8px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 2px; color: var(--vscode-button-secondaryForeground, var(--vscode-foreground)); background: var(--vscode-button-secondaryBackground, #313131); font: inherit; cursor: pointer; }
-/* The screen scrolls only past the smallest font. The side scrollbar's gutter stays whether or not it shows, so the console's own redraws
-   never change the width it fits to. */
-.console-screen { flex: 1; min-height: 0; overflow: auto; scrollbar-gutter: stable; padding: 4px 8px; }
+/* The screen never scrolls: the font fits xterm.js's screen into it, and a screen too large even at the smallest font is cut off, so xterm.js's
+   scrollbar is the console's only one and its scrollbars never change the area the console fits to. */
+.console-screen { flex: 1; min-height: 0; overflow: hidden; padding: 4px 8px; }
 /* Why it ended or did not type, with Reconnect once it ended. */
 .console-foot { flex: none; display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 12px; }
 .console-foot[hidden] { display: none; }

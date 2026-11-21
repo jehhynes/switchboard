@@ -1349,3 +1349,12 @@ Source inspection of Claude Code 2.1.330 (`claude.exe`), and its output in a pse
 
 Current use: the web page's console keeps Dark Modern's terminal colours in both schemes ([architecture.md](architecture.md) § Web page).
 
+## M107. xterm.js's scrollbar and textarea after a font change, 2026-11-21
+
+Source inspection of @xterm/xterm 6.0.0 (`src/browser/Viewport.ts`, `CoreBrowserTerminal.ts`, `services/RenderService.ts`) and the web page's console in headless Chromium 1247 at 125 % display scale, its pane 680 by 1190 CSS px.
+
+- Changing `fontSize` resizes the renderer and redraws the rows at once, but the viewport sizes its scrollbar (`setScrollDimensions` in `_sync`) only when the buffer resizes, a buffer activates or the buffer scrolls, and the helper textarea follows the cursor only when the cursor moves (`_syncTextArea` on `onCursorMove`). A font change alone, as when the console's pane shrinks and it refits, leaves both at the old font's size: a 90-row screen refitted from 1190 to 600 px drew in 576 px, while its scrollbar track stayed 1080 px tall with the thumb placed for that height, and the textarea sat 1080 px down. The console's pane, which then scrolled, showed the track running past the screen with its thumb in the middle and content above and below it.
+- The same-size `resize` returns early and fires nothing, so no public call syncs them; the console calls the private `_core._viewport.queueSync()` and, after the next frame, `_core._syncTextArea()`.
+- Output that scrolls the buffer or moves the cursor syncs them, so the fault showed only on a session idle after a refit.
+
+Current use: the console resyncs after each fit and its pane never scrolls ([architecture.md](architecture.md) § Web page); `packages/web/check-console.mjs` fails if an xterm.js upgrade drops these private parts.

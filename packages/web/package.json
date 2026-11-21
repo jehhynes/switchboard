@@ -15,7 +15,8 @@
   "scripts": {
     "build": "node build.mjs",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run --coverage"
+    "test": "vitest run --coverage",
+    "check:console": "node check-console.mjs"
   },
   "devDependencies": {
     "@types/markdown-it": "^14.2.0",
