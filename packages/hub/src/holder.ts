@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { closeSync, openSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { answers } from '@switchboard/core';
-import { HolderClient, LOG_FILE, PROTOCOL, holderLockAddress, parseHolderRecord, recordPath } from '@switchboard/holder';
+import { HolderClient, LOG_FILE, PROTOCOL, holderLockAddress, killTree, parseHolderRecord, recordPath } from '@switchboard/holder';
 import type { ConnectOptions, HolderRecord, SessionEntry, SpawnRequest } from '@switchboard/holder';
 import { currentHolderBuild, reserveHolderBuild } from './holderInstall.js';
 
@@ -32,6 +32,12 @@ export interface HolderConnection {
 /** `gone`: no holder holds the lock, so every session it held has ended (PRD R94). */
 export type HolderFound = { holder: HolderConnection } | { gone: true } | { error: string };
 
+/** A restart's outcome: the holder of the installed build, the live sessions that kept the old one running, or why it failed. */
+export type HolderRestart = { holder: HolderConnection } | { live: string[] } | { error: string };
+
+/** How long a holder asked to exit may take to answer `shutdown`. */
+const SHUTDOWN_ANSWER_MS = 5_000;
+
 export interface HolderLinkDeps {
   /** The Switchboard home, which holds `holder.json` and the installed builds. */
   home: string;
@@ -47,6 +53,8 @@ export interface HolderLinkDeps {
   lockHeld?(): Promise<boolean>;
   /** Starts `<nodePath> <script> <args>` detached, with its output appended to the log file. */
   launch?(nodePath: string, args: string[], logPath: string): void;
+  /** Ends a process and its descendants, as `taskkill /T /F` does; the error when it could not. */
+  killTree?(pid: number): Promise<{ error: string } | null>;
 }
 
 /** The holder's environment: the hub's without VS Code's runtime and window variables. */
@@ -109,6 +117,112 @@ export class HolderLink {
   /** The holder build installed in the home, which the next start runs; null when none is. */
   installed(): string | null {
     return currentHolderBuild(this.deps.home);
+  }
+
+  /**
+   * Ends the holder, once it holds no live session, and starts the installed build (architecture.md § Restarting the holder). A start waits for it,
+   * so no session is spawned in the old holder meanwhile. A holder that does not exit within 10 seconds of `shutdown` has its process tree ended.
+   */
+  restart(): Promise<HolderRestart> {
+    const before = this.#starting ?? Promise.resolve(null);
+    const ending = before.catch(() => null).then(() => this.#end());
+    const starting: Promise<HolderFound> = ending.then((ended) => (ended === null ? this.#find(true) : this.#find(false)));
+    const held = starting.finally(() => {
+      if (this.#starting === held) {
+        this.#starting = null;
+      }
+    });
+
+    this.#starting = held;
+
+    return ending.then(async (ended) => {
+      if (ended !== null) {
+        return ended;
+      }
+
+      const found = await held;
+
+      return 'holder' in found ? found : { error: 'error' in found ? found.error : 'The terminal holder did not start.' };
+    });
+  }
+
+  /** Ends the holder when it holds no live session: null once no holder holds the lock. */
+  async #end(): Promise<{ live: string[] } | { error: string } | null> {
+    const found = await this.#connected();
+
+    if ('gone' in found) {
+      return null;
+    }
+
+    if ('error' in found) {
+      return found;
+    }
+
+    const old = found.holder;
+    let live: string[];
+
+    try {
+      live = (await old.list()).filter((entry) => entry.exitedAt === null).map((entry) => entry.session);
+    } catch (error) {
+      return { error: (error as Error).message };
+    }
+
+    if (live.length > 0) {
+      return { live };
+    }
+
+    let timer: NodeJS.Timeout | undefined;
+    let refused = false;
+
+    // A holder that does not answer is ended below.
+    await Promise.race([old.shutdown(), new Promise<void>((done) => (timer = setTimeout(done, SHUTDOWN_ANSWER_MS)))])
+      .catch(() => (refused = true))
+      .finally(() => clearTimeout(timer));
+
+    // It refuses while it holds a live session, as one whose spawn began before the list; that session goes back to the caller, never ended here.
+    if (refused) {
+      const started = await old.list().then(
+        (entries) => entries.filter((entry) => entry.exitedAt === null).map((entry) => entry.session),
+        () => [],
+      );
+
+      if (started.length > 0) {
+        return { live: started };
+      }
+    }
+
+    this.close();
+
+    if (await this.#exited()) {
+      this.deps.log(`terminal holder ${old.welcome.build} ended to start the installed build`);
+      return null;
+    }
+
+    const failed = await (this.deps.killTree ?? killTree)(old.welcome.pid);
+
+    if (failed !== null) {
+      return { error: `The terminal holder (pid ${old.welcome.pid}) did not exit and could not be ended: ${failed.error}` };
+    }
+
+    if (!(await this.#exited())) {
+      return { error: `The terminal holder (pid ${old.welcome.pid}) did not exit within ${HOLDER_START_MS / 1000} seconds of its process tree being ended.` };
+    }
+
+    this.deps.log(`terminal holder ${old.welcome.build} did not exit, so its process tree was ended to start the installed build`);
+    return null;
+  }
+
+  /** Whether the holder's lock is free within 10 seconds. */
+  async #exited(): Promise<boolean> {
+    for (const until = this.deps.now() + HOLDER_START_MS; await this.#lockHeld(); ) {
+      if (this.deps.now() >= until) {
+        return false;
+      }
+
+      await this.deps.sleep(POLL_MS);
+    }
+
+    return true;
   }
 
   /** Closes the connection; the holder and its sessions keep running. */

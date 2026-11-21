@@ -23,6 +23,20 @@ export interface HeldSession {
   orphan: boolean;
 }
 
+/** A restart of the terminal holder to the installed build, as the dock and the web page show it (architecture.md § Restarting the holder). */
+export type HolderRestartState =
+  | { state: 'running'; at: number }
+  | { state: 'done'; at: number; resumed: number; failed: { session: string; key: string | null; error: string }[]; error: string | null };
+
+/** The connected holder's build against the installed one, and the last restart since the hub started; `build` is null while none is connected. */
+export interface HolderState {
+  build: string | null;
+  installed: string | null;
+  /** From an older build, as `hub.js holder list` marks it (`olderHolder`). */
+  older: boolean;
+  restart: HolderRestartState | null;
+}
+
 /** `3m`, `2h 5m`. */
 export function idleText(ms: number): string {
   const minutes = Math.max(0, Math.floor(ms / 60_000));

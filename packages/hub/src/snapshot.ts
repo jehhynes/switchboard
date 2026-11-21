@@ -4,7 +4,7 @@
  */
 import type { Comment, Link, OpenTerminal, OpenVSCode, Paste, Playbook, Provider, PullRequestStatus, QueueWait, Session, Settings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
 import { effectiveFocus, heldSlots, homeRepo, itemProvider, playbookChoices, PROVIDERS, queueWaits, reopenRefusal, repoRoots, SCHEDULE_SOURCE, ADHOC_SOURCE } from '@switchboard/core';
-import type { HeldSession } from './held.js';
+import type { HeldSession, HolderState } from './held.js';
 import { doneSince } from './rows.js';
 import type { RepoKeys } from './rows.js';
 
@@ -19,6 +19,8 @@ export interface SnapshotInputs {
   /** Sources being polled. */
   sources: string[];
   held: HeldSession[];
+  /** The terminal holder's build and restart; null with no holder connected and no restart. */
+  holder: HolderState | null;
   /** The pids the resume guard last found per session (PRD R95). */
   guarded: Array<[string, number[]]>;
   nodeError: string | null;
@@ -109,6 +111,8 @@ export interface Snapshot {
   pullRequests?: Record<string, PullRequestStatus>;
   /** The terminal holder's sessions joined with the store, orphans first (PRD R94); absent when it holds none. */
   held?: HeldSession[];
+  /** The terminal holder's build against the installed one, and its last restart (architecture.md § Restarting the holder); absent with no holder connected and no restart. */
+  holder?: HolderState;
   /** In a window's scoped snapshot only: how many work items need the operator, without naming them (architecture.md § Window scope). */
   needsCount?: number;
 }
@@ -234,6 +238,7 @@ export function buildSnapshot(store: Store, inputs: SnapshotInputs): Snapshot {
     repoKeys: repoKeysOf(settings, store.reposBySource()),
     pullRequests: { ...inputs.pullRequests },
     ...(held.length > 0 ? { held } : {}),
+    ...(inputs.holder === null ? {} : { holder: inputs.holder }),
   };
 }
 

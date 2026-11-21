@@ -15,7 +15,8 @@ import { HolderError, Viewer, recordPath } from '@switchboard/holder';
 import { answers, NotWritten, unansweredCard } from '@switchboard/conversation';
 import type { SessionEntry } from '@switchboard/holder';
 import { findHeld, heldFromHolder } from './held.js';
-import type { HeldSession } from './held.js';
+import type { HeldSession, HolderRestartState, HolderState } from './held.js';
+import { olderHolder } from './holderCli.js';
 import { HolderLink } from './holder.js';
 import type { HolderLinkDeps } from './holder.js';
 import { buildSnapshot } from './snapshot.js';
@@ -121,7 +122,7 @@ export interface RuntimeDeps {
   /** The Code Mode idle limit, shorter than the default for tests and live acceptance (`--code-mode-idle-ms`). */
   codeModeIdleMs?: number;
   /** Stand-ins for the holder link's connection, lock check and start, for tests. */
-  holder?: Partial<Pick<HolderLinkDeps, 'connect' | 'lockHeld' | 'launch'>>;
+  holder?: Partial<Pick<HolderLinkDeps, 'connect' | 'lockHeld' | 'launch' | 'killTree'>>;
 }
 
 /** `kill(pid, 0)` sends nothing; EPERM means the process exists but belongs to someone else. */
@@ -214,6 +215,10 @@ export class Runtime {
   private heldError: string | null = null;
   /** Orphans logged, so each is logged once. */
   private readonly orphansLogged = new Set<string>();
+  /** The last restart of the terminal holder since the hub started (architecture.md § Restarting the holder). */
+  private holderRestart: HolderRestartState | null = null;
+  /** The holder build and installed build the last snapshot showed, so a change of either sends a new one. */
+  private holderShown = '';
   /** The leftover pids the resume guard last refused an attach for, per ended Code Mode session, until a resume or a leftover stop succeeds (PRD R95). */
   private readonly guarded = new Map<string, number[]>();
   /** The transcript size last read for a limit, per session, so an unchanged transcript is not read again (architecture.md § Rate limits). */
@@ -314,6 +319,116 @@ export class Runtime {
   /** The holder build installed in the home, which the next holder start runs; null when none is. */
   holderInstalled(): string | null {
     return this.holder.installed();
+  }
+
+  /** The connected holder against the installed build, and the last restart; null with no holder connected and no restart. */
+  holderState(): HolderState | null {
+    const welcome = this.holder.connected()?.welcome ?? null;
+    const installed = this.holder.installed();
+
+    if (welcome === null && this.holderRestart === null) {
+      return null;
+    }
+
+    return { build: welcome?.build ?? null, installed, older: welcome !== null && olderHolder(welcome, installed), restart: this.holderRestart };
+  }
+
+  /**
+   * `POST /holder/restart` (architecture.md § Restarting the holder): restarts a holder from an older build in the background and resumes the
+   * sessions it held; the snapshot's `holder.restart` follows it. Why not, or null once it started.
+   */
+  restartHolder(): string | null {
+    if (this.holderRestart?.state === 'running') {
+      return 'The terminal holder is already restarting.';
+    }
+
+    const welcome = this.holder.connected()?.welcome ?? null;
+
+    if (welcome === null) {
+      return 'No terminal holder is running.';
+    }
+
+    if (!olderHolder(welcome, this.holder.installed())) {
+      return 'The terminal holder already runs the installed build.';
+    }
+
+    this.holderRestart = { state: 'running', at: this.deps.now() };
+    this.deps.log(`restarting the terminal holder ${welcome.build} to start the installed build`);
+    this.changed();
+    this.track(this.runHolderRestart());
+
+    return null;
+  }
+
+  /**
+   * Stops each live held session as `hub.js holder stop --all --yes` does, ends the holder and starts the installed build, then resumes each session
+   * that was active, as the web page's Resume does. A session started in the old holder meanwhile is stopped and resumed too, for up to 3 rounds.
+   */
+  private async runHolderRestart(): Promise<void> {
+    const store = this.deps.store;
+    const keys = new Map<string, string | null>();
+    const failed: { session: string; key: string | null; error: string }[] = [];
+    let error: string | null = null;
+
+    try {
+      for (let round = 1; ; round++) {
+        await this.readHeld();
+
+        const live = this.heldSessions().filter((one) => one.exitedAt === null);
+
+        for (const one of live) {
+          if (!one.orphan && store.session(one.session)?.state !== 'ended' && !keys.has(one.session)) {
+            keys.set(one.session, one.key);
+          }
+        }
+
+        for (const one of live) {
+          const stopped = await this.stopHeld(one.session);
+
+          if ('refused' in stopped) {
+            this.deps.log(`holder restart: held session ${one.session} did not stop: ${stopped.refused}`);
+          }
+        }
+
+        const restarted = await this.holder.restart();
+
+        if ('holder' in restarted) {
+          break;
+        }
+
+        if ('error' in restarted) {
+          error = restarted.error;
+          break;
+        }
+
+        if (round === 3) {
+          error = `The terminal holder still holds ${restarted.live.length} live ${restarted.live.length === 1 ? 'session' : 'sessions'} (${restarted.live.join(', ')}), so it was not ended.`;
+          break;
+        }
+      }
+    } catch (failure) {
+      error = (failure as Error).message;
+    }
+
+    if (error !== null) {
+      this.deps.log(`holder restart failed: ${error}`);
+    }
+
+    // Each stopped session is resumed even when the restart failed, into whichever holder runs.
+    for (const [session, key] of keys) {
+      const result = await this.attach(session).catch((failure: Error) => ({ refused: failure.message, status: 409 as const }));
+
+      // No terminal connects to a session the restart resumes, so its end is not deferred for one.
+      this.reservations.delete(session);
+
+      if ('refused' in result) {
+        this.deps.log(`holder restart: session ${session} did not resume: ${result.refused}`);
+        failed.push({ session, key, error: result.refused });
+      }
+    }
+
+    this.holderRestart = { state: 'done', at: this.deps.now(), resumed: keys.size - failed.length, failed, error };
+    this.changed();
   }
 
   onChange(listener: () => void): () => void {
@@ -1859,6 +1974,7 @@ export class Runtime {
       enabled: [...this.enabledSources()],
       sources: [...this.sources.keys()],
       held: this.heldSessions(),
+      holder: this.holderState(),
       guarded: [...this.guarded],
       nodeError: this.nodeError,
       hookErrors: { ...this.hookErrors },
@@ -2050,7 +2166,11 @@ export class Runtime {
       this.deps.log(`held session ${held.session} has no work item: ${held.label}`);
     }
 
-    if (JSON.stringify(entries) !== before) {
+    const holder = this.holderState();
+    const shown = JSON.stringify([holder?.build ?? null, holder?.installed ?? null]);
+
+    if (JSON.stringify(entries) !== before || shown !== this.holderShown) {
+      this.holderShown = shown;
       this.changed();
     }
   }

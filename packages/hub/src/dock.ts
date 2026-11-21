@@ -279,6 +279,25 @@ export interface DockView {
   held?: DockHeld[];
   /** The note above the groups while a held session has no work item, which opens the held sessions window (PRD R94); absent otherwise. */
   heldNote?: string;
+  /** The notice above the groups while the terminal holder is from an older build or restarting (architecture.md § Restarting the holder); absent otherwise. */
+  holderNotice?: DockHolderNotice;
+  /** The last holder restart's result, until the hub restarts; each client hides it once dismissed, by its `at`. */
+  holderResult?: DockHolderResult;
+}
+
+/**
+ * The holder notice: its text, and `confirm`, what Restart and resume asks before it posts `POST /holder/restart`, null while a restart runs.
+ */
+export interface DockHolderNotice {
+  text: string;
+  confirm: { question: string; detail: string; action: string } | null;
+}
+
+/** A holder restart's result: `failed` when the holder did not restart or a session did not resume. */
+export interface DockHolderResult {
+  at: number;
+  text: string;
+  failed: boolean;
 }
 
 /** The rows by group and in list order, as texts the dock draws without rules of its own (PRD R27, R71). */
@@ -306,6 +325,7 @@ export function dockView(snapshot: Snapshot, now: number, windows: string): Dock
     schedules: snapshot.schedules,
     ...(snapshot.held === undefined ? {} : { held: snapshot.held.map((one) => heldRow(snapshot, one, now, windows)) }),
     ...orphanNote(snapshot.held ?? []),
+    ...holderNotices(snapshot),
   };
 }
 
@@ -329,6 +349,62 @@ function heldRow(snapshot: Snapshot, one: HeldSession, now: number, windows: str
   const terminal = owner === undefined || session === undefined || one.orphan ? null : codeModeDockTerminal(owner, session, windows);
 
   return { session: one.session, item, nativeSessionId, cwd: one.cwd, state: one.state, idle, memory, clients: one.clients, orphan: one.orphan, exited: one.exitedAt !== null, terminal };
+}
+
+const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
+
+/**
+ * The holder notice and result (architecture.md § Restarting the holder). The sessions a restart resumes are the live held ones whose session the
+ * store holds active; one that is starting, running or waiting is in a turn, which the restart interrupts, so the confirmation names it.
+ */
+export function holderNotices(snapshot: Pick<Snapshot, 'holder' | 'held' | 'workItems'>): { holderNotice?: DockHolderNotice; holderResult?: DockHolderResult } {
+  const holder = snapshot.holder;
+
+  if (holder === undefined) {
+    return {};
+  }
+
+  const restart = holder.restart;
+  const shown: { holderNotice?: DockHolderNotice; holderResult?: DockHolderResult } = {};
+
+  if (restart?.state === 'running') {
+    shown.holderNotice = { text: 'Restarting the terminal holder and resuming its sessions…', confirm: null };
+  } else if (holder.older) {
+    const live = (snapshot.held ?? []).filter((one) => one.exitedAt === null);
+    const sessionOf = (id: string) => snapshot.workItems.flatMap((item) => item.sessions.map((session) => ({ item, session }))).find((entry) => entry.session.id === id);
+    const resumed = live.filter((one) => !one.orphan && (sessionOf(one.session)?.session.state ?? 'ended') !== 'ended');
+    const busy = resumed.filter((one) => ['starting', 'running', 'waiting'].includes(sessionOf(one.session)!.session.state));
+    const others = live.length - resumed.length;
+    const name = (one: HeldSession) => {
+      const title = sessionOf(one.session)!.item.ticket.title;
+
+      return one.key === null ? title : `${title} (${one.key})`;
+    };
+    const parts = [
+      live.length === 0 ? 'The terminal holder holds no live session.' : '',
+      resumed.length === 0 ? '' : `Restarting stops ${resumed.length === 1 ? 'the held session' : `the ${resumed.length} held sessions`} and resumes ${resumed.length === 1 ? 'it' : 'them'} in a holder of the installed build.`,
+      busy.length === 0 ? '' : `${busy.length === 1 ? 'This session is' : 'These sessions are'} not idle, so the restart interrupts ${busy.length === 1 ? 'its turn' : 'their turns'}: ${busy.map(name).join(', ')}.`,
+      others === 0 ? '' : `${plural(others, resumed.length === 0 ? 'held session' : 'other held session', resumed.length === 0 ? 'held sessions' : 'other held sessions')} ${others === 1 ? 'ends and is' : 'end and are'} not resumed.`,
+    ];
+
+    shown.holderNotice = {
+      text: `The terminal holder is from an older build. Restart it to update${resumed.length === 0 ? '' : ` (${plural(resumed.length, 'session', 'sessions')} will be resumed)`}.`,
+      confirm: { question: 'Restart the terminal holder?', detail: parts.filter((part) => part !== '').join(' '), action: 'Restart and resume' },
+    };
+  }
+
+  if (restart?.state === 'done') {
+    const resumed = plural(restart.resumed, 'session', 'sessions');
+    const failed = restart.failed.length === 0 ? '' : ` ${plural(restart.failed.length, 'session', 'sessions')} did not resume: ${restart.failed.map((one) => `${one.key ?? one.session}: ${one.error}`).join(' ')}`;
+    const text =
+      restart.error === null
+        ? `The terminal holder restarted${restart.resumed === 0 ? '' : ` and ${resumed} resumed`}.`
+        : `The terminal holder did not restart: ${restart.error}${restart.resumed === 0 ? '' : ` ${resumed} resumed.`}`;
+
+    shown.holderResult = { at: restart.at, text: `${text}${failed}`, failed: restart.error !== null || restart.failed.length > 0 };
+  }
+
+  return shown;
 }
 
 function orphanNote(held: HeldSession[]): { heldNote?: string } {

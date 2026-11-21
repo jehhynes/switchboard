@@ -687,6 +687,67 @@ describe('dockView held sessions (PRD R94)', () => {
   });
 });
 
+describe('dockView holder notice (architecture.md § Restarting the holder)', () => {
+  const held = (session: string, patch: Partial<HeldSession> = {}): HeldSession => ({ session, label: '', workItemId: 7, key: 'gh 107', nativeSessionId: null, cwd: 'D:/git/widgets', state: 'idle', idleSince: NOW, memoryBytes: null, clients: 0, exitedAt: null, exitCode: null, orphan: false, ...patch });
+  const older = { build: 'aaaaaaaaaaaaaaaa', installed: 'bbbbbbbbbbbbbbbb', older: true, restart: null };
+
+  it('shows nothing without a holder, or for a holder of the installed build', () => {
+    expect('holderNotice' in dockView(snapshot([]), NOW, W)).toBe(false);
+    expect(dockView(snapshot([], { holder: { ...older, older: false } }), NOW, W)).not.toHaveProperty('holderNotice');
+  });
+
+  it('counts the sessions a restart resumes and names the ones it interrupts mid-turn, and the ones it ends', () => {
+    const items = [
+      item(7, { sessions: [session({ id: 's1', state: 'idle' })] }),
+      item(8, { sessions: [session({ id: 's2', workItemId: 8, state: 'running' })] }),
+      item(9, { sessions: [session({ id: 's3', workItemId: 9, state: 'waiting' })] }),
+      item(10, { sessions: [session({ id: 's4', workItemId: 10, state: 'ended' })] }),
+    ];
+    const view = dockView(snapshot(items, { holder: older, held: [held('o1', { orphan: true, workItemId: null }), held('s1'), held('s2', { key: 'gh 108' }), held('s3', { key: 'gh 109' }), held('s4'), held('x1', { exitedAt: NOW })] }), NOW, W);
+
+    expect(view.holderNotice).toEqual({
+      text: 'The terminal holder is from an older build. Restart it to update (3 sessions will be resumed).',
+      confirm: {
+        question: 'Restart the terminal holder?',
+        detail: 'Restarting stops the 3 held sessions and resumes them in a holder of the installed build. These sessions are not idle, so the restart interrupts their turns: Issue <8> (gh 108), Issue <9> (gh 109). 2 other held sessions end and are not resumed.',
+        action: 'Restart and resume',
+      },
+    });
+    expect(view).not.toHaveProperty('holderResult');
+
+    const one = dockView(snapshot([items[1]!], { holder: older, held: [held('s2', { key: 'gh 108' })] }), NOW, W);
+
+    expect(one.holderNotice?.text).toBe('The terminal holder is from an older build. Restart it to update (1 session will be resumed).');
+    expect(one.holderNotice?.confirm?.detail).toBe('Restarting stops the held session and resumes it in a holder of the installed build. This session is not idle, so the restart interrupts its turn: Issue <8> (gh 108).');
+
+    const none = dockView(snapshot([], { holder: older }), NOW, W);
+
+    expect(none.holderNotice).toMatchObject({ text: 'The terminal holder is from an older build. Restart it to update.', confirm: { detail: 'The terminal holder holds no live session.' } });
+    expect(dockView(snapshot([], { holder: older, held: [held('o1', { orphan: true, workItemId: null })] }), NOW, W).holderNotice?.confirm?.detail).toBe('1 held session ends and is not resumed.');
+  });
+
+  it('offers no restart while one runs, and shows the last result, failed when the holder or a session failed', () => {
+    const running = dockView(snapshot([], { holder: { ...older, restart: { state: 'running', at: NOW } } }), NOW, W);
+
+    expect(running.holderNotice).toEqual({ text: 'Restarting the terminal holder and resuming its sessions…', confirm: null });
+
+    const done = { state: 'done' as const, at: NOW, resumed: 2, failed: [], error: null };
+
+    expect(dockView(snapshot([], { holder: { ...older, older: false, restart: done } }), NOW, W)).toMatchObject({ holderResult: { at: NOW, text: 'The terminal holder restarted and 2 sessions resumed.', failed: false } });
+    expect(dockView(snapshot([], { holder: { ...older, older: false, restart: { ...done, resumed: 0 } } }), NOW, W).holderResult?.text).toBe('The terminal holder restarted.');
+
+    const partly = dockView(snapshot([], { holder: { ...older, older: false, restart: { ...done, resumed: 1, failed: [{ session: 's2', key: 'gh 108', error: 'Claude Code did not start.' }] } } }), NOW, W);
+
+    expect(partly.holderResult).toEqual({ at: NOW, text: 'The terminal holder restarted and 1 session resumed. 1 session did not resume: gh 108: Claude Code did not start.', failed: true });
+
+    // A failed restart leaves the old holder, so the notice offers it again beside the result.
+    const failed = dockView(snapshot([], { holder: { ...older, restart: { ...done, resumed: 1, error: 'The terminal holder (pid 4) did not exit and could not be ended: Access is denied.' } } }), NOW, W);
+
+    expect(failed.holderResult).toEqual({ at: NOW, text: 'The terminal holder did not restart: The terminal holder (pid 4) did not exit and could not be ended: Access is denied. 1 session resumed.', failed: true });
+    expect(failed.holderNotice?.confirm).not.toBeNull();
+  });
+});
+
 describe('dockView with dock.openTerminal (PRD R28)', () => {
   const shown = (entry: WorkItemView, patch: Partial<Snapshot>): DockRow => dockView(snapshot([entry], patch), NOW, W).groups.flatMap((group) => group.rows)[0]!;
   const ended = item(7, { status: 'blocked', sessions: [session({ state: 'ended' })] });

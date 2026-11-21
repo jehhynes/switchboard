@@ -246,6 +246,8 @@ export interface ConversationServiceDeps {
   setSource?(name: string, enabled: boolean): string | null;
   /** Polls each source that is on now, as the dock's Refresh sources does: why not, or null. */
   pollSources?(): string | null;
+  /** Restarts a terminal holder from an older build and resumes its sessions, as the dock's Restart and resume does: why not, or null once it started. */
+  restartHolder?(detail?: string): string | null;
   /** Runs an operator event the page's New ad-hoc session sends, `adhoc` or `run-schedule`, as the dock's `/action` does: why not, or null. */
   operatorEvent?(event: Record<string, unknown>): string | null;
   /** The Done rows from `since` up to the Done list whose search text holds every word of `text`, as the dock's search further back (PRD R63). */
@@ -1219,6 +1221,25 @@ export class ConversationService {
     const why = this.deps.pollSources === undefined ? 'This hub cannot poll from the page.' : this.deps.pollSources();
 
     return why === null ? { status: 200, body: { done: true } } : { status: 409, body: { error: why } };
+  }
+
+  /**
+   * `page-holder-restart {window, detail}` (architecture.md § Restarting the holder): the list header's Restart and resume, which restarts a terminal
+   * holder from an older build and resumes its sessions, as the dock's does; `detail` is the confirmation the operator accepted. 403 for a key that is not a page's, 409 with the hub's refusal.
+   */
+  pageHolderRestart(body: Record<string, unknown>): { status: number; body: unknown } {
+    if (typeof body['window'] !== 'string') {
+      return { status: 400, body: { error: 'Expected {window}.' } };
+    }
+
+    if (!this.deps.windows.isPage(body['window'])) {
+      return { status: 403, body: { error: 'Not in this window.' } };
+    }
+
+    const detail = typeof body['detail'] === 'string' ? body['detail'] : undefined;
+    const why = this.deps.restartHolder === undefined ? 'This hub cannot restart the terminal holder from the page.' : this.deps.restartHolder(detail);
+
+    return why === null ? { status: 200, body: { started: true } } : { status: 409, body: { error: why } };
   }
 
   /** Each `page-adhoc` that created, by page key and `opId`, so a retried one creates once; the last 100. A refusal is not kept, so a retry after it runs again. */

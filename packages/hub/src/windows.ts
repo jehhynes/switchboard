@@ -459,7 +459,7 @@ export class WindowScopes {
   scoped(key: string, snapshot: Snapshot): Snapshot {
     const window = this.#windows.get(key);
     const ids = new Set(window === undefined ? [] : this.#listed(window).map((ref) => ref.workItemId));
-    const { held: _held, notes: _notes, ...rest } = snapshot;
+    const { held: _held, notes: _notes, holder: _holder, ...rest } = snapshot;
 
     const workItems = snapshot.workItems.filter((item) => ids.has(item.id));
     // Only its own work items' pull requests.

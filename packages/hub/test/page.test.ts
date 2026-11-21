@@ -186,6 +186,15 @@ describe('pageHeader', () => {
     expect(knownFolder(header.folders, 'd:/git/support')).toBe('D:/git/support');
     expect(knownFolder(header.folders, 'D:/git')).toBeNull();
   });
+
+  it("carries the dock's holder notice and restart result", () => {
+    const holderNotice = { text: 'The terminal holder is from an older build. Restart it to update.', confirm: { question: 'Restart the terminal holder?', detail: 'd', action: 'Restart and resume' } };
+    const holderResult = { at: 5, text: 'The terminal holder restarted.', failed: false };
+    const header = pageHeader({ sources: [], repoRoots: [], schedules: [], holderNotice, holderResult }, snapshot([]));
+
+    expect(header).toMatchObject({ holderNotice, holderResult });
+    expect(pageHeader({ sources: [], repoRoots: [], schedules: [] }, snapshot([]))).not.toHaveProperty('holderNotice');
+  });
 });
 
 describe('pageList pool rows', () => {

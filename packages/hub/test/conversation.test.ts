@@ -62,11 +62,13 @@ describe('WindowScopes', () => {
 
     expect(scopes.scope(key)).toEqual({ kind: 'item', workItemId: 2, key: 'k1', folder: 'D:/w12', title: 'Issue <1>', cwd: 'D:/w12', scopeGen: 1, sessionId: 's2', conversations: [{ workItemId: 2, primary: true }] });
 
-    const scoped = scopes.scoped(key, { ...view, held: [] });
+    const scoped = scopes.scoped(key, { ...view, held: [], holder: { build: 'a', installed: 'b', older: true, restart: null } });
 
     expect(scoped.workItems.map((one) => one.id)).toEqual([2]);
     expect(scoped.pool).toEqual([]);
     expect(scoped).not.toHaveProperty('held');
+    // The holder is machine-wide, so the dock and the page show it, never a window.
+    expect(scoped).not.toHaveProperty('holder');
     // Item 2 is blocked, so it needs the operator; the count names no work item.
     expect(scoped.needsCount).toBe(1);
     // The sources' notes and errors can name other tickets.
@@ -1740,6 +1742,10 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
         return name === 'gone' ? 'No source is named gone.' : null;
       },
       pollSources: () => pollRefusal,
+      restartHolder: (detail) => {
+        restarts.push(detail);
+        return pollRefusal;
+      },
       operatorEvent: (event) => {
         events.push(event);
         return event['prompt'] === 'refuse' ? 'Code Mode sessions need hooks.' : null;
@@ -1778,6 +1784,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     const made: Array<[string, string, string | undefined]> = [];
     let pollRefusal: string | null = null;
     const refusePoll = (why: string | null) => void (pollRefusal = why);
+    const restarts: Array<string | undefined> = [];
     let header: PageHeader = { sources: [{ kind: 'github', enabled: true, title: 'gh: polled\nClick to stop polling gh', sources: [{ name: 'gh', enabled: true }] }], repoRoots: ['D:/w1'], folders: ['D:/w1', dir], schedules: [{ name: 'nightly', playbook: 'dev:sweep' }] };
     const setHeader = (next: typeof header) => void (header = next);
     const opens: Array<[string, string]> = [];
@@ -1799,8 +1806,21 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
       return { key, frames };
     };
 
-    return { store, view, scopes, service, openPage, focus, actions, opens, commands, pools, resumed, refuseResume, held, sourceCalls, setHeader, events, made, refusePoll };
+    return { store, view, scopes, service, openPage, focus, actions, opens, commands, pools, resumed, refuseResume, held, sourceCalls, setHeader, events, made, refusePoll, restarts };
   }
+
+  it("runs the list header's Restart and resume for a page key only, answering the hub's refusal (architecture.md § Restarting the holder)", () => {
+    const { service, openPage, refusePoll, restarts, scopes, view } = setup();
+    const page = openPage();
+    const window = scopes.open(view.file, view.view);
+
+    expect(service.pageHolderRestart({ window: page.key, detail: 'Restarting stops the held session.' })).toEqual({ status: 200, body: { started: true } });
+    refusePoll('The terminal holder is already restarting.');
+    expect(service.pageHolderRestart({ window: page.key })).toEqual({ status: 409, body: { error: 'The terminal holder is already restarting.' } });
+    expect(service.pageHolderRestart({ window }).status).toBe(403);
+    expect(service.pageHolderRestart({}).status).toBe(400);
+    expect(restarts).toEqual(['Restarting stops the held session.', undefined]);
+  });
 
   it("runs More Actions' Refresh sources, New ad-hoc session and New conversation in a folder for a page key, in folders and schedules the header offers only", () => {
     const { service, openPage, events, made, refusePoll, scopes, view } = setup();

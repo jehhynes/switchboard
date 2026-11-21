@@ -483,6 +483,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       return pageHeader(built.dock, built.snapshot);
     },
     pollSources: () => runtime.pollNow(),
+    restartHolder: (detail) => restartHolder(detail),
     // The page's New ad-hoc session runs the dock's `adhoc` and `run-schedule` events.
     operatorEvent: (event) => {
       const parsed = parseAction(event);
@@ -663,6 +664,17 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     }
   };
   /** The latest views; on the main thread, built again when a change came since, so a reader sees it at once. */
+  /**
+   * Restart and resume (architecture.md § Restarting the holder): `detail`, the confirmation the operator accepted, must still be the one the view
+   * asks, so a session that started a turn while the operator read it is never interrupted unnamed. Without one, as from an older client, it runs.
+   */
+  const restartHolder = (detail: unknown): string | null => {
+    if (typeof detail === 'string' && detail !== views().dock.holderNotice?.confirm?.detail) {
+      return 'The held sessions changed since you were asked. Press Restart and resume again to see them.';
+    }
+
+    return runtime.restartHolder();
+  };
   const views = (): Built => (builder.inThread && builder.dirty ? builder.buildNow() : (builder.latest() ?? builder.buildNow()));
 
   /** The dock view with each terminal's command, from the settings as they are now; each row's workspace file is written first. */
@@ -808,6 +820,12 @@ const dockWithRuns = () => {
 
         return 'refused' in result ? { status: result.status, body: { error: result.refused } } : { status: 200, body: result };
       },
+      // The dock's Restart and resume of a terminal holder from an older build (architecture.md § Restarting the holder).
+      '/holder/restart': async (body) => {
+        const refused = restartHolder(isRecord(body) ? body['detail'] : undefined);
+
+        return refused === null ? { status: 200, body: { started: true } } : { status: 409, body: { error: refused } };
+      },
       // Continue in Background from an item window's Claude tab (PRD R89).
       '/background': async (body) => {
         const { label, hostPid, workItemIds } = isRecord(body) ? body : {};
@@ -940,6 +958,7 @@ const dockWithRuns = () => {
       '/v1/conversation/row-open': async (body) => (isRecord(body) ? conversation.rowOpen(body) : { status: 400, body: { error: 'Expected {window, opId, workItemId, url}.' } }),
       '/v1/conversation/row-paste': async (body) => (isRecord(body) ? conversation.rowPaste(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId, label}.' } }),
       '/v1/conversation/page-poll': async (body) => (isRecord(body) ? conversation.pagePoll(body) : { status: 400, body: { error: 'Expected {window}.' } }),
+      '/v1/conversation/page-holder-restart': async (body) => (isRecord(body) ? conversation.pageHolderRestart(body) : { status: 400, body: { error: 'Expected {window}.' } }),
       '/v1/conversation/page-adhoc': async (body) => (isRecord(body) ? conversation.pageAdhoc(body) : { status: 400, body: { error: 'Expected {window, opId, prompt, repoRoot, start, provider}.' } }),
       '/v1/conversation/page-folder-conversation': async (body) => (isRecord(body) ? conversation.pageFolderConversation(body) : { status: 400, body: { error: 'Expected {window, opId, folder, provider?}.' } }),
       '/v1/conversation/page-search': async (body) => (isRecord(body) ? conversation.pageSearch(body) : { status: 400, body: { error: 'Expected {window, text, since}.' } }),

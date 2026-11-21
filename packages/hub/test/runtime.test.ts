@@ -3884,6 +3884,115 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
         runtime.stop();
       });
 
+      describe('restart (architecture.md § Restarting the holder)', () => {
+        const INSTALLED = 'cccccccccccccccc';
+
+        /** Installs the build `INSTALLED` in the test home, so the connected holder, of build `b`, is from an older build. */
+        function install(): void {
+          mkdirSync(join(home, '.switchboard', 'holder', INSTALLED), { recursive: true });
+          writeFileSync(join(home, '.switchboard', 'holder', INSTALLED, 'holder.js'), '');
+          writeFileSync(join(home, '.switchboard', 'holder', 'current.json'), JSON.stringify({ build: INSTALLED }));
+        }
+
+        it('stops every live held session, restarts the holder, resumes the active ones and reports the one that did not resume', async () => {
+          install();
+
+          const codeMode = resumer({
+            resumeHeld: async (session) => (session.id === 's2' ? { error: 'Claude Code did not start.' } : { launchId: `${session.id}-new` }),
+          });
+          const context = await attaching(codeMode);
+          const order: string[] = [];
+
+          context.runtime.send({ type: 'adhoc', prompt: 'other', repoRoot: 'D:/git/widgets', start: true });
+          await context.runtime.settled();
+          context.store.updateSession('s2', { codeMode: true, launchId: 'launch-2' });
+          context.entries.splice(0, 1, held('s1'), held('s2'), held('o1'));
+          codeMode.stop = async (target) => {
+            order.push(`stop ${target.sessionId}`);
+            context.entries.splice(context.entries.findIndex((entry) => entry.session === target.sessionId), 1);
+            return null;
+          };
+          await context.runtime.readRoster();
+
+          const holder = context.runtime['holder'];
+          const connection = await holder.find(false);
+
+          if (!('holder' in connection)) {
+            throw new Error('no holder');
+          }
+
+          holder.restart = async () => {
+            order.push('restart');
+            return connection;
+          };
+
+          expect(context.runtime.holderState()).toEqual({ build: 'b', installed: INSTALLED, older: true, restart: null });
+          expect(context.runtime.restartHolder()).toBeNull();
+          expect(context.runtime.restartHolder()).toBe('The terminal holder is already restarting.');
+          expect(context.runtime.snapshot().holder?.restart).toEqual({ state: 'running', at: T0 });
+          await context.runtime.settled();
+
+          expect(order).toEqual(['stop o1', 'stop s1', 'stop s2', 'restart']);
+          expect(context.store.session('s1')).toMatchObject({ state: 'idle', launchId: 's1-new' });
+          // No terminal attaches, so nothing defers the resumed session's end.
+          expect(context.runtime['reservations'].has('s1')).toBe(false);
+          expect(context.store.session('s2')).toMatchObject({ state: 'ended', outcome: 'stopped' });
+          expect(context.runtime.snapshot().holder?.restart).toEqual({ state: 'done', at: T0, resumed: 1, failed: [{ session: 's2', key: 'adhoc 2', error: 'Claude Code did not start.' }], error: null });
+          expect(context.logs).toContain('holder restart: session s2 did not resume: Claude Code did not start.');
+          context.runtime.stop();
+        });
+
+        it('resumes the stopped sessions in the old holder when it still holds a session after 3 rounds', async () => {
+          install();
+
+          const codeMode = resumer();
+          const context = await attaching(codeMode);
+          let restarts = 0;
+
+          codeMode.stop = async () => {
+            context.entries.splice(0, context.entries.length);
+            return null;
+          };
+          await context.runtime.readRoster();
+
+          const holder = context.runtime['holder'];
+
+          holder.restart = async () => {
+            restarts += 1;
+            return { live: ['late-1'] };
+          };
+
+          expect(context.runtime.restartHolder()).toBeNull();
+          await context.runtime.settled();
+
+          expect(restarts).toBe(3);
+          expect(context.store.session('s1')).toMatchObject({ state: 'idle' });
+          expect(context.runtime.snapshot().holder?.restart).toMatchObject({ state: 'done', resumed: 1, failed: [], error: 'The terminal holder still holds 1 live session (late-1), so it was not ended.' });
+          context.runtime.stop();
+        });
+
+        it('refuses with no holder connected, and for a holder of the installed build', async () => {
+          const context = await attaching(resumer());
+
+          expect(context.runtime.restartHolder()).toBe('No terminal holder is running.');
+          expect(context.runtime.holderState()).toBeNull();
+
+          install();
+          await context.runtime.readRoster();
+
+          const connection = await context.runtime['holder'].find(false);
+
+          if (!('holder' in connection)) {
+            throw new Error('no holder');
+          }
+
+          Object.assign(connection.holder.welcome, { build: INSTALLED, features: ['snapshot', 'write', 'view'] });
+          expect(context.runtime.holderState()).toEqual({ build: INSTALLED, installed: INSTALLED, older: false, restart: null });
+          expect(context.runtime.restartHolder()).toBe('The terminal holder already runs the installed build.');
+          context.runtime.stop();
+        });
+      });
+
       it('stops an active held session through the flow by its Switchboard ID, Claude ID, a retired ID or 8 characters of one', async () => {
         for (const id of ['s1', CLAUDE, 'retired-claude-id', CLAUDE.slice(0, 8)]) {
           const codeMode = resumer();

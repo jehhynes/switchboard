@@ -31,6 +31,7 @@ const inputs = (): SnapshotInputs => ({
   enabled: [],
   sources: [],
   held: [],
+  holder: null,
   guarded: [],
   nodeError: null,
   hookErrors: { claude: null, codex: null },

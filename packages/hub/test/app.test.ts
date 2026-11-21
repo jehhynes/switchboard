@@ -2,11 +2,12 @@ import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Exec } from '@switchboard/claude';
 import { Store } from '@switchboard/core';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHubApp, parseAction, parseReport } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 import { postToHub } from '../src/client.js';
 import { listenHub } from '../src/server.js';
+import type { Snapshot } from '../src/snapshot.js';
 import { gitBashRoot, handledBody, isPastePath, registerTitle, reportBody, ticketBody } from '../src/report.js';
 import { tempHome, until } from './helpers.js';
 
@@ -1055,16 +1056,19 @@ describe('createHubApp', () => {
         return 0;
       },
       screen: async () => ({ head: '', text: '' }),
-      shutdown: async () => {},
+      shutdown: async () => {
+        lock = false;
+      },
       onClose: () => {},
       close: () => {},
     };
+    let lock = true;
 
     writeFileSync(join(temp.home, '.switchboard', 'holder.json'), JSON.stringify({ protocol: 1, build: 'b', port: 4100, token: 'holder-token', pid: 4243, startedAt: '2026-11-18T00:00:00.000Z' }));
     mkdirSync(join(temp.home, '.switchboard', 'holder', 'cccccccccccccccc'), { recursive: true });
     writeFileSync(join(temp.home, '.switchboard', 'holder', 'cccccccccccccccc', 'holder.js'), '');
     writeFileSync(join(temp.home, '.switchboard', 'holder', 'current.json'), JSON.stringify({ build: 'cccccccccccccccc' }));
-    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli, holder: { connect: async () => connection, lockHeld: async () => true } } });
+    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli, holder: { connect: async () => (lock ? connection : Promise.reject(new Error('refused'))), lockHeld: async () => lock, killTree: async () => ({ error: 'not in tests' }), launch: () => {} } } });
     closers.push(() => app.close());
     const server = await listenHub({ identity: { hub: 'switchboard', protocol: 1, version: 't', pid: 1 }, onShutdown: () => {}, post: app.post, snapshot: () => app.snapshot() });
     closers.push(() => server.close());
@@ -1079,6 +1083,15 @@ describe('createHubApp', () => {
     expect(await postToHub(record, '/holder/stop', { id: '9273f594' }, 5000)).toEqual({ status: 200, error: null, body: { stopped: 'orphan-1' } });
     expect(kills).toEqual(['orphan-1']);
     expect(await postToHub(record, '/holder/list', {}, 5000)).toEqual({ status: 200, error: null, body: { sessions: [], holder: connection.welcome, installed: 'cccccccccccccccc' } });
+    // The holder's build b is not the installed one, so a restart starts; it ends the holder, whose installed build is incomplete here.
+    expect(await postToHub({ ...record, token: 'wrong' }, '/holder/restart', {}, 5000)).toMatchObject({ status: 401 });
+    // A confirmation the view no longer asks is refused, so no session is interrupted unnamed.
+    expect(await postToHub(record, '/holder/restart', { detail: 'Restarting stops the held session.' }, 5000)).toMatchObject({ status: 409, error: 'The held sessions changed since you were asked. Press Restart and resume again to see them.' });
+    expect(lock).toBe(true);
+    expect(await postToHub(record, '/holder/restart', {}, 5000)).toEqual({ status: 200, error: null, body: { started: true } });
+    expect(await postToHub(record, '/holder/restart', {}, 5000)).toMatchObject({ status: 409 });
+    await vi.waitFor(() => expect((app.snapshot() as Snapshot).holder?.restart).toMatchObject({ state: 'done', resumed: 0, error: expect.stringContaining('The terminal holder is not installed') as unknown }));
+    expect(lock).toBe(false);
   });
 
   it('turns a claimed open of a Code Mode session into its attach terminal and runs hub.js with sessions.nodePath in the dock view (PRD R95)', async () => {

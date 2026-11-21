@@ -6,7 +6,7 @@ import { hostKey, isFolderHost } from '@switchboard/core';
 import type { Store } from '@switchboard/core';
 import { artifactType } from '@switchboard/conversation';
 import { windowOf } from './dock.js';
-import type { DockRow, DockSourceGroup, DockView } from './dock.js';
+import type { DockHolderNotice, DockHolderResult, DockRow, DockSourceGroup, DockView } from './dock.js';
 import { CONTROL_GLYPHS } from './rows.js';
 import type { RowGroup } from './rows.js';
 import type { Snapshot } from './snapshot.js';
@@ -530,13 +530,16 @@ export interface PageHeader {
   folders: string[];
   /** The schedules New ad-hoc session can run now (PRD R82). */
   schedules: { name: string; playbook: string }[];
+  /** The dock's holder notice and restart result (architecture.md § Restarting the holder); absent when the dock shows none. */
+  holderNotice?: DockHolderNotice;
+  holderResult?: DockHolderResult;
 }
 
 /**
  * The page's list header, from the built dock view, so the page and the dock show the same sources. A page cannot browse this computer's
  * folders, so its folder choices are the ones the hub knows: the repo roots, then each folder a conversation is hosted by, once each.
  */
-export function pageHeader(dock: Pick<DockView, 'sources' | 'repoRoots' | 'schedules'>, snapshot: Pick<Snapshot, 'workItems'>): PageHeader {
+export function pageHeader(dock: Pick<DockView, 'sources' | 'repoRoots' | 'schedules' | 'holderNotice' | 'holderResult'>, snapshot: Pick<Snapshot, 'workItems'>): PageHeader {
   const folders = new Map<string, string>();
 
   for (const folder of [...dock.repoRoots, ...snapshot.workItems.flatMap((item) => (item.ticket.hostWindow != null && isFolderHost(item.ticket.hostWindow) ? [item.ticket.hostWindow] : []))]) {
@@ -545,7 +548,14 @@ export function pageHeader(dock: Pick<DockView, 'sources' | 'repoRoots' | 'sched
     }
   }
 
-  return { sources: dock.sources, repoRoots: dock.repoRoots, folders: [...folders.values()], schedules: dock.schedules };
+  return {
+    sources: dock.sources,
+    repoRoots: dock.repoRoots,
+    folders: [...folders.values()],
+    schedules: dock.schedules,
+    ...(dock.holderNotice === undefined ? {} : { holderNotice: dock.holderNotice }),
+    ...(dock.holderResult === undefined ? {} : { holderResult: dock.holderResult }),
+  };
 }
 
 /** The folder of `folders` that names the same folder as `folder`, in any spelling `hostKey` treats as one, or null. */

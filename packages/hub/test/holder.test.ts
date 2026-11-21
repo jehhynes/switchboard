@@ -204,6 +204,132 @@ describe('HolderLink (architecture.md § Terminal holder)', () => {
     });
   });
 
+  describe('restart (architecture.md § Restarting the holder)', () => {
+    function fakeHolder(build: string, pid: number, live: number): HolderConnection & { shutdowns: number } {
+      const entries: SessionEntry[] = Array.from({ length: live }, (_, index) => ({ session: `s${index}`, label: '', pid: 10 + index, cwd: '', startedAt: 0, lastInputAt: null, lastOutputAt: null, exitedAt: null, exitCode: null, clients: 0, memoryBytes: null }));
+      const connection = {
+        welcome: { protocol: 1, build, pid, features: ['snapshot', 'write', 'view'] },
+        compatible: true,
+        shutdowns: 0,
+        spawn: async () => ({ session: 's', pid: 1 }),
+        list: async () => entries,
+        kill: async () => 0,
+        screen: async () => ({ head: '', text: '' }),
+        shutdown: async () => {
+          connection.shutdowns += 1;
+        },
+        onClose: () => {},
+        close: () => {},
+      };
+
+      return connection;
+    }
+
+    /** A home whose record names the old holder, a link whose launch records the installed build's holder, and the lock the test frees. */
+    function restarting(old: HolderConnection, extra: Partial<HolderLinkDeps> = {}) {
+      const home = newHome();
+      const current = fakeHolder(BUILD, 4243, 0);
+      const state = { held: true, launched: [] as string[][], killed: [] as number[] };
+      const made = link(home, {
+        // The old holder answers until it exits.
+        connect: async () => {
+          if (state.launched.length > 0) {
+            return current;
+          }
+
+          if (!state.held) {
+            throw new Error('connect ECONNREFUSED');
+          }
+
+          return old;
+        },
+        lockHeld: async () => state.held,
+        launch: (_node, args) => {
+          state.launched.push(args);
+          writeFileSync(recordPath(home), JSON.stringify({ protocol: 1, build: BUILD, port: 2, token: 'new', pid: 4243, startedAt: '2026-11-18T00:00:01Z' }));
+        },
+        ...extra,
+      });
+
+      writeFileSync(recordPath(home), JSON.stringify({ protocol: 1, build: 'aaaaaaaaaaaaaaaa', port: 1, token: 'old', pid: 4242, startedAt: '2026-11-18T00:00:00Z' }));
+
+      return { home, current, state, ...made };
+    }
+
+    it('ends a holder of another build that holds no live session and starts the installed build, and a start meanwhile waits for it', async () => {
+      const old = fakeHolder('aaaaaaaaaaaaaaaa', 4242, 0);
+      const { home, current, state, link: holder, logs } = restarting(old);
+
+      old.shutdown = async () => {
+        old.shutdowns += 1;
+        state.held = false;
+      };
+
+      expect(await holder.find(false)).toMatchObject({ holder: old });
+      expect(holder.installed()).toBe(BUILD);
+
+      const restart = holder.restart();
+      const start = holder.find(true);
+
+      expect(await restart).toMatchObject({ holder: current });
+      expect(await start).toMatchObject({ holder: current });
+      expect(old.shutdowns).toBe(1);
+      expect(state.launched).toEqual([[join(home, 'holder', BUILD, 'holder.js'), `--home=${home}`, `--build=${BUILD}`]]);
+      expect(logs).toEqual(['terminal holder aaaaaaaaaaaaaaaa ended to start the installed build', `started the terminal holder ${BUILD}`]);
+    });
+
+    it('names a session that started before the shutdown, which the holder refused, and ends nothing', async () => {
+      const old = fakeHolder('aaaaaaaaaaaaaaaa', 4242, 0);
+      const killed: number[] = [];
+      const { state, link: holder } = restarting(old, { killTree: async (pid) => (killed.push(pid), null) });
+      let lists = 0;
+
+      old.list = async () => (lists++ === 0 ? [] : [{ session: 'late-1', label: '', pid: 9, cwd: '', startedAt: 0, lastInputAt: null, lastOutputAt: null, exitedAt: null, exitCode: null, clients: 0, memoryBytes: null }]);
+      old.shutdown = async () => {
+        throw new Error('The terminal holder holds 1 live session.');
+      };
+
+      expect(await holder.restart()).toEqual({ live: ['late-1'] });
+      expect(killed).toEqual([]);
+      expect(state.launched).toEqual([]);
+      expect(await holder.find(false)).toMatchObject({ holder: old });
+    });
+
+    it('keeps a holder that still holds live sessions, naming them', async () => {
+      const old = fakeHolder('aaaaaaaaaaaaaaaa', 4242, 2);
+      const { state, link: holder } = restarting(old);
+
+      expect(await holder.restart()).toEqual({ live: ['s0', 's1'] });
+      expect(old.shutdowns).toBe(0);
+      expect(state.launched).toEqual([]);
+      expect(await holder.find(true)).toMatchObject({ holder: old });
+    });
+
+    it('ends the process tree of a holder that does not exit, and fails when that fails', async () => {
+      let clock = 0;
+      const old = fakeHolder('aaaaaaaaaaaaaaaa', 4242, 0);
+      const killed: number[] = [];
+      const { current, state, link: holder } = restarting(old, {
+        now: () => (clock += 1_000),
+        sleep: async () => {},
+        killTree: async (pid) => {
+          killed.push(pid);
+          state.held = false;
+          return null;
+        },
+      });
+
+      expect(await holder.restart()).toMatchObject({ holder: current });
+      expect(killed).toEqual([4242]);
+
+      const stuck = fakeHolder('aaaaaaaaaaaaaaaa', 4242, 0);
+      const failing = restarting(stuck, { now: () => (clock += 1_000), sleep: async () => {}, killTree: async () => ({ error: 'Access is denied.' }) });
+
+      expect(await failing.link.restart()).toEqual({ error: 'The terminal holder (pid 4242) did not exit and could not be ended: Access is denied.' });
+      expect(failing.state.launched).toEqual([]);
+    });
+  });
+
   it('shares one connection between lookups made together', async () => {
     const home = newHome();
     let connects = 0;
