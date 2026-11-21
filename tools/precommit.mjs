@@ -9,8 +9,10 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { cleanGitEnv, guardRepo } from './git-guard.mjs';
 
 const root = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+const guard = guardRepo(root, { checkout: true });
 const rootPackage = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 
 // Workspaces in package.json order, which is dependency order.
@@ -36,9 +38,18 @@ const exempt = (file) => /\.(md|txt)$/i.test(file) || file.startsWith('.githooks
 const staged = execFileSync('git', ['diff', '--cached', '--name-only', '--no-renames', '--diff-filter=ACMRDTU', '-z'], { encoding: 'utf8' })
   .split('\0').filter(Boolean).filter((f) => !exempt(f));
 
+// The checks run without the hook's GIT_* variables (tools/git-guard.mjs), and
+// fail if they changed the repository's shared git config, or this checkout's
+// HEAD, branch or index, anyway.
 function run(args) {
   console.log(`pre-commit: npm ${args.join(' ')}`);
-  const result = spawnSync('npm', args, { cwd: root, stdio: 'inherit', shell: process.platform === 'win32' });
+  const result = spawnSync('npm', args, { cwd: root, stdio: 'inherit', shell: process.platform === 'win32', env: cleanGitEnv() });
+  const changed = guard.check();
+  if (changed) {
+    console.error('');
+    console.error(`pre-commit: npm ${args.join(' ')} ${changed}`);
+    process.exit(1);
+  }
   if (result.status !== 0) {
     console.error('');
     console.error(`pre-commit: npm ${args.join(' ')} failed. Fix it, or use --no-verify only for a WIP commit.`);

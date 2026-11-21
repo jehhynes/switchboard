@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { cleanGitEnv, guardRepo } from '../../../tools/git-guard.mjs';
 
 const home = mkdtempSync(join(tmpdir(), 'switchboard-vscode-home-'));
 // Portable mode keeps the test build from registering itself for vscode:// links on Windows (GC M49).
@@ -35,10 +36,11 @@ function stopHub() {
 }
 
 const protocolBefore = protocolRegistration();
+const gitGuard = guardRepo(process.cwd());
 
 const child = spawn('npx', ['vscode-test'], {
   cwd: process.cwd(),
-  env: { ...process.env, SWITCHBOARD_TEST_HOME: home, SWITCHBOARD_TEST_PROFILE: profile, SWITCHBOARD_TEST_PORTABLE: portable },
+  env: { ...cleanGitEnv(), SWITCHBOARD_TEST_HOME: home, SWITCHBOARD_TEST_PROFILE: profile, SWITCHBOARD_TEST_PORTABLE: portable },
   stdio: 'inherit',
   shell: true,
 });
@@ -86,5 +88,9 @@ child.on('exit', async (code) => {
   const unchanged = JSON.stringify(protocolRegistration()) === JSON.stringify(protocolBefore);
 
   if (!unchanged) console.error('The VS Code integration run changed the vscode:// registration.');
-  process.exit(unchanged && survived ? (code ?? 1) : 1);
+
+  const gitChanged = gitGuard.check();
+
+  if (gitChanged) console.error(`The VS Code integration run ${gitChanged}`);
+  process.exit(unchanged && survived && !gitChanged ? (code ?? 1) : 1);
 });

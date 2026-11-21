@@ -2,7 +2,7 @@ const assert = require('node:assert');
 const { execFileSync } = require('node:child_process');
 const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = require('node:fs');
 const { tmpdir } = require('node:os');
-const { join } = require('node:path');
+const { join, resolve } = require('node:path');
 const vscode = require('vscode');
 
 /**
@@ -17,8 +17,12 @@ describe('a worktree row\'s Open changes', () => {
   let warned = [];
   const originals = {};
 
+  // No GIT_* variable from the caller, such as a commit hook's GIT_DIR, and no repository search above the temp folder,
+  // so these commands write only to the scratch clone (docs/testing.md § Fixtures and isolation).
+  const gitEnv = { ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.toUpperCase().startsWith('GIT_'))), GIT_CEILING_DIRECTORIES: tmpdir() };
+
   function git(cwd, ...args) {
-    return execFileSync('git', args, { cwd, encoding: 'utf8', windowsHide: true }).trim();
+    return execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', env: gitEnv, windowsHide: true }).trim();
   }
 
   const changes = async (path, title = 'Inbox badge') => (await vscode.extensions.getExtension('switchboard.switchboard').activate()).run({ type: 'changes', path, key: 'gh 18941', title });
@@ -33,6 +37,7 @@ describe('a worktree row\'s Open changes', () => {
     worktree = join(scratch, 'repo.worktrees', '18941-inbox-badge');
     mkdirSync(clone, { recursive: true });
     git(clone, 'init', '--initial-branch=main');
+    assert.strictEqual(resolve(git(clone, 'rev-parse', '--absolute-git-dir')).toLowerCase(), resolve(clone, '.git').toLowerCase());
     git(clone, 'config', 'user.email', 'test@example.invalid');
     git(clone, 'config', 'user.name', 'Test');
     // A remote, so `origin/main` exists as a base ref; nothing is fetched from it.

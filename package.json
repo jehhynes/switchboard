@@ -30,7 +30,7 @@
     "watch": "node tools/watch.mjs",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm test --workspaces --if-present",
-    "verify": "npm run build && npm run typecheck && npm test",
+    "verify": "node tools/verify.mjs",
     "verify:staged": "node tools/precommit.mjs",
     "test:integration": "npm run build && npm run test:integration --workspace switchboard",
     "verify:full": "npm run verify && npm run test:integration",
