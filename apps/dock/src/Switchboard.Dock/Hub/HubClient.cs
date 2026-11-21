@@ -20,7 +20,7 @@ public enum Connection
 /// Holds the running hub's dock stream (<c>GET /dock/events</c>), connecting again whenever it ends, and sends the click's requests.
 /// While no hub answers, <paramref name="starter"/> starts one, as a VS Code window with Switchboard does (PRD R71).
 /// </summary>
-public sealed class HubClient(string switchboardHome, HubStarter? starter = null) : IHub, IConfigHub, IVolumeHub, IDisposable
+public sealed class HubClient(string switchboardHome, HubStarter? starter = null) : IHub, IConfigHub, IDisposable
 {
     static readonly TimeSpan Retry = TimeSpan.FromSeconds(2);
     static readonly TimeSpan HeadersTimeout = TimeSpan.FromSeconds(5);
@@ -271,7 +271,6 @@ public sealed class HubClient(string switchboardHome, HubStarter? starter = null
     public Task<string?> SetSource(string name, bool enabled) => Post("/sources", new JsonObject { ["name"] = name, ["enabled"] = enabled });
 
     public Task<string?> Poll() => Post("/poll", []);
-    public Task<(string? Error, JsonNode? Body)> Volume(JsonObject query) => PostFor("/volume", query);
 
     public Task<string?> Select(string rowKey) => Post("/dock/select", new JsonObject { ["rowKey"] = rowKey });
 

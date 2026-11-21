@@ -30,7 +30,6 @@ public sealed partial class MainWindow : Window
     readonly bool docked;
     readonly IConfigHub? config;
     SettingsWindow? settingsWindow;
-    VolumeWindow? volumeWindow;
     HeldSessionsWindow? heldWindow;
     AppBar? appBar;
     // The strip the docked window last took, in physical pixels.
@@ -1640,7 +1639,6 @@ public sealed partial class MainWindow : Window
     const string SettingsGlyph = "\uEB51";
     const string OutputGlyph = "\uEB9D";
     const string RefreshGlyph = "\uEB37";
-    const string GraphGlyph = "\uEB03";
 
     /// <summary>A submenu's choice, checked when it is the current one.</summary>
     static MenuItem Checked(string header, bool isChecked, Func<Task> run)
@@ -1966,8 +1964,8 @@ public sealed partial class MainWindow : Window
 
     /// <summary>
     /// The header's More Actions menu in groups with a separator between each: New ad-hoc session and New conversation in a folder; Held sessions
-    /// (PRD R94) and Ticket volume report when a Zoho or Forum source is configured; Refresh sources, which polls each source that is on now, and
-    /// Show hub log, which shows the hub log in the VS Code window used last; then Open Settings, last.
+    /// (PRD R94); Refresh sources, which polls each source that is on now, and Show hub log, which shows the hub log in the VS Code window used
+    /// last; then Open Settings, last.
     /// </summary>
     internal List<Control> HeaderMenu() =>
     [
@@ -1975,7 +1973,6 @@ public sealed partial class MainWindow : Window
         Item("New conversation in a folder…", NewSession, FolderGlyph),
         new Separator(),
         Item("Held sessions", OpenHeld, TerminalGlyph),
-        .. model.Sources.Any((source) => source.IsZoho || source.IsForum) ? [Item("Ticket volume report", OpenVolume, GraphGlyph)] : Array.Empty<Control>(),
         new Separator(),
         Item("Refresh sources", async () => model.Status = await hub.Poll(), RefreshGlyph),
         Item("Show hub log", () => Run(null, new JsonObject { ["type"] = "log" }), OutputGlyph),
@@ -2192,25 +2189,6 @@ public sealed partial class MainWindow : Window
         };
         window.Show();
         await editor.Load();
-    }
-
-    async Task OpenVolume()
-    {
-        if (volumeWindow is not null)
-        {
-            volumeWindow.Activate();
-            return;
-        }
-        if (hub is not IVolumeHub volume)
-        {
-            model.Status = "Switchboard is not running, so the ticket volume report cannot open.";
-            return;
-        }
-        var window = new VolumeWindow(volume, actions);
-        volumeWindow = window;
-        window.Closed += (_, _) => volumeWindow = null;
-        window.Show();
-        await window.Load();
     }
 
     /// <summary>The open Settings window, or null.</summary>

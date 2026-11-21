@@ -303,13 +303,13 @@ describe('the list header (architecture.md § Web page)', () => {
   };
   const menuRows = () => [...root.querySelectorAll('.more-menu > li')].map((li) => (li.classList.contains('menu-separator') ? '-' : li.textContent));
 
-  it("lists More Actions in the dock's groups, the sources first for a phone, and Ticket volume report only with a Zoho or Forum source", async () => {
+  it("lists More Actions in the dock's groups, the sources first for a phone", async () => {
     const { page, source } = start();
 
     hello(source);
     click('.more-actions');
     expect(root.querySelector('.more-actions')?.getAttribute('aria-expanded')).toBe('true');
-    expect(menuRows()).toEqual(['gh', 'desk', 'help', '-', 'New ad-hoc session…', 'New conversation in a folder…', '-', 'Held sessions', 'Ticket volume report', '-', 'Refresh sources', 'Show hub log', '-', 'Pair a device…', 'Open Settings']);
+    expect(menuRows()).toEqual(['gh', 'desk', 'help', '-', 'New ad-hoc session…', 'New conversation in a folder…', '-', 'Held sessions', '-', 'Refresh sources', 'Show hub log', '-', 'Pair a device…', 'Open Settings']);
     // The source rows are the phone's: page.css hides them from 768 px, where the icons are in the header.
     expect([...root.querySelectorAll('.more-menu .more-source')]).toHaveLength(4);
     expect(root.querySelector('.more-menu [data-source="help"]')?.getAttribute('aria-checked')).toBe('false');
@@ -318,8 +318,6 @@ describe('the list header (architecture.md § Web page)', () => {
     expect(posts.at(-1)).toMatchObject({ url: '/v1/conversation/page-source', body: { name: 'help', enabled: true } });
     expect(root.querySelector('.more-menu')).not.toBeNull();
 
-    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ sources: [github] }) });
-    expect(menuRows()).not.toContain('Ticket volume report');
     source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ sources: [] }) });
     expect(menuRows()[0]).toBe('New ad-hoc session…');
 

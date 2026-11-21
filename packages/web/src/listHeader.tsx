@@ -407,8 +407,8 @@ function MoreRow({ action, icon, label }: { action: string; icon: string; label:
 const Separator = ({ classes = 'menu-separator' }: { classes?: string }) => <li class={classes} role="separator"></li>;
 
 /**
- * More Actions (PRD R71), in the dock's groups: New ad-hoc session… and New conversation in a folder…; Held sessions, and Ticket volume
- * report with a Zoho or Forum source; Refresh sources and Show hub log; then Pair a device and Open Settings, on this computer's page only. On a phone, where the header has no room for them,
+ * More Actions (PRD R71), in the dock's groups: New ad-hoc session… and New conversation in a folder…; Held sessions; Refresh sources and
+ * Show hub log; then Pair a device and Open Settings, on this computer's page only. On a phone, where the header has no room for them,
  * the source icons come first as a check row per source.
  */
 export function renderMoreMenu(header: PageHeader | null, local = false): VNode {
@@ -423,7 +423,6 @@ export function renderMoreMenu(header: PageHeader | null, local = false): VNode 
       </li>
     )),
   );
-  const volume = (header?.sources ?? []).some((group) => group.kind === 'zoho' || group.kind === 'forum');
 
   return (
     <ul class="glass menu more-menu" role="menu" aria-label="More Actions">
@@ -432,7 +431,6 @@ export function renderMoreMenu(header: PageHeader | null, local = false): VNode 
       <MoreRow action="list-folder" icon="folder" label="New conversation in a folder…" />
       <Separator />
       <MoreRow action="list-later-held" icon="terminal" label="Held sessions" />
-      {volume ? <MoreRow action="list-later-volume" icon="graph" label="Ticket volume report" /> : null}
       <Separator />
       <MoreRow action="list-poll" icon="refresh" label="Refresh sources" />
       <MoreRow action="list-later-log" icon="output" label="Show hub log" />
@@ -448,7 +446,7 @@ export function renderMoreMenu(header: PageHeader | null, local = false): VNode 
 }
 
 /** The dock windows More Actions opens that the page does not have yet, by their row's action. */
-export const LATER: Record<string, string> = { 'list-later-held': 'Held sessions', 'list-later-volume': 'Ticket volume report', 'list-later-log': 'Show hub log' };
+export const LATER: Record<string, string> = { 'list-later-held': 'Held sessions', 'list-later-log': 'Show hub log' };
 
 /** A QR code of `text` as an SVG of dark modules on a light square with a quiet zone of 4 modules, which phone cameras read in either theme. */
 export function QrCode({ text }: { text: string }) {
