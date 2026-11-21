@@ -24,7 +24,7 @@ function hubSession(session: string, fields: Partial<HeldSession> = {}): HeldSes
 
 type Reply = Awaited<ReturnType<HolderCliDeps['post']>>;
 
-const CURRENT = { protocol: 1, build: 'aaaaaaaaaaaaaaaa', pid: 34000, features: ['snapshot', 'write'] };
+const CURRENT = { protocol: 1, build: 'aaaaaaaaaaaaaaaa', pid: 34000, features: ['snapshot', 'write', 'view'] };
 const OLDER = { protocol: 1, build: '61663226176fa458', pid: 34000, features: ['snapshot'] };
 
 /** A hub that answers with `reply` (per path when a function), or none when it is a string, and a holder that lists `entries`, or none when null. */
@@ -208,6 +208,11 @@ describe('hub.js holder (architecture.md § Visibility of held sessions)', () =>
     expect(fromHub.state.out).toBe(
       'Terminal holder: pid 34000, build 61663226176fa458, protocol 1; it is from an older build and cannot type into sessions, and `holder stop --all` ends it so the next session starts this build.\nNo held sessions.\n',
     );
+
+    const noView = cli({ status: 200, error: null, body: { sessions: [], holder: { ...CURRENT, features: ['snapshot', 'write'] } } }, null);
+
+    expect(await noView.run('list')).toBe(0);
+    expect(noView.state.out).toContain("it is from an older build and cannot show its sessions in the web page's console, and");
 
     const current = cli({ status: 200, error: null, body: { sessions: [], holder: CURRENT } }, null);
 

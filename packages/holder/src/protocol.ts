@@ -20,7 +20,7 @@ export const SCROLLBACK_LINES = 10_000;
 /** The start of a session's output kept for start checks after it has scrolled away, in characters. */
 export const HEAD_CHARS = 64 * 1024;
 /** Requests added within this protocol, announced in `welcome.features`; a client sends one only to a holder that names it. */
-export const FEATURES = ['snapshot', 'write'] as const;
+export const FEATURES = ['snapshot', 'write', 'view'] as const;
 export type Feature = (typeof FEATURES)[number];
 
 /** One session in a `list` reply. Times are milliseconds since the epoch. */
@@ -60,10 +60,15 @@ export type ClientMessage =
   | { type: 'kill'; id: number; session: string }
   | { type: 'screen'; id: number; session: string }
   | { type: 'snapshot'; id: number; session: string; scrollback: number }
-  | { type: 'write'; id: number; session: string; data: string }
+  /** `key`: the input is a key typed in a terminal, such as the web page's console, so it sets `keyAt` as an attached client's does. */
+  | { type: 'write'; id: number; session: string; data: string; key?: boolean }
+  /** Resizes the session's pseudo-terminal without attaching, for a client that types through `write`. */
+  | { type: 'size'; id: number; session: string; cols: number; rows: number }
   | { type: 'watch'; id: number }
   | { type: 'shutdown'; id: number }
   | { type: 'attach'; session: string; cols: number; rows: number }
+  /** Watches one session's screen without attaching: no resize, no `clients` count, and no input. */
+  | { type: 'view'; session: string }
   | { type: 'input'; data: string }
   | { type: 'resize'; cols: number; rows: number };
 
@@ -81,6 +86,10 @@ export type HostMessage =
   | { type: 'snapshot'; re: number; session: string; data: string; cols: number; rows: number; rev: number; keyAt?: number | null }
   /** The input of a `write` reached the program; `rev` is the revision after it. */
   | { type: 'written'; re: number; session: string; rev: number }
+  /** The pseudo-terminal has the size a `size` asked for; `rev` is the revision after it. */
+  | { type: 'sized'; re: number; session: string; rev: number }
+  /** To a viewing client: the size the screen is drawn at from here on, before the replay and at each resize, in order with the output. */
+  | { type: 'resized'; cols: number; rows: number }
   | { type: 'watching'; re: number }
   | { type: 'bye'; re: number }
   | { type: 'exited'; session?: string; exitCode: number | null }
@@ -225,7 +234,13 @@ export function parseClientMessage(line: string): ClientMessage | { error: strin
         ? { type: 'snapshot', id: m.id, session: m.session, scrollback: m.scrollback as number }
         : invalid;
     case 'write':
-      return isId(m.id) && isName(m.session) && isText(m.data) && m.data !== '' ? { type: 'write', id: m.id, session: m.session, data: m.data } : invalid;
+      return isId(m.id) && isName(m.session) && isText(m.data) && m.data !== '' && (m.key === undefined || typeof m.key === 'boolean')
+        ? { type: 'write', id: m.id, session: m.session, data: m.data, ...(m.key === true ? { key: true } : {}) }
+        : invalid;
+    case 'size':
+      return isId(m.id) && isName(m.session) && isSize(m.cols) && isSize(m.rows) ? { type: 'size', id: m.id, session: m.session, cols: m.cols, rows: m.rows } : invalid;
+    case 'view':
+      return isName(m.session) ? { type: 'view', session: m.session } : invalid;
     case 'attach':
       return isName(m.session) && isSize(m.cols) && isSize(m.rows) ? { type: 'attach', session: m.session, cols: m.cols, rows: m.rows } : invalid;
     case 'input':

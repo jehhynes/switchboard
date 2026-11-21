@@ -85,14 +85,15 @@ export async function connectHolder(switchboardHome: string): Promise<HolderCont
 export { idleText } from './held.js';
 export { killTree as killProcessTree } from '@switchboard/holder';
 
-/** Whether a holder lacks a request this build sends, as one from an older build does, so it cannot type into sessions. */
+/** Whether a holder lacks a request this build sends, as one from an older build does. */
 export function olderHolder(welcome: HolderIdentity): boolean {
   return welcome.protocol !== PROTOCOL || FEATURES.some((feature) => !(welcome.features ?? []).includes(feature));
 }
 
 /** A line naming the holder, marked when it is from an older build. */
 export function holderLine(welcome: HolderIdentity): string {
-  const older = olderHolder(welcome) ? '; it is from an older build and cannot type into sessions, and `holder stop --all` ends it so the next session starts this build' : '';
+  const lacks = welcome.protocol === PROTOCOL && (welcome.features ?? []).includes('write') ? 'cannot show its sessions in the web page\'s console' : 'cannot type into sessions';
+  const older = olderHolder(welcome) ? `; it is from an older build and ${lacks}, and \`holder stop --all\` ends it so the next session starts this build` : '';
 
   return `Terminal holder: pid ${welcome.pid}, build ${welcome.build}, protocol ${welcome.protocol}${older}.\n`;
 }

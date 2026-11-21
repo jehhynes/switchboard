@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { Attachment, HolderClient, HolderError } from '../src/client.js';
+import { Attachment, HolderClient, HolderError, Viewer } from '../src/client.js';
 import { Raw, TOKEN, startHost, tick } from './fakes.js';
 import type { TestHost } from './fakes.js';
 import headless from '@xterm/headless';
@@ -26,7 +26,7 @@ describe('handshake', () => {
     const { port } = await started();
     const client = await HolderClient.connect({ port, token: TOKEN });
 
-    expect(client.welcome).toEqual({ protocol: 1, build: 'build-1', pid: 4242, features: ['snapshot', 'write'] });
+    expect(client.welcome).toEqual({ protocol: 1, build: 'build-1', pid: 4242, features: ['snapshot', 'write', 'view'] });
     client.close();
   });
 
@@ -317,7 +317,7 @@ describe('watch', () => {
       { type: 'detached', session: 's1', clients: 0 },
       { type: 'exited', session: 's1', exitCode: 7 },
     ]);
-    expect(unwatched.messages).toEqual([{ type: 'welcome', protocol: 1, build: 'build-1', pid: 4242, features: ['snapshot', 'write'] }]);
+    expect(unwatched.messages).toEqual([{ type: 'welcome', protocol: 1, build: 'build-1', pid: 4242, features: ['snapshot', 'write', 'view'] }]);
     unwatched.socket.destroy();
     watcher.close();
     other.close();
@@ -902,6 +902,195 @@ describe('write', () => {
     client.welcome = { ...client.welcome, features: ['snapshot'] };
     await expect(client.write('s1', 'x')).rejects.toThrow('The terminal holder cannot type into sessions; it is from an older build.');
     expect(state.ptys[0]!.writes).toEqual([]);
+    client.close();
+  });
+});
+
+describe('view', () => {
+  async function viewOf(state: TestHost, session: string) {
+    const events: Array<string | [number, number]> = [];
+    const exits: Array<number | null> = [];
+    let replayed = false;
+    const viewer = await Viewer.open({
+      port: state.port,
+      token: TOKEN,
+      session,
+      onSize: (cols, rows) => events.push([cols, rows]),
+      onData: (data) => events.push(data),
+      onReplayed: () => (replayed = true),
+      onExit: (code) => exits.push(code),
+    });
+
+    return { viewer, events, exits, isReplayed: () => replayed };
+  }
+
+  it("replays the screen at the program's size without resizing it or counting a client, then streams output and each resize in order", async () => {
+    const state = await started();
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1', { cols: 80, rows: 24 }));
+    state.ptys[0]!.emit('hello');
+
+    const one = await viewOf(state, 's1');
+
+    await tick();
+    expect(one.isReplayed()).toBe(true);
+    expect(one.events[0]).toEqual([80, 24]);
+    expect(String(one.events[1])).toContain('hello');
+    expect(state.ptys[0]!.sizes).toEqual([]);
+    expect((await client.list())[0]).toMatchObject({ clients: 0 });
+
+    state.ptys[0]!.emit('old size');
+    const attached = await Attachment.open({ port: state.port, token: TOKEN, session: 's1', cols: 120, rows: 40, onData: () => undefined });
+
+    await tick();
+    state.ptys[0]!.emit('new size');
+    await tick();
+    expect(one.events.slice(-3)).toEqual(['old size', [120, 40], 'new size']);
+    attached.close();
+    one.viewer.close();
+    client.close();
+  });
+
+  it('sends a resize that comes while the replay is prepared after the replay, in its place among the output', async () => {
+    const state = await started();
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1', { cols: 80, rows: 24 }));
+
+    const raw = await Raw.ready(state.port);
+
+    raw.send({ type: 'view', session: 's1' });
+    state.ptys[0]!.emit('a');
+    await client.size('s1', 100, 30);
+    state.ptys[0]!.emit('b');
+    await raw.until((m) => m.type === 'output' && m.data === 'b');
+
+    const shown = raw.messages.slice(1).filter((m) => m.type !== 'replay').map((m) => (m.type === 'resized' ? [m.cols, m.rows] : m.type === 'output' ? m.data : m.type));
+
+    // 'a' is in the replay or after it, depending on when the view was read; either way before the resize and 'b'.
+    expect(shown.filter((one) => one !== 'a')).toEqual([[80, 24], 'replayed', [100, 30], 'b']);
+    expect(shown.indexOf('a')).toBeLessThan(shown.findIndex((one) => Array.isArray(one) && one[0] === 100));
+    expect(raw.messages.filter((m) => m.type === 'replay').map((m) => m.data as string).join('') + shown.join(' ')).toContain('a');
+    raw.socket.destroy();
+    client.close();
+  });
+
+  it('closes a viewer that sends input or a resize, and passes neither', async () => {
+    const state = await started();
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1'));
+
+    for (const message of [{ type: 'input', data: 'x' }, { type: 'resize', cols: 10, rows: 10 }]) {
+      const raw = await Raw.ready(state.port);
+
+      raw.send({ type: 'view', session: 's1' });
+      await raw.until((m) => m.type === 'replayed');
+      raw.send(message);
+      await raw.untilClosed();
+      expect(raw.messages.at(-1)).toEqual({ type: 'error', message: `A viewing client cannot send ${message.type}.` });
+    }
+
+    expect(state.ptys[0]!.writes).toEqual([]);
+    expect(state.ptys[0]!.sizes).toEqual([]);
+    client.close();
+  });
+
+  it('tells a viewer that the program exited, and refuses a session it does not hold', async () => {
+    const state = await started();
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1'));
+
+    const one = await viewOf(state, 's1');
+
+    await tick();
+    state.ptys[0]!.exit(3);
+    await tick();
+    expect(one.exits).toEqual([3]);
+
+    const raw = await Raw.ready(state.port);
+
+    raw.send({ type: 'view', session: 'nope' });
+    await raw.untilClosed();
+    expect(raw.messages.at(-1)).toEqual({ type: 'error', message: 'No session nope is held.' });
+    client.close();
+  });
+
+  it('is refused by the client to a holder that does not name it', async () => {
+    const state = await started({ protocol: 2 });
+
+    await expect(Viewer.open({ port: state.port, token: TOKEN, session: 's1', onSize: () => undefined, onData: () => undefined })).rejects.toThrow('The terminal holder speaks protocol 2, not 1.');
+  });
+});
+
+describe('view limits', () => {
+  it('drops a viewer whose replay is read slowly while the output queued behind it passes the limit, and keeps the session', async () => {
+    const state = await started({ clientQueueBytes: 4096 });
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1', { cols: 400, rows: 30 }));
+
+    // A replay of megabytes, which the paused reader leaves waiting on the socket.
+    for (let line = 0; line < 10_000; line++) {
+      state.ptys[0]!.emit(`line ${line} ${'x'.repeat(380)}\r\n`);
+    }
+
+    const raw = await Raw.ready(state.port);
+
+    raw.socket.pause();
+    raw.send({ type: 'view', session: 's1' });
+    await tick(300);
+    state.ptys[0]!.emit('y'.repeat(3000));
+    state.ptys[0]!.emit('z'.repeat(3000));
+    raw.socket.resume();
+    await raw.untilClosed();
+    expect(raw.messages.some((m) => m.type === 'replayed')).toBe(false);
+    expect((await client.list())[0]).toMatchObject({ exitedAt: null });
+    client.close();
+  });
+});
+
+describe('size', () => {
+  it('resizes a session without attaching, and refuses an unknown or ended one', async () => {
+    const state = await started();
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1', { cols: 80, rows: 24 }));
+    expect(await client.size('s1', 100, 30)).toEqual({ rev: 1 });
+    expect(state.ptys[0]!.sizes).toEqual([[100, 30]]);
+    expect((await client.list())[0]).toMatchObject({ clients: 0 });
+    await expect(client.size('nope', 100, 30)).rejects.toMatchObject({ message: 'No session nope is held.', refused: true });
+    state.ptys[0]!.exit(0);
+    await tick();
+    await expect(client.size('s1', 90, 30)).rejects.toThrow('Session s1 has ended.');
+    client.welcome = { ...client.welcome, features: ['snapshot', 'write'] };
+    await expect(client.size('s1', 90, 30)).rejects.toThrow('it is from an older build');
+    client.close();
+  });
+
+  it('closes the connection on a size out of range', async () => {
+    const { port } = await started();
+    const raw = await Raw.ready(port);
+
+    raw.send({ type: 'size', id: 1, session: 's1', cols: 0, rows: 30 });
+    await raw.untilClosed();
+    expect(raw.messages.at(-1)).toEqual({ type: 'error', message: 'Invalid size message.' });
+  });
+});
+
+describe('write with key', () => {
+  it('sets keyAt for a key typed in a terminal, and leaves it for other writes', async () => {
+    const state = await started({ now: () => 7000 });
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1'));
+    await client.write('s1', 'x');
+    expect((await client.snapshot('s1', 0)).keyAt).toBeNull();
+    await client.write('s1', 'y', true);
+    expect((await client.snapshot('s1', 0)).keyAt).toBe(7000);
+    expect(state.ptys[0]!.writes).toEqual(['x', 'y']);
     client.close();
   });
 });

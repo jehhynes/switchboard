@@ -168,12 +168,24 @@ export class HolderClient {
    * Types into the session without attaching, so its size and `clients` stay as they are; resolves the revision after the input. Refused here,
    * without a request, by a holder that does not name `write` in its features.
    */
-  async write(session: string, data: string): Promise<{ rev: number }> {
+  async write(session: string, data: string, key = false): Promise<{ rev: number }> {
     if (!this.welcome.features.includes('write')) {
       throw new HolderError('The terminal holder cannot type into sessions; it is from an older build.');
     }
 
-    return { rev: (await this.#request({ type: 'write', session, data }, 'written')).rev };
+    return { rev: (await this.#request({ type: 'write', session, data, ...(key ? { key: true } : {}) }, 'written')).rev };
+  }
+
+  /**
+   * Resizes the session's pseudo-terminal without attaching; resolves the revision after it. Refused here, without a request, by a holder that
+   * does not name `view` in its features.
+   */
+  async size(session: string, cols: number, rows: number): Promise<{ rev: number }> {
+    if (!this.welcome.features.includes('view')) {
+      throw new HolderError('The terminal holder cannot resize a session for the web page; it is from an older build.', true);
+    }
+
+    return { rev: (await this.#request({ type: 'size', session, cols, rows }, 'sized')).rev };
   }
 
   /** Delivers exits, attaches and detaches on this connection from now on. */
@@ -308,6 +320,61 @@ export class Attachment {
   }
 
   /** Detaches; the session keeps running. */
+  close(): void {
+    this.#socket.destroy();
+  }
+}
+
+export interface ViewOptions extends ConnectOptions {
+  session: string;
+  /** The size the screen is drawn at from here on: before the replay, and at each resize, in order with the data. */
+  onSize: (cols: number, rows: number) => void;
+  /** Replay, then output, to write to the terminal in order. */
+  onData: (data: string) => void;
+  onReplayed?: () => void;
+  onExit?: (exitCode: number | null) => void;
+  /** The connection ended, with the holder's refusal when there was one. */
+  onClose?: (error: HolderError | null) => void;
+}
+
+/** A client that watches one session's screen without attaching: it never changes the session's size and cannot type (`view`). */
+export class Viewer {
+  readonly #socket: Socket;
+
+  private constructor(socket: Socket) {
+    this.#socket = socket;
+  }
+
+  /** Rejects, refused, for a holder that does not name `view` in its features. */
+  static async open(options: ViewOptions): Promise<Viewer> {
+    let exited = false;
+    const { socket, welcome } = await open(
+      options,
+      (message) => {
+        if (message.type === 'replay' || message.type === 'output') {
+          options.onData(message.data);
+        } else if (message.type === 'resized') {
+          options.onSize(message.cols, message.rows);
+        } else if (message.type === 'replayed') {
+          options.onReplayed?.();
+        } else if (message.type === 'exited') {
+          exited = true;
+          options.onExit?.(message.exitCode);
+        }
+      },
+      (error) => options.onClose?.(exited ? null : error),
+    );
+
+    if (welcome.protocol !== PROTOCOL || !welcome.features.includes('view')) {
+      socket.destroy();
+      throw new HolderError(welcome.protocol !== PROTOCOL ? otherProtocol(welcome.protocol) : 'The terminal holder cannot show a session to the web page; it is from an older build.', true);
+    }
+
+    socket.write(encode({ type: 'view', session: options.session }));
+
+    return new Viewer(socket);
+  }
+
   close(): void {
     this.#socket.destroy();
   }

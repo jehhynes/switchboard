@@ -85,6 +85,8 @@ interface Held {
   cols: number;
   rows: number;
   clients: Set<Connection>;
+  /** Clients that watch the screen without attaching (`view`): they get its output and sizes, and set neither its size nor `clients`. */
+  viewers: Set<Connection>;
   /** Rises on every output, resize and input, so a snapshot reader can tell a screen it has already read. */
   rev: number;
   exitWaiters: Set<() => void>;
@@ -93,13 +95,15 @@ interface Held {
 
 interface Connection {
   socket: Socket;
-  state: 'hello' | 'ready' | 'attach' | 'closed';
+  state: 'hello' | 'ready' | 'attach' | 'view' | 'closed';
   watching: boolean;
   held: Held | null;
-  /** Output that arrives while the replay is being prepared; sent after it. */
-  pending: string[] | null;
+  /** Output, and for a viewer the sizes, that arrive while the replay is being prepared; sent after it. */
+  pending: Array<string | { cols: number; rows: number }> | null;
   /** The replay is being written with backpressure, so the queue limit does not apply to it. */
   replaying: boolean;
+  /** The characters held in `pending`, which the queue limit bounds as it bounds the socket's queue. */
+  pendingChars: number;
   cols: number;
   rows: number;
 }
@@ -205,7 +209,7 @@ export class Host {
   }
 
   #accept(socket: Socket): void {
-    const connection: Connection = { socket, state: 'hello', watching: false, held: null, pending: null, replaying: false, cols: 0, rows: 0 };
+    const connection: Connection = { socket, state: 'hello', watching: false, held: null, pending: null, replaying: false, pendingChars: 0, cols: 0, rows: 0 };
     const reader = new LineReader();
     const deadline = setTimeout(() => this.#refuse(connection, 'No hello within the deadline.'), this.#options.helloDeadlineMs ?? HELLO_DEADLINE_MS);
 
@@ -275,6 +279,8 @@ export class Host {
 
     const held = connection.held;
 
+    held?.viewers.delete(connection);
+
     if (held !== null && held.clients.delete(connection)) {
       this.#broadcast({ type: 'detached', session: held.session, clients: held.clients.size });
     }
@@ -297,6 +303,11 @@ export class Host {
 
       connection.state = 'ready';
       this.#send(connection, { type: 'welcome', protocol: this.#options.protocol ?? PROTOCOL, build: this.#options.build, pid: this.#options.pid ?? process.pid, features: [...FEATURES] });
+      return;
+    }
+
+    if (connection.state === 'view') {
+      this.#refuse(connection, `A viewing client cannot send ${message.type}.`);
       return;
     }
 
@@ -331,7 +342,13 @@ export class Host {
         this.#snapshot(connection, message.id, message.session, message.scrollback);
         return;
       case 'write':
-        this.#write(connection, message.id, message.session, message.data);
+        this.#write(connection, message.id, message.session, message.data, message.key === true);
+        return;
+      case 'size':
+        this.#size(connection, message.id, message.session, message.cols, message.rows);
+        return;
+      case 'view':
+        this.#view(connection, message.session);
         return;
       case 'watch':
         connection.watching = true;
@@ -405,6 +422,7 @@ export class Host {
       cols: request.cols,
       rows: request.rows,
       clients: new Set(),
+      viewers: new Set(),
       rev: 0,
       exitWaiters: new Set(),
       removal: null,
@@ -426,9 +444,17 @@ export class Host {
       held.head += data.slice(0, HEAD_CHARS - held.head.length);
     }
 
-    for (const client of held.clients) {
+    for (const client of [...held.clients, ...held.viewers]) {
       if (client.pending !== null) {
         client.pending.push(data);
+        client.pendingChars += data.length;
+
+        // A client whose replay is read slowly while the program writes much is dropped, as one that does not read its output is.
+        if (client.pendingChars > (this.#options.clientQueueBytes ?? CLIENT_QUEUE_BYTES)) {
+          client.state = 'closed';
+          client.pending = null;
+          client.socket.destroy();
+        }
       } else {
         for (const part of chunkData(data)) {
           this.#send(client, { type: 'output', data: part });
@@ -446,7 +472,7 @@ export class Host {
     held.exitCode = exitCode;
 
     // A client still waiting for its replay is told after it; the others once the output still being parsed is on the last screen.
-    const ready = [...held.clients].filter((client) => client.pending === null);
+    const ready = [...held.clients, ...held.viewers].filter((client) => client.pending === null);
 
     held.term.write('', () => {
       for (const client of ready) {
@@ -619,9 +645,9 @@ export class Host {
 
   /**
    * Input from a client that is not attached, such as the hub typing a message: no resize and no `clients` count. It counts as input for
-   * `lastInputAt` and the revision, not as a key typed in a terminal (`keyAt`).
+   * `lastInputAt` and the revision, and as a key typed in a terminal (`keyAt`) only with `key`, as the web page's console sends its keys.
    */
-  #write(connection: Connection, id: number, session: string, data: string): void {
+  #write(connection: Connection, id: number, session: string, data: string, key: boolean): void {
     const held = this.#sessions.get(session);
 
     if (held === undefined) {
@@ -635,9 +661,55 @@ export class Host {
     }
 
     held.lastInputAt = this.#now();
+
+    if (key) {
+      held.keyAt = held.lastInputAt;
+    }
+
     held.rev++;
     held.pty.write(data);
     this.#send(connection, { type: 'written', re: id, session, rev: held.rev });
+  }
+
+  /** Resizes a session's pseudo-terminal for a client that is not attached and types through `write`, so the program draws for its screen. */
+  #size(connection: Connection, id: number, session: string, cols: number, rows: number): void {
+    const held = this.#sessions.get(session);
+
+    if (held === undefined) {
+      this.#send(connection, { type: 'error', re: id, message: `No session ${session} is held.` });
+      return;
+    }
+
+    if (held.exitedAt !== null || held.closedAt !== null) {
+      this.#send(connection, { type: 'error', re: id, message: `Session ${session} has ended.` });
+      return;
+    }
+
+    this.#resize(held, cols, rows);
+    this.#send(connection, { type: 'sized', re: id, session, rev: held.rev });
+  }
+
+  /**
+   * Watches a session without attaching: the screen at the size the program draws it, then its output and each resize, so a reader that must not
+   * change the session's size, such as the web page's console, can show it. Input and resizes from it close the connection.
+   */
+  #view(connection: Connection, session: string): void {
+    const held = this.#sessions.get(session);
+
+    if (held === undefined) {
+      this.#refuse(connection, `No session ${session} is held.`);
+      return;
+    }
+
+    connection.state = 'view';
+    connection.held = held;
+    connection.pending = [];
+
+    if (held.exitedAt === null) {
+      held.viewers.add(connection);
+    }
+
+    held.term.write('', () => void this.#replay(connection, held));
   }
 
   #shutdown(connection: Connection, id: number): void {
@@ -681,6 +753,11 @@ export class Host {
   async #replay(connection: Connection, held: Held): Promise<void> {
     connection.replaying = true;
 
+    // A viewer draws at the program's size, which is the screen's once the output and resizes queued before it are parsed.
+    if (connection.state === 'view') {
+      this.#send(connection, { type: 'resized', cols: held.term.cols, rows: held.term.rows });
+    }
+
     for (const part of chunkData(REPORTS_OFF + held.serializer.serialize({ scrollback: SCROLLBACK_LINES }) + mouseEncoding(held.term))) {
       if (connection.state === 'closed' || connection.socket.destroyed) {
         return;
@@ -704,6 +781,11 @@ export class Host {
     this.#send(connection, { type: 'replayed' });
 
     for (const data of connection.pending ?? []) {
+      if (typeof data !== 'string') {
+        this.#send(connection, { type: 'resized', ...data });
+        continue;
+      }
+
       for (const part of chunkData(data)) {
         this.#send(connection, { type: 'output', data: part });
       }
@@ -744,6 +826,16 @@ export class Host {
     held.rows = rows;
     held.rev++;
     held.pty.resize(cols, rows);
+
+    // A viewer gets the size in order with the output, which from here is drawn at it.
+    for (const viewer of held.viewers) {
+      if (viewer.pending !== null) {
+        viewer.pending.push({ cols, rows });
+      } else {
+        this.#send(viewer, { type: 'resized', cols, rows });
+      }
+    }
+
     // Output already queued was drawn at the old size, so the screen resizes after it is parsed.
     held.term.write('', () => held.term.resize(cols, rows));
   }
