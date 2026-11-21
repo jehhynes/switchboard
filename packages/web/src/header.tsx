@@ -38,9 +38,9 @@ const Separator = () => <li class="menu-separator" role="separator"></li>;
  * row, so a pool ticket's menu in the list runs as the header's does.
  */
 export function menuRows(row: PageRow, view: Pick<View, 'acting' | 'linkMenu'>): VNode[] {
-  const actions = row.actions ?? [];
-  const pastes = row.pastes ?? [];
-  const commands = row.opens ?? [];
+  const actions = row.actions;
+  const pastes = row.pastes;
+  const commands = row.opens;
   const key = rowKey(row);
   const item = (attrs: Record<string, string>, icon: string | null, label: string, after: ComponentChildren = null, classes = ''): VNode => (
     <li role="none">
@@ -63,10 +63,10 @@ export function menuRows(row: PageRow, view: Pick<View, 'acting' | 'linkMenu'>):
   const opens = [
     ...pastes.map((label) => item({ 'data-action': 'row-paste', 'data-label': label }, 'copy', `Copy ${label}`)),
     // The dock's Open in terminal: the open work item's session on the Console tab.
-    ...(row.terminal === true ? [item({ 'data-action': 'open-console' }, 'terminal', 'Open in terminal')] : []),
+    ...(row.terminal ? [item({ 'data-action': 'open-console' }, 'terminal', 'Open in terminal')] : []),
     ...commands.map((one) => item({ 'data-action': 'row-command', 'data-label': one.label }, one.icon, one.label)),
     // The dock's History, which the page shows in the conversation's place.
-    ...(row.history == null ? [] : [item({ 'data-action': 'row-history' }, 'history', 'History')]),
+    ...(row.history === null ? [] : [item({ 'data-action': 'row-history' }, 'history', 'History')]),
     ...(row.url === '' ? [] : [link('ticket', 'Open ticket', 'link-external')]),
     ...(row.links.length > MENU_LINKS ? submenu : row.links.map((one, index) => link(String(index), `Open ${one.label}`, 'link-external'))),
   ];
@@ -86,7 +86,7 @@ function Actions({ row, view }: { row: PageRow | null; view: View }) {
     return null;
   }
 
-  const main = (row.actions ?? []).find((one) => one.group === 'main');
+  const main = row.actions.find((one) => one.group === 'main');
 
   return (
     <>

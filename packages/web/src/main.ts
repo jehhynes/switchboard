@@ -641,7 +641,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const sent = command('send', { ...target, text, ...(asCommand ? { command: true } : {}) });
 
     // Sending hands the box back to the voice, so dictation resumes, as in the Conversation view (architecture.md § Dictation).
-    if (state.voice?.here === true && state.voice.mic !== undefined && !['off', 'idle-off', 'unavailable'].includes(state.voice.mic) && document.activeElement === input) {
+    if (state.voice?.here === true && !['off', 'idle-off', 'unavailable'].includes(state.voice.mic) && document.activeElement === input) {
       input.blur();
     }
 
@@ -2747,7 +2747,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
    */
   const chooseAction = (key: string, label: string): void => {
     const row = rowByKey(key);
-    const action = row?.actions?.find((one) => one.label === label);
+    const action = row?.actions.find((one) => one.label === label);
 
     closeMenus();
 

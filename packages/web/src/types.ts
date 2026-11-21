@@ -123,11 +123,11 @@ export interface ArtifactView {
 export interface VoiceView {
   enabled: boolean;
   here: boolean;
-  mic?: string;
+  mic: string;
   speaking: string | null;
   speakReplies: boolean;
   error: string | null;
-  recognizer?: 'gpu' | 'cpu' | null;
+  recognizer: 'gpu' | 'cpu' | null;
   halfDuplex?: string;
   fullDuplex?: string;
   roomHold?: boolean;
@@ -137,7 +137,7 @@ export interface VoiceView {
 export interface PageRow {
   /** The work item's ID, or null on a pool ticket's row, which has no conversation and carries its ticket's ID instead. */
   workItemId: number | null;
-  ticketId?: number | null;
+  ticketId: number | null;
   title: string;
   /** Line 1: the priority dot's tooltip, or null, and the time at its end. */
   priority: string | null;
@@ -158,24 +158,24 @@ export interface PageRow {
   dim: boolean;
   /** A hosted conversation's host's name; null for other work items. */
   host: string | null;
-  /** The dock's controls the page offers, in the dock's menu order; older hubs send none. */
-  actions?: PageAction[];
+  /** The dock's controls the page offers, in the dock's menu order. */
+  actions: PageAction[];
   /** The control the dock shows as the row's button, when the page offers it. */
-  main?: string | null;
+  main: string | null;
   /** The labels of the drafted texts Copy offers. */
-  pastes?: string[];
+  pastes: string[];
   /** What the list's search matches: the title, key, linked pull requests and issues, playbook, group and branch. */
-  search?: string;
+  search: string;
   /** What the row opens in VS Code through the hub, run with `row-command`: Open in VS Code, Open changes and Open report, each with its codicon's name. */
-  opens?: Array<{ label: string; icon: string }>;
+  opens: Array<{ label: string; icon: string }>;
   /** Whether the dock offers Open in terminal for the row, which opens the page's Console tab. */
-  terminal?: boolean;
+  terminal: boolean;
   /** A Done row's date band, such as `Today`, or an older Done row's month, such as `October 2026`; null in the other groups. */
-  band?: string | null;
+  band: string | null;
   /** Line 1's mic mark before the time on the voice target's row: its codicon glyph and tooltip; null on the others. */
-  voice?: { glyph: string; title: string } | null;
+  voice: { glyph: string; title: string } | null;
   /** The ticket whose History the row's menu opens: its ID and key; null when the dock offers none. */
-  history?: { ticketId: number; key: string } | null;
+  history: { ticketId: number; key: string } | null;
 }
 
 /** A History filter chip's category (`CATEGORIES` in the hub's `history.ts`). */
@@ -247,7 +247,7 @@ export interface SourceGroup {
 /** What the list's header shows besides the list (`PageHeader` in the hub's `page.ts`). */
 export interface PageHeader {
   /** The dock's notes above its groups: settings, playbook, hook, source and voice errors, then what an unconfigured home lacks. */
-  notes?: string[];
+  notes: string[];
   /** "N held sessions without a work item", while a held session has none. */
   heldNote?: string;
   sources: SourceGroup[];

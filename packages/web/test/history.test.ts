@@ -138,7 +138,7 @@ describe("the page's History in use", () => {
     history.replaceState(null, '', '#');
     const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => T0 });
     const source = FakeSource.last!;
-    const row: PageRow = { workItemId: null, ticketId: 77, title: 'Inbox badge', priority: null, time: null, ticket: 'gh 77', sourceKind: 'github', url: '', playbook: '', links: [], returned: 0, comment: null, mark: null, details: [], stripe: null, dim: false, host: null, actions: [], history: { ticketId: 77, key: 'gh 77' } };
+    const row: PageRow = { workItemId: null, ticketId: 77, title: 'Inbox badge', priority: null, time: null, ticket: 'gh 77', sourceKind: 'github', url: '', playbook: '', links: [], returned: 0, comment: null, mark: null, details: [], stripe: null, dim: false, host: null, actions: [], main: null, pastes: [], search: '', opens: [], terminal: false, band: null, voice: null, history: { ticketId: 77, key: 'gh 77' } };
 
     vi.useFakeTimers();
     source.emit('hello', { key: 'pk', groups: [{ key: 'unstarted', title: 'Unstarted', glyph: 'u', empty: null, rows: [row] }], scope: null });
@@ -191,7 +191,7 @@ describe("the page's History in use", () => {
     await vi.advanceTimersByTimeAsync(0);
     await vi.advanceTimersByTimeAsync(0);
   };
-  const row = (patch: Partial<PageRow> = {}): PageRow => ({ workItemId: null, ticketId: 77, title: 'Inbox badge', priority: null, time: null, ticket: 'gh 77', sourceKind: 'github', url: '', playbook: 'dev:build', links: [], returned: 0, comment: null, mark: null, details: [], stripe: null, dim: false, host: null, actions: [], history: { ticketId: 77, key: 'gh 77' }, ...patch });
+  const row = (patch: Partial<PageRow> = {}): PageRow => ({ workItemId: null, ticketId: 77, title: 'Inbox badge', priority: null, time: null, ticket: 'gh 77', sourceKind: 'github', url: '', playbook: 'dev:build', links: [], returned: 0, comment: null, mark: null, details: [], stripe: null, dim: false, host: null, actions: [], main: null, pastes: [], search: '', opens: [], terminal: false, band: null, voice: null, history: { ticketId: 77, key: 'gh 77' }, ...patch });
   const groups = (rows: PageRow[]): PageGroup[] => [{ key: 'unstarted', title: 'Unstarted', glyph: 'u', empty: null, rows }];
   const histories = () => posts.filter((one) => one.url === '/v1/conversation/page-history').map((one) => one.body['ticketId']);
 

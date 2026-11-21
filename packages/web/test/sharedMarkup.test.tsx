@@ -76,7 +76,7 @@ describe('HTML from the shared renderers', () => {
 
   it('is drawn as nodes in the header, the composer and an open Markdown artifact', () => {
     const view = { ...newView(), picker: true };
-    const voice = { enabled: true, here: true, mic: 'hearing', speaking: 'r1', speakReplies: true, error: 'Mic busy' };
+    const voice = { enabled: true, here: true, mic: 'hearing', speaking: 'r1', speakReplies: true, error: 'Mic busy', recognizer: null };
 
     expect(markupText(renderHeader(state(), view))).toEqual([]);
     expect(markupText(renderShared(renderVoice(voice)))).toEqual([]);

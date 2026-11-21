@@ -99,7 +99,7 @@ export function filterGroups(groups: readonly PageGroup[], filter: string, older
   return groups.flatMap((group) => {
     const listed = new Set(group.rows.map((row) => row.workItemId));
     const all = group.key === 'done' ? [...group.rows, ...older.filter((row) => !listed.has(row.workItemId))] : group.rows;
-    const rows = all.filter((row) => matches(row.search ?? '', filter));
+    const rows = all.filter((row) => matches(row.search, filter));
 
     return rows.length === 0 ? [] : [{ ...group, rows }];
   });

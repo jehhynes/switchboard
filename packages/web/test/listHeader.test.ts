@@ -26,11 +26,11 @@ class FakeSource {
   close(): void {}
 }
 
-const listRow = (workItemId: number, patch: Partial<PageRow> = {}): PageRow => ({ workItemId, title: `Item ${workItemId}`, priority: null, time: null, ticket: `gh ${workItemId}`, sourceKind: 'github', url: '', playbook: 'dev:build', links: [], returned: 0, comment: null, mark: null, details: [], stripe: null, dim: false, host: null, ...patch });
+const listRow = (workItemId: number, patch: Partial<PageRow> = {}): PageRow => ({ workItemId, ticketId: null, title: `Item ${workItemId}`, priority: null, time: null, ticket: `gh ${workItemId}`, sourceKind: 'github', url: '', playbook: 'dev:build', links: [], returned: 0, comment: null, mark: null, details: [], stripe: null, dim: false, host: null, actions: [], main: null, pastes: [], search: '', opens: [], terminal: false, band: null, voice: null, history: null, ...patch });
 const listGroup = (key: string, rows: PageRow[], patch: Partial<PageGroup> = {}): PageGroup => ({ key, title: key, glyph: '\u{ea70}', empty: null, rows, ...patch });
 const github: SourceGroup = { kind: 'github', enabled: true, title: 'gh: polled\nClick to stop polling gh', sources: [{ name: 'gh', enabled: true }] };
 const zoho: SourceGroup = { kind: 'zoho', enabled: true, title: 'desk: polled\nhelp: not polled\nClick to choose', sources: [{ name: 'desk', enabled: true }, { name: 'help', enabled: false }] };
-const header = (patch: Partial<PageHeader> = {}): PageHeader => ({ sources: [github, zoho], repoRoots: ['D:/w1'], folders: ['D:/w1', 'D:/git/support'], schedules: [], ...patch });
+const header = (patch: Partial<PageHeader> = {}): PageHeader => ({ notes: [], sources: [github, zoho], repoRoots: ['D:/w1'], folders: ['D:/w1', 'D:/git/support'], schedules: [], ...patch });
 const closed = (): SearchView => ({ open: false, query: '', filter: '', range: 0, older: [], more: false, pending: false, error: null });
 
 describe('the list header (architecture.md § Web page)', () => {

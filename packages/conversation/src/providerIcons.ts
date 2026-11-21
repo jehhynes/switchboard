@@ -14,7 +14,7 @@ const escape = (text: string): string => text.replace(/[&<>"']/g, (char) => `&#$
 
 /**
  * A session's provider as its mark, with its name as the tooltip and the accessible name; a provider with no mark as its name in text; an
- * unknown provider, such as one an older hub omits, as nothing.
+ * absent one, as a conversation without a session has, as nothing.
  */
 export function providerMark(provider: string | undefined | null, className = 'provider'): string {
   if (provider === undefined || provider === null || provider === '') {

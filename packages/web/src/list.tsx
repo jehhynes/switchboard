@@ -64,7 +64,7 @@ function Row({ row, selected, menu }: { row: PageRow; selected: boolean; menu: C
         <span class="row-head">
           {row.priority === null ? null : <span class="priority" role="img" title={row.priority} aria-label={row.priority}></span>}
           <span class="row-title">{row.title}</span>
-          {row.voice == null ? null : (
+          {row.voice === null ? null : (
             <span class="codicon voice-mark" role="img" title={row.voice.title} aria-label={row.voice.title}>
               {row.voice.glyph}
             </span>
@@ -105,7 +105,7 @@ export function bandRuns(rows: readonly PageRow[]): Array<{ band: string | null;
   const runs: Array<{ band: string | null; rows: PageRow[] }> = [];
 
   for (const row of rows) {
-    const band = row.band ?? null;
+    const band = row.band;
     const last = runs.at(-1);
 
     if (last !== undefined && last.band === band) {
@@ -143,7 +143,7 @@ export function renderList(groups: readonly PageGroup[], selected: number | null
               ))}
             </ul>
           );
-        const banded = open && rows.some((row) => (row.band ?? null) !== null);
+        const banded = open && rows.some((row) => row.band !== null);
 
         return (
           <section class="group" data-group={group.key} key={group.key}>
