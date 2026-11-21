@@ -1,5 +1,5 @@
 import type { Snapshot, WorkItemView } from '@switchboard/hub';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DockRow } from '@switchboard/hub';
 import { mainTerminal, paneModel, windowRows } from '../src/paneModel.js';
 import type { PaneItem } from '../src/paneModel.js';
@@ -314,12 +314,22 @@ describe('renderPane (PRD R92)', () => {
 });
 
 describe('startPane (PRD R92)', () => {
+  // Each started pane is stopped after its test, so its size timer never fires once the test's window is gone.
+  const stops: (() => void)[] = [];
+  const start = (...args: Parameters<typeof startPane>): void => {
+    stops.push(startPane(...args));
+  };
+
+  afterEach(() => {
+    stops.splice(0).forEach((stop) => stop());
+  });
+
   it('posts ready, renders each model and posts each click', () => {
     const div = document.createElement('div');
     const postMessage = vi.fn();
 
     document.body.replaceChildren(div);
-    startPane(div, { postMessage });
+    start(div, { postMessage });
 
     expect(postMessage).toHaveBeenCalledWith({ type: 'ready' });
 
@@ -343,7 +353,7 @@ describe('startPane (PRD R92)', () => {
     const show = (items: ReturnType<typeof block>[]) => window.dispatchEvent(new MessageEvent('message', { data: { type: 'model', model: { items, voice: null } } }));
 
     document.body.replaceChildren(div);
-    startPane(div, { postMessage: vi.fn() });
+    start(div, { postMessage: vi.fn() });
     show([block('item:7', 'Approve')]);
 
     const button = div.querySelector<HTMLButtonElement>('[data-main="item:7"]')!;
@@ -363,7 +373,7 @@ describe('startPane (PRD R92)', () => {
     const show = () => window.dispatchEvent(new MessageEvent('message', { data: { type: 'model', model: { items: [{ key: 'item:7', ...EXTRA, links: [link('https://github.com/a/r/pull/42'), link('https://github.com/b/r/pull/42')], report: null, main: null }], voice: null } } }));
 
     document.body.replaceChildren(div);
-    startPane(div, { postMessage: vi.fn() });
+    start(div, { postMessage: vi.fn() });
     show();
 
     const second = div.querySelectorAll<HTMLButtonElement>('[data-open]')[1]!;
@@ -381,7 +391,7 @@ describe('startPane (PRD R92)', () => {
     const show = (report: string | null) => window.dispatchEvent(new MessageEvent('message', { data: { type: 'model', model: model(report) } }));
 
     document.body.replaceChildren(div);
-    startPane(div, { postMessage: vi.fn() });
+    start(div, { postMessage: vi.fn() });
     show(null);
 
     const main = div.querySelector<HTMLButtonElement>('[data-main]')!;
@@ -399,10 +409,10 @@ describe('startPane (PRD R92)', () => {
     const postMessage = vi.fn();
 
     vi.useFakeTimers();
-    vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { observed.push(callback); } observe() {} });
+    vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { observed.push(callback); } observe() {} disconnect() {} });
 
     try {
-      startPane(document.createElement('div'), { postMessage });
+      start(document.createElement('div'), { postMessage });
       postMessage.mockClear();
       vi.advanceTimersByTime(SIZE_MS);
       expect(postMessage).toHaveBeenCalledWith({ type: 'size', inner: window.innerWidth, outer: window.outerWidth, dpr: window.devicePixelRatio });
@@ -411,6 +421,13 @@ describe('startPane (PRD R92)', () => {
       observed[0]!();
       expect(postMessage).toHaveBeenCalledTimes(1);
       expect(postMessage.mock.calls[0]![0]).toMatchObject({ type: 'size' });
+
+      // Stopped, it posts no size and draws no model.
+      stops.splice(0).forEach((stop) => stop());
+      postMessage.mockClear();
+      vi.advanceTimersByTime(SIZE_MS * 4);
+      expect(postMessage).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
     } finally {
       vi.unstubAllGlobals();
       vi.useRealTimers();
