@@ -1,4 +1,5 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { request } from 'node:http';
 import { createServer } from 'node:net';
 import { hubRecordPath, parseHubRecord, Store, switchboardHome } from '@switchboard/core';
@@ -6,6 +7,7 @@ import type { Card } from '@switchboard/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openEvents } from '../src/client.js';
 import { findHub } from '../src/discover.js';
+import { buildOf } from '../src/bundle.js';
 import { call } from '../src/http.js';
 import { holdLock, releaseLock } from '../src/lock.js';
 import { PageAccess } from '../src/page.js';
@@ -291,5 +293,122 @@ describe('serveHub', () => {
       expect(log).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`^browser endpoint not served on 127\\.0\\.0\\.1:${browserPort}: .*EADDRINUSE`)));
       await new Promise((done) => holder.close(done));
     });
+  });
+});
+
+describe('serveHub restart onto a new build', () => {
+  const app = (quiet: () => string | null): HubApp => ({ post: {}, snapshot: () => ({}), dock: () => ({}), snoozedUrls: () => [], cards: () => [], snoozeUrl: () => null, unsnoozeUrl: () => null, onChange: () => {}, busy: () => false, quiet, close: () => {} });
+
+  it('lets a successor wait for the lock of the hub it takes over from, and take its record once that hub stops', async () => {
+    const first = served(await serve());
+    // In one process both hubs have this pid, which the successor takes for the hub it replaces.
+    const second = serve({ takeover: process.pid });
+
+    await new Promise((done) => setTimeout(done, 300));
+    expect(recordOnDisk()?.token).toBe(first.record.token);
+
+    await first.stop('test');
+
+    const taken = served(await second);
+
+    expect(recordOnDisk()).toEqual(taken.record);
+  });
+
+  it('stands a successor down when another hub took the lock, and refuses when the lock is not handed over in time', async () => {
+    const first = served(await serve());
+
+    expect(await serve({ takeover: 1 })).toEqual({ existing: first.record });
+
+    mkdirSync(switchboardHome(home), { recursive: true });
+    await first.stop('test');
+
+    const lock = await holdLock(home);
+
+    try {
+      expect(await serve({ takeover: 1, restart: { bundle: join(home, 'none.js'), successor: async () => ({ error: 'unused' }), takeoverWaitMs: 200 } })).toEqual({ refused: 'the hub (pid 1) did not hand over the hub lock within 0.2 seconds' });
+    } finally {
+      await releaseLock(lock!);
+    }
+  });
+
+  it('ends the successor instead of handing over when the hub was asked to stop while the successor loaded', async () => {
+    const lines: string[] = [];
+    const cancelled: string[] = [];
+    const bundle = join(switchboardHome(home), 'hub.js');
+    let hub: Served | null = null;
+
+    mkdirSync(switchboardHome(home), { recursive: true });
+    hub = served(
+      await serve({
+        log: (line) => lines.push(line),
+        browserPort: null,
+        app: async () => app(() => null),
+        restart: {
+          bundle,
+          checkMs: 20,
+          successor: async () => {
+            await hub!.stop('a client asked it to stop');
+            return { cancel: () => cancelled.push('cancel') };
+          },
+        },
+      }),
+    );
+    writeFileSync(bundle, 'the new build');
+    await until(() => (cancelled.length > 0 ? true : null));
+
+    expect(lines.filter((line) => line.startsWith('stopping') || line.startsWith('hub restart'))).toEqual(['stopping: a client asked it to stop', `hub restart onto build ${buildOf(bundle)} waits: the hub is stopping`]);
+  });
+
+  it('waits while a request is answered or the app is busy, then hands its lock, port and record to the successor and exits', async () => {
+    const bundle = join(switchboardHome(home), 'hub.js');
+    const lines: string[] = [];
+    const exit = vi.fn();
+    let busy: string | null = 'a session is starting';
+    let release: () => void = () => {};
+    let successor: Promise<ServeResult> | null = null;
+
+    mkdirSync(switchboardHome(home), { recursive: true });
+
+    const old = served(
+      await serve({
+        log: (line) => lines.push(line),
+        exit,
+        browserPort: null,
+        app: async () => ({ ...app(() => busy), post: { '/slow': () => new Promise((done) => (release = () => done({ status: 200, body: {} }))) } }),
+        restart: {
+          bundle,
+          checkMs: 20,
+          successor: async () => {
+            successor = serve({ build: 'b2', takeover: process.pid, browserPort: null, app: async () => app(() => null) });
+            return { cancel: () => {} };
+          },
+        },
+      }),
+    );
+
+    writeFileSync(bundle, 'the new build');
+    await until(() => (lines.some((line) => line.includes('waits: a session is starting')) ? true : null));
+
+    const slow = call(old.record.port, 'POST', '/slow', old.record.token, 5000, {});
+
+    busy = null;
+    await until(() => (lines.some((line) => line.includes('waits: a request is being answered')) ? true : null));
+    expect(successor).toBeNull();
+
+    release();
+    expect((await slow)?.status).toBe(200);
+    await until(() => (exit.mock.calls.length > 0 ? true : null));
+
+    const taken = served(await successor!);
+
+    expect(exit).toHaveBeenCalledWith(0);
+    expect(recordOnDisk()).toEqual(taken.record);
+    expect(taken.record.build).toBe('b2');
+    expect(await call(old.record.port, 'GET', '/hub', null, 300)).toBeNull();
+    expect(lines.filter((line) => line.startsWith('restarting the hub') || line.startsWith('hub restart:') || line.startsWith('stopping'))).toEqual([
+      `restarting the hub from build b1 onto build ${buildOf(bundle)}, which is installed`,
+      'stopping: restarting onto the installed build',
+      `hub restart: pid ${process.pid} took over with build b2`,
+    ]);
   });
 });

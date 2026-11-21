@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
-import { switchboardHome } from '@switchboard/core';
-import { ATTACH_TIMEOUT_MS, buildOf, bundleHome, killProcessTree, connectHolder, currentHolderBuild, createHubApp, findHub, gitBashRoot, handledBody, isSnapshotWorker, postToHub, recordedHubPid, registerTitle, reportBody, runAttach, runHolder, runSnapshotWorker, serveHub, stopHub, ticketBody } from '@switchboard/hub';
+import { hubBundlePath, hubLogPath, switchboardHome } from '@switchboard/core';
+import { ATTACH_TIMEOUT_MS, buildOf, reportReady, startSuccessor, bundleHome, killProcessTree, connectHolder, currentHolderBuild, createHubApp, findHub, gitBashRoot, handledBody, isSnapshotWorker, postToHub, recordedHubPid, registerTitle, reportBody, runAttach, runHolder, runSnapshotWorker, serveHub, stopHub, ticketBody } from '@switchboard/hub';
 
 declare const __SWITCHBOARD_VERSION__: string | undefined;
 
@@ -22,6 +22,40 @@ const REPORT_USAGE = `Usage:
   report paste <sessionId> --label <text> --file <absolute path>
   report question <sessionId> --text <question>
 `;
+
+/**
+ * Posts a session command to the running hub, and when the hub answers 503 because it is handing over to a new build, which it does before
+ * handling the command, posts it again to the hub that takes over, until `timeoutMs` has passed (architecture.md § Hub lifecycle). Null when no
+ * hub answers.
+ */
+async function postCommand(home: string, path: string, body: unknown, timeoutMs: number): Promise<Awaited<ReturnType<typeof postToHub>>> {
+  const deadline = Date.now() + timeoutMs;
+  let hub = await findHub(home, timeoutMs);
+
+  for (;;) {
+    const reply = hub === null ? null : await postToHub(hub, path, body, Math.max(1000, deadline - Date.now()));
+
+    if (hub === null || reply === null || reply.status !== 503) {
+      return reply;
+    }
+
+    const restarting = hub.token;
+
+    hub = null;
+
+    while (hub === null) {
+      if (Date.now() > deadline) {
+        return reply;
+      }
+
+      await new Promise((done) => setTimeout(done, 250));
+
+      const next = await findHub(home);
+
+      hub = next !== null && next.token !== restarting ? next : null;
+    }
+  }
+}
 
 /** Why the hub took no command: the process `hub.json` names runs but the hub did not answer, or none runs. */
 function noHub(home: string): string {
@@ -53,8 +87,7 @@ async function ticket(home: string, argv: readonly string[]): Promise<number> {
   }
 
   const native = process.env['CLAUDE_CODE_SESSION_ID'];
-  const hub = await findHub(home, REPORT_TIMEOUT_MS);
-  const reply = hub === null ? null : await postToHub(hub, '/ticket', native ? { ...body, nativeSessionId: native } : body, REPORT_TIMEOUT_MS);
+  const reply = await postCommand(home, '/ticket', native ? { ...body, nativeSessionId: native } : body, REPORT_TIMEOUT_MS);
 
   if (reply === null) {
     process.stderr.write(`${noHub(home)}; run the command again, which answers the contract of a work item it moved.\n`);
@@ -81,8 +114,7 @@ async function report(home: string, argv: readonly string[]): Promise<number> {
       return 1;
     }
     const nativeSessionId = process.env['CLAUDE_CODE_SESSION_ID'];
-    const hub = await findHub(home, REPORT_TIMEOUT_MS);
-    const reply = hub === null ? null : await postToHub(hub, '/handled', { ...body, nativeSessionId }, REPORT_TIMEOUT_MS);
+    const reply = await postCommand(home, '/handled', { ...body, nativeSessionId }, REPORT_TIMEOUT_MS);
     if (reply === null) { process.stderr.write(`${noHub(home)}.\n`); return 2; }
     if (reply.status !== 200) { process.stderr.write(`Refused: ${reply.error ?? reply.status}\n`); return reply.status === 400 ? 1 : 3; }
     process.stdout.write(`${JSON.stringify(reply.body)}\n`);
@@ -101,8 +133,7 @@ async function report(home: string, argv: readonly string[]): Promise<number> {
 
   // Claude names the reporting copy, so the hub can refuse a copy a fork retired (PRD R78).
   const native = process.env['CLAUDE_CODE_SESSION_ID'];
-  const hub = await findHub(home, REPORT_TIMEOUT_MS);
-  const reply = hub === null ? null : await postToHub(hub, '/report', native ? { ...body, nativeSessionId: native } : body, REPORT_TIMEOUT_MS);
+  const reply = await postCommand(home, '/report', native ? { ...body, nativeSessionId: native } : body, REPORT_TIMEOUT_MS);
 
   if (reply === null) {
     process.stderr.write(`${noHub(home)}, so the report was not recorded.\n`);
@@ -136,8 +167,7 @@ async function register(home: string, argv: readonly string[]): Promise<number> 
     return 1;
   }
 
-  const hub = await findHub(home, REGISTER_TIMEOUT_MS);
-  const reply = hub === null ? null : await postToHub(hub, '/register', { nativeSessionId: native, title }, REGISTER_TIMEOUT_MS);
+  const reply = await postCommand(home, '/register', { nativeSessionId: native, title }, REGISTER_TIMEOUT_MS);
 
   if (reply === null) {
     process.stderr.write(`${noHub(home)}; run the command again, which answers the contract of a session it registered.\n`);
@@ -328,10 +358,23 @@ async function main(argv: readonly string[]): Promise<number> {
     return 1;
   }
 
+  const takeover = flag(argv, 'takeover');
+
+  if (takeover !== null && !/^[1-9]\d*$/.test(takeover)) {
+    process.stderr.write(`--takeover takes the pid of the hub to take over from, not "${takeover}".\n`);
+
+    return 1;
+  }
+
+  // A successor's bundle has loaded, so the hub it takes over from can hand over (architecture.md § Hub lifecycle).
+  if (takeover !== null) {
+    reportReady();
+  }
+
   const build = bundle === undefined ? 'unknown' : buildOf(bundle);
   const log = (line: string) => process.stdout.write(`${new Date().toISOString()} ${line}\n`);
   const configDir = resolve(flag(argv, 'config') || switchboardHome(home));
-  const result = await serveHub({ home, version: VERSION, build, configDir, log, app: () => createHubApp({ home, configDir, log, ...(codeModeIdle === null ? {} : { codeModeIdleMs: Number(codeModeIdle) }), ...(bundle === undefined ? {} : { snapshotWorker: resolve(bundle) }) }), ...(idle > 0 ? { idleMs: idle } : {}), ...(browserPort === null ? {} : { browserPort: Number(browserPort) || null }), ...(pagePort === null ? {} : { pagePort: Number(pagePort) }) });
+  const result = await serveHub({ home, version: VERSION, build, configDir, log, app: () => createHubApp({ home, configDir, log, ...(codeModeIdle === null ? {} : { codeModeIdleMs: Number(codeModeIdle) }), ...(bundle === undefined ? {} : { snapshotWorker: resolve(bundle) }) }), ...(idle > 0 ? { idleMs: idle } : {}), ...(takeover === null ? {} : { takeover: Number(takeover) }), restart: { bundle: hubBundlePath(home), successor: () => startSuccessor({ execPath: process.execPath, bundle: hubBundlePath(home), args: argv, env: process.env, logPath: hubLogPath(home) }) }, ...(browserPort === null ? {} : { browserPort: Number(browserPort) || null }), ...(pagePort === null ? {} : { pagePort: Number(pagePort) }) });
 
   if ('existing' in result) {
     process.stdout.write(`A hub is already running for this home on port ${result.existing.port}; pid ${process.pid} exiting.\n`);

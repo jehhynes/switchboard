@@ -1223,6 +1223,11 @@ export class VoiceControl {
     return false;
   }
 
+  /** Whether a reply is offered to the voice process or being spoken, or a voice enrolment runs, so a hub restart waits for it (architecture.md § Hub lifecycle). */
+  speaking(): boolean {
+    return this.#offered.size > 0 || this.#playing.size > 0 || this.#enrolling();
+  }
+
   close(): void {
     this.#closed = true;
     this.#stopFlush();

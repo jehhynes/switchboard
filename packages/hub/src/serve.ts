@@ -8,6 +8,8 @@ import type { BrowserServer } from './browser.js';
 import type { SnoozeByUrl, UnsnoozeByUrl } from './browserSnooze.js';
 import { findHub, readHubRecord } from './discover.js';
 import { holdLock, releaseLock } from './lock.js';
+import { HubRestart, installedBuild, RESTART_CHECK_MS, TAKEOVER_WAIT_MS } from './restart.js';
+import type { Successor } from './restart.js';
 import { listenHub } from './server.js';
 import type { PageRoutes, PostContext, Reply } from './server.js';
 
@@ -52,6 +54,8 @@ export interface HubApp {
   attachWindows?(send: (event: string, data: unknown, keys?: readonly string[]) => number): void;
   /** While true, the hub does not exit for lack of clients (PRD R43). */
   busy(): boolean;
+  /** Why the hub cannot restart onto a new build now, or null when it is quiet (architecture.md § Hub lifecycle). */
+  quiet?(): string | null;
   close(): void;
 }
 
@@ -72,6 +76,19 @@ export interface ServeOptions {
   log?: (line: string) => void;
   /** Built once this process holds the hub lock, so a losing start never opens the store. */
   app?: () => Promise<HubApp>;
+  /** The pid of the hub this one takes over from, whose lock it waits for (`--takeover`). */
+  takeover?: number;
+  /** Restarts onto the installed bundle when that is another build (architecture.md § Hub lifecycle). */
+  restart?: RestartOptions;
+}
+
+export interface RestartOptions {
+  /** The installed bundle, `<home>/.switchboard/hub.js`. */
+  bundle: string;
+  /** Starts the installed bundle as the successor and resolves once it is ready. */
+  successor(): Promise<Successor | { error: string }>;
+  checkMs?: number;
+  takeoverWaitMs?: number;
 }
 
 export interface Served {
@@ -92,12 +109,12 @@ function writeRecord(path: string, record: HubRecord): void {
   renameSync(temporary, path);
 }
 
-async function waitForHub(home: string, waitMs: number): Promise<HubRecord | null> {
+async function waitForHub(home: string, waitMs: number, wanted: (found: HubRecord) => boolean = () => true): Promise<HubRecord | null> {
   for (const deadline = Date.now() + waitMs; ; ) {
     const found = await findHub(home);
 
-    if (found !== null || Date.now() > deadline) {
-      return found;
+    if ((found !== null && wanted(found)) || Date.now() > deadline) {
+      return found !== null && wanted(found) ? found : null;
     }
 
     await new Promise((done) => setTimeout(done, 100));
@@ -117,13 +134,31 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
 
   mkdirSync(switchboardHome(home), { recursive: true });
 
-  const lock = await holdLock(home);
+  let lock = await holdLock(home);
+
+  // A successor waits for the hub it takes over from to let go of the lock, unless another hub took it meanwhile.
+  for (const deadline = Date.now() + (options.restart?.takeoverWaitMs ?? TAKEOVER_WAIT_MS); lock === null && options.takeover !== undefined; ) {
+    const other = await findHub(home);
+
+    if (other !== null && other.pid !== options.takeover) {
+      return { existing: other };
+    }
+
+    if (Date.now() > deadline) {
+      return { refused: `the hub (pid ${options.takeover}) did not hand over the hub lock within ${(options.restart?.takeoverWaitMs ?? TAKEOVER_WAIT_MS) / 1000} seconds` };
+    }
+
+    await new Promise((done) => setTimeout(done, 50));
+    lock = await holdLock(home);
+  }
 
   if (lock === null) {
     const existing = await waitForHub(home, options.waitMs ?? DEFAULT_WAIT_MS);
 
     return existing === null ? { refused: 'another process holds the hub lock but no hub answers' } : { existing };
   }
+
+  const hubLock = lock;
 
   let stopping: Promise<void> | undefined;
 
@@ -218,10 +253,35 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
 
   idle.unref();
 
+  const restartOptions = options.restart;
+  const restart =
+    restartOptions === undefined
+      ? null
+      : new HubRestart({
+          build,
+          installed: installedBuild(restartOptions.bundle),
+          quiet: () => (stopping !== undefined ? 'the hub is stopping' : server.inFlight() > 0 ? 'a request is being answered' : (app?.quiet?.() ?? null)),
+          successor: () => restartOptions.successor(),
+          handOver: async () => {
+            server.hold('The hub is restarting onto a new build; try again in a few seconds.');
+            await stop('restarting onto the installed build');
+
+            const successor = await waitForHub(home, restartOptions.takeoverWaitMs ?? TAKEOVER_WAIT_MS, (found) => found.token !== record.token);
+
+            log(successor === null ? `hub restart: no hub took over within ${(restartOptions.takeoverWaitMs ?? TAKEOVER_WAIT_MS) / 1000} seconds; a VS Code window or the dock starts one` : `hub restart: pid ${successor.pid} took over with build ${successor.build}`);
+            exit(0);
+          },
+          log,
+        });
+  const restartTimer = restart === null ? undefined : setInterval(() => void restart.check(), restartOptions?.checkMs ?? RESTART_CHECK_MS);
+
+  restartTimer?.unref();
+
   const stop = (reason: string): Promise<void> => {
     stopping ??= (async () => {
       log(`stopping: ${reason}`);
       clearInterval(idle);
+      clearInterval(restartTimer);
       clearImmediate(update);
       process.off('exit', unclaim);
       server.stopViews();
@@ -229,7 +289,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
       await browser?.close();
       await server.close();
       unclaim();
-      await releaseLock(lock);
+      await releaseLock(hubLock);
     })();
 
     return stopping;

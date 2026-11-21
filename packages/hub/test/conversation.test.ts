@@ -1562,6 +1562,13 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(store.message('m-held')?.delivery).toBe('open');
 
+    // Messages a stopped hub left wait for a window, not for this hub, so they do not hold off a hub restart; one this hub stores does until sent.
+    expect(service.sending()).toBe(false);
+    store.addMessage({ ...typed, id: 'm-new', text: 'new', opId: 'op-n', pastedAt: null, launch: 'launch-1' });
+    expect(service.sending()).toBe(true);
+    store.updateMessage('m-new', { delivery: 'sent' });
+    expect(service.sending()).toBe(false);
+
     const frames = stream(service);
 
     await settled(() => expect(store.message('m-held')).toBeNull());

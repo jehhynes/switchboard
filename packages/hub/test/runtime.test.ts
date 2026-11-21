@@ -609,6 +609,23 @@ describe('Runtime', () => {
     expect(store.workItem(1)).toMatchObject({ status: 'failed', error: 'Issue 7 was not found in acme/widgets.' });
   });
 
+  it('names what a hub restart waits for: an action, then a starting session, and nothing once settled', async () => {
+    const { store, source, runtime } = setup();
+
+    expect(runtime.restartBlocker()).toBeNull();
+
+    source.result = { tickets: [issue('8')] };
+    await runtime.pollSource('github');
+    expect(runtime.restartBlocker()).toBe('an action is running');
+
+    await runtime.settled();
+    expect(store.session('s1')?.state).not.toBe('starting');
+    expect(runtime.restartBlocker()).toBeNull();
+
+    store.updateSession('s1', { state: 'starting' });
+    expect(runtime.restartBlocker()).toBe('a session is starting');
+  });
+
   it("fails a start with Claude's message", async () => {
     const { store, cli, source, runtime } = setup();
     cli.startResult = fail('Workspace not trusted. Run `claude` in D:\\git\\widgets once and accept the trust prompt, then retry.');

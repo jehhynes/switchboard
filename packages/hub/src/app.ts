@@ -1503,6 +1503,7 @@ const dockWithRuns = () => {
     },
     onChange: (listener) => void builtListeners.push(listener),
     busy: () => runtime.hasActiveSessions() || debriefs.running(),
+    quiet: () => runtime.restartBlocker() ?? (conversation.sending() ? 'a message is being sent' : voice.speaking() ? 'the voice is speaking a reply or enrolling' : debriefs.running() ? 'a friction debrief is running' : null),
     close: () => {
       clearTimeout(pending);
       clearInterval(debriefTimer);

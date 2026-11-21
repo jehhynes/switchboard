@@ -5,8 +5,9 @@ import { createServer, request } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
-import { hubRecordPath, parseHubRecord, switchboardHome } from '@switchboard/core';
-import { holdLock, releaseLock } from '@switchboard/hub';
+import { pathToFileURL } from 'node:url';
+import { hubBundlePath, hubLogPath, hubRecordPath, parseHubRecord, switchboardHome } from '@switchboard/core';
+import { buildOf, findHub, holdLock, keepHub, makeEnsure, openEvents, releaseLock, stopHub } from '@switchboard/hub';
 import type { HubRecord } from '@switchboard/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -32,6 +33,10 @@ function start(...args: string[]): { child: ChildProcess; exited: Promise<{ code
 }
 
 function startWith(extra: Record<string, string | undefined>, ...args: string[]): { child: ChildProcess; exited: Promise<{ code: number | null; stdout: string; stderr: string; pid: number | undefined }> } {
+  return launch(main, extra, args);
+}
+
+function launch(entry: string, extra: Record<string, string | undefined>, args: string[]): { child: ChildProcess; exited: Promise<{ code: number | null; stdout: string; stderr: string; pid: number | undefined }> } {
   // CLAUDE_CONFIG_DIR and CODEX_HOME keep hook installation inside the temporary home. PATH holds only Node and Windows, so the hub runs no
   // real Claude or Codex: an orphaned Codex app-server from the hook trust exchange held <home>/.codex past the cleanup.
   const inherited = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toUpperCase() !== 'PATH'));
@@ -42,7 +47,7 @@ function startWith(extra: Record<string, string | undefined>, ...args: string[])
     delete env[key];
   }
 
-  const child = spawn(process.execPath, [main, ...args, `--home=${home}`, ...(['report', 'register', 'attach', 'holder'].includes(args[0] ?? '') ? [] : ['--browser-port=0', '--page-port=0'])], { windowsHide: true, env });
+  const child = spawn(process.execPath, [entry, ...args, `--home=${home}`, ...(['report', 'register', 'attach', 'holder'].includes(args[0] ?? '') ? [] : ['--browser-port=0', '--page-port=0'])], { windowsHide: true, env });
   let stdout = '';
   let stderr = '';
 
@@ -90,6 +95,48 @@ function status(found: HubRecord): Promise<number> {
     );
 
     outbound.on('error', () => resolve(0));
+    outbound.end();
+  });
+}
+
+async function until<T>(check: () => T | null, within = 10_000): Promise<T> {
+  for (const deadline = Date.now() + within; Date.now() < deadline; ) {
+    const found = check();
+
+    if (found !== null) {
+      return found;
+    }
+
+    await new Promise((done) => setTimeout(done, 50));
+  }
+
+  throw new Error('condition not met in time');
+}
+
+/** The status a stream answers, closed once its headers arrive. */
+function streamStatus(found: HubRecord, path: string): Promise<number> {
+  return new Promise((resolve) => {
+    const outbound = request({ host: '127.0.0.1', port: found.port, path, headers: { Authorization: `Bearer ${found.token}` } }, (response) => {
+      resolve(response.statusCode ?? 0);
+      outbound.destroy();
+    });
+
+    outbound.on('error', () => resolve(0));
+    outbound.end();
+  });
+}
+
+function get(port: number, path: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const outbound = request({ host: '127.0.0.1', port, path }, (response) => {
+      let body = '';
+
+      response.setEncoding('utf8');
+      response.on('data', (chunk: string) => (body += chunk));
+      response.on('end', () => resolve(body));
+    });
+
+    outbound.on('error', reject);
     outbound.end();
   });
 }
@@ -225,6 +272,48 @@ describe('hub entry point', () => {
     } finally {
       server.closeAllConnections();
       server.close();
+    }
+  });
+
+  it('posts a report again to the hub that takes over when the running hub answers that it is restarting', async () => {
+    const posts: string[] = [];
+    const fake = (answer: number, token: string) =>
+      createServer((req, res) => {
+        if (req.method === 'GET') {
+          res.end(JSON.stringify({ hub: 'switchboard', protocol: 1, version: '0.0.0', pid: process.pid }));
+          return;
+        }
+
+        req.resume();
+        req.on('end', () => {
+          posts.push(`${token} ${answer}`);
+          res.writeHead(answer, { 'Content-Type': 'application/json' });
+          res.end(answer === 503 ? JSON.stringify({ error: 'The hub is restarting onto a new build; try again in a few seconds.' }) : '{}');
+
+          if (answer === 503) {
+            writeFileSync(hubRecordPath(home), JSON.stringify({ protocol: 1, version: '0.0.0', build: 'b2', configDir: home, port: ports[1], token: 'new', pid: process.pid, startedAt: 'now' }));
+          }
+        });
+      });
+    const servers = [fake(503, 'old'), fake(200, 'new')];
+    const ports: number[] = [];
+
+    for (const server of servers) {
+      await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+      ports.push((server.address() as AddressInfo).port);
+    }
+
+    mkdirSync(dirname(hubRecordPath(home)), { recursive: true });
+    writeFileSync(hubRecordPath(home), JSON.stringify({ protocol: 1, version: '0.0.0', build: 'b1', configDir: home, port: ports[0], token: 'old', pid: process.pid, startedAt: 'now' }));
+
+    try {
+      expect(await start('report', 'stage', 's1', 'Planning').exited).toMatchObject({ code: 0, stdout: 'recorded\n' });
+      expect(posts).toEqual(['old 503', 'new 200']);
+    } finally {
+      for (const server of servers) {
+        server.closeAllConnections();
+        server.close();
+      }
     }
   });
 
@@ -465,4 +554,67 @@ describe('hub entry point', () => {
     expect((await hub.exited).code).toBe(0);
     expect(record()).toBeNull();
   });
+  it('restarts onto another installed build once quiet, handing its record to the new hub, which windows, the dock and pages reach again', async () => {
+    // The installed bundle loads the built entry point, so changing the file changes the installed build.
+    const bundle = hubBundlePath(home);
+    const shim = `import(${JSON.stringify(pathToFileURL(main).href)});\n`;
+
+    mkdirSync(switchboardHome(home), { recursive: true });
+    writeFileSync(bundle, shim);
+
+    const first = launch(bundle, {}, ['--idle-ms=60000']);
+    const before = await recorded();
+
+    expect(before.build).toBe(buildOf(bundle));
+
+    // A window: its keeper finds the hub of the installed build and opens /events again when the stream ends, starting no hub itself.
+    const opened: string[] = [];
+    const keeper = keepHub({
+      ensure: makeEnsure({ find: () => findHub(home), build: () => buildOf(bundle), configDir: () => before.configDir, stop: stopHub, start: () => {}, now: Date.now, sleep: (ms) => new Promise((done) => setTimeout(done, ms)), logPath: hubLogPath(home) }),
+      open: (found, onEnd) => openEvents(found, onEnd, undefined, (event) => event === 'hello' && opened.push(found.token)),
+      now: Date.now,
+      sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
+      onFailed: (message) => opened.push(`failed: ${message}`),
+    });
+    const dockEnded = new Promise<void>((done) => {
+      const outbound = request({ host: '127.0.0.1', port: before.port, path: '/dock/events', headers: { Authorization: `Bearer ${before.token}` } }, (response) => {
+        response.resume();
+        response.on('close', () => done());
+      });
+
+      outbound.on('error', () => done());
+      outbound.end();
+    });
+
+    try {
+      await until(() => (opened.includes(before.token) ? true : null));
+
+      writeFileSync(bundle, `${shim}// another build\n`);
+
+      const after = await until(() => {
+        const found = record();
+
+        return found !== null && found.pid !== before.pid ? found : null;
+      }, 30_000);
+      const old = await first.exited;
+
+      expect(old.code).toBe(0);
+      expect(after.build).toBe(buildOf(bundle));
+      expect(after.build).not.toBe(before.build);
+      expect(old.stdout).toContain(`restarting the hub from build ${before.build} onto build ${after.build}, which is installed`);
+      expect(old.stdout).toContain(`hub restart: pid ${after.pid} took over with build ${after.build}`);
+      expect(readFileSync(hubLogPath(home), 'utf8')).toContain(`listening on 127.0.0.1:${after.port} as pid ${after.pid}, build ${after.build}`);
+
+      // The window's keeper connected to the new hub; the dock's stream ended and a new one opens on the new record; a page's ping names the new build.
+      await until(() => (opened.includes(after.token) ? true : null), 10_000);
+      expect(opened.filter((entry) => entry.startsWith('failed'))).toEqual([]);
+      expect(keeper.current()?.token).toBe(after.token);
+      await dockEnded;
+      expect(await streamStatus(after, '/dock/events')).toBe(200);
+      expect(JSON.parse(await get(after.port, '/page/ping'))).toEqual({ build: after.build });
+    } finally {
+      keeper.dispose();
+      await start('--stop').exited;
+    }
+  }, 60_000);
 });

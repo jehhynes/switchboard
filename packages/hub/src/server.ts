@@ -128,6 +128,10 @@ export interface HubServer {
   listenPage(port: number, waitMs?: number): Promise<string | null>;
   /** Builds no more views, so nothing reads the app after it closes; streams that open get only `hello`. */
   stopViews(): void;
+  /** `POST` requests on the hub's and the page's ports not yet answered, so the hub restarts only between them (architecture.md § Hub lifecycle). */
+  inFlight(): number;
+  /** Answers every later `POST` 503 with `reason`, while the hub hands over to its successor. */
+  hold(reason: string): void;
   close(): Promise<void>;
 }
 
@@ -215,6 +219,26 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
   let opened = 0;
 
   let emptySince: number | null = now();
+  let inFlight = 0;
+  let held: string | null = null;
+
+  /** Counts a `POST` until its answer, or answers it 503 while the hub hands over; true when it was answered. */
+  const admit = (request: IncomingMessage, response: ServerResponse): boolean => {
+    if (request.method !== 'POST') {
+      return false;
+    }
+
+    if (held !== null) {
+      request.resume();
+      json(response, 503, { error: held });
+      return true;
+    }
+
+    inFlight++;
+    response.once('close', () => inFlight--);
+
+    return false;
+  };
 
   const authorized = (request: IncomingMessage): boolean => {
     const given = Buffer.from(request.headers.authorization ?? '');
@@ -761,6 +785,10 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
   const listenPageOnce = (port: number): Promise<Server> =>
     new Promise((resolve, reject) => {
       const one = createServer((request, response) => {
+        if (admit(request, response)) {
+          return;
+        }
+
         if (!servePage(request, response, new URL(request.url ?? '/', 'http://127.0.0.1'))) {
           json(response, 404, { error: 'not found' });
         }
@@ -776,6 +804,10 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? '/', 'http://127.0.0.1');
     const path = url.pathname;
+
+    if (admit(request, response)) {
+      return;
+    }
 
     if (servePage(request, response, url)) {
       return;
@@ -993,6 +1025,10 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
         },
         stopViews: () => {
           closing = true;
+        },
+        inFlight: () => inFlight,
+        hold: (reason) => {
+          held = reason;
         },
         close: () =>
           new Promise<void>((done) => {

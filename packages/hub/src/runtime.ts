@@ -770,6 +770,38 @@ export class Runtime {
     }
   }
 
+  /**
+   * Why the hub should not restart onto a new build now, or null (architecture.md § Hub lifecycle): a restart would interrupt a holder restart, a
+   * message being typed, a session's start, resume or end, a triage, or an action the flow started.
+   */
+  restartBlocker(): string | null {
+    if (this.holderRestart?.state === 'running') {
+      return 'the terminal holder is restarting';
+    }
+
+    if (this.inputs.size > 0) {
+      return 'a message is being typed into a session';
+    }
+
+    if (this.attaching.size > 0 || this.resuming.size > 0 || this.ending.size > 0) {
+      return 'a session is being resumed or ended';
+    }
+
+    if (this.deps.store.activeSessions().some((session) => session.state === 'starting')) {
+      return 'a session is starting';
+    }
+
+    if (this.deps.store.runningTriages().length > 0) {
+      return 'a triage is running';
+    }
+
+    if (this.reads.size > 0 || this.rosterRead !== null) {
+      return 'a source or the session roster is being read';
+    }
+
+    return this.pending.size > 0 ? 'an action is running' : null;
+  }
+
   /** True while any session may be running, so the hub stays up for its reports (PRD R43). */
   hasActiveSessions(): boolean {
     return this.deps.store.activeSessions().length > 0;

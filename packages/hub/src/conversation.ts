@@ -339,7 +339,16 @@ export class ConversationService {
 
     for (const message of deps.store.openMessages()) {
       this.#leftOpen.set(message.sessionId, [...(this.#leftOpen.get(message.sessionId) ?? []), message]);
+      this.#inherited.add(message.id);
     }
+  }
+
+  /** The messages a stopped hub left open, which wait for a window rather than for this hub. */
+  readonly #inherited = new Set<string>();
+
+  /** Whether a message this hub stored is still being sent, so a hub restart waits for it (architecture.md § Hub lifecycle). */
+  sending(): boolean {
+    return this.deps.store.openMessages().some((message) => !this.#inherited.has(message.id));
   }
 
   /**

@@ -636,3 +636,29 @@ describe('listenHub routes and state', () => {
     expect((await call(server.port, 'GET', '/dock/events', null))?.status).toBe(401);
   });
 });
+
+describe('listenHub restart support', () => {
+  it('counts POST requests until they are answered and answers 503 with the reason to every POST once held', async () => {
+    let release: () => void = () => {};
+
+    server = await listenHub({ identity, onShutdown: () => {}, post: { '/slow': () => new Promise((done) => (release = () => done({ status: 200, body: {} }))), '/fast': async () => ({ status: 200, body: {} }) } });
+
+    expect(server.inFlight()).toBe(0);
+
+    const slow = call(server.port, 'POST', '/slow', server.token, 5000, {});
+
+    await until(() => (server.inFlight() === 1 ? true : null));
+    release();
+    expect((await slow)?.status).toBe(200);
+    await until(() => (server.inFlight() === 0 ? true : null));
+
+    server.hold('The hub is restarting onto a new build; try again in a few seconds.');
+
+    const refused = await call(server.port, 'POST', '/fast', server.token, 5000, {});
+
+    expect(refused?.status).toBe(503);
+    expect(JSON.parse(refused!.body)).toEqual({ error: 'The hub is restarting onto a new build; try again in a few seconds.' });
+    expect(server.inFlight()).toBe(0);
+    expect((await call(server.port, 'GET', '/hub', null, 2000))?.status).toBe(200);
+  });
+});
