@@ -69,6 +69,19 @@ export function shortTitle(title: string): string {
   return (space > PLACEHOLDER_TITLE_CHARS / 2 ? cut.slice(0, space) : cut.slice(0, PLACEHOLDER_TITLE_CHARS)).trimEnd();
 }
 
+/**
+ * Keeps each open menu inside the view (architecture.md § Conversation view): a menu as wide as its content, at most 360 px, and never past the
+ * view's edge less 8 px from the side its button anchors it to.
+ */
+function fitMenus(root: HTMLElement): void {
+  for (const menu of root.querySelectorAll<HTMLElement>('.menu')) {
+    const anchor = (menu.parentElement ?? menu).getBoundingClientRect();
+    const room = menu.classList.contains('align-right') ? anchor.right - 8 : document.documentElement.clientWidth - anchor.left - 8;
+
+    menu.style.maxWidth = `${Math.max(160, Math.min(360, Math.floor(room)))}px`;
+  }
+}
+
 /** Sets an element's HTML only when it changed, so a button under the pointer survives a redraw with the same state. */
 function redraw(element: HTMLElement, html: string): void {
   if (element.dataset['html'] !== html) {
@@ -568,6 +581,8 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
       root.querySelector<HTMLElement>(kind === 'persona' ? 'button.persona' : 'button.picker')?.focus();
     }
   };
+  /** Whether the earlier statuses' menu takes the focus when the page it asked for arrives, as after Older statuses. */
+  let focusEarlier = false;
   /** Asks the extension for the statuses before one, adding them to those listed. */
   const askStatuses = (before: string | null, listed: StatusView[]): void => {
     earlier = { statuses: listed, more: false, loading: true, error: null, id: nextAsk++, sessionId: state.scope?.sessionId ?? null };
@@ -775,6 +790,7 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
 
     startFreshClock();
     morph(root, renderConversation(state, open, Date.now(), freshUntil > Date.now(), { tab, unopened, cards, pill: unseenBelow, menu, earlier, requests: { values: requestValues, errors: requestErrors, sending: requestSending } }));
+    fitMenus(root);
     document.body.dataset['tab'] = tab;
 
     const scroller = root.querySelector<HTMLElement>('.scroll');
@@ -903,6 +919,8 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
 
       askStatuses(state.status === null || state.status.fallback ? null : state.status.id, []);
     } else if (action === 'statuses-more' && earlier !== null) {
+      // Older statuses gives way to "Loading…", so the menu keeps the focus for the first status the page brings.
+      focusEarlier = true;
       askStatuses(earlier.statuses.at(-1)?.id ?? null, earlier.statuses);
     } else if (action === 'status-earlier') {
       vscode.postMessage({ type: 'status-open', statusId: button!.dataset['status'] ?? '' });
@@ -1075,10 +1093,18 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     }
   });
 
-  // Escape stops speech while the view has focus, unless it closes the conversation list.
+  // Escape stops speech while the view has focus, unless it closes the conversation list or a menu.
   root.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && !open.has(PICKER) && menu === null && state.voice?.here === true && state.voice.speaking !== null) {
+    if (event.key === 'Escape' && !open.has(PICKER) && menu === null && earlier === null && state.voice?.here === true && state.voice.speaking !== null) {
       vscode.postMessage({ type: 'stop-speaking' });
+    }
+  });
+
+  // A press outside the earlier statuses' menu and its button closes it, as a VS Code menu closes.
+  document.addEventListener('pointerdown', (event) => {
+    if (earlier !== null && !(event.target instanceof Node && root.querySelector('.status-actions')?.contains(event.target) === true)) {
+      earlier = null;
+      draw();
     }
   });
 
@@ -1088,6 +1114,27 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
       open.delete(PICKER);
       menu = null;
       draw();
+    }
+  });
+
+  // Escape closes the earlier statuses' menu, giving the focus back to its button; Up and Down move within it.
+  root.addEventListener('keydown', (event) => {
+    if (earlier === null || (event.target as HTMLElement).closest('.status-actions') === null) {
+      return;
+    }
+
+    const rows = [...root.querySelectorAll<HTMLElement>('.earlier-menu .menu-row')];
+    const at = rows.indexOf(document.activeElement as HTMLElement);
+
+    if (event.key === 'Escape') {
+      earlier = null;
+      draw();
+      root.querySelector<HTMLElement>('[data-action="statuses"]')?.focus();
+      event.stopImmediatePropagation();
+    } else if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && rows.length > 0) {
+      rows[at === -1 ? 0 : Math.max(0, Math.min(rows.length - 1, at + (event.key === 'ArrowDown' ? 1 : -1)))]!.focus();
+      event.preventDefault();
+      event.stopImmediatePropagation();
     }
   });
 
@@ -1242,8 +1289,17 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
       }
     } else if (event.data.type === 'statuses') {
       if (earlier?.id === event.data.id) {
+        const fromButton = focusEarlier || document.activeElement?.closest('[data-action="statuses"], [data-action="statuses-more"]') != null;
+
+        focusEarlier = false;
+
         earlier = { ...earlier, statuses: [...earlier.statuses, ...event.data.statuses], more: event.data.more, loading: false, error: event.data.error };
         draw();
+
+        // The menu takes the focus when its button had it, on the first status it added.
+        if (fromButton) {
+          root.querySelectorAll<HTMLElement>('.earlier-menu .earlier-status')[earlier.statuses.length - event.data.statuses.length]?.focus();
+        }
       }
     } else if (event.data.type === 'answered') {
       // A Codex request's answer: taken, the request leaves with the hub's next state; refused, its card says why.

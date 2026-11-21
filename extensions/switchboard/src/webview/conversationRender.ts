@@ -513,14 +513,14 @@ export function renderStatus(status: StatusView | null, fresh: boolean, now: num
   const mark = fresh ? '<span class="status-new">New</span>' : '';
   const actions =
     '<span class="status-actions"><button class="icon" type="button" data-action="status-open" title="Open in the Markdown preview" aria-label="Open the status in the Markdown preview"><span class="codicon codicon-open-preview" aria-hidden="true"></span></button>' +
-    `<button class="icon${earlier === null ? '' : ' pressed'}" type="button" data-action="statuses" title="Earlier statuses" aria-label="Earlier statuses" aria-expanded="${earlier !== null}" aria-controls="earlier-statuses"><span class="codicon codicon-history" aria-hidden="true"></span></button></span>`;
+    `<span class="menu-anchor"><button class="icon${earlier === null ? '' : ' pressed'}" type="button" data-action="statuses" title="Earlier statuses" aria-label="Earlier statuses" aria-haspopup="menu" aria-expanded="${earlier !== null}"><span class="codicon codicon-history" aria-hidden="true"></span></button>${earlierStatuses(earlier)}</span></span>`;
   const time = `<span class="status-time" title="${escape(fullTime(status.at))}">${escape(STATUS_TIME.format(status.at))}</span>`;
   const unread = status.unread ? ` unread" data-unread="${escape(status.id)}` : '';
 
   return (
     `<div class="status-tab${fresh ? ' fresh' : ''}${unread}" role="region" aria-label="${unread === '' ? 'Status' : 'Status, unread'}">` +
     `<div class="status-head"><span class="codicon codicon-pulse" aria-hidden="true"></span>${time}<span class="status-dot" aria-hidden="true">·</span>${age(status.at, now, 'status-age')}${mark}${actions}</div>` +
-    `<div class="status-body body">${card === '' ? renderMarkdown(status.markdown) : withoutQuestions(status.markdown, `status:${status.id}`, open)}</div>${card}${earlierStatuses(earlier)}</div>`
+    `<div class="status-body body">${card === '' ? renderMarkdown(status.markdown) : withoutQuestions(status.markdown, `status:${status.id}`, open)}</div>${card}</div>`
   );
 }
 
@@ -528,8 +528,8 @@ export function renderStatus(status: StatusView | null, fresh: boolean, now: num
 const EARLIER_TIME = new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
 /**
- * The Status tab's list of earlier statuses (architecture.md § Statuses), opened by its history button: each status's first line and time,
- * newest first, a click opening it in the Markdown preview, and Older statuses while there are more.
+ * The Status tab's earlier statuses (architecture.md § Statuses), a menu right-aligned under its history button: each status's first line with
+ * its time as the row's note, newest first, a click opening it in the Markdown preview, and Older statuses after a separator while there are more.
  */
 function earlierStatuses(earlier: EarlierStatuses | null): string {
   if (earlier === null) {
@@ -537,11 +537,21 @@ function earlierStatuses(earlier: EarlierStatuses | null): string {
   }
 
   const rows = earlier.statuses
-    .map((status) => `<li><button type="button" class="earlier-status" data-action="status-earlier" data-status="${escape(status.id)}" title="Open in the Markdown preview"><span class="title">${escape(statusLine(status.markdown) || 'Status')}</span><span class="earlier-time">${escape(EARLIER_TIME.format(status.at))}</span></button></li>`)
+    .map((status) => `<li role="none"><button type="button" class="menu-row earlier-status" role="menuitem" data-action="status-earlier" data-status="${escape(status.id)}" title="Open in the Markdown preview">${gutter(null)}<span class="title">${escape(statusLine(status.markdown) || 'Status')}</span><span class="menu-note">${escape(EARLIER_TIME.format(status.at))}</span></button></li>`)
     .join('');
-  const foot = earlier.error !== null ? `<p class="question-error" role="alert">${escape(earlier.error)}</p>` : earlier.loading ? '<p class="empty">Loading…</p>' : earlier.statuses.length === 0 ? '<p class="empty">No earlier statuses yet. A status moves here when the session reports a newer one.</p>' : earlier.more ? '<button type="button" class="earlier-items" data-action="statuses-more">Older statuses</button>' : '';
+  const message = (text: string, alert = false): string => `<li class="menu-message"${alert ? ' role="alert"' : ' role="none"'}>${escape(text)}</li>`;
+  const foot =
+    earlier.error !== null
+      ? message(earlier.error, true)
+      : earlier.loading
+        ? message('Loading…')
+        : earlier.statuses.length === 0
+          ? message('No earlier statuses yet. A status moves here when the session reports a newer one.')
+          : earlier.more
+            ? `${SEPARATOR}<li role="none"><button type="button" class="menu-row" role="menuitem" data-action="statuses-more">${gutter(null)}<span class="title">Older statuses</span></button></li>`
+            : '';
 
-  return `<section class="earlier-statuses" id="earlier-statuses" aria-label="Earlier statuses"><h3 class="earlier-head">Earlier statuses</h3><ul class="earlier-list">${rows}</ul>${foot}</section>`;
+  return `<ul class="menu earlier-menu align-right" id="earlier-statuses" data-key="menu-earlier" role="menu" aria-label="Earlier statuses">${rows}${foot}</ul>`;
 }
 
 /**

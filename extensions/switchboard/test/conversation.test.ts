@@ -2119,7 +2119,7 @@ describe('inline menus and lists instead of quick picks (architecture.md § Conv
     expect(root.querySelector('.header-menu')?.textContent).toBe('The hub did not answer.');
   });
 
-  it('lists the earlier statuses on the Status tab, pages back with Older statuses, and opens one in the preview', () => {
+  it('lists the earlier statuses in a menu under the history button, pages back with Older statuses, and opens one in the preview', () => {
     const { root, posted, send } = start();
     const status = (id: string, at: number, markdown: string): StatusView => ({ id, sessionId: 's2', at, markdown, fallback: false, unread: false });
 
@@ -2127,19 +2127,40 @@ describe('inline menus and lists instead of quick picks (architecture.md § Conv
     root.querySelector<HTMLElement>('[role="tab"][data-tab="status"]')!.click();
     root.querySelector<HTMLElement>('[data-action="statuses"]')!.click();
     expect(posted.at(-1)).toMatchObject({ type: 'statuses', before: 'st-9' });
-    expect(root.querySelector('.earlier-statuses')?.textContent).toContain('Loading…');
+    expect(root.querySelector('.status-actions .menu-anchor > .earlier-menu.menu')?.textContent).toContain('Loading…');
     send({ type: 'statuses', id: posted.at(-1)!['id'], statuses: [status('st-8', T0 - 60_000, '## Built it'), status('st-7', T0 - 120_000, 'Started.')], more: true, error: null });
     expect([...root.querySelectorAll('.earlier-status .title')].map((one) => one.textContent)).toEqual(['Built it', 'Started.']);
+    // Each row's time is its note at the right; Older statuses follows a separator.
+    expect(root.querySelector('.earlier-status .menu-note')?.textContent).toMatch(/\d:\d\d [AP]M$/);
+    expect(root.querySelector('[data-action="statuses-more"]')?.closest('li')?.previousElementSibling?.className).toBe('menu-separator');
+    root.querySelector<HTMLElement>('[data-action="statuses-more"]')!.focus();
     root.querySelector<HTMLElement>('[data-action="statuses-more"]')!.click();
     expect(posted.at(-1)).toMatchObject({ type: 'statuses', before: 'st-7' });
     send({ type: 'statuses', id: posted.at(-1)!['id'], statuses: [status('st-6', T0 - 180_000, 'Planned.')], more: false, error: null });
+    // Older statuses gave way to Loading…; the focus lands on the first status it brought.
+    expect((document.activeElement as HTMLElement | null)?.dataset['status']).toBe('st-6');
     expect(root.querySelectorAll('.earlier-status')).toHaveLength(3);
     expect(root.querySelector('[data-action="statuses-more"]')).toBeNull();
     root.querySelector<HTMLElement>('.earlier-status[data-status="st-8"]')!.click();
     expect(posted.at(-1)).toEqual({ type: 'status-open', statusId: 'st-8' });
-    // The history button closes the list again; another session's status drops it.
+    // The history button closes the menu again, as Escape and a press outside it do.
     root.querySelector<HTMLElement>('[data-action="statuses"]')!.click();
-    expect(root.querySelector('.earlier-statuses')).toBeNull();
+    expect(root.querySelector('.earlier-menu')).toBeNull();
+    root.querySelector<HTMLElement>('[data-action="statuses"]')!.click();
+    expect(root.querySelector('.earlier-menu')).not.toBeNull();
+    root.querySelector<HTMLElement>('[data-action="statuses"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(root.querySelector('.earlier-menu')).toBeNull();
+    expect((document.activeElement as HTMLElement | null)?.dataset['action']).toBe('statuses');
+    root.querySelector<HTMLElement>('[data-action="statuses"]')!.click();
+    root.querySelector('.status-body')!.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    expect(root.querySelector('.earlier-menu')).toBeNull();
+
+    // Escape that closes the menu leaves a reply being spoken alone.
+    send({ type: 'state', state: applyEvent(EMPTY_CONVERSATION, hello([], { status: status('st-9', T0, 'Now.'), voice: { enabled: true, here: true, mic: 'off', speaking: 'r1', speakReplies: true, error: null, recognizer: null } })) });
+    root.querySelector<HTMLElement>('[data-action="statuses"]')!.click();
+    root.querySelector<HTMLElement>('[data-action="statuses"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(root.querySelector('.earlier-menu')).toBeNull();
+    expect(posted.some((message) => message.type === 'stop-speaking')).toBe(false);
   });
 });
 
