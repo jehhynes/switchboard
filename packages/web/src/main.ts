@@ -7,6 +7,7 @@ import type { CardDraft, SideTab, Tab, View } from './render.js';
 import type { ConsoleOptions, MountedConsole } from './console.js';
 import type { ItemView, ScreenPrompt } from './types.js';
 import { morph } from './morph.js';
+import { listHeader } from './listHeader.js';
 import { reconnector } from './reconnect.js';
 import { fitPills } from './fit.js';
 import { overlayScrollbars } from './scrollbars.js';
@@ -85,7 +86,7 @@ export interface ConsoleModule {
  */
 export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageState; close(): void } {
   root.innerHTML =
-    '<aside class="side"><div class="side-head">Switchboard</div><div id="list"></div></aside>' +
+    '<aside class="side"><div class="side-head"></div><div id="list"></div></aside>' +
     `<div class="sash side-sash" role="separator" aria-orientation="vertical" aria-label="Work items width" aria-controls="list" tabindex="0" aria-valuemin="${SIDE_MIN}" aria-valuemax="${SIDE_MAX}" title="Drag to resize; double-click to reset"></div>` +
     '<main class="main"><div id="head"></div><div id="panel" class="scroll"></div><div id="note"></div><div id="composer" hidden></div></main>' +
     `<div class="sash chat-sash" role="separator" aria-orientation="vertical" aria-label="Conversation width" aria-controls="panel" tabindex="0" aria-valuemin="${CHAT_MIN}" aria-valuemax="${CHAT_MAX}" title="Drag to resize; double-click to reset"></div>` +
@@ -216,6 +217,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return { status: 0, body: { error: `Switchboard did not answer: ${String(error)}` } };
     }
   };
+  // The list's header: the dock header's source icons (architecture.md § Web page).
+  const header = listHeader(root.querySelector<HTMLElement>('.side-head')!, { post: (name, body) => post(name, body), redraw: () => draw() });
   /** A command for the conversation the page shows, refused by the hub when the page has moved on since. */
   const command = (name: string, body: Record<string, unknown> = {}): Promise<Answer> => post(name, { scopeGen: state.scope?.scopeGen ?? -1, ...body });
 
@@ -1097,6 +1100,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // On a narrow screen the list and the conversation are each a full-width view (page.css); the list shows until a work item is opened.
     root.classList.toggle('listing', view.list || wanted === null);
     document.title = pageTitle(state.groups);
+    header.draw(state.header);
     morph(sheetHost, renderSheet(view.sheet, view.acting));
     morph(list, expired ? '<p class="empty">This page\'s link is no longer valid. Open a new one with Switchboard: Open Web Page in VS Code, or hub.js web.</p>' : (listError === null ? '' : `<p class="list-error" role="alert">${escape(listError)}</p>`) + renderList(state.groups, state.scope?.workItemId ?? null, view.collapsed));
     fitLines();
@@ -2203,6 +2207,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       listening.abort();
       listWidth?.disconnect();
       stopScrollbars();
+      header.close();
       source.close();
 
       for (const mounted of consoles.values()) {

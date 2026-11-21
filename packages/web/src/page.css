@@ -23,7 +23,21 @@ button:focus-visible, a:focus-visible, .tab:focus-visible { outline: 1px solid v
 
 /* The list of work items, in the dock's groups and drawn as its rows (architecture.md § Web page). */
 .side { flex: none; width: 100%; display: flex; flex-direction: column; background: var(--vscode-sideBar-background); border-right: 1px solid var(--vscode-sideBar-border, var(--vscode-panel-border)); }
-.side-head { padding: 0 20px; height: 35px; line-height: 35px; font-size: 11px; text-transform: uppercase; color: var(--vscode-foreground); }
+/* The list's header, as the dock's title row: the title takes what is left, ending in an ellipsis, and the icons keep their width. */
+.side-head { flex: none; }
+.list-header { display: flex; align-items: center; gap: 2px; min-height: 35px; padding: 0 4px 0 20px; }
+.list-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; text-transform: uppercase; color: var(--vscode-foreground); }
+.header-sources { display: flex; flex: none; }
+.list-header button.icon { flex: none; justify-content: center; min-width: 26px; height: 26px; }
+.source-logo { display: block; width: 16px; height: 16px; }
+.source-logo.forum { width: 24px; }
+svg.source-logo.github { color: #f0f6fc; }
+svg.source-logo.zoho { color: #089949; }
+svg.source-logo.forum { color: #57ae57; }
+.source-logo.off, svg.source-logo.off { color: #7a7a7a; }
+.list-notice { display: flex; align-items: flex-start; gap: 4px; margin: 0; padding: 4px 4px 4px 20px; color: var(--vscode-editorWarning-foreground); }
+.list-notice-text { flex: 1; min-width: 0; }
+@media (hover: none), (pointer: coarse) { .list-header button.icon { min-width: 44px; min-height: 44px; } .list-header { min-height: 44px; } }
 #list { flex: 1; overflow-y: auto; padding-bottom: 12px; }
 #list > .empty { padding: 0 20px; }
 .work-list ul { list-style: none; margin: 0; padding: 0; }

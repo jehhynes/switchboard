@@ -6,7 +6,7 @@ import { hostKey, isFolderHost } from '@switchboard/core';
 import type { Store } from '@switchboard/core';
 import { artifactType } from '@switchboard/conversation';
 import { windowOf } from './dock.js';
-import type { DockRow, DockView } from './dock.js';
+import type { DockRow, DockSourceGroup, DockView } from './dock.js';
 import type { RowGroup } from './rows.js';
 import type { Snapshot } from './snapshot.js';
 
@@ -352,6 +352,17 @@ export function pageList(dock: Pick<DockView, 'groups'>, snapshot: Pick<Snapshot
 
     return { key: group.key, title: group.title, glyph: group.glyph, empty: group.empty, rows };
   });
+}
+
+/** What the page's list header shows besides the list (architecture.md § Web page): the dock header's source icons. */
+export interface PageHeader {
+  /** The configured sources but ad-hoc, by kind, as the dock's header icons show them. */
+  sources: DockSourceGroup[];
+}
+
+/** The page's list header, from the built dock view, so the page and the dock show the same sources. */
+export function pageHeader(dock: Pick<DockView, 'sources'>): PageHeader {
+  return { sources: dock.sources };
 }
 
 /** A work item's row in the dock's view, or null when no group lists it. */

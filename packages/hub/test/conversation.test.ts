@@ -1733,6 +1733,11 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
       newId: () => String(++id),
       pageList: () => pageList(dockView(view.view, NOW, WINDOWS), view.view),
       pageFocused: (key, focused) => focus.push([key, focused]),
+      pageHeader: () => header,
+      setSource: (name, enabled) => {
+        sourceCalls.push([name, enabled]);
+        return name === 'gone' ? 'No source is named gone.' : null;
+      },
       rowAction: (workItemId, action, snooze) => {
         actions.push([workItemId, action, snooze]);
         return action === 'approve' ? 'The work item no longer offers this.' : null;
@@ -1746,6 +1751,9 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
       log: () => {},
     });
     const actions: Array<[number, string, { until: number | null; comment: string | null }]> = [];
+    const sourceCalls: Array<[string, boolean]> = [];
+    let header = { sources: [{ kind: 'github', enabled: true, title: 'gh: polled\nClick to stop polling gh', sources: [{ name: 'gh', enabled: true }] }] };
+    const setHeader = (next: typeof header) => void (header = next);
     const resumed: string[] = [];
     let resumeRefusal: string | null = null;
     const refuseResume = (why: string | null) => void (resumeRefusal = why);
@@ -1762,8 +1770,33 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
       return { key, frames };
     };
 
-    return { store, view, scopes, service, openPage, focus, actions, resumed, refuseResume, held };
+    return { store, view, scopes, service, openPage, focus, actions, resumed, refuseResume, held, sourceCalls, setHeader };
   }
+
+  it("sends the list's header with the list, again when only the header changes, and turns a source on or off for a page key only", () => {
+    const { service, openPage, sourceCalls, setHeader, scopes, view } = setup();
+    const page = openPage();
+
+    expect(page.frames[0]).toMatchObject({ type: 'hello', header: { sources: [{ kind: 'github', enabled: true, sources: [{ name: 'gh', enabled: true }] }] } });
+    service.conversationsChanged();
+    expect(page.frames.filter((frame) => frame.type === 'list')).toEqual([]);
+
+    // A source turned off changes only the header, which still reaches the page.
+    setHeader({ sources: [{ kind: 'github', enabled: false, title: 'gh: not polled', sources: [{ name: 'gh', enabled: false }] }] });
+    service.conversationsChanged();
+    expect(page.frames.at(-1)).toMatchObject({ type: 'list', header: { sources: [{ enabled: false }] } });
+    expect(page.frames.at(-1)!['groups']).toBeInstanceOf(Array);
+
+    expect(service.pageSource({ window: page.key, name: 'gh', enabled: true })).toEqual({ status: 200, body: { done: true } });
+    expect(service.pageSource({ window: page.key, name: 'gone', enabled: true })).toEqual({ status: 409, body: { error: 'No source is named gone.' } });
+    expect(service.pageSource({ window: page.key, name: 'gh', enabled: 'yes' }).status).toBe(400);
+    // A window's key, or none, cannot turn sources on or off through the page's command.
+    const window = scopes.open(view.file, view.view);
+
+    expect(service.pageSource({ window, name: 'gh', enabled: false }).status).toBe(403);
+    expect(service.pageSource({ window: 'nobody', name: 'gh', enabled: false }).status).toBe(403);
+    expect(sourceCalls).toEqual([['gh', true], ['gone', true]]);
+  });
 
   it('starts a page unbound with its key and list, binds it to any work item it selects, and holds it to that work item', () => {
     const { scopes, service, openPage, view } = setup();

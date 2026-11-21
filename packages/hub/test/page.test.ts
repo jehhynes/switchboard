@@ -407,6 +407,10 @@ describe('the web page routes', () => {
           posted.push(body);
           return { status: 200, body: { done: true } };
         },
+        '/v1/conversation/page-source': async (body) => {
+          posted.push(body);
+          return { status: 200, body: {} };
+        },
       },
     });
 
@@ -452,10 +456,14 @@ describe('the web page routes', () => {
 
     expect((await post('/v1/conversation/resume', `http://127.0.0.1:${port}`)).status).toBe(200);
     expect((await post('/v1/conversation/row-action', `http://127.0.0.1:${port}`)).status).toBe(200);
+    // The list header's commands are page commands too, under the same cookie and origin checks.
+    expect((await post('/v1/conversation/page-source', `http://127.0.0.1:${port}`)).status).toBe(200);
+    expect((await post('/v1/conversation/page-source', `http://127.0.0.1:${server.port}`)).status).toBe(403);
+    expect((await post('/v1/conversation/page-source', `http://127.0.0.1:${port}`, {})).status).toBe(404);
     expect((await post('/v1/conversation/resume', `http://127.0.0.1:${server.port}`)).status).toBe(403);
     expect((await post('/v1/conversation/resume', `http://127.0.0.1:${port}`, {})).status).toBe(404);
     expect((await post('/v1/conversation/resume', `http://127.0.0.1:${port}`, { Cookie: 'sb_page=forged' })).status).toBe(401);
-    expect(posted).toHaveLength(2);
+    expect(posted).toHaveLength(3);
     stream.destroy();
   });
 

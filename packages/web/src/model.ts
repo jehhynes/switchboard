@@ -1,6 +1,6 @@
 import { SESSION_ICONS, SESSION_TONES, sessionIcon } from '@switchboard/core/group';
 import type { IconTone, SessionIcon } from '@switchboard/core/group';
-import type { ArtifactView, ConversationEntry, ItemView, PageGroup, PageRow, ReplyView, ScopeView, SessionView, StatusView, VoiceView } from './types.js';
+import type { ArtifactView, ConversationEntry, ItemView, PageGroup, PageHeader, PageRow, ReplyView, ScopeView, SessionView, StatusView, VoiceView } from './types.js';
 
 /** What the page shows, kept from its conversation stream (architecture.md § Web page). */
 export interface PageState {
@@ -8,6 +8,8 @@ export interface PageState {
   key: string | null;
   connected: boolean;
   groups: PageGroup[];
+  /** What the list's header shows: the dock header's sources; null before the hub sent it. */
+  header: PageHeader | null;
   /** The selected work item's group, its current session and what it shows; null before the page selected one. */
   scope: ScopeView | null;
   session: SessionView | null;
@@ -20,7 +22,7 @@ export interface PageState {
   expandReplies: boolean;
 }
 
-export const EMPTY: PageState = { key: null, connected: false, groups: [], scope: null, session: null, items: [], more: false, status: null, artifacts: [], unread: 0, voice: null, expandReplies: false };
+export const EMPTY: PageState = { key: null, connected: false, groups: [], header: null, scope: null, session: null, items: [], more: false, status: null, artifacts: [], unread: 0, voice: null, expandReplies: false };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Event = { type: string } & Record<string, any>;
@@ -55,6 +57,7 @@ export function applyEvent(state: PageState, event: Event): PageState {
         key: event['key'] ?? state.key,
         connected: true,
         groups: event['groups'] ?? state.groups,
+        header: event['header'] ?? state.header,
         scope: event['scope'] ?? null,
         session: (event['sessions'] as SessionView[] | undefined)?.find((one) => one.current) ?? null,
         items: ((event['items'] as ItemView[] | undefined) ?? []).filter((item) => !notSent(item)),
@@ -66,7 +69,7 @@ export function applyEvent(state: PageState, event: Event): PageState {
         expandReplies: event['settings']?.expandReplies ?? state.expandReplies,
       };
     case 'list':
-      return { ...state, groups: event['groups'] };
+      return { ...state, groups: event['groups'], header: event['header'] ?? state.header };
     case 'scope':
       return { ...state, scope: event['scope'] ?? null };
     case 'conversations':

@@ -35,7 +35,7 @@ import type { Snapshot, WorkItemView } from './snapshot.js';
 import { SnapshotBuilder } from './snapshotBuilder.js';
 import type { Built } from './snapshotBuilder.js';
 import { WindowScopes } from './windows.js';
-import { dockRowOf, PageAccess, pageActionEvent, pageList, pasteText } from './page.js';
+import { dockRowOf, PageAccess, pageActionEvent, pageHeader, pageList, pasteText } from './page.js';
 import { pageAsset } from './pageAssets.js';
 import { needsMessage, newlyNeeding, rowFor, targetForUrl } from './needs.js';
 import { volumeReply } from './volume.js';
@@ -472,6 +472,17 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
       return pageList(built.dock, built.snapshot);
     },
+    pageHeader: () => pageHeader(views().dock),
+    // The page's source icons turn a source on or off as the dock's do (architecture.md § Web page).
+    setSource: (name, enabled) => {
+      const error = runtime.setSourceEnabled(name, enabled);
+
+      if (error === null) {
+        sendDock('config', {});
+      }
+
+      return error;
+    },
     // The page's row actions run as the dock's, rechecked against the row as it is now (architecture.md § Web page).
     rowAction: (workItemId, action, snooze) => {
       const row = dockRowOf(views().dock, workItemId);
@@ -838,6 +849,7 @@ const dockWithRuns = () => {
       '/v1/conversation/page-conversation': async (body) => (isRecord(body) ? conversation.pageConversation(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, provider?}.' } }),
       '/v1/conversation/resume': async (body) => (isRecord(body) ? conversation.resume(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } }),
       '/v1/conversation/row-paste': async (body) => (isRecord(body) ? conversation.rowPaste(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId, label}.' } }),
+      '/v1/conversation/page-source': async (body) => (isRecord(body) ? conversation.pageSource(body) : { status: 400, body: { error: 'Expected {window, name, enabled}.' } }),
       '/v1/conversation/page-focus': async (body) => (isRecord(body) ? conversation.pageFocus(body) : { status: 400, body: { error: 'Expected {window, focused}.' } }),
       '/v1/conversation/persona': async (body) => (isRecord(body) ? conversation.personaCommand('persona', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, personaId}.' } }),
       '/v1/conversation/mic': async (body) => (isRecord(body) ? conversation.voiceCommand('mic', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, on}.' } }),

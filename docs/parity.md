@@ -144,13 +144,13 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 
 | # | Behaviour | Dock evidence | Web | Web evidence and note |
 |---|---|---|---|---|
-| H1 | Source icons per kind, grey when off; click toggles one source, or opens a check menu for several | `OnSourceClicked` MainWindow.axaml.cs:1787 | Missing | |
+| H1 | Source icons per kind, grey when off; click toggles one source, or opens a check menu for several | `OnSourceClicked` MainWindow.axaml.cs:1787 | Present | `sourceButton` listHeader.ts, `page-source` in conversation.ts; a kind without a logo shows the `tag` codicon where the dock's button is blank; a refusal shows under the header (no toast, H6) |
 | H2 | More Actions: New ad-hoc session…, New conversation in a folder…, Held sessions, Ticket volume report, Refresh sources, Show hub log, Open Settings | `HeaderMenu` MainWindow.axaml.cs:1903 | Partly | New conversation… in the conversation dropdown (render.ts:337) starts one in the selected conversation's host only |
 | H3 | Settings, playbook, hook, source and voice errors and setup notes above the groups, in the warning colour | MainWindow.axaml:450-456, `snapshotErrors` rows.ts:844 | Missing | |
 | H4 | "N held sessions without a work item" above the groups, opening the held sessions window | MainWindow.axaml:458-462 | Missing | |
 | H5 | Needs-you message in the toast when a work item starts needing the operator; a click on it runs that row's click | `ShowNeedsYou` MainWindow.axaml.cs:267 | Missing | The tab title counts Blocked on you instead (`pageTitle` model.ts:107) |
 | H6 | The toast hides after 10 seconds shown with the pointer off it; Dismiss clears it | `CheckStatus` MainWindow.axaml.cs:544 | Missing | no toast |
-| H8 | Title row: Close, More Actions, Auto-hide, Search and the source icons keep their width from the right, the title takes the rest with an ellipsis, and a control that does not fit whole is hidden | `HeaderPanel`, MainWindow.axaml:378-418 | Missing | the list's head is a static "Switchboard" label (main.ts:49); the conversation header has other controls |
+| H8 | Title row: Close, More Actions, Auto-hide, Search and the source icons keep their width from the right, the title takes the rest with an ellipsis, and a control that does not fit whole is hidden | `HeaderPanel`, MainWindow.axaml:378-418 | Partly | `renderListHeader` listHeader.ts: the icons keep their width and the title ends in an ellipsis; nothing is hidden for want of room. Close and Auto-hide are Dock only (D3, D6) |
 | H7 | Page title counts Blocked on you, "(2) Switchboard" | none | Web only | `pageTitle` model.ts:107 |
 
 ## Connection

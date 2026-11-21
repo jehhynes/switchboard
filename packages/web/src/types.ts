@@ -161,6 +161,21 @@ export interface PageRow {
   pastes?: string[];
 }
 
+/** One header icon: the configured sources of one kind (`DockSourceGroup` in the hub's `dock.ts`). */
+export interface SourceGroup {
+  kind: string;
+  /** Whether any source of the kind is polled. */
+  enabled: boolean;
+  /** The icon's tooltip: each source and whether it is polled, then what a click does. */
+  title: string;
+  sources: Array<{ name: string; enabled: boolean }>;
+}
+
+/** What the list's header shows besides the list (`PageHeader` in the hub's `page.ts`). */
+export interface PageHeader {
+  sources: SourceGroup[];
+}
+
 /** A prompt the session waits on in its terminal, as the hub read it from the screen (`ScreenPrompt` in the conversation package). */
 export interface ScreenPrompt {
   id: string;

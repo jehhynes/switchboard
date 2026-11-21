@@ -9,7 +9,7 @@ import { SESSION_ENDED, SESSION_RELAUNCHED } from './runtime.js';
 import { canonicalFolder } from './windows.js';
 import { artifactFile, findFiles } from './page.js';
 import { writeUpload } from './uploads.js';
-import type { PageFile, PageListGroup } from './page.js';
+import type { PageFile, PageHeader, PageListGroup } from './page.js';
 import type { ConversationRef, WindowScope, WindowScopes } from './windows.js';
 import type { VoiceView } from './voice.js';
 import { ClaudeConversationAdapter } from './claudeConversation.js';
@@ -240,6 +240,10 @@ export interface ConversationServiceDeps {
   pinPersona?(sessionId: string, personaId: string | null): string | null;
   /** The web page's list, in the dock's groups (architecture.md § Web page); without it a page lists nothing. */
   pageList?(): PageListGroup[];
+  /** The web page's list header: the dock header's sources (architecture.md § Web page). */
+  pageHeader?(): PageHeader;
+  /** Turns one source on or off, as the dock's source icons do: why not, or null. */
+  setSource?(name: string, enabled: boolean): string | null;
   /** A page's focus changed: a focused, visible page counts as a focused window for the voice. */
   pageFocused?(key: string, focused: boolean): void;
   /**
@@ -522,7 +526,14 @@ export class ConversationService {
     return this.deps.pageList?.() ?? [];
   }
 
-  /** Sends each page its list when it changed. */
+  /** The page's list and its header, as `list` and `hello` carry them; no header without `pageHeader`. */
+  #pageListEvent(): { groups: PageListGroup[]; header?: PageHeader } {
+    const header = this.deps.pageHeader?.();
+
+    return { groups: this.pageList(), ...(header === undefined ? {} : { header }) };
+  }
+
+  /** Sends each page its list when it or its header changed. */
   #listChanged(): void {
     const pages = [...this.#streams.keys()].filter((key) => this.deps.windows.isPage(key));
 
@@ -530,15 +541,35 @@ export class ConversationService {
       return;
     }
 
-    const groups = this.pageList();
-    const text = JSON.stringify(groups);
+    const event = this.#pageListEvent();
+    const text = JSON.stringify(event);
 
     for (const key of pages) {
       if (this.#listShown.get(key) !== text) {
         this.#listShown.set(key, text);
-        this.#send(key, 'list', { groups });
+        this.#send(key, 'list', event);
       }
     }
+  }
+
+  /**
+   * `page-source {window, name, enabled}` (architecture.md § Web page): turns one source on or off, as the dock's source icons do. 403 for a key
+   * that is not a page's, 409 with the hub's refusal.
+   */
+  pageSource(body: Record<string, unknown>): { status: number; body: unknown } {
+    const { window, name, enabled } = body;
+
+    if (typeof window !== 'string' || typeof name !== 'string' || name === '' || typeof enabled !== 'boolean') {
+      return { status: 400, body: { error: 'Expected {window, name, enabled}.' } };
+    }
+
+    if (!this.deps.windows.isPage(window)) {
+      return { status: 403, body: { error: 'Not in this window.' } };
+    }
+
+    const why = this.deps.setSource === undefined ? 'This hub cannot turn sources on or off from the page.' : this.deps.setSource(name, enabled);
+
+    return why === null ? { status: 200, body: { done: true } } : { status: 409, body: { error: why } };
   }
 
   /** Each `row-action`'s answer, by page key and `opId`, so a retried one runs once; the last 100. */
@@ -1016,10 +1047,10 @@ export class ConversationService {
   }
 
   #pageHello(key: string): Record<string, unknown> {
-    const groups = this.pageList();
+    const event = this.#pageListEvent();
 
-    this.#listShown.set(key, JSON.stringify(groups));
-    return { key, groups };
+    this.#listShown.set(key, JSON.stringify(event));
+    return { key, ...event };
   }
 
   /** The voice state and the setting the view reads, which a `hello` carries with voice (architecture.md § Voice). */
