@@ -308,6 +308,9 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 .tab .tab-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tab-open .tab-label { flex: 1 1 auto; }
 .tab .codicon { flex: none; font-size: 14px; }
+/* A file's type icon (fileIcons.tsx): its Seti character at 150% of the text, centred in a 16-pixel box, as VS Code's Explorer and tabs draw it. */
+.file-icon { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; }
+.file-icon::before { font-family: seti; font-size: 150%; font-style: normal; font-weight: normal; line-height: 1; -webkit-font-smoothing: antialiased; }
 .tab-close { display: flex; flex: none; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; border: none; border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
 .tab-close:hover { background: color-mix(in srgb, var(--vscode-foreground) 15%, transparent); }
 /* Artifacts and its count, at the strip's end after the artifact tabs that fit, opening a menu of every artifact. */

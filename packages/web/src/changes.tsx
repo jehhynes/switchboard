@@ -1,6 +1,7 @@
 // The Changes list (PRD R118, architecture.md § Web page): the open conversation's worktree changes from its merge base to disk, as the VS
 // Code window's Open changes shows them, in a menu from the Changes button at the end of the tab strips.
 import type { ComponentChildren, VNode } from 'preact';
+import { FileIcon } from './fileIcons.js';
 
 export type ChangeStatus = 'A' | 'M' | 'D' | 'R' | 'U' | 'C';
 export type ChangeStage = 'committed' | 'staged' | 'working' | 'untracked';
@@ -85,7 +86,7 @@ function Row({ row }: { row: ChangeRow }): VNode {
 
   return (
     <li class={`change-row status-${row.status}`} data-path={row.path} title={rowTitle(row)}>
-      <span class="codicon codicon-file" aria-hidden="true"></span>
+      <FileIcon path={row.path} />
       <span class={`change-name${row.status === 'D' ? ' deleted' : ''}`}>{name}</span>
       <span class="change-dir">{dir}</span>
       <Counts row={row} />

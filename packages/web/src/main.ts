@@ -30,6 +30,7 @@ import type { HistoryOpen, HistoryUi } from './history.js';
 import type { HistoryCategory, HistoryView } from '@switchboard/protocol';
 import { askForNotifications, notificationsAllowed, notifyNeeds, playChime } from './alerts.js';
 import { ChangesController, changesButton, renderChangesMenu } from './changes.js';
+import { useFileIcons } from './fileIcons.js';
 import type { NeedsItem } from './alerts.js';
 
 /** The stream's event types the page reads. */
@@ -332,6 +333,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   // The Changes list, its menu and the session state it was last drawn at, so a turn's end reads it again (architecture.md § Web page).
   const changes = new ChangesController({ fetch: (...args) => deps.fetch(...args), key: () => state.key, draw: () => draw() });
   let changesSession: string | null = null;
+  // File type icons, whose mapping loads the first time a list draws one (architecture.md § Web page).
+  const dropFileIcons = useFileIcons({ fetch: (...args) => deps.fetch(...args), loaded: () => draw() });
 
   // The groups the operator opened or closed on an earlier load, as the dock keeps them across runs.
   view.collapsed = collapsedGroups(localStorage.getItem(GROUPS_KEY));
@@ -3295,6 +3298,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       listening.abort();
       dropDrawer();
       listWidth?.disconnect();
+      dropFileIcons();
       header.close();
       source.close();
 

@@ -60,6 +60,9 @@ const assets = {
   'theme.css': text('text/css; charset=utf-8', theme),
   'codicon.css': text('text/css; charset=utf-8', readFileSync(join(codicons, 'codicon.css'), 'utf8')),
   'codicon.ttf': binary('font/ttf', join(codicons, 'codicon.ttf')),
+  // VS Code's Seti file icons (src/seti/LICENSE.txt), which the page loads the first time it draws a file's icon (src/fileIcons.tsx).
+  'file-icons.json': text('application/json', JSON.stringify({ ...JSON.parse(readFileSync('src/seti/file-icons.json', 'utf8')), license: readFileSync('src/seti/LICENSE.txt', 'utf8') })),
+  'seti.woff': binary('font/woff', 'src/seti/seti.woff'),
   'manifest.webmanifest': text('application/manifest+json', JSON.stringify(manifest)),
   'sw.js': text('text/javascript; charset=utf-8', await bundle('src/swEntry.ts')),
   'offline.html': text('text/html; charset=utf-8', html('src/offline.html')),

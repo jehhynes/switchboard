@@ -542,6 +542,10 @@ describe('pageAsset', () => {
   it("serves the page's own files and Mermaid from the home, and nothing else", () => {
     expect(pageAsset('index.html', dir)?.mime).toBe('text/html; charset=utf-8');
     expect(Buffer.isBuffer(pageAsset('codicon.ttf', dir)?.body)).toBe(true);
+    // VS Code's Seti file icons, with their licence in the mapping.
+    expect(pageAsset('seti.woff', dir)?.mime).toBe('font/woff');
+    expect((pageAsset('seti.woff', dir)?.body as Buffer).subarray(0, 4).toString()).toBe('wOFF');
+    expect(JSON.parse(String(pageAsset('file-icons.json', dir)?.body)).license).toContain('Copyright (c) 2014 Jesse Weed');
     // Every file served without a sign-in is one of the page's own.
     expect([...PUBLIC_PAGE_FILES].filter((name) => pageAsset(name, dir) === null)).toEqual([]);
     expect(pageAsset('mermaid.min.js', dir)).toBeNull();

@@ -2,7 +2,8 @@
 // persona and the view options, and the tabs under it or the switch atop the side column.
 import type { ComponentChildren, VNode } from 'preact';
 import { providerMark } from '@switchboard/conversation/providerIcons';
-import { artifactIcon, selectedEntry, selectedRow, stateIcon } from './model.js';
+import { FileIcon } from './fileIcons.js';
+import { selectedEntry, selectedRow, stateIcon } from './model.js';
 import type { PageState } from './model.js';
 import { ago, artifactBar, LINK_LABEL_MAX, paneStatus, rowKey, TABS } from './render.js';
 import type { SideTab, Tab, View } from './render.js';
@@ -358,7 +359,7 @@ function artifactTabs(state: PageState, strip: ArtifactStrip): ComponentChildren
       return (
         <span class={`tab artifact-tab${selected ? ' selected' : ''}`} role="presentation" data-action="artifact" data-path={artifact.path}>
           <button class="tab-open" type="button" role="tab" aria-selected={selected} tabindex={selected ? 0 : -1} title={`${artifact.title} · ${artifact.kind}`}>
-            <span class={`codicon codicon-${artifactIcon(artifact.type)}`} aria-hidden="true"></span>
+            <FileIcon path={artifact.path} />
             <span class="tab-label">{artifact.title}</span>
           </button>
           <button class="tab-close" type="button" data-action="close-artifact" data-path={artifact.path} aria-label={`Close ${artifact.title}`} title="Close" tabindex={selected ? 0 : -1}>
@@ -380,7 +381,7 @@ function artifactTabs(state: PageState, strip: ArtifactStrip): ComponentChildren
             {ordered.map((artifact) => (
               <button class={`menu-row${tabs.includes(artifact) ? ' in-bar' : ''}${closed.has(artifact.path) ? ' closed' : ''}`} type="button" role="menuitem" data-action="artifact" data-path={artifact.path} title={artifact.path}>
                 <span class="menu-gutter">
-                  <span class={`codicon codicon-${artifactIcon(artifact.type)}`} aria-hidden="true"></span>
+                  <FileIcon path={artifact.path} />
                 </span>
                 <span class="title">{artifact.title}</span>
                 <span class="menu-note">{closed.has(artifact.path) ? `Closed · ${ago(artifact.updatedAt, strip.now)}` : ago(artifact.updatedAt, strip.now)}</span>
