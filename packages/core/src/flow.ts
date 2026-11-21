@@ -6,7 +6,7 @@ import { latestDue, SCHEDULE_SOURCE, scheduleText } from './schedule.js';
 import { homeRepo, isRootPattern, repoOf, repoRoots, samePath, ticketRoot } from './repo.js';
 import type { PermissionMode, Provider, ScheduleSettings, Settings } from './settings.js';
 import { REPORT_KINDS } from './model.js';
-import type { Immediacy, LimitReading, ReportKind, Session, SessionKind, SessionState, Severity, Ticket, TicketBlocker, WorkItem, WorkItemStatus } from './model.js';
+import type { Immediacy, LimitReading, ReportKind, Session, SessionKind, SessionState, Severity, Ticket, TicketBlocker, Triage, WorkItem, WorkItemStatus } from './model.js';
 import { focusUrl } from './focus.js';
 import type { Anchor, SourceLink } from './source.js';
 import type { Actor, EventRecord, NewWorkItem, Store } from './store.js';
@@ -108,8 +108,6 @@ export function nothingNew(handled: HandledWork | null, activityAt: number | nul
 
 /** One ticket from a complete poll. A ticket of the source missing from the poll is not in the assigned state. */
 export interface PolledTicket {
-  inQueue?: boolean;
-  assigneeId?: string | null;
   sourceKey: string;
   /** The reference people use, such as `#123` or `T456`; the source sets it (`{{ticket.ref}}`). */
   ref: string;
@@ -824,9 +822,6 @@ class Flow {
     }
     if (assignmentChanges.length > 0) this.store.noteEvent({ assignmentChanges });
     const seen = new Set<string>();
-    if (source === 'zoho' || source === 'forum') {
-      this.store.volumePoll(source, this.now, (this.context.settings.sources[source]?.pollIntervalSeconds ?? 300) * 1000);
-    }
 
     for (const entry of polled) {
       seen.add(entry.sourceKey);
@@ -840,8 +835,6 @@ class Flow {
         url: entry.url,
         assigned: entry.assigned,
         pool: entry.pool,
-        inQueue: (source === 'zoho' || source === 'forum') && entry.inQueue === true,
-        assigneeId: entry.assigneeId ?? null,
         sortAt: entry.sortAt,
         scopeAt: this.scopeAt(known, entry),
         lastPolledAt: this.now,
@@ -864,6 +857,8 @@ class Flow {
 
       if (known.pool && !entry.pool) {
         this.leftPool(known.id);
+      } else if (!known.pool && entry.pool) {
+        this.reenteredPool(known.id);
       }
 
       if (entry.assigned && (!known.assigned || returned.has(known.id))) {
@@ -875,7 +870,7 @@ class Flow {
 
     for (const ticket of this.store.currentTickets(source)) {
       if (!seen.has(ticket.sourceKey)) {
-        this.store.updateTicket(ticket.id, { assigned: false, pool: false, inQueue: false, assigneeId: null, lastPolledAt: this.now, ...UNSNOOZED });
+        this.store.updateTicket(ticket.id, { assigned: false, pool: false, lastPolledAt: this.now, ...UNSNOOZED });
 
         if (ticket.pool) {
           this.leftPool(ticket.id);
@@ -939,13 +934,31 @@ class Flow {
     });
   }
 
-  /** Support keeps ticket-only triages across queue and assignment changes for reporting. */
+  /**
+   * A ticket that left the pool without a pick loses its pool triage, so it is triaged again if it returns (PRD R47). A running one is kept
+   * until it ends, so it still counts toward `triage.concurrency` and a work item on the ticket waits for it rather than starting a second.
+   */
   private leftPool(ticketId: number): void {
-    const source = this.store.ticket(ticketId)!.source;
-    if (source === 'zoho' || source === 'forum') return;
+    for (const triage of this.store.poolTriages(ticketId)) {
+      if (triage.endedAt !== null) this.store.deleteTriage(triage.id);
+    }
+  }
+
+  /** A ticket back in the pool drops a pool triage still running from before it left, so the new entry is triaged afresh. */
+  private reenteredPool(ticketId: number): void {
     for (const triage of this.store.poolTriages(ticketId)) {
       this.store.deleteTriage(triage.id);
     }
+  }
+
+  /** Drops a pool triage that ends after its ticket left the pool, before its result touches the ticket; true when it did. */
+  private leftPoolTriage(triage: Triage): boolean {
+    if (triage.workItemId !== null || this.store.ticket(triage.ticketId)!.pool) {
+      return false;
+    }
+
+    this.store.deleteTriage(triage.id);
+    return true;
   }
 
   /**
@@ -1137,7 +1150,6 @@ class Flow {
         throw new Refusal(`Switchboard already has ${event.source} ${event.sourceKey}.`);
       }
 
-      this.store.transferVolume(existing.id, ticket.id);
       this.store.deleteBareTicket(existing.id);
     }
 
@@ -1358,7 +1370,7 @@ class Flow {
   private triageSucceeded(event: Extract<FlowEvent, { type: 'triage-succeeded' }>): void {
     const triage = this.store.triage(event.triageId);
 
-    if (triage === null || triage.endedAt !== null) {
+    if (triage === null || triage.endedAt !== null || this.leftPoolTriage(triage)) {
       return;
     }
 
@@ -1414,7 +1426,7 @@ class Flow {
   private triageFailed(triageId: number, error: string, context: string | null): void {
     const triage = this.store.triage(triageId);
 
-    if (triage === null || triage.endedAt !== null) {
+    if (triage === null || triage.endedAt !== null || this.leftPoolTriage(triage)) {
       return;
     }
 
@@ -1576,11 +1588,6 @@ class Flow {
       // The started task session's prompt holds the guidance (PRD R77).
       if (session.kind === 'task' && item.guidance !== null) {
         this.store.updateWorkItem(item.id, { guidance: null });
-      }
-
-      const ticket = this.store.ticket(item.ticketId)!;
-      if (session.kind === 'task' && (ticket.source === 'zoho' || ticket.source === 'forum')) {
-        this.store.volumeWorked(ticket.id, session.id, this.now);
       }
     }
   }
@@ -2909,10 +2916,11 @@ class Flow {
     this.scheduleStarts();
   }
 
-  /** Triages work items, pool tickets, then retained Support tickets, within the shared concurrency limit. */
+  /** Triages work items, then pool tickets that have no triage yet, up to `triage.concurrency` at once (PRD R47). */
   private scheduleTriage(): void {
     const running = this.store.runningTriages();
     const busy = new Set(running.map((triage) => triage.workItemId));
+    // A work item waits for a pool triage still running on its ticket (`leftPool`).
     const busyTickets = new Set(running.filter((triage) => triage.workItemId === null).map((triage) => triage.ticketId));
     let free = this.context.settings.triage.concurrency - running.length;
     const start = (ticket: Ticket, item: WorkItem | null) => {
@@ -2941,12 +2949,6 @@ class Flow {
       if (!ticket.snoozed && ticket.handledAssignmentKey == null && this.store.poolTriages(ticket.id).length === 0 && !this.hasOpenWorkItem(ticket.id)) {
         start(ticket, null);
       }
-    }
-
-    const enabled = this.store.enabledSources();
-    for (const ticket of this.store.unclassifiedTickets()) {
-      if (free <= 0) return;
-      if (enabled.has(ticket.source) && this.context.settings.sources[ticket.source] && !ticket.snoozed && ticket.handledAssignmentKey == null && !this.hasOpenWorkItem(ticket.id)) start(ticket, null);
     }
   }
 

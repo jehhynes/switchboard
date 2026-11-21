@@ -492,6 +492,23 @@ export const MIGRATIONS = [
     at INTEGER NOT NULL,
     PRIMARY KEY (workItemId, path)
   );`,
+  // Support volume is removed (PRD R84): other engineers' tickets lose their ticket-only triages, and every ticket its queue fields, volume facts
+  // and classification. Their tickets stay, as a ticket that left the pool does.
+  `DELETE FROM triages WHERE workItemId IS NULL AND ticketId IN (SELECT id FROM tickets WHERE source IN ('zoho', 'forum') AND pool = 0);
+   DROP TABLE ticketClassifications;
+   DELETE FROM events WHERE type IN ('volume-gap', 'volume-worked') AND id NOT IN (SELECT eventId FROM changes);
+   UPDATE changes SET fields = json_remove(fields, '$.inQueue', '$.assigneeId')
+     WHERE entity = 'ticket' AND (json_type(fields, '$.inQueue') IS NOT NULL OR json_type(fields, '$.assigneeId') IS NOT NULL);
+   DELETE FROM changes WHERE entity = 'ticket' AND op = 'update' AND fields = '{}';
+   DROP INDEX currentQueue;
+   ALTER TABLE tickets DROP COLUMN inQueue;
+   ALTER TABLE tickets DROP COLUMN assigneeId;
+   ALTER TABLE sourceStates DROP COLUMN volumeStartedAt;
+   ALTER TABLE sourceStates DROP COLUMN volumeLastAt;
+   ALTER TABLE sourceStates DROP COLUMN volumeInterval;
+   ALTER TABLE sourceStates DROP COLUMN volumeTimezone;
+   INSERT INTO historyRevisions (ticketId, revision) SELECT id, 1 FROM tickets WHERE source IN ('zoho', 'forum') AND true
+     ON CONFLICT (ticketId) DO UPDATE SET revision = revision + 1;`,
 ];
 
 /**
@@ -526,7 +543,7 @@ const REPLY_PLACE = "(source = 'screen' AND withdrawn = 0)";
 /** A reply that counts as unread (`countsUnread`) and was not seen. */
 const UNREAD_REPLY = "seenAt IS NULL AND withdrawn = 0 AND rewrittenBy IS NULL AND kind <> 'note' AND opening <> ''";
 
-const BOOLEANS = new Set(['assigned', 'pool', 'inQueue', 'snoozed', 'released', 'releasing', 'approvalHeld', 'external', 'mentioned', 'codeMode', 'promptless', 'personaPinned']);
+const BOOLEANS = new Set(['assigned', 'pool', 'snoozed', 'released', 'releasing', 'approvalHeld', 'external', 'mentioned', 'codeMode', 'promptless', 'personaPinned']);
 /** Stored as comma-separated text. */
 const LISTS = new Set(['reports', 'retiredIds']);
 /** Stored as JSON text. */
@@ -969,7 +986,7 @@ export class Store {
   }
 
   insertTicket(ticket: NewTicket): Ticket {
-    const row = { adhocKey: null, hostWindow: null, repo: '', inQueue: false, assigneeId: null, handledAssignmentKey: null, snoozeComment: null, blockers: [], ...ticket };
+    const row = { adhocKey: null, hostWindow: null, repo: '', handledAssignmentKey: null, snoozeComment: null, blockers: [], ...ticket };
 
     return { id: this.#insert('tickets', row as unknown as Row), ...row };
   }
@@ -991,7 +1008,6 @@ export class Store {
     this.#db.prepare('DELETE FROM changes WHERE ticketId = ?').run(id);
     this.#db.prepare('DELETE FROM events WHERE ticketId = ?').run(id);
     this.#db.prepare('DELETE FROM historyRevisions WHERE ticketId = ?').run(id);
-    this.#db.prepare('DELETE FROM ticketClassifications WHERE ticketId = ?').run(id);
     this.#db.prepare('DELETE FROM tickets WHERE id = ?').run(id);
   }
 
@@ -1064,46 +1080,9 @@ export class Store {
     return this.#all('SELECT * FROM tickets WHERE source = ? ORDER BY id', source);
   }
 
+  /** The source's tickets in the assigned state or the pool, which a poll that misses them takes out of both. */
   currentTickets(source: string): Ticket[] {
-    return this.#all('SELECT * FROM tickets WHERE source = ? AND (inQueue = 1 OR assigned = 1 OR pool = 1) ORDER BY id', source);
-  }
-
-  volumePoll(source: string, at: number, interval: number): void {
-    const previous = this.#one<{ volumeLastAt: number | null; volumeInterval: number | null }>('SELECT volumeLastAt, volumeInterval FROM sourceStates WHERE name = ?', source);
-    if (previous?.volumeLastAt != null && at - previous.volumeLastAt > 3 * (previous.volumeInterval ?? interval)) {
-      this.#db.prepare("INSERT INTO events(at, type, actor, detail) VALUES (?, 'volume-gap', 'hub', ?)").run(at, JSON.stringify({ source, from: previous.volumeLastAt, to: at }));
-    }
-    this.#db.prepare(`INSERT INTO sourceStates(name, enabled, volumeStartedAt, volumeLastAt, volumeInterval) VALUES (?, 1, ?, ?, ?)
-      ON CONFLICT(name) DO UPDATE SET volumeStartedAt = COALESCE(volumeStartedAt, excluded.volumeStartedAt), volumeLastAt = excluded.volumeLastAt, volumeInterval = excluded.volumeInterval`).run(source, at, at, interval);
-  }
-
-  volumeWorked(ticketId: number, sessionId: string, at: number): void {
-    this.#db.prepare("INSERT INTO events(at, type, actor, ticketId, detail) VALUES (?, 'volume-worked', 'hub', ?, ?)").run(at, ticketId, JSON.stringify({ sessionId }));
-    this.#bump(ticketId);
-  }
-
-  /** Ticket-report identity consolidation preserves queue evidence on the surviving ticket. */
-  transferVolume(from: number, to: number): void {
-    this.#db.prepare(`INSERT INTO ticketClassifications SELECT ?, playbook, immediacy, severity, at FROM ticketClassifications WHERE ticketId = ?
-      ON CONFLICT(ticketId) DO UPDATE SET playbook = excluded.playbook, immediacy = excluded.immediacy, severity = excluded.severity, at = excluded.at
-      WHERE excluded.at > ticketClassifications.at`).run(to, from);
-    const ticket = this.ticket(from)!;
-    this.#db.prepare("UPDATE changes SET ticketId = ?, entityId = CASE WHEN entity = 'ticket' THEN ? ELSE entityId END WHERE ticketId = ?").run(to, String(to), from);
-    this.#db.prepare('UPDATE events SET ticketId = ? WHERE ticketId = ?').run(to, from);
-    this.#db.prepare('UPDATE tickets SET inQueue = ?, assigneeId = ? WHERE id = ?').run(ticket.inQueue ? 1 : 0, ticket.assigneeId ?? null, to);
-    this.#bump(to);
-  }
-
-  volumeData(): import('./volume.js').VolumeData {
-    return {
-      classifications: this.#all('SELECT * FROM ticketClassifications'),
-      sources: this.#db.prepare('SELECT name AS source, volumeStartedAt AS startedAt, volumeLastAt AS lastAt, volumeInterval AS interval, volumeTimezone AS timezone FROM sourceStates WHERE volumeStartedAt IS NOT NULL').all() as unknown as import('./volume.js').VolumeSource[],
-      tickets: this.#all<Ticket>("SELECT * FROM tickets WHERE source IN ('zoho', 'forum')"),
-      changes: this.#db.prepare(`SELECT c.ticketId, e.at, c.fields FROM changes c JOIN events e ON e.id = c.eventId JOIN tickets t ON t.id = c.ticketId
-        WHERE c.entity = 'ticket' AND t.source IN ('zoho', 'forum') AND (json_type(c.fields, '$.inQueue') IS NOT NULL OR json_type(c.fields, '$.assigned') IS NOT NULL) ORDER BY e.at, c.id`).all().map((r) => ({ ticketId: r['ticketId'] as number, at: r['at'] as number, fields: JSON.parse(r['fields'] as string) as Record<string, [unknown, unknown]> })),
-      worked: this.#db.prepare("SELECT ticketId, at FROM events WHERE type = 'volume-worked' ORDER BY at, id").all() as unknown as { ticketId: number; at: number }[],
-      gaps: this.#db.prepare("SELECT detail FROM events WHERE type = 'volume-gap' ORDER BY at, id").all().map((r) => JSON.parse(r['detail'] as string) as { source: string; from: number; to: number }),
-    };
+    return this.#all('SELECT * FROM tickets WHERE source = ? AND (assigned = 1 OR pool = 1) ORDER BY id', source);
   }
 
   insertWorkItem(item: NewWorkItem): WorkItem {
@@ -1253,23 +1232,6 @@ export class Store {
 
   updateTriage(id: number, patch: Partial<NewTriage>): void {
     this.#update('triages', id, patch);
-    const triage = this.triage(id)!;
-    if (triage.playbook !== null && triage.endedAt !== null && triage.error === null) {
-      this.#db.prepare(`INSERT INTO ticketClassifications
-        SELECT id, ?, ?, ?, ? FROM tickets WHERE id = ? AND source IN ('zoho', 'forum')
-        ON CONFLICT(ticketId) DO UPDATE SET playbook = excluded.playbook, immediacy = excluded.immediacy, severity = excluded.severity, at = excluded.at
-        WHERE excluded.at >= ticketClassifications.at`).run(triage.playbook, triage.immediacy, triage.severity, triage.endedAt, triage.ticketId);
-    }
-  }
-
-  /** Retained Support tickets without a classification or an outstanding/failed ticket-only attempt. */
-  unclassifiedTickets(): Ticket[] {
-    return this.#all(`SELECT t.* FROM tickets t WHERE source IN ('zoho', 'forum') AND lastPolledAt IS NOT NULL
-      AND assigned = 0 AND pool = 0
-      AND (inQueue = 1 OR EXISTS (SELECT 1 FROM changes WHERE ticketId = t.id AND entity = 'ticket' AND json_extract(fields, '$.inQueue[1]') = 1))
-      AND NOT EXISTS (SELECT 1 FROM ticketClassifications WHERE ticketId = t.id)
-      AND NOT EXISTS (SELECT 1 FROM triages WHERE ticketId = t.id AND workItemId IS NULL)
-      ORDER BY t.id`);
   }
 
   triage(id: number): Triage | null {
@@ -1418,8 +1380,7 @@ export class Store {
 
   /** Forgets the state of every source not in `names`, so a source removed and added again starts off (PRD R3). */
   keepSourceStates(names: string[]): void {
-    this.#db.prepare(`UPDATE sourceStates SET enabled = 0 WHERE name NOT IN (SELECT value FROM json_each(?))`).run(JSON.stringify(names));
-    this.#db.prepare(`DELETE FROM sourceStates WHERE volumeStartedAt IS NULL AND name NOT IN (SELECT value FROM json_each(?))`).run(JSON.stringify(names));
+    this.#db.prepare(`DELETE FROM sourceStates WHERE name NOT IN (SELECT value FROM json_each(?))`).run(JSON.stringify(names));
   }
 
   /** When the activity log began; earlier work shows only as the facts its migration reconstructed. */

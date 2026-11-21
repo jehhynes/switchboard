@@ -18,7 +18,6 @@ export * from './githubLinks.js';
 export * from './queue.js';
 export * from './runner.js';
 export * from './exec.js';
-export * from './volume.js';
 export * from './classifier.js';
 export * from './conversation.js';
 export * from './persona.js';

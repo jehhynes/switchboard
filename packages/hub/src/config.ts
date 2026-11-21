@@ -49,8 +49,8 @@ export function sourceOptionsError(name: string, kind: string, options: Record<s
 }
 
 /**
- * Errors between sources, which reject the file whole (PRD R42): only a GitHub source may be named apart from its kind, because Support volume
- * recording finds Zoho and Forum tickets by source name; no source may take another kind's name; and no two GitHub sources may read one project
+ * Errors between sources, which reject the file whole (PRD R42): only a GitHub source may be named apart from its kind, because schema
+ * migrations find Zoho and Forum tickets by source name; no source may take another kind's name; and no two GitHub sources may read one project
  * board, including a source that is off, because an issue would then belong to both.
  */
 export function sourcesErrors(settings: Settings, recorded: Readonly<Record<string, string>> = {}): string[] {

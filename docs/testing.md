@@ -151,6 +151,4 @@ R85 tests cover registration before queue entry, unchanged assignments across st
 
 ## Support volume
 
-Core tests verify the recorded evidence: observed queue retention, the initial baseline, assignment transfers, work-item deletion, identity consolidation, failed polls and coverage gaps. Source fixtures verify all fetched Support tickets are retained with no additional history/audit reads for other engineers. Live acceptance uses isolated storage and read-only source polling; it must not pick or start any Support ticket.
-
-Support classification tests cover priority and shared concurrency, other-assignee isolation, failure and cancellation, departure while waiting, assignment changes, durable classifications after deletion, and migration from existing triages.
+R84 is removed. Source fixtures verify that Zoho and Forum leave out a ticket another engineer holds without reading its history or audit; pool tests verify that work items are triaged before pool tickets and that a ticket neither assigned nor in the pool is never triaged; a store test verifies the upgrade that drops Support volume's data.

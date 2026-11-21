@@ -9,13 +9,13 @@ const raw = (name: string) => readFileSync(join(import.meta.dirname, 'fixtures',
 const CONFIG = (parseForumConfig({ userId: '7' }) as { config: ForumConfig }).config;
 
 describe('ForumSource.poll', () => {
-  it('retains all open topics without audit reads for other assignees', async () => {
+  it('reads open topics in the forum: unassigned ones are the pool, yours are assigned, and anyone else’s are left out', async () => {
     const opened = JSON.stringify({ EntityId: 90100, OpenedUtc: '2026-09-20 08:00:00.123' });
     const query = vi.fn<Query>(async (sql) => parseRows(sql.includes('AuditEntity') ? opened : raw('topics')));
     const result = await new ForumSource(CONFIG, query).poll();
 
     expect(query.mock.calls[0]?.[0]).toBe(
-      'SELECT t.Id, t.Title, t.`Key`, t.AssigneeId, t.CreatedUtc, lp.CreatedUtc AS LastPublicPostUtc FROM Thread t LEFT JOIN Entry lp ON lp.Id = t.LastPublicEntryId WHERE t.CommunityId = 1 AND t.DeletedUtc IS NULL AND t.IsLocked = 0 AND t.Status = 0 LIMIT 500;',
+      'SELECT t.Id, t.Title, t.`Key`, t.AssigneeId, t.CreatedUtc, lp.CreatedUtc AS LastPublicPostUtc FROM Thread t LEFT JOIN Entry lp ON lp.Id = t.LastPublicEntryId WHERE t.CommunityId = 1 AND t.DeletedUtc IS NULL AND t.IsLocked = 0 AND t.Status = 0 AND (t.AssigneeId IS NULL OR t.AssigneeId = 7) LIMIT 500;',
     );
 
     // Someone else's topic is not looked up; a topic is Open since its latest audited Status change.
@@ -27,7 +27,7 @@ describe('ForumSource.poll', () => {
     const tickets = (result as { tickets: { sourceKey: string; assigned: boolean; pool: boolean; sortAt: number | null; enteredAt: number | null }[] }).tickets;
 
     // Recorded live: 7 open topics, none assigned; two synthetic rows add yours and someone else's.
-    expect(tickets).toHaveLength(9);
+    expect(tickets).toHaveLength(8);
     expect(tickets.filter((ticket) => ticket.pool)).toHaveLength(7);
     expect(tickets.find((ticket) => ticket.sourceKey === '90100')).toEqual({
       sourceKey: '90100',
@@ -38,12 +38,10 @@ describe('ForumSource.poll', () => {
       url: 'https://forum.example.com/t/forum/topic-90100',
       assigned: true,
       pool: false,
-      inQueue: true,
-      assigneeId: CONFIG.userId,
       sortAt: Date.UTC(2026, 8, 2, 11, 0, 0),
       enteredAt: Date.UTC(2026, 8, 20, 8, 0, 0, 123),
     });
-    expect(tickets.find((ticket) => ticket.sourceKey === '90101')).toMatchObject({ assigned: false, pool: false, inQueue: true, enteredAt: null });
+    expect(tickets.some((ticket) => ticket.sourceKey === '90101')).toBe(false);
     expect(tickets[0]).toMatchObject({ sourceKey: '90001', sortAt: Date.UTC(2026, 9, 1, 17, 54, 51), enteredAt: Date.UTC(2026, 9, 1, 17, 54, 51) });
   });
 
@@ -52,14 +50,14 @@ describe('ForumSource.poll', () => {
     const topics = (audit: QueryResult) => async (sql: string) => (sql.includes('AuditEntity') ? audit : parseRows(row));
 
     expect(await new ForumSource(CONFIG, topics({ rows: [] })).poll()).toEqual({
-      tickets: [{ sourceKey: '5', ref: 'T5', repo: '', sourceId: null, title: 't', url: 'https://forum.example.com/t/forum/k', assigned: false, pool: true, inQueue: true, assigneeId: null, sortAt: Date.UTC(2026, 0, 2, 3, 4, 5), enteredAt: Date.UTC(2026, 0, 2, 3, 4, 5) }],
+      tickets: [{ sourceKey: '5', ref: 'T5', repo: '', sourceId: null, title: 't', url: 'https://forum.example.com/t/forum/k', assigned: false, pool: true, sortAt: Date.UTC(2026, 0, 2, 3, 4, 5), enteredAt: Date.UTC(2026, 0, 2, 3, 4, 5) }],
     });
     expect(await new ForumSource(CONFIG, topics({ error: 'Access denied to audit.' })).poll()).toEqual({ error: 'Access denied to audit.' });
     // With no topic, the audit store is not read.
     const empty = vi.fn<Query>(async () => ({ rows: [] }));
     expect(await new ForumSource(CONFIG, empty).poll()).toEqual({ tickets: [] });
     expect(empty).toHaveBeenCalledTimes(1);
-    expect(await new ForumSource({ ...CONFIG, maxRows: 1 }, async () => parseRows(row)).poll()).toEqual({ error: '1 or more open Forum topics; raise sources.forum.maxRows.' });
+    expect(await new ForumSource({ ...CONFIG, maxRows: 1 }, async () => parseRows(row)).poll()).toEqual({ error: '1 or more open Forum topics assigned to you or no one; raise sources.forum.maxRows.' });
     expect(await new ForumSource(CONFIG, async () => ({ error: 'The forum database cannot be reached; check the VPN.' })).poll()).toEqual({ error: 'The forum database cannot be reached; check the VPN.' });
   });
 });

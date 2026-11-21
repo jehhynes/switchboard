@@ -140,13 +140,14 @@ export class ForumSource implements Source {
     readonly name = 'forum',
   ) {}
 
-  /** All open topics; only yours and the unassigned pool are actionable (PRD R5, R47). */
+  /** Open topics in the forum: yours are assigned, unassigned ones are the pool, and anyone else's are left out (PRD R5, R47). */
   async poll(): Promise<PollResult> {
     const result = await this.query(
       'SELECT t.Id, t.Title, t.`Key`, t.AssigneeId, t.CreatedUtc, lp.CreatedUtc AS LastPublicPostUtc FROM Thread t ' +
         'LEFT JOIN Entry lp ON lp.Id = t.LastPublicEntryId ' +
         `WHERE t.CommunityId = ${this.config.forumId} AND t.DeletedUtc IS NULL AND t.IsLocked = 0 AND t.Status = 0 ` +
-        `LIMIT ${this.config.maxRows};`,
+        // Anyone else's topics are left out before the limit, so they never make a poll incomplete.
+        `AND (t.AssigneeId IS NULL OR t.AssigneeId = ${this.config.userId}) LIMIT ${this.config.maxRows};`,
     );
 
     if ('error' in result) {
@@ -154,7 +155,7 @@ export class ForumSource implements Source {
     }
 
     if (result.rows.length >= this.config.maxRows) {
-      return { error: `${this.config.maxRows} or more open Forum topics; raise sources.${this.name}.maxRows.` };
+      return { error: `${this.config.maxRows} or more open Forum topics assigned to you or no one; raise sources.${this.name}.maxRows.` };
     }
 
     const tickets: PolledTicket[] = [];
@@ -165,7 +166,7 @@ export class ForumSource implements Source {
       return opened;
     }
 
-    for (const row of result.rows) {
+    for (const row of kept) {
       const assignee = row['AssigneeId'] === null || row['AssigneeId'] === undefined ? null : String(row['AssigneeId']);
 
       tickets.push({
@@ -176,12 +177,10 @@ export class ForumSource implements Source {
         url: `https://forum.example.com/t/forum/${String(row['Key'] ?? '')}`,
         assigned: assignee === this.config.userId,
         pool: assignee === null,
-        inQueue: true,
-        assigneeId: assignee,
         // The last public post is how long the asker has waited; a topic without one falls back to its creation.
         sortAt: utc(row['LastPublicPostUtc']) ?? utc(row['CreatedUtc']),
         repo: '',
-        enteredAt: assignee !== null && assignee !== this.config.userId ? null : opened.at.get(String(row['Id'])) ?? utc(row['CreatedUtc']),
+        enteredAt: opened.at.get(String(row['Id'])) ?? utc(row['CreatedUtc']),
       });
     }
 

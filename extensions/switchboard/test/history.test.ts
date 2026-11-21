@@ -239,18 +239,3 @@ describe('History page', () => {
     }
   });
 });
-
-it('labels retained Support queue and work facts in History', () => {
-  const run = new Run();
-  run.send({ type: 'poll', source: 'zoho', tickets: [{ ...ISSUE, assigned: false, inQueue: true, assigneeId: 'other' }] });
-  run.store.volumeWorked(1, 'removed-session', T0 + 1);
-  run.now += MINUTE;
-  run.send({ type: 'poll', source: 'zoho', tickets: [] });
-  const view = historyView(run.history(), run.now);
-  const entries = view.sections.flatMap(section => section.entries);
-  expect(entries.some(entry => entry.text === 'Worked in Switchboard')).toBe(true);
-  expect(JSON.stringify(entries)).toContain('Observed outside the active Support queue');
-  expect(JSON.stringify(entries)).not.toContain('ticket.inQueue');
-  expect(JSON.stringify(entries)).not.toContain('volume-worked');
-  run.store.close();
-});

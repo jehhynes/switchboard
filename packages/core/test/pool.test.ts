@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { FlowAction, PolledTicket } from '../src/flow.js';
-import { Harness, T0, playbooks } from './flowHarness.js';
+import { Harness, T0, playbooks, settings } from './flowHarness.js';
 
 /** A Zoho ticket: in the pool, assigned to the operator, or neither. Its R ref shows that the source, not core, chooses the reference. */
 function zoho(key: string, state: 'pool' | 'assigned' | 'neither', sortAt = Number(key)): PolledTicket {
@@ -62,16 +62,63 @@ describe('pool triage (PRD R47, R50)', () => {
     expect(h.store.poolTriages(1)).toMatchObject([{ error: 'Triage playbook triage:zoho: Unknown template variable: ticket.title.', endedAt: T0 }]);
   });
 
-  it('keeps the Support triage when a ticket leaves the pool and reuses it if it returns', () => {
+  it('drops the pool triage of a ticket that leaves the pool, and triages it again if it returns', () => {
     const h = new Harness({ playbooks: ZOHO_PLAYBOOKS });
     const triage = only(pollZoho(h, zoho('500', 'pool')), 'triage');
     h.act({ type: 'triage-succeeded', triageId: triage.triageId, context: 'ctx', playbook: 'support:case', immediacy: null, severity: null, model: null });
 
     pollZoho(h);
     expect(h.store.ticket(1)).toMatchObject({ pool: false, assigned: false });
-    expect(h.store.poolTriages(1)).toMatchObject([{ playbook: 'support:case' }]);
+    expect(h.store.poolTriages(1)).toEqual([]);
 
-    expect(pollZoho(h, zoho('500', 'pool'))).toEqual([]);
+    expect(only(pollZoho(h, zoho('500', 'pool')), 'triage').ticket.sourceKey).toBe('500');
+  });
+
+  it('lets a pool ticket assigned while its triage runs wait for that triage, then drops it and triages the work item', () => {
+    const h = new Harness({ playbooks: ZOHO_PLAYBOOKS });
+    const pool = only(pollZoho(h, zoho('500', 'pool')), 'triage');
+
+    expect(pollZoho(h, zoho('500', 'assigned'))).toEqual([]);
+    expect(h.store.runningTriages()).toMatchObject([{ id: pool.triageId, workItemId: null }]);
+    expect(h.store.workItemsForTicket(1)).toMatchObject([{ status: 'triaging' }]);
+
+    const local = only(h.act({ type: 'triage-succeeded', triageId: pool.triageId, context: 'ctx', playbook: 'support:case', immediacy: null, severity: null, model: null }), 'triage');
+    expect(local).toMatchObject({ workItemId: 1 });
+    expect(h.store.poolTriages(1)).toEqual([]);
+  });
+
+  it('ignores a pool triage that ends after another engineer claimed the ticket, adding none of its links', () => {
+    const h = new Harness({ playbooks: ZOHO_PLAYBOOKS });
+    const pool = only(pollZoho(h, zoho('500', 'pool')), 'triage');
+
+    pollZoho(h);
+    expect(h.act({ type: 'triage-succeeded', triageId: pool.triageId, context: 'ctx', playbook: 'support:case', immediacy: null, severity: null, model: null, links: [{ label: 'PR', target: 'https://github.com/o/r/pull/2' }] })).toEqual([]);
+    expect([h.store.poolTriages(1), h.store.linksFor(1)]).toEqual([[], []]);
+  });
+
+  it('triages a ticket afresh when it returns to the pool while a triage from before it left still runs', () => {
+    const h = new Harness({ playbooks: ZOHO_PLAYBOOKS });
+    const old = only(pollZoho(h, zoho('500', 'pool')), 'triage');
+
+    pollZoho(h);
+    const fresh = only(pollZoho(h, zoho('500', 'pool')), 'triage');
+    expect(fresh.triageId).not.toBe(old.triageId);
+
+    expect(h.act({ type: 'triage-succeeded', triageId: old.triageId, context: 'ctx', playbook: 'support:case', immediacy: null, severity: null, model: null })).toEqual([]);
+    expect(h.store.poolTriages(1)).toMatchObject([{ id: fresh.triageId, endedAt: null }]);
+  });
+
+  it('triages work items before pool tickets within the shared concurrency limit, and never a ticket neither assigned nor in the pool', () => {
+    const h = new Harness({ playbooks: ZOHO_PLAYBOOKS, settings: settings({ triage: { concurrency: 1 } }) });
+    const first = only(pollZoho(h, zoho('501', 'neither'), zoho('502', 'pool'), zoho('503', 'assigned')), 'triage');
+    expect(first).toMatchObject({ ticket: { sourceKey: '503' }, workItemId: 1 });
+
+    const second = only(h.act({ type: 'triage-succeeded', triageId: first.triageId, context: 'ctx', playbook: 'support:case', immediacy: null, severity: null, model: null }).filter((a) => a.type === 'triage'), 'triage');
+    expect(second).toMatchObject({ ticket: { sourceKey: '502' }, workItemId: null });
+
+    h.act({ type: 'triage-succeeded', triageId: second.triageId, context: 'ctx', playbook: 'support:case', immediacy: null, severity: null, model: null });
+    expect(h.act({ type: 'tick' }).filter((a) => a.type === 'triage')).toEqual([]);
+    expect([h.store.poolTriages(1), h.store.workItemsForTicket(1)]).toEqual([[], []]);
   });
 
   it('lists pool tickets oldest first', () => {

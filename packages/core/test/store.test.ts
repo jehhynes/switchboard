@@ -90,21 +90,41 @@ describe('Store', () => {
     store.close();
   });
 
-  it('seeds the latest successful Support classification when upgrading version 29', () => {
-    const path = join(dir, 'v29.db');
+  it('drops Support volume when upgrading: other engineers\' ticket-only triages, queue fields, volume facts and classifications (PRD R84)', () => {
+    const version = MIGRATIONS.length - 1;
+    const path = join(dir, 'volume.db');
     const raw = new DatabaseSync(path);
-    raw.exec(MIGRATIONS.slice(0, 29).join(';'));
-    raw.exec(`PRAGMA user_version = 29;
-      INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'zoho', '1', 'One', '', 0, ''), (2, 'github', '2', 'Two', '', 0, '');
-      INSERT INTO triages (ticketId, startedAt, endedAt, playbook, immediacy, severity, error) VALUES
-        (1, 1, 2, 'support:old', 'URGENT', 'HIGH', NULL),
-        (1, 3, 4, 'support:new', 'BLOCKING', 'LOW', NULL),
-        (1, 5, 6, NULL, NULL, NULL, 'Failed'),
-        (2, 1, 2, 'dev:question', NULL, NULL, NULL);`);
+    raw.exec(MIGRATIONS.slice(0, version).join(';'));
+    raw.exec(`PRAGMA user_version = ${version};
+      INSERT INTO tickets (id, source, sourceKey, title, url, assigned, pool, inQueue, assigneeId, repoRoot) VALUES
+        (1, 'zoho', '1', 'Other', '', 0, 0, 1, 'other', ''), (2, 'zoho', '2', 'Pool', '', 0, 1, 1, NULL, ''), (3, 'github', '3', 'Gone', '', 0, 0, 0, NULL, '');
+      INSERT INTO triages (id, ticketId, startedAt, endedAt, playbook) VALUES (1, 1, 1, 2, 'support:defect'), (2, 2, 1, 2, 'support:defect'), (3, 3, 1, 2, 'dev:question');
+      INSERT INTO ticketClassifications VALUES (1, 'support:defect', NULL, NULL, 2);
+      INSERT INTO sourceStates (name, enabled, volumeStartedAt, volumeLastAt, volumeInterval) VALUES ('zoho', 1, 1, 5, 300000);
+      INSERT INTO events (id, at, type, actor, ticketId) VALUES (10, 3, 'poll', 'hub', 1), (11, 4, 'volume-worked', 'hub', 1), (12, 5, 'volume-gap', 'hub', NULL), (13, 6, 'poll', 'hub', 2);
+      INSERT INTO changes (eventId, ticketId, entity, entityId, op, fields) VALUES
+        (10, 1, 'ticket', '1', 'update', '{"inQueue":[true,false],"assigneeId":["other",null]}'),
+        (13, 2, 'ticket', '2', 'update', '{"pool":[false,true],"inQueue":[false,true]}');
+      INSERT INTO historyRevisions (ticketId, revision) VALUES (1, 4);`);
     raw.close();
+
     const store = Store.open(path);
-    expect(store.volumeData().classifications).toEqual([{ ticketId: 1, playbook: 'support:new', immediacy: 'BLOCKING', severity: 'LOW', at: 4 }]);
+    expect([store.ticket(1)?.title, store.ticket(2)?.pool]).toEqual(['Other', true]);
+    expect([store.poolTriages(1), store.poolTriages(2).length, store.poolTriages(3).length]).toEqual([[], 1, 1]);
+    expect(store.enabledSources().has('zoho')).toBe(true);
+    // An open History tab that read the old changes reads them again.
+    expect([store.historyRevision(1), store.historyRevision(2), store.historyRevision(3)]).toEqual(['5', '1', '0']);
     store.close();
+
+    const after = new DatabaseSync(path);
+    const columns = (table: string) => (after.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((column) => column.name);
+    expect(columns('tickets')).not.toContain('inQueue');
+    expect(columns('tickets')).not.toContain('assigneeId');
+    expect(columns('sourceStates')).toEqual(['name', 'enabled']);
+    expect(after.prepare("SELECT name FROM sqlite_master WHERE name IN ('ticketClassifications', 'currentQueue')").all()).toEqual([]);
+    expect(after.prepare('SELECT id, type FROM events WHERE id >= 10 ORDER BY id').all()).toEqual([{ id: 10, type: 'poll' }, { id: 13, type: 'poll' }]);
+    expect(after.prepare('SELECT ticketId, fields FROM changes ORDER BY id').all()).toEqual([{ ticketId: 2, fields: '{"pool":[false,true]}' }]);
+    after.close();
   });
 
   it('marks a version 31 link mentioned only when triage added it to a Zoho or Forum ticket and no accepted session report named it (PRD R61)', () => {
@@ -167,7 +187,7 @@ describe('Store', () => {
     raw.close();
 
     const reopened = Store.open(path);
-    expect(reopened.findTicket('github', '1')).toEqual({ id: 1, source: 'github', sourceKey: '1', ref: '#1', repo: '', sourceId: null, title: 'One', url: 'u', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: 5, repoRoot: '', adhocKey: null, hostWindow: null, inQueue: false, assigneeId: null, handledAssignmentKey: null, snoozeComment: null, blockers: [] });
+    expect(reopened.findTicket('github', '1')).toEqual({ id: 1, source: 'github', sourceKey: '1', ref: '#1', repo: '', sourceId: null, title: 'One', url: 'u', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: 5, repoRoot: '', adhocKey: null, hostWindow: null, handledAssignmentKey: null, snoozeComment: null, blockers: [] });
     reopened.close();
   });
 

@@ -140,10 +140,15 @@ export class ZohoSource implements Source {
       const tickets: PolledTicket[] = [];
 
       for (const ticket of rows.filter((row) => this.inScope(row))) {
-        tickets.push(await this.polled(ticket, teamOf));
+        const holder = this.classify(ticket.assigneeId, teamOf);
+
+        // Another engineer's ticket is neither assigned nor in the pool, so it is left out.
+        if (holder !== 'engineer') {
+          tickets.push(await this.polled(ticket, holder));
+        }
       }
 
-      const kept = new Set(tickets.filter((ticket) => ticket.assigned || ticket.pool).map((ticket) => ticket.sourceId));
+      const kept = new Set(tickets.map((ticket) => ticket.sourceId));
 
       for (const id of this.entered.keys()) {
         if (!kept.has(id)) {
@@ -197,9 +202,7 @@ export class ZohoSource implements Source {
     return ticket.cf?.[this.config.escalationField] === this.config.escalationValue;
   }
 
-  /** Other engineers' tickets are retained for volume, without becoming actionable. */
-  private async polled(ticket: SearchTicket, teamOf: Map<string, string[]>): Promise<PolledTicket> {
-    const holder = this.classify(ticket.assigneeId, teamOf);
+  private async polled(ticket: SearchTicket, holder: AssigneeClass): Promise<PolledTicket> {
     // The customer has waited since their last message; a ticket without one falls back to its creation.
     const waiting = Date.parse(ticket.customerResponseTime ?? ticket.createdTime ?? '');
 
@@ -211,11 +214,9 @@ export class ZohoSource implements Source {
       url: ticket.webUrl,
       assigned: holder === 'mine',
       pool: holder === 'none' || holder === 'support',
-      inQueue: true,
-      assigneeId: ticket.assigneeId,
       sortAt: Number.isNaN(waiting) ? null : waiting,
       repo: '',
-      enteredAt: holder === 'engineer' ? null : await this.enteredScope(ticket),
+      enteredAt: await this.enteredScope(ticket),
     };
   }
 

@@ -46,9 +46,6 @@ export interface Ticket {
   assigned: boolean;
   /** Whether the last complete poll saw the ticket in the source's pool (PRD R47). */
   pool: boolean;
-  /** Active Support queue membership, independent of assigned/pool eligibility. */
-  inQueue?: boolean;
-  assigneeId?: string | null;
   /** Snoozed by the operator: no automatic triage or start until it wakes or is restored (PRD R49). Local only. */
   snoozed: boolean;
   /** When the snooze ends and the ticket returns to its group; null for an indefinite snooze (PRD R49). */
