@@ -1,5 +1,5 @@
 import { readPaneEnabled, readSnoozed } from './hub.js';
-import { PaneConnection, PaneWindow } from './pane.js';
+import { PaneConnection, PaneWindow, paneMarkerUrl } from './pane.js';
 import type { KeyValue, PaneSocketLike } from './pane.js';
 import { readCards } from './pills.js';
 import { postSnooze, postUnsnooze, snoozeMessage, unsnoozeMessage } from './snooze.js';
@@ -141,7 +141,7 @@ if (!FIREFOX) {
     enabled: () => readPaneEnabled((url) => fetch(url, { cache: 'no-store' })),
     window: new PaneWindow(
       {
-        markerUrl: (marker) => `${markerPage}#${marker}`,
+        markerUrl: (marker) => paneMarkerUrl(markerPage, marker),
         isMarker: (url) => url.startsWith(markerPage),
         // Chrome takes the foreground for a new window even with focused false (mechanics M103); the dock places it.
         createWindow: async (url) => (await chrome.windows.create({ type: 'normal', url, focused: false })).id!,

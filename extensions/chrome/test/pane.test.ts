@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
-import { MAX_TABS, MAX_TRIES, PANE_SOCKET_URL, PING_MS, PaneConnection, PaneWindow, paneLinks, paneMarker, retryWait } from '../src/pane.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { MAX_TABS, MAX_TRIES, PANE_SOCKET_URL, PING_MS, PaneConnection, PaneWindow, paneLinks, paneMarker, paneMarkerTitle, paneMarkerUrl, retryWait } from '../src/pane.js';
 import type { KeyValue, PaneBrowser, PaneSocketLike } from '../src/pane.js';
 
 const MARKER_PAGE = 'chrome-extension://hlbibnhgkgnjkbfledhgjblacloneije/pane.html';
@@ -21,7 +21,7 @@ function browser() {
   const calls: string[] = [];
   let next = 100;
   const fake: PaneBrowser = {
-    markerUrl: (marker) => `${MARKER_PAGE}#${marker}`,
+    markerUrl: (marker) => paneMarkerUrl(MARKER_PAGE, marker),
     isMarker: (url) => url.startsWith(MARKER_PAGE),
     createWindow: async (url) => {
       const id = next++;
@@ -81,6 +81,47 @@ describe('paneMarker and paneLinks', () => {
   });
 });
 
+describe('paneMarkerUrl and paneMarkerTitle', () => {
+  it('puts the marker in the query, so a new marker in a reused tab loads a new document that titles it again', () => {
+    const first = new URL(paneMarkerUrl(MARKER_PAGE, '0123456789ab'));
+    const second = new URL(paneMarkerUrl(MARKER_PAGE, 'ba9876543210'));
+
+    expect(first.hash).toBe('');
+    // A change of fragment alone is a same-document navigation that runs no script and keeps the old title.
+    expect(first.origin + first.pathname + first.search).not.toBe(second.origin + second.pathname + second.search);
+    expect(paneMarkerTitle(first.search)).toBe('Switchboard pane 0123456789ab');
+    expect(paneMarkerTitle(second.search)).toBe('Switchboard pane ba9876543210');
+  });
+
+  it('titles the page without a marker when the query holds none or a malformed one', () => {
+    expect(paneMarkerTitle('')).toBe('Switchboard pane');
+    expect(paneMarkerTitle('?marker=XYZ')).toBe('Switchboard pane');
+    expect(paneMarkerTitle('?marker=0123456789abc')).toBe('Switchboard pane');
+  });
+});
+
+describe('the marker page', () => {
+  afterEach(() => {
+    history.replaceState(null, '', '/');
+    vi.resetModules();
+  });
+
+  it('titles itself from the marker in its query each time it loads', async () => {
+    for (const marker of ['0123456789ab', 'ba9876543210']) {
+      history.replaceState(null, '', new URL(paneMarkerUrl(MARKER_PAGE, marker)).search);
+      vi.resetModules();
+      await import('../src/panePage.js');
+      expect(document.title).toBe(`Switchboard pane ${marker}`);
+    }
+
+    // A fragment is not read: the old form titles no marker, so a tab left on it is found only after it loads a query URL.
+    history.replaceState(null, '', '/#aaaaaaaaaaaa');
+    vi.resetModules();
+    await import('../src/panePage.js');
+    expect(document.title).toBe('Switchboard pane');
+  });
+});
+
 describe('PaneWindow', () => {
   it('opens one window on the marker page, then shows a tab per link with the active one in front and the marker tab closed', async () => {
     const { fake, windows, calls } = browser();
@@ -88,10 +129,10 @@ describe('PaneWindow', () => {
     const pane = new PaneWindow(fake, session);
 
     await pane.mark('0123456789ab');
-    expect(calls).toEqual([`window ${MARKER_PAGE}#0123456789ab`]);
+    expect(calls).toEqual([`window ${MARKER_PAGE}?marker=0123456789ab`]);
 
     await pane.show(['https://github.com/o/r/issues/1', 'https://github.com/o/r/pull/2'], 'https://github.com/o/r/pull/2');
-    expect(calls.slice(1)).toEqual(['open https://github.com/o/r/issues/1', 'open https://github.com/o/r/pull/2', 'activate https://github.com/o/r/pull/2', `close ${MARKER_PAGE}#0123456789ab`]);
+    expect(calls.slice(1)).toEqual(['open https://github.com/o/r/issues/1', 'open https://github.com/o/r/pull/2', 'activate https://github.com/o/r/pull/2', `close ${MARKER_PAGE}?marker=0123456789ab`]);
     expect([...windows.values()][0]!.map((tab) => tab.url)).toEqual(['https://github.com/o/r/issues/1', 'https://github.com/o/r/pull/2']);
   });
 
@@ -132,6 +173,22 @@ describe('PaneWindow', () => {
     expect(calls).toEqual(['open https://a.test/1', 'activate https://a.test/1']);
   });
 
+  it('loads the query form into a marker tab left on the old fragment form, and closes such a tab when it shows the links', async () => {
+    const { fake, windows, calls } = browser();
+    const session = memory({ pane: { windowId: 7, links: {} } });
+
+    windows.set(7, [{ id: 70, url: `${MARKER_PAGE}#1b17b20dd815`, active: true }]);
+    const pane = new PaneWindow(fake, session);
+
+    await pane.mark('ef4652596974');
+    expect(calls).toEqual([`load 70 ${MARKER_PAGE}?marker=ef4652596974`, `activate ${MARKER_PAGE}?marker=ef4652596974`]);
+
+    windows.get(7)!.push({ id: 71, url: `${MARKER_PAGE}#1b17b20dd815`, active: false });
+    await pane.show(['https://a.test/1'], 'https://a.test/1');
+    expect(calls).toContain(`close ${MARKER_PAGE}#1b17b20dd815`);
+    expect(calls).toContain(`close ${MARKER_PAGE}?marker=ef4652596974`);
+  });
+
   it('marks an open window again in its marker tab, or a new one, and opens a new window once the old one closed', async () => {
     const { fake, windows, calls } = browser();
     const session = memory();
@@ -142,19 +199,19 @@ describe('PaneWindow', () => {
     const markerTab = windows.get(windowId)![0]!.id;
 
     await pane.mark('ba9876543210');
-    expect(calls[1]).toBe(`load ${markerTab} ${MARKER_PAGE}#ba9876543210`);
-    expect(calls[2]).toBe(`activate ${MARKER_PAGE}#ba9876543210`);
+    expect(calls[1]).toBe(`load ${markerTab} ${MARKER_PAGE}?marker=ba9876543210`);
+    expect(calls[2]).toBe(`activate ${MARKER_PAGE}?marker=ba9876543210`);
 
     await pane.show(['https://a.test/1'], 'https://a.test/1');
     await pane.mark('aaaaaaaaaaaa');
-    expect(calls.at(-1)).toBe(`open ${MARKER_PAGE}#aaaaaaaaaaaa active`);
+    expect(calls.at(-1)).toBe(`open ${MARKER_PAGE}?marker=aaaaaaaaaaaa active`);
 
     expect(await pane.removed(999)).toBe(false);
     windows.delete(windowId);
     expect(await pane.removed(windowId)).toBe(true);
     expect(session.items).toEqual({});
     await pane.mark('bbbbbbbbbbbb');
-    expect(calls.at(-1)).toBe(`window ${MARKER_PAGE}#bbbbbbbbbbbb`);
+    expect(calls.at(-1)).toBe(`window ${MARKER_PAGE}?marker=bbbbbbbbbbbb`);
   });
 });
 

@@ -24,6 +24,21 @@ export function paneMarker(value: unknown): string | null {
   return typeof value === 'string' && MARKER.test(value) ? value : null;
 }
 
+/**
+ * The marker page's URL for a marker, `pane.html?marker=<marker>`. The marker is in the query, not the fragment, so loading it in a tab that
+ * shows another marker is a new document, whose script titles the tab again; a fragment change alone would keep the old title.
+ */
+export function paneMarkerUrl(page: string, marker: string): string {
+  return `${page}?marker=${marker}`;
+}
+
+/** The marker page's title for its `location.search`: `Switchboard pane <marker>`, which the pane helper finds the window by. */
+export function paneMarkerTitle(search: string): string {
+  const marker = paneMarker(new URLSearchParams(search).get('marker'));
+
+  return marker === null ? 'Switchboard pane' : `Switchboard pane ${marker}`;
+}
+
 /** The links a `tabs` message names, each an http or https URL of at most 2048 characters, or null for anything else. */
 export function paneLinks(urls: unknown, active: unknown): { urls: string[]; active: string } | null {
   if (!Array.isArray(urls) || urls.length === 0 || urls.length > MAX_TABS || typeof active !== 'string' || !urls.includes(active)) {
