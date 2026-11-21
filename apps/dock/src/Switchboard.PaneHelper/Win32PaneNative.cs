@@ -48,54 +48,54 @@ public sealed class Win32PaneNative : IPaneNative, IDisposable
         foregroundHook = Native.SetWinEventHook(Native.EventSystemForeground, Native.EventSystemForeground, 0, foregroundProc, 0, 0, Native.WinEventOutOfContext);
     }
 
-    /// <summary>The installed page's app name, its manifest's <c>name</c> (packages/web), which Chrome shows as an installed app window's title.</summary>
-    public const string PageAppName = "Switchboard";
+    /// <summary>The top-level Chrome windows, front first, as the search compares them.</summary>
+    static List<ChromeWindow> ChromeWindows()
+    {
+        var windows = new List<ChromeWindow>();
 
-    /// <summary>The title Chrome gives a window opened with <c>--app=http://127.0.0.1:&lt;port&gt;/page/</c>: the host, an underscore and the path.</summary>
-    static readonly System.Text.RegularExpressions.Regex AppTitle = new(@"^(127\.0\.0\.1|localhost)_/page/$");
+        Native.EnumWindows(
+            (window, _) =>
+            {
+                if (ClassOf(window) == "Chrome_WidgetWin_1")
+                {
+                    windows.Add(new ChromeWindow(window, ProcessOf(window), Native.Title(window), Native.IsWindowVisible(window), Native.GetWindow(window, Native.GwOwner) != 0, AppUserModel.Of(window)));
+                }
 
-    public nint FindPane(string marker) => FindChrome((_, title) => title.Contains($"Switchboard pane {marker}", StringComparison.Ordinal), visibleOnly: false);
+                return true;
+            },
+            0);
+
+        return windows;
+    }
+
+    public nint FindPane(string marker)
+    {
+        var (pane, byTitle) = PaneTitles.PickPane(ChromeWindows(), marker);
+
+        if (pane is not null && byTitle)
+        {
+            Log($"pane: took the pane window {pane.Handle:X} by its title \"{pane.Title}\", which lacks marker {marker}: the only one in the page's browser");
+        }
+
+        return pane?.Handle ?? 0;
+    }
 
     public bool IsVisible(nint window) => Native.IsWindowVisible(window);
 
     public nint FindApp(string marker, nint pane)
     {
-        bool Unowned(nint window) => window != pane && Native.GetWindow(window, Native.GwOwner) == 0;
+        var windows = ChromeWindows();
+        var paneWindow = windows.FirstOrDefault((window) => window.Handle == pane);
+        var page = PaneTitles.PickPage(windows, marker, paneWindow);
 
-        var marked = FindChrome((window, title) => Unowned(window) && title.Contains($"[sb-pane {marker}]", StringComparison.Ordinal));
-
-        if (marked != 0)
+        if (page is not null && paneWindow is not null && !PaneTitles.PageMarked(page.Title, marker))
         {
-            return marked;
+            var count = PaneTitles.PageCandidates(windows, paneWindow);
+
+            Log($"pane: took the page's window {page.Handle:X} by its title \"{page.Title}\", which lacks marker {marker}{(count > 1 ? $", the front one of {count}" : "")}");
         }
 
-        // By name only in the pane's process, the browser the extension runs in, so another browser's window of the same name is never taken.
-        // EnumWindows goes from the front, so the first is the page window in use, as the owner page is the one that last had the focus.
-        if (pane == 0)
-        {
-            return 0;
-        }
-
-        var paneProcess = ProcessOf(pane);
-
-        var named = new List<nint>();
-
-        FindChrome((window, title) =>
-        {
-            if (Unowned(window) && ProcessOf(window) == paneProcess && (title == PageAppName || AppTitle.IsMatch(title)))
-            {
-                named.Add(window);
-            }
-
-            return false;
-        });
-
-        if (named.Count > 1)
-        {
-            Log($"pane: {named.Count} windows look like the page's ({string.Join(", ", named.Select((window) => window.ToString("X")))}); taking the front one");
-        }
-
-        return named.Count == 0 ? 0 : named[0];
+        return page?.Handle ?? 0;
     }
 
     static uint ProcessOf(nint window)
@@ -144,7 +144,7 @@ public sealed class Win32PaneNative : IPaneNative, IDisposable
                 var process = ProcessOf(window);
                 var shown = marked ? $"\"{title}\"" : $"{title.Length} chars";
 
-                var named = title == PageAppName || AppTitle.IsMatch(title);
+                var named = PaneTitles.PageNamed(title) || PaneTitles.PaneAny(title);
 
                 if (named)
                 {
