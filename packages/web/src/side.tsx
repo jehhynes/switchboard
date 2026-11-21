@@ -9,7 +9,7 @@ import { ago, artifactUrl, framed, withoutQuestions } from './render.js';
 import type { View } from './render.js';
 import { cardOf } from './timeline.js';
 import { trusted } from './trusted.js';
-import type { ArtifactView, StatusView } from './types.js';
+import type { ArtifactView, StatusView } from '@switchboard/protocol';
 
 /** The Status tab: the latest status as Markdown with its time and age and a New mark while unread, or the stage dimmed. */
 export function renderStatus(state: PageState, view: View, now: number): VNode {

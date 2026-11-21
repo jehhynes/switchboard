@@ -22,7 +22,7 @@ export interface EntryLink {
   label: string;
   icon: string;
   title: string;
-  open: Record<string, unknown>;
+  open: { type: string; [key: string]: unknown };
 }
 
 export interface Entry {
@@ -153,7 +153,7 @@ const str = (value: unknown): string => (value === null || value === undefined ?
  * registered from (PRD R81), or has no native ID yet; then null. A Code Mode session opens in its attach terminal in every state, by its
  * Switchboard session ID (PRD R95).
  */
-export function sessionOpen(session: Session): Record<string, unknown> | null {
+export function sessionOpen(session: Session): EntryLink['open'] | null {
   if (session.codeMode === true) {
     return { type: 'open', sessionId: session.id, cwd: session.cwd, provider: 'claude', codeMode: true };
   }

@@ -10,7 +10,7 @@ import { renderTimeline } from '../src/timeline.js';
 import { renderHeader } from '../src/header.js';
 import { renderShared } from '../src/composer.js';
 import { renderMarkdown } from '../src/markdown.js';
-import type { MessageView, ReplyView, SessionView, StatusView } from '../src/types.js';
+import type { MessageView, ReplyView, SessionView, StatusView } from '@switchboard/protocol';
 
 // The shared renderers (messageMeta, spokenBubble, voiceControls, providerIcons) and the page's Markdown return HTML, which a part must draw
 // through `trusted`; given to JSX as a child, it shows as text such as "<time class=…".

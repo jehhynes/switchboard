@@ -38,9 +38,10 @@
     "@switchboard/forum": "*",
     "@switchboard/github": "*",
     "@switchboard/holder": "*",
+    "@switchboard/protocol": "*",
     "@switchboard/voice": "*",
-    "@switchboard/zoho": "*",
-    "@switchboard/web": "*"
+    "@switchboard/web": "*",
+    "@switchboard/zoho": "*"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

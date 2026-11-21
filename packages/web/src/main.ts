@@ -7,7 +7,7 @@ import { answerText, artifactTabsFit, artifactUrl, bandOpen, browserNote, closed
 import type { CardDraft, PaneView, SideTab, Tab, View } from './render.js';
 import type { ConsoleOptions, MountedConsole } from './console.js';
 import { LIGHT_SCHEME } from './console.js';
-import type { ArtifactView, ItemView, PageRow, ScreenPrompt } from './types.js';
+import type { ArtifactView, ItemView, PageRow, ScreenPrompt } from '@switchboard/protocol';
 import { mount, unmount } from './island.js';
 import type { ComponentChild, VNode } from 'preact';
 import { renderList, renderListPane } from './list.js';
@@ -27,7 +27,7 @@ import { renderContextMeter } from '@switchboard/conversation/contextMeter';
 import type { ContextMenuState } from '@switchboard/conversation/contextMeter';
 import { EMPTY_HISTORY_UI, renderHistory } from './history.js';
 import type { HistoryOpen, HistoryUi } from './history.js';
-import type { HistoryCategory, HistoryView } from './types.js';
+import type { HistoryCategory, HistoryView } from '@switchboard/protocol';
 import { askForNotifications, notificationsAllowed, notifyNeeds, playChime } from './alerts.js';
 import { ChangesController, changesButton, renderChangesMenu } from './changes.js';
 import type { NeedsItem } from './alerts.js';

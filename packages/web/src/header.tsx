@@ -7,7 +7,7 @@ import type { PageState } from './model.js';
 import { ago, artifactBar, LINK_LABEL_MAX, paneStatus, rowKey, TABS } from './render.js';
 import type { SideTab, Tab, View } from './render.js';
 import { trusted } from './trusted.js';
-import type { PageAction, PageRow } from './types.js';
+import type { PageAction, PageRow } from '@switchboard/protocol';
 
 /** The most links the menu lists by themselves; more go in its Open link submenu, as the dock's `MenuLinks`. */
 const MENU_LINKS = 2;

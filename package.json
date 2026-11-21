@@ -13,6 +13,7 @@
     "packages/forum",
     "packages/holder",
     "packages/conversation",
+    "packages/protocol",
     "packages/voice",
     "packages/claude",
     "packages/codex",

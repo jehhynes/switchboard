@@ -1,6 +1,7 @@
 /**
- * The conversation API's types as the page reads them (architecture.md § Conversation API). The page shares only the protocol with the VS Code
- * view, so it declares the fields it reads here rather than importing the hub.
+ * The wire types of the conversation API and the page's list (architecture.md § Conversation API, § Web page): the fields the web page reads. The
+ * page imports them, since it cannot import the hub, which bundles the page; the hub checks that its own views still carry them
+ * (`packages/hub/src/protocol.ts`), so a change on either side that breaks the other fails the build.
  */
 
 import type { Mark } from '@switchboard/core/group';
@@ -72,7 +73,7 @@ export interface MessageView {
   withdrawn: boolean;
   origin: 'terminal' | 'typed' | 'voice';
   text: string;
-  delivery: 'open' | 'sent' | 'uncertain' | 'not-sent' | null;
+  delivery: 'open' | 'sent' | 'uncertain' | 'not-sent' | 'refused' | null;
   error: string | null;
   /** A dictated message's pieces with their voice checks, a part sent while still being spoken, and the reply it spoke over (architecture.md § Dictation). */
   pieces?: Array<{ text: string; score: number | null; f0: number | null; dropped: boolean }>;
@@ -190,7 +191,7 @@ export interface HistoryLink {
   label: string;
   icon: string;
   title: string;
-  open: { type: string; url?: string; [key: string]: unknown };
+  open: { type: string; [key: string]: unknown };
 }
 
 /** One History entry (`Entry` in the hub's `history.ts`). */

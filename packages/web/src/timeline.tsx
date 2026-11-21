@@ -11,7 +11,7 @@ import { copyButton, renderInline, renderMarkdown } from './markdown.js';
 import { dayLabel, deliveryMark, spokenMark, spokenRender, withoutQuestions } from './render.js';
 import type { CardDraft, View } from './render.js';
 import { trusted } from './trusted.js';
-import type { ArtifactView, MessageView, NativeRequest, ReplyView, ScreenPrompt } from './types.js';
+import type { ArtifactView, MessageView, NativeRequest, ReplyView, ScreenPrompt } from '@switchboard/protocol';
 
 /**
  * One of our messages: its bubble over its meta line (`metaLine`, shared with the Conversation view). A failed delivery always shows; with

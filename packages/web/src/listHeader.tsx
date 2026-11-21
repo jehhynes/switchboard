@@ -1,7 +1,7 @@
 import type { ComponentChildren, VNode } from 'preact';
 import qrcode from 'qrcode-generator';
 import { mount } from './island.js';
-import type { PageGroup, PageHeader, PageRow, SourceGroup } from './types.js';
+import type { PageGroup, PageHeader, PageRow, SourceGroup } from '@switchboard/protocol';
 
 type Answer = { status: number; body: Record<string, unknown> };
 

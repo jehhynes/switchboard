@@ -3,7 +3,7 @@ import { startPage } from '../src/main.js';
 import { bareKey, filterGroups, isKey, rangeSince, renderListHeader, SEARCH_DELAY_MS } from '../src/listHeader.js';
 import { html } from './html.js';
 import type { SearchView } from '../src/listHeader.js';
-import type { PageGroup, PageHeader, PageRow, SourceGroup } from '../src/types.js';
+import type { PageGroup, PageHeader, PageRow, SourceGroup } from '@switchboard/protocol';
 
 class FakeSource {
   static last: FakeSource | null = null;

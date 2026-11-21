@@ -3,7 +3,7 @@ import { startPage } from '../src/main.js';
 import { EMPTY_HISTORY_UI, entryShown, gapText, historyUrl, renderHistory, RUN_LIMIT } from '../src/history.js';
 import type { HistoryOpen } from '../src/history.js';
 import { html } from './html.js';
-import type { HistoryCategory, HistoryEntry, HistoryView, PageGroup, PageRow } from '../src/types.js';
+import type { HistoryCategory, HistoryEntry, HistoryView, PageGroup, PageRow } from '@switchboard/protocol';
 
 class FakeSource {
   static last: FakeSource | null = null;

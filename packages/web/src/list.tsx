@@ -3,7 +3,7 @@ import type { ComponentChildren, VNode } from 'preact';
 import { MARK_ICONS, SPINNING_MARKS } from '@switchboard/core/group';
 import { SourceLogo } from './listHeader.js';
 import { bandOpen, rowKey } from './render.js';
-import type { PageGroup, PageRow } from './types.js';
+import type { PageGroup, PageRow } from '@switchboard/protocol';
 
 /** The codicon Returned shows, as the dock's pill does. */
 const RETURNED_GLYPH = '\u{eae2}';

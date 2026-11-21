@@ -13,8 +13,8 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/**/*.{ts,tsx}'],
-      // The browser's entry points and the protocol's types have nothing to run.
-      exclude: ['src/entry.ts', 'src/swEntry.ts', 'src/offlineEntry.ts', 'src/consoleEntry.ts', 'src/types.ts'],
+      // The browser's entry points have nothing to run.
+      exclude: ['src/entry.ts', 'src/swEntry.ts', 'src/offlineEntry.ts', 'src/consoleEntry.ts'],
       thresholds: { lines: 80, branches: 75, functions: 80, statements: 80 },
     },
   },

@@ -1,6 +1,6 @@
 import { SESSION_ICONS, SESSION_TONES, sessionIcon } from '@switchboard/core/group';
 import type { IconTone, SessionIcon } from '@switchboard/core/group';
-import type { ArtifactView, ConversationEntry, ItemView, PageGroup, PageHeader, PageRow, ReplyView, ScopeView, SessionView, StatusView, VoiceView } from './types.js';
+import type { ArtifactView, ConversationEntry, ItemView, PageGroup, PageHeader, PageRow, ReplyView, ScopeView, SessionView, StatusView, VoiceView } from '@switchboard/protocol';
 
 /** What the page shows, kept from its conversation stream (architecture.md § Web page). */
 export interface PageState {

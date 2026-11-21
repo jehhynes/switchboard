@@ -1,7 +1,7 @@
 // The web page's History (architecture.md § Web page): a ticket's activity as the VS Code History tab shows it (PRD R59), from the view the hub
 // builds, drawn by the page's own code in the conversation's place.
 import type { VNode } from 'preact';
-import type { HistoryCategory, HistoryEntry, HistoryLink, HistorySection, HistoryView } from './types.js';
+import type { HistoryCategory, HistoryEntry, HistoryLink, HistorySection, HistoryView } from '@switchboard/protocol';
 
 /** What the operator set in a ticket's History while the page is open: hidden chips, the filter, opened or closed sections, expanded runs. */
 export interface HistoryUi {

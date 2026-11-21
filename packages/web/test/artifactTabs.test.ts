@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { renderSideSwitch, renderTabs } from '../src/header.js';
 import { ARTIFACT_MENU_WIDTH, ARTIFACT_TAB_WIDTH, ARTIFACT_TABS_MAX, artifactBar, artifactTabsFit, closedArtifacts, newView } from '../src/render.js';
 import { EMPTY } from '../src/model.js';
-import type { ArtifactView } from '../src/types.js';
+import type { ArtifactView } from '@switchboard/protocol';
 import { html } from './html.js';
 
 const artifact = (index: number): ArtifactView => ({ path: `chat/a${index}.md`, owner: 'chat', kind: 'note', title: `Note ${index}`, ext: 'md', type: 'markdown', updatedAt: 1_000 + index });

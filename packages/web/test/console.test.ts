@@ -7,7 +7,7 @@ import { consoleNote, newView } from '../src/render.js';
 import { renderSideSwitch, renderTabs } from '../src/header.js';
 import { html } from './html.js';
 import { EMPTY } from '../src/model.js';
-import type { SessionView } from '../src/types.js';
+import type { SessionView } from '@switchboard/protocol';
 import { PAGE_ASSETS } from '../dist/index.js';
 
 class FakeSource {
