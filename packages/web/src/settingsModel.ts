@@ -1205,6 +1205,17 @@ export function generalFields(state: EditorState): Section[] {
           ],
         },
         {
+          path: 'dock.openIn',
+          label: 'Row click opens',
+          kind: 'select',
+          help: 'Where a click on a row opens its work item. Web app shows it in the installed Switchboard web app, bringing its window forward, or opens the web page in your browser when the app is not open. Alt-click opens the other.',
+          placeholder: 'vscode',
+          options: [
+            { value: 'vscode', label: 'VS Code' },
+            { value: 'web', label: 'Web app' },
+          ],
+        },
+        {
           path: 'dock.openTerminal',
           label: 'Terminal for "Open in terminal"',
           kind: 'select',
@@ -1219,13 +1230,30 @@ export function generalFields(state: EditorState): Section[] {
       ],
     },
     {
+      heading: 'Alerts',
+      fields: [
+        {
+          path: 'alerts.surface',
+          label: 'Needs-you alerts from',
+          kind: 'select',
+          help: 'Where a work item that starts needing you is announced, so one event alerts once. Web app when open uses the installed Switchboard web app while it is open, else the dock. Web page when open uses any open Switchboard web page, the installed app first, else the dock. A web page announces only once you allowed its notifications, which it asks for at your first click in it, and plays the needs-you sound when the voice does not.',
+          placeholder: 'auto',
+          options: [
+            { value: 'auto', label: 'Web app when open' },
+            { value: 'web', label: 'Web page when open' },
+            { value: 'dock', label: 'Dock' },
+          ],
+        },
+      ],
+    },
+    {
       heading: 'Web page',
       fields: [
         {
           path: 'web.chromePane',
           label: 'Chrome pane (experimental)',
           kind: 'boolean',
-          help: "Experimental, Windows only, and may break with Chrome updates. Shows the selected work item's ticket and pull request in a Chrome window that the dock keeps over the installed web page's right column. Needs the Switchboard Chrome extension, paired from the page's view options.",
+          help: "Experimental, Windows only, and may break with Chrome updates. Shows the selected work item's ticket and pull request in a Chrome window that Switchboard keeps over the installed web page's right column, without the dock. Needs the Switchboard Chrome extension, paired from the page's view options.",
           fallback: false,
         },
       ],
@@ -1465,7 +1493,7 @@ export function errorPages(state: EditorState): Map<string, string | null> {
 
 /** The parts of settings.json a page edits, by which the navigation marks it unsaved. */
 export function pagePaths(page: string): string[] {
-  return page === 'general' ? ['sessions', 'triage', 'dock', 'web'] : page.startsWith('source:') ? [`sources.${page.slice('source:'.length)}`] : page.startsWith('schedule:') ? [`schedules.${page.slice('schedule:'.length)}`] : [];
+  return page === 'general' ? ['sessions', 'triage', 'dock', 'alerts', 'web'] : page.startsWith('source:') ? [`sources.${page.slice('source:'.length)}`] : page.startsWith('schedule:') ? [`schedules.${page.slice('schedule:'.length)}`] : [];
 }
 
 export function pageDirty(state: EditorState, page: string): boolean {

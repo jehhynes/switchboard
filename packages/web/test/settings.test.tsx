@@ -129,8 +129,8 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     expect(host.querySelector('.settings-nav-entry.current')?.textContent).toContain('General');
     expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('General');
     expect(host.querySelector('.settings-file')?.textContent).toBe('C:/home/.switchboard/settings.json');
-    expect(texts('.settings-section-heading')).toEqual(['Sessions', 'Claude sessions', 'Codex sessions', 'Triage', 'Dock', 'Web page', 'Advanced']);
-    expect(texts('.settings-section:not(.advanced) .settings-caption label')).toEqual(['Default agent', 'Concurrency', 'Code Mode (experimental)', 'Friction debriefs', 'Model', 'Permission mode', 'Model', 'Permission mode', 'Concurrency', 'Model', 'Timeout (seconds)', 'Rows open in', 'Terminal for "Open in terminal"', 'Chrome pane (experimental)']);
+    expect(texts('.settings-section-heading')).toEqual(['Sessions', 'Claude sessions', 'Codex sessions', 'Triage', 'Dock', 'Alerts', 'Web page', 'Advanced']);
+    expect(texts('.settings-section:not(.advanced) .settings-caption label')).toEqual(['Default agent', 'Concurrency', 'Code Mode (experimental)', 'Friction debriefs', 'Model', 'Permission mode', 'Model', 'Permission mode', 'Concurrency', 'Model', 'Timeout (seconds)', 'Rows open in', 'Row click opens', 'Terminal for "Open in terminal"', 'Needs-you alerts from', 'Chrome pane (experimental)']);
     expect(host.querySelector('[data-path="sessions.installHooks"]')).toBeNull();
     expect(host.querySelector('.settings-toggle')?.getAttribute('aria-expanded')).toBe('false');
     expect(host.querySelector('.settings-status')?.textContent).toBe('Saved');
@@ -141,6 +141,8 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     expect(field<HTMLSelectElement>('sessions.provider').value).toBe('claude');
     expect([...field<HTMLSelectElement>('sessions.provider').options].map((option) => option.textContent)).toEqual(['Claude', 'Codex']);
     expect(field<HTMLSelectElement>('sessions.codex.permissionMode').value).toBe('bypassPermissions');
+    expect(field<HTMLSelectElement>('dock.openIn').value).toBe('vscode');
+    expect([...field<HTMLSelectElement>('alerts.surface').options].map((option) => option.textContent)).toEqual(['Web app when open', 'Web page when open', 'Dock']);
 
     // Advanced opens to show the executable paths, and Install hooks shows the file's false over its default true.
     host.querySelector<HTMLButtonElement>('.settings-toggle')!.click();
@@ -210,9 +212,12 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
 
     field<HTMLSelectElement>('dock.openVSCode').value = 'review';
     field<HTMLSelectElement>('dock.openVSCode').dispatchEvent(new Event('change', { bubbles: true }));
+    field<HTMLSelectElement>('alerts.surface').value = 'dock';
+    field<HTMLSelectElement>('alerts.surface').dispatchEvent(new Event('change', { bubbles: true }));
+    expect(host.querySelector('.settings-nav-entry.current .settings-dirty')).not.toBeNull();
     button('Save').click();
     await settle();
-    expect(named('page-settings-save').at(-1)!.body).toMatchObject({ value: { sessions: { installHooks: false, codeMode: true }, dock: { openVSCode: 'review' } }, version: 'v2' });
+    expect(named('page-settings-save').at(-1)!.body).toMatchObject({ value: { sessions: { installHooks: false, codeMode: true }, dock: { openVSCode: 'review' }, alerts: { surface: 'dock' } }, version: 'v2' });
     expect(pane.isOpen()).toBe(false);
     expect(host.innerHTML).toBe('');
     expect(closed).toHaveBeenCalledTimes(1);
