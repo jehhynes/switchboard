@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createServer } from 'node:net';
-import { currentHolderBuild, installHolder, installLockAddress, installVoice, reserveHolderBuild, VOICE_INSTALL } from '../src/holderInstall.js';
+import { currentHolderBuild, installHolder, installLockAddress, installPaneHelper, installVoice, PANE_HELPER_INSTALL, paneHelperRecordPath, reserveHolderBuild, VOICE_INSTALL } from '../src/holderInstall.js';
 
 const temps: string[] = [];
 
@@ -102,6 +102,34 @@ describe('installVoice', () => {
     expect(existsSync(join(voice, `${old}.123.tmp`))).toBe(false);
     expect(existsSync(join(voice, `${old}.123.456.old`))).toBe(false);
     expect(readFileSync(join(voice, BUILD_A, 'voice.js'), 'utf8')).toBe('voice');
+  });
+});
+
+describe('installPaneHelper', () => {
+  it("installs the pane helper's build in its own folder, keeping the build the hub's running helper loaded", async () => {
+    const home = temp();
+    const helperBuild = (build: string) => {
+      const dir = temp();
+
+      writeFileSync(join(dir, 'Switchboard.PaneHelper.exe'), 'exe');
+      writeFileSync(join(dir, 'Switchboard.PaneHelper.dll'), 'dll');
+      writeFileSync(join(dir, 'manifest.json'), JSON.stringify({ build, files: ['Switchboard.PaneHelper.dll', 'Switchboard.PaneHelper.exe'] }));
+
+      return dir;
+    };
+
+    expect(await installPaneHelper(helperBuild(BUILD_A), home)).toEqual({ build: BUILD_A });
+    expect(readFileSync(join(home, 'pane-helper', BUILD_A, 'Switchboard.PaneHelper.exe'), 'utf8')).toBe('exe');
+    expect(currentHolderBuild(home, PANE_HELPER_INSTALL)).toBe(BUILD_A);
+    expect(currentHolderBuild(home)).toBeNull();
+    writeFileSync(paneHelperRecordPath(home), JSON.stringify({ build: BUILD_A, pid: 4242 }));
+    expect(await installPaneHelper(helperBuild(BUILD_B), home, (pid) => pid === 4242, () => Date.now() + 3_600_000)).toEqual({ build: BUILD_B });
+    expect(currentHolderBuild(home, PANE_HELPER_INSTALL)).toBe(BUILD_B);
+    expect(existsSync(join(home, 'pane-helper', BUILD_A, 'Switchboard.PaneHelper.exe'))).toBe(true);
+    await installPaneHelper(helperBuild(BUILD_B), home, () => false, () => Date.now() + 3_600_000);
+    expect(existsSync(join(home, 'pane-helper', BUILD_A))).toBe(false);
+    expect(installLockAddress('C:/h', 'win32', PANE_HELPER_INSTALL)).toMatch(/switchboard-pane-helper-install-[0-9a-f]{16}$/);
+    expect(await installPaneHelper(temp(), home)).toMatchObject({ error: expect.stringContaining('manifest.json is missing or invalid') as unknown });
   });
 });
 

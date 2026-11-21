@@ -1,10 +1,10 @@
-import { appendFileSync, unwatchFile, watchFile } from 'node:fs';
+import { appendFileSync, existsSync, unwatchFile, watchFile } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import * as vscode from 'vscode';
 import { hubBundlePath, hubLogPath, resolveConfigDir, switchboardHome } from '@switchboard/core';
 import type { HubRecord } from '@switchboard/core';
-import { buildOf, dockView, findHub, installBundle, installHolder, installVoice, keepHub, makeEnsure, openEvents, postToHub, stopHub, windowItems, windowsDir } from '@switchboard/hub';
+import { buildOf, dockView, findHub, installBundle, installHolder, installPaneHelper, installVoice, keepHub, makeEnsure, openEvents, postToHub, stopHub, windowItems, windowsDir } from '@switchboard/hub';
 import { continueInBackground } from './background.js';
 import { closeDueAt, closeIfDone } from './closeWindow.js';
 import { showDock } from './dockApp.js';
@@ -139,9 +139,16 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     // The page then shows diagrams as their code.
   }
 
-  // A holder that cannot be installed fails only Code Mode starts, and a voice process only speech; the cause goes to the hub log, which every
-  // window shows (PRD R94, architecture.md § Voice).
-  for (const install of [installHolder(context.asAbsolutePath('dist/holder'), switchboardHome(home)), installVoice(context.asAbsolutePath('dist/voice'), switchboardHome(home))]) {
+  // A holder that cannot be installed fails only Code Mode starts, a voice process only speech, and the pane helper, which only Windows builds
+  // carry, only the Chrome pane; the cause goes to the hub log, which every window shows (PRD R94, architecture.md § Voice, § Pane helper).
+  const paneHelper = context.asAbsolutePath('dist/pane-helper');
+  const installs = [installHolder(context.asAbsolutePath('dist/holder'), switchboardHome(home)), installVoice(context.asAbsolutePath('dist/voice'), switchboardHome(home))];
+
+  if (process.platform === 'win32' && existsSync(paneHelper)) {
+    installs.push(installPaneHelper(paneHelper, switchboardHome(home)));
+  }
+
+  for (const install of installs) {
     void install.then((installed) => {
       if ('error' in installed) {
         try {

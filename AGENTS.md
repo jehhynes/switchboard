@@ -84,6 +84,8 @@ Package with `vsce package --no-dependencies`; the workspace script includes the
 
 Confirm the installed bundle under `%USERPROFILE%/.vscode/extensions/switchboard.switchboard-0.0.0/dist/` (`~/.vscode/extensions/…` on Linux) contains the change, then report that the developer can reload when ready. Do not reload their window. Activation copies the hub bundle to the Switchboard home and can replace a running hub.
 
+The Chrome pane helper (`apps/dock/src/Switchboard.PaneHelper`) ships in the VS Code extension, not with the dock: for changes to it, rebuild, package and install the extension as above.
+
 For changes to the dock, close the running dock (it holds its files open), then run `npm run publish --workspace @switchboard/dock`, which publishes it to `~/.switchboard/dock/` (`%USERPROFILE%` on Windows), and report that the operator can start `Switchboard.Dock.exe`, or `Switchboard.Dock` on Linux, there.
 
 For changes to the browser extension (`extensions/chrome` or `extensions/firefox`), run `npm run build` and `npm run lint --workspace @switchboard/firefox`, which must report no errors. Report that the operator can reload `extensions/chrome/dist` in `chrome://extensions` and load `extensions/firefox/dist/manifest.json` in `about:debugging`. `npm run sign --workspace @switchboard/firefox` signs and releases the Firefox build only from a pushed commit, so run it after the change is pushed when `~/.switchboard/amo.env` holds the operator's keys, without reading that file, and otherwise report that the operator can; they then install `extensions/firefox/switchboard-firefox-signed.xpi` from `about:addons`.

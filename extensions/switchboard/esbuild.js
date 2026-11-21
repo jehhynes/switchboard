@@ -229,6 +229,27 @@ function copyRecognition() {
   }
 }
 
+/**
+ * Publishes the Chrome pane helper (architecture.md § Pane helper), a .NET program, into dist/pane-helper with its manifest, on Windows only, so
+ * the extension installs it per build as it installs the holder. Without the .NET SDK the build warns and the Chrome pane does not start.
+ */
+function publishPaneHelper() {
+  if (process.platform !== 'win32') {
+    return;
+  }
+
+  const project = path.join('..', '..', 'apps', 'dock', 'src', 'Switchboard.PaneHelper', 'Switchboard.PaneHelper.csproj');
+  const result = require('node:child_process').spawnSync('dotnet', ['publish', project, '-c', 'Release', '--nologo', '-v', 'q', '-p:DebugType=none', '-o', 'dist/pane-helper'], { stdio: 'inherit' });
+
+  if (result.status !== 0) {
+    console.warn('The Chrome pane helper was not published (dotnet publish failed or the .NET SDK is missing), so the Chrome pane cannot start.');
+    fs.rmSync('dist/pane-helper', { recursive: true, force: true });
+    return;
+  }
+
+  writeManifest('dist/pane-helper');
+}
+
 /** Names a holder or voice build by a hash of every file's path and content, so any change installs a new folder (architecture.md § Terminal holder). */
 function writeManifest(dir) {
   const files = filesUnder(dir).filter((file) => file !== 'manifest.json');
@@ -245,6 +266,7 @@ async function main() {
   // A file left from an earlier build, such as a removed webview, would ship in the package.
   fs.rmSync('dist', { recursive: true, force: true });
   copyAssets();
+  publishPaneHelper();
 
   if (process.argv.includes('--watch')) {
     for (const config of [options, webview, holder, voice]) {
