@@ -6,7 +6,7 @@ import { answerText, answersIn, complete, parseQuestions } from '@switchboard/co
 import { artifactUrl, newView, renderArtifactView, turnRow, renderHeader, renderList, renderMicButton, renderTimeline, renderVoice, markdownBody } from '../src/render.js';
 import { renderMicButton as viewMicButton } from '@switchboard/conversation/voiceControls';
 import { renderMarkdown } from '../src/markdown.js';
-import { CHAT_MAX, CHAT_MIN, SENT_NOTE_MS, SIDE_MAX, SIDE_MIN, startPage } from '../src/main.js';
+import { CHAT_MAX, CHAT_MIN, SENT_NOTE_MS, SIDE_MAX, SIDE_MIN, startPage, stepScale } from '../src/main.js';
 import type { ArtifactView, MessageView, PageGroup, PageRow, ReplyView, SessionView } from '../src/types.js';
 
 const message = (id: string, ord: number, patch: Partial<MessageView> = {}): MessageView => ({ type: 'message', id, sessionId: 's', workItemId: 1, at: 1_000 + ord, ord, provisional: false, withdrawn: false, origin: 'typed', text: `text ${id}`, delivery: 'sent', error: null, ...patch });
@@ -1091,6 +1091,51 @@ describe('the page in use', () => {
     page.close();
   });
 
+  it("sets the conversation's text size from the header's menu and Ctrl+=, Ctrl+- and Ctrl+0, keeps it, and leaves the rest of the page alone", () => {
+    localStorage.setItem('switchboard.textScale', '1.25');
+
+    const { page, source } = start();
+    const scale = (): string => root.style.getPropertyValue('--chat-scale');
+
+    // Set before the first draw, so the conversation does not change size after it shows.
+    expect(scale()).toBe('1.25');
+    hello(source);
+    expect(root.querySelector('.text-size-menu')).toBeNull();
+    click('.header button.text-size');
+    expect(root.querySelector('.text-size-value')!.textContent).toBe('125%');
+    click('.text-size-menu [data-action="text-larger"]');
+    expect(scale()).toBe('1.5');
+    expect(localStorage.getItem('switchboard.textScale')).toBe('1.5');
+    click('.text-size-menu [data-action="text-larger"]');
+    expect(scale()).toBe('1.5');
+    expect(root.querySelector('.text-size-value')!.textContent).toBe('150%');
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: '-', ctrlKey: true, bubbles: true, cancelable: true }));
+    expect(scale()).toBe('1.25');
+    const zero = new KeyboardEvent('keydown', { key: '0', ctrlKey: true, bubbles: true, cancelable: true });
+
+    document.dispatchEvent(zero);
+    expect(zero.defaultPrevented).toBe(true);
+    expect(scale()).toBe('1');
+    expect(localStorage.getItem('switchboard.textScale')).toBeNull();
+    // Without Ctrl, or with Alt, the keys type as usual.
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: '=', bubbles: true }));
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: '=', ctrlKey: true, altKey: true, bubbles: true }));
+    expect(scale()).toBe('1');
+    root.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(root.querySelector('.text-size-menu')).toBeNull();
+    expect(document.activeElement).toBe(root.querySelector('.header button.text-size'));
+
+    // One header menu at a time: View options closes the dropdown, and the dropdown View options.
+    click('.header button.picker');
+    click('.header button.text-size');
+    expect(root.querySelector('.header button.picker')!.getAttribute('aria-expanded')).toBe('false');
+    expect(root.querySelector('.text-size-menu')).not.toBeNull();
+    click('.header button.picker');
+    expect(root.querySelector('.text-size-menu')).toBeNull();
+    click('.header button.picker');
+    page.close();
+  });
+
   it("resizes the work items from their sash by dragging and the arrow keys, within limits, keeps the width, and resets it on a double-click", () => {
     localStorage.setItem('switchboard.sideWidth', '300');
 
@@ -1758,6 +1803,16 @@ describe('the page against late answers', () => {
   });
 });
 
+describe('stepScale', () => {
+  it('steps through the text sizes and stays at the ends, from 100% for a size not in the list', () => {
+    expect(stepScale(1, 1)).toBe(1.1);
+    expect(stepScale(1, -1)).toBe(0.9);
+    expect(stepScale(1.5, 1)).toBe(1.5);
+    expect(stepScale(0.85, -1)).toBe(0.85);
+    expect(stepScale(1.07, 1)).toBe(1.1);
+  });
+});
+
 describe("the list's CSS", () => {
   const css = readFileSync(join(__dirname, '../src/page.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
   /** The declarations of every rule with a selector the test picks. */
@@ -1789,10 +1844,14 @@ describe("the list's CSS", () => {
     }
   });
 
+  it("scales only the conversation's text by --chat-scale", () => {
+    expect([...css.matchAll(/([^{}]+)\{[^{}]*var\(--chat-scale/g)].map(([, selector]) => selector!.trim())).toEqual(['.timeline, .composer textarea, .composer .live-mirror']);
+  });
+
   it('caps the conversation on a wide screen and gives the Status and Artifacts column the rest of the width, with no cap of its own', () => {
     expect(declarationsOf((selector) => selector === '#root.wide > .main')).toEqual(['flex: 0 1 var(--chat-width, 940px);']);
     // With the column hidden the conversation keeps that width, centred.
-    expect(declarationsOf((selector) => selector === '.timeline')).toEqual([expect.stringContaining('max-width: calc(var(--chat-width, 940px) - 40px)')]);
+    expect(declarationsOf((selector) => selector === '.timeline').join(' ')).toContain('max-width: calc(var(--chat-width, 940px) - 40px)');
     expect(declarationsOf((selector) => selector === '#composer').join(' ')).toContain('max-width: var(--chat-width, 940px)');
     const detail = declarationsOf((selector) => selector.startsWith('#root.wide > .detail') || selector === '.detail' || selector.startsWith('.detail .'));
 

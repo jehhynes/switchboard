@@ -32,6 +32,16 @@ const SASH_STEP = 16;
 const COMPACT_PILL = 26;
 const PILL_GAP = 6;
 const SIDE_WIDTH = 'switchboard.sideWidth';
+/** The conversation's text sizes, as shares of the theme's, and where the page keeps the one chosen. */
+export const TEXT_SCALES = [0.85, 0.9, 1, 1.1, 1.25, 1.5];
+const TEXT_SCALE = 'switchboard.textScale';
+
+/** The next text size up (1) or down (-1) from `scale`, staying at the ends. */
+export function stepScale(scale: number, step: 1 | -1): number {
+  const at = TEXT_SCALES.indexOf(scale);
+
+  return TEXT_SCALES[Math.max(0, Math.min(TEXT_SCALES.length - 1, (at === -1 ? TEXT_SCALES.indexOf(1) : at) + step))]!;
+}
 const CHAT_WIDTH = 'switchboard.chatWidth';
 /** From this width Status and Artifacts are a column beside the conversation rather than tabs. */
 export const WIDE_QUERY = '(min-width: 1200px)';
@@ -136,6 +146,25 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   };
   const listWidth = typeof ResizeObserver === 'function' ? new ResizeObserver(() => fitLines()) : null;
   const stopScrollbars = overlayScrollbars(root);
+  /** The conversation's text size, a share of the theme's (--chat-scale), kept in local storage and set before the first draw. */
+  const setTextScale = (scale: number, keep = true): void => {
+    view.textScale = scale;
+    root.style.setProperty('--chat-scale', String(scale));
+
+    if (keep) {
+      try {
+        if (scale === 1) {
+          localStorage.removeItem(TEXT_SCALE);
+        } else {
+          localStorage.setItem(TEXT_SCALE, String(scale));
+        }
+      } catch {
+        // A page without local storage keeps the size until it reloads.
+      }
+
+      draw();
+    }
+  };
 
   listWidth?.observe(list);
   /** The tab the conversation's pane shows: always the conversation while Status and Artifacts have their own column. */
@@ -144,6 +173,16 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   wideQuery?.addEventListener?.('change', () => draw());
   let state: PageState = EMPTY;
   const view: View = newView();
+
+  setTextScale(((): number => {
+    try {
+      const kept = Number(localStorage.getItem(TEXT_SCALE));
+
+      return TEXT_SCALES.includes(kept) ? kept : 1;
+    } catch {
+      return 1;
+    }
+  })(), false);
   /** A select refused while no conversation was shown, which the list shows until the next select. */
   let listError: string | null = null;
   let wanted: number | null = Number(/^#w=(\d+)$/.exec(location.hash)?.[1] ?? NaN) || null;
@@ -1391,16 +1430,19 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         // One header menu at a time.
         view.personas = null;
         view.actions = false;
+        view.textMenu = false;
         draw();
         break;
       case 'persona':
         view.actions = false;
+        view.textMenu = false;
         void choosePersona();
         break;
       case 'actions':
         view.actions = !view.actions;
         view.picker = false;
         view.personas = null;
+        view.textMenu = false;
         draw();
         break;
       case 'row-action':
@@ -1475,6 +1517,22 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         break;
       case 'artifact-window':
         artifactWindow();
+        break;
+      case 'text-menu':
+        view.textMenu = !view.textMenu;
+        // One header menu at a time.
+        view.providers = null;
+        view.picker = false;
+        view.personas = null;
+        view.actions = false;
+        draw();
+        break;
+      case 'text-smaller':
+      case 'text-larger':
+        setTextScale(stepScale(view.textScale, action === 'text-larger' ? 1 : -1));
+        break;
+      case 'text-reset':
+        setTextScale(1);
         break;
       case 'pick': {
         const key = button!.dataset['card']!;
@@ -1559,11 +1617,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   });
   // The dropdown closes on a press outside the header and on Escape, which gives the focus back to its button.
   document.addEventListener('pointerdown', (event) => {
-    if ((view.picker || view.personas !== null || view.actions || view.providers !== null) && !(event.target instanceof Node && head.querySelector('.header')?.contains(event.target) === true)) {
+    if ((view.picker || view.personas !== null || view.actions || view.providers !== null || view.textMenu) && !(event.target instanceof Node && head.querySelector('.header')?.contains(event.target) === true)) {
       view.providers = null;
       view.picker = false;
       view.personas = null;
       view.actions = false;
+      view.textMenu = false;
       draw();
     }
   });
@@ -1572,18 +1631,19 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       view.sheet = null;
       draw();
       event.stopImmediatePropagation();
-    } else if (event.key === 'Escape' && (view.picker || view.personas !== null || view.actions || view.providers !== null)) {
-      const opener = view.picker || view.providers !== null ? 'button.picker' : view.actions ? 'button.actions' : 'button.persona';
+    } else if (event.key === 'Escape' && (view.picker || view.personas !== null || view.actions || view.providers !== null || view.textMenu)) {
+      const opener = view.picker || view.providers !== null ? 'button.picker' : view.actions ? 'button.actions' : view.textMenu ? 'button.text-size' : 'button.persona';
 
       view.providers = null;
 
       view.picker = false;
       view.personas = null;
       view.actions = false;
+      view.textMenu = false;
       draw();
       head.querySelector<HTMLElement>(opener)?.focus();
       event.stopImmediatePropagation();
-    } else if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && (view.picker || view.personas !== null || view.actions || view.providers !== null)) {
+    } else if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && (view.picker || view.personas !== null || view.actions || view.providers !== null || view.textMenu)) {
       // Up and Down move between a header menu's rows, as in a VS Code menu.
       const rows = [...head.querySelectorAll<HTMLElement>('.header .menu .menu-row')];
       const at = rows.indexOf(document.activeElement as HTMLElement);
@@ -1592,6 +1652,19 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         rows[at === -1 ? (event.key === 'ArrowDown' ? 0 : rows.length - 1) : Math.max(0, Math.min(rows.length - 1, at + (event.key === 'ArrowDown' ? 1 : -1)))]!.focus();
         event.preventDefault();
       }
+    }
+  });
+  // Ctrl+= and Ctrl+- make the conversation's text larger or smaller, Ctrl+0 resets it, in place of the browser's zoom.
+  document.addEventListener('keydown', (event) => {
+    if (!(event.ctrlKey || event.metaKey) || event.altKey) {
+      return;
+    }
+
+    const step = event.key === '=' || event.key === '+' ? 1 : event.key === '-' || event.key === '_' ? -1 : event.key === '0' ? 0 : null;
+
+    if (step !== null) {
+      event.preventDefault();
+      setTextScale(step === 0 ? 1 : stepScale(view.textScale, step));
     }
   });
   // Ctrl+B shows or hides the work items, Ctrl+Alt+B the Status and Artifacts column, as VS Code's side bars.

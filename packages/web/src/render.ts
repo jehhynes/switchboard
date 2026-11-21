@@ -49,6 +49,9 @@ export interface View {
   acting: boolean;
   /** What the Status and Artifacts column shows on a wide screen. */
   side: 'status' | 'artifacts';
+  /** The conversation's text size, a share of the theme's, and whether its menu is open. */
+  textScale: number;
+  textMenu: boolean;
   /** New conversation…'s provider menu under the dropdown: the providers, null while they load, or why not. */
   providers: { items: Array<{ provider: string; name: string; default: boolean }> | null; error: string | null } | null;
   /** The prompt the session waits on in its terminal, as last read, for the session it was read for; a key being sent waits. */
@@ -61,7 +64,7 @@ export type Sheet =
   | { kind: 'snooze'; workItemId: number; title: string; choices: SnoozeChoice[]; picked: string; date: string; comment: string }
   | { kind: 'text'; title: string; text: string };
 
-export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), list: false, actions: false, sheet: null, acting: false, prompt: null, providers: null, side: 'status' });
+export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), list: false, actions: false, sheet: null, acting: false, prompt: null, providers: null, side: 'status', textScale: 1, textMenu: false });
 
 /** Each row action's codicon, as the dock draws its controls. */
 const ACTION_ICONS: Record<string, string> = { start: 'play', approve: 'check', retry: 'refresh', stop: 'debug-stop', 'mark-done': 'pass', snooze: 'clockface', restore: 'debug-restart', delete: 'trash' };
@@ -317,6 +320,16 @@ function layoutToggle(side: 'list' | 'detail', shown: boolean): string {
   return `<button type="button" class="icon layout-toggle ${side}-toggle" data-action="toggle-${side}" aria-pressed="${shown}" title="${title}" aria-label="${title}"><span class="codicon codicon-layout-sidebar-${side === 'list' ? 'left' : 'right'}${shown ? '' : '-off'}" aria-hidden="true"></span></button>`;
 }
 
+/** The header's Text size button and its menu: smaller, the size, larger, and Reset, for the conversation's text only. */
+function textSize(view: View): string {
+  const percent = `${Math.round(view.textScale * 100)}%`;
+  const menu = view.textMenu
+    ? `<div class="glass menu text-size-menu align-right" role="menu" aria-label="Text size"><div class="text-size-row"><button type="button" class="icon menu-row" role="menuitem" data-action="text-smaller" title="Smaller (Ctrl+-)" aria-label="Smaller text">A−</button><span class="text-size-value" aria-live="polite">${percent}</span><button type="button" class="icon menu-row" role="menuitem" data-action="text-larger" title="Larger (Ctrl+=)" aria-label="Larger text">A+</button></div><button type="button" class="menu-row" role="menuitem" data-action="text-reset"><span class="menu-gutter" aria-hidden="true"></span><span class="title">Reset (Ctrl+0)</span></button></div>`
+    : '';
+
+  return `<div class="menu-anchor text-size-anchor"><button type="button" class="icon text-size" data-action="text-menu" aria-haspopup="menu" aria-expanded="${view.textMenu}" title="Text size: ${percent}" aria-label="Text size"><span class="codicon codicon-text-size" aria-hidden="true"></span></button>${menu}</div>`;
+}
+
 /** The header: the dropdown of the selected work item's conversations, its button drawn as its rows are, and the persona as an icon. */
 export function renderHeader(state: PageState, view: View, layout: Layout = { list: true, detail: null }): string {
   const scope = state.scope!;
@@ -366,7 +379,7 @@ export function renderHeader(state: PageState, view: View, layout: Layout = { li
   const personaMenu = menu === null ? '' : `<ul class="glass menu persona-menu align-right" role="menu" aria-label="Persona">${rows}</ul>`;
   const personaPart = personaButton === '' ? '' : `<div class="menu-anchor persona-anchor">${personaButton}${personaMenu}</div>`;
 
-  return `<header class="header"><button type="button" class="icon back-toggle" data-action="back" title="Back to work items" aria-label="Back to work items"><span class="codicon codicon-arrow-left" aria-hidden="true"></span></button>${layoutToggle('list', layout.list)}${picker}${renderActions(selectedRow(state), view)}${personaPart}${layout.detail === null ? '' : layoutToggle('detail', layout.detail)}</header>`;
+  return `<header class="header"><button type="button" class="icon back-toggle" data-action="back" title="Back to work items" aria-label="Back to work items"><span class="codicon codicon-arrow-left" aria-hidden="true"></span></button>${layoutToggle('list', layout.list)}${picker}${renderActions(selectedRow(state), view)}${personaPart}${textSize(view)}${layout.detail === null ? '' : layoutToggle('detail', layout.detail)}</header>`;
 }
 
 /**
