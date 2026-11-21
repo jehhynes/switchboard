@@ -217,46 +217,64 @@ function holder(home: string, argv: readonly string[]): Promise<number> {
 }
 
 /**
- * Prints a one-time link to the web page, or with `revoke` signs every browser out of it (architecture.md § Web page). Exit codes: 0 done, 2 no
- * hub, 3 refused.
+ * Prints a one-time link to the web page; with `pair`, a pairing link and code for another device; with `devices`, the signed-in devices; with
+ * `revoke`, signs every device out, or with an ID that one (architecture.md § Web page, § Remote access). Exit codes: 0 done, 2 no hub, 3 refused.
  */
 async function web(home: string, rest: readonly string[]): Promise<number> {
   const words = rest.filter((argument) => !argument.startsWith('--'));
-  const revoke = words[0] === 'revoke';
+  const [verb = 'link', id] = words;
+  const known = verb === 'link' ? words.length === 0 : verb === 'revoke' ? words.length <= 2 : (verb === 'pair' || verb === 'devices') && words.length === 1;
 
-  if (words.length > (revoke ? 1 : 0)) {
-    process.stderr.write(`Usage: hub.js web [revoke]\n`);
+  if (!known) {
+    process.stderr.write(`Usage: hub.js web [pair | devices | revoke [<device ID>]]\n`);
     return 1;
   }
 
+  const route = verb === 'link' ? '/page/link' : `/page/${verb}`;
   const hub = await findHub(home, REPORT_TIMEOUT_MS);
-  const reply = hub === null ? null : await postToHub(hub, revoke ? '/page/revoke' : '/page/link', {}, REPORT_TIMEOUT_MS);
+  const reply = hub === null ? null : await postToHub(hub, route, verb === 'revoke' && id !== undefined ? { id } : {}, REPORT_TIMEOUT_MS);
 
   if (reply === null) {
     process.stderr.write(`${noHub(home)}.\n`);
     return 2;
   }
 
-  if (revoke) {
-    const revoked = (reply.body as { revoked?: unknown } | null)?.revoked;
+  const body = (reply.body ?? {}) as Record<string, unknown>;
 
-    if (reply.status !== 200 || typeof revoked !== 'number') {
-      process.stderr.write(`Refused: ${reply.error ?? `status ${reply.status}`}\n`);
-      return 3;
-    }
-
-    process.stdout.write(`Signed out every browser (${revoked} sign-ins). Open a new link to use the web page again.\n`);
-    return 0;
-  }
-
-  const url = (reply.body as { url?: unknown } | null)?.url;
-
-  if (reply.status !== 200 || typeof url !== 'string') {
-    process.stderr.write(`Refused: ${reply.error ?? `status ${reply.status}`}\n`);
+  if (reply.status !== 200) {
+    process.stderr.write(`Refused: ${typeof body['error'] === 'string' ? body['error'] : (reply.error ?? `status ${reply.status}`)}\n`);
     return 3;
   }
 
-  const notice = (reply.body as { notice?: unknown } | null)?.notice;
+  if (verb === 'revoke') {
+    process.stdout.write(id !== undefined ? `Signed out device ${id}.\n` : `Signed out every browser (${String(body['revoked'])} sign-ins). Open a new link to use the web page again.\n`);
+    return 0;
+  }
+
+  if (verb === 'pair') {
+    process.stdout.write(`Open this link on the device within five minutes; it works once:\n${String(body['url'])}\nOr open https://${String(body['host'])}/ on the device and type the code ${String(body['code'])}.\n`);
+    return 0;
+  }
+
+  if (verb === 'devices') {
+    const devices = Array.isArray(body['devices']) ? (body['devices'] as Array<{ id: string; label: string; host: string | null; login: string | null; usedAt: number }>) : [];
+
+    process.stdout.write(
+      devices.length === 0
+        ? 'No device is signed in.\n'
+        : devices.map((one) => `${one.id}  ${one.label || 'Unknown device'}  ${one.host === null ? 'this computer' : `${one.host} as ${String(one.login)}`}  last used ${new Date(one.usedAt).toLocaleString()}\n`).join(''),
+    );
+    return 0;
+  }
+
+  const url = body['url'];
+
+  if (typeof url !== 'string') {
+    process.stderr.write(`Refused: status ${reply.status}\n`);
+    return 3;
+  }
+
+  const notice = body['notice'];
 
   if (typeof notice === 'string') {
     process.stderr.write(`${notice}\n`);

@@ -296,6 +296,29 @@ describe('createHubApp', () => {
     expect((app.snapshot() as { repoRoots: string[] }).repoRoots).toEqual(['D:/scratch']);
   });
 
+  it('serves the web page to the remote hosts and logins of its settings, adding Tailscale\'s once it answers, and logs why not (PRD R115)', async () => {
+    writeSettings({ sessions: { installHooks: false }, web: { remoteHosts: ['extra.example.net'], remoteLogins: ['a@example.com'], tailscale: true } });
+
+    const status = JSON.stringify({ BackendState: 'Running', Self: { DNSName: 'pc.tail1.ts.net.', UserID: 7 }, User: { '7': { LoginName: 'alex@example.com' } } });
+    const lines: string[] = [];
+    const exec = async (file: string, args: string[]) => (file === 'tailscale' ? { code: 0, stdout: status, stderr: '', missing: false, timedOut: false } : noCli(file, args, { timeoutMs: 0 }));
+    const app = await createHubApp({ home: temp.home, log: (line) => lines.push(line), deps: { exec } });
+
+    await until(() => (app.page!.remote!().hosts.length === 2 ? true : null));
+    expect(app.page!.remote!()).toEqual({ hosts: ['pc.tail1.ts.net', 'extra.example.net'], logins: ['a@example.com', 'alex@example.com'] });
+    expect(lines).toContain('web page: served as https://pc.tail1.ts.net to the Tailscale login alex@example.com through tailscale serve');
+    await app.close();
+
+    writeSettings({ sessions: { installHooks: false }, web: { remoteHosts: ['extra.example.net'] } });
+
+    const unset: string[] = [];
+    const plain = await createHubApp({ home: temp.home, log: (line) => unset.push(line), deps: { exec: noCli } });
+
+    closers.push(() => plain.close());
+    expect(plain.page!.remote!()).toEqual({ hosts: ['extra.example.net'], logins: [] });
+    expect(unset).toContain('web page: web.remoteHosts is set but web.remoteLogins is empty, so no remote device is let in');
+  });
+
   it('gives a page, and only a page, a pairing token for the Chrome extension while the Chrome pane is on (PRD R113)', async () => {
     writeSettings({ sessions: { installHooks: false } });
     const off = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli } });

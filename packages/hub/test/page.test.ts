@@ -4,11 +4,12 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { listenHub } from '../src/server.js';
+import { LOCAL_PAGE_COMMANDS, listenHub } from '../src/server.js';
 import type { HubServer, PageRoutes } from '../src/server.js';
+import type { RemoteAccess } from '../src/page.js';
 import { createHash } from 'node:crypto';
 import { Store } from '@switchboard/core';
-import { artifactFile, cookieValue, dockRowOf, findFiles, knownFolder, pageHeader, loopbackHost, PageAccess, pageCookie, PUBLIC_PAGE_FILES, PAGE_LINK_MS, PAGE_SESSION_MS, PAGE_SESSIONS_KEPT, pageActionEvent, pageActions, pageCommandOf, pageGroups, pageList, pageOpens, pasteText, poolRowOf, rowOpenUrl, tabUrl } from '../src/page.js';
+import { artifactFile, cookieValue, deviceLabel, PAIR_CODE_TRIES, PAIR_MS, pageOrigin, dockRowOf, findFiles, knownFolder, pageHeader, loopbackHost, PageAccess, pageCookie, PUBLIC_PAGE_FILES, PAGE_LINK_MS, PAGE_SESSION_MS, PAGE_SESSIONS_KEPT, pageActionEvent, pageActions, pageCommandOf, pageGroups, pageList, pageOpens, pasteText, poolRowOf, rowOpenUrl, tabUrl } from '../src/page.js';
 import { dockView } from '../src/dock.js';
 import type { DockView } from '../src/dock.js';
 import { pageAsset } from '../src/pageAssets.js';
@@ -109,6 +110,126 @@ describe('PageAccess', () => {
     expect(loopbackHost('localhost:5000', 5000)).toBe(true);
     expect(loopbackHost('evil.example:5000', 5000)).toBe(false);
     expect(loopbackHost('127.0.0.1:5001', 5000)).toBe(false);
+  });
+});
+
+describe('remote access', () => {
+  let store: Store;
+
+  beforeEach(() => {
+    store = Store.open(':memory:');
+  });
+
+  afterEach(() => {
+    store.close();
+  });
+
+  const remote: RemoteAccess = { hosts: ['pc.tail.ts.net'], logins: ['alex@example.com'] };
+  const proxied = { host: 'pc.tail.ts.net', 'x-forwarded-proto': 'https', 'x-forwarded-for': '100.64.0.2', 'x-forwarded-host': 'pc.tail.ts.net', 'tailscale-user-login': 'alex@example.com' };
+
+  it('takes a request with no proxy header as local by its loopback Host, and a proxied one as remote only from an allowed host and login over HTTPS', () => {
+    expect(pageOrigin({ host: '127.0.0.1:5000' }, '127.0.0.1', 5000, remote)).toEqual({ host: null, login: null, origin: 'http://127.0.0.1:5000' });
+    expect(pageOrigin({ host: 'localhost:5000' }, '::1', 5000, remote)).toEqual({ host: null, login: null, origin: 'http://localhost:5000' });
+    expect(pageOrigin({ host: 'pc.tail.ts.net' }, '127.0.0.1', 5000, remote)).toEqual({ refused: 'The page is served only as 127.0.0.1 or localhost.' });
+    expect(pageOrigin(proxied, '127.0.0.1', 5000, remote)).toEqual({ host: 'pc.tail.ts.net', login: 'alex@example.com', origin: 'https://pc.tail.ts.net' });
+    expect(pageOrigin({ ...proxied, host: 'PC.tail.ts.net:443', 'x-forwarded-host': 'PC.tail.ts.net:443' }, '::ffff:127.0.0.1', 5000, remote)).toMatchObject({ host: 'pc.tail.ts.net', origin: 'https://pc.tail.ts.net' });
+    // A peer that is not this computer is refused, though the hub listens on the loopback only.
+    expect(pageOrigin({ host: '127.0.0.1:5000' }, '192.168.1.5', 5000, remote)).toHaveProperty('refused');
+    // A proxied request is never local, even when it names the loopback, so a tailnet client cannot pass for this computer.
+    expect(pageOrigin({ ...proxied, host: '127.0.0.1:5000', 'x-forwarded-host': '127.0.0.1:5000' }, '127.0.0.1', 5000, remote)).toHaveProperty('refused');
+    expect(pageOrigin({ host: '127.0.0.1:5000', forwarded: 'for=1.2.3.4' }, '127.0.0.1', 5000, remote)).toHaveProperty('refused');
+    expect(pageOrigin({ ...proxied, host: 'other.tail.ts.net', 'x-forwarded-host': 'other.tail.ts.net' }, '127.0.0.1', 5000, remote)).toEqual({ refused: 'The page is not served as this name. Set web.tailscale or web.remoteHosts in settings.json.' });
+    expect(pageOrigin({ ...proxied, 'x-forwarded-proto': 'http' }, '127.0.0.1', 5000, remote)).toEqual({ refused: 'The page is served to another device only over HTTPS through tailscale serve.' });
+    expect(pageOrigin({ ...proxied, 'x-forwarded-proto': undefined }, '127.0.0.1', 5000, remote)).toHaveProperty('refused');
+    expect(pageOrigin({ ...proxied, 'x-forwarded-host': 'evil.example' }, '127.0.0.1', 5000, remote)).toHaveProperty('refused');
+    expect(pageOrigin({ ...proxied, 'tailscale-funnel-request': '?1' }, '127.0.0.1', 5000, remote)).toEqual({ refused: 'The page is not served through Tailscale Funnel.' });
+    const login = { refused: 'This Tailscale login may not use the page. Set web.tailscale or web.remoteLogins in settings.json.' };
+
+    expect(pageOrigin({ ...proxied, 'tailscale-user-login': undefined }, '127.0.0.1', 5000, remote)).toEqual(login);
+    expect(pageOrigin({ ...proxied, 'tailscale-user-login': 'mallory@example.com' }, '127.0.0.1', 5000, remote)).toEqual(login);
+    // With no login allowed, no remote request is let in.
+    expect(pageOrigin(proxied, '127.0.0.1', 5000, { hosts: remote.hosts, logins: [] })).toEqual(login);
+  });
+
+  it('gives a pairing link for its remote host only, uses its token or its code once, and binds the sign-in to that host and login', () => {
+    let now = 1_000;
+    const access = new PageAccess(store, () => now);
+    const at = { host: 'pc.tail.ts.net', login: 'alex@example.com', origin: 'https://pc.tail.ts.net' } as const;
+    const local = { host: null, login: null, origin: 'http://127.0.0.1:1' } as const;
+    const pairing = access.pair('pc.tail.ts.net');
+    const token = new URL(pairing.url).searchParams.get('t')!;
+
+    expect(pairing).toMatchObject({ host: 'pc.tail.ts.net', expiresAt: 1_000 + PAIR_MS });
+    expect(pairing.url).toBe(`https://pc.tail.ts.net/page?t=${token}`);
+    expect(pairing.code).toMatch(/^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/);
+    // Tried on this computer, a pairing token is refused and used up.
+    expect(access.exchange(token, undefined, local, 'x')).toBeNull();
+    expect(access.exchange(token, undefined, at, 'x')).toBeNull();
+    expect(access.exchangeCode(pairing.code, undefined, at, 'x')).toBeNull();
+
+    const second = access.pair('pc.tail.ts.net');
+    const cookie = access.exchangeCode(second.code.toLowerCase().replace('-', ' '), undefined, at, 'Android · Chrome')!;
+
+    expect(cookie).toMatch(/^[0-9a-f]{64}$/);
+    expect(access.exchange(new URL(second.url).searchParams.get('t')!, undefined, at, 'x')).toBeNull();
+    expect(access.allows(`sb_page=${cookie}`, at)).toBe(true);
+    expect(access.allows(`sb_page=${cookie}`, local)).toBe(false);
+    expect(access.allows(`sb_page=${cookie}`, { ...at, login: 'other@example.com' })).toBe(false);
+    expect(access.allows(`sb_page=${cookie}`, { ...at, host: 'other.tail.ts.net' })).toBe(false);
+
+    // A local token works only on this computer.
+    const localToken = access.token();
+
+    expect(access.exchange(localToken, undefined, at, 'x')).toBeNull();
+
+    now += 1;
+
+    const own = access.exchange(access.token(), undefined, local, 'Windows · Edge')!;
+
+    expect(access.allows(`sb_page=${own}`, at)).toBe(false);
+    expect(access.allows(`sb_page=${own}`)).toBe(true);
+    // A code is never taken on this computer, and expires with its link.
+    const third = access.pair('pc.tail.ts.net');
+
+    expect(access.exchangeCode(third.code, undefined, local, 'x')).toBeNull();
+    now += PAIR_MS + 1;
+    expect(access.exchangeCode(third.code, undefined, at, 'x')).toBeNull();
+
+    const devices = access.devices();
+
+    expect(devices.map((one) => [one.label, one.host, one.login])).toEqual([
+      ['Windows · Edge', null, null],
+      ['Android · Chrome', 'pc.tail.ts.net', 'alex@example.com'],
+    ]);
+    expect(devices[1]!.id).toBe(createHash('sha256').update(cookie).digest('hex').slice(0, 8));
+    expect(access.revoke('00000000')).toBeNull();
+    expect(access.revoke(devices[1]!.id.toUpperCase())).toBe(createHash('sha256').update(cookie).digest('hex'));
+    expect(access.allows(`sb_page=${cookie}`, at)).toBe(false);
+    expect(access.devices()).toHaveLength(1);
+  });
+
+  it(`drops every code given out after ${PAIR_CODE_TRIES} wrong ones`, () => {
+    const access = new PageAccess(store);
+    const at = { host: 'pc.tail.ts.net', login: 'alex@example.com', origin: 'https://pc.tail.ts.net' } as const;
+    const pairing = access.pair('pc.tail.ts.net');
+
+    for (let wrong = 0; wrong < PAIR_CODE_TRIES; wrong++) {
+      expect(access.exchangeCode('AAAA-AAAA', undefined, at, 'x')).toBeNull();
+    }
+
+    expect(access.exchangeCode(pairing.code, undefined, at, 'x')).toBeNull();
+    expect(access.exchange(new URL(pairing.url).searchParams.get('t')!, undefined, at, 'x')).toBeNull();
+    // A new code after that works.
+    expect(access.exchangeCode(access.pair('pc.tail.ts.net').code, undefined, at, 'x')).toMatch(/^[0-9a-f]{64}$/);
+    expect(pageCookie('ab', true)).toBe(`sb_page=ab; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${PAGE_SESSION_MS / 1000}`);
+  });
+
+  it('names a device by its system and browser', () => {
+    expect(deviceLabel('Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Mobile Safari/537.36')).toBe('Android · Chrome');
+    expect(deviceLabel('Mozilla/5.0 (iPhone; CPU iPhone OS 19_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/19.0 Mobile/15E148 Safari/604.1')).toBe('iPhone · Safari');
+    expect(deviceLabel('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.0.0')).toBe('Windows · Edge');
+    expect(deviceLabel('Mozilla/5.0 (Android 15; Mobile; rv:140.0) Gecko/140.0 Firefox/140.0')).toBe('Android · Firefox');
+    expect(deviceLabel(undefined)).toBe('Unknown device · browser');
   });
 });
 
@@ -495,7 +616,11 @@ describe('the web page routes', () => {
     store.close();
   });
 
+  // The remote hosts and logins the served page reads, none until a test sets them.
+  let remoteAccess: RemoteAccess = { hosts: [], logins: [] };
+
   async function serve() {
+    remoteAccess = { hosts: [], logins: [] };
     const posted: unknown[] = [];
     const uploaded: unknown[] = [];
     const closed: string[] = [];
@@ -510,6 +635,7 @@ describe('the web page routes', () => {
 
     const page: PageRoutes = {
       access: new PageAccess(store),
+      remote: () => remoteAccess,
       asset: (name) => (name === 'index.html' ? { mime: 'text/html; charset=utf-8', body: '<html>page {{build}}</html>' } : ['manifest.webmanifest', 'sw.js', 'page.js'].includes(name) ? { mime: 'text/plain', body: name } : null),
       opened: (app) => {
         const key = `page-${++keys}`;
@@ -744,6 +870,139 @@ describe('the web page routes', () => {
     expect((await send(server.port, 'GET', '/page/manifest.webmanifest', { Host: `evil.example:${server.port}` })).status).toBe(403);
   });
 
+  it('serves the page through tailscale serve to an allowed host and login over HTTPS only, redirects / to the page, and asks a device for a code', async () => {
+    await serve();
+
+    const local = await send(server.port, 'GET', '/', {});
+
+    expect(local.status).toBe(303);
+    expect(local.headers['location']).toBe('/page/');
+
+    const ts = { Host: 'pc.tail.ts.net', 'X-Forwarded-Proto': 'https', 'X-Forwarded-For': '100.64.0.2', 'X-Forwarded-Host': 'pc.tail.ts.net', 'Tailscale-User-Login': 'alex@example.com' };
+
+    // Off until the host and login are set.
+    expect((await send(server.port, 'GET', '/', ts)).status).toBe(403);
+    remoteAccess = { hosts: ['pc.tail.ts.net'], logins: ['alex@example.com'] };
+
+    const root = await send(server.port, 'GET', '/', ts);
+
+    expect(root.status).toBe(303);
+    expect(root.headers['location']).toBe('/page/');
+    expect(root.headers['strict-transport-security']).toBe('max-age=31536000');
+    expect(JSON.parse((await send(server.port, 'GET', '/page/ping', ts)).body)).toEqual({ build: 'b7' });
+    expect((await send(server.port, 'GET', '/page/manifest.webmanifest', ts)).status).toBe(200);
+    expect((await send(server.port, 'GET', '/page/ping', { ...ts, 'X-Forwarded-Proto': 'http' })).status).toBe(403);
+    expect((await send(server.port, 'GET', '/page/ping', { ...ts, 'Tailscale-User-Login': 'mallory@example.com' })).status).toBe(403);
+    expect((await send(server.port, 'GET', '/page/ping', { ...ts, 'Tailscale-Funnel-Request': '?1' })).status).toBe(403);
+    expect((await send(server.port, 'GET', '/page/ping', { ...ts, Host: `127.0.0.1:${server.port}`, 'X-Forwarded-Host': `127.0.0.1:${server.port}` })).status).toBe(403);
+
+    const signedOut = await send(server.port, 'GET', '/page/', ts);
+
+    expect(signedOut.status).toBe(401);
+    expect(signedOut.body).toContain('<form method="get" action="/page">');
+    expect(signedOut.body).not.toContain('wrong or has expired');
+    expect(signedOut.headers['content-security-policy']).toBe("default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
+    expect((await send(server.port, 'GET', '/page', ts)).status).toBe(200);
+
+    const wrong = await send(server.port, 'GET', '/page?code=AAAA-AAAA', ts);
+
+    expect(wrong.status).toBe(403);
+    expect(wrong.body).toContain('That code is wrong or has expired.');
+  });
+
+  it('pairs a device only from this computer, by link or code once, with a Secure cookie bound to its host and login, and lists and revokes devices', async () => {
+    const { url } = await serve();
+    const localCookie = String((await send(server.port, 'GET', `${url.pathname}${url.search}`, {})).headers['set-cookie']).split(';')[0]!;
+    const stream = request({ host: '127.0.0.1', port: server.port, path: '/v1/conversation/events?page=1', headers: { Host: `127.0.0.1:${server.port}`, Cookie: localCookie } }, (response) => response.resume());
+
+    stream.on('error', () => {});
+    stream.end();
+    await until(() => (server.clients() === 1 ? true : null));
+
+    const here = `http://127.0.0.1:${server.port}`;
+    const post = (command: string, headers: Record<string, string>, body: Record<string, unknown> = {}) => send(server.port, 'POST', `/v1/conversation/${command}`, { 'Content-Type': 'application/json', ...headers }, { window: 'page-1', ...body });
+
+    expect(JSON.parse((await post('page-pair', { Cookie: localCookie, Origin: here })).body)).toEqual({ error: expect.stringContaining('Pairing a device needs remote access') });
+    remoteAccess = { hosts: ['pc.tail.ts.net'], logins: ['alex@example.com', 'other@example.com'] };
+
+    const ts = { Host: 'pc.tail.ts.net', 'X-Forwarded-Proto': 'https', 'X-Forwarded-For': '100.64.0.2', 'Tailscale-User-Login': 'alex@example.com', 'User-Agent': 'Mozilla/5.0 (Linux; Android 15) Chrome/141.0 Mobile Safari/537.36' };
+    const pairing = JSON.parse((await post('page-pair', { Cookie: localCookie, Origin: here })).body) as { url: string; code: string; host: string };
+    const link = new URL(pairing.url);
+
+    expect(link.origin).toBe('https://pc.tail.ts.net');
+    // Its token is not taken on this computer, which uses it up.
+    expect((await send(server.port, 'GET', `${link.pathname}${link.search}`, {})).status).toBe(403);
+    expect((await send(server.port, 'GET', `${link.pathname}${link.search}`, ts)).status).toBe(403);
+
+    const again = new URL((JSON.parse((await post('page-pair', { Cookie: localCookie, Origin: here })).body) as { url: string }).url);
+    const paired = await send(server.port, 'GET', `${again.pathname}${again.search}`, ts);
+    const phone = String(paired.headers['set-cookie']).split(';')[0]!;
+
+    expect(paired.status).toBe(303);
+    expect(String(paired.headers['set-cookie'])).toMatch(/; HttpOnly; Secure; SameSite=Strict; Path=\//);
+    expect((await send(server.port, 'GET', `${again.pathname}${again.search}`, ts)).status).toBe(403);
+
+    const list = await send(server.port, 'GET', '/v1/page/list', { ...ts, Cookie: phone });
+
+    expect(list.status).toBe(200);
+    expect(String(list.headers['set-cookie'])).toContain('; Secure;');
+    // The phone's cookie works only through its host and login, and this computer's only here.
+    expect((await send(server.port, 'GET', '/v1/page/list', { Cookie: phone })).status).toBe(401);
+    expect((await send(server.port, 'GET', '/v1/page/list', { ...ts, Cookie: phone, 'Tailscale-User-Login': 'other@example.com' })).status).toBe(401);
+    expect((await send(server.port, 'GET', '/v1/page/list', { ...ts, Cookie: localCookie })).status).toBe(401);
+
+    // The code pairs a second device once.
+    const code = (JSON.parse((await post('page-pair', { Cookie: localCookie, Origin: here })).body) as { code: string }).code;
+    const tablet = await send(server.port, 'GET', `/page?code=${code.toLowerCase()}`, { ...ts, 'User-Agent': 'Mozilla/5.0 (iPad; CPU OS 19_0 like Mac OS X) Version/19.0 Safari/604.1' });
+
+    expect(tablet.status).toBe(303);
+    expect((await send(server.port, 'GET', `/page?code=${code}`, ts)).status).toBe(403);
+    // A code typed on this computer is not a link.
+    expect((await send(server.port, 'GET', `/page?code=${code}`, {})).status).toBe(403);
+
+    // A paired device posts from its own origin and may not pair, list devices or drive the Chrome pane.
+    expect((await post('page-source', { ...ts, Cookie: phone, Origin: here })).status).toBe(403);
+    expect((await post('page-source', { ...ts, Cookie: phone, Origin: 'https://pc.tail.ts.net' })).status).toBe(200);
+    for (const command of ['page-pair', 'page-devices', 'page-device-revoke']) {
+      expect((await post(command, { ...ts, Cookie: phone, Origin: 'https://pc.tail.ts.net' })).status).toBe(403);
+    }
+
+    expect([...LOCAL_PAGE_COMMANDS]).toEqual(['page-pair', 'page-devices', 'page-device-revoke', 'pane-pair', 'pane-rect']);
+
+    const devices = JSON.parse((await post('page-devices', { Cookie: localCookie, Origin: here })).body) as { devices: Array<{ id: string; label: string; host: string | null; login: string | null; current: boolean }> };
+
+    expect(devices.devices.map(({ label, host, login, current }) => ({ label, host, login, current }))).toEqual([
+      { label: 'iPad · Safari', host: 'pc.tail.ts.net', login: 'alex@example.com', current: false },
+      { label: 'Android · Chrome', host: 'pc.tail.ts.net', login: 'alex@example.com', current: false },
+      { label: 'Unknown device · browser', host: null, login: null, current: true },
+    ]);
+    expect(JSON.parse((await send(server.port, 'POST', '/page/devices', { Authorization: `Bearer ${server.token}` })).body).devices).toHaveLength(3);
+
+    // Revoking the phone ends its open page and leaves the others signed in.
+    let ended = false;
+    const phoneStream = request({ host: '127.0.0.1', port: server.port, path: '/v1/conversation/events?page=1', headers: { ...ts, Cookie: phone } }, (response) => {
+      response.resume();
+      response.on('end', () => (ended = true));
+    });
+
+    phoneStream.on('error', () => {});
+    phoneStream.end();
+    await until(() => (server.clients() === 2 ? true : null));
+
+    const phoneId = devices.devices[1]!.id;
+
+    expect((await post('page-device-revoke', { Cookie: localCookie, Origin: here }, { id: 'zz' })).status).toBe(400);
+    expect(JSON.parse((await post('page-device-revoke', { Cookie: localCookie, Origin: here }, { id: phoneId })).body)).toEqual({ revoked: 1 });
+    await until(() => (ended ? true : null));
+    expect((await send(server.port, 'GET', '/v1/page/list', { ...ts, Cookie: phone })).status).toBe(401);
+    expect((await send(server.port, 'GET', '/v1/page/list', { Cookie: localCookie })).status).toBe(200);
+    expect((await send(server.port, 'POST', '/page/revoke', { Authorization: `Bearer ${server.token}` }, { id: phoneId })).status).toBe(404);
+    expect(JSON.parse((await send(server.port, 'POST', '/page/revoke', { Authorization: `Bearer ${server.token}` }, { id: devices.devices[0]!.id })).body)).toEqual({ revoked: 1 });
+    expect(JSON.parse((await send(server.port, 'POST', '/page/pair', { Authorization: `Bearer ${server.token}` })).body)).toMatchObject({ host: 'pc.tail.ts.net', url: expect.stringMatching(/^https:\/\/pc\.tail\.ts\.net\/page\?t=[0-9a-f]{64}$/) });
+    expect((await send(server.port, 'POST', '/page/pair', {})).status).toBe(401);
+    stream.destroy();
+  });
+
   it('revokes every sign-in only with the hub token and ends the open pages\' streams', async () => {
     const { url, closed } = await serve();
     const exchange = await send(server.port, 'GET', `${url.pathname}${url.search}`, {});
@@ -865,10 +1124,18 @@ describe('the web page routes', () => {
     expect(uploaded).toHaveLength(1);
   });
 
-  it("serves a page's artifact by the page key alone, sandboxed with no network, and nothing outside its folder", async () => {
-    const { open } = await serve();
+  it("serves a page's artifact by the page key alone, only from where its page signed in, sandboxed with no network, and nothing outside its folder", async () => {
+    const { url } = await serve();
+    const cookie = String((await send(server.port, 'GET', `${url.pathname}${url.search}`, {})).headers['set-cookie']).split(';')[0]!;
+    // Through a remote host the page key of this computer's page is not found, and a key never opened by a page stream is none.
+    const ts = { Host: 'pc.tail.ts.net', 'X-Forwarded-Proto': 'https', 'X-Forwarded-For': '100.64.0.2', 'Tailscale-User-Login': 'alex@example.com' };
+    const stream = request({ host: '127.0.0.1', port: server.port, path: '/v1/conversation/events?page=1', headers: { Host: `127.0.0.1:${server.port}`, Cookie: cookie } }, (response) => response.resume());
 
-    expect(open()).toBe('page-1');
+    stream.on('error', () => {});
+    stream.end();
+    await until(() => (server.clients() === 1 ? true : null));
+    remoteAccess = { hosts: ['pc.tail.ts.net'], logins: ['alex@example.com'] };
+    expect((await send(server.port, 'GET', '/v1/conversation/artifact/page-1/chat/page.html', ts)).status).toBe(404);
 
     const served = await send(server.port, 'GET', '/v1/conversation/artifact/page-1/chat/page.html', {});
 
@@ -880,6 +1147,9 @@ describe('the web page routes', () => {
     expect(served.headers['referrer-policy']).toBe('no-referrer');
     expect((await send(server.port, 'GET', '/v1/conversation/artifact/page-2/chat/page.html', {})).status).toBe(404);
     expect((await send(server.port, 'GET', '/v1/conversation/artifact/page-1/..%2F..%2Fw1%2Fchat%2Fpage.html', {})).status).toBe(404);
+    stream.destroy();
+    await until(() => (server.clients() === 0 ? true : null));
+    expect((await send(server.port, 'GET', '/v1/conversation/artifact/page-1/chat/page.html', {})).status).toBe(404);
   });
 
   it("streams a page's console only with its cookie, for its page key and shown session, and takes its keys only from the page's origin", async () => {

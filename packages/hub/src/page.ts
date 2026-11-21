@@ -3,7 +3,8 @@ import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { realpathSync, statSync } from 'node:fs';
 import { basename, isAbsolute, join, relative, sep } from 'node:path';
 import { hostKey, isFolderHost } from '@switchboard/core';
-import type { Store } from '@switchboard/core';
+import type { PageDevice, Store } from '@switchboard/core';
+import type { IncomingHttpHeaders } from 'node:http';
 import { artifactType } from '@switchboard/conversation';
 import { windowOf } from './dock.js';
 import type { DockHolderNotice, DockHolderResult, DockRow, DockSourceGroup, DockView } from './dock.js';
@@ -25,12 +26,109 @@ export const PAGE_SESSIONS_KEPT = 20;
 /** How often a sign-in's latest use is written to the store. */
 const PAGE_SESSION_TOUCH_MS = 60 * 60_000;
 
-/** Where the page's sign-ins are kept: the hub's store, by each cookie's SHA-256. */
-export type PageSessions = Pick<Store, 'pageSession' | 'savePageSession' | 'deletePageSessions' | 'trimPageSessions'>;
+/** How long a pairing link and its code can be used (architecture.md § Remote access). */
+export const PAIR_MS = 5 * 60_000;
+/** Wrong pairing codes after which every code given out is dropped, so a code cannot be guessed. */
+export const PAIR_CODE_TRIES = 10;
+/** The letters a pairing code is made of: no 0, 1, I or O, which read alike. */
+const CODE_LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
-/** The Set-Cookie value that signs this computer in with a cookie value (architecture.md § Web page). */
-export function pageCookie(value: string): string {
-  return `${PAGE_COOKIE}=${value}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${PAGE_SESSION_MS / 1000}`;
+/** Where the page's sign-ins are kept: the hub's store, by each cookie's SHA-256. */
+export type PageSessions = Pick<Store, 'pageSession' | 'pageSessions' | 'savePageSession' | 'deletePageSessions' | 'trimPageSessions'>;
+
+/**
+ * The Set-Cookie value that signs a browser in with a cookie value (architecture.md § Web page); `Secure` for a device that reaches the page
+ * through a remote host, which is always HTTPS.
+ */
+export function pageCookie(value: string, secure = false): string {
+  return `${PAGE_COOKIE}=${value}; HttpOnly;${secure ? ' Secure;' : ''} SameSite=Strict; Path=/; Max-Age=${PAGE_SESSION_MS / 1000}`;
+}
+
+/** The names the page also answers as through `tailscale serve`, and the Tailscale logins a request through them must carry (architecture.md § Remote access). */
+export interface RemoteAccess {
+  hosts: readonly string[];
+  logins: readonly string[];
+}
+
+/**
+ * Where a page request came from: this computer, with no host or login, or a remote host through `tailscale serve` with the login Tailscale
+ * named; `origin` is the `Origin` the page's posts must carry.
+ */
+export type PageOrigin = { host: null; login: null; origin: string } | { host: string; login: string; origin: string };
+
+/** A request from this computer, where a sign-in is checked when no origin is named. */
+const LOCAL_ORIGIN: PageOrigin = { host: null, login: null, origin: '' };
+
+/** Headers only a proxy adds: a request with any of them came through one, so it is never taken as this computer's own. */
+const PROXY_HEADERS = ['forwarded', 'via', 'x-forwarded-for', 'x-forwarded-host', 'x-forwarded-proto', 'x-forwarded-port', 'x-real-ip', 'tailscale-user-login', 'tailscale-user-name', 'tailscale-user-profile-pic', 'tailscale-funnel-request', 'tailscale-headers-info', 'tailscale-app-capabilities'];
+
+/** Whether a socket's peer address is this computer's loopback. */
+function loopbackPeer(address: string | undefined): boolean {
+  return address !== undefined && (/^127\./.test(address) || address === '::1' || /^::ffff:127\./.test(address));
+}
+
+/**
+ * Where a page request came from (architecture.md § Remote access), or why it is refused. The hub listens on 127.0.0.1 only, so every request
+ * comes from this computer, a proxy such as `tailscale serve` included. A request with no proxy header is this computer's own and must name
+ * `127.0.0.1:<port>` or `localhost:<port>`, against DNS rebinding. One with a proxy header must name an allowed remote host, as HTTPS, not as a
+ * Funnel request, and carry an allowed `Tailscale-User-Login`, which `tailscale serve` sets from the device's owner and removes when a client
+ * sends it.
+ */
+export function pageOrigin(headers: IncomingHttpHeaders, peer: string | undefined, port: number, remote: RemoteAccess): PageOrigin | { refused: string } {
+  const host = headers.host;
+
+  if (!loopbackPeer(peer)) {
+    return { refused: 'The page is served only through this computer.' };
+  }
+
+  if (!PROXY_HEADERS.some((name) => headers[name] !== undefined)) {
+    return loopbackHost(host, port) ? { host: null, login: null, origin: `http://${host}` } : { refused: 'The page is served only as 127.0.0.1 or localhost.' };
+  }
+
+  const name = (host ?? '').toLowerCase().replace(/:443$/, '');
+  const login = headers['tailscale-user-login'];
+
+  if (!remote.hosts.includes(name)) {
+    return { refused: 'The page is not served as this name. Set web.tailscale or web.remoteHosts in settings.json.' };
+  }
+
+  if (headers['x-forwarded-proto'] !== 'https' || (headers['x-forwarded-host'] !== undefined && headers['x-forwarded-host'] !== host)) {
+    return { refused: 'The page is served to another device only over HTTPS through tailscale serve.' };
+  }
+
+  if (headers['tailscale-funnel-request'] !== undefined) {
+    return { refused: 'The page is not served through Tailscale Funnel.' };
+  }
+
+  if (typeof login !== 'string' || !remote.logins.includes(login.toLowerCase())) {
+    return { refused: 'This Tailscale login may not use the page. Set web.tailscale or web.remoteLogins in settings.json.' };
+  }
+
+  return { host: name, login: login.toLowerCase(), origin: `https://${name}` };
+}
+
+/** A short name for the device a browser runs on, from its User-Agent: its system and its browser, such as "Android · Chrome". */
+export function deviceLabel(agent: string | undefined): string {
+  const text = agent ?? '';
+  const system = /iPhone/.test(text) ? 'iPhone' : /iPad/.test(text) ? 'iPad' : /Android/.test(text) ? 'Android' : /CrOS/.test(text) ? 'ChromeOS' : /Windows/.test(text) ? 'Windows' : /Macintosh|Mac OS X/.test(text) ? 'Mac' : /Linux/.test(text) ? 'Linux' : 'Unknown device';
+  const browser = /Edg(A|iOS)?\//.test(text) ? 'Edge' : /SamsungBrowser/.test(text) ? 'Samsung Internet' : /Firefox\/|FxiOS/.test(text) ? 'Firefox' : /Chrome\/|CriOS/.test(text) ? 'Chrome' : /Safari\//.test(text) ? 'Safari' : 'browser';
+
+  return `${system} · ${browser}`;
+}
+
+/** A remembered sign-in as the device list shows it: its ID, the start of its hash, its device, and when it was made and last used. */
+export interface PageDeviceView extends PageDevice {
+  id: string;
+  createdAt: number;
+  usedAt: number;
+}
+
+/** A pairing link's parts (architecture.md § Remote access): its URL on the remote host, its code, and when both stop working. */
+export interface PagePairing {
+  url: string;
+  code: string;
+  host: string;
+  expiresAt: number;
 }
 
 function hashOf(cookie: string): string {
@@ -38,42 +136,78 @@ function hashOf(cookie: string): string {
 }
 
 /**
- * The web page's credential (architecture.md § Web page): a one-time token in a link, which the page exchanges for a cookie it cannot read. Tokens
- * live in the hub's memory; each cookie is a remembered sign-in for this computer, kept in the store as its hash only, so it outlives a hub restart
- * until it goes unused for `PAGE_SESSION_MS` or is revoked.
+ * The web page's credential (architecture.md § Web page, § Remote access): a one-time token in a link, which the page exchanges for a cookie it
+ * cannot read. Tokens live in the hub's memory; a pairing token, for a remote host, also has a short code to type in its place. Each cookie is a
+ * remembered sign-in for one device, kept in the store as its hash only with where it was made, so it outlives a hub restart until it goes unused
+ * for `PAGE_SESSION_MS` or is revoked, and it works only from where it was made: this computer, or the remote host and login it was paired through.
  */
 export class PageAccess {
-  readonly #tokens = new Map<string, number>();
+  // Each token's expiry and, for a pairing token, its remote host and code.
+  readonly #tokens = new Map<string, { until: number; host: string | null; code: string | null }>();
+  readonly #codes = new Map<string, string>();
+  #wrongCodes = 0;
 
   constructor(
     private readonly sessions: PageSessions,
     private readonly now: () => number = Date.now,
   ) {}
 
-  /** A new one-time token, good for `PAGE_LINK_MS`. */
-  token(): string {
-    const token = randomBytes(32).toString('hex');
-
-    for (const [old, until] of this.#tokens) {
-      if (until < this.now()) {
-        this.#tokens.delete(old);
+  #prune(): void {
+    for (const [old, entry] of this.#tokens) {
+      if (entry.until < this.now()) {
+        this.#drop(old);
       }
     }
-
-    this.#tokens.set(token, this.now() + PAGE_LINK_MS);
-    return token;
   }
 
-  /**
-   * A new cookie value for a token not used yet and not expired, which it uses up; null otherwise. The sign-in the request's Cookie header
-   * already holds is forgotten, so signing in again leaves no old cookie valid.
-   */
-  exchange(token: string, header?: string): string | null {
-    const until = this.#tokens.get(token);
+  #drop(token: string): void {
+    const code = this.#tokens.get(token)?.code ?? null;
 
     this.#tokens.delete(token);
 
-    if (until === undefined || until < this.now()) {
+    if (code !== null) {
+      this.#codes.delete(code);
+    }
+  }
+
+  /** A new one-time token for this computer, good for `PAGE_LINK_MS`. */
+  token(): string {
+    this.#prune();
+
+    const token = randomBytes(32).toString('hex');
+
+    this.#tokens.set(token, { until: this.now() + PAGE_LINK_MS, host: null, code: null });
+    return token;
+  }
+
+  /** A new pairing link for a device on `host`, a remote host: a one-time token and its code, good for `PAIR_MS`; using either uses up both. */
+  pair(host: string): PagePairing {
+    this.#prune();
+
+    const token = randomBytes(32).toString('hex');
+    let code = '';
+
+    do {
+      code = [...randomBytes(8)].map((byte) => CODE_LETTERS[byte % CODE_LETTERS.length]).join('');
+    } while (this.#codes.has(code));
+
+    const until = this.now() + PAIR_MS;
+
+    this.#tokens.set(token, { until, host, code });
+    this.#codes.set(code, token);
+    return { url: `https://${host}/page?t=${token}`, code: `${code.slice(0, 4)}-${code.slice(4)}`, host, expiresAt: until };
+  }
+
+  /**
+   * A new cookie value for a token not used yet and not expired, given out for where the request came from, which it uses up; null otherwise.
+   * The sign-in the request's Cookie header already holds is forgotten, so signing in again leaves no old cookie valid.
+   */
+  exchange(token: string, header?: string, origin: PageOrigin = LOCAL_ORIGIN, label = ''): string | null {
+    const entry = this.#tokens.get(token);
+
+    this.#drop(token);
+
+    if (entry === undefined || entry.until < this.now() || entry.host !== origin.host) {
       return null;
     }
 
@@ -85,13 +219,38 @@ export class PageAccess {
 
     const cookie = randomBytes(32).toString('hex');
 
-    this.sessions.savePageSession(hashOf(cookie), this.now());
+    this.sessions.savePageSession(hashOf(cookie), this.now(), { label, host: origin.host, login: origin.login });
     this.sessions.trimPageSessions(this.now() - PAGE_SESSION_MS, PAGE_SESSIONS_KEPT);
     return cookie;
   }
 
-  /** Whether a request's Cookie header carries a sign-in this hub gave out, not revoked and used within `PAGE_SESSION_MS`, which counts as a use. */
-  allows(header: string | undefined): boolean {
+  /**
+   * A typed pairing code, in any case and with or without its dash, exchanged as its token is, only through a remote host; null for a wrong one.
+   * After `PAIR_CODE_TRIES` wrong codes every code given out is dropped, its link with it.
+   */
+  exchangeCode(code: string, header: string | undefined, origin: PageOrigin, label: string): string | null {
+    const token = origin.host === null ? undefined : this.#codes.get(code.toUpperCase().replace(/[^A-Z0-9]/g, ''));
+
+    if (token === undefined) {
+      if (++this.#wrongCodes >= PAIR_CODE_TRIES) {
+        this.#wrongCodes = 0;
+
+        for (const one of [...this.#codes.values()]) {
+          this.#drop(one);
+        }
+      }
+
+      return null;
+    }
+
+    return this.exchange(token, header, origin, label);
+  }
+
+  /**
+   * Whether a request's Cookie header carries a sign-in this hub gave out, not revoked and used within `PAGE_SESSION_MS`, made where the request
+   * comes from, which counts as a use.
+   */
+  allows(header: string | undefined, origin: PageOrigin = LOCAL_ORIGIN): boolean {
     const given = cookieValue(header, PAGE_COOKIE);
 
     if (given === null || !/^[0-9a-f]{64}$/.test(given)) {
@@ -102,7 +261,7 @@ export class PageAccess {
     const session = this.sessions.pageSession(hash);
     const now = this.now();
 
-    if (session === null) {
+    if (session === null || session.host !== origin.host || session.login !== origin.login) {
       return false;
     }
 
@@ -125,10 +284,32 @@ export class PageAccess {
     return given === null ? null : hashOf(given);
   }
 
+  /** The remembered sign-ins, the one used last first, each with its ID, the first 8 characters of its hash. */
+  devices(): PageDeviceView[] {
+    return this.sessions.pageSessions().map(({ hash, label, host, login, createdAt, usedAt }) => ({ id: deviceId(hash), label, host, login, createdAt, usedAt }));
+  }
+
+  /** Forgets the sign-in with this ID; answers its stored key, or null when no one sign-in has it. */
+  revoke(id: string): string | null {
+    const found = this.sessions.pageSessions().filter((one) => deviceId(one.hash) === id.toLowerCase());
+
+    if (found.length !== 1) {
+      return null;
+    }
+
+    this.sessions.deletePageSessions(found[0]!.hash);
+    return found[0]!.hash;
+  }
+
   /** Forgets every sign-in, so every browser needs a new link; answers how many there were. */
   revokeAll(): number {
     return this.sessions.deletePageSessions();
   }
+}
+
+/** A sign-in's ID in the device list: the first 8 characters of its stored hash, which tells nothing of the cookie. */
+export function deviceId(hash: string): string {
+  return hash.slice(0, 8);
 }
 
 /** The page's files a browser fetches without its cookie, for installing the page and for the offline page; none holds anything private. */
@@ -136,6 +317,17 @@ export const PUBLIC_PAGE_FILES = new Set(['manifest.webmanifest', 'sw.js', 'offl
 
 /** What `/page/` answers a browser that is not signed in. */
 export const SIGNED_OUT_HTML = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Switchboard</title><style>body{margin:0;display:grid;place-items:center;min-height:100vh;background:#1f1f1f;color:#cccccc;font:14px system-ui,sans-serif}main{max-width:28rem;padding:24px}h1{font-size:18px;font-weight:600;margin:0 0 8px}</style></head><body><main><h1>Not signed in</h1><p>This browser is not signed in to Switchboard. Open the page with Switchboard: Open Web Page in VS Code, or <code>hub.js web</code>.</p></main></body></html>';
+
+/** The CSP of the pairing page: its own styles and a form that asks only this origin. */
+export const PAIR_CSP = "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
+
+/**
+ * What a remote host answers a device that is not signed in (architecture.md § Remote access): a form that sends a pairing code to `/page`, and
+ * after a wrong or expired one, says so.
+ */
+export function pairHtml(wrong: boolean): string {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Switchboard</title><style>body{margin:0;display:grid;place-items:center;min-height:100vh;background:#1f1f1f;color:#cccccc;font:16px system-ui,sans-serif}main{max-width:24rem;padding:24px}h1{font-size:20px;font-weight:600;margin:0 0 8px}p{line-height:1.4}.wrong{color:#f48771}input,button{font:inherit;font-size:20px;padding:10px 12px;border-radius:4px;box-sizing:border-box;width:100%;margin-top:8px}input{background:#313131;color:#cccccc;border:1px solid #3c3c3c;text-transform:uppercase;letter-spacing:2px}button{background:#0078d4;color:#ffffff;border:0}</style></head><body><main><h1>Pair this device</h1><p>On the computer that runs Switchboard, open the web page, choose More Actions, then Pair a device, and scan its code, or type the code it shows here.</p>${wrong ? '<p class="wrong" role="alert">That code is wrong or has expired. Get a new one from Pair a device.</p>' : ''}<form method="get" action="/page"><input name="code" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" placeholder="ABCD-EFGH" aria-label="Pairing code" required maxlength="12"><button type="submit">Pair</button></form></main></body></html>`;
+}
 
 /** A cookie's value from a Cookie header, or null. */
 export function cookieValue(header: string | undefined, name: string): string | null {

@@ -322,8 +322,12 @@ describe('hub entry point', () => {
     }
   });
 
-  it('prints a web page link and signs every browser out through the hub, with exit codes for usage and no hub', async () => {
-    expect(await start('web', 'now').exited).toMatchObject({ code: 1, stderr: 'Usage: hub.js web [revoke]\n' });
+  it('prints a web page link, pairs, lists and signs browsers out through the hub, with exit codes for usage, refusals and no hub', async () => {
+    const usage = 'Usage: hub.js web [pair | devices | revoke [<device ID>]]\n';
+
+    expect(await start('web', 'now').exited).toMatchObject({ code: 1, stderr: usage });
+    expect(await start('web', 'pair', 'now').exited).toMatchObject({ code: 1, stderr: usage });
+    expect(await start('web', 'revoke', 'a', 'b').exited).toMatchObject({ code: 1, stderr: usage });
     expect((await start('web').exited).code).toBe(2);
     expect((await start('web', 'revoke').exited).code).toBe(2);
     expect(await start('--page-port=soon').exited).toMatchObject({ code: 1, stderr: '--page-port takes a port number, not "soon".\n' });
@@ -335,6 +339,11 @@ describe('hub entry point', () => {
     expect(link.code).toBe(0);
     expect(link.stdout).toMatch(new RegExp(`http://127\\.0\\.0\\.1:${found.port}/page\\?t=[0-9a-f]{64}`));
     expect(await start('web', 'revoke').exited).toMatchObject({ code: 0, stdout: 'Signed out every browser (0 sign-ins). Open a new link to use the web page again.\n' });
+    expect(await start('web', 'devices').exited).toMatchObject({ code: 0, stdout: 'No device is signed in.\n' });
+    // No remote host is set, so there is nothing to pair through.
+    expect(await start('web', 'pair').exited).toMatchObject({ code: 3, stderr: expect.stringContaining('Refused: Pairing a device needs remote access') });
+    expect(await start('web', 'revoke', 'abcdef12').exited).toMatchObject({ code: 3, stderr: 'Refused: No device has the ID abcdef12.\n' });
+    expect(await start('web', 'revoke', 'nope').exited).toMatchObject({ code: 3, stderr: 'Refused: Expected {id}, a device ID of 8 hex characters.\n' });
 
     await start('--stop').exited;
     expect((await hub.exited).code).toBe(0);

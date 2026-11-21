@@ -4,8 +4,8 @@ import { createServer } from 'node:http';
 import { pipeline } from 'node:stream';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import type { HubIdentity } from '@switchboard/core';
-import { ARTIFACT_CSP, CONSOLE_QUEUE_BYTES, cookieValue, loopbackHost, PAGE_COOKIE, PAGE_CSP, pageCookie, PUBLIC_PAGE_FILES, SIGNED_OUT_HTML } from './page.js';
-import type { PageAccess } from './page.js';
+import { ARTIFACT_CSP, CONSOLE_QUEUE_BYTES, cookieValue, deviceId, deviceLabel, PAGE_COOKIE, PAGE_CSP, pageCookie, pageOrigin, PAIR_CSP, pairHtml, PUBLIC_PAGE_FILES, SIGNED_OUT_HTML } from './page.js';
+import type { PageAccess, PageOrigin, RemoteAccess } from './page.js';
 import { MAX_UPLOAD_BYTES } from './uploads.js';
 
 export interface Reply {
@@ -58,6 +58,8 @@ export interface PostContext {
 /** What the web page's routes read (architecture.md § Web page). */
 export interface PageRoutes {
   access: PageAccess;
+  /** The remote hosts and logins the page is served to through `tailscale serve` (architecture.md § Remote access); none without it. */
+  remote?(): RemoteAccess;
   /** A file of the page itself, by its name under `/page/`, `index.html` for the page; null for none. */
   asset(name: string): { mime: string; body: Buffer | string } | null;
   /** Registers a page's conversation stream, `installed` when it runs as the installed app, and returns its page key. */
@@ -80,8 +82,24 @@ export interface PageRoutes {
 /**
  * The conversation commands a page may post with its cookie; never `new-conversation`, since a page hosts none: its New conversation… is
  * `page-conversation`, hosted by the shown conversation's folder. `row-action`, `row-paste`, `resume`, `prompt`, `prompt-key` and `console-input` take only a page key.
+ * The hub itself answers `page-pair`, `page-devices` and `page-device-revoke` (architecture.md § Remote access).
  */
-export const PAGE_COMMANDS = new Set(['send', 'history', 'seen', 'select', 'statuses', 'commands', 'answer', 'talk-here', 'stop-speaking', 'speak-replies', 'replay', 'personas', 'persona', 'page-focus', 'row-action', 'row-paste', 'row-open', 'row-command', 'pool-action', 'resume', 'prompt', 'prompt-key', 'mic', 'composer', 'providers', 'page-conversation', 'console-input', 'page-source', 'page-search', 'page-poll', 'page-history', 'page-holder-restart', 'page-adhoc', 'page-folder-conversation', 'pane-pair', 'pane-rect']);
+export const PAGE_COMMANDS = new Set(['send', 'history', 'seen', 'select', 'statuses', 'commands', 'answer', 'talk-here', 'stop-speaking', 'speak-replies', 'replay', 'personas', 'persona', 'page-focus', 'row-action', 'row-paste', 'row-open', 'row-command', 'pool-action', 'resume', 'prompt', 'prompt-key', 'mic', 'composer', 'providers', 'page-conversation', 'console-input', 'page-source', 'page-search', 'page-poll', 'page-history', 'page-holder-restart', 'page-adhoc', 'page-folder-conversation', 'pane-pair', 'pane-rect', 'page-pair', 'page-devices', 'page-device-revoke']);
+
+/**
+ * The page commands a device that reaches the page through a remote host may not post (architecture.md § Remote access): pairing and the device
+ * list, so a paired device cannot pair others or sign this computer out, and the Chrome pane's, which works only beside this computer's page.
+ */
+export const LOCAL_PAGE_COMMANDS = new Set(['page-pair', 'page-devices', 'page-device-revoke', 'pane-pair', 'pane-rect']);
+
+/** The page routes only the hub token reaches, which the page's own routes never answer. */
+const HUB_PAGE_ROUTES = new Set(['/page/link', '/page/revoke', '/page/pair', '/page/devices']);
+
+/** The page commands the hub answers itself: pairing a device and the device list (architecture.md § Remote access). */
+const DEVICE_COMMANDS = new Set(['page-pair', 'page-devices', 'page-device-revoke']);
+
+/** Why a pairing link cannot be made with no remote host and login. */
+export const REMOTE_OFF = 'Pairing a device needs remote access: set web.tailscale to true, or web.remoteHosts and web.remoteLogins, in settings.json, run tailscale serve, and restart the hub.';
 
 export interface HubServer {
   port: number;
@@ -135,7 +153,8 @@ const HEARTBEAT_MS = 15_000;
 const PAGE_PORT_WAIT_MS = 3_000;
 const BODY_LIMIT = 1024 * 1024;
 
-function readJson(request: IncomingMessage): Promise<unknown> {
+/** The JSON body of a request; an empty body is `{}` when `emptyOk`. */
+function readJson(request: IncomingMessage, emptyOk = false): Promise<unknown> {
   return new Promise((resolve, reject) => {
     let text = '';
 
@@ -150,7 +169,7 @@ function readJson(request: IncomingMessage): Promise<unknown> {
     });
     request.on('end', () => {
       try {
-        resolve(JSON.parse(text));
+        resolve(emptyOk && text === '' ? {} : JSON.parse(text));
       } catch {
         reject(new Error('body is not JSON'));
       }
@@ -398,29 +417,88 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
   let pageReady: Promise<unknown> = Promise.resolve();
   // Open page streams and the sign-in each opened with, so a revoke ends them all and a sign-in replaced ends its own.
   const pageStreams = new Map<ServerResponse, string | null>();
+  // Where each open page key's stream came from, this computer or a remote host and login, so its artifact links work only from there.
+  const pageKeyOrigins = new Map<string, string>();
+  const originOf = (origin: PageOrigin): string => (origin.host === null ? 'local' : `${origin.host} ${origin.login}`);
   const page = options.page;
+
+  /** Ends the open page streams of one sign-in, by its stored key, or of every sign-in. */
+  const endPages = (session?: string): void => {
+    for (const [stream, one] of pageStreams) {
+      if (session === undefined || one === session) {
+        stream.end();
+      }
+    }
+  };
+  /** A pairing link for the first remote host (architecture.md § Remote access), or why not while remote access is off. */
+  const pairing = (): Reply => {
+    const remote = page?.remote?.() ?? { hosts: [], logins: [] };
+    const host = remote.hosts[0];
+
+    return host === undefined || remote.logins.length === 0 || page === undefined ? { status: 409, body: { error: REMOTE_OFF } } : { status: 200, body: page.access.pair(host) };
+  };
+  /** The remembered sign-ins, with `current` on the one a Cookie header holds. */
+  const devices = (cookie?: string): Reply => {
+    const current = page?.access.sessionOf(cookie) ?? null;
+
+    return { status: 200, body: { devices: (page?.access.devices() ?? []).map((one) => ({ ...one, current: current !== null && deviceId(current) === one.id })) } };
+  };
+  /** Signs one device out by its ID and ends its open pages. */
+  const revokeDevice = (id: unknown): Reply => {
+    if (typeof id !== 'string' || !/^[0-9a-f]{8}$/i.test(id)) {
+      return { status: 400, body: { error: 'Expected {id}, a device ID of 8 hex characters.' } };
+    }
+
+    const hash = page?.access.revoke(id) ?? null;
+
+    if (hash === null) {
+      return { status: 404, body: { error: `No device has the ID ${id}.` } };
+    }
+
+    endPages(hash);
+    return { status: 200, body: { revoked: 1 } };
+  };
+  /** A device command the page posts, which the hub answers itself; null for any other command. */
+  const devicesRoute = (command: string, body: unknown, cookie: string | undefined): Reply | null =>
+    command === 'page-pair' ? pairing() : command === 'page-devices' ? devices(cookie) : command === 'page-device-revoke' ? revokeDevice((body as { id?: unknown } | null)?.id) : null;
 
   /** The web page's routes (architecture.md § Web page); false for any other request. */
   const servePage = (request: IncomingMessage, response: ServerResponse, url: URL): boolean => {
     const path = url.pathname;
-    const isPageRoute = path === '/page' || path.startsWith('/page/') || path === '/v1/page/list' || path.startsWith('/v1/conversation/artifact/') || (path === '/v1/conversation/events' && url.searchParams.has('page')) || path === '/v1/conversation/files' || path === '/v1/conversation/console';
+    const isPageRoute = path === '/' || path === '/page' || path.startsWith('/page/') || path === '/v1/page/list' || path.startsWith('/v1/conversation/artifact/') || (path === '/v1/conversation/events' && url.searchParams.has('page')) || path === '/v1/conversation/files' || path === '/v1/conversation/console';
     const bearer = request.headers.authorization !== undefined;
     const cookiePost = request.method === 'POST' && !bearer && path.startsWith('/v1/conversation/') && request.headers.cookie !== undefined;
 
-    if (page === undefined || (!isPageRoute && !cookiePost) || (request.method === 'POST' && (path === '/page/link' || path === '/page/revoke'))) {
+    if (page === undefined || (!isPageRoute && !cookiePost) || (request.method === 'POST' && HUB_PAGE_ROUTES.has(path))) {
       return false;
     }
 
     response.setHeader('Referrer-Policy', 'no-referrer');
     response.setHeader('X-Content-Type-Options', 'nosniff');
 
-    // Another name for this machine, as a DNS rebinding attack uses, never reaches the page. The port is the one the request came in on.
-    if (!loopbackHost(request.headers.host, request.socket.localPort ?? 0)) {
-      json(response, 403, { error: 'The page is served only as 127.0.0.1 or localhost.' });
+    // Another name for this machine, as a DNS rebinding attack uses, never reaches the page, nor a proxied request that does not come from an
+    // allowed remote host and login over HTTPS (architecture.md § Remote access). The port is the one the request came in on.
+    const origin = pageOrigin(request.headers, request.socket.remoteAddress, request.socket.localPort ?? 0, page.remote?.() ?? { hosts: [], logins: [] });
+
+    if ('refused' in origin) {
+      json(response, 403, { error: origin.refused });
       return true;
     }
 
-    // An artifact's own files, which its sandboxed frame loads without the cookie, are read by the page key in their path.
+    const remote = origin.host !== null;
+
+    if (remote) {
+      response.setHeader('Strict-Transport-Security', 'max-age=31536000');
+    }
+
+    if (request.method === 'GET' && path === '/') {
+      response.writeHead(303, { Location: '/page/', 'Cache-Control': 'no-store' });
+      response.end();
+      return true;
+    }
+
+    // An artifact's own files, which its sandboxed frame loads without the cookie, are read by the page key in their path, only from where the
+    // page that holds the key signed in (architecture.md § Remote access).
     if (request.method === 'GET' && path.startsWith('/v1/conversation/artifact/')) {
       const [key = '', ...rest] = path.slice('/v1/conversation/artifact/'.length).split('/');
       let name = '';
@@ -431,7 +509,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
         // A malformed name is not found.
       }
 
-      const file = page.isPage(key) ? page.artifact(key, name) : null;
+      const file = page.isPage(key) && pageKeyOrigins.get(key) === originOf(origin) ? page.artifact(key, name) : null;
 
       if (file === null) {
         json(response, 404, { error: 'No such artifact here.' });
@@ -445,7 +523,23 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
 
     if (request.method === 'GET' && path === '/page') {
       const previous = page.access.sessionOf(request.headers.cookie);
-      const cookie = page.access.exchange(url.searchParams.get('t') ?? '', request.headers.cookie);
+      const code = remote ? url.searchParams.get('code') : null;
+      const label = deviceLabel(request.headers['user-agent']);
+
+      // A remote host with neither a link's token nor a code asks for the code.
+      if (remote && code === null && !url.searchParams.has('t')) {
+        response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Frame-Options': 'DENY', 'Content-Security-Policy': PAIR_CSP });
+        response.end(pairHtml(false));
+        return true;
+      }
+
+      const cookie = code !== null ? page.access.exchangeCode(code, request.headers.cookie, origin, label) : page.access.exchange(url.searchParams.get('t') ?? '', request.headers.cookie, origin, label);
+
+      if (cookie === null && remote) {
+        response.writeHead(403, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Frame-Options': 'DENY', 'Content-Security-Policy': PAIR_CSP });
+        response.end(pairHtml(true));
+        return true;
+      }
 
       if (cookie === null) {
         response.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
@@ -459,7 +553,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
         }
       }
 
-      response.writeHead(303, { 'Set-Cookie': pageCookie(cookie), Location: '/page/', 'Cache-Control': 'no-store' });
+      response.writeHead(303, { 'Set-Cookie': pageCookie(cookie, remote), Location: '/page/', 'Cache-Control': 'no-store' });
       response.end();
       return true;
     }
@@ -490,10 +584,10 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       return true;
     }
 
-    if (!page.access.allows(request.headers.cookie)) {
+    if (!page.access.allows(request.headers.cookie, origin)) {
       if (request.method === 'GET' && path === '/page/') {
-        response.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Frame-Options': 'DENY', 'Content-Security-Policy': PAGE_CSP });
-        response.end(SIGNED_OUT_HTML);
+        response.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Frame-Options': 'DENY', 'Content-Security-Policy': remote ? PAIR_CSP : PAGE_CSP });
+        response.end(remote ? pairHtml(false) : SIGNED_OUT_HTML);
       } else {
         json(response, 401, { error: 'unauthorized' });
       }
@@ -502,7 +596,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     }
 
     // Each signed-in request renews the cookie's Max-Age, as it renews the sign-in, so a computer in use stays signed in.
-    response.setHeader('Set-Cookie', pageCookie(cookieValue(request.headers.cookie, PAGE_COOKIE)!));
+    response.setHeader('Set-Cookie', pageCookie(cookieValue(request.headers.cookie, PAGE_COOKIE)!, remote));
 
     if (request.method === 'GET' && path.startsWith('/page/')) {
       sendAsset(path === '/page/' ? 'index.html' : path.slice('/page/'.length));
@@ -512,12 +606,14 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     if (request.method === 'GET' && path === '/v1/conversation/events') {
       let key: string | null = page.opened(url.searchParams.get('installed') === '1');
 
+      pageKeyOrigins.set(key, originOf(origin));
       openConversation(request, response, key);
       pageStreams.set(response, page.access.sessionOf(request.headers.cookie));
       request.on('close', () => {
         pageStreams.delete(response);
 
         if (key !== null) {
+          pageKeyOrigins.delete(key);
           options.windowClosed?.(key);
           key = null;
         }
@@ -593,7 +689,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
         json(response, status, { error });
       };
 
-      if (request.headers.origin !== `http://${request.headers.host}`) {
+      if (request.headers.origin !== origin.origin) {
         refuse(403, 'The page posts only from its own origin.');
       } else if (!page.isPage(window)) {
         refuse(403, 'Not in this window.');
@@ -620,13 +716,18 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     const command = path.slice('/v1/conversation/'.length);
     const handler = options.post?.[path];
 
-    if (request.method !== 'POST' || !PAGE_COMMANDS.has(command) || handler === undefined) {
+    if (request.method !== 'POST' || !PAGE_COMMANDS.has(command) || (handler === undefined && !DEVICE_COMMANDS.has(command))) {
       json(response, 404, { error: 'not found' });
       return true;
     }
 
-    if (request.headers.origin !== `http://${request.headers.host}`) {
+    if (request.headers.origin !== origin.origin) {
       json(response, 403, { error: 'The page posts only from its own origin.' });
+      return true;
+    }
+
+    if (remote && LOCAL_PAGE_COMMANDS.has(command)) {
+      json(response, 403, { error: 'Do this from the page on the computer that runs Switchboard.' });
       return true;
     }
 
@@ -639,7 +740,14 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
           return;
         }
 
-        handler(body).then(
+        const own = devicesRoute(command, body, request.headers.cookie);
+
+        if (own !== null) {
+          json(response, own.status, own.body);
+          return;
+        }
+
+        handler!(body).then(
           (reply) => json(response, reply.status, reply.body),
           (error: unknown) => json(response, 500, { error: String(error) }),
         );
@@ -738,13 +846,34 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       );
     } else if (request.method === 'POST' && path === '/page/revoke' && page !== undefined) {
       // Signs every browser out of the web page and ends the open pages' streams (architecture.md § Web page).
-      const revoked = page.access.revokeAll();
+      // With {id}, signs out that device only (architecture.md § Remote access).
+      readJson(request, true).then(
+        (body) => {
+          const id = (body as { id?: unknown } | null)?.id;
 
-      for (const stream of pageStreams.keys()) {
-        stream.end();
-      }
+          if (id !== undefined) {
+            const reply = revokeDevice(id);
 
-      json(response, 200, { revoked });
+            json(response, reply.status, reply.body);
+            return;
+          }
+
+          const revoked = page.access.revokeAll();
+
+          endPages();
+          json(response, 200, { revoked });
+        },
+        (error: Error) => json(response, 400, { error: error.message }),
+      );
+    } else if (request.method === 'POST' && path === '/page/pair' && page !== undefined) {
+      // A pairing link and code for a device on a remote host (architecture.md § Remote access).
+      const reply = pairing();
+
+      json(response, reply.status, reply.body);
+    } else if (request.method === 'POST' && path === '/page/devices' && page !== undefined) {
+      const reply = devices();
+
+      json(response, reply.status, reply.body);
     } else if (request.method === 'POST' && path === '/shutdown') {
       json(response, 200, { stopping: true });
       options.onShutdown();

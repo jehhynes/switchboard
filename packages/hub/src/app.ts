@@ -35,6 +35,8 @@ import type { Snapshot, WorkItemView } from './snapshot.js';
 import { SnapshotBuilder } from './snapshotBuilder.js';
 import type { Built } from './snapshotBuilder.js';
 import { WindowScopes } from './windows.js';
+import { tailscaleIdentity } from './tailscale.js';
+import type { RemoteAccess } from './page.js';
 import { dockRowOf, PageAccess, pageActionEvent, pageCommandOf, pageHeader, pageList, pageRow, pasteText, poolRowOf, rowOpenUrl } from './page.js';
 import { launcher } from './launch.js';
 import type { Launcher } from './launch.js';
@@ -242,6 +244,25 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
   if (deps.codeModeIdleMs !== undefined) {
     deps.log(`Code Mode idle limit: ${deps.codeModeIdleMs} ms`);
+  }
+
+  // The names and logins the web page is served to through tailscale serve, read at start (architecture.md § Remote access); with
+  // web.tailscale, this machine's Tailscale name and owner join them once `tailscale status` answers.
+  const web = config.settings.web;
+  let remote: RemoteAccess = { hosts: [...web.remoteHosts], logins: [...web.remoteLogins] };
+
+  if (web.tailscale) {
+    void tailscaleIdentity(deps.exec).then((found) => {
+      if ('error' in found) {
+        deps.log(`web page: Tailscale not used: ${found.error}`);
+        return;
+      }
+
+      remote = { hosts: [...new Set([found.host, ...remote.hosts])], logins: [...new Set([...remote.logins, found.login])] };
+      deps.log(`web page: served as https://${found.host} to the Tailscale login ${found.login} through tailscale serve`);
+    });
+  } else if (remote.hosts.length > 0) {
+    deps.log(remote.logins.length > 0 ? `web page: served as ${remote.hosts.map((host) => `https://${host}`).join(', ')} through tailscale serve` : 'web page: web.remoteHosts is set but web.remoteLogins is empty, so no remote device is let in');
   }
 
   const runtime = new Runtime(deps, config);
@@ -1421,6 +1442,7 @@ const dockWithRuns = () => {
     conversation: (key, write) => conversation.open(key, write),
     page: {
       access: new PageAccess(store, deps.now),
+      remote: () => remote,
       asset: (name) => pageAsset(name, home),
       opened: (installed) => {
         const key = scopes.openPage();
