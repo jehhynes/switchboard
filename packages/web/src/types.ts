@@ -126,14 +126,25 @@ export interface VoiceView {
   roomHold?: boolean;
 }
 
-/** A row of the page's list: the dock row's title, ticket key, playbook, mark and stripe (`PageRow` in the hub's `page.ts`). */
+/** A row of the page's list: the dock row's three lines, mark and stripe (`PageRow` in the hub's `page.ts`). */
 export interface PageRow {
   workItemId: number;
   title: string;
+  /** Line 1: the priority dot's tooltip, or null, and the time at its end. */
+  priority: string | null;
+  time: { text: string; title: string } | null;
   ticket: string;
   sourceKind: string;
+  /** The ticket's URL, for its pill's tooltip; empty for an ad-hoc ticket. */
+  url: string;
   playbook: string;
+  /** Line 2: the ticket's link pills, each with its codicon glyph or none, the Returned count, and the comment icon. */
+  links: Array<{ label: string; url: string; kind: 'pr' | 'issue' | 'url'; badge: string; glyph: string | null; mentioned: boolean }>;
+  returned: number;
+  comment: { glyph: string; title: string } | null;
+  /** Line 3: the mark, then the details, each coloured by its tone. */
   mark: { kind: Mark; glyph: string; title: string } | null;
+  details: Array<{ text: string; title: string | null; tone: 'warning' | 'error' | null }>;
   stripe: 'error' | 'warning' | 'turn' | null;
   dim: boolean;
   /** A hosted conversation's host's name; null for other work items. */

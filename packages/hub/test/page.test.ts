@@ -84,7 +84,7 @@ describe('pageList', () => {
     const ownRow = dock.groups.flatMap((group) => group.rows).find((row) => row.key === 'item:1')!;
 
     expect(list.map((group) => [group.key, group.title, group.glyph])).toEqual(dock.groups.map((group) => [group.key, group.title, group.glyph]));
-    expect(list.flatMap((group) => group.rows).find((row) => row.workItemId === 1)).toEqual({ workItemId: 1, title: 'Fix the badge', ticket: ownRow.ticket, sourceKind: ownRow.sourceKind, playbook: ownRow.playbook, mark: ownRow.mark, stripe: ownRow.stripe, dim: ownRow.dim, host: null, actions: pageActions(ownRow), main: null, pastes: [] });
+    expect(list.flatMap((group) => group.rows).find((row) => row.workItemId === 1)).toEqual({ workItemId: 1, title: 'Fix the badge', priority: ownRow.priority, time: ownRow.time, ticket: ownRow.ticket, sourceKind: ownRow.sourceKind, url: ownRow.url, playbook: ownRow.playbook, links: [], returned: ownRow.returned, comment: ownRow.comment, mark: ownRow.mark, details: ownRow.details, stripe: ownRow.stripe, dim: ownRow.dim, host: null, actions: pageActions(ownRow), main: null, pastes: [] });
     // Each row in the dock's group, in the dock's order, a hosted conversation with its host's name.
     expect(list.map((group) => group.rows.map((row) => row.workItemId))).toEqual(dock.groups.map((group) => group.rows.map((row) => Number(row.key.slice('item:'.length)))));
     expect(list.flatMap((group) => group.rows).filter((row) => row.host !== null).map((row) => [row.workItemId, row.host]).sort()).toEqual([[4, 'support'], [5, 'x']]);
@@ -93,7 +93,7 @@ describe('pageList', () => {
 
   it('leaves out pool tickets and rows of work items the snapshot lacks, and keeps a done hosted conversation in Done', () => {
     const doneHosted = item(6, { status: 'done', ticket: { ...item(6).ticket, title: 'Old chat', hostWindow: 'D:/git/support' } });
-    const row = (key: string) => ({ key, title: key, ticket: 'gh 1', sourceKind: 'github', playbook: 'dev', mark: null, stripe: null, dim: false, controls: [], main: null, pastes: [] }) as unknown as DockView['groups'][number]['rows'][number];
+    const row = (key: string) => ({ key, title: key, ticket: 'gh 1', sourceKind: 'github', playbook: 'dev', links: [], details: [], mark: null, stripe: null, dim: false, controls: [], main: null, pastes: [] }) as unknown as DockView['groups'][number]['rows'][number];
     const dock = { groups: [{ key: 'unstarted', title: 'Unstarted', glyph: 'u', empty: 'Nothing waits to be started.', rows: [row('ticket:9'), row('item:77')] }, { key: 'done', title: 'Done', glyph: 'd', empty: null, rows: [row('item:6')] }] } as Pick<DockView, 'groups'>;
     const list = pageList(dock, snapshot([doneHosted]));
 
@@ -101,6 +101,23 @@ describe('pageList', () => {
       { key: 'unstarted', title: 'Unstarted', glyph: 'u', empty: 'Nothing waits to be started.', rows: [] },
       { key: 'done', title: 'Done', glyph: 'd', empty: null, rows: [expect.objectContaining({ workItemId: 6, host: 'support' })] },
     ]);
+  });
+});
+
+describe('pageList rows', () => {
+  it("carries the dock row's three lines as the dock built them, without a pull request's status", () => {
+    const dockRow = {
+      key: 'item:3', title: 'Fix it', priority: 'Priority: P1', time: { text: '2h', title: 'In queue since 11:40' }, ticket: 'gh 3', sourceKind: 'github', url: 'https://github.com/o/r/issues/3', playbook: 'dev:build',
+      links: [{ label: 'PR #9', url: 'https://github.com/o/r/pull/9', kind: 'pr', badge: '9', glyph: '\u{ea64}', mentioned: false, pr: { state: 'open' } }],
+      returned: 2, comment: { glyph: 'c', title: 'Nov 20\nWaits on Sam' }, mark: { kind: 'limited', glyph: 'w', title: 'Rate limited' },
+      details: [{ text: 'Rate limited · resumes 1:20 PM', title: 'Resets at 1:20 PM', tone: 'warning' }, { text: 'Post the reply', title: null, tone: null }],
+      stripe: null, dim: false, controls: [], main: null, pastes: [],
+    } as unknown as DockView['groups'][number]['rows'][number];
+    const dock = { groups: [{ key: 'progress', title: 'In progress', glyph: 'p', empty: null, rows: [dockRow] }] } as Pick<DockView, 'groups'>;
+    const [shown] = pageList(dock, snapshot([item(3)]))[0]!.rows;
+
+    expect(shown).toMatchObject({ priority: 'Priority: P1', time: { text: '2h', title: 'In queue since 11:40' }, url: 'https://github.com/o/r/issues/3', returned: 2, comment: { glyph: 'c', title: 'Nov 20\nWaits on Sam' }, mark: { kind: 'limited', glyph: 'w', title: 'Rate limited' }, details: dockRow.details });
+    expect(shown!.links).toEqual([{ label: 'PR #9', url: 'https://github.com/o/r/pull/9', kind: 'pr', badge: '9', glyph: '\u{ea64}', mentioned: false }]);
   });
 });
 

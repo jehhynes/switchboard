@@ -209,9 +209,18 @@ export function ago(at: number, now: number): string {
 /** The groups the list shows collapsed until the operator opens them, as the dock does. */
 export const COLLAPSED_GROUPS: readonly string[] = ['done'];
 
+/** The codicon Returned shows, as the dock's pill does. */
+const RETURNED_GLYPH = '\u{eae2}';
+
+/** A pill on line 2: its codicon glyph, if any, then its text, the full name in its tooltip. */
+function pill(classes: string, glyph: string | null, text: string, title: string): string {
+  return `<span class="pill ${classes}" title="${escape(title)}">${glyph === null ? '' : `<span class="codicon" aria-hidden="true">${escape(glyph)}</span>`}<span class="pill-text">${escape(text)}</span></span>`;
+}
+
 /**
- * A row of the list, drawn as the dock's: the title on line 1; on line 2 the mark, the ticket key as a pill in its source's colour and the
- * playbook, its namespace muted, or a hosted conversation's host; the dock's stripe on its left edge.
+ * A row of the list, drawn as the dock's three lines from the hub's dock row: line 1 the priority dot, the title and the time; line 2 the
+ * comment icon, the playbook with its namespace muted (or a hosted conversation's host), the ticket key as a pill in its source's colour, the
+ * link pills and Returned; line 3 the mark and the details, a muted " · " between them, in their tones. The dock's stripe is on its left edge.
  */
 function listRow(row: PageRow, selected: boolean): string {
   const kind = row.mark?.kind;
@@ -227,11 +236,25 @@ function listRow(row: PageRow, selected: boolean): string {
         ? ''
         : `<span class="playbook" title="${escape(row.playbook)}">${colon === -1 ? '' : `<span class="namespace">${escape(row.playbook.slice(0, colon + 1))}</span>`}${escape(row.playbook.slice(colon + 1))}</span>`;
   const classes = ['row', ...(row.stripe === null ? [] : [`stripe-${row.stripe}`]), ...(row.dim ? ['dim'] : []), ...(selected ? ['selected'] : [])].join(' ');
+  const priority = row.priority === null ? '' : `<span class="priority" role="img" title="${escape(row.priority)}" aria-label="${escape(row.priority)}"></span>`;
+  const time = row.time === null ? '' : `<span class="row-time" title="${escape(row.time.title)}">${escape(row.time.text)}</span>`;
+  const comment = row.comment === null ? '' : `<span class="codicon comment" role="img" title="${escape(row.comment.title)}" aria-label="Comments">${escape(row.comment.glyph)}</span>`;
+  const ticket = pill(`ticket source-${escape(row.sourceKind)}`, null, row.ticket, row.url === '' ? row.ticket : `${row.ticket}\n${row.url}`);
+  const links = row.links
+    .map((link) => pill(`link ${link.kind}${link.mentioned ? ' mentioned' : ''}`, link.glyph, link.badge, `${link.label}${link.mentioned ? ', named in the ticket' : ''}\n${link.url}`))
+    .join('');
+  const linkPills = links === '' ? '' : `<span class="row-links">${links}</span>`;
+  const returned = row.returned > 0 ? pill('returned', RETURNED_GLYPH, String(row.returned), `Returned ${row.returned}: earlier work items with this playbook, or one it is a return of, were done for this ticket`) : '';
+  const details = row.details
+    .map((detail, index) => `${index > 0 ? '<span class="row-detail-separator" aria-hidden="true">·</span>' : ''}<span class="row-detail${detail.tone === null ? '' : ` ${detail.tone}`}"${detail.title === null ? '' : ` title="${escape(detail.title)}"`}>${escape(detail.text)}</span>`)
+    .join('');
 
   return (
     `<li><button type="button" class="${classes}" data-action="select" data-work-item="${row.workItemId}" aria-current="${selected}" title="${escape(row.title)}">` +
-    `<span class="row-title">${escape(row.title)}</span>` +
-    `<span class="row-line">${mark}<span class="pill ticket source-${escape(row.sourceKind)}">${escape(row.ticket)}</span>${playbook}</span></button></li>`
+    `<span class="row-head">${priority}<span class="row-title">${escape(row.title)}</span>${time}</span>` +
+    `<span class="row-line">${comment}${playbook}${ticket}${linkPills}${returned}</span>` +
+    (mark === '' && details === '' ? '' : `<span class="row-line row-details">${mark}${details}</span>`) +
+    '</button></li>'
   );
 }
 

@@ -11,7 +11,7 @@ const message = (id: string, ord: number, patch: Partial<MessageView> = {}): Mes
 const reply = (id: string, ord: number, patch: Partial<ReplyView> = {}): ReplyView => ({ type: 'reply', id, sessionId: 's', at: 1_000 + ord, ord, provisional: false, kind: 'reply', answers: null, opening: `reply ${id}`, rewrittenBy: null, withdrawn: false, unread: false, speak: null, tone: null, spoken: { state: 'none', atMs: null, saidChars: null }, ...patch });
 const session = (patch: Partial<SessionView> = {}): SessionView => ({ id: 's', title: 'Task session s', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, persona: null, ...patch });
 const scope = { kind: 'page' as const, key: 'k', folder: 'D:/w', title: 'Fix it', scopeGen: 3, conversations: [{ workItemId: 1, title: 'Fix it', primary: true, sessionId: 's', state: 'idle' as const, conversation: 'full' as const, unread: 0 }], workItemId: 1, cwd: 'D:/w', sessionId: 's' };
-const listRow = (workItemId: number, patch: Partial<PageRow> = {}): PageRow => ({ workItemId, title: `Item ${workItemId}`, ticket: `gh ${workItemId}`, sourceKind: 'github', playbook: 'dev:build', mark: null, stripe: null, dim: false, host: null, ...patch });
+const listRow = (workItemId: number, patch: Partial<PageRow> = {}): PageRow => ({ workItemId, title: `Item ${workItemId}`, priority: null, time: null, ticket: `gh ${workItemId}`, sourceKind: 'github', url: '', playbook: 'dev:build', links: [], returned: 0, comment: null, mark: null, details: [], stripe: null, dim: false, host: null, ...patch });
 const listGroup = (key: string, rows: PageRow[], patch: Partial<PageGroup> = {}): PageGroup => ({ key, title: key, glyph: '\u{ea70}', empty: null, rows, ...patch });
 const artifact = (path: string, type: ArtifactView['type'], ext: string): ArtifactView => ({ path, owner: 'chat', kind: 'page', title: path, ext, type, updatedAt: 1_500 });
 
@@ -219,6 +219,57 @@ describe('drawing', () => {
     expect(root.querySelector('.count')).toBeNull();
     // The dropdown shows none either.
     expect(renderHeader({ ...EMPTY, connected: true, scope: { ...scope, conversations: [{ ...scope.conversations[0]!, unread: 3 }] }, session: session(), unread: 3 }, { ...newView(), picker: true })).not.toContain('class="count"');
+  });
+
+  it("draws a row's three lines from the dock row: priority, title and time; comment, playbook, ticket, links and Returned; mark and details", () => {
+    const root = document.createElement('div');
+    const links: PageRow['links'] = [
+      { label: 'PR #19002', url: 'https://github.com/o/r/pull/19002', kind: 'pr', badge: '19002', glyph: '\u{ea64}', mentioned: false },
+      { label: 'gh 18800', url: 'https://github.com/o/r/issues/18800', kind: 'issue', badge: 'gh 18800', glyph: null, mentioned: true },
+    ];
+    const details: PageRow['details'] = [
+      { text: 'Rate limited · resumes 1:20 PM', title: 'Resets at 1:20 PM', tone: 'warning' },
+      { text: 'Setup <failed>', title: null, tone: 'error' },
+      { text: 'Post the reply', title: null, tone: null },
+    ];
+    const full = listRow(1, { priority: 'Priority: P1', time: { text: '2h', title: 'In queue since 11:40' }, url: 'https://github.com/o/r/issues/1', links, returned: 2, comment: { glyph: '\u{ea6b}', title: 'Nov 20\nWaits on Sam' }, mark: { kind: 'limited', glyph: '\u{eba2}', title: 'Rate limited' }, details });
+
+    root.innerHTML = renderList([listGroup('progress', [full, listRow(2)])], null, new Set());
+
+    const row = root.querySelector<HTMLElement>('[data-work-item="1"]')!;
+    const [head, line2, line3] = [...row.children] as HTMLElement[];
+
+    expect(row.children).toHaveLength(3);
+    expect(head!.querySelector('.priority')!.getAttribute('title')).toBe('Priority: P1');
+    expect(head!.querySelector('.row-title')!.textContent).toBe('Item 1');
+    expect(head!.querySelector('.row-time')!.textContent).toBe('2h');
+    expect(head!.querySelector('.row-time')!.getAttribute('title')).toBe('In queue since 11:40');
+    // Line 2 in the dock's order, each pill's whole name and URL in its tooltip.
+    expect([...line2!.children].map((child) => child.className)).toEqual(['codicon comment', 'playbook', 'pill ticket source-github', 'row-links', 'pill returned']);
+    expect([...line2!.querySelectorAll('.row-links > .pill')].map((child) => child.className)).toEqual(['pill link pr', 'pill link issue mentioned']);
+    expect(line2!.querySelector('.comment')!.getAttribute('title')).toBe('Nov 20\nWaits on Sam');
+    expect(line2!.querySelector('.ticket')!.getAttribute('title')).toBe('gh 1\nhttps://github.com/o/r/issues/1');
+    expect(line2!.querySelector('.pr')!.textContent).toBe('\u{ea64}19002');
+    expect(line2!.querySelector('.pr')!.getAttribute('title')).toBe('PR #19002\nhttps://github.com/o/r/pull/19002');
+    expect(line2!.querySelector('.issue .codicon')).toBeNull();
+    expect(line2!.querySelector('.issue')!.getAttribute('title')).toBe('gh 18800, named in the ticket\nhttps://github.com/o/r/issues/18800');
+    expect(line2!.querySelector('.returned .pill-text')!.textContent).toBe('2');
+    // Line 3: the mark, then each detail in its tone with a muted separator between them, never before the first.
+    expect(line3!.className).toBe('row-line row-details');
+    expect(line3!.firstElementChild!.className).toBe('codicon codicon-watch mark state-icon tone-attention');
+    expect([...line3!.querySelectorAll('.row-detail')].map((one) => [one.className, one.textContent, one.getAttribute('title')])).toEqual([
+      ['row-detail warning', 'Rate limited · resumes 1:20 PM', 'Resets at 1:20 PM'],
+      ['row-detail error', 'Setup <failed>', null],
+      ['row-detail', 'Post the reply', null],
+    ]);
+    expect(line3!.querySelectorAll('.row-detail-separator')).toHaveLength(2);
+    expect(line3!.children[1]!.className).toBe('row-detail warning');
+    // A row with no priority, time, comment, links, Returned, mark or details draws only its title, playbook and key, and no line 3.
+    const bare = root.querySelector<HTMLElement>('[data-work-item="2"]')!;
+
+    expect(bare.children).toHaveLength(2);
+    expect(bare.querySelector('.priority, .row-time, .comment, .row-links, .returned, .row-details')).toBeNull();
+    expect(bare.querySelector('.ticket')!.getAttribute('title')).toBe('gh 2');
   });
 
   it('collapses Done by default, still showing the selected row of a collapsed group, and says when there is nothing', () => {

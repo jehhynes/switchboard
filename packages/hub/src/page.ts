@@ -147,15 +147,25 @@ export function pageGroups(snapshot: Snapshot, windows: string, keep: number | n
   return [...groups.values()].sort((a, b) => b.newest - a.newest).map(({ kind, title, ids }) => ({ kind, title, ids }));
 }
 
-/** A row of the page's list: the dock row's line 1 and line 2, its mark and its stripe (architecture.md § Web page). */
+/** A row of the page's list: the dock row's three lines, its mark and its stripe, as the dock built them (architecture.md § Web page). */
 export interface PageRow {
   workItemId: number;
   title: string;
-  /** The ticket's key, such as `gh 18941`, and its source's plugin, which colours its pill as the dock's. */
+  /** Line 1: the priority dot's tooltip, or null, and the time at its end. */
+  priority: DockRow['priority'];
+  time: DockRow['time'];
+  /** The ticket's key, such as `gh 18941`, and its source's plugin, which colours its pill as the dock's; `url` is the ticket's, empty for an ad-hoc one. */
   ticket: string;
   sourceKind: string;
+  url: string;
   playbook: string;
+  /** Line 2 after the ticket's key: its link pills, the Returned count, and the comment icon before the playbook. */
+  links: Omit<DockRow['links'][number], 'pr'>[];
+  returned: number;
+  comment: DockRow['comment'];
+  /** Line 3: the mark, then the details. */
   mark: DockRow['mark'];
+  details: DockRow['details'];
   stripe: DockRow['stripe'];
   /** A Ready for review row on the agent's turn, dimmed as the dock dims it. */
   dim: boolean;
@@ -261,10 +271,17 @@ export function pageList(dock: Pick<DockView, 'groups'>, snapshot: Pick<Snapshot
       const shown: PageRow = {
         workItemId: item.id,
         title: row.title,
+        priority: row.priority,
+        time: row.time,
         ticket: row.ticket,
         sourceKind: row.sourceKind,
+        url: row.url,
         playbook: row.playbook,
+        links: row.links.map(({ label, url, kind, badge, glyph, mentioned }) => ({ label, url, kind, badge, glyph, mentioned })),
+        returned: row.returned,
+        comment: row.comment,
         mark: row.mark,
+        details: row.details,
         stripe: row.stripe,
         dim: row.dim,
         host: host === null ? null : hostTitle(host),
