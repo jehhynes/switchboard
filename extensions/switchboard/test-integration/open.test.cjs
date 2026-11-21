@@ -129,7 +129,7 @@ describe('Open in Switchboard (PRD R69)', () => {
   it('says when no row has the URL, and refuses another URI', async () => {
     assert.strictEqual(await extension.openUri(uri('https://github.com/o/r/issues/999')), null);
     assert.strictEqual(await extension.openUri(vscode.Uri.parse('vscode://switchboard.switchboard/close?url=x')), null);
-    assert.deepStrictEqual(messages, ['Switchboard has no work item for https://github.com/o/r/issues/999', 'Switchboard cannot open vscode://switchboard.switchboard/close?url=x.']);
+    assert.deepStrictEqual(messages, ['Switchboard: no work item has https://github.com/o/r/issues/999.', 'Switchboard: cannot open vscode://switchboard.switchboard/close?url=x.']);
     assert.deepStrictEqual(opened, []);
   });
 });

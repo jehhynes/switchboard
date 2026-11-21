@@ -208,25 +208,31 @@ describe('a row\'s History', () => {
     const realCreate = Object.getOwnPropertyDescriptor(vscode.window, 'createTerminal');
     const realExecute = vscode.commands.executeCommand;
     const realError = vscode.window.showErrorMessage;
+    const realWarning = vscode.window.showWarningMessage;
     let created;
     let ran;
     let errors;
+    let warnings;
 
     beforeEach(() => {
       created = [];
       ran = [];
       errors = [];
+      warnings = [];
       Object.defineProperty(vscode.window, 'createTerminal', { configurable: true, value: (options) => (created.push(options), { options, exitStatus: undefined, show: () => {} }) });
       // Claude's commands and folder opens are recorded, so neither a Claude tab nor a window opens.
       vscode.commands.executeCommand = (command, ...args) =>
-        command.startsWith('claude-vscode.') || command === 'vscode.openFolder' ? (ran.push([command, args[0]?.fsPath ?? args[0]]), Promise.resolve()) : realExecute.call(vscode.commands, command, ...args);
+        command.startsWith('claude-vscode.') || command === 'vscode.openFolder' || command === 'switchboard.showHubLog' ? (ran.push([command, args[0]?.fsPath ?? args[0]]), Promise.resolve()) : realExecute.call(vscode.commands, command, ...args);
       vscode.window.showErrorMessage = (message) => (errors.push(message), Promise.resolve(undefined));
+      // The hub's silence offers Show Hub Log; choosing it runs the command.
+      vscode.window.showWarningMessage = (message, ...buttons) => (warnings.push([message, ...buttons]), Promise.resolve(buttons[0]));
     });
 
     afterEach(() => {
       Object.defineProperty(vscode.window, 'createTerminal', realCreate);
       vscode.commands.executeCommand = realExecute;
       vscode.window.showErrorMessage = realError;
+      vscode.window.showWarningMessage = realWarning;
     });
 
     it("opens the session's own item window, which claims its attach terminal, since this folder window claims no item window's open (architecture.md § Window scope)", async () => {
@@ -234,7 +240,7 @@ describe('a row\'s History', () => {
 
       assert.strictEqual(await extension.historyLink({ type: 'open', sessionId: 'hist-cm', cwd: folder, provider: 'claude', codeMode: true }), 'other-folder');
 
-      assert.deepStrictEqual(errors, []);
+      assert.deepStrictEqual([errors, warnings], [[], []]);
       assert.strictEqual(created.length, 0);
       assert.strictEqual(ran.length, 1, JSON.stringify(ran));
       assert.strictEqual(ran[0][0], 'vscode.openFolder');
@@ -266,8 +272,11 @@ describe('a row\'s History', () => {
       }
 
       assert.deepStrictEqual(paths, ['/open']);
-      assert.deepStrictEqual(errors, ['Switchboard: the hub did not answer.', 'Switchboard: The session has no window to open it in.']);
-      assert.deepStrictEqual([created.length, ran.length], [0, 0]);
+      assert.deepStrictEqual(errors, []);
+      assert.deepStrictEqual(warnings, [['Switchboard: the hub did not answer.', 'Show Hub Log'], ['Switchboard: The session has no window to open it in.']]);
+      await new Promise((done) => setTimeout(done, 0));
+      assert.deepStrictEqual(ran, [['switchboard.showHubLog', undefined]]);
+      assert.strictEqual(created.length, 0);
     });
   });
 

@@ -31,6 +31,7 @@ import type { EditorLayout, Kept, Outcome, Point } from './sideBars.js';
 import { HubState } from './state.js';
 import { ItemTabs } from './tabs.js';
 import type { PaneMessage } from './webview/paneRender.js';
+import { warnHub } from './hubNotice.js';
 
 export interface SwitchboardApi {
   /**
@@ -286,7 +287,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     const left = record === null ? null : await postToHub(record, '/window', { workspace: windowFile, command: terminal }, 10_000);
 
     if (record === null || left?.status !== 200) {
-      void vscode.window.showErrorMessage(`Switchboard: ${left?.error ?? 'the hub did not answer.'}`);
+      warnHub(left);
       return undefined;
     }
 
@@ -488,10 +489,10 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     vscode.commands.registerCommand('switchboard.openWebPage', async () => {
       const record = keeper.current();
       const reply = record === null ? null : await postToHub(record, '/page/link', {}, 5_000);
-      const url = reply?.status === 200 ? (reply.body as { url?: unknown }).url : undefined;
+      const url = reply?.status === 200 ? (reply.body as { url?: unknown } | null)?.url : undefined;
 
       if (typeof url !== 'string') {
-        void vscode.window.showErrorMessage(`Switchboard: the web page could not be opened: ${reply?.error ?? 'the hub is not running'}.`);
+        warnHub(reply, 'the web page did not open');
         return;
       }
 

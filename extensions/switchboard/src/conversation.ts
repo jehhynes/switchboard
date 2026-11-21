@@ -11,6 +11,7 @@ import { linkTarget, previewLinks, supportsSecondarySidebar } from './links.js';
 import { excludeGlob, fileGlob, rankFiles } from './composerModel.js';
 import type { CommandItem, FileItem } from './composerModel.js';
 import { writePastedImage } from './pastedImages.js';
+import { warnHub } from './hubNotice.js';
 
 /**
  * The Conversation view's two contributions (architecture.md § Conversation view): in the secondary side bar, as Claude Code's own panel, and
@@ -495,7 +496,7 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
     const reply = await postToHub(target.record, `/v1/conversation/${name}`, { window: target.key, scopeGen: scope.scopeGen, opId: randomUUID(), ...extra }, HISTORY_TIMEOUT_MS);
 
     if (reply?.status !== 200 && name !== 'stop-speaking') {
-      void vscode.window.showWarningMessage(`Switchboard: ${reply?.error ?? 'the hub did not answer.'}`);
+      warnHub(reply);
     }
   }
 
@@ -597,7 +598,7 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
     const reply = await postToHub(target.record, '/v1/conversation/history', { window: target.key, scopeGen: scope.scopeGen, opId: randomUUID(), sessionId: scope.sessionId, before: oldest?.id ?? null }, HISTORY_TIMEOUT_MS);
 
     if (reply?.status !== 200) {
-      void vscode.window.showWarningMessage(`Switchboard: ${reply?.error ?? 'the hub did not answer.'}`);
+      warnHub(reply);
       return;
     }
 
@@ -714,7 +715,7 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
     const reply = await postToHub(target.record, '/v1/conversation/select', { window: target.key, scopeGen: scope.scopeGen, opId: randomUUID(), workItemId }, HISTORY_TIMEOUT_MS);
 
     if (reply?.status !== 200) {
-      void vscode.window.showWarningMessage(`Switchboard: ${reply?.error ?? 'the hub did not answer.'}`);
+      warnHub(reply);
     }
   }
 

@@ -179,6 +179,20 @@ describe('Continue in Background (PRD R89)', () => {
     assert.deepStrictEqual(closes, []);
   });
 
+  it('says the hub did not answer, with Show Hub Log, when no hub listens on its port', async () => {
+    const buttons = [];
+    panels.push(claudeTab());
+    await inFront();
+    vscode.window.showWarningMessage = (text, ...offered) => (messages.push(text), buttons.push(offered), Promise.resolve(undefined));
+
+    await extension.background({ ...hub.record, port: 1 }, [7]);
+
+    assert.deepStrictEqual(messages, ['Switchboard: the hub did not answer, so the session stays where it is.']);
+    assert.deepStrictEqual(buttons, [['Show Hub Log']]);
+    assert.strictEqual(open(panels[0]), true);
+    assert.deepStrictEqual(closes, []);
+  });
+
   it('closes nothing when another Claude tab opened while the hub answered', async () => {
     panels.push(claudeTab());
     await inFront();

@@ -4,6 +4,7 @@ import type { HubRecord } from '@switchboard/core';
 import { executableDirOnPath } from '@switchboard/core';
 import type { DockRow, Snapshot } from '@switchboard/hub';
 import { dockView, postToHub, windowsDir, writeWorkspaceFile } from '@switchboard/hub';
+import { warnHub } from './hubNotice.js';
 import { openUrlOf } from './search.js';
 import { reuseFilter } from './tabs.js';
 import type { KeyState } from './terminalKeys.js';
@@ -19,10 +20,8 @@ export type WindowCommand = { type: string; [key: string]: unknown };
 export async function act(record: HubRecord | null, action: unknown): Promise<{ status: number; error: string | null } | null> {
   const reply = record === null ? null : await postToHub(record, '/action', action, ACTION_TIMEOUT_MS);
 
-  if (reply === null) {
-    void vscode.window.showErrorMessage('Switchboard: the hub did not answer.');
-  } else if (reply.status !== 200) {
-    void vscode.window.showWarningMessage(`Switchboard: ${reply.error ?? `the hub answered ${reply.status}.`}`);
+  if (reply?.status !== 200) {
+    warnHub(reply);
   }
 
   return reply;
@@ -293,7 +292,7 @@ export async function openAttach(record: HubRecord | null, sessionId: string, cw
   // file or a folder window's folder (architecture.md § Window scope).
   if (destination.here) {
     if (!(await claim(record, run)).answered) {
-      void vscode.window.showErrorMessage('Switchboard: the hub did not answer.');
+      warnHub(null);
       return 'refused';
     }
 
@@ -321,7 +320,7 @@ async function leave(record: HubRecord | null, sessionId: string, cwd: string): 
   const workspace = body?.workspace;
 
   if (reply?.status !== 200 || typeof workspace !== 'string') {
-    void vscode.window.showErrorMessage(`Switchboard: ${reply?.error ?? 'the hub did not answer.'}`);
+    warnHub(reply);
     return null;
   }
 
@@ -492,7 +491,7 @@ async function click(context: OpenContext, key: string, replaced: () => boolean,
       return 'dock';
     }
 
-    void vscode.window.showErrorMessage(`Switchboard: ${sent?.error ?? 'the hub did not answer.'}`);
+    warnHub(sent);
     return 'refused';
   }
 
@@ -563,7 +562,7 @@ async function click(context: OpenContext, key: string, replaced: () => boolean,
     }
 
     if (left?.status !== 200) {
-      void vscode.window.showErrorMessage('Switchboard: the hub did not answer.');
+      warnHub(left ?? null);
       return 'refused';
     }
   }
@@ -603,7 +602,7 @@ export async function openUri(context: OpenContext, uri: vscode.Uri): Promise<st
   const url = openUrlOf(uri.path, uri.query);
 
   if (url === null) {
-    void vscode.window.showWarningMessage(`Switchboard cannot open ${uri.toString(true)}.`);
+    void vscode.window.showWarningMessage(`Switchboard: cannot open ${uri.toString(true)}.`);
     return null;
   }
 
@@ -614,14 +613,14 @@ export async function openUri(context: OpenContext, uri: vscode.Uri): Promise<st
   const found = record === null ? null : await postToHub(record, '/open-url', { url }, ACTION_TIMEOUT_MS);
 
   if (found?.status === 404) {
-    void vscode.window.showInformationMessage(`Switchboard has no work item for ${url}`);
+    void vscode.window.showInformationMessage(`Switchboard: no work item has ${url}.`);
     return null;
   }
 
-  const row = found?.status === 200 ? (found.body as { row?: DockRow }).row : undefined;
+  const row = found?.status === 200 ? (found.body as { row?: DockRow } | null)?.row : undefined;
 
   if (row === undefined) {
-    void vscode.window.showErrorMessage(`Switchboard: ${found?.error ?? 'the hub did not answer.'}`);
+    warnHub(found);
     return null;
   }
 
@@ -629,7 +628,7 @@ export async function openUri(context: OpenContext, uri: vscode.Uri): Promise<st
     const sent = await postToHub(record!, '/dock/click', { rowKey: row.key }, ACTION_TIMEOUT_MS);
 
     if (sent?.status !== 202) {
-      void vscode.window.showErrorMessage(`Switchboard: ${sent?.error ?? 'the hub did not answer.'}`);
+      warnHub(sent);
     }
 
     return row.key;

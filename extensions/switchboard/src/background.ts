@@ -1,6 +1,7 @@
 import type { HubRecord } from '@switchboard/core';
 import { postToHub } from '@switchboard/hub';
 import * as vscode from 'vscode';
+import { warnHub } from './hubNotice.js';
 
 /** The Claude Code extension's editor tab is a webview of this view type (mechanics M55). */
 const CLAUDE_PANEL = 'claudeVSCodePanel';
@@ -49,11 +50,11 @@ export function closeRefusal(label: string | null): string | null {
  * The hub's move, then its last check that the moving process is still the window's only Claude session, since a session opened in the window
  * meanwhile, such as in the sidebar, would end with it and only the hub sees the window's processes; or why the window stays open.
  */
-async function answersOf(record: HubRecord, label: string | null, workItemIds: number[]): Promise<{ pid: number } | { refused: string }> {
+async function answersOf(record: HubRecord, label: string | null, workItemIds: number[]): Promise<{ pid: number } | { refused: string } | { silent: string }> {
   const reply = await postToHub(record, '/background', { label, hostPid: process.pid, workItemIds }, BACKGROUND_TIMEOUT_MS);
 
   if (reply === null) {
-    return { refused: 'the hub did not answer, so the session stays where it is.' };
+    return { silent: 'the session stays where it is' };
   }
 
   const pid = (reply.body as { pid?: unknown } | null)?.pid;
@@ -68,11 +69,15 @@ async function answersOf(record: HubRecord, label: string | null, workItemIds: n
     return { pid };
   }
 
+  if (check === null) {
+    return { silent: 'the window stays open' };
+  }
+
   return {
     refused:
-      check?.status === 200
+      check.status === 200
         ? 'Another Claude session started in this window while Switchboard answered, so the window stays open.'
-        : `the window's sessions could not be checked, so the window stays open: ${check?.error ?? 'the hub did not answer'}.`,
+        : `the window's sessions could not be checked, so the window stays open: ${check.error ?? `the hub answered ${check.status}`}.`,
   };
 }
 
@@ -110,7 +115,7 @@ export async function continueInBackground(deps: BackgroundDeps, where: 'tab' | 
   }
 
   if (deps.record === null) {
-    void vscode.window.showErrorMessage('Switchboard: the hub did not answer, so the session stays where it is.');
+    warnHub(null, 'the session stays where it is');
     return;
   }
 
@@ -120,6 +125,11 @@ export async function continueInBackground(deps: BackgroundDeps, where: 'tab' | 
     closedMeanwhile ||= label !== null && event.closed.some((tab) => isClaude(tab) && tab.label === label);
   });
   const answers = await answersOf(deps.record, label, deps.workItemIds).finally(() => watch.dispose());
+
+  if ('silent' in answers) {
+    warnHub(null, answers.silent);
+    return;
+  }
 
   if ('refused' in answers) {
     refuse(answers.refused);
