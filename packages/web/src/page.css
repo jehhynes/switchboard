@@ -62,6 +62,9 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 .menu-row .count { box-sizing: border-box; min-width: 16px; height: 16px; padding: 0 5px; border-radius: 8px; text-align: center; font-size: 11px; line-height: 16px; color: var(--vscode-activityBarBadge-foreground); background: var(--vscode-activityBarBadge-background); }
 .menu-note { flex: none; margin-left: 24px; color: var(--vscode-descriptionForeground); }
 .menu-row:hover .menu-note, .menu-row:focus .menu-note { color: inherit; opacity: 0.8; }
+/* A conversation's row: its state codicon stands in the gutter, and the selected one is marked by a highlight, not a check mark. */
+.conversation-row > .codicon:first-child { width: 28px; margin-right: -6px; text-align: center; }
+.conversation-row[aria-checked="true"]:not(:hover):not(:focus) { background: var(--vscode-list-inactiveSelectionBackground, rgba(127, 127, 127, 0.2)); }
 .menu-separator { height: 1px; margin: 4px 10px; background: var(--vscode-menu-separatorBackground, var(--vscode-widget-border, rgba(127, 127, 127, 0.35))); }
 .menu-message { max-width: 320px; padding: 5px 16px 5px 34px; color: var(--vscode-descriptionForeground); white-space: normal; }
 .tabs { display: flex; gap: 4px; padding: 0 8px; border-bottom: 1px solid var(--vscode-panel-border); user-select: none; }

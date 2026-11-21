@@ -197,7 +197,7 @@ describe('drawing', () => {
     expect(root.querySelector('.header > .provider')).toBeNull();
     expect(root.querySelector('button.picker > .provider')?.getAttribute('aria-label')).toBe('Codex');
     expect(root.querySelector('.conversation-menu .provider')?.getAttribute('aria-label')).toBe('Codex');
-    expect(root.querySelector('button.picker')!.innerHTML).toBe(`${[...root.querySelector('.conversation-menu [aria-checked="true"]')!.children].slice(1).map((child) => child.outerHTML).join('')}<span class="codicon codicon-chevron-down" aria-hidden="true"></span>`);
+    expect(root.querySelector('button.picker')!.innerHTML).toBe(`${root.querySelector('.conversation-menu [aria-checked="true"]')!.innerHTML}<span class="codicon codicon-chevron-down" aria-hidden="true"></span>`);
     root.innerHTML = renderHeader({ ...EMPTY, connected: true, scope, session: session() }, newView());
     expect(root.querySelector('.provider')).toBeNull();
   });

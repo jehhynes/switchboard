@@ -609,21 +609,20 @@ const SEPARATOR = '<li class="menu-separator" role="separator"></li>';
 
 /**
  * A conversation as the dropdown's button and each of its rows draw it, from this one renderer so they never differ (architecture.md §
- * Conversation view): its session's state codicon, its title, its provider's mark and its unread count with the unread mark.
+ * Conversation view): its session's state codicon, its title and its provider's mark; no unread count, as on the web page and the dock.
  */
 export function conversationLabel(entry: ConversationEntry, state: ConversationState): string {
   const selected = entry.workItemId === state.scope?.workItemId;
-  // The selected conversation's state, provider and count come from its current session, which the view follows more closely than the entry.
+  // The selected conversation's state and provider come from its current session, which the view follows more closely than the entry.
   const icon = selected ? stateIcon(state.session) : stateIcon(entry.state === null ? null : ({ state: entry.state, waitingFor: null } as never));
-  const unread = selected ? state.unread : entry.unread;
-  const count = unread > 0 ? `<span class="count" title="${unread} unread">${unread}</span>` : '';
 
-  return `${codicon(icon)}<span class="title">${escape(entry.title)}</span>${providerMark(selected ? (state.session?.provider ?? entry.provider) : entry.provider)}${count}`;
+  return `${codicon(icon)}<span class="title">${escape(entry.title)}</span>${providerMark(selected ? (state.session?.provider ?? entry.provider) : entry.provider)}`;
 }
 
 /**
  * The header's conversation dropdown (architecture.md § Conversation view): a button that shows the selected conversation as its rows do, then
- * a chevron, and opens the menu of the window's conversations, the primary work item first, the selected one checked, then New conversation…,
+ * a chevron, and opens the menu of the window's conversations, the primary work item first, the selected one highlighted rather than checked, since
+ * an idle session's state codicon is already a check, then New conversation…,
  * which opens the providers' menu under the same button. A folder window with no conversation yet shows its folder's name.
  */
 function picker(state: ConversationState, open: boolean, menu: HeaderMenu | null): string {
@@ -633,7 +632,7 @@ function picker(state: ConversationState, open: boolean, menu: HeaderMenu | null
   const rows = scope.conversations.map((entry) => {
     const chosen = entry.workItemId === scope.workItemId;
 
-    return `<li role="none"><button type="button" class="menu-row" role="menuitemradio" aria-checked="${chosen}" data-action="select" data-work-item="${entry.workItemId}">${gutter(chosen ? 'check' : null)}${conversationLabel(entry, state)}</button></li>`;
+    return `<li role="none"><button type="button" class="menu-row conversation-row" role="menuitemradio" aria-checked="${chosen}" data-action="select" data-work-item="${entry.workItemId}">${conversationLabel(entry, state)}</button></li>`;
   });
   const create = `<li role="none"><button type="button" class="menu-row" role="menuitem" data-action="new" aria-haspopup="menu">${gutter('add')}<span class="title">New conversation…</span></button></li>`;
   const list = open ? `<ul class="glass menu conversation-menu" data-key="menu-conversations" role="menu" aria-label="Conversations">${rows.join('')}${rows.length > 0 ? SEPARATOR : ''}${create}</ul>` : '';

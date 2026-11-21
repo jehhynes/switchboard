@@ -120,7 +120,7 @@ export function renderHeader(state: PageState, view: View): string {
     .map((entry) => {
       const chosen = entry.workItemId === scope.workItemId;
 
-      return `<li role="none"><button type="button" class="menu-row" role="menuitemradio" aria-checked="${chosen}" data-action="select" data-work-item="${entry.workItemId}">${gutter(chosen)}${conversationLabel(entry, state)}</button></li>`;
+      return `<li role="none"><button type="button" class="menu-row conversation-row" role="menuitemradio" aria-checked="${chosen}" data-action="select" data-work-item="${entry.workItemId}">${conversationLabel(entry, state)}</button></li>`;
     })
     .join('');
   const persona = state.session?.persona;

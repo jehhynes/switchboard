@@ -1720,7 +1720,7 @@ describe('several conversations in a window (architecture.md § Conversation vie
     expect(applyEvent(EMPTY_CONVERSATION, { type: 'conversations', conversations: [HOSTED] })).toBe(EMPTY_CONVERSATION);
   });
 
-  it('draws the selected conversation as a dropdown that lists every conversation with its state and unread count, then New conversation…', () => {
+  it('draws the selected conversation as a dropdown that lists every conversation with its state and provider, then New conversation…', () => {
     const closed = renderConversation(base(), new Set(), T0);
 
     // The plus left the header: New conversation… is in the dropdown.
@@ -1734,10 +1734,11 @@ describe('several conversations in a window (architecture.md § Conversation vie
     menu.innerHTML = opened;
     expect(menu.querySelectorAll('.conversation-menu [role="menuitemradio"]')).toHaveLength(2);
     expect(menu.querySelector('.conversation-menu [aria-checked="true"]')?.getAttribute('data-work-item')).toBe('9');
-    expect(menu.querySelector('.conversation-menu [aria-checked="true"] .menu-gutter .codicon-check')).not.toBeNull();
-    expect(menu.querySelector('.conversation-menu [aria-checked="false"] .menu-gutter')?.innerHTML).toBe('');
-    // The selected conversation's count is its current session's, which the view keeps.
-    expect(renderConversation({ ...base({ scope: { ...TWO, workItemId: 9, sessionId: 's9' } }), unread: 2 }, new Set([PICKER]), T0)).toContain('<span class="count" title="2 unread">2</span>');
+    // The selected row is highlighted, not checked, since an idle session's codicon is itself a check; no row shows an unread count.
+    expect(menu.querySelector('.conversation-row .menu-gutter')).toBeNull();
+    expect(menu.querySelector('.conversation-row [aria-checked="true"]')).toBeNull();
+    expect(menu.querySelector('.conversation-row[aria-checked="true"]')?.querySelectorAll('.codicon-check')).toHaveLength(0);
+    expect(renderConversation({ ...base({ scope: { ...TWO, workItemId: 9, sessionId: 's9' } }), unread: 2 }, new Set([PICKER]), T0)).not.toContain('class="count"');
     // A separator, then New conversation… last.
     expect([...menu.querySelectorAll('.conversation-menu > li')].slice(-2).map((li) => li.className || li.textContent)).toEqual(['menu-separator', 'New conversation…']);
     expect(menu.querySelector('.conversation-menu > li:last-child button')?.getAttribute('data-action')).toBe('new');
@@ -1748,14 +1749,14 @@ describe('several conversations in a window (architecture.md § Conversation vie
 
     list.innerHTML = marked;
     expect([...list.querySelectorAll('.conversation-menu [role="menuitemradio"]')].map((button) => [...button.children].map((child) => child.getAttribute('aria-label') ?? child.className))).toEqual([
-      ['menu-gutter', 'Working', 'title', 'Claude'],
-      ['menu-gutter', expect.any(String), 'title', 'Codex', 'count'],
+      ['Working', 'title', 'Claude'],
+      [expect.any(String), 'title', 'Codex'],
     ]);
     // The button shows the selected conversation from the same renderer as its row, then the chevron.
     const row = list.querySelector('.conversation-menu [aria-checked="true"]')!;
     const button = list.querySelector('button.picker')!;
 
-    expect(button.innerHTML).toBe(`${[...row.children].slice(1).map((child) => child.outerHTML).join('')}<span class="codicon codicon-chevron-down" aria-hidden="true"></span>`);
+    expect(button.innerHTML).toBe(`${row.innerHTML}<span class="codicon codicon-chevron-down" aria-hidden="true"></span>`);
     list.innerHTML = opened;
     expect(list.querySelector('.conversation-menu .provider')).toBeNull();
   });
