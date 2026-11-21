@@ -252,33 +252,31 @@ public sealed class ChromePane(IPaneNative native, Action<JsonObject> report, Fu
             return;
         }
 
+        // Each order is applied to the window as it is, not as last left, so a lost or repeated order cannot leave the pane shown under another tab.
         if (rect is null)
         {
-            if (!hidden)
+            if (native.IsVisible(pane) && !native.Hide(pane, true))
             {
-                if (!native.Hide(pane, true))
-                {
-                    Fail("Windows did not hide the pane.");
-                    return;
-                }
-
-                hidden = true;
+                Fail("Windows did not hide the pane.");
+                return;
             }
 
+            hidden = true;
             Report("hidden");
             return;
         }
 
-        if (hidden)
+        // A minimized page window hides the pane with it; it is shown again when the page's window is restored.
+        if (!native.IsVisible(pane) && !native.IsIconic(app))
         {
             if (!native.Hide(pane, false))
             {
                 Fail("Windows did not show the pane again.");
                 return;
             }
-
-            hidden = false;
         }
+
+        hidden = false;
 
         // Owning does not reorder windows: raised once, the pane then stays directly above the page's window. A refused raise is tried again.
         if (!raised)
@@ -411,8 +409,11 @@ public sealed class ChromePane(IPaneNative native, Action<JsonObject> report, Fu
         }
     }
 
-    /// <summary>Stops gluing: the pane, when it still exists, is no longer owned and shows as a plain Chrome window.</summary>
-    void Release()
+    /**
+     * Stops gluing: the pane, when it still exists, is no longer owned. On a failure it shows as a plain Chrome window; otherwise, as when its page
+     * reloads or closes or the helper stops, it is hidden, so no page's tab shows it, until a page's Browser tab glues it again.
+     */
+    void Release(bool show = false)
     {
         settle?.Dispose();
         search?.Dispose();
@@ -420,9 +421,13 @@ public sealed class ChromePane(IPaneNative native, Action<JsonObject> report, Fu
 
         if (pane != 0 && native.IsAlive(pane))
         {
-            if (hidden)
+            if (show && !native.IsVisible(pane))
             {
                 native.Hide(pane, false);
+            }
+            else if (!show && native.IsVisible(pane) && !native.Hide(pane, true))
+            {
+                native.Log("pane: Windows did not hide the pane as it was let go, so it stays shown");
             }
 
             native.Own(pane, 0);
@@ -451,7 +456,7 @@ public sealed class ChromePane(IPaneNative native, Action<JsonObject> report, Fu
 
         var stopped = marker;
 
-        Release();
+        Release(show: true);
         failed = true;
         Send(new JsonObject { ["state"] = "failed", ["marker"] = stopped, ["reason"] = reason });
     }

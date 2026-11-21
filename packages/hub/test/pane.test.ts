@@ -113,6 +113,36 @@ describe('PaneState', () => {
     expect(pane.extensionSent.at(-1)).toEqual({ type: 'tabs', urls: [PR], active: PR });
   });
 
+  it('drops a report that a newer one from the same page overtook, so an old column cannot show the pane over another tab', () => {
+    const pane = setup();
+
+    pane.state.helperReport({ state: 'ready', marker: null });
+    pane.state.pageRect('page-1', RECT, 1);
+    pane.state.helperReport({ state: 'found', marker: '000000000001' });
+    pane.state.pageRect('page-1', null, 3);
+    pane.state.pageRect('page-1', RECT, 2);
+
+    expect(pane.helperSent.at(-1)).toEqual({ marker: '000000000001', rect: null });
+  });
+
+  it('sends the helper each report of the owner page again, the same as before or not, and none of a page that does not own the pane', () => {
+    const pane = setup();
+
+    pane.state.helperReport({ state: 'ready', marker: null });
+    pane.state.pageRect('page-1', RECT);
+    pane.state.helperReport({ state: 'found', marker: '000000000001' });
+    pane.state.pageRect('page-1', null);
+    const sent = pane.helperSent.length;
+
+    pane.state.pageRect('page-1', null);
+    expect(pane.helperSent).toHaveLength(sent + 1);
+    expect(pane.helperSent.at(-1)).toEqual({ marker: '000000000001', rect: null });
+    pane.state.update();
+    expect(pane.helperSent).toHaveLength(sent + 1);
+    pane.state.pageRect('page-2', RECT);
+    expect(pane.helperSent).toHaveLength(sent + 1);
+  });
+
   it('hides the pane without a column or links, and keeps the windows it found', () => {
     const pane = setup();
 

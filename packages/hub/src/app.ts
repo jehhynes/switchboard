@@ -1187,7 +1187,7 @@ const dockWithRuns = () => {
           return { status: 403, body: { error: 'Not in this window.' } };
         }
 
-        pane.pageRect(body['window'], paneRect(body['rect']));
+        pane.pageRect(body['window'], paneRect(body['rect']), typeof body['seq'] === 'number' ? body['seq'] : undefined);
         return { status: 200, body: { done: true } };
       },
       '/v1/conversation/page-focus': async (body) => (isRecord(body) ? conversation.pageFocus(body) : { status: 400, body: { error: 'Expected {window, focused}.' } }),

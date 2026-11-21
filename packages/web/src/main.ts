@@ -180,7 +180,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const listWidth = typeof ResizeObserver === 'function' ? new ResizeObserver(() => fitLines()) : null;
   listWidth?.observe(list);
   /** Whether the Browser tab shows: on the installed page while the Chrome pane is on (PRD R113). */
-  const browserTab = (): boolean => view.pane?.enabled === true && standalone();
+  /** Whether this page can drive the Chrome pane: only a page on this computer posts its area (`pane-rect` is a local command). */
+  const paneLocal = (): boolean => deps.local ?? ['127.0.0.1', 'localhost'].includes(location.hostname);
+  const browserTab = (): boolean => view.pane?.enabled === true && standalone() && paneLocal();
   /** The tab the conversation's pane shows: always the conversation while Status and Artifacts have their own column, and never a Browser tab that is gone. */
   const mainTab = (): Tab => (wide() || (view.tab === 'browser' && !browserTab()) || (view.tab === 'artifacts' && openArtifact() === null) ? 'conversation' : view.tab);
   /** The work item whose tabs were last chosen on its opening, and whether the operator has chosen a tab since. */
@@ -276,6 +278,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
    */
   const chooseTab = (tab: Tab): void => {
     tabChosen = true;
+    // The pane follows the tab: its state is sent again, whatever was sent before.
+    forcePane = true;
 
     if (tab === 'browser') {
       view.side = 'browser';
@@ -289,8 +293,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       view.side = tab !== 'conversation' ? tab : view.side === 'browser' ? 'status' : view.side;
     }
   };
-  /** Reports the Browser tab's area to the hub after each draw, once the pane's report is set up below. */
+  /** Reports the Browser tab's area to the hub after each draw, once the pane's report is set up below; sent again after a tab change. */
   let reportBrowser = (): void => {};
+  let forcePane = false;
 
   wideQuery?.addEventListener?.('change', () => draw());
   drawerQuery?.addEventListener?.('change', () => draw());
@@ -317,9 +322,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   let opId = 0;
   const newOp = (): string => `${deps.now().toString(36)}-${(++opId).toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
-  const post = async (name: string, body: Record<string, unknown>): Promise<Answer> => {
+  const post = async (name: string, body: Record<string, unknown>, keepalive = false): Promise<Answer> => {
     try {
-      const response = await deps.fetch(`/v1/conversation/${name}`, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ window: state.key, opId: newOp(), ...body }) });
+      const response = await deps.fetch(`/v1/conversation/${name}`, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ window: state.key, opId: newOp(), ...body }), ...(keepalive ? { keepalive } : {}) });
 
       expired ||= response.status === 401;
       return { status: response.status, body: (await response.json().catch(() => ({}))) as Record<string, unknown> };
@@ -2930,15 +2935,34 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     return wide() ? (sideTab() === 'browser' ? detailBody : null) : mainTab() === 'browser' ? panel : null;
   };
-  const reportPane = (): void => {
+  /**
+   * Sends the Chrome pane's state, the Browser tab's area or null, when it changed, and with `force` whatever was sent before, so the pane's
+   * visibility follows the tab shown even after a lost request; a request the hub did not take is sent again at the next report.
+   */
+  // Numbers each report, so the hub drops one that a later one overtook.
+  let paneSeq = 0;
+  const reportPane = (force = false): void => {
+    // A page on another device cannot drive the pane; the hub refuses its reports. A closed page reports nothing more.
+    if (!paneLocal() || listening.signal.aborted) {
+      return;
+    }
+
     const area = browserArea();
     const box = area === null ? null : area.getBoundingClientRect();
     const rect = box === null || box.width === 0 ? null : { left: box.left, top: box.top, width: box.width, height: box.height, dpr: window.devicePixelRatio || 1, innerWidth: window.innerWidth, innerHeight: window.innerHeight };
     const text = JSON.stringify(rect);
 
-    if (text !== paneSent) {
+    // Sent again whatever was sent only while the pane is on for this page; off, only a change goes.
+    const again = force && view.pane?.enabled === true && paneLocal();
+
+    if (again || text !== paneSent) {
       paneSent = text;
-      void post('pane-rect', { rect });
+      paneSeq += 1;
+      void post('pane-rect', { rect, seq: paneSeq }).then((answer) => {
+        if (answer.status !== 200 && paneSent === text) {
+          paneSent = '';
+        }
+      });
     }
   };
   const paneColumn = typeof ResizeObserver === 'function' ? new ResizeObserver(() => reportPane()) : null;
@@ -2958,7 +2982,28 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
   strips?.observe(detailHead);
   strips?.observe(head);
-  reportBrowser = reportPane;
+  reportBrowser = () => {
+    const force = forcePane;
+
+    forcePane = false;
+    reportPane(force);
+  };
+  // The pane's state is sent again when the page comes back to the front or into view, and hidden when the page goes away, as on a reload.
+  window.addEventListener('focus', () => reportPane(true), { signal: listening.signal });
+  document.addEventListener('visibilitychange', () => reportPane(true), { signal: listening.signal });
+  // A page back from the back/forward cache, which sent null as it went, shows the pane again if Browser is its tab.
+  window.addEventListener('pageshow', (event) => {
+    if (event.persisted) {
+      reportPane(true);
+    }
+  }, { signal: listening.signal });
+  window.addEventListener('pagehide', () => {
+    if (view.pane?.enabled === true && paneLocal() && state.key !== null) {
+      paneSent = 'null';
+      paneSeq += 1;
+      void post('pane-rect', { rect: null, seq: paneSeq }, true);
+    }
+  }, { signal: listening.signal });
   // Settings and the list header's sheets open and close without the page's draw.
   const settingsShown = typeof MutationObserver === 'function' ? new MutationObserver(() => reportPane()) : null;
 
@@ -3128,6 +3173,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         }
       }
 
+      // A new stream sends the pane's state again.
+      if (type === 'hello') {
+        forcePane = true;
+      }
+
       // The hub's tabs for the work item: in each `hello`, and from another device in `tabs`.
       if (type === 'hello' && state.scope?.workItemId != null) {
         const tabs = data['tabs'] as { tab: string | null; closed: Array<{ path: string; updatedAt: number }> } | null | undefined;
@@ -3138,13 +3188,13 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         const tabs = data['tabs'] as { tab: string | null; closed: Array<{ path: string; updatedAt: number }> };
 
         savedTabs = { workItemId: data['workItemId'] as number, tab: tabs.tab, closed: tabs.closed };
+      }
 
-        // The artifact shown here closed on another device: Status shows.
-        if (view.artifact !== null && closedNow().has(view.artifact)) {
-          view.artifact = null;
-          view.side = view.side === 'artifacts' ? 'status' : view.side;
-          view.tab = view.tab === 'artifacts' ? 'status' : view.tab;
-        }
+      // The artifact shown here closed on another device, as a `tabs` event or a new `hello` tells: Status shows.
+      if ((type === 'tabs' || type === 'hello') && view.artifact !== null && closedNow().has(view.artifact)) {
+        view.artifact = null;
+        view.side = view.side === 'artifacts' ? 'status' : view.side;
+        view.tab = view.tab === 'artifacts' ? 'status' : view.tab;
       }
 
       // A work item opened anew, or the pane's state known before the operator chose a tab on it: its opening tabs (`openTabs`).

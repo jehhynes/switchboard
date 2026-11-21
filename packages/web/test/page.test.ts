@@ -2366,6 +2366,81 @@ describe('the page in use', () => {
     page.close();
   });
 
+  it('keeps the pane in step with the tab shown: sends its state again on a tab change, focus and visibility, hides it as the page goes, and shows it after a reload only on Browser', async () => {
+    const query = { matches: true, addEventListener: () => {} };
+
+    vi.stubGlobal('matchMedia', vi.fn(() => query));
+    onTestFinished(() => {
+      vi.unstubAllGlobals();
+    });
+
+    const inits: Array<{ url: string; keepalive: boolean | undefined }> = [];
+    const fetch = (async (url: string, init?: { body?: string; keepalive?: boolean }) => {
+      posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) });
+      inits.push({ url, keepalive: init?.keepalive });
+      return { status: 200, ok: true, json: async () => ({}), text: async () => '' };
+    }) as unknown as typeof globalThis.fetch;
+    const open = () => startPage(root, { fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, standalone: () => true, toExtension: async () => ({ ok: true }) });
+    const paired = { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: true, error: null };
+    const rects = () => posts.filter((post) => post.url.endsWith('/pane-rect')).map((post) => post.body['rect']);
+    let page = open();
+    let source = FakeSource.last!;
+
+    vi.spyOn(root.querySelector('#detail .detail-body')!, 'getBoundingClientRect').mockReturnValue({ left: 1300, top: 85, width: 600, height: 855 } as DOMRect);
+    hello(source, { openOn: 'browser', groups: [listGroup('progress', [listRow(1, { title: 'Fix it', url: 'https://github.com/o/r/issues/1' })])] });
+    source.emit('pane', { pane: paired });
+    expect(rects().at(-1)).toMatchObject({ left: 1300, width: 600 });
+
+    // Status: null, and again on choosing Status once more, although nothing changed.
+    click('#detail [data-side="status"]');
+    expect(rects().at(-1)).toBeNull();
+    const sent = rects().length;
+
+    click('#detail [data-side="status"]');
+    expect(rects()).toHaveLength(sent + 1);
+    window.dispatchEvent(new Event('focus'));
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(rects()).toHaveLength(sent + 3);
+    expect(rects().slice(sent)).toEqual([null, null, null]);
+
+    // Browser again, then the page goes: null, sent to outlive the page.
+    click('#detail [data-side="browser"]');
+    expect(rects().at(-1)).toMatchObject({ width: 600 });
+    window.dispatchEvent(new Event('pagehide'));
+    expect(rects().at(-1)).toBeNull();
+    expect(inits.filter((init) => init.url.endsWith('/pane-rect')).at(-1)!.keepalive).toBe(true);
+    // Back from the back/forward cache, it sends its column again; each report carries a later number than the one before.
+    window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+    expect(rects().at(-1)).toMatchObject({ width: 600 });
+    const seqs = posts.filter((post) => post.url.endsWith('/pane-rect')).map((post) => post.body['seq'] as number);
+    expect(seqs.every((seq, index) => index === 0 || seq > seqs[index - 1]!)).toBe(true);
+    page.close();
+
+    // After the reload, the kept choice, Browser, shows again with the pane over it.
+    page = open();
+    source = FakeSource.last!;
+    vi.spyOn(root.querySelector('#detail .detail-body')!, 'getBoundingClientRect').mockReturnValue({ left: 1300, top: 85, width: 600, height: 855 } as DOMRect);
+    hello(source, { openOn: 'browser', groups: [listGroup('progress', [listRow(1, { title: 'Fix it', url: 'https://github.com/o/r/issues/1' })])] });
+    source.emit('pane', { pane: paired });
+    expect(root.querySelector<HTMLElement>('#detail .side-switch .tab.selected')!.dataset['side']).toBe('browser');
+    expect(rects().at(-1)).toMatchObject({ width: 600 });
+    page.close();
+
+    // A page on another device cannot drive the pane, so it has no Browser tab.
+    page = startPage(root, { fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, standalone: () => true, local: false, toExtension: async () => ({ ok: true }) });
+    source = FakeSource.last!;
+    hello(source, { openOn: 'browser', groups: [listGroup('progress', [listRow(1, { title: 'Fix it', url: 'https://github.com/o/r/issues/1' })])] });
+    source.emit('pane', { pane: paired });
+    expect(root.querySelector('#detail [data-side="browser"]')).toBeNull();
+    expect(root.querySelector<HTMLElement>('#detail .side-switch .tab.selected')!.dataset['side']).toBe('status');
+    const remote = rects().length;
+
+    window.dispatchEvent(new Event('focus'));
+    expect(rects()).toHaveLength(remote);
+    page.close();
+    posts.length = 0;
+  });
+
   it('says in the Browser tab why the Chrome pane does not cover it, and nothing while it does', () => {
     const pane = { enabled: true, extension: 'paired' as const, marker: null, shown: false, error: null };
 

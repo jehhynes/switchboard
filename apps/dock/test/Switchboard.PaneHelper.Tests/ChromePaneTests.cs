@@ -136,6 +136,12 @@ public sealed class ChromePaneTests
         public bool Hide(nint pane, bool hidden)
         {
             Calls.Add(hidden ? "hide" : "show");
+
+            if (HideWorks)
+            {
+                PaneShown = !hidden;
+            }
+
             return HideWorks;
         }
 
@@ -520,7 +526,7 @@ public sealed class ChromePaneTests
     }
 
     [Fact]
-    public void Order_NoMarker_ShowsAndUnownsThePane()
+    public void Order_NoMarker_KeepsAHiddenPaneHiddenAndUnownsIt()
     {
         var (pane, native, reports, _) = Make();
 
@@ -528,8 +534,44 @@ public sealed class ChromePaneTests
         native.Calls.Clear();
         pane.Order(new PaneOrder(null, null));
 
-        // Let go, it gets its animations back, a plain Chrome window again.
-        Assert.Equal(["show", "own 0", "transitions on"], native.Calls);
+        // As when the page reloads or closes: nothing shows the pane until a page's Browser tab glues it again.
+        Assert.Equal(["own 0", "transitions on"], native.Calls);
         Assert.Equal("found,hidden", States(reports));
+    }
+
+    [Fact]
+    public void Order_NoMarker_HidesAShownPaneBeforeLettingItGo()
+    {
+        var (pane, native, _, _) = Make();
+
+        pane.Order(new PaneOrder("0123456789ab", Rect));
+        native.Calls.Clear();
+        pane.Order(new PaneOrder(null, null));
+
+        Assert.Equal(["hide", "own 0", "transitions on"], native.Calls);
+        Assert.False(native.PaneShown);
+    }
+
+    [Fact]
+    public void Order_SameOrderAgain_HidesAPaneShownBehindItsBack()
+    {
+        var (pane, native, reports, _) = Make();
+
+        pane.Order(new PaneOrder("0123456789ab", null));
+        // Something showed the window although the order still hides it: the next order, even the same one, hides it again.
+        native.PaneShown = true;
+        native.Calls.Clear();
+        pane.Order(new PaneOrder("0123456789ab", null));
+
+        Assert.Equal(["hide"], native.Calls);
+        Assert.False(native.PaneShown);
+
+        // And shows a pane hidden behind its back when the column comes, though the pane was shown before.
+        pane.Order(new PaneOrder("0123456789ab", Rect));
+        native.PaneShown = false;
+        native.Calls.Clear();
+        pane.Order(new PaneOrder("0123456789ab", Rect));
+        Assert.Equal("show", native.Calls[0]);
+        Assert.Equal("found,hidden,shown", States(reports));
     }
 }

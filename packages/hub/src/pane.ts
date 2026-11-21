@@ -99,6 +99,8 @@ export class PaneState {
   #rect: PaneRect | null = null;
   /** Each page's latest column, so a page that gains the focus can take the pane over. */
   readonly #rects = new Map<string, PaneRect>();
+  /** Each page's last report number: requests can overtake one another, and an older report must not undo a newer one. */
+  readonly #seqs = new Map<string, number>();
   /** The page that last gained its own focus, which takes the pane over once it has a column. */
   #focusedPage: string | null = null;
   #marker: string | null = null;
@@ -121,7 +123,15 @@ export class PaneState {
    * `pane-rect`: the page's column, or null when it has none the pane can cover. A page owns the pane when none does, and takes it over when it
    * gains the focus (`pageFocused`), so a page in the background never moves the pane away from the one in use.
    */
-  pageRect(key: string, rect: PaneRect | null): void {
+  pageRect(key: string, rect: PaneRect | null, seq?: number): void {
+    if (seq !== undefined) {
+      if (seq <= (this.#seqs.get(key) ?? -Infinity)) {
+        return;
+      }
+
+      this.#seqs.set(key, seq);
+    }
+
     if (rect === null) {
       this.#rects.delete(key);
     } else {
@@ -132,8 +142,10 @@ export class PaneState {
       this.#setOwner(key);
     }
 
+    // Each report of the owner's goes to the helper, the same as before or not, so the pane follows the page even after a lost order.
     if (this.#owner === key) {
       this.#rect = rect;
+      this.#sentHelper = '';
     }
 
     this.update();
@@ -155,6 +167,7 @@ export class PaneState {
   pageClosed(key: string): void {
     this.#sentPages.delete(key);
     this.#rects.delete(key);
+    this.#seqs.delete(key);
     this.#focusedPage = this.#focusedPage === key ? null : this.#focusedPage;
 
     if (this.#owner === key) {
