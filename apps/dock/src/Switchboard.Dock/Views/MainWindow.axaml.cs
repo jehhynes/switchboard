@@ -131,6 +131,7 @@ public sealed partial class MainWindow : Window
             }
         };
         StatusClock = () => clock.Elapsed;
+        MenuScreenAt = ScreenForMenu;
         // The 1-second check could miss a short hover, so leaving the toast restarts its time too.
         StatusToast.PointerExited += (_, _) => statusSince = StatusClock();
         // After the XAML, whose width is the default.
@@ -1058,7 +1059,7 @@ public sealed partial class MainWindow : Window
                 return () =>
                 {
                     model.Selected = row.Key;
-                    RowMenu(MenuOf(row.Row), model.GripOnLeft, focused.TranslatePoint(default, this) ?? default).Open(this);
+                    RowMenu(MenuOf(row.Row), model.GripOnLeft, focused.TranslatePoint(default, this) ?? default, MenuScreenAt).Open(this);
                     return Task.CompletedTask;
                 };
             }
@@ -1389,7 +1390,7 @@ public sealed partial class MainWindow : Window
         // which has no position, opens at the row's corner.
         var at = e.TryGetPosition(this, out _) ? pointer : target.TranslatePoint(default, this) ?? default;
 
-        RowMenu(MenuOf(row.Row), model.GripOnLeft, at).Open(this);
+        RowMenu(MenuOf(row.Row), model.GripOnLeft, at, MenuScreenAt).Open(this);
     }
 
     /// <summary>A tooltip at the pointer, placed as a row's menu is, because the default horizontal slide moved it beside the dock.</summary>
@@ -1402,39 +1403,25 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// A row's menu at the pointer, opening away from the screen edge the dock is on. Popups are kept inside the monitor's working area, which
-    /// leaves out the dock's app bar strip, so a horizontal adjustment would move the menu beside the dock; only vertical ones are allowed.
-    /// Submenus follow the same rule.
+    /// A row's menu at the pointer, or a header button's below it, opening away from the screen edge the dock is on and kept on the monitor with
+    /// its submenus (<see cref="MenuPlacement"/>), on the monitor <paramref name="screenAt"/> finds, Avalonia's when null.
     /// </summary>
-    internal static ContextMenu RowMenu(List<Control> items, bool dockOnRight, Point at)
-    {
-        foreach (var item in items.OfType<MenuItem>().Where((item) => item.ItemsSource is not null))
-        {
-            item.TemplateApplied += (_, e) =>
-            {
-                if (e.NameScope.Find<Popup>("PART_Popup") is { } popup)
-                {
-                    popup.Placement = dockOnRight ? PlacementMode.LeftEdgeAlignedTop : PlacementMode.RightEdgeAlignedTop;
-                    popup.PlacementConstraintAdjustment = PopupPositionerConstraintAdjustment.FlipY | PopupPositionerConstraintAdjustment.SlideY;
+    internal static ContextMenu RowMenu(List<Control> items, bool dockOnRight, Point at, MenuScreenAt? screenAt = null) => MenuPlacement.Menu(items, dockOnRight, at, screenAt);
 
-                    // The theme's offset overlaps the submenu with its item on the right; mirror it so a left submenu overlaps too.
-                    if (dockOnRight)
-                    {
-                        popup.HorizontalOffset = -popup.HorizontalOffset;
-                    }
-                }
-            };
+    /// <summary>The monitor a menu opens on; tests replace it.</summary>
+    internal MenuScreenAt MenuScreenAt { get; set; }
+
+    /// <summary>Avalonia's monitor at the point, with Mutter's work area for it as an X11 dock window, as <see cref="PlaceOnEdge"/> takes.</summary>
+    MenuScreen? ScreenForMenu(Visual visual, Avalonia.PixelPoint point)
+    {
+        if (MenuPlacement.ScreenOf(visual, point) is not { } screen)
+        {
+            return null;
         }
 
-        return new()
-        {
-            ItemsSource = items,
-            Placement = PlacementMode.AnchorAndGravity,
-            PlacementRect = new Rect(at, new Size(1, 1)),
-            PlacementAnchor = PopupAnchor.TopLeft,
-            PlacementGravity = dockOnRight ? PopupGravity.BottomLeft : PopupGravity.BottomRight,
-            PlacementConstraintAdjustment = PopupPositionerConstraintAdjustment.FlipY | PopupPositionerConstraintAdjustment.SlideY,
-        };
+        return x11 is { } monitors && DockPlacement.WorkAreaOn(PixelRectOf(screen.Bounds), monitors.WorkAreas()) is { } work
+            ? screen with { WorkArea = new Avalonia.PixelRect(work.Left, work.Top, work.Width, work.Height) }
+            : screen;
     }
 
     /// <summary>The state controls, which change what the work item waits for rather than run its work (PRD R71).</summary>
@@ -1754,7 +1741,7 @@ public sealed partial class MainWindow : Window
         }
         else
         {
-            new ContextMenu { ItemsSource = row.Row.Pastes.Select((paste) => Item(paste.Label, () => Copy(paste))).ToList() }.Open(button);
+            RowMenu(row.Row.Pastes.Select((paste) => (Control)Item(paste.Label, () => Copy(paste))).ToList(), model.GripOnLeft, new Point(model.GripOnLeft ? button.Bounds.Width : 0, button.Bounds.Height), MenuScreenAt).Open(button);
         }
     }
 
@@ -1781,8 +1768,13 @@ public sealed partial class MainWindow : Window
 
         var menu = SourceMenu(group, new Point(model.GripOnLeft ? button.Bounds.Width : 0, button.Bounds.Height));
 
-        button.ContextMenu = menu;
-        menu.Open(button);
+        OpenBelow(button, menu, () =>
+        {
+            if (button.DataContext is SourceViewModel { IsMenu: true })
+            {
+                OnSourceClicked(button, new RoutedEventArgs());
+            }
+        });
 
         // A snapshot that adds or removes a source replaces the icons, so the menu's entries would be stale.
         void Replaced(object? _, System.Collections.Specialized.NotifyCollectionChangedEventArgs __) => menu.Close();
@@ -1815,7 +1807,7 @@ public sealed partial class MainWindow : Window
 
             return (Control)item;
         }).ToList();
-        var menu = RowMenu(items, model.GripOnLeft, at);
+        var menu = RowMenu(items, model.GripOnLeft, at, MenuScreenAt);
 
         // Space toggles a check box as Enter does; Avalonia's menus take only Enter.
         menu.AddHandler(KeyDownEvent, (_, e) =>
@@ -1830,14 +1822,46 @@ public sealed partial class MainWindow : Window
         return menu;
     }
 
+    // The header buttons whose context request opens their menu again through OpenBelow.
+    readonly HashSet<Control> menuButtons = [];
+
+    /// <summary>
+    /// Opens a header button's menu, its ContextMenu while open. A menu kept on the button after it closed would open again on a right-click or the
+    /// context-menu key with Avalonia's own placement and the size limits of its first opening, so it is removed on close and a context request
+    /// runs <paramref name="reopen"/>, which builds and places it afresh.
+    /// </summary>
+    void OpenBelow(Control button, ContextMenu menu, Action reopen)
+    {
+        if (menuButtons.Add(button))
+        {
+            button.ContextRequested += (_, e) =>
+            {
+                if (button.ContextMenu is null)
+                {
+                    e.Handled = true;
+                    reopen();
+                }
+            };
+        }
+
+        button.ContextMenu = menu;
+        menu.Closed += (_, _) =>
+        {
+            if (button.ContextMenu == menu)
+            {
+                button.ContextMenu = null;
+            }
+        };
+        menu.Open(button);
+    }
+
     /// <summary>The header's More Actions menu, below the button and opening away from the screen edge the dock is on.</summary>
     void OnMoreClicked(object? sender, RoutedEventArgs e)
     {
         var dockOnRight = model.GripOnLeft;
-        var menu = RowMenu(HeaderMenu(), dockOnRight, new Point(dockOnRight ? MoreButton.Bounds.Width : 0, MoreButton.Bounds.Height));
+        var menu = RowMenu(HeaderMenu(), dockOnRight, new Point(dockOnRight ? MoreButton.Bounds.Width : 0, MoreButton.Bounds.Height), MenuScreenAt);
 
-        MoreButton.ContextMenu = menu;
-        menu.Open(MoreButton);
+        OpenBelow(MoreButton, menu, () => OnMoreClicked(MoreButton, new RoutedEventArgs()));
     }
 
     /// <summary>
@@ -2111,10 +2135,9 @@ public sealed partial class MainWindow : Window
             model.Range = index;
             return Task.CompletedTask;
         })).ToList();
-        var menu = RowMenu(items, model.GripOnLeft, new Point(0, SearchRangeButton.Bounds.Height));
+        var menu = RowMenu(items, model.GripOnLeft, new Point(0, SearchRangeButton.Bounds.Height), MenuScreenAt);
 
-        SearchRangeButton.ContextMenu = menu;
-        menu.Open(SearchRangeButton);
+        OpenBelow(SearchRangeButton, menu, () => OnSearchRangeClicked(SearchRangeButton, new RoutedEventArgs()));
     }
 
     void OnSearchClicked(object? sender, RoutedEventArgs e)

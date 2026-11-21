@@ -58,6 +58,8 @@ public sealed class ControlsTests
 
         Click(more);
         more.ContextMenu!.Items.OfType<MenuItem>().Single((item) => (string)item.Header! == header).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        // A real click closes the menu, which opens below the button over the rows.
+        more.ContextMenu.Close();
         Dispatcher.UIThread.RunJobs();
     }
 
@@ -388,10 +390,11 @@ public sealed class ControlsTests
         Click(icon);
         Assert.True(icon.ContextMenu!.IsOpen);
 
+        var menu = icon.ContextMenu!;
         model.Show(Fixtures.View);
         Dispatcher.UIThread.RunJobs();
 
-        Assert.False(icon.ContextMenu!.IsOpen);
+        Assert.False(menu.IsOpen);
         Assert.Single(((SourceViewModel)SourceIcon(window, "github").DataContext!).Entries);
     }
 
@@ -411,14 +414,15 @@ public sealed class ControlsTests
         window.KeyPressQwerty(PhysicalKey.Space, RawInputModifiers.None);
         Dispatcher.UIThread.RunJobs();
         Assert.Equal(["source personal True"], hub.Calls);
-        Assert.True(icon.ContextMenu.IsOpen);
+        var menu = icon.ContextMenu;
+        Assert.True(menu.IsOpen);
 
         window.KeyPressQwerty(PhysicalKey.Enter, RawInputModifiers.None);
         Dispatcher.UIThread.RunJobs();
         Assert.Equal(["source personal True", "source personal True"], hub.Calls);
         window.KeyPressQwerty(PhysicalKey.Escape, RawInputModifiers.None);
         Dispatcher.UIThread.RunJobs();
-        Assert.False(icon.ContextMenu.IsOpen);
+        Assert.False(menu.IsOpen);
         Assert.True(icon.IsFocused);
     }
 

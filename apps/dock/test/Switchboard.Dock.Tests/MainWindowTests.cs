@@ -326,12 +326,13 @@ public sealed class MainWindowTests
         Wait(window);
         // The headless tap moves no pointer, so the dock is still hidden when the menu opens.
         Tap(window, more);
-        Assert.True(more.ContextMenu!.IsOpen);
+        var menu = more.ContextMenu!;
+        Assert.True(menu.IsOpen);
 
         window.Width = 400;
         Dispatcher.UIThread.RunJobs();
 
-        Assert.False(more.ContextMenu.IsOpen);
+        Assert.False(menu.IsOpen);
         Assert.Equal(["release", "clip Left 3", "clip Left 3"], edge.Calls);
     }
 
@@ -1725,24 +1726,6 @@ public sealed class MainWindowTests
         Assert.Equal(Avalonia.Controls.Primitives.PopupPositioning.PopupGravity.BottomLeft, MainWindow.RowMenu([], dockOnRight: true, new Point(30, 40)).PlacementGravity);
         Assert.Equal(vertical, MainWindow.RowMenu([], dockOnRight: true, new Point(30, 40)).PlacementConstraintAdjustment);
         Assert.Equal(new Rect(30, 40, 1, 1), MainWindow.RowMenu([], dockOnRight: true, new Point(30, 40)).PlacementRect);
-    }
-
-    [AvaloniaTheory]
-    [InlineData(false, PlacementMode.RightEdgeAlignedTop, -4)]
-    [InlineData(true, PlacementMode.LeftEdgeAlignedTop, 4)]
-    public void RowMenu_Submenu_OpensAwayFromTheEdgeOverlapsItsItemAndAdjustsOnlyVertically(bool dockOnRight, PlacementMode placement, double offset)
-    {
-        var (window, _) = Open();
-        var submenu = new MenuItem { Header = "Snooze", ItemsSource = new List<string> { "Tomorrow" } };
-
-        MainWindow.RowMenu([submenu], dockOnRight, new Point(30, 40)).Open(window);
-        Dispatcher.UIThread.RunJobs();
-
-        var popup = submenu.GetVisualDescendants().OfType<Avalonia.Controls.Primitives.Popup>().Single((popup) => popup.Name == "PART_Popup");
-
-        Assert.Equal(placement, popup.Placement);
-        Assert.Equal(offset, popup.HorizontalOffset);
-        Assert.Equal(Avalonia.Controls.Primitives.PopupPositioning.PopupPositionerConstraintAdjustment.FlipY | Avalonia.Controls.Primitives.PopupPositioning.PopupPositionerConstraintAdjustment.SlideY, popup.PlacementConstraintAdjustment);
     }
 
     [AvaloniaFact]
