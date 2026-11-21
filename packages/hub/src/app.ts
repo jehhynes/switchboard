@@ -572,6 +572,14 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     isPage: (key) => scopes.isPage(key),
     scope: (key) => scopes.scope(key),
     openFile: (workItemId, path, line) => commandInWindow(workItemId, OPEN_IN_VSCODE, { type: 'openFile', path, line }),
+    viewed: { list: (workItemId) => store.viewedFiles(workItemId), set: (workItemId, path, hash) => store.setViewedFile(workItemId, path, hash, deps.now()) },
+    viewedChanged: (workItemId, from, payload) => {
+      for (const key of conversation.pages()) {
+        if (key !== from && scopes.scope(key)?.workItemId === workItemId) {
+          conversation.notify(key, 'viewed', { workItemId, ...payload });
+        }
+      }
+    },
   });
   const pageConsole = new PageConsole({
     isPage: (key) => scopes.isPage(key),
@@ -1171,6 +1179,8 @@ const dockWithRuns = () => {
       '/v1/conversation/page-adhoc': async (body) => (isRecord(body) ? conversation.pageAdhoc(body) : { status: 400, body: { error: 'Expected {window, opId, prompt, repoRoot, start, provider}.' } }),
       '/v1/conversation/page-folder-conversation': async (body) => (isRecord(body) ? conversation.pageFolderConversation(body) : { status: 400, body: { error: 'Expected {window, opId, folder, provider?}.' } }),
       // A changed file opened at a line in the work item's VS Code window (architecture.md § Web page).
+      // A changed file ticked viewed, or its tick cleared, for every device (architecture.md § Web page).
+      '/v1/conversation/viewed': async (body) => (isRecord(body) ? pageChanges.viewedCommand(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, path, hash, viewed}.' } }),
       '/v1/conversation/open-file': async (body) => (isRecord(body) ? pageChanges.openFileCommand(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, path, line}.' } }),
       '/v1/conversation/page-search': async (body) => (isRecord(body) ? conversation.pageSearch(body) : { status: 400, body: { error: 'Expected {window, text, since}.' } }),
       // The page's tabs for its work item, kept for every device (architecture.md § Web page).

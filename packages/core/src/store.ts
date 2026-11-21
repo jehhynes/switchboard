@@ -484,6 +484,14 @@ export const MIGRATIONS = [
   );`,
   // The web page's choices that hold for every work item, such as Status or Browser to open on (architecture.md § Web page).
   `CREATE TABLE pagePrefs (name TEXT PRIMARY KEY, value TEXT NOT NULL);`,
+  // The web page's viewed ticks (architecture.md § Web page): a changed file a work item's operator marked viewed, at the content it had then.
+  `CREATE TABLE viewedFiles (
+    workItemId INTEGER NOT NULL,
+    path TEXT NOT NULL,
+    hash TEXT NOT NULL,
+    at INTEGER NOT NULL,
+    PRIMARY KEY (workItemId, path)
+  );`,
 ];
 
 /**
@@ -1139,6 +1147,7 @@ export class Store {
     this.#db.prepare('DELETE FROM pastes WHERE workItemId = ?').run(id);
     this.#db.prepare('DELETE FROM comments WHERE workItemId = ?').run(id);
     this.#db.prepare('DELETE FROM pageTabs WHERE workItemId = ?').run(id);
+    this.#db.prepare('DELETE FROM viewedFiles WHERE workItemId = ?').run(id);
     this.#db.prepare('UPDATE workItems SET parentId = NULL WHERE parentId = ?').run(id);
     this.#db.prepare('DELETE FROM workItems WHERE id = ?').run(id);
   }
@@ -1706,6 +1715,22 @@ export class Store {
   }
 
   /** Every remembered sign-in, the one used last first. */
+  /** A work item's viewed ticks on the web page (architecture.md § Web page): each ticked file's path and the content hash it was ticked at. */
+  viewedFiles(workItemId: number): Map<string, string> {
+    const rows = this.#db.prepare('SELECT path, hash FROM viewedFiles WHERE workItemId = ?').all(workItemId) as Array<{ path: string; hash: string }>;
+
+    return new Map(rows.map((row) => [row.path, row.hash]));
+  }
+
+  /** Ticks a changed file viewed at a content hash, or clears its tick with null. */
+  setViewedFile(workItemId: number, path: string, hash: string | null, at: number): void {
+    if (hash === null) {
+      this.#db.prepare('DELETE FROM viewedFiles WHERE workItemId = ? AND path = ?').run(workItemId, path);
+    } else {
+      this.#db.prepare('INSERT INTO viewedFiles (workItemId, path, hash, at) VALUES (?, ?, ?, ?) ON CONFLICT (workItemId, path) DO UPDATE SET hash = excluded.hash, at = excluded.at').run(workItemId, path, hash, at);
+    }
+  }
+
   /** A work item's tabs on the web page, or null before any was chosen (architecture.md § Web page). */
   pageTabs(workItemId: number): PageTabs | null {
     const row = this.#db.prepare('SELECT tab, closed FROM pageTabs WHERE workItemId = ?').get(workItemId) as { tab: string | null; closed: string } | undefined;

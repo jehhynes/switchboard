@@ -28,6 +28,10 @@ export interface ChangeRow {
   additions: number | null;
   deletions: number | null;
   binary: boolean;
+  /** The file's content now, which a viewed tick is kept at: git's blob ID of the file on disk, or `deleted` for a deleted file. */
+  hash: string;
+  /** Whether the work item's operator ticked the file viewed at this content (`PageChanges.changes`). */
+  viewed?: boolean;
 }
 
 export interface ChangesView {
@@ -378,6 +382,7 @@ export async function readChanges(folder: string, git: Git = nodeGit, withCounts
       additions: numbers.additions,
       deletions: numbers.deletions,
       binary: counted?.binary ?? (counts.has(path) && numbers.additions === null),
+      hash: 'deleted',
     };
   };
   // A few files read at a time, in order, so a worktree with many untracked files does not open them all at once.
@@ -385,6 +390,32 @@ export async function readChanges(folder: string, git: Git = nodeGit, withCounts
 
   for (let start = 0; start < planned.rows.length; start += COUNT_AT_ONCE) {
     rows.push(...(await Promise.all(planned.rows.slice(start, start + COUNT_AT_ONCE).map(rowOf))));
+  }
+
+  // Each file's content hash on disk: its blob ID, without running the repository's filters, for a file inside the worktree only (`fileInside`),
+  // in one git process; a file that went meanwhile fails that process, so each is then hashed on its own.
+  const present: ChangeRow[] = [];
+
+  for (let start = 0; start < rows.length; start += COUNT_AT_ONCE) {
+    const batch = rows.slice(start, start + COUNT_AT_ONCE).filter((row) => row.status !== 'D');
+    const inside = await Promise.all(batch.map((row) => fileInside(root, row.path)));
+
+    batch.forEach((row, index) => (inside[index] === null ? (row.hash = 'unreadable') : present.push(row)));
+  }
+
+  const hashOf = async (paths: string[]): Promise<string[] | null> => {
+    const hashed = await git(['hash-object', '--no-filters', '--stdin-paths'], root, { stdin: paths.join('\n') + '\n' });
+    const lines = hashed.stdout.toString('utf8').split('\n');
+
+    return hashed.code === 0 && paths.every((_, index) => /^[0-9a-f]{40,64}$/.test(lines[index] ?? '')) ? lines.slice(0, paths.length) : null;
+  };
+  const all = present.length === 0 ? [] : await hashOf(present.map((row) => row.path));
+
+  for (let start = 0; start < present.length; start += COUNT_AT_ONCE) {
+    const batch = present.slice(start, start + COUNT_AT_ONCE);
+    const hashes = all ?? (await Promise.all(batch.map(async (row) => (await hashOf([row.path]))?.[0] ?? 'unreadable')));
+
+    batch.forEach((row, index) => (row.hash = all === null ? hashes[index]! : all[start + index]!));
   }
 
   return {
@@ -488,6 +519,10 @@ export interface PageChangesDeps {
   git?: Git;
   /** Opens a file at a line in the work item's VS Code window, opening the window when it is closed: why not, or null. */
   openFile?(workItemId: number, path: string, line: number): string | null;
+  /** The work items' viewed ticks (the store's `viewedFiles`); without them no file shows as viewed. */
+  viewed?: { list(workItemId: number): Map<string, string>; set(workItemId: number, path: string, hash: string | null): void };
+  /** Tells the other pages showing a work item that a tick changed, as a `viewed` event. */
+  viewedChanged?(workItemId: number, from: string, payload: { path: string; hash: string; viewed: boolean }): void;
 }
 
 /** The hub's `file` answer: a file read whole, on disk or at the base, for the page's file view. */
@@ -578,7 +613,8 @@ export class PageChanges {
       return { status: 409, body: read };
     }
 
-    const body = { scopeGen: scope.scopeGen, ...read.view };
+    const ticked = scope.workItemId === null ? new Map<string, string>() : (this.deps.viewed?.list(scope.workItemId) ?? new Map<string, string>());
+    const body = { scopeGen: scope.scopeGen, ...read.view, rows: read.view.rows.map((row) => ({ ...row, viewed: row.hash !== 'unreadable' && ticked.get(row.path) === row.hash })) };
 
     return { status: 200, body, etag: etagOf(body) };
   }
@@ -698,5 +734,78 @@ export class PageChanges {
     const why = this.deps.openFile === undefined ? 'This hub cannot open files in VS Code.' : this.deps.openFile(scope.workItemId, real, line);
 
     return why === null ? { status: 200, body: { opened: path } } : { status: 409, body: { error: why } };
+  }
+
+  /**
+   * `viewed {window, scopeGen, opId, path, hash, viewed}`: ticks a change row viewed at the content hash the page showed, or clears its tick, for
+   * the selected conversation's work item, and tells the other pages showing it. 409 when the file's content changed since, so a tick is never
+   * kept for content the operator did not see, or for a stale `scopeGen`; 404 for a path that is no row.
+   */
+  async viewedCommand(body: Record<string, unknown>): Promise<ChangesReply> {
+    const { window, scopeGen, opId, path, hash, viewed } = body;
+
+    if (typeof window !== 'string' || !Number.isInteger(scopeGen) || typeof opId !== 'string' || opId === '' || opId.length > 100 || !relativePath(path) || typeof hash !== 'string' || hash.length > 100 || typeof viewed !== 'boolean') {
+      return { status: 400, body: { error: 'Expected {window, scopeGen, opId, path, hash, viewed}.' } };
+    }
+
+    // A retried `opId` answers as the first did, so a lost answer never sets a tick again after a later one.
+    const done = this.#ticked.get(`${window} ${opId}`);
+
+    if (done !== undefined) {
+      return done;
+    }
+
+    const reply = await this.#tick(window, scopeGen as number, path, hash, viewed);
+
+    this.#ticked.set(`${window} ${opId}`, reply);
+
+    if (this.#ticked.size > OPENED_KEPT) {
+      this.#ticked.delete(this.#ticked.keys().next().value!);
+    }
+
+    return reply;
+  }
+
+  /** Each `viewed`'s answer by page key and `opId`, the last {@link OPENED_KEPT}. */
+  readonly #ticked = new Map<string, ChangesReply>();
+
+  async #tick(window: string, scopeGen: number, path: string, hash: string, viewed: boolean): Promise<ChangesReply> {
+    const scope = unscoped(this.deps, window);
+
+    if ('status' in scope) {
+      return scope;
+    }
+
+    if (scope.scopeGen !== scopeGen || scope.workItemId === null) {
+      return { status: 409, body: { error: CONVERSATION_MOVED } };
+    }
+
+    if (this.deps.viewed === undefined) {
+      return { status: 409, body: { error: 'This hub keeps no viewed ticks.' } };
+    }
+
+    const read = await readChanges(scope.cwd!, this.deps.git, false);
+
+    if (!same(this.deps, window, scope)) {
+      return { status: 409, body: { error: CONVERSATION_MOVED } };
+    }
+
+    if ('error' in read) {
+      return { status: 409, body: read };
+    }
+
+    const row = read.view.rows.find((one) => one.path === path);
+
+    if (row === undefined) {
+      return { status: 404, body: { error: `${path} is not one of the changes now.` } };
+    }
+
+    if (row.hash !== hash || row.hash === 'unreadable') {
+      return { status: 409, body: { error: `${path} changed since it was shown; read it again.`, hash: row.hash } };
+    }
+
+    this.deps.viewed.set(scope.workItemId, path, viewed ? hash : null);
+    this.deps.viewedChanged?.(scope.workItemId, window, { path, hash, viewed });
+    return { status: 200, body: { path, hash, viewed } };
   }
 }

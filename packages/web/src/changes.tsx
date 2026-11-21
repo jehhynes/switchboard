@@ -18,6 +18,9 @@ export interface ChangeRow {
   additions: number | null;
   deletions: number | null;
   binary: boolean;
+  /** The content hash a viewed tick is kept at, and whether the file is ticked viewed at it. */
+  hash: string;
+  viewed?: boolean;
 }
 
 /** The hub's `changes` answer. */
@@ -125,13 +128,22 @@ function Counts({ row }: { row: ChangeRow }) {
 }
 
 /** One row: the file's name, its folder, the lines added and deleted, and its status letter, as VS Code's Source Control draws a change. */
+/** A file's Viewed tick, as on a pull request: ticked at the content it had, cleared when that changes. */
+function ViewedBox({ row }: { row: ChangeRow }): VNode {
+  return (
+    <label class="change-viewed" title={row.viewed === true ? 'Viewed; untick to read it again' : 'Mark viewed'}>
+      <input type="checkbox" data-action="diff-viewed" data-path={row.path} checked={row.viewed === true} aria-label={`Viewed ${row.path}`} />
+    </label>
+  );
+}
+
 function Row({ row }: { row: ChangeRow }): VNode {
   const slash = row.path.lastIndexOf('/');
   const name = row.path.slice(slash + 1);
   const dir = slash === -1 ? '' : row.path.slice(0, slash);
 
   return (
-    <li>
+    <li class={`change-item${row.viewed === true ? ' viewed' : ''}`}>
       <button class={`change-row status-${row.status}`} type="button" data-action="diff-open" data-path={row.path} title={rowTitle(row)}>
       <FileIcon path={row.path} />
       <span class={`change-name${row.status === 'D' ? ' deleted' : ''}`}>{name}</span>
@@ -141,6 +153,7 @@ function Row({ row }: { row: ChangeRow }): VNode {
         {row.status}
       </span>
       </button>
+      <ViewedBox row={row} />
     </li>
   );
 }
@@ -150,7 +163,10 @@ export function listNote(list: ChangesList): string {
   const since = list.base === null ? 'Uncommitted changes only, no merge base' : `Since ${list.base.slice(0, 7)}`;
   const files = list.total === 1 ? '1 file' : `${list.total} files`;
 
-  return list.shown < list.total ? `${since} · first ${list.shown} of ${files}` : `${since} · ${files}`;
+  const viewed = list.rows.filter((row) => row.viewed === true).length;
+  const ticked = viewed === 0 ? '' : ` · ${viewed} viewed`;
+
+  return list.shown < list.total ? `${since} · first ${list.shown} of ${files}${ticked}` : `${since} · ${files}${ticked}`;
 }
 
 /** The Changes menu while open, under the strip: its note and Refresh, then the rows, or why there are none. */
@@ -204,6 +220,8 @@ export interface ChangesDeps {
   loadDiff(): Promise<DiffModule | null>;
   /** Empties a pane Preact drew into, before the diff tab draws into it itself. */
   takePane(pane: HTMLElement): void;
+  /** The work item the page shows, which a `viewed` event must name. */
+  workItemId(): number | null;
   /** Posts a command for the conversation the page shows, with its `scopeGen`. */
   command(name: string, body: Record<string, unknown>): Promise<{ status: number; body: Record<string, unknown> }>;
 }
@@ -279,6 +297,12 @@ function DiffHead({ path, row, choice, wrap, loading, file, note }: { path: stri
         <button class="diff-wrap" type="button" data-action="diff-wrap" aria-pressed={wrap} title="Wrap long lines">
           Wrap
         </button>
+        {row === undefined ? null : (
+          <label class="diff-viewed">
+            <input type="checkbox" data-action="diff-viewed" data-path={path} checked={row.viewed === true} />
+            Viewed
+          </label>
+        )}
         <button class="icon" type="button" data-action="diff-refresh" title="Refresh" aria-label="Refresh" disabled={loading}>
           <span class={`codicon codicon-refresh${loading ? ' codicon-modifier-spin' : ''}`} aria-hidden="true"></span>
         </button>
@@ -448,6 +472,11 @@ export class ChangesController {
       return true;
     }
 
+    if (action === 'diff-viewed' && path !== undefined) {
+      void this.toggleViewed(path);
+      return true;
+    }
+
     if (action === 'diff-back' && this.view.open !== null) {
       this.#files.delete(this.view.open);
       this.deps.draw();
@@ -603,6 +632,59 @@ export class ChangesController {
     }
 
     if (reading === this.#diffReads && this.#files.get(tab) === open) {
+      this.deps.draw();
+    }
+  }
+
+  /**
+   * Ticks a file viewed at the content the page shows, or clears its tick, in the hub, for every device; a file that changed since is read again
+   * rather than ticked.
+   */
+  async toggleViewed(path: string): Promise<void> {
+    const row = this.view.list?.rows.find((one) => one.path === path);
+
+    if (row === undefined) {
+      return;
+    }
+
+    row.viewed = row.viewed !== true;
+    this.deps.draw();
+
+    // One post at a time per file, the last click's choice sent once the one on its way answers, so the hub ends where the page shows.
+    if (this.#ticking.has(row)) {
+      return;
+    }
+
+    this.#ticking.add(row);
+
+    try {
+      for (let sent: boolean | null = null; row.viewed !== sent; ) {
+        sent = row.viewed === true;
+
+        const answer = await this.deps.command('viewed', { path, hash: row.hash, viewed: sent });
+
+        if (answer.status !== 200) {
+          row.viewed = !sent;
+          this.view.error = String(answer.body['error'] ?? `Switchboard answered ${answer.status}.`);
+          this.deps.draw();
+          void this.refresh();
+          return;
+        }
+      }
+    } finally {
+      this.#ticking.delete(row);
+    }
+  }
+
+  /** The rows whose tick is being posted: a list read again has new rows, which post on their own. */
+  readonly #ticking = new WeakSet<ChangeRow>();
+
+  /** Another device ticked a file or cleared its tick: the list follows it while the file's content is the one ticked. */
+  viewedEvent(data: Record<string, unknown>): void {
+    const row = data['workItemId'] === this.deps.workItemId() ? this.view.list?.rows.find((one) => one.path === data['path'] && one.hash === data['hash']) : undefined;
+
+    if (row !== undefined && typeof data['viewed'] === 'boolean') {
+      row.viewed = data['viewed'];
       this.deps.draw();
     }
   }

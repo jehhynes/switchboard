@@ -35,7 +35,7 @@ import { useFileIcons } from './fileIcons.js';
 import type { NeedsItem } from './alerts.js';
 
 /** The stream's event types the page reads. */
-export const EVENTS = ['tabs', 'hello', 'list', 'scope', 'conversations', 'session', 'message', 'reply', 'status', 'artifact', 'unread', 'voice', 'settings', 'progress', 'words', 'draft', 'pane', 'needs', 'show', 'config'];
+export const EVENTS = ['tabs', 'hello', 'list', 'scope', 'conversations', 'session', 'message', 'reply', 'status', 'artifact', 'unread', 'voice', 'settings', 'progress', 'words', 'draft', 'pane', 'needs', 'show', 'config', 'viewed'];
 /** How long the page's title holds the marker the dock finds its window by after a `show` (architecture.md § Dock). */
 export const SHOW_MARKER_MS = 5_000;
 /** How often the page wakes the Chrome extension while the Chrome pane is on and no extension is connected. */
@@ -363,6 +363,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     loadDiff: () => deps.loadDiff?.() ?? Promise.resolve(null),
     takePane: (pane) => takePane(pane),
     command: (name, body) => command(name, body),
+    workItemId: () => state.scope?.workItemId ?? null,
   });
   let changesSession: string | null = null;
   // File type icons, whose mapping loads the first time a list draws one (architecture.md § Web page).
@@ -3256,6 +3257,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
           historyChange = null;
           void readHistory();
         }, HISTORY_CHANGE_MS);
+      }
+
+      // Another device ticked a changed file viewed, or cleared its tick (architecture.md § Web page).
+      if (type === 'viewed') {
+        changes.viewedEvent(data);
       }
 
       // settings.json changed on disk: Settings reads it again, keeping unsaved edits under the dock's changed-on-disk warning (PRD R54).

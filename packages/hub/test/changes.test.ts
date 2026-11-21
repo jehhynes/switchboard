@@ -156,6 +156,22 @@ describe('readChanges', () => {
     }
   });
 
+  it('hashes no file a junction leads to, and still hashes the rest', async () => {
+    const repo = makeRepo({ 'dir/a.txt': 'a\n', 'b.txt': 'b\n' });
+    const outside = mkdtempSync(join(tmpdir(), 'sb-hash-out-'));
+
+    writeFileSync(join(outside, 'a.txt'), 'outside\n');
+    rmSync(join(repo.root, 'dir'), { recursive: true });
+    symlinkSync(outside, join(repo.root, 'dir'), 'junction');
+    repo.write('b.txt', 'changed\n');
+
+    const rows = ((await readChanges(repo.root)) as WorktreeChanges).view.rows;
+
+    expect(rows.find((row) => row.path === 'b.txt')!.hash).toBe(repo.git('hash-object', '--no-filters', 'b.txt').trim());
+    expect(rows.some((row) => row.path.startsWith('dir'))).toBe(true);
+    expect(rows.filter((row) => row.path.startsWith('dir')).every((row) => row.hash === 'unreadable' || row.hash === 'deleted')).toBe(true);
+  });
+
   it('says why for a folder outside any repository', async () => {
     const folder = mkdtempSync(join(tmpdir(), 'sb-no-repo-'));
 
@@ -379,5 +395,51 @@ describe('the file view', () => {
     expect((await changes.openFileCommand({ window: 'p1', scopeGen: 4, opId: 'o6', path: 'src/kept.ts', line: 0 })).status).toBe(400);
     expect(await new PageChanges({ isPage: () => true, scope: () => scope(repo.root, 4), openFile: () => 'The work item is gone.' }).openFileCommand({ window: 'p1', scopeGen: 4, opId: 'o2', path: 'src/kept.ts', line: 1 })).toEqual({ status: 409, body: { error: 'The work item is gone.' } });
     expect(opened).toHaveLength(1);
+  });
+});
+
+describe('viewed ticks', () => {
+  const scope = (cwd: string, scopeGen = 1): WindowScope => ({ kind: 'page', key: 'p1', folder: cwd, title: 'T', scopeGen, conversations: [], workItemId: 7, cwd, sessionId: 's1' });
+
+  it("gives each row its content's blob ID, or deleted, and marks a row viewed only at the hash it was ticked at", { timeout: 30_000 }, async () => {
+    const repo = busyRepo();
+    const ticks = new Map<string, string>();
+    const told: unknown[] = [];
+    const changes = new PageChanges({
+      isPage: () => true,
+      scope: () => scope(repo.root),
+      viewed: { list: () => new Map(ticks), set: (_id, path, hash) => (hash === null ? ticks.delete(path) : ticks.set(path, hash)) },
+      viewedChanged: (id, from, payload) => told.push([id, from, payload]),
+    });
+    const rows = async () => ((await changes.changes('p1')).body as ChangesView).rows;
+    const edited = (await rows()).find((row) => row.path === 'edited.md')!;
+
+    expect(edited.hash).toBe(repo.git('hash-object', '--no-filters', 'edited.md').trim());
+    expect((await rows()).find((row) => row.path === 'gone.txt')!.hash).toBe('deleted');
+    expect(edited.viewed).toBe(false);
+
+    expect(await changes.viewedCommand({ window: 'p1', scopeGen: 1, opId: 'v1', path: 'edited.md', hash: edited.hash, viewed: true })).toEqual({ status: 200, body: { path: 'edited.md', hash: edited.hash, viewed: true } });
+    expect(told).toEqual([[7, 'p1', { path: 'edited.md', hash: edited.hash, viewed: true }]]);
+    // A retried opId answers as the first did and tells no one again.
+    expect((await changes.viewedCommand({ window: 'p1', scopeGen: 1, opId: 'v1', path: 'edited.md', hash: edited.hash, viewed: true })).status).toBe(200);
+    expect(told).toHaveLength(1);
+    expect((await changes.viewedCommand({ window: 'p1', scopeGen: 1, path: 'edited.md', hash: edited.hash, viewed: true })).status).toBe(400);
+    expect((await rows()).find((row) => row.path === 'edited.md')!.viewed).toBe(true);
+
+    // The file changes: its tick no longer shows, and a tick at the old hash is refused.
+    repo.write('edited.md', 'changed again\n');
+    expect((await rows()).find((row) => row.path === 'edited.md')!.viewed).toBe(false);
+    expect((await changes.viewedCommand({ window: 'p1', scopeGen: 1, opId: 'o-old', path: 'edited.md', hash: edited.hash, viewed: true })).status).toBe(409);
+
+    // A tick cleared, and refusals of a stale scope generation, a path that is no row, and a malformed body.
+    const now = (await rows()).find((row) => row.path === 'edited.md')!;
+
+    await changes.viewedCommand({ window: 'p1', scopeGen: 1, opId: 'v2', path: 'edited.md', hash: now.hash, viewed: true });
+    await changes.viewedCommand({ window: 'p1', scopeGen: 1, opId: 'v3', path: 'edited.md', hash: now.hash, viewed: false });
+    expect(ticks.has('edited.md')).toBe(false);
+    expect((await changes.viewedCommand({ window: 'p1', scopeGen: 2, opId: 'v4', path: 'edited.md', hash: now.hash, viewed: true })).status).toBe(409);
+    expect((await changes.viewedCommand({ window: 'p1', scopeGen: 1, opId: 'v5', path: 'src/kept.ts', hash: 'x', viewed: true })).status).toBe(404);
+    expect((await changes.viewedCommand({ window: 'p1', scopeGen: 1, opId: 'v6', path: '../x', hash: 'x', viewed: true })).status).toBe(400);
+    expect((await changes.viewedCommand({ window: 'p1', scopeGen: 1, opId: 'v7', path: 'edited.md', hash: now.hash, viewed: 'yes' })).status).toBe(400);
   });
 });

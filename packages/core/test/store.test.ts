@@ -729,6 +729,23 @@ describe('Store', () => {
     again.close();
   });
 
+  it("keeps a work item's viewed ticks by path at a content hash, clears one, and drops them with the work item", () => {
+    const store = Store.open(join(dir, 'viewed.db'));
+
+    expect(store.viewedFiles(7)).toEqual(new Map());
+    store.setViewedFile(7, 'src/a.ts', 'h1', 10);
+    store.setViewedFile(7, 'src/b.ts', 'h2', 11);
+    store.setViewedFile(7, 'src/a.ts', 'h3', 12);
+    store.setViewedFile(8, 'src/a.ts', 'other', 13);
+    expect(store.viewedFiles(7)).toEqual(new Map([['src/a.ts', 'h3'], ['src/b.ts', 'h2']]));
+    store.setViewedFile(7, 'src/b.ts', null, 14);
+    expect(store.viewedFiles(7)).toEqual(new Map([['src/a.ts', 'h3']]));
+    store.deleteWorkItem(7);
+    expect(store.viewedFiles(7)).toEqual(new Map());
+    expect(store.viewedFiles(8)).toEqual(new Map([['src/a.ts', 'other']]));
+    store.close();
+  });
+
   it('keeps web page sign-ins by hash, records their use, forgets one or all, and trims the stale and the oldest past the limit', () => {
     const store = Store.open(join(dir, 'pages.db'));
 

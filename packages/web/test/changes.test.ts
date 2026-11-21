@@ -31,9 +31,9 @@ const LIST: ChangesList = {
   base: '0123456789abcdef0123456789abcdef01234567',
   head: 'fedcba9876543210fedcba9876543210fedcba98',
   rows: [
-    { path: 'docs/a.md', status: 'M', stages: ['committed', 'working'], additions: 3, deletions: 1, binary: false },
-    { path: 'src/new.ts', from: 'src/old.ts', status: 'R', stages: ['staged'], additions: 0, deletions: 0, binary: false },
-    { path: 'logo.png', status: 'U', stages: ['untracked'], additions: null, deletions: null, binary: true },
+    { path: 'docs/a.md', status: 'M', stages: ['committed', 'working'], additions: 3, deletions: 1, binary: false, hash: 'h-a', viewed: false },
+    { path: 'src/new.ts', from: 'src/old.ts', status: 'R', stages: ['staged'], additions: 0, deletions: 0, binary: false, hash: 'h-new', viewed: true },
+    { path: 'logo.png', status: 'U', stages: ['untracked'], additions: null, deletions: null, binary: true, hash: 'h-logo', viewed: false },
   ],
   stages: { committed: 1, staged: 1, working: 1, untracked: 1 },
   shown: 3,
@@ -105,6 +105,15 @@ describe('the Changes list', () => {
         return { status: 200, ok: true, json: async () => ({ path: params.get('path'), side: params.get('side'), contents: 'x', binary: false, tooLarge: false }) } as unknown as Response;
       }
 
+      if (url === '/v1/conversation/viewed') {
+        const sent = JSON.parse(String((init as { body?: string } | undefined)?.body)) as Record<string, unknown>;
+
+        gets.push(`VIEWED ${String(sent['path'])} ${String(sent['hash'])} ${String(sent['viewed'])} ${String(sent['scopeGen'])}`);
+        return (sent['path'] === 'logo.png'
+          ? { status: 409, ok: false, json: async () => ({ error: 'logo.png changed since it was shown; read it again.' }) }
+          : { status: 200, ok: true, json: async () => ({ path: sent['path'], hash: sent['hash'], viewed: sent['viewed'] }) }) as unknown as Response;
+      }
+
       if (url === '/v1/conversation/open-file') {
         gets.push(`POST ${String((init as { body?: string } | undefined)?.body)}`);
         return { status: 409, ok: false, json: async () => ({ error: 'The work item no longer offers this.' }) } as unknown as Response;
@@ -115,7 +124,7 @@ describe('the Changes list', () => {
         diffPath !== null
           ? (diffAnswers[diffPath] ?? { status: 200, body: { path: diffPath, status: 'M', patch: 'diff --git a/x b/x', old: 'a', new: 'b', binary: false, tooLarge: null } })
           : url.startsWith('/v1/conversation/changes')
-            ? (answers.shift() ?? { status: 200, body: LIST })
+            ? (answers.shift() ?? { status: 200, body: structuredClone(LIST) })
             : { status: 200, body: {} };
 
       if (diffPath !== null) {
@@ -155,7 +164,8 @@ describe('the Changes list', () => {
       ['logo.png', '', 'binary', 'U'],
     ]);
     expect(rows[1]!.title).toBe('src/old.ts → src/new.ts\nRenamed · staged');
-    expect(root.querySelector('.changes-note')!.textContent).toBe('Since 0123456 · 3 files');
+    expect(root.querySelector('.changes-note')!.textContent).toBe('Since 0123456 · 3 files · 1 viewed');
+    expect([...root.querySelectorAll<HTMLInputElement>('.change-viewed input')].map((box) => box.checked)).toEqual([false, true, false]);
     expect(button().querySelector('.tab-badge')!.textContent).toBe('3');
   });
 
@@ -382,6 +392,72 @@ describe('the Changes list', () => {
     vi.unstubAllGlobals();
   });
 
+  it('ticks a file viewed at the hash it was shown with, from the list and the diff, follows another device, and takes back a refused tick', async () => {
+    const { source } = start();
+
+    button().click();
+    await flush();
+    root.querySelectorAll<HTMLElement>('.change-viewed input')[0]!.click();
+    await flush();
+    expect(gets.at(-1)).toBe('VIEWED docs/a.md h-a true 3');
+    expect(root.querySelectorAll<HTMLInputElement>('.change-viewed input')[0]!.checked).toBe(true);
+    // Ticking does not open the file.
+    expect(root.querySelector('.diff-tab')).toBeNull();
+
+    // Another device clears it at that hash; one at another hash, or for another work item, changes nothing.
+    source.emit('viewed', { workItemId: 1, path: 'docs/a.md', hash: 'other', viewed: false });
+    source.emit('viewed', { workItemId: 2, path: 'docs/a.md', hash: 'h-a', viewed: false });
+    expect(root.querySelectorAll<HTMLInputElement>('.change-viewed input')[0]!.checked).toBe(true);
+    source.emit('viewed', { workItemId: 1, path: 'docs/a.md', hash: 'h-a', viewed: false });
+    expect(root.querySelectorAll<HTMLInputElement>('.change-viewed input')[0]!.checked).toBe(false);
+
+    // A file that changed since is not ticked: the list says so and reads again.
+    const before = gets.length;
+
+    root.querySelectorAll<HTMLElement>('.change-viewed input')[2]!.click();
+    await flush();
+    await flush();
+    expect(gets.slice(before)).toEqual(['VIEWED logo.png h-logo true 3', '/v1/conversation/changes?window=pk']);
+
+    // The diff's header has the same tick.
+    root.querySelectorAll<HTMLElement>('.change-row')[1]!.click();
+    await flush();
+    await flush();
+    expect(root.querySelector<HTMLInputElement>('.diff-viewed input')!.checked).toBe(true);
+    root.querySelector<HTMLElement>('.diff-viewed input')!.click();
+    await flush();
+    expect(gets.at(-1)).toBe('VIEWED src/new.ts h-new false 3');
+  });
+
+  it('sends a file\'s ticks one at a time, ending on the last click', async () => {
+    start();
+    button().click();
+    await flush();
+
+    const box = () => root.querySelectorAll<HTMLElement>('.change-viewed input')[0]!;
+
+    // Ticked and unticked before the first answer: the untick follows the tick, never beside it.
+    box().click();
+    box().click();
+    for (let index = 0; index < 6; index++) {
+      await flush();
+    }
+
+    expect(gets.filter((one) => one.startsWith('VIEWED'))).toEqual(['VIEWED docs/a.md h-a true 3', 'VIEWED docs/a.md h-a false 3']);
+    expect((box() as HTMLInputElement).checked).toBe(false);
+
+    // Ticked, unticked and ticked again: the page and the hub already agree once the first answers.
+    box().click();
+    box().click();
+    box().click();
+    for (let index = 0; index < 6; index++) {
+      await flush();
+    }
+
+    expect(gets.filter((one) => one.startsWith('VIEWED'))).toHaveLength(3);
+    expect((box() as HTMLInputElement).checked).toBe(true);
+  });
+
   it('drops the diff tabs when the page moves to another conversation', async () => {
     const { source } = start();
 
@@ -412,12 +488,13 @@ describe('the Changes list text', () => {
   });
 
   it('says the base, the file count and a cut list', () => {
-    expect(listNote({ ...LIST, base: null })).toBe('Uncommitted changes only, no merge base · 3 files');
-    expect(listNote({ ...LIST, shown: 400, total: 512 })).toBe('Since 0123456 · first 400 of 512 files');
-    expect(listNote({ ...LIST, total: 1 })).toBe('Since 0123456 · 1 file');
+    expect(listNote({ ...LIST, base: null })).toBe('Uncommitted changes only, no merge base · 3 files · 1 viewed');
+    expect(listNote({ ...LIST, shown: 400, total: 512 })).toBe('Since 0123456 · first 400 of 512 files · 1 viewed');
+    expect(listNote({ ...LIST, total: 1 })).toBe('Since 0123456 · 1 file · 1 viewed');
   });
 
   it("names a row's stages in its tooltip", () => {
+    expect(listNote({ ...LIST, rows: LIST.rows.map((row) => ({ ...row, viewed: false })) })).toBe('Since 0123456 · 3 files');
     expect(rowTitle(LIST.rows[0]!)).toBe('docs/a.md\nModified · committed, unstaged');
     expect(rowTitle({ ...LIST.rows[0]!, stages: [] })).toBe('docs/a.md\nModified');
   });

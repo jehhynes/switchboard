@@ -75,3 +75,11 @@
 .diff-host > .empty { padding: 12px; color: var(--vscode-descriptionForeground); }
 @media (max-width: 599px) { .diff-host { --diffs-font-size: 12px; --diffs-line-height: 17px; } }
 @media (hover: none), (pointer: coarse) { .diff-head button.icon { width: 44px; height: 44px; } .diff-layout button, .diff-wrap { min-height: 36px; } }
+/* A row's Viewed tick, after its status letter; a viewed row's name dims, as on a pull request. */
+.change-item { display: flex; align-items: center; }
+.change-item > .change-row { flex: 1 1 auto; min-width: 0; }
+.change-viewed { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 28px; cursor: pointer; }
+.change-viewed input, .diff-viewed input { margin: 0; accent-color: var(--vscode-focusBorder); cursor: pointer; }
+.change-item.viewed .change-name, .change-item.viewed .change-dir { opacity: 0.6; }
+.diff-viewed { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+@media (hover: none), (pointer: coarse) { .change-viewed { width: 44px; height: 44px; } .change-viewed input, .diff-viewed input { width: 20px; height: 20px; } }
