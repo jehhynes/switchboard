@@ -148,18 +148,18 @@ export function mountConsole(host: HTMLElement, createTerm: (options: TermOption
     Object.entries(attributes).forEach(([name, value]) => node.setAttribute(name, value));
     return node;
   };
-  const bar = element('div', 'console-bar');
-  const stateText = element('span', 'console-state', { role: 'status' });
-  const sizeText = element('span', 'console-size');
-  const reconnect = element('button', 'console-reconnect', { type: 'button' });
-  const screen = element('div', 'console-screen');
+  // No bar above the screen: the focus border alone shows that it types (architecture.md § Web page).
+  const screen = element('div', 'console-screen', { role: 'group', 'aria-label': 'Session console', title: 'Session console' });
+  const foot = element('div', 'console-foot');
   const note = element('p', 'console-note', { role: 'alert' });
+  const reconnect = element('button', 'console-reconnect', { type: 'button' });
 
   reconnect.hidden = true;
   reconnect.textContent = 'Reconnect';
   note.hidden = true;
-  bar.append(stateText, sizeText, reconnect);
-  host.replaceChildren(bar, screen, note);
+  foot.hidden = true;
+  foot.append(note, reconnect);
+  host.replaceChildren(screen, foot);
   // The terminal's colours follow the operating system's light or dark setting, as the page's do, and change with it.
   const scheme = typeof matchMedia === 'function' ? matchMedia(LIGHT_SCHEME) : null;
   const colours = (): Record<string, string> => ({ ...CONSOLE_THEMES[scheme?.matches === true ? 'light' : 'dark'] });
@@ -248,11 +248,10 @@ export function mountConsole(host: HTMLElement, createTerm: (options: TermOption
 
   const drawState = (): void => {
     host.classList.toggle('typing', typing && !ended);
-    stateText.textContent = ended ? 'Not connected' : typing ? 'Typing: keys go to the session. Click outside to stop.' : 'Watching. Click to type.';
-    sizeText.textContent = `${term.cols}×${term.rows}`;
     note.hidden = error === null;
     note.textContent = error ?? '';
     reconnect.hidden = !ended;
+    foot.hidden = note.hidden && reconnect.hidden;
   };
 
   /**
@@ -365,8 +364,7 @@ export function mountConsole(host: HTMLElement, createTerm: (options: TermOption
   const onFocus = (): void => {
     typing = true;
     sizeWanted = true;
-    // The bar says it types before the size is read, so a bar that changes the pane's height never costs the session a second resize, which
-    // makes the program redraw and can repeat lines in its scrollback (mechanics M104).
+    // The focus border is an outline, which takes no room, so focusing never changes the pane's size and the session is resized once.
     drawState();
     void flush();
   };

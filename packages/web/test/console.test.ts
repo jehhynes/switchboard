@@ -208,8 +208,12 @@ describe('the console', () => {
     source().emit('replayed', {});
     expect(term.calls).toEqual(['reset', 'resize 120x40']);
     expect(term.written).toEqual(['hello']);
-    expect(host.querySelector('.console-size')!.textContent).toBe('120×40');
-    expect(host.querySelector('.console-state')!.textContent).toBe('Watching. Click to type.');
+    // No bar and no instruction text: the screen names itself, and only the focus border shows that it types.
+    expect([...host.children].map((child) => child.className)).toEqual(['console-screen', 'console-foot']);
+    expect(host.querySelector<HTMLElement>('.console-foot')!.hidden).toBe(true);
+    expect(host.querySelector('.console-screen')!.getAttribute('aria-label')).toBe('Session console');
+    expect(host.querySelector('.console-screen')!.getAttribute('title')).toBe('Session console');
+    expect(host.textContent).not.toMatch(/120|Click|Watching/);
     // Data that no key produced, such as the terminal's answer to a query, never reaches the session.
     term.emit('\u001b[?1;2c');
     term.press('x');
@@ -224,7 +228,6 @@ describe('the console', () => {
     term.textarea!.dispatchEvent(new Event('focus'));
     await tick();
     expect(host.classList.contains('typing')).toBe(true);
-    expect(host.querySelector('.console-state')!.textContent).toContain('Typing');
     expect(typed).toEqual([{ data: '', size: expect.objectContaining({ cols: expect.any(Number), rows: expect.any(Number) }) }]);
     term.press('\u001b');
     await tick();
@@ -374,7 +377,7 @@ describe('the console', () => {
  * shows while the drawn screen is taller than the pane, the bottom one while it is wider, and the observer reports each change of the
  * screen's content box, as a browser's does, including the changes the console's own redraws cause.
  */
-function laidOut(box: { width: number; height: number }, bar = { typingAdds: 0 }) {
+function laidOut(box: { width: number; height: number }) {
   const style = document.createElement('style');
 
   style.textContent = PAGE_ASSETS['page.css']!.body;
@@ -416,14 +419,16 @@ function laidOut(box: { width: number; height: number }, bar = { typingAdds: 0 }
     return null;
   };
   const { host, term, typed, source, console } = mounted(type);
+
+  // As the page mounts it, so page.css styles it.
+  host.classList.add('console');
   const screen = host.querySelector<HTMLElement>('.console-screen')!;
   const drawn = document.createElement('div');
   const SCROLLBAR = 15;
   // A cell does not scale exactly with the font, as hinted fonts do.
   const cellWidth = (): number => Math.floor((term.options.fontSize ?? CONSOLE_FONT_PX) * 0.55 * 2 * display.scale) / 2;
   const cellHeight = (): number => Math.ceil((term.options.fontSize ?? CONSOLE_FONT_PX) * 1.2);
-  // A bar whose typing state wraps to a second line takes that much height from the screen.
-  const height = (): number => box.height - (host.classList.contains('typing') ? bar.typingAdds : 0);
+  const height = (): number => box.height;
   const layout = () => {
     const css = getComputedStyle(screen);
     const padX = parseFloat(css.paddingLeft) + parseFloat(css.paddingRight);
@@ -468,7 +473,7 @@ function laidOut(box: { width: number; height: number }, bar = { typingAdds: 0 }
     [...scaled].forEach((listener) => listener());
   };
 
-  return { term, typed, source, console, settle, refusals, rescale, listeners: () => scaled.length, reports: () => reports, fits: () => layout().width <= layout().clientWidth - layout().padX,
+  return { host, term, typed, source, console, settle, refusals, rescale, listeners: () => scaled.length, reports: () => reports, fits: () => layout().width <= layout().clientWidth - layout().padX,
     /** Whether the drawn screen is no taller than the pane, so the pane shows no side scrollbar of its own. */
     fitsHeight: () => !layout().side,
     /** The pixels the pane can grow by before it holds another column. */
@@ -578,20 +583,29 @@ it('scales a screen taller than the pane down until its rows fit, so only xterm.
     pane.console.dispose();
   });
 
-  it('resizes the session once on focus, though the bar saying it types takes height from the screen', async () => {
+  it('resizes the session once on focus, with no bar above the screen to change its height', async () => {
     // Each resize makes the program redraw, which can repeat lines in its scrollback (mechanics M104).
-    for (const typingAdds of [0, 18, 40]) {
-      const pane = laidOut({ width: 340, height: 500 }, { typingAdds });
+    const pane = laidOut({ width: 340, height: 500 });
 
-      pane.source().emit('size', { cols: 120, rows: 40 });
-      await run(pane.settle, 500);
-      pane.term.textarea!.dispatchEvent(new Event('focus'));
-      await run(pane.settle, 2000);
-      expect({ typingAdds, sent: pane.typed.length }).toEqual({ typingAdds, sent: 1 });
-      expect(pane.fitsHeight()).toBe(true);
-      pane.console.dispose();
-      vi.unstubAllGlobals();
-    }
+    // The box page.css gives the console and its parts, which typing must leave as it is: only the outline, which takes no room, changes.
+    const boxes = (): string[] =>
+      [pane.host, ...pane.host.children].map((node) => {
+        const css = getComputedStyle(node);
+
+        return [css.display, css.borderTopWidth, css.borderBottomWidth, css.paddingTop, css.paddingBottom, css.marginTop, css.marginBottom, css.height].join(' ');
+      });
+
+    pane.source().emit('size', { cols: 120, rows: 40 });
+    await run(pane.settle, 500);
+    const watching = boxes();
+
+    pane.term.textarea!.dispatchEvent(new Event('focus'));
+    await run(pane.settle, 2000);
+    expect(pane.host.classList.contains('typing')).toBe(true);
+    expect(boxes()).toEqual(watching);
+    expect(pane.typed).toHaveLength(1);
+    expect(pane.fitsHeight()).toBe(true);
+    pane.console.dispose();
   });
 
   it('refits to a display whose cells are another width, though the pane keeps its size', async () => {
