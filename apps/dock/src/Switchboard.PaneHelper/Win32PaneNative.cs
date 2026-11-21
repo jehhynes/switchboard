@@ -225,6 +225,19 @@ public sealed class Win32PaneNative : IPaneNative, IDisposable
         return done;
     }
 
+    public bool Transitions(nint pane, bool on)
+    {
+        var value = on ? 0 : 1;
+        var result = Native.DwmSetWindowAttribute(pane, Native.DwmwaTransitionsForceDisabled, ref value, sizeof(int));
+
+        if (result != 0)
+        {
+            Log($"pane: DWM refused to turn {(on ? "on" : "off")} the animations of {pane:X}: 0x{result:X8}");
+        }
+
+        return result == 0;
+    }
+
     public void Restore(nint pane) => Native.ShowWindow(pane, SwShowNoActivate);
 
     public CompositorCheck CheckCompositor(nint pane)

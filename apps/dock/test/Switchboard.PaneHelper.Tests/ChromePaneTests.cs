@@ -139,6 +139,14 @@ public sealed class ChromePaneTests
             return HideWorks;
         }
 
+        public bool TransitionsWork = true;
+
+        public bool Transitions(nint pane, bool on)
+        {
+            Calls.Add(on ? "transitions on" : "transitions off");
+            return TransitionsWork;
+        }
+
         public void Restore(nint pane)
         {
             Calls.Add("restore");
@@ -210,7 +218,8 @@ public sealed class ChromePaneTests
 
         pane.Order(new PaneOrder("0123456789ab", Rect));
 
-        Assert.Equal(["own 10", "watch 10", "log pane found: app A, pane 14", "raise", "resize 607x907", "move 1293,80"], native.Calls);
+        // Found, the pane loses the show and hide animations, so the Browser tab's hide and show are instant.
+        Assert.Equal(["own 10", "transitions off", "log pane: show and hide animations off", "watch 10", "log pane found: app A, pane 14", "raise", "resize 607x907", "move 1293,80"], native.Calls);
         Assert.Equal("found,shown", States(reports));
         Assert.Equal("0123456789ab", reports[0]["marker"]!.GetValue<string>());
         // The visible frame lands on the column, its right edge pulled in by the pane's 7 px invisible border so the page window's resize border stays
@@ -307,6 +316,18 @@ public sealed class ChromePaneTests
     }
 
     [Fact]
+    public void Order_AnimationsRefused_LogsItAndGluesThePaneAnyway()
+    {
+        var (pane, native, reports, _) = Make();
+
+        native.TransitionsWork = false;
+        pane.Order(new PaneOrder("0123456789ab", Rect));
+
+        Assert.Contains("log pane: Windows kept the show and hide animations on", native.Calls);
+        Assert.Equal("found,shown", States(reports));
+    }
+
+    [Fact]
     public void Order_OwnerRefused_FailsAndLetsThePaneGo()
     {
         var (pane, native, reports, _) = Make();
@@ -347,7 +368,7 @@ public sealed class ChromePaneTests
 
         Assert.Equal("found,shown,failed", States(reports));
         Assert.Equal("Windows did not hide the pane.", reports[^1]["reason"]!.GetValue<string>());
-        Assert.Equal("own 0", native.Calls[^1]);
+        Assert.Equal(["own 0", "transitions on"], native.Calls[^2..]);
     }
 
     [Fact]
@@ -507,7 +528,8 @@ public sealed class ChromePaneTests
         native.Calls.Clear();
         pane.Order(new PaneOrder(null, null));
 
-        Assert.Equal(["show", "own 0"], native.Calls);
+        // Let go, it gets its animations back, a plain Chrome window again.
+        Assert.Equal(["show", "own 0", "transitions on"], native.Calls);
         Assert.Equal("found,hidden", States(reports));
     }
 }

@@ -66,6 +66,9 @@ static class Native
     [DllImport("user32.dll")]
     public static extern bool SetWindowPos(nint window, nint after, int x, int y, int width, int height, uint flags);
 
+    [DllImport("dwmapi.dll")]
+    public static extern int DwmSetWindowAttribute(nint window, uint attribute, ref int value, int size);
+
     [DllImport("user32.dll")]
     public static extern nint SetWinEventHook(uint eventMin, uint eventMax, nint module, WinEventProc proc, uint process, uint thread, uint flags);
 
@@ -94,6 +97,7 @@ static class Native
     public static extern uint GetCurrentThreadId();
 
     public const uint GwOwner = 4;
+    public const uint DwmwaTransitionsForceDisabled = 3;
     public const uint SwpNoSize = 0x1, SwpNoMove = 0x2, SwpNoZOrder = 0x4, SwpNoActivate = 0x10;
     public const uint EventSystemForeground = 3, EventObjectDestroy = 0x8001, WinEventOutOfContext = 0;
     public const int ObjIdWindow = 0, ChildIdSelf = 0;

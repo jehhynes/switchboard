@@ -58,6 +58,11 @@ public interface IPaneNative
     /// <summary>Hides the pane, keeping its place, or shows it again without activating it; true when it is then hidden or shown.</summary>
     bool Hide(nint pane, bool hidden);
 
+    /// <summary>
+    /// Turns Windows' show and hide animations off for the pane, or on again, so the Browser tab's hide and show are instant; true when DWM took it.
+    /// </summary>
+    bool Transitions(nint pane, bool on);
+
     /// <summary>Restores a maximized pane without activating it.</summary>
     void Restore(nint pane);
 
@@ -224,6 +229,8 @@ public sealed class ChromePane(IPaneNative native, Action<JsonObject> report, Fu
         }
 
         found = true;
+        // Without this, hiding the pane fades it out, which shows when another tab is chosen.
+        native.Log(native.Transitions(pane, false) ? "pane: show and hide animations off" : "pane: Windows kept the show and hide animations on");
         // A helper that crashed or was killed while the pane was hidden left it so; the next column shows it.
         hidden = !native.IsVisible(pane);
         native.Watch(app);
@@ -419,6 +426,7 @@ public sealed class ChromePane(IPaneNative native, Action<JsonObject> report, Fu
             }
 
             native.Own(pane, 0);
+            native.Transitions(pane, true);
         }
 
         app = pane = 0;
