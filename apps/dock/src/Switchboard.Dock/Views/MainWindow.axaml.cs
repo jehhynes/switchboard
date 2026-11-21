@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Presenters;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Primitives.PopupPositioning;
 using Avalonia.Input;
@@ -209,6 +210,7 @@ public sealed partial class MainWindow : Window
         LayoutUpdated += (_, _) =>
         {
             RedrawDrop();
+            PinGroupHeads();
 
             // A hub update or a selection while hidden moves the rows, so the sliver follows them.
             if (hidden)
@@ -216,7 +218,11 @@ public sealed partial class MainWindow : Window
                 Sliver.Bars = SliverBars();
             }
         };
-        RowScroller.ScrollChanged += (_, _) => RedrawDrop();
+        RowScroller.ScrollChanged += (_, _) =>
+        {
+            RedrawDrop();
+            PinGroupHeads();
+        };
         // As an X11 dock window, the sliver at the right edge is cut from the window's width, which the X server sets after the dock asks for it.
         Resized += (_, _) =>
         {
@@ -716,7 +722,10 @@ public sealed partial class MainWindow : Window
     /// <summary>The coloured stripe of each row in the list's view, cut to the view, at its height in the window.</summary>
     internal List<SliverBar> SliverBars()
     {
-        var view = new Rect(RowScroller.Bounds.Size);
+        // A pinned heading covers the rows that scroll under it, so their stripes are out of view.
+        var covered = GroupHeads().Where((group) => group.Pin.RenderTransform is TranslateTransform { Y: > 0 } && group.Pin.IsEffectivelyVisible)
+            .Select((group) => (group.Pin.TranslatePoint(default, RowScroller)?.Y ?? 0) + group.Pin.Bounds.Height).DefaultIfEmpty(0).Max();
+        var view = new Rect(0, Math.Max(0, covered), RowScroller.Bounds.Width, Math.Max(0, RowScroller.Bounds.Height - covered));
         List<SliverBar> bars = [];
 
         foreach (var stripe in GroupList.GetVisualDescendants().OfType<Border>().Where((border) => border.Classes.Contains("stripe") && border.Background is not null && border.IsEffectivelyVisible))
@@ -978,17 +987,29 @@ public sealed partial class MainWindow : Window
         Dispatcher.UIThread.Post(
             () =>
             {
-                if (this.GetVisualDescendants().OfType<Border>().FirstOrDefault((border) => border.Classes.Contains("row") && border.DataContext is RowViewModel row && row.Key == key) is { } shown)
+                if (RowBorder(key) is { } shown)
                 {
-                    shown.BringIntoView();
+                    Reveal(shown);
                 }
-                // Done draws only its rows in view, so a row out of view has no border yet.
+                // Done draws only its rows in view, so a row out of view has no border yet; once drawn, it is moved out from under the pinned heading.
                 else if (this.GetVisualDescendants().OfType<ItemsControl>().FirstOrDefault((list) => list.DataContext is BandViewModel band && band.Shown.Any((row) => row.Key == key)) is { DataContext: BandViewModel band } list)
                 {
                     list.ScrollIntoView(band.Shown.First((row) => row.Key == key));
+                    Dispatcher.UIThread.Post(
+                        () =>
+                        {
+                            if (RowBorder(key) is { } drawn)
+                            {
+                                Reveal(drawn);
+                            }
+                        },
+                        DispatcherPriority.Loaded);
                 }
             },
             DispatcherPriority.Loaded);
+
+    Border? RowBorder(string key) =>
+        this.GetVisualDescendants().OfType<Border>().FirstOrDefault((border) => border.Classes.Contains("row") && border.DataContext is RowViewModel row && row.Key == key);
 
     async void OnKey(object? sender, KeyEventArgs e)
     {
@@ -1080,6 +1101,46 @@ public sealed partial class MainWindow : Window
         return null;
     }
 
+    /// <summary>The group headings, each in its wrapper that pins it, with the group's section that holds it and its rows.</summary>
+    IEnumerable<(StackPanel Section, Border Pin)> GroupHeads() =>
+        GroupList.GetRealizedContainers().OfType<ContentPresenter>().Select((container) => container.Child)
+            .OfType<StackPanel>().Where((section) => section.Children.Count > 0 && section.Children[0] is Border pin && pin.Classes.Contains("group-pin"))
+            .Select((section) => (section, (Border)section.Children[0]));
+
+    /// <summary>
+    /// Pins the heading of the group at the top of the list there while the group's rows scroll under it, and lets the next group's heading push it
+    /// up, as a sticky heading does: a heading whose section starts above the list's top moves down by as much, but no further than its section's
+    /// end, the gap after it included. A render offset, so the layout and the rows' places stay as they are.
+    /// </summary>
+    void PinGroupHeads()
+    {
+        foreach (var (section, pin) in GroupHeads())
+        {
+            var top = section.IsEffectivelyVisible ? section.TranslatePoint(default, RowScroller)?.Y ?? 0 : 0;
+            var shift = Math.Clamp(-top, 0, Math.Max(0, section.Bounds.Height + section.Margin.Bottom - pin.Bounds.Height));
+
+            if (pin.RenderTransform is TranslateTransform offset)
+            {
+                if (offset.Y != shift)
+                {
+                    offset.Y = shift;
+                }
+            }
+            else if (shift > 0)
+            {
+                pin.RenderTransform = new TranslateTransform(0, shift);
+            }
+        }
+    }
+
+    /// <summary>Scrolls a row into view below the pinned group heading, which would cover a row scrolled to the list's top.</summary>
+    void Reveal(Control row)
+    {
+        var head = GroupHeads().Select((group) => group.Pin.Bounds.Height).FirstOrDefault((height) => height > 0);
+
+        row.BringIntoView(new Rect(0, -head, row.Bounds.Width, row.Bounds.Height + head));
+    }
+
     /// <summary>The list's rows and group and band headings that show, in list order.</summary>
     List<Border> ListStops() =>
         GroupList.GetVisualDescendants().OfType<Border>().Where((border) => (border.Classes.Contains("row") || border.Classes.Contains("group") || border.Classes.Contains("band")) && border.IsEffectivelyVisible).ToList();
@@ -1102,7 +1163,7 @@ public sealed partial class MainWindow : Window
         if (e.NavigationMethod != NavigationMethod.Pointer && sender is Border { DataContext: RowViewModel row } border && e.Source == border)
         {
             model.Selected = row.Key;
-            border.BringIntoView();
+            Reveal(border);
         }
     }
 

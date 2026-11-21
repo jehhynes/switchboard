@@ -1650,9 +1650,16 @@ public sealed class MainWindowTests
         scroller.Offset = new Vector(0, first.Top - viewTop + 10);
         Dispatcher.UIThread.RunJobs();
 
+        // The group's heading is pinned at the list's top and covers what scrolls under it, so the view starts below it.
+        var pin = window.GetVisualDescendants().OfType<Border>().First((border) => border.Classes.Contains("group-pin") && border.RenderTransform is TranslateTransform { Y: > 0 });
+        var pinned = pin.Bounds.Height;
+
+        scroller.Offset = new Vector(0, first.Top - viewTop - pinned + 10);
+        Dispatcher.UIThread.RunJobs();
+
         var cut = window.SliverBars()[0];
 
-        Assert.Equal(viewTop, cut.Top, 3);
+        Assert.Equal(viewTop + pinned, cut.Top, 3);
         Assert.Equal(first.Height - 10, cut.Height, 3);
     }
 

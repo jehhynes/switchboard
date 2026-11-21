@@ -72,12 +72,17 @@ svg.source-logo.forum { color: #57ae57; }
 @media (hover: none), (pointer: coarse) { .list-header button.icon { min-width: 44px; min-height: 44px; } .list-header { min-height: 44px; } }
 #list { flex: 1; overflow-y: auto; padding-bottom: 12px; }
 #list > .empty { padding: 0 20px; }
+.work-list { --group-head-height: 44px; }
 .work-list ul { list-style: none; margin: 0; padding: 0; }
-.group { margin-bottom: 8px; }
+/* The gap after a group is inside its section, so its pinned header stays until the next group's header reaches it. */
+.group::after { content: ''; display: block; height: 8px; }
 .list-error { margin: 0; padding: 8px 12px; color: var(--vscode-errorForeground); }
-/* A group's header is a tinted bar of the focus blue, as the dock's: chevron, the group's codicon, its title and its count. */
-.group-head { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 44px; padding: 4px 8px 4px 6px; border: none; background: color-mix(in srgb, var(--vscode-focusBorder) 25%, transparent); color: var(--vscode-foreground); text-align: left; cursor: pointer; }
-.group-head:hover { background: color-mix(in srgb, var(--vscode-focusBorder) 35%, transparent); }
+/* A group's header is a tinted bar of the focus blue, as the dock's: chevron, the group's codicon, its title and its count. It stays pinned at the
+   top of the list while the group's rows scroll under it, until the next group's header pushes it up; mixed with the list's background, so the
+   bar is opaque and rows do not show through it. Rows and their menus scroll to below it. */
+.group-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 6px; width: 100%; min-height: var(--group-head-height); padding: 4px 8px 4px 6px; border: none; background: color-mix(in srgb, var(--vscode-focusBorder) 25%, var(--vscode-sideBar-background)); color: var(--vscode-foreground); text-align: left; cursor: pointer; }
+.group-head:hover { background: color-mix(in srgb, var(--vscode-focusBorder) 35%, var(--vscode-sideBar-background)); }
+.work-list .row, .work-list .row-menu { scroll-margin-top: var(--group-head-height); }
 .group-head .group-icon { font-size: 16px; }
 .group-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .group-count { flex: none; min-width: 18px; padding: 0 5px; border-radius: 9px; text-align: center; font-size: 11px; font-weight: 600; line-height: 18px; background: var(--vscode-focusBorder); color: #fff; }
@@ -155,7 +160,7 @@ svg.source-logo.forum { color: #57ae57; }
 }
 /* With a mouse, the group headers can be as compact as the dock's. */
 @media (min-width: 768px) and (pointer: fine) {
-  .group-head { min-height: 32px; }
+  .work-list { --group-head-height: 32px; }
 }
 
 /* The conversation, as the Conversation view: header, tabs, the tab's panel and the composer. */

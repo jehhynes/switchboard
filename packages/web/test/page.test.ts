@@ -2288,6 +2288,26 @@ describe("the list's CSS", () => {
     expect(declarationsOf((selector) => selector === '.composer-error').join(' ')).toMatch(/margin: 0 0 8px;.*border-radius: 8px;/);
   });
 
+  it("pins each group's header at the list's top on an opaque bar, with the gap inside the group so the next header pushes it up", () => {
+    const head = declarationsOf((selector) => selector === '.group-head').join(' ');
+
+    expect(head).toMatch(/position: sticky; top: 0; z-index: 2;/);
+    expect(head).toContain('min-height: var(--group-head-height)');
+    // Mixed with the list's background, never with transparent, so rows do not show through.
+    for (const rule of [head, declarationsOf((selector) => selector === '.group-head:hover').join(' ')]) {
+      expect(rule).toMatch(/background: color-mix\(in srgb, var\(--vscode-focusBorder\) \d+%, var\(--vscode-sideBar-background\)\)/);
+    }
+    // A margin outside the section would unpin the header 8 px before the next one arrives.
+    expect(declarationsOf((selector) => selector === '.group')).toEqual([]);
+    expect(declarationsOf((selector) => selector === '.group::after').join(' ')).toContain('height: 8px');
+    // A row or menu scrolled into view lands below the pinned header, which is as tall as the variable says.
+    expect(declarationsOf((selector) => selector === '.work-list .row')).toEqual(['scroll-margin-top: var(--group-head-height);']);
+    expect(declarationsOf((selector) => selector === '.work-list').join(' ')).toContain('--group-head-height: 44px');
+    const wide = css.split('@media (min-width: 768px) and (pointer: fine) {').slice(1).map((block) => block.slice(0, block.indexOf('\n}'))).join('\n');
+
+    expect(wide).toContain('.work-list { --group-head-height: 32px; }');
+  });
+
   it("scales only the conversation's text by --chat-scale", () => {
     expect([...css.matchAll(/([^{}]+)\{[^{}]*var\(--chat-scale/g)].map(([, selector]) => selector!.trim())).toEqual(['.timeline, .composer textarea, .composer .live-mirror']);
   });

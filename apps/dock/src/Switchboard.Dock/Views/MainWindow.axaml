@@ -478,15 +478,19 @@
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="views:GroupViewModel">
                 <StackPanel IsVisible="{Binding IsShown}" Margin="0,0,0,8">
-                  <Border Classes="group" Focusable="True" PointerPressed="OnHeaderPressed" Tapped="OnGroupTapped" DoubleTapped="OnGroupTapped">
-                    <Grid ColumnDefinitions="Auto,Auto,*,Auto">
-                      <TextBlock Classes="icon" Text="{Binding Chevron}" Margin="0,0,4,0" />
-                      <TextBlock Grid.Column="1" Classes="icon group-icon" Text="{Binding Glyph}" Margin="0,0,6,0" />
-                      <TextBlock Grid.Column="2" Text="{Binding Title}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" />
-                      <Border Grid.Column="3" Classes="badge" Classes.zero="{Binding IsZero}">
-                        <TextBlock Text="{Binding Count}" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" />
-                      </Border>
-                    </Grid>
+                  <!-- Pinned to the top of the list while the group's rows scroll under it, until the next heading pushes it up (PinGroupHeads);
+                       on the dock's background, so the tinted bar is opaque and rows do not show through it. -->
+                  <Border Classes="group-pin" Background="{DynamicResource DockBackground}" ZIndex="1">
+                    <Border Classes="group" Focusable="True" PointerPressed="OnHeaderPressed" Tapped="OnGroupTapped" DoubleTapped="OnGroupTapped">
+                      <Grid ColumnDefinitions="Auto,Auto,*,Auto">
+                        <TextBlock Classes="icon" Text="{Binding Chevron}" Margin="0,0,4,0" />
+                        <TextBlock Grid.Column="1" Classes="icon group-icon" Text="{Binding Glyph}" Margin="0,0,6,0" />
+                        <TextBlock Grid.Column="2" Text="{Binding Title}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" />
+                        <Border Grid.Column="3" Classes="badge" Classes.zero="{Binding IsZero}">
+                          <TextBlock Text="{Binding Count}" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                        </Border>
+                      </Grid>
+                    </Border>
                   </Border>
                   <StackPanel IsVisible="{Binding ShowsRows}">
                     <TextBlock Text="{Binding Empty}" IsVisible="{Binding ShowEmpty}" Classes="empty-state" TextWrapping="Wrap" />
