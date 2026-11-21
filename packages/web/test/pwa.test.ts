@@ -147,6 +147,18 @@ describe('the installable page', () => {
     }
   });
 
+  it("keeps the title bar in the page's colour and draws a line along the installed app's top edge, not the browser tab's", () => {
+    const css = PAGE_ASSETS['page.css']!.body;
+    const rule = /@media \(display-mode: standalone\) \{ body::before \{([^}]*)\} \}/.exec(css);
+
+    expect(rule?.[1]).toContain('height: 1px');
+    expect(rule?.[1]).toContain('background: var(--vscode-titleBar-border, var(--vscode-widget-border))');
+    expect(rule?.[1]).toContain('position: fixed');
+    // Only the installed app draws it; a browser tab has its own tab strip above the page.
+    expect(css.replace(rule![0], '')).not.toMatch(/body::before/);
+    expect(JSON.parse(PAGE_ASSETS['manifest.webmanifest']!.body)).toMatchObject({ theme_color: sideBar });
+  });
+
   it('links the manifest from the page and the offline page, with the theme colour, and serves every file the worker keeps', () => {
     for (const name of ['index.html', 'offline.html']) {
       const html = PAGE_ASSETS[name]!.body;

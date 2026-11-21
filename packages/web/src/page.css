@@ -1,6 +1,8 @@
 /* The web page (architecture.md § Web page), drawn as the VS Code Conversation view is, from the theme copy's variables. */
 html, body { height: 100%; margin: 0; }
 body { color: var(--vscode-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); line-height: 1.5; }
+/* The installed app's title bar takes the page's colour, so a line along the page's top edge marks where the title bar ends. */
+@media (display-mode: standalone) { body::before { content: ''; position: fixed; inset: 0 0 auto 0; z-index: 1000; height: 1px; background: var(--vscode-titleBar-border, var(--vscode-widget-border)); pointer-events: none; } }
 #root { display: flex; height: 100%; }
 .codicon { font: normal normal normal 14px/1 codicon; display: inline-block; text-decoration: none; text-rendering: auto; -webkit-font-smoothing: antialiased; user-select: none; }
 .codicon-modifier-spin { animation: codicon-spin 1.5s steps(30) infinite; }
