@@ -658,6 +658,50 @@ describe('hub entry point', () => {
       await start('--stop').exited;
     }
   }, 60_000);
+  it('starts the installed hub detached on hub.js start, with this runtime and the --config folder, and reports a running one', async () => {
+    const missing = await start('start').exited;
+
+    expect(missing.code).toBe(1);
+    expect(missing.stderr).toBe(`No hub is installed in ${hubBundlePath(home)}; run <extension folder>/dist/hub.js install first.\n`);
+    expect((await start('start', '--takeover=1').exited).code).toBe(1);
+
+    mkdirSync(switchboardHome(home), { recursive: true });
+    writeFileSync(hubBundlePath(home), `import(${JSON.stringify(pathToFileURL(main).href)});\n`);
+
+    const configDir = join(home, 'config');
+    const started = await start('start', `--config=${configDir}`).exited;
+    const found = record()!;
+
+    try {
+      expect(started.stderr).toBe('');
+      expect(started.code).toBe(0);
+      expect(started.stdout).toBe(`Started the hub: pid ${found.pid}, build ${buildOf(hubBundlePath(home))}, config folder ${resolve(configDir)}.\n`);
+      // The hub outlives the command, runs on its runtime rather than VS Code's, and logs to hub.log.
+      expect(found.pid).not.toBe(started.pid);
+      expect(found.execPath).toBe(process.execPath);
+      expect(await status(found)).toBe(200);
+      await until(() => (readFileSync(hubLogPath(home), 'utf8').includes(`as pid ${found.pid}`) ? true : null));
+
+      const again = await start('start').exited;
+
+      expect(again).toMatchObject({ code: 0, stdout: `The hub is already running: pid ${found.pid}, build ${found.build}, config folder ${resolve(configDir)}.\n` });
+    } finally {
+      await start('--stop').exited;
+    }
+
+    await until(() => (record() === null ? true : null));
+
+    const quick = await start('start', '--no-wait').exited;
+
+    try {
+      expect(quick.code).toBe(0);
+      expect(quick.stdout).toMatch(/^Starting the hub \(pid \d+\); its output goes to /);
+      expect((await recorded()).configDir).toBe(resolve(home, '.switchboard'));
+    } finally {
+      await until(() => (record() !== null ? true : null));
+      await start('--stop').exited;
+    }
+  }, 60_000);
   it("installs the builds an extension's dist folder carries on hub.js install, and refuses to run from another folder", async () => {
     const refused = await start('install').exited;
 

@@ -1,7 +1,8 @@
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { hubBundlePath, hubLogPath, switchboardHome } from '@switchboard/core';
-import { ATTACH_TIMEOUT_MS, buildOf, carriesBuilds, installCarried, reportReady, startSuccessor, bundleHome, killProcessTree, connectHolder, currentHolderBuild, createHubApp, findHub, gitBashRoot, handledBody, isSnapshotWorker, postToHub, recordedHubPid, registerTitle, reportBody, runAttach, runHolder, runSnapshotWorker, serveHub, stopHub, ticketBody } from '@switchboard/hub';
+import { existsSync } from 'node:fs';
+import { ATTACH_TIMEOUT_MS, buildOf, carriesBuilds, installCarried, reportReady, startSuccessor, bundleHome, killProcessTree, connectHolder, currentHolderBuild, createHubApp, findHub, gitBashRoot, handledBody, isSnapshotWorker, postToHub, recordedHubPid, registerTitle, reportBody, runAttach, runHolder, runSnapshotWorker, serveHub, START_FLAGS, START_WAIT_MS, startDetached, stopHub, ticketBody } from '@switchboard/hub';
 
 declare const __SWITCHBOARD_VERSION__: string | undefined;
 
@@ -396,16 +397,78 @@ async function restart(home: string, rest: readonly string[]): Promise<number> {
   return 4;
 }
 
+const START_USAGE = `Usage: hub.js start [--config=<dir>] [--no-wait] [${START_FLAGS.filter((name) => name !== 'config').map((name) => `--${name}=<value>`).join('] [')}]\n`;
+
+/**
+ * Starts the installed hub detached, when none runs for the home, with the runtime that runs this command, and waits for it (architecture.md
+ * § Hub lifecycle); `--no-wait`, for a login start or a link, returns once it is started. Exit codes: 0 running or started, 1 usage or no
+ * installed hub, 4 not started.
+ */
+async function start(home: string, rest: readonly string[]): Promise<number> {
+  const passed = rest.filter((argument) => argument !== '--no-wait');
+
+  if (passed.some((argument) => !(START_FLAGS as readonly string[]).some((name) => argument.startsWith(`--${name}=`)))) {
+    process.stderr.write(START_USAGE);
+    return 1;
+  }
+
+  const running = await findHub(home);
+
+  if (running !== null) {
+    process.stdout.write(`The hub is already running: pid ${running.pid}, build ${running.build}, config folder ${running.configDir}.\n`);
+    return 0;
+  }
+
+  const bundle = hubBundlePath(home);
+
+  if (!existsSync(bundle)) {
+    process.stderr.write(`No hub is installed in ${bundle}; run <extension folder>/dist/hub.js install first.\n`);
+    return 1;
+  }
+
+  const configDir = resolve(flag(passed, 'config') || switchboardHome(home));
+  const child = startDetached(process.execPath, bundle, home, [`--home=${home}`, `--config=${configDir}`, ...passed.filter((argument) => !argument.startsWith('--config='))]);
+
+  if (rest.includes('--no-wait')) {
+    process.stdout.write(`Starting the hub (pid ${child.pid}); its output goes to ${hubLogPath(home)}.\n`);
+    return 0;
+  }
+
+  const ended: { code: number | null } = { code: null };
+
+  child.on('exit', (code) => (ended.code = code ?? 1));
+  child.on('error', () => (ended.code = 1));
+
+  for (const deadline = Date.now() + START_WAIT_MS; Date.now() < deadline; ) {
+    await new Promise((done) => setTimeout(done, 100));
+
+    const found = await findHub(home);
+
+    if (found !== null) {
+      process.stdout.write(`Started the hub: pid ${found.pid}, build ${found.build}, config folder ${found.configDir}.\n`);
+      return 0;
+    }
+
+    if (ended.code !== null) {
+      process.stderr.write(`The hub exited with code ${ended.code}; see ${hubLogPath(home)}.\n`);
+      return 4;
+    }
+  }
+
+  process.stderr.write(`The hub did not start within ${START_WAIT_MS / 1000} seconds; see ${hubLogPath(home)}.\n`);
+  return 4;
+}
+
 /** Returns an exit code, or -1 to keep serving. */
 async function main(argv: readonly string[]): Promise<number> {
   const bundle = process.argv[1];
 
-  if (argv[0] === 'report' || argv[0] === 'register' || argv[0] === 'attach' || argv[0] === 'holder' || argv[0] === 'web' || argv[0] === 'restart' || argv[0] === 'install') {
+  if (argv[0] === 'report' || argv[0] === 'register' || argv[0] === 'attach' || argv[0] === 'holder' || argv[0] === 'web' || argv[0] === 'restart' || argv[0] === 'install' || argv[0] === 'start') {
     // A session runs `<home>/.switchboard/hub.js report …`, so the bundle's location names its home; the extension's own bundle names none.
     const home = flag(argv, 'home') || bundleHome(bundle, homedir());
     const rest = argv.slice(1).filter((argument) => !argument.startsWith('--home'));
 
-    const commands = { report, register, attach, holder, web, restart, install: (home: string, rest: readonly string[]) => install(home, rest, bundle) };
+    const commands = { report, register, attach, holder, web, restart, start, install: (home: string, rest: readonly string[]) => install(home, rest, bundle) };
 
     return commands[argv[0] as keyof typeof commands](home, rest);
   }
