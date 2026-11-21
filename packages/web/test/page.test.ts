@@ -2010,7 +2010,7 @@ describe('the page in use', () => {
     document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
     expect(root.querySelector('#list .row-menu')).toBeNull();
     click('#list [data-row="ticket:9"].pill.ticket');
-    expect(opened).toEqual(['https://github.com/o/r/issues/9#switchboard-tab']);
+    expect(opened).toEqual(['https://github.com/o/r/issues/9']);
     expect(root.querySelector('#list .row-menu')).toBeNull();
     page.close();
   });
@@ -2035,7 +2035,7 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it("opens a row's ticket and link pills in a new tab, marked as the dock marks them, without selecting the row, and only http or https links", async () => {
+  it("opens a row's ticket and link pills in a new tab without selecting the row, and only http or https links", async () => {
     const { page, source, opened } = start();
     const links = [
       { label: 'PR #5', url: 'https://github.com/o/r/pull/5', kind: 'pr' as const, badge: '5', glyph: '\u{ea64}', mentioned: false },
@@ -2050,7 +2050,7 @@ describe('the page in use', () => {
     click('#list [data-work-item="2"] .pill.link[title^="Notes"]');
     click('#list [data-work-item="2"] .pill.link[title^="Bad"]');
     await flush();
-    expect(opened).toEqual(['https://github.com/o/r/issues/2#switchboard-tab', 'https://github.com/o/r/pull/5#switchboard-tab', 'https://example.test/a?b=1&switchboard-tab=1#top']);
+    expect(opened).toEqual(['https://github.com/o/r/issues/2', 'https://github.com/o/r/pull/5', 'https://example.test/a?b=1#top']);
     // The pill's click is not the row's: nothing is selected.
     expect(posts.filter((post) => post.url.endsWith('/select'))).toEqual([]);
     expect(root.querySelector('#list .row.selected')?.getAttribute('data-work-item')).toBe('1');
@@ -2186,7 +2186,7 @@ describe('the page in use', () => {
     expect([...root.querySelectorAll('.actions-menu .menu-row')].map((row) => row.textContent)).toEqual(['Open ticket', 'Open PR #5', `Open ${long.slice(0, 42).trimEnd()}…`]);
     expect(root.querySelector('.actions-menu [data-link="1"]')!.getAttribute('title')).toBe(`Open ${long}`);
     click('.actions-menu [data-link="ticket"]');
-    expect(opened).toEqual(['https://github.com/o/r/issues/1#switchboard-tab']);
+    expect(opened).toEqual(['https://github.com/o/r/issues/1']);
     expect(root.querySelector('.actions-menu')).toBeNull();
 
     source.emit('list', { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', links: [link('One', 'https://example.test/1'), link('Two', 'https://example.test/2'), link('Three', 'https://example.test/3')] })])] });
@@ -2196,7 +2196,7 @@ describe('the page in use', () => {
     expect([...root.querySelectorAll('.actions-menu .menu-row')].map((row) => row.textContent)).toEqual(['Open link', 'One', 'Two', 'Three']);
     expect(root.querySelector('.actions-menu [data-action="link-menu"]')!.getAttribute('aria-expanded')).toBe('true');
     click('.actions-menu [data-link="2"]');
-    expect(opened.at(-1)).toBe('https://example.test/3#switchboard-tab');
+    expect(opened.at(-1)).toBe('https://example.test/3');
     // The submenu starts closed the next time the menu opens.
     click('button.actions');
     expect(root.querySelectorAll('.actions-menu .submenu-row')).toHaveLength(0);

@@ -190,7 +190,7 @@ public sealed class TerminalTests
 
         Assert.Null(await Switcher().Click(row with { Open = new DockOpen("select", null, null, null, null) }, Cancel));
         Assert.Null(await Switcher().Click(row with { Open = new DockOpen("url", null, null, null, "https://github.com/o/r/issues/107") }, Cancel));
-        Assert.Equal(["url https://github.com/o/r/issues/107#switchboard-tab"], windows.Calls);
+        Assert.Equal(["url https://github.com/o/r/issues/107"], windows.Calls);
         Assert.Empty(vsCode.Calls);
         Assert.Empty(hub.Calls);
     }

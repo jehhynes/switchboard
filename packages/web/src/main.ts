@@ -2717,7 +2717,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     view.linkMenu = false;
   };
   /**
-   * Opens a row's ticket or link, an http or https URL from the hub's row, in a new tab, marked as the dock marks it; the installed app asks the
+   * Opens a row's ticket or link, an http or https URL from the hub's row, in a new tab; the installed app asks the
    * hub, which opens it in the default browser, since a link it opened itself would stay in the browser that installed it.
    */
   const openLink = (key: string, which: string): void => {

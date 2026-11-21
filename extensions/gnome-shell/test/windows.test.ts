@@ -61,8 +61,8 @@ describe('isListedTerminal', () => {
 });
 
 describe('isWebUrl', () => {
-  it('takes http and https links, as the dock marks them', () => {
-    expect(isWebUrl('https://github.com/o/r/issues/1?switchboard-tab=1#issuecomment-2')).toBe(true);
+  it('takes http and https links, with a query and a bookmark', () => {
+    expect(isWebUrl('https://github.com/o/r/issues/1?a=1#issuecomment-2')).toBe(true);
     expect(isWebUrl('HTTP://localhost:8080/')).toBe(true);
   });
 

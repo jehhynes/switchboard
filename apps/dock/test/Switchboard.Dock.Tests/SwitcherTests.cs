@@ -92,7 +92,7 @@ public sealed class SwitcherTests
     public async Task OpenInPage_PoolTicket_RunsItsOwnClick()
     {
         Assert.Null(await Switcher().OpenInPage(Fixtures.Row("ticket:4"), TestContext.Current.CancellationToken));
-        Assert.Equal(["url https://github.com/o/r/issues/104#switchboard-tab"], windows.Calls);
+        Assert.Equal(["url https://github.com/o/r/issues/104"], windows.Calls);
         Assert.Empty(hub.Calls);
     }
 
@@ -418,22 +418,16 @@ public sealed class SwitcherTests
     public async Task Click_RowWithoutWindow_OpensTheTicket()
     {
         Assert.Null(await Switcher().Click(Fixtures.Row("ticket:4"), TestContext.Current.CancellationToken));
-        Assert.Equal(["url https://github.com/o/r/issues/104#switchboard-tab"], windows.Calls);
+        Assert.Equal(["url https://github.com/o/r/issues/104"], windows.Calls);
         Assert.Empty(hub.Calls);
     }
 
     [Fact]
-    public void OpenUrl_LinkWithFragment_PutsTheMarkInTheQueryBeforeIt()
+    public void OpenUrl_LinkWithQueryAndFragment_OpensItUnchanged()
     {
-        Assert.Null(Switcher().OpenUrl("https://github.com/o/r/issues/1#issuecomment-2"));
-        Assert.Equal(["url https://github.com/o/r/issues/1?switchboard-tab=1#issuecomment-2"], windows.Calls);
+        Assert.Null(Switcher().OpenUrl("https://github.com/o/r/issues/1?a=1#issuecomment-2"));
+        Assert.Equal(["url https://github.com/o/r/issues/1?a=1#issuecomment-2"], windows.Calls);
     }
-
-    [Theory]
-    [InlineData("https://x.test/p?a=1", "https://x.test/p?a=1#switchboard-tab")]
-    [InlineData("https://x.test/p?a=1#b", "https://x.test/p?a=1&switchboard-tab=1#b")]
-    [InlineData("https://desk.zoho.com/support/x/ShowHomePage.do#Cases/dv/1?y", "https://desk.zoho.com/support/x/ShowHomePage.do?switchboard-tab=1#Cases/dv/1?y")]
-    public void Marked_LinkWithOrWithoutBookmark_AddsTheMatchingMark(string url, string marked) => Assert.Equal(marked, Switching.Switcher.Marked(url));
 
     [Fact]
     public async Task Click_BrowserFails_SaysWhy()

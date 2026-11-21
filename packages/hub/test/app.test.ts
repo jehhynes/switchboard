@@ -870,7 +870,7 @@ describe('createHubApp', () => {
     const page = app.page!.opened();
 
     expect(await app.post['/v1/conversation/row-open']!({ window: page, opId: 'o1', workItemId: 1, url: 'https://github.com/o/r/pull/5' })).toEqual({ status: 200, body: { opened: true } });
-    expect(opened).toEqual(['https://github.com/o/r/pull/5#switchboard-tab']);
+    expect(opened).toEqual(['https://github.com/o/r/pull/5']);
     expect(await app.post['/v1/conversation/row-open']!({ window: page, opId: 'o2', workItemId: 1, url: 'https://evil.test/' })).toEqual({ status: 409, body: { error: 'The work item no longer links to this.' } });
     expect(await app.post['/v1/conversation/row-open']!({ window: page, opId: 'o3', workItemId: 99, url: 'https://github.com/o/r/pull/5' })).toEqual({ status: 409, body: { error: 'The work item is gone.' } });
     expect(await app.post['/v1/conversation/pool-action']!({ window: page, opId: 'o4', ticketId: 99, label: 'Start' })).toEqual({ status: 409, body: { error: 'The ticket is no longer in the pool.' } });

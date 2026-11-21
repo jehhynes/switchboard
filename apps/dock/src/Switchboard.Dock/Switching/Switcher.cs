@@ -571,35 +571,14 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
         return cancel.IsCancellationRequested ? null : failure;
     }
 
-    /// <summary>The bookmark the dock adds to a link that has none, which the Chrome extension's <c>TAB_BOOKMARK</c> also holds (PRD R74).</summary>
-    public const string TabBookmark = "#switchboard-tab";
-
-    /// <summary>The query parameter the dock adds to a link that has a bookmark, which the extension's <c>TAB_PARAMETER</c> also holds.</summary>
-    public const string TabParameter = "switchboard-tab=1";
-
-    /// <summary>The URL with <see cref="TabBookmark"/> added, or, when it has a bookmark, <see cref="TabParameter"/> last in its query before the unchanged bookmark.</summary>
-    public static string Marked(string url)
-    {
-        var hash = url.IndexOf('#');
-
-        if (hash == -1)
-        {
-            return url + TabBookmark;
-        }
-
-        var target = url[..hash];
-
-        return target + (target.Contains('?') ? "&" : "?") + TabParameter + url[hash..];
-    }
-
-    /// <summary>Opens a URL in the browser, marked so the Chrome extension puts its tab in the Switchboard group; returns why it could not, or null.</summary>
+    /// <summary>Opens a URL in the browser; returns why it could not, or null.</summary>
     public string? OpenUrl(string url) => OpenUrl(windows, url);
 
     public static string? OpenUrl(IWindows windows, string url)
     {
         try
         {
-            windows.OpenUrl(Marked(url));
+            windows.OpenUrl(url);
             return null;
         }
         catch (Exception error) when (error is InvalidOperationException or System.ComponentModel.Win32Exception)

@@ -12,8 +12,8 @@ describe('launcher (architecture.md § Web page)', () => {
     const runs: Array<{ file: string; args: string[]; env: NodeJS.ProcessEnv }> = [];
     const launch = launcher((file, args, env) => runs.push({ file, args, env }), 'linux', { PATH: '/bin', ELECTRON_RUN_AS_NODE: '1', VSCODE_PID: '7' });
 
-    launch.openUrl('https://x.test/#switchboard-tab');
-    expect(runs).toEqual([{ file: 'xdg-open', args: ['https://x.test/#switchboard-tab'], env: { PATH: '/bin' } }]);
+    launch.openUrl('https://x.test/a?b=1#c');
+    expect(runs).toEqual([{ file: 'xdg-open', args: ['https://x.test/a?b=1#c'], env: { PATH: '/bin' } }]);
     expect(() => launch.openUrl('javascript:alert(1)')).toThrow('Only an http or https URL opens.');
     expect(() => launch.openUrl('file:///etc/passwd')).toThrow();
     expect(runs).toHaveLength(1);

@@ -239,9 +239,9 @@ describe("the page's History in use", () => {
     expect(root.querySelector('#history h1')).not.toBeNull();
     expect(root.querySelector<HTMLElement>('.hist-filter')!.getAttribute('value') ?? root.querySelector<HTMLInputElement>('.hist-filter')!.value).toBe('first saw');
 
-    // An http link opens in a tab with the dock's mark.
+    // An http link opens in a tab.
     root.querySelector<HTMLElement>('.hist-hero-links .hist-link')!.click();
-    expect(opened).toEqual(['https://github.com/o/r/issues/77#switchboard-tab']);
+    expect(opened).toEqual(['https://github.com/o/r/issues/77']);
 
     // Escape closes it, and no read follows.
     root.querySelector<HTMLElement>('.hist-close')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));

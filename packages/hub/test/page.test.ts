@@ -474,19 +474,19 @@ describe('pageActions', () => {
     expect(pageCommandOf({ window: { name: 'f', title: 't', folders: ['D:/w'], file: null, hosted: true, folder: 'D:/w' }, commands: [] }, 'Open in VS Code')).toEqual({ destination: 'D:/w', command: null });
   });
 
-  it("opens only the row's own http or https ticket URL or link, marked as the dock marks it", () => {
+  it("opens only the row's own http or https ticket URL or link, unchanged but for the URL parser's form", () => {
     const row = { url: 'https://github.com/o/r/issues/1', links: [{ url: 'https://example.test/a?b=1#top' }, { url: 'javascript:alert(1)' }, { url: 'file:///C:/x' }] };
 
-    expect(rowOpenUrl(row, 'https://github.com/o/r/issues/1')).toBe('https://github.com/o/r/issues/1#switchboard-tab');
-    expect(rowOpenUrl(row, 'https://example.test/a?b=1#top')).toBe('https://example.test/a?b=1&switchboard-tab=1#top');
+    expect(rowOpenUrl(row, 'https://github.com/o/r/issues/1')).toBe('https://github.com/o/r/issues/1');
+    expect(rowOpenUrl(row, 'https://example.test/a?b=1#top')).toBe('https://example.test/a?b=1#top');
     // A link the row holds but that is not http or https, or a URL the row does not hold, never opens.
     expect(rowOpenUrl(row, 'javascript:alert(1)')).toBeNull();
     expect(rowOpenUrl(row, 'file:///C:/x')).toBeNull();
     expect(rowOpenUrl(row, 'https://evil.test/')).toBeNull();
     expect(rowOpenUrl({ url: '', links: [] }, '')).toBeNull();
     // The parser's form goes out, so a space or quote cannot split the browser's argument.
-    expect(tabUrl('https://example.test/a b"c')).toBe('https://example.test/a%20b%22c#switchboard-tab');
-    expect(tabUrl('https://example.test/?q=1#x')).toBe('https://example.test/?q=1&switchboard-tab=1#x');
+    expect(tabUrl('https://example.test/a b"c')).toBe('https://example.test/a%20b%22c');
+    expect(tabUrl('https://example.test/?q=1#x')).toBe('https://example.test/?q=1#x');
     expect(tabUrl('not a url')).toBeNull();
   });
 
