@@ -56,6 +56,7 @@ export function renderPane(model: PaneModel): string {
           })
           .join('');
         const playbook = `<span class="playbook"${item.mark === null ? '' : ` title="${escape(item.mark.title)}"`}>${item.mark === null ? '' : `<span class="codicon mark" aria-label="${escape(item.mark.title)}" role="img">${escape(item.mark.glyph)}</span>`}${escape(item.playbook)}</span>`;
+        const unread = item.unread > 0 ? `<span class="unread-count" title="${item.unread === 1 ? '1 unread reply or status' : `${item.unread} unread replies and statuses`}">${item.unread}</span>` : '';
         const progress = item.progress.map((text) => line('progress', text)).join('');
         const status = item.status === null ? '' : line('status', { text: item.status, title: 'The latest status, on the Conversation view\'s Status tab' }, '<span class="codicon codicon-pulse" aria-hidden="true"></span>');
         const alerts = item.alerts.map((text) => line('alert', text, '<span class="codicon codicon-warning" aria-hidden="true"></span>')).join('');
@@ -66,7 +67,7 @@ export function renderPane(model: PaneModel): string {
             : `<button class="main" data-key="main" data-main="${escape(item.key)}" title="${escape(item.main.title)}">${item.main.glyph === null ? '' : `<span class="codicon">${escape(item.main.glyph)}</span>`}${escape(item.main.label)}</button>`;
         const actions = report === '' && main === '' ? '' : `<div class="actions">${report}${main}</div>`;
 
-        return `<section class="item${item.stripe === null ? '' : ` stripe-${item.stripe}`}" data-key="${escape(item.key)}"><div class="pills">${pills}${playbook}</div>${progress}${status}${alerts}${actions}</section>`;
+        return `<section class="item${item.stripe === null ? '' : ` stripe-${item.stripe}`}" data-key="${escape(item.key)}"><div class="pills">${pills}${playbook}${unread}</div>${progress}${status}${alerts}${actions}</section>`;
       })
       .join('') + voice
   );

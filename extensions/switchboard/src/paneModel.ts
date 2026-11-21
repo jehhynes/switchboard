@@ -44,6 +44,8 @@ export interface PaneItem {
   alerts: PaneText[];
   /** The approval report's draft, a file path, or null. */
   report: string | null;
+  /** Unread replies and statuses in its Conversation view (PRD R100), drawn with the one unread mark; 0 for none. */
+  unread: number;
   main: { label: string; glyph: string | null; title: string } | null;
 }
 
@@ -132,6 +134,7 @@ function paneItem(row: DockRow, status: PaneWindow['status']): PaneItem {
     status: status !== null && status.workItemId === workItemId && status.line !== '' ? status.line : null,
     alerts: row.details.filter(alert).map(({ text, title }) => ({ text, title })),
     report: typeof report === 'string' ? report : null,
+    unread: row.unread,
     main: row.main === null ? null : { label: row.main, glyph: row.mainGlyph, title: row.mainTitle ?? row.main },
   };
 }
