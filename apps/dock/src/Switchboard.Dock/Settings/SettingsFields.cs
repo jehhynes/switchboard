@@ -351,36 +351,40 @@ public static partial class SettingsFields
         [
             new Section("Sessions",
             [
+                new Field("sessions.provider", "Default agent", FieldKind.Select, "The agent playbook and ad-hoc sessions run in. A playbook can name its own.", "claude", providers),
                 new Field("sessions.concurrency", "Concurrency", FieldKind.Integer, "Sessions that run at once, 1 to 10. A start with no free slot waits as queued.", "2"),
-                new Field("sessions.provider", "Agent", FieldKind.Select, "The agent playbook and ad-hoc sessions run in. A playbook can name its own.", "claude", providers),
-                new Field("sessions.installHooks", "Install hooks", FieldKind.Boolean, "Add Switchboard’s hooks to your Claude and Codex settings, so the dock shows when a session waits for you or runs in VS Code. Off, the session list and Codex’s run output alone decide state.", Fallback: true),
-                new Field("sessions.debriefs", "Friction debriefs", FieldKind.Boolean, "Ask each session what slowed it down, once its work item is done or 45 minutes after its last turn. The answers go to ~/.claude/.wip/debrief for the friction-review skill.", Fallback: false),
                 new Field("sessions.codeMode", "Code Mode (experimental)", FieldKind.Boolean, "New Claude sessions run with Claude Code’s Code Mode, held by Switchboard’s terminal holder, and open in a terminal instead of the Claude view. They keep running between turns until you stop them or they sit idle for an hour. They skip the gateway in your Claude settings and use your Claude subscription sign-in. Sessions already started keep their mode. Needs Install hooks.", Fallback: false),
-                new Field("sessions.nodePath", "Node.js path", FieldKind.Text, "The Node.js that Switchboard’s hooks and session reports run. Set its full path, with no spaces, when the agents’ PATH does not include it, such as a Node.js installed through nvm.", "node"),
+                new Field("sessions.debriefs", "Friction debriefs", FieldKind.Boolean, "Ask each session what slowed it down, once its work item is done or 45 minutes after its last turn. The answers go to ~/.claude/.wip/debrief for the friction-review skill.", Fallback: false),
             ]),
             new Section("Claude sessions",
             [
-                new Field("sessions.permissionMode", "Permission mode", FieldKind.Select, "A playbook can set its own.", "auto", modes),
                 new Field("sessions.model", "Model", FieldKind.Text, "A playbook can set its own.", "Claude's default"),
-                new Field("sessions.claudePath", "Claude Code path", FieldKind.Text, "The Claude Code CLI the hub and Open in terminal run. Set its full path when their PATH does not include it.", "claude"),
+                new Field("sessions.permissionMode", "Permission mode", FieldKind.Select, "A playbook can set its own.", "auto", modes),
             ]),
             new Section("Codex sessions",
             [
-                new Field("sessions.codex.permissionMode", "Permission mode", FieldKind.Select, "A playbook can set its own. Commands in Codex’s sandbox cannot use your sign-ins, such as gh’s, so skills that call them need bypassPermissions.", "bypassPermissions", codexModes),
                 new Field("sessions.codex.model", "Model", FieldKind.Text, "A playbook can set its own.", "Codex's default"),
-                new Field("sessions.codexPath", "Codex path", FieldKind.Text, "The Codex CLI the hub and Open in terminal run. Set its full path when their PATH does not include it, such as a Codex installed through nvm.", "codex"),
-            ]),
-            new Section("Dock",
-            [
-                new Field("dock.openVSCode", "Open VS Code", FieldKind.Select, "Where a row opens its work. Only for review opens the session in a terminal, Ptyxis on Linux or Windows Terminal on Windows, until its work awaits approval or is finished, so fewer VS Code windows stay open.", "always", [new FieldOption("always", "Always"), new FieldOption("review", "Only for review")]),
-                new Field("dock.openTerminal", "Open in terminal", FieldKind.Select, "Where Open in terminal runs when Open VS Code is Always. VS Code when open brings forward the session's terminal app window when there is one, else uses the item window's terminal while that window is open, else the terminal app: Ptyxis on Linux, Windows Terminal on Windows. On Linux without Switchboard's GNOME Shell extension it uses the item window. Only for review always uses the terminal app.", "vscode", [new FieldOption("vscode", "VS Code"), new FieldOption("app", "Terminal app"), new FieldOption("auto", "VS Code when open")]),
+                new Field("sessions.codex.permissionMode", "Permission mode", FieldKind.Select, "A playbook can set its own. Commands in Codex’s sandbox cannot use your sign-ins, such as gh’s, so skills that call them need bypassPermissions.", "bypassPermissions", codexModes),
             ]),
             new Section("Triage",
             [
-                new Field("triage.model", "Model", FieldKind.Text, "Triage uses the default provider. A model from the other provider falls back to its default.", "Provider's default"),
                 new Field("triage.concurrency", "Concurrency", FieldKind.Integer, "Triages that run at once.", "2"),
+                new Field("triage.model", "Model", FieldKind.Text, "Triage uses the default agent. A model from the other agent falls back to its default.", "Agent's default"),
                 new Field("triage.timeoutSeconds", "Timeout (seconds)", FieldKind.Integer, "", "180"),
             ]),
+            // The Settings window draws the dock theme, kept in dock.json, first in this section.
+            new Section("Dock",
+            [
+                new Field("dock.openVSCode", "Rows open in", FieldKind.Select, "Where a row opens its work. Only for review opens the session in a terminal, Ptyxis on Linux or Windows Terminal on Windows, until its work awaits approval or is finished, so fewer VS Code windows stay open.", "always", [new FieldOption("always", "Always"), new FieldOption("review", "Only for review")]),
+                new Field("dock.openTerminal", "Terminal for \"Open in terminal\"", FieldKind.Select, "Where Open in terminal runs when Rows open in is Always. VS Code when open brings forward the session's terminal app window when there is one, else uses the item window's terminal while that window is open, else the terminal app: Ptyxis on Linux, Windows Terminal on Windows. On Linux without Switchboard's GNOME Shell extension it uses the item window. Only for review always uses the terminal app.", "vscode", [new FieldOption("vscode", "VS Code"), new FieldOption("app", "Terminal app"), new FieldOption("auto", "VS Code when open")]),
+            ]),
+            new Section("Advanced",
+            [
+                new Field("sessions.installHooks", "Install hooks", FieldKind.Boolean, "Add Switchboard’s hooks to your Claude and Codex settings, so the dock shows when a session waits for you or runs in VS Code. Off, the session list and Codex’s run output alone decide state.", Fallback: true),
+                new Field("sessions.claudePath", "Claude Code path", FieldKind.Text, "The Claude Code CLI the hub and Open in terminal run. Set its full path when their PATH does not include it.", "claude"),
+                new Field("sessions.codexPath", "Codex path", FieldKind.Text, "The Codex CLI the hub and Open in terminal run. Set its full path when their PATH does not include it, such as a Codex installed through nvm.", "codex"),
+                new Field("sessions.nodePath", "Node.js path", FieldKind.Text, "The Node.js that Switchboard’s hooks and session reports run. Set its full path, with no spaces, when the agents’ PATH does not include it, such as a Node.js installed through nvm.", "node"),
+            ], Advanced: true),
         ];
     }
 

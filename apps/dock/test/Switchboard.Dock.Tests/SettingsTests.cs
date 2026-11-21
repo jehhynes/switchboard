@@ -6,31 +6,40 @@ namespace Switchboard.Dock.Tests;
 public sealed class SettingsFieldsTests
 {
     [Fact]
-    public void GeneralFields_AnyState_ListsSessionsDockThenTriageFields()
+    public void GeneralFields_AnyState_GroupsSessionsAgentsTriageDockThenACollapsedAdvancedSection()
     {
         var sections = SettingsFields.GeneralFields(SettingsConfigs.State());
+        var fields = sections.SelectMany((section) => section.Fields).ToDictionary((field) => field.Path);
 
-        Assert.Equal(["Sessions", "Claude sessions", "Codex sessions", "Dock", "Triage"], sections.Select((section) => section.Heading));
+        Assert.Equal(["Sessions", "Claude sessions", "Codex sessions", "Triage", "Dock", "Advanced"], sections.Select((section) => section.Heading));
+        Assert.Equal([false, false, false, false, false, true], sections.Select((section) => section.Advanced));
         Assert.Equal(
             [
-                "sessions.concurrency", "sessions.provider", "sessions.installHooks", "sessions.debriefs", "sessions.codeMode", "sessions.nodePath", "sessions.permissionMode", "sessions.model", "sessions.claudePath", "sessions.codex.permissionMode", "sessions.codex.model", "sessions.codexPath",
+                "sessions.provider", "sessions.concurrency", "sessions.codeMode", "sessions.debriefs",
+                "sessions.model", "sessions.permissionMode",
+                "sessions.codex.model", "sessions.codex.permissionMode",
+                "triage.concurrency", "triage.model", "triage.timeoutSeconds",
                 "dock.openVSCode", "dock.openTerminal",
-                "triage.model", "triage.concurrency", "triage.timeoutSeconds",
+                "sessions.installHooks", "sessions.claudePath", "sessions.codexPath", "sessions.nodePath",
             ],
             sections.SelectMany((section) => section.Fields).Select((field) => field.Path));
-        Assert.Equal(["claude", "codex"], sections[0].Fields[1].Options!.Select((option) => option.Value));
-        Assert.Equal(["Claude", "Codex"], sections[0].Fields[1].Options!.Select((option) => option.Label));
-        Assert.True(sections[0].Fields[2].Fallback);
-        Assert.False(sections[0].Fields[3].Fallback);
-        Assert.Equal(("Code Mode (experimental)", FieldKind.Boolean, false), (sections[0].Fields[4].Label, sections[0].Fields[4].Kind, sections[0].Fields[4].Fallback));
-        Assert.Contains("skip the gateway in your Claude settings and use your Claude subscription sign-in", sections[0].Fields[4].Help);
-        Assert.Equal(["acceptEdits", "auto", "plan"], sections[1].Fields[0].Options!.Select((option) => option.Value));
-        Assert.Equal(["auto", "bypassPermissions"], sections[2].Fields[0].Options!.Select((option) => option.Value));
-        Assert.Equal("bypassPermissions", sections[2].Fields[0].Placeholder);
-        Assert.Equal([("always", "Always"), ("review", "Only for review")], sections[3].Fields[0].Options!.Select((option) => (option.Value, option.Label)));
-        Assert.Equal("always", sections[3].Fields[0].Placeholder);
-        Assert.Equal([("vscode", "VS Code"), ("app", "Terminal app"), ("auto", "VS Code when open")], sections[3].Fields[1].Options!.Select((option) => (option.Value, option.Label)));
-        Assert.Equal("vscode", sections[3].Fields[1].Placeholder);
+        Assert.Equal(
+            ["Default agent", "Concurrency", "Code Mode (experimental)", "Friction debriefs", "Model", "Permission mode", "Model", "Permission mode", "Concurrency", "Model", "Timeout (seconds)", "Rows open in", "Terminal for \"Open in terminal\"", "Install hooks", "Claude Code path", "Codex path", "Node.js path"],
+            sections.SelectMany((section) => section.Fields).Select((field) => field.Label));
+        Assert.Equal(["claude", "codex"], fields["sessions.provider"].Options!.Select((option) => option.Value));
+        Assert.Equal(["Claude", "Codex"], fields["sessions.provider"].Options!.Select((option) => option.Label));
+        Assert.True(fields["sessions.installHooks"].Fallback);
+        Assert.False(fields["sessions.debriefs"].Fallback);
+        Assert.Equal((FieldKind.Boolean, false), (fields["sessions.codeMode"].Kind, fields["sessions.codeMode"].Fallback));
+        Assert.Contains("skip the gateway in your Claude settings and use your Claude subscription sign-in", fields["sessions.codeMode"].Help);
+        Assert.Equal(["acceptEdits", "auto", "plan"], fields["sessions.permissionMode"].Options!.Select((option) => option.Value));
+        Assert.Equal(["auto", "bypassPermissions"], fields["sessions.codex.permissionMode"].Options!.Select((option) => option.Value));
+        Assert.Equal("bypassPermissions", fields["sessions.codex.permissionMode"].Placeholder);
+        Assert.Equal([("always", "Always"), ("review", "Only for review")], fields["dock.openVSCode"].Options!.Select((option) => (option.Value, option.Label)));
+        Assert.Equal("always", fields["dock.openVSCode"].Placeholder);
+        Assert.Equal([("vscode", "VS Code"), ("app", "Terminal app"), ("auto", "VS Code when open")], fields["dock.openTerminal"].Options!.Select((option) => (option.Value, option.Label)));
+        Assert.Equal("vscode", fields["dock.openTerminal"].Placeholder);
+        Assert.Contains("when Rows open in is Always", fields["dock.openTerminal"].Help);
     }
 
     [Fact]
@@ -380,11 +389,12 @@ public sealed class SettingsPagesTests
         var nav = SettingsPages.Nav(SettingsConfigs.State());
 
         Assert.Equal(
-            ["heading Settings", "item General", "item Voice", "heading Personas", "add New persona", "heading Sources", "item GitHub", "item Zoho Desk off", "add Add Forum", "add New source", "heading Schedules", "add New schedule", "heading Playbooks", "namespace dev", "item develop", "item review", "namespace triage", "item github", "add New playbook"],
+            ["item General", "heading Sources", "item GitHub", "item Zoho Desk off", "add New Forum source", "add New source", "heading Playbooks", "namespace dev", "item develop", "item review", "namespace triage", "item github", "add New playbook", "heading Schedules", "add New schedule", "heading Voice", "item Voice settings", "add New persona"],
             nav.Select((entry) => $"{entry.Kind} {entry.Label}{(entry.Note is null ? "" : $" {entry.Note}")}"));
-        Assert.True(nav[1].Current);
-        Assert.Equal("add-source", nav[8].Command);
-        Assert.Equal("forum", nav[8].Argument);
+        Assert.True(nav[0].Current);
+        Assert.Equal("add-source", nav[4].Command);
+        Assert.Equal("forum", nav[4].Argument);
+        Assert.Equal("voice", nav[16].Argument);
         Assert.DoesNotContain(nav, (entry) => entry.Dirty || entry.HasErrors);
     }
 
@@ -407,6 +417,7 @@ public sealed class SettingsPagesTests
     [Theory]
     [InlineData("sessions.concurrency", "general")]
     [InlineData("triage.model", "general")]
+    [InlineData("dock.openVSCode", "general")]
     [InlineData("sources.github.repo", "source:github")]
     [InlineData("sources.zoho.orgId", "source:zoho")]
     public void Nav_SettingEdited_MarksOnlyItsPage(string path, string page)
@@ -574,7 +585,7 @@ public sealed class SettingsPagesTests
         state.Errors = ["sessions.concurrency must be 1 to 10.", "sources.github.repo must be owner/name.", "Something else."];
 
         var page = SettingsPages.Page(state);
-        var concurrency = page.Sections[0].Fields[0];
+        var concurrency = page.Sections[0].Fields.Single((field) => field.Field.Path == "sessions.concurrency");
 
         Assert.Equal(["Something else."], page.Errors);
         Assert.Equal(["sessions.concurrency must be 1 to 10."], concurrency.Errors);
@@ -850,9 +861,11 @@ public sealed class SettingsEditorTests
 {
     readonly FakeConfigHub hub = new();
 
-    static Field Concurrency => SettingsFields.GeneralFields(SettingsConfigs.State())[0].Fields[0];
+    static Field Concurrency => GeneralField("sessions.concurrency");
 
-    static Field Model => SettingsFields.GeneralFields(SettingsConfigs.State())[1].Fields[1];
+    static Field Model => GeneralField("sessions.model");
+
+    static Field GeneralField(string path) => SettingsFields.GeneralFields(SettingsConfigs.State()).SelectMany((section) => section.Fields).Single((field) => field.Path == path);
 
     static Field PlaybookField(string path, FieldKind kind = FieldKind.Text) => new(path, path, kind, "");
 

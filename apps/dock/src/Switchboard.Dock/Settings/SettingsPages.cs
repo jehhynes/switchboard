@@ -104,22 +104,16 @@ public static class SettingsPages
     {
         var sources = state.SettingsValue?["sources"] is JsonObject configured ? configured.ToList() : [];
         var missing = state.Config.SourceKinds.Where((kind) => !sources.Any((entry) => entry.Key == kind));
-        List<NavEntry> nav = [new("heading", "Settings"), Item(state, "general", "General"), Item(state, "voice", "Voice"), new("heading", "Personas")];
-
-        nav.AddRange(Enumerable.Range(0, state.PersonaCount).Select((index) => Item(state, $"persona:{index}", state.PersonaLabel(index))));
-        nav.Add(new NavEntry("add", "New persona", "navigate", "new-persona", Current: state.Page == "new-persona"));
-        nav.Add(new NavEntry("heading", "Sources"));
+        // In the order a ticket takes: its source, its playbook, the schedules that start playbooks, then voice, an optional feature.
+        List<NavEntry> nav = [Item(state, "general", "General"), new("heading", "Sources")];
 
         foreach (var (name, _) in sources)
         {
             nav.Add(Item(state, $"source:{name}", SettingsFields.SourceTitle(state, name), state.Config.Enabled.GetValueOrDefault(name) ? null : "off"));
         }
 
-        nav.AddRange(missing.Select((kind) => new NavEntry("add", $"Add {SettingsFields.SourceLabel(kind)}", "add-source", kind)));
+        nav.AddRange(missing.Select((kind) => new NavEntry("add", $"New {SettingsFields.SourceLabel(kind)} source", "add-source", kind)));
         nav.Add(new NavEntry("add", "New source", "navigate", "new-source", Current: state.Page == "new-source"));
-        nav.Add(new NavEntry("heading", "Schedules"));
-        nav.AddRange(state.ScheduleNames.Select((name) => Item(state, $"schedule:{name}", name)));
-        nav.Add(new NavEntry("add", "New schedule", "navigate", "new-schedule", Current: state.Page == "new-schedule"));
         nav.Add(new NavEntry("heading", "Playbooks"));
 
         foreach (var group in state.PlaybookNames.GroupBy((full) => full.Split(':')[0]))
@@ -131,6 +125,13 @@ public static class SettingsPages
         }
 
         nav.Add(new NavEntry("add", "New playbook", "navigate", "new-playbook", Current: state.Page == "new-playbook"));
+        nav.Add(new NavEntry("heading", "Schedules"));
+        nav.AddRange(state.ScheduleNames.Select((name) => Item(state, $"schedule:{name}", name)));
+        nav.Add(new NavEntry("add", "New schedule", "navigate", "new-schedule", Current: state.Page == "new-schedule"));
+        nav.Add(new NavEntry("heading", "Voice"));
+        nav.Add(Item(state, "voice", "Voice settings"));
+        nav.AddRange(Enumerable.Range(0, state.PersonaCount).Select((index) => Item(state, $"persona:{index}", state.PersonaLabel(index))));
+        nav.Add(new NavEntry("add", "New persona", "navigate", "new-persona", Current: state.Page == "new-persona"));
 
         return nav;
     }
@@ -185,7 +186,7 @@ public static class SettingsPages
             return Json(SettingsFields.GetAt(state.Draft, path)) != Json(SettingsFields.GetAt(state.Config.Settings.Value, path));
         }
 
-        string[] paths = page == "general" ? ["sessions", "triage"]
+        string[] paths = page == "general" ? ["sessions", "triage", "dock"]
             : page.StartsWith("schedule:", StringComparison.Ordinal) ? [$"schedules.{page["schedule:".Length..]}"]
             : [$"sources.{page["source:".Length..]}"];
 

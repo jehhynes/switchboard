@@ -201,8 +201,19 @@ public sealed class SettingsWindowTests
         Assert.Contains("General", texts);
         Assert.Contains("Concurrency", texts);
         Assert.Equal("2", Field<TextBox>(window, "sessions.concurrency").Text);
-        Assert.Contains("+ Add Forum", texts);
+        Assert.Contains("+ New Forum source", texts);
         Assert.Contains("develop", texts);
+        Assert.Contains("VOICE", texts);
+        Assert.DoesNotContain("Appearance", texts);
+        Assert.False(Field<TextBox>(window, "sessions.nodePath").IsEffectivelyVisible);
+        Click(window.GetVisualDescendants().OfType<Button>().Single((button) => button.Name == "section:Advanced"));
+        Assert.True(Field<TextBox>(window, "sessions.nodePath").IsEffectivelyVisible);
+
+        // The dock theme, kept in dock.json, is the first row of the Dock section.
+        var themeRow = (Control)ThemeBox(window).Parent!;
+        var dockRows = (StackPanel)themeRow.Parent!;
+        Assert.Same(themeRow, dockRows.Children[0]);
+        Assert.Same(dockRows, Field<ComboBox>(window, "dock.openVSCode").Parent!.Parent!.Parent);
         Assert.False(PageButton(window, "save").IsEnabled);
         Assert.False(PageButton(window, "discard").IsEnabled);
         Assert.Equal("Saved", FileStatus(window));

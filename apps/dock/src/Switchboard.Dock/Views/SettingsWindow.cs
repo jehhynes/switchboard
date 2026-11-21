@@ -347,6 +347,8 @@ public sealed class SettingsWindow : Window
         page.Children.Add(notes);
         page.Children.Add(errors);
 
+        Control? themeRow = null;
+
         if (state.Page == "general")
         {
             var choices = new[] { (Label: "Follow the system theme", Value: "system"), (Label: "Follow the VS Code theme", Value: "vscode"), (Label: "Always light", Value: "light"), (Label: "Always dark", Value: "dark") };
@@ -359,10 +361,8 @@ public sealed class SettingsWindow : Window
                     Update();
                 }
             };
-            page.Children.Add(new TextBlock { Text = "Appearance", FontSize = 15, FontWeight = FontWeight.SemiBold });
-            page.Children.Add(new TextBlock { Text = "Dock theme" });
-            page.Children.Add(box);
-            page.Children.Add(Tinted(new TextBlock { Text = "VS Code follows the most recently focused window's light or dark appearance. Custom colours are not copied.", TextWrapping = TextWrapping.Wrap }, "DockMuted"));
+            box.MinWidth = 260;
+            themeRow = Row("Theme", "The dock's colours. Follow the VS Code theme uses the most recently focused window's light or dark appearance. Custom colours are not copied.", box);
         }
 
         if (view.Message is not null)
@@ -380,6 +380,12 @@ public sealed class SettingsWindow : Window
         foreach (var section in view.Sections)
         {
             var rows = new StackPanel { Spacing = 2 };
+
+            // The dock theme, kept in dock.json rather than settings.json, leads General's Dock section.
+            if (themeRow is not null && section.Heading == "Dock")
+            {
+                rows.Children.Add(themeRow);
+            }
 
             foreach (var run in Runs(section.Fields))
             {

@@ -52,11 +52,12 @@ public sealed class VoiceSettingsTests
         var nav = SettingsPages.Nav(state);
 
         Assert.Equal(
-            ["heading Settings", "item General", "item Voice", "heading Personas", "item Nova", "item Orion Two", "add New persona", "heading Sources"],
-            nav.Take(8).Select((entry) => $"{entry.Kind} {entry.Label}"));
-        Assert.Equal(("persona:0", false, true), (nav[4].Argument, nav[4].Dirty, nav[4].HasErrors));
-        Assert.Equal(("persona:1", true, false), (nav[5].Argument, nav[5].Dirty, nav[5].HasErrors));
-        Assert.False(nav[2].Dirty);
+            ["heading Voice", "item Voice settings", "item Nova", "item Orion Two", "add New persona"],
+            nav.SkipWhile((entry) => entry.Label != "Voice").Select((entry) => $"{entry.Kind} {entry.Label}"));
+        var voice = nav.Single((entry) => entry.Argument == "voice");
+        Assert.Equal(("persona:0", false, true), (nav[^3].Argument, nav[^3].Dirty, nav[^3].HasErrors));
+        Assert.Equal(("persona:1", true, false), (nav[^2].Argument, nav[^2].Dirty, nav[^2].HasErrors));
+        Assert.False(voice.Dirty);
     }
 
     [Fact]
