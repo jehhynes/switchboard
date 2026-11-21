@@ -100,6 +100,8 @@ export interface Served {
 export type ServeResult = { served: Served } | { existing: HubRecord } | { refused: string };
 
 export const DEFAULT_WAIT_MS = 5000;
+/** How long a stopping hub waits for the requests it is answering before it closes the app. */
+export const STOP_REQUESTS_MS = 5000;
 
 /** Write through a temporary file, so a reader never sees a partial record. */
 function writeRecord(path: string, record: HubRecord): void {
@@ -293,9 +295,19 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
       clearImmediate(update);
       process.off('exit', unclaim);
       server.stopViews();
-      app?.close();
+      // A request being answered still uses the app; later ones are refused, and the app closes once those finish or after 5 seconds.
+      server.hold(`The hub is stopping: ${reason}.`);
+
+      for (const until = Date.now() + STOP_REQUESTS_MS; server.inFlight() > 0 && Date.now() < until; ) {
+        await new Promise((done) => setTimeout(done, 20));
+      }
+
       await browser?.close();
+      // Closing the server ends the streams, whose close handlers still read the app's store, such as the pane's tabs of a page that closes; the
+      // app closes after them.
       await server.close();
+      await new Promise((done) => setImmediate(done));
+      app?.close();
       unclaim();
       await releaseLock(hubLock);
     })();

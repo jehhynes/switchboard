@@ -576,7 +576,7 @@ process.emitWarning = ((warning: string | Error, ...rest: unknown[]) => {
 }) as typeof process.emitWarning;
 
 process.on('uncaughtException', (error) => {
-  process.stderr.write(`uncaughtException: ${String(error)}\n`);
+  process.stderr.write(`uncaughtException: ${error instanceof Error && error.stack !== undefined ? error.stack : String(error)}\n`);
   process.exit(1);
 });
 

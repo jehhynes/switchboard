@@ -132,6 +132,63 @@ describe('serveHub', () => {
     expect(recordOnDisk()).toEqual(second.record);
   });
 
+  it('ends the streams before it closes the app, so their close handlers can still read the store', async () => {
+    const events: string[] = [];
+    let closed = false;
+    const app: HubApp = {
+      post: {},
+      snapshot: () => ({}),
+      dock: () => ({}),
+      snoozedUrls: () => [],
+      cards: () => [],
+      snoozeUrl: () => null,
+      unsnoozeUrl: () => null,
+      onChange: () => {},
+      busy: () => false,
+      windowOpened: () => 'key-1',
+      windowClosed: (key) => {
+        if (closed) {
+          throw new Error('database is not open');
+        }
+
+        events.push(`closed ${key}`);
+      },
+      close: () => {
+        closed = true;
+        events.push('app closed');
+      },
+    };
+    const hub = served(await serve({ app: async () => app, browserPort: null }));
+    const stream = await openEvents(hub.record, () => undefined, 2000, undefined, { workspace: '', focused: '1' });
+
+    expect(stream).not.toBeNull();
+    await hub.stop('test');
+
+    expect(events).toEqual(['closed key-1', 'app closed']);
+  });
+
+  it('refuses new requests once stopping and closes the app only after the requests it is answering', async () => {
+    const events: string[] = [];
+    let release: (() => void) | null = null;
+    const app: HubApp = { post: { '/slow': () => new Promise((done) => (release = () => (events.push('answered'), done({ status: 200, body: {} })))), '/fast': async () => ({ status: 200, body: {} }) }, snapshot: () => ({}), dock: () => ({}), snoozedUrls: () => [], cards: () => [], snoozeUrl: () => null, unsnoozeUrl: () => null, onChange: () => {}, busy: () => false, close: () => void events.push('app closed') };
+    const hub = served(await serve({ app: async () => app, browserPort: null }));
+    const slow = call(hub.record.port, 'POST', '/slow', hub.record.token, 5000, {});
+
+    await until(() => (release !== null ? true : null));
+
+    const stopped = hub.stop('a client asked it to stop');
+    const refused = await call(hub.record.port, 'POST', '/fast', hub.record.token, 2000, {});
+
+    expect(refused?.status).toBe(503);
+    expect(JSON.parse(refused!.body)).toEqual({ error: 'The hub is stopping: a client asked it to stop.' });
+    expect(events).toEqual([]);
+
+    release!();
+    expect((await slow)?.status).toBe(200);
+    await stopped;
+    expect(events).toEqual(['answered', 'app closed']);
+  });
+
   it('removes its record and stops listening when stopped', async () => {
     const hub = served(await serve());
 

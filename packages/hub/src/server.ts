@@ -145,7 +145,7 @@ export interface HubServer {
   stopViews(): void;
   /** `POST` requests on the hub's and the page's ports not yet answered, so the hub restarts only between them (architecture.md § Hub lifecycle). */
   inFlight(): number;
-  /** Answers every later `POST` 503 with `reason`, while the hub hands over to its successor. */
+  /** Answers every later `POST` 503 with `reason`, the first one given, while the hub hands over to its successor or stops. */
   hold(reason: string): void;
   close(): Promise<void>;
 }
@@ -256,8 +256,8 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
 
   /** Counts a `POST` until its answer, or answers it 503 while the hub hands over; true when it was answered. */
   const admit = (request: IncomingMessage, response: ServerResponse): boolean => {
-    // `/restart` asks for the restart itself, so it does not hold the restart off.
-    if (request.method !== 'POST' || request.url === '/restart') {
+    // `/restart` and `/shutdown` ask for the restart or the stop itself, so they do not hold it off.
+    if (request.method !== 'POST' || request.url === '/restart' || request.url === '/shutdown') {
       return false;
     }
 
@@ -1087,7 +1087,8 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
         },
         inFlight: () => inFlight,
         hold: (reason) => {
-          held = reason;
+          // The first reason stays, such as a restart's, which is why a stop that follows it refuses.
+          held ??= reason;
         },
         close: () =>
           new Promise<void>((done) => {
