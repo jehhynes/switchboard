@@ -1964,6 +1964,80 @@ describe('the page in use', () => {
     expect(start().source.url).toBe('/v1/conversation/events?page=1');
   });
 
+  it('raises a needs-you alert the hub sends as a silent notification per work item whose click shows it, with the chime only when asked', async () => {
+    const notices: FakeNotice[] = [];
+    const asked = vi.fn(async () => 'granted');
+
+    class FakeNotice {
+      static permission = 'default';
+      static requestPermission = asked;
+      onclick: (() => void) | null = null;
+      closed = false;
+
+      constructor(
+        readonly title: string,
+        readonly options: NotificationOptions,
+      ) {
+        notices.push(this);
+      }
+
+      close(): void {
+        this.closed = true;
+      }
+    }
+
+    vi.stubGlobal('Notification', FakeNotice);
+    const focus = vi.spyOn(window, 'focus').mockImplementation(() => {});
+    const { page, source } = start();
+
+    hello(source);
+    await flush();
+    expect(posts.filter((post) => post.url.endsWith('/page-focus')).at(-1)?.body).toMatchObject({ notify: false });
+    // Asked once, on the first press in the page; the answer tells the hub the page may now alert.
+    asked.mockImplementation(async () => ((FakeNotice.permission = 'granted'), 'granted'));
+    document.dispatchEvent(new Event('pointerdown'));
+    document.dispatchEvent(new Event('pointerdown'));
+    expect(asked).toHaveBeenCalledTimes(1);
+    await flush();
+    expect(posts.filter((post) => post.url.endsWith('/page-focus')).at(-1)?.body).toMatchObject({ notify: true });
+    FakeNotice.permission = 'denied';
+    // Not allowed yet: no notification, but the message shows under the list header as the dock's toast.
+    source.emit('needs', { items: [{ workItemId: 2, message: 'Switchboard: Side — Review, then approve' }], sound: false });
+    expect(notices).toEqual([]);
+    expect(root.querySelector('.needs-toast .needs-message')?.textContent).toBe('Switchboard: Side — Review, then approve');
+
+    FakeNotice.permission = 'granted';
+    source.emit('needs', { items: [{ workItemId: 2, message: 'Switchboard: Side — Review, then approve' }], sound: false });
+    expect(notices.map((one) => [one.title, one.options])).toEqual([['Switchboard', { body: 'Side — Review, then approve', tag: 'switchboard-needs-2', silent: true }]]);
+    notices[0]!.onclick!();
+    expect(focus).toHaveBeenCalled();
+    expect(notices[0]!.closed).toBe(true);
+    expect(location.hash).toBe('#w=2');
+
+    const oscillators = vi.fn();
+
+    vi.stubGlobal(
+      'AudioContext',
+      class {
+        currentTime = 0;
+        destination = {};
+        createOscillator = () => {
+          const one = { frequency: { value: 0 }, connect: (next: unknown) => next, start: () => {}, stop: () => oscillators(one.frequency.value) };
+
+          return one;
+        };
+        createGain = () => ({ gain: { setValueAtTime: () => {}, linearRampToValueAtTime: () => {} }, connect: (next: unknown) => next });
+        close = async () => {};
+      },
+    );
+    source.emit('needs', { items: [{ workItemId: 1, message: 'Switchboard: Fix it — Answer a question' }], sound: false });
+    expect(oscillators).not.toHaveBeenCalled();
+    source.emit('needs', { items: [{ workItemId: 1, message: 'Switchboard: Fix it — Answer a question' }], sound: true });
+    expect(oscillators.mock.calls).toEqual([[880], [1320]]);
+    page.close();
+    vi.unstubAllGlobals();
+  });
+
   it('asks the hub to open a link in the default browser when installed as an app, and shows its refusal', async () => {
     const { page, source, opened } = start();
     const links = [{ label: 'PR #5', url: 'https://github.com/o/r/pull/5', kind: 'pr' as const, badge: '5', glyph: null, mentioned: false }, { label: 'Bad', url: 'file:///C:/x', kind: 'url' as const, badge: 'Bad', glyph: null, mentioned: false }];

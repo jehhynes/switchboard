@@ -253,8 +253,8 @@ export interface ConversationServiceDeps {
   operatorEvent?(event: Record<string, unknown>): string | null;
   /** The Done rows from `since` up to the Done list whose search text holds every word of `text`, as the dock's search further back (PRD R63). */
   searchDone?(text: string, since: number): { rows: PageRow[]; more: boolean };
-  /** A page's focus changed: a focused, visible page counts as a focused window for the voice. */
-  pageFocused?(key: string, focused: boolean): void;
+  /** A page's focus changed: a focused, visible page counts as a focused window for the voice; `notify`, when sent, whether it may show notifications. */
+  pageFocused?(key: string, focused: boolean, notify?: boolean): void;
   /**
    * Runs one of the page's row actions (`PAGE_ACTIONS`) on a work item, after checking that its dock row still offers it: why not, or null
    * (architecture.md § Web page).
@@ -983,19 +983,22 @@ export class ConversationService {
     }
   }
 
-  /** `page-focus {window, focused}`: a page's focus and visibility, for the voice (architecture.md § Web page); 403 for a key that is not a page's. */
+  /**
+   * `page-focus {window, focused, notify?}`: a page's focus and visibility, for the voice, and whether the browser lets it show notifications, for
+   * needs-you alerts (architecture.md § Web page); 403 for a key that is not a page's.
+   */
   pageFocus(body: Record<string, unknown>): { status: number; body: unknown } {
-    const { window, focused } = body;
+    const { window, focused, notify } = body;
 
-    if (typeof window !== 'string' || typeof focused !== 'boolean') {
-      return { status: 400, body: { error: 'Expected {window, focused}.' } };
+    if (typeof window !== 'string' || typeof focused !== 'boolean' || !(notify === undefined || typeof notify === 'boolean')) {
+      return { status: 400, body: { error: 'Expected {window, focused, notify?}.' } };
     }
 
     if (!this.deps.windows.isPage(window)) {
       return { status: 403, body: { error: 'Not in this window.' } };
     }
 
-    this.deps.pageFocused?.(window, focused);
+    this.deps.pageFocused?.(window, focused, notify);
     return { status: 200, body: { focused } };
   }
 
@@ -1070,10 +1073,13 @@ export class ConversationService {
     this.#listChanged();
   }
 
-  /** `needs {items}` to every page: the work items that started needing the operator, each with the dock's message (PRD R65). */
-  pageNeeds(items: Array<{ workItemId: number; message: string }>): void {
-    for (const key of this.pages()) {
-      this.#send(key, 'needs', { items });
+  /**
+   * `needs {items, sound}` to the page that raises needs-you alerts (`alerts.surface`, PRD R65): the work items that started needing the
+   * operator, each with the dock's message, and whether the page plays the needs-you sound. A key that is not a page's gets nothing.
+   */
+  pageNeeds(key: string, items: Array<{ workItemId: number; message: string }>, sound: boolean): void {
+    if (this.deps.windows.isPage(key)) {
+      this.#send(key, 'needs', { items, sound });
     }
   }
 

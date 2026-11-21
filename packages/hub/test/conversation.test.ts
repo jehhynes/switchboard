@@ -1952,15 +1952,19 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     expect(service.pageHistory({ window, ticketId }).status).toBe(403);
   });
 
-  it("sends each page, and no window, the work items that started needing the operator with the dock's message (PRD R65)", () => {
+  it("sends the page that raises alerts, and no other page or window, the work items that started needing the operator with the dock's message (PRD R65)", () => {
     const { service, openPage, scopes, view } = setup();
     const page = openPage();
+    const other = openPage();
     const window = scopes.open(view.file, view.view);
     const frames: Array<{ type: string }> = [];
 
     service.open(window, (frame) => frames.push(JSON.parse(/^data: (.*)$/m.exec(frame)![1]!) as { type: string }));
-    service.pageNeeds([{ workItemId: 2, message: 'gh 2 is waiting for your answer.' }]);
-    expect(page.frames.at(-1)).toMatchObject({ type: 'needs', items: [{ workItemId: 2, message: 'gh 2 is waiting for your answer.' }] });
+    service.pageNeeds(page.key, [{ workItemId: 2, message: 'gh 2 is waiting for your answer.' }], true);
+    expect(page.frames.at(-1)).toMatchObject({ type: 'needs', items: [{ workItemId: 2, message: 'gh 2 is waiting for your answer.' }], sound: true });
+    expect(other.frames.some((frame) => frame.type === 'needs')).toBe(false);
+    // A window key is never sent one.
+    service.pageNeeds(window, [{ workItemId: 2, message: 'gh 2 is waiting for your answer.' }], false);
     expect(frames.some((frame) => frame.type === 'needs')).toBe(false);
   });
 

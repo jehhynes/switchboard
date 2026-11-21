@@ -10,6 +10,7 @@ describe('parseSettings', () => {
         sources: {},
         schedules: {},
         dock: { openVSCode: 'always', openTerminal: 'vscode', openIn: 'vscode' },
+        alerts: { surface: 'auto' },
         voice: { enabled: false, voice: 'marin', style: 'none', speed: 1, expressive: false, expandReplies: false, awayMinutes: 2, needsYouSound: true, outputDevice: null, micIdleMinutes: 10, endPauseMs: 3000, inputDevice: null, halfDuplexTailMs: 800, duplex: { local: 'auto', remote: 'auto' }, matchThreshold: 0.6, pitchLowFactor: 1.22, pitchMinLowShare: 0.2, roomHold: true, roomHoldSeconds: 60, personas: [], playbookPersonas: {}, spokenAlerts: true, alertOn: { finished: true, question: true, permission: true }, alertAnswerSeconds: 10, operatorName: '' },
         web: { port: 47616, chromePane: false },
       },
@@ -25,6 +26,7 @@ describe('parseSettings', () => {
           github: { pollIntervalSeconds: 300, repoRoot: 'D:/git/widgets', triagePlaybook: 'triage:github', setupPrompt: '/init-worktree {{ticket.sourceKey}}', repo: 'acme/widgets', logins: ['work-login'] },
         },
         dock: { openVSCode: 'review', openTerminal: 'auto', openIn: 'web' },
+        alerts: { surface: 'dock' },
         voice: { enabled: true, voice: 'cedar', style: 'pair', speed: 1.25, expressive: true, expandReplies: true, awayMinutes: 5, needsYouSound: false, outputDevice: 'Speakers', micIdleMinutes: 0, endPauseMs: 2500, inputDevice: 'Headset', halfDuplexTailMs: 450, duplex: { local: 'full', remote: 'half' }, matchThreshold: 0.7, pitchLowFactor: 1.5, pitchMinLowShare: 0, roomHold: false, roomHoldSeconds: 120, spokenAlerts: false, alertOn: { finished: false, question: true, permission: false }, alertAnswerSeconds: 20, operatorName: ' Alex ' },
         web: { port: 0, chromePane: true },
       }),
@@ -47,6 +49,7 @@ describe('parseSettings', () => {
         },
         schedules: {},
         dock: { openVSCode: 'review', openTerminal: 'auto', openIn: 'web' },
+        alerts: { surface: 'dock' },
         voice: { enabled: true, voice: 'cedar', style: 'pair', speed: 1.25, expressive: true, expandReplies: true, awayMinutes: 5, needsYouSound: false, outputDevice: 'Speakers', micIdleMinutes: 0, endPauseMs: 2500, inputDevice: 'Headset', halfDuplexTailMs: 450, duplex: { local: 'full', remote: 'half' }, matchThreshold: 0.7, pitchLowFactor: 1.5, pitchMinLowShare: 0, roomHold: false, roomHoldSeconds: 120, personas: [], playbookPersonas: {}, spokenAlerts: false, alertOn: { finished: false, question: true, permission: false }, alertAnswerSeconds: 20, operatorName: 'Alex' },
         web: { port: 0, chromePane: true },
       },
@@ -105,8 +108,10 @@ describe('parseSettings', () => {
     expect(parseSettings('{"dock":"review"}')).toMatchObject({ errors: [expect.stringContaining('dock')] });
   });
 
-  it('refuses a dock.openIn outside its choices', () => {
+  it('refuses a dock.openIn or alerts.surface outside its choices, and other alerts keys', () => {
     expect(parseSettings('{"dock":{"openIn":"browser"}}')).toEqual({ errors: ['dock.openIn must be one of vscode, web.'] });
+    expect(parseSettings('{"alerts":{"surface":"both","sound":true}}')).toEqual({ errors: ['alerts.sound is not a setting.', 'alerts.surface must be one of auto, web, dock.'] });
+    expect(parseSettings('{"alerts":"web"}')).toMatchObject({ errors: [expect.stringContaining('alerts')] });
   });
 
   it('fills defaults for a source that sets nothing', () => {

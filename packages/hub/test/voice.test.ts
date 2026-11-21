@@ -503,13 +503,14 @@ describe('VoiceControl', () => {
     windows.set('k1', scope('k1', 1, 's1'));
     control.update();
     await settle();
-    control.needsYou([1], 1);
-    control.needsYou([], null);
+    expect(control.needsYou([1], 1)).toBe(false);
+    expect(control.needsYou([], null)).toBe(false);
     expect(connections[0]!.sent.filter((one) => one.type === 'earcon')).toEqual([]);
-    control.needsYou([1, 2], 1);
+    // It says whether it played, so a web page that raises the alert does not sound as well.
+    expect(control.needsYou([1, 2], 1)).toBe(true);
     expect(connections[0]!.sent.filter((one) => one.type === 'earcon')).toEqual([{ type: 'earcon', kind: 'needs-you' }]);
     setSettings({ needsYouSound: false });
-    control.needsYou([2], 1);
+    expect(control.needsYou([2], 1)).toBe(false);
     expect(connections[0]!.sent.filter((one) => one.type === 'earcon')).toHaveLength(1);
   });
 

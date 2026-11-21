@@ -26,6 +26,8 @@ import type { ContextMenuState } from '@switchboard/conversation/contextMeter';
 import { EMPTY_HISTORY_UI, renderHistory } from './history.js';
 import type { HistoryOpen, HistoryUi } from './history.js';
 import type { HistoryCategory, HistoryView } from './types.js';
+import { askForNotifications, notificationsAllowed, notifyNeeds, playChime } from './alerts.js';
+import type { NeedsItem } from './alerts.js';
 
 /** The stream's event types the page reads. */
 export const EVENTS = ['hello', 'list', 'scope', 'conversations', 'session', 'message', 'reply', 'status', 'artifact', 'unread', 'voice', 'settings', 'progress', 'words', 'draft', 'pane', 'needs', 'show'];
@@ -1435,7 +1437,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     if (state.key !== null && (force || focused !== focusSent)) {
       focusSent = focused;
-      void post('page-focus', { focused });
+      void post('page-focus', { focused, notify: notificationsAllowed() });
     }
 
     checkSeen();
@@ -2638,6 +2640,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
   // ---- The stream ----
   // The installed app says so, since a dock click with `dock.openIn: web` shows its work item there (architecture.md § Web page).
+  // The hub routes needs-you alerts to a page only once it may show notifications, so the page says when that changes.
+  askForNotifications(document, () => reportFocus(true));
   const installedApp = deps.standalone?.() ?? (typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches);
   const source = new deps.EventSource(installedApp ? '/v1/conversation/events?page=1&installed=1' : '/v1/conversation/events?page=1');
 
@@ -2674,11 +2678,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         }, HISTORY_CHANGE_MS);
       }
 
-      if (type === 'needs') {
-        // A work item started needing the operator: the message shows under the list's header, as in the dock's toast (PRD R65).
-        header.needs(Array.isArray(data['items']) ? (data['items'] as Array<{ workItemId: number; message: string }>) : []);
-      }
-
       if (type === 'pane') {
         view.pane = (data['pane'] as PaneView | undefined) ?? null;
         paneChanged();
@@ -2697,6 +2696,17 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
           draw();
         }, SHOW_MARKER_MS);
         void select(data['workItemId']);
+      }
+
+      // The hub chose this page to raise needs-you alerts (alerts.surface, PRD R65): the message under the list's header, as in the dock's toast,
+      // a notification per work item, and the chime when nothing else sounds.
+      if (type === 'needs' && Array.isArray(data['items'])) {
+        header.needs(data['items'] as NeedsItem[]);
+        notifyNeeds(data['items'] as NeedsItem[], (workItemId) => void select(workItemId));
+
+        if (data['sound'] === true) {
+          playChime();
+        }
       }
 
       if (type === 'words') {

@@ -1211,13 +1211,16 @@ export class VoiceControl {
     return this.#terminalFocus ?? (focused === null ? null : (this.deps.windows.scope(focused)?.sessionId ?? null));
   }
 
-  /** A work item other than the voice target's started needing the operator: the process plays the needs-you sound. */
-  needsYou(workItemIds: number[], targetWorkItem: number | null): void {
+  /** A work item other than the voice target's started needing the operator: the process plays the needs-you sound. Returns whether it was sent. */
+  needsYou(workItemIds: number[], targetWorkItem: number | null): boolean {
     const settings = this.deps.settings();
 
     if (settings.enabled && settings.needsYouSound && this.#client !== null && workItemIds.some((id) => id !== targetWorkItem)) {
       this.#client.send({ type: 'earcon', kind: 'needs-you' });
+      return true;
     }
+
+    return false;
   }
 
   close(): void {

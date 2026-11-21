@@ -46,6 +46,7 @@ export function settings(patch: { sessions?: Partial<Settings['sessions']>; tria
     },
     schedules: patch.schedules ?? {},
     dock: DEFAULT_SETTINGS.dock,
+    alerts: DEFAULT_SETTINGS.alerts,
     voice: DEFAULT_SETTINGS.voice,
     web: DEFAULT_SETTINGS.web,
   };

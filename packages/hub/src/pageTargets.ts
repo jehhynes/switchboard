@@ -1,13 +1,15 @@
+import type { AlertSurface } from '@switchboard/core';
+
 /**
- * The open web pages the dock opens a work item in (PRD R71): whether each runs as the installed app, and when it last opened or gained focus,
- * so one page, the one used last, acts for the hub.
+ * The open web pages the dock opens a work item in and that raise needs-you alerts (PRD R65, R71): whether each runs as the installed app, and
+ * when it last opened or gained focus, so one page, the one used last, acts for the hub.
  */
 export class PageTargets {
-  readonly #pages = new Map<string, { installed: boolean; at: number }>();
+  readonly #pages = new Map<string, { installed: boolean; at: number; notifies: boolean }>();
   #clock = 0;
 
   opened(key: string, installed: boolean): void {
-    this.#pages.set(key, { installed, at: ++this.#clock });
+    this.#pages.set(key, { installed, at: ++this.#clock, notifies: false });
   }
 
   focused(key: string): void {
@@ -15,6 +17,15 @@ export class PageTargets {
 
     if (page !== undefined) {
       page.at = ++this.#clock;
+    }
+  }
+
+  /** Whether the browser lets the page show notifications, as the page reports it; a page that cannot alerts nobody, so the dock does. */
+  notifies(key: string, notifies: boolean): void {
+    const page = this.#pages.get(key);
+
+    if (page !== undefined) {
+      page.notifies = notifies;
     }
   }
 
@@ -27,8 +38,15 @@ export class PageTargets {
     return this.#latest((page) => page.installed);
   }
 
+  /**
+   * The page that raises needs-you alerts for `alerts.surface`, or null for the dock, among the pages that may show notifications: `auto` the
+   * installed page used last; `web` that, else any page used last; `dock` none.
+   */
+  alerting(surface: AlertSurface): string | null {
+    return surface === 'dock' ? null : (this.#latest((page) => page.notifies && page.installed) ?? (surface === 'web' ? this.#latest((page) => page.notifies) : null));
+  }
 
-  #latest(test: (page: { installed: boolean; at: number }) => boolean): string | null {
+  #latest(test: (page: { installed: boolean; at: number; notifies: boolean }) => boolean): string | null {
     let found: [string, number] | null = null;
 
     for (const [key, page] of this.#pages) {

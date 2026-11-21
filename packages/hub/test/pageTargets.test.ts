@@ -21,4 +21,28 @@ describe('PageTargets', () => {
     pages.closed('app2');
     expect(pages.installed()).toBeNull();
   });
+
+  it('alerts on the installed page for auto, on any page for web, and never for dock, only from pages that may show notifications', () => {
+    const pages = new PageTargets();
+
+    expect(pages.alerting('auto')).toBeNull();
+    expect(pages.alerting('web')).toBeNull();
+    pages.opened('tab1', false);
+    pages.opened('tab2', false);
+    // Without notifications a page cannot alert, so the dock does.
+    expect(pages.alerting('web')).toBeNull();
+    pages.notifies('tab1', true);
+    pages.notifies('tab2', true);
+    pages.focused('tab1');
+    expect(pages.alerting('auto')).toBeNull();
+    expect(pages.alerting('web')).toBe('tab1');
+    pages.opened('app', true);
+    pages.focused('tab2');
+    expect(pages.alerting('auto')).toBeNull();
+    expect(pages.alerting('web')).toBe('tab2');
+    pages.notifies('app', true);
+    expect(pages.alerting('auto')).toBe('app');
+    expect(pages.alerting('web')).toBe('app');
+    expect(pages.alerting('dock')).toBeNull();
+  });
 });

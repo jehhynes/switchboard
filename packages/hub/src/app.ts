@@ -379,7 +379,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   });
   // Pages whose own focus is on, and the page whose pane window has the focus, which counts as the page's (architecture.md § Pane state).
   const focusedPages = new Set<string>();
-  // The installed page a dock click opens a work item in (architecture.md § Web page).
+  // The installed page a dock click opens a work item in, and the page that raises needs-you alerts (architecture.md § Web page).
   const pageTargets = new PageTargets();
   let paneFocusedFor: string | null = null;
   const pane: PaneState = new PaneState({
@@ -683,7 +683,11 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       return paste === undefined ? null : pasteText(paste.file);
     },
     // A focused, visible page counts as a focused window for the voice (architecture.md § Web page).
-    pageFocused: (key, focused) => {
+    pageFocused: (key, focused, notify) => {
+      if (notify !== undefined) {
+        pageTargets.notifies(key, notify);
+      }
+
       if (focused) {
         focusedPages.add(key);
         pageTargets.focused(key);
@@ -720,7 +724,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     conversation.sessionsChanged();
     pane.update();
 
-    // The dock says when a work item starts needing the operator, which the windows no longer see (PRD R65).
+    // The dock or a web page says when a work item starts needing the operator, which the windows no longer see (PRD R65).
     const newly = newlyNeeding(announced, built.snapshot);
     const newlyNeedingIds = newly.map((item) => item.id);
     const needing = newly.flatMap((item) => {
@@ -730,12 +734,6 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     });
 
     announced = built.snapshot;
-
-    if (needing.length > 0) {
-      sendDock('needs', { items: needing.map(({ rowKey, message }) => ({ rowKey, message })) });
-      // The web page shows it as the dock does (architecture.md § Web page).
-      conversation.pageNeeds(needing.map(({ workItemId, message }) => ({ workItemId, message })));
-    }
 
     // Spoken alerts for the live Code Mode sessions' turns and waits; a work item alerted gets no needs-you sound as well (architecture.md § Spoken alerts).
     const alerted = voice.sessionsChanged(
@@ -747,11 +745,22 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     );
     // The needs-you sound, for a work item other than the voice target's (architecture.md § Voice).
     const targetSession = voice.target === null ? null : store.session(voice.target);
+    const unalerted = newlyNeedingIds.filter((id) => !alerted.includes(id));
+    const chimed = voice.needsYou(unalerted, targetSession?.workItemId ?? null);
 
-    voice.needsYou(
-      newlyNeedingIds.filter((id) => !alerted.includes(id)),
-      targetSession?.workItemId ?? null,
-    );
+    // One surface, `alerts.surface`, shows each needs-you message: a web page or the dock (architecture.md § Needs you).
+    if (needing.length > 0) {
+      const page = pageTargets.alerting(config.settings.alerts.surface);
+
+      if (page === null) {
+        sendDock('needs', { items: needing.map(({ rowKey, message }) => ({ rowKey, message })) });
+      } else {
+        // The page sounds only where neither the voice's chime nor a spoken alert does, so one event makes one sound.
+        const sound = config.settings.voice.needsYouSound && !chimed && unalerted.some((id) => id !== targetSession?.workItemId);
+
+        conversation.pageNeeds(page, needing.map(({ workItemId, message }) => ({ workItemId, message })), sound);
+      }
+    }
 
     for (const listener of builtListeners) {
       listener();
