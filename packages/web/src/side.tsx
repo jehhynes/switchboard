@@ -33,7 +33,7 @@ export function renderStatus(state: PageState, view: View, now: number): VNode {
         <span class="codicon codicon-pulse" aria-hidden="true"></span>
         <span class="status-label">{status.fallback ? 'Stage' : 'Status'}</span>
         <span class="status-age">
-          {stampTime(status.at)} · {ago(status.at, now)}
+          {trusted(stampTime(status.at))} · {ago(status.at, now)}
         </span>
         {status.unread ? <span class="status-new">New</span> : null}
       </div>
