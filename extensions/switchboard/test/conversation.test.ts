@@ -403,6 +403,12 @@ describe('the Conversation view page', () => {
     expect([...root.querySelector('li[data-id="t1"] .meta')!.children].map((child) => child.className)).toEqual(['meta-marks', 'stamp']);
     expect(root.querySelector('li[data-id="t1"] .meta-marks')!.innerHTML).toContain('class="delivery not-sent"');
     expect(rule('.meta .stamp')).toContain('margin-left: auto;');
+    // The notes above the composer and its error take its corners and sit 8 px above it.
+    expect(rule('.composer')).toContain('border-radius: 8px;');
+    for (const selector of ['.session-note', '.terminal-question', '.composer-error']) {
+      expect(rule(selector)).toMatch(/margin: 0 (auto|0) 8px;/);
+      expect(rule(selector)).toContain('border-radius: 8px;');
+    }
   });
 
   it('shows the time only on the first item after a day divider, each timed item\'s with message details on, and the rest as a tooltip', () => {

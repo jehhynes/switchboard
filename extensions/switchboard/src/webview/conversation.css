@@ -200,7 +200,7 @@ body.vscode-reduce-motion .composer .mic .codicon { animation: none; }
 .composer-tool .codicon { font-size: 16px; }
 .slash-glyph { font-family: var(--vscode-editor-font-family, monospace); font-size: 14px; line-height: 1; }
 #composer.drop-target .composer { outline: 2px dashed var(--vscode-focusBorder); outline-offset: 2px; }
-.composer-error { display: flex; align-items: flex-start; gap: 6px; margin: 0 0 6px; padding: 6px 4px 6px 10px; border: 1px solid var(--vscode-inputValidation-errorBorder, var(--vscode-errorForeground)); border-radius: 6px; background: var(--vscode-inputValidation-errorBackground, transparent); color: var(--vscode-foreground); }
+.composer-error { display: flex; align-items: flex-start; gap: 6px; margin: 0 0 8px; padding: 6px 4px 6px 10px; border: 1px solid var(--vscode-inputValidation-errorBorder, var(--vscode-errorForeground)); border-radius: 8px; background: var(--vscode-inputValidation-errorBackground, transparent); color: var(--vscode-foreground); }
 .composer-error[hidden] { display: none; }
 .composer-error-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .composer-error .dismiss { display: flex; flex: none; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; border: none; border-radius: 4px; cursor: pointer; color: inherit; background: transparent; }
@@ -302,10 +302,10 @@ body.vscode-high-contrast .conversation-row[aria-checked="true"], body.vscode-hi
 .question-submit:disabled { opacity: 0.5; cursor: not-allowed; }
 .status-tab .question-card { margin-top: 12px; }
 /* While an AskUserQuestion menu holds the session: a line over the composer, in the waiting colour, with Open in terminal. */
-.terminal-question { display: flex; flex: none; align-items: center; gap: 6px; margin: 0 auto 8px; width: calc(100% - 32px); max-width: 680px; box-sizing: border-box; padding: 6px 6px 6px 10px; border: 1px solid var(--vscode-inlineChatInput-border, var(--vscode-input-border, var(--vscode-widget-border, rgba(127, 127, 127, 0.4)))); border-radius: 6px; background: var(--vscode-input-background); }
+.terminal-question { display: flex; flex: none; align-items: center; gap: 6px; margin: 0 auto 8px; width: calc(100% - 32px); max-width: 680px; box-sizing: border-box; padding: 6px 6px 6px 10px; border: 1px solid var(--vscode-inlineChatInput-border, var(--vscode-input-border, var(--vscode-widget-border, rgba(127, 127, 127, 0.4)))); border-radius: 8px; background: var(--vscode-input-background); }
 .terminal-question > .codicon { color: var(--vscode-editorWarning-foreground); }
 /* An ended session's note, and the composer's "Sent" line on another tab: one line in the composer's width just above it. */
-.session-note { display: flex; flex: none; align-items: center; gap: 6px; margin: 0 auto 8px; width: calc(100% - 32px); max-width: 680px; box-sizing: border-box; padding: 6px 6px 6px 10px; border: 1px solid var(--vscode-inlineChatInput-border, var(--vscode-input-border, var(--vscode-widget-border, rgba(127, 127, 127, 0.4)))); border-radius: 6px; background: var(--vscode-input-background); }
+.session-note { display: flex; flex: none; align-items: center; gap: 6px; margin: 0 auto 8px; width: calc(100% - 32px); max-width: 680px; box-sizing: border-box; padding: 6px 6px 6px 10px; border: 1px solid var(--vscode-inlineChatInput-border, var(--vscode-input-border, var(--vscode-widget-border, rgba(127, 127, 127, 0.4)))); border-radius: 8px; background: var(--vscode-input-background); }
 .session-note > .codicon { color: var(--vscode-descriptionForeground); }
 .session-note-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .composer-sent { display: flex; align-items: center; gap: 4px; margin: 0 0 6px; color: var(--vscode-descriptionForeground); font-size: 0.9em; }
