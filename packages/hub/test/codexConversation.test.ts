@@ -188,4 +188,17 @@ describe('Codex conversation adapter and shared service',()=>{
     await vi.waitFor(()=>expect(p.store.message(id)).toBeNull());
     expect(p.runner.send).toHaveBeenCalledTimes(1);
   });
+  it('sends the window its thread\'s context size from Codex\'s token usage, and nothing to another window (architecture.md § Context meter)',async()=>{
+    const p=setup();await p.service.poll();
+    expect(p.frames[0]).toMatchObject({type:'hello',sessions:[{id:'s1',context:null}]});
+    p.emit({method:'thread/tokenUsage/updated',params:{threadId:'thread-1',turnId:'t1',tokenUsage:{total:{inputTokens:900_000,cachedInputTokens:0,outputTokens:1,reasoningOutputTokens:0,totalTokens:900_001},last:{inputTokens:60_000,cachedInputTokens:50_000,outputTokens:2_000,reasoningOutputTokens:500,totalTokens:62_000},modelContextWindow:258_400}}});
+    await p.service.poll();
+    expect(p.frames.filter(f=>f['type']==='session').at(-1)).toMatchObject({session:{id:'s1',context:{used:62_000,window:258_400,compactAt:null}}});
+    expect(p.others.some(f=>f['type']==='session'&&(f['session'] as Json)['id']==='s1')).toBe(false);
+    // An event of an unknown thread changes nothing.
+    const sent=p.frames.length;
+    p.emit({method:'thread/tokenUsage/updated',params:{threadId:'thread-9',turnId:'t1',tokenUsage:{total:{},last:{totalTokens:5}}}});
+    await p.service.poll();
+    expect(p.frames.length).toBe(sent);
+  });
 });

@@ -1327,3 +1327,15 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
   - The repeated lines are in the holder's own buffer, which the console's replay serializes and every attached terminal shows; the console writes its stream after a reset, once.
 - **Not verified:** Linux; the cause inside ConPTY or Claude Code's renderer; a banner repeated by a resize while it was at the screen's top edge, which the symptom suggests.
 - **Current use:** the web page's console gives the session its size only when it starts typing and when its pane holds other cells while it types, measured after its bar shows the typing state (architecture.md § Web page).
+
+## M105. Context size and auto-compact threshold in Claude Code and Codex, 2026-11-21
+
+Source inspection of the Claude Code VS Code extension 2.1.328 (`extension.js`, `webview/index.js`), the operator's Claude Code transcripts, and `codex app-server generate-json-schema --experimental` of Codex CLI 0.171.0.
+
+- Claude Code's panel counts a request's size as `input_tokens + cache_creation_input_tokens + cache_read_input_tokens + output_tokens` of its latest assistant message, and its context indicator puts the auto-compact threshold at `contextWindow - min(maxOutputTokens, 20000) - 13000`, with `contextWindow` and `maxOutputTokens` from the result's `modelUsage`. The indicator shows only once less than half remains, as a 20 px pie, with "N% of context remaining until auto-compact." and "Click to compact now." on hover; a click compacts.
+- Claude Code's model table gives each model's `context.window` and `max_output_tokens.default`: 200,000 for the Claude 3.x, Haiku 4.5, Sonnet 4.x and Opus 4.0 to 4.6 models, 1,000,000 natively for Opus 4.7 and later, Sonnet 5 and later, Haiku 5.5, Fable and Mythos, with 32,000 to 128,000 output. Sonnet 3.7 and 4.x and Opus 4.6 reach 1,000,000 with the `[1m]` suffix or the 1M beta.
+- Transcripts record the API model ID without the `[1m]` suffix: an `opus` session at 515,000 tokens wrote `claude-opus-5-5`. `compact_boundary` lines carry `compactMetadata.trigger`, `preTokens` and, in newer versions, `postTokens`. Two automatic compactions of `claude-opus-5-5` sessions happened at 966,902 and 969,719 tokens, at the formula's 967,000; others happened between 207,000 and 470,000, which settings such as `autoCompactWindow` (per model, or `auto` for "the window tuned for the model") and `CLAUDE_CODE_AUTO_COMPACT_WINDOW` move, so the formula is an upper bound.
+- Codex's app-server sends `thread/tokenUsage/updated {threadId, turnId, tokenUsage: {total, last, modelContextWindow}}`, each breakdown `{inputTokens, cachedInputTokens, outputTokens, reasoningOutputTokens, totalTokens}`; rollouts record `model_context_window` (258,400 for the operator's model). It reports no auto-compact threshold.
+
+Current use: [architecture.md](architecture.md) § Context meter.
+

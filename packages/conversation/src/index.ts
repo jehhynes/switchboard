@@ -1,5 +1,7 @@
 export * from './artifacts.js';
 export * from './commands.js';
+export * from './context.js';
+export * from './contextMeter.js';
 export * from './conversation.js';
 export * from './input.js';
 export * from './prompt.js';

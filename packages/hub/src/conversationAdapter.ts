@@ -1,5 +1,5 @@
 import type { ConversationMessage, Session } from '@switchboard/core';
-import type { ConversationChange, InputOutcome, SessionInput, SlashCommand } from '@switchboard/conversation';
+import type { ContextView, ConversationChange, InputOutcome, SessionInput, SlashCommand } from '@switchboard/conversation';
 
 export type SendGuard = NonNullable<Parameters<SessionInput['send']>[2]>;
 export type ResolveGuard = Parameters<SessionInput['resolve']>[4];
@@ -31,5 +31,7 @@ export interface ConversationAdapter {
   cannotSend(session: Session): string | null;
   close(): void;
   requests?(session: Session): NativeRequest[];
+  /** The session's context size as last read (architecture.md § Context meter), or null while it is not known. */
+  context?(session: Session): ContextView | null;
   answer?(session: Session, id: string, answer: unknown): Promise<void>;
 }

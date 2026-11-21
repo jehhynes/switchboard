@@ -905,6 +905,54 @@ describe('ConversationService', () => {
     expect(service.commands({ window: key, scopeGen: 1, sessionId: 7 })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } });
   });
 
+it("sends a window its session's context size from the transcript, again only when a main-chain request changes it (architecture.md § Context meter)", async () => {
+    const { view, service, transcript, open } = setup();
+    const usage = (uuid: string, tokens: number, extra: Record<string, unknown> = {}) =>
+      JSON.stringify({ type: 'assistant', uuid, timestamp: new Date(NOW).toISOString(), ...extra, message: { model: 'claude-sonnet-4-6', role: 'assistant', content: [{ type: 'text', text: 'ok' }], usage: { input_tokens: 2, cache_creation_input_tokens: 1_000, cache_read_input_tokens: tokens, output_tokens: 98 } } });
+    const lines = [usage('a1', 100_000)];
+
+    transcript('D:/w12', 'n2', lines);
+    const { frames, key } = open(view.file);
+
+    expect(frames[0]).toMatchObject({ type: 'hello', sessions: [{ id: 's2', context: { used: 101_100, window: 200_000, compactAt: 167_000, model: 'claude-sonnet-4-6' } }] });
+    // The first poll may send the session the hello already carried; a poll that reads nothing new sends nothing.
+    await service.poll();
+    const sent = frames.filter((frame) => frame.type === 'session').length;
+
+    await service.poll();
+    // A subagent's request is not the session's context.
+    lines.push(usage('a2', 150_000, { isSidechain: true }));
+    transcript('D:/w12', 'n2', lines);
+    await service.poll();
+    expect(frames.filter((frame) => frame.type === 'session')).toHaveLength(sent);
+
+    lines.push(usage('a3', 150_000));
+    transcript('D:/w12', 'n2', lines);
+    await service.poll();
+    await service.poll();
+    expect(frames.filter((frame) => frame.type === 'session').slice(sent)).toMatchObject([{ session: { id: 's2', context: { used: 151_100, window: 200_000, compactAt: 167_000 } } }]);
+
+    // A request that builds the session's view without sending it does not count as the window having the new size.
+    lines.push(usage('a4', 160_000));
+    transcript('D:/w12', 'n2', lines);
+    expect(service.send({ window: key, scopeGen: 1, opId: 'op-x', sessionId: 's2', launch: 'other', text: 'x' }).status).toBe(409);
+    await service.poll();
+    expect(frames.filter((frame) => frame.type === 'session').at(-1)).toMatchObject({ session: { context: { used: 161_100 } } });
+
+    // A compaction leaves the size its boundary gives.
+    lines.push(JSON.stringify({ type: 'system', subtype: 'compact_boundary', compactMetadata: { trigger: 'manual', preTokens: 151_100, postTokens: 20_000 } }));
+    transcript('D:/w12', 'n2', lines);
+    await service.poll();
+    expect(frames.filter((frame) => frame.type === 'session').at(-1)).toMatchObject({ session: { context: { used: 20_000 } } });
+  });
+
+  it('marks the context unknown for a session with no transcript yet', () => {
+    const { view, open } = setup();
+    const { frames } = open(view.file);
+
+    expect(frames[0]).toMatchObject({ type: 'hello', sessions: [{ id: 's2', context: null }] });
+  });
+
   it("tells a window its session's new state once, and starts a moved window from a fresh hello", () => {
     const { view, service, open, store, scopes } = setup();
     const { frames, key } = open(view.file);

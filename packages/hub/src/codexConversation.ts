@@ -2,7 +2,8 @@ import type { ConversationMessage, Session, Store } from '@switchboard/core';
 import { AppServer, AppServerError, AppServerRunner, items, object } from '@switchboard/codex';
 import type { Json } from '@switchboard/codex';
 import { ConversationLog } from '@switchboard/conversation';
-import type { SlashCommand } from '@switchboard/conversation';
+import { codexContext } from '@switchboard/conversation';
+import type { ContextView, SlashCommand } from '@switchboard/conversation';
 import type { ConversationAdapter, ConversationChanged, DeliveryOutcome, NativeRequest, ResolveGuard, SendGuard } from './conversationAdapter.js';
 
 const UNKNOWN = 'Codex did not confirm delivery. Switchboard will check its history; check the terminal before resending.';
@@ -29,6 +30,8 @@ export class CodexConversationAdapter implements ConversationAdapter {
   #buffered = new Map<string, Json[]>();
   #uncertainChecks = new Map<string, number>();
   #toolItems = new Map<string, Json>();
+  /** Each thread's context size from its latest `thread/tokenUsage/updated`, by session; unknown until the first after the hub started. */
+  #contexts = new Map<string, ContextView>();
   readonly #unlisten: () => void;
   #closed = false;
 
@@ -39,6 +42,7 @@ export class CodexConversationAdapter implements ConversationAdapter {
   cannotSend(session: Session): string | null { return this.#errors.get(session.id) ?? null; }
   close(): void { this.#closed = true; this.#unlisten(); this.#logs.clear(); this.#requests.clear(); }
   commands(session: Session): SlashCommand[] { return this.#commands.get(session.id) ?? []; }
+  context(session: Session): ContextView | null { return this.supports(session) ? (this.#contexts.get(session.id) ?? null) : null; }
   requests(session: Session): NativeRequest[] { return [...this.#requests.values()].filter(r => r.sessionId === session.id && r.generation === this.deps.server.generation).map(r => r.view); }
 
   #log(session: Session): ConversationLog {
@@ -128,10 +132,18 @@ export class CodexConversationAdapter implements ConversationAdapter {
   }
 
   #event(event: Json): void {
-    if (!['item/started', 'item/completed', 'serverRequest/resolved', 'turn/completed'].includes(String(event['method'])) && event['id'] === undefined) return;
+    if (!['item/started', 'item/completed', 'serverRequest/resolved', 'turn/completed', 'thread/tokenUsage/updated'].includes(String(event['method'])) && event['id'] === undefined) return;
     const params = object(event['params']);
     const session = typeof params['threadId'] === 'string' ? this.deps.store.sessionByNativeId(params['threadId']) : null;
     if (session === null || !this.supports(session) || session.state === 'ended') return;
+    if (event['method'] === 'thread/tokenUsage/updated') {
+      // The latest request's tokens are what the thread holds now (architecture.md § Context meter).
+      const usage = object(params['tokenUsage']);
+      const used = object(usage['last'])['totalTokens'];
+      const window = usage['modelContextWindow'];
+      if (typeof used === 'number' && used > 0) this.#contexts.set(session.id, codexContext(used, typeof window === 'number' ? window : null));
+      return;
+    }
     if (event['method'] === 'item/started' && object(params['item'])['type'] === 'fileChange') {
       const item = object(params['item']);
       this.#toolItems.set(`${session.id}:${String(item['id'])}`, item);

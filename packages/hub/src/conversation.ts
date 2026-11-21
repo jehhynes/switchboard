@@ -4,7 +4,7 @@ import { artifactsDir, hostKey, PERMISSION_PROMPT, personaById, sessionTone, STA
 import type { PersonaSettings } from '@switchboard/core';
 import { ArtifactFolder, MAX_MESSAGE_CHARS, NotWritten, interruptNote, messageTags, pasteText } from '@switchboard/conversation';
 import { promptKeyData, readPrompt, screenRows, stepsText, TYPING_PAUSE_MS } from '@switchboard/conversation';
-import type { Artifact, ConversationChange, HeardTag, InputOutcome, InputSteps, PromptKey, ScreenPrompt, SlashCommand } from '@switchboard/conversation';
+import type { Artifact, ContextView, ConversationChange, HeardTag, InputOutcome, InputSteps, PromptKey, ScreenPrompt, SlashCommand } from '@switchboard/conversation';
 import { SESSION_ENDED, SESSION_RELAUNCHED } from './runtime.js';
 import { canonicalFolder } from './windows.js';
 import { artifactFile, findFiles, knownFolder, MAX_INPUT_CHARS } from './page.js';
@@ -55,6 +55,8 @@ export interface SessionView {
    * next attempt rather than the reset. Absent from an older hub.
    */
   limit?: { until: number; retry: boolean } | null;
+  /** The session's context size (architecture.md § Context meter), null while not known. Absent from an older hub. */
+  context?: ContextView | null;
 }
 
 /** The voice settings a session's persona is read from. */
@@ -397,6 +399,26 @@ export class ConversationService {
       catch (error) { this.deps.log(`conversation read failed: ${String(error)}`); }
       finally { this.#polling.delete(adapter); }
     }));
+    this.#contextChanged();
+  }
+
+  /** The context size each window was last sent with its session, by window key, so a size read since sends it again (architecture.md § Context meter). */
+  readonly #contexts = new Map<string, string>();
+
+  /** Sends the windows their sessions again when a shown session's context size differs from the one a window was last sent. */
+  #contextChanged(): void {
+    if (this.#closed) return;
+    let changed = false;
+    const read = new Map<string, string>();
+    for (const key of this.#streams.keys()) {
+      const id = this.deps.windows.scope(key)?.sessionId;
+      const session = id == null ? null : this.deps.store.session(id);
+      if (session === null) continue;
+      if (!read.has(session.id)) read.set(session.id, JSON.stringify(this.#adapter(session)?.context?.(session) ?? null));
+      if (this.#contexts.get(key) !== read.get(session.id)) changed = true;
+    }
+    for (const key of this.#contexts.keys()) if (!this.#streams.has(key)) this.#contexts.delete(key);
+    if (changed) this.#sendSessions();
   }
 
   /** Reads the conversations of these sessions at once, between polls, so a turn's last reply is in the store when its end is decided (PRD R103). */
@@ -421,9 +443,9 @@ export class ConversationService {
   #adapter(session: Session): ConversationAdapter | undefined { return this.#adapters.find(adapter => adapter.supports(session)); }
 
   #view(session: Session, current: boolean, hooks: boolean, personas: PersonaView | null = null): SessionView {
-    const view = sessionView(session, current, hooks, personas);
-    if (session.execution !== 'app-server') return view;
     const adapter = this.#adapter(session);
+    const view = { ...sessionView(session, current, hooks, personas), context: adapter?.context?.(session) ?? null };
+    if (session.execution !== 'app-server') return view;
     return { ...view, provider: 'codex', requests: adapter?.requests?.(session) ?? [], reason: adapter?.cannotSend(session) ?? view.reason };
   }
 
@@ -1165,11 +1187,14 @@ export class ConversationService {
     }
 
     const folder = this.#artifactFolder(scope, key);
+    const session = current === null ? null : this.#view(current, true, this.deps.hooks(), this.deps.personas?.() ?? null);
+
+    this.#contexts.set(key, JSON.stringify(session?.context ?? null));
 
     return {
       protocol: CONVERSATION_PROTOCOL,
       scope: view,
-      sessions: current === null ? [] : [this.#view(current, true, this.deps.hooks(), this.deps.personas?.() ?? null)],
+      sessions: session === null ? [] : [session],
       items: page.items.filter((item) => !item.withdrawn).map(itemView),
       more: page.more,
       status,
@@ -1466,6 +1491,16 @@ export class ConversationService {
 
   /** Sends each window its current session again when its state changed, which the header's icon shows. */
   sessionsChanged(): void {
+    this.#sendSessions();
+
+    // A stage reported before the session's first status.
+    this.#statusChanged(this.#streams.keys());
+    this.conversationsChanged();
+    this.deps.voice?.update();
+  }
+
+  /** Sends each window its current session when its view differs from the one it was last sent. */
+  #sendSessions(): void {
     for (const key of this.#streams.keys()) {
       const scope = this.deps.windows.scope(key);
       const session = scope?.sessionId == null ? null : this.deps.store.session(scope.sessionId);
@@ -1477,16 +1512,13 @@ export class ConversationService {
       const view = this.#view(session, true, this.deps.hooks(), this.deps.personas?.() ?? null);
       const text = JSON.stringify(view);
 
+      this.#contexts.set(key, JSON.stringify(view.context ?? null));
+
       if (this.#shown.get(key) !== text) {
         this.#shown.set(key, text);
         this.#send(key, 'session', { session: view });
       }
     }
-
-    // A stage reported before the session's first status.
-    this.#statusChanged(this.#streams.keys());
-    this.conversationsChanged();
-    this.deps.voice?.update();
   }
 
   /**

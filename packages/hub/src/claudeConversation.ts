@@ -2,8 +2,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ConversationMessage, Session } from '@switchboard/core';
 import { findTranscript } from '@switchboard/claude';
-import { SessionCommands, SessionConversation, SessionInput, SNAPSHOT_SCROLLBACK, readSnapshot } from '@switchboard/conversation';
-import type { InputOutcome, SlashCommand } from '@switchboard/conversation';
+import { SessionCommands, SessionConversation, SessionInput, SNAPSHOT_SCROLLBACK, TranscriptContext, readSnapshot } from '@switchboard/conversation';
+import type { ContextView, InputOutcome, SlashCommand } from '@switchboard/conversation';
 import type { ConversationServiceDeps } from './conversation.js';
 import type { ConversationAdapter, ConversationChanged, SendGuard, ResolveGuard } from './conversationAdapter.js';
 
@@ -27,13 +27,38 @@ export class ClaudeConversationAdapter implements ConversationAdapter {
   readonly #readers = new Map<string, Reader>();
   readonly #inputs = new Map<string, SessionInput>();
   readonly #commands = new Map<string, SessionCommands>();
+  /** Each shown session's context reading, with the transcript it reads, found again only when the Claude session ID changes. */
+  readonly #contexts = new Map<string, { nativeSessionId: string; path: string | null; reader: TranscriptContext }>();
   readonly #ansiTheme: boolean;
   constructor(private readonly deps: ConversationServiceDeps, private readonly changed: ConversationChanged) {
     this.#ansiTheme = ansiTheme(deps.claudeConfig);
   }
   supports(session: Session): boolean { return session.codeMode === true; }
   cannotSend(): string | null { return this.deps.input.cannotType(); }
-  close(): void { this.#readers.clear(); this.#commands.clear(); }
+  close(): void { this.#readers.clear(); this.#commands.clear(); this.#contexts.clear(); }
+  context(session: Session): ContextView | null {
+    const native = session.nativeSessionId;
+
+    if (!this.supports(session) || native === null) {
+      this.#contexts.delete(session.id);
+      return null;
+    }
+
+    let context = this.#contexts.get(session.id);
+
+    if (context?.nativeSessionId !== native) {
+      const reader = this.#readers.get(session.id);
+      const path = reader?.path?.nativeSessionId === native ? reader.path.path : (findTranscript(this.deps.projectsDir, session.cwd, native)?.path ?? null);
+
+      context = { nativeSessionId: native, path, reader: context?.reader ?? new TranscriptContext() };
+      this.#contexts.set(session.id, context);
+    } else if (context.path === null) {
+      // A transcript not written yet when first looked for.
+      context.path = this.#readers.get(session.id)?.path?.path ?? null;
+    }
+
+    return context.reader.read(context.path);
+  }
   async poll(sessions: Session[]): Promise<void> {
     const live = sessions.filter(session => this.supports(session) && session.nativeSessionId !== null && session.state !== 'starting');
     for (const session of live) await this.#read(session);
