@@ -24,8 +24,7 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 5. Mark colours (M3): the dock and the web page colour marks by different rules; one of them should change.
 6. Keyboard (K2, K4, K5, O3, O4): no arrow-key walk, F8, menu key, drag or Alt+arrow reordering.
 7. Voice mark (R3): the page does not show which row the voice speaks for.
-8. Pool row click (R20): a pool ticket's click opens its menu on the page and its triage focus in the dock; the operator approves that as Differs, or one side changes.
-9. Web-only behaviours the dock lacks (R8, C13, G10, H7): a hosted conversation's host on line 2, Stop asking first, the selected row kept in a collapsed group.
+8. Web-only behaviours the dock lacks (R8, C13, G10, H7): a hosted conversation's host on line 2, Stop asking first, the selected row kept in a collapsed group.
 
 ## Groups
 
@@ -78,7 +77,7 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 | R17 | Line 3 shows the mark's title when the row has no details, and is absent with neither | `orMarkTitle` dock.ts:411, `HasThirdLine` ViewModels.cs:1133 | Present | render.ts:256 |
 | R18 | Line 3 texts from the hub: wait reasons, rate limit (`Rate limited · resumes…`), blockers in the warning tone, wake time and snooze comment, warning and error, `From <key>`, approval summary or stage with its age, stale stage in the warning tone | `itemRow` dock.ts:386-393, `limitTexts` rows.ts:666, `wake` dock.ts:487 | Present | Same `details` through `pageList` |
 | R19 | Row separator rule above each row but the first in its band | MainWindow.axaml:169-177 | Partly | page.css:34-35: the first in its group, since Done has no bands (G8) |
-| R20 | Pool tickets (Unstarted, Snoozed) show as rows with Start or Triage again | `poolRow` dock.ts:415 | Partly | Listed with the dock's three lines by `pageList` page.ts (`ticketId`, no `workItemId`); a pool ticket has no conversation, so a click opens its menu under the row, where the dock's click opens its triage focus in the browser (`.wip/web-row-controls-notes.md`, pending the operator) |
+| R20 | Pool tickets (Unstarted, Snoozed) show as rows with Start or Triage again | `poolRow` dock.ts:415 | Differs | Listed with the dock's three lines by `pageList` page.ts (`ticketId`, no `workItemId`); a pool ticket has no conversation, so a click opens its menu under the row (Start, Triage again …), where the dock's click opens its triage focus in the browser; operator approved 2026-11-21 |
 | R21 | No unread count on rows: no work item list shows unread (architecture.md § Unread) | (dropped in `a7274f7`) | Present | `PageRow` page.ts:205 carries none and `listRow` render.ts:225 draws none |
 | R22 | The selected row's buttons beside lines 2 and 3: main control (Approve in the accent colour, its prompt in the tooltip), Copy, Open report; hidden on other rows and on rows with none | MainWindow.axaml:577-591, 126-134, `mainTitle` rows.ts:139 | Partly | The main control is a button in the conversation header, not on the row (`renderActions` render.ts:94-95); Copy and Open report are in the actions menu |
 
