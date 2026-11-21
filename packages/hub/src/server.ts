@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { pipeline } from 'node:stream';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import type { HubIdentity } from '@switchboard/core';
-import { ARTIFACT_CSP, cookieValue, loopbackHost, PAGE_COOKIE, PAGE_CSP, pageCookie, PUBLIC_PAGE_FILES, SIGNED_OUT_HTML } from './page.js';
+import { ARTIFACT_CSP, CONSOLE_QUEUE_BYTES, cookieValue, loopbackHost, PAGE_COOKIE, PAGE_CSP, pageCookie, PUBLIC_PAGE_FILES, SIGNED_OUT_HTML } from './page.js';
 import type { PageAccess } from './page.js';
 import { MAX_UPLOAD_BYTES } from './uploads.js';
 
@@ -64,13 +64,18 @@ export interface PageRoutes {
   artifact(key: string, name: string): { path: string; mime: string; sandboxed: boolean } | null;
   /** Writes a file the page's composer attaches, for a page key at the `scopeGen` it showed: `{path, image}`, or why not. */
   upload(key: string, scopeGen: number, name: string, bytes: Uint8Array): Reply;
+  /**
+   * Opens a page's console on a session (architecture.md § Web page), writing its SSE events with `send` and ending the stream with `end`; a refusal
+   * with no stream for a key that is not a page's or a session it does not show.
+   */
+  console?(key: string, sessionId: string, send: (event: string, data: unknown) => boolean, end: () => void): { close(): void } | { status: number; error: string };
 }
 
 /**
  * The conversation commands a page may post with its cookie; never `new-conversation`, since a page hosts none: its New conversation… is
- * `page-conversation`, hosted by the shown conversation's folder. `row-action`, `row-paste`, `resume`, `prompt` and `prompt-key` take only a page key.
+ * `page-conversation`, hosted by the shown conversation's folder. `row-action`, `row-paste`, `resume`, `prompt`, `prompt-key` and `console-input` take only a page key.
  */
-export const PAGE_COMMANDS = new Set(['send', 'history', 'seen', 'select', 'statuses', 'commands', 'answer', 'talk-here', 'stop-speaking', 'speak-replies', 'replay', 'personas', 'persona', 'page-focus', 'row-action', 'row-paste', 'resume', 'prompt', 'prompt-key', 'mic', 'composer', 'providers', 'page-conversation']);
+export const PAGE_COMMANDS = new Set(['send', 'history', 'seen', 'select', 'statuses', 'commands', 'answer', 'talk-here', 'stop-speaking', 'speak-replies', 'replay', 'personas', 'persona', 'page-focus', 'row-action', 'row-paste', 'resume', 'prompt', 'prompt-key', 'mic', 'composer', 'providers', 'page-conversation', 'console-input']);
 
 export interface HubServer {
   port: number;
@@ -392,7 +397,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
   /** The web page's routes (architecture.md § Web page); false for any other request. */
   const servePage = (request: IncomingMessage, response: ServerResponse, url: URL): boolean => {
     const path = url.pathname;
-    const isPageRoute = path === '/page' || path.startsWith('/page/') || path === '/v1/page/list' || path.startsWith('/v1/conversation/artifact/') || (path === '/v1/conversation/events' && url.searchParams.has('page')) || path === '/v1/conversation/files';
+    const isPageRoute = path === '/page' || path.startsWith('/page/') || path === '/v1/page/list' || path.startsWith('/v1/conversation/artifact/') || (path === '/v1/conversation/events' && url.searchParams.has('page')) || path === '/v1/conversation/files' || path === '/v1/conversation/console';
     const bearer = request.headers.authorization !== undefined;
     const cookiePost = request.method === 'POST' && !bearer && path.startsWith('/v1/conversation/') && request.headers.cookie !== undefined;
 
@@ -520,6 +525,45 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     }
 
     const window = url.searchParams.get('window') ?? '';
+
+    // The console of the page's selected conversation (architecture.md § Web page): the held session's screen and output as SSE events.
+    if (request.method === 'GET' && path === '/v1/conversation/console') {
+      const sessionId = url.searchParams.get('sessionId') ?? '';
+      const send = (event: string, data: unknown): boolean => {
+        if (response.writableEnded) {
+          return false;
+        }
+
+        response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        return response.writableLength <= CONSOLE_QUEUE_BYTES;
+      };
+      const end = (): void => {
+        pageStreams.delete(response);
+        response.end();
+      };
+
+      if (page.console === undefined) {
+        json(response, 404, { error: 'not found' });
+        return true;
+      }
+
+      response.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
+      pageStreams.set(response, page.access.sessionOf(request.headers.cookie));
+
+      const opened = page.console(window, sessionId, send, end);
+
+      if ('status' in opened) {
+        send('unavailable', { reason: opened.error });
+        end();
+        return true;
+      }
+
+      request.on('close', () => {
+        pageStreams.delete(response);
+        opened.close();
+      });
+      return true;
+    }
 
     if (request.method === 'GET' && path === '/v1/conversation/files') {
       if (!page.isPage(window)) {

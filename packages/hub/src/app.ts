@@ -24,6 +24,7 @@ import { Runtime } from './runtime.js';
 import type { ReportBody, RuntimeDeps } from './runtime.js';
 import { WindowQueue } from './windowQueue.js';
 import { ConversationService, claudePaths, sessionView } from './conversation.js';
+import { PageConsole } from './console.js';
 import { CodexConversationAdapter } from './codexConversation.js';
 import { runAppServerDebrief } from '@switchboard/codex';
 import { alertDetail, alertKind, VoiceControl } from './voice.js';
@@ -412,6 +413,17 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     // The dock's mic mark and voice note are added to its view as it is sent.
     dockChanged: builtNow,
     now: deps.now,
+    log: deps.log,
+  });
+  // The web page's console of a held session (architecture.md § Web page).
+  const pageConsole = new PageConsole({
+    isPage: (key) => scopes.isPage(key),
+    scope: (key) => scopes.scope(key),
+    session: (id) => store.session(id),
+    view: (session, handlers) => runtime.viewHeld(session, handlers),
+    reserve: (sessionId, launch) => runtime.reserveInput(sessionId, launch),
+    write: (session, data) => runtime.writeHeld(session, data, true),
+    size: (session, cols, rows) => runtime.sizeHeld(session, cols, rows),
     log: deps.log,
   });
   const conversation: ConversationService = new ConversationService({
@@ -821,6 +833,7 @@ const dockWithRuns = () => {
       '/v1/conversation/personas': async (body) => (isRecord(body) ? conversation.personaCommand('personas', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId}.' } }),
       '/v1/conversation/row-action': async (body) => (isRecord(body) ? conversation.rowAction(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId, action}.' } }),
       '/v1/conversation/prompt': async (body) => (isRecord(body) ? conversation.prompt(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } }),
+      '/v1/conversation/console-input': async (body) => (isRecord(body) ? pageConsole.input(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, data, cols?, rows?}.' } }),
       '/v1/conversation/prompt-key': async (body) => (isRecord(body) ? conversation.promptKey(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, prompt, key}.' } }),
       '/v1/conversation/page-conversation': async (body) => (isRecord(body) ? conversation.pageConversation(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, provider?}.' } }),
       '/v1/conversation/resume': async (body) => (isRecord(body) ? conversation.resume(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } }),
@@ -1119,6 +1132,7 @@ const dockWithRuns = () => {
       files: (key, query) => conversation.files(key, query),
       artifact: (key, name) => conversation.artifactFile(key, name),
       upload: (key, scopeGen, name, bytes) => conversation.pageUpload(key, scopeGen, name, bytes),
+      console: (key, sessionId, send, end) => pageConsole.open(key, sessionId, send, end),
     },
     pagePort: () => config.settings.web.port,
     dock: () => dockWithRuns(),
@@ -1149,6 +1163,7 @@ const dockWithRuns = () => {
       clearTimeout(pending);
       clearInterval(debriefTimer);
       voice.close();
+      pageConsole.close();
       conversation.stop();
       builder.close();
       runtime.stop();

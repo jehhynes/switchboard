@@ -11,7 +11,7 @@ import { activeSession, ADHOC_SOURCE, artifactsDir, awaitsRecheck, QUESTION_CARD
 import { noKind } from './config.js';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
-import { HolderError, recordPath } from '@switchboard/holder';
+import { HolderError, Viewer, recordPath } from '@switchboard/holder';
 import { answers, NotWritten, unansweredCard } from '@switchboard/conversation';
 import type { SessionEntry } from '@switchboard/holder';
 import { findHeld, heldFromHolder } from './held.js';
@@ -68,6 +68,21 @@ export const SESSION_RELAUNCHED = 'The session was resumed since the view showed
 export function holderCannotType(stopAll: string): string {
   return `The terminal holder is from an older build and cannot type. To switch to this build, run ${stopAll} in a terminal: it lists the sessions that end with the holder, each of which can be resumed, and ends them when run again with --yes. Until then, open the session in the terminal.`;
 }
+/** Why the web page's console cannot show a held session: its holder is from an older build; `stopAll` replaces it, as for `holderCannotType`. */
+export function holderCannotView(stopAll: string): string {
+  return `The terminal holder is from an older build and cannot show its sessions here. To switch to this build, run ${stopAll} in a terminal: it lists the sessions that end with the holder, each of which can be resumed, and ends them when run again with --yes. Until then, open the session in the terminal.`;
+}
+
+/** What the web page's console hears from a held session it watches (architecture.md § Web page). */
+export interface HeldViewHandlers {
+  onSize(cols: number, rows: number): void;
+  onData(data: string): void;
+  onReplayed(): void;
+  onExit(exitCode: number | null): void;
+  /** The holder ended the view, with why when it was not the program's exit. */
+  onClose(error: string | null): void;
+}
+
 /** How long `POST /attach` defers a held session's end for its client to connect (architecture.md § Code Mode sessions). */
 export const ATTACH_RESERVATION_MS = 15_000;
 
@@ -1709,8 +1724,53 @@ export class Runtime {
     return holder === null || (holder.write !== undefined && (holder.welcome.features ?? []).includes('write')) ? null : holderCannotType(this.holderStopCommand);
   }
 
-  /** Types into a held session through the connection the roster reads keep (architecture.md § Typing a message). */
-  async writeHeld(session: string, data: string): Promise<{ rev: number }> {
+  /**
+   * Watches a held session for the web page's console (architecture.md § Web page) on a connection of its own, which never resizes the session;
+   * rejects with why when no holder runs, it is from an older build or it does not hold the session. It never starts a holder.
+   */
+  async viewHeld(session: string, handlers: HeldViewHandlers): Promise<{ close(): void }> {
+    const found = await this.holder.find(false);
+    const record = this.holder.record();
+
+    if (!('holder' in found) || record === null) {
+      throw new Error('The terminal holder is not running, so the session has no console. Resume continues it.');
+    }
+
+    if (!found.holder.compatible || !(found.holder.welcome.features ?? []).includes('view')) {
+      throw new Error(holderCannotView(this.holderStopCommand));
+    }
+
+    return Viewer.open({
+      ...record,
+      session,
+      onSize: (cols, rows) => handlers.onSize(cols, rows),
+      onData: (data) => handlers.onData(data),
+      onReplayed: () => handlers.onReplayed(),
+      onExit: (exitCode) => handlers.onExit(exitCode),
+      onClose: (error) => handlers.onClose(error === null ? null : /^No session .* is held\.$/.test(error.message) ? 'The terminal holder no longer holds this session. Resume continues it.' : error.message),
+    });
+  }
+
+  /** Resizes a held session for the web page's console that types into it, without attaching (architecture.md § Web page). */
+  async sizeHeld(session: string, cols: number, rows: number): Promise<void> {
+    const holder = this.holder.connected();
+
+    if (holder === null || holder.size === undefined || !(holder.welcome.features ?? []).includes('view')) {
+      throw new NotWritten(holder === null ? 'The terminal holder is not connected.' : holderCannotView(this.holderStopCommand));
+    }
+
+    try {
+      await holder.size(session, cols, rows);
+    } catch (error) {
+      throw error instanceof HolderError && error.refused ? new NotWritten(error.message) : error;
+    }
+  }
+
+  /**
+   * Types into a held session through the connection the roster reads keep (architecture.md § Typing a message); `key` marks a key typed in the
+   * web page's console, which counts as a key typed in a terminal.
+   */
+  async writeHeld(session: string, data: string, key = false): Promise<{ rev: number }> {
     const holder = this.holder.connected();
 
     if (holder === null) {
@@ -1722,7 +1782,7 @@ export class Runtime {
     }
 
     try {
-      return await holder.write(session, data);
+      return await (key ? holder.write(session, data, true) : holder.write(session, data));
     } catch (error) {
       // A refusal did nothing; a lost connection may have delivered the input.
       throw error instanceof HolderError && error.refused ? new NotWritten(error.message) : error;

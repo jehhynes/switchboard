@@ -10,6 +10,9 @@ import type { DockRow, DockView } from './dock.js';
 import type { RowGroup } from './rows.js';
 import type { Snapshot } from './snapshot.js';
 
+/** Output queued for a page's console stream beyond this ends the stream, as the holder drops a client that does not read. */
+export const CONSOLE_QUEUE_BYTES = 8 * 1024 * 1024;
+
 /** The cookie a page holds once it exchanged its one-time link (architecture.md § Web page). */
 export const PAGE_COOKIE = 'sb_page';
 /** How long a page link can be opened. */

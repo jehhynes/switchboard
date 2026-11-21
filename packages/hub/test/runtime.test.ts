@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer as createNetServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { ClaudeRunner, conversationRules, projectSlug } from '@switchboard/claude';
@@ -3716,6 +3717,90 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
       expect(context.runtime.heldHolder()).toMatchObject({ protocol: 1 });
       await expect(context.runtime.writeHeld('s1', 'x')).rejects.toThrow(new NotWritten(cannotType!));
       context.runtime.stop();
+    });
+
+    it("shows a held session in the page's console and resizes it only through a holder that serves view", async () => {
+      const context = await attaching(resumer());
+
+      await context.runtime.readRoster();
+
+      const handlers = { onSize: () => undefined, onData: () => undefined, onReplayed: () => undefined, onExit: () => undefined, onClose: () => undefined };
+
+      await expect(context.runtime.viewHeld('s1', handlers)).rejects.toThrow(/^The terminal holder is from an older build and cannot show its sessions here\. To switch to this build, run .* holder stop --all/);
+      await expect(context.runtime.sizeHeld('s1', 100, 30)).rejects.toBeInstanceOf(NotWritten);
+      context.runtime.stop();
+    });
+
+    it("streams a held session to the page's console over its own view connection, and resizes and types with a key through the holder", async () => {
+      const context = await attaching(resumer());
+      const calls: string[] = [];
+      const fake = createNetServer((socket) => {
+        let buffer = '';
+
+        socket.on('data', (chunk) => {
+          buffer += chunk.toString('utf8');
+
+          for (let index = buffer.indexOf('\n'); index !== -1; index = buffer.indexOf('\n')) {
+            const message = JSON.parse(buffer.slice(0, index)) as { type: string; token?: string; session?: string };
+
+            buffer = buffer.slice(index + 1);
+            calls.push(message.type === 'hello' ? `hello ${message.token}` : `${message.type} ${message.session}`);
+
+            if (message.type === 'hello') {
+              socket.write(JSON.stringify({ type: 'welcome', protocol: 1, build: 'b', pid: 4243, features: ['snapshot', 'write', 'view'] }) + '\n');
+            } else if (message.type === 'view') {
+              for (const line of [{ type: 'resized', cols: 80, rows: 24 }, { type: 'replay', data: 'screen' }, { type: 'replayed' }, { type: 'output', data: 'more' }, { type: 'exited', exitCode: 0 }]) {
+                socket.write(JSON.stringify(line) + '\n');
+              }
+
+              socket.end();
+            }
+          }
+        });
+      });
+
+      await new Promise<void>((done) => fake.listen(0, '127.0.0.1', done));
+      writeFileSync(recordPath(join(home, '.switchboard')), JSON.stringify({ protocol: 1, build: 'b', port: (fake.address() as { port: number }).port, token: 'holder-token', pid: 4243, startedAt: '2026-11-18T00:00:00.000Z' }));
+      context.runtime.stop();
+
+      const connection: HolderConnection = {
+        welcome: { protocol: 1, build: 'b', pid: 4243, features: ['snapshot', 'write', 'view'] },
+        compatible: true,
+        spawn: async () => ({ session: 's', pid: 1 }),
+        list: async () => context.entries,
+        kill: async () => 0,
+        screen: async () => ({ head: '', text: '' }),
+        write: async (session, data, key) => {
+          calls.push(`write ${session} ${data} ${String(key)}`);
+          return { rev: 1 };
+        },
+        size: async (session, cols, rows) => {
+          calls.push(`size ${session} ${cols}x${rows}`);
+          return { rev: 1 };
+        },
+        shutdown: async () => {},
+        onClose: () => {},
+        close: () => {},
+      };
+      const viewing = setup(config({ installHooks: true }), () => T0, { claude: fakeRunner(), codeMode: resumer() }, new FakeCodex(), {}, { holder: { connect: async () => connection, lockHeld: async () => true } });
+      const seen: string[] = [];
+      const closed = new Promise<string | null>((done) => {
+        void viewing.runtime.viewHeld('s1', {
+          onSize: (cols, rows) => seen.push(`size ${cols}x${rows}`),
+          onData: (data) => seen.push(data),
+          onReplayed: () => seen.push('replayed'),
+          onExit: (exitCode) => seen.push(`exited ${String(exitCode)}`),
+          onClose: done,
+        });
+      });
+
+      expect(await closed).toBeNull();
+      expect(seen).toEqual(['size 80x24', 'screen', 'replayed', 'more', 'exited 0']);
+      await viewing.runtime.sizeHeld('s1', 100, 30);
+      await viewing.runtime.writeHeld('s1', 'k', true);
+      expect(calls).toEqual(['hello holder-token', 'view s1', 'size s1 100x30', 'write s1 k true']);
+      viewing.runtime.stop();
+      await new Promise((done) => fake.close(done));
     });
     describe('held sessions (PRD R94)', () => {
       const CLAUDE = '9273f594-1111-4222-8333-444455556666';

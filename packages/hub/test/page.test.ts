@@ -343,6 +343,7 @@ describe('the web page routes', () => {
     const posted: unknown[] = [];
     const uploaded: unknown[] = [];
     const closed: string[] = [];
+    const consoles: string[] = [];
     const pages = new Set<string>();
     let keys = 0;
     const folder = join(dir, 'w1');
@@ -366,6 +367,15 @@ describe('the web page routes', () => {
       upload: (key, scopeGen, name, bytes) => {
         uploaded.push({ key, scopeGen, name, bytes: Buffer.from(bytes).toString('utf8') });
         return { status: 200, body: { path: 'C:\\Temp\\a.txt', image: false } };
+      },
+      console: (key, sessionId, write) => {
+        if (key !== 'page-1' || sessionId !== 's1') {
+          return { status: 403, error: 'Not in this window.' };
+        }
+
+        write('size', { cols: 80, rows: 24 });
+        write('data', { data: 'hello\r\n' });
+        return { close: () => consoles.push(`closed ${key}`) };
       },
     };
 
@@ -393,13 +403,17 @@ describe('the web page routes', () => {
           posted.push(body);
           return { status: 200, body: {} };
         },
+        '/v1/conversation/console-input': async (body) => {
+          posted.push(body);
+          return { status: 200, body: { done: true } };
+        },
       },
     });
 
     const link = await send(server.port, 'POST', '/page/link', { Authorization: `Bearer ${server.token}` });
     const url = new URL(JSON.parse(link.body).url as string);
 
-    return { posted, uploaded, closed, url, folder, open: () => page.opened() };
+    return { posted, uploaded, closed, consoles, url, folder, open: () => page.opened() };
   }
 
   it("serves the page on its fixed port, which the link names, by that port's Host only, and nothing but the page there", async () => {
@@ -680,5 +694,43 @@ describe('the web page routes', () => {
     expect(served.headers['referrer-policy']).toBe('no-referrer');
     expect((await send(server.port, 'GET', '/v1/conversation/artifact/page-2/chat/page.html', {})).status).toBe(404);
     expect((await send(server.port, 'GET', '/v1/conversation/artifact/page-1/..%2F..%2Fw1%2Fchat%2Fpage.html', {})).status).toBe(404);
+  });
+
+  it("streams a page's console only with its cookie, for its page key and shown session, and takes its keys only from the page's origin", async () => {
+    const { url, posted, consoles, open } = await serve();
+    const exchange = await send(server.port, 'GET', `${url.pathname}${url.search}`, {});
+    const cookie = String(exchange.headers['set-cookie']).split(';')[0]!;
+
+    expect(open()).toBe('page-1');
+    expect((await send(server.port, 'GET', '/v1/conversation/console?window=page-1&sessionId=s1', {})).status).toBe(401);
+    expect((await send(server.port, 'GET', '/v1/conversation/console?window=page-1&sessionId=s1', { Cookie: cookie, Host: `evil.example:${server.port}` })).status).toBe(403);
+
+    const refused = await send(server.port, 'GET', '/v1/conversation/console?window=page-1&sessionId=other', { Cookie: cookie });
+
+    expect(refused.headers['content-type']).toBe('text/event-stream');
+    expect(refused.body).toBe('event: unavailable\ndata: {"reason":"Not in this window."}\n\n');
+
+    const chunks: string[] = [];
+    const stream = request({ host: '127.0.0.1', port: server.port, path: '/v1/conversation/console?window=page-1&sessionId=s1', headers: { Host: `127.0.0.1:${server.port}`, Cookie: cookie } }, (response) => {
+      response.setEncoding('utf8');
+      response.on('data', (chunk: string) => chunks.push(chunk));
+    });
+
+    stream.on('error', () => {});
+    stream.end();
+    await until(() => (chunks.join('').includes('hello') ? true : null));
+    expect(chunks.join('')).toBe('event: size\ndata: {"cols":80,"rows":24}\n\nevent: data\ndata: {"data":"hello\\r\\n"}\n\n');
+    stream.destroy();
+    await until(() => (consoles.includes('closed page-1') ? true : null));
+
+    const origin = `http://127.0.0.1:${server.port}`;
+    const keys = { window: 'page-1', scopeGen: 1, opId: 'o1', sessionId: 's1', launch: 'L', data: 'x' };
+    const post = (body: unknown, headers: Record<string, string>) => send(server.port, 'POST', '/v1/conversation/console-input', { 'Content-Type': 'application/json', ...headers }, body);
+
+    expect((await post(keys, { Cookie: cookie })).status).toBe(403);
+    expect((await post(keys, { Cookie: cookie, Origin: 'http://localhost:1' })).status).toBe(403);
+    expect((await post({ ...keys, window: 'a-window-key' }, { Cookie: cookie, Origin: origin })).status).toBe(403);
+    expect((await post(keys, { Cookie: cookie, Origin: origin })).status).toBe(200);
+    expect(posted).toEqual([keys]);
   });
 });
