@@ -17,6 +17,48 @@ public sealed class App : Application
 
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
 
+    /// <summary>
+    /// The Chrome pane (PRD R113), Windows only: the hub's orders and the window events go to <see cref="ChromePane"/> on the UI thread, and the
+    /// dock tells each hub it connects to that it can glue a pane.
+    /// </summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    static void StartChromePane(HubClient hub, IClassicDesktopStyleApplicationLifetime desktop)
+    {
+        var native = new Win32PaneNative(SwitchboardHome);
+        var pane = new ChromePane(
+            native,
+            (report) => _ = hub.Pane(report),
+            (delay, run) =>
+            {
+                var timer = new DispatcherTimer { Interval = delay };
+
+                timer.Tick += (_, _) =>
+                {
+                    timer.Stop();
+                    run();
+                };
+                timer.Start();
+                return new Disposer(timer.Stop);
+            });
+
+        native.Moved += pane.Moved;
+        native.Destroyed += pane.Destroyed;
+        native.Foreground += pane.Foreground;
+        hub.PaneOrdered += (order) => Dispatcher.UIThread.Post(() => pane.Order(order));
+        // A hub, new or restarted, starts no pane until a dock that can glue one says so.
+        hub.Connected += () => _ = hub.Pane(new System.Text.Json.Nodes.JsonObject { ["state"] = "ready" });
+        desktop.Exit += (_, _) =>
+        {
+            pane.Order(new PaneOrder(null, null));
+            native.Dispose();
+        };
+    }
+
+    sealed class Disposer(Action dispose) : IDisposable
+    {
+        public void Dispose() => dispose();
+    }
+
     public override void OnFrameworkInitializationCompleted()
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
@@ -34,6 +76,7 @@ public sealed class App : Application
                 windows.WatchForeground(window.ShowForeground);
                 windows.WatchClosed(model.WindowClosed);
                 desktop.Exit += (_, _) => windows.Dispose();
+                StartChromePane(hub, desktop);
             }
             else
             {

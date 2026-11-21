@@ -192,3 +192,4 @@ Window management with no counterpart in a browser page. These rows are outside 
 | D6 | Close the dock | `OnCloseClicked` MainWindow.axaml.cs:1272 |
 | D7 | Held sessions, Ticket volume report and Settings open in windows of their own | `OpenHeld`, `OpenVolume`, `OpenSettings` MainWindow.axaml.cs:1918, 2105, 2063 |
 | D8 | Tooltips and menus open at the pointer or button, away from the dock's edge and kept on its monitor | `PlaceTip`, `MenuPlacement` MainWindow.axaml.cs:1397, 1409 |
+| D9 | Glues the Chrome pane window over the installed web page's right column on Windows (PRD R113) | `ChromePane` ChromePane.cs |
