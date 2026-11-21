@@ -85,8 +85,17 @@ button:focus-visible, a:focus-visible, .tab:focus-visible { outline: 1px solid v
 .back-bar { flex: none; border-bottom: 1px solid var(--vscode-panel-border); }
 button.back { display: flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 14px 0 10px; border: none; background: transparent; color: var(--vscode-foreground); cursor: pointer; }
 button.back:hover { background: var(--vscode-toolbar-hoverBackground); }
+/* The sash on the work items' edge resizes them (main.ts keeps the width in --side-width), drawn as VS Code's: invisible until hovered,
+   dragged or focused, then a 4 px line in the sash colour over the edge, taking no width of its own. */
+.side-sash { display: none; }
 @media (min-width: 768px) {
-  .side { width: clamp(260px, 30vw, 340px); }
+  .side { width: var(--side-width, clamp(260px, 30vw, 340px)); min-width: 200px; max-width: 50vw; }
+  .side-sash { display: block; flex: none; position: relative; z-index: 5; width: 4px; margin: 0 -2px; cursor: col-resize; touch-action: none; transition: background-color 0.1s 0.3s; }
+  .side-sash:hover, .side-sash.dragging, .side-sash:focus-visible { background: var(--vscode-sash-hoverBorder, var(--vscode-focusBorder)); outline: none; }
+  .side-sash.dragging { transition: none; }
+  #root.resizing { cursor: col-resize; user-select: none; }
+  #root.resizing iframe { pointer-events: none; }
+  #root.list-hidden > .side-sash { display: none; }
   #root.listing > .main, #root:not(.listing) > .side { display: flex; }
   .back-bar { display: none; }
 }

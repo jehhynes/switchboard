@@ -6,7 +6,7 @@ import { answerText, answersIn, complete, parseQuestions } from '@switchboard/co
 import { artifactUrl, newView, renderArtifactView, turnRow, renderHeader, renderList, renderMicButton, renderTimeline, renderVoice, markdownBody } from '../src/render.js';
 import { renderMicButton as viewMicButton } from '@switchboard/conversation/voiceControls';
 import { renderMarkdown } from '../src/markdown.js';
-import { SENT_NOTE_MS, startPage } from '../src/main.js';
+import { SENT_NOTE_MS, SIDE_MAX, SIDE_MIN, startPage } from '../src/main.js';
 import type { ArtifactView, MessageView, PageGroup, PageRow, ReplyView, SessionView } from '../src/types.js';
 
 const message = (id: string, ord: number, patch: Partial<MessageView> = {}): MessageView => ({ type: 'message', id, sessionId: 's', workItemId: 1, at: 1_000 + ord, ord, provisional: false, withdrawn: false, origin: 'typed', text: `text ${id}`, delivery: 'sent', error: null, ...patch });
@@ -1053,6 +1053,63 @@ describe('the page in use', () => {
     expect(root.querySelector('iframe')!.getAttribute('sandbox')).toBe('allow-scripts');
     click('[data-tab="conversation"]');
     expect(root.querySelector('#composer')!.hasAttribute('hidden')).toBe(false);
+    page.close();
+  });
+
+  it("resizes the work items from their sash by dragging and the arrow keys, within limits, keeps the width, and resets it on a double-click", () => {
+    localStorage.setItem('switchboard.sideWidth', '300');
+
+    const { page } = start();
+    const side = root.querySelector<HTMLElement>('.side')!;
+    const sash = root.querySelector<HTMLElement>('.side-sash')!;
+    const width = (): string => root.style.getPropertyValue('--side-width');
+
+    // The kept width is set before the list is drawn, so the page does not jump.
+    expect(width()).toBe('300px');
+    expect(sash.getAttribute('role')).toBe('separator');
+    expect(sash.getAttribute('aria-valuenow')).toBe('300');
+    vi.spyOn(side, 'getBoundingClientRect').mockImplementation(() => ({ left: 0, width: parseFloat(width()) || 300 }) as DOMRect);
+
+    sash.dispatchEvent(new MouseEvent('pointerdown', { button: 0, clientX: 300, bubbles: true }));
+    expect(root.classList.contains('resizing')).toBe(true);
+    sash.dispatchEvent(new MouseEvent('pointermove', { clientX: 420, bubbles: true }));
+    expect(width()).toBe('420px');
+    // Kept only when the drag ends.
+    expect(localStorage.getItem('switchboard.sideWidth')).toBe('300');
+    sash.dispatchEvent(new MouseEvent('pointermove', { clientX: 5_000, bubbles: true }));
+    expect(width()).toBe(`${SIDE_MAX}px`);
+    sash.dispatchEvent(new MouseEvent('pointermove', { clientX: 50, bubbles: true }));
+    expect(width()).toBe(`${SIDE_MIN}px`);
+    sash.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+    expect(root.classList.contains('resizing')).toBe(false);
+    expect(localStorage.getItem('switchboard.sideWidth')).toBe(String(SIDE_MIN));
+    // A move after the drag ended changes nothing.
+    sash.dispatchEvent(new MouseEvent('pointermove', { clientX: 400, bubbles: true }));
+    expect(width()).toBe(`${SIDE_MIN}px`);
+
+    sash.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    expect(width()).toBe(`${SIDE_MIN + 16}px`);
+    sash.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', shiftKey: true, bubbles: true }));
+    expect(width()).toBe(`${SIDE_MIN + 80}px`);
+    sash.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+    expect(width()).toBe(`${SIDE_MIN + 64}px`);
+    sash.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+    expect(localStorage.getItem('switchboard.sideWidth')).toBe(String(SIDE_MAX));
+    sash.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(width()).toBe(`${SIDE_MAX}px`);
+
+    // On a narrow page, which holds the list at half its width, the keys step from the width drawn, not the one set.
+    Object.defineProperty(side, 'clientWidth', { configurable: true, get: () => Math.min(parseFloat(width()), 384) });
+    sash.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+    expect(width()).toBe('368px');
+    expect(sash.getAttribute('aria-valuenow')).toBe('368');
+    sash.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+    expect(sash.getAttribute('aria-valuenow')).toBe('384');
+
+    sash.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    expect(width()).toBe('');
+    expect(sash.hasAttribute('aria-valuenow')).toBe(false);
+    expect(localStorage.getItem('switchboard.sideWidth')).toBeNull();
     page.close();
   });
 

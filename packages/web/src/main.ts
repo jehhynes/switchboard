@@ -20,6 +20,11 @@ export const SENT_NOTE_MS = 4_000;
 export const PROMPT_POLL_MS = 1_000;
 /** How long the box's draft waits before the hub hears it, as in the Conversation view. */
 export const COMPOSER_DRAFT_MS = 300;
+/** The work items' width the sash allows, in pixels, its arrow-key step, and where the page keeps it. */
+export const SIDE_MIN = 200;
+export const SIDE_MAX = 600;
+const SIDE_STEP = 16;
+const SIDE_WIDTH = 'switchboard.sideWidth';
 /** From this width Status and Artifacts are a column beside the conversation rather than tabs. */
 export const WIDE_QUERY = '(min-width: 1200px)';
 /** Where the page keeps which side columns are shown. */
@@ -53,6 +58,7 @@ type Answer = { status: number; body: Record<string, unknown> };
 export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageState; close(): void } {
   root.innerHTML =
     '<aside class="side"><div class="side-head">Switchboard</div><div id="list"></div></aside>' +
+    `<div class="side-sash" role="separator" aria-orientation="vertical" aria-label="Work items width" aria-controls="list" tabindex="0" aria-valuemin="${SIDE_MIN}" aria-valuemax="${SIDE_MAX}" title="Drag to resize; double-click to reset"></div>` +
     '<main class="main"><div class="back-bar"><button type="button" class="back" data-action="back" aria-label="Back to the work items"><span class="codicon codicon-arrow-left" aria-hidden="true"></span><span>Work items</span></button></div><div id="head"></div><div id="panel" class="scroll"></div><div id="note"></div><div id="composer" hidden></div></main><aside id="detail" class="detail" aria-label="Status and artifacts"><div class="detail-head"></div><div class="detail-body scroll"></div></aside><div id="sheet"></div><div class="live" aria-live="polite"></div>';
 
   const list = root.querySelector<HTMLElement>('#list')!;
@@ -82,6 +88,88 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   };
   const wideScreen = (): boolean => wideQuery?.matches === true;
   const wide = (): boolean => wideScreen() && layout.detail;
+
+  // The work items' width (architecture.md § Web page): dragged on the sash at their edge, or set with the arrow keys while it has the focus,
+  // kept in local storage and set before the list is first drawn; a double-click goes back to the default.
+  const side = root.querySelector<HTMLElement>('.side')!;
+  const sash = root.querySelector<HTMLElement>('.side-sash')!;
+  /** The width set, or null for the default. */
+  let sideWidth: number | null = null;
+  /** The work items' width as drawn, without their border, which the page's width can hold below the width set. */
+  const drawnWidth = (): number => side.clientWidth || (sideWidth ?? side.getBoundingClientRect().width);
+  const setSideWidth = (width: number | null, keep: boolean): void => {
+    const value = width === null ? null : Math.round(Math.min(SIDE_MAX, Math.max(SIDE_MIN, width)));
+
+    sideWidth = value;
+
+    if (value === null) {
+      root.style.removeProperty('--side-width');
+      sash.removeAttribute('aria-valuenow');
+    } else {
+      root.style.setProperty('--side-width', `${value}px`);
+      sash.setAttribute('aria-valuenow', String(side.clientWidth || value));
+    }
+
+    if (keep) {
+      try {
+        if (value === null) {
+          localStorage.removeItem(SIDE_WIDTH);
+        } else {
+          localStorage.setItem(SIDE_WIDTH, String(value));
+        }
+      } catch {
+        // A page without local storage keeps the width until it reloads.
+      }
+    }
+  };
+
+  setSideWidth(((): number | null => {
+    try {
+      const kept = Number(localStorage.getItem(SIDE_WIDTH));
+
+      return Number.isFinite(kept) && kept > 0 ? kept : null;
+    } catch {
+      return null;
+    }
+  })(), false);
+  sash.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) {
+      return;
+    }
+
+    event.preventDefault();
+    sash.focus({ preventScroll: true });
+    sash.setPointerCapture?.(event.pointerId);
+    sash.classList.add('dragging');
+    root.classList.add('resizing');
+
+    const left = side.getBoundingClientRect().left;
+    const move = (next: PointerEvent): void => setSideWidth(next.clientX - left, false);
+    const end = (): void => {
+      sash.removeEventListener('pointermove', move);
+      sash.removeEventListener('pointerup', end);
+      sash.removeEventListener('pointercancel', end);
+      sash.classList.remove('dragging');
+      root.classList.remove('resizing');
+      setSideWidth(drawnWidth(), true);
+    };
+
+    sash.addEventListener('pointermove', move);
+    sash.addEventListener('pointerup', end);
+    sash.addEventListener('pointercancel', end);
+  });
+  sash.addEventListener('dblclick', () => setSideWidth(null, true));
+  sash.addEventListener('keydown', (event) => {
+    const step = event.shiftKey ? SIDE_STEP * 4 : SIDE_STEP;
+    const now = drawnWidth();
+    const next = { ArrowLeft: now - step, ArrowRight: now + step, Home: SIDE_MIN, End: SIDE_MAX }[event.key];
+
+    if (next !== undefined) {
+      event.preventDefault();
+      event.stopPropagation();
+      setSideWidth(next, true);
+    }
+  });
   /** The tab the conversation's pane shows: always the conversation while Status and Artifacts have their own column. */
   const mainTab = (): Tab => (wide() ? 'conversation' : view.tab);
 
