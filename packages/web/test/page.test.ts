@@ -2691,7 +2691,10 @@ describe("the list's CSS", () => {
     const selected = declarationsOf((selector) => selector === '.row.selected');
 
     expect(selected).toHaveLength(1);
-    expect(selected[0]).toContain('background: var(--vscode-list-activeSelectionBackground)');
+    expect(selected[0]).toContain('background: var(--sb-row-selected)');
+    // The dock's selection colours: the theme's in Dark Modern and its own #E4E6F1 in Light Modern (App.axaml DockSelected).
+    expect(css).toMatch(/:root \{[^}]*--sb-row-selected: var\(--vscode-list-activeSelectionBackground\);/);
+    expect(css).toMatch(/@media \(prefers-color-scheme: light\) \{\s*:root \{[^}]*--sb-row-selected: #E4E6F1;/);
     expect(selected[0]).not.toMatch(/box-shadow|outline|border/);
     expect(declarationsOf((selector) => selector === 'button:focus-visible')).toEqual([expect.stringContaining('outline: 1px solid var(--vscode-focusBorder)')]);
   });

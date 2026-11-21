@@ -69,14 +69,34 @@ describe('the theme copy', () => {
     }
   });
 
-  it("draws the page's own colours and the composer's light fill from variables that follow the scheme", () => {
+  it("draws the page's own colours, its surfaces and the composer's light fill from variables that follow the scheme", () => {
     const css = PAGE_ASSETS['page.css']!.body;
     const light = /@media \(prefers-color-scheme: light\) \{\s*:root \{([^}]*)\}/.exec(css)?.[1] ?? '';
 
-    for (const name of ['--sb-github', '--sb-pull-request', '--sb-source-off', '--sb-composer-background']) {
+    for (const name of ['--sb-github', '--sb-pull-request', '--sb-source-off', '--sb-composer-background', '--sb-chat-background', '--sb-bar-background', '--sb-row-selected']) {
       expect(light, name).toContain(`${name}:`);
     }
 
     expect(css).not.toMatch(/#f0f6fc;\s*\}|#a371f7 18%/);
+    expect(css).toMatch(/\.main \{[^}]*background: var\(--sb-chat-background\)/);
+    expect(css).toMatch(/\.row\.selected \{[^}]*background: var\(--sb-row-selected\)/);
+    expect(css).toMatch(/\.header \{[^}]*background: var\(--sb-bar-background\)/);
+    expect(css).toMatch(/\.tabs \{[^}]*background: var\(--sb-bar-background\)/);
+  });
+
+  it('gives light its Light Modern surfaces: the conversation white, its bars and the side bar grey, and a selected row that shows and stays readable', () => {
+    const css = PAGE_ASSETS['page.css']!.body;
+    const light = /@media \(prefers-color-scheme: light\) \{\s*:root \{([^}]*)\}/.exec(css)?.[1] ?? '';
+    const { light: colours } = blocks();
+    const selected = /--sb-row-selected: (#[0-9A-Fa-f]{6});/.exec(light)?.[1] ?? '';
+
+    expect(light).toContain('--sb-chat-background: var(--vscode-editor-background);');
+    expect(light).toContain('--sb-bar-background: var(--vscode-sideBar-background);');
+    expect(colours.get('--vscode-editor-background')).toBe('#FFFFFF');
+    expect(contrast(selected, colours.get('--vscode-sideBar-background')!)).toBeGreaterThan(contrast(colours.get('--vscode-list-activeSelectionBackground')!, colours.get('--vscode-sideBar-background')!));
+
+    for (const text of ['--vscode-foreground', '--vscode-descriptionForeground', '--vscode-list-activeSelectionForeground']) {
+      expect(contrast(colours.get(text)!, selected), text).toBeGreaterThanOrEqual(4.5);
+    }
   });
 });
