@@ -451,7 +451,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     }
 
     /** A file of the page, under the page's own headers. */
-    const sendAsset = (name: string, headers: Record<string, string> = {}): void => {
+    const sendAsset = (name: string): void => {
       const asset = page.asset(name);
 
       if (asset === null) {
@@ -459,8 +459,9 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
         return;
       }
 
-      response.writeHead(200, { 'Content-Type': asset.mime, 'Cache-Control': 'no-cache', 'X-Frame-Options': 'DENY', 'Content-Security-Policy': PAGE_CSP, ...headers });
-      response.end(asset.body);
+      response.writeHead(200, { 'Content-Type': asset.mime, 'Cache-Control': 'no-cache', 'X-Frame-Options': 'DENY', 'Content-Security-Policy': PAGE_CSP });
+      // The page learns the build of the hub that served it, so it can tell when a restarted hub serves another page.
+      response.end(name === 'index.html' ? String(asset.body).replaceAll('{{build}}', options.build ?? '') : asset.body);
     };
 
     // The installed page's manifest, icons, service worker and offline page, which a browser fetches without the cookie.
@@ -486,9 +487,11 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       return true;
     }
 
+    // Each signed-in request renews the cookie's Max-Age, as it renews the sign-in, so a computer in use stays signed in.
+    response.setHeader('Set-Cookie', pageCookie(cookieValue(request.headers.cookie, PAGE_COOKIE)!));
+
     if (request.method === 'GET' && path.startsWith('/page/')) {
-      // Loading the page renews its sign-in's cookie, so a computer in use stays signed in.
-      sendAsset(path === '/page/' ? 'index.html' : path.slice('/page/'.length), path === '/page/' ? { 'Set-Cookie': pageCookie(cookieValue(request.headers.cookie, PAGE_COOKIE)!) } : {});
+      sendAsset(path === '/page/' ? 'index.html' : path.slice('/page/'.length));
       return true;
     }
 

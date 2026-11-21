@@ -329,7 +329,7 @@ describe('the web page routes', () => {
 
     const page: PageRoutes = {
       access: new PageAccess(store),
-      asset: (name) => (name === 'index.html' ? { mime: 'text/html; charset=utf-8', body: '<html>page</html>' } : ['manifest.webmanifest', 'sw.js', 'page.js'].includes(name) ? { mime: 'text/plain', body: name } : null),
+      asset: (name) => (name === 'index.html' ? { mime: 'text/html; charset=utf-8', body: '<html>page {{build}}</html>' } : ['manifest.webmanifest', 'sw.js', 'page.js'].includes(name) ? { mime: 'text/plain', body: name } : null),
       opened: () => {
         const key = `page-${++keys}`;
 
@@ -464,6 +464,9 @@ describe('the web page routes', () => {
     expect(signedOut.headers['content-type']).toBe('text/html; charset=utf-8');
     expect(signedOut.body).toContain('not signed in to Switchboard');
     expect(signedOut.headers['set-cookie']).toBeUndefined();
+    // Any signed-in request renews it, as a page left open makes no page loads; a file anyone may fetch does not.
+    expect(String((await send(server.port, 'GET', '/v1/page/list', { Cookie: cookie })).headers['set-cookie'])).toBe(pageCookie(cookie.slice('sb_page='.length)));
+    expect((await send(server.port, 'GET', '/page/manifest.webmanifest', { Cookie: cookie })).headers['set-cookie']).toBeUndefined();
   });
 
   it('ends the streams of a sign-in that a new link replaces, and only those', async () => {
@@ -556,7 +559,8 @@ describe('the web page routes', () => {
 
     const shown = await send(server.port, 'GET', '/page/', { Cookie: cookie });
 
-    expect(shown).toMatchObject({ status: 200, body: '<html>page</html>' });
+    // The page names the build of the hub that served it.
+    expect(shown).toMatchObject({ status: 200, body: '<html>page b7</html>' });
     expect(shown.headers['content-security-policy']).toContain("frame-ancestors 'none'");
     expect((await send(server.port, 'GET', '/page/missing.js', { Cookie: cookie })).status).toBe(404);
     // Another name for this machine, as DNS rebinding gives, is refused even with the cookie.

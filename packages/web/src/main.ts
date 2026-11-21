@@ -6,6 +6,7 @@ import { answerText, artifactUrl, complete, firstSnoozeDay, renderEndedNote, ren
 import type { CardDraft, Tab, View } from './render.js';
 import type { ItemView, ScreenPrompt } from './types.js';
 import { morph } from './morph.js';
+import { reconnector } from './reconnect.js';
 
 /** The stream's event types the page reads. */
 export const EVENTS = ['hello', 'list', 'scope', 'conversations', 'session', 'message', 'reply', 'status', 'artifact', 'unread', 'voice', 'settings', 'progress', 'words', 'draft'];
@@ -32,6 +33,9 @@ export interface PageDeps {
   now(): number;
   /** Loads Mermaid's script on first use; resolves false when the hub has none. */
   loadMermaid?(): Promise<boolean>;
+  /** The build of the hub that served the page, from its `switchboard-build` meta tag, and how to reload, for a hub that restarts. */
+  build?: string | null;
+  reload?(): void;
 }
 
 type Answer = { status: number; body: Record<string, unknown> };
@@ -1603,8 +1607,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     });
   }
 
+  const lost = reconnector({ fetch: (url, init) => deps.fetch(url, init), setTimeout: (run, ms) => setTimeout(run, ms), reload: deps.reload ?? (() => location.reload()), build: deps.build ?? null });
+
   source.addEventListener('error', () => {
     state = { ...state, connected: false };
+    lost(source);
     // A stream refused for its cookie does not come back: the page needs a new link.
     void deps.fetch('/v1/page/list', { credentials: 'same-origin' }).then((response) => {
       expired = response.status === 401;

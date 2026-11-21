@@ -153,7 +153,7 @@ describe('the installable page', () => {
 
       expect(html).toContain('<link rel="manifest" href="manifest.webmanifest">');
       expect(html).toContain(`<meta name="theme-color" content="${sideBar}">`);
-      expect(html).not.toContain('{{');
+      expect(html).not.toContain('{{themeColor}}');
     }
 
     expect(PAGE_ASSETS['offline.html']!.body).toContain('Switchboard is not running');
