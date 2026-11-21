@@ -22,11 +22,10 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 3. Problems the page never shows (H3, H4, H5): settings, source and voice errors, orphan held sessions, and the needs-you message.
 4. Done's date bands and group state (G5, G6, G8): Done is one flat list, Snoozed starts open, and open or closed choices do not survive a reload.
 5. Mark colours (M3): the dock and the web page colour marks by different rules; one of them should change.
-6. Shrinking pills (R13-R15): pills are dropped or the playbook squeezed instead of shrinking to icons; in progress on branch `web-layout`.
-7. Keyboard (K2, K4, K5, O3, O4): no arrow-key walk, F8, menu key, drag or Alt+arrow reordering.
-8. Voice mark (R3): the page does not show which row the voice speaks for.
-9. Pool tickets (R20): left out by architecture.md § Web page; the operator approves that as Differs, or the page adds them.
-10. Web-only behaviours the dock lacks (R8, C13, G10, H7): a hosted conversation's host on line 2, Stop asking first, the selected row kept in a collapsed group.
+6. Keyboard (K2, K4, K5, O3, O4): no arrow-key walk, F8, menu key, drag or Alt+arrow reordering.
+7. Voice mark (R3): the page does not show which row the voice speaks for.
+8. Pool tickets (R20): left out by architecture.md § Web page; the operator approves that as Differs, or the page adds them.
+9. Web-only behaviours the dock lacks (R8, C13, G10, H7): a hosted conversation's host on line 2, Stop asking first, the selected row kept in a collapsed group.
 
 ## Groups
 
@@ -71,9 +70,9 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 | R10 | Line 2: link pills after the key: a pull request purple with its icon and number, an issue by its key, a link by its label, a link the ticket's text names grey and last | MainWindow.axaml:530-547, `linksOf` dock.ts:452 | Present | render.ts:243-246, page.css:70-71 |
 | R11 | Line 2: Returned pill in the warning colour with the return icon and count, its meaning in its tooltip | MainWindow.axaml:548-553, `ReturnedTitle` ViewModels.cs:1161 | Present | render.ts:247, page.css:72 |
 | R12 | A pill with a link opens it on click or Enter instead of the row's click | `OnPillTapped` MainWindow.axaml.cs:1301, `ListKey` :1027 | Missing | Pills are text inside the row button (architecture.md § Web page) |
-| R13 | Pills shrink to their icon rather than being cut: longest first while the playbook keeps its width, the rest once the playbook is 60 px, Returned last; a pill of 56 px or less keeps its text until then | `PillLine` PillLine.cs:8-187 | Partly | The playbook gives way first down to 3em, then link pills are left out whole from the last (page.css:51-66); no pill shrinks to its icon. Shrinking pills are being built on branch `web-layout` |
-| R14 | A compact key pill shows the source's logo (or a tag for a source without one); a compact link pill its PR, issue or link icon | MainWindow.axaml:521-526, `IconGlyph` DockView.cs:125 | Missing | Follows R13 |
-| R15 | Pills that do not fit even as icons are left out whole, the last first, Returned only when it alone does not fit; they show again when the line widens | PillLine.cs:162-172 | Partly | Link pills are left out whole; the key and Returned never are |
+| R13 | Pills shrink to their icon rather than being cut: longest first while the playbook keeps its width, the rest once the playbook is 60 px, Returned last; a pill of 56 px or less keeps its text until then | `PillLine` PillLine.cs:8-187 | Present | `fitPills` fit.ts, applied to every row once a frame after a list redraw or a change of its width (`fitLines` main.ts) |
+| R14 | A compact key pill shows the source's logo (or a tag for a source without one); a compact link pill its PR, issue or link icon | MainWindow.axaml:521-526, `IconGlyph` DockView.cs:125 | Present | A compact key pill shows codicon `github` or `tag` (`pill` render.ts); a link pill keeps its glyph; Zoho and Forum have no logo on the page |
+| R15 | Pills that do not fit even as icons are left out whole, the last first, Returned only when it alone does not fit; they show again when the line widens | PillLine.cs:162-172 | Present | `fitPills` fit.ts: the playbook gives way entirely first, then pills are left out the last first, Returned only when alone it does not fit |
 | R16 | Line 3: the mark, then the details with a muted `·` between them, each in its tone, the last cut with an ellipsis; tooltips hold whole texts | MainWindow.axaml:556-574, `DetailViewModel` ViewModels.cs:1214 | Present | render.ts:248-256, page.css:73-79 |
 | R17 | Line 3 shows the mark's title when the row has no details, and is absent with neither | `orMarkTitle` dock.ts:411, `HasThirdLine` ViewModels.cs:1133 | Present | render.ts:256 |
 | R18 | Line 3 texts from the hub: wait reasons, rate limit (`Rate limited · resumes…`), blockers in the warning tone, wake time and snooze comment, warning and error, `From <key>`, approval summary or stage with its age, stale stage in the warning tone | `itemRow` dock.ts:386-393, `limitTexts` rows.ts:666, `wake` dock.ts:487 | Present | Same `details` through `pageList` |
@@ -91,7 +90,7 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 | M3 | Mark colour: the dock draws every mark in the foreground colour and only Failed in the error colour; the web page follows `MARK_TONES` (muted, warning for question, permission, send, blocked and limited, error for failed) | MainWindow.axaml:557 (`failed` class only) | Partly | render.ts:230; architecture.md § Conversation view names `MARK_TONES` as the rule for the web page and the view, not the dock |
 | M4 | Left stripe 3 px, inset 8 px top and bottom: error (failed), warning (blocked or asking), turn in the focus blue (operator's turn in review); none on the agent's turn or snoozed | MainWindow.axaml:185-199, `stripeOf` rows.ts:720 | Present | page.css:36-39 |
 | M5 | The selected row's stripe is full height | MainWindow.axaml:188-190 | Present | page.css:43 |
-| M6 | Selected row in the selection colour | MainWindow.axaml:181-183 | Partly | page.css:42 also draws a focus-blue outline the dock has only for keyboard focus |
+| M6 | Selected row in the selection colour | MainWindow.axaml:181-183 | Present | `.row.selected` page.css; the focus ring shows only on a keyboard focus (`button:focus-visible`), as the dock's |
 | M7 | Row hover background | MainWindow.axaml:178-180 | Present | page.css:40 |
 | M8 | Colours from VS Code's Light Modern or Dark Modern, chosen by the dock theme setting (system, VS Code, light, dark) | `ApplyTheme` MainWindow.axaml.cs:1938 | Partly | Dark Modern only (theme.css) |
 
