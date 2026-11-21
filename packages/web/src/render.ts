@@ -134,23 +134,22 @@ function message(item: MessageView, stamped: boolean): string {
   return `<li class="message${item.provisional ? ' provisional' : ''}" data-id="${escape(item.id)}">${line}<div class="box${/^\/[\w:.-]+(\s|$)/.test(item.text) ? ' command' : ''}">${escape(item.text)}</div></li>`;
 }
 
-/** What became of a reply's speech, as a line under it. */
+/** A note under a reply whose speech failed; empty otherwise, since routine speech states show nothing. */
 function spokenLine(item: ReplyView): string {
-  const line = (icon: string, text: string): string => `<div class="spoken"><span class="codicon codicon-${icon}" aria-hidden="true"></span><span>${escape(text)}</span></div>`;
-  const at = item.spoken.atMs === null ? '' : ` at ${Math.floor(item.spoken.atMs / 60_000)}:${String(Math.floor(item.spoken.atMs / 1000) % 60).padStart(2, '0')}`;
+  return item.spoken.state === 'failed'
+    ? '<div class="spoken failed" title="Speaking this reply failed; see the voice log."><span class="codicon codicon-mute" aria-hidden="true"></span><span>Not spoken</span></div>'
+    : '';
+}
 
-  switch (item.spoken.state) {
-    case 'playing':
-      return line('unmute', 'Speaking');
-    case 'interrupted':
-      return line('unmute', `interrupted${at}`);
-    case 'stopped-moved':
-      return line('mute', 'stopped: voice moved');
-    case 'failed':
-      return line('mute', 'not spoken: speech failed');
-    default:
-      return '';
+/** The passage read aloud; after the operator spoke over it, the part not heard is dimmed, as plain text. */
+function passageHtml(item: ReplyView, passage: string): string {
+  const said = item.spoken.saidChars;
+
+  if (item.spoken.state !== 'interrupted' || said === null) {
+    return renderMarkdown(passage);
   }
+
+  return `<p class="passage">${escape(passage.slice(0, said))}<span class="unheard">${escape(passage.slice(said))}</span></p>`;
 }
 
 function reply(item: ReplyView, earlier: ReplyView | null, view: View, stamped: boolean, card: string, expandReplies: boolean): string {
@@ -161,7 +160,7 @@ function reply(item: ReplyView, earlier: ReplyView | null, view: View, stamped: 
   // Focused mode: a reply with a [speak] passage shows the passage first and the whole reply behind Show more.
   const passage = item.kind === 'reply' && item.speak !== null && item.speak.trim() !== '' && item.speak.trim() !== item.opening.trim() ? item.speak : null;
   const expanded = passage === null || expandReplies !== view.open.has(`more:${item.id}`);
-  const body = !expanded && passage !== null ? renderMarkdown(passage) : card === '' ? renderMarkdown(item.opening) : withoutQuestions(item.opening, `reply:${item.id}`, view.open);
+  const body = !expanded && passage !== null ? passageHtml(item, passage) : card === '' ? renderMarkdown(item.opening) : withoutQuestions(item.opening, `reply:${item.id}`, view.open);
   const more = passage === null ? '' : `<button class="show-more" type="button" data-action="more" data-reply="${escape(item.id)}" aria-expanded="${expanded}">${expanded ? 'Show less' : 'Show more'}</button>`;
   const tone = item.tone === null ? '' : `<div class="tone">${escape(item.tone)}</div>`;
   const rewritten = earlier === null ? '' : `<details class="fold" data-fold="earlier:${escape(item.id)}"${view.open.has(`earlier:${item.id}`) ? ' open' : ''}><summary>Rewritten</summary><div class="was">${renderMarkdown(earlier.opening)}</div></details>`;

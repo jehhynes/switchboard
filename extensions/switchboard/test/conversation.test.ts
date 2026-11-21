@@ -828,18 +828,19 @@ describe('speech in the view (architecture.md § Voice)', () => {
     expect(expanded).toContain('aria-expanded="true">Show less</button>');
   });
 
-  it("says what became of a reply's speech, dimming the passage not heard yet", () => {
+  it('dims the part of an interrupted passage not heard, and says Not spoken only when speech failed', () => {
     const spoken = (state_: ReplyView['spoken']['state'], atMs: number | null = null, saidChars: number | null = null) =>
       renderConversation(state([reply('r1', T0, { opening: 'Fixed it. More.', speak: 'Fixed it.', spoken: { state: state_, atMs, saidChars } })]));
 
-    expect(spoken('playing', 100, 3)).toContain('<p class="passage">Fix<span class="unheard">ed it.</span></p>');
-    expect(spoken('playing', 100, 3)).toContain('<span>Speaking</span>');
-    expect(spoken('interrupted', 7_400, 5)).toContain('<span>interrupted at 0:07</span>');
-    expect(spoken('interrupted')).toContain('<span>interrupted</span>');
-    expect(spoken('stopped-moved')).toContain('<span>stopped: voice moved</span>');
-    expect(spoken('failed')).toContain('<span>not spoken: speech failed</span>');
-    expect(spoken('played')).not.toContain('class="spoken');
-    expect(spoken('queued')).not.toContain('class="spoken');
+    expect(spoken('interrupted', 7_400, 3)).toContain('<p class="passage">Fix<span class="unheard">ed it.</span></p>');
+    expect(spoken('interrupted', 7_400, 3)).not.toContain('0:07');
+    expect(spoken('failed')).toContain('<span>Not spoken</span>');
+    // Routine states show nothing: no line under the reply, and a playing passage is not dimmed.
+    expect(spoken('playing', 100, 3)).not.toContain('class="unheard"');
+
+    for (const routine of ['playing', 'interrupted', 'stopped-moved', 'played', 'queued', 'skipped'] as const) {
+      expect(spoken(routine, 100, 3)).not.toContain('class="spoken');
+    }
   });
 
   it('offers Speak replies and Stop as icon buttons, Talk here only while the voice is elsewhere, R to replay a reply and Escape to stop', () => {

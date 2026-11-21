@@ -174,36 +174,18 @@ function voiceLine(item: MessageView): string {
   return `<div class="voice-line" title="${escape(title)}"><span class="codicon codicon-mic" aria-hidden="true"></span><span>${label}</span></div>`;
 }
 
-/** A playback position as the view shows it: "0:07". */
-function clock(ms: number): string {
-  const seconds = Math.floor(ms / 1000);
-
-  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
-}
-
-/** What became of a reply's speech, as a small line under it (architecture.md § Voice); empty when there is nothing to say. */
+/** A note under a reply whose speech failed (architecture.md § Voice); empty otherwise, since routine speech states show nothing. */
 export function spokenLine(item: ReplyView): string {
-  const line = (icon: string, text: string, kind: string): string => `<div class="spoken ${kind}"><span class="codicon codicon-${icon}" aria-hidden="true"></span><span>${escape(text)}</span></div>`;
-
-  switch (item.spoken.state) {
-    case 'playing':
-      return line('unmute', 'Speaking', 'playing');
-    case 'interrupted':
-      return line('unmute', item.spoken.atMs === null ? 'interrupted' : `interrupted at ${clock(item.spoken.atMs)}`, 'interrupted');
-    case 'stopped-moved':
-      return line('mute', 'stopped: voice moved', 'stopped');
-    case 'failed':
-      return line('mute', 'not spoken: speech failed', 'failed');
-    default:
-      return '';
-  }
+  return item.spoken.state === 'failed'
+    ? '<div class="spoken failed" title="Speaking this reply failed; see the voice log."><span class="codicon codicon-mute" aria-hidden="true"></span><span>Not spoken</span></div>'
+    : '';
 }
 
-/** The passage read aloud; while it plays or after it was cut short, the part not heard yet is dimmed, as plain text. */
+/** The passage read aloud; after the operator spoke over it, the part not heard is dimmed, as plain text. */
 function passageHtml(item: ReplyView, passage: string): string {
   const said = item.spoken.saidChars;
 
-  if ((item.spoken.state !== 'playing' && item.spoken.state !== 'interrupted') || said === null) {
+  if (item.spoken.state !== 'interrupted' || said === null) {
     return renderMarkdown(passage);
   }
 

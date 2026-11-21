@@ -104,6 +104,22 @@ describe('question cards in replies', () => {
 });
 
 describe('drawing', () => {
+  // The page's state with these items, as a hello brings them.
+  const pageState = (items: Array<MessageView | ReplyView>) => applyEvent(EMPTY, { type: 'hello', key: 'k', groups: [], scope, sessions: [session()], items, more: false, status: null, artifacts: [] });
+
+  it('dims the part of an interrupted passage not heard, and says Not spoken only when speech failed', () => {
+    const spoken = (state: ReplyView['spoken']['state']) => renderTimeline(pageState([reply('r1', 1, { opening: 'Fixed it. More.', speak: 'Fixed it.', spoken: { state, atMs: 7_400, saidChars: 3 } })]), newView());
+
+    expect(spoken('interrupted')).toContain('<p class="passage">Fix<span class="unheard">ed it.</span></p>');
+    expect(spoken('interrupted')).not.toContain('0:07');
+    expect(spoken('failed')).toContain('<span>Not spoken</span>');
+    expect(spoken('playing')).not.toContain('class="unheard"');
+
+    for (const routine of ['playing', 'interrupted', 'stopped-moved', 'played', 'queued'] as const) {
+      expect(spoken(routine)).not.toContain('class="spoken');
+    }
+  });
+
   it("keeps raw HTML out of Markdown, opens web links in a new tab and shows paths as text", () => {
     const html = renderMarkdown('<img src=x onerror=alert(1)> [web](https://example.com) [file](src/a.ts) [bad](javascript:alert(1))');
 
