@@ -14,7 +14,8 @@ const CHROME_FONT = "url('chrome-extension://__MSG_@@extension_id__/codicon.ttf'
 
 /**
  * The Chrome manifest changed for Firefox, which runs a background script instead of a service worker, needs an add-on ID, and
- * matches nothing with a match pattern that has a port, so the hub's host permission covers every port of its host (mechanics M52).
+ * matches nothing with a match pattern that has a port, so the hub's host permission covers every port of its host (mechanics M52). The Chrome
+ * pane's `key` and `externally_connectable` are left out: Firefox has neither a key-derived ID nor messages from web pages, so it has no pane.
  * The version adds the build number to Chrome's, because addons.mozilla.org signs each version once.
  * @param {Record<string, unknown>} chrome
  * @param {number} build
@@ -43,8 +44,10 @@ export function firefoxManifest(chrome, build) {
     throw new Error('The Chrome manifest has no host permissions.');
   }
 
+  const { key: _key, externally_connectable: _pages, ...kept } = chrome;
+
   return {
-    ...chrome,
+    ...kept,
     version: `${chrome.version}.${build}`,
     background: { scripts: [background.service_worker] },
     host_permissions: hosts.map((host) => host.replace(/^([a-z]+:\/\/[^/:]+):\d+\//, '$1/')),

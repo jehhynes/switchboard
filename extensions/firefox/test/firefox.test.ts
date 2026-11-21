@@ -6,9 +6,9 @@ const chromeManifest = JSON.parse(readFileSync(new URL('../../chrome/src/manifes
 const chromeCss = readFileSync(new URL('../../chrome/src/content.css', import.meta.url), 'utf8');
 
 describe('firefoxManifest', () => {
-  it('runs the background as a script, adds the add-on ID, drops the host permission port and keeps every other key of the Chrome manifest', () => {
+  it('runs the background as a script, adds the add-on ID, drops the host permission port and the Chrome pane, and keeps every other key of the Chrome manifest', () => {
     const { background, browser_specific_settings, host_permissions, version, ...rest } = firefoxManifest(chromeManifest, 446_400);
-    const { background: _chromeBackground, host_permissions: chromeHosts, version: chromeVersion, ...chromeRest } = chromeManifest;
+    const { background: _chromeBackground, host_permissions: chromeHosts, version: chromeVersion, key, externally_connectable, ...chromeRest } = chromeManifest;
 
     expect([chromeVersion, version]).toEqual(['0.0.1', '0.0.1.446400']);
 
@@ -17,6 +17,7 @@ describe('firefoxManifest', () => {
     expect(background).toEqual({ scripts: ['background.js'] });
     expect(browser_specific_settings).toEqual({ gecko: { id: 'switchboard@switchboard', strict_min_version: '140.0', data_collection_permissions: { required: ['none'] } } });
     expect(rest).toEqual(chromeRest);
+    expect([typeof key, externally_connectable]).toEqual(['string', { matches: ['http://127.0.0.1/*', 'http://localhost/*'] }]);
     expect(rest.permissions).toEqual(['storage', 'tabs', 'tabGroups', 'webNavigation']);
   });
 

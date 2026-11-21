@@ -5,7 +5,7 @@ import { build } from 'esbuild';
 // dist/ is the unpacked extension that Chrome loads.
 mkdirSync('dist', { recursive: true });
 
-for (const file of ['manifest.json', 'content.css']) {
+for (const file of ['manifest.json', 'content.css', 'pane.html']) {
   copyFileSync(`src/${file}`, `dist/${file}`);
 }
 
@@ -16,7 +16,7 @@ for (const size of [16, 32, 48, 128]) {
 }
 
 await build({
-  entryPoints: { content: 'src/main.ts', background: 'src/background.ts' },
+  entryPoints: { content: 'src/main.ts', background: 'src/background.ts', panePage: 'src/panePage.ts' },
   bundle: true,
   format: 'iife',
   platform: 'browser',

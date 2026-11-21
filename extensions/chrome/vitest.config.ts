@@ -10,7 +10,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],
-      exclude: ['src/main.ts', 'src/background.ts', 'src/chrome.d.ts'],
+      exclude: ['src/main.ts', 'src/background.ts', 'src/panePage.ts', 'src/chrome.d.ts'],
       thresholds: { lines: 85, branches: 85, functions: 85, statements: 85 },
     },
   },

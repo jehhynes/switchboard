@@ -1,4 +1,6 @@
 import { readSnoozed } from './hub.js';
+import { PaneConnection, PaneWindow } from './pane.js';
+import type { KeyValue, PaneSocketLike } from './pane.js';
 import { readCards } from './pills.js';
 import { postSnooze, postUnsnooze, snoozeMessage, unsnoozeMessage } from './snooze.js';
 import { GROUP_TITLE, bookmarkRemoved, dockLink, firstNavigations, placedKinds, tabPlacer } from './tabs.js';
@@ -129,3 +131,41 @@ chrome.tabs.onUpdated.addListener((tabId, change) => {
     .then((left) => (left ? kinds.forget(tabId) : undefined))
     .catch((error: unknown) => console.error('Switchboard could not forget a tab that left its group', error));
 });
+
+// The Chrome pane (architecture.md § Browser extension): Chrome only, as Firefox has neither the fixed extension ID nor externally_connectable.
+if (!FIREFOX) {
+  const store = (area: chrome.storage.StorageArea): KeyValue => ({ get: (key) => area.get(key), set: (items) => area.set(items), remove: (key) => area.remove(key) });
+  const markerPage = chrome.runtime.getURL('pane.html');
+  const pane = new PaneConnection({
+    socket: (url) => new WebSocket(url) as unknown as PaneSocketLike,
+    window: new PaneWindow(
+      {
+        markerUrl: (marker) => `${markerPage}#${marker}`,
+        isMarker: (url) => url.startsWith(markerPage),
+        // Chrome takes the foreground for a new window even with focused false (mechanics M103); the dock places it.
+        createWindow: async (url) => (await chrome.windows.create({ type: 'normal', url, focused: false })).id!,
+        windowExists: (windowId) => chrome.windows.get(windowId).then(() => true, () => false),
+        tabs: async (windowId) => (await chrome.tabs.query({ windowId })).flatMap((tab) => (tab.id === undefined ? [] : [{ id: tab.id, url: tab.pendingUrl ?? tab.url ?? '' }])),
+        openTab: async (windowId, url, active) => (await chrome.tabs.create({ windowId, url, active })).id!,
+        loadTab: async (tabId, url) => void (await chrome.tabs.update(tabId, { url })),
+        activateTab: async (tabId) => void (await chrome.tabs.update(tabId, { active: true })),
+        closeTab: (tabId) => chrome.tabs.remove(tabId),
+      },
+      store(chrome.storage.session),
+    ),
+    local: store(chrome.storage.local),
+    setTimeout: (run, ms) => setTimeout(run, ms),
+    clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+    setInterval: (run, ms) => setInterval(run, ms),
+    clearInterval: (timer) => clearInterval(timer as ReturnType<typeof setInterval>),
+    log: (message, error) => console.error(message, error),
+  });
+
+  // The page wakes the service worker, which Chrome stops while no socket keeps it busy, and hands it the pairing token.
+  chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
+    sendResponse(pane.external(message, sender.origin));
+    return false;
+  });
+  chrome.windows.onRemoved.addListener((windowId) => void pane.windowRemoved(windowId).catch((error: unknown) => console.error('Switchboard could not forget its pane', error)));
+  pane.connect();
+}

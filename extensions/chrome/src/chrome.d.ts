@@ -4,6 +4,11 @@
 declare const FIREFOX: boolean;
 declare namespace chrome.runtime {
   function sendMessage(message: unknown): Promise<unknown>;
+  function getURL(path: string): string;
+
+  const onMessageExternal: {
+    addListener(listener: (message: unknown, sender: { origin?: string }, sendResponse: (response: unknown) => void) => boolean): void;
+  };
 
   const onMessage: {
     addListener(listener: (message: unknown, sender: unknown, sendResponse: (response: unknown) => void) => boolean): void;
@@ -19,8 +24,9 @@ declare namespace chrome.tabs {
     pendingUrl?: string;
   }
 
-  function query(query: { groupId: number }): Promise<Tab[]>;
-  function update(tabId: number, properties: { url: string; loadReplace?: boolean }): Promise<Tab | undefined>;
+  function query(query: { groupId: number } | { windowId: number }): Promise<Tab[]>;
+  function update(tabId: number, properties: { url: string; loadReplace?: boolean } | { active: true }): Promise<Tab | undefined>;
+  function create(properties: { windowId: number; url: string; active: boolean }): Promise<Tab>;
   function move(tabId: number, properties: { index: number }): Promise<Tab>;
   function group(options: { tabIds: number; groupId?: number; createProperties?: { windowId: number } }): Promise<number>;
   function remove(tabId: number): Promise<void>;
@@ -32,7 +38,25 @@ declare namespace chrome.tabs {
 }
 
 declare namespace chrome.storage {
-  const session: import('./tabs.js').SessionStorage;
+  interface StorageArea {
+    get(key: string): Promise<Record<string, unknown>>;
+    set(items: Record<string, unknown>): Promise<void>;
+    remove(key: string): Promise<void>;
+  }
+
+  const session: import('./tabs.js').SessionStorage & StorageArea;
+  const local: StorageArea;
+}
+
+declare namespace chrome.windows {
+  interface Window {
+    id?: number;
+  }
+
+  function create(properties: { type: 'normal'; url: string; focused: boolean }): Promise<Window>;
+  function get(windowId: number): Promise<Window>;
+
+  const onRemoved: { addListener(listener: (windowId: number) => void): void };
 }
 
 declare namespace chrome.tabGroups {
