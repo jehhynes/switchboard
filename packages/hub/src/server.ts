@@ -88,7 +88,7 @@ export interface PageRoutes {
 }
 
 /** The page's read-only change routes, under `/v1/conversation/` (architecture.md § Web page). */
-export const CHANGE_ROUTES = new Set(['changes', 'diff']);
+export const CHANGE_ROUTES = new Set(['changes', 'diff', 'file']);
 
 /** The least JSON body sent gzipped to a client that takes it. */
 const GZIP_MIN_BYTES = 1024;
@@ -98,7 +98,7 @@ const GZIP_MIN_BYTES = 1024;
  * `page-conversation`, hosted by the shown conversation's folder. `row-action`, `row-paste`, `resume`, `prompt`, `prompt-key` and `console-input` take only a page key.
  * The hub itself answers `page-pair`, `page-devices` and `page-device-revoke` (architecture.md § Remote access).
  */
-export const PAGE_COMMANDS = new Set(['send', 'history', 'seen', 'select', 'statuses', 'commands', 'answer', 'talk-here', 'stop-speaking', 'speak-replies', 'replay', 'personas', 'persona', 'page-focus', 'row-action', 'row-paste', 'row-open', 'row-command', 'pool-action', 'resume', 'prompt', 'prompt-key', 'mic', 'composer', 'providers', 'page-conversation', 'console-input', 'page-source', 'page-tabs', 'page-search', 'page-poll', 'page-history', 'page-holder-restart', 'page-adhoc', 'page-folder-conversation', 'pane-pair', 'pane-rect', 'page-pair', 'page-devices', 'page-device-revoke', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll']);
+export const PAGE_COMMANDS = new Set(['open-file', 'send', 'history', 'seen', 'select', 'statuses', 'commands', 'answer', 'talk-here', 'stop-speaking', 'speak-replies', 'replay', 'personas', 'persona', 'page-focus', 'row-action', 'row-paste', 'row-open', 'row-command', 'pool-action', 'resume', 'prompt', 'prompt-key', 'mic', 'composer', 'providers', 'page-conversation', 'console-input', 'page-source', 'page-tabs', 'page-search', 'page-poll', 'page-history', 'page-holder-restart', 'page-adhoc', 'page-folder-conversation', 'pane-pair', 'pane-rect', 'page-pair', 'page-devices', 'page-device-revoke', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll']);
 
 /**
  * The page commands a device that reaches the page through a remote host may not post (architecture.md § Remote access): pairing and the device

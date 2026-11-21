@@ -13,6 +13,21 @@ export interface DiffData {
   tooLarge: 'sides' | 'patch' | null;
 }
 
+/** The hub's `file` answer: a file read whole, on disk or at the base. */
+export interface FileData {
+  path: string;
+  side: 'disk' | 'base';
+  contents: string | null;
+  binary: boolean;
+  tooLarge: boolean;
+}
+
+export interface FileMountOptions {
+  wrap: boolean;
+  /** The line to scroll to and select, null for the top. */
+  line: number | null;
+}
+
 export interface DiffMountOptions {
   layout: 'split' | 'stacked';
   wrap: boolean;
@@ -28,4 +43,5 @@ export interface DiffMount {
 /** What `diff.js` exports. */
 export interface DiffModule {
   mountDiff(host: HTMLElement, data: DiffData, version: string, options: DiffMountOptions): DiffMount | null;
+  mountFile(host: HTMLElement, data: FileData, version: string, options: FileMountOptions): DiffMount;
 }

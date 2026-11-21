@@ -15,7 +15,7 @@ import type { HistoryMessage } from './historyPanel.js';
 import { LogTail } from './hubLog.js';
 import { startHub } from './hubProcess.js';
 import { claimIsFor } from './claims.js';
-import { act, claimOpen, setTerminalState, setWindowKey, newClaudeTab, openAttach, openLink, openRow, openSession, openTab, openTerminal, openUri, providerOf, terminalCommandOf, windowFolder, workspaceFile } from './open.js';
+import { act, claimOpen, openFileAt, setTerminalState, setWindowKey, newClaudeTab, openAttach, openLink, openRow, openSession, openTab, openTerminal, openUri, providerOf, terminalCommandOf, windowFolder, workspaceFile } from './open.js';
 import type { OpenContext, OpenResult, WindowCommand } from './open.js';
 import { Pane } from './pane.js';
 import { Artifacts } from './artifacts.js';
@@ -209,6 +209,9 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
         return vscode.commands.executeCommand('switchboard.conversation.focus');
       case 'openUrl':
         return openLink(String(command['url']));
+      case 'openFile':
+        // A changed file the web page opened at a line (architecture.md § Web page).
+        return openFileAt(String(command['path']), Number(command['line']));
       case 'openTabs':
         return tabs.openAll(await state.first(TABS_STATE_WAIT_MS));
       case 'log':

@@ -4,7 +4,7 @@
 import type { ComponentChildren, VNode } from 'preact';
 import { FileIcon } from './fileIcons.js';
 import { mount, unmount } from './island.js';
-import type { DiffData, DiffModule, DiffMount } from './diff/types.js';
+import type { DiffData, DiffModule, DiffMount, FileData } from './diff/types.js';
 
 export type ChangeStatus = 'A' | 'M' | 'D' | 'R' | 'U' | 'C';
 export type ChangeStage = 'committed' | 'staged' | 'working' | 'untracked';
@@ -204,13 +204,63 @@ export interface ChangesDeps {
   loadDiff(): Promise<DiffModule | null>;
   /** Empties a pane Preact drew into, before the diff tab draws into it itself. */
   takePane(pane: HTMLElement): void;
+  /** Posts a command for the conversation the page shows, with its `scopeGen`. */
+  command(name: string, body: Record<string, unknown>): Promise<{ status: number; body: Record<string, unknown> }>;
+}
+
+/** A diff tab's file view: the file at a line, on disk or at the base, opened from a line number of its diff. */
+interface FileOpen {
+  path: string;
+  side: 'disk' | 'base';
+  line: number;
+  entry: { state: 'loading' } | { state: 'ok'; data: FileData; version: string } | { state: 'error'; error: string };
+}
+
+/** What the file view says in place of the file: a read on its way, why it failed, a binary file or one too large. */
+export function fileNote(entry: FileOpen['entry']): string | null {
+  if (entry.state === 'loading') {
+    return 'Reading the file…';
+  }
+
+  if (entry.state === 'error') {
+    return entry.error;
+  }
+
+  return entry.data.binary ? 'Binary file not shown.' : entry.data.tooLarge ? 'This file is too large to show here. Open it in VS Code.' : null;
 }
 
 /** A file's diff as read: on its way, read, or why not. */
 type DiffEntry = { state: 'loading' } | { state: 'ok'; data: DiffData; version: string } | { state: 'error'; error: string };
 
 /** The diff tab's header: the path, a rename's old path, the counts, the layout and wrap controls and Refresh. */
-function DiffHead({ path, row, choice, wrap, loading }: { path: string; row: ChangeRow | undefined; choice: DiffLayout; wrap: boolean; loading: boolean }): VNode {
+function DiffHead({ path, row, choice, wrap, loading, file, note }: { path: string; row: ChangeRow | undefined; choice: DiffLayout; wrap: boolean; loading: boolean; file: FileOpen | null; note: string | null }): VNode {
+  // Open in VS Code opens the file on disk, at the file view's line; a deleted file has none.
+  const openable = file === null ? row?.status !== 'D' : file.side === 'disk';
+  const open = openable ? (
+    <button class="diff-open" type="button" data-action="diff-open-vscode" title="Open the file in its VS Code window">
+      <span class="codicon codicon-go-to-file" aria-hidden="true"></span>
+      Open in VS Code
+    </button>
+  ) : null;
+
+  if (file !== null) {
+    return (
+      <div class="diff-head">
+        <button class="icon" type="button" data-action="diff-back" title="Back to the diff" aria-label="Back to the diff">
+          <span class="codicon codicon-arrow-left" aria-hidden="true"></span>
+        </button>
+        <span class="diff-title" title={file.path}>
+          {file.path}:{file.line}
+          {file.side === 'base' ? <span class="diff-from"> at the base</span> : null}
+        </span>
+        <span class="diff-tools">
+          {note === null ? null : <span class="diff-note">{note}</span>}
+          {open}
+        </span>
+      </div>
+    );
+  }
+
   return (
     <div class="diff-head">
       <span class={`diff-title${row === undefined ? '' : ` status-${row.status}`}`} title={row === undefined ? path : rowTitle(row)}>
@@ -232,6 +282,8 @@ function DiffHead({ path, row, choice, wrap, loading }: { path: string; row: Cha
         <button class="icon" type="button" data-action="diff-refresh" title="Refresh" aria-label="Refresh" disabled={loading}>
           <span class={`codicon codicon-refresh${loading ? ' codicon-modifier-spin' : ''}`} aria-hidden="true"></span>
         </button>
+        {note === null ? null : <span class="diff-note">{note}</span>}
+        {open}
       </span>
     </div>
   );
@@ -264,6 +316,9 @@ export class ChangesController {
   /** The diff viewer on each host it draws into, dropped once its host leaves the page. */
   readonly #mounted = new Map<HTMLElement, { mount: DiffMount | null; layout: string }>();
   #module: Promise<DiffModule | null> | null = null;
+  /** Each diff tab's file view while it shows one, by the tab's path, and what Open in VS Code last said. */
+  readonly #files = new Map<string, FileOpen>();
+  #note: { path: string; text: string } | null = null;
   #layout: DiffLayout = 'auto';
   #wrap: boolean | null = null;
 
@@ -288,6 +343,8 @@ export class ChangesController {
       this.#reading++;
       this.#diffReads++;
       this.#diffs.clear();
+      this.#files.clear();
+      this.#note = null;
       Object.assign(this.view, newChanges(), { for: id });
       return;
     }
@@ -391,6 +448,17 @@ export class ChangesController {
       return true;
     }
 
+    if (action === 'diff-back' && this.view.open !== null) {
+      this.#files.delete(this.view.open);
+      this.deps.draw();
+      return true;
+    }
+
+    if (action === 'diff-open-vscode' && this.view.open !== null) {
+      void this.openInVsCode(this.view.open);
+      return true;
+    }
+
     return target.closest('.changes-menu') !== null;
   }
 
@@ -420,6 +488,7 @@ export class ChangesController {
 
     this.view.tabs.splice(at, 1);
     this.#diffs.delete(path);
+    this.#files.delete(path);
     this.#diffSeq.delete(path);
     this.#loadingDiff.delete(path);
 
@@ -486,12 +555,65 @@ export class ChangesController {
     const host = pane.querySelector<HTMLElement>(':scope > .diff-view > .diff-host');
     const mounted = host === null ? undefined : this.#mounted.get(host);
     const shown = this.#shownLayout(pane);
-    const layout = `${shown.layout} ${shown.wrap}`;
+    // A file view is always stacked; only its wrapping follows the width.
+    const layout = host?.classList.contains('file-view') === true ? `stacked ${shown.wrap}` : `${shown.layout} ${shown.wrap}`;
 
-    if (mounted !== undefined && !host!.classList.contains('file-view') && mounted.layout !== layout) {
+    if (mounted !== undefined && mounted.layout !== layout) {
       mounted.layout = layout;
       mounted.mount?.set(shown.layout, shown.wrap);
     }
+  }
+
+  /**
+   * Shows the open tab's file at a line, from a line number clicked in its diff: the file on disk for the new side, the file at the base for the
+   * old side (a deleted file's only side).
+   */
+  openFileView(side: 'old' | 'new', line: number): void {
+    const tab = this.view.open;
+    const row = tab === null ? undefined : this.view.list?.rows.find((one) => one.path === tab);
+
+    if (tab === null) {
+      return;
+    }
+
+    const base = side === 'old' || row?.status === 'D';
+    const open: FileOpen = { path: base ? (row?.from ?? tab) : tab, side: base ? 'base' : 'disk', line, entry: { state: 'loading' } };
+
+    this.#files.set(tab, open);
+    this.#note = null;
+    this.deps.draw();
+    void this.#readFile(tab, open);
+  }
+
+  async #readFile(tab: string, open: FileOpen): Promise<void> {
+    const key = this.deps.key();
+    const reading = this.#diffReads;
+
+    if (key === null) {
+      return;
+    }
+
+    try {
+      const response = await this.deps.fetch(`/v1/conversation/file?window=${encodeURIComponent(key)}&path=${encodeURIComponent(open.path)}&side=${open.side}`, { credentials: 'same-origin' });
+      const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+
+      open.entry = response.ok ? { state: 'ok', data: body as unknown as FileData, version: response.headers?.get?.('ETag') ?? String(Date.now()) } : { state: 'error', error: String(body['error'] ?? `Switchboard answered ${response.status}.`) };
+    } catch (failure) {
+      open.entry = { state: 'error', error: `Switchboard did not answer: ${String(failure)}` };
+    }
+
+    if (reading === this.#diffReads && this.#files.get(tab) === open) {
+      this.deps.draw();
+    }
+  }
+
+  /** Opens the tab's file, at the file view's line or its first, in the work item's VS Code window, and says how that went. */
+  async openInVsCode(tab: string): Promise<void> {
+    const open = this.#files.get(tab);
+    const answer = await this.deps.command('open-file', { path: open?.path ?? tab, line: open?.line ?? 1 });
+
+    this.#note = { path: tab, text: answer.status === 200 ? 'Opened in VS Code.' : String(answer.body['error'] ?? `Switchboard answered ${answer.status}.`) };
+    this.deps.draw();
   }
 
   #keep(key: string, value: string | null): void {
@@ -529,8 +651,10 @@ export class ChangesController {
     }
 
     const entry = this.#diffs.get(path);
+    const file = this.#files.get(path) ?? null;
     const shown = this.#shownLayout(pane);
-    const id = `${path}\u0000${entry?.state === 'ok' ? entry.version : (entry?.state ?? '')}`;
+    const version = file !== null ? `file ${file.side} ${file.path} ${file.line} ${file.entry.state === 'ok' ? file.entry.version : file.entry.state}` : entry?.state === 'ok' ? entry.version : (entry?.state ?? '');
+    const id = `${path}\u0000${version}`;
     let view = pane.querySelector<HTMLElement>(':scope > .diff-view');
 
     if (view?.dataset['diff'] !== id) {
@@ -542,19 +666,17 @@ export class ChangesController {
       view.lastElementChild!.className = 'diff-host';
       pane.replaceChildren(view);
       this.drop();
-      this.#mountInto(view.lastElementChild as HTMLElement, entry, shown);
+
+      if (file === null) {
+        this.#mountInto(view.lastElementChild as HTMLElement, entry, shown);
+      } else {
+        view.lastElementChild!.classList.add('file-view');
+        this.#mountFileInto(view.lastElementChild as HTMLElement, file, shown.wrap);
+      }
     }
 
-    const host = view.lastElementChild as HTMLElement;
-    const mounted = this.#mounted.get(host);
-    const layout = `${shown.layout} ${shown.wrap}`;
-
-    if (mounted !== undefined && mounted.layout !== layout) {
-      mounted.layout = layout;
-      mounted.mount?.set(shown.layout, shown.wrap);
-    }
-
-    mount(view.firstElementChild!, <DiffHead path={path} row={this.view.list?.rows.find((one) => one.path === path)} choice={this.#layout} wrap={shown.wrap} loading={this.#loadingDiff.has(path)} />);
+    this.#relayout(pane);
+    mount(view.firstElementChild!, <DiffHead path={path} row={this.view.list?.rows.find((one) => one.path === path)} choice={this.#layout} wrap={shown.wrap} loading={this.#loadingDiff.has(path)} file={file} note={this.#note?.path === path ? this.#note.text : null} />);
   }
 
   /** Mounts the diff viewer on a host once its module loads, or says why there is no diff to show. */
@@ -594,13 +716,52 @@ export class ChangesController {
 
       const [layout, wrap] = kept.layout.split(' ') as ['split' | 'stacked', string];
 
-      kept.mount = module.mountDiff(host, entry.data, entry.version, { layout, wrap: wrap === 'true' });
+      kept.mount = module.mountDiff(host, entry.data, entry.version, { layout, wrap: wrap === 'true', onLine: (side, line) => this.openFileView(side, line) });
 
       if (kept.mount === null) {
         say("git's patch for this file could not be read.");
       } else if (entry.data.tooLarge === 'sides') {
         host.classList.add('patch-only');
       }
+    });
+  }
+
+  /** Mounts the file view on a host once the viewer loads, or says why there is no file to show. */
+  #mountFileInto(host: HTMLElement, file: FileOpen, wrap: boolean): void {
+    const say = (text: string): void => {
+      const line = document.createElement('p');
+
+      line.className = 'empty';
+      line.textContent = text;
+      host.replaceChildren(line);
+    };
+    const note = fileNote(file.entry);
+    const entry = file.entry;
+
+    this.#mounted.set(host, { mount: null, layout: `stacked ${wrap}` });
+
+    if (note !== null || entry.state !== 'ok') {
+      say(note ?? 'Reading the file…');
+      return;
+    }
+
+    say('Loading the diff viewer…');
+    this.#module ??= this.deps.loadDiff();
+    void this.#module.then((module) => {
+      const kept = this.#mounted.get(host);
+
+      if (kept === undefined || !host.isConnected) {
+        return;
+      }
+
+      if (module === null) {
+        this.#module = null;
+        say('The diff viewer could not be loaded. Reload the page to try again.');
+        return;
+      }
+
+      host.replaceChildren();
+      kept.mount = module.mountFile(host, entry.data, entry.version, { wrap, line: file.line });
     });
   }
 

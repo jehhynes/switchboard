@@ -64,28 +64,50 @@ describe('the Changes list', () => {
   });
 
   const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
-  const mounts: Array<{ path: string; layout: string; wrap: boolean; sets: string[]; disposed: boolean }> = [];
+  const mounts: Array<{ path: string; layout: string; wrap: boolean; sets: string[]; disposed: boolean; onLine?: (side: 'old' | 'new', line: number) => void }> = [];
+  const files: Array<{ path: string; side: string; line: number | null }> = [];
+  const fileSets: string[] = [];
   let module: DiffModule | null;
   let diffAnswers: Record<string, { status: number; body: unknown }>;
 
   beforeEach(() => {
     mounts.length = 0;
+    files.length = 0;
+    fileSets.length = 0;
     diffAnswers = {};
     module = {
       mountDiff: (host, data, _version, options) => {
-        const mount = { path: data.path, layout: options.layout, wrap: options.wrap, sets: [] as string[], disposed: false };
+        const mount = { path: data.path, layout: options.layout, wrap: options.wrap, sets: [] as string[], disposed: false, ...(options.onLine === undefined ? {} : { onLine: options.onLine }) };
 
         mounts.push(mount);
         host.textContent = `diff of ${data.path}`;
         return data.patch === 'unreadable' ? null : { set: (layout, wrap) => mount.sets.push(`${layout} ${wrap}`), dispose: () => (mount.disposed = true) };
       },
+      mountFile: (host, data, _version, options) => {
+        files.push({ path: data.path, side: data.side, line: options.line });
+        host.textContent = `file ${data.path} at ${String(options.line)}`;
+        return { set: (layout, wrap) => fileSets.push(`${layout} ${wrap}`), dispose: () => {} };
+      },
     };
   });
 
   const start = () => {
-    const fetch = vi.fn(async (url: string) => {
+    const fetch = vi.fn(async (url: string, init?: unknown) => {
       if (url.startsWith('/v1/conversation/changes')) {
         gets.push(url);
+      }
+
+      if (url.startsWith('/v1/conversation/file')) {
+        gets.push(url);
+
+        const params = new URLSearchParams(url.slice(url.indexOf('?')));
+
+        return { status: 200, ok: true, json: async () => ({ path: params.get('path'), side: params.get('side'), contents: 'x', binary: false, tooLarge: false }) } as unknown as Response;
+      }
+
+      if (url === '/v1/conversation/open-file') {
+        gets.push(`POST ${String((init as { body?: string } | undefined)?.body)}`);
+        return { status: 409, ok: false, json: async () => ({ error: 'The work item no longer offers this.' }) } as unknown as Response;
       }
 
       const diffPath = url.startsWith('/v1/conversation/diff') ? decodeURIComponent(/path=([^&]*)/.exec(url)![1]!) : null;
@@ -243,6 +265,35 @@ describe('the Changes list', () => {
     expect(mounts.every((mount) => mount.disposed)).toBe(true);
   });
 
+  it("shows the file at a clicked line number, the base's for the old side, and asks for it in VS Code", async () => {
+    start();
+    await openRow(1);
+    mounts[0]!.onLine!('new', 12);
+    await flush();
+    await flush();
+    expect(gets.at(-1)).toBe('/v1/conversation/file?window=pk&path=src%2Fnew.ts&side=disk');
+    expect(files.at(-1)).toEqual({ path: 'src/new.ts', side: 'disk', line: 12 });
+    expect(root.querySelector('.diff-title')!.textContent).toBe('src/new.ts:12');
+
+    root.querySelector<HTMLElement>('[data-action="diff-open-vscode"]')!.click();
+    await flush();
+    expect(JSON.parse(gets.at(-1)!.slice('POST '.length))).toMatchObject({ window: 'pk', scopeGen: 3, path: 'src/new.ts', line: 12 });
+    expect(root.querySelector('.diff-note')!.textContent).toBe('The work item no longer offers this.');
+
+    root.querySelector<HTMLElement>('[data-action="diff-back"]')!.click();
+    await flush();
+    await flush();
+    expect(root.querySelector('.diff-title')!.textContent).toBe('src/old.ts → src/new.ts');
+
+    // The old side's line opens the file at the base, by its old name, with nothing to open in VS Code.
+    mounts.at(-1)!.onLine!('old', 3);
+    await flush();
+    await flush();
+    expect(files.at(-1)).toEqual({ path: 'src/old.ts', side: 'base', line: 3 });
+    expect(root.querySelector('.diff-title')!.textContent).toBe('src/old.ts:3 at the base');
+    expect(root.querySelector('[data-action="diff-open-vscode"]')).toBeNull();
+  });
+
   it('changes the layout and wrapping on the open diff and keeps the choice', async () => {
     start();
     await openRow(0);
@@ -320,6 +371,14 @@ describe('the Changes list', () => {
     Object.defineProperty(pane, 'clientWidth', { configurable: true, value: 1200 });
     observers.forEach((callback) => callback([{ target: pane }]));
     expect(mounts[0]!.sets.at(-1)).toBe('split false');
+
+    // A file view wraps as its pane narrows, and stays stacked.
+    mounts[0]!.onLine!('new', 2);
+    await flush();
+    await flush();
+    Object.defineProperty(pane, 'clientWidth', { configurable: true, value: 500 });
+    observers.forEach((callback) => callback([{ target: pane }]));
+    expect(fileSets.at(-1)).toBe('stacked true');
     vi.unstubAllGlobals();
   });
 

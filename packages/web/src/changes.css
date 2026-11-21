@@ -69,6 +69,9 @@
   --diffs-bg-deletion-emphasis-override: #ff000033;
   --diffs-bg-separator-override: var(--vscode-sideBar-background);
 }
+.diff-open { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 4px; background: var(--vscode-button-secondaryBackground, transparent); color: var(--vscode-button-secondaryForeground, var(--vscode-foreground)); font: inherit; cursor: pointer; }
+.diff-open:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground)); }
+.diff-note { color: var(--vscode-descriptionForeground); }
 .diff-host > .empty { padding: 12px; color: var(--vscode-descriptionForeground); }
 @media (max-width: 599px) { .diff-host { --diffs-font-size: 12px; --diffs-line-height: 17px; } }
 @media (hover: none), (pointer: coarse) { .diff-head button.icon { width: 44px; height: 44px; } .diff-layout button, .diff-wrap { min-height: 36px; } }

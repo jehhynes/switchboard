@@ -1,8 +1,8 @@
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { DIFF_MAX_BYTES, fileInside, PageChanges, parseNameStatus, parseNumstat, readCapped, readChanges, readDiff, relativePath, SIDE_MAX_BYTES } from '../src/changes.js';
+import { DIFF_MAX_BYTES, fileInside, PageChanges, parseNameStatus, parseNumstat, readCapped, readChanges, readDiff, readFileView, relativePath, SIDE_MAX_BYTES } from '../src/changes.js';
 import type { ChangesView, WorktreeChanges } from '../src/changes.js';
 import type { WindowScope } from '../src/windows.js';
 import { isolateGit, makeRepo } from './gitFixture.js';
@@ -203,6 +203,14 @@ describe('paths the page names', () => {
     repo.write('../' + outside.split(/[\\/]/).pop() + '/secret.txt', 'secret\n');
     expect(await fileInside(repo.root, 'out/secret.txt')).toBeNull();
   });
+
+  it('refuses a link or junction that stays inside the worktree too, as to git\'s own files or an ignored folder', async () => {
+    const repo = makeRepo({ 'in.txt': 'in\n' });
+
+    symlinkSync(join(repo.root, '.git'), join(repo.root, 'gitdir'), 'junction');
+    expect(await fileInside(repo.root, 'gitdir/config')).toBeNull();
+    expect(await fileInside(repo.root, 'in.txt')).not.toBeNull();
+  });
 });
 
 describe('PageChanges', () => {
@@ -323,5 +331,53 @@ describe('PageChanges.diff', () => {
     expect((await changes.diff('p1', null)).status).toBe(400);
     expect(await changes.diff('p1', 'src/kept.ts')).toEqual({ status: 404, body: { error: 'src/kept.ts is not one of the changes now.' } });
     expect((await new PageChanges({ isPage: () => false, scope: () => scope(repo.root) }).diff('p1', 'edited.md')).status).toBe(403);
+  });
+});
+
+describe('the file view', () => {
+  const scope = (cwd: string, scopeGen = 1): WindowScope => ({ kind: 'page', key: 'p1', folder: cwd, title: 'T', scopeGen, conversations: [], workItemId: 7, cwd, sessionId: 's1' });
+
+  it("reads a file git tracks or would track on disk, and a change row's file at the base, and nothing else", async () => {
+    const repo = busyRepo();
+    const changes = (await readChanges(repo.root)) as WorktreeChanges;
+
+    expect(await readFileView(changes, 'src/kept.ts', 'disk')).toEqual({ path: 'src/kept.ts', side: 'disk', contents: lines(5), binary: false, tooLarge: false });
+    expect(await readFileView(changes, 'notes/new.txt', 'disk')).toMatchObject({ contents: 'one\ntwo\nthree' });
+    expect(await readFileView(changes, 'image.bin', 'disk')).toMatchObject({ contents: null, binary: true });
+    expect(await readFileView(changes, 'src/old-name.ts', 'base')).toMatchObject({ side: 'base', contents: lines(8) });
+    expect(await readFileView(changes, 'gone.txt', 'base')).toMatchObject({ contents: 'bye\n' });
+
+    // An ignored file, git's own files, a base file that is no change row, and a file that is not there.
+    for (const [path, side] of [['ignored.log', 'disk'], ['.git/config', 'disk'], ['src/kept.ts', 'base'], ['gone.txt', 'disk']] as const) {
+      expect(await readFileView(changes, path, side)).toBeNull();
+    }
+  });
+
+  it("answers the route with an ETag and refuses another side, a path that is not plain, and one it does not answer", async () => {
+    const repo = busyRepo();
+    const changes = new PageChanges({ isPage: () => true, scope: () => scope(repo.root) });
+
+    expect(await changes.file('p1', 'src/kept.ts', 'disk')).toMatchObject({ status: 200, etag: expect.stringMatching(/^[0-9a-f]{32}$/) });
+    expect((await changes.file('p1', 'src/kept.ts', 'index')).status).toBe(400);
+    expect((await changes.file('p1', '../x', 'disk')).status).toBe(400);
+    expect(await changes.file('p1', 'ignored.log', 'disk')).toEqual({ status: 404, body: { error: 'ignored.log is not a file of this worktree.' } });
+  });
+
+  it("opens a file of the worktree at a line in the work item's window, by its real path, only at the page's scope generation", async () => {
+    const repo = busyRepo();
+    const opened: Array<[number, string, number]> = [];
+    const changes = new PageChanges({ isPage: () => true, scope: () => scope(repo.root, 4), openFile: (id, path, line) => (opened.push([id, path, line]), null) });
+
+    expect(await changes.openFileCommand({ window: 'p1', scopeGen: 4, opId: 'o', path: 'src/kept.ts', line: 3 })).toEqual({ status: 200, body: { opened: 'src/kept.ts' } });
+    // A retried opId answers as the first did and opens nothing more; one without an opId is refused.
+    expect(await changes.openFileCommand({ window: 'p1', scopeGen: 4, opId: 'o', path: 'src/kept.ts', line: 3 })).toEqual({ status: 200, body: { opened: 'src/kept.ts' } });
+    expect((await changes.openFileCommand({ window: 'p1', scopeGen: 4, path: 'src/kept.ts', line: 3 })).status).toBe(400);
+    expect(opened).toEqual([[7, realpathSync.native(join(repo.root, 'src', 'kept.ts')), 3]]);
+    expect((await changes.openFileCommand({ window: 'p1', scopeGen: 3, opId: 'o3', path: 'src/kept.ts', line: 3 })).status).toBe(409);
+    expect((await changes.openFileCommand({ window: 'p1', scopeGen: 4, opId: 'o4', path: 'missing.ts', line: 3 })).status).toBe(404);
+    expect((await changes.openFileCommand({ window: 'p1', scopeGen: 4, opId: 'o5', path: '../x', line: 3 })).status).toBe(400);
+    expect((await changes.openFileCommand({ window: 'p1', scopeGen: 4, opId: 'o6', path: 'src/kept.ts', line: 0 })).status).toBe(400);
+    expect(await new PageChanges({ isPage: () => true, scope: () => scope(repo.root, 4), openFile: () => 'The work item is gone.' }).openFileCommand({ window: 'p1', scopeGen: 4, opId: 'o2', path: 'src/kept.ts', line: 1 })).toEqual({ status: 409, body: { error: 'The work item is gone.' } });
+    expect(opened).toHaveLength(1);
   });
 });

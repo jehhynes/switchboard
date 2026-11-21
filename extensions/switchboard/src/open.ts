@@ -638,3 +638,14 @@ export async function openUri(context: OpenContext, uri: vscode.Uri): Promise<st
   void openRow({ ...context, record }, row.key, row);
   return row.key;
 }
+
+/** Opens a file at a 1-based line, selected, as the web page's Open in VS Code asks (architecture.md § Web page). */
+export async function openFileAt(path: string, line: number): Promise<void> {
+  const at = Number.isInteger(line) && line > 0 ? line - 1 : 0;
+
+  try {
+    await vscode.window.showTextDocument(vscode.Uri.file(path), { selection: new vscode.Range(at, 0, at, 0), preview: false });
+  } catch (error) {
+    void vscode.window.showErrorMessage(`Switchboard: could not open ${path}: ${String(error)}`);
+  }
+}

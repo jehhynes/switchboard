@@ -162,7 +162,8 @@ const COUNT_AT_ONCE = 8;
 
 /**
  * A file under `root` by a path relative to it, resolved by real path, or null when it is not a file inside it: `..`, an absolute path, or a
- * link or junction out of it is refused, as an artifact's file is.
+ * link or junction out of it is refused, as an artifact's file is, and so is any link or junction on the way, even one inside the worktree,
+ * since it could lead to a file git ignores or to git's own files.
  */
 export async function fileInside(root: string, path: string): Promise<string | null> {
   if (!relativePath(path)) {
@@ -171,10 +172,12 @@ export async function fileInside(root: string, path: string): Promise<string | n
 
   try {
     const top = await realpath(root);
-    const real = await realpath(join(top, ...path.split('/')));
+    const lexical = join(top, ...path.split('/'));
+    const real = await realpath(lexical);
     const inside = relative(top, real);
+    const direct = process.platform === 'win32' ? real.toLowerCase() === lexical.toLowerCase() : real === lexical;
 
-    return inside !== '' && inside !== '..' && !inside.startsWith(`..${sep}`) && !isAbsolute(inside) && (await stat(real)).isFile() ? real : null;
+    return direct && inside !== '' && inside !== '..' && !inside.startsWith(`..${sep}`) && !isAbsolute(inside) && (await stat(real)).isFile() ? real : null;
   } catch {
     return null;
   }
@@ -467,7 +470,10 @@ export async function readDiff(changes: WorktreeChanges, path: string, git: Git 
     return { ...base, tooLarge: null };
   }
 
-  if (old === 'large' || now === 'large' || patch.stdout.length + (old?.length ?? 0) + (now?.length ?? 0) > DIFF_MAX_BYTES) {
+  // A side the row has but that cannot be read, such as a link, leaves the patch alone too.
+  const unread = (sides.original !== null && old === null) || (sides.modified !== null && now === null);
+
+  if (unread || old === 'large' || now === 'large' || patch.stdout.length + (old?.length ?? 0) + (now?.length ?? 0) > DIFF_MAX_BYTES) {
     return { ...base, patch: patch.stdout.toString('utf8'), tooLarge: 'sides' };
   }
 
@@ -480,6 +486,46 @@ export interface PageChangesDeps {
   isPage(key: string): boolean;
   scope(key: string): WindowScope | null;
   git?: Git;
+  /** Opens a file at a line in the work item's VS Code window, opening the window when it is closed: why not, or null. */
+  openFile?(workItemId: number, path: string, line: number): string | null;
+}
+
+/** The hub's `file` answer: a file read whole, on disk or at the base, for the page's file view. */
+export interface FileView {
+  path: string;
+  side: 'disk' | 'base';
+  contents: string | null;
+  binary: boolean;
+  tooLarge: boolean;
+}
+
+/**
+ * A file of the worktree for the file view (`side` disk): one git tracks or would track, never an ignored one or one under `.git`, read by real
+ * path inside the worktree; or (`side` base) a change row's file at the base, read as `<base>:<path>` for the row's own base path only. Null for
+ * any other path.
+ */
+export async function readFileView(changes: WorktreeChanges, path: string, side: 'disk' | 'base', git: Git = nodeGit): Promise<FileView | null> {
+  let bytes: Buffer | 'large' | null;
+
+  if (side === 'base') {
+    const row = [...changes.sides.values()].find((one) => one.original?.path === path);
+
+    bytes = row?.original == null ? null : await readSide(changes, row.original, git);
+  } else {
+    const listed = await git(['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', path], changes.root);
+
+    bytes = listed.code === 0 && fields(listed.stdout).includes(path) ? await readSide(changes, { path, ref: null }, git) : null;
+  }
+
+  if (bytes === null) {
+    return null;
+  }
+
+  if (bytes === 'large') {
+    return { path, side, contents: null, binary: false, tooLarge: true };
+  }
+
+  return looksBinary(bytes) ? { path, side, contents: null, binary: true, tooLarge: false } : { path, side, contents: bytes.toString('utf8'), binary: false, tooLarge: false };
 }
 
 /** Why a page key gets no changes: not a page's, or no selected conversation with a folder yet. */
@@ -501,6 +547,9 @@ function same(deps: PageChangesDeps, key: string, scope: WindowScope): boolean {
 }
 
 export const CONVERSATION_MOVED = "The window's conversation changed.";
+
+/** How many `open-file` answers a page's retried `opId` can find. */
+const OPENED_KEPT = 100;
 
 /** An answer's `ETag`: a hash of its JSON, so an unchanged answer is answered 304. */
 export function etagOf(body: unknown): string {
@@ -561,5 +610,93 @@ export class PageChanges {
     }
 
     return diff === null ? { status: 404, body: { error: `${path} is not one of the changes now.` } } : { status: 200, body: diff, etag: etagOf(diff) };
+  }
+
+  /**
+   * `GET /v1/conversation/file?window=<page key>&path=<path>&side=disk|base`: a file of the selected conversation's worktree read whole
+   * (`readFileView`); 400 for a path that is not plain and relative or another side, 404 for one it does not answer.
+   */
+  async file(key: string, path: unknown, side: unknown): Promise<ChangesReply> {
+    if (!relativePath(path) || (side !== 'disk' && side !== 'base')) {
+      return { status: 400, body: { error: 'Expected a path relative to the worktree and a side, disk or base.' } };
+    }
+
+    const scope = unscoped(this.deps, key);
+
+    if ('status' in scope) {
+      return scope;
+    }
+
+    const read = await readChanges(scope.cwd!, this.deps.git, false);
+    const view = 'error' in read ? null : await readFileView(read, path, side, this.deps.git);
+
+    if (!same(this.deps, key, scope)) {
+      return { status: 409, body: { error: CONVERSATION_MOVED } };
+    }
+
+    if ('error' in read) {
+      return { status: 409, body: read };
+    }
+
+    return view === null ? { status: 404, body: { error: `${path} is not a file of this worktree.` } } : { status: 200, body: view, etag: etagOf(view) };
+  }
+
+  /**
+   * `open-file {window, scopeGen, opId, path, line}`: opens a file of the selected conversation's worktree at a line in its work item's VS Code
+   * window, as Open in VS Code does; 403 for a key that is not a page's, 409 for a stale `scopeGen` or a refusal, 404 for a path that is no file
+   * inside the worktree.
+   */
+  async openFileCommand(body: Record<string, unknown>): Promise<ChangesReply> {
+    const { window, scopeGen, opId, path, line } = body;
+
+    if (typeof window !== 'string' || !Number.isInteger(scopeGen) || typeof opId !== 'string' || opId === '' || opId.length > 100 || !relativePath(path) || !Number.isInteger(line) || (line as number) < 1) {
+      return { status: 400, body: { error: 'Expected {window, scopeGen, opId, path, line}.' } };
+    }
+
+    // A retried `opId` answers as the first did, so a lost answer never opens the file twice.
+    const done = this.#opened.get(`${window} ${opId}`);
+
+    if (done !== undefined) {
+      return done;
+    }
+
+    const reply = await this.#openFile(window, scopeGen as number, path, line as number);
+
+    this.#opened.set(`${window} ${opId}`, reply);
+
+    if (this.#opened.size > OPENED_KEPT) {
+      this.#opened.delete(this.#opened.keys().next().value!);
+    }
+
+    return reply;
+  }
+
+  /** Each `open-file`'s answer by page key and `opId`, the last {@link OPENED_KEPT}. */
+  readonly #opened = new Map<string, ChangesReply>();
+
+  async #openFile(window: string, scopeGen: number, path: string, line: number): Promise<ChangesReply> {
+    const scope = unscoped(this.deps, window);
+
+    if ('status' in scope) {
+      return scope;
+    }
+
+    if (scope.scopeGen !== scopeGen || scope.workItemId === null) {
+      return { status: 409, body: { error: CONVERSATION_MOVED } };
+    }
+
+    const real = await fileInside(scope.cwd!, path);
+
+    if (real === null) {
+      return { status: 404, body: { error: `${path} is not a file of this worktree.` } };
+    }
+
+    if (!same(this.deps, window, scope)) {
+      return { status: 409, body: { error: CONVERSATION_MOVED } };
+    }
+
+    const why = this.deps.openFile === undefined ? 'This hub cannot open files in VS Code.' : this.deps.openFile(scope.workItemId, real, line);
+
+    return why === null ? { status: 200, body: { opened: path } } : { status: 409, body: { error: why } };
   }
 }

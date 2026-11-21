@@ -362,6 +362,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     },
     loadDiff: () => deps.loadDiff?.() ?? Promise.resolve(null),
     takePane: (pane) => takePane(pane),
+    command: (name, body) => command(name, body),
   });
   let changesSession: string | null = null;
   // File type icons, whose mapping loads the first time a list draws one (architecture.md § Web page).

@@ -5,7 +5,7 @@ import { CodeView, processFile, registerCustomTheme } from '@pierre/diffs';
 import type { CodeViewItem, CodeViewOptions, FileDiffMetadata } from '@pierre/diffs';
 import { getOrCreateWorkerPoolSingleton } from '@pierre/diffs/worker';
 import type { WorkerPoolManager } from '@pierre/diffs/worker';
-import type { DiffData, DiffMount, DiffMountOptions } from './types.js';
+import type { DiffData, DiffMount, DiffMountOptions, FileData, FileMountOptions } from './types.js';
 
 registerCustomTheme('sb-dark-modern', () => import('./themes/sb-dark-modern.json').then((module) => module.default as never));
 registerCustomTheme('sb-light-modern', () => import('./themes/sb-light-modern.json').then((module) => module.default as never));
@@ -98,4 +98,20 @@ export function mountDiff(host: HTMLElement, data: DiffData, version: string, mo
     set: (layout, wrap) => view.setOptions({ ...options(layout, wrap), onLineNumberClick: (props: { lineNumber: number; annotationSide?: 'deletions' | 'additions' }) => mount.onLine?.(props.annotationSide === 'deletions' ? 'old' : 'new', props.lineNumber) } as CodeViewOptions<undefined, undefined>),
     dispose: () => view.cleanUp(),
   };
+}
+
+/** Draws a whole file read-only into `host`, scrolled to `line` and with it selected (PRD R118's file view). */
+export function mountFile(host: HTMLElement, data: FileData, version: string, mount: FileMountOptions): DiffMount {
+  const view = new CodeView<undefined, undefined>(options('stacked', mount.wrap), workers());
+  const item: CodeViewItem<undefined> = { id: data.path, type: 'file', file: { name: data.path, contents: data.contents ?? '', cacheKey: version } };
+
+  view.setup(host);
+  view.setItems([item]);
+
+  if (mount.line !== null && mount.line > 0) {
+    view.scrollTo({ type: 'line', id: data.path, lineNumber: mount.line, align: 'center', behavior: 'instant' });
+    view.setSelectedLines({ id: data.path, range: { start: mount.line, end: mount.line } });
+  }
+
+  return { set: (_layout, wrap) => view.setOptions(options('stacked', wrap)), dispose: () => view.cleanUp() };
 }

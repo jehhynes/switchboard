@@ -37,7 +37,7 @@ import type { Built } from './snapshotBuilder.js';
 import { WindowScopes } from './windows.js';
 import { tailscaleIdentity } from './tailscale.js';
 import type { RemoteAccess } from './page.js';
-import { dockRowOf, PageAccess, pageActionEvent, pageCommandOf, pageHeader, pageList, pageRow, pasteText, poolRowOf, rowOpenUrl } from './page.js';
+import { dockRowOf, PageAccess, pageActionEvent, OPEN_IN_VSCODE, pageCommandOf, pageHeader, pageList, pageRow, pasteText, poolRowOf, rowOpenUrl } from './page.js';
 import { launcher } from './launch.js';
 import type { Launcher } from './launch.js';
 import { pageAsset } from './pageAssets.js';
@@ -534,8 +534,45 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     log: deps.log,
   });
   // The web page's console of a held session (architecture.md § Web page).
+  /**
+   * Runs a VS Code control of a work item's row from the page (architecture.md § Web page): opens or brings forward the row's window and leaves it
+   * the dock's command for the label, or `command` in its place, after checking the row offers the label now: why not, or null.
+   */
+  const commandInWindow = (workItemId: number, label: string, command?: Record<string, unknown>): string | null => {
+    const row = dockRowOf(views().dock, workItemId);
+    const built = row === null ? { refused: 'The work item is gone.' } : pageCommandOf(row, label);
+
+    if ('refused' in built) {
+      return built.refused;
+    }
+
+    const destination = built.destination;
+    const left = command ?? built.command;
+    // A window not open yet shows its tabs once it opens, as one the dock opens does (PRD R72); a folder window has none.
+    const ids = [...(row!.window?.file != null && scopes.keysOf(destination).length === 0 ? [{ type: 'openTabs' }] : []), ...(left === null ? [] : [left])].map((one) => windowQueue.recordCommand(one, destination));
+
+    if (ids.includes(null)) {
+      ids.forEach((id) => id !== null && windowQueue.withdrawCommand(id));
+      return 'The hub could not save the command; see its log.';
+    }
+
+    try {
+      launch.openCode(destination);
+    } catch (error) {
+      ids.forEach((id) => windowQueue.withdrawCommand(id!));
+      return `VS Code did not start: ${(error as Error).message}`;
+    }
+
+    askToClaim(destination);
+    deps.log(`page: ${label}${command === undefined ? '' : ` (${String(command['type'])})`} for work item ${workItemId} in ${destination}`);
+    return null;
+  };
   // The web page's Changes list and diffs, read with git in the page's selected conversation's folder (architecture.md § Web page).
-  const pageChanges = new PageChanges({ isPage: (key) => scopes.isPage(key), scope: (key) => scopes.scope(key) });
+  const pageChanges = new PageChanges({
+    isPage: (key) => scopes.isPage(key),
+    scope: (key) => scopes.scope(key),
+    openFile: (workItemId, path, line) => commandInWindow(workItemId, OPEN_IN_VSCODE, { type: 'openFile', path, line }),
+  });
   const pageConsole = new PageConsole({
     isPage: (key) => scopes.isPage(key),
     scope: (key) => scopes.scope(key),
@@ -665,34 +702,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       return parsed === null ? 'The ticket no longer offers this.' : runtime.send(parsed).refused;
     },
     // The page's VS Code controls: the dock's command left for the row's window, which VS Code opens or brings forward (architecture.md § Web page).
-    rowCommand: (workItemId, label) => {
-      const row = dockRowOf(views().dock, workItemId);
-      const built = row === null ? { refused: 'The work item is gone.' } : pageCommandOf(row, label);
-
-      if ('refused' in built) {
-        return built.refused;
-      }
-
-      const { destination, command } = built;
-      // A window not open yet shows its tabs once it opens, as one the dock opens does (PRD R72); a folder window has none.
-      const left = [...(row!.window?.file != null && scopes.keysOf(destination).length === 0 ? [{ type: 'openTabs' }] : []), ...(command === null ? [] : [command])].map((one) => windowQueue.recordCommand(one, destination));
-
-      if (left.includes(null)) {
-        left.forEach((id) => id !== null && windowQueue.withdrawCommand(id));
-        return 'The hub could not save the command; see its log.';
-      }
-
-      try {
-        launch.openCode(destination);
-      } catch (error) {
-        left.forEach((id) => windowQueue.withdrawCommand(id!));
-        return `VS Code did not start: ${(error as Error).message}`;
-      }
-
-      askToClaim(destination);
-      deps.log(`page: ${label} for work item ${workItemId} in ${destination}`);
-      return null;
-    },
+    rowCommand: (workItemId, label) => commandInWindow(workItemId, label),
     // The installed page's link, opened in the default browser only when its row holds it now (architecture.md § Web page).
     rowOpen: (rowKey, url) => {
       const row = views().dock.groups.flatMap((group) => group.rows).find((one) => one.key === rowKey) ?? null;
@@ -1160,6 +1170,8 @@ const dockWithRuns = () => {
       '/v1/conversation/page-holder-restart': async (body) => (isRecord(body) ? conversation.pageHolderRestart(body) : { status: 400, body: { error: 'Expected {window}.' } }),
       '/v1/conversation/page-adhoc': async (body) => (isRecord(body) ? conversation.pageAdhoc(body) : { status: 400, body: { error: 'Expected {window, opId, prompt, repoRoot, start, provider}.' } }),
       '/v1/conversation/page-folder-conversation': async (body) => (isRecord(body) ? conversation.pageFolderConversation(body) : { status: 400, body: { error: 'Expected {window, opId, folder, provider?}.' } }),
+      // A changed file opened at a line in the work item's VS Code window (architecture.md § Web page).
+      '/v1/conversation/open-file': async (body) => (isRecord(body) ? pageChanges.openFileCommand(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, path, line}.' } }),
       '/v1/conversation/page-search': async (body) => (isRecord(body) ? conversation.pageSearch(body) : { status: 400, body: { error: 'Expected {window, text, since}.' } }),
       // The page's tabs for its work item, kept for every device (architecture.md § Web page).
       '/v1/conversation/page-tabs': async (body) => (isRecord(body) ? conversation.pageTabs(body) : { status: 400, body: { error: 'Expected {window, workItemId, tab?, close?, reopen?, openOn?}.' } }),
@@ -1488,7 +1500,14 @@ const dockWithRuns = () => {
       artifact: (key, name) => conversation.artifactFile(key, name),
       upload: (key, scopeGen, name, bytes) => conversation.pageUpload(key, scopeGen, name, bytes),
       console: (key, sessionId, send, end) => pageConsole.open(key, sessionId, send, end),
-      changes: (route, key, query) => (route === 'changes' ? pageChanges.changes(key) : route === 'diff' ? pageChanges.diff(key, query.get('path')) : Promise.resolve({ status: 404, body: { error: 'not found' } })),
+      changes: (route, key, query) =>
+        route === 'changes'
+          ? pageChanges.changes(key)
+          : route === 'diff'
+            ? pageChanges.diff(key, query.get('path'))
+            : route === 'file'
+              ? pageChanges.file(key, query.get('path'), query.get('side'))
+              : Promise.resolve({ status: 404, body: { error: 'not found' } }),
     },
     pagePort: () => config.settings.web.port,
     dock: () => dockWithRuns(),
