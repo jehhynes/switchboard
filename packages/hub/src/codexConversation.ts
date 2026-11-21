@@ -1,6 +1,6 @@
 import type { ConversationMessage, Session, Store } from '@switchboard/core';
-import { AppServer, AppServerError, AppServerRunner, items, object } from '@switchboard/codex';
-import type { Json } from '@switchboard/codex';
+import { AppServer, AppServerError, AppServerRunner, items, object, settingsDifferences, threadSettings } from '@switchboard/codex';
+import type { Json, ThreadSettings } from '@switchboard/codex';
 import { ConversationLog } from '@switchboard/conversation';
 import { codexContext } from '@switchboard/conversation';
 import type { ContextView, SlashCommand } from '@switchboard/conversation';
@@ -32,6 +32,8 @@ export class CodexConversationAdapter implements ConversationAdapter {
   #toolItems = new Map<string, Json>();
   /** Each thread's context size from its latest `thread/tokenUsage/updated`, by session; unknown until the first after the hub started. */
   #contexts = new Map<string, ContextView>();
+  /** The first model seen in a thread's `thread/settings/updated`, and the differences last noted, by session. */
+  #settings = new Map<string, { model: string | null; noted: string }>();
   readonly #unlisten: () => void;
   #closed = false;
 
@@ -44,6 +46,26 @@ export class CodexConversationAdapter implements ConversationAdapter {
   commands(session: Session): SlashCommand[] { return this.#commands.get(session.id) ?? []; }
   context(session: Session): ContextView | null { return this.supports(session) ? (this.#contexts.get(session.id) ?? null) : null; }
   requests(session: Session): NativeRequest[] { return [...this.#requests.values()].filter(r => r.sessionId === session.id && r.generation === this.deps.server.generation).map(r => r.view); }
+
+  /**
+   * Notes in the conversation a change of the thread's model, approvals, sandbox or collaboration mode away from what Switchboard started it
+   * with, as Codex's terminal makes with /model, /permissions or Shift+Tab, and their return; every later turn runs under them, the hub's
+   * included (mechanics M108). The instructions and service tier a terminal's first turn sets are not noted: they change neither.
+   */
+  #settingsChanged(session: Session, now: ThreadSettings): void {
+    const start = this.deps.runner.startSettings(session);
+    const before = this.#settings.get(session.id);
+    if (start === null) return;
+    const model = before?.model ?? now.model;
+    const differences = settingsDifferences(start, now, model).join('; ');
+    this.#settings.set(session.id, { model, noted: differences });
+    if (differences === (before?.noted ?? '')) return;
+    const text = differences === ''
+      ? "The session's Codex settings are back to those Switchboard started it with."
+      : `The session's Codex settings changed outside Switchboard: ${differences}. Every later turn uses them, messages sent from here included.`;
+    this.deps.log(`session ${session.id}: ${text}`);
+    this.#log(session).note(text);
+  }
 
   #log(session: Session): ConversationLog {
     let log = this.#logs.get(session.id);
@@ -132,10 +154,14 @@ export class CodexConversationAdapter implements ConversationAdapter {
   }
 
   #event(event: Json): void {
-    if (!['item/started', 'item/completed', 'serverRequest/resolved', 'turn/completed', 'thread/tokenUsage/updated'].includes(String(event['method'])) && event['id'] === undefined) return;
+    if (!['item/started', 'item/completed', 'serverRequest/resolved', 'turn/completed', 'thread/tokenUsage/updated', 'thread/settings/updated'].includes(String(event['method'])) && event['id'] === undefined) return;
     const params = object(event['params']);
     const session = typeof params['threadId'] === 'string' ? this.deps.store.sessionByNativeId(params['threadId']) : null;
     if (session === null || !this.supports(session) || session.state === 'ended') return;
+    if (event['method'] === 'thread/settings/updated') {
+      this.#settingsChanged(session, threadSettings(object(params['threadSettings'])));
+      return;
+    }
     if (event['method'] === 'thread/tokenUsage/updated') {
       // The latest request's tokens are what the thread holds now (architecture.md § Context meter).
       const usage = object(params['tokenUsage']);

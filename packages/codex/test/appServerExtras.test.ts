@@ -72,3 +72,20 @@ describe('whether a thread has a turn (mechanics M108)', () => {
     await expect(runner(() => { throw new AppServerError('The connection to Codex closed.'); }).runner.hasTurns('thread-1')).rejects.toThrow('The connection to Codex closed.');
   });
 });
+
+describe("a thread's start settings (mechanics M108)", () => {
+  it("keeps the daemon's first answer for the thread, not a later resume's, and falls back to the session's options", async () => {
+    const answers: Record<string, Json> = {
+      'thread/start': { thread: { id: 'thread-1' }, model: 'gpt-a', approvalPolicy: 'never', approvalsReviewer: 'user', sandbox: { type: 'dangerFullAccess' } },
+      'thread/resume': { thread: { id: 'thread-1' }, model: 'gpt-b', approvalPolicy: 'on-request', approvalsReviewer: 'user', sandbox: { type: 'readOnly', networkAccess: false } },
+    };
+    const request = vi.fn(async (method: string) => answers[method] ?? {});
+    const server = { request, listen: () => () => {}, generation: 0 } as unknown as AppServer;
+    const session = { id: 's1', workItemId: 1, cwd: 'D:/repo', nativeSessionId: 'thread-1', state: 'idle' } as never;
+    const runner = new AppServerRunner({ server, session: () => session, sessions: () => [session], created: () => {}, instructions: () => '', state: () => {}, now: () => 0, resumeOptions: () => ({ permissionMode: 'auto', model: null }) });
+    expect(runner.startSettings({ ...(session as object), nativeSessionId: 'thread-9' } as never)).toEqual({ model: null, approvalPolicy: 'on-request', approvalsReviewer: 'auto_review', sandbox: 'workspace-write', network: null, mode: 'default' });
+    await runner.start({ sessionId: 's1', workItemId: 1, cwd: mkdtempSync(join(tmpdir(), 'sb-start-')), permissionMode: 'bypassPermissions', model: null, prompt: '', name: 'n' } as never);
+    await runner.configure(session);
+    expect(runner.startSettings(session)).toEqual({ model: 'gpt-a', approvalPolicy: 'never', approvalsReviewer: 'user', sandbox: 'danger-full-access', network: null, mode: 'default' });
+  });
+});

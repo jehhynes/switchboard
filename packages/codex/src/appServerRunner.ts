@@ -6,6 +6,8 @@ import { artifactsDir, isCodexPermissionMode, PERMISSION_PROMPT } from '@switchb
 import { AppServer, AppServerError, object } from './appServer.js';
 import type { Json } from './appServer.js';
 import { codexPrompt } from './args.js';
+import { answeredSettings, startSettings } from './threadSettings.js';
+import type { ThreadSettings } from './threadSettings.js';
 
 export interface AppServerRunnerDeps {
   server: AppServer;
@@ -43,6 +45,8 @@ export class AppServerRunner implements SessionRunner {
   readonly #windows = new Map<string, { resetsAt: number | null; full: boolean }>();
   /** The limit each session's last failed turn stopped at, which a later rate-limit update can give a reset. */
   readonly #limits = new Map<string, LimitReading>();
+  /** The settings each thread's first start or resume answer since the hub started reported, by thread ID. */
+  readonly #started = new Map<string, ThreadSettings>();
 
   constructor(readonly deps: AppServerRunnerDeps) {
     deps.server.listen((event) => {
@@ -140,6 +144,7 @@ export class AppServerRunner implements SessionRunner {
       const native = object(result['thread'])['id'];
       if (typeof native !== 'string') throw new Error('Codex returned no thread ID.');
       threadId = native;
+      this.#answered(native, result);
       this.deps.created(action.sessionId, native);
       this.#joined.set(native, this.deps.server.generation);
       this.#rememberInstructions(action.sessionId, native, instructions, null);
@@ -180,6 +185,7 @@ export class AppServerRunner implements SessionRunner {
       const joined = this.#joined.get(id) === this.deps.server.generation;
       const instructions = joined ? undefined : this.deps.currentInstructions?.(session);
       const result = await this.deps.server.request(joined ? 'thread/read' : 'thread/resume', { threadId: id, ...(joined ? {} : { excludeTurns: true, ...this.#resumeOptions(session) }) });
+      if (!joined) this.#answered(id, result);
       if (!joined && this.subscription(session) === revision) {
         await this.#configure(session, instructions);
         this.#joined.set(id, this.deps.server.generation);
@@ -200,7 +206,7 @@ export class AppServerRunner implements SessionRunner {
   async configure(session: Session): Promise<void> {
     if (session.nativeSessionId === null) throw new Error('The Codex session has no thread ID.');
     const instructions = this.deps.currentInstructions?.(session);
-    await this.deps.server.request('thread/resume', { threadId: session.nativeSessionId, excludeTurns: true, ...this.#resumeOptions(session) });
+    this.#answered(session.nativeSessionId, await this.deps.server.request('thread/resume', { threadId: session.nativeSessionId, excludeTurns: true, ...this.#resumeOptions(session) }));
     await this.#configure(session, instructions);
     if (session.nativeSessionId !== null) this.#joined.set(session.nativeSessionId, this.deps.server.generation);
     this.deps.configured?.(session);
@@ -279,6 +285,23 @@ export class AppServerRunner implements SessionRunner {
       if (session.nativeSessionId !== null) this.#joined.delete(session.nativeSessionId);
       this.deps.log?.(`Codex instruction refresh failed: ${String(error)}`);
     }
+  }
+
+  /**
+   * The settings the session's thread ran with when this hub first started or joined it, as the daemon answered; else those its options give,
+   * or null with no `resumeOptions`. A settings change found later is measured against them (mechanics M108).
+   */
+  startSettings(session: Session): ThreadSettings | null {
+    const answered = session.nativeSessionId === null ? undefined : this.#started.get(session.nativeSessionId);
+    if (answered !== undefined) return answered;
+    const options = this.deps.resumeOptions?.(session);
+    return options === undefined ? null : startSettings(options.permissionMode, options.model);
+  }
+
+  /** Keeps the first settings the daemon answered for a thread; a later answer can already hold a change made outside Switchboard. */
+  #answered(threadId: string, answer: Json): void {
+    const settings = answeredSettings(answer);
+    if (settings !== null && !this.#started.has(threadId)) this.#started.set(threadId, settings);
   }
 
   /** Whether the thread has a turn; Codex keeps no rollout of a thread before its first, so no other client can resume it yet (mechanics M108). */

@@ -182,7 +182,8 @@ export class ConversationLog {
     }
   }
 
-  protected note(text: string): void {
+  /** A note of Switchboard's own in the conversation, such as a change it found in the session's settings. */
+  note(text: string): void {
     const id = `r-${this.deps.newId()}`;
 
     this.deps.store.addReply({ id, sessionId: this.sessionId, workItemId: this.workItemId, at: this.deps.now(), kind: 'note', answers: null, opening: text, source: 'transcript', replaces: null, rewrittenBy: null, withdrawn: false, transcriptUuid: null });

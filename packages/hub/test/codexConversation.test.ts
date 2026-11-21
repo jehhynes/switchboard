@@ -27,14 +27,15 @@ function setup(resume?: (sessionId: string) => Promise<string | null>) {
   let receive=(_event:Json):void=>{};
   const server={generation:1,listen:(listener:(event:Json)=>void)=>{receive=listener;return ()=>{};},request:vi.fn(async()=>({data:[]})),respond:vi.fn(async()=>{})};
   let turns:Json[]=[];
-  const runner={subscription:()=>0,configure:vi.fn(async()=>{}),restoreInstructions:vi.fn(async()=>{}),follow:vi.fn(async()=>({status:{type:'idle'}})),history:vi.fn(async(threadId:string)=>threadId==='thread-1'?turns:[]),send:vi.fn(async()=>{})};
+  let start:Json|null={model:null,approvalPolicy:'never',approvalsReviewer:'user',sandbox:'danger-full-access',mode:'default'};
+  const runner={startSettings:()=>start,subscription:()=>0,configure:vi.fn(async()=>{}),restoreInstructions:vi.fn(async()=>{}),follow:vi.fn(async()=>({status:{type:'idle'}})),history:vi.fn(async(threadId:string)=>threadId==='thread-1'?turns:[]),send:vi.fn(async()=>{})};
   const frames:Json[]=[];const others:Json[]=[];let adapter:CodexConversationAdapter;
   const service=new ConversationService({store,windows:scopes,projectsDir:'/unused',claudeConfig:'/unused',screen:async()=>{throw new Error('Codex must not read a screen');},input:{reserve:async()=>{throw new Error('Codex must not reserve terminal input');},write:async()=>{throw new Error('Codex must not type');},cannotType:()=> 'holder unavailable'},hooks:()=>false,now:()=>now,newId:()=>String(++id),log:()=>{},...(resume===undefined?{}:{resume}),adapters:changed=>[adapter=new CodexConversationAdapter({store,server:server as unknown as AppServer,runner:runner as unknown as AppServerRunner,now:()=>now,newId:()=>String(++id),log:()=>{},requestsChanged:()=>service.sessionsChanged()},changed)]});
   service.open(key,frame=>frames.push(JSON.parse(/^data: (.*)$/m.exec(frame)![1]!)));
   service.open(other,frame=>others.push(JSON.parse(/^data: (.*)$/m.exec(frame)![1]!)));
   closes.push(()=>{service.stop();store.close();});
   const body={window:key,scopeGen:scopes.scope(key)!.scopeGen,sessionId:'s1',launch:'launch-1',opId:'op-1',text:'hello'};
-  return {store,service,adapter:()=>adapter,server,runner,key,other,body,frames,others,emit:(event:Json)=>receive(event),turns:(value:Json[])=>{turns=value;},advance:()=>{now+=6_000;}};
+  return {store,service,adapter:()=>adapter,server,runner,key,other,body,frames,others,emit:(event:Json)=>receive(event),turns:(value:Json[])=>{turns=value;},advance:()=>{now+=6_000;},start:(value:Json|null)=>{start=value;}};
 }
 
 describe('Codex conversation adapter and shared service',()=>{
@@ -200,5 +201,42 @@ describe('Codex conversation adapter and shared service',()=>{
     p.emit({method:'thread/tokenUsage/updated',params:{threadId:'thread-9',turnId:'t1',tokenUsage:{total:{},last:{totalTokens:5}}}});
     await p.service.poll();
     expect(p.frames.length).toBe(sent);
+  });
+});
+
+describe("Codex settings changed outside Switchboard (mechanics M108)",()=>{
+  const update=(patch:Json={}):Json=>({method:'thread/settings/updated',params:{threadId:'thread-1',threadSettings:{model:'gpt-a',approvalPolicy:'never',approvalsReviewer:'user',sandboxPolicy:{type:'dangerFullAccess'},collaborationMode:{mode:'default',settings:{developer_instructions:'# Collaboration Mode: Default'}},serviceTier:'default',...patch}}});
+  const notes=(p:ReturnType<typeof setup>)=>p.store.latestReplies('s1',50).filter(r=>r.kind==='note').map(r=>r.opening).reverse();
+
+  it("notes a model, sandbox, approvals or Plan mode change once, and their return, but not a terminal turn's own instructions",async()=>{
+    const p=setup();await p.service.poll();
+    // The first turn typed in the terminal sets Codex's Default-mode text and service tier: nothing to note.
+    p.emit(update());
+    expect(notes(p)).toEqual([]);
+    p.emit(update({model:'gpt-b'}));
+    expect(notes(p)).toEqual(["The session's Codex settings changed outside Switchboard: model gpt-b (was gpt-a). Every later turn uses them, messages sent from here included."]);
+    p.emit(update({model:'gpt-b'}));
+    expect(notes(p)).toHaveLength(1);
+    p.emit(update({model:'gpt-b',sandboxPolicy:{type:'workspaceWrite'},approvalPolicy:'on-request',collaborationMode:{mode:'plan',settings:{}}}));
+    expect(notes(p).at(-1)).toBe("The session's Codex settings changed outside Switchboard: model gpt-b (was gpt-a); approvals on-request, reviewed by user (started with never, reviewed by user); sandbox workspace-write (started with danger-full-access); Plan mode. Every later turn uses them, messages sent from here included.");
+    p.emit(update());
+    expect(notes(p).at(-1)).toBe("The session's Codex settings are back to those Switchboard started it with.");
+    // Another session's thread is noted in its own conversation only; an ended session and a runner that cannot tell the start's settings note nothing.
+    p.emit({method:'thread/settings/updated',params:{threadId:'thread-2',threadSettings:{model:'gpt-z',approvalPolicy:'untrusted',sandboxPolicy:{type:'dangerFullAccess'}}}});
+    expect(p.store.latestReplies('s2',50).filter(r=>r.kind==='note').map(r=>r.opening)).toEqual(["The session's Codex settings changed outside Switchboard: approvals untrusted, reviewed by user (started with never, reviewed by user). Every later turn uses them, messages sent from here included."]);
+    expect(notes(p)).toHaveLength(3);
+    p.start(null);
+    p.emit(update({sandboxPolicy:{type:'readOnly'}}));
+    p.start({model:'gpt-a',approvalPolicy:'never',approvalsReviewer:'user',sandbox:'danger-full-access',mode:'default'});
+    p.store.updateSession('s1',{state:'ended'});
+    p.emit(update({sandboxPolicy:{type:'readOnly'}}));
+    expect(notes(p)).toHaveLength(3);
+  });
+
+  it('compares the model with the one Switchboard set',async()=>{
+    const p=setup();await p.service.poll();
+    p.start({model:'gpt-a',approvalPolicy:'never',approvalsReviewer:'user',sandbox:'danger-full-access',mode:'default'});
+    p.emit(update({model:'gpt-c'}));
+    expect(notes(p)).toEqual(["The session's Codex settings changed outside Switchboard: model gpt-c (started with gpt-a). Every later turn uses them, messages sent from here included."]);
   });
 });
