@@ -1312,3 +1312,16 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
   - An extension service worker with a WebSocket that carried a message every 20 s stayed alive 188 s. `chrome.windows.create({focused: false})` still took the foreground.
 - **Current use:** the dock's `ChromePane` and the extension's pane window (architecture.md § Chrome pane).
 - **Not verified:** the operator's branded Chrome with the extension and a real installed app together; the pane's own window buttons, Snap layouts, virtual desktops, sleep and Chrome restarts; whether session restore brings back a pane closed with its owner. The trial counts are small and from one Chrome version.
+
+## M104. Repeated lines after resizing a held session, 2026-11-21
+
+- **Versions:** Claude Code CLI 2.1.330 (native build), Haiku 5.5, on Windows 11 Pro 10.0.26300; Node.js 24.14.0, node-pty 1.1.0 (ConPTY), @xterm/headless 6.0.0.
+- **Symptom:** the web page's console showed Claude Code's banner five times stacked, and earlier conversation lines a second time, after the session had been resized several times.
+- **Experiment:** `.wip/resize-exp/exp.cjs` (not committed) spawned `claude --model haiku --settings {"tui":"default"}` with `CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1` in node-pty at 120×40, on a scratch `CLAUDE_CONFIG_DIR` holding a copy of the operator's sign-in (deleted after), and wrote its output into a headless terminal with 10,000 lines of scrollback, resizing that terminal after the output already queued as the holder does. It asked for the numbers 1 to 80, one per line, so the conversation outgrew the screen, then resized the pseudo-terminal: once to 100 columns, once to the same size, four times between 110 and 100 columns 250 ms apart, once to 30 rows, and four times between 90 and 100 columns 40 ms apart. After each step it counted the banners and the number lines that appeared more than once in the headless buffer. A second run set xterm.js's `windowsPty: {backend: 'conpty', buildNumber: 26300}`.
+- **Result:**
+  - Before any resize every number showed once. Each change of columns repeated about one line at the screen's top edge in the scrollback: 3 repeated lines after the first resize, 7 after the next four, 11 after the last four. A resize to the same size, which the holder skips, and a change of rows alone repeated none.
+  - The output held one banner throughout: Claude did not reprint its history on a resize. With a conversation shorter than the screen, every resize redrew a clean screen.
+  - `windowsPty` gave the same 11 repeated lines.
+  - The repeated lines are in the holder's own buffer, which the console's replay serializes and every attached terminal shows; the console writes its stream after a reset, once.
+- **Not verified:** Linux; the cause inside ConPTY or Claude Code's renderer; a banner repeated by a resize while it was at the screen's top edge, which the symptom suggests.
+- **Current use:** the web page's console gives the session its size only when it starts typing and when its pane holds other cells while it types, measured after its bar shows the typing state (architecture.md § Web page).

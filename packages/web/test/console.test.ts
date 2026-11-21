@@ -316,11 +316,16 @@ describe('the console', () => {
     expect(host.innerHTML).toBe('');
   });
 
-  it('fits the columns by font size down to its minimum, and its own size to the pane', () => {
-    expect(fittedFont(780, 100, 7.8)).toBe(CONSOLE_FONT_PX);
-    expect(fittedFont(780, 120, 7.8)).toBe(10);
-    expect(fittedFont(100, 300, 7.8)).toBe(CONSOLE_MIN_FONT_PX);
-    expect(fittedFont(0, 80, 7.8)).toBe(CONSOLE_FONT_PX);
+  it('fits the columns and rows by font size down to its minimum, and its own size to the pane', () => {
+    const cell = { width: 7.8, height: 16 };
+
+    expect(fittedFont({ width: 780, height: 640 }, { cols: 100, rows: 40 }, cell)).toBe(CONSOLE_FONT_PX);
+    expect(fittedFont({ width: 780, height: 640 }, { cols: 120, rows: 40 }, cell)).toBe(10);
+    // The rows bind when the screen is taller than the pane, though its columns fit.
+    expect(fittedFont({ width: 780, height: 400 }, { cols: 80, rows: 40 }, cell)).toBe(8);
+    expect(fittedFont({ width: 780, height: 480 }, { cols: 80, rows: 40 }, cell)).toBe(9);
+    expect(fittedFont({ width: 100, height: 640 }, { cols: 300, rows: 40 }, cell)).toBe(CONSOLE_MIN_FONT_PX);
+    expect(fittedFont({ width: 0, height: 0 }, { cols: 80, rows: 24 }, cell)).toBe(CONSOLE_FONT_PX);
     expect(fittedSize(800, 400, { width: 8, height: 16 })).toEqual({ cols: 100, rows: 25 });
     expect(fittedSize(10, 10, { width: 8, height: 16 })).toEqual({ cols: 20, rows: 5 });
   });
@@ -331,7 +336,7 @@ describe('the console', () => {
  * shows while the drawn screen is taller than the pane, the bottom one while it is wider, and the observer reports each change of the
  * screen's content box, as a browser's does, including the changes the console's own redraws cause.
  */
-function laidOut(box: { width: number; height: number }) {
+function laidOut(box: { width: number; height: number }, bar = { typingAdds: 0 }) {
   const style = document.createElement('style');
 
   style.textContent = PAGE_ASSETS['page.css']!.body;
@@ -375,17 +380,19 @@ function laidOut(box: { width: number; height: number }) {
   // A cell does not scale exactly with the font, as hinted fonts do.
   const cellWidth = (): number => Math.floor((term.options.fontSize ?? CONSOLE_FONT_PX) * 0.55 * 2 * display.scale) / 2;
   const cellHeight = (): number => Math.ceil((term.options.fontSize ?? CONSOLE_FONT_PX) * 1.2);
+  // A bar whose typing state wraps to a second line takes that much height from the screen.
+  const height = (): number => box.height - (host.classList.contains('typing') ? bar.typingAdds : 0);
   const layout = () => {
     const css = getComputedStyle(screen);
     const padX = parseFloat(css.paddingLeft) + parseFloat(css.paddingRight);
     const padY = parseFloat(css.paddingTop) + parseFloat(css.paddingBottom);
     const width = term.cols * cellWidth();
-    const height = term.rows * cellHeight();
-    const side = height > box.height - padY;
+    const drawnHeight = term.rows * cellHeight();
+    const side = drawnHeight > height() - padY;
     const clientWidth = box.width - (side || css.scrollbarGutter === 'stable' ? SCROLLBAR : 0);
     const bottom = width > clientWidth - padX;
 
-    return { clientWidth, clientHeight: box.height - (bottom ? SCROLLBAR : 0), padX, padY, width, height };
+    return { clientWidth, clientHeight: height() - (bottom ? SCROLLBAR : 0), padX, padY, width, height: drawnHeight, side };
   };
 
   drawn.className = 'xterm-screen';
@@ -393,7 +400,7 @@ function laidOut(box: { width: number; height: number }) {
   drawn.getBoundingClientRect = () => ({ width: term.cols * cellWidth(), height: term.rows * cellHeight() }) as DOMRect;
   Object.defineProperty(screen, 'clientWidth', { get: () => layout().clientWidth });
   Object.defineProperty(screen, 'clientHeight', { get: () => layout().clientHeight });
-  Object.defineProperty(screen, 'offsetHeight', { get: () => box.height });
+  Object.defineProperty(screen, 'offsetHeight', { get: () => height() });
 
   let reported = '';
   let reports = 0;
@@ -420,6 +427,8 @@ function laidOut(box: { width: number; height: number }) {
   };
 
   return { term, typed, source, console, settle, refusals, rescale, listeners: () => scaled.length, reports: () => reports, fits: () => layout().width <= layout().clientWidth - layout().padX,
+    /** Whether the drawn screen is no taller than the pane, so the pane shows no side scrollbar of its own. */
+    fitsHeight: () => !layout().side,
     /** The pixels the pane can grow by before it holds another column. */
     spare: () => Math.max(0, cellWidth() - 1 - ((layout().clientWidth - layout().padX) % cellWidth())),
   };
@@ -461,8 +470,8 @@ describe('the console in a laid-out pane', () => {
 
         await run(pane.settle, 600);
         expect({ width, height, fonts: fonts.length }).toEqual({ width, height, fonts: settled });
-        // The columns fit whenever a font above the minimum fits them, though a smaller font's cells do not scale exactly.
-        expect(pane.term.options.fontSize === CONSOLE_MIN_FONT_PX || pane.fits()).toBe(true);
+        // The screen fits whenever a font above the minimum fits it, though a smaller font's cells do not scale exactly.
+        expect(pane.term.options.fontSize === CONSOLE_MIN_FONT_PX || (pane.fits() && pane.fitsHeight())).toBe(true);
         expect(pane.reports()).toBeLessThan(5);
         expect(pane.typed).toEqual([]);
         pane.console.dispose();
@@ -509,10 +518,44 @@ describe('the console in a laid-out pane', () => {
     }
   }, 30_000);
 
+it('scales a screen taller than the pane down until its rows fit, so only xterm.js scrolls', async () => {
+    const pane = laidOut({ width: 760, height: 420 });
+
+    // 80 columns fit at 13 px; 30 rows of 16 px do not.
+    pane.source().emit('size', { cols: 80, rows: 30 });
+    await run(pane.settle, 500);
+    expect(pane.term.options.fontSize).toBeLessThan(CONSOLE_FONT_PX);
+    expect(pane.term.options.fontSize).toBeGreaterThan(CONSOLE_MIN_FONT_PX);
+    expect(pane.fitsHeight()).toBe(true);
+    expect(pane.fits()).toBe(true);
+    // A screen that fits again at 13 px goes back to it.
+    pane.source().emit('size', { cols: 80, rows: 20 });
+    await run(pane.settle, 500);
+    expect(pane.term.options.fontSize).toBe(CONSOLE_FONT_PX);
+    expect(pane.typed).toEqual([]);
+    pane.console.dispose();
+  });
+
+  it('resizes the session once on focus, though the bar saying it types takes height from the screen', async () => {
+    // Each resize makes the program redraw, which can repeat lines in its scrollback (mechanics M104).
+    for (const typingAdds of [0, 18, 40]) {
+      const pane = laidOut({ width: 340, height: 500 }, { typingAdds });
+
+      pane.source().emit('size', { cols: 120, rows: 40 });
+      await run(pane.settle, 500);
+      pane.term.textarea!.dispatchEvent(new Event('focus'));
+      await run(pane.settle, 2000);
+      expect({ typingAdds, sent: pane.typed.length }).toEqual({ typingAdds, sent: 1 });
+      expect(pane.fitsHeight()).toBe(true);
+      pane.console.dispose();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('refits to a display whose cells are another width, though the pane keeps its size', async () => {
     const pane = laidOut({ width: 640, height: 500 });
 
-    pane.source().emit('size', { cols: 120, rows: 40 });
+    pane.source().emit('size', { cols: 120, rows: 24 });
     await run(pane.settle, 500);
     expect(pane.term.options.fontSize).toBe(9);
     pane.rescale(0.8);

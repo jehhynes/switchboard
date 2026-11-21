@@ -1,6 +1,6 @@
 /**
  * The web page's console (architecture.md § Web page): a held session's terminal drawn with xterm.js from the hub's console stream. It shows the
- * session at the size the program draws, scaling its font to fit the column down to `CONSOLE_MIN_FONT_PX` and scrolling sideways past that, so a
+ * session at the size the program draws, scaling its font to fit the pane down to `CONSOLE_MIN_FONT_PX` and scrolling past that, so a
  * console that only watches never re-wraps the screen or changes the session's size. Focusing it makes it type: the keys the operator presses go to
  * the session, and the session takes the console's size, so the program redraws for it; blurring it makes it watch again. Mouse reporting stays
  * off, so a pointer over it never types (mechanics M101), and the terminal's own answers to the program's queries are never sent.
@@ -90,13 +90,15 @@ export function keptModes(params: ReadonlyArray<number | number[]>): number[] {
   return params.map((param) => (Array.isArray(param) ? param[0]! : param)).filter((mode) => !REPORT_MODES.has(mode));
 }
 
-/** The font size that fits `cols` cells of `cellWidth` at `CONSOLE_FONT_PX` into `width` pixels, between the minimum and that size. */
-export function fittedFont(width: number, cols: number, cellWidth: number): number {
-  if (width <= 0 || cols <= 0 || cellWidth <= 0) {
-    return CONSOLE_FONT_PX;
-  }
+/**
+ * The font size that fits `size` in cells of `cell` at `CONSOLE_FONT_PX` into `area`, between the minimum and that size, so the screen
+ * fits the pane in both directions and xterm.js's own scrollback is the only scroller. A dimension of 0 sets no limit.
+ */
+export function fittedFont(area: { width: number; height: number }, size: { cols: number; rows: number }, cell: { width: number; height: number }): number {
+  const fits = (pixels: number, cells: number, cellPixels: number): number =>
+    pixels <= 0 || cells <= 0 || cellPixels <= 0 ? CONSOLE_FONT_PX : Math.floor((CONSOLE_FONT_PX * pixels) / (cellPixels * cells));
 
-  return Math.max(CONSOLE_MIN_FONT_PX, Math.min(CONSOLE_FONT_PX, Math.floor((CONSOLE_FONT_PX * width) / (cellWidth * cols))));
+  return Math.max(CONSOLE_MIN_FONT_PX, Math.min(CONSOLE_FONT_PX, fits(area.width, size.cols, cell.width), fits(area.height, size.rows, cell.height)));
 }
 
 /** The columns and rows that fill `width` by `height` pixels with cells of the given size at `CONSOLE_FONT_PX`. */
@@ -250,18 +252,24 @@ export function mountConsole(host: HTMLElement, createTerm: (options: TermOption
   };
 
   /**
-   * Scales the font so the session's columns fit the pane, never above the console's own size. A smaller font's cells can be wider than
-   * the 13 px cell scaled down, so it steps down from the scaled font while the drawn screen is still wider than the pane.
+   * Scales the font so the session's columns and rows fit the pane, never above the console's own size. A smaller font's cells can be
+   * larger than the 13 px cell scaled down, so it steps down from the scaled font while the drawn screen is still wider or taller than the pane.
    */
   const fit = (): void => {
-    const width = area().width;
-    let font = fittedFont(width, term.cols, measure().width);
+    const room = area();
+    let font = fittedFont(room, { cols: term.cols, rows: term.rows }, measure());
 
     if (term.options.fontSize !== font) {
       term.options.fontSize = font;
     }
 
-    while (font > CONSOLE_MIN_FONT_PX && width > 0 && (term.element?.querySelector<HTMLElement>('.xterm-screen')?.getBoundingClientRect().width ?? 0) > width) {
+    const overflows = (): boolean => {
+      const drawn = term.element?.querySelector<HTMLElement>('.xterm-screen')?.getBoundingClientRect();
+
+      return drawn !== undefined && ((room.width > 0 && drawn.width > room.width) || (room.height > 0 && drawn.height > room.height));
+    };
+
+    while (font > CONSOLE_MIN_FONT_PX && overflows()) {
       font--;
       term.options.fontSize = font;
     }
@@ -323,8 +331,10 @@ export function mountConsole(host: HTMLElement, createTerm: (options: TermOption
   const onFocus = (): void => {
     typing = true;
     sizeWanted = true;
-    void flush();
+    // The bar says it types before the size is read, so a bar that changes the pane's height never costs the session a second resize, which
+    // makes the program redraw and can repeat lines in its scrollback (mechanics M104).
     drawState();
+    void flush();
   };
   const onBlur = (): void => {
     typing = false;
