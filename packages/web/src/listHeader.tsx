@@ -175,6 +175,29 @@ export interface HeaderView {
   notice: string | null;
   /** The `at` of the holder restart result dismissed last, which stays hidden. */
   holderDismissed?: number | null;
+  /** The last work item that started needing the operator, with the dock's message, shown until it times out or is dismissed (PRD R65). */
+  needs?: { workItemId: number; message: string } | null;
+}
+
+/** How long the needs-you message shows on a visible page with the pointer off it, as the dock's status toast. */
+export const NEEDS_SHOWN_MS = 10_000;
+/** How often the page counts that time. */
+const NEEDS_TICK_MS = 1_000;
+
+/** The needs-you message under the header, as the dock's status toast shows it: a click on the message opens its work item. */
+function NeedsYou({ view }: { view: HeaderView }) {
+  const needs = view.needs ?? null;
+
+  return needs === null ? null : (
+    <p class="needs-toast" role="status">
+      <button type="button" class="needs-message" data-action="list-needs" title="Open this work item">
+        {needs.message}
+      </button>
+      <button type="button" class="icon dismiss" data-action="list-needs-dismiss" title="Dismiss" aria-label="Dismiss">
+        <span class="codicon codicon-close" aria-hidden="true"></span>
+      </button>
+    </p>
+  );
 }
 
 /**
@@ -321,6 +344,7 @@ export function renderListHeader(header: PageHeader | null, view: HeaderView): V
           </div>
         </div>
       ) : null}
+      <NeedsYou view={view} />
       {view.notice === null ? null : (
         <p class="list-notice" role="alert">
           <span class="list-notice-text">{view.notice}</span>
@@ -608,6 +632,8 @@ export function renderSearchEnd(search: SearchView, empty: boolean): VNode | nul
 export interface ListHeader {
   /** Draws the header for the hub's latest header and list. */
   draw(header: PageHeader | null, groups: readonly PageGroup[]): void;
+  /** Shows the hub's `needs` event: the last of its work items, as the dock's toast does. */
+  needs(items: ReadonlyArray<{ workItemId: number; message: string }>): void;
   /** The list to draw: filtered while a search applies, with the rows the hub found before the Done list. */
   list(groups: readonly PageGroup[]): { groups: PageGroup[]; filtering: boolean };
   /** The end of the search's results, drawn after the list; nothing without a search. */
@@ -631,6 +657,26 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
   let timer: ReturnType<typeof setTimeout> | null = null;
   // Each search asked of the hub, so a newer search or range drops an older answer (F7).
   let searchRun = 0;
+  // How long the needs-you message has shown on a visible page with the pointer off it; a hidden page or the pointer on it starts it again.
+  let needsShown = 0;
+  let needsTimer: ReturnType<typeof setInterval> | null = null;
+  let needsHovered = false;
+  const clearNeeds = (): void => {
+    view.needs = null;
+
+    if (needsTimer !== null) {
+      clearInterval(needsTimer);
+      needsTimer = null;
+    }
+  };
+  const needsTick = (): void => {
+    needsShown = needsHovered || document.hidden ? 0 : needsShown + NEEDS_TICK_MS;
+
+    if (needsShown >= NEEDS_SHOWN_MS) {
+      clearNeeds();
+      redraw();
+    }
+  };
 
   const redraw = (): void => deps.redraw();
   const closeMenu = (focusOpener: boolean): void => {
@@ -960,6 +1006,22 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
         view.notice = null;
         redraw();
         break;
+      case 'list-needs': {
+        const workItemId = view.needs?.workItemId;
+
+        clearNeeds();
+        redraw();
+
+        if (workItemId !== undefined) {
+          deps.select(workItemId);
+        }
+
+        break;
+      }
+      case 'list-needs-dismiss':
+        clearNeeds();
+        redraw();
+        break;
       case 'list-holder-restart':
         view.sheet = { kind: 'holder', busy: false, error: null };
         redraw();
@@ -1061,8 +1123,26 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
   };
 
   document.addEventListener('pointerdown', outside);
+  host.addEventListener('pointerover', (event) => {
+    needsHovered = (event.target as HTMLElement).closest?.('.needs-toast') != null;
+  });
+  host.addEventListener('pointerleave', () => {
+    needsHovered = false;
+  });
 
   return {
+    needs: (items) => {
+      const last = items.at(-1);
+
+      if (last === undefined) {
+        return;
+      }
+
+      view.needs = { workItemId: last.workItemId, message: last.message };
+      needsShown = 0;
+      needsTimer ??= setInterval(needsTick, NEEDS_TICK_MS);
+      redraw();
+    },
     draw: (header, listed) => {
       shown = header;
       groups = listed;
@@ -1079,6 +1159,7 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
     end: (filtered) => renderSearchEnd(search, filtered.every((group) => group.rows.length === 0)),
     close: () => {
       cancelTimer();
+      clearNeeds();
       document.removeEventListener('pointerdown', outside);
     },
   };

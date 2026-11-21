@@ -1069,6 +1069,13 @@ export class ConversationService {
     this.#listChanged();
   }
 
+  /** `needs {items}` to every page: the work items that started needing the operator, each with the dock's message (PRD R65). */
+  pageNeeds(items: Array<{ workItemId: number; message: string }>): void {
+    for (const key of this.pages()) {
+      this.#send(key, 'needs', { items });
+    }
+  }
+
   /** The keys of the pages with an open stream. */
   pages(): string[] {
     return [...this.#streams.keys()].filter((key) => this.deps.windows.isPage(key));

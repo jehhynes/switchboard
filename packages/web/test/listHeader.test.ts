@@ -342,6 +342,36 @@ describe('the list header (architecture.md § Web page)', () => {
     page.close();
   });
 
+  it("shows the last work item that started needing the operator under the header, opens it on a click, and hides it after 10 s off the pointer (PRD R65)", async () => {
+    vi.useFakeTimers();
+    const { source } = start();
+
+    hello(source, { groups: [listGroup('blocked', [listRow(1), listRow(2)])] });
+    source.emit('needs', { items: [{ workItemId: 1, message: 'gh 1 is waiting for your answer.' }, { workItemId: 2, message: 'gh 2 asks for permission.' }] });
+    expect(root.querySelector('.needs-message')?.textContent).toBe('gh 2 asks for permission.');
+    // The pointer on it keeps it; off it, 10 s hide it.
+    root.querySelector('.needs-message')!.dispatchEvent(new Event('pointerover', { bubbles: true }));
+    vi.advanceTimersByTime(15_000);
+    expect(root.querySelector('.needs-toast')).not.toBeNull();
+    root.querySelector('.side-head')!.dispatchEvent(new Event('pointerleave'));
+    vi.advanceTimersByTime(9_000);
+    expect(root.querySelector('.needs-toast')).not.toBeNull();
+    vi.advanceTimersByTime(1_000);
+    expect(root.querySelector('.needs-toast')).toBeNull();
+
+    // A click on the message opens its work item and clears it; Dismiss only clears.
+    source.emit('needs', { items: [{ workItemId: 1, message: 'gh 1 is waiting for your answer.' }] });
+    click('.needs-message');
+    expect(root.querySelector('.needs-toast')).toBeNull();
+    expect(location.hash).toBe('#w=1');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(posts.filter((one) => one.url.endsWith('/select')).map((one) => one.body['workItemId'])).toEqual([1]);
+    source.emit('needs', { items: [{ workItemId: 2, message: 'gh 2 asks for permission.' }] });
+    click('[data-action="list-needs-dismiss"]');
+    expect(root.querySelector('.needs-toast')).toBeNull();
+    expect(location.hash).toBe('#w=1');
+  });
+
   it("shows the dock's notes under the header in the warning colour, and the held-session note, which opens what Held sessions opens", () => {
     const { source } = start();
 

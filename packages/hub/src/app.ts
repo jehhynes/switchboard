@@ -719,13 +719,15 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     const needing = newly.flatMap((item) => {
       const rowKey = rowFor(built.snapshot, { workItemId: item.id });
 
-      return rowKey === null ? [] : [{ rowKey, message: needsMessage(item) }];
+      return rowKey === null ? [] : [{ rowKey, workItemId: item.id, message: needsMessage(item) }];
     });
 
     announced = built.snapshot;
 
     if (needing.length > 0) {
-      sendDock('needs', { items: needing });
+      sendDock('needs', { items: needing.map(({ rowKey, message }) => ({ rowKey, message })) });
+      // The web page shows it as the dock does (architecture.md § Web page).
+      conversation.pageNeeds(needing.map(({ workItemId, message }) => ({ workItemId, message })));
     }
 
     // Spoken alerts for the live Code Mode sessions' turns and waits; a work item alerted gets no needs-you sound as well (architecture.md § Spoken alerts).

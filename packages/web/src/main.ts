@@ -25,7 +25,7 @@ import { renderContextMeter } from '@switchboard/conversation/contextMeter';
 import type { ContextMenuState } from '@switchboard/conversation/contextMeter';
 
 /** The stream's event types the page reads. */
-export const EVENTS = ['hello', 'list', 'scope', 'conversations', 'session', 'message', 'reply', 'status', 'artifact', 'unread', 'voice', 'settings', 'progress', 'words', 'draft', 'pane'];
+export const EVENTS = ['hello', 'list', 'scope', 'conversations', 'session', 'message', 'reply', 'status', 'artifact', 'unread', 'voice', 'settings', 'progress', 'words', 'draft', 'pane', 'needs'];
 /** How often the page wakes the Chrome extension while the Chrome pane is on and no extension is connected. */
 export const PANE_WAKE_MS = 30_000;
 /** How long an unread reply or status must be visible on a focused page before it counts as seen (architecture.md § Unread). */
@@ -2462,6 +2462,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       }
 
       // Dictation (architecture.md § Dictation): live words show dimmed after the box's text; the hub's draft fills the box unless the operator typed over it.
+      if (type === 'needs') {
+        // A work item started needing the operator: the message shows under the list's header, as in the dock's toast (PRD R65).
+        header.needs(Array.isArray(data['items']) ? (data['items'] as Array<{ workItemId: number; message: string }>) : []);
+      }
+
       if (type === 'pane') {
         view.pane = (data['pane'] as PaneView | undefined) ?? null;
         paneChanged();

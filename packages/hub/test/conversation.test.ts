@@ -1938,6 +1938,18 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     expect(sourceCalls).toEqual([['gh', true], ['gone', true]]);
   });
 
+  it("sends each page, and no window, the work items that started needing the operator with the dock's message (PRD R65)", () => {
+    const { service, openPage, scopes, view } = setup();
+    const page = openPage();
+    const window = scopes.open(view.file, view.view);
+    const frames: Array<{ type: string }> = [];
+
+    service.open(window, (frame) => frames.push(JSON.parse(/^data: (.*)$/m.exec(frame)![1]!) as { type: string }));
+    service.pageNeeds([{ workItemId: 2, message: 'gh 2 is waiting for your answer.' }]);
+    expect(page.frames.at(-1)).toMatchObject({ type: 'needs', items: [{ workItemId: 2, message: 'gh 2 is waiting for your answer.' }] });
+    expect(frames.some((frame) => frame.type === 'needs')).toBe(false);
+  });
+
   it('starts a page unbound with its key and list, binds it to any work item it selects, and holds it to that work item', () => {
     const { scopes, service, openPage, view } = setup();
     const page = openPage();
