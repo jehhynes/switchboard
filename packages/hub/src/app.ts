@@ -4,7 +4,7 @@ import type { FSWatcher } from 'node:fs';
 import { dirname, join, posix, win32 } from 'node:path';
 import { homedir } from 'node:os';
 import { claudeSettingsPath, readRoster, spawnExec } from '@switchboard/claude';
-import { hostKey, hubBundlePath, NEW_CONVERSATION_TITLE, personaById, Store, switchboardHome } from '@switchboard/core';
+import { hostKey, hubBundlePath, NEW_CONVERSATION_TITLE, PANE_EXTENSION_ID, personaById, Store, switchboardHome } from '@switchboard/core';
 import { CODEX_PERMISSION_MODES, PERMISSION_MODES, PROVIDERS, TEMPLATE_VARIABLES } from '@switchboard/core';
 import type { FlowEvent, SourceSettings } from '@switchboard/core';
 import { githubSource } from '@switchboard/github';
@@ -42,6 +42,7 @@ import { pageAsset } from './pageAssets.js';
 import { needsMessage, newlyNeeding, rowFor, targetForUrl } from './needs.js';
 import { volumeReply } from './volume.js';
 import { installedProviders } from './installed.js';
+import { PaneLink } from './paneLink.js';
 
 const RELOAD_DEBOUNCE_MS = 300;
 /** The mic codicon in codicon.ttf, which marks the voice target's dock row (architecture.md § Voice). */
@@ -329,11 +330,27 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       config = loadConfig(configDir, config, store.homeRepos());
       runtime.reload(config);
       voice.settingsChanged();
+
+      if (!config.settings.web.chromePane) {
+        paneLink.closeAll();
+      }
+
       // The dock's Settings window reads the file again (PRD R54).
       sendDock('config', {});
     }, RELOAD_DEBOUNCE_MS);
   };
   const watchers: FSWatcher[] = [watch(configDir, (_event, file) => file === 'settings.json' && reload())];
+
+  // The Chrome pane's paired socket with the extension (architecture.md § Pane socket).
+  const paneLink = new PaneLink({
+    origin: `chrome-extension://${PANE_EXTENSION_ID}`,
+    file: join(home, 'chrome-pane.json'),
+    enabled: () => config.settings.web.chromePane,
+    now: deps.now,
+    log: deps.log,
+    message: () => undefined,
+    changed: () => undefined,
+  });
 
   // Each window sees only its own work item (architecture.md § Window scope); views are built off the main thread and published whole.
   const scopes = new WindowScopes({ store, windows, now: deps.now });
@@ -963,6 +980,22 @@ const dockWithRuns = () => {
       '/v1/conversation/page-folder-conversation': async (body) => (isRecord(body) ? conversation.pageFolderConversation(body) : { status: 400, body: { error: 'Expected {window, opId, folder, provider?}.' } }),
       '/v1/conversation/page-search': async (body) => (isRecord(body) ? conversation.pageSearch(body) : { status: 400, body: { error: 'Expected {window, text, since}.' } }),
       '/v1/conversation/page-source': async (body) => (isRecord(body) ? conversation.pageSource(body) : { status: 400, body: { error: 'Expected {window, name, enabled}.' } }),
+      // A one-time token the page hands the Chrome extension to pair it (architecture.md § Pane socket).
+      '/v1/conversation/pane-pair': async (body) => {
+        if (!isRecord(body) || typeof body['window'] !== 'string') {
+          return { status: 400, body: { error: 'Expected {window}.' } };
+        }
+
+        if (!scopes.isPage(body['window'])) {
+          return { status: 403, body: { error: 'Not in this window.' } };
+        }
+
+        if (!config.settings.web.chromePane) {
+          return { status: 409, body: { error: 'The Chrome pane is off. Turn on Chrome pane in the dock’s Settings, General page.' } };
+        }
+
+        return { status: 200, body: { token: paneLink.pairingToken(), extensionId: PANE_EXTENSION_ID } };
+      },
       '/v1/conversation/page-focus': async (body) => (isRecord(body) ? conversation.pageFocus(body) : { status: 400, body: { error: 'Expected {window, focused}.' } }),
       '/v1/conversation/persona': async (body) => (isRecord(body) ? conversation.personaCommand('persona', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, personaId}.' } }),
       '/v1/conversation/mic': async (body) => (isRecord(body) ? conversation.voiceCommand('mic', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, on}.' } }),
@@ -1277,6 +1310,7 @@ const dockWithRuns = () => {
 
       return ticket === null ? null : { refused: runtime.send({ type: 'snooze', ticketId: ticket.id, until }).refused };
     },
+    paneUpgrade: (request, socket, head) => paneLink.upgrade(request, socket, head),
     unsnoozeUrl: (url) => {
       const ticket = store.ticketInScopeByUrl(url);
 
@@ -1288,6 +1322,7 @@ const dockWithRuns = () => {
       clearTimeout(pending);
       clearInterval(debriefTimer);
       voice.close();
+      paneLink.closeAll();
       pageConsole.close();
       conversation.stop();
       builder.close();

@@ -1,4 +1,6 @@
 import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import type { IncomingMessage } from 'node:http';
+import type { Duplex } from 'node:stream';
 import { BROWSER_PORT, HUB_NAME, PROTOCOL, hubRecordPath, switchboardHome } from '@switchboard/core';
 import type { Card, HubRecord } from '@switchboard/core';
 import { listenBrowser } from './browser.js';
@@ -37,6 +39,8 @@ export interface HubApp {
   snoozeUrl: SnoozeByUrl;
   /** Ends a ticket's snooze by URL for the Chrome extension (PRD R66). */
   unsnoozeUrl: UnsnoozeByUrl;
+  /** The Chrome pane's socket upgrade on the browser endpoint (PRD R113). */
+  paneUpgrade?(request: IncomingMessage, socket: Duplex, head: Buffer): void;
   onChange(listener: () => void): void;
   /** Gives the app the way to send an event to the dock's streams, which answers how many it reached. */
   attachDock?(send: (event: string, data: unknown) => number): void;
@@ -168,7 +172,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
 
   if (app !== undefined && browserPort !== null) {
     // A taken port, such as one held by a second hub for another home, costs only the Chrome extension.
-    browser = await listenBrowser(browserPort, () => app.snoozedUrls(), () => app.cards(), (url, until) => app.snoozeUrl(url, until), (url) => app.unsnoozeUrl(url)).catch((error: unknown) => {
+    browser = await listenBrowser(browserPort, () => app.snoozedUrls(), () => app.cards(), (url, until) => app.snoozeUrl(url, until), (url) => app.unsnoozeUrl(url), app.paneUpgrade === undefined ? undefined : (request, socket, head) => app.paneUpgrade!(request, socket, head)).catch((error: unknown) => {
       log(`browser endpoint not served on 127.0.0.1:${browserPort}: ${String(error)}`);
 
       return null;

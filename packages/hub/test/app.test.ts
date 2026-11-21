@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Exec } from '@switchboard/claude';
-import { Store } from '@switchboard/core';
+import { PANE_EXTENSION_ID, Store } from '@switchboard/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHubApp, parseAction, parseReport } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
@@ -294,6 +294,24 @@ describe('createHubApp', () => {
     expect(await app.post['/contract']!({ nativeSessionId: 'n', source: 'resume' })).toEqual({ status: 404, body: { error: 'No Switchboard session has this Claude session ID.' } });
     expect(app.busy()).toBe(false);
     expect((app.snapshot() as { repoRoots: string[] }).repoRoots).toEqual(['D:/scratch']);
+  });
+
+  it('gives a page, and only a page, a pairing token for the Chrome extension while the Chrome pane is on (PRD R113)', async () => {
+    writeSettings({ sessions: { installHooks: false } });
+    const off = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli } });
+    const offPage = off.page!.opened();
+
+    expect(await off.post['/v1/conversation/pane-pair']!({ window: offPage })).toEqual({ status: 409, body: { error: 'The Chrome pane is off. Turn on Chrome pane in the dock’s Settings, General page.' } });
+    await off.close();
+
+    writeSettings({ sessions: { installHooks: false }, web: { chromePane: true } });
+    const app = await start();
+    const page = app.page!.opened();
+    const paired = await app.post['/v1/conversation/pane-pair']!({ window: page });
+
+    expect(paired).toMatchObject({ status: 200, body: { extensionId: PANE_EXTENSION_ID, token: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/) } });
+    expect(await app.post['/v1/conversation/pane-pair']!({ window: 'nobody' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(await app.post['/v1/conversation/pane-pair']!({})).toEqual({ status: 400, body: { error: 'Expected {window}.' } });
   });
 
   it('refuses Continue in Background with a bad body, and answers the roster’s refusal (PRD R89)', async () => {
