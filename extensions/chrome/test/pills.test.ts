@@ -99,9 +99,9 @@ describe('applyPills', () => {
     applyPills(document, cardsByIssue([needs, working, { url: 'https://github.com/github/roadmap/issues/1153', playbook: null, group: 'unstarted', snoozed: true }]));
 
     expect(pills()).toEqual([
-      { card: '88050488', after: 'board-card-header-title-88050488', namespace: 'dev:', text: 'dev:review-pr', group: 'blocked', title: 'Switchboard: Blocked on you. Click to open in VS Code.' },
-      { card: '94970044', after: 'board-card-header-title-94970044', namespace: 'dev:', text: 'dev:new-dev', group: 'progress', title: 'Switchboard: In progress. Click to open in VS Code.' },
-      { card: '126571572', after: 'board-card-header-title-126571572', namespace: '', text: 'Unstarted', group: 'snoozed', title: 'Switchboard: Snoozed. Click to open in VS Code.' },
+      { card: '88050488', after: 'board-card-header-title-88050488', namespace: 'dev:', text: 'dev:review-pr', group: 'blocked', title: 'Switchboard: Blocked on you. Click to open in Switchboard.' },
+      { card: '94970044', after: 'board-card-header-title-94970044', namespace: 'dev:', text: 'dev:new-dev', group: 'progress', title: 'Switchboard: In progress. Click to open in Switchboard.' },
+      { card: '126571572', after: 'board-card-header-title-126571572', namespace: '', text: 'Unstarted', group: 'snoozed', title: 'Switchboard: Snoozed. Click to open in Switchboard.' },
     ]);
   });
 
@@ -134,9 +134,9 @@ describe('applyPills', () => {
     ]));
 
     expect([...document.querySelectorAll('.switchboard-pill')].map((pill) => pill.getAttribute('aria-label'))).toEqual([
-      'dev:develop, Blocked on you, Failed, open in VS Code',
-      'dev:new-dev, In progress, open in VS Code',
-      'Unstarted, Snoozed, Triaging, open in VS Code',
+      'dev:develop, Blocked on you, Failed, open in Switchboard',
+      'dev:new-dev, In progress, open in Switchboard',
+      'Unstarted, Snoozed, Triaging, open in Switchboard',
     ]);
   });
 
@@ -151,7 +151,7 @@ describe('applyPills', () => {
     expect(document.activeElement).toBe(pill);
     expect(pill.dataset['switchboardTone']).toBe('error');
     expect(pill.querySelector('.switchboard-mark')!.getAttribute('data-switchboard-mark')).toBe('failed');
-    expect(pill.getAttribute('aria-label')).toBe('dev:review-pr, Blocked on you, Failed, open in VS Code');
+    expect(pill.getAttribute('aria-label')).toBe('dev:review-pr, Blocked on you, Failed, open in Switchboard');
 
     // A selection in the label that did not change stays.
     const label = pill.lastChild!;
@@ -184,9 +184,9 @@ describe('applyPills', () => {
     });
 
     expect(marks).toEqual([
-      ['SPAN', 'switchboard-mark', 'question', 'true', '\u{eb32}dev:review-pr', 'Switchboard: Blocked on you · Answer a question. Click to open in VS Code.'],
-      ['SPAN', 'switchboard-mark', 'queued', 'true', '\u{ea82}dev:new-dev', 'Switchboard: Unstarted · Queued. Click to open in VS Code.'],
-      ['SPAN', 'switchboard-mark', 'blocked', 'true', '\u{ead1}dev:sb-plan', 'Switchboard: Snoozed · Blocked. Click to open in VS Code.'],
+      ['SPAN', 'switchboard-mark', 'question', 'true', '\u{eb32}dev:review-pr', 'Switchboard: Blocked on you · Answer a question. Click to open in Switchboard.'],
+      ['SPAN', 'switchboard-mark', 'queued', 'true', '\u{ea82}dev:new-dev', 'Switchboard: Unstarted · Queued. Click to open in Switchboard.'],
+      ['SPAN', 'switchboard-mark', 'blocked', 'true', '\u{ead1}dev:sb-plan', 'Switchboard: Snoozed · Blocked. Click to open in Switchboard.'],
     ]);
   });
 
@@ -202,7 +202,7 @@ describe('applyPills', () => {
     applyPills(document, cardsByIssue([{ ...needs, mark: null }, working]));
 
     expect(document.querySelectorAll('.switchboard-mark')).toHaveLength(0);
-    expect(pills().map((pill) => pill.title)).toEqual(['Switchboard: Blocked on you. Click to open in VS Code.', 'Switchboard: In progress. Click to open in VS Code.']);
+    expect(pills().map((pill) => pill.title)).toEqual(['Switchboard: Blocked on you. Click to open in Switchboard.', 'Switchboard: In progress. Click to open in Switchboard.']);
   });
 
   it('colours a Failed mark with content.css and spins Running and Triaging', () => {
@@ -237,7 +237,7 @@ describe('applyPills', () => {
     applyPills(document, cardsByIssue([{ ...needs, playbook: 'dev:review-pr-followup', group: 'progress' }]));
 
     expect(pills()).toEqual([
-      { card: '88050488', after: 'board-card-header-title-88050488', namespace: 'dev:', text: 'dev:review-pr-followup', group: 'progress', title: 'Switchboard: In progress. Click to open in VS Code.' },
+      { card: '88050488', after: 'board-card-header-title-88050488', namespace: 'dev:', text: 'dev:review-pr-followup', group: 'progress', title: 'Switchboard: In progress. Click to open in Switchboard.' },
     ]);
 
     applyPills(document, new Map());

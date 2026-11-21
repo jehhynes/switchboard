@@ -71,9 +71,9 @@ function pill(doc: Document, card: Card): HTMLElement {
   const group = card.snoozed ? 'Snoozed' : GROUPS[card.group];
   const mark = card.mark == null ? null : MARK_TITLES[card.mark];
 
-  element.title = `Switchboard: ${group}${mark === null ? '' : ` · ${mark}`}. Click to open in VS Code.`;
+  element.title = `Switchboard: ${group}${mark === null ? '' : ` · ${mark}`}. Click to open in Switchboard.`;
   // Screen readers often skip the title, so the name says the group and the mark too.
-  element.setAttribute('aria-label', [...new Set([label, group]), ...(mark === null ? [] : [mark]), 'open in VS Code'].join(', '));
+  element.setAttribute('aria-label', [...new Set([label, group]), ...(mark === null ? [] : [mark]), 'open in Switchboard'].join(', '));
   namespace.className = 'switchboard-namespace';
   namespace.textContent = label.slice(0, colon + 1);
 
