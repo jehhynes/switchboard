@@ -187,10 +187,9 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 .message .box.command { font-family: var(--vscode-editor-font-family); font-size: 0.9em; }
 .message.provisional .box { opacity: 0.7; }
 .reply { padding-left: 30px; }
-.reply .dot { position: absolute; left: 9px; top: calc(var(--pad-top) + 7px); width: 7px; height: 7px; border-radius: 50%; background: var(--vscode-descriptionForeground); }
+.reply .dot { position: absolute; left: 9px; top: calc(var(--pad-top) + 7px + var(--dot-shift, 0px)); width: 7px; height: 7px; border-radius: 50%; background: var(--vscode-descriptionForeground); }
 .reply.unread .dot { background: var(--vscode-activityBarBadge-background); }
 .reply.aside { color: var(--vscode-descriptionForeground); font-size: 0.92em; }
-.passage .unheard { color: var(--vscode-descriptionForeground); opacity: 0.7; }
 .note { text-align: center; color: var(--vscode-descriptionForeground); font-size: 0.92em; }
 .working { display: flex; align-items: center; gap: 6px; padding-left: 3px; font-weight: 500; }
 .working .codicon { color: var(--vscode-progressBar-background); font-size: 16px; }

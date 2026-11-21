@@ -98,6 +98,13 @@ describe('question cards in replies', () => {
     host.innerHTML = renderTimeline(pageState([reply('r1', 1, { opening: `${ending}\n\nThen I start.` })]), newView());
     expect(host.querySelector('details.questions-fold summary')?.textContent).toBe('1 question — answer below');
     expect(host.querySelector('li[data-id="r1"] > .body')?.textContent).toContain('Then I start.');
+    // Questions before a spoken passage fold too, with the whole reply shown, rather than leaving the text.
+    const view = newView();
+
+    view.open.add('more:r1');
+    host.innerHTML = renderTimeline(pageState([reply('r1', 1, { opening: `${ending}\n\nThen I start.`, speak: 'Then I start.' })]), view);
+    expect(host.querySelector('details.questions-fold summary')?.textContent).toBe('1 question — answer below');
+    expect(host.querySelector('li[data-id="r1"] .speech-bubble')?.textContent?.trim()).toBe('Then I start.');
     host.innerHTML = renderTimeline(pageState([reply('r1', 1, { opening: ending }), message('m1', 2, { text: 'Later.' })]), newView());
     expect(host.querySelector('.question-card')?.className).toBe('question-card skipped');
     expect(host.querySelector('.question-card [aria-checked="true"]')).toBeNull();
@@ -166,7 +173,7 @@ describe('drawing', () => {
   it('dims the part of an interrupted passage not heard, and says Not spoken only when speech failed', () => {
     const spoken = (state: ReplyView['spoken']['state']) => renderTimeline(pageState([reply('r1', 1, { opening: 'Fixed it. More.', speak: 'Fixed it.', spoken: { state, atMs: 7_400, saidChars: 3 } })]), newView());
 
-    expect(spoken('interrupted')).toContain('<p class="passage">Fix<span class="unheard">ed it.</span></p>');
+    expect(spoken('interrupted')).toContain('<div class="speech-bubble"><p class="passage">Fix<span class="unheard">ed it.</span></p></div>');
     expect(spoken('interrupted')).not.toContain('0:07');
     expect(spoken('failed')).toContain('<span>Not spoken</span>');
     expect(spoken('playing')).not.toContain('class="unheard"');
@@ -174,6 +181,24 @@ describe('drawing', () => {
     for (const routine of ['playing', 'interrupted', 'stopped-moved', 'played', 'queued'] as const) {
       expect(spoken(routine)).not.toContain('class="spoken');
     }
+  });
+
+  it('draws a passage as a bubble on the left, once, in its place when the whole reply shows, and a reply that is all passage as only its bubble', () => {
+    const host = document.createElement('div');
+    const items = [reply('r1', 1, { opening: 'Before.\n\nFixed it.\n\n- one', speak: 'Fixed it.' }), reply('r2', 2, { opening: 'Same.', speak: 'Same.' }), reply('r3', 3, { opening: 'Plain.' })];
+    const kinds = (id: string) => [...host.querySelector(`li[data-id="${id}"] > .body`)!.children].map((child) => (child.classList.contains('speech-bubble') ? `bubble:${child.textContent!.trim()}` : child.tagName.toLowerCase()));
+    const view = newView();
+
+    host.innerHTML = renderTimeline(pageState(items), view);
+    expect(kinds('r1')).toEqual(['bubble:Fixed it.', 'button']);
+    expect(kinds('r2')).toEqual(['bubble:Same.']);
+    expect(host.querySelector('li[data-id="r3"] .speech-bubble')).toBeNull();
+
+    view.open.add('more:r1');
+    host.innerHTML = renderTimeline(pageState(items), view);
+    expect(kinds('r1')).toEqual(['p', 'bubble:Fixed it.', 'ul', 'button']);
+    expect(host.querySelector('li[data-id="r1"] > .body')!.textContent!.match(/Fixed it\./g)).toHaveLength(1);
+    expect([...host.querySelector('li[data-id="r1"]')!.children].map((child) => child.className)).toEqual(['dot', 'body', 'meta']);
   });
 
   it("keeps raw HTML out of Markdown, opens web links in a new tab and shows paths as text", () => {

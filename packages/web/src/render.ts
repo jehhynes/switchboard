@@ -1,6 +1,7 @@
 import { providerMark } from '@switchboard/conversation/providerIcons';
 import { renderMicButton, renderVoiceControls } from '@switchboard/conversation/voiceControls';
 import { fullTime, metaLine, stamped, stampTime, toneMark, voiceMark } from '@switchboard/conversation/messageMeta';
+import { hasUnspokenText, spokenBody } from '@switchboard/conversation/spokenBubble';
 import { artifactIcon, awaitingReply, selectedEntry, selectedRow, stateIcon, timeline } from './model.js';
 import type { PageState } from './model.js';
 import { copyButton, escape, renderInline, renderMarkdown } from './markdown.js';
@@ -437,27 +438,21 @@ function spokenMark(item: ReplyView): string {
     : '';
 }
 
-/** The passage read aloud; after the operator spoke over it, the part not heard is dimmed, as plain text. */
-function passageHtml(item: ReplyView, passage: string): string {
-  const said = item.spoken.saidChars;
-
-  if (item.spoken.state !== 'interrupted' || said === null) {
-    return renderMarkdown(passage);
-  }
-
-  return `<p class="passage">${escape(passage.slice(0, said))}<span class="unheard">${escape(passage.slice(said))}</span></p>`;
-}
-
 function reply(item: ReplyView, earlier: ReplyView | null, view: View, stamped: boolean, card: string, expandReplies: boolean): string {
   if (item.kind === 'note') {
     return `<li class="note" data-id="${escape(item.id)}">${escape(item.opening)}</li>`;
   }
 
-  // Focused mode: a reply with a [speak] passage shows the passage first and the whole reply behind Show more.
-  const passage = item.kind === 'reply' && item.speak !== null && item.speak.trim() !== '' && item.speak.trim() !== item.opening.trim() ? item.speak : null;
-  const expanded = passage === null || expandReplies !== view.open.has(`more:${item.id}`);
-  const body = !expanded && passage !== null ? passageHtml(item, passage) : card === '' ? renderMarkdown(item.opening) : withoutQuestions(item.opening, `reply:${item.id}`, view.open);
-  const more = passage === null ? '' : `<button class="show-more" type="button" data-action="more" data-reply="${escape(item.id)}" aria-expanded="${expanded}">${expanded ? 'Show less' : 'Show more'}</button>`;
+  // Focused mode, as in the Conversation view: a reply with a [speak] passage shows the passage first and the whole reply behind Show more. The
+  // passage is a bubble on the left, in its place when the whole reply shows; after the operator spoke over it, the part not heard is dimmed.
+  const passage = item.kind === 'reply' && item.speak !== null && item.speak.trim() !== '' ? item.speak : null;
+  const folded = passage !== null && hasUnspokenText(item.opening, passage);
+  const expanded = !folded || expandReplies !== view.open.has(`more:${item.id}`);
+  // Only the text that ends the reply can end in the card's questions, which it leaves out; questions before a passage fold into one line.
+  const markdownPart = (text: string, last: boolean): string => (card === '' ? renderMarkdown(text) : withoutQuestions(text, last ? `reply:${item.id}` : `reply:${item.id}:before`, view.open, last));
+  const said = item.spoken.state === 'interrupted' ? item.spoken.saidChars : null;
+  const body = passage === null ? markdownPart(item.opening, true) : spokenBody(item.opening, passage, said, !expanded, { markdown: markdownPart, escape });
+  const more = !folded ? '' : `<button class="show-more" type="button" data-action="more" data-reply="${escape(item.id)}" aria-expanded="${expanded}">${expanded ? 'Show less' : 'Show more'}</button>`;
   const tone = toneMark(item.tone, view.details);
   const rewritten = earlier === null ? '' : `<details class="fold" data-fold="earlier:${escape(item.id)}"${view.open.has(`earlier:${item.id}`) ? ' open' : ''}><summary>Rewritten</summary><div class="was">${renderMarkdown(earlier.opening)}</div></details>`;
   // The copy button comes first on the line under the reply, then the tone with message details on and a speech failure, and the time at the right.
@@ -473,9 +468,10 @@ function artifactRow(artifact: ArtifactView): string {
 
 /**
  * A reply's or a status's Markdown when its card draws its questions: questions that end it are left out; questions with text after them stay
- * in place, folded into one line, "2 questions — answer below", that opens them.
+ * in place, folded into one line, "2 questions — answer below", that opens them. `ends` is false for text a spoken passage follows, whose questions
+ * all fold.
  */
-export function withoutQuestions(markdown: string, key: string, open: ReadonlySet<string>): string {
+export function withoutQuestions(markdown: string, key: string, open: ReadonlySet<string>, ends = true): string {
   const segments = questionSegments(markdown);
 
   if (segments === null) {
@@ -484,7 +480,7 @@ export function withoutQuestions(markdown: string, key: string, open: ReadonlySe
 
   // The last run of questions, when only blank lines follow it, ends the message as the rules ask, and the card alone shows it.
   const last = segments.reduce((found, segment, index) => (segment.questions > 0 ? index : found), -1);
-  const ending = segments.slice(last + 1).every((segment) => segment.text.trim() === '');
+  const ending = ends && segments.slice(last + 1).every((segment) => segment.text.trim() === '');
 
   return segments
     .map((segment, index) => {
