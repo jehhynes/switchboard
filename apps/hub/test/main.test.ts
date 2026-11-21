@@ -47,7 +47,7 @@ function launch(entry: string, extra: Record<string, string | undefined>, args: 
     delete env[key];
   }
 
-  const child = spawn(process.execPath, [entry, ...args, `--home=${home}`, ...(['report', 'register', 'attach', 'holder', 'restart', 'install'].includes(args[0] ?? '') ? [] : ['--browser-port=0', '--page-port=0'])], { windowsHide: true, env });
+  const child = spawn(process.execPath, [entry, ...args, `--home=${home}`, ...(['report', 'register', 'attach', 'holder', 'restart', 'install', 'autostart'].includes(args[0] ?? '') ? [] : ['--browser-port=0', '--page-port=0'])], { windowsHide: true, env });
   let stdout = '';
   let stderr = '';
 
@@ -702,6 +702,11 @@ describe('hub entry point', () => {
       await start('--stop').exited;
     }
   }, 60_000);
+  it('refuses hub.js autostart usage errors before reading or changing any login start', async () => {
+    for (const args of [['autostart', 'maybe'], ['autostart', 'on', 'off'], ['autostart', 'on', '--force']]) {
+      expect(await start(...args).exited).toMatchObject({ code: 1, stdout: '', stderr: 'Usage: hub.js autostart [on | off] [--config=<dir>] [--dry-run]\n' });
+    }
+  });
   it("installs the builds an extension's dist folder carries on hub.js install, and refuses to run from another folder", async () => {
     const refused = await start('install').exited;
 

@@ -1,8 +1,9 @@
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { hubBundlePath, hubLogPath, switchboardHome } from '@switchboard/core';
+import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { ATTACH_TIMEOUT_MS, buildOf, carriesBuilds, installCarried, reportReady, startSuccessor, bundleHome, killProcessTree, connectHolder, currentHolderBuild, createHubApp, findHub, gitBashRoot, handledBody, isSnapshotWorker, postToHub, recordedHubPid, registerTitle, reportBody, runAttach, runHolder, runSnapshotWorker, serveHub, START_FLAGS, START_WAIT_MS, startDetached, stopHub, ticketBody } from '@switchboard/hub';
+import { ATTACH_TIMEOUT_MS, buildOf, carriesBuilds, installCarried, reportReady, startSuccessor, bundleHome, killProcessTree, connectHolder, currentHolderBuild, createHubApp, findHub, gitBashRoot, handledBody, isSnapshotWorker, postToHub, recordedHubPid, registerTitle, reportBody, runAttach, runHolder, runAutostart, runSnapshotWorker, serveHub, START_FLAGS, START_WAIT_MS, startDetached, stopHub, ticketBody } from '@switchboard/hub';
 
 declare const __SWITCHBOARD_VERSION__: string | undefined;
 
@@ -459,16 +460,39 @@ async function start(home: string, rest: readonly string[]): Promise<number> {
   return 4;
 }
 
+/** Runs `hub.js autostart` with the real registry or desktop entries (architecture.md § Hub lifecycle). */
+async function autostart(home: string, rest: readonly string[]): Promise<number> {
+  return runAutostart(rest, {
+    platform: process.platform,
+    osHome: homedir(),
+    env: process.env,
+    run: (command, args) =>
+      new Promise((done) =>
+        execFile(command, args, { windowsHide: true, timeout: 15_000 }, (error, stdout, stderr) =>
+          done({ code: error === null ? 0 : typeof error.code === 'number' ? error.code : 1, stdout: `${stdout}${stderr}` }),
+        ),
+      ),
+    home: resolve(home),
+    runtime: process.execPath,
+    electron: process.versions['electron'] !== undefined,
+    bundle: hubBundlePath(home),
+    defaultConfigDir: async () => (await findHub(home))?.configDir || switchboardHome(home),
+    exists: existsSync,
+    out: (text) => process.stdout.write(text),
+    err: (text) => process.stderr.write(text),
+  });
+}
+
 /** Returns an exit code, or -1 to keep serving. */
 async function main(argv: readonly string[]): Promise<number> {
   const bundle = process.argv[1];
 
-  if (argv[0] === 'report' || argv[0] === 'register' || argv[0] === 'attach' || argv[0] === 'holder' || argv[0] === 'web' || argv[0] === 'restart' || argv[0] === 'install' || argv[0] === 'start') {
+  if (argv[0] === 'report' || argv[0] === 'register' || argv[0] === 'attach' || argv[0] === 'holder' || argv[0] === 'web' || argv[0] === 'restart' || argv[0] === 'install' || argv[0] === 'start' || argv[0] === 'autostart') {
     // A session runs `<home>/.switchboard/hub.js report …`, so the bundle's location names its home; the extension's own bundle names none.
     const home = flag(argv, 'home') || bundleHome(bundle, homedir());
     const rest = argv.slice(1).filter((argument) => !argument.startsWith('--home'));
 
-    const commands = { report, register, attach, holder, web, restart, start, install: (home: string, rest: readonly string[]) => install(home, rest, bundle) };
+    const commands = { report, register, attach, holder, web, restart, start, autostart, install: (home: string, rest: readonly string[]) => install(home, rest, bundle) };
 
     return commands[argv[0] as keyof typeof commands](home, rest);
   }
