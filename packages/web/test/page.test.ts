@@ -3027,6 +3027,14 @@ describe("the list's CSS", () => {
   const declarationsOf = (pick: (selector: string) => boolean): string[] =>
     [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, selectors]) => selectors!.split(',').some((selector) => pick(selector.trim()))).map(([, , body]) => body!.trim());
 
+  it('shows the app\'s title in the list header only under 768 px, taking the room the icons leave', () => {
+    expect(declarationsOf((selector) => selector === '.list-title')).toEqual(['display: none;', expect.stringContaining('display: flex; flex: 1;')]);
+    // Every width under 768 px, a zoomed 767.5 px included, which a max-width of 767 px would miss.
+    expect(css).toMatch(/@media \(width < 768px\) \{ \.list-title \{ display: flex; flex: 1;[^}]*min-width: 0;/);
+    expect(css).toMatch(/@media \(width < 768px\) \{ \.list-header \.header-sources, \.list-header \.header-separator \{ display: none; \} \}/);
+    expect(declarationsOf((selector) => selector === '.list-title-text')).toEqual([expect.stringContaining('text-overflow: ellipsis')]);
+  });
+
   it('marks the selected row with only the selection colours, as the dock does, leaving the focus ring to a keyboard focus', () => {
     const selected = declarationsOf((selector) => selector === '.row.selected');
 

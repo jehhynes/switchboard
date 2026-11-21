@@ -78,9 +78,12 @@ describe('the list header (architecture.md § Web page)', () => {
 
     const buttons = [...host.querySelectorAll<HTMLElement>('.source-toggle')];
 
-    // The page's own title names Switchboard, so the list's header has no label (approved by the operator).
-    expect(host.querySelector('.list-title')).toBeNull();
-    expect(host.querySelector('.list-header')?.textContent).not.toContain('Switchboard');
+    // The app's icon and name come first; page.css shows them only on a phone, where no window title names the app (the operator's decision).
+    const title = host.querySelector('.list-header > .list-title:first-child');
+
+    expect(title?.textContent).toBe('Switchboard');
+    expect(title?.querySelector('img.list-title-icon')?.getAttribute('src')).toBe('icon-192.png');
+    expect(title?.querySelector('img')?.getAttribute('alt')).toBe('');
     expect(buttons.map((one) => one.getAttribute('aria-label'))).toEqual(['gh', 'zoho', 'jira']);
     expect(buttons[0]!.title).toBe('gh: polled\nClick to stop polling gh');
     expect(buttons[0]!.getAttribute('aria-pressed')).toBe('true');

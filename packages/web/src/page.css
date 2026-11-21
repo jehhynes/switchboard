@@ -37,9 +37,15 @@ button:focus-visible, a:focus-visible, .tab:focus-visible { outline: 1px solid v
 
 /* The list of work items, in the dock's groups and drawn as its rows (architecture.md § Web page). */
 .side { flex: none; width: 100%; display: flex; flex-direction: column; background: var(--vscode-sideBar-background); border-right: 1px solid var(--vscode-sideBar-border, var(--vscode-panel-border)); }
-/* The list's header, as the dock's title row: the title takes what is left, ending in an ellipsis, and the icons keep their width. */
+/* The list's header, as the dock's title row: the icons keep their width at the right. */
 .side-head { flex: none; }
 .list-header { display: flex; align-items: center; justify-content: flex-end; gap: 2px; min-height: 35px; padding: 0 4px 0 20px; }
+/* On a phone the list is its own view and no window title names the app, so the header starts with the icon and "Switchboard", which take
+   what is left and end in an ellipsis; from 768 px the window or tab title shows it. */
+.list-title { display: none; }
+@media (width < 768px) { .list-title { display: flex; flex: 1; align-items: center; gap: 6px; min-width: 0; font-weight: 600; } }
+.list-title-icon { flex: none; width: 16px; height: 16px; }
+.list-title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .header-sources { display: flex; flex: none; }
 .list-header button.icon { flex: none; justify-content: center; min-width: 26px; height: 26px; }
 .source-logo { display: block; width: 16px; height: 16px; }
@@ -64,7 +70,7 @@ svg.source-logo.forum { color: #57ae57; }
 @media (hover: none), (pointer: coarse) { .search-box { height: 44px; } .search-range, .search-end button.link { min-height: 44px; } }
 .menu-row .source-logo { flex: none; margin-right: 2px; }
 /* On a phone the source icons leave the title row for the top of More Actions, as check rows; from 768 px they are in the row. */
-@media (max-width: 767px) { .list-header .header-sources, .list-header .header-separator { display: none; } }
+@media (width < 768px) { .list-header .header-sources, .list-header .header-separator { display: none; } }
 @media (min-width: 768px) { .more-menu .more-source { display: none; } }
 .sheet-select { box-sizing: border-box; width: 100%; min-height: 26px; font: inherit; color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground)); background: var(--vscode-dropdown-background, var(--vscode-input-background)); border: 1px solid var(--vscode-dropdown-border, var(--vscode-input-border, transparent)); border-radius: 2px; }
 .sheet-error { margin: 0 0 12px; color: var(--vscode-errorForeground); }
