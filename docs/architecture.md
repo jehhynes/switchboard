@@ -23,7 +23,7 @@ npm workspaces, TypeScript strict, Node ≥ 22.13, Vitest, esbuild and vsce, fol
 | `packages/github` | GitHub source: assigned state, triage context | core |
 | `packages/zoho` | Zoho Desk source | core |
 | `packages/forum` | Forum source over the forum database | core |
-| `packages/protocol` | Types only: the wire types of the conversation API and the page's list, the fields the web page reads ([Conversation API](#conversation-api)) | core's `group` and conversation's `contextMeter` types |
+| `packages/protocol` | Types only: the wire types of the conversation API, the page's list and its change routes, the fields the web page reads ([Conversation API](#conversation-api)) | core's `group` and conversation's `contextMeter` types |
 | `packages/web` | The web page's own front end and its Dark Modern and Light Modern theme copy, carried as strings for the hub to serve ([Web page](#web-page)) | protocol; core's `group` and `snooze` modules; conversation's `questions`, `providerIcons` and `voiceControls` modules |
 | `packages/hub` | Polling scheduler, flow execution, loopback HTTP/SSE server, report endpoint, debrief scheduler, `HolderLink`, which finds or starts the terminal holder, the snapshot worker, window scopes, the conversation service, `VoiceLink` and `VoiceControl`, which supervise the voice process and route speech, and the web page's routes | core, sources, claude, conversation, protocol, web, the holder and voice clients |
 | `apps/hub` | Hub entry point, the `switchboard report` CLI, `hub.js attach`, `hub.js holder` and `hub.js web`, bundled as one file | hub |

@@ -11,6 +11,7 @@ import type { DockSourceGroup } from './dock.js';
 import type { CATEGORIES, Entry, HistoryView, Section } from './history.js';
 import type { PageAction, PageHeader, PageListGroup, PageRow } from './page.js';
 import type { VoiceView } from './voice.js';
+import type { ChangeRow, ChangesView, DiffView, FileView } from './changes.js';
 
 /** `Sent`, which must carry every field `Read` has, with types the page accepts. */
 type Carries<Sent extends Read, Read> = Sent;
@@ -36,4 +37,8 @@ export type PageProtocolChecks = [
   Carries<Entry, Page.HistoryEntry>,
   Carries<Entry['links'][number], Page.HistoryLink>,
   Carries<ScreenPrompt, Page.ScreenPrompt>,
+  Carries<ChangeRow, Page.ChangeRow>,
+  Carries<ChangesView & { scopeGen: number }, Page.ChangesList>,
+  Carries<DiffView, Page.DiffData>,
+  Carries<FileView, Page.FileData>,
 ];

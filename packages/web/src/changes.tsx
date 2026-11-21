@@ -4,35 +4,10 @@
 import type { ComponentChildren, VNode } from 'preact';
 import { FileIcon } from './fileIcons.js';
 import { mount, unmount } from './island.js';
-import type { DiffData, DiffModule, DiffMount, FileData } from './diff/types.js';
+import type { ChangeRow, ChangesList, ChangeStage, ChangeStatus, DiffData, FileData } from '@switchboard/protocol';
+import type { DiffModule, DiffMount } from './diff/types.js';
 
-export type ChangeStatus = 'A' | 'M' | 'D' | 'R' | 'U' | 'C';
-export type ChangeStage = 'committed' | 'staged' | 'working' | 'untracked';
-
-/** A row of the hub's `changes` answer. */
-export interface ChangeRow {
-  path: string;
-  from?: string;
-  status: ChangeStatus;
-  stages: ChangeStage[];
-  additions: number | null;
-  deletions: number | null;
-  binary: boolean;
-  /** The content hash a viewed tick is kept at, and whether the file is ticked viewed at it. */
-  hash: string;
-  viewed?: boolean;
-}
-
-/** The hub's `changes` answer. */
-export interface ChangesList {
-  scopeGen: number;
-  base: string | null;
-  head: string;
-  rows: ChangeRow[];
-  stages: Record<ChangeStage, number>;
-  shown: number;
-  total: number;
-}
+export type { ChangeRow, ChangesList, ChangeStage, ChangeStatus } from '@switchboard/protocol';
 
 /** What the page keeps of the Changes list: the list as last read, a read on its way or why one failed, and whether its menu is open. */
 export interface ChangesView {

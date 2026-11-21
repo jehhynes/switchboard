@@ -294,3 +294,54 @@ export interface PageGroup {
   empty: string | null;
   rows: PageRow[];
 }
+
+/** A change row's status letter, as VS Code's Source Control shows it: added, modified, deleted, renamed, untracked, or a conflict (PRD R118). */
+export type ChangeStatus = 'A' | 'M' | 'D' | 'R' | 'U' | 'C';
+export type ChangeStage = 'committed' | 'staged' | 'working' | 'untracked';
+
+/** A row of the `changes` answer (architecture.md § Web page, Changes). */
+export interface ChangeRow {
+  path: string;
+  from?: string;
+  status: ChangeStatus;
+  stages: ChangeStage[];
+  additions: number | null;
+  deletions: number | null;
+  binary: boolean;
+  /** The content hash a viewed tick is kept at, and whether the file is ticked viewed at it. */
+  hash: string;
+  viewed?: boolean;
+}
+
+/** The `changes` answer. */
+export interface ChangesList {
+  scopeGen: number;
+  base: string | null;
+  head: string;
+  rows: ChangeRow[];
+  stages: Record<ChangeStage, number>;
+  shown: number;
+  total: number;
+}
+
+/** The `diff` answer: git's patch from the base to disk and both whole sides, null where the file has none or the hub left it out. */
+export interface DiffData {
+  path: string;
+  from?: string;
+  status: string;
+  patch: string | null;
+  old: string | null;
+  new: string | null;
+  binary: boolean;
+  /** Why the sides or the patch were left out: `sides` when only the patch came, `patch` when nothing did. */
+  tooLarge: 'sides' | 'patch' | null;
+}
+
+/** The `file` answer: a file read whole, on disk or at the base. */
+export interface FileData {
+  path: string;
+  side: 'disk' | 'base';
+  contents: string | null;
+  binary: boolean;
+  tooLarge: boolean;
+}
