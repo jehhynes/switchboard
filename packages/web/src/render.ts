@@ -64,8 +64,9 @@ export interface View {
   collapsed: Set<string>;
   /** Whether a narrow screen shows the list rather than the conversation: after Back, or before a work item is opened. */
   list: boolean;
-  /** Whether the header's actions menu is open. */
+  /** Whether the header's actions menu is open, and in it the Open link submenu. */
   actions: boolean;
+  linkMenu: boolean;
   /** The sheet over the page that asks before an action, picks a snooze, or shows a draft to copy by hand. */
   sheet: Sheet | null;
   /** A row action is running, so its controls wait. */
@@ -89,33 +90,54 @@ export type Sheet =
   | { kind: 'snooze'; workItemId: number; title: string; choices: SnoozeChoice[]; picked: string; date: string; comment: string }
   | { kind: 'text'; title: string; text: string };
 
-export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), list: false, actions: false, sheet: null, acting: false, prompt: null, providers: null, side: 'status', textScale: 1, textMenu: false, details: false });
+export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), list: false, actions: false, linkMenu: false, sheet: null, acting: false, prompt: null, providers: null, side: 'status', textScale: 1, textMenu: false, details: false });
 
 /** Each row action's codicon, as the dock draws its controls. */
 const ACTION_ICONS: Record<string, string> = { start: 'play', approve: 'check', retry: 'refresh', stop: 'debug-stop', 'mark-done': 'pass', snooze: 'clockface', restore: 'debug-restart', delete: 'trash' };
 /** The dock's state controls, listed after the work controls. */
 const STATE_ACTIONS = new Set(['mark-done', 'snooze', 'restore']);
+/** The most links the menu lists by themselves; more go in its Open link submenu, as the dock's `MenuLinks`. */
+const MENU_LINKS = 2;
+/** The longest menu label for a link, as the dock's `LinkLabelMax`; a longer one is cut with an ellipsis and shown whole in its tooltip. */
+export const LINK_LABEL_MAX = 48;
+
+/** A link's menu label, cut to `LINK_LABEL_MAX` with an ellipsis. */
+function clipLabel(label: string): string {
+  return label.length > LINK_LABEL_MAX ? `${label.slice(0, LINK_LABEL_MAX - 1).trimEnd()}…` : label;
+}
 
 /**
  * The header's row actions (architecture.md § Web page): the dock's main control as a button, then every control in a menu under an
- * ellipsis, grouped as the dock's row menu is: the work controls, the state controls, Copy, then Delete; empty when the row offers none.
+ * ellipsis, grouped as the dock's row menu is: the work controls, the state controls, what the row opens (Copy, Open ticket and its links, more
+ * than two of them in an Open link submenu), then Delete; empty when the row offers none.
  */
 export function renderActions(row: PageRow | null, view: View): string {
   const actions = row?.actions ?? [];
   const pastes = row?.pastes ?? [];
 
-  if (row === null || (actions.length === 0 && pastes.length === 0)) {
+  if (row === null || (actions.length === 0 && pastes.length === 0 && row.url === '' && row.links.length === 0)) {
     return '';
   }
 
   const disabled = view.acting ? ' disabled' : '';
-  const item = (attrs: string, icon: string, label: string): string =>
-    `<li role="none"><button type="button" class="menu-row" role="menuitem" ${attrs}${disabled}><span class="menu-gutter" aria-hidden="true"><span class="codicon codicon-${icon}"></span></span><span class="title">${escape(label)}</span></button></li>`;
+  const item = (attrs: string, icon: string | null, label: string, after = '', classes = ''): string =>
+    `<li role="none"><button type="button" class="menu-row${classes === '' ? '' : ` ${classes}`}" role="menuitem" ${attrs}${disabled}><span class="menu-gutter" aria-hidden="true">${icon === null ? '' : `<span class="codicon codicon-${icon}"></span>`}</span><span class="title">${escape(label)}</span>${after}</button></li>`;
   const act = (action: PageAction): string => item(`data-action="row-action" data-row-action="${escape(action.action)}"`, ACTION_ICONS[action.action] ?? 'circle-outline', action.label);
+  // A link's label can be free text a session reported, so a long one is cut, whole in its tooltip, as in the dock's menu.
+  const link = (which: string, label: string, icon: string | null, classes = ''): string =>
+    item(`data-action="open-link" data-work-item="${row.workItemId}" data-link="${which}"${label.length > LINK_LABEL_MAX ? ` title="${escape(label)}"` : ''}`, icon, clipLabel(label), '', classes);
+  const submenu =
+    item(`data-action="link-menu" aria-haspopup="true" aria-expanded="${view.linkMenu}"`, 'link-external', 'Open link', `<span class="codicon codicon-chevron-${view.linkMenu ? 'down' : 'right'}" aria-hidden="true"></span>`) +
+    (view.linkMenu ? row.links.map((one, index) => link(String(index), one.label, null, 'submenu-row')).join('') : '');
+  const opens = [
+    ...pastes.map((label) => item(`data-action="row-paste" data-label="${escape(label)}"`, 'copy', `Copy ${label}`)),
+    ...(row.url === '' ? [] : [link('ticket', 'Open ticket', 'link-external')]),
+    ...(row.links.length > MENU_LINKS ? [submenu] : row.links.map((one, index) => link(String(index), `Open ${one.label}`, 'link-external'))),
+  ];
   const groups = [
     actions.filter((one) => one.action !== 'delete' && !STATE_ACTIONS.has(one.action)).map(act),
     actions.filter((one) => STATE_ACTIONS.has(one.action)).map(act),
-    pastes.map((label) => item(`data-action="row-paste" data-label="${escape(label)}"`, 'copy', `Copy ${label}`)),
+    opens,
     actions.filter((one) => one.action === 'delete').map(act),
   ].filter((group) => group.length > 0);
   const rows = groups.map((group) => group.join('')).join('<li class="menu-separator" role="separator"></li>');
@@ -232,12 +254,13 @@ const RETURNED_GLYPH = '\u{eae2}';
 
 /**
  * A pill on line 2: its codicon glyph, if any, then its text, the full name in its tooltip. `icon` names a codicon shown only when the pill
- * shrinks to its icon (`fitPills`), for a pill that has no glyph whole: the ticket key's source, GitHub's mark or a tag.
+ * shrinks to its icon (`fitPills`), for a pill that has no glyph whole: the ticket key's source, GitHub's mark or a tag. `attrs` makes a pill with
+ * a link open it.
  */
-function pill(classes: string, glyph: string | null, text: string, title: string, icon?: string): string {
+function pill(classes: string, glyph: string | null, text: string, title: string, icon?: string, attrs = ''): string {
   const shown = glyph === null ? (icon === undefined ? '' : `<span class="codicon codicon-${icon} pill-icon" aria-hidden="true"></span>`) : `<span class="codicon" aria-hidden="true">${escape(glyph)}</span>`;
 
-  return `<span class="pill ${classes}" title="${escape(title)}">${shown}<span class="pill-text">${escape(text)}</span></span>`;
+  return `<span class="pill ${classes}" title="${escape(title)}"${attrs}>${shown}<span class="pill-text">${escape(text)}</span></span>`;
 }
 
 /**
@@ -262,9 +285,11 @@ function listRow(row: PageRow, selected: boolean): string {
   const priority = row.priority === null ? '' : `<span class="priority" role="img" title="${escape(row.priority)}" aria-label="${escape(row.priority)}"></span>`;
   const time = row.time === null ? '' : `<span class="row-time" title="${escape(row.time.title)}">${escape(row.time.text)}</span>`;
   const comment = row.comment === null ? '' : `<span class="codicon comment" role="img" title="${escape(row.comment.title)}" aria-label="Comments">${escape(row.comment.glyph)}</span>`;
-  const ticket = pill(`ticket source-${escape(row.sourceKind)}`, null, row.ticket, row.url === '' ? row.ticket : `${row.ticket}\n${row.url}`, row.sourceKind === 'github' ? 'github' : 'tag');
+  // A pill with a link opens it instead of the row's click, as the dock's `OnPillTapped` (PRD R52).
+  const opens = (which: string): string => ` data-action="open-link" data-work-item="${row.workItemId}" data-link="${which}"`;
+  const ticket = pill(`ticket source-${escape(row.sourceKind)}`, null, row.ticket, row.url === '' ? row.ticket : `${row.ticket}\n${row.url}`, row.sourceKind === 'github' ? 'github' : 'tag', row.url === '' ? '' : opens('ticket'));
   const links = row.links
-    .map((link) => pill(`link ${link.kind}${link.mentioned ? ' mentioned' : ''}`, link.glyph, link.badge, `${link.label}${link.mentioned ? ', named in the ticket' : ''}\n${link.url}`))
+    .map((link, index) => pill(`link ${link.kind}${link.mentioned ? ' mentioned' : ''}`, link.glyph, link.badge, `${link.label}${link.mentioned ? ', named in the ticket' : ''}\n${link.url}`, undefined, opens(String(index))))
     .join('');
   const linkPills = links === '' ? '' : `<span class="row-links">${links}</span>`;
   const returned = row.returned > 0 ? pill('returned', RETURNED_GLYPH, String(row.returned), `Returned ${row.returned}: earlier work items with this playbook, or one it is a return of, were done for this ticket`) : '';

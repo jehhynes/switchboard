@@ -1,4 +1,4 @@
-import { applyEvent, commandQuery, EMPTY, mentionOf, mentionQuery, pageTitle, selectedEntry, selectedRow, sentTexts, shortTitle, withEarlier } from './model.js';
+import { applyEvent, commandQuery, EMPTY, mentionOf, mentionQuery, pageTitle, rowLink, selectedEntry, selectedRow, sentTexts, shortTitle, tabUrl, withEarlier } from './model.js';
 import { snoozeChoices } from '@switchboard/core/snooze';
 import type { PageState } from './model.js';
 import { escape, renderMarkdown } from './markdown.js';
@@ -69,6 +69,8 @@ export interface PageDeps {
   /** The build of the hub that served the page, from its `switchboard-build` meta tag, and how to reload, for a hub that restarts. */
   build?: string | null;
   reload?(): void;
+  /** Opens a link in a new browser tab; `window.open` without an opener or referrer when left out. */
+  openUrl?(url: string): void;
 }
 
 type Answer = { status: number; body: Record<string, unknown> };
@@ -1517,6 +1519,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         break;
       case 'actions':
         view.actions = !view.actions;
+        view.linkMenu = false;
         view.picker = false;
         view.personas = null;
         view.textMenu = false;
@@ -1527,6 +1530,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         break;
       case 'row-paste':
         void copyPaste(button!.dataset['label'] ?? '');
+        break;
+      case 'open-link':
+        // A pill's link opens without selecting its row; the menu's closes the menu.
+        openLink(Number(button!.dataset['workItem']), button!.dataset['link'] ?? '');
+        break;
+      case 'link-menu':
+        view.linkMenu = !view.linkMenu;
+        draw();
         break;
       case 'sheet-cancel':
         // A press on the sheet itself is not one on its backdrop.
@@ -1929,6 +1940,20 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   };
 
   // ---- Row actions (architecture.md § Web page) ----
+  /** Opens a row's ticket or link, an http or https URL from the hub's row, in a new tab, marked as the dock marks it. */
+  const openLink = (workItemId: number, which: string): void => {
+    const url = rowLink(state, workItemId, which);
+    const target = url === null ? null : tabUrl(url);
+
+    if (view.actions) {
+      view.actions = false;
+      draw();
+    }
+
+    if (target !== null) {
+      (deps.openUrl ?? ((one: string) => void window.open(one, '_blank', 'noopener,noreferrer')))(target);
+    }
+  };
   /** A control of the header's actions: Snooze… opens its choices, one that asks first its question, any other runs at once. */
   const chooseAction = (type: string): void => {
     const row = selectedRow(state);

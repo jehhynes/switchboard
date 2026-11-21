@@ -120,6 +120,54 @@ export function selectedRow(state: PageState): PageRow | null {
   return id === null ? null : (state.groups.flatMap((group) => group.rows).find((row) => row.workItemId === id) ?? null);
 }
 
+/** The bookmark and the query parameter the dock adds to a link it opens (`Switcher.Marked`), so the Chrome extension groups its tab (PRD R74). */
+const TAB_BOOKMARK = '#switchboard-tab';
+const TAB_PARAMETER = 'switchboard-tab=1';
+
+/**
+ * A link as the page opens it: an http or https URL with the dock's mark, the bookmark added or, when it has one, the parameter last in its query
+ * before the unchanged bookmark; null for any other URL, so a row's link never runs a script or opens a file.
+ */
+export function tabUrl(url: string): string | null {
+  let parsed: URL;
+
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return null;
+  }
+
+  const href = parsed.href;
+  const hash = href.indexOf('#');
+
+  if (hash === -1) {
+    return `${href}${TAB_BOOKMARK}`;
+  }
+
+  const target = href.slice(0, hash);
+
+  return `${target}${target.includes('?') ? '&' : '?'}${TAB_PARAMETER}${href.slice(hash)}`;
+}
+
+/** The URL of a row's ticket (`ticket`) or of its link by index, or null when the list has no such row or link. */
+export function rowLink(state: PageState, workItemId: number, which: string): string | null {
+  const row = state.groups.flatMap((group) => group.rows).find((one) => one.workItemId === workItemId);
+
+  if (row === undefined) {
+    return null;
+  }
+
+  if (which === 'ticket') {
+    return row.url === '' ? null : row.url;
+  }
+
+  return /^\d+$/.test(which) ? (row.links[Number(which)]?.url ?? null) : null;
+}
+
 /** Older items a `history` page brought, before those shown. */
 export function withEarlier(state: PageState, items: ItemView[], more: boolean): PageState {
   const known = new Set(state.items.map((item) => item.id));
