@@ -266,6 +266,8 @@ export interface ConversationServiceDeps {
   rowPaste?(workItemId: number, label: string): Promise<string | null>;
   /** The folder the files a page attaches are written to; `UPLOAD_DIR` by default. */
   uploads?: string;
+  /** Opens a work item row's ticket URL or link in the default browser, after checking that its dock row holds it now: why not, or null. */
+  rowOpen?(workItemId: number, url: string): string | null;
   log(line: string): void;
 }
 
@@ -622,6 +624,40 @@ export class ConversationService {
 
     const why = this.deps.rowAction === undefined ? 'This hub runs no actions from the page.' : this.deps.rowAction(workItemId as number, action, { until: (until as number | null | undefined) ?? null, comment: typeof comment === 'string' && comment.trim() !== '' ? comment.trim() : null });
     const answer = why === null ? { status: 200, body: { done: true } } : { status: 409, body: { error: why } };
+
+    this.#rowActions.set(`${window} ${opId}`, answer);
+
+    for (const old of [...this.#rowActions.keys()].slice(0, -100)) {
+      this.#rowActions.delete(old);
+    }
+
+    return answer;
+  }
+
+  /**
+   * `row-open {window, opId, workItemId, url}` (architecture.md § Web page): the installed page's link, opened by the hub in the default browser,
+   * for any work item the page lists, since its list already holds every row's links; 403 for a key that is not a page's, 409 with why not, such
+   * as a URL the row no longer holds. A repeated `opId` answers the first result.
+   */
+  rowOpen(body: Record<string, unknown>): { status: number; body: unknown } {
+    const { window, opId, workItemId, url } = body;
+
+    if (typeof window !== 'string' || typeof opId !== 'string' || opId === '' || !Number.isInteger(workItemId) || typeof url !== 'string') {
+      return { status: 400, body: { error: 'Expected {window, opId, workItemId, url}.' } };
+    }
+
+    if (!this.deps.windows.isPage(window)) {
+      return { status: 403, body: { error: 'Not in this window.' } };
+    }
+
+    const done = this.#rowActions.get(`${window} ${opId}`);
+
+    if (done !== undefined) {
+      return done;
+    }
+
+    const why = this.deps.rowOpen === undefined ? 'This hub opens no links for the page.' : this.deps.rowOpen(workItemId as number, url);
+    const answer = why === null ? { status: 200, body: { opened: true } } : { status: 409, body: { error: why } };
 
     this.#rowActions.set(`${window} ${opId}`, answer);
 

@@ -287,6 +287,44 @@ export function pageActionEvent(row: Pick<DockRow, 'controls' | 'main' | 'ticket
   return action === 'snooze' ? { ...control.action, until: snooze.until, ...(snooze.comment === null ? {} : { comment: snooze.comment }) } : { ...control.action };
 }
 
+/** The bookmark and the query parameter the dock adds to a link it opens (`Switcher.Marked`), so the Chrome extension groups its tab (PRD R74). */
+const TAB_BOOKMARK = '#switchboard-tab';
+const TAB_PARAMETER = 'switchboard-tab=1';
+
+/**
+ * A link as the hub opens it for the page: an http or https URL, normalised by the URL parser, with the dock's mark (the bookmark added or, when
+ * it has one, the parameter last in its query before it); null for any other URL.
+ */
+export function tabUrl(url: string): string | null {
+  let parsed: URL;
+
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return null;
+  }
+
+  const href = parsed.href;
+  const hash = href.indexOf('#');
+
+  if (hash === -1) {
+    return `${href}${TAB_BOOKMARK}`;
+  }
+
+  const target = href.slice(0, hash);
+
+  return `${target}${target.includes('?') ? '&' : '?'}${TAB_PARAMETER}${href.slice(hash)}`;
+}
+
+/** The URL `row-open` opens for a row: `url` marked, only when it is the row's ticket URL or one of its links now and http or https; else null. */
+export function rowOpenUrl(row: { url: string; links: ReadonlyArray<{ url: string }> }, url: string): string | null {
+  return url !== '' && (row.url === url || row.links.some((link) => link.url === url)) ? tabUrl(url) : null;
+}
+
 /** A drafted text as Copy puts it on the clipboard: the file as it is now, without a byte order mark or trailing whitespace (PRD R60). */
 export async function pasteText(file: string): Promise<string> {
   return (await readFile(file, 'utf8')).replace(/^\uFEFF/, '').trimEnd();

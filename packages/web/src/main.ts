@@ -71,6 +71,8 @@ export interface PageDeps {
   reload?(): void;
   /** Opens a link in a new browser tab; `window.open` without an opener or referrer when left out. */
   openUrl?(url: string): void;
+  /** Whether the page runs as the installed app, whose links the hub opens in the default browser; read from `display-mode` when left out. */
+  standalone?(): boolean;
 }
 
 type Answer = { status: number; body: Record<string, unknown> };
@@ -1940,7 +1942,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   };
 
   // ---- Row actions (architecture.md § Web page) ----
-  /** Opens a row's ticket or link, an http or https URL from the hub's row, in a new tab, marked as the dock marks it. */
+  /**
+   * Opens a row's ticket or link, an http or https URL from the hub's row, in a new tab, marked as the dock marks it; the installed app asks the
+   * hub, which opens it in the default browser, since a link it opened itself would stay in the browser that installed it.
+   */
   const openLink = (workItemId: number, which: string): void => {
     const url = rowLink(state, workItemId, which);
     const target = url === null ? null : tabUrl(url);
@@ -1950,9 +1955,16 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       draw();
     }
 
-    if (target !== null) {
-      (deps.openUrl ?? ((one: string) => void window.open(one, '_blank', 'noopener,noreferrer')))(target);
+    if (target === null) {
+      return;
     }
+
+    if (deps.standalone?.() ?? (typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches)) {
+      void post('row-open', { workItemId, url }).then((answer) => answer.status === 200 || showError(String(answer.body['error'] ?? `The link did not open (status ${answer.status}).`)));
+      return;
+    }
+
+    (deps.openUrl ?? ((one: string) => void window.open(one, '_blank', 'noopener,noreferrer')))(target);
   };
   /** A control of the header's actions: Snooze… opens its choices, one that asks first its question, any other runs at once. */
   const chooseAction = (type: string): void => {

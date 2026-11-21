@@ -35,7 +35,9 @@ import type { Snapshot, WorkItemView } from './snapshot.js';
 import { SnapshotBuilder } from './snapshotBuilder.js';
 import type { Built } from './snapshotBuilder.js';
 import { WindowScopes } from './windows.js';
-import { dockRowOf, PageAccess, pageActionEvent, pageHeader, pageList, pageRow, pasteText } from './page.js';
+import { dockRowOf, PageAccess, pageActionEvent, pageHeader, pageList, pageRow, pasteText, rowOpenUrl } from './page.js';
+import { launcher } from './launch.js';
+import type { Launcher } from './launch.js';
 import { pageAsset } from './pageAssets.js';
 import { needsMessage, newlyNeeding, rowFor, targetForUrl } from './needs.js';
 import { volumeReply } from './volume.js';
@@ -197,6 +199,8 @@ export interface AppOptions {
    * one. Without it the snapshot is built on the main thread.
    */
   snapshotWorker?: string;
+  /** What the hub starts for the web page, such as the browser for a link; tests replace it. */
+  launch?: Launcher;
 }
 
 /** Opens the store, loads configuration, and runs the core for the hub process. */
@@ -230,6 +234,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   }
 
   const runtime = new Runtime(deps, config);
+  const launch = options.launch ?? launcher();
   // Kept in a file, because the window the dock is opening may replace this hub before it claims (architecture.md § Claude Code runner).
   const windowQueue = WindowQueue.load(join(home, 'window-queue.json'), deps.now, deps.log);
   const claudeRoot = dirname(deps.claudeSettings).replaceAll('\\', '/');
@@ -529,6 +534,22 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       }
 
       return session?.execution === 'app-server' ? runtime.resumeThread(sessionId) : 'This session resumes only in Claude.';
+    },
+    // The installed page's link, opened in the default browser only when its row holds it now (architecture.md § Web page).
+    rowOpen: (workItemId, url) => {
+      const row = dockRowOf(views().dock, workItemId);
+      const target = row === null ? null : rowOpenUrl(row, url);
+
+      if (target === null) {
+        return row === null ? 'The work item is gone.' : 'The work item no longer links to this.';
+      }
+
+      try {
+        launch.openUrl(target);
+        return null;
+      } catch (error) {
+        return `The browser did not open ${url}: ${(error as Error).message}`;
+      }
     },
     rowPaste: async (workItemId, label) => {
       const paste = dockRowOf(views().dock, workItemId)?.pastes.find((one) => one.label === label);
@@ -871,6 +892,7 @@ const dockWithRuns = () => {
       '/v1/conversation/prompt-key': async (body) => (isRecord(body) ? conversation.promptKey(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, prompt, key}.' } }),
       '/v1/conversation/page-conversation': async (body) => (isRecord(body) ? conversation.pageConversation(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, provider?}.' } }),
       '/v1/conversation/resume': async (body) => (isRecord(body) ? conversation.resume(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } }),
+      '/v1/conversation/row-open': async (body) => (isRecord(body) ? conversation.rowOpen(body) : { status: 400, body: { error: 'Expected {window, opId, workItemId, url}.' } }),
       '/v1/conversation/row-paste': async (body) => (isRecord(body) ? conversation.rowPaste(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId, label}.' } }),
       '/v1/conversation/page-poll': async (body) => (isRecord(body) ? conversation.pagePoll(body) : { status: 400, body: { error: 'Expected {window}.' } }),
       '/v1/conversation/page-adhoc': async (body) => (isRecord(body) ? conversation.pageAdhoc(body) : { status: 400, body: { error: 'Expected {window, opId, prompt, repoRoot, start, provider}.' } }),

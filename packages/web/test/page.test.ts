@@ -1054,10 +1054,12 @@ describe('the page in use', () => {
   let posts: Array<{ url: string; body: Record<string, unknown> }>;
   let root: HTMLElement;
   let answers: Record<string, { status: number; body: unknown; text?: string; wait?: Promise<void> }>;
+  let installed: boolean;
 
   beforeEach(() => {
     posts = [];
     answers = {};
+    installed = false;
     root = document.createElement('div');
     document.body.replaceChildren(root);
     localStorage.clear();
@@ -1083,7 +1085,7 @@ describe('the page in use', () => {
     });
     const mermaid = vi.fn(async () => false);
     const opened: string[] = [];
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, loadMermaid: mermaid, openUrl: (url) => opened.push(url) });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, loadMermaid: mermaid, openUrl: (url) => opened.push(url), standalone: () => installed });
 
     return { page, source: FakeSource.last!, mermaid, opened };
   };
@@ -1468,6 +1470,29 @@ describe('the page in use', () => {
     expect(root.querySelector('#list .row.selected')?.getAttribute('data-work-item')).toBe('1');
     // A row without a ticket URL, such as an ad-hoc one, has a ticket pill that opens nothing.
     expect(root.querySelector('#list [data-work-item="1"] .pill.ticket')!.hasAttribute('data-action')).toBe(false);
+    page.close();
+  });
+
+  it('asks the hub to open a link in the default browser when installed as an app, and shows its refusal', async () => {
+    const { page, source, opened } = start();
+    const links = [{ label: 'PR #5', url: 'https://github.com/o/r/pull/5', kind: 'pr' as const, badge: '5', glyph: null, mentioned: false }, { label: 'Bad', url: 'file:///C:/x', kind: 'url' as const, badge: 'Bad', glyph: null, mentioned: false }];
+
+    installed = true;
+    hello(source, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it' }), listRow(2, { links })])] });
+    posts = [];
+    click('#list [data-work-item="2"] .pill.link.pr');
+    click('#list [data-work-item="2"] .pill.link[title^="Bad"]');
+    await flush();
+    expect(opened).toEqual([]);
+    expect(posts.map((post) => post.url)).toEqual(['/v1/conversation/row-open']);
+    // The hub gets the row's own URL, unmarked, and checks it against the row itself.
+    expect(posts[0]!.body).toMatchObject({ window: 'pk', workItemId: 2, url: 'https://github.com/o/r/pull/5' });
+
+    answers['/row-open'] = { status: 409, body: { error: 'The work item no longer links to this.' } };
+    click('#list [data-work-item="2"] .pill.link.pr');
+    await flush();
+    await flush();
+    expect(root.querySelector('.composer-error-text')!.textContent).toBe('The work item no longer links to this.');
     page.close();
   });
 
