@@ -779,6 +779,38 @@ describe('createHubApp', () => {
     }
   });
 
+  it("opens a listed row's link, runs a pool ticket's control and a VS Code control for the page only as each row offers it now (architecture.md § Web page)", async () => {
+    writeSettings({ sessions: { installHooks: false }, sources: { adhoc: { repoRoot: 'D:/scratch' } } });
+    const opened: string[] = [];
+    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli }, launch: { openUrl: (url) => opened.push(url), openCode: (target) => opened.push(`code ${target}`) } });
+
+    closers.push(() => app.close());
+    app.runtime.send({ type: 'adhoc', prompt: 'Fix the badge', repoRoot: 'D:/scratch', start: false });
+    await app.runtime.settled();
+
+    const ticketId = (app.snapshot() as { workItems: { ticket: { id: number } }[] }).workItems[0]!.ticket.id;
+    const writer = Store.open(join(temp.home, '.switchboard', 'switchboard.db'));
+
+    writer.addLink({ ticketId, label: 'PR #5', target: 'https://github.com/o/r/pull/5', reportedAt: 1, mentioned: false });
+    writer.close();
+    // Another work item builds a snapshot with the link.
+    app.runtime.send({ type: 'adhoc', prompt: 'Something else', repoRoot: 'D:/scratch', start: false });
+    await app.runtime.settled();
+
+    const page = app.page!.opened();
+
+    expect(await app.post['/v1/conversation/row-open']!({ window: page, opId: 'o1', workItemId: 1, url: 'https://github.com/o/r/pull/5' })).toEqual({ status: 200, body: { opened: true } });
+    expect(opened).toEqual(['https://github.com/o/r/pull/5#switchboard-tab']);
+    expect(await app.post['/v1/conversation/row-open']!({ window: page, opId: 'o2', workItemId: 1, url: 'https://evil.test/' })).toEqual({ status: 409, body: { error: 'The work item no longer links to this.' } });
+    expect(await app.post['/v1/conversation/row-open']!({ window: page, opId: 'o3', workItemId: 99, url: 'https://github.com/o/r/pull/5' })).toEqual({ status: 409, body: { error: 'The work item is gone.' } });
+    expect(await app.post['/v1/conversation/pool-action']!({ window: page, opId: 'o4', ticketId: 99, label: 'Start' })).toEqual({ status: 409, body: { error: 'The ticket is no longer in the pool.' } });
+
+    // A VS Code control runs on the page's selected work item; an ad-hoc work item with no session has no window to open.
+    expect(await app.post['/v1/conversation/select']!({ window: page, opId: 'o5', workItemId: 1 })).toMatchObject({ status: 200 });
+    expect(await app.post['/v1/conversation/row-command']!({ window: page, scopeGen: 1, opId: 'o6', workItemId: 1, label: 'Open in VS Code' })).toEqual({ status: 409, body: { error: 'The work item no longer offers this.' } });
+    expect(opened).toHaveLength(1);
+  });
+
   it('forwards a click to the dock only while a dock that runs clicks is connected (PRD R65, R69)', async () => {
     writeSettings({ sessions: { installHooks: false } });
     const app = await start();
