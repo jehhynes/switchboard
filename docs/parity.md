@@ -175,7 +175,6 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 | K7 | A view that moves the focused row keeps the focus on it, or on its closed group's heading | `RestoreFocus` MainWindow.axaml.cs:291 | Partly | `morph` keeps a row's node when it stays in place |
 | K8 | Every mark, pill, time, comment, priority and detail has its meaning in a tooltip | MainWindow.axaml:502-569 | Present | `title` attributes in `listRow` render.ts:225-258 |
 | K10 | Header icon buttons have accessible names; marks and the priority dot have an image role and label | MainWindow.axaml:392-416 | Present | render.ts:230, 239, 241 |
-| K11 | Ctrl+B and Ctrl+Alt+B show or hide the side columns | none | Web only | main.ts:1204-1214 |
 
 ## Dock only
 

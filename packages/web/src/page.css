@@ -139,7 +139,6 @@ svg.source-logo.forum { color: #57ae57; }
 @media (min-width: 768px) {
   .side { width: var(--side-width, clamp(260px, 30vw, 340px)); min-width: 200px; max-width: 50vw; }
   .side-sash { display: block; }
-  #root.list-hidden > .side-sash { display: none; }
   #root.listing > .main, #root:not(.listing) > .side { display: flex; }
 }
 /* With a mouse, the group headers can be as compact as the dock's. */
@@ -504,15 +503,11 @@ button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }
 .codicon.state-icon.codicon-modifier-spin { animation: codicon-spin 1.1s linear infinite; }
 @media (prefers-reduced-motion: reduce) { .codicon.state-icon.codicon-modifier-spin { animation: none; } }
 
-/* The side columns' toggles (architecture.md § Web page): from 768 px the work items can be hidden, from 1200 px the Status and Artifacts column;
-   a phone keeps the list and the conversation as separate views. */
-/* .header > raises them over button.icon's display. */
-.layout-toggle, .back-toggle { flex: none; }
-.header > .list-toggle { display: none; }
+/* Back to the work items, only on a phone, where the list and the conversation are separate views (architecture.md § Web page). */
+/* .header > raises it over button.icon's display. */
+.back-toggle { flex: none; }
 @media (min-width: 768px) {
-  .header > .list-toggle { display: inline-flex; }
   .header > .back-toggle { display: none; }
-  #root.list-hidden > .side { display: none; }
 }
 /* The Text size menu: smaller, the size and larger on one row, then Reset. */
 .text-size-anchor { flex: none; }

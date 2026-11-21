@@ -684,11 +684,12 @@ describe('the page', () => {
     source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1), listRow(2)])], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
     expect(root.classList.contains('listing')).toBe(false);
 
-    // Back is the header's first button, before the work items' toggle, which CSS shows in its place from 768 px; no bar of its own.
+    // Back is the header's first button, which CSS hides from 768 px, where the list always shows; no bar of its own, and no list toggle.
     const back = root.querySelector<HTMLElement>('.header > button.back-toggle')!;
 
     expect(back.getAttribute('aria-label')).toBe('Back to work items');
-    expect(back.nextElementSibling!.classList.contains('list-toggle')).toBe(true);
+    expect(back.previousElementSibling).toBeNull();
+    expect(root.querySelector('.list-toggle')).toBeNull();
     expect(root.querySelector('.back-bar')).toBeNull();
     back.click();
     expect(root.classList.contains('listing')).toBe(true);
@@ -1533,7 +1534,7 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it('puts Status and Artifacts in a column beside the conversation on a wide screen, with their own switch, and keeps the tabs otherwise', async () => {
+  it('puts Status and Artifacts in a column beside the conversation on a wide screen, with their own switch and no toggle, and keeps the tabs otherwise', async () => {
     const listeners: Array<() => void> = [];
     const query = { matches: true, addEventListener: (_type: string, listener: () => void) => listeners.push(listener) };
 
@@ -1553,26 +1554,18 @@ describe('the page in use', () => {
     expect(root.querySelector('#detail iframe')).not.toBeNull();
     expect(root.querySelector('#panel .timeline')).not.toBeNull();
 
-    // Either side column hides from the header or the keyboard, and the choice is kept; with the right one hidden the tabs come back.
-    click('[data-action="toggle-list"]');
-    expect(root.classList.contains('list-hidden')).toBe(true);
-    expect(root.querySelector('[data-action="toggle-list"]')!.getAttribute('aria-pressed')).toBe('false');
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', ctrlKey: true, altKey: true }));
-    expect(root.classList.contains('wide')).toBe(false);
-    expect(root.querySelector('#head .tabs')).not.toBeNull();
-    expect(JSON.parse(localStorage.getItem('switchboard.layout')!)).toEqual({ list: false, detail: false });
-    click('[data-action="toggle-detail"]');
-    // Not while typing in the composer.
-    root.querySelector('textarea')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', ctrlKey: true, bubbles: true }));
-    expect(root.classList.contains('list-hidden')).toBe(true);
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', ctrlKey: true }));
+    // Both side columns show whenever the width allows: no toggle, no shortcut, and no kept choice.
+    localStorage.setItem('switchboard.layout', JSON.stringify({ list: false, detail: false }));
+    expect(root.querySelector('[data-action="toggle-list"], [data-action="toggle-detail"], .layout-toggle')).toBeNull();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', ctrlKey: true, cancelable: true }));
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', ctrlKey: true, altKey: true, cancelable: true }));
     expect(root.classList.contains('list-hidden')).toBe(false);
     expect(root.classList.contains('wide')).toBe(true);
+    expect(root.querySelector('#head .tabs')).toBeNull();
 
     query.matches = false;
     listeners.forEach((listener) => listener());
     expect(root.querySelector('#head .tabs')).not.toBeNull();
-    expect(root.querySelector('[data-action="toggle-detail"]')).toBeNull();
     expect(root.querySelector('#detail .detail-body')!.innerHTML).toBe('');
     vi.unstubAllGlobals();
     page.close();
@@ -1899,17 +1892,17 @@ describe("the list's CSS", () => {
     expect(declarationsOf((selector) => selector === 'button:focus-visible')).toEqual([expect.stringContaining('outline: 1px solid var(--vscode-focusBorder)')]);
   });
 
-  it('swaps Back and the work items\' toggle and shows the work items\' sash by the page\'s width alone', () => {
+  it('hides Back and shows the work items\' sash by the page\'s width alone, with no list toggle or hidden list', () => {
     const narrow = css.slice(0, css.indexOf('@media (min-width: 768px)'));
 
-    // Selectors that outrank button.icon's display, which kept the toggle on a phone's width.
-    expect(declarationsOf((selector) => selector === '.header > .list-toggle')).toEqual(['display: none;', 'display: inline-flex;']);
+    expect(css).not.toMatch(/list-toggle|layout-toggle|list-hidden/);
+    // A selector that outranks button.icon's display.
     expect(declarationsOf((selector) => selector === '.header > .back-toggle')).toEqual(['display: none;']);
     expect(declarationsOf((selector) => selector === '.side-sash')).toEqual(['display: block;']);
     expect(narrow).not.toMatch(/\.side-sash \{ display: block/);
     const wide = css.split('@media (min-width: 768px) {').slice(1).map((block) => block.slice(0, block.indexOf('\n}'))).join('\n');
 
-    for (const rule of ['.header > .back-toggle { display: none; }', '.header > .list-toggle { display: inline-flex; }', '.side-sash { display: block; }']) {
+    for (const rule of ['.header > .back-toggle { display: none; }', '.side-sash { display: block; }']) {
       expect(wide).toContain(rule);
       expect(narrow).not.toContain(rule);
     }
