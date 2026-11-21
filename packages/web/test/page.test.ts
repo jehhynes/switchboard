@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyEvent, awaitingReply, EMPTY, mentionOf, mentionQuery, commandQuery, shortTitle, timeline, withEarlier } from '../src/model.js';
 import { answerText, answersIn, complete, parseQuestions } from '@switchboard/conversation/questions';
@@ -1546,5 +1548,21 @@ describe('the page against late answers', () => {
     await flush();
     expect(posts.filter((post) => post.url.endsWith('/answer')).at(-1)?.body).toMatchObject({ requestId: 'q1', answer: { port: '8799', key: 'abc' } });
     page.close();
+  });
+});
+
+describe("the list's CSS", () => {
+  const css = readFileSync(join(__dirname, '../src/page.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  /** The declarations of every rule with a selector the test picks. */
+  const declarationsOf = (pick: (selector: string) => boolean): string[] =>
+    [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, selectors]) => selectors!.split(',').some((selector) => pick(selector.trim()))).map(([, , body]) => body!.trim());
+
+  it('marks the selected row with only the selection colours, as the dock does, leaving the focus ring to a keyboard focus', () => {
+    const selected = declarationsOf((selector) => selector === '.row.selected');
+
+    expect(selected).toHaveLength(1);
+    expect(selected[0]).toContain('background: var(--vscode-list-activeSelectionBackground)');
+    expect(selected[0]).not.toMatch(/box-shadow|outline|border/);
+    expect(declarationsOf((selector) => selector === 'button:focus-visible')).toEqual([expect.stringContaining('outline: 1px solid var(--vscode-focusBorder)')]);
   });
 });
