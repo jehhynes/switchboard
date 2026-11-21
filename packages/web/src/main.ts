@@ -6,6 +6,7 @@ import { escape, renderMarkdown } from './markdown.js';
 import { answerText, artifactUrl, complete, firstSnoozeDay, inputReady, renderMicButton, markdownBody, newView, parseQuestions, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, SIDE_TABS } from './render.js';
 import type { CardDraft, PaneView, SideTab, Tab, View } from './render.js';
 import type { ConsoleOptions, MountedConsole } from './console.js';
+import { LIGHT_SCHEME } from './console.js';
 import type { ArtifactView, ItemView, PageRow, ScreenPrompt } from './types.js';
 import { mount, unmount } from './island.js';
 import type { ComponentChild, VNode } from 'preact';
@@ -796,11 +797,19 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
   // ---- Drawing ----
   let mermaidRun: Promise<boolean> | null = null;
+  /** Each diagram's source, kept from before Mermaid replaced it with its drawing, so a change of scheme can draw it again. */
+  const diagramSources = new WeakMap<HTMLElement, string>();
   const drawDiagrams = (within: HTMLElement): void => {
     const diagrams = within.querySelectorAll<HTMLElement>('pre.mermaid');
 
     if (diagrams.length === 0 || deps.loadMermaid === undefined) {
       return;
+    }
+
+    for (const node of diagrams) {
+      if (!node.hasAttribute('data-processed')) {
+        diagramSources.set(node, node.textContent ?? '');
+      }
     }
 
     mermaidRun ??= deps.loadMermaid();
@@ -812,6 +821,35 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       }
     });
   };
+  // Mermaid bakes its theme's colours into each drawing, so when the operating system's scheme changes the diagrams shown are drawn again from
+  // their sources in the new scheme's theme.
+  const schemeQuery = typeof window.matchMedia === 'function' ? window.matchMedia(LIGHT_SCHEME) : null;
+
+  schemeQuery?.addEventListener?.(
+    'change',
+    () =>
+      void mermaidRun?.then((loaded) => {
+        const mermaid = (globalThis as { mermaid?: { initialize(options: object): void; run(options: { nodes: ArrayLike<HTMLElement> }): Promise<void> } }).mermaid;
+
+        if (!loaded || mermaid === undefined) {
+          return;
+        }
+
+        mermaid.initialize(mermaidOptions());
+
+        const drawn = [...root.querySelectorAll<HTMLElement>('pre.mermaid[data-processed]')].filter((node) => diagramSources.has(node));
+
+        for (const node of drawn) {
+          node.removeAttribute('data-processed');
+          node.textContent = diagramSources.get(node)!;
+        }
+
+        if (drawn.length > 0) {
+          void mermaid.run({ nodes: drawn }).catch(() => undefined);
+        }
+      }),
+    { signal: listening.signal },
+  );
   /** Each open Markdown artifact's drawn HTML by its path and version (null when it could not be read, undefined while it loads), and where it scrolls to once drawn. */
   const artifactDocs = new Map<string, { updatedAt: number; html: string | null | undefined; top: number | null }>();
   /** An open artifact's key in `artifactDocs`: the page key, the selection's work item and `scopeGen`, and the path, so another work item's artifact of the same path and time is never shown. */
@@ -2442,6 +2480,13 @@ export function loadConsole(): Promise<ConsoleModule | null> {
   });
 }
 
+/** Mermaid's options: strict, drawn on demand, in its `default` theme while the operating system is light and its `dark` one otherwise. */
+export function mermaidOptions(): { startOnLoad: false; securityLevel: 'strict'; theme: 'default' | 'dark' } {
+  const light = typeof matchMedia === 'function' && matchMedia(LIGHT_SCHEME).matches;
+
+  return { startOnLoad: false, securityLevel: 'strict', theme: light ? 'default' : 'dark' };
+}
+
 /** Loads Mermaid from the hub once, for diagrams in replies, statuses and artifacts; false when the hub has none. */
 export function loadMermaid(): Promise<boolean> {
   return new Promise((resolve) => {
@@ -2451,7 +2496,7 @@ export function loadMermaid(): Promise<boolean> {
     script.onload = () => {
       const mermaid = (globalThis as { mermaid?: { initialize(options: object): void } }).mermaid;
 
-      mermaid?.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'dark' });
+      mermaid?.initialize(mermaidOptions());
       resolve(mermaid !== undefined);
     };
     script.onerror = () => resolve(false);

@@ -12,7 +12,7 @@ import { renderList } from '../src/list.js';
 import { html } from './html.js';
 import { renderMicButton as viewMicButton } from '@switchboard/conversation/voiceControls';
 import { renderMarkdown } from '../src/markdown.js';
-import { CHAT_MAX, CHAT_MIN, SENT_NOTE_MS, SIDE_MAX, SIDE_MIN, startPage, stepScale } from '../src/main.js';
+import { CHAT_MAX, CHAT_MIN, loadMermaid, SENT_NOTE_MS, SIDE_MAX, SIDE_MIN, startPage, stepScale } from '../src/main.js';
 import type { ArtifactView, MessageView, PageGroup, PageRow, ReplyView, SessionView } from '../src/types.js';
 
 const message = (id: string, ord: number, patch: Partial<MessageView> = {}): MessageView => ({ type: 'message', id, sessionId: 's', workItemId: 1, at: 1_000 + ord, ord, provisional: false, withdrawn: false, origin: 'typed', text: `text ${id}`, delivery: 'sent', error: null, ...patch });
@@ -1086,7 +1086,7 @@ describe('the page in use', () => {
     vi.useRealTimers();
   });
 
-  const start = () => {
+  const start = (loadDiagrams: () => Promise<boolean> = async () => false) => {
     const fetch = vi.fn(async (url: string, init?: { body?: string }) => {
       posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) });
 
@@ -1097,7 +1097,7 @@ describe('the page in use', () => {
 
       return { status: answer.status, ok: answer.status === 200, json: async () => answer.body, text: async () => answer.text ?? '' } as unknown as Response;
     });
-    const mermaid = vi.fn(async () => false);
+    const mermaid = vi.fn(loadDiagrams);
     const opened: string[] = [];
     const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, loadMermaid: mermaid, openUrl: (url) => opened.push(url), standalone: () => installed });
 
@@ -1107,6 +1107,60 @@ describe('the page in use', () => {
   const click = (selector: string) => root.querySelector<HTMLElement>(selector)!.click();
   const hello = (source: FakeSource, patch: Record<string, unknown> = {}) =>
     source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1, { title: 'Fix it' }), listRow(2, { title: 'Side', host: 'w' })])], scope: { ...scope, conversations: [...scope.conversations, { ...scope.conversations[0]!, workItemId: 2, title: 'Side', primary: false }] }, sessions: [session()], items: [message('m1', 1), reply('r1', 2, { unread: true, opening: '1. Port?\n   - A) 1\n   - B) 2', answers: 'm1' })], more: true, status: { id: 'st-r1', sessionId: 's', at: 5_000, markdown: '**Working** on it\n\n```mermaid\ngraph TD; A-->B;\n```', fallback: false, unread: true }, artifacts: [artifact('chat/plan.md', 'markdown', 'md'), artifact('chat/p.html', 'html', 'html')], unread: 1, voice: { enabled: true, here: false, speaking: null, speakReplies: true, error: null }, ...patch });
+
+  it("draws Mermaid diagrams in the system scheme's theme, and draws the ones shown again from their sources when the scheme changes", async () => {
+    const changes: Array<() => void> = [];
+    // As a browser's, the listener goes when its signal aborts.
+    const scheme = {
+      matches: false,
+      addEventListener: (_type: string, listener: () => void, options?: { signal?: AbortSignal }) => {
+        changes.push(listener);
+        options?.signal?.addEventListener('abort', () => changes.splice(changes.indexOf(listener), 1));
+      },
+    };
+    const drawn: string[] = [];
+    const mermaid = {
+      initialize: vi.fn(),
+      run: vi.fn(async ({ nodes }: { nodes: ArrayLike<HTMLElement> }) => {
+        for (const node of Array.from(nodes)) {
+          drawn.push(node.textContent ?? '');
+          node.setAttribute('data-processed', 'true');
+          node.textContent = 'svg';
+        }
+      }),
+    };
+
+    vi.stubGlobal('matchMedia', vi.fn((query: string) => (query === '(prefers-color-scheme: light)' ? scheme : { matches: false, addEventListener: () => {} })));
+    vi.stubGlobal('mermaid', mermaid);
+
+    // The page's own loader initializes Mermaid in the scheme's theme once its script loads.
+    const loaded = loadMermaid();
+    const script = document.head.querySelector<HTMLScriptElement>('script[src="/page/mermaid.min.js"]')!;
+
+    script.dispatchEvent(new Event('load'));
+    expect(await loaded).toBe(true);
+    expect(mermaid.initialize).toHaveBeenLastCalledWith({ startOnLoad: false, securityLevel: 'strict', theme: 'dark' });
+    script.remove();
+
+    const { page, source } = start(async () => true);
+
+    hello(source);
+    click('[data-tab="status"]');
+    await flush();
+    expect(drawn).toEqual(['graph TD; A-->B;\n']);
+    expect(root.querySelector('pre.mermaid')!.textContent).toBe('svg');
+
+    scheme.matches = true;
+    changes.forEach((change) => change());
+    await flush();
+    expect(mermaid.initialize).toHaveBeenLastCalledWith({ startOnLoad: false, securityLevel: 'strict', theme: 'default' });
+    expect(drawn).toEqual(['graph TD; A-->B;\n', 'graph TD; A-->B;\n']);
+    page.close();
+
+    // A closed page stops listening.
+    expect(changes).toEqual([]);
+    vi.unstubAllGlobals();
+  });
 
   it('switches tabs, opens artifacts in the page, and draws a Markdown artifact with its pictures from its own folder', async () => {
     const { page, source, mermaid } = start();
