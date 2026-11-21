@@ -130,7 +130,18 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
     }
   };
 
+  /** Makes the page under Settings inert while Settings shows, so Tab and clicks reach only Settings. */
+  const cover = (on: boolean): void => {
+    for (const sibling of host.parentElement?.children ?? []) {
+      if (sibling !== host) {
+        sibling.toggleAttribute('inert', on);
+      }
+    }
+  };
+
   const draw = (): void => {
+    cover(view.open);
+
     if (!view.open) {
       mount(host, null);
       return;

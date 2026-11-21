@@ -346,6 +346,11 @@ describe('the list header (architecture.md § Web page)', () => {
     expect(root.querySelector('.more-menu')).toBeNull();
     expect(root.querySelector('.settings')).not.toBeNull();
     expect(posts.at(-1)?.url).toBe('/v1/conversation/page-settings-read');
+    // The page under Settings takes no focus or clicks until Settings closes.
+    expect(root.querySelector<HTMLElement>('.side')?.closest<HTMLElement>('[inert]')).not.toBeNull();
+    root.querySelector<HTMLButtonElement>('.settings-close')!.click();
+    expect(root.querySelector('.settings')).toBeNull();
+    expect(root.querySelector('[inert]')).toBeNull();
 
     page.close();
   });
