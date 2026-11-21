@@ -1021,7 +1021,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const drawRegions = (): void => {
     // On a narrow screen the list and the conversation are each a full-width view (page.css); the list shows until a work item is opened.
     root.classList.toggle('listing', view.list || wanted === null);
-    // The dock finds this window by the marker until it has found it (architecture.md § Pane state).
+    // The pane helper finds this window by the marker until it has found it (architecture.md § Pane state).
     document.title = pageTitle(state.groups) + (view.pane?.marker == null ? '' : ` [sb-pane ${view.pane.marker}]`);
     header.draw(state.header, state.groups);
     // A search shows only the rows that match, in every group, open (PRD R63).

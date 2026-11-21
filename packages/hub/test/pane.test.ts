@@ -36,9 +36,10 @@ describe('paneTabs', () => {
 function setup() {
   let enabled = true;
   let extension: PaneLinkState = 'paired';
-  let docks = 1;
+  let helper = true;
+  const wanted: boolean[] = [];
   const extensionSent: Array<Record<string, unknown>> = [];
-  const dockSent: Array<Record<string, unknown>> = [];
+  const helperSent: Array<Record<string, unknown>> = [];
   const pageSent: Array<[string, PanePageView]> = [];
   const focus: Array<[string, boolean]> = [];
   const tabs = new Map<string, { workItemId: number; urls: string[]; active: string } | null>([['page-1', { workItemId: 1, urls: [ISSUE, PR], active: ISSUE }], ['page-2', { workItemId: 2, urls: [PR], active: PR }]]);
@@ -47,7 +48,8 @@ function setup() {
     enabled: () => enabled,
     extension: () => extension,
     toExtension: (message) => (extensionSent.push(message), extension === 'paired'),
-    toDock: (data) => (dockSent.push(data), docks),
+    toHelper: (data) => (helperSent.push(data), helper),
+    want: (on) => wanted.push(on),
     toPage: (key, view) => pageSent.push([key, view]),
     pages: () => ['page-1', 'page-2'],
     tabsOf: (key) => tabs.get(key) ?? null,
@@ -59,39 +61,44 @@ function setup() {
   return {
     state,
     extensionSent,
-    dockSent,
+    helperSent,
+    wanted,
     pageSent,
     focus,
     tabs,
     lastPage: (key: string) => pageSent.filter(([one]) => one === key).at(-1)?.[1],
-    set: (next: { enabled?: boolean; extension?: PaneLinkState; docks?: number }) => {
+    set: (next: { enabled?: boolean; extension?: PaneLinkState; helper?: boolean }) => {
       enabled = next.enabled ?? enabled;
       extension = next.extension ?? extension;
-      docks = next.docks ?? docks;
+      helper = next.helper ?? helper;
     },
   };
 }
 
 describe('PaneState', () => {
-  it('starts nothing until a dock is ready, then marks the window, sends the tabs once the dock found it, and shows the pane', () => {
+  it('wants the helper once a page owns the pane, starts nothing until it is ready, then marks the window, sends the tabs once it found it, and shows the pane', () => {
     const pane = setup();
 
+    pane.state.update();
+    expect(pane.wanted.at(-1)).toBe(false);
     pane.state.pageRect('page-1', RECT);
+    expect(pane.wanted.at(-1)).toBe(true);
     expect(pane.extensionSent).toEqual([]);
+    expect(pane.helperSent).toEqual([]);
     expect(pane.lastPage('page-1')).toEqual({ enabled: true, extension: 'paired', extensionId: PANE_EXTENSION_ID, marker: null, shown: false, error: null });
 
-    pane.state.dockReport({ state: 'ready', marker: null });
+    pane.state.helperReport({ state: 'ready', marker: null });
     expect(pane.extensionSent).toEqual([{ type: 'window', marker: '000000000001' }]);
-    expect(pane.dockSent.at(-1)).toEqual({ marker: '000000000001', rect: RECT });
+    expect(pane.helperSent.at(-1)).toEqual({ marker: '000000000001', rect: RECT });
     expect(pane.lastPage('page-1')!.marker).toBe('000000000001');
     expect(pane.lastPage('page-2')!.marker).toBeNull();
 
-    expect(pane.state.dockReport({ state: 'found', marker: 'stale0000000' })).toBe(false);
-    expect(pane.state.dockReport({ state: 'found', marker: '000000000001' })).toBe(true);
+    expect(pane.state.helperReport({ state: 'found', marker: 'stale0000000' })).toBe(false);
+    expect(pane.state.helperReport({ state: 'found', marker: '000000000001' })).toBe(true);
     expect(pane.extensionSent.at(-1)).toEqual({ type: 'tabs', urls: [ISSUE, PR], active: ISSUE });
     expect(pane.lastPage('page-1')!.marker).toBeNull();
 
-    pane.state.dockReport({ state: 'shown', marker: '000000000001' });
+    pane.state.helperReport({ state: 'shown', marker: '000000000001' });
     expect(pane.lastPage('page-1')!.shown).toBe(true);
 
     // Nothing new: nothing is sent again.
@@ -109,54 +116,82 @@ describe('PaneState', () => {
   it('hides the pane without a column or links, and keeps the windows it found', () => {
     const pane = setup();
 
-    pane.state.dockReport({ state: 'ready', marker: null });
+    pane.state.helperReport({ state: 'ready', marker: null });
     pane.state.pageRect('page-1', RECT);
-    pane.state.dockReport({ state: 'found', marker: '000000000001' });
-    pane.state.dockReport({ state: 'shown', marker: '000000000001' });
+    pane.state.helperReport({ state: 'found', marker: '000000000001' });
+    pane.state.helperReport({ state: 'shown', marker: '000000000001' });
     pane.state.pageRect('page-1', null);
-    expect(pane.dockSent.at(-1)).toEqual({ marker: '000000000001', rect: null });
+    expect(pane.helperSent.at(-1)).toEqual({ marker: '000000000001', rect: null });
     expect(pane.lastPage('page-1')!.shown).toBe(false);
 
     pane.state.pageRect('page-1', RECT);
     pane.tabs.set('page-1', null);
     pane.state.update();
-    expect(pane.dockSent.at(-1)).toEqual({ marker: '000000000001', rect: null });
+    expect(pane.helperSent.at(-1)).toEqual({ marker: '000000000001', rect: null });
   });
 
-  it('lets go of the pane when the setting goes off, the extension unpairs or the dock stream is gone', () => {
+  it('lets go of the pane and stops wanting the helper when the setting goes off or the extension unpairs, and starts over when the helper is gone', () => {
     const pane = setup();
 
-    pane.state.dockReport({ state: 'ready', marker: null });
+    pane.state.helperReport({ state: 'ready', marker: null });
     pane.state.pageRect('page-1', RECT);
     pane.set({ enabled: false });
     pane.state.update();
-    expect(pane.dockSent.at(-1)).toEqual({ marker: null, rect: null });
+    expect(pane.helperSent.at(-1)).toEqual({ marker: null, rect: null });
+    expect(pane.wanted.at(-1)).toBe(false);
     expect(pane.lastPage('page-1')!.enabled).toBe(false);
 
     pane.set({ enabled: true, extension: 'unpaired' });
     pane.state.update();
-    expect(pane.dockSent.at(-1)).toEqual({ marker: null, rect: null });
+    expect(pane.helperSent.at(-1)).toEqual({ marker: null, rect: null });
     expect(pane.lastPage('page-1')!.extension).toBe('unpaired');
 
-    pane.set({ extension: 'paired', docks: 0 });
+    pane.set({ extension: 'paired', helper: false });
     pane.state.update();
-    // The dock was gone, so it is not ready until it says so again.
+    expect(pane.wanted.at(-1)).toBe(true);
+    // The helper did not take the order, so it is not ready until it says so again.
     const windows = pane.extensionSent.filter((message) => message['type'] === 'window').length;
 
-    pane.set({ docks: 1 });
+    pane.set({ helper: true });
     pane.state.update();
     expect(pane.extensionSent.filter((message) => message['type'] === 'window')).toHaveLength(windows);
-    pane.state.dockReport({ state: 'ready', marker: null });
+    pane.state.helperReport({ state: 'ready', marker: null });
     expect(pane.extensionSent.filter((message) => message['type'] === 'window')).toHaveLength(windows + 1);
+
+    // The helper stopped: the marker goes, and its restart starts over with a new one.
+    const sent = pane.helperSent.length;
+
+    pane.state.helperStopped(null);
+    expect(pane.helperSent).toHaveLength(sent);
+    expect(pane.lastPage('page-1')!.marker).toBeNull();
+    pane.state.helperReport({ state: 'ready', marker: null });
+    expect(pane.extensionSent.filter((message) => message['type'] === 'window')).toHaveLength(windows + 2);
+  });
+
+  it('shows why the helper does not run until it is ready again, below a failure the helper reported', () => {
+    const pane = setup();
+
+    pane.state.pageRect('page-1', RECT);
+    pane.state.helperStopped('The Chrome pane helper is not installed.');
+    expect(pane.lastPage('page-1')!.error).toBe('The Chrome pane helper is not installed.');
+    expect(pane.lastPage('page-2')!.error).toBeNull();
+    pane.state.helperReport({ state: 'ready', marker: null });
+    expect(pane.lastPage('page-1')!.error).toBeNull();
+
+    pane.state.helperReport({ state: 'failed', marker: '000000000001', reason: 'Windows refused to move or resize the pane.' });
+    pane.state.helperStopped('The Chrome pane helper keeps stopping.');
+    expect(pane.lastPage('page-1')!.error).toBe('Windows refused to move or resize the pane.');
+    // A failure dismisses the pane, so the helper is not wanted until another work item.
+    expect(pane.wanted.at(-1)).toBe(false);
   });
 
   it('finds the windows again with a new marker after one was recreated, and hands the pane to a page with a column when it gains the focus', () => {
     const pane = setup();
 
-    pane.state.dockReport({ state: 'ready', marker: null });
+    pane.state.helperReport({ state: 'ready', marker: null });
     pane.state.pageRect('page-1', RECT);
-    pane.state.dockReport({ state: 'found', marker: '000000000001' });
-    pane.state.dockReport({ state: 'lost', marker: '000000000001' });
+    pane.state.helperReport({ state: 'found', marker: '000000000001' });
+    pane.state.helperReport({ state: 'lost', marker: '000000000001' });
     expect(pane.extensionSent.at(-1)).toEqual({ type: 'window', marker: '000000000002' });
 
     // A page in the background reports a column: the pane stays.
@@ -177,16 +212,16 @@ describe('PaneState', () => {
     expect(pane.extensionSent.at(-1)).toEqual({ type: 'window', marker: '000000000004' });
     pane.state.pageClosed('page-1');
 
-    expect(pane.dockSent.at(-1)).toEqual({ marker: null, rect: null });
+    expect(pane.helperSent.at(-1)).toEqual({ marker: null, rect: null });
   });
 
   it('stops after a failure or the operator closing the pane until the page shows another work item, saying why', () => {
     const pane = setup();
 
-    pane.state.dockReport({ state: 'ready', marker: null });
+    pane.state.helperReport({ state: 'ready', marker: null });
     pane.state.pageRect('page-1', RECT);
-    pane.state.dockReport({ state: 'failed', marker: '000000000001', reason: 'The pane would not fit the column.' });
-    expect(pane.dockSent.at(-1)).toEqual({ marker: null, rect: null });
+    pane.state.helperReport({ state: 'failed', marker: '000000000001', reason: 'The pane would not fit the column.' });
+    expect(pane.helperSent.at(-1)).toEqual({ marker: null, rect: null });
     expect(pane.lastPage('page-1')!.error).toBe('The pane would not fit the column.');
 
     pane.state.update();
@@ -198,7 +233,7 @@ describe('PaneState', () => {
     expect(pane.lastPage('page-1')!.error).toBeNull();
 
     pane.state.extensionMessage({ type: 'closed' });
-    expect(pane.dockSent.at(-1)).toEqual({ marker: null, rect: null });
+    expect(pane.helperSent.at(-1)).toEqual({ marker: null, rect: null });
     // Another work item with the same links lifts it too.
     pane.tabs.set('page-1', { workItemId: 4, urls: [PR], active: PR });
     pane.state.update();
@@ -208,13 +243,13 @@ describe('PaneState', () => {
   it('reports the pane’s focus as its page’s, and drops it when the pane is let go', () => {
     const pane = setup();
 
-    pane.state.dockReport({ state: 'ready', marker: null });
+    pane.state.helperReport({ state: 'ready', marker: null });
     pane.state.pageRect('page-1', RECT);
-    pane.state.dockReport({ state: 'shown', marker: '000000000001', focused: true });
-    pane.state.dockReport({ state: 'shown', marker: '000000000001', focused: true });
-    pane.state.dockReport({ state: 'shown', marker: '000000000001', focused: false });
-    pane.state.dockReport({ state: 'shown', marker: '000000000001', focused: true });
-    pane.state.dockReport({ state: 'lost', marker: '000000000001' });
+    pane.state.helperReport({ state: 'shown', marker: '000000000001', focused: true });
+    pane.state.helperReport({ state: 'shown', marker: '000000000001', focused: true });
+    pane.state.helperReport({ state: 'shown', marker: '000000000001', focused: false });
+    pane.state.helperReport({ state: 'shown', marker: '000000000001', focused: true });
+    pane.state.helperReport({ state: 'lost', marker: '000000000001' });
     expect(pane.focus).toEqual([['page-1', true], ['page-1', false], ['page-1', true], ['page-1', false]]);
   });
 });

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, watch } from 'node:fs';
+import { mkdirSync, watch, writeFileSync } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { dirname, join, posix, win32 } from 'node:path';
 import { homedir } from 'node:os';
@@ -44,6 +44,10 @@ import { volumeReply } from './volume.js';
 import { installedProviders } from './installed.js';
 import { PaneLink } from './paneLink.js';
 import { PaneState, paneRect, paneTabs } from './pane.js';
+import { PaneHelper, spawnPaneHelper } from './paneHelper.js';
+import type { PaneHelperDeps } from './paneHelper.js';
+import { currentHolderBuild, PANE_HELPER_INSTALL, paneHelperRecordPath, reserveHolderBuild } from './holderInstall.js';
+import { spawnEnvironment } from './spawn.js';
 
 const RELOAD_DEBOUNCE_MS = 300;
 /** The mic codicon in codicon.ttf, which marks the voice target's dock row (architecture.md § Voice). */
@@ -203,6 +207,8 @@ export interface AppOptions {
   snapshotWorker?: string;
   /** What the hub starts for the web page, such as the browser for a link; tests replace it. */
   launch?: Launcher;
+  /** Starts the Chrome pane helper (architecture.md § Pane helper); tests replace it. */
+  startPaneHelper?: PaneHelperDeps['start'];
 }
 
 /** Opens the store, loads configuration, and runs the core for the hub process. */
@@ -354,6 +360,20 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     message: (message) => pane.extensionMessage(message),
     changed: () => pane.update(),
   });
+  // The Chrome pane helper, started while a page needs the pane (architecture.md § Pane helper).
+  const paneHelper = new PaneHelper({
+    start: options.startPaneHelper ?? (() => startPaneHelper(home)),
+    report: (report) => {
+      if (!pane.helperReport(report)) {
+        deps.log(`pane helper: a report for an old marker: ${report.state}`);
+      }
+    },
+    stopped: (error) => pane.helperStopped(error),
+    log: deps.log,
+    now: deps.now,
+    setTimeout: (run, ms) => setTimeout(run, ms),
+    clearTimeout: (timer) => clearTimeout(timer as NodeJS.Timeout),
+  });
   // Pages whose own focus is on, and the page whose pane window has the focus, which counts as the page's (architecture.md § Pane state).
   const focusedPages = new Set<string>();
   let paneFocusedFor: string | null = null;
@@ -361,7 +381,8 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     enabled: () => config.settings.web.chromePane,
     extension: () => paneLink.state(),
     toExtension: (message) => paneLink.send(message),
-    toDock: (data) => sendDock('pane', data),
+    toHelper: (order) => paneHelper.send(order),
+    want: (on) => paneHelper.want(on),
     toPage: (key, view) => conversation.notify(key, 'pane', { pane: view }),
     pages: () => conversation.pages(),
     tabsOf: (key) => {
@@ -1233,26 +1254,6 @@ const dockWithRuns = () => {
         voice.terminalFocused(sessionId, at);
         return { status: 200, body: { focus: sessionId } };
       },
-      // The dock's Chrome pane reports (architecture.md § Pane state): ready on connecting, then found, shown, hidden, lost or failed for a marker.
-      '/dock/pane': async (body) => {
-        const state = isRecord(body) ? body['state'] : undefined;
-        const marker = isRecord(body) ? (body['marker'] ?? null) : undefined;
-        const focused = isRecord(body) ? body['focused'] : undefined;
-        const reason = isRecord(body) ? body['reason'] : undefined;
-
-        if (
-          !['ready', 'found', 'shown', 'hidden', 'lost', 'failed'].includes(String(state)) ||
-          !(marker === null || typeof marker === 'string') ||
-          !(focused === undefined || typeof focused === 'boolean') ||
-          !(reason === undefined || (typeof reason === 'string' && reason.length <= 500))
-        ) {
-          return { status: 400, body: { error: 'Expected {state, marker?, focused?, reason?}.' } };
-        }
-
-        return pane.dockReport({ state: state as string, marker: marker as string | null, ...(focused === undefined ? {} : { focused: focused as boolean }), ...(reason === undefined ? {} : { reason: reason as string }) })
-          ? { status: 200, body: { done: true } }
-          : { status: 409, body: { error: 'The pane has another marker now.' } };
-      },
       // The dock's New conversation in a folder (architecture.md § Hosted conversations): a conversation hosted by a folder, selected there before its window opens.
       '/dock/new-conversation': async (body) => (isRecord(body) ? conversation.dockConversation(body) : { status: 400, body: { error: 'Expected {folder, opId}.' } }),
       '/dock/show': async () =>
@@ -1404,6 +1405,7 @@ const dockWithRuns = () => {
       clearTimeout(pending);
       clearInterval(debriefTimer);
       voice.close();
+      paneHelper.close();
       paneLink.closeAll();
       pageConsole.close();
       conversation.stop();
@@ -1417,6 +1419,32 @@ const dockWithRuns = () => {
       store.close();
     },
   };
+}
+
+/**
+ * Starts the installed Chrome pane helper's current build (architecture.md § Pane helper), reserving its folder and naming it in
+ * `pane-helper.json` so an install keeps it, or says why it cannot.
+ */
+async function startPaneHelper(home: string): Promise<Awaited<ReturnType<PaneHelperDeps['start']>>> {
+  if (process.platform !== 'win32') {
+    return { error: 'The Chrome pane works on Windows only.' };
+  }
+
+  const build = currentHolderBuild(home, PANE_HELPER_INSTALL);
+
+  if (build === null || !(await reserveHolderBuild(home, build, PANE_HELPER_INSTALL))) {
+    return { error: 'The Chrome pane helper is not installed. Open a VS Code window with the Switchboard extension, which installs it, then reload this page.' };
+  }
+
+  const helper = spawnPaneHelper(join(home, PANE_HELPER_INSTALL.name, build, PANE_HELPER_INSTALL.entry), ['--home', home], spawnEnvironment(process.env));
+
+  try {
+    writeFileSync(paneHelperRecordPath(home), JSON.stringify({ build, pid: helper.pid ?? 0 }));
+  } catch {
+    // Without the record an install may remove the build's other files; the running helper has loaded what it needs.
+  }
+
+  return { process: helper };
 }
 
 /** Open work items per playbook, so deleting a playbook can say what still uses it. */

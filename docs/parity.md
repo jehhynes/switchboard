@@ -128,7 +128,7 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 | C15 | Triage again and Start on a pool row | `poolControls` rows.ts:301 | Present | In the pool row's menu with Start with guidance… and Snooze… or Unsnooze, run through `pool-action` |
 | C16 | A control acts only on the hub's current view; with no hub the dock refuses it | `Act` MainWindow.axaml.cs:1662 | Present | the hub checks the row still offers it (`pageActionEvent` page.ts:275) |
 | C17 | A refusal or failure shows in the toast in the warning colours | `Status` ViewModels.cs:438 | Partly | shows over the composer (`runAction` main.ts:1416) |
-| C18 | The open work item's ticket and links in a Chrome window over the installed page's right column, behind `web.chromePane` on Windows (PRD R113) | none: the dock opens links in the browser's Switchboard tab group (R74) | Web only | `reportPane` main.ts, `PaneState` pane.ts; the dock glues the window (D9). The operator approved the pane as a page feature in R113 |
+| C18 | The open work item's ticket and links in a Chrome window over the installed page's right column, behind `web.chromePane` on Windows (PRD R113) | none: the dock opens links in the browser's Switchboard tab group (R74) | Web only | `reportPane` main.ts, `PaneState` pane.ts; the hub's pane helper glues the window, with or without the dock (architecture.md § Pane helper). The operator approved the pane as a page feature in R113 |
 
 ## Search
 
@@ -192,4 +192,3 @@ Window management with no counterpart in a browser page. These rows are outside 
 | D6 | Close the dock | `OnCloseClicked` MainWindow.axaml.cs:1272 |
 | D7 | Held sessions, Ticket volume report and Settings open in windows of their own | `OpenHeld`, `OpenVolume`, `OpenSettings` MainWindow.axaml.cs:1918, 2105, 2063 |
 | D8 | Tooltips and menus open at the pointer or button, away from the dock's edge and kept on its monitor | `PlaceTip`, `MenuPlacement` MainWindow.axaml.cs:1397, 1409 |
-| D9 | Glues the Chrome pane window over the installed web page's right column on Windows (PRD R113) | `ChromePane` ChromePane.cs |

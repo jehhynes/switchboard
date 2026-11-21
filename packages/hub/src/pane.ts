@@ -24,9 +24,9 @@ export interface PanePageView {
   extension: PaneLinkState;
   /** The extension the page wakes and hands a pairing token to. */
   extensionId: string;
-  /** The marker the page puts in its title until the dock has found its window. */
+  /** The marker the page puts in its title until the pane helper has found its window. */
   marker: string | null;
-  /** The dock shows the pane over this page's column. */
+  /** The pane helper shows the pane over this page's column. */
   shown: boolean;
   error: string | null;
 }
@@ -76,8 +76,10 @@ export interface PaneStateDeps {
   extension(): PaneLinkState;
   /** Sends the extension a message; false when no paired extension is connected. */
   toExtension(message: Record<string, unknown>): boolean;
-  /** Sends the dock its `pane` event; how many dock streams it reached. */
-  toDock(data: Record<string, unknown>): number;
+  /** Sends the pane helper its `pane` order; false when no ready helper takes it. */
+  toHelper(data: { marker: string | null; rect: PaneRect | null }): boolean;
+  /** Whether a page needs the pane helper: the setting is on, a paired extension is connected and a page owns the pane. */
+  want(on: boolean): void;
   toPage(key: string, view: PanePageView): void;
   pages(): string[];
   /** The tabs of the work item a page shows, with its ID, or null. */
@@ -90,7 +92,7 @@ export interface PaneStateDeps {
 
 /**
  * The Chrome pane's state in the hub (architecture.md § Pane state): which page owns the pane, its column, the handshake marker, and what the
- * dock reported; it tells the extension which window and tabs to show, the dock where to put the pane, and each page what it needs to draw.
+ * pane helper reported; it tells the extension which window and tabs to show, the helper where to put the pane, and each page what to draw.
  */
 export class PaneState {
   #owner: string | null = null;
@@ -104,10 +106,12 @@ export class PaneState {
   #shown = false;
   #focused = false;
   #error: string | null = null;
+  /** Why the pane helper is not running, until it says it is ready again. */
+  #helperError: string | null = null;
   /** The operator closed the pane window: no new one until the page shows another work item. */
   #dismissed: string | null = null;
-  #dockReady = false;
-  #sentDock = '';
+  #helperReady = false;
+  #sentHelper = '';
   #sentTabs = '';
   readonly #sentPages = new Map<string, string>();
 
@@ -160,11 +164,12 @@ export class PaneState {
     this.update();
   }
 
-  /** `POST /dock/pane`: the dock's report on the current marker; false for a stale marker. */
-  dockReport(report: { state: string; marker: string | null; focused?: boolean; reason?: string }): boolean {
+  /** The pane helper's report (architecture.md § Pane helper): `ready`, or the current marker's state; false for a stale marker. */
+  helperReport(report: { state: string; marker: string | null; focused?: boolean; reason?: string }): boolean {
     if (report.state === 'ready') {
-      this.#dockReady = true;
-      this.#sentDock = '';
+      this.#helperReady = true;
+      this.#helperError = null;
+      this.#sentHelper = '';
       this.update();
       return true;
     }
@@ -187,7 +192,7 @@ export class PaneState {
       this.deps.log('pane: a window was recreated; finding them again');
       this.#restart();
     } else if (report.state === 'failed') {
-      this.#error = report.reason ?? 'The dock could not keep the pane in place.';
+      this.#error = report.reason ?? 'Switchboard could not keep the pane in place.';
       this.deps.log(`pane: ${this.#error}`);
       this.#restart();
       this.#dismissed = this.#tabsKey();
@@ -195,6 +200,14 @@ export class PaneState {
 
     this.update();
     return true;
+  }
+
+  /** The pane helper stopped, with why when it will not start again until no page needs it: the pane starts over once one is ready again. */
+  helperStopped(error: string | null): void {
+    this.#helperReady = false;
+    this.#helperError = error;
+    this.#sentHelper = '';
+    this.update();
   }
 
   /** A paired extension's message: `closed` when the operator closed the pane window. */
@@ -217,7 +230,8 @@ export class PaneState {
       this.#error = null;
     }
 
-    const active = this.deps.enabled() && this.deps.extension() === 'paired' && this.#owner !== null && this.#dockReady && this.#dismissed === null;
+    const wanted = this.deps.enabled() && this.deps.extension() === 'paired' && this.#owner !== null && this.#dismissed === null;
+    const active = wanted && this.#helperReady;
 
     if (!active && this.#marker !== null) {
       this.#restart();
@@ -235,17 +249,20 @@ export class PaneState {
       this.deps.toExtension({ type: 'tabs', urls: tabs!.urls, active: tabs!.active });
     }
 
-    const dock = { marker: this.#marker, rect: show ? this.#rect : null };
-    const dockKey = JSON.stringify(dock);
+    const order = { marker: this.#marker, rect: show ? this.#rect : null };
+    const orderKey = JSON.stringify(order);
 
-    if (dockKey !== this.#sentDock) {
-      this.#sentDock = dockKey;
+    if (this.#helperReady && orderKey !== this.#sentHelper) {
+      this.#sentHelper = orderKey;
 
-      if (this.deps.toDock(dock) === 0) {
-        this.#dockReady = false;
-        this.#sentDock = '';
+      if (!this.deps.toHelper(order)) {
+        this.#helperReady = false;
+        this.#sentHelper = '';
       }
     }
+
+    // Started when a page needs it and stopped when none does; a stopped helper lets the pane go.
+    this.deps.want(wanted);
 
     for (const key of this.deps.pages()) {
       const view: PanePageView = {
@@ -254,7 +271,7 @@ export class PaneState {
         extensionId: PANE_EXTENSION_ID,
         marker: key === this.#owner && !this.#found ? this.#marker : null,
         shown: key === this.#owner && show && this.#shown,
-        error: key === this.#owner ? this.#error : null,
+        error: key === this.#owner ? (this.#error ?? this.#helperError) : null,
       };
       const text = JSON.stringify(view);
 
