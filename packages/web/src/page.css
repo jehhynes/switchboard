@@ -6,6 +6,13 @@ body { color: var(--vscode-foreground); background: var(--vscode-editor-backgrou
 .codicon-modifier-spin { animation: codicon-spin 1.5s steps(30) infinite; }
 @keyframes codicon-spin { 100% { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .codicon-modifier-spin { animation: none; } }
+/* Overlay scrollbars, as the dock's (scrollbars.ts): the vertical scroll areas hide their own bar, and one thin thumb floats over the edge of the
+   area being scrolled or hovered, taking no width, and fades out. Other scrollers, such as a code block's, keep the theme's thin bars. */
+:is(#list, .scroll, .artifact-doc, .menu, .composer-menu, .sheet, .composer textarea) { scrollbar-width: none; }
+.scroll-thumb { position: fixed; z-index: 60; width: 6px; border-radius: 3px; background: var(--vscode-scrollbarSlider-background); opacity: 0; pointer-events: none; transition: opacity 0.4s; }
+.scroll-thumb.shown { opacity: 1; pointer-events: auto; transition-duration: 0.1s; }
+.scroll-thumb:hover, .scroll-thumb.dragging { background: var(--vscode-scrollbarSlider-activeBackground, var(--vscode-scrollbarSlider-hoverBackground)); }
+@media (prefers-reduced-motion: reduce) { .scroll-thumb { transition: none; } }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background); }
 ::-webkit-scrollbar-thumb:hover { background: var(--vscode-scrollbarSlider-hoverBackground); }

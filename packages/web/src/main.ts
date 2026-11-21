@@ -8,6 +8,7 @@ import type { ItemView, ScreenPrompt } from './types.js';
 import { morph } from './morph.js';
 import { reconnector } from './reconnect.js';
 import { fitPills } from './fit.js';
+import { overlayScrollbars } from './scrollbars.js';
 
 /** The stream's event types the page reads. */
 export const EVENTS = ['hello', 'list', 'scope', 'conversations', 'session', 'message', 'reply', 'status', 'artifact', 'unread', 'voice', 'settings', 'progress', 'words', 'draft'];
@@ -134,6 +135,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     });
   };
   const listWidth = typeof ResizeObserver === 'function' ? new ResizeObserver(() => fitLines()) : null;
+  const stopScrollbars = overlayScrollbars(root);
 
   listWidth?.observe(list);
   /** The tab the conversation's pane shows: always the conversation while Status and Artifacts have their own column. */
@@ -2019,6 +2021,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       clearInterval(promptTimer);
       listening.abort();
       listWidth?.disconnect();
+      stopScrollbars();
       source.close();
     },
   };
