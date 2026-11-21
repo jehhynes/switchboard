@@ -5,10 +5,11 @@ html, body { height: 100%; margin: 0; }
    Surfaces: Dark Modern draws the conversation on the side bar's colour, as Claude Code's panel does. Light Modern keeps white for the editor
    alone, so in light the conversation is the white surface, its header and tab bars take the side bar's grey as Light Modern's title bar and
    editor tabs do, and the selected row takes the dock's light selection colour (#E4E6F1, Light Modern's selected activity bar item), since
-   Light Modern's list selection (#E8E8E8) barely shows on the side bar. */
-:root { --sb-github: #f0f6fc; --sb-pull-request: #a371f7; --sb-source-off: #7a7a7a; --sb-chat-background: var(--vscode-sideBar-background); --sb-bar-background: transparent; --sb-row-selected: var(--vscode-list-activeSelectionBackground); }
+   Light Modern's list selection (#E8E8E8) barely shows on the side bar. The list's muted texts take the dock's grey (DockMuted), which in
+   Light Modern is #717171, not the theme's description colour. */
+:root { --sb-github: #f0f6fc; --sb-pull-request: #a371f7; --sb-source-off: #7a7a7a; --sb-chat-background: var(--vscode-sideBar-background); --sb-bar-background: transparent; --sb-row-selected: var(--vscode-list-activeSelectionBackground); --sb-row-muted: var(--vscode-descriptionForeground); }
 @media (prefers-color-scheme: light) {
-  :root { --sb-github: #1f2328; --sb-pull-request: #8250df; --sb-source-off: #8a8a8a; --sb-composer-background: color-mix(in srgb, var(--vscode-input-background) 50%, var(--vscode-sideBar-background)); --sb-chat-background: var(--vscode-editor-background); --sb-bar-background: var(--vscode-sideBar-background); --sb-row-selected: #E4E6F1; }
+  :root { --sb-github: #1f2328; --sb-pull-request: #8250df; --sb-source-off: #8a8a8a; --sb-composer-background: color-mix(in srgb, var(--vscode-input-background) 50%, var(--vscode-sideBar-background)); --sb-chat-background: var(--vscode-editor-background); --sb-bar-background: var(--vscode-sideBar-background); --sb-row-selected: #E4E6F1; --sb-row-muted: #717171; }
 }
 body { color: var(--vscode-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); line-height: 1.5; }
 /* The installed app's title bar takes the page's colour, so a line along the page's top edge marks where the title bar ends. */
@@ -121,35 +122,46 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 .band-rule { flex: 1; height: 1px; margin-left: 8px; background: var(--vscode-descriptionForeground); opacity: 0.3; }
 @media (hover: none), (pointer: coarse) { .band-head { min-height: 44px; } }
 .group-empty { margin: 0; padding: 6px 12px 4px 11px; color: var(--vscode-descriptionForeground); font-style: italic; }
-/* A row: the dock's three lines; the dock's 3 px stripe on its left edge, inset so neighbouring stripes stay apart. */
-.row { position: relative; display: flex; flex-direction: column; gap: 3px; width: 100%; min-height: 44px; padding: 5px 8px 6px 11px; border: none; border-top: 1px solid var(--vscode-sideBar-border, var(--vscode-panel-border)); background: transparent; color: inherit; text-align: left; cursor: pointer; }
-.rows > li:first-child > .row { border-top-color: transparent; }
+/* A row: the dock's three lines, each 18 px tall with 3 px between them, in its 13 px text (its pills' 12 px); the dock's 3 px stripe on its left
+   edge, inset so neighbouring stripes stay apart. Colours are the dock's: the foreground for texts and marks, its muted grey (--sb-row-muted)
+   for the namespace, time, comment and details, and the same colours on the selected row. */
+.row { position: relative; display: flex; flex-direction: column; gap: 3px; width: 100%; min-height: 44px; padding: 5px 8px 6px 11px; border: none; border-top: 1px solid var(--vscode-sideBar-border, var(--vscode-panel-border)); background: transparent; color: var(--vscode-foreground); line-height: normal; text-align: left; cursor: pointer; }
+/* The first row in its band has no rule and no rule's 1 px, as the dock's. */
+.rows > li:first-child > .row { border-top: none; }
 .row::before { content: ''; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; }
 .row.stripe-warning::before { background: var(--vscode-editorWarning-foreground); }
 .row.stripe-error::before { background: var(--vscode-testing-iconFailed); }
 .row.stripe-turn::before { background: var(--vscode-focusBorder); }
 .row:hover { background: var(--vscode-list-hoverBackground); }
 /* The selected row: the selection colour and its stripe the full height, as the dock's; no outline, so only a keyboard focus draws the focus ring. */
-.row.selected { background: var(--sb-row-selected); color: var(--vscode-list-activeSelectionForeground); }
+.row.selected { background: var(--sb-row-selected); }
 .row.selected::before { top: 0; bottom: 0; }
 .row.dim > * { opacity: 0.6; }
-/* Line 1: the priority dot, the title, and the time at its end, muted. */
-.row-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.row-head .priority { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #e8820c; }
+/* Line 1: the priority dot, the title, the mic mark and the time at its end, muted; its texts at the line's top, as the dock's. */
+.row-head { display: flex; align-items: flex-start; gap: 6px; height: 18px; min-width: 0; }
+.row-head .priority { flex: none; align-self: center; width: 8px; height: 8px; border-radius: 50%; background: #e8820c; }
 .row-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-/* The mic mark before the time on the voice target's row, as the dock's. */
-.row-head .voice-mark { flex: none; }
-.row-time { flex: none; margin-left: 2px; font-size: 12px; color: var(--vscode-descriptionForeground); }
+/* The mic mark before the time on the voice target's row, as the dock's: 8 px after the title. */
+.row-head .voice-mark { flex: none; align-self: center; margin-left: 2px; }
+.row-time { flex: none; margin-left: 2px; color: var(--sb-row-muted); }
 /* Lines 2 and 3 stay one line each and clip their end; line 2's pills shrink to their icons as the dock's do (below). */
-.row-line { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; font-size: 12px; line-height: 18px; }
+.row-line { display: flex; align-items: center; gap: 6px; height: 18px; min-width: 0; overflow: hidden; }
 .row-line .mark, .row-line .comment { flex: none; }
-.row-line .comment { color: var(--vscode-descriptionForeground); }
+/* The dock's marks, comment icon and mic mark sit 1 px below the middle of their line, which lines a codicon up with Segoe UI's text. */
+.row-line .mark, .row-line .comment, .row-head .voice-mark { position: relative; top: 1px; }
+.row-line .comment { color: var(--sb-row-muted); }
+/* Their texts sit at the line's top, as the dock's do, and their icons and pills in its middle. */
+.row-line .playbook, .row-details .row-detail, .row-details .row-detail-separator { align-self: flex-start; }
 .row-line .playbook { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.row-line .namespace, .row-line .host { color: var(--vscode-descriptionForeground); }
-.row.selected .row-line .namespace, .row.selected .row-line .host, .row.selected .row-time, .row.selected .row-line .comment, .row.selected .row-detail:not(.warning, .error), .row.selected .row-detail-separator { color: inherit; opacity: 0.75; }
-/* Ticket keys, link badges and Returned as the dock's and the Switchboard pane's pills: the key in its source's colour, GitHub in the foreground, Zoho and Forum green, a pull request purple, a link the ticket's text names grey, Returned in the warning colour. */
-.row-line .pill { flex: none; display: inline-flex; align-items: center; gap: 3px; box-sizing: border-box; overflow: hidden; white-space: nowrap; border: 1px solid var(--vscode-descriptionForeground); border-radius: 9px; padding: 0 6px; font-size: 12px; line-height: 16px; background: color-mix(in srgb, var(--vscode-foreground) 12%, transparent); color: var(--vscode-foreground); }
-.row-line .pill .codicon { flex: none; font-size: 12px; }
+.row-line .namespace, .row-line .host { color: var(--sb-row-muted); }
+/* Ticket keys, link badges and Returned as the dock's pills: 18 px tall with a 14 px icon and 12 px text, outlined with an 18% fill; the key in
+   its source's colour (GitHub's white or black, Zoho and Forum green), a pull request purple, a link the ticket's text names grey, Returned in the
+   warning colour; a pill that opens a link fills more under the pointer. */
+.row-line .pill { flex: none; display: inline-flex; align-items: center; gap: 3px; box-sizing: border-box; height: 18px; overflow: hidden; white-space: nowrap; border: 1px solid var(--sb-row-muted); border-radius: 9px; padding: 0 6px; font-size: 12px; line-height: 16px; background: color-mix(in srgb, var(--vscode-foreground) 12%, transparent); color: var(--vscode-foreground); }
+.row-line .pill .codicon { flex: none; font-size: 14px; }
+/* A compact key pill's source logo fits 12 px, and its tag is 12 px, as the dock's. */
+.row-line .pill .source-logo { flex: none; width: 12px; height: 12px; }
+.row-line .pill .codicon.source-logo { font-size: 12px; line-height: 12px; }
 /* A pill's label is never cut: when the line is too narrow the page shrinks a pill to its icon (.compact) or leaves it out (.omitted), as the
    dock does (fitPills in fit.ts); its tooltip keeps its name and URL. */
 .row-line .pill-text { white-space: nowrap; }
@@ -159,20 +171,29 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 .row-line .row-links { flex: none; display: flex; gap: 6px; }
 .row-line .row-links:not(:has(.pill:not(.omitted))) { display: none; }
 .row-line .pill[data-action] { cursor: pointer; }
-.row-line .pill[data-action]:hover { text-decoration: underline; }
-.row-line .pill.ticket.source-github, .row-line .pill.link.issue { border-color: var(--vscode-foreground); background: color-mix(in srgb, var(--vscode-foreground) 18%, transparent); }
+.row-line .pill[data-action]:hover { background: color-mix(in srgb, var(--vscode-foreground) 20%, transparent); }
+.row-line .pill.ticket.source-github, .row-line .pill.link.issue { border-color: var(--sb-github); background: color-mix(in srgb, var(--sb-github) 18%, transparent); }
+.row-line .pill.ticket.source-github[data-action]:hover, .row-line .pill.link.issue:hover { background: color-mix(in srgb, var(--sb-github) 32%, transparent); }
 .row-line .pill.ticket.source-zoho { border-color: #089949; background: color-mix(in srgb, #089949 18%, transparent); }
+.row-line .pill.ticket.source-zoho[data-action]:hover { background: color-mix(in srgb, #089949 32%, transparent); }
 .row-line .pill.ticket.source-forum { border-color: #57ae57; background: color-mix(in srgb, #57ae57 18%, transparent); }
+.row-line .pill.ticket.source-forum[data-action]:hover { background: color-mix(in srgb, #57ae57 32%, transparent); }
 .row-line .pill.link.pr { border-color: var(--sb-pull-request); background: color-mix(in srgb, var(--sb-pull-request) 18%, transparent); }
-.row-line .pill.link.mentioned { border-color: var(--vscode-descriptionForeground); background: color-mix(in srgb, var(--vscode-foreground) 12%, transparent); color: var(--vscode-descriptionForeground); }
+.row-line .pill.link.pr:hover { background: color-mix(in srgb, var(--sb-pull-request) 32%, transparent); }
+.row-line .pill.link.mentioned { border-color: var(--sb-row-muted); background: color-mix(in srgb, var(--vscode-foreground) 12%, transparent); color: var(--sb-row-muted); }
+.row-line .pill.link.mentioned:hover { background: color-mix(in srgb, var(--vscode-foreground) 20%, transparent); }
 .row-line .pill.returned { border-color: var(--vscode-editorWarning-foreground); background: color-mix(in srgb, var(--vscode-editorWarning-foreground) 18%, transparent); color: var(--vscode-editorWarning-foreground); }
-/* Line 3: the mark, then the details, muted unless they warn or fail, each cut with an ellipsis, with a muted · between them. */
-.row-details .row-detail { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--vscode-descriptionForeground); }
+/* Line 3: the mark in the foreground colour, Failed's in the error colour, as the dock's, then the details, muted unless they warn or fail,
+   each cut with an ellipsis, with a muted · between them. */
+.row-details .mark { font-size: 14px; }
+.row-details .mark.failed, .row-details .row-detail.error { color: var(--vscode-testing-iconFailed); }
+.row-details .row-detail { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--sb-row-muted); }
 /* The details before the last keep their width, as the dock's do, and the last takes the room left. */
 .row-details .row-detail:not(:last-child) { flex-shrink: 0; max-width: 100%; }
-.row-details .row-detail-separator { flex: none; color: var(--vscode-descriptionForeground); }
+/* The last detail ends 6 px before the line's end, where the dock's ellipsis is. */
+.row-details .row-detail:last-child { margin-right: 6px; }
+.row-details .row-detail-separator { flex: none; color: var(--sb-row-muted); }
 .row-details .row-detail.warning { color: var(--vscode-editorWarning-foreground); }
-.row-details .row-detail.error { color: var(--vscode-errorForeground); }
 /*
  * Phone first: under 768 px the list and the conversation are each a full-width view, the list until a work item is opened, the conversation
  * with a Back button at the start of its header; touch targets are at least 44 px tall. From 768 px the open work item takes the room first:

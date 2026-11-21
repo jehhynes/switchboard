@@ -145,10 +145,10 @@ const LOGOS: Record<string, { viewBox: string; path: string; stroke: boolean; ev
   },
 };
 
-/** A source kind's logo, grey while off; a kind without one shows a tag, so its button is never blank. */
-export function SourceLogo({ kind, enabled }: { kind: string; enabled: boolean }) {
+/** A source kind's logo, grey while off, with `extra` classes; a kind without one shows a tag, so its button is never blank. */
+export function SourceLogo({ kind, enabled, extra = '' }: { kind: string; enabled: boolean; extra?: string }) {
   const logo = LOGOS[kind];
-  const state = enabled ? '' : ' off';
+  const state = `${enabled ? '' : ' off'}${extra === '' ? '' : ` ${extra}`}`;
 
   if (logo === undefined) {
     return <span class={`codicon codicon-tag source-logo${state}`} aria-hidden="true"></span>;

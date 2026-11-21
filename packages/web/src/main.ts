@@ -52,8 +52,9 @@ export const SIDE_MAX = 600;
 export const CHAT_MIN = 480;
 export const CHAT_MAX = 1600;
 const SASH_STEP = 16;
-/** A pill shrunk to its icon: its 1 px borders, 6 px padding each side and a 12 px codicon; and the space between line 2's items. */
-const COMPACT_PILL = 26;
+/** A pill shrunk to its icon, as the dock's: its 1 px borders and 6 px padding each side round a 14 px codicon, or the key's 12 px logo; and the space between line 2's items. */
+const COMPACT_PILL = 28;
+const COMPACT_KEY = 26;
 const PILL_GAP = 6;
 const SIDE_WIDTH = 'switchboard.sideWidth';
 /** Where the page keeps Show message details. */
@@ -168,7 +169,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         const playbook = line.querySelector<HTMLElement>('.playbook');
         const others = [...line.children].filter((child) => child !== playbook && !child.classList.contains('pill') && !child.classList.contains('row-links')).map((child) => (child as HTMLElement).offsetWidth);
 
-        return { pills, fit: fitPills(line.clientWidth, others, playbook?.scrollWidth ?? 0, pills.map((pill) => ({ width: pill.offsetWidth, compact: COMPACT_PILL, returned: pill.classList.contains('returned') })), PILL_GAP) };
+        return { pills, fit: fitPills(line.clientWidth, others, playbook?.scrollWidth ?? 0, pills.map((pill) => ({ width: pill.offsetWidth, compact: pill.classList.contains('ticket') ? COMPACT_KEY : COMPACT_PILL, returned: pill.classList.contains('returned') })), PILL_GAP) };
       });
 
       for (const { pills, fit } of plans) {
@@ -267,6 +268,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const chips = composerHost.querySelector<HTMLElement>('.attachments')!;
   // Document listeners end with the page.
   const listening = new AbortController();
+  // A pill's width changes once the codicon font loads, so the lines are fitted again then.
+  document.fonts?.addEventListener?.('loadingdone', () => fitLines(), { signal: listening.signal });
   // The draft the hub last sent for dictation, per session, so a newer one replaces it in the box but never text typed over it, and one that came
   // while a message was being sent, which fills the box once the send answered.
   const hubDrafts = new Map<string, string>();

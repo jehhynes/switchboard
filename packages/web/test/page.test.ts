@@ -279,20 +279,21 @@ describe('drawing', () => {
     expect(first.querySelector('.row-title')!.textContent).toBe('Fix <the> badge');
     expect(first.className).toBe('row stripe-turn');
     // The mark by the shared icon name, the ticket key in its source's colour, the playbook's namespace muted.
-    expect(first.querySelector('.mark')!.className).toBe('codicon codicon-eye mark state-icon tone-muted');
+    expect(first.querySelector('.mark')!.className).toBe('codicon codicon-eye mark');
     expect(first.querySelector('.mark')!.getAttribute('aria-label')).toBe('Review, then approve');
     expect(first.querySelector('.pill')!.className).toBe('pill ticket source-github');
-    // The ticket key's icon shows only when the pill shrinks to it: GitHub's mark, or a tag for a source without one.
-    expect(first.querySelector('.pill .pill-icon')!.className).toBe('codicon codicon-github pill-icon');
+    // The ticket key's icon shows only when the pill shrinks to it: its source's logo, the dock's path.
+    expect(first.querySelector('.pill .pill-icon')!.getAttribute('class')).toBe('source-logo github pill-icon');
+    expect(first.querySelector('.pill .pill-icon path')!.getAttribute('d')).toMatch(/^M12 \.297c-6\.63 0-12 5\.373-12 12/);
     expect(first.querySelector('.playbook')!.innerHTML).toBe('<span class="namespace">dev:</span>build');
     expect(root.querySelector('[data-work-item="2"]')!.className).toBe('row stripe-warning dim');
     expect(root.querySelectorAll('.voice-mark')).toHaveLength(0);
     expect(root.querySelector('[data-work-item="2"] .pill')!.className).toBe('pill ticket source-zoho');
-    expect(root.querySelector('[data-work-item="2"] .pill .pill-icon')!.className).toBe('codicon codicon-tag pill-icon');
+    expect(root.querySelector('[data-work-item="2"] .pill .pill-icon')!.getAttribute('class')).toBe('source-logo zoho pill-icon');
     expect(root.querySelector('[data-work-item="2"] .playbook')!.innerHTML).toBe('triage');
-    // A running mark spins, muted, as the dock's does; a failed one takes the error tone.
-    expect(root.querySelector('[data-work-item="3"] .mark')!.className).toBe('codicon codicon-loading mark state-icon tone-muted codicon-modifier-spin');
-    expect(root.querySelector('[data-work-item="4"] .mark')!.className).toBe('codicon codicon-error mark state-icon tone-error failed');
+    // A running mark spins, as the dock's does; a failed one is marked for the error colour, and no mark takes a tone.
+    expect(root.querySelector('[data-work-item="3"] .mark')!.className).toBe('codicon codicon-loading mark codicon-modifier-spin');
+    expect(root.querySelector('[data-work-item="4"] .mark')!.className).toBe('codicon codicon-error mark failed');
     expect(root.querySelector('[data-work-item="3"]')!.className).toBe('row selected');
     expect(root.querySelector('[data-work-item="3"]')!.getAttribute('aria-current')).toBe('true');
     expect(root.querySelectorAll('[aria-current="true"]')).toHaveLength(1);
@@ -342,12 +343,13 @@ describe('drawing', () => {
     expect(line2!.querySelector('.ticket')!.getAttribute('title')).toBe('gh 1\nhttps://github.com/o/r/issues/1');
     expect(line2!.querySelector('.pr')!.textContent).toBe('\u{ea64}19002');
     expect(line2!.querySelector('.pr')!.getAttribute('title')).toBe('PR #19002\nhttps://github.com/o/r/pull/19002');
-    expect(line2!.querySelector('.issue .codicon')).toBeNull();
+    // An issue's pill has no icon whole, and the issues codicon when it shrinks to its icon, as the dock's.
+    expect([...line2!.querySelectorAll('.issue .codicon')].map((one) => one.className)).toEqual(['codicon codicon-issues pill-icon']);
     expect(line2!.querySelector('.issue')!.getAttribute('title')).toBe('gh 18800, named in the ticket\nhttps://github.com/o/r/issues/18800');
     expect(line2!.querySelector('.returned .pill-text')!.textContent).toBe('2');
     // Line 3: the mark, then each detail in its tone with a muted separator between them, never before the first.
     expect(line3!.className).toBe('row-line row-details');
-    expect(line3!.firstElementChild!.className).toBe('codicon codicon-watch mark state-icon tone-attention');
+    expect(line3!.firstElementChild!.className).toBe('codicon codicon-watch mark');
     expect([...line3!.querySelectorAll('.row-detail')].map((one) => [one.className, one.textContent, one.getAttribute('title')])).toEqual([
       ['row-detail warning', 'Rate limited · resumes 1:20 PM', 'Resets at 1:20 PM'],
       ['row-detail error', 'Setup <failed>', null],
@@ -2764,6 +2766,36 @@ describe("the list's CSS", () => {
     expect(css).toMatch(/@media \(prefers-color-scheme: light\) \{\s*:root \{[^}]*--sb-row-selected: #E4E6F1;/);
     expect(selected[0]).not.toMatch(/box-shadow|outline|border/);
     expect(declarationsOf((selector) => selector === 'button:focus-visible')).toEqual([expect.stringContaining('outline: 1px solid var(--vscode-focusBorder)')]);
+    // The selected row keeps the dock's text colours: no foreground and no faded muted texts.
+    expect(selected[0]).not.toMatch(/(^|[ ;])color:/);
+    expect(css).not.toMatch(/\.row\.selected [^{]*\{[^}]*opacity/);
+  });
+
+  it("draws rows in the dock's sizes and colours (MainWindow.axaml, App.axaml)", () => {
+    const one = (selector: string): string => {
+      const found = declarationsOf((each) => each === selector);
+
+      expect(found, selector).toHaveLength(1);
+
+      return found[0]!;
+    };
+
+    // 18 px lines in 13 px text, the first row in a band without the rule's pixel.
+    expect(one('.row-head')).toContain('height: 18px');
+    expect(one('.row-line')).toContain('height: 18px');
+    expect(one('.row-line')).not.toMatch(/font-size/);
+    expect(one('.row-time')).not.toMatch(/font-size/);
+    expect(one('.rows > li:first-child > .row')).toContain('border-top: none');
+    // Pills 18 px tall with 14 px icons and 12 px text; a key's logo 12 px; GitHub's key in the dock's GitHub colour, not the foreground.
+    expect(one('.row-line .pill')).toMatch(/height: 18px;.*font-size: 12px/);
+    expect(one('.row-line .pill .codicon')).toBe('flex: none; font-size: 14px;');
+    expect(one('.row-line .pill .source-logo')).toContain('width: 12px; height: 12px');
+    expect(declarationsOf((each) => each === '.row-line .pill.ticket.source-github')).toEqual(['border-color: var(--sb-github); background: color-mix(in srgb, var(--sb-github) 18%, transparent);']);
+    // Marks in the foreground, Failed in the dock's error colour; the muted texts in the dock's grey, #717171 in Light Modern.
+    expect(one('.row-details .mark')).toBe('font-size: 14px;');
+    expect(declarationsOf((each) => each === '.row-details .mark.failed')).toEqual(['color: var(--vscode-testing-iconFailed);']);
+    expect(css).toMatch(/@media \(prefers-color-scheme: light\) \{\s*:root \{[^}]*--sb-row-muted: #717171;/);
+    expect(one('.row-time')).toContain('color: var(--sb-row-muted)');
   });
 
   it('hides Back and shows the work items\' sash by the page\'s width alone, with no kept list toggle', () => {
