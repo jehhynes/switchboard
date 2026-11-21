@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CONSOLE_FONT_PX, CONSOLE_INPUT_CHARS, CONSOLE_MIN_FONT_PX, fittedFont, fittedSize, keptModes, mountConsole } from '../src/console.js';
+import { CONSOLE_FONT_PX, CONSOLE_INPUT_CHARS, CONSOLE_MIN_FONT_PX, CONSOLE_THEMES, fittedFont, fittedSize, keptModes, LIGHT_SCHEME, mountConsole } from '../src/console.js';
 import type { ConsoleOptions, ConsoleTerm, MountedConsole, TermOptions } from '../src/console.js';
 import { startPage } from '../src/main.js';
 import type { ConsoleModule } from '../src/main.js';
@@ -44,7 +44,7 @@ class FakeTerm implements ConsoleTerm {
   rows = 24;
   element: HTMLElement | undefined;
   textarea: HTMLTextAreaElement | undefined;
-  options: { fontSize?: number };
+  options: { fontSize?: number; theme?: Record<string, string> };
   readonly written: string[] = [];
   readonly calls: string[] = [];
   selection = '';
@@ -158,6 +158,44 @@ function mounted(type: ConsoleOptions['type'] = async () => null) {
 
   return { host, term: terms[0]!, typed, copied, console, source: () => FakeSource.last };
 }
+
+describe("the console's colours", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("draws in VS Code's terminal colours for the system's scheme and changes them when the scheme changes, until disposed", () => {
+    const listeners: Array<() => void> = [];
+    const asked: string[] = [];
+    const scheme = {
+      matches: true,
+      addEventListener: (_type: string, listener: () => void) => listeners.push(listener),
+      removeEventListener: (_type: string, listener: () => void) => listeners.splice(listeners.indexOf(listener), 1),
+    };
+
+    vi.stubGlobal('matchMedia', (query: string) => (asked.push(query), query === LIGHT_SCHEME ? scheme : { matches: false, addEventListener: () => {}, removeEventListener: () => {} }));
+
+    const { term, console } = mounted();
+
+    expect(asked).toContain(LIGHT_SCHEME);
+    expect(term.created.theme).toEqual(CONSOLE_THEMES.light);
+    expect(term.created.theme).toMatchObject({ background: '#f8f8f8', foreground: '#3b3b3b' });
+    scheme.matches = false;
+    listeners.forEach((listener) => listener());
+    expect(term.options.theme).toEqual(CONSOLE_THEMES.dark);
+    expect(term.options.theme).toMatchObject({ background: '#181818', foreground: '#cccccc' });
+    console.dispose();
+    expect(listeners).toEqual([]);
+  });
+
+  it("draws in Dark Modern's colours where the browser cannot tell the scheme, and its background matches the console's own", () => {
+    const { term } = mounted();
+    const css = PAGE_ASSETS['theme.css']!.body;
+    const light = css.indexOf('@media (prefers-color-scheme: light)');
+
+    expect(term.created.theme).toEqual(CONSOLE_THEMES.dark);
+    expect(css.slice(0, light)).toContain(`--vscode-panel-background: ${CONSOLE_THEMES.dark.background!.toUpperCase()};`);
+    expect(css.slice(light)).toContain(`--vscode-panel-background: ${CONSOLE_THEMES.light.background!.toUpperCase()};`);
+  });
+});
 
 describe('the console', () => {
   it("draws the stream at the program's size, scaling the font to fit and never resizing the session while it watches", async () => {
@@ -346,7 +384,11 @@ function laidOut(box: { width: number; height: number }, bar = { typingAdds: 0 }
   const scaled: Array<() => void> = [];
   const display = { scale: 1 };
 
-  vi.stubGlobal('matchMedia', () => ({ addEventListener: (_type: string, listener: () => void) => scaled.push(listener), removeEventListener: (_type: string, listener: () => void) => scaled.splice(scaled.indexOf(listener), 1) }));
+  vi.stubGlobal('matchMedia', (query: string) =>
+    query.startsWith('(resolution:')
+      ? { addEventListener: (_type: string, listener: () => void) => scaled.push(listener), removeEventListener: (_type: string, listener: () => void) => scaled.splice(scaled.indexOf(listener), 1) }
+      : { matches: false, addEventListener: () => {}, removeEventListener: () => {} },
+  );
 
   vi.stubGlobal(
     'ResizeObserver',
