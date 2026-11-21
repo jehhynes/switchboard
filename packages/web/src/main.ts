@@ -3,7 +3,7 @@ import { snoozeChoices } from '@switchboard/core/snooze';
 import type { PageState } from './model.js';
 import { placeMenus } from '@switchboard/conversation/menuPlace';
 import { escape, renderMarkdown } from './markdown.js';
-import { answerText, artifactTabsFit, artifactUrl, bandOpen, browserNote, closedArtifacts, paneLink, collapsedGroups, complete, firstSnoozeDay, GROUPS_KEY, inputReady, renderMicButton, markdownBody, newView, parseQuestions, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, SIDE_TABS } from './render.js';
+import { answerText, artifactTabsFit, artifactUrl, bandOpen, browserNote, closedArtifacts, paneLink, collapsedGroups, complete, firstSnoozeDay, GROUPS_KEY, inputReady, renderMicButton, markdownBody, newView, parseQuestions, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, hasConsole, SIDE_TABS } from './render.js';
 import type { CardDraft, PaneView, SideTab, Tab, View } from './render.js';
 import type { ConsoleOptions, MountedConsole } from './console.js';
 import { LIGHT_SCHEME } from './console.js';
@@ -214,8 +214,18 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /** Whether this page can drive the Chrome pane: only a page on this computer posts its area (`pane-rect` is a local command). */
   const paneLocal = (): boolean => deps.local ?? ['127.0.0.1', 'localhost'].includes(location.hostname);
   const browserTab = (): boolean => view.pane?.enabled === true && standalone() && paneLocal();
+  /** Whether the open work item has links the Chrome pane can show. */
+  const itemLinks = (): boolean => {
+    const row = selectedRow(state);
+
+    return row !== null && (paneLink(row.url) || row.links.some((link) => paneLink(link.url)));
+  };
+  /** Whether the Browser tab shows: the pane on for this page, and links of the open work item to show; the operator's Status or Browser choice stays. */
+  const showBrowser = (): boolean => browserTab() && itemLinks();
+  /** Whether the Console tab shows: an active session, not ended, that the terminal holder may hold; otherwise its console would be blank, so there is no tab. */
+  const showConsole = (): boolean => hasConsole(state.session);
   /** The tab the conversation's pane shows: always the conversation while Status and Artifacts have their own column, and never a Browser tab that is gone. */
-  const mainTab = (): Tab => (wide() || (view.tab === 'browser' && !browserTab()) || (view.tab === 'artifacts' && openArtifact() === null) ? 'conversation' : view.tab);
+  const mainTab = (): Tab => (wide() || (view.tab === 'browser' && !showBrowser()) || (view.tab === 'artifacts' && openArtifact() === null) ? 'conversation' : view.tab === 'console' && !showConsole() ? 'status' : view.tab);
   /** The work item whose tabs were last chosen on its opening, and whether the operator has chosen a tab since. */
   let openedItem: number | null = null;
   let tabChosen = false;
@@ -235,7 +245,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const browserUseful = (): boolean => {
     const row = selectedRow(state);
 
-    return browserTab() && view.pane?.extension === 'paired' && row !== null && (paneLink(row.url) || row.links.some((link) => paneLink(link.url)));
+    return browserTab() && view.pane?.extension === 'paired' && row !== null && itemLinks();
   };
   const browserFirst = (): boolean => browserUseful() && state.session === null;
   /** The tab every work item opens on, Status or Browser, as the operator last chose it on any device; null before any choice. */
@@ -248,7 +258,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const openTabs = (): void => {
     const saved = savedTabs?.workItemId === state.scope?.workItemId ? savedTabs?.tab : null;
     const path = saved?.startsWith('artifact:') === true ? saved.slice('artifact:'.length) : null;
-    const kept: Tab | null = saved === 'console' ? 'console' : path !== null && state.artifacts.some((one) => one.path === path) && !closedNow().has(path) ? 'artifacts' : null;
+    const kept: Tab | null = saved === 'console' && showConsole() ? 'console' : path !== null && state.artifacts.some((one) => one.path === path) && !closedNow().has(path) ? 'artifacts' : null;
     const browser = openOn === 'browser' ? browserUseful() : openOn === null && browserFirst();
     const chosen: Tab = kept ?? (browser ? 'browser' : 'status');
 
@@ -298,7 +308,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     void post('page-tabs', closed ? { workItemId, close: { path, updatedAt: artifact.updatedAt } } : { workItemId, reopen: path });
   };
   /** What the column right of the conversation shows: Status in place of a Browser tab that is gone. */
-  const sideTab = (): SideTab => ((view.side === 'browser' && !browserTab()) || (view.side === 'artifacts' && openArtifact() === null) ? 'status' : view.side);
+  const sideTab = (): SideTab => ((view.side === 'browser' && !showBrowser()) || (view.side === 'console' && !showConsole()) || (view.side === 'artifacts' && openArtifact() === null) ? 'status' : view.side);
   /** The artifact whose tab is chosen, while the work item still has it; artifacts have no list of their own, only a tab each and a menu. */
   function openArtifact(): string | null {
     return view.artifact !== null && state.artifacts.some((one) => one.path === view.artifact) ? view.artifact : null;
@@ -1517,7 +1527,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     const strip = { open: openArtifact(), fit: view.artifactFit, menu: view.artifactMenu, now: deps.now(), closed: closedNow() };
 
-    mount(head, [renderHeader(state, view), side ? null : renderTabs({ ...view, tab: mainTab() }, state, browserTab(), strip, changesButton(changes.view)), side ? null : renderChangesMenu(changes.view)]);
+    mount(head, [renderHeader(state, view), side ? null : renderTabs({ ...view, tab: mainTab() }, state, showBrowser(), strip, changesButton(changes.view), showConsole()), side ? null : renderChangesMenu(changes.view)]);
 
     const artifact = view.artifact === null ? undefined : state.artifacts.find((one) => one.path === view.artifact);
     const now = deps.now();
@@ -1570,7 +1580,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     drawTab(panel, mainTab());
 
     if (side) {
-      mount(detailHead, [renderSideSwitch(sideTab(), state, browserTab(), strip, changesButton(changes.view)), renderChangesMenu(changes.view)]);
+      mount(detailHead, [renderSideSwitch(sideTab(), state, showBrowser(), strip, changesButton(changes.view), showConsole()), renderChangesMenu(changes.view)]);
       drawTab(detailBody, sideTab());
     }
     // The composer first, so the conversation is scrolled against its final height.
@@ -2292,6 +2302,13 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         break;
       case 'open-console':
         closeMenus();
+
+        // Without a console to show there is no Console tab, and the tab shown and the kept choice stay.
+        if (!showConsole()) {
+          draw();
+          break;
+        }
+
         leaving('console');
 
         chooseTab('console');
@@ -2985,7 +3002,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // The pane window stays above the page, so it hides while Settings, a sheet (the page's or the list header's) or History covers the page.
     const listSheet = root.querySelector('#list-sheet .sheet-backdrop') !== null;
 
-    if (!browserTab() || state.key === null || state.scope === null || view.sheet !== null || listSheet || settingsPane.isOpen() || shownHistory !== null) {
+    if (!showBrowser() || state.key === null || state.scope === null || view.sheet !== null || listSheet || settingsPane.isOpen() || shownHistory !== null) {
       return null;
     }
 

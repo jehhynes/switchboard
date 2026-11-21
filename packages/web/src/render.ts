@@ -114,6 +114,11 @@ export function browserNote(pane: PaneView | null, width: number, hasLinks: bool
  * Why the Console tab shows no console for the session (architecture.md § Web page), or null when the terminal holder may hold it: a session the
  * page cannot talk to runs outside the holder. A Code Mode session and a Codex app-server session have one; the hub says why when it cannot open.
  */
+/** Whether the Console tab has a console to show: an active session, not ended, that the terminal holder may hold. */
+export function hasConsole(session: PageState['session']): boolean {
+  return session !== null && session.state !== 'ended' && consoleNote(session) === null;
+}
+
 export function consoleNote(session: PageState['session']): string | null {
   if (session === null) {
     return 'No session has started yet.';

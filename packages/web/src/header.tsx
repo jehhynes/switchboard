@@ -5,7 +5,7 @@ import { providerMark } from '@switchboard/conversation/providerIcons';
 import { FileIcon } from './fileIcons.js';
 import { selectedEntry, selectedRow, stateIcon } from './model.js';
 import type { PageState } from './model.js';
-import { ago, artifactBar, LINK_LABEL_MAX, paneStatus, rowKey, TABS } from './render.js';
+import { ago, artifactBar, hasConsole, LINK_LABEL_MAX, paneStatus, rowKey, TABS } from './render.js';
 import type { SideTab, Tab, View } from './render.js';
 import { trusted } from './trusted.js';
 import type { PageAction, PageRow } from '@switchboard/protocol';
@@ -38,7 +38,7 @@ const Separator = () => <li class="menu-separator" role="separator"></li>;
  * links, more than two of them in an Open link submenu), then the controls that ask first; empty when the row offers none. Each item names its
  * row, so a pool ticket's menu in the list runs as the header's does.
  */
-export function menuRows(row: PageRow, view: Pick<View, 'acting' | 'linkMenu'>): VNode[] {
+export function menuRows(row: PageRow, view: Pick<View, 'acting' | 'linkMenu'>, console = true): VNode[] {
   const actions = row.actions;
   const pastes = row.pastes;
   const commands = row.opens;
@@ -63,8 +63,8 @@ export function menuRows(row: PageRow, view: Pick<View, 'acting' | 'linkMenu'>):
   ];
   const opens = [
     ...pastes.map((label) => item({ 'data-action': 'row-paste', 'data-label': label }, 'copy', `Copy ${label}`)),
-    // The dock's Open in terminal: the open work item's session on the Console tab.
-    ...(row.terminal ? [item({ 'data-action': 'open-console' }, 'terminal', 'Open in terminal')] : []),
+    // The dock's Open in terminal: the open work item's session on the Console tab, while it has one to show.
+    ...(row.terminal && console ? [item({ 'data-action': 'open-console' }, 'terminal', 'Open in terminal')] : []),
     ...commands.map((one) => item({ 'data-action': 'row-command', 'data-label': one.label }, one.icon, one.label)),
     // The dock's History, which the page shows in the conversation's place.
     ...(row.history === null ? [] : [item({ 'data-action': 'row-history' }, 'history', 'History')]),
@@ -80,8 +80,8 @@ export function menuRows(row: PageRow, view: Pick<View, 'acting' | 'linkMenu'>):
  * The header's row actions (architecture.md § Web page): the dock's main control as a button, then the row's menu (`menuRows`) under an
  * ellipsis; nothing when the row offers none.
  */
-function Actions({ row, view }: { row: PageRow | null; view: View }) {
-  const rows = row === null ? [] : menuRows(row, view);
+function Actions({ row, view, console }: { row: PageRow | null; view: View; console: boolean }) {
+  const rows = row === null ? [] : menuRows(row, view, console);
 
   if (row === null || rows.length === 0) {
     return null;
@@ -305,7 +305,7 @@ export function renderHeader(state: PageState, view: View): VNode {
         </button>
         {pickerMenu}
       </div>
-      <Actions row={selectedRow(state)} view={view} />
+      <Actions row={selectedRow(state)} view={view} console={hasConsole(state.session)} />
       {personaButton === null ? null : (
         <div class="menu-anchor persona-anchor">
           {personaButton}
@@ -395,19 +395,19 @@ function artifactTabs(state: PageState, strip: ArtifactStrip): ComponentChildren
 }
 
 /**
- * The tab strip atop the column right of the conversation on a wide screen: Status, Console and Browser, then a tab per artifact (`artifactTabs`);
+ * The tab strip atop the column right of the conversation on a wide screen: Status, Console and Browser, each while it has something to show, then a tab per artifact (`artifactTabs`);
  * the conversation keeps its own pane beside it. `extra` follows them, as the Changes button does.
  */
-export function renderSideSwitch(side: SideTab, state: PageState, browser = false, strip: ArtifactStrip = { open: null, fit: 0, menu: false, now: 0 }, extra: ComponentChildren = null): VNode {
+export function renderSideSwitch(side: SideTab, state: PageState, browser = false, strip: ArtifactStrip = { open: null, fit: 0, menu: false, now: 0 }, extra: ComponentChildren = null, console = true): VNode {
   const fresh = state.status?.unread === true;
   const tabs: Array<[SideTab, string, string]> = [
     ['status', 'Status', fresh ? 'New' : ''],
-    ['console', 'Console', ''],
+    ...(console ? [['console', 'Console', ''] as [SideTab, string, string]] : []),
     ...(browser ? [['browser', 'Browser', ''] as [SideTab, string, string]] : []),
   ];
 
   return (
-    <nav class="tabs side-switch" role="tablist" aria-label={browser ? 'Status, console, browser and artifacts' : 'Status, console and artifacts'}>
+    <nav class="tabs side-switch" role="tablist" aria-label={['Status', ...(console ? ['console'] : []), ...(browser ? ['browser'] : [])].join(', ') + ' and artifacts'}>
       {tabs.map(([tab, label, badge]) => (
         <TabButton selected={tab === side} label={label} badge={badge} attrs={{ 'data-side': tab }} />
       ))}
@@ -417,15 +417,15 @@ export function renderSideSwitch(side: SideTab, state: PageState, browser = fals
   );
 }
 
-/** The conversation's tab strip on a narrower screen: Conversation, Status, Console and Browser, then a tab per artifact as in the column, and `extra`, as the Changes button. */
-export function renderTabs(view: View, state: PageState, browser = false, strip: ArtifactStrip = { open: null, fit: 0, menu: false, now: 0 }, extra: ComponentChildren = null): VNode {
+/** The conversation's tab strip on a narrower screen: Conversation, Status, Console and Browser, each while it has something to show, then a tab per artifact as in the column, and `extra`, as the Changes button. */
+export function renderTabs(view: View, state: PageState, browser = false, strip: ArtifactStrip = { open: null, fit: 0, menu: false, now: 0 }, extra: ComponentChildren = null, console = true): VNode {
   const fresh = state.status?.unread === true;
   // As in the VS Code view: Status has its New badge; the page shows no unread counts.
   const badges: Record<Tab, string> = { conversation: '', status: fresh ? 'New' : '', artifacts: '', console: '', browser: '' };
 
   return (
     <nav class="tabs" role="tablist">
-      {TABS.filter(({ tab }) => tab !== 'artifacts' && (browser || tab !== 'browser')).map(({ tab, label }) => (
+      {TABS.filter(({ tab }) => tab !== 'artifacts' && (browser || tab !== 'browser') && (console || tab !== 'console')).map(({ tab, label }) => (
         <TabButton selected={tab === view.tab} label={label} badge={badges[tab]} attrs={{ 'data-tab': tab }} />
       ))}
       {artifactTabs(state, { ...strip, open: view.tab === 'artifacts' ? strip.open : null })}

@@ -2059,6 +2059,13 @@ describe('the page in use', () => {
     // It opens a tab of the page; nothing is posted for it.
     expect(posts.filter((post) => post.url.includes('/row-'))).toEqual([]);
 
+    // Nor while the session has no console to show, as once it has ended.
+    source.emit('session', { session: session({ state: 'ended', conversation: 'read-only' }) });
+    click('button.actions');
+    expect(root.querySelector('.actions-menu [data-action="open-console"]')).toBeNull();
+    click('button.actions');
+    source.emit('session', { session: session() });
+
     // A row the dock offers no terminal for has no such item.
     source.emit('list', { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', pastes: ['Reply'] })])] });
     click('button.actions');
@@ -2322,6 +2329,47 @@ describe('the page in use', () => {
     page.close();
   });
 
+  it('shows the Browser tab only for a work item with links and the Console tab only for an active held session, falling back to Status', async () => {
+    const query = { matches: true, addEventListener: () => {} };
+
+    vi.stubGlobal('matchMedia', vi.fn(() => query));
+    onTestFinished(() => {
+      vi.unstubAllGlobals();
+    });
+
+    const page = startPage(root, { fetch: (async (url: string, init?: { body?: string }) => (posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) }), { status: 200, ok: true, json: async () => ({}), text: async () => '' })) as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, standalone: () => true, toExtension: async () => ({ ok: true }) });
+    const source = FakeSource.last!;
+    const tabs = () => [...root.querySelectorAll<HTMLElement>('#detail .side-switch [data-side]')].map((tab) => tab.dataset['side']);
+    const chosen = () => root.querySelector<HTMLElement>('#detail .side-switch .tab.selected')?.dataset['side'];
+    const paired = { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: null };
+    const linked = [listGroup('progress', [listRow(1, { title: 'Fix it', url: 'https://github.com/o/r/issues/1' })])];
+    const unlinked = [listGroup('progress', [listRow(1, { title: 'Fix it', url: '', links: [] })])];
+
+    hello(source, { groups: linked });
+    source.emit('pane', { pane: paired });
+    expect(tabs()).toEqual(['status', 'console', 'browser']);
+
+    // Browser chosen, then the links go: no Browser tab, Status shown; the choice of Browser stays for the next work item with links.
+    click('#detail [data-side="browser"]');
+    source.emit('list', { groups: unlinked });
+    expect(tabs()).toEqual(['status', 'console']);
+    expect(chosen()).toBe('status');
+    source.emit('list', { groups: linked });
+    expect(chosen()).toBe('browser');
+
+    // Console chosen, then the session ends: no Console tab, Status shown.
+    click('#detail [data-side="console"]');
+    source.emit('session', { session: session({ state: 'ended', conversation: 'read-only' }) });
+    expect(tabs()).toEqual(['status', 'browser']);
+    expect(chosen()).toBe('status');
+    // A session the terminal holder does not hold has none either.
+    source.emit('session', { session: session({ state: 'running', conversation: 'none' }) });
+    expect(tabs()).toEqual(['status', 'browser']);
+    source.emit('session', { session: session({ state: 'running' }) });
+    expect(tabs()).toEqual(['status', 'console', 'browser']);
+    page.close();
+  });
+
   it('opens each work item on Browser when it has no session and links the paired pane can show, else on Status, keeping a choice only within the work item', async () => {
     window.innerWidth = 1920;
     onTestFinished(() => {
@@ -2342,10 +2390,11 @@ describe('the page in use', () => {
     source.emit('pane', { pane: paired });
     expect(chosen()).toBe('browser');
     expect(posts.filter((post) => post.url.endsWith('/pane-rect')).at(-1)?.body['rect']).not.toBeNull();
-    // A tab chosen there stays while the work item is open.
-    click('#detail [data-side="console"]');
+    // Without a session it has no Console tab. A tab chosen there stays while the work item is open.
+    expect(root.querySelector('#detail [data-side="console"]')).toBeNull();
+    click('#detail [data-side="status"]');
     source.emit('pane', { pane: { ...paired, shown: true } });
-    expect(chosen()).toBe('console');
+    expect(chosen()).toBe('status');
 
     // Another work item: one with a session opens on Status, whatever was chosen before.
     hello(source, { groups: linked(2), scope: { ...scope, workItemId: 2 } });
@@ -2514,7 +2563,7 @@ describe('the page in use', () => {
 
     vi.spyOn(root.querySelector('#detail .detail-body')!, 'getBoundingClientRect').mockReturnValue({ left: 1300, top: 85, width: 600, height: 855 } as DOMRect);
     vi.spyOn(root.querySelector('#panel')!, 'getBoundingClientRect').mockReturnValue({ left: 300, top: 120, width: 700, height: 700 } as DOMRect);
-    hello(source);
+    hello(source, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', url: 'https://github.com/o/r/issues/1' })])] });
     await flush();
     // Off: no Browser tab and nothing reported.
     expect(root.querySelector('[data-side="browser"]')).toBeNull();
