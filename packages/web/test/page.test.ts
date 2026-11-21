@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyEvent, awaitingReply, EMPTY, mentionOf, mentionQuery, commandQuery, shortTitle, timeline, withEarlier } from '../src/model.js';
@@ -2175,7 +2176,8 @@ describe("the list's CSS", () => {
     expect(note).toContain('padding: 0 20px');
     expect(composer).toContain('padding: 0 20px 16px');
     expect(declarationsOf((selector) => selector === '.session-note').join(' ')).toMatch(/margin: 0 0 8px;.*border-radius: 8px;/);
-    expect(declarationsOf((selector) => selector === '.composer').join(' ')).toContain('border-radius: 8px');
+    // The composer's own corners come from the composer.css the Conversation view shares.
+    expect(readFileSync(createRequire(import.meta.url).resolve('@switchboard/conversation/composer.css'), 'utf8')).toMatch(/\n\.composer \{[^}]*border-radius: 8px;/);
     expect(declarationsOf((selector) => selector === '.composer-error').join(' ')).toMatch(/margin: 0 0 8px;.*border-radius: 8px;/);
   });
 

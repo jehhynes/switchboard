@@ -383,6 +383,22 @@ describe('the Conversation view page', () => {
     expect(renderConversation(state([reply('r1', T0)], { more: true }))).toContain('data-action="earlier"');
   });
 
+  it("draws the composer from the composer.css it shares with the web page: a fill between the side bar and the input colour, and no rule of its own for the box", () => {
+    const css = readFileSync(join(__dirname, '../src/webview/conversation.css'), 'utf8');
+    const shared = readFileSync(require.resolve('@switchboard/conversation/composer.css'), 'utf8');
+    const rule = (text: string, selector: string) => text.split('\n').find((line) => line.startsWith(`${selector} {`)) ?? '';
+
+    expect(shared).toContain('--sb-composer-background: color-mix(in srgb, var(--vscode-foreground) 7%, var(--vscode-sideBar-background));');
+    expect(rule(shared, 'body.vscode-light')).toContain('--sb-composer-background: color-mix(in srgb, var(--vscode-input-background) 50%, var(--vscode-sideBar-background));');
+    expect(rule(shared, 'body.vscode-high-contrast, body.vscode-high-contrast-light')).toContain('--sb-composer-background: var(--vscode-input-background);');
+    expect(rule(shared, '.composer')).toContain('background: var(--sb-composer-background);');
+    expect(rule(shared, '.composer')).toContain('border-radius: 8px;');
+    expect(rule(shared, '.composer-footer')).toContain('border-top: 0.5px solid var(--sb-composer-border);');
+    expect(rule(shared, '.composer-tool')).toContain('color: var(--vscode-descriptionForeground);');
+    expect(css).not.toMatch(/(^|\n)\.composer \{[^}]*(background|border|border-radius)\s*:/);
+    expect(css).not.toMatch(/(^|\n)\.composer-footer \{/);
+  });
+
   it('draws our messages as bubbles on the right, at most 85% wide in the web page\'s message blue with a smaller bottom-right corner, with its marks and time on one line under them', () => {
     const css = readFileSync(join(__dirname, '../src/webview/conversation.css'), 'utf8');
     const shared = readFileSync(require.resolve('@switchboard/conversation/bubbles.css'), 'utf8');
@@ -406,7 +422,7 @@ describe('the Conversation view page', () => {
     expect(root.querySelector('li[data-id="t1"] .meta-marks')!.innerHTML).toContain('class="delivery not-sent"');
     expect(rule('.meta .stamp')).toContain('margin-left: auto;');
     // The notes above the composer and its error take its corners and sit 8 px above it.
-    expect(rule('.composer')).toContain('border-radius: 8px;');
+    expect(readFileSync(require.resolve('@switchboard/conversation/composer.css'), 'utf8')).toMatch(/\n\.composer \{[^}]*border-radius: 8px;/);
     for (const selector of ['.session-note', '.terminal-question', '.composer-error']) {
       expect(rule(selector)).toMatch(/margin: 0 (auto|0) 8px;/);
       expect(rule(selector)).toContain('border-radius: 8px;');

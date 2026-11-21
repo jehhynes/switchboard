@@ -1,4 +1,8 @@
 // @vitest-environment node
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { PAGE_ASSETS } from '../dist/index.js';
 import { OFFLINE_RETRY_MS, waitForHub } from '../src/offline.js';
@@ -157,6 +161,17 @@ describe('the installable page', () => {
     // Only the installed app draws it; a browser tab has its own tab strip above the page.
     expect(css.replace(rule![0], '')).not.toMatch(/body::before/);
     expect(JSON.parse(PAGE_ASSETS['manifest.webmanifest']!.body)).toMatchObject({ theme_color: sideBar });
+  });
+
+  it("draws the composer from the composer.css it shares with the Conversation view, before the page's own rules, which leave the box alone", () => {
+    const css = PAGE_ASSETS['page.css']!.body;
+    const own = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../src/page.css'), 'utf8');
+    const shared = readFileSync(createRequire(import.meta.url).resolve('@switchboard/conversation/composer.css'), 'utf8');
+
+    expect(css.indexOf(shared)).toBeGreaterThanOrEqual(0);
+    expect(css.indexOf(shared)).toBeLessThan(css.indexOf(own));
+    expect(own).not.toMatch(/(^|\n)\.composer \{[^}]*(background|border|border-radius)\s*:/);
+    expect(own).not.toMatch(/(^|\n)\.composer-footer \{/);
   });
 
   it('links the manifest from the page and the offline page, with the theme colour, and serves every file the worker keeps', () => {

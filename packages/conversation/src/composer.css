@@ -1,0 +1,22 @@
+/* The composer's box and footer, shared by the VS Code Conversation view and the web page, whose builds put this file before their own styles
+   (architecture.md § Conversation view), so the two cannot drift. The fill is lifted off the side bar by 7% of the foreground in dark themes,
+   halfway between the side bar and the input colour of Dark Modern and level with neither, and halfway between the side bar and the input
+   colour in light ones; high contrast themes keep the input colour. */
+:root {
+  --sb-composer-background: color-mix(in srgb, var(--vscode-foreground) 7%, var(--vscode-sideBar-background));
+  --sb-composer-border: var(--vscode-inlineChatInput-border, var(--vscode-input-border, var(--vscode-widget-border, rgba(127, 127, 127, 0.4))));
+}
+body.vscode-light { --sb-composer-background: color-mix(in srgb, var(--vscode-input-background) 50%, var(--vscode-sideBar-background)); }
+body.vscode-high-contrast, body.vscode-high-contrast-light { --sb-composer-background: var(--vscode-input-background); }
+
+.composer { position: relative; display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--sb-composer-border); border-radius: 8px; background: var(--sb-composer-background); color: var(--vscode-input-foreground); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1); }
+.composer:focus-within { border-color: var(--vscode-focusBorder); box-shadow: 0 0 0 3px color-mix(in srgb, var(--vscode-focusBorder) 12%, transparent), 0 1px 2px color-mix(in srgb, var(--vscode-focusBorder), transparent 80%); }
+.composer textarea { padding: 10px 14px; }
+.composer-footer { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 5px; border-top: 0.5px solid var(--sb-composer-border); color: var(--vscode-descriptionForeground); }
+.composer-tool, .composer .send { display: flex; flex: none; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border: none; border-radius: 5px; cursor: pointer; }
+.composer-tool { color: var(--vscode-descriptionForeground); background: transparent; font: inherit; }
+.composer-tool:hover:not(:disabled) { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground); }
+.composer .send { color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
+.composer .send:hover:not(:disabled) { background: var(--vscode-button-hoverBackground, var(--vscode-button-background)); }
+.composer-tool:disabled, .composer .send:disabled { cursor: not-allowed; opacity: 0.4; }
+.composer-tool .codicon, .composer .send .codicon { font-size: 16px; }
