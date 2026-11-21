@@ -766,6 +766,210 @@ describe('the page', () => {
   });
 });
 
+describe('attaching files from the composer', () => {
+  type Call = { url: string; body: unknown; type: string | undefined };
+  let calls: Call[];
+  let waiting: Array<(status: number, body: unknown) => void>;
+  let root: HTMLElement;
+
+  beforeEach(() => {
+    calls = [];
+    waiting = [];
+    root = document.createElement('div');
+    document.body.replaceChildren(root);
+    localStorage.clear();
+    history.replaceState(null, '', '#w=1');
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const start = () => {
+    const fetch = vi.fn((url: string, init?: RequestInit) => {
+      calls.push({ url, body: typeof init?.body === 'string' ? (JSON.parse(init.body) as unknown) : init?.body, type: (init?.headers as Record<string, string> | undefined)?.['Content-Type'] });
+
+      // An upload answers when the test says, or fails when its chip is removed.
+      if (url.startsWith('/v1/conversation/upload')) {
+        return new Promise<Response>((resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+          waiting.push((status, body) => resolve({ status, ok: status === 200, json: async () => body } as unknown as Response));
+        });
+      }
+
+      return Promise.resolve({ status: 200, ok: true, json: async () => ({ message: { id: 'm1' } }) } as unknown as Response);
+    });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000 });
+    const source = FakeSource.last!;
+
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    return { page, source };
+  };
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const uploads = () => calls.filter((call) => call.url.startsWith('/v1/conversation/upload'));
+  const chipNames = () => [...root.querySelectorAll('.attachment')].map((chip) => [chip.querySelector('.attachment-name')?.textContent, chip.querySelector('.codicon')?.className]);
+  const pick = (files: File[]) => {
+    const picker = root.querySelector<HTMLInputElement>('input.attach-input')!;
+
+    Object.defineProperty(picker, 'files', { value: files, configurable: true });
+    picker.dispatchEvent(new Event('change'));
+  };
+  /** A paste or drop event carrying files, as a browser builds one. */
+  const carrying = (type: 'paste' | 'drop' | 'dragover', field: 'clipboardData' | 'dataTransfer', files: File[], types = ['Files']) => {
+    const event = new Event(type, { bubbles: true, cancelable: true });
+
+    Object.defineProperty(event, field, { value: { files, types, dropEffect: 'none' } });
+    return event;
+  };
+
+  it('puts + left of /, sends picked files to the hub as chips, and sends their paths as mentions after the text once all have arrived', async () => {
+    const { page } = start();
+    const composer = root.querySelector<HTMLElement>('#composer')!;
+    const input = composer.querySelector('textarea')!;
+    const send = composer.querySelector<HTMLButtonElement>('button.send')!;
+
+    expect([...composer.querySelectorAll('.composer-controls > button')].map((button) => button.getAttribute('aria-label'))).toEqual(['Attach files', 'Show slash commands']);
+
+    const opened = vi.spyOn(composer.querySelector<HTMLInputElement>('input.attach-input')!, 'click').mockImplementation(() => {});
+
+    composer.querySelector<HTMLButtonElement>('button.attach')!.click();
+    expect(opened).toHaveBeenCalledTimes(1);
+
+    const notes = new File(['hello'], 'notes one.txt', { type: 'text/plain' });
+    const picture = new File([new Uint8Array([0x89, 0x50])], 'shot.png', { type: 'image/png' });
+
+    pick([notes, picture]);
+    expect(uploads().map((call) => [call.url, call.body, call.type])).toEqual([
+      ['/v1/conversation/upload?window=pk&scopeGen=3&name=notes%20one.txt', notes, 'text/plain'],
+      ['/v1/conversation/upload?window=pk&scopeGen=3&name=shot.png', picture, 'image/png'],
+    ]);
+    expect(chipNames()).toEqual([['notes one.txt', 'codicon codicon-loading codicon-modifier-spin'], ['shot.png', 'codicon codicon-loading codicon-modifier-spin']]);
+    input.value = 'Look at these';
+    input.dispatchEvent(new Event('input'));
+    // Nothing goes while a file is still on its way.
+    expect(send.disabled).toBe(true);
+
+    waiting[0]!(200, { path: 'C:\\Temp\\switchboard-pasted\\attached-1-notes_one.txt', image: false });
+    waiting[1]!(200, { path: 'C:\\Temp\\switchboard-pasted\\pasted-1.png', image: true });
+    await flush();
+    expect(chipNames()).toEqual([['notes one.txt', 'codicon codicon-file'], ['shot.png', 'codicon codicon-file-media']]);
+    expect(send.disabled).toBe(false);
+
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await flush();
+    await flush();
+    expect(calls.find((call) => call.url.endsWith('/send'))?.body).toMatchObject({ window: 'pk', scopeGen: 3, sessionId: 's', launch: 'L', text: 'Look at these @"C:/Temp/switchboard-pasted/attached-1-notes_one.txt" @"C:/Temp/switchboard-pasted/pasted-1.png"' });
+    expect(chipNames()).toEqual([]);
+    expect(root.querySelector<HTMLElement>('.attachments')!.hidden).toBe(true);
+    expect(JSON.parse(localStorage.getItem('switchboard.attachments') ?? '{}')).toEqual({});
+
+    // Files alone make a message.
+    pick([notes]);
+    waiting[2]!(200, { path: 'C:\\Temp\\a.txt', image: false });
+    await flush();
+    expect(input.value).toBe('');
+    expect(send.disabled).toBe(false);
+    send.click();
+    await flush();
+    expect(calls.filter((call) => call.url.endsWith('/send')).at(-1)?.body).toMatchObject({ text: '@"C:/Temp/a.txt"' });
+    page.close();
+  });
+
+  it("removes a chip and ends its upload, refuses a file too large or empty without sending it, says the hub's refusal, and keeps chips per work item over a reload", async () => {
+    const first = start();
+    const composer = root.querySelector<HTMLElement>('#composer')!;
+    const error = () => (composer.querySelector<HTMLElement>('.composer-error')!.hidden ? null : composer.querySelector('.composer-error-text')!.textContent);
+
+    pick([new File(['a'], 'a.txt')]);
+    expect(uploads()[0]!.type).toBe('application/octet-stream');
+    root.querySelector<HTMLButtonElement>('.attachment-remove')!.click();
+    expect(chipNames()).toEqual([]);
+    await flush();
+    // The upload ended with its chip, so its late answer adds nothing.
+    waiting[0]!(200, { path: 'C:\\Temp\\a.txt', image: false });
+    await flush();
+    expect(chipNames()).toEqual([]);
+    expect(error()).toBeNull();
+
+    const big = new File(['x'], 'big.bin');
+
+    Object.defineProperty(big, 'size', { value: 10 * 1024 * 1024 + 1 });
+    pick([big, new File([], 'empty.txt')]);
+    expect(error()).toBe('big.bin is larger than 10 MB. empty.txt is empty.');
+    expect(uploads()).toHaveLength(1);
+
+    pick([new File(['no'], 'fake.png', { type: 'image/png' })]);
+    waiting[1]!(400, { error: 'fake.png is not a PNG, JPEG, GIF or WebP image.' });
+    await flush();
+    expect(chipNames()).toEqual([]);
+    expect(error()).toBe('fake.png is not a PNG, JPEG, GIF or WebP image.');
+
+    pick(Array.from({ length: 11 }, (_, index) => new File(['c'], `c${index}.txt`)));
+    expect(uploads()).toHaveLength(12);
+    expect(error()).toBe('A message takes at most 10 files.');
+    waiting.slice(2).forEach((answer, index) => answer(200, { path: `C:\\Temp\\c${index}.txt`, image: false }));
+    await flush();
+    expect(chipNames()).toHaveLength(10);
+    first.page.close();
+
+    // A reload shows the work item's chips again; another work item has none.
+    const second = start();
+
+    expect(chipNames().map(([name]) => name)).toEqual(Array.from({ length: 10 }, (_, index) => `c${index}.txt`));
+    second.source.emit('hello', { key: 'pk', groups: [], scope: { ...scope, workItemId: 2, scopeGen: 4 }, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    expect(chipNames()).toEqual([]);
+    second.page.close();
+  });
+
+  it('attaches files pasted without text and dropped from the computer, and none for a session the page cannot talk to', async () => {
+    const { page, source } = start();
+    const composer = root.querySelector<HTMLElement>('#composer')!;
+    const input = composer.querySelector('textarea')!;
+    const file = new File(['p'], 'image.png', { type: 'image/png' });
+    const pasted = carrying('paste', 'clipboardData', [file]);
+
+    input.dispatchEvent(pasted);
+    expect(pasted.defaultPrevented).toBe(true);
+    expect(uploads()).toHaveLength(1);
+
+    // Text copied with a picture, as from a web page, pastes as text.
+    const withText = carrying('paste', 'clipboardData', [file], ['text/plain', 'text/html', 'Files']);
+
+    input.dispatchEvent(withText);
+    expect(withText.defaultPrevented).toBe(false);
+    expect(uploads()).toHaveLength(1);
+
+    const over = carrying('dragover', 'dataTransfer', []);
+
+    root.querySelector('#panel')!.dispatchEvent(over);
+    expect(over.defaultPrevented).toBe(true);
+    expect(composer.classList.contains('drop-target')).toBe(true);
+
+    const dropped = carrying('drop', 'dataTransfer', [new File(['d'], 'report.pdf', { type: 'application/pdf' })]);
+
+    root.querySelector('#panel')!.dispatchEvent(dropped);
+    expect(dropped.defaultPrevented).toBe(true);
+    expect(composer.classList.contains('drop-target')).toBe(false);
+    expect(uploads().map((call) => call.url)).toEqual(['/v1/conversation/upload?window=pk&scopeGen=3&name=image.png', '/v1/conversation/upload?window=pk&scopeGen=3&name=report.pdf']);
+
+    // A session the page cannot talk to takes no file, and a drop still does not open the file in the tab.
+    source.emit('session', { session: session({ conversation: 'read-only', reason: 'The session is unobserved: sessions.installHooks is off.' }) });
+    expect(composer.querySelector<HTMLButtonElement>('button.attach')!.disabled).toBe(true);
+
+    const refused = carrying('drop', 'dataTransfer', [file]);
+
+    root.querySelector('#panel')!.dispatchEvent(refused);
+    expect(refused.defaultPrevented).toBe(true);
+    expect(uploads()).toHaveLength(2);
+    // Text dragged within the page is no file drop.
+    const text = carrying('drop', 'dataTransfer', [], ['text/plain']);
+
+    root.querySelector('#panel')!.dispatchEvent(text);
+    expect(text.defaultPrevented).toBe(false);
+    page.close();
+  });
+});
+
 describe('the page in use', () => {
   let posts: Array<{ url: string; body: Record<string, unknown> }>;
   let root: HTMLElement;

@@ -26,6 +26,12 @@ export const WIDE_QUERY = '(min-width: 1200px)';
 const LAYOUT = 'switchboard.layout';
 /** Where the page keeps each work item's draft, over a reload. */
 const DRAFTS = 'switchboard.drafts';
+/** Where the page keeps each work item's attached files, over a reload. */
+const ATTACHMENTS = 'switchboard.attachments';
+/** The largest file the composer attaches, the hub's limit and the Conversation view's for a pasted image. */
+export const MAX_ATTACH_BYTES = 10 * 1024 * 1024;
+/** The most files one message carries. */
+export const MAX_ATTACHMENTS = 10;
 
 export interface PageDeps {
   fetch: typeof fetch;
@@ -106,7 +112,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   composerHost.innerHTML =
     '<div class="composer-sent" role="status" hidden><span class="codicon codicon-check" aria-hidden="true"></span><span>Sent. Its reply shows on the Conversation tab.</span></div>' +
     '<div class="composer-error" role="alert" hidden><span class="composer-error-text"></span><button class="dismiss" type="button" aria-label="Dismiss"><span class="codicon codicon-close"></span></button></div>' +
-    '<div class="composer"><div class="glass composer-menu" role="listbox" hidden></div><div class="composer-input"><div class="live-mirror"><span class="mirror-text" aria-hidden="true"></span><span class="live-words" aria-live="polite" hidden></span></div><textarea rows="1" aria-label="Message"></textarea></div><div class="composer-footer"><div class="composer-controls">' +
+    '<div class="composer"><div class="glass composer-menu" role="listbox" hidden></div><div class="attachments" role="list" aria-label="Attached files" hidden></div><div class="composer-input"><div class="live-mirror"><span class="mirror-text" aria-hidden="true"></span><span class="live-words" aria-live="polite" hidden></span></div><textarea rows="1" aria-label="Message"></textarea></div><div class="composer-footer"><div class="composer-controls">' +
+    '<button class="composer-tool attach" type="button" title="Attach files…" aria-label="Attach files"><span class="codicon codicon-add" aria-hidden="true"></span></button><input class="attach-input" type="file" multiple hidden tabindex="-1" aria-hidden="true">' +
     '<button class="composer-tool slash" type="button" title="Show slash commands (/)" aria-label="Show slash commands"><span class="slash-glyph">/</span></button></div><div class="voice-controls"></div>' +
     '<span class="composer-mic"></span><button class="send" type="button" title="Send (Enter)" aria-label="Send" disabled><span class="codicon codicon-arrow-up"></span></button></div></div>';
 
@@ -119,6 +126,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const liveWords = composerHost.querySelector<HTMLElement>('.live-words')!;
   const mirror = composerHost.querySelector<HTMLElement>('.live-mirror')!;
   const mirrorText = composerHost.querySelector<HTMLElement>('.mirror-text')!;
+  const attachButton = composerHost.querySelector<HTMLButtonElement>('button.attach')!;
+  const attachInput = composerHost.querySelector<HTMLInputElement>('input.attach-input')!;
+  const chips = composerHost.querySelector<HTMLElement>('.attachments')!;
+  // Document listeners end with the page.
+  const listening = new AbortController();
   // The draft the hub last sent for dictation, per session, so a newer one replaces it in the box but never text typed over it, and one that came
   // while a message was being sent, which fills the box once the send answered.
   const hubDrafts = new Map<string, string>();
@@ -181,6 +193,159 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     localStorage.setItem(DRAFTS, JSON.stringify(all));
   };
+
+  // ---- Attached files (architecture.md § Web page) ----
+  // Each work item's files, as chips above the box until its next message names them; `path` is null while the hub takes the file.
+  type Attached = { id: number; name: string; path: string | null; image: boolean; abort: AbortController | null };
+  const attached = new Map<number, Attached[]>();
+  let attachedId = 0;
+  const keptAttachments = (): Record<string, Array<{ name: string; path: string; image: boolean }>> => {
+    try {
+      const kept = JSON.parse(localStorage.getItem(ATTACHMENTS) ?? '{}') as unknown;
+
+      return typeof kept === 'object' && kept !== null ? (kept as Record<string, Array<{ name: string; path: string; image: boolean }>>) : {};
+    } catch {
+      return {};
+    }
+  };
+  const attachedTo = (workItemId: number): Attached[] => {
+    let list = attached.get(workItemId);
+
+    if (list === undefined) {
+      const kept = keptAttachments()[workItemId];
+
+      list = (Array.isArray(kept) ? kept : [])
+        .filter((one) => typeof one?.name === 'string' && typeof one.path === 'string')
+        .map((one) => ({ id: ++attachedId, name: one.name, path: one.path, image: one.image === true, abort: null }));
+      attached.set(workItemId, list);
+    }
+
+    return list;
+  };
+  const keepAttachments = (workItemId: number): void => {
+    const all = keptAttachments();
+    const ready = attachedTo(workItemId).flatMap((one) => (one.path === null ? [] : [{ name: one.name, path: one.path, image: one.image }]));
+
+    if (ready.length === 0) {
+      delete all[workItemId];
+    } else {
+      all[workItemId] = ready;
+    }
+
+    localStorage.setItem(ATTACHMENTS, JSON.stringify(all));
+  };
+  const shownAttachments = (): Attached[] => (draftOf === null ? [] : attachedTo(draftOf));
+  const uploading = (): boolean => shownAttachments().some((one) => one.path === null);
+  const drawAttachments = (): void => {
+    const list = shownAttachments();
+
+    chips.hidden = list.length === 0;
+    chips.innerHTML = list
+      .map((one) => {
+        const icon = one.path === null ? 'loading codicon-modifier-spin' : one.image ? 'file-media' : 'file';
+
+        return (
+          `<span class="attachment" role="listitem" data-attachment="${one.id}" title="${escape(one.path === null ? `Attaching ${one.name}…` : one.name)}">` +
+          `<span class="codicon codicon-${icon}" aria-hidden="true"></span><span class="attachment-name">${escape(one.name)}</span>` +
+          `<button type="button" class="attachment-remove" data-remove="${one.id}" aria-label="Remove ${escape(one.name)}"><span class="codicon codicon-close" aria-hidden="true"></span></button></span>`
+        );
+      })
+      .join('');
+  };
+  /** Whether the composer takes files now: a conversation shown whose session can take a message. */
+  const canAttach = (): boolean => draftOf !== null && state.key !== null && state.scope !== null && state.connected && state.session?.conversation === 'full';
+  /** Sends one file to the hub for the work item it was attached to, and puts its path on its chip, or drops the chip and says why. */
+  const upload = async (workItemId: number, key: string, scopeGen: number, file: File, entry: Attached): Promise<void> => {
+    let error: string | null = null;
+
+    try {
+      const response = await deps.fetch(`/v1/conversation/upload?window=${encodeURIComponent(key)}&scopeGen=${scopeGen}&name=${encodeURIComponent(entry.name)}`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': file.type === '' ? 'application/octet-stream' : file.type },
+        body: file,
+        signal: entry.abort!.signal,
+      });
+      const body = (await response.json().catch(() => ({}))) as { path?: unknown; image?: unknown; error?: unknown };
+
+      expired ||= response.status === 401;
+
+      if (response.ok && typeof body.path === 'string') {
+        entry.path = body.path;
+        entry.image = body.image === true;
+      } else {
+        error = String(body.error ?? `${entry.name} was not attached (status ${response.status}).`);
+      }
+    } catch (failure) {
+      // A chip removed while its file was sent ends its request.
+      if (entry.abort?.signal.aborted === true) {
+        return;
+      }
+
+      error = `${entry.name} was not attached: Switchboard did not answer (${String(failure)}).`;
+    }
+
+    entry.abort = null;
+
+    const list = attachedTo(workItemId);
+
+    if (!list.includes(entry)) {
+      return;
+    }
+
+    if (error !== null) {
+      list.splice(list.indexOf(entry), 1);
+
+      if (workItemId === draftOf) {
+        showError(error);
+      } else {
+        errors.set(workItemId, error);
+      }
+    }
+
+    keepAttachments(workItemId);
+
+    if (workItemId === draftOf) {
+      drawAttachments();
+      refresh();
+    }
+  };
+  /** Attaches files picked, pasted or dropped to the shown work item: each sent to the hub, at most 10 MB and 10 files to a message. */
+  const attachFiles = (files: readonly File[]): void => {
+    if (!canAttach() || files.length === 0) {
+      return;
+    }
+
+    const workItemId = draftOf!;
+    const list = attachedTo(workItemId);
+    const refused: string[] = [];
+
+    for (const file of files) {
+      const name = file.name === '' ? 'Pasted file' : file.name;
+
+      if (list.length >= MAX_ATTACHMENTS) {
+        refused.push(`A message takes at most ${MAX_ATTACHMENTS} files.`);
+        break;
+      }
+
+      if (file.size === 0 || file.size > MAX_ATTACH_BYTES) {
+        refused.push(file.size === 0 ? `${name} is empty.` : `${name} is larger than 10 MB.`);
+        continue;
+      }
+
+      const entry: Attached = { id: ++attachedId, name, path: null, image: file.type.startsWith('image/'), abort: new AbortController() };
+
+      list.push(entry);
+      void upload(workItemId, state.key!, state.scope!.scopeGen, file, entry);
+    }
+
+    if (refused.length > 0) {
+      showError(refused.join(' '));
+    }
+
+    drawAttachments();
+    refresh();
+  };
   const sentNote = composerHost.querySelector<HTMLElement>('.composer-sent')!;
   let sentTimer: ReturnType<typeof setTimeout> | undefined;
   /** A message sent from another tab leaves that tab shown, with a short line that it went. */
@@ -228,7 +393,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       mirror.scrollTop = input.scrollTop;
     }
   };
-  const canSend = (): boolean => state.connected && state.session?.conversation === 'full' && !sending && input.value.trim() !== '';
+  const canSend = (): boolean => state.connected && state.session?.conversation === 'full' && !sending && !uploading() && (input.value.trim() !== '' || shownAttachments().length > 0);
   const refresh = (): void => {
     send.disabled = !canSend();
   };
@@ -312,7 +477,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
-    const text = input.value;
+    // Attached files go as mentions after the text, as the Conversation view puts a picked file's mention in the box.
+    const files = shownAttachments().slice();
+    const typed = input.value;
+    const mentions = files.flatMap((one) => mentionOf(one.path!.replaceAll('\\', '/')) ?? []);
+    const text = mentions.length === 0 ? typed : typed.trim() === '' ? mentions.join(' ') : `${typed.replace(/\s+$/, '')} ${mentions.join(' ')}`;
     const asCommand = chosen !== null && (text.trim() === chosen || text.startsWith(`${chosen} `)) && !text.trim().includes('\n');
     const target = { sessionId: state.session.id, launch: state.session.launch };
     const from = draftOf;
@@ -358,9 +527,13 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       if (from !== null) {
         delete all[from];
         localStorage.setItem(DRAFTS, JSON.stringify(all));
+        // Files attached while it was sent stay for the next message.
+        attached.set(from, attachedTo(from).filter((one) => !files.includes(one)));
+        keepAttachments(from);
       }
 
       keepDraft();
+      drawAttachments();
     } else if (late !== undefined) {
       // Refused before its send answered: the text stays where it was typed, with why.
       unsent.delete(id!);
@@ -368,7 +541,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       if (from === draftOf) {
         showError(late.error);
       } else {
-        giveBack(from, text, late.error);
+        // Its files stay attached, so only the typed text goes back.
+        giveBack(from, typed, late.error);
       }
     } else if (from === draftOf) {
       showError(String(answer.body['error'] ?? `Not sent (status ${answer.status}).`));
@@ -485,6 +659,86 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   });
   send.addEventListener('click', () => void submit());
   errorBox.querySelector('button.dismiss')!.addEventListener('click', () => showError(null));
+  // The + button opens the browser's file picker, which a phone offers its camera and photos in too.
+  attachButton.addEventListener('click', () => {
+    if (canAttach()) {
+      attachInput.click();
+    }
+  });
+  attachInput.addEventListener('change', () => {
+    attachFiles([...(attachInput.files ?? [])]);
+    attachInput.value = '';
+  });
+  chips.addEventListener('click', (event) => {
+    const id = Number((event.target as HTMLElement).closest<HTMLElement>('[data-remove]')?.dataset['remove'] ?? NaN);
+    const list = shownAttachments();
+    const entry = list.find((one) => one.id === id);
+
+    if (entry === undefined || draftOf === null) {
+      return;
+    }
+
+    entry.abort?.abort();
+    list.splice(list.indexOf(entry), 1);
+    keepAttachments(draftOf);
+    drawAttachments();
+    refresh();
+    input.focus();
+  });
+  // Files pasted with no text beside them are attached; text pasted with a picture, as from a web page, stays text, as in the Conversation view.
+  input.addEventListener('paste', (event) => {
+    const data = event.clipboardData;
+    const files = [...(data?.files ?? [])];
+
+    if (data === null || files.length === 0 || [...data.types].includes('text/plain')) {
+      return;
+    }
+
+    event.preventDefault();
+    attachFiles(files);
+  });
+  // Files dragged onto the page from the computer are attached; a drop the composer cannot take is still kept from opening the file in the tab.
+  const carriesFiles = (event: DragEvent): boolean => [...(event.dataTransfer?.types ?? [])].includes('Files');
+
+  document.addEventListener(
+    'dragover',
+    (event) => {
+      if (!carriesFiles(event)) {
+        return;
+      }
+
+      event.preventDefault();
+      composerHost.classList.toggle('drop-target', canAttach());
+
+      if (event.dataTransfer !== null) {
+        event.dataTransfer.dropEffect = canAttach() ? 'copy' : 'none';
+      }
+    },
+    { signal: listening.signal },
+  );
+  document.addEventListener(
+    'dragleave',
+    (event) => {
+      if (event.relatedTarget === null) {
+        composerHost.classList.remove('drop-target');
+      }
+    },
+    { signal: listening.signal },
+  );
+  document.addEventListener(
+    'drop',
+    (event) => {
+      composerHost.classList.remove('drop-target');
+
+      if (!carriesFiles(event)) {
+        return;
+      }
+
+      event.preventDefault();
+      attachFiles([...(event.dataTransfer?.files ?? [])]);
+    },
+    { signal: listening.signal },
+  );
   composerHost.querySelector('button.slash')!.addEventListener('click', () => {
     if (input.value === '' && !input.disabled) {
       input.value = '/';
@@ -544,6 +798,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       walk = null;
       showError(id === null ? null : (errors.get(id) ?? null));
       closeMenu();
+      drawAttachments();
 
       if (id !== null) {
         errors.delete(id);
@@ -555,6 +810,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // On every tab, so the operator can type and dictate from the status or the artifacts too.
     composerHost.hidden = state.scope === null;
     input.disabled = !full;
+    attachButton.disabled = !full;
     input.placeholder = full
       ? `Message ${shortTitle(selectedEntry(state)?.title ?? state.scope?.title ?? '')}…`
       : state.session?.state === 'ended' && state.session.conversation !== 'none'
@@ -1626,6 +1882,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     close: () => {
       clearInterval(seenTimer);
       clearInterval(promptTimer);
+      listening.abort();
       source.close();
     },
   };
