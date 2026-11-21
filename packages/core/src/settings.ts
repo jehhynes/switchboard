@@ -137,6 +137,8 @@ export interface Persona {
 /** A persona's longest name and personality. */
 export const PERSONA_NAME_MAX = 40;
 export const PERSONALITY_MAX = 600;
+/** The longest name an alert calls the operator by. */
+export const OPERATOR_NAME_MAX = 40;
 
 /** How dictation listens while the voice plays (architecture.md § Dictation). */
 export const DUPLEX_MODES = ['auto', 'full', 'half'] as const;
@@ -188,6 +190,14 @@ export interface VoiceSettings {
   personas: Persona[];
   /** A persona ID by playbook name, which that playbook's sessions take unless one is pinned. */
   playbookPersonas: Record<string, string>;
+  /** Spoken alerts (architecture.md § Spoken alerts): the voice calls the operator when a session that is not the voice target needs them. */
+  spokenAlerts: boolean;
+  /** Which events alert: a turn finished, a question waits, a permission prompt waits. */
+  alertOn: { finished: boolean; question: boolean; permission: boolean };
+  /** How long the voice listens for an answer after an alert, in seconds. */
+  alertAnswerSeconds: number;
+  /** The name an alert calls the operator by, as in "Hey Alex?"; empty says only "Hey?". */
+  operatorName: string;
 }
 
 export interface Settings {
@@ -206,7 +216,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sources: {},
   schedules: {},
   dock: { openVSCode: 'always', openTerminal: 'vscode' },
-  voice: { enabled: false, voice: 'marin', style: 'none', speed: 1, expressive: false, expandReplies: false, awayMinutes: 2, needsYouSound: true, outputDevice: null, micIdleMinutes: 10, endPauseMs: 3000, inputDevice: null, halfDuplexTailMs: 800, duplex: { local: 'auto', remote: 'auto' }, matchThreshold: 0.6, pitchLowFactor: 1.22, pitchMinLowShare: 0.2, roomHold: true, roomHoldSeconds: 60, personas: [], playbookPersonas: {} },
+  voice: { enabled: false, voice: 'marin', style: 'none', speed: 1, expressive: false, expandReplies: false, awayMinutes: 2, needsYouSound: true, outputDevice: null, micIdleMinutes: 10, endPauseMs: 3000, inputDevice: null, halfDuplexTailMs: 800, duplex: { local: 'auto', remote: 'auto' }, matchThreshold: 0.6, pitchLowFactor: 1.22, pitchMinLowShare: 0.2, roomHold: true, roomHoldSeconds: 60, personas: [], playbookPersonas: {}, spokenAlerts: true, alertOn: { finished: true, question: true, permission: true }, alertAnswerSeconds: 10, operatorName: '' },
 };
 
 /** A source's or schedule's name: it keys tickets in the store and History. */
@@ -483,9 +493,17 @@ export function parseSettings(text: string): SettingsResult {
   };
 
   const voiceIn = read.section(root, 'voice', 'voice');
-  read.unknown(voiceIn, ['enabled', 'voice', 'style', 'speed', 'expressive', 'expandReplies', 'awayMinutes', 'needsYouSound', 'outputDevice', 'micIdleMinutes', 'endPauseMs', 'inputDevice', 'halfDuplexTailMs', 'duplex', 'matchThreshold', 'pitchLowFactor', 'pitchMinLowShare', 'roomHold', 'roomHoldSeconds', 'personas', 'playbookPersonas'], 'voice');
+  read.unknown(voiceIn, ['enabled', 'voice', 'style', 'speed', 'expressive', 'expandReplies', 'awayMinutes', 'needsYouSound', 'outputDevice', 'micIdleMinutes', 'endPauseMs', 'inputDevice', 'halfDuplexTailMs', 'duplex', 'matchThreshold', 'pitchLowFactor', 'pitchMinLowShare', 'roomHold', 'roomHoldSeconds', 'personas', 'playbookPersonas', 'spokenAlerts', 'alertOn', 'alertAnswerSeconds', 'operatorName'], 'voice');
   const duplexIn = read.section(voiceIn, 'duplex', 'voice.duplex');
   read.unknown(duplexIn, ['local', 'remote'], 'voice.duplex');
+  const alertOnIn = read.section(voiceIn, 'alertOn', 'voice.alertOn');
+  read.unknown(alertOnIn, ['finished', 'question', 'permission'], 'voice.alertOn');
+  const operatorName = read.string(voiceIn, 'operatorName', 'voice', defaults.voice.operatorName).trim();
+
+  if (operatorName.length > OPERATOR_NAME_MAX) {
+    read.errors.push(`voice.operatorName must be at most ${OPERATOR_NAME_MAX} characters.`);
+  }
+
   const voice: VoiceSettings = {
     enabled: read.boolean(voiceIn, 'enabled', 'voice', defaults.voice.enabled),
     voice: read.choice(voiceIn, 'voice', 'voice', TTS_VOICES, defaults.voice.voice),
@@ -511,6 +529,14 @@ export function parseSettings(text: string): SettingsResult {
     roomHoldSeconds: read.integer(voiceIn, 'roomHoldSeconds', 'voice', defaults.voice.roomHoldSeconds, 1, 3600),
     personas: [],
     playbookPersonas: {},
+    spokenAlerts: read.boolean(voiceIn, 'spokenAlerts', 'voice', defaults.voice.spokenAlerts),
+    alertOn: {
+      finished: read.boolean(alertOnIn, 'finished', 'voice.alertOn', defaults.voice.alertOn.finished),
+      question: read.boolean(alertOnIn, 'question', 'voice.alertOn', defaults.voice.alertOn.question),
+      permission: read.boolean(alertOnIn, 'permission', 'voice.alertOn', defaults.voice.alertOn.permission),
+    },
+    alertAnswerSeconds: read.integer(voiceIn, 'alertAnswerSeconds', 'voice', defaults.voice.alertAnswerSeconds, 3, 60),
+    operatorName,
   };
 
   voice.personas = parsePersonas(read, voiceIn['personas'], voice);
