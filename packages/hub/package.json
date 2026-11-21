@@ -15,6 +15,10 @@
       "types": "./dist/rows.d.ts",
       "default": "./dist/rows.js"
     },
+    "./history": {
+      "types": "./dist/history.d.ts",
+      "default": "./dist/history.js"
+    },
     "./snapshotWorker": {
       "types": "./dist/snapshotWorkerMain.d.ts",
       "default": "./dist/snapshotWorkerMain.js"

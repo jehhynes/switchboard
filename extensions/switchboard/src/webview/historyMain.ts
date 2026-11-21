@@ -1,5 +1,5 @@
 import type { TicketHistory } from '@switchboard/core';
-import { historyView } from './historyModel.js';
+import { historyView } from '@switchboard/hub/history';
 import { EMPTY_UI, renderHistory } from './historyRender.js';
 import { morph } from './morph.js';
 import type { HistoryUi } from './historyRender.js';

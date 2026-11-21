@@ -1,5 +1,5 @@
-import { CATEGORIES, durationText, timeText } from './historyModel.js';
-import type { Category, Entry, EntryLink, HistoryView, Section } from './historyModel.js';
+import { CATEGORIES, durationText, timeText } from '@switchboard/hub/history';
+import type { Category, Entry, EntryLink, HistoryView, Section } from '@switchboard/hub/history';
 
 /** Text safe inside HTML text and quoted attributes. */
 function escape(text: string): string {

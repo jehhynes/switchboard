@@ -1,6 +1,8 @@
+// The History view's model (PRD R59), which the extension's History tab and the web page's History both draw. Imports only types and
+// browser-safe modules, so the History webview bundles it through `@switchboard/hub/history`.
 import type { HistoryChange, HistoryEvent, Session, TicketHistory, WorkItemStatus } from '@switchboard/core';
 import { adhocLabel, DONE_WORDS, PERMISSION_PROMPT, START_PROMPT } from '@switchboard/core/group';
-import { ticketKey } from '@switchboard/hub/rows';
+import { ticketKey } from './rows.js';
 
 /** The filter chips of History (PRD R59). */
 export type Category = 'you' | 'session' | 'report' | 'triage' | 'ticket';
