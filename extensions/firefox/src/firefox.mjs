@@ -1,7 +1,7 @@
-/** The add-on ID, which Firefox needs for `storage` and which keeps one installed copy across reinstalls. */
+/** The add-on ID, which keeps one installed copy across reinstalls. */
 export const GECKO_ID = 'switchboard@switchboard';
 
-/** The first Firefox with `tabGroups` and `data_collection_permissions`. */
+/** The first Firefox with `data_collection_permissions`. */
 export const MIN_VERSION = '140.0';
 
 /** Builds are numbered by the minutes since this time, so a build in a later minute has a higher version. */
@@ -10,12 +10,15 @@ const BUILD_EPOCH = Date.UTC(2026, 0, 1);
 /** A part of a Firefox version: at most nine digits, with no leading zero. */
 const VERSION_PART = /^(0|[1-9]\d{0,8})$/;
 
+/** The permissions only the Chrome pane uses: `storage` for its state and pairing, `tabs` to read its window's tab URLs. */
+const PANE_PERMISSIONS = ['storage', 'tabs'];
+
 const CHROME_FONT = "url('chrome-extension://__MSG_@@extension_id__/codicon.ttf')";
 
 /**
  * The Chrome manifest changed for Firefox, which runs a background script instead of a service worker, needs an add-on ID, and
  * matches nothing with a match pattern that has a port, so the hub's host permission covers every port of its host (mechanics M52). The Chrome
- * pane's `key` and `externally_connectable` are left out: Firefox has neither a key-derived ID nor messages from web pages, so it has no pane.
+ * pane's `key`, `externally_connectable` and permissions are left out: Firefox has neither a key-derived ID nor messages from web pages, so it has no pane.
  * The version adds the build number to Chrome's, because addons.mozilla.org signs each version once.
  * @param {Record<string, unknown>} chrome
  * @param {number} build
@@ -44,10 +47,12 @@ export function firefoxManifest(chrome, build) {
     throw new Error('The Chrome manifest has no host permissions.');
   }
 
-  const { key: _key, externally_connectable: _pages, ...kept } = chrome;
+  const { key: _key, externally_connectable: _pages, permissions, ...kept } = chrome;
+  const firefoxPermissions = Array.isArray(permissions) ? permissions.filter((permission) => !PANE_PERMISSIONS.includes(permission)) : [];
 
   return {
     ...kept,
+    ...(firefoxPermissions.length === 0 ? {} : { permissions: firefoxPermissions }),
     version: `${chrome.version}.${build}`,
     background: { scripts: [background.service_worker] },
     host_permissions: hosts.map((host) => host.replace(/^([a-z]+:\/\/[^/:]+):\d+\//, '$1/')),

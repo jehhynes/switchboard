@@ -327,7 +327,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
   - With the network on and no Zoho sign-in, a marked `desk.zoho.com/agent/acme/acme-inc/tickets/details/<id>` link was redirected to `desk.zoho.com/support/login.sas?serviceurl=…`, so a kind read from the tab's address no longer matched the next Zoho link, and the operator saw a second Zoho tab in their Chrome. With the kind recorded in `chrome.storage.session`, a second link opened after `ServiceWorker.stopAllWorkers` replaced the first tab, and session storage held only the new tab's `placedKind:<id>` key.
   - A link opened in the first moments after the extension was installed, before its worker had started, was not placed.
 - **Not verified:** a link from the dock through Windows' URL handler to Chrome; the operator's branded Chrome, which no longer accepts `--load-extension` (M23); how GitHub, Zoho Desk and Forum treat the marks when the extension is missing; whether Chrome warns before an extension closes a tab with unsaved changes; where Zoho Desk takes a signed-in agent's link; Duplicate, Reopen closed tab or session restore of a tab whose current entry still has the bookmark, as after Back to it, which would be placed again.
-- **Current use:** the Switchboard tab group (PRD R74; architecture.md § Browser extension).
+- **Current use:** none. The browser extensions no longer group or replace the dock's tabs, and the dock no longer marks its links (PRD R74); the Chrome pane (R113) keeps a work item's links together.
 
 ## M29. Opening a new Claude session in a tab without changing the preferred location
 
