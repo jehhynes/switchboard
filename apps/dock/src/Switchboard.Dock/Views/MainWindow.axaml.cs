@@ -1499,14 +1499,20 @@ public sealed partial class MainWindow : Window
             opens.Add(Switcher.IsTerminal(command) ? Item(command.Label, () => OpenInTerminal(row), command.Glyph) : Item(command.Label, () => Run(row, command.Command), command.Glyph));
         }
 
-        // The ticket, then its links, such as its pull request (PRD R52), open in the browser.
-        foreach (var (label, url) in (row.Url == "" ? [] : new[] { ("Open ticket", row.Url) }).Concat(row.Links.Select((link) => ($"Open {link.Label}", link.Url))))
+        // The ticket, then its links, such as its pull request (PRD R52), open in the browser. A link's label can be free text a session
+        // reported, so a long one is cut, whole in its tooltip, and more than two links go in an Open link submenu.
+        if (row.Url != "")
         {
-            opens.Add(Item(label, () =>
-            {
-                model.Status = actions.OpenUrl(url);
-                return Task.CompletedTask;
-            }, LinkGlyph));
+            opens.Add(LinkItem("Open ticket", row.Url, LinkGlyph));
+        }
+
+        if (row.Links.Count > MenuLinks)
+        {
+            opens.Add(new MenuItem { Header = "Open link", Icon = Glyph(LinkGlyph), ItemsSource = row.Links.Select((link) => LinkItem(link.Label, link.Url)).ToList() });
+        }
+        else
+        {
+            opens.AddRange(row.Links.Select((link) => LinkItem($"Open {link.Label}", link.Url, LinkGlyph)));
         }
 
         // Controls that ask first, such as Delete, come last, apart from the rest.
@@ -1528,6 +1534,29 @@ public sealed partial class MainWindow : Window
         }
 
         return items;
+    }
+
+    /// <summary>The most links the row menu lists by themselves; more go in its Open link submenu.</summary>
+    const int MenuLinks = 2;
+
+    /// <summary>The longest menu item label for a link; a longer one is cut with an ellipsis and shown whole in its tooltip.</summary>
+    internal const int LinkLabelMax = 48;
+
+    /// <summary>A menu item that opens a URL in the browser.</summary>
+    MenuItem LinkItem(string label, string url, string? glyph = null)
+    {
+        var item = Item(label.Length > LinkLabelMax ? label[..(LinkLabelMax - 1)].TrimEnd() + "…" : label, () =>
+        {
+            model.Status = actions.OpenUrl(url);
+            return Task.CompletedTask;
+        }, glyph);
+
+        if (label.Length > LinkLabelMax)
+        {
+            ToolTip.SetTip(item, label);
+        }
+
+        return item;
     }
 
     /// <summary>A hub control's item: Snooze… opens its dialog; any other posts its action, asking for its text first when it has an input.</summary>

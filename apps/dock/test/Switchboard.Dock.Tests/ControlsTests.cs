@@ -1297,6 +1297,34 @@ public sealed class ControlsTests
     }
 
     [AvaloniaFact]
+    public void MenuOf_LongLinkAndMoreThanTwoLinks_CutsTheLabelAndGroupsTheLinks()
+    {
+        var (window, _) = Open();
+        var text = "the customer's reply drafted in the shared folder for review before sending";
+        var draft = new DockLink(text, "https://example.test/draft");
+        var one = window.MenuOf(Fixtures.Row("item:8") with { Links = [draft] }).OfType<MenuItem>().Single((item) => ((string)item.Header!).StartsWith("Open the", StringComparison.Ordinal));
+
+        Assert.Equal(MainWindow.LinkLabelMax, ((string)one.Header!).Length);
+        Assert.EndsWith("…", (string)one.Header!);
+        Assert.Equal($"Open {text}", ToolTip.GetTip(one));
+
+        var two = window.MenuOf(Fixtures.Row("item:8") with { Links = [new DockLink("PR #1", "https://example.test/1"), new DockLink("gh 2", "https://example.test/2")] });
+        Assert.Equal(["Open ticket", "Open PR #1", "Open gh 2"], two.Select((item) => item is MenuItem named ? (string)named.Header! : "").SkipWhile((header) => header != "Open ticket").TakeWhile((header) => header != ""));
+
+        var three = window.MenuOf(Fixtures.Row("item:8") with { Links = [new DockLink("PR #1", "https://example.test/1"), new DockLink("gh 2", "https://example.test/2"), draft] });
+        var submenu = three.OfType<MenuItem>().Single((item) => (string?)item.Header == "Open link");
+        var items = submenu.ItemsSource!.Cast<MenuItem>().ToList();
+
+        Assert.Equal(["Open ticket", "Open link"], three.Select((item) => item is MenuItem named ? (string)named.Header! : "").SkipWhile((header) => header != "Open ticket").TakeWhile((header) => header != ""));
+        Assert.Equal(["PR #1", "gh 2"], items.Take(2).Select((item) => (string)item.Header!));
+        Assert.Equal(text, ToolTip.GetTip(items[2]));
+
+        items[1].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(["https://example.test/2"], actions.Urls);
+    }
+
+    [AvaloniaFact]
     public void MenuOf_AnswerInTerminalOpeningAnotherTerminal_KeepsOpenInTerminal()
     {
         var review = ReviewQuestion();
