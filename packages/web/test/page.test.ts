@@ -1122,7 +1122,8 @@ describe('the page in use', () => {
     const mermaid = {
       initialize: vi.fn(),
       run: vi.fn(async ({ nodes }: { nodes: ArrayLike<HTMLElement> }) => {
-        for (const node of Array.from(nodes)) {
+        // As Mermaid does, a block already drawn is skipped.
+        for (const node of Array.from(nodes).filter((one) => !one.hasAttribute('data-processed'))) {
           drawn.push(node.textContent ?? '');
           node.setAttribute('data-processed', 'true');
           node.textContent = 'svg';
@@ -1159,6 +1160,42 @@ describe('the page in use', () => {
 
     // A closed page stops listening.
     expect(changes).toEqual([]);
+    vi.unstubAllGlobals();
+  });
+
+  it('draws a diagram again when its source changes, never leaving the old drawing over the new source', async () => {
+    const drawn: string[] = [];
+    const mermaid = {
+      initialize: vi.fn(),
+      run: vi.fn(async ({ nodes }: { nodes: ArrayLike<HTMLElement> }) => {
+        // As Mermaid does, a block already drawn is skipped.
+        for (const node of Array.from(nodes).filter((one) => !one.hasAttribute('data-processed'))) {
+          drawn.push(node.textContent ?? '');
+          node.setAttribute('data-processed', 'true');
+          node.textContent = `svg of ${node.textContent ?? ''}`;
+        }
+      }),
+    };
+
+    vi.stubGlobal('mermaid', mermaid);
+
+    const { page, source } = start(async () => true);
+    const status = (markdown: string) => ({ id: 'st-r1', sessionId: 's', at: 5_000, markdown, fallback: false, unread: false });
+
+    hello(source);
+    click('[data-tab="status"]');
+    await flush();
+    expect(drawn).toEqual(['graph TD; A-->B;\n']);
+    source.emit('status', { status: status('**Working** on it\n\n```mermaid\ngraph TD; A-->C;\n```') });
+    await flush();
+    expect(drawn).toEqual(['graph TD; A-->B;\n', 'graph TD; A-->C;\n']);
+    expect([...root.querySelectorAll('pre.mermaid')].map((node) => node.textContent)).toEqual(['svg of graph TD; A-->C;\n']);
+    // The same source again keeps its drawing.
+    source.emit('status', { status: { ...status('**Working** on it\n\n```mermaid\ngraph TD; A-->C;\n```'), at: 6_000 } });
+    await flush();
+    expect(drawn).toHaveLength(2);
+    expect(root.querySelector('pre.mermaid')!.textContent).toBe('svg of graph TD; A-->C;\n');
+    page.close();
     vi.unstubAllGlobals();
   });
 

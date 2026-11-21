@@ -16,12 +16,14 @@ export function escape(text: string): string {
 
 const defaultFence = markdown.renderer.rules.fence!;
 
-// A Mermaid block becomes a diagram once Mermaid loads; every other block sits in a frame with its copy button.
+// A Mermaid block becomes a diagram once Mermaid loads; every other block sits in a frame with its copy button. Mermaid replaces the block's
+// contents with its drawing, so the block is keyed by its place and its source: a changed source is a new block, drawn afresh, never a
+// drawing left over its old source.
 markdown.renderer.rules.fence = (tokens, index, options, env, self) => {
   const token = tokens[index]!;
 
   if (token.info.trim().split(/\s+/)[0] === 'mermaid') {
-    return `<pre class="mermaid">${escape(token.content)}</pre>`;
+    return `<pre class="mermaid" data-key="mermaid:${index}:${escape(token.content)}">${escape(token.content)}</pre>`;
   }
 
   return `<div class="code-block">${copyButton('copy-code', 'Copy code')}${defaultFence(tokens, index, options, env, self)}</div>`;
