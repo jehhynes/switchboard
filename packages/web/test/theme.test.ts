@@ -86,10 +86,12 @@ describe('the theme copy', () => {
     expect(css).toMatch(/--sb-tab-strip: color-mix\(in srgb, var\(--sb-tab-surface\), #000 var\(--sb-tab-shade\)\)/);
     expect(css).toMatch(/\.tab\.selected \{[^}]*background: var\(--sb-tab-surface\)/);
     expect(light).toContain('--sb-tab-shade:');
-    // The column's strip fills the header row's height from the top: its tabs stretch, nothing pushes them to the bottom.
-    expect(css).toMatch(/\.detail-head \{[^}]*min-height: 45px;[^}]*align-items: stretch;/);
-    expect(css).not.toMatch(/\.detail-head \{[^}]*align-items: flex-end/);
-    expect(css).toMatch(/\.detail-head \.tab \{[^}]*height: auto;/);
+    // The column's strip starts at its top with no band above, its tabs at their own height, the chosen tab's top edge one pixel down, in the accent.
+    expect(css).toMatch(/\.detail-head \{[^}]*align-items: flex-start;[^}]*padding-top: 1px;/);
+    expect(css).not.toMatch(/\.detail-head \{[^}]*min-height/);
+    expect(css).not.toMatch(/\.detail-head \.tab \{/);
+    expect(css).toMatch(/\.tab \{[^}]*height: 35px;[^}]*border-top: 1px solid transparent;/);
+    expect(css).toMatch(/\.tab\.selected \{[^}]*border-top-color: var\(--vscode-panelTitle-activeBorder\);/);
     // The console's typing border is drawn inside its own box, dimmed, on all four sides, above xterm.js's layers.
     expect(css).toMatch(/\.console \{[^}]*position: relative;[^}]*isolation: isolate;/);
     expect(css).toMatch(/\.console\.typing::after \{[^}]*inset: 0;[^}]*z-index: 50;[^}]*border: 1px solid color-mix\(in srgb, var\(--vscode-focusBorder\) 45%, transparent\);/);

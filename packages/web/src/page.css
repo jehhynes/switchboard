@@ -625,11 +625,11 @@ button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }
   #root.wide > .main { flex: 0 1 var(--chat-width, 940px); }
   #root.wide > .chat-sash { display: block; }
   #root.wide > .detail { display: flex; flex: 1 1 360px; flex-direction: column; min-width: 360px; background: var(--vscode-sideBar-background); border-left: 1px solid var(--vscode-panel-border); }
-  /* The column's tab strip is as tall as the conversation's header row beside it, its tabs filling it from the top, with no band above. */
-  .detail-head { flex: none; min-height: 45px; display: flex; align-items: stretch; border-bottom: 1px solid var(--vscode-panel-border); }
+  /* The column's tab strip starts at the column's top, with no band above, and its tabs keep their own height. One pixel of the strip above
+     them keeps the chosen tab's top edge off the window's top edge, which the window's frame can cover. */
+  .detail-head { flex: none; display: flex; align-items: flex-start; padding-top: 1px; border-bottom: 1px solid var(--vscode-panel-border); }
   .detail-head { background: var(--sb-tab-strip); }
   .detail-head .tabs { flex: 1; min-width: 0; border-bottom: none; }
-  .detail-head .tab { height: auto; min-height: 35px; }
   .detail .status-tab, .detail .artifact-list, .detail .artifact-doc { max-width: none; }
 }
 
