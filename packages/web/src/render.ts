@@ -214,52 +214,6 @@ export function ago(at: number, now: number): string {
 export const COLLAPSED_GROUPS: readonly string[] = ['done'];
 
 /**
- * One of our messages: its bubble over its meta line (`metaLine`, shared with the Conversation view). A failed delivery always shows; with
- * message details on, a dictated message's mark too. A message with no meta line has its time as the bubble's tooltip.
- */
-function message(item: MessageView, stamped: boolean, details: boolean): string {
-  const failed = item.delivery === 'uncertain' ? `<span class="delivery uncertain" title="${escape(item.error ?? '')}">uncertain</span>` : '';
-  const meta = metaLine([voiceMark(item, details), failed], item.at, stamped);
-
-  return `<li class="message${item.provisional ? ' provisional' : ''}" data-id="${escape(item.id)}"><div class="bubble"${meta === '' ? ` title="${escape(fullTime(item.at))}"` : ''}><div class="box${/^\/[\w:.-]+(\s|$)/.test(item.text) ? ' command' : ''}">${escape(item.text)}</div>${meta}</div></li>`;
-}
-
-/** The mark of a reply whose speech failed; empty otherwise, since routine speech states show nothing. */
-function spokenMark(item: ReplyView): string {
-  return item.spoken.state === 'failed'
-    ? '<span class="spoken failed" title="Speaking this reply failed; see the voice log."><span class="codicon codicon-mute" aria-hidden="true"></span><span>Not spoken</span></span>'
-    : '';
-}
-
-function reply(item: ReplyView, earlier: ReplyView | null, view: View, stamped: boolean, card: string, expandReplies: boolean): string {
-  if (item.kind === 'note') {
-    return `<li class="note" data-id="${escape(item.id)}">${escape(item.opening)}</li>`;
-  }
-
-  // Focused mode, as in the Conversation view: a reply with a [speak] passage shows the passage first and the whole reply behind Show more. The
-  // passage is a bubble on the left, in its place when the whole reply shows; after the operator spoke over it, the part not heard is dimmed.
-  const passage = item.kind === 'reply' && item.speak !== null && item.speak.trim() !== '' ? item.speak : null;
-  const folded = passage !== null && hasUnspokenText(item.opening, passage);
-  const expanded = !folded || expandReplies !== view.open.has(`more:${item.id}`);
-  // Only the text that ends the reply can end in the card's questions, which it leaves out; questions before a passage fold into one line.
-  const markdownPart = (text: string, last: boolean): string => (card === '' ? renderMarkdown(text) : withoutQuestions(text, last ? `reply:${item.id}` : `reply:${item.id}:before`, view.open, last));
-  const said = item.spoken.state === 'interrupted' ? item.spoken.saidChars : null;
-  const body = passage === null ? markdownPart(item.opening, true) : spokenBody(item.opening, passage, said, !expanded, { markdown: markdownPart, escape });
-  const more = !folded ? '' : `<button class="show-more" type="button" data-action="more" data-reply="${escape(item.id)}" aria-expanded="${expanded}">${expanded ? 'Show less' : 'Show more'}</button>`;
-  const tone = toneMark(item.tone, view.details);
-  const rewritten = earlier === null ? '' : `<details class="fold" data-fold="earlier:${escape(item.id)}"${view.open.has(`earlier:${item.id}`) ? ' open' : ''}><summary>Rewritten</summary><div class="was">${renderMarkdown(earlier.opening)}</div></details>`;
-  // The copy button comes first on the line under the reply, then the tone with message details on and a speech failure, and the time at the right.
-  const meta = metaLine([item.provisional ? '' : copyButton('copy-reply', 'Copy response'), tone, spokenMark(item)], item.at, stamped);
-  const unread = item.unread ? ` unread" data-unread="${escape(item.id)}` : '';
-
-  return `<li class="reply ${item.kind}${unread}" data-id="${escape(item.id)}"${item.speak === null ? '' : ' data-speak="1"'}><span class="dot"${item.unread ? ' title="Unread"' : ''}></span><div class="body">${body}${more}${rewritten}</div>${meta}${card}</li>`;
-}
-
-function artifactRow(artifact: ArtifactView): string {
-  return `<li class="artifact"><button class="artifact-open" type="button" data-action="artifact" data-path="${escape(artifact.path)}" title="${escape(artifact.path)}"><span class="codicon codicon-${artifactIcon(artifact.type)}" aria-hidden="true"></span><span class="artifact-title">${escape(artifact.title)}</span><span class="artifact-kind">${escape(artifact.kind)}</span></button></li>`;
-}
-
-/**
  * A reply's or a status's Markdown when its card draws its questions: questions that end it are left out; questions with text after them stay
  * in place, folded into one line, "2 questions — answer below", that opens them. `ends` is false for text a spoken passage follows, whose questions
  * all fold.
@@ -292,196 +246,21 @@ export function withoutQuestions(markdown: string, key: string, open: ReadonlySe
     .join('');
 }
 
-/** A question card: each question with its options as radio or checkbox rows, an Other field, and Submit; greyed with its picks once answered. */
-export function questionCard(key: string, questions: readonly Question[], draft: CardDraft | undefined, answer: string | null, canAnswer: boolean): string {
-  // A later message answers the card only when it answers its questions; one that ignores them sets it aside, Skipped, with no picks.
-  const outcome = cardOutcome(answer, questions);
-  const answered = outcome !== null;
-  const choices = outcome === 'answered' ? answersIn(answer!, questions) : answered ? new Map<number, QuestionChoice>() : (draft?.choices ?? new Map<number, QuestionChoice>());
-  const locked = answered || !canAnswer || draft?.sending === true || draft?.sent != null;
-  const blocks = questions.map((question, index) => {
-    const choice = choices.get(index);
-    const options = question.options
-      .map((option) => {
-        const checked = choice?.letters.includes(option.letter) ?? false;
-        const mark = question.multi
-          ? `<span class="question-mark checkbox${checked ? ' checked' : ''}" aria-hidden="true">${checked ? '<span class="codicon codicon-check"></span>' : ''}</span>`
-          : `<span class="question-mark radio${checked ? ' checked' : ''}" aria-hidden="true">${checked ? '<span class="radio-dot"></span>' : ''}</span>`;
-
-        return `<button type="button" class="question-option${answered && !checked ? ' dimmed' : ''}" role="${question.multi ? 'checkbox' : 'radio'}" aria-checked="${checked}" data-action="pick" data-card="${escape(key)}" data-question="${index}" data-letter="${option.letter}"${locked ? ' disabled' : ''}>${mark}<span class="question-option-text"><span class="question-letter">${option.letter}</span> ${renderInline(option.text)}</span></button>`;
-      })
-      .join('');
-    const other = answered || !canAnswer ? (choice?.other ? `<div class="question-answer-other">Other: ${escape(choice.other)}</div>` : '') : `<input class="question-other" type="text" data-card="${escape(key)}" data-question="${index}" placeholder="Other…" value="${escape(choice?.other ?? '')}"${locked ? ' disabled' : ''}>`;
-
-    return `<div class="question-block"><div class="question-text">${question.number === null ? '' : `${question.number}. `}${renderInline(question.text)}</div><div class="question-options">${options}${other}</div></div>`;
-  });
-  const footer = answered
-    ? `<span class="question-state">${outcome === 'answered' ? 'Answered' : 'Skipped: your next message did not answer these questions'}</span>`
-    : !canAnswer
-      ? ''
-      : `${draft?.error ? `<span class="question-error">${escape(draft.error)}</span>` : ''}${draft?.sent != null ? '<span class="question-state">Sending…</span>' : ''}<button type="button" class="question-submit" data-action="answer" data-card="${escape(key)}"${locked || !complete(questions, choices) ? ' disabled' : ''}>Submit</button>`;
-
-  return `<div class="question-card${answered ? ` ${outcome}` : ''}" data-card-key="${escape(key)}">${blocks.join('')}<div class="question-footer">${footer}</div></div>`;
+/** A message's mark for an uncertain delivery, for its meta line (`metaLine` takes HTML); empty otherwise. */
+export function deliveryMark(item: MessageView): string {
+  return item.delivery === 'uncertain' ? `<span class="delivery uncertain" title="${escape(item.error ?? '')}">uncertain</span>` : '';
 }
 
-/** The card of a reply's or a status's questions, answered by the first message after it; empty without questions. */
-function cardOf(key: string, markdown: string, answer: string | null, view: View, canAnswer: boolean): string {
-  const questions = parseQuestions(markdown);
-
-  return questions.length === 0 ? '' : questionCard(key, questions, view.cards.get(key), answer, canAnswer);
+/** The mark of a reply whose speech failed, for its meta line; empty otherwise, since routine speech states show nothing. */
+export function spokenMark(item: ReplyView): string {
+  return item.spoken.state === 'failed'
+    ? '<span class="spoken failed" title="Speaking this reply failed; see the voice log."><span class="codicon codicon-mute" aria-hidden="true"></span><span>Not spoken</span></span>'
+    : '';
 }
 
-/** The text of the first message after a reply, which answers its card. */
-function answerAfter(state: PageState, replyId: string): string | null {
-  const from = state.items.findIndex((item) => item.id === replyId);
-  const later = from === -1 ? undefined : state.items.slice(from + 1).find((item) => item.type === 'message' && answers(item));
-
-  return later?.type === 'message' ? later.text : null;
-}
-
-/** The Conversation tab: why the page cannot talk to the session, earlier messages, and the timeline with its spinner. */
-export function renderTimeline(state: PageState, view: View, now: number = Date.now()): string {
-  if (state.session === null) {
-    return '<p class="empty">No session yet. Messages appear here once the work item\'s session starts.</p>';
-  }
-
-  const entries = timeline(state.items, state.artifacts);
-  const canAnswer = state.connected && state.session.conversation === 'full';
-  // After the newest item, so replies written mid-turn show above it.
-  const shownPrompt = view.prompt !== null && view.prompt.sessionId === state.session.id ? view.prompt : null;
-  const spinner = turnRow(state.session, awaitingReply(state.items, state.session), shownPrompt?.prompt != null);
-  let lastDay: string | null = null;
-  const rows = entries.map((entry) => {
-    if (entry.type === 'artifact') {
-      return artifactRow(entry.artifact);
-    }
-
-    // The first item shown, and each turn that starts on another day than the turn before it, has a divider.
-    const day = new Date(entry.item.at).toDateString();
-    const divider = day !== lastDay && (lastDay === null || entry.type === 'message') ? `<li class="day" role="separator">${escape(dayLabel(entry.item.at, now))}</li>` : '';
-
-    lastDay = entry.type === 'message' || lastDay === null ? day : lastDay;
-
-    // The first item after a day's divider shows its time; with message details on, every item does.
-    const timed = entry.type === 'message' || entry.item.kind !== 'note';
-    const shown = stamped(timed, view.details, divider !== '');
-    const html =
-      entry.type === 'message'
-        ? message(entry.item, shown, view.details)
-        : reply(entry.item, entry.earlier, view, shown, entry.item.kind === 'reply' ? cardOf(`reply:${entry.item.id}`, entry.item.opening, answerAfter(state, entry.item.id), view, canAnswer) : '', state.expandReplies);
-
-    return divider + html;
-  });
-  const earlier = state.more ? '<button class="earlier-items" type="button" data-action="earlier">Show earlier messages</button>' : '';
-  // An ended session's reason shows above the composer instead.
-  const notice = state.session.reason === null || state.session.state === 'ended' ? '' : `<p class="notice">${escape(state.session.reason)}</p>`;
-  const requests = state.session.requests ?? [];
-  const asking =
-    requests.length > 0
-      ? requests.map((request) => renderRequest(request, view.requestValues)).join('')
-      : shownPrompt?.prompt != null && state.session.state === 'waiting'
-        ? renderPrompt(shownPrompt.prompt, state.session.waitingFor, shownPrompt.sending)
-        : '';
-
-  return `${notice}${earlier}${rows.length === 0 && spinner === '' ? '<p class="empty">No messages yet. They appear here when you or the session write one.</p>' : `<ol class="timeline" aria-label="Conversation">${rows.join('')}${spinner}</ol>`}${asking}`;
-}
-
-/**
- * The row at the end of the timeline while the session is in a turn: "Starting…" or "Thinking…" with the spinner while it works on a reply;
- * while it waits on the operator in the terminal, "Waiting for your answer", "Waiting for permission" or "Waiting in the terminal" with a still
- * icon in the warning colour, since the page has no terminal to open. A Codex request the page answers draws its own card instead.
- */
-export function turnRow(session: PageState['session'], awaiting: boolean, prompted = false): string {
-  if (session?.state === 'waiting' && session.waitingFor !== null && (session.requests ?? []).length === 0) {
-    const label = session.waitingFor === 'question' ? 'Waiting for your answer' : session.waitingFor === 'permission' ? 'Waiting for permission' : 'Waiting in the terminal';
-    const icon = session.waitingFor === 'permission' ? 'shield' : session.waitingFor === 'question' ? 'question' : 'terminal';
-    const who = session.provider === 'codex' ? 'Codex' : 'Claude';
-
-    return `<li class="working waiting" role="status"><span class="codicon codicon-${icon}" aria-hidden="true"></span><span class="working-label">${label}</span><span class="working-detail">${who} asks in its terminal; ${prompted ? 'answer it below.' : 'answer it there.'}</span></li>`;
-  }
-
-  if (!awaiting || session === null) {
-    return '';
-  }
-
-  return `<li class="working"><span class="codicon codicon-loading${session.state === 'waiting' ? '' : ' codicon-modifier-spin'}" aria-hidden="true"></span><span>${session.state === 'starting' ? 'Starting' : 'Thinking'}…</span></li>`;
-}
-
-/**
- * A permission prompt or question form a Claude session waits on in its terminal, as its screen shows it (architecture.md § Web page): the
- * prompt's lines, a button per numbered option, which presses its digit, Next (→) on a question form, and Cancel (Esc). Typed answers stay in the
- * terminal.
- */
-export function renderPrompt(prompt: ScreenPrompt, waitingFor: string | null, sending: boolean): string {
-  const disabled = sending ? ' disabled' : '';
-  const options = prompt.options
-    .map((option) => `<button type="button" class="prompt-option${option.selected ? ' current' : ''}" data-action="prompt-key" data-prompt-key="${escape(option.key)}"${disabled}><span class="question-letter">${escape(option.key)}</span> ${escape(option.label)}</button>`)
-    .join('');
-  const next = prompt.next ? `<button type="button" class="prompt-option secondary" data-action="prompt-key" data-prompt-key="next"${disabled}>Next →</button>` : '';
-  const cancel = `<button type="button" class="prompt-option secondary" data-action="prompt-key" data-prompt-key="escape"${disabled}>Cancel (Esc)</button>`;
-  const title = waitingFor === 'permission' ? 'Claude asks for permission' : 'Claude asks you';
-
-  return (
-    `<div class="request question-card prompt-card" data-key="prompt" role="group" aria-label="${escape(title)}"><div class="request-title"><span class="codicon codicon-${waitingFor === 'permission' ? 'shield' : 'question'}" aria-hidden="true"></span> ${escape(title)}</div>` +
-    `<pre class="prompt-screen">${escape(prompt.lines.join('\n'))}</pre><div class="prompt-options">${options}</div><div class="question-footer">${next}${cancel}<span class="prompt-note">To type an answer, use the terminal.</span></div></div>`
-  );
-}
-
-const DECISIONS: Record<string, string> = { accept: 'Allow once', acceptForSession: 'Allow for session', decline: 'Decline', cancel: 'Cancel' };
-
-/**
- * A Codex session's pending request: a permission with its decisions as buttons, or questions with their options and a field for a typed
- * answer, a secret one hidden; one the page cannot answer says to answer it in the terminal.
- */
-export function renderRequest(request: NativeRequest, values: ReadonlyMap<string, string>): string {
-  const head = `<div class="request-title"><span class="codicon codicon-${request.kind === 'permission' ? 'shield' : 'question'}" aria-hidden="true"></span> ${escape(request.title)}</div>`;
-
-  if (request.kind === 'unsupported') {
-    return `<div class="request" data-key="request-${escape(request.id)}">${head}<p class="empty">Answer it in the terminal.</p></div>`;
-  }
-
-  if (request.kind === 'permission') {
-    return `<div class="request" data-key="request-${escape(request.id)}">${head}<div class="request-actions">${request.decisions.map((decision) => `<button type="button" class="request-button" data-action="request-decision" data-request="${escape(request.id)}" data-decision="${escape(decision)}">${escape(DECISIONS[decision] ?? decision)}</button>`).join('')}</div></div>`;
-  }
-
-  const fields = request.questions.map((question) => {
-    const key = `${request.id}:${question.id}`;
-    const value = values.get(key) ?? '';
-    const options = question.options.map((option) => `<button type="button" class="question-option" role="radio" aria-checked="${value === option}" data-action="request-option" data-field="${escape(key)}" data-value="${escape(option)}"><span class="question-mark radio${value === option ? ' checked' : ''}" aria-hidden="true">${value === option ? '<span class="radio-dot"></span>' : ''}</span><span class="question-option-text">${escape(option)}</span></button>`).join('');
-
-    return `<div class="question-block" data-key="${escape(key)}"><div class="question-text">${escape(question.question)}</div><div class="question-options">${options}<input class="question-other request-field" type="${question.secret === true ? 'password' : 'text'}" data-field="${escape(key)}" placeholder="${question.options.length === 0 ? 'Answer…' : 'Other…'}" value="${question.options.includes(value) ? '' : escape(value)}"></div></div>`;
-  });
-
-  return `<div class="request question-card" data-key="request-${escape(request.id)}">${head}${fields.join('')}<div class="question-footer"><button type="button" class="question-submit" data-action="request-answer" data-request="${escape(request.id)}">Submit</button></div></div>`;
-}
-
-/** The Status tab: the latest status as Markdown with its time and age and a New mark while unread, or the stage dimmed. */
-export function renderStatus(state: PageState, view: View, now: number): string {
-  const status: StatusView | null = state.status;
-
-  if (status === null) {
-    return '<p class="empty">No status yet. It appears here when the session reports one.</p>';
-  }
-
-  const answer = (): string | null => {
-    const from = state.items.findIndex((item) => item.type === 'reply' && `st-${item.id}` === status.id);
-    const later = (from === -1 ? state.items.filter((item) => item.at > status.at) : state.items.slice(from + 1)).find((item) => item.type === 'message' && answers(item));
-
-    return later?.type === 'message' ? later.text : null;
-  };
-  const card = status.fallback ? '' : cardOf(`status:${status.id}`, status.markdown, answer(), view, state.connected && state.session?.conversation === 'full');
-  const label = status.fallback ? 'Stage' : 'Status';
-
-  return `<div class="status-tab${status.fallback ? ' fallback' : ''}${status.unread ? ' unread' : ''}"${status.unread ? ` data-unread="${escape(status.id)}"` : ''}><div class="status-head"><span class="codicon codicon-pulse" aria-hidden="true"></span><span class="status-label">${label}</span><span class="status-age">${stampTime(status.at)} · ${ago(status.at, now)}</span>${status.unread ? '<span class="status-new">New</span>' : ''}</div><div class="status-body body">${card === '' ? renderMarkdown(status.markdown) : withoutQuestions(status.markdown, `status:${status.id}`, view.open)}</div>${card}</div>`;
-}
-
-/** The Artifacts tab: the work item's artifacts newest first; a click opens one in the page. */
-export function renderArtifacts(state: PageState, now: number): string {
-  if (state.artifacts.length === 0) {
-    return '<p class="empty">No artifacts yet. They appear here when the session writes one.</p>';
-  }
-
-  return `<ul class="artifact-list">${state.artifacts.map((artifact) => `<li><button class="artifact-open" type="button" data-action="artifact" data-path="${escape(artifact.path)}" title="${escape(artifact.path)}"><span class="codicon codicon-${artifactIcon(artifact.type)}" aria-hidden="true"></span><span class="artifact-title">${escape(artifact.title)}</span><span class="artifact-kind">${escape(artifact.kind)} · ${ago(artifact.updatedAt, now)}</span></button></li>`).join('')}</ul>`;
+/** How the shared `spokenBody` draws a reply's text around its bubbles: `markdown` for the text, the page's own escaping for a passage heard in part. */
+export function spokenRender(markdown: (text: string, last: boolean) => string): { markdown: (text: string, last: boolean) => string; escape: (text: string) => string } {
+  return { markdown, escape };
 }
 
 /** The URL of an artifact's file for the page key, which the sandboxed frame's own relative files also resolve against. */

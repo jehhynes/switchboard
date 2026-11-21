@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyEvent, awaitingReply, EMPTY, mentionOf, mentionQuery, commandQuery, shortTitle, timeline, withEarlier } from '../src/model.js';
 import { answerText, answersIn, complete, parseQuestions } from '@switchboard/conversation/questions';
-import { artifactUrl, newView, renderArtifactView, turnRow, renderMicButton, renderTimeline, renderVoice, markdownBody } from '../src/render.js';
+import { artifactUrl, newView, renderArtifactView, renderMicButton, renderVoice, markdownBody } from '../src/render.js';
+import { renderTimeline, turnRow } from '../src/timeline.js';
 import { renderHeader } from '../src/header.js';
 import { renderList } from '../src/list.js';
 import { html } from './html.js';
@@ -97,24 +98,24 @@ describe('question cards in replies', () => {
   it('leaves questions that end a reply out of its text, folds ones written mid-message, and tells an answer from a message that skipped them', () => {
     const host = document.createElement('div');
 
-    host.innerHTML = renderTimeline(pageState([reply('r1', 1, { opening: ending })]), newView());
+    host.innerHTML = html(renderTimeline(pageState([reply('r1', 1, { opening: ending })]), newView()));
     expect(host.querySelector('li[data-id="r1"] > .body')?.textContent?.trim()).toBe('Before I go on:');
-    host.innerHTML = renderTimeline(pageState([reply('r1', 1, { opening: `${ending}\n\nThen I start.` })]), newView());
+    host.innerHTML = html(renderTimeline(pageState([reply('r1', 1, { opening: `${ending}\n\nThen I start.` })]), newView()));
     expect(host.querySelector('details.questions-fold summary')?.textContent).toBe('1 question — answer below');
     expect(host.querySelector('li[data-id="r1"] > .body')?.textContent).toContain('Then I start.');
     // Questions before a spoken passage fold too, with the whole reply shown, rather than leaving the text.
     const view = newView();
 
     view.open.add('more:r1');
-    host.innerHTML = renderTimeline(pageState([reply('r1', 1, { opening: `${ending}\n\nThen I start.`, speak: 'Then I start.' })]), view);
+    host.innerHTML = html(renderTimeline(pageState([reply('r1', 1, { opening: `${ending}\n\nThen I start.`, speak: 'Then I start.' })]), view));
     expect(host.querySelector('details.questions-fold summary')?.textContent).toBe('1 question — answer below');
     expect(host.querySelector('li[data-id="r1"] .speech-bubble')?.textContent?.trim()).toBe('Then I start.');
-    host.innerHTML = renderTimeline(pageState([reply('r1', 1, { opening: ending }), message('m1', 2, { text: 'Later.' })]), newView());
+    host.innerHTML = html(renderTimeline(pageState([reply('r1', 1, { opening: ending }), message('m1', 2, { text: 'Later.' })]), newView()));
     expect(host.querySelector('.question-card')?.className).toBe('question-card skipped');
     expect(host.querySelector('.question-card [aria-checked="true"]')).toBeNull();
-    host.innerHTML = renderTimeline(pageState([reply('r1', 1, { opening: ending }), message('m1', 2, { text: '1B' })]), newView());
+    host.innerHTML = html(renderTimeline(pageState([reply('r1', 1, { opening: ending }), message('m1', 2, { text: '1B' })]), newView()));
     expect(host.querySelector('.question-card')?.className).toBe('question-card answered');
-    host.innerHTML = renderTimeline(pageState([reply('r1', 1, { opening: ending }), message('m1', 2, { text: '1B', delivery: 'open' })]), newView());
+    host.innerHTML = html(renderTimeline(pageState([reply('r1', 1, { opening: ending }), message('m1', 2, { text: '1B', delivery: 'open' })]), newView()));
     expect(host.querySelector('.question-card')?.className).toBe('question-card');
   });
 });
@@ -125,12 +126,12 @@ describe('drawing', () => {
 
   it('puts a Today, Yesterday or dated divider before the first item and each turn on another day', () => {
     const at = (day: number, hour: number): number => new Date(2026, 10, day, hour).getTime();
-    const html = renderTimeline(pageState([message('m1', 1, { at: at(17, 9) }), reply('r1', 2, { at: at(18, 1) }), message('m2', 3, { at: at(19, 9) }), message('m3', 4, { at: at(20, 9) })]), newView(), at(20, 12));
+    const markup = html(renderTimeline(pageState([message('m1', 1, { at: at(17, 9) }), reply('r1', 2, { at: at(18, 1) }), message('m2', 3, { at: at(19, 9) }), message('m3', 4, { at: at(20, 9) })]), newView(), at(20, 12)));
     const host = document.createElement('div');
 
-    host.innerHTML = html;
+    host.innerHTML = markup;
     expect([...host.querySelectorAll('.timeline > li')].map((li) => li.getAttribute('data-id') ?? li.textContent)).toEqual(['Tue, Nov 17', 'm1', 'r1', 'Yesterday', 'm2', 'Today', 'm3']);
-    expect(renderTimeline(pageState([message('m1', 1, { at: new Date(2025, 11, 31, 9).getTime() })]), newView(), at(20, 12))).toContain('>Wed, Dec 31, 2025</li>');
+    expect(html(renderTimeline(pageState([message('m1', 1, { at: new Date(2025, 11, 31, 9).getTime() })]), newView(), at(20, 12)))).toContain('>Wed, Dec 31, 2025</li>');
   });
 
   it('shows the time only on the first item after a day\'s divider, and the optional marks and every time only with message details on', () => {
@@ -144,7 +145,7 @@ describe('drawing', () => {
     const host = document.createElement('div');
     const stamps = (): string[] => [...host.querySelectorAll('.timeline > li[data-id]')].map((li) => `${li.getAttribute('data-id')}:${li.querySelector('.stamp')?.textContent ?? '-'}`);
 
-    host.innerHTML = renderTimeline(pageState(items), newView(), at(12));
+    host.innerHTML = html(renderTimeline(pageState(items), newView(), at(12)));
     expect(stamps()).toEqual(['m1:9:00 AM', 'r1:-', 'm2:-', 'm3:-']);
     // Off: no Dictated or tone, but the copy button and the error mark stay, and the time is the line's or the bubble's tooltip.
     expect(host.querySelector('.voice-mark')).toBeNull();
@@ -155,7 +156,7 @@ describe('drawing', () => {
     expect(host.querySelector('li[data-id="m3"] .meta')).toBeNull();
     expect(host.querySelector('li[data-id="m3"] .bubble')!.getAttribute('title')).toMatch(/^2026-11-20 11:00:00 /);
 
-    host.innerHTML = renderTimeline(pageState(items), { ...newView(), details: true }, at(12));
+    host.innerHTML = html(renderTimeline(pageState(items), { ...newView(), details: true }, at(12)));
     expect(stamps()).toEqual(['m1:9:00 AM', 'r1:9:05 AM', 'm2:10:00 AM', 'm3:11:00 AM']);
     expect(host.querySelector('li[data-id="m1"] .voice-mark')!.textContent).toBe('dictated');
     expect(host.querySelector('li[data-id="m1"] .voice-mark')!.getAttribute('title')).toBe('Dictated in 1 piece:\nhello there · match 0.91 · 140 Hz');
@@ -166,7 +167,7 @@ describe('drawing', () => {
   it("puts a message's and a reply's metadata on one line under it, the reply's copy button first and the time at the right", () => {
     const host = document.createElement('div');
 
-    host.innerHTML = renderTimeline(pageState([message('m1', 1, { delivery: 'uncertain', error: 'Check the terminal.' }), reply('r1', 120_000, { tone: 'calm', spoken: { state: 'failed', atMs: null, saidChars: null } })]), { ...newView(), details: true });
+    host.innerHTML = html(renderTimeline(pageState([message('m1', 1, { delivery: 'uncertain', error: 'Check the terminal.' }), reply('r1', 120_000, { tone: 'calm', spoken: { state: 'failed', atMs: null, saidChars: null } })]), { ...newView(), details: true }));
     expect([...host.querySelector('li[data-id="m1"] > .bubble')!.children].map((child) => child.className)).toEqual(['box', 'meta']);
     expect([...host.querySelector('li[data-id="m1"] .meta')!.children].map((child) => child.className)).toEqual(['meta-marks', 'stamp']);
     expect([...host.querySelector('li[data-id="r1"]')!.children].map((child) => child.className)).toEqual(['dot', 'body', 'meta']);
@@ -175,7 +176,7 @@ describe('drawing', () => {
   });
 
   it('dims the part of an interrupted passage not heard, and says Not spoken only when speech failed', () => {
-    const spoken = (state: ReplyView['spoken']['state']) => renderTimeline(pageState([reply('r1', 1, { opening: 'Fixed it. More.', speak: 'Fixed it.', spoken: { state, atMs: 7_400, saidChars: 3 } })]), newView());
+    const spoken = (state: ReplyView['spoken']['state']) => html(renderTimeline(pageState([reply('r1', 1, { opening: 'Fixed it. More.', speak: 'Fixed it.', spoken: { state, atMs: 7_400, saidChars: 3 } })]), newView()));
 
     expect(spoken('interrupted')).toContain('<div class="speech-bubble"><p class="passage">Fix<span class="unheard">ed it.</span></p></div>');
     expect(spoken('interrupted')).not.toContain('0:07');
@@ -193,13 +194,13 @@ describe('drawing', () => {
     const kinds = (id: string) => [...host.querySelector(`li[data-id="${id}"] > .body`)!.children].map((child) => (child.classList.contains('speech-bubble') ? `bubble:${child.textContent!.trim()}` : child.tagName.toLowerCase()));
     const view = newView();
 
-    host.innerHTML = renderTimeline(pageState(items), view);
+    host.innerHTML = html(renderTimeline(pageState(items), view));
     expect(kinds('r1')).toEqual(['bubble:Fixed it.', 'button']);
     expect(kinds('r2')).toEqual(['bubble:Same.']);
     expect(host.querySelector('li[data-id="r3"] .speech-bubble')).toBeNull();
 
     view.open.add('more:r1');
-    host.innerHTML = renderTimeline(pageState(items), view);
+    host.innerHTML = html(renderTimeline(pageState(items), view));
     expect(kinds('r1')).toEqual(['p', 'bubble:Fixed it.', 'ul', 'button']);
     expect(host.querySelector('li[data-id="r1"] > .body')!.textContent!.match(/Fixed it\./g)).toHaveLength(1);
     expect([...host.querySelector('li[data-id="r1"]')!.children].map((child) => child.className)).toEqual(['dot', 'body', 'meta']);
@@ -215,12 +216,12 @@ describe('drawing', () => {
   });
 
   it('says what the turn waits for: Starting or Thinking with the spinner, and the answer or permission the terminal asks for instead of Thinking', () => {
-    expect(turnRow(session({ state: 'starting' }), true)).toContain('Starting…');
-    expect(turnRow(session({ state: 'running' }), true)).toContain('codicon-modifier-spin');
-    expect(turnRow(session({ state: 'running' }), false)).toBe('');
-    expect(turnRow(session({ state: 'waiting', waitingFor: 'question' }), true)).toMatch(/codicon-question[\s\S]*Waiting for your answer/);
-    expect(turnRow(session({ state: 'waiting', waitingFor: 'permission' }), false)).toMatch(/codicon-shield[\s\S]*Waiting for permission/);
-    expect(turnRow(session({ state: 'waiting', waitingFor: 'permission' }), true)).not.toContain('Thinking');
+    expect(html(turnRow(session({ state: 'starting' }), true))).toContain('Starting…');
+    expect(html(turnRow(session({ state: 'running' }), true))).toContain('codicon-modifier-spin');
+    expect(html(turnRow(session({ state: 'running' }), false))).toBe('');
+    expect(html(turnRow(session({ state: 'waiting', waitingFor: 'question' }), true))).toMatch(/codicon-question[\s\S]*Waiting for your answer/);
+    expect(html(turnRow(session({ state: 'waiting', waitingFor: 'permission' }), false))).toMatch(/codicon-shield[\s\S]*Waiting for permission/);
+    expect(html(turnRow(session({ state: 'waiting', waitingFor: 'permission' }), true))).not.toContain('Thinking');
   });
 
   it('opens a page or an SVG artifact in a sandboxed frame with an opaque origin, and media in the page', () => {
@@ -396,25 +397,25 @@ describe('drawing', () => {
 
   it('draws the spinner after the newest item while the session works on a reply, so progress written mid-turn shows above it', () => {
     const items = [message('m1', 1), reply('a1', 2, { kind: 'aside' }), reply('a2', 3, { kind: 'aside' })];
-    const order = (html: string): string[] => [...html.matchAll(/<li class="([^"]+)"(?: data-id="([^"]+)")?/g)].map((match) => match[2] ?? match[1]!);
-    const html = renderTimeline({ ...EMPTY, connected: true, scope, session: session({ state: 'running' }), items }, newView());
+    const order = (markup: string): string[] => [...markup.matchAll(/<li class="([^"]+)"(?: data-id="([^"]+)")?/g)].map((match) => match[2] ?? match[1]!);
+    const markup = html(renderTimeline({ ...EMPTY, connected: true, scope, session: session({ state: 'running' }), items }, newView()));
 
-    expect(order(html)).toEqual(['day', 'm1', 'a1', 'a2', 'working']);
-    expect(renderTimeline({ ...EMPTY, connected: true, scope, session: session({ state: 'running' }), items: [...items, reply('r1', 4)] }, newView())).not.toContain('class="working"');
-    expect(renderTimeline({ ...EMPTY, connected: true, scope, session: session({ state: 'idle' }), items }, newView())).not.toContain('class="working"');
+    expect(order(markup)).toEqual(['day', 'm1', 'a1', 'a2', 'working']);
+    expect(html(renderTimeline({ ...EMPTY, connected: true, scope, session: session({ state: 'running' }), items: [...items, reply('r1', 4)] }, newView()))).not.toContain('class="working"');
+    expect(html(renderTimeline({ ...EMPTY, connected: true, scope, session: session({ state: 'idle' }), items }, newView()))).not.toContain('class="working"');
   });
 
   it('gives a time the tooltip the VS Code view gives it: date, 24-hour time and zone', () => {
     const at = Date.UTC(2026, 10, 20, 18, 30, 17);
-    const html = renderTimeline({ ...EMPTY, connected: true, scope, session: session({ state: 'idle' }), items: [message('m1', at - 1_000), reply('r1', at)] }, newView());
+    const markup = html(renderTimeline({ ...EMPTY, connected: true, scope, session: session({ state: 'idle' }), items: [message('m1', at - 1_000), reply('r1', at)] }, newView()));
 
-    expect(html).toMatch(/<time class="stamp" datetime="2026-11-20T18:30:17\.000Z" title="2026-11-20 \d{2}:30:17 [^"]+">/);
+    expect(markup).toMatch(/<time class="stamp" datetime="2026-11-20T18:30:17\.000Z" title="2026-11-20 \d{2}:30:17 [^"]+">/);
   });
 
   it('draws a card under a reply that asks, answered by the next message', () => {
     const state = { ...EMPTY, connected: true, scope, session: session(), items: [reply('r1', 1, { opening: 'Pick:\n- A) x\n- B) y' }), message('m1', 2, { text: 'B' })] };
 
-    expect(renderTimeline(state, newView())).toMatch(/question-card[\s\S]*aria-checked="true" data-action="pick" data-card="reply:r1" data-question="0" data-letter="B"[\s\S]*Answered/);
+    expect(html(renderTimeline(state, newView()))).toMatch(/question-card[\s\S]*aria-checked="true" data-action="pick" data-card="reply:r1" data-question="0" data-letter="B"[\s\S]*Answered/);
   });
 });
 

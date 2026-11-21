@@ -2,15 +2,17 @@ import { applyEvent, commandQuery, EMPTY, mentionOf, mentionQuery, pageTitle, ro
 import { snoozeChoices } from '@switchboard/core/snooze';
 import type { PageState } from './model.js';
 import { escape, renderMarkdown } from './markdown.js';
-import { answerText, artifactUrl, complete, firstSnoozeDay, inputReady, renderEndedNote, renderMicButton, markdownBody, newView, parseQuestions, renderArtifacts, renderArtifactView, renderSheet, rowKey, renderStatus, renderTimeline, renderVoice, snoozeDateUntil, TABS, consoleNote, SIDE_TABS } from './render.js';
+import { answerText, artifactUrl, complete, firstSnoozeDay, inputReady, renderEndedNote, renderMicButton, markdownBody, newView, parseQuestions, renderArtifactView, renderSheet, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, SIDE_TABS } from './render.js';
 import type { CardDraft, SideTab, Tab, View } from './render.js';
 import type { ConsoleOptions, MountedConsole } from './console.js';
 import type { ItemView, PageRow, ScreenPrompt } from './types.js';
 import { morph } from './morph.js';
-import { mount } from './island.js';
-import type { VNode } from 'preact';
+import { mount, unmount } from './island.js';
+import type { ComponentChild, VNode } from 'preact';
 import { renderList, renderListPane } from './list.js';
 import { menuRows, renderHeader, renderSideSwitch, renderTabs } from './header.js';
+import { renderTimeline } from './timeline.js';
+import { renderArtifacts, renderEmpty, renderStatus } from './side.js';
 import { listHeader } from './listHeader.js';
 import { attachments, drawChips } from './attachments.js';
 import type { Attached } from './attachments.js';
@@ -961,6 +963,22 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     return row === undefined ? null : { row: rowKey(row), rows: menuRows(row, view) };
   };
+  // A pane holds Preact's tree, or what the page draws into it itself: an open artifact or a console, whose frame, media and terminal must not be
+  // redrawn. Each hand-over empties it first.
+  const preactPanes = new WeakSet<HTMLElement>();
+  const drawPane = (pane: HTMLElement, tree: ComponentChild): void => {
+    if (!preactPanes.has(pane)) {
+      pane.replaceChildren();
+      preactPanes.add(pane);
+    }
+
+    mount(pane, tree);
+  };
+  const takePane = (pane: HTMLElement): void => {
+    if (preactPanes.delete(pane)) {
+      unmount(pane);
+    }
+  };
   const draw = (): void => {
     // On a narrow screen the list and the conversation are each a full-width view (page.css); the list shows until a work item is opened.
     root.classList.toggle('listing', view.list || wanted === null);
@@ -984,12 +1002,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     if (!side) {
       mount(detailHead, null);
-      morph(detailBody, '');
+      drawPane(detailBody, null);
     }
 
     if (state.scope === null) {
       mount(head, null);
-      morph(panel, `<p class="empty">${state.connected ? 'Choose a work item on the left.' : 'Connecting to Switchboard…'}</p>`);
+      drawPane(panel, renderEmpty(state.connected ? 'Choose a work item on the left.' : 'Connecting to Switchboard…'));
       shown = null;
       updateComposer();
       return;
@@ -1003,25 +1021,21 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const drawTab = (pane: HTMLElement, tab: Tab): void => {
       pane.classList.toggle('console-pane', tab === 'console');
 
-      // A console's terminal is its own; another tab starts from an empty pane rather than morph its nodes.
-      if (tab !== 'console' && pane.querySelector(':scope > .console') !== null) {
-        pane.innerHTML = '';
-      }
-
       if (tab === 'console') {
         drawConsole(pane);
       } else if (tab === 'artifacts' && artifact !== undefined && state.key !== null) {
-        const open = pane.querySelector<HTMLElement>('.artifact-view');
+        const open = pane.querySelector<HTMLElement>(':scope > .artifact-view');
 
         // A new version replaces the one shown, and a Markdown artifact keeps the reader's place.
         if (open?.dataset['artifact'] !== artifact.path || open.dataset['version'] !== String(artifact.updatedAt)) {
           const top = open?.dataset['artifact'] === artifact.path ? (open.querySelector<HTMLElement>('.artifact-doc')?.scrollTop ?? 0) : 0;
 
+          takePane(pane);
           pane.innerHTML = renderArtifactView(state.key, artifact);
           void fillArtifact(artifact.path, top);
         }
       } else {
-        morph(pane, tab === 'status' ? renderStatus(state, view, now) : tab === 'artifacts' ? renderArtifacts(state, now) : renderTimeline(state, view));
+        drawPane(pane, tab === 'status' ? renderStatus(state, view, now) : tab === 'artifacts' ? renderArtifacts(state, now) : renderTimeline(state, view));
         drawDiagrams(pane);
       }
 
@@ -1084,7 +1098,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const why = consoleNote(session);
 
     if (why !== null || session === null || state.key === null) {
-      morph(pane, `<p class="empty">${escape(why ?? 'Connecting to Switchboard…')}</p>`);
+      drawPane(pane, renderEmpty(why ?? 'Connecting to Switchboard…'));
       return;
     }
 
@@ -1096,6 +1110,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
+    takePane(pane);
     pane.innerHTML = `<div class="console" data-console="${escape(id)}"><p class="empty">Loading the console…</p></div>`;
     dropConsoles();
 
