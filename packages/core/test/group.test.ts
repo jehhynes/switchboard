@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { activeSession, adhocLabel, failedAtTriage, groupOf, holdsSlot, markOf, needsYou, QUESTION_CARD, reviewOrder, triageLabel, turnOf, urlKey, waitsOnCard } from '../src/group.js';
+import { activeSession, adhocLabel, failedAtTriage, groupOf, holdsSlot, MARK_ICONS, markOf, needsYou, QUESTION_CARD, reviewOrder, SESSION_ICONS, sessionIcon, triageLabel, turnOf, urlKey, waitsOnCard } from '../src/group.js';
 import type { DoneReason, SessionOutcome, SessionState, WorkItemStatus } from '../src/model.js';
 
 const item = (status: WorkItemStatus, ...states: SessionState[]) => ({
@@ -227,5 +227,27 @@ describe('adhocLabel', () => {
     expect(adhocLabel({ parentId: 4, prompted: true }, none)).toBe('task');
     expect(adhocLabel({ parentId: null, prompted: true }, { sourceId: 'task' })).toBe('task');
     expect(adhocLabel({ parentId: null, prompted: false }, none)).toBe('registered');
+  });
+});
+
+describe('sessionIcon', () => {
+  it('draws each session state with the icon of the mark that means the same, and keeps check for Done', () => {
+    expect(SESSION_ICONS[sessionIcon('running')]).toBe(`${MARK_ICONS.running}~spin`);
+    expect(SESSION_ICONS[sessionIcon('starting')]).toBe(`${MARK_ICONS.running}~spin`);
+    expect(SESSION_ICONS[sessionIcon('waiting', 'question')]).toBe(MARK_ICONS.question);
+    expect(SESSION_ICONS[sessionIcon('waiting', 'start-prompt')]).toBe(MARK_ICONS.question);
+    expect(SESSION_ICONS[sessionIcon('waiting', 'permission')]).toBe(MARK_ICONS.permission);
+    expect(SESSION_ICONS[sessionIcon('idle')]).toBe(MARK_ICONS.idle);
+    expect(SESSION_ICONS[sessionIcon('failed')]).toBe(MARK_ICONS.failed);
+    expect(SESSION_ICONS[sessionIcon('idle', null, true)]).toBe(MARK_ICONS.limited);
+    expect(SESSION_ICONS[sessionIcon('ended')]).toBe('debug-stop');
+    expect(SESSION_ICONS[sessionIcon(null)]).toBe('circle-slash');
+    expect(Object.values(SESSION_ICONS)).not.toContain(MARK_ICONS['done-session']);
+  });
+
+  it('gives no two session states the same icon unless they mean the same, starting and running both being at work', () => {
+    const icons = Object.entries(SESSION_ICONS).filter(([kind]) => kind !== 'starting').map(([, icon]) => icon);
+
+    expect(new Set(icons).size).toBe(icons.length);
   });
 });

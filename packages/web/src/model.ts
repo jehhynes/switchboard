@@ -1,3 +1,5 @@
+import { SESSION_ICONS, sessionIcon } from '@switchboard/core/group';
+import type { SessionIcon } from '@switchboard/core/group';
 import type { ArtifactView, ConversationEntry, ItemView, PageGroup, ReplyView, ScopeView, SessionView, StatusView, VoiceView } from './types.js';
 
 /** What the page shows, kept from its conversation stream (architecture.md § Web page). */
@@ -185,24 +187,26 @@ export function stateIcon(state: SessionView['state'] | null | undefined, waitin
     const time = at.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
     const when = at.toDateString() === new Date().toDateString() ? time : `${at.toLocaleDateString('en-US', { weekday: 'short' })} ${time}`;
 
-    return { icon: 'watch', text: `Rate limited · ${limit.retry ? 'retries' : 'resumes'} ${when}` };
+    return { icon: SESSION_ICONS.limited, text: `Rate limited · ${limit.retry ? 'retries' : 'resumes'} ${when}` };
   }
 
-  switch (state) {
-    case 'starting':
-      return { icon: 'loading~spin', text: 'Starting' };
-    case 'running':
-      return { icon: 'loading~spin', text: 'Working' };
-    case 'waiting':
-      return waitingFor === 'permission' ? { icon: 'shield', text: 'Waiting for permission' } : { icon: 'question', text: 'Waiting for your answer' };
-    case 'idle':
-      return { icon: 'check', text: 'Idle' };
-    case 'ended':
-      return { icon: 'debug-stop', text: 'Ended' };
-    default:
-      return { icon: 'circle-outline', text: 'No session' };
-  }
+  const kind = sessionIcon(state, waitingFor);
+
+  return { icon: SESSION_ICONS[kind], text: SESSION_WORDS[kind] };
 }
+
+/** Each session icon in words, as the Conversation view says them. */
+const SESSION_WORDS: Record<SessionIcon, string> = {
+  question: 'Waiting for your answer',
+  limited: 'Rate limited',
+  permission: 'Waiting for permission',
+  running: 'Working',
+  idle: 'Idle',
+  failed: 'Failed',
+  starting: 'Starting',
+  ended: 'Ended',
+  none: 'No session',
+};
 
 /** An artifact type's codicon. */
 export function artifactIcon(type: ArtifactView['type']): string {

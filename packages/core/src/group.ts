@@ -179,6 +179,75 @@ export const MARK_GLYPHS: Record<Mark, string> = {
   'done-unassigned': '\u{ea6e}', // sign-out
 };
 
+/**
+ * Each mark's codicon name, the icon `MARK_GLYPHS` draws, for a webview or a page that draws codicons by class: one mapping for the dock, the
+ * Switchboard pane, the Conversation view and the web page.
+ */
+export const MARK_ICONS: Record<Mark, string> = {
+  question: 'question',
+  permission: 'shield',
+  send: 'send',
+  review: 'eye',
+  finished: 'eye',
+  blocked: 'debug-pause',
+  failed: 'error',
+  queued: 'clock',
+  setup: 'tools',
+  running: 'loading',
+  limited: 'watch',
+  idle: 'circle-large-outline',
+  triaging: 'loading',
+  'done-session': 'check',
+  'done-operator': 'account',
+  'done-unassigned': 'sign-out',
+};
+
+/** The marks drawn spinning, as the dock spins them: a session at work. */
+export const SPINNING_MARKS: ReadonlySet<Mark> = new Set<Mark>(['running', 'triaging']);
+
+/** A session's state as an icon: its mark's when one means the same, else `starting`, `ended` or `none` for no session. */
+export type SessionIcon = 'question' | 'permission' | 'running' | 'limited' | 'idle' | 'failed' | 'starting' | 'ended' | 'none';
+
+/**
+ * The codicon of each session state, `~spin` for one that spins: the same icon as the mark of that meaning, so a session waiting on a question
+ * shows the dock's question mark and an idle one its Idle mark. `check` is left to Done.
+ */
+export const SESSION_ICONS: Record<SessionIcon, string> = {
+  question: MARK_ICONS.question,
+  permission: MARK_ICONS.permission,
+  running: `${MARK_ICONS.running}~spin`,
+  limited: MARK_ICONS.limited,
+  idle: MARK_ICONS.idle,
+  failed: MARK_ICONS.failed,
+  starting: `${MARK_ICONS.running}~spin`,
+  ended: 'debug-stop',
+  none: 'circle-slash',
+};
+
+/** A session's icon by its state, what it waits for and whether it waits for a usage limit to reset; `none` without a session. */
+export function sessionIcon(state: Session['state'] | null | undefined, waitingFor: string | null = null, limited = false): SessionIcon {
+  if (limited) {
+    return 'limited';
+  }
+
+  switch (state) {
+    case 'starting':
+      return 'starting';
+    case 'running':
+      return 'running';
+    case 'waiting':
+      return waitingFor === 'permission' ? 'permission' : 'question';
+    case 'idle':
+      return 'idle';
+    case 'failed':
+      return 'failed';
+    case 'ended':
+      return 'ended';
+    default:
+      return 'none';
+  }
+}
+
 /** The work item's mark, or null for an Unstarted item that is not triaging, failed or queued, which shows its priority instead. A snoozed item has its group's mark. */
 export function markOf(item: Grouped & Pick<WorkItem, 'doneReason'> & { approvalSends: boolean }): Mark | null {
   switch (groupOf(item)) {

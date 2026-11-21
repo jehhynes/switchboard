@@ -1,3 +1,5 @@
+import { SESSION_ICONS, sessionIcon } from '@switchboard/core/group';
+import type { SessionIcon } from '@switchboard/core/group';
 import type { ArtifactView, ConversationEntry, ItemView, ReplyView, ScopeView, SessionView, StatusView, VoiceView } from '@switchboard/hub';
 
 /** What a window's Conversation view shows, kept from its conversation stream (architecture.md § Conversation view). */
@@ -372,23 +374,21 @@ export function micOn(voice: VoiceView | null): boolean {
 
 /** The header's codicon for the session's state (architecture.md § Conversation view). */
 export function stateIcon(session: SessionView | null): { icon: string; text: string } {
-  // A session waiting for a usage limit to reset (architecture.md § Rate limits).
-  if (session?.limit != null) {
-    return { icon: 'watch', text: limitText(session.limit) };
-  }
+  const kind = sessionIcon(session?.state, session?.waitingFor ?? null, session?.limit != null);
 
-  switch (session?.state) {
-    case undefined:
-      return { icon: 'circle-outline', text: 'No session' };
-    case 'starting':
-      return { icon: 'loading~spin', text: 'Starting' };
-    case 'running':
-      return { icon: 'loading~spin', text: 'Working' };
-    case 'waiting':
-      return session.waitingFor === 'permission' ? { icon: 'shield', text: 'Waiting for permission' } : { icon: 'question', text: 'Waiting for your answer' };
-    case 'idle':
-      return { icon: 'check', text: 'Idle' };
-    case 'ended':
-      return { icon: 'debug-stop', text: 'Ended' };
-  }
+  // A session waiting for a usage limit to reset (architecture.md § Rate limits).
+  return { icon: SESSION_ICONS[kind], text: kind === 'limited' ? limitText(session!.limit!) : SESSION_WORDS[kind] };
 }
+
+/** Each session icon in words. */
+const SESSION_WORDS: Record<SessionIcon, string> = {
+  question: 'Waiting for your answer',
+  limited: 'Rate limited',
+  permission: 'Waiting for permission',
+  running: 'Working',
+  idle: 'Idle',
+  failed: 'Failed',
+  starting: 'Starting',
+  ended: 'Ended',
+  none: 'No session',
+};

@@ -29,6 +29,7 @@
     "vitest": "^3.2.7"
   },
   "dependencies": {
-    "@switchboard/conversation": "*"
+    "@switchboard/conversation": "*",
+    "@switchboard/core": "*"
   }
 }

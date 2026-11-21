@@ -240,10 +240,11 @@ describe('the conversation state', () => {
     expect(stateIcon(SESSION)).toEqual({ icon: 'loading~spin', text: 'Working' });
     expect(stateIcon({ ...SESSION, state: 'waiting', waitingFor: 'question' }).icon).toBe('question');
     expect(stateIcon({ ...SESSION, state: 'waiting', waitingFor: 'permission' }).icon).toBe('shield');
-    expect(stateIcon({ ...SESSION, state: 'idle' }).icon).toBe('check');
+    // The dock's Idle mark; `check` is Done's.
+    expect(stateIcon({ ...SESSION, state: 'idle' })).toEqual({ icon: 'circle-large-outline', text: 'Idle' });
     expect(stateIcon({ ...SESSION, state: 'ended' }).icon).toBe('debug-stop');
     expect(stateIcon({ ...SESSION, state: 'starting' }).icon).toBe('loading~spin');
-    expect(stateIcon(null).icon).toBe('circle-outline');
+    expect(stateIcon(null)).toEqual({ icon: 'circle-slash', text: 'No session' });
   });
 
   it('shows a session waiting for a usage limit to reset with a watch and when it resumes (architecture.md § Rate limits)', () => {
@@ -1734,7 +1735,7 @@ describe('several conversations in a window (architecture.md § Conversation vie
     menu.innerHTML = opened;
     expect(menu.querySelectorAll('.conversation-menu [role="menuitemradio"]')).toHaveLength(2);
     expect(menu.querySelector('.conversation-menu [aria-checked="true"]')?.getAttribute('data-work-item')).toBe('9');
-    // The selected row is highlighted, not checked, since an idle session's codicon is itself a check; no row shows an unread count.
+    // The selected row is highlighted, not checked; no row shows an unread count.
     expect(menu.querySelector('.conversation-row .menu-gutter')).toBeNull();
     expect(menu.querySelector('.conversation-row [aria-checked="true"]')).toBeNull();
     expect(menu.querySelector('.conversation-row[aria-checked="true"]')?.querySelectorAll('.codicon-check')).toHaveLength(0);
