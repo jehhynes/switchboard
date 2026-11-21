@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { Attachment, HolderClient, HolderError } from '../src/client.js';
 import { Raw, TOKEN, startHost, tick } from './fakes.js';
 import type { TestHost } from './fakes.js';
+import headless from '@xterm/headless';
+import { mouseEncoding } from '../src/host.js';
 import type { Pty } from '../src/host.js';
 
 let current: TestHost | null = null;
@@ -409,6 +411,45 @@ describe('attach', () => {
     expect(one.closes).toEqual([null]);
     expect(one.received.at(-1)).toBe('bye\r\n');
     client.close();
+  });
+
+  it('replays mouse tracking with the encoding the program set, and none once the program turned it off, into a terminal left with other modes', async () => {
+    const cases: Array<[string, string, string]> = [
+      ['\u001b[?1000h\u001b[?1002h\u001b[?1003h\u001b[?1015h\u001b[?1006h', 'any', 'SGR'],
+      ['\u001b[?1002h\u001b[?1016h', 'drag', 'SGR_PIXELS'],
+      ['\u001b[?1003h\u001b[?1006h\u001b[?1006l', 'any', 'DEFAULT'],
+      ['\u001b[?1003h\u001b[?1006h\u001b[?1003l\u001b[?1006l', 'none', 'DEFAULT'],
+    ];
+    const state = await started();
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    for (const [index, [modes, tracking, encoding]] of cases.entries()) {
+      await client.spawn(spawnRequest(`s${index}`));
+      state.ptys[index]!.emit(`screen${modes}`);
+
+      const one = await attachTo(state, `s${index}`, 100, 30);
+
+      await tick();
+      expect(one.isReplayed()).toBe(true);
+
+      const terminal = new headless.Terminal({ cols: 100, rows: 30, allowProposedApi: true });
+
+      // A terminal the attach client reused after another program turned on any-event tracking, SGR pixels and focus reports.
+      await new Promise<void>((resolve) => terminal.write('\u001b[?1003h\u001b[?1016h\u001b[?1004h', resolve));
+      await new Promise<void>((resolve) => terminal.write(one.received.join(''), resolve));
+      expect(terminal.modes.sendFocusMode).toBe(false);
+      expect([terminal.modes.mouseTrackingMode, (terminal as unknown as { _core: { coreMouseService: { activeEncoding: string } } })._core.coreMouseService.activeEncoding]).toEqual([tracking, encoding]);
+      terminal.dispose();
+      one.attachment.close();
+    }
+
+    client.close();
+  });
+
+  it('turns mouse tracking off after the replay when the encoding cannot be read', () => {
+    expect(mouseEncoding({ modes: { mouseTrackingMode: 'any' } })).toBe('\u001b[?1003l');
+    expect(mouseEncoding({ modes: { mouseTrackingMode: 'vt200' }, _core: { coreMouseService: { activeEncoding: 'URXVT' } } } as never)).toBe('\u001b[?1000l');
+    expect(mouseEncoding({ modes: { mouseTrackingMode: 'none' } })).toBe('');
   });
 
   it('replays the last screen and the exit code to a client attaching after the exit, and ignores its input', async () => {

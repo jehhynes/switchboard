@@ -104,6 +104,33 @@ interface Connection {
   rows: number;
 }
 
+const TRACKING_MODES: Record<string, number> = { x10: 9, vt200: 1000, drag: 1002, any: 1003 };
+const ENCODING_MODES: Record<string, string> = { DEFAULT: '', SGR: '\u001b[?1006h', SGR_PIXELS: '\u001b[?1016h' };
+
+/**
+ * Turns off the modes that make a terminal send reports: mouse tracking and its encodings, and focus reports. A replay starts with it,
+ * because the attach client reuses its terminal and the serialized screen only turns modes on (mechanics M101).
+ */
+export const REPORTS_OFF = '\u001b[?9l\u001b[?1000l\u001b[?1002l\u001b[?1003l\u001b[?1004l\u001b[?1005l\u001b[?1006l\u001b[?1015l\u001b[?1016l';
+
+/**
+ * What a replay needs after `SerializeAddon.serialize` to leave a terminal's mouse reporting as the program set it. The addon restores
+ * mouse tracking (DECSET 9, 1000, 1002, 1003) but not its encoding, so a terminal fed the replay alone sends legacy `ESC [ M` reports
+ * that a program which asked for SGR reports (DECSET 1006) reads as Esc and typed text. This adds the program's encoding, read from
+ * xterm's mouse service, which has no public API; when that cannot be read it turns the tracking off instead (mechanics M101).
+ */
+export function mouseEncoding(term: { modes: { mouseTrackingMode: string } }): string {
+  const tracking = TRACKING_MODES[term.modes.mouseTrackingMode];
+
+  if (tracking === undefined) {
+    return '';
+  }
+
+  const encoding = (term as { _core?: { coreMouseService?: { activeEncoding?: unknown } } })._core?.coreMouseService?.activeEncoding;
+
+  return typeof encoding === 'string' && Object.hasOwn(ENCODING_MODES, encoding) ? ENCODING_MODES[encoding]! : `\u001b[?${tracking}l`;
+}
+
 /** Holds programs in pseudo-terminals and serves the holder protocol on loopback. */
 export class Host {
   readonly #options: HostOptions;
@@ -654,7 +681,7 @@ export class Host {
   async #replay(connection: Connection, held: Held): Promise<void> {
     connection.replaying = true;
 
-    for (const part of chunkData(held.serializer.serialize({ scrollback: SCROLLBACK_LINES }))) {
+    for (const part of chunkData(REPORTS_OFF + held.serializer.serialize({ scrollback: SCROLLBACK_LINES }) + mouseEncoding(held.term))) {
       if (connection.state === 'closed' || connection.socket.destroyed) {
         return;
       }
