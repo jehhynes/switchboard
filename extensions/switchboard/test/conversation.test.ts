@@ -307,7 +307,7 @@ describe('the Conversation view page', () => {
     root.innerHTML = renderConversation(state([message('m1', T0, 'Sent', { provisional: true })]));
     expect(root.querySelector('.message')?.className).toBe('message provisional');
     root.innerHTML = html;
-    expect([...root.querySelectorAll('.timeline > li')].map((li) => li.className)).toEqual(['message', 'reply reply', 'reply aside', 'note']);
+    expect([...root.querySelectorAll('.timeline > li')].map((li) => li.className)).toEqual(['day', 'message', 'reply reply', 'reply aside', 'note']);
     expect(root.querySelector('.reply.reply .body > p')?.innerHTML).toBe('Both fixed.');
     expect(root.querySelector<HTMLDetailsElement>('.fold.earlier')?.open).toBe(true);
     expect(root.querySelector('.fold.earlier .was table')).not.toBeNull();
@@ -429,16 +429,20 @@ describe('the Conversation view page', () => {
     // The stamp sits over a message's bubble, as over a reply, and a slash command shows in the editor font.
     expect([...root.querySelector('li[data-id="m1"]')!.children].map((child) => child.className)).toEqual(['stamp-line', 'box command']);
     expect(root.querySelector('li[data-id="m2"] .box')?.className).toBe('box');
-    // No divider before the first turn; one, without the year, before the turn on the next day, which the keys skip.
-    expect([...root.querySelectorAll('.timeline > li')].map((li) => li.getAttribute('data-id') ?? li.className)).toEqual(['m1', 'r1', 'n1', 'a1', 'day', 'm2', 'r2']);
-    expect(root.querySelector('.day')?.textContent).toBe('Fri, Nov 20');
+    // A divider before the first turn and before the turn on the next day, which the keys skip: Yesterday and Today.
+    expect([...root.querySelectorAll('.timeline > li')].map((li) => li.getAttribute('data-id') ?? li.className)).toEqual(['day', 'm1', 'r1', 'n1', 'a1', 'day', 'm2', 'r2']);
+    expect([...root.querySelectorAll('.day')].map((day) => day.textContent)).toEqual(['Yesterday', 'Today']);
     expect(root.querySelector('.day')?.getAttribute('role')).toBe('separator');
 
     // A reply after midnight in the same turn gets no divider, the next turn does; a turn in an earlier year shows its year.
     root.innerHTML = renderConversation(state([message('m1', at(19, 23, 50), 'Late'), reply('r1', at(20, 0, 10)), message('m2', at(20, 0, 20), 'Still')], { session: { ...SESSION, state: 'idle' } }), new Set(), at(20, 1, 0));
-    expect([...root.querySelectorAll('.timeline > li')].map((li) => li.getAttribute('data-id') ?? li.className)).toEqual(['m1', 'r1', 'day', 'm2']);
+    expect([...root.querySelectorAll('.timeline > li')].map((li) => li.getAttribute('data-id') ?? li.className)).toEqual(['day', 'm1', 'r1', 'day', 'm2']);
     root.innerHTML = renderConversation(state([message('m1', new Date(2026, 11, 30, 9).getTime(), 'Old'), message('m2', new Date(2026, 11, 31, 9).getTime(), 'New')]), new Set(), new Date(2027, 2, 1).getTime());
-    expect(root.querySelector('.day')?.textContent).toBe('Thu, Dec 31, 2026');
+    expect([...root.querySelectorAll('.day')].map((day) => day.textContent)).toEqual(['Wed, Dec 30, 2026', 'Thu, Dec 31, 2026']);
+    // Earlier this year: the weekday and date, without the year; the times stay time-only.
+    root.innerHTML = renderConversation(state([message('m1', at(17, 9, 5), 'Older')]), new Set(), at(20, 9, 0));
+    expect(root.querySelector('.day')?.textContent).toBe('Tue, Nov 17');
+    expect(root.querySelector('li[data-id="m1"] .stamp')?.textContent).toBe('9:05 AM');
   });
 
   it('shows a spinner after the newest item while the session works on a reply, gone when the reply arrives or the turn ends', () => {
@@ -447,9 +451,9 @@ describe('the Conversation view page', () => {
 
     root.innerHTML = renderConversation(state(asked));
     // Progress written mid-turn shows above it, as an artifact written since does.
-    expect([...root.querySelectorAll('.timeline > li')].map((li) => li.className)).toEqual(['reply reply', 'message', 'reply aside', 'working']);
+    expect([...root.querySelectorAll('.timeline > li')].map((li) => li.className)).toEqual(['day', 'reply reply', 'message', 'reply aside', 'working']);
     root.innerHTML = renderConversation(state([...asked, reply('a2', T0 + 3, { kind: 'aside', opening: 'Writing' })], { artifacts: [{ path: 'chat/a.md', owner: 'chat', kind: 'page', title: 'Page', ext: 'md', type: 'markdown', updatedAt: T0 + 4 }] }));
-    expect([...root.querySelectorAll('.timeline > li')].map((li) => li.getAttribute('data-id') ?? li.className)).toEqual(['r1', 'm1', 'a1', 'a2', 'artifact:chat/a.md', 'working']);
+    expect([...root.querySelectorAll('.timeline > li')].map((li) => li.getAttribute('data-id') ?? li.className)).toEqual(['day', 'r1', 'm1', 'a1', 'a2', 'artifact:chat/a.md', 'working']);
     expect(root.querySelector('.working .codicon')?.className).toBe('working-icon codicon codicon-loading codicon-modifier-spin');
     // "Thinking…" beside it, as in Claude Code's panel, which a screen reader hears once, as "Thinking".
     expect(root.querySelector('.working .working-label')?.textContent).toBe('Thinking…');
@@ -1904,7 +1908,7 @@ describe('redraws and following the end (architecture.md § Conversation view)',
     expect(root.querySelector('.scroll')).toBe(scroller);
     expect(root.querySelector('li[data-id="r1"] [data-action="copy-reply"]')).toBe(copy);
     expect(document.activeElement).toBe(copy);
-    expect(root.querySelectorAll('.timeline > li')).toHaveLength(2);
+    expect(root.querySelectorAll('.timeline > li[data-id]')).toHaveLength(2);
     // Another conversation gets a scroller of its own.
     send(applyEvent(EMPTY_CONVERSATION, hello([reply('r9', T0)], { scope: { ...SCOPE, scopeGen: 2 } })));
     expect(root.querySelector('.scroll')).not.toBe(scroller);

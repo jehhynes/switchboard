@@ -107,6 +107,16 @@ describe('drawing', () => {
   // The page's state with these items, as a hello brings them.
   const pageState = (items: Array<MessageView | ReplyView>) => applyEvent(EMPTY, { type: 'hello', key: 'k', groups: [], scope, sessions: [session()], items, more: false, status: null, artifacts: [] });
 
+  it('puts a Today, Yesterday or dated divider before the first item and each turn on another day', () => {
+    const at = (day: number, hour: number): number => new Date(2026, 10, day, hour).getTime();
+    const html = renderTimeline(pageState([message('m1', 1, { at: at(17, 9) }), reply('r1', 2, { at: at(18, 1) }), message('m2', 3, { at: at(19, 9) }), message('m3', 4, { at: at(20, 9) })]), newView(), at(20, 12));
+    const host = document.createElement('div');
+
+    host.innerHTML = html;
+    expect([...host.querySelectorAll('.timeline > li')].map((li) => li.getAttribute('data-id') ?? li.textContent)).toEqual(['Tue, Nov 17', 'm1', 'r1', 'Yesterday', 'm2', 'Today', 'm3']);
+    expect(renderTimeline(pageState([message('m1', 1, { at: new Date(2025, 11, 31, 9).getTime() })]), newView(), at(20, 12))).toContain('>Wed, Dec 31, 2025</li>');
+  });
+
   it('dims the part of an interrupted passage not heard, and says Not spoken only when speech failed', () => {
     const spoken = (state: ReplyView['spoken']['state']) => renderTimeline(pageState([reply('r1', 1, { opening: 'Fixed it. More.', speak: 'Fixed it.', spoken: { state, atMs: 7_400, saidChars: 3 } })]), newView());
 
@@ -188,7 +198,7 @@ describe('drawing', () => {
     const order = (html: string): string[] => [...html.matchAll(/<li class="([^"]+)"(?: data-id="([^"]+)")?/g)].map((match) => match[2] ?? match[1]!);
     const html = renderTimeline({ ...EMPTY, connected: true, scope, session: session({ state: 'running' }), items }, newView());
 
-    expect(order(html)).toEqual(['m1', 'a1', 'a2', 'working']);
+    expect(order(html)).toEqual(['day', 'm1', 'a1', 'a2', 'working']);
     expect(renderTimeline({ ...EMPTY, connected: true, scope, session: session({ state: 'running' }), items: [...items, reply('r1', 4)] }, newView())).not.toContain('class="working"');
     expect(renderTimeline({ ...EMPTY, connected: true, scope, session: session({ state: 'idle' }), items }, newView())).not.toContain('class="working"');
   });

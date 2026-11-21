@@ -89,11 +89,18 @@ function dayOf(at: number): string {
   return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
 }
 
-/** The divider before a turn that starts on another day than the turn before it, with the year only when it is not this year's. */
-function dayDivider(at: number, now: number): string {
-  const label = (new Date(at).getFullYear() === new Date(now).getFullYear() ? DAY : DAY_WITH_YEAR).format(at);
+/** A day as its divider names it: "Today", "Yesterday", the weekday and date this year, or the full date with the year. */
+export function dayLabel(at: number, now: number): string {
+  const midnight = (time: number): number => new Date(new Date(time).getFullYear(), new Date(time).getMonth(), new Date(time).getDate()).getTime();
+  // Rounded, since a day with a daylight saving change is 23 or 25 hours long.
+  const days = Math.round((midnight(now) - midnight(at)) / 86_400_000);
 
-  return `<li class="day" role="separator">${escape(label)}</li>`;
+  return days === 0 ? 'Today' : days === 1 ? 'Yesterday' : (new Date(at).getFullYear() === new Date(now).getFullYear() ? DAY : DAY_WITH_YEAR).format(at);
+}
+
+/** The divider before the first turn shown on each day. */
+function dayDivider(at: number, now: number): string {
+  return `<li class="day" role="separator">${escape(dayLabel(at, now))}</li>`;
 }
 
 /** A message that is a slash command, which shows in the editor font. */
@@ -764,21 +771,21 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
   };
   // The turn's row after the newest item, so replies written mid-turn show above it; it has no data-id, so the keys skip it.
   const spinner = turnRow(state.session, awaitingReply(state.items, state.session));
-  // A turn starts at each message; one that starts on another day than the turn before it has a divider, as in Claude Code's panel.
+  // A turn starts at each message; the first item shown, and each turn that starts on another day than the turn before it, has a divider.
   let turnDay: string | null = null;
   // A time shows only where the minute changes from the item before, so a message and the reply to it in the same minute read as one exchange.
   let lastMinute: string | null = null;
-  const entries = shown.map((entry, index) => {
+  const entries = shown.map((entry) => {
     if (entry.type === 'artifact') {
       return artifactRow(entry.artifact);
     }
 
     let divider = '';
 
-    if (index === 0 || entry.type === 'message') {
+    if (turnDay === null || entry.type === 'message') {
       const day = dayOf(entry.item.at);
 
-      divider = turnDay !== null && day !== turnDay ? dayDivider(entry.item.at, now) : '';
+      divider = day !== turnDay ? dayDivider(entry.item.at, now) : '';
       turnDay = day;
     }
 

@@ -60,7 +60,7 @@ describe('artifact rows', () => {
 
     const row = root.querySelector<HTMLElement>('li.artifact')!;
 
-    expect([...root.querySelectorAll('.timeline > li')].map((li) => li.className)).toEqual(['message', 'artifact', 'reply reply']);
+    expect([...root.querySelectorAll('.timeline > li')].map((li) => li.className)).toEqual(['day', 'message', 'artifact', 'reply reply']);
     expect(row.querySelector('.codicon')?.className).toBe('codicon codicon-globe');
     expect(row.querySelector('.artifact-title')?.innerHTML).toBe('A &lt;b&gt;vs&lt;/b&gt; B');
     expect(row.querySelector('.artifact-kind')?.textContent).toBe('comparison');

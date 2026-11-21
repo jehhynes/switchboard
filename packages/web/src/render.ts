@@ -42,6 +42,16 @@ const STAMP = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-dig
 /** A time's tooltip, as the VS Code view's: "2026-11-19 13:46:05 EST". */
 const STAMP_FULL = new Intl.DateTimeFormat('en-US', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23', timeZoneName: 'short' });
 const DAY = new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+const DAY_WITH_YEAR = new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+
+/** A day as its divider names it: "Today", "Yesterday", the weekday and date this year, or the full date with the year. */
+export function dayLabel(at: number, now: number): string {
+  const midnight = (time: number): number => new Date(new Date(time).getFullYear(), new Date(time).getMonth(), new Date(time).getDate()).getTime();
+  // Rounded, since a day with a daylight saving change is 23 or 25 hours long.
+  const days = Math.round((midnight(now) - midnight(at)) / 86_400_000);
+
+  return days === 0 ? 'Today' : days === 1 ? 'Yesterday' : (new Date(at).getFullYear() === new Date(now).getFullYear() ? DAY : DAY_WITH_YEAR).format(at);
+}
 
 function codicon({ icon, text }: { icon: string; text: string }): string {
   const [name, modifier] = icon.split('~');
@@ -254,7 +264,7 @@ function answerAfter(state: PageState, replyId: string): string | null {
 }
 
 /** The Conversation tab: why the page cannot talk to the session, earlier messages, and the timeline with its spinner. */
-export function renderTimeline(state: PageState, view: View): string {
+export function renderTimeline(state: PageState, view: View, now: number = Date.now()): string {
   if (state.session === null) {
     return '<p class="empty">No session yet. Messages appear here once the work item\'s session starts.</p>';
   }
@@ -270,8 +280,9 @@ export function renderTimeline(state: PageState, view: View): string {
       return artifactRow(entry.artifact);
     }
 
+    // The first item shown, and each turn that starts on another day than the turn before it, has a divider.
     const day = new Date(entry.item.at).toDateString();
-    const divider = lastDay !== null && day !== lastDay && entry.type === 'message' ? `<li class="day" role="separator">${escape(DAY.format(entry.item.at))}</li>` : '';
+    const divider = day !== lastDay && (lastDay === null || entry.type === 'message') ? `<li class="day" role="separator">${escape(dayLabel(entry.item.at, now))}</li>` : '';
 
     lastDay = entry.type === 'message' || lastDay === null ? day : lastDay;
 
