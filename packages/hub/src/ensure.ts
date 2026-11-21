@@ -53,7 +53,8 @@ export function makeEnsure(deps: EnsureDeps): () => Promise<Ensured> {
     const wanted = (record: HubRecord) => record.build === build && record.configDir === configDir;
     const found = await deps.find();
 
-    if (found !== null && wanted(found)) {
+    // A hub that restarts by itself onto the installed build does so once nothing is in progress, so it is kept rather than stopped mid-work.
+    if (found !== null && (wanted(found) || (found.restarts === true && found.configDir === configDir))) {
       return { record: found };
     }
 

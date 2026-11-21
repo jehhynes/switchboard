@@ -507,6 +507,8 @@ describe('serveHub restart onto a new build', () => {
     expect(exit).toHaveBeenCalledWith(0);
     expect(recordOnDisk()).toEqual(taken.record);
     expect(taken.record.build).toBe('b2');
+    expect(old.record.restarts).toBe(true);
+    expect(taken.record.restarts).toBeUndefined();
     expect(await call(old.record.port, 'GET', '/hub', null, 300)).toBeNull();
     expect(lines.filter((line) => line.startsWith('restarting the hub') || line.startsWith('hub restart:') || line.startsWith('stopping'))).toEqual([
       `restarting the hub from build b1 onto build ${buildOf(bundle)}, which is installed`,

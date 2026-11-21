@@ -22,6 +22,8 @@ export interface HubRecord {
   token: string;
   pid: number;
   startedAt: string;
+  /** The hub restarts by itself onto the installed bundle when that is another build (architecture.md § Hub lifecycle); absent from an older hub. */
+  restarts?: boolean;
 }
 
 /** What the hub reports about itself. */
@@ -66,7 +68,7 @@ export function parseHubRecord(text: string): HubRecord | null {
     return null;
   }
 
-  return { protocol: raw.protocol, version: raw.version, build: raw.build, configDir: raw.configDir, execPath: raw.execPath, port: raw.port, token: raw.token, pid: raw.pid, startedAt: raw.startedAt };
+  return { protocol: raw.protocol, version: raw.version, build: raw.build, configDir: raw.configDir, execPath: raw.execPath, port: raw.port, token: raw.token, pid: raw.pid, startedAt: raw.startedAt, ...(raw.restarts === true ? { restarts: true } : {}) };
 }
 
 export function parseHubIdentity(text: string): HubIdentity | null {

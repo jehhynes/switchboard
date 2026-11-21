@@ -274,6 +274,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
     token: server.token,
     pid: process.pid,
     startedAt: new Date().toISOString(),
+    ...(options.restart === undefined ? {} : { restarts: true }),
   };
 
   // Any record already here belongs to a hub that died, since this process holds the lock.

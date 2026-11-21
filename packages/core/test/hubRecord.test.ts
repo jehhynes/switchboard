@@ -8,6 +8,11 @@ describe('parseHubRecord', () => {
     expect(parseHubRecord(JSON.stringify(record))).toEqual(record);
   });
 
+  it('reads restarts only when true', () => {
+    expect(parseHubRecord(JSON.stringify({ ...record, restarts: true }))).toEqual({ ...record, restarts: true });
+    expect(parseHubRecord(JSON.stringify({ ...record, restarts: 'yes' }))).toEqual(record);
+  });
+
   it('drops unknown fields', () => {
     expect(parseHubRecord(JSON.stringify({ ...record, extra: true }))).toEqual(record);
   });

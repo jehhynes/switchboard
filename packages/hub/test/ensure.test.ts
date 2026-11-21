@@ -84,6 +84,21 @@ describe('makeEnsure', () => {
     expect(deps.start.mock.invocationCallOrder[0]).toBeGreaterThan(deps.find.mock.invocationCallOrder[2]!);
   });
 
+  it('keeps a hub of another build that restarts by itself onto the installed one, but not one that reads another config folder', async () => {
+    const restarting = { ...old, restarts: true };
+    const kept = fakes([restarting]);
+
+    expect(await makeEnsure(kept)()).toEqual({ record: restarting });
+    expect(kept.stop).not.toHaveBeenCalled();
+    expect(kept.start).not.toHaveBeenCalled();
+
+    const elsewhere = { ...restarting, configDir: 'D:/other' };
+    const replaced = fakes([elsewhere, null, current]);
+
+    expect(await makeEnsure(replaced)()).toEqual({ record: current });
+    expect(replaced.stop).toHaveBeenCalledWith(elsewhere);
+  });
+
   it('replaces a hub of the installed build that reads another config folder', async () => {
     const elsewhere: HubRecord = { ...current, configDir: 'C:/other', token: 't2', pid: 8 };
     const deps = fakes([elsewhere, null, null, current]);
