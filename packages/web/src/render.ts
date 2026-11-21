@@ -101,22 +101,6 @@ export function rowKey(row: Pick<PageRow, 'workItemId' | 'ticketId'>): string {
   return row.workItemId !== null ? `item:${row.workItemId}` : `ticket:${row.ticketId ?? ''}`;
 }
 
-/**
- * The note above the composer while the session has ended, with Resume, as the Conversation view's; a session the page cannot talk to at all
- * (`none`) gets only its reason.
- */
-export function renderEndedNote(session: PageState['session'], resuming: boolean): string {
-  if (session?.state !== 'ended') {
-    return '';
-  }
-
-  const resumable = session.conversation !== 'none';
-  const text = resumable ? 'The session has ended. Resume continues it.' : (session.reason ?? 'The session has ended.');
-  const button = resumable ? `<button type="button" class="session-resume" data-action="resume"${resuming ? ' disabled' : ''}>${resuming ? 'Resuming…' : 'Resume'}</button>` : '';
-
-  return `<div class="session-note" role="status"><span class="codicon codicon-stop-circle state-icon tone-muted" aria-hidden="true"></span><span class="session-note-text">${escape(text)}</span>${button}</div>`;
-}
-
 /** The first day a snooze date can wake on: the day of the earliest timed choice, as `yyyy-mm-dd`; null with none. */
 export function firstSnoozeDay(choices: readonly SnoozeChoice[]): string | null {
   const times = choices.flatMap((choice) => (choice.until === null ? [] : [choice.until]));

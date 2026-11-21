@@ -2,7 +2,7 @@ import { applyEvent, commandQuery, EMPTY, mentionOf, mentionQuery, pageTitle, ro
 import { snoozeChoices } from '@switchboard/core/snooze';
 import type { PageState } from './model.js';
 import { escape, renderMarkdown } from './markdown.js';
-import { answerText, artifactUrl, complete, firstSnoozeDay, inputReady, renderEndedNote, renderMicButton, markdownBody, newView, parseQuestions, renderArtifactView, renderSheet, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, SIDE_TABS } from './render.js';
+import { answerText, artifactUrl, complete, firstSnoozeDay, inputReady, renderMicButton, markdownBody, newView, parseQuestions, renderArtifactView, renderSheet, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, SIDE_TABS } from './render.js';
 import type { CardDraft, SideTab, Tab, View } from './render.js';
 import type { ConsoleOptions, MountedConsole } from './console.js';
 import type { ItemView, PageRow, ScreenPrompt } from './types.js';
@@ -13,6 +13,7 @@ import { renderList, renderListPane } from './list.js';
 import { menuRows, renderHeader, renderSideSwitch, renderTabs } from './header.js';
 import { renderTimeline } from './timeline.js';
 import { renderArtifacts, renderEmpty, renderStatus } from './side.js';
+import { renderComposer, renderComposerMenu, renderEndedNote, renderFrame, renderShared } from './composer.js';
 import { listHeader } from './listHeader.js';
 import { attachments, drawChips } from './attachments.js';
 import type { Attached } from './attachments.js';
@@ -88,12 +89,10 @@ export interface ConsoleModule {
  * the composer on the right. Everything it shows comes from its own conversation stream, bound to the work item it selected.
  */
 export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageState; close(): void } {
-  root.innerHTML =
-    '<aside class="side"><div class="side-head"></div><div id="list"></div><div id="list-sheet"></div></aside>' +
-    `<div class="sash side-sash" role="separator" aria-orientation="vertical" aria-label="Work items width" aria-controls="list" tabindex="0" aria-valuemin="${SIDE_MIN}" aria-valuemax="${SIDE_MAX}" title="Drag to resize; double-click to reset"></div>` +
-    '<main class="main"><div id="head"></div><div id="panel" class="scroll"></div><div id="note"></div><div id="composer" hidden></div></main>' +
-    `<div class="sash chat-sash" role="separator" aria-orientation="vertical" aria-label="Conversation width" aria-controls="panel" tabindex="0" aria-valuemin="${CHAT_MIN}" aria-valuemax="${CHAT_MAX}" title="Drag to resize; double-click to reset"></div>` +
-    '<aside id="detail" class="detail" aria-label="Status and artifacts"><div class="detail-head"></div><div class="detail-body scroll"></div></aside><div id="sheet"></div><div class="live" aria-live="polite"></div>';
+  // A root that held a page before starts empty.
+  unmount(root);
+  root.replaceChildren();
+  mount(root, renderFrame({ min: SIDE_MIN, max: SIDE_MAX }, { min: CHAT_MIN, max: CHAT_MAX }));
 
   const list = root.querySelector<HTMLElement>('#list')!;
   const head = root.querySelector<HTMLElement>('#head')!;
@@ -212,13 +211,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const command = (name: string, body: Record<string, unknown> = {}): Promise<Answer> => post(name, { scopeGen: state.scope?.scopeGen ?? -1, ...body });
 
   // ---- The composer ----
-  composerHost.innerHTML =
-    '<div class="composer-sent" role="status" hidden><span class="codicon codicon-check" aria-hidden="true"></span><span>Sent. Its reply shows on the Conversation tab.</span></div>' +
-    '<div class="composer-error" role="alert" hidden><span class="composer-error-text"></span><button class="dismiss" type="button" aria-label="Dismiss"><span class="codicon codicon-close"></span></button></div>' +
-    '<div class="composer"><div class="glass composer-menu" role="listbox" hidden></div><div class="attachments" role="list" aria-label="Attached files" hidden></div><div class="composer-input"><div class="live-mirror"><span class="mirror-text" aria-hidden="true"></span><span class="live-words" aria-live="polite" hidden></span></div><textarea rows="1" aria-label="Message"></textarea></div><div class="composer-footer"><div class="composer-controls">' +
-    '<button class="composer-tool attach" type="button" title="Attach files…" aria-label="Attach files"><span class="codicon codicon-add" aria-hidden="true"></span></button><input class="attach-input" type="file" multiple hidden tabindex="-1" aria-hidden="true">' +
-    '<button class="composer-tool slash" type="button" title="Show slash commands (/)" aria-label="Show slash commands"><span class="slash-glyph">/</span></button></div><div class="voice-controls"></div>' +
-    '<span class="composer-mic"></span><button class="send" type="button" title="Send (Enter)" aria-label="Send" disabled><span class="codicon codicon-arrow-up"></span></button></div></div>';
+  mount(composerHost, renderComposer());
 
   const input = composerHost.querySelector('textarea')!;
   const send = composerHost.querySelector<HTMLButtonElement>('button.send')!;
@@ -392,7 +385,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const closeMenu = (): void => {
     menuOpen = null;
     menu.hidden = true;
-    menu.replaceChildren();
+    mount(menu, null);
   };
   const drawMenu = (): void => {
     if (menuOpen === null) {
@@ -400,12 +393,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
-    menu.innerHTML =
-      menuOpen.items.length === 0
-        ? `<div class="menu-empty">${menuOpen.kind === 'files' ? 'No matching files' : 'No matching commands'}</div>`
-        : menuOpen.kind === 'files'
-          ? menuOpen.items.map((item, index) => `<div class="menu-item${index === active ? ' active' : ''}" role="option" data-index="${index}"><span class="codicon codicon-${item.dir ? 'folder' : 'file'}"></span><span class="menu-name">${escape(item.path)}</span></div>`).join('')
-          : menuOpen.items.map((item, index) => `<div class="menu-item command${index === active ? ' active' : ''}" role="option" data-index="${index}"><span class="menu-label">/${escape(item.name)}</span>${item.description === '' ? '' : `<span class="menu-description">${escape(item.description)}</span>`}</div>`).join('');
+    mount(menu, renderComposerMenu(menuOpen, active));
     menu.hidden = false;
   };
   /** The `@` picker and the `/` list follow the text before the caret. */
@@ -792,8 +780,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         ? 'Resume the session to send a message.'
         : (state.session?.reason ?? (state.connected ? 'No session has started yet.' : 'Connecting to Switchboard…'));
     // The same controls as the Conversation view's, acting on this computer's voice process (architecture.md § Web page).
-    morph(voiceControls, renderVoice(state.voice, full));
-    morph(micSlot, full ? renderMicButton(state.voice) : '');
+    mount(voiceControls, renderShared(renderVoice(state.voice, full)));
+    mount(micSlot, full ? renderShared(renderMicButton(state.voice)) : null);
     grow();
     refresh();
   };
@@ -994,7 +982,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     // An ended session's note sits just above the composer on every tab, with Resume, as in the Conversation view; the page resumes it in the
     // terminal holder, or a Codex thread in its daemon, without a terminal.
-    morph(note, renderEndedNote(state.session, resuming));
+    mount(note, renderEndedNote(state.session, resuming));
 
     const side = wide() && state.scope !== null;
 

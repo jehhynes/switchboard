@@ -25,4 +25,14 @@ describe('trusted markup', () => {
     expect(trusted('')).toBeNull();
   });
 
+  it('never turns one keyed node into another, so a focused control is replaced rather than changed under the focus', () => {
+    const host = document.createElement('div');
+
+    mount(host, <div>{trusted('<button data-key="stop">Stop</button>')}</div>);
+    const stop = host.querySelector('button')!;
+
+    mount(host, <div>{trusted('<button data-key="talk-here">Talk here</button>')}</div>);
+    expect(stop.isConnected).toBe(false);
+    expect(host.querySelector('button')!.textContent).toBe('Talk here');
+  });
 });
