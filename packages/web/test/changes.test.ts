@@ -254,6 +254,9 @@ describe('the Changes list', () => {
     expect(root.querySelector('.changes-menu')).toBeNull();
     expect(gets).toContain('/v1/conversation/diff?window=pk&path=docs%2Fa.md');
     expect([...root.querySelectorAll('.diff-tab .tab-label')].map((one) => one.textContent)).toEqual(['a.md']);
+    // The file's type icon, the file codicon until the icon theme loads.
+    expect(root.querySelector('.diff-tab .tab-open > .codicon')).not.toBeNull();
+    expect(root.querySelector('.diff-tab .codicon-diff')).toBeNull();
     expect(root.querySelector('.diff-tab')!.classList.contains('selected')).toBe(true);
     expect(root.querySelector('.diff-title')!.textContent).toBe('docs/a.md');
     expect(root.querySelector('.diff-host')!.textContent).toBe('diff of docs/a.md');

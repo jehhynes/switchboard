@@ -64,7 +64,7 @@ export function diffTabs(changes: ChangesView, shown: boolean): ComponentChildre
     return (
       <span class={`tab diff-tab${path === changes.tabs[0] ? ' push' : ''}${selected ? ' selected' : ''}${row === undefined ? '' : ` status-${row.status}`}`} role="presentation">
         <button class="tab-open" type="button" role="tab" data-action="diff-tab" data-path={path} aria-selected={selected} tabindex={selected ? 0 : -1} title={row === undefined ? path : rowTitle(row)}>
-          <span class="codicon codicon-diff" aria-hidden="true"></span>
+          <FileIcon path={path} />
           <span class="tab-label">{baseName(path)}</span>
         </button>
         <button class="tab-close" type="button" data-action="diff-close" data-path={path} aria-label={`Close ${baseName(path)}`} title="Close" tabindex={selected ? 0 : -1}>
