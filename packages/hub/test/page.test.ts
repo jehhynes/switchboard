@@ -74,7 +74,7 @@ describe('pageGroups', () => {
 describe('pageList', () => {
   const WINDOWS = 'C:/sb/windows';
 
-  it("lists the dock's groups in the dock's order with its titles and rows, work items only, and the hosted conversations last", () => {
+  it("lists the dock's groups in the dock's order with its titles and rows, work items only, hosted conversations where the dock puts them", () => {
     const own = item(1, { ticket: { ...item(1).ticket, title: 'Fix the badge' }, sessions: [session({ id: 's1', workItemId: 1, cwd: 'D:/w1' })] });
     const byFolder = item(4, { ticket: { ...item(4).ticket, title: 'Folder chat', hostWindow: 'D:/git/support' } });
     const byWindow = item(5, { ticket: { ...item(5).ticket, title: 'Aside', hostWindow: 'C:/sb/windows/x.code-workspace' } });
@@ -83,13 +83,15 @@ describe('pageList', () => {
     const list = pageList(dock, view);
     const ownRow = dock.groups.flatMap((group) => group.rows).find((row) => row.key === 'item:1')!;
 
-    expect(list.slice(0, -1).map((group) => [group.key, group.title, group.glyph])).toEqual(dock.groups.map((group) => [group.key, group.title, group.glyph]));
+    expect(list.map((group) => [group.key, group.title, group.glyph])).toEqual(dock.groups.map((group) => [group.key, group.title, group.glyph]));
     expect(list.flatMap((group) => group.rows).find((row) => row.workItemId === 1)).toEqual({ workItemId: 1, title: 'Fix the badge', ticket: ownRow.ticket, sourceKind: ownRow.sourceKind, playbook: ownRow.playbook, mark: ownRow.mark, stripe: ownRow.stripe, dim: ownRow.dim, host: null, actions: pageActions(ownRow), main: null, pastes: [] });
-    expect(list.at(-1)).toMatchObject({ key: 'conversations', title: 'Conversations', glyph: '\u{eac7}', rows: [{ workItemId: 5, host: 'x' }, { workItemId: 4, host: 'support' }] });
-    expect(list.slice(0, -1).flatMap((group) => group.rows).map((row) => row.workItemId)).toEqual([1]);
+    // Each row in the dock's group, in the dock's order, a hosted conversation with its host's name.
+    expect(list.map((group) => group.rows.map((row) => row.workItemId))).toEqual(dock.groups.map((group) => group.rows.map((row) => Number(row.key.slice('item:'.length)))));
+    expect(list.flatMap((group) => group.rows).filter((row) => row.host !== null).map((row) => [row.workItemId, row.host]).sort()).toEqual([[4, 'support'], [5, 'x']]);
+    expect(list.some((group) => (group.key as string) === 'conversations')).toBe(false);
   });
 
-  it('leaves out pool tickets and rows of work items the snapshot lacks, keeps a done hosted conversation in Done, and has no Conversations group without one', () => {
+  it('leaves out pool tickets and rows of work items the snapshot lacks, and keeps a done hosted conversation in Done', () => {
     const doneHosted = item(6, { status: 'done', ticket: { ...item(6).ticket, title: 'Old chat', hostWindow: 'D:/git/support' } });
     const row = (key: string) => ({ key, title: key, ticket: 'gh 1', sourceKind: 'github', playbook: 'dev', mark: null, stripe: null, dim: false, controls: [], main: null, pastes: [] }) as unknown as DockView['groups'][number]['rows'][number];
     const dock = { groups: [{ key: 'unstarted', title: 'Unstarted', glyph: 'u', empty: 'Nothing waits to be started.', rows: [row('ticket:9'), row('item:77')] }, { key: 'done', title: 'Done', glyph: 'd', empty: null, rows: [row('item:6')] }] } as Pick<DockView, 'groups'>;

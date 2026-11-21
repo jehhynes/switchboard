@@ -223,18 +223,15 @@ export async function pasteText(file: string): Promise<string> {
   return (await readFile(file, 'utf8')).replace(/^\uFEFF/, '').trimEnd();
 }
 
-/** A group of the page's list: one of the dock's groups, with its codicon glyph, or `conversations`, the hosted conversations, last. */
+/** A group of the page's list: one of the dock's groups, with its codicon glyph. */
 export interface PageListGroup {
-  key: RowGroup | 'conversations';
+  key: RowGroup;
   title: string;
   glyph: string;
   /** What the group says when it has no rows, or null. */
   empty: string | null;
   rows: PageRow[];
 }
-
-/** The Conversations group's codicon glyph, `comment-discussion`. */
-const CONVERSATIONS_GLYPH = '\u{eac7}';
 
 /** A host's name: a folder's last segment, or a workspace file's name without `.code-workspace`. */
 function hostTitle(host: string): string {
@@ -243,13 +240,12 @@ function hostTitle(host: string): string {
 
 /**
  * The page's list (architecture.md § Web page): the dock's groups in the dock's order, with its titles, glyphs and empty texts, holding the
- * dock's work item rows; pool tickets, which have no conversation, are left out. Hosted conversations that are not done leave their group for a
- * last group, Conversations, newest first, shown only when it has rows.
+ * dock's work item rows where the dock puts them, hosted conversations included (every conversation is a work item); pool tickets, which have
+ * no conversation, are left out.
  */
 export function pageList(dock: Pick<DockView, 'groups'>, snapshot: Pick<Snapshot, 'workItems'>): PageListGroup[] {
   const items = new Map(snapshot.workItems.map((item) => [item.id, item]));
-  const hosted: PageRow[] = [];
-  const groups: PageListGroup[] = dock.groups.map((group) => {
+  return dock.groups.map((group) => {
     const rows: PageRow[] = [];
 
     for (const row of group.rows) {
@@ -277,13 +273,11 @@ export function pageList(dock: Pick<DockView, 'groups'>, snapshot: Pick<Snapshot
         pastes: row.pastes.map((paste) => paste.label),
       };
 
-      (host !== null && group.key !== 'done' ? hosted : rows).push(shown);
+      rows.push(shown);
     }
 
     return { key: group.key, title: group.title, glyph: group.glyph, empty: group.empty, rows };
   });
-
-  return hosted.length === 0 ? groups : [...groups, { key: 'conversations', title: 'Conversations', glyph: CONVERSATIONS_GLYPH, empty: null, rows: hosted.sort((a, b) => b.workItemId - a.workItemId) }];
 }
 
 /** A work item's row in the dock's view, or null when no group lists it. */

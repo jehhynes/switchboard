@@ -1792,9 +1792,9 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
 
     const page = openPage();
 
-    // The hosted conversation is listed last, in Conversations, under its host's name; its host stays in its status group.
-    expect(service.pageList().at(-1)).toMatchObject({ key: 'conversations', rows: [{ workItemId: hosted.id, title: 'Side chat', host: expect.any(String) }] });
-    expect(service.pageList().find((group) => group.key !== 'conversations' && group.rows.some((row) => row.workItemId === 2))).toBeDefined();
+    // The hosted conversation is listed in the group the dock puts it in, under its host's name, as its host is.
+    expect(service.pageList().flatMap((group) => group.rows).find((row) => row.workItemId === hosted.id)).toMatchObject({ title: 'Side chat', host: expect.any(String) });
+    expect(service.pageList().map((group) => group.key)).not.toContain('conversations');
     service.select({ window: page.key, opId: 'o', workItemId: hosted.id });
     expect(scopes.scope(page.key)?.conversations).toEqual([{ workItemId: 2, primary: true }, { workItemId: hosted.id, primary: false }]);
     // Done while selected, it stays in its host's group.
@@ -1804,7 +1804,6 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     view.view = done;
     scopes.update(done);
     expect(scopes.scope(page.key)?.conversations).toEqual([{ workItemId: 2, primary: true }, { workItemId: hosted.id, primary: false }]);
-    expect(service.pageList().some((group) => group.key === 'conversations')).toBe(false);
     expect(service.select({ window: page.key, opId: 'o', workItemId: 2 }).status).toBe(200);
     expect(scopes.scope(page.key)).toMatchObject({ workItemId: 2, scopeGen: 2 });
   });
