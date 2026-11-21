@@ -2,6 +2,8 @@
 
 A living checklist of what the dock's work item list and rows do (PRD R27, R71; [architecture.md § Dock](architecture.md#dock) and [§ Rows](architecture.md#rows)) and whether the web page's list does the same ([architecture.md § Web page](architecture.md#web-page)). One row per behaviour.
 
+A change to a listed behaviour follows the rule in [AGENTS.md](../AGENTS.md#dock-and-web-parity).
+
 Statuses:
 
 - **Present**: the web page does it as the dock does.

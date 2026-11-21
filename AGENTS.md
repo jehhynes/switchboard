@@ -90,6 +90,15 @@ For changes to the browser extension (`extensions/chrome` or `extensions/firefox
 
 For changes to the GNOME Shell extension, run `npm run publish --workspace @switchboard/gnome-shell`, which installs it to `~/.local/share/gnome-shell/extensions/switchboard@switchboard/` and enables it, and report that GNOME Shell loads the change at the operator's next login.
 
+## Dock and web parity
+
+[parity.md](docs/parity.md) lists every behaviour of the dock's work item list and rows, and whether the web page matches it.
+
+- Make a change to a behaviour parity.md lists on both the dock and the web page in the same branch, or mark its row Differs with the operator's approval, or the design decision the operator took, named in its note.
+- Update the behaviour's row in parity.md in the commit that changes it, and add a row for a new list or row behaviour of either side.
+- Review a change to the dock's list or rows, the web page's list, or the hub's row data (`rows.ts`, `dock.ts`, `page.ts`) against parity.md, and report a missing counterpart or row update as a finding.
+- Rows marked Dock only are outside this rule.
+
 ## Commit messages
 
 Use `type(scope): summary`.

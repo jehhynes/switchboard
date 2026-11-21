@@ -11,6 +11,7 @@ Use automated checks for behavior and integration, and visual inspection for pre
 | VS Code host wiring or UI-visible behavior | Also `npm run test:integration` in a real VS Code |
 | Extension packaging | `vsce package --no-dependencies` succeeds |
 | Runner, source fetch or report path | Also [live acceptance](#live-acceptance) from step 7 on |
+| A behaviour listed in [parity.md](parity.md) | The same change on the dock and the web page, or a Differs row the operator approved or decided, and parity.md updated in the same commit ([AGENTS.md](../AGENTS.md#dock-and-web-parity)) |
 | Markdown only | Accuracy, links, and consistency across documents |
 
 `npm run verify` builds, typechecks, and runs workspace tests with coverage thresholds. Build first: spawn tests run built bundles.
