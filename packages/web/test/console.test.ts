@@ -171,6 +171,13 @@ describe("the console's colours", () => {
     expect(term.created.theme).toEqual(CONSOLE_THEME);
     expect(term.created.theme).toMatchObject({ background: '#181818', foreground: '#cccccc', white: '#e5e5e5' });
     expect(css).toMatch(new RegExp(`\\.console \\{[^}]*color-scheme: dark;[^}]*background: ${CONSOLE_THEME.background!};`, 'i'));
+    // xterm.js's scrollbar takes the page's: the console's slider colours, and the page's 8 px width, which the fit leaves out.
+    for (const [option, variable] of [['scrollbarSliderBackground', 'background'], ['scrollbarSliderHoverBackground', 'hoverBackground'], ['scrollbarSliderActiveBackground', 'activeBackground']] as const) {
+      expect(css).toMatch(new RegExp(`\\.console \\{[^}]*--vscode-scrollbarSlider-${variable}: ${CONSOLE_THEME[option]!.replace(/[()]/g, '\\$&')};`));
+    }
+
+    expect(css).toMatch(/::-webkit-scrollbar \{ width: 8px;/);
+    expect(css).toContain(`.console .xterm .xterm-scrollable-element > .scrollbar.vertical { width: ${XTERM_SCROLLBAR_PX}px !important;`);
     // The light scheme's block never gives the console another background.
     expect(/@media \(prefers-color-scheme: light\) \{\s*:root \{([^}]*)\}/.exec(css)?.[1]).not.toMatch(/console/);
   });

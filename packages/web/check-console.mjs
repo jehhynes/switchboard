@@ -75,7 +75,9 @@ async function check({ name, pane: [width, height], from, size: [cols, rows] }) 
   const failures = [];
   if (screen.scrollWidth > screen.clientWidth || screen.scrollHeight > screen.clientHeight) failures.push('the pane holds more than it shows: ' + screen.scrollWidth + 'x' + screen.scrollHeight + ' in ' + screen.clientWidth + 'x' + screen.clientHeight);
   if (scrollers.length > 0) failures.push('scrollers besides xterm.js: ' + scrollers.join(', '));
-  if (drawn.right > inner.right - 14 + 0.5) failures.push('the screen reaches ' + drawn.right + ', past ' + (inner.right - 14) + ', under xterm.js scrollbar or the pane edge');
+  const bar = host.querySelector('.xterm .scrollbar.vertical');
+  const barLeft = bar === null ? inner.right : Math.min(inner.right, box(bar).left);
+  if (drawn.right > barLeft + 0.5) failures.push('the screen reaches ' + drawn.right + ', past ' + barLeft + ', under xterm.js scrollbar or the pane edge');
   if (drawn.bottom > inner.bottom + 0.5) failures.push('the screen reaches ' + drawn.bottom + ', below the pane at ' + inner.bottom);
   if (Math.abs(viewport.height - drawn.height) > 1) failures.push('xterm.js scrolls ' + viewport.height + ' px for a screen of ' + drawn.height);
   const track = host.querySelector('.xterm .scrollbar.vertical');

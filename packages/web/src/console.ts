@@ -62,8 +62,8 @@ export const CONSOLE_RESIZE_MS = 200;
 export const REPORT_MODES: ReadonlySet<number> = new Set([9, 1000, 1001, 1002, 1003, 1004, 1005, 1006, 1015, 1016]);
 /** A mouse report, legacy or SGR, which the console never sends even if a mode slipped through. */
 const MOUSE_REPORT = /^\u001b\[(?:M[\s\S]{3}|<\d+;\d+;\d+[mM])$/;
-/** The width of xterm.js's own scrollbar, its `DEFAULT_SCROLL_BAR_WIDTH`, drawn over the right edge of its screen. */
-export const XTERM_SCROLLBAR_PX = 14;
+/** The width of xterm.js's own scrollbar, drawn over the right edge of its screen: the page's 8 px (page.css) rather than xterm.js's 14 px. */
+export const XTERM_SCROLLBAR_PX = 8;
 /** The fonts the console draws with: VS Code's editor font. */
 const FONT_FAMILY = 'Consolas, "Courier New", monospace';
 /**
@@ -92,6 +92,10 @@ export const CONSOLE_THEME: Readonly<Record<string, string>> = {
   brightMagenta: '#d670d6',
   brightCyan: '#29b8db',
   brightWhite: '#e5e5e5',
+  // Dark Modern's slider colours, as the page's own scrollbars and the console's (page.css) take them.
+  scrollbarSliderBackground: 'rgba(121, 121, 121, 0.4)',
+  scrollbarSliderHoverBackground: 'rgba(100, 100, 100, 0.7)',
+  scrollbarSliderActiveBackground: 'rgba(191, 191, 191, 0.4)',
 };
 /** The media query under which the page draws Light Modern (theme.css). */
 export const LIGHT_SCHEME = '(prefers-color-scheme: light)';

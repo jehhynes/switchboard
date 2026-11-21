@@ -593,6 +593,10 @@ button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }
 /* The screen never scrolls: the font fits xterm.js's screen into it, and a screen too large even at the smallest font is cut off, so xterm.js's
    scrollbar is the console's only one and its scrollbars never change the area the console fits to. */
 .console-screen { flex: 1; min-height: 0; overflow: hidden; padding: 4px 8px; }
+/* xterm.js's scrollbar drawn as the page's own (above): 8 px over a clear track, a 4 px rounded thumb in the slider colours its theme gives it
+   (console.ts). xterm.js sets 14 px inline, hence !important; `XTERM_SCROLLBAR_PX` is this width. */
+.console .xterm .xterm-scrollable-element > .scrollbar.vertical { width: 8px !important; background: transparent; }
+.console .xterm .xterm-scrollable-element > .scrollbar.vertical > .slider { left: 2px !important; width: 4px !important; border-radius: 2px; }
 /* Why it ended or did not type, with Reconnect once it ended. */
 .console-foot { flex: none; display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 12px; }
 .console-foot[hidden] { display: none; }
