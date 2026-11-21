@@ -38,19 +38,28 @@ export function copyButton(action: 'copy-code' | 'copy-reply', label: string): s
 
 /**
  * Markdown as HTML: a web link opens in a new tab with no referrer; a link to a path, which a browser cannot open, keeps its text and shows its
- * target as a tooltip. `base`, when given, turns an image's relative source into the artifact file route, for an artifact's Markdown.
+ * target as a tooltip. `base`, when given, turns an image's relative source into the artifact file route, for an artifact's Markdown, and
+ * `link` a relative link's target into the attributes of its `<a>`, or null to keep it as text.
  */
-export function renderMarkdown(text: string, base?: (path: string) => string | null): string {
-  return linkify(markdown.render(text), base);
+export function renderMarkdown(text: string, base?: (path: string) => string | null, link?: (href: string) => string | null): string {
+  return linkify(markdown.render(text), base, link);
 }
 
 export function renderInline(text: string): string {
   return linkify(markdown.renderInline(text));
 }
 
-function linkify(html: string, base?: (path: string) => string | null): string {
+function linkify(html: string, base?: (path: string) => string | null, link?: (href: string) => string | null): string {
   return html
-    .replace(/<a href="([^"]*)"/g, (_match, href: string) => (webLink(href) ? `<a href="${href}" target="_blank" rel="noopener noreferrer"` : `<a class="path-link" title="${href}"`))
+    .replace(/<a href="([^"]*)"/g, (_match, href: string) => {
+      if (webLink(href)) {
+        return `<a href="${href}" target="_blank" rel="noopener noreferrer"`;
+      }
+
+      const to = link?.(href) ?? null;
+
+      return to === null ? `<a class="path-link" title="${href}"` : `<a ${to}`;
+    })
     .replace(/<img src="([^"]*)"/g, (_match, src: string) => {
       if (/^(?:https?:|data:)/i.test(src)) {
         return `<img src="${src}"`;

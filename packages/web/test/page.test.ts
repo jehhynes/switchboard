@@ -170,11 +170,27 @@ describe('drawing', () => {
 
     expect(page).toContain('sandbox="allow-scripts"');
     expect(page).not.toContain('allow-same-origin');
-    expect(page).toContain(`src="${artifactUrl('key', 'chat/p.html')}"`);
+    expect(page).toContain(`src="${artifactUrl('key', 'chat/p.html')}?v=1500"`);
     expect(svg).toContain('<iframe');
     expect(renderArtifactView('key', artifact('chat/p.png', 'image', 'png'))).toContain('<img class="media"');
     expect(renderArtifactView('key', artifact('chat/v.mp4', 'video', 'mp4'))).toContain('<video');
     expect(renderArtifactView('key', artifact('chat/d.pdf', 'file', 'pdf'))).toContain('download');
+
+    // The head: the kind as a badge, the title, Open in new window and Download; each version's file loads afresh.
+    const head = document.createElement('div');
+
+    head.innerHTML = renderArtifactView('key', { ...artifact('chat/v.mp4', 'video', 'mp4'), kind: 'demo', title: 'Demo' });
+    expect(head.querySelector('.artifact-badge')!.textContent).toBe('demo');
+    expect(head.querySelector('.artifact-head .artifact-title')!.textContent).toBe('Demo');
+    expect(head.querySelector('.artifact-view')!.getAttribute('data-version')).toBe('1500');
+    expect(head.querySelector('video')!.getAttribute('src')).toBe('/v1/conversation/artifact/key/chat/v.mp4?v=1500');
+    expect(head.querySelector('a[title="Open in new window"]')!.getAttribute('target')).toBe('_blank');
+    expect(head.querySelector('a[title="Open in new window"]')!.getAttribute('href')).toBe('/v1/conversation/artifact/key/chat/v.mp4?v=1500');
+    expect(head.querySelector('a[download]')!.getAttribute('href')).toBe('/v1/conversation/artifact/key/chat/v.mp4');
+    // Markdown, which the page draws itself, opens as drawn rather than as its source text.
+    head.innerHTML = renderArtifactView('key', artifact('chat/a.md', 'markdown', 'md'));
+    expect(head.querySelector('a[title="Open in new window"]')).toBeNull();
+    expect(head.querySelector('button[data-action="artifact-window"]')).not.toBeNull();
     expect(artifactUrl('k y', 'chat/a b.md')).toBe('/v1/conversation/artifact/k%20y/chat/a%20b.md');
     expect(markdownBody('---\ntitle: x\n---\n# Body')).toBe('# Body');
   });
@@ -1037,6 +1053,73 @@ describe('the page in use', () => {
     expect(root.querySelector('iframe')!.getAttribute('sandbox')).toBe('allow-scripts');
     click('[data-tab="conversation"]');
     expect(root.querySelector('#composer')!.hasAttribute('hidden')).toBe(false);
+    page.close();
+  });
+
+  it("draws a Markdown artifact's links as claude-collab does, redraws a new version in place, and opens it as drawn in a new window", async () => {
+    const { page, source } = start();
+
+    answers['/artifact/'] = { status: 200, body: {}, text: '# Plan\n\n[page](p.html) [notes](plan/notes.txt) [up](../x.md) [web](https://example.com/a)\n\n| a | b |\n|---|---|\n| 1 | 2 |' };
+    hello(source);
+    click('[data-tab="artifacts"]');
+    click('[data-path="chat/plan.md"]');
+    await flush();
+    await flush();
+
+    const doc = root.querySelector<HTMLElement>('.artifact-doc')!;
+
+    expect(root.querySelector('.artifact-badge')!.textContent).toBe('page');
+    expect(doc.querySelector('table td')!.textContent).toBe('1');
+    // Another artifact opens in place; another file of the folder in a new tab; a target outside the folder stays text.
+    expect(doc.querySelector('a[data-path="chat/p.html"]')!.getAttribute('data-action')).toBe('artifact');
+    expect(doc.querySelector('a[href$="plan/notes.txt"]')!.getAttribute('target')).toBe('_blank');
+    expect(doc.querySelector('a.path-link')!.textContent).toBe('up');
+    expect(doc.querySelector('a[href="https://example.com/a"]')!.getAttribute('target')).toBe('_blank');
+
+    // A new version is fetched again and keeps the reader's place.
+    doc.scrollTop = 40;
+    const fetches = posts.filter((post) => post.url.includes('/artifact/')).length;
+
+    answers['/artifact/'] = { status: 200, body: {}, text: '# Plan v2\n\n![pic](plan/pic.png) [page](p.html)' };
+    source.emit('artifact', { artifact: { ...artifact('chat/plan.md', 'markdown', 'md'), updatedAt: 2_000 } });
+    await flush();
+    await flush();
+    expect(posts.filter((post) => post.url.includes('/artifact/')).length).toBe(fetches + 1);
+    expect(root.querySelector('.artifact-view')!.getAttribute('data-version')).toBe('2000');
+    expect(root.querySelector('.artifact-doc h1')!.textContent).toBe('Plan v2');
+    expect(root.querySelector<HTMLElement>('.artifact-doc')!.scrollTop).toBe(40);
+
+    // The same version is not fetched again on a redraw.
+    source.emit('unread', { unread: 0 });
+    await flush();
+    expect(posts.filter((post) => post.url.includes('/artifact/')).length).toBe(fetches + 1);
+
+    // Open in new window: the drawn document, without copy buttons, as a page of its own.
+    const opened = vi.spyOn(window, 'open').mockReturnValue(null);
+    let blob: Blob | null = null;
+
+    Object.assign(URL, { createObjectURL: vi.fn((value: Blob) => ((blob = value), 'blob:x')), revokeObjectURL: vi.fn() });
+    click('[data-action="artifact-window"]');
+    expect(opened).toHaveBeenCalledWith('blob:x', '_blank', 'noopener');
+
+    const html = await blob!.text();
+
+    expect(html).toContain('<h1>Plan v2</h1>');
+    expect(html).toContain('class="artifact-window"');
+    expect(html).toContain('/page/page.css');
+    expect(html).not.toContain('data-action="close-artifact"');
+    // Its pictures and links name the hub in full, since a blob: document has no base for the page's paths.
+    expect(html).toContain(`src="${location.origin}/v1/conversation/artifact/pk/chat/plan/pic.png"`);
+    expect(html).toContain(`href="${location.origin}/v1/conversation/artifact/pk/chat/p.html"`);
+    expect(html).not.toContain('data-action="artifact"');
+
+    // A link to another artifact opens it in place.
+    answers['/artifact/'] = { status: 200, body: {}, text: '[page](p.html)' };
+    source.emit('artifact', { artifact: { ...artifact('chat/plan.md', 'markdown', 'md'), updatedAt: 3_000 } });
+    await flush();
+    await flush();
+    click('.artifact-doc a[data-path="chat/p.html"]');
+    expect(root.querySelector('iframe')!.getAttribute('src')).toBe('/v1/conversation/artifact/pk/chat/p.html?v=1500');
     page.close();
   });
 

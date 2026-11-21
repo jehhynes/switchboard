@@ -841,8 +841,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       }
     });
   };
-  /** Draws an open Markdown artifact: its text fetched by the page key, its relative pictures from its folder, Mermaid included. */
-  const fillArtifact = async (path: string): Promise<void> => {
+  /**
+   * Draws an open Markdown artifact as claude-collab's viewer does: its text fetched by the page key, without its front matter, whose kind and
+   * title the head shows; its relative pictures from its folder; a relative link to another artifact opening that one in place, and to another
+   * file in the folder opening the file in a new tab; Mermaid included. `top` is the scroll position to keep when a new version replaces it.
+   */
+  const fillArtifact = async (path: string, top = 0): Promise<void> => {
     const doc = root.querySelector<HTMLElement>('.artifact-doc');
 
     if (doc === null || state.key === null) {
@@ -853,10 +857,18 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const response = await deps.fetch(artifactUrl(key, path), { credentials: 'same-origin', cache: 'no-store' }).catch(() => null);
     const text = response?.ok === true ? await response.text() : null;
     const folder = path.split('/').slice(0, -1);
-    const base = (src: string): string | null => {
+    /** A relative target's path in the artifact folder, or null for one outside it. */
+    const inFolder = (target: string): string | null => {
       const parts = [...folder];
+      let decoded: string;
 
-      for (const part of src.split(/[?#]/)[0]!.split('/')) {
+      try {
+        decoded = decodeURIComponent(target.split(/[?#]/)[0]!);
+      } catch {
+        return null;
+      }
+
+      for (const part of decoded.split('/')) {
         if (part === '..') {
           return null;
         }
@@ -866,13 +878,64 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         }
       }
 
-      return parts.length < 2 ? null : artifactUrl(key, parts.join('/'));
+      return parts.length < 2 ? null : parts.join('/');
+    };
+    const base = (src: string): string | null => {
+      const file = inFolder(src);
+
+      return file === null ? null : artifactUrl(key, file);
+    };
+    const link = (href: string): string | null => {
+      const file = href.startsWith('#') ? null : inFolder(href);
+
+      if (file === null) {
+        return null;
+      }
+
+      return state.artifacts.some((one) => one.path === file)
+        ? `href="${escape(artifactUrl(key, file))}" data-action="artifact" data-path="${escape(file)}"`
+        : `href="${escape(artifactUrl(key, file))}" target="_blank" rel="noopener noreferrer"`;
     };
 
     if (view.artifact === path && root.contains(doc)) {
-      doc.innerHTML = text === null ? '<p class="empty">This artifact could not be read.</p>' : renderMarkdown(markdownBody(text), base);
+      doc.innerHTML = text === null ? '<p class="empty">This artifact could not be read.</p>' : renderMarkdown(markdownBody(text), base, link);
+      doc.scrollTop = top;
       drawDiagrams(doc);
     }
+  };
+  /** Opens the shown Markdown artifact, as drawn, in a window of its own, with the page's styles and without its buttons. */
+  const artifactWindow = (): void => {
+    const shown = root.querySelector<HTMLElement>('.artifact-view');
+    const doc = shown?.querySelector<HTMLElement>('.artifact-doc');
+
+    if (shown === null || shown === undefined || doc === null || doc === undefined) {
+      return;
+    }
+
+    const copy = doc.cloneNode(true) as HTMLElement;
+
+    copy.querySelectorAll('.copy').forEach((button) => button.remove());
+    // A blob: document has no base for the page's own paths, so its pictures and links name the hub in full.
+    copy.querySelectorAll<HTMLElement>('[src^="/"], [href^="/"]').forEach((node) => {
+      for (const name of ['src', 'href']) {
+        const value = node.getAttribute(name);
+
+        if (value?.startsWith('/') === true && !value.startsWith('//')) {
+          node.setAttribute(name, `${location.origin}${value}`);
+        }
+      }
+
+      node.removeAttribute('data-action');
+    });
+
+    const badge = shown.querySelector('.artifact-badge')?.outerHTML ?? '';
+    const title = shown.querySelector('.artifact-title')?.textContent ?? '';
+    const styles = ['theme.css', 'codicon.css', 'page.css'].map((name) => `<link rel="stylesheet" href="${location.origin}/page/${name}">`).join('');
+    const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><title>${escape(title)}</title>${styles}</head><body class="artifact-window"><div class="artifact-view"><div class="artifact-head">${badge}<span class="artifact-title">${escape(title)}</span></div>${copy.outerHTML}</div></body></html>`;
+    const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+
+    window.open(url, '_blank', 'noopener');
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
   };
 
   // Whether the conversation follows its end, set by the operator's own scrolling, and where the page itself last scrolled it, as in the Conversation view.
@@ -955,9 +1018,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     /** Draws the Status or Artifacts tab, or an open artifact, into a pane; an open artifact stays as it is, so a frame or a video is not reloaded. */
     const drawTab = (pane: HTMLElement, tab: Tab): void => {
       if (tab === 'artifacts' && artifact !== undefined && state.key !== null) {
-        if (pane.querySelector<HTMLElement>('.artifact-view')?.dataset['artifact'] !== artifact.path) {
+        const open = pane.querySelector<HTMLElement>('.artifact-view');
+
+        // A new version replaces the one shown, and a Markdown artifact keeps the reader's place.
+        if (open?.dataset['artifact'] !== artifact.path || open.dataset['version'] !== String(artifact.updatedAt)) {
+          const top = open?.dataset['artifact'] === artifact.path ? (open.querySelector<HTMLElement>('.artifact-doc')?.scrollTop ?? 0) : 0;
+
           pane.innerHTML = renderArtifactView(state.key, artifact);
-          void fillArtifact(artifact.path);
+          void fillArtifact(artifact.path, top);
         }
       } else {
         morph(pane, tab === 'status' ? renderStatus(state, view, now) : tab === 'artifacts' ? renderArtifacts(state, now) : renderTimeline(state, view));
@@ -1324,6 +1392,15 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         break;
       }
       case 'artifact':
+        // A link to another artifact in a Markdown artifact opens it in place, unless asked for a new tab.
+        if (button!.tagName === 'A') {
+          if (event.ctrlKey || event.metaKey || event.shiftKey || event.button !== 0) {
+            break;
+          }
+
+          event.preventDefault();
+        }
+
         leaving('artifacts');
 
         if (wide()) {
@@ -1338,6 +1415,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       case 'close-artifact':
         view.artifact = null;
         draw();
+        break;
+      case 'artifact-window':
+        artifactWindow();
         break;
       case 'pick': {
         const key = button!.dataset['card']!;
