@@ -302,8 +302,8 @@ public sealed class ChromePane(IPaneNative native, Action<JsonObject> report, Fu
             native.Restore(pane);
         }
 
-        var target = PaneGeometry.Column(native.Frame(app), rect);
         var bounds = native.Bounds(pane);
+        var target = Target(bounds);
         var place = PaneGeometry.Placement(target, native.Frame(pane), bounds);
         var ok = true;
 
@@ -318,6 +318,14 @@ public sealed class ChromePane(IPaneNative native, Action<JsonObject> report, Fu
         }
 
         return ok;
+    }
+
+    /// <summary>Where the pane's visible frame goes now: the page's column, kept clear of the page window's right and bottom resize borders.</summary>
+    Box Target(Box paneBounds)
+    {
+        var appFrame = native.Frame(app);
+
+        return PaneGeometry.Inset(PaneGeometry.Column(appFrame, rect!), appFrame, native.Frame(pane), paneBounds, native.IsZoomed(app));
     }
 
     void Settle()
@@ -388,7 +396,7 @@ public sealed class ChromePane(IPaneNative native, Action<JsonObject> report, Fu
 
         failures = 0;
 
-        var target = PaneGeometry.Column(native.Frame(app), rect);
+        var target = Target(native.Bounds(pane));
 
         if (native.Frame(pane).Width > target.Width + WidthSlack)
         {

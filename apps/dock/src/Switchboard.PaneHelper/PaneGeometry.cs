@@ -35,6 +35,20 @@ public static class PaneGeometry
     }
 
     /// <summary>
+    /// Where the pane's visible frame goes: the column, with its right and bottom edges pulled in so that the pane window's invisible resize
+    /// borders end at the app window's visible frame. The app window's own resize borders lie outside its visible frame (mechanics M103), so the
+    /// pointer still reaches them to resize the app from its right or bottom edge or corner. A maximized app window has none to keep clear.
+    /// </summary>
+    public static Box Inset(Box column, Box appFrame, Box paneFrame, Box paneBounds, bool appMaximized) =>
+        appMaximized
+            ? column
+            : column with
+            {
+                Right = Math.Min(column.Right, appFrame.Right - (paneBounds.Right - paneFrame.Right)),
+                Bottom = Math.Min(column.Bottom, appFrame.Bottom - (paneBounds.Bottom - paneFrame.Bottom)),
+            };
+
+    /// <summary>
     /// The window rectangle that puts the pane's visible frame on <paramref name="target"/>: <c>GetWindowRect</c> includes the invisible resize
     /// borders that the DWM frame leaves out, read fresh each time since they change with the monitor's scale.
     /// </summary>

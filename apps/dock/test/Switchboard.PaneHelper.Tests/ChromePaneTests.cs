@@ -24,6 +24,32 @@ public sealed class PaneGeometryTests
     }
 
     [Fact]
+    public void Inset_ColumnAtTheAppsRightAndBottomEdges_KeepsThePaneWindowInsideTheAppsVisibleFrame()
+    {
+        var appFrame = new Box(100, 50, 2100, 1250);
+        var paneFrame = new Box(507, 0, 1107, 700);
+        var paneBounds = new Box(500, 0, 1114, 707);
+        var target = PaneGeometry.Inset(new Box(1400, 300, 2100, 1250), appFrame, paneFrame, paneBounds, appMaximized: false);
+
+        Assert.Equal(new Box(1400, 300, 2093, 1243), target);
+        // The pane window, with its invisible borders, ends where the app's visible frame ends; the app's resize borders lie outside it.
+        var place = PaneGeometry.Placement(target, paneFrame, paneBounds);
+
+        Assert.Equal((2100, 1250), (place.Right, place.Bottom));
+    }
+
+    [Fact]
+    public void Inset_ColumnClearOfTheEdgesOrAppMaximized_LeavesTheColumn()
+    {
+        var appFrame = new Box(100, 50, 2100, 1250);
+        var paneFrame = new Box(507, 0, 1107, 700);
+        var paneBounds = new Box(500, 0, 1114, 707);
+
+        Assert.Equal(new Box(1400, 300, 2000, 1100), PaneGeometry.Inset(new Box(1400, 300, 2000, 1100), appFrame, paneFrame, paneBounds, appMaximized: false));
+        Assert.Equal(new Box(1400, 300, 2100, 1250), PaneGeometry.Inset(new Box(1400, 300, 2100, 1250), appFrame, paneFrame, paneBounds, appMaximized: true));
+    }
+
+    [Fact]
     public void Placement_InvisibleBorders_PutsTheVisibleFrameOnTheTarget()
     {
         var place = PaneGeometry.Placement(new Box(1000, 100, 1600, 900), new Box(507, 0, 1107, 700), new Box(500, 0, 1114, 707));
@@ -70,7 +96,9 @@ public sealed class ChromePaneTests
 
         public bool IsIconic(nint window) => window == AppWindow ? AppIconic : PaneIconic;
 
-        public bool IsZoomed(nint window) => window == PaneWindow && PaneZoomed;
+        public bool AppZoomed;
+
+        public bool IsZoomed(nint window) => window == PaneWindow ? PaneZoomed : AppZoomed;
 
         public Box Frame(nint window) => window == AppWindow ? AppFrame : PaneFrame;
 
@@ -182,20 +210,33 @@ public sealed class ChromePaneTests
 
         pane.Order(new PaneOrder("0123456789ab", Rect));
 
-        Assert.Equal(["own 10", "watch 10", "log pane found: app A, pane 14", "raise", "resize 614x907", "move 1293,80"], native.Calls);
+        Assert.Equal(["own 10", "watch 10", "log pane found: app A, pane 14", "raise", "resize 607x907", "move 1293,80"], native.Calls);
         Assert.Equal("found,shown", States(reports));
         Assert.Equal("0123456789ab", reports[0]["marker"]!.GetValue<string>());
-        // The visible frame lands on the column: the viewport ends at the frame's bottom, and the column starts 40 px into it.
-        Assert.Equal(new Box(1300, 80, 1900, 980), native.PaneFrame);
+        // The visible frame lands on the column, its right edge pulled in by the pane's 7 px invisible border so the page window's resize border stays
+        // clear: the viewport ends at the frame's bottom, and the column starts 40 px into it.
+        Assert.Equal(new Box(1300, 80, 1893, 980), native.PaneFrame);
 
         native.Calls.Clear();
         pane.Order(new PaneOrder("0123456789ab", Rect with { Width = 650, Left = 1250 }));
-        Assert.Equal(["resize 664x907", "move 1243,80"], native.Calls);
+        Assert.Equal(["resize 657x907", "move 1243,80"], native.Calls);
 
         native.Calls.Clear();
         timers.Pass(ChromePane.SettleDelay);
         Assert.Equal(["compositor InPlace"], native.Calls);
         Assert.Equal("found,shown", States(reports));
+    }
+
+    [Fact]
+    public void Order_AppMaximized_CoversTheColumnToTheAppsEdges()
+    {
+        var (pane, native, _, _) = Make();
+
+        native.AppZoomed = true;
+        pane.Order(new PaneOrder("0123456789ab", Rect));
+
+        Assert.Contains("resize 614x907", native.Calls);
+        Assert.Equal(new Box(1300, 80, 1900, 980), native.PaneFrame);
     }
 
     [Fact]
@@ -371,7 +412,7 @@ public sealed class ChromePaneTests
         pane.Moved(PaneWindow);
         Assert.Empty(native.Calls);
         timers.Pass(ChromePane.SettleDelay);
-        Assert.Equal(["restore", "resize 614x907", "move 1293,80", "compositor InPlace"], native.Calls);
+        Assert.Equal(["restore", "resize 607x907", "move 1293,80", "compositor InPlace"], native.Calls);
     }
 
     [Fact]
