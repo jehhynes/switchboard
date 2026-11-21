@@ -680,7 +680,7 @@ describe('createHubApp', () => {
     expect(await app.post['/open-url']!({ url: '' })).toEqual({ status: 400, body: { error: 'Expected {url}.' } });
   });
 
-  it('shows the dock only while a dock stream is connected, and tells it when the config files change', async () => {
+  it('shows the dock only while a dock stream is connected, and tells it and every page when the config files change', async () => {
     writeSettings({ sessions: { installHooks: false } });
     const app = await start();
     const sent: string[] = [];
@@ -693,8 +693,16 @@ describe('createHubApp', () => {
     expect(await app.post['/dock/show']!({})).toEqual({ status: 200, body: { shown: true } });
     expect(sent).toEqual(['show']);
 
+    // A page's Settings reads the file again too, and a window that is not a page is not told.
+    const pageFrames: string[] = [];
+    const windowFrames: string[] = [];
+
+    app.conversation!(app.page!.opened(false), (frame) => pageFrames.push(frame));
+    app.conversation!(app.windowOpened!(null), (frame) => windowFrames.push(frame));
     writeSettings({ sessions: { installHooks: false, concurrency: 3 } });
     await until(() => (sent.includes('config') ? true : null));
+    await until(() => (pageFrames.some((frame) => frame.includes('\nevent: config\n')) ? true : null));
+    expect(windowFrames.some((frame) => frame.includes('\nevent: config\n'))).toBe(false);
   });
 
   it('answers the Voice page\'s Enroll my voice with how enrolment stands, refusing a start while voice is off (architecture.md § Voice check and barge-in)', async () => {

@@ -243,6 +243,28 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     expect(button('Discard').disabled).toBe(false);
   });
 
+  it("reads settings.json again after a refused save when the config event came while the save ran", async () => {
+    const pane = (await opened()).pane;
+    let release: (answer: Answer) => void = () => {};
+
+    answers['page-settings-save'] = () => new Promise<Answer>((resolve) => (release = resolve)) as never;
+    type('sessions.model', 'opus');
+    button('Save').click();
+    await settle(CHECK_DELAY_MS);
+    expect(named('page-settings-save')).toHaveLength(1);
+
+    const reads = named('page-settings-read').length;
+
+    answers['page-settings-read'] = { status: 200, body: config({ sessions: { installHooks: true } }, { settings: { path: 'p', version: 'v7', value: { sessions: { installHooks: true } }, error: null } }) };
+    await pane.reload();
+    expect(named('page-settings-read')).toHaveLength(reads);
+    release({ status: 409, body: { errors: ['settings.json changed on disk after the editor read it. Discard your changes and open Settings again to load it.'] } });
+    await settle();
+    expect(named('page-settings-read')).toHaveLength(reads + 1);
+    expect(host.querySelector('.settings-warning')?.textContent).toBe('settings.json changed on disk, so your changes cannot be saved. Discard them and open Settings again to load it.');
+    expect(button('Save').disabled).toBe(true);
+  });
+
   it('asks before closing over unsaved changes: Keep editing stays, Discard closes without saving, and Escape asks too', async () => {
     const { pane } = await opened();
 

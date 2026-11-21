@@ -291,6 +291,14 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   });
 
   let sendDock: (event: string, data: unknown) => number = () => 0;
+  /** settings.json or a source's state changed: the dock's Settings window and every page's Settings read the file again (PRD R54). */
+  const configChanged = (): void => {
+    sendDock('config', {});
+
+    for (const key of conversation.pages()) {
+      conversation.notify(key, 'config', {});
+    }
+  };
   let clickDock: (data: unknown) => boolean = () => false;
   let sendWindows: (event: string, data: unknown, keys?: readonly string[]) => number = () => 0;
   /**
@@ -369,7 +377,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       pane.update();
 
       // The dock's Settings window reads the file again (PRD R54).
-      sendDock('config', {});
+      configChanged();
     }, RELOAD_DEBOUNCE_MS);
   };
   const watchers: FSWatcher[] = [watch(configDir, (_event, file) => file === 'settings.json' && reload())];
@@ -610,7 +618,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       const error = runtime.setSourceEnabled(name, enabled);
 
       if (error === null) {
-        sendDock('config', {});
+        configChanged();
       }
 
       return error;
@@ -1278,7 +1286,7 @@ const dockWithRuns = () => {
 
         if (error === null) {
           // The Settings window reads again, so its source states and checks follow the toggle (PRD R54).
-          sendDock('config', {});
+          configChanged();
         }
 
         return error === null ? { status: 200, body: { done: true } } : { status: 409, body: { error } };

@@ -31,7 +31,7 @@ import { askForNotifications, notificationsAllowed, notifyNeeds, playChime } fro
 import type { NeedsItem } from './alerts.js';
 
 /** The stream's event types the page reads. */
-export const EVENTS = ['hello', 'list', 'scope', 'conversations', 'session', 'message', 'reply', 'status', 'artifact', 'unread', 'voice', 'settings', 'progress', 'words', 'draft', 'pane', 'needs', 'show'];
+export const EVENTS = ['hello', 'list', 'scope', 'conversations', 'session', 'message', 'reply', 'status', 'artifact', 'unread', 'voice', 'settings', 'progress', 'words', 'draft', 'pane', 'needs', 'show', 'config'];
 /** How long the page's title holds the marker the dock finds its window by after a `show` (architecture.md § Dock). */
 export const SHOW_MARKER_MS = 5_000;
 /** How often the page wakes the Chrome extension while the Chrome pane is on and no extension is connected. */
@@ -2866,6 +2866,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
           historyChange = null;
           void readHistory();
         }, HISTORY_CHANGE_MS);
+      }
+
+      // settings.json changed on disk: Settings reads it again, keeping unsaved edits under the dock's changed-on-disk warning (PRD R54).
+      if (type === 'config') {
+        void settingsPane.reload();
       }
 
       if (type === 'pane') {

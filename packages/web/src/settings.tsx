@@ -72,6 +72,8 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
   let checkedEdits = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let saving: Promise<boolean> | null = null;
+  // Whether the hub's config event came while a save ran.
+  let reloadDue = false;
   let polling = false;
   let asked = false;
   // Each enrolment request, so an answer that a later request or a close overtook is dropped.
@@ -613,6 +615,15 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
       current.saving = false;
     }
 
+    // A read asked for while the save ran comes after it; a successful save reads the file anyway, and a refused one then shows it changed on disk.
+    if (reloadDue) {
+      reloadDue = false;
+
+      if (answer.status !== 200) {
+        void load();
+      }
+    }
+
     if (state !== current) {
       return false;
     }
@@ -821,7 +832,19 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
     requestClose,
     isOpen: () => view.open,
     state: () => state,
-    reload: () => (view.open && state?.saving !== true ? load() : Promise.resolve()),
+    reload: () => {
+      if (!view.open) {
+        return Promise.resolve();
+      }
+
+      // A read asked for while a save runs waits for the save's answer (saveDraft).
+      if (state?.saving === true) {
+        reloadDue = true;
+        return Promise.resolve();
+      }
+
+      return load();
+    },
   };
 }
 

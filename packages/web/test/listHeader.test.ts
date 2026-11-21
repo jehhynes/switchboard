@@ -355,6 +355,45 @@ describe('the list header (architecture.md § Web page)', () => {
     page.close();
   });
 
+  it("reads settings.json again on the hub's config event: an untouched page shows the file, and unsaved edits stay under the changed-on-disk warning (PRD R54)", async () => {
+    const { page, source } = start();
+    const read = (version: string, concurrency: number) => ({
+      status: 200,
+      body: { settings: { path: 'C:/s.json', version, value: { sessions: { concurrency } }, error: null }, permissionModes: ['auto'], codexPermissionModes: [], providers: ['claude'], templateVariables: [], sourceKinds: ['github'], inUse: {}, enabled: {}, configDir: 'C:/c' },
+    });
+    const concurrency = () => root.querySelector<HTMLInputElement>('[data-path="sessions.concurrency"] input')!;
+
+    answers['/page-settings-check'] = { status: 200, body: { errors: [] } };
+    answers['/page-settings-read'] = read('v1', 2);
+    hello(source);
+    click('.more-actions');
+    click('.more-menu [data-action="list-settings"]');
+    await flush();
+    await flush();
+    root.querySelector<HTMLButtonElement>('.settings-nav-entry')!.click();
+    await flush();
+    expect(concurrency().value).toBe('2');
+
+    answers['/page-settings-read'] = read('v2', 4);
+    source.emit('config', {});
+    await flush();
+    await flush();
+    expect(concurrency().value).toBe('4');
+    expect(root.querySelector('.settings-warning')).toBeNull();
+
+    concurrency().value = '5';
+    concurrency().dispatchEvent(new Event('input', { bubbles: true }));
+    answers['/page-settings-read'] = read('v3', 6);
+    source.emit('config', {});
+    await flush();
+    await flush();
+    expect(concurrency().value).toBe('5');
+    expect(root.querySelector('.settings-warning')?.textContent).toBe('settings.json changed on disk, so your changes cannot be saved. Discard them and open Settings again to load it.');
+    expect(root.querySelector<HTMLButtonElement>('.settings-bar .sheet-button.primary')!.disabled).toBe(true);
+
+    page.close();
+  });
+
   it("shows the last work item that started needing the operator under the header, opens it on a click, and hides it after 10 s off the pointer (PRD R65)", async () => {
     vi.useFakeTimers();
     const { source } = start();
