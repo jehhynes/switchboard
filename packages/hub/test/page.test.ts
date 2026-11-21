@@ -304,6 +304,28 @@ function send(port: number, method: string, path: string, headers: Record<string
   });
 }
 
+/** A POST of raw bytes, answering its status and body; `length` replaces the Content-Length header, and null sends the body chunked. */
+function sendBytes(port: number, path: string, headers: Record<string, string>, body: Buffer, length: number | null = body.length): Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: string }> {
+  return new Promise((resolve, reject) => {
+    const outbound = request({ host: '127.0.0.1', port, method: 'POST', path, headers: { Host: `127.0.0.1:${port}`, ...headers, ...(length === null ? {} : { 'Content-Length': String(length) }) } }, (response) => {
+      let text = '';
+
+      response.setEncoding('utf8');
+      response.on('data', (chunk: string) => (text += chunk));
+      response.on('end', () => resolve({ status: response.statusCode ?? 0, headers: response.headers, body: text }));
+    });
+
+    outbound.on('error', reject);
+    // A length larger than the body is refused before the body is read, so none is sent; a body written before the end goes chunked.
+    if (length === null) {
+      outbound.write(body);
+      outbound.end();
+    } else {
+      outbound.end(length > body.length ? undefined : body);
+    }
+  });
+}
+
 describe('the web page routes', () => {
   let server: HubServer;
   let store: Store;
@@ -319,6 +341,7 @@ describe('the web page routes', () => {
 
   async function serve() {
     const posted: unknown[] = [];
+    const uploaded: unknown[] = [];
     const closed: string[] = [];
     const pages = new Set<string>();
     let keys = 0;
@@ -340,6 +363,10 @@ describe('the web page routes', () => {
       list: () => [{ kind: 'item', title: 'T', conversations: [] }],
       files: async (key) => (key === 'page-1' ? [{ path: 'a.ts', dir: false }] : null),
       artifact: (key, name) => (key === 'page-1' ? artifactFile(folder, name) : null),
+      upload: (key, scopeGen, name, bytes) => {
+        uploaded.push({ key, scopeGen, name, bytes: Buffer.from(bytes).toString('utf8') });
+        return { status: 200, body: { path: 'C:\\Temp\\a.txt', image: false } };
+      },
     };
 
     server = await listenHub({
@@ -372,7 +399,7 @@ describe('the web page routes', () => {
     const link = await send(server.port, 'POST', '/page/link', { Authorization: `Bearer ${server.token}` });
     const url = new URL(JSON.parse(link.body).url as string);
 
-    return { posted, closed, url, folder, open: () => page.opened() };
+    return { posted, uploaded, closed, url, folder, open: () => page.opened() };
   }
 
   it("serves the page on its fixed port, which the link names, by that port's Host only, and nothing but the page there", async () => {
@@ -602,6 +629,40 @@ describe('the web page routes', () => {
 
     stream.destroy();
     await until(() => (closed.includes('page-1') ? true : null));
+  });
+
+  it('takes a file the composer attaches only with the cookie, from its own origin, for a page key, with its length and at most 10 MB', async () => {
+    const { url, uploaded, open } = await serve();
+    const exchange = await send(server.port, 'GET', `${url.pathname}${url.search}`, {});
+    const cookie = String(exchange.headers['set-cookie']).split(';')[0]!;
+    const origin = `http://127.0.0.1:${server.port}`;
+    const path = '/v1/conversation/upload?window=page-1&scopeGen=3&name=notes%20one.txt';
+    const bytes = Buffer.from('hello');
+
+    expect(open()).toBe('page-1');
+
+    const taken = await sendBytes(server.port, path, { Cookie: cookie, Origin: origin, 'Content-Type': 'text/plain' }, bytes);
+
+    expect(taken.status).toBe(200);
+    expect(JSON.parse(taken.body)).toEqual({ path: 'C:\\Temp\\a.txt', image: false });
+    expect(uploaded).toEqual([{ key: 'page-1', scopeGen: 3, name: 'notes one.txt', bytes: 'hello' }]);
+
+    expect((await sendBytes(server.port, path, { Origin: origin }, bytes)).status).toBe(401);
+    expect((await sendBytes(server.port, path, { Cookie: 'sb_page=forged', Origin: origin }, bytes)).status).toBe(401);
+    expect((await sendBytes(server.port, path, { Cookie: cookie }, bytes)).status).toBe(403);
+    expect((await sendBytes(server.port, path, { Cookie: cookie, Origin: 'http://127.0.0.1:8766' }, bytes)).status).toBe(403);
+    expect((await sendBytes(server.port, path, { Cookie: cookie, Origin: `http://evil.example:${server.port}`, Host: `evil.example:${server.port}` }, bytes)).status).toBe(403);
+    expect((await sendBytes(server.port, path.replace('page-1', 'page-2'), { Cookie: cookie, Origin: origin }, bytes)).status).toBe(403);
+    expect((await sendBytes(server.port, path, { Cookie: cookie, Origin: origin }, bytes, null)).status).toBe(411);
+
+    const large = await sendBytes(server.port, path, { Cookie: cookie, Origin: origin }, Buffer.alloc(0), 10 * 1024 * 1024 + 1);
+
+    expect(large.status).toBe(413);
+    expect(JSON.parse(large.body)).toEqual({ error: 'notes one.txt is larger than 10 MB.' });
+    // A window's GET, or the hub token, reaches no upload: the route is the page's alone.
+    expect((await send(server.port, 'GET', path, { Cookie: cookie })).status).toBe(401);
+    expect((await sendBytes(server.port, path, { Authorization: `Bearer ${server.token}` }, bytes)).status).toBe(404);
+    expect(uploaded).toHaveLength(1);
   });
 
   it("serves a page's artifact by the page key alone, sandboxed with no network, and nothing outside its folder", async () => {

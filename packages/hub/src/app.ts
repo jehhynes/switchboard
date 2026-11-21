@@ -1118,6 +1118,7 @@ const dockWithRuns = () => {
       list: () => conversation.pageList(),
       files: (key, query) => conversation.files(key, query),
       artifact: (key, name) => conversation.artifactFile(key, name),
+      upload: (key, scopeGen, name, bytes) => conversation.pageUpload(key, scopeGen, name, bytes),
     },
     pagePort: () => config.settings.web.port,
     dock: () => dockWithRuns(),

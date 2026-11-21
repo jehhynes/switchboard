@@ -8,6 +8,7 @@ import type { Artifact, ConversationChange, HeardTag, InputOutcome, InputSteps, 
 import { SESSION_ENDED, SESSION_RELAUNCHED } from './runtime.js';
 import { canonicalFolder } from './windows.js';
 import { artifactFile, findFiles } from './page.js';
+import { writeUpload } from './uploads.js';
 import type { PageFile, PageListGroup } from './page.js';
 import type { ConversationRef, WindowScope, WindowScopes } from './windows.js';
 import type { VoiceView } from './voice.js';
@@ -253,6 +254,8 @@ export interface ConversationServiceDeps {
   resumeSession?(sessionId: string): Promise<string | null>;
   /** A drafted text of a work item's row that Copy offers, by its label; null when the row offers none by that label. */
   rowPaste?(workItemId: number, label: string): Promise<string | null>;
+  /** The folder the files a page attaches are written to; `UPLOAD_DIR` by default. */
+  uploads?: string;
   log(line: string): void;
 }
 
@@ -822,6 +825,39 @@ export class ConversationService {
     const scope = this.deps.windows.scope(key);
 
     return scope?.cwd == null ? null : findFiles(scope.cwd, query);
+  }
+
+  /**
+   * A file the page's composer attaches (architecture.md § Web page), written for a mention in its next message: only for a page key whose
+   * selected conversation's current session can take a message, at the `scopeGen` the page showed. `{path, image}`, or why not.
+   */
+  pageUpload(key: string, scopeGen: number, name: string, bytes: Uint8Array): { status: number; body: unknown } {
+    const scope = this.deps.windows.isPage(key) ? this.deps.windows.scope(key) : null;
+    const refused = refusal(scope, scopeGen, null);
+
+    if (refused !== null) {
+      return refused;
+    }
+
+    const session = scope!.sessionId === null ? null : this.deps.store.session(scope!.sessionId);
+
+    if (session === null) {
+      return { status: 409, body: { error: 'No session has started yet.' } };
+    }
+
+    const view = this.#view(session, true, this.deps.hooks(), this.deps.personas?.() ?? null);
+
+    if (view.conversation !== 'full') {
+      return { status: 409, body: { error: view.reason ?? SESSION_ENDED } };
+    }
+
+    try {
+      const written = writeUpload(name, bytes, this.deps.now(), this.deps.uploads);
+
+      return 'error' in written ? { status: 400, body: written } : { status: 200, body: written };
+    } catch (error) {
+      return { status: 500, body: { error: `${name === '' ? 'The file' : name} was not saved: ${(error as Error).message}` } };
+    }
   }
 
   /** Sends each window its dropdown when an entry changed while its selection did not: a conversation added or done, a title, state or count. */

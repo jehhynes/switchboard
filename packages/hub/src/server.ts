@@ -6,6 +6,7 @@ import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import type { HubIdentity } from '@switchboard/core';
 import { ARTIFACT_CSP, cookieValue, loopbackHost, PAGE_COOKIE, PAGE_CSP, pageCookie, PUBLIC_PAGE_FILES, SIGNED_OUT_HTML } from './page.js';
 import type { PageAccess } from './page.js';
+import { MAX_UPLOAD_BYTES } from './uploads.js';
 
 export interface Reply {
   status: number;
@@ -61,6 +62,8 @@ export interface PageRoutes {
   files(key: string, query: string): Promise<unknown>;
   /** An artifact's file for a page key, or null outside its scope. */
   artifact(key: string, name: string): { path: string; mime: string; sandboxed: boolean } | null;
+  /** Writes a file the page's composer attaches, for a page key at the `scopeGen` it showed: `{path, image}`, or why not. */
+  upload(key: string, scopeGen: number, name: string, bytes: Uint8Array): Reply;
 }
 
 /**
@@ -528,6 +531,38 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
         (files) => json(response, files === null ? 403 : 200, files === null ? { error: 'Not in this window.' } : { files }),
         (error: unknown) => json(response, 500, { error: String(error) }),
       );
+      return true;
+    }
+
+    // A file the composer attaches: its bytes as the body, with its length, from the page's own origin, for a page key, at most 10 MB.
+    if (request.method === 'POST' && path === '/v1/conversation/upload') {
+      const length = Number(request.headers['content-length']);
+      const refuse = (status: number, error: string): void => {
+        // The body is not read, so the connection closes rather than wait for it.
+        response.setHeader('Connection', 'close');
+        json(response, status, { error });
+      };
+
+      if (request.headers.origin !== `http://${request.headers.host}`) {
+        refuse(403, 'The page posts only from its own origin.');
+      } else if (!page.isPage(window)) {
+        refuse(403, 'Not in this window.');
+      } else if (!Number.isSafeInteger(length) || request.headers['transfer-encoding'] !== undefined) {
+        refuse(411, 'Send the file with its length.');
+      } else if (length > MAX_UPLOAD_BYTES) {
+        refuse(413, `${url.searchParams.get('name') || 'The file'} is larger than 10 MB.`);
+      } else {
+        const chunks: Buffer[] = [];
+
+        request.on('data', (chunk: Buffer) => chunks.push(chunk));
+        request.on('end', () => {
+          const reply = page.upload(window, Number(url.searchParams.get('scopeGen') ?? NaN), url.searchParams.get('name') ?? '', Buffer.concat(chunks));
+
+          json(response, reply.status, reply.body);
+        });
+        request.on('error', () => response.destroy());
+      }
+
       return true;
     }
 

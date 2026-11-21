@@ -1738,6 +1738,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
         return action === 'approve' ? 'The work item no longer offers this.' : null;
       },
       rowPaste: async (_workItemId, label) => (label === 'Reply' ? 'Dear Ana' : null),
+      uploads: join(dir, 'uploads'),
       resumeSession: async (sessionId) => {
         resumed.push(sessionId);
         return resumeRefusal;
@@ -1859,6 +1860,29 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     expect(await service.rowPaste({ window: page.key, scopeGen: 1, opId: 'c', workItemId: 3, label: 'Reply' })).toEqual({ status: 200, body: { text: 'Dear Ana' } });
     expect((await service.rowPaste({ window: page.key, scopeGen: 1, opId: 'c', workItemId: 3, label: 'Other' })).status).toBe(409);
     expect((await service.rowPaste({ window: page.key, scopeGen: 1, opId: 'c', workItemId: 2, label: 'Reply' })).status).toBe(403);
+  });
+
+  it("writes a file the page attaches only for its selected conversation's session that can take a message, at its scope generation", () => {
+    const { store, scopes, service, openPage, view } = setup();
+    const page = openPage();
+    const window = scopes.open(view.file, view.view);
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2]);
+
+    expect(service.pageUpload(page.key, 0, 'a.png', png).status).toBe(403);
+    service.select({ window: page.key, opId: 'o', workItemId: 3 });
+    expect(service.pageUpload(window, scopes.scope(window)!.scopeGen, 'a.png', png).status).toBe(403);
+    expect(service.pageUpload(page.key, 0, 'a.png', png)).toEqual({ status: 409, body: { error: "The window's conversation changed." } });
+
+    const written = service.pageUpload(page.key, 1, 'a.png', png);
+    const path = (written.body as { path: string }).path;
+
+    expect(written).toEqual({ status: 200, body: { path: expect.stringMatching(/[\\/]uploads[\\/]pasted-\d{8}-\d{6}-[0-9a-f]{6}\.png$/), image: true } });
+    expect(readFileSync(path)).toEqual(png);
+    expect(service.pageUpload(page.key, 1, 'notes.png', Buffer.from('hello'))).toEqual({ status: 400, body: { error: 'notes.png is not a PNG, JPEG, GIF or WebP image.' } });
+
+    // A session the page cannot talk to takes no file.
+    store.updateSession('s3', { codeMode: false });
+    expect(service.pageUpload(page.key, 1, 'b.txt', Buffer.from('b'))).toMatchObject({ status: 409 });
   });
 
   it("resumes the page's own current session once it has ended, and only that", async () => {

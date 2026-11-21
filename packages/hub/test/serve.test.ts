@@ -263,7 +263,7 @@ describe('serveHub', () => {
       const pagePort = await freePort();
       const log = vi.fn();
       const store = Store.open(':memory:');
-      const page = { access: new PageAccess(store), asset: () => null, opened: () => 'p', isPage: () => false, list: () => [], files: async () => null, artifact: () => null };
+      const page = { access: new PageAccess(store), asset: () => null, opened: () => 'p', isPage: () => false, list: () => [], files: async () => null, artifact: () => null, upload: () => ({ status: 403, body: {} }) };
       const hub = served(await serve({ browserPort: null, log, app: async () => ({ ...app([]), page, pagePort: () => pagePort }) }));
 
       await until(() => (log.mock.calls.some(([line]) => line === `web page on http://127.0.0.1:${pagePort}/page/`) ? true : null));
