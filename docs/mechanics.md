@@ -1297,3 +1297,18 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
   - In a multi-select question a digit toggled that option's `[ ]`/`[✔]` and stayed on the question; Enter toggled the option under the cursor rather than submitting; the strip's → reaches Submit.
 - **Current use:** the web page shows such a prompt from the screen and answers it by its digits, Escape and → only (`readPrompt` and `promptKeyData` in `packages/conversation/src/prompt.ts`, architecture.md § Web page); typed answers ("Type something") stay in the terminal. The screens recorded here, scrubbed, are the fixtures in `packages/conversation/test/fixtures/prompts`.
 - **Not verified:** a prompt raised from a Code Mode `REPL` script, including the auto mode countdown prompt (M80); Tab to amend; Linux; narrower terminals that wrap the options further.
+
+## M103. A Chrome window glued over an installed web app's column, 2026-11-21
+
+- **Versions:** Chrome 157.0.8103.52 (window tests) and Chrome for Testing 155.0.8059.12 (extension tests), .NET 10, Windows 11 Pro 10.0.26300, three monitors at 125%, 100% and 150%.
+- **Experiment:** a throwaway PerMonitorV2 helper moved a scratch Chrome instance's windows (scratch `--user-data-dir`): an `--app=` window standing in for the installed page, which has the same class, frame and title bar, and a second, normal tabbed window as the pane, found by marker titles. A test MV3 extension opened the pane window and switched its tabs on messages over a WebSocket from the helper. Spike report: `.wip/artifacts/chat/research-chrome-pane.md` in claude-collab; code in the `spike-chrome-pane` worktree's `.wip/chrome-pane/`.
+- **Result:**
+  - A visible `Chrome_WidgetWin_1` window's title is `<page title> - Google Chrome` for a normal window and the page title alone for an app window, and follows the active tab. Every window of a profile is in one browser process.
+  - `SetWindowLongPtr(pane, GWLP_HWNDPARENT, app)` made the pane owned; it stayed below the app until raised once with `SetWindowPos(HWND_TOP, SWP_NOACTIVATE)`, then stayed directly above it. Minimizing the app hid the pane and restoring showed it; closing the app destroyed the pane and its tabs.
+  - One `SetWindowPos` that moved and resized together left the child `Intermediate D3D Window` offset inside the pane in 25 of 28 trials, drawing the page shifted or blank; a resize with `SWP_NOMOVE` and a move with `SWP_NOSIZE` left it at 0,0 in 24 of 24. Moves between monitors of different scale still offset it (6 of 8), because Chrome resizes its window on `WM_DPICHANGED`; aligning again 300 ms after the last change and moving that child back to 0,0 with `SetWindowPos` fixed all 8.
+  - A normal window would not go below about 514 DIP wide (643 px at 125%), so the column must be at least about 515 CSS px.
+  - The page's viewport origin is the DWM frame's left plus half the side border and its bottom minus that border and `innerHeight × devicePixelRatio`; `Chrome_RenderWidgetHostHWND` exists only after the window had the focus.
+  - Activating the pane made it the foreground window and the app page's `document.hasFocus()` false.
+  - An extension service worker with a WebSocket that carried a message every 20 s stayed alive 188 s. `chrome.windows.create({focused: false})` still took the foreground.
+- **Current use:** the dock's `ChromePane` and the extension's pane window (architecture.md § Chrome pane).
+- **Not verified:** the operator's branded Chrome with the extension and a real installed app together; the pane's own window buttons, Snap layouts, virtual desktops, sleep and Chrome restarts; whether session restore brings back a pane closed with its owner. The trial counts are small and from one Chrome version.

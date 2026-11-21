@@ -112,6 +112,11 @@ export interface DockSettings {
 export interface WebSettings {
   /** The port the hub serves the page on, read at hub start, so an installed page keeps its address; 0 serves it only on the hub's own port. */
   port: number;
+  /**
+   * The Chrome pane (PRD R113): the installed page's selected work item's ticket and links in a Chrome window the dock keeps on the page's right
+   * column. Experimental and Windows only; off by default.
+   */
+  chromePane: boolean;
 }
 
 /** The voices of OpenAI's realtime speech models (voice-design § 4.8); OpenAI recommends marin and cedar. */
@@ -224,7 +229,7 @@ export const DEFAULT_SETTINGS: Settings = {
   schedules: {},
   dock: { openVSCode: 'always', openTerminal: 'vscode' },
   voice: { enabled: false, voice: 'marin', style: 'none', speed: 1, expressive: false, expandReplies: false, awayMinutes: 2, needsYouSound: true, outputDevice: null, micIdleMinutes: 10, endPauseMs: 3000, inputDevice: null, halfDuplexTailMs: 800, duplex: { local: 'auto', remote: 'auto' }, matchThreshold: 0.6, pitchLowFactor: 1.22, pitchMinLowShare: 0.2, roomHold: true, roomHoldSeconds: 60, personas: [], playbookPersonas: {}, spokenAlerts: true, alertOn: { finished: true, question: true, permission: true }, alertAnswerSeconds: 10, operatorName: '' },
-  web: { port: 47616 },
+  web: { port: 47616, chromePane: false },
 };
 
 /** A source's or schedule's name: it keys tickets in the store and History. */
@@ -551,8 +556,8 @@ export function parseSettings(text: string): SettingsResult {
   voice.playbookPersonas = parsePlaybookPersonas(read, voiceIn['playbookPersonas'], voice.personas);
 
   const webIn = read.section(root, 'web', 'web');
-  read.unknown(webIn, ['port'], 'web');
-  const web: WebSettings = { port: read.integer(webIn, 'port', 'web', defaults.web.port, 0, 65535) };
+  read.unknown(webIn, ['port', 'chromePane'], 'web');
+  const web: WebSettings = { port: read.integer(webIn, 'port', 'web', defaults.web.port, 0, 65535), chromePane: read.boolean(webIn, 'chromePane', 'web', defaults.web.chromePane) };
 
   return read.errors.length > 0 ? { errors: read.errors } : { settings: { sessions, triage, sources, schedules, dock, voice, web } };
 }

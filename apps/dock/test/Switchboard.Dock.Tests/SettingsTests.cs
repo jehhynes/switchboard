@@ -6,13 +6,13 @@ namespace Switchboard.Dock.Tests;
 public sealed class SettingsFieldsTests
 {
     [Fact]
-    public void GeneralFields_AnyState_GroupsSessionsAgentsTriageDockThenACollapsedAdvancedSection()
+    public void GeneralFields_AnyState_GroupsSessionsAgentsTriageDockWebPageThenACollapsedAdvancedSection()
     {
         var sections = SettingsFields.GeneralFields(SettingsConfigs.State());
         var fields = sections.SelectMany((section) => section.Fields).ToDictionary((field) => field.Path);
 
-        Assert.Equal(["Sessions", "Claude sessions", "Codex sessions", "Triage", "Dock", "Advanced"], sections.Select((section) => section.Heading));
-        Assert.Equal([false, false, false, false, false, true], sections.Select((section) => section.Advanced));
+        Assert.Equal(["Sessions", "Claude sessions", "Codex sessions", "Triage", "Dock", "Web page", "Advanced"], sections.Select((section) => section.Heading));
+        Assert.Equal([false, false, false, false, false, false, true], sections.Select((section) => section.Advanced));
         Assert.Equal(
             [
                 "sessions.provider", "sessions.concurrency", "sessions.codeMode", "sessions.debriefs",
@@ -20,11 +20,12 @@ public sealed class SettingsFieldsTests
                 "sessions.codex.model", "sessions.codex.permissionMode",
                 "triage.concurrency", "triage.model", "triage.timeoutSeconds",
                 "dock.openVSCode", "dock.openTerminal",
+                "web.chromePane",
                 "sessions.installHooks", "sessions.claudePath", "sessions.codexPath", "sessions.nodePath",
             ],
             sections.SelectMany((section) => section.Fields).Select((field) => field.Path));
         Assert.Equal(
-            ["Default agent", "Concurrency", "Code Mode (experimental)", "Friction debriefs", "Model", "Permission mode", "Model", "Permission mode", "Concurrency", "Model", "Timeout (seconds)", "Rows open in", "Terminal for \"Open in terminal\"", "Install hooks", "Claude Code path", "Codex path", "Node.js path"],
+            ["Default agent", "Concurrency", "Code Mode (experimental)", "Friction debriefs", "Model", "Permission mode", "Model", "Permission mode", "Concurrency", "Model", "Timeout (seconds)", "Rows open in", "Terminal for \"Open in terminal\"", "Chrome pane (experimental)", "Install hooks", "Claude Code path", "Codex path", "Node.js path"],
             sections.SelectMany((section) => section.Fields).Select((field) => field.Label));
         Assert.Equal(["claude", "codex"], fields["sessions.provider"].Options!.Select((option) => option.Value));
         Assert.Equal(["Claude", "Codex"], fields["sessions.provider"].Options!.Select((option) => option.Label));
@@ -40,6 +41,8 @@ public sealed class SettingsFieldsTests
         Assert.Equal([("vscode", "VS Code"), ("app", "Terminal app"), ("auto", "VS Code when open")], fields["dock.openTerminal"].Options!.Select((option) => (option.Value, option.Label)));
         Assert.Equal("vscode", fields["dock.openTerminal"].Placeholder);
         Assert.Contains("when Rows open in is Always", fields["dock.openTerminal"].Help);
+        Assert.Equal((FieldKind.Boolean, false), (fields["web.chromePane"].Kind, fields["web.chromePane"].Fallback));
+        Assert.StartsWith("Experimental, Windows only, and may break with Chrome updates.", fields["web.chromePane"].Help);
     }
 
     [Fact]
