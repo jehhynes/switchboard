@@ -472,6 +472,18 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
       return runtime.send(parsed).refused;
     },
+    // The page's Resume: the attach terminal's resume of a Code Mode session, without the terminal, or a Codex app-server thread's.
+    resumeSession: async (sessionId) => {
+      const session = store.session(sessionId);
+
+      if (session?.codeMode === true) {
+        const result = await runtime.attach(sessionId);
+
+        return 'refused' in result ? result.refused : null;
+      }
+
+      return session?.execution === 'app-server' ? runtime.resumeThread(sessionId) : 'This session resumes only in Claude.';
+    },
     rowPaste: async (workItemId, label) => {
       const paste = dockRowOf(views().dock, workItemId)?.pastes.find((one) => one.label === label);
 
@@ -808,6 +820,7 @@ const dockWithRuns = () => {
       '/v1/conversation/replay': async (body) => (isRecord(body) ? conversation.voiceCommand('replay', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, replyId}.' } }),
       '/v1/conversation/personas': async (body) => (isRecord(body) ? conversation.personaCommand('personas', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId}.' } }),
       '/v1/conversation/row-action': async (body) => (isRecord(body) ? conversation.rowAction(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId, action}.' } }),
+      '/v1/conversation/resume': async (body) => (isRecord(body) ? conversation.resume(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } }),
       '/v1/conversation/row-paste': async (body) => (isRecord(body) ? conversation.rowPaste(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId, label}.' } }),
       '/v1/conversation/page-focus': async (body) => (isRecord(body) ? conversation.pageFocus(body) : { status: 400, body: { error: 'Expected {window, focused}.' } }),
       '/v1/conversation/persona': async (body) => (isRecord(body) ? conversation.personaCommand('persona', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, personaId}.' } }),

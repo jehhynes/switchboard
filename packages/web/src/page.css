@@ -234,6 +234,10 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 /* An ended session's note and the composer's "Sent" line, just above the composer. */
 .session-note { display: flex; align-items: center; gap: 6px; box-sizing: border-box; width: calc(100% - 32px); max-width: 680px; margin: 0 auto 8px; padding: 6px 10px; border: 1px solid var(--vscode-input-border); border-radius: 6px; background: var(--vscode-input-background); }
 .session-note-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.session-resume { flex: none; min-height: 26px; padding: 0 10px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 4px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); cursor: pointer; }
+.session-resume:hover { background: var(--vscode-button-hoverBackground); }
+.session-resume:disabled { opacity: 0.6; cursor: default; }
+@media (hover: none), (pointer: coarse) { .session-resume { min-height: 44px; } }
 .composer-sent { display: flex; align-items: center; gap: 4px; margin: 0 0 6px; color: var(--vscode-descriptionForeground); font-size: 0.9em; }
 .composer-sent[hidden] { display: none; }
 .composer-sent .codicon { color: var(--vscode-testing-iconPassed); }

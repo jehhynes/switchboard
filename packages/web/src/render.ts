@@ -91,6 +91,22 @@ export function renderActions(row: PageRow | null, view: View): string {
   return `${mainButton}<div class="menu-anchor actions-anchor"><button type="button" class="actions" data-action="actions" aria-haspopup="menu" aria-expanded="${view.actions}" title="Actions" aria-label="Actions"><span class="codicon codicon-ellipsis" aria-hidden="true"></span></button>${menu}</div>`;
 }
 
+/**
+ * The note above the composer while the session has ended, with Resume, as the Conversation view's; a session the page cannot talk to at all
+ * (`none`) gets only its reason.
+ */
+export function renderEndedNote(session: PageState['session'], resuming: boolean): string {
+  if (session?.state !== 'ended') {
+    return '';
+  }
+
+  const resumable = session.conversation !== 'none';
+  const text = resumable ? 'The session has ended. Resume continues it.' : (session.reason ?? 'The session has ended.');
+  const button = resumable ? `<button type="button" class="session-resume" data-action="resume"${resuming ? ' disabled' : ''}>${resuming ? 'Resuming…' : 'Resume'}</button>` : '';
+
+  return `<div class="session-note" role="status"><span class="codicon codicon-debug-stop" aria-hidden="true"></span><span class="session-note-text">${escape(text)}</span>${button}</div>`;
+}
+
 /** The first day a snooze date can wake on: the day of the earliest timed choice, as `yyyy-mm-dd`; null with none. */
 export function firstSnoozeDay(choices: readonly SnoozeChoice[]): string | null {
   const times = choices.flatMap((choice) => (choice.until === null ? [] : [choice.until]));

@@ -1731,9 +1731,16 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
         return action === 'approve' ? 'The work item no longer offers this.' : null;
       },
       rowPaste: async (_workItemId, label) => (label === 'Reply' ? 'Dear Ana' : null),
+      resumeSession: async (sessionId) => {
+        resumed.push(sessionId);
+        return resumeRefusal;
+      },
       log: () => {},
     });
     const actions: Array<[number, string, { until: number | null; comment: string | null }]> = [];
+    const resumed: string[] = [];
+    let resumeRefusal: string | null = null;
+    const refuseResume = (why: string | null) => void (resumeRefusal = why);
 
     stored(store, view);
     scopes.update(view.view);
@@ -1747,7 +1754,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
       return { key, frames };
     };
 
-    return { store, view, scopes, service, openPage, focus, actions };
+    return { store, view, scopes, service, openPage, focus, actions, resumed, refuseResume };
   }
 
   it('starts a page unbound with its key and list, binds it to any work item it selects, and holds it to that work item', () => {
@@ -1845,6 +1852,25 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     expect(await service.rowPaste({ window: page.key, scopeGen: 1, opId: 'c', workItemId: 3, label: 'Reply' })).toEqual({ status: 200, body: { text: 'Dear Ana' } });
     expect((await service.rowPaste({ window: page.key, scopeGen: 1, opId: 'c', workItemId: 3, label: 'Other' })).status).toBe(409);
     expect((await service.rowPaste({ window: page.key, scopeGen: 1, opId: 'c', workItemId: 2, label: 'Reply' })).status).toBe(403);
+  });
+
+  it("resumes the page's own current session once it has ended, and only that", async () => {
+    const { store, scopes, service, openPage, view, resumed, refuseResume } = setup();
+    const page = openPage();
+    const window = scopes.open(view.file, view.view);
+
+    service.select({ window: page.key, opId: 'o', workItemId: 3 });
+    expect((await service.resume({ window: page.key, scopeGen: 1, opId: 'r', sessionId: 's3' })).body).toEqual({ error: 'The session has not ended.' });
+    store.updateSession('s3', { state: 'ended' });
+    expect((await service.resume({ window: page.key, scopeGen: 1, opId: 'r', sessionId: 's2' })).status).toBe(403);
+    expect((await service.resume({ window: page.key, scopeGen: 0, opId: 'r', sessionId: 's3' })).status).toBe(409);
+    expect((await service.resume({ window, scopeGen: scopes.scope(window)!.scopeGen, opId: 'r', sessionId: scopes.scope(window)!.sessionId })).status).toBe(403);
+    expect(resumed).toEqual([]);
+
+    expect(await service.resume({ window: page.key, scopeGen: 1, opId: 'r', sessionId: 's3' })).toEqual({ status: 200, body: { resumed: true } });
+    refuseResume('Session s3 still has 1 process from its previous run (pid 9). Stop them or wait for them to end.');
+    expect(await service.resume({ window: page.key, scopeGen: 1, opId: 'r2', sessionId: 's3' })).toEqual({ status: 409, body: { error: 'Session s3 still has 1 process from its previous run (pid 9). Stop them or wait for them to end.' } });
+    expect(resumed).toEqual(['s3', 's3']);
   });
 
   it("unbinds a page whose work item was deleted, raising its scope generation", () => {

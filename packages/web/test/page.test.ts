@@ -382,10 +382,24 @@ describe('the page', () => {
     expect(composer.querySelector<HTMLElement>('.composer-sent')!.hidden).toBe(false);
     expect(SENT_NOTE_MS).toBe(4_000);
 
-    source.emit('session', { session: session({ state: 'ended', conversation: 'read-only', reason: 'The session has ended.' }) });
-    expect(root.querySelector('#note .session-note-text')?.textContent).toBe('The session has ended.');
+    source.emit('session', { session: session({ state: 'ended', conversation: 'read-only', reason: 'The session has ended. Open it in the terminal to resume it.' }) });
+    expect(root.querySelector('#note .session-note-text')?.textContent).toBe('The session has ended. Resume continues it.');
+    expect(input.placeholder).toBe('Resume the session to send a message.');
     root.querySelector<HTMLElement>('[data-tab="conversation"]')!.click();
     expect(root.querySelector('#panel .notice')).toBeNull();
+
+    // Resume runs the hub's resume for the session shown; a refusal shows over the composer.
+    posts = [];
+    root.querySelector<HTMLElement>('#note [data-action="resume"]')!.click();
+    expect(root.querySelector<HTMLButtonElement>('#note [data-action="resume"]')!.disabled).toBe(true);
+    await flush();
+    expect(posts.find((post) => post.url.endsWith('/resume'))?.body).toMatchObject({ window: 'pk', scopeGen: 3, sessionId: 's' });
+    expect(root.querySelector<HTMLButtonElement>('#note [data-action="resume"]')!.disabled).toBe(false);
+
+    // A background session the page cannot talk to has only its reason.
+    source.emit('session', { session: session({ state: 'ended', conversation: 'none', reason: 'Open it in Claude to talk to it.' }) });
+    expect(root.querySelector('#note .session-note-text')?.textContent).toBe('Open it in Claude to talk to it.');
+    expect(root.querySelector('#note [data-action="resume"]')).toBeNull();
     page.close();
   });
 
@@ -685,12 +699,12 @@ describe('the page', () => {
   it('disables the composer with the reason for a session it cannot talk to', () => {
     const { page, source } = start();
 
-    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ conversation: 'read-only', state: 'ended', reason: 'The session has ended.' })], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ conversation: 'read-only', state: 'idle', reason: 'The session is unobserved: sessions.installHooks is off.' })], items: [], more: false, status: null, artifacts: [] });
 
     const input = root.querySelector('textarea')!;
 
     expect(input.disabled).toBe(true);
-    expect(input.placeholder).toBe('The session has ended.');
+    expect(input.placeholder).toBe('The session is unobserved: sessions.installHooks is off.');
     page.close();
   });
 });

@@ -2,7 +2,7 @@ import { applyEvent, commandQuery, EMPTY, mentionOf, mentionQuery, pageTitle, se
 import { snoozeChoices } from '@switchboard/core/snooze';
 import type { PageState } from './model.js';
 import { escape, renderMarkdown } from './markdown.js';
-import { answerText, artifactUrl, complete, firstSnoozeDay, markdownBody, newView, parseQuestions, renderArtifacts, renderArtifactView, renderHeader, renderList, renderSheet, renderStatus, renderTabs, renderTimeline, renderVoice, snoozeDateUntil, TABS } from './render.js';
+import { answerText, artifactUrl, complete, firstSnoozeDay, renderEndedNote, markdownBody, newView, parseQuestions, renderArtifacts, renderArtifactView, renderHeader, renderList, renderSheet, renderStatus, renderTabs, renderTimeline, renderVoice, snoozeDateUntil, TABS } from './render.js';
 import type { CardDraft, Tab, View } from './render.js';
 import type { ItemView } from './types.js';
 import { morph } from './morph.js';
@@ -487,7 +487,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // On every tab, so the operator can type and dictate from the status or the artifacts too.
     composerHost.hidden = state.scope === null;
     input.disabled = !full;
-    input.placeholder = full ? `Message ${shortTitle(selectedEntry(state)?.title ?? state.scope?.title ?? '')}…` : (state.session?.reason ?? (state.connected ? 'No session has started yet.' : 'Connecting to Switchboard…'));
+    input.placeholder = full
+      ? `Message ${shortTitle(selectedEntry(state)?.title ?? state.scope?.title ?? '')}…`
+      : state.session?.state === 'ended' && state.session.conversation !== 'none'
+        ? 'Resume the session to send a message.'
+        : (state.session?.reason ?? (state.connected ? 'No session has started yet.' : 'Connecting to Switchboard…'));
     morph(voiceControls, renderVoice(state.voice));
     grow();
     refresh();
@@ -596,8 +600,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     morph(sheetHost, renderSheet(view.sheet, view.acting));
     morph(list, expired ? '<p class="empty">This page\'s link is no longer valid. Open a new one with Switchboard: Open Web Page in VS Code, or hub.js web.</p>' : (listError === null ? '' : `<p class="list-error" role="alert">${escape(listError)}</p>`) + renderList(state.groups, state.scope?.workItemId ?? null, view.collapsed));
 
-    // An ended session's reason sits just above the composer it disables, on every tab; the page has no terminal to resume it in.
-    morph(note, state.session?.state === 'ended' ? `<div class="session-note" role="status"><span class="codicon codicon-debug-stop" aria-hidden="true"></span><span class="session-note-text">${escape(state.session.reason ?? 'The session has ended. A message continues it.')}</span></div>` : '');
+    // An ended session's note sits just above the composer on every tab, with Resume, as in the Conversation view; the page resumes it in the
+    // terminal holder, or a Codex thread in its daemon, without a terminal.
+    morph(note, renderEndedNote(state.session, resuming));
 
     if (state.scope === null) {
       morph(head, '');
@@ -917,6 +922,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       case 'sheet-go':
         void sheetGo();
         break;
+      case 'resume':
+        void resume();
+        break;
       case 'persona-pick':
         view.personas = null;
         draw();
@@ -1102,6 +1110,23 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     if (reply.status !== 200) {
       showError(String(reply.body['error'] ?? 'Codex did not confirm the answer. Check its terminal.'));
     }
+  };
+
+  // ---- Resume (architecture.md § Web page) ----
+  let resuming = false;
+  const resume = async (): Promise<void> => {
+    if (state.session === null || state.session.state !== 'ended' || resuming) {
+      return;
+    }
+
+    resuming = true;
+    draw();
+
+    const answer = await command('resume', { sessionId: state.session.id });
+
+    resuming = false;
+    showError(answer.status === 200 ? null : String(answer.body['error'] ?? `The session did not resume (status ${answer.status}).`));
+    draw();
   };
 
   // ---- Row actions (architecture.md § Web page) ----

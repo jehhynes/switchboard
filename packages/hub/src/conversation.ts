@@ -246,6 +246,11 @@ export interface ConversationServiceDeps {
    * (architecture.md § Web page).
    */
   rowAction?(workItemId: number, action: string, snooze: { until: number | null; comment: string | null }): string | null;
+  /**
+   * Resumes an ended session without a terminal, as the attach terminal's resume does for a Code Mode session and a message does for a Codex
+   * app-server session (architecture.md § Web page): why not, or null.
+   */
+  resumeSession?(sessionId: string): Promise<string | null>;
   /** A drafted text of a work item's row that Copy offers, by its label; null when the row offers none by that label. */
   rowPaste?(workItemId: number, label: string): Promise<string | null>;
   log(line: string): void;
@@ -585,6 +590,43 @@ export class ConversationService {
     }
 
     return answer;
+  }
+
+  /**
+   * `resume {window, scopeGen, opId, sessionId}` (architecture.md § Web page): resumes the page's selected conversation's current session when it
+   * has ended; 403 outside the scope or for a window key, 409 for a stale `scopeGen`, a session that has not ended, and with the resume's refusal.
+   */
+  async resume(body: Record<string, unknown>): Promise<{ status: number; body: unknown }> {
+    const { window, scopeGen, opId, sessionId } = body;
+
+    if (typeof window !== 'string' || typeof scopeGen !== 'number' || typeof opId !== 'string' || typeof sessionId !== 'string') {
+      return { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } };
+    }
+
+    const refused = refusal(this.deps.windows.isPage(window) ? this.deps.windows.scope(window) : null, scopeGen, sessionId);
+
+    if (refused !== null) {
+      return refused;
+    }
+
+    const session = this.deps.store.session(sessionId);
+
+    if (session === null) {
+      return { status: 403, body: { error: 'Not in this window.' } };
+    }
+
+    if (session.state !== 'ended') {
+      return { status: 409, body: { error: 'The session has not ended.' } };
+    }
+
+    const why = this.deps.resumeSession === undefined ? 'This hub cannot resume a session from the page.' : await this.deps.resumeSession(sessionId);
+
+    if (why !== null) {
+      return { status: 409, body: { error: why } };
+    }
+
+    this.sessionsChanged();
+    return { status: 200, body: { resumed: true } };
   }
 
   /** `row-paste {window, scopeGen, opId, workItemId, label}`: the drafted text Copy offers on the page's selected work item, as `{text}`; it only reads. */
