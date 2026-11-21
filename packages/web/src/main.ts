@@ -21,6 +21,8 @@ export const PROMPT_POLL_MS = 1_000;
 export const COMPOSER_DRAFT_MS = 300;
 /** From this width Status and Artifacts are a column beside the conversation rather than tabs. */
 export const WIDE_QUERY = '(min-width: 1200px)';
+/** Where the page keeps which side columns are shown. */
+const LAYOUT = 'switchboard.layout';
 /** Where the page keeps each work item's draft, over a reload. */
 const DRAFTS = 'switchboard.drafts';
 
@@ -53,7 +55,23 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const detailBody = root.querySelector<HTMLElement>('#detail .detail-body')!;
   // On a wide screen Status and Artifacts leave the tabs for a column of their own beside the conversation (architecture.md § Web page).
   const wideQuery = typeof window.matchMedia === 'function' ? window.matchMedia(WIDE_QUERY) : null;
-  const wide = (): boolean => wideQuery?.matches === true;
+  // Each side column can be hidden on a wide screen, remembered in local storage; with the right one hidden, Status and Artifacts are tabs again.
+  const layout = ((): { list: boolean; detail: boolean } => {
+    try {
+      const kept = JSON.parse(localStorage.getItem(LAYOUT) ?? '{}') as { list?: unknown; detail?: unknown };
+
+      return { list: kept.list !== false, detail: kept.detail !== false };
+    } catch {
+      return { list: true, detail: true };
+    }
+  })();
+  const toggleSide = (side: 'list' | 'detail'): void => {
+    layout[side] = !layout[side];
+    localStorage.setItem(LAYOUT, JSON.stringify(layout));
+    draw();
+  };
+  const wideScreen = (): boolean => wideQuery?.matches === true;
+  const wide = (): boolean => wideScreen() && layout.detail;
   /** The tab the conversation's pane shows: always the conversation while Status and Artifacts have their own column. */
   const mainTab = (): Tab => (wide() ? 'conversation' : view.tab);
 
@@ -655,6 +673,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const side = wide() && state.scope !== null;
 
     root.classList.toggle('wide', side);
+    root.classList.toggle('list-hidden', !layout.list && state.scope !== null);
 
     if (!side) {
       morph(detailHead, '');
@@ -669,7 +688,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
-    morph(head, renderHeader(state, view) + (side ? '' : renderTabs(view, state)));
+    morph(head, renderHeader(state, view, { list: layout.list, detail: wideScreen() ? layout.detail : null }) + (side ? '' : renderTabs(view, state)));
 
     const artifact = view.artifact === null ? undefined : state.artifacts.find((one) => one.path === view.artifact);
     const now = deps.now();
@@ -968,6 +987,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         draw();
         break;
       }
+      case 'toggle-list':
+        toggleSide('list');
+        break;
+      case 'toggle-detail':
+        toggleSide('detail');
+        break;
       case 'new-conversation':
         void newConversation();
         break;
@@ -1170,6 +1195,17 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         rows[at === -1 ? (event.key === 'ArrowDown' ? 0 : rows.length - 1) : Math.max(0, Math.min(rows.length - 1, at + (event.key === 'ArrowDown' ? 1 : -1)))]!.focus();
         event.preventDefault();
       }
+    }
+  });
+  // Ctrl+B shows or hides the work items, Ctrl+Alt+B the Status and Artifacts column, as VS Code's side bars.
+  document.addEventListener('keydown', (event) => {
+    const target = event.target as HTMLElement | null;
+    // Not while typing, where the browser or the operator may use the keys.
+    const typing = target !== null && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName));
+
+    if (event.ctrlKey && !event.shiftKey && !event.metaKey && !typing && event.key.toLowerCase() === 'b' && state.scope !== null) {
+      event.preventDefault();
+      toggleSide(event.altKey ? 'detail' : 'list');
     }
   });
   root.addEventListener('keydown', (event) => {

@@ -385,3 +385,12 @@ button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }
 .codicon.state-icon.tone-error { color: var(--vscode-errorForeground); }
 .codicon.state-icon.codicon-modifier-spin { animation: codicon-spin 1.1s linear infinite; }
 @media (prefers-reduced-motion: reduce) { .codicon.state-icon.codicon-modifier-spin { animation: none; } }
+
+/* The side columns' toggles (architecture.md § Web page): from 768 px the work items can be hidden, from 1200 px the Status and Artifacts column;
+   a phone keeps the list and the conversation as separate views. */
+.layout-toggle { flex: none; }
+.list-toggle { display: none; }
+@media (min-width: 768px) {
+  .list-toggle { display: inline-flex; }
+  #root.list-hidden > .side { display: none; }
+}

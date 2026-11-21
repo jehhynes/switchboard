@@ -275,8 +275,22 @@ export function conversationLabel(entry: PageState['scope'] extends infer S ? (S
   return `${codicon(icon)}<span class="title">${escape(entry.title)}</span>${providerMark(selected ? (state.session?.provider ?? entry.provider) : entry.provider)}`;
 }
 
+/** Which side columns are shown, for the header's toggles: the work items' list, and the Status and Artifacts column, null where the screen has none. */
+export interface Layout {
+  list: boolean;
+  detail: boolean | null;
+}
+
+/** A header toggle that shows or hides a side column, as VS Code's layout controls do. */
+function layoutToggle(side: 'list' | 'detail', shown: boolean): string {
+  const what = side === 'list' ? 'the work items' : 'Status and Artifacts';
+  const title = `${shown ? 'Hide' : 'Show'} ${what} (${side === 'list' ? 'Ctrl+B' : 'Ctrl+Alt+B'})`;
+
+  return `<button type="button" class="icon layout-toggle ${side}-toggle" data-action="toggle-${side}" aria-pressed="${shown}" title="${title}" aria-label="${title}"><span class="codicon codicon-layout-sidebar-${side === 'list' ? 'left' : 'right'}${shown ? '' : '-off'}" aria-hidden="true"></span></button>`;
+}
+
 /** The header: the dropdown of the selected work item's conversations, its button drawn as its rows are, and the persona as an icon. */
-export function renderHeader(state: PageState, view: View): string {
+export function renderHeader(state: PageState, view: View, layout: Layout = { list: true, detail: null }): string {
   const scope = state.scope!;
   const selected = selectedEntry(state);
   const title = selected?.title ?? scope.title;
@@ -324,7 +338,7 @@ export function renderHeader(state: PageState, view: View): string {
   const personaMenu = menu === null ? '' : `<ul class="glass menu persona-menu align-right" role="menu" aria-label="Persona">${rows}</ul>`;
   const personaPart = personaButton === '' ? '' : `<div class="menu-anchor persona-anchor">${personaButton}${personaMenu}</div>`;
 
-  return `<header class="header">${picker}${renderActions(selectedRow(state), view)}${personaPart}</header>`;
+  return `<header class="header">${layoutToggle('list', layout.list)}${picker}${renderActions(selectedRow(state), view)}${personaPart}${layout.detail === null ? '' : layoutToggle('detail', layout.detail)}</header>`;
 }
 
 /**

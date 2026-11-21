@@ -973,9 +973,26 @@ describe('the page in use', () => {
     expect(root.querySelector('#detail iframe')).not.toBeNull();
     expect(root.querySelector('#panel .timeline')).not.toBeNull();
 
+    // Either side column hides from the header or the keyboard, and the choice is kept; with the right one hidden the tabs come back.
+    click('[data-action="toggle-list"]');
+    expect(root.classList.contains('list-hidden')).toBe(true);
+    expect(root.querySelector('[data-action="toggle-list"]')!.getAttribute('aria-pressed')).toBe('false');
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', ctrlKey: true, altKey: true }));
+    expect(root.classList.contains('wide')).toBe(false);
+    expect(root.querySelector('#head .tabs')).not.toBeNull();
+    expect(JSON.parse(localStorage.getItem('switchboard.layout')!)).toEqual({ list: false, detail: false });
+    click('[data-action="toggle-detail"]');
+    // Not while typing in the composer.
+    root.querySelector('textarea')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', ctrlKey: true, bubbles: true }));
+    expect(root.classList.contains('list-hidden')).toBe(true);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', ctrlKey: true }));
+    expect(root.classList.contains('list-hidden')).toBe(false);
+    expect(root.classList.contains('wide')).toBe(true);
+
     query.matches = false;
     listeners.forEach((listener) => listener());
     expect(root.querySelector('#head .tabs')).not.toBeNull();
+    expect(root.querySelector('[data-action="toggle-detail"]')).toBeNull();
     expect(root.querySelector('#detail .detail-body')!.innerHTML).toBe('');
     vi.unstubAllGlobals();
     page.close();
