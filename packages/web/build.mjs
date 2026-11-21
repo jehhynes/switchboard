@@ -1,12 +1,54 @@
 // Builds the web page (architecture.md § Web page) and writes dist/index.js, which carries each of its files as a string, so the hub bundle
 // serves the page that matches it without files of its own on disk.
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import esbuild from 'esbuild';
 
 const require = createRequire(import.meta.url);
-const bundle = async (entry) =>
+
+/**
+ * The diff viewer (architecture.md § Web page): ES modules with code splitting in dist/diff, so each grammar and theme is a chunk of its own
+ * that loads only when a file needs it, with `shiki/langs` swapped for the grammars in src/diff/langs.ts, and manifest.json naming the build
+ * by a hash of every file's name and content and listing the files, which the extension installs in `<home>/web/diff/<build>/` and the hub
+ * serves only by those names. Answers the build.
+ */
+async function buildDiff() {
+  rmSync('dist/diff', { recursive: true, force: true });
+  await esbuild.build({
+    entryPoints: { diff: 'src/diff/viewer.ts', worker: 'src/diff/worker.ts' },
+    bundle: true,
+    format: 'esm',
+    splitting: true,
+    platform: 'browser',
+    target: 'es2022',
+    minify: true,
+    outdir: 'dist/diff',
+    chunkNames: 'chunks/[name]-[hash]',
+    loader: { '.json': 'json' },
+    logLevel: 'warning',
+    plugins: [{ name: 'diff-langs', setup: (build) => build.onResolve({ filter: /^shiki\/langs$/ }, () => ({ path: join(process.cwd(), 'src', 'diff', 'langs.ts') })) }],
+  });
+
+  const files = readdirSync('dist/diff', { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => join(entry.parentPath, entry.name).slice('dist/diff/'.length).replaceAll('\\', '/'))
+    .sort();
+  const hash = createHash('sha256');
+
+  for (const file of files) {
+    hash.update(file).update('\0').update(readFileSync(join('dist/diff', file))).update('\0');
+  }
+
+  const build = hash.digest('hex').slice(0, 16);
+
+  writeFileSync('dist/diff/manifest.json', JSON.stringify({ build, files }, null, 2));
+  return build;
+}
+
+const diffBuild = await buildDiff();
+const bundle = async (entry, define = {}) =>
   (
     await esbuild.build({
       entryPoints: [entry],
@@ -20,6 +62,7 @@ const bundle = async (entry) =>
       // The page's .tsx parts are Preact components (architecture.md § Web page).
       jsx: 'automatic',
       jsxImportSource: 'preact',
+      define,
     })
   ).outputFiles[0].text;
 const codicons = dirname(require.resolve('@vscode/codicons/dist/codicon.css'));
@@ -51,7 +94,8 @@ const manifest = {
 };
 const assets = {
   'index.html': text('text/html; charset=utf-8', html('src/index.html')),
-  'page.js': text('text/javascript; charset=utf-8', await bundle('src/entry.ts')),
+  // The page imports the diff viewer from the build it was built with (`__DIFF_BUILD__`).
+  'page.js': text('text/javascript; charset=utf-8', await bundle('src/entry.ts', { __DIFF_BUILD__: JSON.stringify(diffBuild) })),
   // The console's script and xterm.js's styles, loaded only when a console first shows.
   'console.js': text('text/javascript; charset=utf-8', await bundle('src/consoleEntry.ts')),
   'xterm.css': text('text/css; charset=utf-8', readFileSync(require.resolve('@xterm/xterm/css/xterm.css'), 'utf8')),

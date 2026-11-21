@@ -1488,7 +1488,7 @@ const dockWithRuns = () => {
       artifact: (key, name) => conversation.artifactFile(key, name),
       upload: (key, scopeGen, name, bytes) => conversation.pageUpload(key, scopeGen, name, bytes),
       console: (key, sessionId, send, end) => pageConsole.open(key, sessionId, send, end),
-      changes: (route, key) => (route === 'changes' ? pageChanges.changes(key) : Promise.resolve({ status: 404, body: { error: 'not found' } })),
+      changes: (route, key, query) => (route === 'changes' ? pageChanges.changes(key) : route === 'diff' ? pageChanges.diff(key, query.get('path')) : Promise.resolve({ status: 404, body: { error: 'not found' } })),
     },
     pagePort: () => config.settings.web.port,
     dock: () => dockWithRuns(),

@@ -1,7 +1,10 @@
-// The Changes list (PRD R118, architecture.md § Web page): the open conversation's worktree changes from its merge base to disk, as the VS
-// Code window's Open changes shows them, in a menu from the Changes button at the end of the tab strips.
+// The Changes list and the diff tabs (PRD R118, architecture.md § Web page): the open conversation's worktree changes from its merge base to
+// disk, as the VS Code window's Open changes shows them, in a menu from the Changes button at the end of the tab strips; each file opens in a
+// closable tab of its own, drawn by the diff viewer the page loads on first use.
 import type { ComponentChildren, VNode } from 'preact';
 import { FileIcon } from './fileIcons.js';
+import { mount, unmount } from './island.js';
+import type { DiffData, DiffModule, DiffMount } from './diff/types.js';
 
 export type ChangeStatus = 'A' | 'M' | 'D' | 'R' | 'U' | 'C';
 export type ChangeStage = 'committed' | 'staged' | 'working' | 'untracked';
@@ -36,9 +39,26 @@ export interface ChangesView {
   menu: boolean;
   /** The conversation the list was read for: the page key, scope generation and work item. */
   for: string | null;
+  /** The files with a tab, in the order they opened, and the one the diff tab shows. */
+  tabs: string[];
+  open: string | null;
 }
 
-export const newChanges = (): ChangesView => ({ list: null, loading: false, error: null, menu: false, for: null });
+export const newChanges = (): ChangesView => ({ list: null, loading: false, error: null, menu: false, for: null, tabs: [], open: null });
+
+/** Where the diff's sides go: side by side, one above the other, or by the pane's width (`auto`, stacked and wrapped under {@link SPLIT_MIN_WIDTH}). */
+export type DiffLayout = 'auto' | 'split' | 'stacked';
+/** The narrowest pane a diff shows side by side in, as VS Code's diff editor switches to inline at 900 px. */
+export const SPLIT_MIN_WIDTH = 900;
+const LAYOUT_KEY = 'switchboard.diffLayout';
+const WRAP_KEY = 'switchboard.diffWrap';
+
+/** The layout and wrapping a diff shows with in a pane `width` pixels wide. */
+export function diffLayout(choice: DiffLayout, wrap: boolean | null, width: number): { layout: 'split' | 'stacked'; wrap: boolean } {
+  const layout = choice === 'auto' ? (width > 0 && width < SPLIT_MIN_WIDTH ? 'stacked' : 'split') : choice;
+
+  return { layout, wrap: wrap ?? (choice === 'auto' && layout === 'stacked') };
+}
 
 const STATUS_TITLES: Record<ChangeStatus, string> = { A: 'Added', M: 'Modified', D: 'Deleted', R: 'Renamed', U: 'Untracked', C: 'Conflict' };
 const STAGE_TITLES: Record<ChangeStage, string> = { committed: 'committed', staged: 'staged', working: 'unstaged', untracked: 'untracked' };
@@ -51,12 +71,38 @@ export function rowTitle(row: ChangeRow): string {
   return `${row.from === undefined ? row.path : `${row.from} → ${row.path}`}\n${STATUS_TITLES[row.status]}${said}`;
 }
 
+/** A file's name, the last part of its path. */
+const baseName = (path: string): string => path.slice(path.lastIndexOf('/') + 1);
+
+/**
+ * The diff tabs, one per file opened from the list, each with its status colour and a close button, as an artifact's tab is drawn; `shown` is
+ * whether the strip shows the diff tab now, so the open file's tab is selected.
+ */
+export function diffTabs(changes: ChangesView, shown: boolean): ComponentChildren {
+  return changes.tabs.map((path) => {
+    const selected = shown && path === changes.open;
+    const row = changes.list?.rows.find((one) => one.path === path);
+
+    return (
+      <span class={`tab diff-tab${path === changes.tabs[0] ? ' push' : ''}${selected ? ' selected' : ''}${row === undefined ? '' : ` status-${row.status}`}`} role="presentation">
+        <button class="tab-open" type="button" role="tab" data-action="diff-tab" data-path={path} aria-selected={selected} tabindex={selected ? 0 : -1} title={row === undefined ? path : rowTitle(row)}>
+          <span class="codicon codicon-diff" aria-hidden="true"></span>
+          <span class="tab-label">{baseName(path)}</span>
+        </button>
+        <button class="tab-close" type="button" data-action="diff-close" data-path={path} aria-label={`Close ${baseName(path)}`} title="Close" tabindex={selected ? 0 : -1}>
+          <span class="codicon codicon-close" aria-hidden="true"></span>
+        </button>
+      </span>
+    );
+  });
+}
+
 /** The Changes button, after the strip's tabs, with the count once a list was read. */
 export function changesButton(changes: ChangesView): VNode {
   const count = changes.list?.total;
 
   return (
-    <button class={`tab changes-button${changes.menu ? ' open' : ''}`} type="button" data-action="changes-menu" aria-expanded={changes.menu} title="The worktree's changes since its base">
+    <button class={`tab changes-button${changes.tabs.length === 0 ? ' push' : ''}${changes.menu ? ' open' : ''}`} type="button" data-action="changes-menu" aria-expanded={changes.menu} title="The worktree's changes since its base">
       <span class="codicon codicon-diff-multiple" aria-hidden="true"></span>
       <span class="tab-label">Changes</span>
       {count === undefined ? null : <span class="tab-badge muted">{count}</span>}
@@ -85,7 +131,8 @@ function Row({ row }: { row: ChangeRow }): VNode {
   const dir = slash === -1 ? '' : row.path.slice(0, slash);
 
   return (
-    <li class={`change-row status-${row.status}`} data-path={row.path} title={rowTitle(row)}>
+    <li>
+      <button class={`change-row status-${row.status}`} type="button" data-action="diff-open" data-path={row.path} title={rowTitle(row)}>
       <FileIcon path={row.path} />
       <span class={`change-name${row.status === 'D' ? ' deleted' : ''}`}>{name}</span>
       <span class="change-dir">{dir}</span>
@@ -93,6 +140,7 @@ function Row({ row }: { row: ChangeRow }): VNode {
       <span class="change-status" aria-label={STATUS_TITLES[row.status]}>
         {row.status}
       </span>
+      </button>
     </li>
   );
 }
@@ -148,14 +196,88 @@ export interface ChangesDeps {
   /** The page key, null before the stream's hello. */
   key(): string | null;
   draw(): void;
+  /** Shows the diff tab, in the side column on a wide screen and in the conversation's strip on a narrower one. */
+  showDiff(): void;
+  /** The last diff tab closed while it showed: the strip shows another tab. */
+  closedDiff(): void;
+  /** Loads the diff viewer's module on first use; null when it cannot load. */
+  loadDiff(): Promise<DiffModule | null>;
+  /** Empties a pane Preact drew into, before the diff tab draws into it itself. */
+  takePane(pane: HTMLElement): void;
+}
+
+/** A file's diff as read: on its way, read, or why not. */
+type DiffEntry = { state: 'loading' } | { state: 'ok'; data: DiffData; version: string } | { state: 'error'; error: string };
+
+/** The diff tab's header: the path, a rename's old path, the counts, the layout and wrap controls and Refresh. */
+function DiffHead({ path, row, choice, wrap, loading }: { path: string; row: ChangeRow | undefined; choice: DiffLayout; wrap: boolean; loading: boolean }): VNode {
+  return (
+    <div class="diff-head">
+      <span class={`diff-title${row === undefined ? '' : ` status-${row.status}`}`} title={row === undefined ? path : rowTitle(row)}>
+        {row?.from === undefined ? null : <span class="diff-from">{row.from} → </span>}
+        {path}
+      </span>
+      {row === undefined ? null : <Counts row={row} />}
+      <span class="diff-tools">
+        <span class="diff-layout" role="group" aria-label="Layout">
+          {(['auto', 'split', 'stacked'] as const).map((one) => (
+            <button type="button" data-action="diff-layout" data-layout={one} aria-pressed={choice === one} title={one === 'auto' ? `Side by side from ${SPLIT_MIN_WIDTH} px, else stacked and wrapped` : one === 'split' ? 'Side by side' : 'Stacked'}>
+              {one === 'auto' ? 'Auto' : one === 'split' ? 'Split' : 'Stacked'}
+            </button>
+          ))}
+        </span>
+        <button class="diff-wrap" type="button" data-action="diff-wrap" aria-pressed={wrap} title="Wrap long lines">
+          Wrap
+        </button>
+        <button class="icon" type="button" data-action="diff-refresh" title="Refresh" aria-label="Refresh" disabled={loading}>
+          <span class={`codicon codicon-refresh${loading ? ' codicon-modifier-spin' : ''}`} aria-hidden="true"></span>
+        </button>
+      </span>
+    </div>
+  );
+}
+
+/** What the diff tab says in place of a diff: a binary file, one too large, a read on its way or why it failed. */
+export function diffNote(entry: DiffEntry | undefined): string | null {
+  if (entry === undefined || entry.state === 'loading') {
+    return 'Reading the diff…';
+  }
+
+  if (entry.state === 'error') {
+    return entry.error;
+  }
+
+  if (entry.data.binary) {
+    return 'Binary file not shown.';
+  }
+
+  return entry.data.tooLarge === 'patch' || entry.data.patch === null ? 'This change is too large to show here. Open it in VS Code.' : null;
 }
 
 /** The page's side of the Changes list: reads it from the hub, and answers the clicks and presses that open, refresh and close its menu. */
 export class ChangesController {
   readonly view: ChangesView = newChanges();
   #reading = 0;
+  /** Each opened file's diff as read, by path, dropped with the list. */
+  readonly #diffs = new Map<string, DiffEntry>();
+  #diffReads = 0;
+  /** The diff viewer on each host it draws into, dropped once its host leaves the page. */
+  readonly #mounted = new Map<HTMLElement, { mount: DiffMount | null; layout: string }>();
+  #module: Promise<DiffModule | null> | null = null;
+  #layout: DiffLayout = 'auto';
+  #wrap: boolean | null = null;
 
-  constructor(private readonly deps: ChangesDeps) {}
+  constructor(private readonly deps: ChangesDeps) {
+    try {
+      const layout = localStorage.getItem(LAYOUT_KEY);
+      const wrap = localStorage.getItem(WRAP_KEY);
+
+      this.#layout = layout === 'split' || layout === 'stacked' ? layout : 'auto';
+      this.#wrap = wrap === null ? null : wrap === '1';
+    } catch {
+      // Without local storage the choices last until the page reloads.
+    }
+  }
 
   /**
    * Follows the page's conversation: `id` names it (page key, scope generation, work item), so another one drops the list and closes the menu;
@@ -164,12 +286,18 @@ export class ChangesController {
   follow(id: string | null, turnEnded: boolean): void {
     if (id !== this.view.for) {
       this.#reading++;
+      this.#diffReads++;
+      this.#diffs.clear();
       Object.assign(this.view, newChanges(), { for: id });
       return;
     }
 
     if (turnEnded && this.view.menu) {
       void this.refresh();
+    }
+
+    if (turnEnded && this.view.open !== null) {
+      void this.readDiff(this.view.open);
     }
   }
 
@@ -232,7 +360,258 @@ export class ChangesController {
       return true;
     }
 
+    const path = target.closest<HTMLElement>('[data-path]')?.dataset['path'];
+
+    if ((action === 'diff-open' || action === 'diff-tab') && path !== undefined) {
+      this.openDiff(path);
+      return true;
+    }
+
+    if (action === 'diff-close' && path !== undefined) {
+      this.closeDiff(path);
+      return true;
+    }
+
+    if (action === 'diff-layout') {
+      this.#layout = (target.closest<HTMLElement>('[data-layout]')?.dataset['layout'] as DiffLayout | undefined) ?? 'auto';
+      this.#keep(LAYOUT_KEY, this.#layout === 'auto' ? null : this.#layout);
+      this.deps.draw();
+      return true;
+    }
+
+    if (action === 'diff-wrap') {
+      this.#wrap = !this.#shownLayout(target.closest<HTMLElement>('.diff-view')?.parentElement ?? null).wrap;
+      this.#keep(WRAP_KEY, this.#wrap ? '1' : '0');
+      this.deps.draw();
+      return true;
+    }
+
+    if (action === 'diff-refresh' && this.view.open !== null) {
+      void this.readDiff(this.view.open);
+      return true;
+    }
+
     return target.closest('.changes-menu') !== null;
+  }
+
+  /** Opens a file's diff in its own tab, or shows its tab, and reads it when it has not been read. */
+  openDiff(path: string): void {
+    if (!this.view.tabs.includes(path)) {
+      this.view.tabs.push(path);
+    }
+
+    this.view.open = path;
+    this.view.menu = false;
+
+    if (!this.#diffs.has(path)) {
+      void this.readDiff(path);
+    }
+
+    this.deps.showDiff();
+  }
+
+  /** Closes a file's tab; closing the one shown shows its neighbour, or another tab of the strip when it was the last. */
+  closeDiff(path: string): void {
+    const at = this.view.tabs.indexOf(path);
+
+    if (at === -1) {
+      return;
+    }
+
+    this.view.tabs.splice(at, 1);
+    this.#diffs.delete(path);
+    this.#diffSeq.delete(path);
+    this.#loadingDiff.delete(path);
+
+    if (this.view.open === path) {
+      this.view.open = this.view.tabs[Math.min(at, this.view.tabs.length - 1)] ?? null;
+
+      if (this.view.open === null) {
+        this.deps.closedDiff();
+        return;
+      }
+    }
+
+    this.deps.draw();
+  }
+
+  /** Reads a file's diff from the hub; an answer for a conversation or a read the page has moved on from is dropped. */
+  async readDiff(path: string): Promise<void> {
+    const key = this.deps.key();
+
+    if (key === null) {
+      return;
+    }
+
+    const reading = this.#diffReads;
+    const seq = ++this.#seq;
+    const before = this.#diffs.get(path);
+
+    this.#diffSeq.set(path, seq);
+
+    this.#diffs.set(path, before?.state === 'ok' ? before : { state: 'loading' });
+    this.#loadingDiff.add(path);
+    this.deps.draw();
+
+    let entry: DiffEntry;
+
+    try {
+      const response = await this.deps.fetch(`/v1/conversation/diff?window=${encodeURIComponent(key)}&path=${encodeURIComponent(path)}`, { credentials: 'same-origin' });
+      const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+
+      entry = response.ok ? { state: 'ok', data: body as unknown as DiffData, version: response.headers?.get?.('ETag') ?? String(body['version'] ?? Date.now()) } : { state: 'error', error: String(body['error'] ?? `Switchboard answered ${response.status}.`) };
+    } catch (failure) {
+      entry = { state: 'error', error: `Switchboard did not answer: ${String(failure)}` };
+    }
+
+    if (reading !== this.#diffReads || !this.view.tabs.includes(path) || this.#diffSeq.get(path) !== seq) {
+      return;
+    }
+
+    this.#loadingDiff.delete(path);
+    this.#diffs.set(path, entry);
+    this.deps.draw();
+  }
+
+  readonly #loadingDiff = new Set<string>();
+  /** Each file's latest read, so an older answer that arrives after a newer one, or after its tab closed, is dropped. */
+  readonly #diffSeq = new Map<string, number>();
+  #seq = 0;
+  /** The panes the diff tab drew into, watched so Auto follows a pane resized past 900 px without a redraw. */
+  #resize: ResizeObserver | null = null;
+  readonly #watched = new WeakSet<HTMLElement>();
+
+  /** Gives the diff shown in `pane` the layout its width calls for now. */
+  #relayout(pane: HTMLElement): void {
+    const host = pane.querySelector<HTMLElement>(':scope > .diff-view > .diff-host');
+    const mounted = host === null ? undefined : this.#mounted.get(host);
+    const shown = this.#shownLayout(pane);
+    const layout = `${shown.layout} ${shown.wrap}`;
+
+    if (mounted !== undefined && !host!.classList.contains('file-view') && mounted.layout !== layout) {
+      mounted.layout = layout;
+      mounted.mount?.set(shown.layout, shown.wrap);
+    }
+  }
+
+  #keep(key: string, value: string | null): void {
+    try {
+      if (value === null) {
+        localStorage.removeItem(key);
+      } else {
+        localStorage.setItem(key, value);
+      }
+    } catch {
+      // Kept until the page reloads.
+    }
+  }
+
+  /** The layout and wrapping the diff shows with in `pane` now. */
+  #shownLayout(pane: HTMLElement | null): { layout: 'split' | 'stacked'; wrap: boolean } {
+    return diffLayout(this.#layout, this.#wrap, pane?.clientWidth || (typeof innerWidth === 'number' ? innerWidth : 0));
+  }
+
+  /**
+   * Draws the open file's diff into a pane: its header, then the diff viewer, which keeps its own DOM, mounted once per file and version and
+   * given the layout again when the pane's width or a choice changes it.
+   */
+  drawDiff(pane: HTMLElement): void {
+    const path = this.view.open;
+
+    if (path === null) {
+      return;
+    }
+
+    if (!this.#watched.has(pane) && typeof ResizeObserver === 'function') {
+      this.#resize ??= new ResizeObserver((entries) => entries.forEach((one) => this.#relayout(one.target as HTMLElement)));
+      this.#resize.observe(pane);
+      this.#watched.add(pane);
+    }
+
+    const entry = this.#diffs.get(path);
+    const shown = this.#shownLayout(pane);
+    const id = `${path}\u0000${entry?.state === 'ok' ? entry.version : (entry?.state ?? '')}`;
+    let view = pane.querySelector<HTMLElement>(':scope > .diff-view');
+
+    if (view?.dataset['diff'] !== id) {
+      this.deps.takePane(pane);
+      view = document.createElement('div');
+      view.className = 'diff-view';
+      view.dataset['diff'] = id;
+      view.append(document.createElement('div'), document.createElement('div'));
+      view.lastElementChild!.className = 'diff-host';
+      pane.replaceChildren(view);
+      this.drop();
+      this.#mountInto(view.lastElementChild as HTMLElement, entry, shown);
+    }
+
+    const host = view.lastElementChild as HTMLElement;
+    const mounted = this.#mounted.get(host);
+    const layout = `${shown.layout} ${shown.wrap}`;
+
+    if (mounted !== undefined && mounted.layout !== layout) {
+      mounted.layout = layout;
+      mounted.mount?.set(shown.layout, shown.wrap);
+    }
+
+    mount(view.firstElementChild!, <DiffHead path={path} row={this.view.list?.rows.find((one) => one.path === path)} choice={this.#layout} wrap={shown.wrap} loading={this.#loadingDiff.has(path)} />);
+  }
+
+  /** Mounts the diff viewer on a host once its module loads, or says why there is no diff to show. */
+  #mountInto(host: HTMLElement, entry: DiffEntry | undefined, shown: { layout: 'split' | 'stacked'; wrap: boolean }): void {
+    const say = (text: string): void => {
+      const note = document.createElement('p');
+
+      note.className = 'empty';
+      note.textContent = text;
+      host.replaceChildren(note);
+    };
+    const note = diffNote(entry);
+
+    this.#mounted.set(host, { mount: null, layout: `${shown.layout} ${shown.wrap}` });
+
+    if (note !== null || entry?.state !== 'ok') {
+      say(note ?? 'Reading the diff…');
+      return;
+    }
+
+    say('Loading the diff viewer…');
+    this.#module ??= this.deps.loadDiff();
+    void this.#module.then((module) => {
+      const kept = this.#mounted.get(host);
+
+      if (kept === undefined || !host.isConnected) {
+        return;
+      }
+
+      if (module === null) {
+        this.#module = null;
+        say('The diff viewer could not be loaded. Reload the page to try again.');
+        return;
+      }
+
+      host.replaceChildren();
+
+      const [layout, wrap] = kept.layout.split(' ') as ['split' | 'stacked', string];
+
+      kept.mount = module.mountDiff(host, entry.data, entry.version, { layout, wrap: wrap === 'true' });
+
+      if (kept.mount === null) {
+        say("git's patch for this file could not be read.");
+      } else if (entry.data.tooLarge === 'sides') {
+        host.classList.add('patch-only');
+      }
+    });
+  }
+
+  /** Ends the diff viewers whose host has left the page. */
+  drop(): void {
+    for (const [host, mounted] of this.#mounted) {
+      if (!host.isConnected) {
+        this.#mounted.delete(host);
+        mounted.mount?.dispose();
+      }
+    }
   }
 
   /** Closes the menu on a press outside it and its button; true when it closed. */

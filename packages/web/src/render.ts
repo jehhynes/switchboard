@@ -9,7 +9,8 @@ import type { Question, QuestionChoice } from '@switchboard/conversation/questio
 import type { ArtifactView, MessageView, NativeRequest, PageAction, PageGroup, PageRow, ReplyView, ScreenPrompt, StatusView, VoiceView } from '@switchboard/protocol';
 import type { SnoozeChoice } from '@switchboard/core/snooze';
 
-export type Tab = 'conversation' | 'status' | 'artifacts' | 'console' | 'browser';
+/** `diff` shows the open file's diff tab (`changes.tsx`), which has no fixed tab of its own. */
+export type Tab = 'conversation' | 'status' | 'artifacts' | 'console' | 'browser' | 'diff';
 export const TABS: Array<{ tab: Tab; label: string }> = [
   { tab: 'conversation', label: 'Conversation' },
   { tab: 'status', label: 'Status' },
@@ -19,7 +20,7 @@ export const TABS: Array<{ tab: Tab; label: string }> = [
 ];
 
 /** What the column right of the conversation shows on a wide screen. */
-export type SideTab = 'status' | 'artifacts' | 'console' | 'browser';
+export type SideTab = 'status' | 'artifacts' | 'console' | 'browser' | 'diff';
 export const SIDE_TABS: readonly SideTab[] = ['status', 'artifacts', 'console', 'browser'];
 
 /** The most artifact tabs a strip shows, whatever its width (PRD R109): the rest are in the Artifacts menu at its end. */

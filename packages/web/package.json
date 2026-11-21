@@ -19,6 +19,8 @@
     "check:console": "node check-console.mjs"
   },
   "devDependencies": {
+    "@pierre/diffs": "1.6.4",
+    "@shikijs/langs": "4.6.0",
     "@types/markdown-it": "^14.2.0",
     "@types/node": "^24.0.0",
     "@vitest/coverage-v8": "^3.2.7",
@@ -29,6 +31,7 @@
     "markdown-it": "^14.3.3",
     "preact": "^11.2.0",
     "qrcode-generator": "^2.0.4",
+    "shiki": "4.6.0",
     "typescript": "^5.9.0",
     "vitest": "^3.2.7"
   },

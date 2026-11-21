@@ -1,4 +1,4 @@
-import { loadConsole, loadMermaid, startPage } from './main.js';
+import { loadConsole, loadDiff, loadMermaid, startPage } from './main.js';
 
 startPage(document.getElementById('root')!, {
   fetch: (...args) => fetch(...args),
@@ -6,6 +6,7 @@ startPage(document.getElementById('root')!, {
   now: Date.now,
   loadMermaid,
   loadConsole,
+  loadDiff,
   build: document.querySelector<HTMLMetaElement>('meta[name="switchboard-build"]')?.content || null,
   reload: () => location.reload(),
 });

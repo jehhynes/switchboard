@@ -64,7 +64,7 @@ export interface PageRoutes {
   /** The remote hosts and logins the page is served to through `tailscale serve` (architecture.md § Remote access); none without it. */
   remote?(): RemoteAccess;
   /** A file of the page itself, by its name under `/page/`, `index.html` for the page; null for none. */
-  asset(name: string): { mime: string; body: Buffer | string } | null;
+  asset(name: string): { mime: string; body: Buffer | string; immutable?: boolean; gzip?: Buffer } | null;
   /** Registers a page's conversation stream, `installed` when it runs as the installed app, and returns its page key. */
   opened(installed?: boolean): string;
   isPage(key: string): boolean;
@@ -88,7 +88,7 @@ export interface PageRoutes {
 }
 
 /** The page's read-only change routes, under `/v1/conversation/` (architecture.md § Web page). */
-export const CHANGE_ROUTES = new Set(['changes']);
+export const CHANGE_ROUTES = new Set(['changes', 'diff']);
 
 /** The least JSON body sent gzipped to a client that takes it. */
 const GZIP_MIN_BYTES = 1024;
@@ -624,7 +624,23 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
         return;
       }
 
-      response.writeHead(200, { 'Content-Type': asset.mime, 'Cache-Control': 'no-cache', 'X-Frame-Options': 'DENY', 'Content-Security-Policy': PAGE_CSP });
+      // A file that never changes under its name, as the diff viewer's under its build, is kept by the browser and goes gzipped when taken.
+      const gzip = asset.gzip !== undefined && /\bgzip\b/.test(String(request.headers['accept-encoding'] ?? ''));
+
+      response.writeHead(200, {
+        'Content-Type': asset.mime,
+        'Cache-Control': asset.immutable === true ? 'private, max-age=31536000, immutable' : 'no-cache',
+        'X-Frame-Options': 'DENY',
+        'Content-Security-Policy': PAGE_CSP,
+        ...(asset.gzip === undefined ? {} : { Vary: 'Accept-Encoding' }),
+        ...(gzip ? { 'Content-Encoding': 'gzip' } : {}),
+      });
+
+      if (gzip) {
+        response.end(asset.gzip);
+        return;
+      }
+
       // The page learns the build of the hub that served it, so it can tell when a restarted hub serves another page.
       response.end(name === 'index.html' ? String(asset.body).replaceAll('{{build}}', options.build ?? '') : asset.body);
     };

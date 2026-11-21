@@ -3,8 +3,10 @@
 :root { --sb-git-added: #81b88b; --sb-git-modified: #e2c08d; --sb-git-deleted: #c74e39; --sb-git-untracked: #73c991; --sb-git-renamed: #73c991; --sb-git-conflict: #e4676b; }
 @media (prefers-color-scheme: light) { :root { --sb-git-added: #587c0c; --sb-git-modified: #895503; --sb-git-deleted: #ad0707; --sb-git-untracked: #007100; --sb-git-renamed: #007100; --sb-git-conflict: #ad0707; } }
 #head, .detail-head { position: relative; }
-.tab.changes-button { flex: none; margin-left: auto; border-right: none; border-left: 1px solid var(--vscode-panel-border); cursor: pointer; }
-.artifact-more + .changes-button { margin-left: 0; }
+.tab.changes-button { flex: none; border-right: none; border-left: 1px solid var(--vscode-panel-border); cursor: pointer; }
+/* The diff tabs and the Changes button sit at the strip's end, after the Artifacts menu where it shows. */
+.tab.push { margin-left: auto; }
+.artifact-more + .tab.push { margin-left: 0; }
 .tab.changes-button.open { color: var(--vscode-panelTitle-activeForeground); }
 .tab.changes-button .codicon-chevron-down { font-size: 12px; }
 .changes-menu { position: absolute; z-index: 30; top: calc(100% - 1px); right: 8px; box-sizing: border-box; display: flex; flex-direction: column; width: min(560px, calc(100% - 16px)); max-height: min(70vh, 560px); padding: 4px; border-radius: 8px; font-size: 13px; }
@@ -32,3 +34,41 @@
 .changes-empty { margin: 0; padding: 8px; color: var(--vscode-descriptionForeground); white-space: normal; }
 .changes-empty.error { color: var(--vscode-errorForeground); }
 @media (hover: none), (pointer: coarse) { .change-row { height: 44px; } .changes-head button.icon { width: 44px; height: 44px; } }
+/* A file's diff tab, drawn as an artifact's: its name in its status colour, cut with an ellipsis, and a close mark. */
+.tab.diff-tab { box-sizing: border-box; max-width: 200px; padding: 0 6px 0 0; }
+.tab.diff-tab .tab-label { overflow: hidden; text-overflow: ellipsis; }
+.tab.diff-tab.status-A .tab-label, .tab.diff-tab.status-U .tab-label { color: var(--sb-git-added); }
+.tab.diff-tab.status-M .tab-label { color: var(--sb-git-modified); }
+.tab.diff-tab.status-D .tab-label { color: var(--sb-git-deleted); text-decoration: line-through; }
+.tab.diff-tab.status-R .tab-label { color: var(--sb-git-renamed); }
+.tab.diff-tab.status-C .tab-label { color: var(--sb-git-conflict); }
+.changes-rows button.change-row { width: 100%; border: none; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.changes-rows button.change-row:hover, .changes-rows button.change-row:focus-visible { background: var(--vscode-list-hoverBackground); outline: none; }
+/* The diff tab's pane: its header, then the diff viewer, which scrolls itself, in VS Code's editor font and diff editor colours. */
+.diff-pane { padding: 0 !important; overflow: hidden !important; }
+.diff-view { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.diff-head { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 4px 8px 4px 12px; border-bottom: 1px solid var(--vscode-panel-border); font-size: 12px; }
+.diff-title { flex: 1 1 200px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--vscode-editor-font-family); }
+.diff-from { color: var(--vscode-descriptionForeground); }
+.diff-tools { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+.diff-layout { display: inline-flex; border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 4px; overflow: hidden; }
+.diff-layout button, .diff-wrap { padding: 2px 8px; border: none; background: transparent; color: var(--vscode-foreground); font: inherit; cursor: pointer; }
+.diff-wrap { border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 4px; }
+.diff-layout button[aria-pressed="true"], .diff-wrap[aria-pressed="true"] { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+.diff-head button.icon { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: none; border-radius: 4px; background: transparent; color: var(--vscode-foreground); cursor: pointer; }
+.diff-head button.icon:hover { background: var(--vscode-toolbar-hoverBackground); }
+.diff-host { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain;
+  --diffs-font-family: var(--vscode-editor-font-family);
+  --diffs-header-font-family: var(--vscode-font-family);
+  --diffs-font-size: 14px; --diffs-line-height: 19px;
+  --diffs-bg-addition-override: #9bb95533;
+  --diffs-bg-addition-number-override: #9bb95533;
+  --diffs-bg-addition-emphasis-override: light-dark(#9ccc2c40, #9ccc2c33);
+  --diffs-bg-deletion-override: #ff000033;
+  --diffs-bg-deletion-number-override: #ff000033;
+  --diffs-bg-deletion-emphasis-override: #ff000033;
+  --diffs-bg-separator-override: var(--vscode-sideBar-background);
+}
+.diff-host > .empty { padding: 12px; color: var(--vscode-descriptionForeground); }
+@media (max-width: 599px) { .diff-host { --diffs-font-size: 12px; --diffs-line-height: 17px; } }
+@media (hover: none), (pointer: coarse) { .diff-head button.icon { width: 44px; height: 44px; } .diff-layout button, .diff-wrap { min-height: 36px; } }

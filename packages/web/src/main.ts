@@ -29,7 +29,8 @@ import { EMPTY_HISTORY_UI, renderHistory } from './history.js';
 import type { HistoryOpen, HistoryUi } from './history.js';
 import type { HistoryCategory, HistoryView } from '@switchboard/protocol';
 import { askForNotifications, notificationsAllowed, notifyNeeds, playChime } from './alerts.js';
-import { ChangesController, changesButton, renderChangesMenu } from './changes.js';
+import { ChangesController, changesButton, diffTabs, renderChangesMenu } from './changes.js';
+import type { DiffModule } from './diff/types.js';
 import { useFileIcons } from './fileIcons.js';
 import type { NeedsItem } from './alerts.js';
 
@@ -89,6 +90,8 @@ export interface PageDeps {
   loadMermaid?(): Promise<boolean>;
   /** Loads the console's script and styles on first use; resolves null when they cannot load. */
   loadConsole?(): Promise<ConsoleModule | null>;
+  /** Loads the diff viewer's modules on first use; resolves null when they cannot load. */
+  loadDiff?(): Promise<DiffModule | null>;
   /** The build of the hub that served the page, from its `switchboard-build` meta tag, and how to reload, for a hub that restarts. */
   build?: string | null;
   reload?(): void;
@@ -227,7 +230,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /** Whether the Console tab shows: an active session, not ended, that the terminal holder may hold; otherwise its console would be blank, so there is no tab. */
   const showConsole = (): boolean => hasConsole(state.session);
   /** The tab the conversation's pane shows: always the conversation while Status and Artifacts have their own column, and never a Browser tab that is gone. */
-  const mainTab = (): Tab => (wide() || (view.tab === 'browser' && !showBrowser()) || (view.tab === 'artifacts' && openArtifact() === null) ? 'conversation' : view.tab === 'console' && !showConsole() ? 'status' : view.tab);
+  const mainTab = (): Tab => (wide() || (view.tab === 'browser' && !showBrowser()) || (view.tab === 'artifacts' && openArtifact() === null) || (view.tab === 'diff' && changes.view.open === null) ? 'conversation' : view.tab === 'console' && !showConsole() ? 'status' : view.tab);
   /** The work item whose tabs were last chosen on its opening, and whether the operator has chosen a tab since. */
   let openedItem: number | null = null;
   let tabChosen = false;
@@ -277,7 +280,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const workItemId = state.scope?.workItemId ?? null;
     const shown = wide() ? sideTab() : mainTab();
 
-    if (workItemId === null || shown === 'conversation') {
+    // A diff tab lasts as long as the page shows the work item, so it is not kept.
+    if (workItemId === null || shown === 'conversation' || shown === 'diff') {
       return;
     }
 
@@ -310,7 +314,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     void post('page-tabs', closed ? { workItemId, close: { path, updatedAt: artifact.updatedAt } } : { workItemId, reopen: path });
   };
   /** What the column right of the conversation shows: Status in place of a Browser tab that is gone. */
-  const sideTab = (): SideTab => ((view.side === 'browser' && !showBrowser()) || (view.side === 'console' && !showConsole()) || (view.side === 'artifacts' && openArtifact() === null) ? 'status' : view.side);
+  const sideTab = (): SideTab => ((view.side === 'browser' && !showBrowser()) || (view.side === 'console' && !showConsole()) || (view.side === 'artifacts' && openArtifact() === null) || (view.side === 'diff' && changes.view.open === null) ? 'status' : view.side);
   /** The artifact whose tab is chosen, while the work item still has it; artifacts have no list of their own, only a tab each and a menu. */
   function openArtifact(): string | null {
     return view.artifact !== null && state.artifacts.some((one) => one.path === view.artifact) ? view.artifact : null;
@@ -343,7 +347,22 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   let state: PageState = EMPTY;
   const view: View = newView();
   // The Changes list, its menu and the session state it was last drawn at, so a turn's end reads it again (architecture.md § Web page).
-  const changes = new ChangesController({ fetch: (...args) => deps.fetch(...args), key: () => state.key, draw: () => draw() });
+  const changes = new ChangesController({
+    fetch: (...args) => deps.fetch(...args),
+    key: () => state.key,
+    draw: () => draw(),
+    showDiff: () => {
+      leaving('diff');
+      chooseTab('diff');
+      draw();
+    },
+    closedDiff: () => {
+      chooseTab(wide() ? 'status' : 'conversation');
+      draw();
+    },
+    loadDiff: () => deps.loadDiff?.() ?? Promise.resolve(null),
+    takePane: (pane) => takePane(pane),
+  });
   let changesSession: string | null = null;
   // File type icons, whose mapping loads the first time a list draws one (architecture.md § Web page).
   const dropFileIcons = useFileIcons({ fetch: (...args) => deps.fetch(...args), loaded: () => draw() });
@@ -1529,7 +1548,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     const strip = { open: openArtifact(), fit: view.artifactFit, menu: view.artifactMenu, now: deps.now(), closed: closedNow() };
 
-    mount(head, [renderHeader(state, view), side ? null : renderTabs({ ...view, tab: mainTab() }, state, showBrowser(), strip, changesButton(changes.view), showConsole()), side ? null : renderChangesMenu(changes.view)]);
+    const changeTabs = (shown: Tab): ComponentChild[] => [diffTabs(changes.view, shown === 'diff'), changesButton(changes.view)];
+
+    mount(head, [renderHeader(state, view), side ? null : renderTabs({ ...view, tab: mainTab() }, state, showBrowser(), strip, changeTabs(mainTab()), showConsole()), side ? null : renderChangesMenu(changes.view)]);
 
     const artifact = view.artifact === null ? undefined : state.artifacts.find((one) => one.path === view.artifact);
     const now = deps.now();
@@ -1537,6 +1558,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const drawTab = (pane: HTMLElement, tab: Tab): void => {
       pane.classList.toggle('console-pane', tab === 'console');
       pane.classList.toggle('browser-pane', tab === 'browser');
+      pane.classList.toggle('diff-pane', tab === 'diff');
 
       if (tab === 'browser') {
         // The Chrome pane's window lies over this area while it shows; until then the area says why it does not.
@@ -1546,6 +1568,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         drawPane(pane, note === null ? null : renderEmpty(note));
       } else if (tab === 'console') {
         drawConsole(pane);
+      } else if (tab === 'diff') {
+        changes.drawDiff(pane);
       } else if (tab === 'artifacts' && artifact !== undefined && state.key !== null) {
         const kept = artifactDocs.get(docKey(artifact.path));
 
@@ -1582,7 +1606,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     drawTab(panel, mainTab());
 
     if (side) {
-      mount(detailHead, [renderSideSwitch(sideTab(), state, showBrowser(), strip, changesButton(changes.view), showConsole()), renderChangesMenu(changes.view)]);
+      mount(detailHead, [renderSideSwitch(sideTab(), state, showBrowser(), strip, changeTabs(sideTab()), showConsole()), renderChangesMenu(changes.view)]);
       drawTab(detailBody, sideTab());
     }
     // The composer first, so the conversation is scrolled against its final height.
@@ -1615,6 +1639,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     followEnd();
     checkSeen();
     dropConsoles();
+    changes.drop();
   };
   /** Opens each open menu down and to the right of its button, or the other way where the page has no room (`placeMenus`, architecture.md § Menus). */
   const fitMenus = (): void => placeMenus(root, { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight });
@@ -3402,6 +3427,19 @@ export function mermaidOptions(): { startOnLoad: false; securityLevel: 'strict';
   const light = typeof matchMedia === 'function' && matchMedia(LIGHT_SCHEME).matches;
 
   return { startOnLoad: false, securityLevel: 'strict', theme: light ? 'default' : 'dark' };
+}
+
+/** The diff viewer's build this page was built with, its folder under `/page/diff/` (`packages/web/build.mjs`). */
+declare const __DIFF_BUILD__: string | undefined;
+
+/** Loads the diff viewer's modules from the hub, the build this page was built with; null when the hub has none. */
+export function loadDiff(): Promise<DiffModule | null> {
+  const url = `/page/diff/${typeof __DIFF_BUILD__ === 'string' ? __DIFF_BUILD__ : 'none'}/diff.js`;
+
+  return import(url).then(
+    (module) => module as DiffModule,
+    () => null,
+  );
 }
 
 /** Loads Mermaid from the hub once, for diagrams in replies, statuses and artifacts; false when the hub has none. */

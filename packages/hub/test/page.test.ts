@@ -1,3 +1,4 @@
+import { gzipSync } from 'node:zlib';
 import { request } from 'node:http';
 import { createServer } from 'node:net';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -645,7 +646,7 @@ describe('the web page routes', () => {
     const page: PageRoutes = {
       access: new PageAccess(store),
       remote: () => remoteAccess,
-      asset: (name) => (name === 'index.html' ? { mime: 'text/html; charset=utf-8', body: '<html>page {{build}}</html>' } : ['manifest.webmanifest', 'sw.js', 'page.js'].includes(name) ? { mime: 'text/plain', body: name } : null),
+      asset: (name) => (name === 'diff/b1/diff.js' ? { mime: 'text/javascript; charset=utf-8', body: 'plain', immutable: true, gzip: gzipSync('plain') } : name === 'index.html' ? { mime: 'text/html; charset=utf-8', body: '<html>page {{build}}</html>' } : ['manifest.webmanifest', 'sw.js', 'page.js'].includes(name) ? { mime: 'text/plain', body: name } : null),
       opened: (app) => {
         const key = `page-${++keys}`;
 
@@ -1131,6 +1132,14 @@ describe('the web page routes', () => {
     expect((await send(server.port, 'GET', '/v1/conversation/changes?window=page-1', { Cookie: cookie, 'If-None-Match': '"e1"' })).status).toBe(304);
     expect((await send(server.port, 'GET', '/v1/conversation/changes?window=page-2', { Cookie: cookie })).status).toBe(403);
     expect((await send(server.port, 'GET', '/v1/conversation/changes?window=page-1', {})).status).toBe(401);
+
+    // The diff viewer's files: kept by the browser, gzipped when taken, and only with the cookie.
+    const viewer = await send(server.port, 'GET', '/page/diff/b1/diff.js', { Cookie: cookie, 'Accept-Encoding': 'gzip' });
+
+    expect(viewer.headers['cache-control']).toBe('private, max-age=31536000, immutable');
+    expect(viewer.headers['content-encoding']).toBe('gzip');
+    expect((await send(server.port, 'GET', '/page/diff/b1/diff.js', { Cookie: cookie })).body).toBe('plain');
+    expect((await send(server.port, 'GET', '/page/diff/b1/diff.js', {})).status).toBe(401);
 
     stream.destroy();
     await until(() => (closed.includes('page-1') ? true : null));

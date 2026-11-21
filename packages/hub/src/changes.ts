@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFile, realpath, stat } from 'node:fs/promises';
+import { open, realpath, stat } from 'node:fs/promises';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { changesPlan } from '@switchboard/core';
 import type { ChangedPath, DiffRow } from '@switchboard/core';
@@ -180,6 +180,37 @@ export async function fileInside(root: string, path: string): Promise<string | n
   }
 }
 
+/**
+ * A file's bytes, at most `cap`: `large` when it holds more, read through one handle, so a file that grows while it is read is still cut at
+ * the cap; null when it cannot be read.
+ */
+export async function readCapped(real: string, cap: number): Promise<Buffer | 'large' | null> {
+  let handle: Awaited<ReturnType<typeof open>> | null = null;
+
+  try {
+    handle = await open(real, 'r');
+
+    const buffer = Buffer.alloc(cap + 1);
+    let length = 0;
+
+    for (;;) {
+      const { bytesRead } = await handle.read(buffer, length, buffer.length - length, length);
+
+      length += bytesRead;
+
+      if (bytesRead === 0 || length > cap) {
+        break;
+      }
+    }
+
+    return length > cap ? 'large' : buffer.subarray(0, length);
+  } catch {
+    return null;
+  } finally {
+    await handle?.close();
+  }
+}
+
 /** Whether a path is a plain relative path with forward slashes, as git prints one: no empty, `.` or `..` part, no backslash, colon at its start or NUL. */
 export function relativePath(path: unknown): path is string {
   return (
@@ -208,7 +239,11 @@ async function untrackedCounts(root: string, path: string, budget: { bytes: numb
 
     budget.bytes -= size;
 
-    const bytes = await readFile(real);
+    const bytes = await readCapped(real, COUNT_MAX_BYTES);
+
+    if (!(bytes instanceof Buffer)) {
+      return { additions: null, binary: false };
+    }
 
     if (looksBinary(bytes)) {
       return { additions: null, binary: true };
@@ -246,7 +281,7 @@ async function mergeBase(root: string, git: Git): Promise<string | null> {
 }
 
 /** A worktree's changes from its merge base to disk, read in `folder`'s repository; why not when git cannot read it. */
-export async function readChanges(folder: string, git: Git = nodeGit): Promise<WorktreeChanges | { error: string }> {
+export async function readChanges(folder: string, git: Git = nodeGit, withCounts = true): Promise<WorktreeChanges | { error: string }> {
   const top = await git(['rev-parse', '--show-toplevel'], folder);
   const root = top.stdout.toString('utf8').trim();
 
@@ -327,7 +362,7 @@ export async function readChanges(folder: string, git: Git = nodeGit): Promise<W
             ? 'R'
             : 'M';
     const touched = CHANGE_STAGES.filter((stage) => keys.some((key) => stagesOf.get(key)?.has(stage) === true));
-    const counted = isUntracked ? await untrackedCounts(root, path, budget).then(({ additions, binary }) => ({ additions, deletions: additions === null ? null : 0, binary })) : null;
+    const counted = isUntracked && withCounts ? await untrackedCounts(root, path, budget).then(({ additions, binary }) => ({ additions, deletions: additions === null ? null : 0, binary })) : null;
     const numbers = counted ?? counts.get(path) ?? { additions: null, deletions: null };
 
     sides.set(path, { ...row, untracked: isUntracked });
@@ -355,6 +390,88 @@ export async function readChanges(folder: string, git: Git = nodeGit): Promise<W
     view: { base, head, rows, stages: { committed: stages.committed.length, staged: stages.staged.length, working: stages.working.length, untracked: stages.untracked.length }, shown: planned.shown, total: planned.total },
     sides,
   };
+}
+
+/** The most bytes of each side of a diff, and of its patch, the hub sends; past them a diff shows its patch alone, or nothing. */
+export const SIDE_MAX_BYTES = 4 * 1024 * 1024;
+export const PATCH_MAX_BYTES = 4 * 1024 * 1024;
+/** The most bytes of a patch and both sides together; past it the sides are left out. */
+export const DIFF_MAX_BYTES = 8 * 1024 * 1024;
+
+/** The hub's `diff` answer for one change row (architecture.md § Web page). */
+export interface DiffView {
+  path: string;
+  from?: string;
+  status: ChangeStatus;
+  /** git's patch from the base to disk, null for a binary file or one too large. */
+  patch: string | null;
+  /** The whole file at the base and on disk, null where it has none, or when either is too large. */
+  old: string | null;
+  new: string | null;
+  binary: boolean;
+  tooLarge: 'sides' | 'patch' | null;
+}
+
+const DIFF_ARGS = ['diff', '--no-ext-diff', '--no-textconv', '--no-color', '--no-relative', '--src-prefix=a/', '--dst-prefix=b/'];
+
+/** A side of a diff read whole: a blob at the base by `<ref>:<path>`, or the file on disk by real path inside the worktree; `large` past the cap. */
+async function readSide(changes: WorktreeChanges, side: { path: string; ref: string | null }, git: Git): Promise<Buffer | 'large' | null> {
+  if (side.ref !== null) {
+    const blob = await git(['cat-file', 'blob', `${changes.ref}:${side.path}`], changes.root, { maxBytes: SIDE_MAX_BYTES });
+
+    return blob.tooLarge ? 'large' : blob.code === 0 ? blob.stdout : null;
+  }
+
+  const real = await fileInside(changes.root, side.path);
+
+  if (real === null) {
+    return null;
+  }
+
+  return readCapped(real, SIDE_MAX_BYTES);
+}
+
+/**
+ * One change row's diff, `path` being its path now (a deleted file's at the base): git's patch, from `git diff --no-index` against nothing for
+ * an untracked file and `git diff -M1% <base>` limited to the row's paths otherwise, so a rename pairs as the row does, and both whole sides;
+ * null for a path that is not one of the rows. Only the rows' own paths are read: a git-side path as `<base>:<path>`, never a ref the
+ * caller names, and a disk-side path by real path inside the worktree.
+ */
+export async function readDiff(changes: WorktreeChanges, path: string, git: Git = nodeGit): Promise<DiffView | null> {
+  const row = changes.view.rows.find((one) => one.path === path);
+  const sides = changes.sides.get(path);
+
+  if (row === undefined || sides === undefined) {
+    return null;
+  }
+
+  const base: DiffView = { path, ...(row.from === undefined ? {} : { from: row.from }), status: row.status, patch: null, old: null, new: null, binary: false, tooLarge: null };
+  const [old, now] = await Promise.all([sides.original === null ? null : readSide(changes, sides.original, git), sides.modified === null ? null : readSide(changes, sides.modified, git)]);
+
+  if ((old instanceof Buffer && looksBinary(old)) || (now instanceof Buffer && looksBinary(now)) || row.binary) {
+    return { ...base, binary: true };
+  }
+
+  const paths = [...new Set([sides.original?.path, sides.modified?.path].filter((one): one is string => one !== undefined))];
+  const patch = sides.untracked
+    ? await git([...DIFF_ARGS, '--no-index', '--', '/dev/null', path], changes.root, { maxBytes: PATCH_MAX_BYTES })
+    : await git([...DIFF_ARGS, '-M1%', changes.ref, '--', ...paths], changes.root, { maxBytes: PATCH_MAX_BYTES });
+  // `--no-index` exits 1 when the files differ, as they always do here.
+  const patchOk = patch.code === 0 || (sides.untracked && patch.code === 1);
+
+  if (patch.tooLarge) {
+    return { ...base, tooLarge: 'patch' };
+  }
+
+  if (!patchOk || patch.stdout.length === 0) {
+    return { ...base, tooLarge: null };
+  }
+
+  if (old === 'large' || now === 'large' || patch.stdout.length + (old?.length ?? 0) + (now?.length ?? 0) > DIFF_MAX_BYTES) {
+    return { ...base, patch: patch.stdout.toString('utf8'), tooLarge: 'sides' };
+  }
+
+  return { ...base, patch: patch.stdout.toString('utf8'), old: old?.toString('utf8') ?? null, new: now?.toString('utf8') ?? null };
 }
 
 export type ChangesReply = { status: number; body: unknown; etag?: string };
@@ -415,5 +532,34 @@ export class PageChanges {
     const body = { scopeGen: scope.scopeGen, ...read.view };
 
     return { status: 200, body, etag: etagOf(body) };
+  }
+
+  /**
+   * `GET /v1/conversation/diff?window=<page key>&path=<path>`: one change row's `DiffView`, for a path that is one of the selected conversation's
+   * change rows now; 400 for a path that is not a plain relative one, 404 for one that is no row.
+   */
+  async diff(key: string, path: unknown): Promise<ChangesReply> {
+    if (!relativePath(path)) {
+      return { status: 400, body: { error: 'Expected a path relative to the worktree.' } };
+    }
+
+    const scope = unscoped(this.deps, key);
+
+    if ('status' in scope) {
+      return scope;
+    }
+
+    const read = await readChanges(scope.cwd!, this.deps.git, false);
+    const diff = 'error' in read ? null : await readDiff(read, path, this.deps.git);
+
+    if (!same(this.deps, key, scope)) {
+      return { status: 409, body: { error: CONVERSATION_MOVED } };
+    }
+
+    if ('error' in read) {
+      return { status: 409, body: read };
+    }
+
+    return diff === null ? { status: 404, body: { error: `${path} is not one of the changes now.` } } : { status: 200, body: diff, etag: etagOf(diff) };
   }
 }

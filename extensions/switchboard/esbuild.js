@@ -99,6 +99,13 @@ function copyAssets() {
   // Mermaid's self-contained build, which sets `globalThis.mermaid`, so the Markdown preview draws diagrams offline.
   fs.mkdirSync('dist/mermaid', { recursive: true });
   fs.copyFileSync(path.join(path.dirname(require.resolve('mermaid/package.json')), 'dist', 'mermaid.min.js'), 'dist/mermaid/mermaid.min.js');
+
+  // The web page's diff viewer, built by packages/web into its own folder with a manifest, which activation installs in the home.
+  if (fs.existsSync('../../packages/web/dist/diff/manifest.json')) {
+    fs.cpSync('../../packages/web/dist/diff', 'dist/diff', { recursive: true });
+  } else {
+    console.warn('packages/web has not built its diff viewer, so the web page shows no diffs. Build packages/web first.');
+  }
 }
 
 /** Every file under a folder, relative with forward slashes, sorted. */

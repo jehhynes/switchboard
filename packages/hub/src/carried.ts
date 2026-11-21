@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { hubBundlePath, switchboardHome } from '@switchboard/core';
 import { installBundle } from './bundle.js';
 import { installHolder, installPaneHelper, installVoice, MANIFEST_FILE } from './holderInstall.js';
+import { installDiffViewer } from './pageAssets.js';
 
 /** What an install did: whether the hub bundle changed, and once the per-build programs are installed, each one's error. */
 export interface CarriedInstall {
@@ -12,7 +13,7 @@ export interface CarriedInstall {
 
 /**
  * Installs what the extension carries in its `dist` folder into the home, as activation does and `hub.js install` does without VS Code
- * (architecture.md § Hub lifecycle): the hub bundle, which a running hub then restarts onto, and the web page's Mermaid at once, then the
+ * (architecture.md § Hub lifecycle): the hub bundle, which a running hub then restarts onto, and the web page's Mermaid and diff viewer at once, then the
  * terminal holder's, the voice process's and, on Windows, the Chrome pane helper's builds. A hub bundle that cannot be copied throws; a program
  * that cannot be installed fails only what it runs, so its error is returned.
  */
@@ -24,6 +25,13 @@ export function installCarried(dist: string, home: string, platform: NodeJS.Plat
     installBundle(join(dist, 'mermaid', 'mermaid.min.js'), join(switchboardHome(home), 'web', 'mermaid.min.js'));
   } catch {
     // The page then shows diagrams as their code.
+  }
+
+  // The web page's diff viewer, in a folder named by its build, so a page loads the build it was built with (architecture.md § Web page).
+  try {
+    installDiffViewer(join(dist, 'diff'), join(switchboardHome(home), 'web'));
+  } catch {
+    // The page then says the diff viewer could not be loaded.
   }
 
   const target = switchboardHome(home);

@@ -1381,6 +1381,13 @@ Current use: the console resyncs after each fit and its pane never scrolls ([arc
 - **Not verified:** the managed daemon itself; a terminal reconnecting to a restarted daemon; several terminals over hours; a `request_user_input` question from the terminal's side; an eye check in the web console; Linux.
 - **Current use:** the web page's console on a Codex app-server session ([architecture.md](architecture.md) § Codex runner): the hub holds `codex resume --no-alt-screen --remote <control socket> <thread>` in the terminal holder, started when a console first opens and only once the thread has a turn, and ended with the session; each change of the thread's model, approvals, sandbox or collaboration mode away from what Switchboard started it with is noted in the conversation. Re-run after upgrading Codex.
 
+## M109. The diff viewer under the web page's CSP, 2026-11-21
+
+- **Setup:** `packages/web`'s built `dist/diff/` (@pierre/diffs 1.6.4, Shiki 4.6.0) served under `/page/diff/<build>/` with the web page's CSP (`PAGE_CSP`), with the page's `theme.css` and `page.css`, by a stand-in page whose own module script imports `diff.js` and calls `mountDiff`; headless Chromium through `playwright-cli`, the system scheme light. Cases: `packages/web/src/main.ts` from 3,108 to 3,438 lines with git's 588-line patch, and a one-line change of the 14,127-line `package-lock.json`.
+- **Result:** no CSP or script error: `import()` of the viewer, its module workers (`new Worker(new URL('./worker.js', import.meta.url), {type: 'module'})`) and their grammar and theme chunks all load as the page's own scripts. `main.ts` showed split at 1,280 px with 69 rows in the DOM and 712 coloured tokens once the workers answered, folded unchanged regions with their handles, and word highlights; at 375 px it showed stacked and wrapped in 12 px type. The lock file showed its changed line uncoloured, past the 10,000-line cap. No long task was observed in either case.
+- **Not verified:** dark mode, a live hub and page (the diff route, the tabs and the installed folder together), and a real phone.
+- **Current use:** the web page's diff tabs ([architecture.md](architecture.md) § Web page, Diffs). Re-run after upgrading @pierre/diffs or Shiki.
+
 ## M110. VS Code's file icon lookup, 2026-11-21
 
 - **Versions:** VS Code 1.147.0 (commit `8a14f0cc1b08d531eb83255ea3764ae22aa932b5`), its built-in `theme-seti` extension (`vs-seti-icon-theme.json`, `seti.woff`).

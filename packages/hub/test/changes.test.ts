@@ -1,8 +1,8 @@
-import { mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { fileInside, PageChanges, parseNameStatus, parseNumstat, readChanges, relativePath } from '../src/changes.js';
+import { DIFF_MAX_BYTES, fileInside, PageChanges, parseNameStatus, parseNumstat, readCapped, readChanges, readDiff, relativePath, SIDE_MAX_BYTES } from '../src/changes.js';
 import type { ChangesView, WorktreeChanges } from '../src/changes.js';
 import type { WindowScope } from '../src/windows.js';
 import { isolateGit, makeRepo } from './gitFixture.js';
@@ -238,5 +238,90 @@ describe('PageChanges', () => {
     const changes = new PageChanges({ isPage: () => true, scope: () => scope(repo.root, gen++) });
 
     expect(await changes.changes('p1')).toEqual({ status: 409, body: { error: "The window's conversation changed." } });
+  });
+});
+
+describe('readDiff', () => {
+  const read = async (root: string) => (await readChanges(root)) as WorktreeChanges;
+
+  it("answers git's patch and both whole sides for an edit, a rename, a deletion and an untracked file", async () => {
+    const repo = busyRepo();
+    const changes = await read(repo.root);
+    const edited = await readDiff(changes, 'edited.md');
+
+    expect(edited).toMatchObject({ path: 'edited.md', status: 'M', old: 'line 1\nline 2\nline 3\n', new: 'line 1\nchanged\nline 3\n', binary: false, tooLarge: null });
+    expect(edited!.patch).toContain('--- a/edited.md\n+++ b/edited.md');
+    expect(edited!.patch).toContain('-line 2\n+changed');
+
+    const renamed = await readDiff(changes, 'src/new-name.ts');
+
+    expect(renamed).toMatchObject({ from: 'src/old-name.ts', status: 'R', old: lines(8), new: lines(8) });
+    expect(renamed!.patch).toContain('rename from src/old-name.ts\nrename to src/new-name.ts');
+
+    expect(await readDiff(changes, 'gone.txt')).toMatchObject({ status: 'D', old: 'bye\n', new: null, patch: expect.stringContaining('deleted file mode') });
+    expect(await readDiff(changes, 'notes/new.txt')).toMatchObject({ status: 'U', old: null, new: 'one\ntwo\nthree', patch: expect.stringContaining('+++ b/notes/new.txt') });
+  });
+
+  it('answers a binary file without its bytes, and null for a path that is no change row', async () => {
+    const changes = await read(busyRepo().root);
+
+    expect(await readDiff(changes, 'image.bin')).toMatchObject({ binary: true, patch: null, old: null, new: null });
+    expect(await readDiff(changes, 'src/kept.ts')).toBeNull();
+    expect(await readDiff(changes, '.git/config')).toBeNull();
+  });
+
+  it('sends the patch alone for a file whose side passes the cap', async () => {
+    const big = lines(Math.ceil(SIDE_MAX_BYTES / 10));
+    const repo = makeRepo({ 'big.txt': big });
+
+    expect(big.length).toBeGreaterThan(SIDE_MAX_BYTES);
+    repo.write('big.txt', big.replace('line 5\n', 'changed\n'));
+
+    const diff = await readDiff(await read(repo.root), 'big.txt');
+
+    expect(diff).toMatchObject({ tooLarge: 'sides', old: null, new: null });
+    expect(diff!.patch).toContain('-line 5\n+changed');
+  });
+
+  it('leaves the sides out when the patch and both sides together pass the total cap', async () => {
+    // Each side just under its own cap, and every hundredth line changed, so the patch is under its cap too.
+    const side = Array.from({ length: Math.floor((SIDE_MAX_BYTES - 1000) / 12) }, (_, index) => `row ${String(index).padStart(7, '0')}\n`).join('');
+    const repo = makeRepo({ 'big.txt': side });
+
+    repo.write('big.txt', side.replace(/row (\d{5}00)\n/g, 'new $1\n'));
+    expect(await readDiff(await read(repo.root), 'big.txt')).toMatchObject({ tooLarge: 'sides', old: null, new: null });
+  });
+
+  it('reads a file no further than its cap, however large it is when read', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sb-capped-'));
+
+    writeFileSync(join(dir, 'a'), 'x'.repeat(100));
+    expect(await readCapped(join(dir, 'a'), 100)).toEqual(Buffer.from('x'.repeat(100)));
+    expect(await readCapped(join(dir, 'a'), 99)).toBe('large');
+    expect(await readCapped(join(dir, 'missing'), 99)).toBeNull();
+  });
+
+  it('sends nothing for a patch past its cap', async () => {
+    const repo = makeRepo({ 'big.txt': 'a\n' });
+
+    repo.write('big.txt', 'x'.repeat(SIDE_MAX_BYTES + 10) + '\n');
+    expect(await readDiff(await read(repo.root), 'big.txt')).toMatchObject({ tooLarge: 'patch', patch: null, old: null, new: null });
+  });
+});
+
+describe('PageChanges.diff', () => {
+  const scope = (cwd: string): WindowScope => ({ kind: 'page', key: 'p1', folder: cwd, title: 'T', scopeGen: 1, conversations: [], workItemId: 7, cwd, sessionId: 's1' });
+
+  it('answers a change row with an ETag, and refuses a path that is not plain or not a change', async () => {
+    const repo = busyRepo();
+    const changes = new PageChanges({ isPage: () => true, scope: () => scope(repo.root) });
+    const reply = await changes.diff('p1', 'edited.md');
+
+    expect(reply).toMatchObject({ status: 200, body: { path: 'edited.md' }, etag: expect.stringMatching(/^[0-9a-f]{32}$/) });
+    expect((await changes.diff('p1', '../outside.txt')).status).toBe(400);
+    expect((await changes.diff('p1', 'C:/Windows/win.ini')).status).toBe(400);
+    expect((await changes.diff('p1', null)).status).toBe(400);
+    expect(await changes.diff('p1', 'src/kept.ts')).toEqual({ status: 404, body: { error: 'src/kept.ts is not one of the changes now.' } });
+    expect((await new PageChanges({ isPage: () => false, scope: () => scope(repo.root) }).diff('p1', 'edited.md')).status).toBe(403);
   });
 });
