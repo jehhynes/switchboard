@@ -761,6 +761,16 @@ describe('the page in use', () => {
     page.close();
   });
 
+  it('counts the Blocked on you rows in the page title, and drops the count when none is left', () => {
+    const { page, source } = start();
+
+    hello(source, { groups: [listGroup('blocked', [listRow(1), listRow(4)]), listGroup('review', [listRow(5)])] });
+    expect(document.title).toBe('(2) Switchboard');
+    source.emit('list', { groups: [listGroup('blocked', []), listGroup('review', [listRow(5)])] });
+    expect(document.title).toBe('Switchboard');
+    page.close();
+  });
+
   it("runs the selected work item's row actions from the header: the main button, Stop and Delete after their question, Snooze with a choice, and Copy", async () => {
     const { page, source } = start();
     const actions = [

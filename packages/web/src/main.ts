@@ -1,4 +1,4 @@
-import { applyEvent, commandQuery, EMPTY, mentionOf, mentionQuery, selectedEntry, selectedRow, sentTexts, shortTitle, withEarlier } from './model.js';
+import { applyEvent, commandQuery, EMPTY, mentionOf, mentionQuery, pageTitle, selectedEntry, selectedRow, sentTexts, shortTitle, withEarlier } from './model.js';
 import { snoozeChoices } from '@switchboard/core/snooze';
 import type { PageState } from './model.js';
 import { escape, renderMarkdown } from './markdown.js';
@@ -592,6 +592,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const draw = (): void => {
     // On a narrow screen the list and the conversation are each a full-width view (page.css); the list shows until a work item is opened.
     root.classList.toggle('listing', view.list || wanted === null);
+    document.title = pageTitle(state.groups);
     morph(sheetHost, renderSheet(view.sheet, view.acting));
     morph(list, expired ? '<p class="empty">This page\'s link is no longer valid. Open a new one with Switchboard: Open Web Page in VS Code, or hub.js web.</p>' : (listError === null ? '' : `<p class="list-error" role="alert">${escape(listError)}</p>`) + renderList(state.groups, state.scope?.workItemId ?? null, view.collapsed));
 

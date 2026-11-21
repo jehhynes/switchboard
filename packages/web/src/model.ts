@@ -103,6 +103,13 @@ export function applyEvent(state: PageState, event: Event): PageState {
   }
 }
 
+/** The page's title: "(2) Switchboard" while the dock's Blocked on you group holds two work items, else "Switchboard". */
+export function pageTitle(groups: readonly PageGroup[]): string {
+  const needs = groups.find((group) => group.key === 'blocked')?.rows.length ?? 0;
+
+  return needs === 0 ? 'Switchboard' : `(${needs}) Switchboard`;
+}
+
 /** The list's row of the selected work item, which carries its actions; null before a select or while the list lacks it. */
 export function selectedRow(state: PageState): PageRow | null {
   const id = state.scope?.workItemId ?? null;
