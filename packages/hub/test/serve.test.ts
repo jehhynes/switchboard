@@ -162,6 +162,23 @@ describe('serveHub', () => {
     expect(recordOnDisk()).toBeNull();
   });
 
+  it('keeps running with no client when no idle time is given', async () => {
+    // Only the interval clock is faked, so the hub's sockets and lock work as usual.
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+
+    try {
+      const exit = vi.fn();
+
+      served(await serve({ exit }));
+      vi.advanceTimersByTime(24 * 60 * 60_000);
+
+      expect(exit).not.toHaveBeenCalled();
+      expect(recordOnDisk()).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('exits after the idle time with no client', async () => {
     const exit = vi.fn();
 

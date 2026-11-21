@@ -65,6 +65,7 @@ export interface ServeOptions {
   build: string;
   /** Recorded so a window can tell whether the hub reads the config folder it expects. */
   configDir: string;
+  /** Exit after this long with no connected client, for tests; without it the hub runs until it is stopped. */
   idleMs?: number;
   /** The browser endpoint's port; null serves none. Defaults to `BROWSER_PORT`. */
   browserPort?: number | null;
@@ -98,7 +99,6 @@ export interface Served {
 
 export type ServeResult = { served: Served } | { existing: HubRecord } | { refused: string };
 
-export const DEFAULT_IDLE_MS = 30 * 60_000;
 export const DEFAULT_WAIT_MS = 5000;
 
 /** Write through a temporary file, so a reader never sees a partial record. */
@@ -123,14 +123,14 @@ async function waitForHub(home: string, waitMs: number, wanted: (found: HubRecor
 
 /**
  * Serve the hub for a home, or report the hub already serving it. Only the holder of the hub lock writes or removes
- * `hub.json`, so concurrent starts leave one hub. Exits after `idleMs` with no connected client.
+ * `hub.json`, so concurrent starts leave one hub. Runs until it is stopped, or with `idleMs` until that long passes with no connected client.
  */
 export async function serveHub(options: ServeOptions): Promise<ServeResult> {
   const { home, version, build, configDir } = options;
   const path = hubRecordPath(home);
   const exit = options.exit ?? ((code: number) => process.exit(code));
   const log = options.log ?? ((line: string) => process.stdout.write(`${new Date().toISOString()} ${line}\n`));
-  const idleMs = options.idleMs ?? DEFAULT_IDLE_MS;
+  const idleMs = options.idleMs;
 
   mkdirSync(switchboardHome(home), { recursive: true });
 
@@ -245,18 +245,21 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
 
   process.on('exit', unclaim);
 
-  const idle = setInterval(
-    () => {
-      const since = server.emptySince();
+  const idle =
+    idleMs === undefined
+      ? undefined
+      : setInterval(
+          () => {
+            const since = server.emptySince();
 
-      if (since !== null && Date.now() - since >= idleMs && app?.busy() !== true) {
-        void stop('no client connected').then(() => exit(0));
-      }
-    },
-    Math.max(50, Math.min(60_000, Math.floor(idleMs / 4))),
-  );
+            if (since !== null && Date.now() - since >= idleMs && app?.busy() !== true) {
+              void stop('no client connected').then(() => exit(0));
+            }
+          },
+          Math.max(50, Math.min(60_000, Math.floor(idleMs / 4))),
+        );
 
-  idle.unref();
+  idle?.unref();
 
   const restartOptions = options.restart;
   const restart =
@@ -273,7 +276,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
 
             const successor = await waitForHub(home, restartOptions.takeoverWaitMs ?? TAKEOVER_WAIT_MS, (found) => found.token !== record.token);
 
-            log(successor === null ? `hub restart: no hub took over within ${(restartOptions.takeoverWaitMs ?? TAKEOVER_WAIT_MS) / 1000} seconds; a VS Code window or the dock starts one` : `hub restart: pid ${successor.pid} took over with build ${successor.build}`);
+            log(successor === null ? `hub restart: no hub took over within ${(restartOptions.takeoverWaitMs ?? TAKEOVER_WAIT_MS) / 1000} seconds; hub.js start, a VS Code window or the dock starts one` : `hub restart: pid ${successor.pid} took over with build ${successor.build}`);
             exit(0);
           },
           log,
