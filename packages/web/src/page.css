@@ -414,6 +414,9 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 .body.artifact-doc code { font-family: ui-monospace, Consolas, monospace; font-size: 13px; color: inherit; background: var(--vscode-panel-border); padding: 1px 4px; border-radius: 4px; }
 .body.artifact-doc pre { margin: 1em 0; padding: 10px; border: 1px solid var(--vscode-panel-border); border-radius: 6px; overflow-x: auto; background: var(--vscode-editor-background); }
 .body.artifact-doc pre code { background: none; padding: 0; }
+/* Text, data and code shown as they are, wrapped at the pane's width. */
+.body.artifact-doc pre.artifact-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: ui-monospace, Consolas, monospace; font-size: 13px; line-height: 1.45; }
+.artifact-frame.artifact-pdf { background: none; }
 .body.artifact-doc pre.mermaid { text-align: center; }
 .body.artifact-doc table { border-collapse: collapse; margin: 0 0 12px; font-size: 14px; display: block; overflow-x: auto; }
 .body.artifact-doc th, .body.artifact-doc td { border: 1px solid var(--vscode-panel-border); padding: 5px 9px; text-align: left; vertical-align: top; }

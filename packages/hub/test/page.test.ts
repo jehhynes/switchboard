@@ -505,12 +505,17 @@ describe('artifactFile', () => {
     writeFileSync(join(folder, 'chat', 'page.html'), '<p>hi</p>');
     writeFileSync(join(folder, 'chat', 'page', 'pic.svg'), '<svg/>');
     writeFileSync(join(folder, 'chat', 'notes.md'), '# n');
+    writeFileSync(join(folder, 'chat', 'run.log'), 'line');
+    writeFileSync(join(folder, 'chat', 'blob.bin'), 'x');
     writeFileSync(join(dir, 'outside', 'secret.md'), 'secret');
     symlinkSync(join(dir, 'outside'), join(folder, 'chat', 'link'), 'junction');
 
     expect(artifactFile(folder, 'chat/page.html')).toMatchObject({ mime: 'text/html; charset=utf-8', sandboxed: true });
     expect(artifactFile(folder, 'chat/page/pic.svg')).toMatchObject({ mime: 'image/svg+xml', sandboxed: true });
     expect(artifactFile(folder, 'chat/notes.md')).toMatchObject({ sandboxed: false });
+    // Text, data and code are plain text, which a new window shows; an unknown file stays a sandboxed download.
+    expect(artifactFile(folder, 'chat/run.log')).toMatchObject({ mime: 'text/plain; charset=utf-8', sandboxed: false });
+    expect(artifactFile(folder, 'chat/blob.bin')).toMatchObject({ mime: 'application/octet-stream', sandboxed: true });
     expect(artifactFile(folder, '../outside/secret.md')).toBeNull();
     expect(artifactFile(folder, 'chat/link/secret.md')).toBeNull();
     expect(artifactFile(folder, 'chat/.hidden')).toBeNull();

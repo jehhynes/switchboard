@@ -3,7 +3,7 @@ import { snoozeChoices } from '@switchboard/core/snooze';
 import type { PageState } from './model.js';
 import { placeMenus } from '@switchboard/conversation/menuPlace';
 import { escape, renderMarkdown } from './markdown.js';
-import { answerText, artifactTabsFit, artifactUrl, bandOpen, browserNote, closedArtifacts, paneLink, collapsedGroups, complete, firstSnoozeDay, GROUPS_KEY, inputReady, renderMicButton, markdownBody, newView, parseQuestions, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, hasConsole, SIDE_TABS } from './render.js';
+import { answerText, artifactShow, artifactTabsFit, artifactUrl, textArtifactHtml, bandOpen, browserNote, closedArtifacts, paneLink, collapsedGroups, complete, firstSnoozeDay, GROUPS_KEY, inputReady, renderMicButton, markdownBody, newView, parseQuestions, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, hasConsole, SIDE_TABS } from './render.js';
 import type { CardDraft, PaneView, SideTab, Tab, View } from './render.js';
 import type { ConsoleOptions, MountedConsole } from './console.js';
 import { LIGHT_SCHEME } from './console.js';
@@ -1167,7 +1167,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
-    entry.html = text === null ? null : renderMarkdown(markdownBody(text), base, link);
+    entry.html = text === null ? null : artifactShow(artifact) === 'text' ? textArtifactHtml(text, artifact.ext.toLowerCase().replace(/^\./, '') || path.slice(path.lastIndexOf('.') + 1).toLowerCase()) : renderMarkdown(markdownBody(text), base, link);
 
     if (view.artifact === path) {
       draw();
@@ -1550,7 +1550,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         const kept = artifactDocs.get(docKey(artifact.path));
 
         // A new version replaces the one shown, and a Markdown artifact keeps the reader's place.
-        if (artifact.type === 'markdown' && kept?.updatedAt !== artifact.updatedAt) {
+        if ((artifact.type === 'markdown' || artifactShow(artifact) === 'text') && kept?.updatedAt !== artifact.updatedAt) {
           const open = pane.querySelector<HTMLElement>(':scope > .artifact-view');
 
           void fillArtifact(artifact, open?.dataset['artifact'] === artifact.path ? (open.querySelector<HTMLElement>('.artifact-doc')?.scrollTop ?? 0) : 0);

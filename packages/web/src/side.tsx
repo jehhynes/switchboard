@@ -5,7 +5,7 @@ import { answers } from '@switchboard/conversation/questions';
 import { artifactIcon } from './model.js';
 import type { PageState } from './model.js';
 import { renderMarkdown } from './markdown.js';
-import { ago, artifactUrl, framed, withoutQuestions } from './render.js';
+import { ago, artifactShow, artifactUrl, withoutQuestions } from './render.js';
 import type { View } from './render.js';
 import { cardOf } from './timeline.js';
 import { trusted } from './trusted.js';
@@ -81,15 +81,18 @@ export function renderEmpty(text: string): VNode {
 export function renderArtifactView(key: string, artifact: ArtifactView, doc?: string | null): VNode {
   const file = artifactUrl(key, artifact.path);
   const url = `${file}?v=${artifact.updatedAt}`;
-  const body = framed(artifact) ? (
+  const show = artifactShow(artifact);
+  const body = show === 'frame' ? (
     <iframe class="artifact-frame" sandbox="allow-scripts" referrerpolicy="no-referrer" src={url} title={artifact.title}></iframe>
-  ) : artifact.type === 'image' ? (
+  ) : show === 'pdf' ? (
+    <iframe class="artifact-frame artifact-pdf" referrerpolicy="no-referrer" src={url} title={artifact.title}></iframe>
+  ) : show === 'image' ? (
     <img class="media" alt={artifact.title} src={url} />
-  ) : artifact.type === 'audio' ? (
+  ) : show === 'audio' ? (
     <audio class="media" controls preload="metadata" src={url}></audio>
-  ) : artifact.type === 'video' ? (
+  ) : show === 'video' ? (
     <video class="media" controls preload="metadata" src={url}></video>
-  ) : artifact.type === 'markdown' ? (
+  ) : show === 'markdown' || show === 'text' ? (
     <div class="artifact-doc body">{doc === undefined ? <p class="empty">Loading…</p> : doc === null ? <p class="empty">This artifact could not be read.</p> : trusted(doc)}</div>
   ) : (
     <p class="empty">

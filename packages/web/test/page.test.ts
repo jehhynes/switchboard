@@ -1508,6 +1508,40 @@ describe('the page in use', () => {
     page.close();
   });
 
+  it('shows text, data and code preformatted, JSON indented, a PDF in the browser viewer, and only an unknown file as a download', async () => {
+    const { page, source } = start();
+    const artifact = (path: string, ext: string, updatedAt: number) => ({ path, owner: 'chat', kind: 'report', title: path, ext, type: 'file', updatedAt });
+
+    answers['/artifact/'] = { status: 200, body: {}, text: '{"a":1,"b":"<x>"}' };
+    hello(source, { artifacts: [artifact('chat/data.json', 'json', 4), artifact('chat/notes.txt', 'txt', 3), artifact('chat/report.pdf', 'pdf', 2), artifact('chat/blob.bin', 'bin', 1)] });
+    click('#head .artifact-tab[data-path="chat/data.json"]');
+    await flush();
+    await flush();
+    const json = root.querySelector('.artifact-doc pre.artifact-text code')!;
+
+    expect(json.textContent).toBe('{\n  "a": 1,\n  "b": "<x>"\n}');
+    expect(json.innerHTML).toContain('&lt;x&gt;');
+    expect(root.querySelector('.artifact-view a[download]')).not.toBeNull();
+    expect(root.querySelector('.artifact-view [title="Open in new window"]')).not.toBeNull();
+
+    answers['/artifact/'] = { status: 200, body: {}, text: 'plain <b>text</b>' };
+    click('#head .artifact-tab[data-path="chat/notes.txt"]');
+    await flush();
+    await flush();
+    expect(root.querySelector('.artifact-doc pre.artifact-text')!.textContent).toBe('plain <b>text</b>');
+    expect(root.querySelector('.artifact-doc b')).toBeNull();
+
+    click('#head .artifact-tab[data-path="chat/report.pdf"]');
+    const pdf = root.querySelector('iframe.artifact-pdf')!;
+
+    expect(pdf.getAttribute('src')).toContain('/v1/conversation/artifact/pk/chat/report.pdf');
+    expect(pdf.hasAttribute('sandbox')).toBe(false);
+
+    click('#head .artifact-tab[data-path="chat/blob.bin"]');
+    expect(root.querySelector('.artifact-view .empty a[download]')!.textContent).toContain('Download blob.bin');
+    page.close();
+  });
+
   it("shrinks line 2's pills to their icons when a row is too narrow, after a redraw of the list, and whole again when it widens", async () => {
     const { page, source } = start();
     let line = 150;

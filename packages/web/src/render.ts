@@ -368,6 +368,47 @@ export function artifactUrl(key: string, path: string): string {
 }
 
 /** Whether an artifact opens in the sandboxed frame: a page or an SVG, whose scripts must reach neither the page nor the network. */
+/** File extensions of text an artifact's tab shows as it is, preformatted: plain text, data and code. */
+export const TEXT_ARTIFACTS: ReadonlySet<string> = new Set(['txt', 'text', 'log', 'json', 'jsonl', 'csv', 'tsv', 'yaml', 'yml', 'toml', 'ini', 'xml', 'diff', 'patch', 'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'css', 'py', 'cs', 'sh', 'ps1', 'psm1', 'bat', 'cmd', 'sql', 'go', 'rs', 'java', 'rb', 'php', 'c', 'h', 'cpp', 'hpp']);
+/** An artifact's file extension, lower case, without its dot. */
+const extOf = (artifact: ArtifactView): string => (artifact.ext || artifact.path.slice(artifact.path.lastIndexOf('.') + 1)).toLowerCase().replace(/^\./, '');
+/**
+ * How an artifact's tab shows it (architecture.md § Web page): an HTML page or an SVG framed, Markdown drawn, text, data and code preformatted, a
+ * PDF in the browser's viewer, pictures, audio and video played; only another kind of file is a download.
+ */
+export function artifactShow(artifact: ArtifactView): 'frame' | 'markdown' | 'text' | 'pdf' | 'image' | 'audio' | 'video' | 'download' {
+  const ext = extOf(artifact);
+
+  if (framed(artifact)) {
+    return 'frame';
+  }
+
+  if (artifact.type !== 'file') {
+    return artifact.type === 'html' ? 'frame' : artifact.type;
+  }
+
+  return ext === 'pdf' ? 'pdf' : TEXT_ARTIFACTS.has(ext) ? 'text' : 'download';
+}
+
+/** A text artifact as the tab shows it: escaped and preformatted, JSON indented when it parses, cut at `TEXT_ARTIFACT_MAX` characters with a note. */
+export const TEXT_ARTIFACT_MAX = 2_000_000;
+export function textArtifactHtml(text: string, ext: string): string {
+  let shown = text;
+
+  if (ext === 'json') {
+    try {
+      shown = JSON.stringify(JSON.parse(text), null, 2);
+    } catch {
+      // Not JSON after all: shown as it is.
+    }
+  }
+
+  const cut = shown.length > TEXT_ARTIFACT_MAX;
+  const esc = (value: string): string => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  return `<pre class="artifact-text"><code>${esc(cut ? shown.slice(0, TEXT_ARTIFACT_MAX) : shown)}</code></pre>${cut ? '<p class="empty">Cut here: open it in a new window to see the rest.</p>' : ''}`;
+}
+
 export function framed(artifact: ArtifactView): boolean {
   return artifact.type === 'html' || artifact.ext.toLowerCase() === 'svg' || artifact.ext.toLowerCase() === '.svg';
 }

@@ -806,6 +806,8 @@ const MIME: Record<string, string> = {
   pdf: 'application/pdf',
   css: 'text/css; charset=utf-8',
   js: 'text/javascript; charset=utf-8',
+  // Text, data and code the page shows preformatted, served as plain text so a new window shows them too.
+  ...Object.fromEntries(['text', 'log', 'jsonl', 'tsv', 'yaml', 'yml', 'toml', 'ini', 'xml', 'diff', 'patch', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'py', 'cs', 'sh', 'ps1', 'psm1', 'bat', 'cmd', 'sql', 'go', 'rs', 'java', 'rb', 'php', 'c', 'h', 'cpp', 'hpp'].map((ext) => [ext, 'text/plain; charset=utf-8'])),
 };
 
 /**
