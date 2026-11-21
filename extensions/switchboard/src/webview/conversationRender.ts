@@ -72,10 +72,14 @@ function stamp(at: number): string {
 }
 
 function stampTime(at: number): string {
-  const parts = Object.fromEntries(STAMP_FULL.formatToParts(at).map((part) => [part.type, part.value]));
-  const full = `${parts['year']}-${parts['month']}-${parts['day']} ${parts['hour']}:${parts['minute']}:${parts['second']} ${parts['timeZoneName']}`;
+  return `<time class="stamp" datetime="${new Date(at).toISOString()}" title="${escape(fullTime(at))}">${STAMP.format(at)}</time>`;
+}
 
-  return `<time class="stamp" datetime="${new Date(at).toISOString()}" title="${escape(full)}">${STAMP.format(at)}</time>`;
+/** Every time tooltip: "2026-11-19 13:46:05 EST". */
+function fullTime(at: number): string {
+  const parts = Object.fromEntries(STAMP_FULL.formatToParts(at).map((part) => [part.type, part.value]));
+
+  return `${parts['year']}-${parts['month']}-${parts['day']} ${parts['hour']}:${parts['minute']}:${parts['second']} ${parts['timeZoneName']}`;
 }
 
 /** The local calendar day of a time, to tell when a turn starts on another day. */
@@ -514,7 +518,7 @@ export function renderStatus(status: StatusView | null, fresh: boolean, now: num
   const actions =
     '<span class="status-actions"><button class="icon" type="button" data-action="status-open" title="Open in the Markdown preview" aria-label="Open the status in the Markdown preview"><span class="codicon codicon-open-preview" aria-hidden="true"></span></button>' +
     `<button class="icon${earlier === null ? '' : ' pressed'}" type="button" data-action="statuses" title="Earlier statuses" aria-label="Earlier statuses" aria-expanded="${earlier !== null}" aria-controls="earlier-statuses"><span class="codicon codicon-history" aria-hidden="true"></span></button></span>`;
-  const time = `<span class="status-time" title="${escape(new Date(status.at).toString())}">${escape(STATUS_TIME.format(status.at))}</span>`;
+  const time = `<span class="status-time" title="${escape(fullTime(status.at))}">${escape(STATUS_TIME.format(status.at))}</span>`;
   const unread = status.unread ? ` unread" data-unread="${escape(status.id)}` : '';
 
   return (

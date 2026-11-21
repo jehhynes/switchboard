@@ -1412,6 +1412,7 @@ describe('the Status tab', () => {
     root.innerHTML = renderConversation(state({ status: status('st-1', '## Done <img src=x onerror=alert(1)>\n\n| a |\n|---|\n| 1 |') }), new Set(), at, false, on('status'));
     expect([...root.children].map((child) => child.className)).toEqual(['header', 'tabs', 'panel']);
     expect(root.querySelector('.status-head .codicon-pulse')).not.toBeNull();
+    expect(root.querySelector('.status-time')?.getAttribute('title')).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \S+$/);
     expect(root.querySelector('.status-time')?.textContent).toBe(new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(T0));
     expect(root.querySelector('.status-age')?.textContent).toBe('4 min ago');
     expect(root.querySelector('.status-body h2')?.textContent).toBe('Done <img src=x onerror=alert(1)>');

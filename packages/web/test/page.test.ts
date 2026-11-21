@@ -177,6 +177,13 @@ describe('drawing', () => {
     expect(renderTimeline({ ...EMPTY, connected: true, scope, session: session({ state: 'idle' }), items }, newView())).not.toContain('class="working"');
   });
 
+  it('gives a time the tooltip the VS Code view gives it: date, 24-hour time and zone', () => {
+    const at = Date.UTC(2026, 10, 20, 18, 30, 17);
+    const html = renderTimeline({ ...EMPTY, connected: true, scope, session: session({ state: 'idle' }), items: [message('m1', at - 1_000), reply('r1', at)] }, newView());
+
+    expect(html).toMatch(/<time class="stamp" datetime="2026-11-20T18:30:17\.000Z" title="2026-11-20 \d{2}:30:17 [^"]+">/);
+  });
+
   it('draws a card under a reply that asks, answered by the next message', () => {
     const state = { ...EMPTY, connected: true, scope, session: session(), items: [reply('r1', 1, { opening: 'Pick:\n- A) x\n- B) y' }), message('m1', 2, { text: 'B' })] };
 

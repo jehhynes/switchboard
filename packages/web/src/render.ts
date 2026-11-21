@@ -39,6 +39,8 @@ export interface View {
 export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null });
 
 const STAMP = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', hourCycle: 'h12' });
+/** A time's tooltip, as the VS Code view's: "2026-11-19 13:46:05 EST". */
+const STAMP_FULL = new Intl.DateTimeFormat('en-US', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23', timeZoneName: 'short' });
 const DAY = new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 
 function codicon({ icon, text }: { icon: string; text: string }): string {
@@ -48,7 +50,10 @@ function codicon({ icon, text }: { icon: string; text: string }): string {
 }
 
 function stampTime(at: number): string {
-  return `<time class="stamp" datetime="${new Date(at).toISOString()}" title="${escape(new Date(at).toLocaleString())}">${STAMP.format(at)}</time>`;
+  const parts = Object.fromEntries(STAMP_FULL.formatToParts(at).map((part) => [part.type, part.value]));
+  const full = `${parts['year']}-${parts['month']}-${parts['day']} ${parts['hour']}:${parts['minute']}:${parts['second']} ${parts['timeZoneName']}`;
+
+  return `<time class="stamp" datetime="${new Date(at).toISOString()}" title="${escape(full)}">${STAMP.format(at)}</time>`;
 }
 
 /** How long ago, in the largest whole unit: "just now", "4 min ago", "2 h ago", "3 d ago". */
