@@ -34,6 +34,9 @@ const manifest = {
 const assets = {
   'index.html': text('text/html; charset=utf-8', html('src/index.html')),
   'page.js': text('text/javascript; charset=utf-8', await bundle('src/entry.ts')),
+  // The console's script and xterm.js's styles, loaded only when a console first shows.
+  'console.js': text('text/javascript; charset=utf-8', await bundle('src/consoleEntry.ts')),
+  'xterm.css': text('text/css; charset=utf-8', readFileSync(require.resolve('@xterm/xterm/css/xterm.css'), 'utf8')),
   'page.css': text('text/css; charset=utf-8', readFileSync('src/page.css', 'utf8')),
   'theme.css': text('text/css; charset=utf-8', theme),
   'codicon.css': text('text/css; charset=utf-8', readFileSync(join(codicons, 'codicon.css'), 'utf8')),

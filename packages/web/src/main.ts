@@ -2,8 +2,9 @@ import { applyEvent, commandQuery, EMPTY, mentionOf, mentionQuery, pageTitle, se
 import { snoozeChoices } from '@switchboard/core/snooze';
 import type { PageState } from './model.js';
 import { escape, renderMarkdown } from './markdown.js';
-import { answerText, artifactUrl, complete, firstSnoozeDay, renderEndedNote, renderMicButton, markdownBody, newView, parseQuestions, renderArtifacts, renderArtifactView, renderHeader, renderList, renderSheet, renderSideSwitch, renderStatus, renderTabs, renderTimeline, renderVoice, snoozeDateUntil, TABS } from './render.js';
-import type { CardDraft, Tab, View } from './render.js';
+import { answerText, artifactUrl, complete, firstSnoozeDay, renderEndedNote, renderMicButton, markdownBody, newView, parseQuestions, renderArtifacts, renderArtifactView, renderHeader, renderList, renderSheet, renderSideSwitch, renderStatus, renderTabs, renderTimeline, renderVoice, snoozeDateUntil, TABS, consoleNote, SIDE_TABS } from './render.js';
+import type { CardDraft, SideTab, Tab, View } from './render.js';
+import type { ConsoleOptions, MountedConsole } from './console.js';
 import type { ItemView, ScreenPrompt } from './types.js';
 import { morph } from './morph.js';
 import { reconnector } from './reconnect.js';
@@ -64,12 +65,19 @@ export interface PageDeps {
   now(): number;
   /** Loads Mermaid's script on first use; resolves false when the hub has none. */
   loadMermaid?(): Promise<boolean>;
+  /** Loads the console's script and styles on first use; resolves null when they cannot load. */
+  loadConsole?(): Promise<ConsoleModule | null>;
   /** The build of the hub that served the page, from its `switchboard-build` meta tag, and how to reload, for a hub that restarts. */
   build?: string | null;
   reload?(): void;
 }
 
 type Answer = { status: number; body: Record<string, unknown> };
+
+/** What the console's script, `console.js`, offers once loaded (architecture.md § Web page). */
+export interface ConsoleModule {
+  mount(host: HTMLElement, options: ConsoleOptions): MountedConsole;
+}
 
 /**
  * The web page (architecture.md § Web page): the list of work items on the left; the selected one's conversation, status and artifacts tabs and
@@ -1121,7 +1129,16 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const now = deps.now();
     /** Draws the Status or Artifacts tab, or an open artifact, into a pane; an open artifact stays as it is, so a frame or a video is not reloaded. */
     const drawTab = (pane: HTMLElement, tab: Tab): void => {
-      if (tab === 'artifacts' && artifact !== undefined && state.key !== null) {
+      pane.classList.toggle('console-pane', tab === 'console');
+
+      // A console's terminal is its own; another tab starts from an empty pane rather than morph its nodes.
+      if (tab !== 'console' && pane.querySelector(':scope > .console') !== null) {
+        pane.innerHTML = '';
+      }
+
+      if (tab === 'console') {
+        drawConsole(pane);
+      } else if (tab === 'artifacts' && artifact !== undefined && state.key !== null) {
         const open = pane.querySelector<HTMLElement>('.artifact-view');
 
         // A new version replaces the one shown, and a Markdown artifact keeps the reader's place.
@@ -1174,7 +1191,75 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     followEnd();
     checkSeen();
+    dropConsoles();
   };
+
+  // ---- The console ----
+  // Each mounted console by its host, ended once its host leaves the page.
+  const consoles = new Map<HTMLElement, MountedConsole>();
+  let consoleLoad: Promise<ConsoleModule | null> | null = null;
+  const dropConsoles = (): void => {
+    for (const [host, mounted] of consoles) {
+      if (!root.contains(host)) {
+        consoles.delete(host);
+        mounted.dispose();
+      }
+    }
+  };
+  /** Draws the Console tab: the selected conversation's held session, mounted once per page key, scope generation, session and launch (architecture.md § Web page). */
+  function drawConsole(pane: HTMLElement): void {
+    const session = state.session;
+    const why = consoleNote(session);
+
+    if (why !== null || session === null || state.key === null) {
+      morph(pane, `<p class="empty">${escape(why ?? 'Connecting to Switchboard…')}</p>`);
+      return;
+    }
+
+    // The hub ends a console when the page's scope generation, session or launch changes, so the page mounts a new one then.
+    const id = `${state.key} ${state.scope?.scopeGen ?? ''} ${session.id} ${session.launch ?? ''}`;
+    const shownConsole = pane.querySelector<HTMLElement>(':scope > .console');
+
+    if (shownConsole?.dataset['console'] === id) {
+      return;
+    }
+
+    pane.innerHTML = `<div class="console" data-console="${escape(id)}"><p class="empty">Loading the console…</p></div>`;
+    dropConsoles();
+
+    const host = pane.firstElementChild as HTMLElement;
+    const key = state.key;
+    const sessionId = session.id;
+    const launch = session.launch;
+
+    consoleLoad ??= deps.loadConsole?.() ?? Promise.resolve(null);
+    void consoleLoad.then((module) => {
+      if (!root.contains(host)) {
+        return;
+      }
+
+      if (module === null) {
+        host.innerHTML = '<p class="empty">The console could not be loaded. Reload the page to try again.</p>';
+        consoleLoad = null;
+        return;
+      }
+
+      host.innerHTML = '';
+      consoles.set(
+        host,
+        module.mount(host, {
+          url: `/v1/conversation/console?window=${encodeURIComponent(key)}&sessionId=${encodeURIComponent(sessionId)}`,
+          EventSource: deps.EventSource,
+          type: async (data, size) => {
+            const answer = await command('console-input', { sessionId, launch, data, ...size });
+
+            return answer.status === 200 ? null : String(answer.body['error'] ?? `Switchboard answered ${answer.status}.`);
+          },
+          copy: (text) => void navigator.clipboard?.writeText(text).catch(() => undefined),
+        }),
+      );
+    });
+  }
 
   // ---- Seen ----
   const visibleSince = new Map<string, number>();
@@ -1380,8 +1465,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const target = event.target as HTMLElement;
     const sideTab = target.closest<HTMLElement>('[data-side]')?.dataset['side'];
 
-    if (sideTab === 'status' || sideTab === 'artifacts') {
-      view.side = sideTab;
+    if (SIDE_TABS.includes(sideTab as SideTab)) {
+      view.side = sideTab as SideTab;
       view.artifact = sideTab === 'artifacts' ? view.artifact : null;
       draw();
       return;
@@ -2119,8 +2204,29 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       listWidth?.disconnect();
       stopScrollbars();
       source.close();
+
+      for (const mounted of consoles.values()) {
+        mounted.dispose();
+      }
+
+      consoles.clear();
     },
   };
+}
+
+/** Loads the console's script and xterm.js's styles from the hub, the first time a console shows; null when the script cannot load. */
+export function loadConsole(): Promise<ConsoleModule | null> {
+  return new Promise((resolve) => {
+    const styles = document.createElement('link');
+    const script = document.createElement('script');
+
+    styles.rel = 'stylesheet';
+    styles.href = '/page/xterm.css';
+    script.src = '/page/console.js';
+    script.onload = () => resolve((globalThis as { switchboardConsole?: ConsoleModule }).switchboardConsole ?? null);
+    script.onerror = () => resolve(null);
+    document.head.append(styles, script);
+  });
 }
 
 /** Loads Mermaid from the hub once, for diagrams in replies, statuses and artifacts; false when the hub has none. */

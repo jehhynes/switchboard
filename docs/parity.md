@@ -18,7 +18,7 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 ## Open gaps, by value
 
 1. Search (F1-F7): the web page cannot find a work item by key, title or branch, nor reach Done work older than two weeks.
-2. Row controls the page lacks (C4-C6, C8-C10, C15, O5, R12): Reopen, Start with guidance or prompt, Add comment, Open ticket and links, Open in Claude or terminal, Open changes, History, Open report, Move, and pool tickets' Start and Triage again.
+2. Row controls the page lacks (C4-C6, C8-C10, C15, O5, R12): Reopen, Start with guidance or prompt, Add comment, Open ticket and links, Open in Claude or Codex and a Codex terminal, Open changes, History, Open report, Move, and pool tickets' Start and Triage again.
 3. Problems the page never shows (H3, H4, H5): settings, source and voice errors, orphan held sessions, and the needs-you message.
 4. Done's date bands and group state (G5, G6, G8): Done is one flat list, Snoozed starts open, and open or closed choices do not survive a reload.
 5. Mark colours (M3): the dock and the web page colour marks by different rules; one of them should change.
@@ -117,7 +117,7 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 | C5 | Start with guidance… and Start with prompt… (text, playbook choice) | `guidedStart`, `promptedStart` rows.ts:82-94, `InputDialog` | Missing | controls with `input` are left out (page.ts:255) |
 | C6 | Add comment… | `commentControl` rows.ts:97 | Missing | same |
 | C7 | Persona submenu with the session's persona checked and Clear pin | `personaControls` app.ts:601, MainWindow.axaml.cs:1477 | Partly | Persona button and roster in the conversation header (render.ts:327-333) |
-| C8 | Open in Claude or Codex, Answer in terminal, Open in terminal | rows.ts:168-205, MainWindow.axaml.cs:1450-1500 | Missing | "Open in terminal is not on the page" (architecture.md § Web page); a terminal prompt card answers some waits |
+| C8 | Open in Claude or Codex, Answer in terminal, Open in terminal | rows.ts:168-205, MainWindow.axaml.cs:1450-1500 | Partly | The Console tab shows a held Claude Code Mode session's terminal and types into it once clicked (`drawConsole` main.ts, `console.ts`; architecture.md § Web page), and a terminal prompt card answers some waits; Open in Claude or Codex, and a terminal for a Codex session, are not on the page |
 | C9 | Open changes, History, Open report (VS Code commands) | `windowCommands` dock.ts:771 | Missing | |
 | C10 | Open ticket and an Open item per link, more than two in an Open link submenu, labels cut at 48 characters | MainWindow.axaml.cs:1502-1560 | Missing | see R12 |
 | C11 | Copy: one draft copies at once, several open a Copy submenu of labels; `Copied <label>.` in the neutral toast; an unreadable draft says why | `Copy` MainWindow.axaml.cs:1715, menu :1482-1489, `OnCopyClicked` :1762 | Partly | `copyPaste` main.ts:1447: each draft is its own item in the actions menu (render.ts:90), nothing confirms the copy, and a refused clipboard shows the text to copy |

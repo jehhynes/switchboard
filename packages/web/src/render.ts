@@ -10,12 +10,33 @@ import type { ArtifactView, MessageView, NativeRequest, PageAction, PageGroup, P
 import type { SnoozeChoice } from '@switchboard/core/snooze';
 import { MARK_ICONS, MARK_TONES, SPINNING_MARKS } from '@switchboard/core/group';
 
-export type Tab = 'conversation' | 'status' | 'artifacts';
+export type Tab = 'conversation' | 'status' | 'artifacts' | 'console';
 export const TABS: Array<{ tab: Tab; label: string }> = [
   { tab: 'conversation', label: 'Conversation' },
   { tab: 'status', label: 'Status' },
   { tab: 'artifacts', label: 'Artifacts' },
+  { tab: 'console', label: 'Console' },
 ];
+
+/** What the column right of the conversation shows on a wide screen. */
+export type SideTab = 'status' | 'artifacts' | 'console';
+export const SIDE_TABS: readonly SideTab[] = ['status', 'artifacts', 'console'];
+
+/**
+ * Why the Console tab shows no console for the session (architecture.md § Web page), or null when the terminal holder may hold it: a Codex
+ * session runs in Codex's app-server, and a session the page cannot talk to runs outside the holder.
+ */
+export function consoleNote(session: PageState['session']): string | null {
+  if (session === null) {
+    return 'No session has started yet.';
+  }
+
+  if (session.provider === 'codex') {
+    return "This Codex session runs in Codex's app-server, not in Switchboard's terminal holder, so it has no console here. Open it in a terminal from VS Code or the dock.";
+  }
+
+  return session.conversation === 'none' ? "This session does not run in Switchboard's terminal holder, so it has no console here." : null;
+}
 
 /** A question card's choices and the answer on its way, kept by the page until the answer shows in the conversation. */
 export interface CardDraft {
@@ -49,7 +70,7 @@ export interface View {
   /** A row action is running, so its controls wait. */
   acting: boolean;
   /** What the Status and Artifacts column shows on a wide screen. */
-  side: 'status' | 'artifacts';
+  side: SideTab;
   /** The conversation's text size, a share of the theme's, and whether its menu is open. */
   textScale: number;
   textMenu: boolean;
@@ -382,18 +403,18 @@ export function renderHeader(state: PageState, view: View, layout: Layout = { li
  * The switch at the top of the Status and Artifacts column on a wide screen, drawn as the tabs are, with the same badges; the conversation keeps
  * its own pane beside it.
  */
-export function renderSideSwitch(side: 'status' | 'artifacts', state: PageState): string {
+export function renderSideSwitch(side: SideTab, state: PageState): string {
   const fresh = state.status?.unread === true;
-  const button = (tab: 'status' | 'artifacts', label: string, badge: string): string =>
+  const button = (tab: SideTab, label: string, badge: string): string =>
     `<button class="tab${tab === side ? ' selected' : ''}" type="button" role="tab" data-side="${tab}" aria-selected="${tab === side}" tabindex="${tab === side ? 0 : -1}">${label}${badge === '' ? '' : `<span class="tab-badge">${badge}</span>`}</button>`;
 
-  return `<nav class="tabs side-switch" role="tablist" aria-label="Status and artifacts">${button('status', 'Status', fresh ? 'New' : '')}${button('artifacts', 'Artifacts', '')}</nav>`;
+  return `<nav class="tabs side-switch" role="tablist" aria-label="Status, artifacts and console">${button('status', 'Status', fresh ? 'New' : '')}${button('artifacts', 'Artifacts', '')}${button('console', 'Console', '')}</nav>`;
 }
 
 export function renderTabs(view: View, state: PageState): string {
   const fresh = state.status?.unread === true;
   // As in the VS Code view: Status has its New badge; the page shows no unread counts.
-  const badges: Record<Tab, string> = { conversation: '', status: fresh ? 'New' : '', artifacts: '' };
+  const badges: Record<Tab, string> = { conversation: '', status: fresh ? 'New' : '', artifacts: '', console: '' };
 
   return `<nav class="tabs" role="tablist">${TABS.map(({ tab, label }) => `<button class="tab${tab === view.tab ? ' selected' : ''}" type="button" role="tab" data-tab="${tab}" aria-selected="${tab === view.tab}" tabindex="${tab === view.tab ? 0 : -1}">${label}${badges[tab] === '' ? '' : `<span class="tab-badge">${badges[tab]}</span>`}</button>`).join('')}</nav>`;
 }
