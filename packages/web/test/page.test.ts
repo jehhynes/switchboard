@@ -2265,6 +2265,54 @@ describe('the page in use', () => {
     page.close();
   });
 
+  it('shows the Browser tab for a work item without a session while the extension is paired, and the operator\'s own tab again for one with a session', async () => {
+    const query = { matches: true, addEventListener: () => {} };
+
+    vi.stubGlobal('matchMedia', vi.fn(() => query));
+    onTestFinished(() => {
+      vi.unstubAllGlobals();
+    });
+
+    const page = startPage(root, { fetch: (async (url: string, init?: { body?: string }) => (posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) }), { status: 200, ok: true, json: async () => ({}), text: async () => '' })) as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, standalone: () => true, toExtension: async () => ({ ok: true }) });
+    const source = FakeSource.last!;
+    const chosen = () => root.querySelector<HTMLElement>('#detail .side-switch .tab.selected')?.dataset['side'];
+    const paired = { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: null };
+
+    vi.spyOn(root.querySelector('#detail .detail-body')!, 'getBoundingClientRect').mockReturnValue({ left: 1300, top: 85, width: 600, height: 855 } as DOMRect);
+    // With a session: the operator's own choice, Console here.
+    hello(source);
+    source.emit('pane', { pane: paired });
+    click('#detail [data-side="console"]');
+    expect(chosen()).toBe('console');
+
+    // Without one: Browser, and the column's area is reported for the pane.
+    hello(source, { sessions: [] });
+    expect(chosen()).toBe('browser');
+    expect(posts.filter((post) => post.url.endsWith('/pane-rect')).at(-1)?.body['rect']).not.toBeNull();
+
+    // A tab chosen there stays chosen for that work item.
+    click('#detail [data-side="status"]');
+    expect(chosen()).toBe('status');
+
+    // Back to a work item with a session: the operator's last choice.
+    hello(source);
+    expect(chosen()).toBe('status');
+
+    // Not paired: no Browser tab takes over.
+    source.emit('pane', { pane: { ...paired, extension: 'unpaired' } });
+    hello(source, { sessions: [], scope: { ...scope, workItemId: 9 } });
+    expect(chosen()).toBe('status');
+
+    // Narrower, the conversation's tabs do the same.
+    query.matches = false;
+    source.emit('pane', { pane: paired });
+    hello(source, { sessions: [], scope: { ...scope, workItemId: 10 } });
+    expect(root.querySelector<HTMLElement>('#head .tab.selected')!.dataset['tab']).toBe('browser');
+    hello(source);
+    expect(root.querySelector<HTMLElement>('#head .tab.selected')!.dataset['tab']).not.toBe('browser');
+    page.close();
+  });
+
   it('says in the Browser tab why the Chrome pane does not cover it, and nothing while it does', () => {
     const pane = { enabled: true, extension: 'paired' as const, marker: null, shown: false, error: null };
 

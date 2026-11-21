@@ -182,9 +182,18 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /** Whether the Browser tab shows: on the installed page while the Chrome pane is on (PRD R113). */
   const browserTab = (): boolean => view.pane?.enabled === true && standalone();
   /** The tab the conversation's pane shows: always the conversation while Status and Artifacts have their own column, and never a Browser tab that is gone. */
-  const mainTab = (): Tab => (wide() || (view.tab === 'browser' && !browserTab()) || (view.tab === 'artifacts' && openArtifact() === null) ? 'conversation' : view.tab);
+  /** The work item the operator chose a tab on while the Browser tab had taken over, so it does not take over again until another work item. */
+  let tabChosenFor: number | null = null;
+  /**
+   * Whether the Browser tab shows in place of the operator's choice: the work item has no session yet, as an unstarted one or a pool ticket, so its
+   * ticket in the paired Chrome pane is all there is to see. The operator's own choice comes back for a work item with a session.
+   */
+  const autoBrowser = (): boolean =>
+    browserTab() && view.pane?.extension === 'paired' && state.scope !== null && state.session === null && tabChosenFor !== state.scope.workItemId;
+  const mainTab = (): Tab =>
+    !wide() && autoBrowser() ? 'browser' : wide() || (view.tab === 'browser' && !browserTab()) || (view.tab === 'artifacts' && openArtifact() === null) ? 'conversation' : view.tab;
   /** What the column right of the conversation shows: Status in place of a Browser tab that is gone. */
-  const sideTab = (): SideTab => ((view.side === 'browser' && !browserTab()) || (view.side === 'artifacts' && openArtifact() === null) ? 'status' : view.side);
+  const sideTab = (): SideTab => (autoBrowser() ? 'browser' : (view.side === 'browser' && !browserTab()) || (view.side === 'artifacts' && openArtifact() === null) ? 'status' : view.side);
   /** The artifact whose tab is chosen, while the work item still has it; artifacts have no list of their own, only a tab each and a menu. */
   function openArtifact(): string | null {
     return view.artifact !== null && state.artifacts.some((one) => one.path === view.artifact) ? view.artifact : null;
@@ -194,6 +203,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
    * the Chrome pane; another tab chosen in one layout leaves Browser in the other.
    */
   const chooseTab = (tab: Tab): void => {
+    if (autoBrowser()) {
+      tabChosenFor = state.scope?.workItemId ?? null;
+    }
+
     if (tab === 'browser') {
       view.side = 'browser';
       view.tab = 'browser';
