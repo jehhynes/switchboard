@@ -7,7 +7,7 @@ namespace Switchboard.Dock.Hub;
 
 // The hub's dock view (architecture.md § Dock), built by `dockView` in packages/hub/src/dock.ts; the dock adds no rules of its own.
 
-public sealed record DockView(IReadOnlyList<string> Notes, IReadOnlyList<DockGroup> Groups, IReadOnlyList<SnoozeChoice> Snooze, IReadOnlyList<SourceGroup> Sources, IReadOnlyList<string> RepoRoots, IReadOnlyList<ScheduleEntry>? Schedules = null, OpenWindows? Windows = null, string? Theme = null, IReadOnlyList<DockHeld>? Held = null, string? HeldNote = null)
+public sealed record DockView(IReadOnlyList<string> Notes, IReadOnlyList<DockGroup> Groups, IReadOnlyList<SnoozeChoice> Snooze, IReadOnlyList<SourceGroup> Sources, IReadOnlyList<string> RepoRoots, IReadOnlyList<ScheduleEntry>? Schedules = null, OpenWindows? Windows = null, string? Theme = null, IReadOnlyList<DockHeld>? Held = null, string? HeldNote = null, DockHolderNotice? HolderNotice = null, DockHolderResult? HolderResult = null)
 {
     static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) } };
 
@@ -36,6 +36,15 @@ public sealed record OpenWindows(IReadOnlyList<string> Open, string? Front, int 
 /// store holds; <paramref name="Terminal"/> is its attach terminal, null for an orphan.
 /// </summary>
 public sealed record DockHeld(string Session, string Item, string NativeSessionId, string Cwd, string State, string Idle, string Memory, int Clients, bool Orphan, bool Exited = false, DockTerminal? Terminal = null);
+
+/// <summary>
+/// The notice above the groups while the terminal holder is from an older build or restarting (architecture.md § Restarting the holder): its text and
+/// what Restart and resume asks before it posts, null while a restart runs.
+/// </summary>
+public sealed record DockHolderNotice(string Text, DockConfirm? Confirm);
+
+/// <summary>The last holder restart's result; &lt;paramref name="Failed"/&gt; when the holder did not restart or a session did not resume. The dock hides it once dismissed, by &lt;paramref name="At"/&gt;.</summary>
+public sealed record DockHolderResult(long At, string Text, bool Failed);
 
 /// <summary>A schedule Run now can start, and the playbook it runs (PRD R82).</summary>
 public sealed record ScheduleEntry(string Name, string Playbook);

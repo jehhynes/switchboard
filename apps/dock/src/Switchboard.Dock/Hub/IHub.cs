@@ -58,6 +58,12 @@ public interface IHub
     /// <summary>Stops a held session by its Switchboard session ID (PRD R94).</summary>
     Task<string?> StopHeld(string session);
 
+    /// <summary>
+    /// Restarts a terminal holder from an older build and resumes its sessions in the background (architecture.md § Restarting the holder);
+    /// &lt;paramref name="detail"/&gt; is the confirmation the operator accepted, which the hub refuses once it asks another.
+    /// </summary>
+    Task<string?> RestartHolder(string detail);
+
     /// <summary>The first view, from the current one on, that passes <paramref name="test"/>, or null after <paramref name="within"/>.</summary>
     Task<DockView?> Until(Func<DockView, bool> test, TimeSpan within);
 }

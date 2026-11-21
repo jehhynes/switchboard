@@ -329,6 +329,8 @@ public sealed class HubClient(string switchboardHome, HubStarter? starter = null
 
     public Task<string?> StopHeld(string session) => Post("/holder/stop", new JsonObject { ["id"] = session });
 
+    public Task<string?> RestartHolder(string detail) => Post("/holder/restart", new JsonObject { ["detail"] = detail });
+
     public async Task<WindowReply> Open(string sessionId, string cwd, string workspace)
     {
         var (error, body) = await PostFor("/open", new JsonObject { ["sessionId"] = sessionId, ["cwd"] = cwd, ["workspace"] = workspace });

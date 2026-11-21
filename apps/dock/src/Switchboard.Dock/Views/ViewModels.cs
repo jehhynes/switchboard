@@ -171,6 +171,48 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
         private set => Set(ref heldNote, value);
     }
 
+    DockHolderNotice? holderNotice;
+    DockHolderResult? holderResult;
+    long? dismissedResult;
+
+    /// <summary>The notice while the terminal holder is from an older build or restarting (architecture.md § Restarting the holder).</summary>
+    public DockHolderNotice? HolderNotice
+    {
+        get => holderNotice;
+        private set
+        {
+            Set(ref holderNotice, value);
+            Changed(nameof(HolderNoticeText));
+            Changed(nameof(CanRestartHolder));
+        }
+    }
+
+    public string? HolderNoticeText => holderNotice?.Text;
+
+    /// <summary>Restart and resume shows while no restart runs.</summary>
+    public bool CanRestartHolder => holderNotice?.Confirm is not null;
+
+    /// <summary>The last holder restart's result, until it is dismissed.</summary>
+    public DockHolderResult? HolderResult => holderResult is { } result && result.At != dismissedResult ? result : null;
+
+    public string? HolderResultText => HolderResult?.Text;
+
+    public bool HolderResultFailed => HolderResult?.Failed == true;
+
+    /// <summary>Hides the shown restart result; a later restart's shows again.</summary>
+    public void DismissHolderResult()
+    {
+        dismissedResult = holderResult?.At;
+        HolderResultChanged();
+    }
+
+    void HolderResultChanged()
+    {
+        Changed(nameof(HolderResult));
+        Changed(nameof(HolderResultText));
+        Changed(nameof(HolderResultFailed));
+    }
+
     /// <summary>
     /// The search applied: only rows whose search text holds every word show, and every group with one shows open (PRD R63). Setting it applies it
     /// at once and puts it in the search box.
@@ -538,6 +580,13 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
         Schedules = view.Schedules ?? [];
         Held = view.Held ?? [];
         HeldNote = view.HeldNote;
+        HolderNotice = view.HolderNotice;
+
+        if (view.HolderResult != holderResult)
+        {
+            holderResult = view.HolderResult;
+            HolderResultChanged();
+        }
 
         // Groups are updated in place, so an open source menu, its anchor and its focus survive the snapshot a toggle sends.
         var groups = view.Sources.Select((group) => group.Current).ToList();

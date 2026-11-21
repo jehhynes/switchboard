@@ -169,6 +169,15 @@ sealed class FakeHub : IHub
         return Task.FromResult(StopReply);
     }
 
+    public string? RestartReply { get; set; }
+
+    public Task<string?> RestartHolder(string detail)
+    {
+        Calls.Add($"restart holder {detail}");
+
+        return Task.FromResult(RestartReply);
+    }
+
     /// <summary>Runs while <see cref="Until"/> waits, as another click would.</summary>
     public Action? OnUntil { get; set; }
 

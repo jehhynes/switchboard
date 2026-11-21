@@ -255,6 +255,19 @@ public sealed class HubClientTests
     }
 
     [Fact]
+    public async Task RestartHolder_HubRefusesOrAccepts_PostsAndReturnsTheRefusal()
+    {
+        var refuse = true;
+        using var server = new LoopbackHub((_, _, stream) => refuse ? LoopbackHub.Reply(stream, 409, "{\"error\":\"The terminal holder already runs the installed build.\"}") : LoopbackHub.Reply(stream, 200, "{\"started\":true}"));
+        using var client = new HubClient(HomeFor(server));
+
+        Assert.Equal("The terminal holder already runs the installed build.", await client.RestartHolder("d"));
+        refuse = false;
+        Assert.Null(await client.RestartHolder("Restarting stops the held session."));
+        Assert.Contains("POST /holder/restart HTTP/1.1 {\"detail\":\"Restarting stops the held session.\"}", server.Requests);
+    }
+
+    [Fact]
     public async Task Search_HubAnswersRefusesOrSendsJunk_ReturnsTheRowsOrWhy()
     {
         var row = System.Text.Json.Nodes.JsonNode.Parse(Fixtures.DockJson)!["groups"]![0]!["rows"]![0]!.ToJsonString();

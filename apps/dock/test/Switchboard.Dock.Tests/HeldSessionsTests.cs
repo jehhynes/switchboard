@@ -156,6 +156,72 @@ public sealed class HeldSessionsTests
         window.HeldWindow!.Close();
     }
 
+    static Button DialogButton(Window window, string name) => Assert.Single(window.OwnedWindows).GetVisualDescendants().OfType<Button>().Single((button) => button.Name == name);
+
+    [AvaloniaFact]
+    public void HolderNotice_RestartClicked_AsksTheHubsQuestionAndPostsOnlyAfterRestart()
+    {
+        var (window, _) = Open(Fixtures.HolderView);
+        var restart = window.FindControl<Button>("HolderRestartButton")!;
+
+        Assert.True(window.FindControl<StackPanel>("HolderNotice")!.IsVisible);
+        Assert.Equal("The terminal holder is from an older build. Restart it to update (1 session will be resumed).", window.FindControl<TextBlock>("HolderNoticeLine")!.Text);
+        Assert.True(restart.IsVisible);
+
+        Click(restart);
+        var texts = Assert.Single(window.OwnedWindows).GetVisualDescendants().OfType<TextBlock>().Select((text) => text.Text).ToList();
+
+        Assert.Contains("Restart the terminal holder?", texts);
+        Assert.Contains(texts, (text) => text?.Contains("not idle, so the restart interrupts its turn: Issue <15> (gh 115).", StringComparison.Ordinal) == true);
+        Click(DialogButton(window, "ConfirmCancel"));
+        Assert.Empty(hub.Calls);
+
+        hub.RestartReply = "The terminal holder is already restarting.";
+        Click(restart);
+        Click(DialogButton(window, "ConfirmAction"));
+        Assert.Equal([$"restart holder {Fixtures.HolderView.HolderNotice!.Confirm!.Detail}"], hub.Calls);
+        Assert.Equal("The terminal holder is already restarting.", window.FindControl<TextBlock>("StatusLine")!.Text);
+    }
+
+    [AvaloniaFact]
+    public void HolderNotice_Restarting_HidesTheButtonAndShowsTheResultUntilDismissed()
+    {
+        var (window, model) = Open(Fixtures.View with { HolderNotice = new DockHolderNotice("Restarting the terminal holder and resuming its sessions…", null) });
+
+        Assert.False(window.FindControl<Button>("HolderRestartButton")!.IsVisible);
+        Assert.False(window.FindControl<Grid>("HolderResult")!.IsVisible);
+
+        var result = Fixtures.HolderView.HolderResult!;
+
+        model.Show(Fixtures.View with { HolderResult = result });
+        Dispatcher.UIThread.RunJobs();
+        Assert.False(window.FindControl<StackPanel>("HolderNotice")!.IsVisible);
+        Assert.True(window.FindControl<Grid>("HolderResult")!.IsVisible);
+        Assert.Equal("The terminal holder restarted and 1 session resumed. 1 session did not resume: gh 109: Claude Code did not start.", window.FindControl<TextBlock>("HolderResultLine")!.Text);
+        Assert.Contains("warning", window.FindControl<TextBlock>("HolderResultLine")!.Classes);
+
+        Click(window.FindControl<Button>("DismissHolderResultButton")!);
+        Assert.False(window.FindControl<Grid>("HolderResult")!.IsVisible);
+
+        // The same result stays dismissed; a later restart's shows.
+        model.Show(Fixtures.View with { HolderResult = result });
+        Dispatcher.UIThread.RunJobs();
+        Assert.False(window.FindControl<Grid>("HolderResult")!.IsVisible);
+        model.Show(Fixtures.View with { HolderResult = result with { At = result.At + 1, Text = "The terminal holder restarted.", Failed = false } });
+        Dispatcher.UIThread.RunJobs();
+        Assert.True(window.FindControl<Grid>("HolderResult")!.IsVisible);
+        Assert.DoesNotContain("warning", window.FindControl<TextBlock>("HolderResultLine")!.Classes);
+    }
+
+    [AvaloniaFact]
+    public void HolderNotice_HolderCurrent_IsHidden()
+    {
+        var (window, _) = Open(Fixtures.View);
+
+        Assert.False(window.FindControl<StackPanel>("HolderNotice")!.IsVisible);
+        Assert.False(window.FindControl<Grid>("HolderResult")!.IsVisible);
+    }
+
     [AvaloniaFact]
     public void HeldNote_NoOrphan_IsHidden()
     {

@@ -1935,6 +1935,29 @@ public sealed partial class MainWindow : Window
 
     void OnHeldNoteClicked(object? sender, RoutedEventArgs e) => _ = OpenHeld();
 
+    /// <summary>
+    /// Restart and resume (architecture.md § Restarting the holder): asks with the hub's question, which names the sessions the restart interrupts, then
+    /// posts the restart; its progress and result come back in the hub's view.
+    /// </summary>
+    async void OnHolderRestartClicked(object? sender, RoutedEventArgs e)
+    {
+        if (model.HolderNotice?.Confirm is not { } confirm || !await ConfirmDialog.Ask(ShownForDialog(), confirm.Question, confirm.Detail, confirm.Action))
+        {
+            return;
+        }
+
+        if (!model.IsLive)
+        {
+            model.Status = "Switchboard is not running, so the terminal holder cannot restart.";
+            return;
+        }
+
+        model.Status = null;
+        model.Status = await hub.RestartHolder(confirm.Detail);
+    }
+
+    void OnDismissHolderResultClicked(object? sender, RoutedEventArgs e) => model.DismissHolderResult();
+
     void ApplyTheme()
     {
         var theme = model.Settings.Theme == "vscode" ? model.VsCodeTheme : model.Settings.Theme;
@@ -2299,6 +2322,8 @@ public sealed partial class MainWindow : Window
         public Task<string?> Select(string rowKey) => Task.FromResult<string?>(null);
 
         public Task<string?> StopHeld(string session) => Task.FromResult<string?>(null);
+
+        public Task<string?> RestartHolder(string detail) => Task.FromResult<string?>(null);
 
         public Task<string?> Focus(string? sessionId, long at) => Task.FromResult<string?>(null);
 

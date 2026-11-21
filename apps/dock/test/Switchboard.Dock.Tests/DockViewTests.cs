@@ -233,6 +233,24 @@ public sealed class DockViewTests
     }
 
     [Fact]
+    public void Parse_RecordedHolderNotice_ReadsItsTextQuestionAndResult()
+    {
+        var view = Fixtures.HolderView;
+
+        Assert.Equal("The terminal holder is from an older build. Restart it to update (1 session will be resumed).", view.HolderNotice!.Text);
+        Assert.Equal(("Restart the terminal holder?", "Restart and resume"), (view.HolderNotice.Confirm!.Question, view.HolderNotice.Confirm.Action));
+        Assert.Contains("interrupts its turn: Issue <15> (gh 115).", view.HolderNotice.Confirm.Detail, StringComparison.Ordinal);
+        Assert.True(view.HolderResult!.Failed);
+        Assert.StartsWith("The terminal holder restarted and 1 session resumed.", view.HolderResult.Text, StringComparison.Ordinal);
+
+        var json = JsonNode.Parse(Fixtures.DockJson)!.AsObject();
+
+        json.Remove("holderNotice");
+        json.Remove("holderResult");
+        Assert.Equal((null, null), (DockView.Parse(json.ToJsonString()).HolderNotice, DockView.Parse(json.ToJsonString()).HolderResult));
+    }
+
+    [Fact]
     public void Parse_HubWithoutHeldSessions_ReadsNone()
     {
         var json = JsonNode.Parse(Fixtures.DockJson)!.AsObject();

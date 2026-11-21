@@ -487,6 +487,7 @@ describe('dockView', () => {
             { session: 'o1', label: 'switchboard · ad-hoc · adhoc 9 9273f594-1111', workItemId: null, key: 'adhoc 9', nativeSessionId: '9273f594-1111', cwd: 'D:/scratch', state: 'live', idleSince: NOW - 3 * 60_000, memoryBytes: 52_428_800, clients: 0, exitedAt: null, exitCode: null, orphan: true },
             { session: 'cm15', label: 'switchboard · dev:develop · gh 115 eeee5555-native', workItemId: 15, key: 'gh 115', nativeSessionId: 'eeee5555-native', cwd: 'D:/git/widgets', state: 'waiting', idleSince: NOW - 125 * 60_000, memoryBytes: 314_572_800, clients: 1, exitedAt: null, exitCode: null, orphan: false },
           ],
+          holder: { build: 'aaaaaaaaaaaaaaaa', installed: 'bbbbbbbbbbbbbbbb', older: true, restart: { state: 'done', at: NOW - 60_000, resumed: 1, failed: [{ session: 's9', key: 'gh 109', error: 'Claude Code did not start.' }], error: null } },
         },
       ),
       NOW,

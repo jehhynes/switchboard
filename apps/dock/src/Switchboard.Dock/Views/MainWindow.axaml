@@ -460,6 +460,19 @@
                   ToolTip.Tip="Open held sessions" AutomationProperties.Name="Open held sessions">
             <TextBlock Text="{Binding HeldNote}" TextWrapping="Wrap" Classes="warning" />
           </Button>
+          <!-- A terminal holder from an older build, or restarting (architecture.md § Restarting the holder). -->
+          <StackPanel Name="HolderNotice" IsVisible="{Binding HolderNoticeText, Converter={x:Static ObjectConverters.IsNotNull}}" Margin="8,4">
+            <TextBlock Name="HolderNoticeLine" Text="{Binding HolderNoticeText}" TextWrapping="Wrap" Classes="warning" />
+            <Button Name="HolderRestartButton" Content="Restart and resume" IsVisible="{Binding CanRestartHolder}" Click="OnHolderRestartClicked"
+                    HorizontalAlignment="Left" Margin="0,4,0,0" />
+          </StackPanel>
+          <Grid Name="HolderResult" ColumnDefinitions="*,Auto" IsVisible="{Binding HolderResultText, Converter={x:Static ObjectConverters.IsNotNull}}" Margin="8,4">
+            <TextBlock Name="HolderResultLine" Text="{Binding HolderResultText}" TextWrapping="Wrap" VerticalAlignment="Center" Classes.warning="{Binding HolderResultFailed}" />
+            <Button Name="DismissHolderResultButton" Grid.Column="1" Classes="dismiss" VerticalAlignment="Top" Click="OnDismissHolderResultClicked"
+                    ToolTip.Tip="Dismiss" AutomationProperties.Name="Dismiss">
+              <TextBlock Classes="icon" Text="&#xEA76;" />
+            </Button>
+          </Grid>
           <!-- Without the hub the last rows stay for reference, dimmed, and their controls do nothing. -->
           <ItemsControl Name="GroupList" ItemsSource="{Binding Groups}" IsEnabled="{Binding IsLive}">
             <ItemsControl.ItemTemplate>
