@@ -1015,7 +1015,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     const full = state.connected && state.session?.conversation === 'full';
 
-    // On every tab, so the operator can type and dictate from the status or the artifacts too.
+    // On every tab, so the operator can type and dictate from the status or the artifacts too, but on a short screen (page.css).
     composerHost.hidden = state.scope === null;
     input.disabled = !full;
     attachButton.disabled = !full;
@@ -1494,6 +1494,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const side = wide() && state.scope !== null;
 
     root.classList.toggle('wide', side);
+    // Under 800 px of height the composer shows only on the Conversation tab (page.css).
+    root.classList.toggle('off-conversation', state.scope !== null && mainTab() !== 'conversation');
 
     if (!side) {
       mount(detailHead, null);

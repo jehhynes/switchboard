@@ -611,6 +611,13 @@ button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }
    The conversation's pane keeps the width set on its sash, 940 px by default, its timeline and composer as wide as with the column hidden, and
    the column, at least 360 px (DETAIL_MIN), takes the rest of the width, so a wide screen gives the status and artifacts the room. */
 .detail { display: none; }
+/* A screen under 800 px tall, such as a phone on its side or a short window, gives the other tabs the whole height: the composer and the note above it show only on the
+   Conversation tab (#root.off-conversation, set by main.ts), hidden rather than removed so the draft stays. A focused composer stays, so an
+   on-screen keyboard that shortens the page never takes away the box being typed in, and so does one showing an error, such as a refused
+   header action, until it is dismissed. A wide layout always shows the conversation here. */
+@media (height < 800px) {
+  #root.off-conversation:not(:has(#composer:focus-within, #composer .composer-error:not([hidden]))) #note, #root.off-conversation:not(:has(#composer:focus-within, #composer .composer-error:not([hidden]))) #composer { display: none; }
+}
 @media (min-width: 768px) {
   #root.wide > .main { flex: 0 1 var(--chat-width, 940px); }
   #root.wide > .chat-sash { display: block; }

@@ -615,6 +615,37 @@ describe('the page', () => {
     page.close();
   });
 
+  it('marks #root.off-conversation while the tabs show another tab, for the short-screen rule, keeping the draft, and never in the wide layout', () => {
+    window.innerWidth = 700;
+
+    const { page, source } = start();
+    const composer = root.querySelector<HTMLElement>('#composer')!;
+    const input = composer.querySelector('textarea')!;
+
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [reply('r1', 1)], more: false, status: null, artifacts: [] });
+    expect(root.classList.contains('wide')).toBe(false);
+    expect(root.classList.contains('off-conversation')).toBe(false);
+    input.value = 'Half a thought';
+    input.dispatchEvent(new Event('input'));
+    root.querySelector<HTMLElement>('[data-tab="status"]')!.click();
+    expect(root.classList.contains('off-conversation')).toBe(true);
+    // Hidden by the stylesheet only, so the box and its text stay.
+    expect(composer.hidden).toBe(false);
+    expect(root.querySelector('#composer textarea')).toBe(input);
+    root.querySelector<HTMLElement>('[data-tab="conversation"]')!.click();
+    expect(root.classList.contains('off-conversation')).toBe(false);
+    expect(input.value).toBe('Half a thought');
+
+    // In the wide layout the conversation's pane always shows the conversation, whatever the column shows.
+    root.querySelector<HTMLElement>('[data-tab="status"]')!.click();
+    expect(root.classList.contains('off-conversation')).toBe(true);
+    resizeTo(1920);
+    expect(root.classList.contains('wide')).toBe(true);
+    expect(root.classList.contains('off-conversation')).toBe(false);
+    resizeTo(1024);
+    page.close();
+  });
+
   it('lists the persona roster under the header, keeps it open over stream events, and pins the one picked', async () => {
     const fetch = vi.fn(async (url: string, init?: { body?: string }) => {
       posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) });
@@ -3230,6 +3261,16 @@ describe("the list's CSS", () => {
     expect(declarationsOf((selector) => selector === '#root.drawers:not(.listing):not(.history) > .side').join(' ')).not.toContain('transition');
     expect(declarationsOf((selector) => selector === '#root.drawers.drawer-open:not(.listing):not(.history) > .side').join(' ')).toContain('transition: transform 0.15s ease-out');
     expect(declarationsOf((selector) => selector === '.sliver').join(' ')).toMatch(/position: fixed;.*left: 0;.*width: 3px;/);
+  });
+
+  it('shows the composer and the note above it only on the Conversation tab under 800 px of height, unless the composer has the focus or an error', () => {
+    // Kept while focused, for the on-screen keyboard, and while it shows an error, such as a refused header action from another tab.
+    const rule = '#root.off-conversation:not(:has(#composer:focus-within, #composer .composer-error:not([hidden])))';
+
+    // Every height under 800 px, a zoomed 799.5 px included, and no width condition.
+    expect(css).toContain(`@media (height < 800px) {\n  ${rule} #note, ${rule} #composer { display: none; }\n}`);
+    // Nothing else hides them by that class, so taller screens keep the composer on every tab.
+    expect(css.match(/off-conversation/g)).toHaveLength(2);
   });
 
   it('puts Status and Artifacts beside the conversation only where #root.wide says they fit, never on a phone', () => {
