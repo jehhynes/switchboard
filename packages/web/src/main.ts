@@ -1528,7 +1528,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         draw();
         break;
       case 'row-action':
-        chooseAction(button!.dataset['rowAction'] ?? '');
+        chooseAction(button!.dataset['label'] ?? '');
         break;
       case 'row-paste':
         void copyPaste(button!.dataset['label'] ?? '');
@@ -1967,9 +1967,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     (deps.openUrl ?? ((one: string) => void window.open(one, '_blank', 'noopener,noreferrer')))(target);
   };
   /** A control of the header's actions: Snooze… opens its choices, one that asks first its question, any other runs at once. */
-  const chooseAction = (type: string): void => {
+  const chooseAction = (label: string): void => {
     const row = selectedRow(state);
-    const action = row?.actions?.find((one) => one.action === type);
+    const action = row?.actions?.find((one) => one.label === label);
 
     view.actions = false;
 
@@ -1979,21 +1979,21 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
 
     if (action.action === 'snooze') {
-      view.sheet = { kind: 'snooze', workItemId: row.workItemId, title: row.title, choices: snoozeChoices(new Date(deps.now())), picked: '0', date: '', comment: '' };
+      view.sheet = { kind: 'snooze', workItemId: row.workItemId, label: action.label, title: row.title, choices: snoozeChoices(new Date(deps.now())), picked: '0', date: '', comment: '' };
     } else if (action.confirm !== null) {
       view.sheet = { kind: 'confirm', workItemId: row.workItemId, action };
     } else {
-      void runAction(row.workItemId, action.action, {});
+      void runAction(row.workItemId, action.label, {});
     }
 
     draw();
   };
-  /** Runs a row action on the selected work item; the hub checks again that its row still offers it. */
-  const runAction = async (workItemId: number, action: string, extra: Record<string, unknown>): Promise<void> => {
+  /** Runs a row action, named by its label, on the selected work item; the hub checks again that its row still offers it. */
+  const runAction = async (workItemId: number, label: string, extra: Record<string, unknown>): Promise<void> => {
     view.acting = true;
     draw();
 
-    const answer = await command('row-action', { workItemId, action, ...extra });
+    const answer = await command('row-action', { workItemId, label, ...extra });
 
     view.acting = false;
     view.sheet = null;
@@ -2008,7 +2008,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
 
     if (sheet.kind === 'confirm') {
-      await runAction(sheet.workItemId, sheet.action.action, {});
+      await runAction(sheet.workItemId, sheet.action.label, {});
     } else if (sheet.kind === 'snooze') {
       const picked = sheet.picked;
       const until = picked === 'date' ? snoozeDateUntil(sheet.date, sheet.choices) : (sheet.choices[Number(picked)]?.until ?? null);
@@ -2021,7 +2021,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
       const comment = sheet.comment.trim();
 
-      await runAction(sheet.workItemId, 'snooze', { until, ...(comment === '' ? {} : { comment }) });
+      await runAction(sheet.workItemId, sheet.label, { until, ...(comment === '' ? {} : { comment }) });
     } else {
       view.sheet = null;
       draw();

@@ -209,7 +209,7 @@ describe('pageActions', () => {
     expect(pageActions(unstarted).find((one) => one.action === 'delete')?.confirm).toEqual(unstarted.controls.find((one) => one.label === 'Delete')!.confirm);
     // Start with guidance… asks for text, Add comment… is a note and History opens VS Code, so the page leaves them out.
     expect(unstarted.controls.map((one) => one.label)).toEqual(expect.arrayContaining(['Start with guidance…', 'Add comment…']));
-    expect(pageActions(rowOf(item(2, { status: 'awaiting-approval' })))[0]).toEqual({ label: 'Approve', action: 'approve', confirm: null });
+    expect(pageActions(rowOf(item(2, { status: 'awaiting-approval' })))[0]).toEqual({ label: 'Approve', action: 'approve', icon: 'check', group: 'main', confirm: null });
     expect(pageActions(rowOf(item(3, { status: 'failed' }))).map((one) => one.action)).toContain('retry');
 
     const running = rowOf(item(4, { status: 'running', sessions: [session({ id: 's4', workItemId: 4, codeMode: true, state: 'running' })] }));
@@ -222,12 +222,32 @@ describe('pageActions', () => {
   it("builds the action from the row's own control, adds only Snooze's wake time and comment, and refuses one the row does not offer", () => {
     const row = rowOf(item(1, { status: 'unstarted' }));
 
-    expect(pageActionEvent(row, 'start', { until: 5, comment: 'x' })).toEqual({ type: 'start', workItemId: 1 });
-    expect(pageActionEvent(row, 'snooze', { until: 5, comment: 'later' })).toEqual({ type: 'snooze', ticketId: row.controls.find((one) => one.label === 'Snooze…')!.action['ticketId'], until: 5, comment: 'later' });
-    expect(pageActionEvent(row, 'snooze', { until: null, comment: null })).not.toHaveProperty('comment');
-    expect(pageActionEvent(row, 'approve', { until: null, comment: null })).toBeNull();
-    expect(pageActionEvent(row, 'comment', { until: null, comment: null })).toBeNull();
-    expect(pageActionEvent(row, 'reopen', { until: null, comment: null })).toBeNull();
+    expect(pageActionEvent(row, 'Start', { until: 5, comment: 'x' })).toEqual({ type: 'start', workItemId: 1 });
+    expect(pageActionEvent(row, 'Snooze…', { until: 5, comment: 'later' })).toEqual({ type: 'snooze', ticketId: row.controls.find((one) => one.label === 'Snooze…')!.action['ticketId'], until: 5, comment: 'later' });
+    expect(pageActionEvent(row, 'Snooze…', { until: null, comment: null })).not.toHaveProperty('comment');
+    expect(pageActionEvent(row, 'Approve', { until: null, comment: null })).toBeNull();
+    expect(pageActionEvent(row, 'Reopen', { until: null, comment: null })).toBeNull();
+    // An action type is not a label.
+    expect(pageActionEvent(row, 'start', { until: null, comment: null })).toBeNull();
+  });
+
+  it("offers Reopen with the state controls, and Ready for review's Move and Reset position as the order group, each running the row's own move", () => {
+    const done = rowOf(item(1, { status: 'done', doneAt: NOW, reopenable: true }));
+
+    expect(pageActions(done).map((one) => [one.label, one.group, one.icon])).toEqual([['Reopen', 'state', 'issue-reopened'], ['Delete', 'asking', 'trash']]);
+    expect(pageActionEvent(done, 'Reopen', { until: null, comment: null })).toEqual({ type: 'reopen', workItemId: 1 });
+
+    const review = dockView(snapshot([item(1, { status: 'awaiting-approval', readyAt: NOW - 3 }), item(2, { status: 'awaiting-approval', readyAt: NOW - 2, orderAt: NOW }), item(3, { status: 'awaiting-approval', readyAt: NOW - 1 })]), NOW, WINDOWS);
+    const ids = review.groups.find((group) => group.key === 'review')!.rows.map((row) => Number(row.key.slice('item:'.length)));
+    const middle = dockRowOf(review, ids[1]!)!;
+    const moves = pageActions(middle).filter((one) => one.group === 'order');
+
+    expect(moves.map((one) => one.label)).toEqual(['Move to top', 'Move up', 'Move down', ...(middle.controls.some((one) => one.label === 'Reset position') ? ['Reset position'] : [])]);
+    expect(moves.map((one) => one.icon).slice(0, 3)).toEqual(['arrow-circle-up', 'arrow-up', 'arrow-down']);
+    // The order group comes after the state controls and before Delete, as in the dock's menu.
+    expect(pageActions(middle).map((one) => one.group)).toEqual([...pageActions(middle).map((one) => one.group)].sort((a, b) => ['main', 'work', 'state', 'order', 'asking'].indexOf(a) - ['main', 'work', 'state', 'order', 'asking'].indexOf(b)));
+    expect(pageActionEvent(middle, 'Move down', { until: null, comment: null })).toEqual({ type: 'move', workItemId: ids[1], after: ids[2] });
+    expect(pageActionEvent(middle, 'Move to top', { until: null, comment: null })).toEqual({ type: 'move', workItemId: ids[1], after: null });
   });
 
   it("opens only the row's own http or https ticket URL or link, marked as the dock marks it", () => {

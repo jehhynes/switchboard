@@ -87,15 +87,11 @@ export interface View {
 /** A sheet: Delete's or Stop's question, Snooze…'s choices, or a drafted text the clipboard refused. */
 export type Sheet =
   | { kind: 'confirm'; workItemId: number; action: PageAction }
-  | { kind: 'snooze'; workItemId: number; title: string; choices: SnoozeChoice[]; picked: string; date: string; comment: string }
+  | { kind: 'snooze'; workItemId: number; label: string; title: string; choices: SnoozeChoice[]; picked: string; date: string; comment: string }
   | { kind: 'text'; title: string; text: string };
 
 export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), list: false, actions: false, linkMenu: false, sheet: null, acting: false, prompt: null, providers: null, side: 'status', textScale: 1, textMenu: false, details: false });
 
-/** Each row action's codicon, as the dock draws its controls. */
-const ACTION_ICONS: Record<string, string> = { start: 'play', approve: 'check', retry: 'refresh', stop: 'debug-stop', 'mark-done': 'pass', snooze: 'clockface', restore: 'debug-restart', delete: 'trash' };
-/** The dock's state controls, listed after the work controls. */
-const STATE_ACTIONS = new Set(['mark-done', 'snooze', 'restore']);
 /** The most links the menu lists by themselves; more go in its Open link submenu, as the dock's `MenuLinks`. */
 const MENU_LINKS = 2;
 /** The longest menu label for a link, as the dock's `LinkLabelMax`; a longer one is cut with an ellipsis and shown whole in its tooltip. */
@@ -108,8 +104,9 @@ function clipLabel(label: string): string {
 
 /**
  * The header's row actions (architecture.md § Web page): the dock's main control as a button, then every control in a menu under an
- * ellipsis, grouped as the dock's row menu is: the work controls, the state controls, what the row opens (Copy, Open ticket and its links, more
- * than two of them in an Open link submenu), then Delete; empty when the row offers none.
+ * ellipsis, grouped as the dock's row menu is: the main control, the work controls, the state controls, the order controls, what the row opens
+ * (Copy, Open ticket and its links, more than two of them in an Open link submenu), then the controls that ask first; empty when the row offers
+ * none.
  */
 export function renderActions(row: PageRow | null, view: View): string {
   const actions = row?.actions ?? [];
@@ -122,7 +119,8 @@ export function renderActions(row: PageRow | null, view: View): string {
   const disabled = view.acting ? ' disabled' : '';
   const item = (attrs: string, icon: string | null, label: string, after = '', classes = ''): string =>
     `<li role="none"><button type="button" class="menu-row${classes === '' ? '' : ` ${classes}`}" role="menuitem" ${attrs}${disabled}><span class="menu-gutter" aria-hidden="true">${icon === null ? '' : `<span class="codicon codicon-${icon}"></span>`}</span><span class="title">${escape(label)}</span>${after}</button></li>`;
-  const act = (action: PageAction): string => item(`data-action="row-action" data-row-action="${escape(action.action)}"`, ACTION_ICONS[action.action] ?? 'circle-outline', action.label);
+  const act = (action: PageAction): string => item(`data-action="row-action" data-label="${escape(action.label)}"`, action.icon, action.label);
+  const grouped = (group: PageAction['group']): string[] => actions.filter((one) => one.group === group).map(act);
   // A link's label can be free text a session reported, so a long one is cut, whole in its tooltip, as in the dock's menu.
   const link = (which: string, label: string, icon: string | null, classes = ''): string =>
     item(`data-action="open-link" data-work-item="${row.workItemId}" data-link="${which}"${label.length > LINK_LABEL_MAX ? ` title="${escape(label)}"` : ''}`, icon, clipLabel(label), '', classes);
@@ -134,15 +132,10 @@ export function renderActions(row: PageRow | null, view: View): string {
     ...(row.url === '' ? [] : [link('ticket', 'Open ticket', 'link-external')]),
     ...(row.links.length > MENU_LINKS ? [submenu] : row.links.map((one, index) => link(String(index), `Open ${one.label}`, 'link-external'))),
   ];
-  const groups = [
-    actions.filter((one) => one.action !== 'delete' && !STATE_ACTIONS.has(one.action)).map(act),
-    actions.filter((one) => STATE_ACTIONS.has(one.action)).map(act),
-    opens,
-    actions.filter((one) => one.action === 'delete').map(act),
-  ].filter((group) => group.length > 0);
+  const groups = [grouped('main'), grouped('work'), grouped('state'), grouped('order'), opens, grouped('asking')].filter((group) => group.length > 0);
   const rows = groups.map((group) => group.join('')).join('<li class="menu-separator" role="separator"></li>');
-  const main = actions.find((one) => one.label === row.main && row.main !== null);
-  const mainButton = main === undefined ? '' : `<button type="button" class="row-main" data-action="row-action" data-row-action="${escape(main.action)}"${disabled}><span class="codicon codicon-${ACTION_ICONS[main.action] ?? 'play'}" aria-hidden="true"></span><span>${escape(main.label)}</span></button>`;
+  const main = actions.find((one) => one.group === 'main');
+  const mainButton = main === undefined ? '' : `<button type="button" class="row-main" data-action="row-action" data-label="${escape(main.label)}"${disabled}><span class="codicon codicon-${escape(main.icon)}" aria-hidden="true"></span><span>${escape(main.label)}</span></button>`;
   const menu = view.actions ? `<ul class="glass menu actions-menu align-right" role="menu" aria-label="Actions">${rows}</ul>` : '';
 
   return `${mainButton}<div class="menu-anchor actions-anchor"><button type="button" class="actions" data-action="actions" aria-haspopup="menu" aria-expanded="${view.actions}" title="Actions" aria-label="Actions"><span class="codicon codicon-ellipsis" aria-hidden="true"></span></button>${menu}</div>`;

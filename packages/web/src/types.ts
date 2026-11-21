@@ -192,10 +192,14 @@ export interface ScreenPrompt {
   next: boolean;
 }
 
-/** One of the dock's controls on the page (`PageAction` in the hub's `page.ts`), run with `row-action`. */
+/** One of the dock's controls on the page (`PageAction` in the hub's `page.ts`), run with `row-action` by its label. */
 export interface PageAction {
   label: string;
   action: string;
+  /** Its codicon's name. */
+  icon: string;
+  /** Its group in the dock's row menu, which draws a separator between groups. */
+  group: 'main' | 'work' | 'state' | 'order' | 'asking';
   confirm: { question: string; detail: string; action: string } | null;
 }
 

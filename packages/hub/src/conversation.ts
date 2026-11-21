@@ -256,7 +256,7 @@ export interface ConversationServiceDeps {
    * Runs one of the page's row actions (`PAGE_ACTIONS`) on a work item, after checking that its dock row still offers it: why not, or null
    * (architecture.md § Web page).
    */
-  rowAction?(workItemId: number, action: string, snooze: { until: number | null; comment: string | null }): string | null;
+  rowAction?(workItemId: number, label: string, snooze: { until: number | null; comment: string | null }): string | null;
   /**
    * Resumes an ended session without a terminal, as the attach terminal's resume does for a Code Mode session and a message does for a Codex
    * app-server session (architecture.md § Web page): why not, or null.
@@ -584,12 +584,12 @@ export class ConversationService {
   readonly #rowActions = new Map<string, { status: number; body: unknown }>();
 
   /**
-   * `row-action {window, scopeGen, opId, workItemId, action, until?, comment?}` (architecture.md § Web page): one of the dock's controls on the
-   * page's selected work item, rechecked against its row when it runs. 403 for a key that is not a page's or another work item, 409 for a stale
+   * `row-action {window, scopeGen, opId, workItemId, label, until?, comment?}` (architecture.md § Web page): one of the dock's controls on the
+   * page's selected work item, named by its label, rechecked against its row when it runs. 403 for a key that is not a page's or another work item, 409 for a stale
    * `scopeGen` and with the refusal, such as a control the row no longer offers.
    */
   rowAction(body: Record<string, unknown>): { status: number; body: unknown } {
-    const { window, scopeGen, opId, workItemId, action, until, comment } = body;
+    const { window, scopeGen, opId, workItemId, label, until, comment } = body;
 
     if (
       typeof window !== 'string' ||
@@ -597,11 +597,11 @@ export class ConversationService {
       typeof opId !== 'string' ||
       opId === '' ||
       !Number.isInteger(workItemId) ||
-      typeof action !== 'string' ||
+      typeof label !== 'string' ||
       !(until === undefined || until === null || (typeof until === 'number' && Number.isFinite(until))) ||
       !(comment === undefined || comment === null || (typeof comment === 'string' && comment.length <= MAX_MESSAGE_CHARS))
     ) {
-      return { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId, action, until?, comment?}.' } };
+      return { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId, label, until?, comment?}.' } };
     }
 
     const scope = this.deps.windows.isPage(window) ? this.deps.windows.scope(window) : null;
@@ -622,7 +622,7 @@ export class ConversationService {
       return done;
     }
 
-    const why = this.deps.rowAction === undefined ? 'This hub runs no actions from the page.' : this.deps.rowAction(workItemId as number, action, { until: (until as number | null | undefined) ?? null, comment: typeof comment === 'string' && comment.trim() !== '' ? comment.trim() : null });
+    const why = this.deps.rowAction === undefined ? 'This hub runs no actions from the page.' : this.deps.rowAction(workItemId as number, label, { until: (until as number | null | undefined) ?? null, comment: typeof comment === 'string' && comment.trim() !== '' ? comment.trim() : null });
     const answer = why === null ? { status: 200, body: { done: true } } : { status: 409, body: { error: why } };
 
     this.#rowActions.set(`${window} ${opId}`, answer);

@@ -1380,11 +1380,12 @@ describe('the page in use', () => {
   it("runs the selected work item's row actions from the header: the main button, Stop and Delete after their question, Snooze with a choice, and Copy", async () => {
     const { page, source } = start();
     const actions = [
-      { label: 'Approve', action: 'approve', confirm: null },
-      { label: 'Stop', action: 'stop', confirm: { question: 'Stop gh 1?', detail: 'It stops.', action: 'Stop' } },
-      { label: 'Mark done', action: 'mark-done', confirm: null },
-      { label: 'Snooze…', action: 'snooze', confirm: null },
-      { label: 'Delete', action: 'delete', confirm: { question: 'Delete gh 1?', detail: 'Gone.', action: 'Delete' } },
+      { label: 'Approve', action: 'approve', icon: 'check', group: 'main' as const, confirm: null },
+      { label: 'Stop', action: 'stop', icon: 'debug-stop', group: 'work' as const, confirm: { question: 'Stop gh 1?', detail: 'It stops.', action: 'Stop' } },
+      { label: 'Mark done', action: 'mark-done', icon: 'pass', group: 'state' as const, confirm: null },
+      { label: 'Snooze…', action: 'snooze', icon: 'clockface', group: 'state' as const, confirm: null },
+      { label: 'Move up', action: 'move', icon: 'arrow-up', group: 'order' as const, confirm: null },
+      { label: 'Delete', action: 'delete', icon: 'trash', group: 'asking' as const, confirm: { question: 'Delete gh 1?', detail: 'Gone.', action: 'Delete' } },
     ];
     const clipboard = vi.fn(async () => undefined);
 
@@ -1393,12 +1394,18 @@ describe('the page in use', () => {
     expect(root.querySelector('.header .row-main')!.textContent).toBe('Approve');
     click('.header .row-main');
     await flush();
-    expect(posts.find((post) => post.url.endsWith('/row-action'))?.body).toMatchObject({ window: 'pk', scopeGen: 3, workItemId: 1, action: 'approve' });
+    expect(posts.find((post) => post.url.endsWith('/row-action'))?.body).toMatchObject({ window: 'pk', scopeGen: 3, workItemId: 1, label: 'Approve' });
+    expect(root.querySelector('.header .row-main .codicon-check')).not.toBeNull();
 
     click('button.actions');
-    expect([...root.querySelectorAll('.actions-menu .menu-row')].map((row) => row.textContent)).toEqual(['Approve', 'Stop', 'Mark done', 'Snooze…', 'Copy Reply', 'Delete']);
-    expect(root.querySelectorAll('.actions-menu .menu-separator')).toHaveLength(3);
-    click('.actions-menu [data-row-action="stop"]');
+    // The dock's menu groups: main, work, state, order, what the row opens, and what asks first.
+    expect([...root.querySelectorAll('.actions-menu .menu-row')].map((row) => row.textContent)).toEqual(['Approve', 'Stop', 'Mark done', 'Snooze…', 'Move up', 'Copy Reply', 'Delete']);
+    expect(root.querySelectorAll('.actions-menu .menu-separator')).toHaveLength(5);
+    click('.actions-menu [data-label="Move up"]');
+    await flush();
+    expect(posts.filter((post) => post.url.endsWith('/row-action')).at(-1)?.body).toMatchObject({ workItemId: 1, label: 'Move up' });
+    click('button.actions');
+    click('.actions-menu [data-label="Stop"]');
     expect(root.querySelector('.sheet-title')!.textContent).toBe('Stop gh 1?');
     posts = [];
     click('.sheet [data-action="sheet-cancel"]');
@@ -1406,18 +1413,18 @@ describe('the page in use', () => {
     expect(posts).toEqual([]);
 
     click('button.actions');
-    click('.actions-menu [data-row-action="delete"]');
+    click('.actions-menu [data-label="Delete"]');
     answers['/row-action'] = { status: 409, body: { error: 'The work item no longer offers this.' } };
     click('.sheet [data-action="sheet-go"]');
     await flush();
-    expect(posts.find((post) => post.url.endsWith('/row-action'))?.body).toMatchObject({ action: 'delete', workItemId: 1 });
+    expect(posts.find((post) => post.url.endsWith('/row-action'))?.body).toMatchObject({ label: 'Delete', workItemId: 1 });
     expect(root.querySelector('.composer-error-text')!.textContent).toBe('The work item no longer offers this.');
     expect(root.querySelector('.sheet')).toBeNull();
 
     answers['/row-action'] = { status: 200, body: { done: true } };
     posts = [];
     click('button.actions');
-    click('.actions-menu [data-row-action="snooze"]');
+    click('.actions-menu [data-label="Snooze…"]');
     expect(root.querySelector('.sheet-title')!.textContent).toBe('Snooze Fix it');
     const second = root.querySelectorAll<HTMLInputElement>('.sheet input[name="snooze"]')[1]!;
     const note = root.querySelector<HTMLTextAreaElement>('.snooze-comment')!;
@@ -1432,7 +1439,7 @@ describe('the page in use', () => {
     expect(root.querySelector<HTMLTextAreaElement>('.snooze-comment')!.value).toBe('after the release');
     click('.sheet [data-action="sheet-go"]');
     await flush();
-    expect(posts.find((post) => post.url.endsWith('/row-action'))?.body).toMatchObject({ action: 'snooze', until: expect.any(Number), comment: 'after the release' });
+    expect(posts.find((post) => post.url.endsWith('/row-action'))?.body).toMatchObject({ label: 'Snooze…', until: expect.any(Number), comment: 'after the release' });
 
     answers['/row-paste'] = { status: 200, body: { text: 'Dear Ana' } };
     click('button.actions');

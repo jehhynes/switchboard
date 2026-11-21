@@ -512,9 +512,9 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       return error;
     },
     // The page's row actions run as the dock's, rechecked against the row as it is now (architecture.md § Web page).
-    rowAction: (workItemId, action, snooze) => {
+    rowAction: (workItemId, label, snooze) => {
       const row = dockRowOf(views().dock, workItemId);
-      const event = row === null ? null : pageActionEvent(row, action, snooze);
+      const event = row === null ? null : pageActionEvent(row, label, snooze);
       const parsed = event === null ? null : parseAction(event);
 
       if (parsed === null) {
@@ -886,7 +886,7 @@ const dockWithRuns = () => {
       '/v1/conversation/speak-replies': async (body) => (isRecord(body) ? conversation.voiceCommand('speak-replies', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, on}.' } }),
       '/v1/conversation/replay': async (body) => (isRecord(body) ? conversation.voiceCommand('replay', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, replyId}.' } }),
       '/v1/conversation/personas': async (body) => (isRecord(body) ? conversation.personaCommand('personas', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId}.' } }),
-      '/v1/conversation/row-action': async (body) => (isRecord(body) ? conversation.rowAction(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId, action}.' } }),
+      '/v1/conversation/row-action': async (body) => (isRecord(body) ? conversation.rowAction(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId, label}.' } }),
       '/v1/conversation/prompt': async (body) => (isRecord(body) ? conversation.prompt(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } }),
       '/v1/conversation/console-input': async (body) => (isRecord(body) ? pageConsole.input(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, data, cols?, rows?}.' } }),
       '/v1/conversation/prompt-key': async (body) => (isRecord(body) ? conversation.promptKey(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, prompt, key}.' } }),

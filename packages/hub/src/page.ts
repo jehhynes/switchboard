@@ -7,6 +7,7 @@ import type { Store } from '@switchboard/core';
 import { artifactType } from '@switchboard/conversation';
 import { windowOf } from './dock.js';
 import type { DockRow, DockSourceGroup, DockView } from './dock.js';
+import { CONTROL_GLYPHS } from './rows.js';
 import type { RowGroup } from './rows.js';
 import type { Snapshot } from './snapshot.js';
 
@@ -239,52 +240,70 @@ export interface PageRow {
 }
 
 /** The dock's actions the page may run through `row-action`, each on one work item. */
-export const PAGE_ACTIONS = ['start', 'approve', 'retry', 'stop', 'mark-done', 'snooze', 'restore', 'delete'] as const;
+export const PAGE_ACTIONS = ['start', 'approve', 'retry', 'stop', 'mark-done', 'reopen', 'snooze', 'restore', 'move', 'reset-position', 'delete'] as const;
 export type PageActionType = (typeof PAGE_ACTIONS)[number];
 
-/** One control the page offers: its dock label, the action it runs, and what the page asks first. */
+/** The groups of the dock's row menu (`MenuOf`), in its order, with a separator between them; what the row opens comes before `asking`. */
+export type PageActionGroup = 'main' | 'work' | 'state' | 'order' | 'asking';
+
+/**
+ * One control the page offers: its dock label, which names it in `row-action`, the action it runs, its codicon, its group in the dock's menu,
+ * and what the page asks first.
+ */
 export interface PageAction {
   label: string;
   action: PageActionType;
+  icon: string;
+  group: PageActionGroup;
   confirm: { question: string; detail: string; action: string } | null;
 }
 
-/** The dock's state controls, which its menu lists after the work controls. */
-const STATE_ACTIONS = new Set<string>(['mark-done', 'snooze', 'restore']);
+/** The dock's state controls, which change what the work item waits for (`StateActions` in the dock). */
+const STATE_ACTIONS = new Set<string>(['mark-done', 'reopen', 'snooze', 'restore']);
+/** The order controls of a Ready for review row (`OrderActions` in the dock). */
+const ORDER_ACTIONS = new Set<string>(['move', 'reset-position']);
+/** Each control glyph's codicon name, for the page, which draws codicons by name. */
+const CONTROL_ICONS = new Map<string, string>(Object.entries(CONTROL_GLYPHS).map(([name, glyph]) => [glyph, name]));
 
 /**
- * The page's controls for a dock row: the dock's hub controls whose action is in `PAGE_ACTIONS` and that ask for no text, in the dock's menu
- * order (the row's button, its work, its state, then the controls that ask first). Stop asks first on the page, as Delete does in the dock.
+ * The page's controls for a dock row: the dock's hub controls whose action is in `PAGE_ACTIONS` and that ask for no text, grouped and ordered as
+ * the dock's menu: the row's main control, its work, its state, its order in Ready for review, then the controls that ask first. Stop asks first on
+ * the page, as Delete does in the dock.
  */
 export function pageActions(row: Pick<DockRow, 'controls' | 'main' | 'ticket'>): PageAction[] {
   const offered = row.controls.filter((control) => (PAGE_ACTIONS as readonly string[]).includes(String(control.action['type'])) && control.input === undefined && control.group === undefined);
-  const shown = (control: DockRow['controls'][number]): PageAction => {
-    const action = String(control.action['type']) as PageActionType;
-    const confirm = control.confirm ?? (action === 'stop' ? { question: `Stop ${row.ticket}?`, detail: 'Switchboard stops its running session, and the work item waits for you as Stopped by you.', action: 'Stop' } : null);
+  const main = offered.find((control) => control.label === row.main && control.confirm === undefined);
+  const groupOf = (control: DockRow['controls'][number]): PageActionGroup => {
+    const type = String(control.action['type']);
 
-    return { label: control.label, action, confirm };
+    return control === main ? 'main' : control.confirm !== undefined ? 'asking' : STATE_ACTIONS.has(type) ? 'state' : ORDER_ACTIONS.has(type) ? 'order' : 'work';
   };
-  const main = offered.filter((control) => control.label === row.main && control.confirm === undefined);
-  const rest = offered.filter((control) => !main.includes(control));
-  const work = rest.filter((control) => control.confirm === undefined && !STATE_ACTIONS.has(String(control.action['type'])));
-  const state = rest.filter((control) => control.confirm === undefined && STATE_ACTIONS.has(String(control.action['type'])));
-  const asking = rest.filter((control) => control.confirm !== undefined);
+  const order: PageActionGroup[] = ['main', 'work', 'state', 'order', 'asking'];
 
-  return [...main, ...work, ...state, ...asking].map(shown);
+  return offered
+    .map((control) => {
+      const action = String(control.action['type']) as PageActionType;
+      const confirm = control.confirm ?? (action === 'stop' ? { question: `Stop ${row.ticket}?`, detail: 'Switchboard stops its running session, and the work item waits for you as Stopped by you.', action: 'Stop' } : null);
+
+      return { label: control.label, action, icon: CONTROL_ICONS.get(control.glyph) ?? 'circle-outline', group: groupOf(control), confirm };
+    })
+    .sort((a, b) => order.indexOf(a.group) - order.indexOf(b.group));
 }
 
 /**
- * The action `row-action` posts for a work item's dock row: the hub's own control's action, never the page's, with Snooze's `until` and
- * `comment`; null when the row no longer offers it.
+ * The action `row-action` posts for a work item's dock row, by the control's label: the hub's own control's action, never the page's, with Snooze's
+ * `until` and `comment`; null when the row no longer offers it.
  */
-export function pageActionEvent(row: Pick<DockRow, 'controls' | 'main' | 'ticket'>, action: string, snooze: { until: number | null; comment: string | null }): Record<string, unknown> | null {
-  if (!pageActions(row).some((one) => one.action === action)) {
+export function pageActionEvent(row: Pick<DockRow, 'controls' | 'main' | 'ticket'>, label: string, snooze: { until: number | null; comment: string | null }): Record<string, unknown> | null {
+  const offered = pageActions(row).find((one) => one.label === label);
+
+  if (offered === undefined) {
     return null;
   }
 
-  const control = row.controls.find((one) => one.action['type'] === action && one.input === undefined && one.group === undefined)!;
+  const control = row.controls.find((one) => one.label === label && one.input === undefined && one.group === undefined)!;
 
-  return action === 'snooze' ? { ...control.action, until: snooze.until, ...(snooze.comment === null ? {} : { comment: snooze.comment }) } : { ...control.action };
+  return offered.action === 'snooze' ? { ...control.action, until: snooze.until, ...(snooze.comment === null ? {} : { comment: snooze.comment }) } : { ...control.action };
 }
 
 /** The bookmark and the query parameter the dock adds to a link it opens (`Switcher.Marked`), so the Chrome extension groups its tab (PRD R74). */
