@@ -1,3 +1,4 @@
+import { PANE_EXTENSION_ID } from '@switchboard/core';
 import { describe, expect, it } from 'vitest';
 import { PANE_MIN_WIDTH, PaneState, paneRect, paneTabs } from '../src/pane.js';
 import type { PanePageView } from '../src/pane.js';
@@ -77,7 +78,7 @@ describe('PaneState', () => {
 
     pane.state.pageRect('page-1', RECT);
     expect(pane.extensionSent).toEqual([]);
-    expect(pane.lastPage('page-1')).toEqual({ enabled: true, extension: 'paired', marker: null, shown: false, error: null });
+    expect(pane.lastPage('page-1')).toEqual({ enabled: true, extension: 'paired', extensionId: PANE_EXTENSION_ID, marker: null, shown: false, error: null });
 
     pane.state.dockReport({ state: 'ready', marker: null });
     expect(pane.extensionSent).toEqual([{ type: 'window', marker: '000000000001' }]);

@@ -82,6 +82,32 @@ export interface View {
   providers: { items: Array<{ provider: string; name: string; default: boolean }> | null; error: string | null } | null;
   /** The prompt the session waits on in its terminal, as last read, for the session it was read for; a key being sent waits. */
   prompt: { sessionId: string; prompt: ScreenPrompt | null; sending: boolean } | null;
+  /** The Chrome pane as the hub last described it (architecture.md § Pane state), and the outcome of a pairing from this page. */
+  pane: PaneView | null;
+  paneNote: string | null;
+}
+
+/** The hub's `pane` event (architecture.md § Pane state). */
+export interface PaneView {
+  enabled: boolean;
+  extension: 'none' | 'unpaired' | 'paired';
+  extensionId?: string;
+  marker: string | null;
+  shown: boolean;
+  error: string | null;
+}
+
+/** What the view options menu says of the Chrome pane, or null while it is off. */
+export function paneStatus(pane: PaneView | null): string | null {
+  if (pane === null || !pane.enabled) {
+    return null;
+  }
+
+  if (pane.error !== null) {
+    return `Chrome pane stopped: ${pane.error}`;
+  }
+
+  return pane.extension === 'none' ? 'Chrome pane: the Switchboard Chrome extension is not connected.' : pane.extension === 'unpaired' ? 'Chrome pane: the Chrome extension is not paired.' : pane.shown ? 'Chrome pane: showing.' : 'Chrome pane: paired.';
 }
 
 /** A sheet: Delete's or Stop's question, Snooze…'s choices, a control's text (and choice) as the dock's input dialog asks for it, or a drafted text the clipboard refused. */
@@ -91,7 +117,7 @@ export type Sheet =
   | { kind: 'snooze'; row: string; label: string; title: string; choices: SnoozeChoice[]; picked: string; date: string; comment: string }
   | { kind: 'text'; title: string; text: string };
 
-export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), list: false, actions: false, linkMenu: false, rowMenu: null, sheet: null, acting: false, prompt: null, providers: null, side: 'status', textScale: 1, textMenu: false, details: false });
+export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), list: false, actions: false, linkMenu: false, rowMenu: null, sheet: null, acting: false, prompt: null, providers: null, side: 'status', textScale: 1, textMenu: false, details: false, pane: null, paneNote: null });
 
 /** The longest menu label for a link, as the dock's `LinkLabelMax`; a longer one is cut with an ellipsis and shown whole in its tooltip. */
 export const LINK_LABEL_MAX = 48;

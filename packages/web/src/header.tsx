@@ -4,7 +4,7 @@ import type { ComponentChildren, VNode } from 'preact';
 import { providerMark } from '@switchboard/conversation/providerIcons';
 import { selectedEntry, selectedRow, stateIcon } from './model.js';
 import type { PageState } from './model.js';
-import { LINK_LABEL_MAX, rowKey, TABS } from './render.js';
+import { LINK_LABEL_MAX, paneStatus, rowKey, TABS } from './render.js';
 import type { SideTab, Tab, View } from './render.js';
 import { trusted } from './trusted.js';
 import type { PageAction, PageRow } from './types.js';
@@ -127,9 +127,38 @@ function ConversationLabel({ entry, state }: { entry: Entry; state: PageState })
   );
 }
 
+/** The view options menu's Chrome pane rows while it is on: its state, the last pairing's outcome, and Pair Chrome extension until paired. */
+function PaneRows({ view }: { view: View }) {
+  const status = paneStatus(view.pane);
+
+  if (status === null) {
+    return null;
+  }
+
+  return (
+    <>
+      <div class="menu-separator" role="separator"></div>
+      <p class="pane-note">{status}</p>
+      {view.paneNote === null ? null : (
+        <p class="pane-note" role="status">
+          {view.paneNote}
+        </p>
+      )}
+      {view.pane!.extension === 'paired' ? null : (
+        <button type="button" class="menu-row" role="menuitem" data-action="pane-pair">
+          <span class="menu-gutter" aria-hidden="true">
+            <span class="codicon codicon-plug"></span>
+          </span>
+          <span class="title">Pair Chrome extension</span>
+        </button>
+      )}
+    </>
+  );
+}
+
 /**
- * The header's view options button and its menu: the conversation's text size (smaller, the size, larger, and Reset) and Show message
- * details.
+ * The header's view options button and its menu: the conversation's text size (smaller, the size, larger, and Reset), Show message details,
+ * and the Chrome pane's state and pairing while it is on.
  */
 function TextSize({ view }: { view: View }) {
   const percent = `${Math.round(view.textScale * 100)}%`;
@@ -159,6 +188,7 @@ function TextSize({ view }: { view: View }) {
             <Gutter checked={view.details} />
             <span class="title">Show message details</span>
           </button>
+          <PaneRows view={view} />
         </div>
       ) : null}
     </div>

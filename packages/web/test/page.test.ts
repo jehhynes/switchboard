@@ -1822,6 +1822,76 @@ describe('the page in use', () => {
     page.close();
   });
 
+  it('reports the right column for the Chrome pane, marks its title, wakes and pairs the extension, and moves Status and Artifacts to the tabs while the pane shows (PRD R113)', async () => {
+    const query = { matches: true, addEventListener: () => {} };
+
+    vi.stubGlobal('matchMedia', vi.fn(() => query));
+
+    const sent: Array<[string, Record<string, unknown>]> = [];
+    const fetch = vi.fn(async (url: string, init?: { body?: string }) => {
+      posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) });
+
+      const body = url.endsWith('/pane-pair') ? { token: 'tok', extensionId: 'ext' } : {};
+
+      return { status: 200, ok: true, json: async () => body, text: async () => '' } as unknown as Response;
+    });
+    const page = startPage(root, {
+      fetch: fetch as unknown as typeof globalThis.fetch,
+      EventSource: FakeSource as unknown as typeof EventSource,
+      now: () => 10_000,
+      standalone: () => true,
+      toExtension: async (id, message) => (sent.push([id, message]), { ok: true }),
+    });
+    const source = FakeSource.last!;
+
+    vi.spyOn(root.querySelector('#detail')!, 'getBoundingClientRect').mockReturnValue({ left: 1300, top: 40, width: 600, height: 900 } as DOMRect);
+    hello(source);
+    await flush();
+    // Off: nothing reported.
+    expect(posts.filter((post) => post.url.endsWith('/pane-rect'))).toEqual([]);
+
+    source.emit('pane', { pane: { enabled: true, extension: 'none', extensionId: 'ext', marker: '0123456789ab', shown: false, error: null } });
+    await flush();
+    expect(sent).toEqual([['ext', { type: 'wake' }]]);
+    expect(document.title).toMatch(/ \[sb-pane 0123456789ab\]$/);
+    expect(posts.filter((post) => post.url.endsWith('/pane-rect')).at(-1)?.body).toMatchObject({ rect: { left: 1300, top: 40, width: 600, height: 900, dpr: expect.any(Number) } });
+    expect(root.querySelector('#detail .status-tab')).not.toBeNull();
+
+    click('[data-action="text-menu"]');
+    expect(root.querySelector('.text-size-menu .pane-note')!.textContent).toBe('Chrome pane: the Switchboard Chrome extension is not connected.');
+    click('[data-action="pane-pair"]');
+    await flush();
+    await flush();
+    expect(sent.at(-1)).toEqual(['ext', { type: 'pair', token: 'tok' }]);
+    expect(root.querySelector('.text-size-menu [role="status"]')!.textContent).toBe('Sent to the Chrome extension.');
+
+    source.emit('pane', { pane: { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: true, error: null } });
+    await flush();
+    expect(document.title).not.toContain('sb-pane');
+    expect(root.classList.contains('pane-shown')).toBe(true);
+    expect(root.classList.contains('wide')).toBe(true);
+    expect(root.querySelector('#head .tabs')).not.toBeNull();
+    expect(root.querySelector('#detail .detail-body')!.innerHTML).toBe('');
+    expect(root.querySelector('[data-action="pane-pair"]')).toBeNull();
+    // The tabs open what they name in the conversation's pane.
+    click('#head [data-tab="status"]');
+    expect(root.querySelector('#panel .status-tab')).not.toBeNull();
+    expect(root.querySelector('#panel .timeline')).toBeNull();
+    click('#head [data-tab="conversation"]');
+    expect(root.querySelector('#panel .timeline')).not.toBeNull();
+
+    source.emit('pane', { pane: { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: 'The pane would not fit the column.' } });
+    expect(root.querySelector('.text-size-menu .pane-note')!.textContent).toBe('Chrome pane stopped: The pane would not fit the column.');
+    expect(root.querySelector('#detail .status-tab')).not.toBeNull();
+
+    // Narrower than the column: the page reports none.
+    query.matches = false;
+    window.dispatchEvent(new Event('resize'));
+    expect(posts.filter((post) => post.url.endsWith('/pane-rect')).at(-1)?.body).toMatchObject({ rect: null });
+    vi.unstubAllGlobals();
+    page.close();
+  });
+
   it('puts Status and Artifacts in a column beside the conversation on a wide screen, with their own switch and no toggle, and keeps the tabs otherwise', async () => {
     const listeners: Array<() => void> = [];
     const query = { matches: true, addEventListener: (_type: string, listener: () => void) => listeners.push(listener) };

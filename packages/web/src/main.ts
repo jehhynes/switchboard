@@ -3,7 +3,7 @@ import { snoozeChoices } from '@switchboard/core/snooze';
 import type { PageState } from './model.js';
 import { escape, renderMarkdown } from './markdown.js';
 import { answerText, artifactUrl, complete, firstSnoozeDay, inputReady, renderMicButton, markdownBody, newView, parseQuestions, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, SIDE_TABS } from './render.js';
-import type { CardDraft, SideTab, Tab, View } from './render.js';
+import type { CardDraft, PaneView, SideTab, Tab, View } from './render.js';
 import type { ConsoleOptions, MountedConsole } from './console.js';
 import type { ArtifactView, ItemView, PageRow, ScreenPrompt } from './types.js';
 import { mount, unmount } from './island.js';
@@ -21,7 +21,9 @@ import { reconnector } from './reconnect.js';
 import { fitPills } from './fit.js';
 
 /** The stream's event types the page reads. */
-export const EVENTS = ['hello', 'list', 'scope', 'conversations', 'session', 'message', 'reply', 'status', 'artifact', 'unread', 'voice', 'settings', 'progress', 'words', 'draft'];
+export const EVENTS = ['hello', 'list', 'scope', 'conversations', 'session', 'message', 'reply', 'status', 'artifact', 'unread', 'voice', 'settings', 'progress', 'words', 'draft', 'pane'];
+/** How often the page wakes the Chrome extension while the Chrome pane is on and no extension is connected. */
+export const PANE_WAKE_MS = 30_000;
 /** How long an unread reply or status must be visible on a focused page before it counts as seen (architecture.md § Unread). */
 export const SEEN_MS = 1_000;
 const SEEN_CHECK_MS = 250;
@@ -75,6 +77,11 @@ export interface PageDeps {
   openUrl?(url: string): void;
   /** Whether the page runs as the installed app, whose links the hub opens in the default browser; read from `display-mode` when left out. */
   standalone?(): boolean;
+  /**
+   * Sends a message to the Chrome extension with that ID (`chrome.runtime.sendMessage`, which `externally_connectable` allows); resolves its
+   * answer, or null when the browser has no such extension. Read from `chrome.runtime` when left out.
+   */
+  toExtension?(extensionId: string, message: Record<string, unknown>): Promise<unknown>;
 }
 
 type Answer = { status: number; body: Record<string, unknown> };
@@ -167,7 +174,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
   listWidth?.observe(list);
   /** The tab the conversation's pane shows: always the conversation while Status and Artifacts have their own column. */
-  const mainTab = (): Tab => (wide() ? 'conversation' : view.tab);
+  const mainTab = (): Tab => (wide() && view.pane?.shown !== true ? 'conversation' : view.tab);
 
   wideQuery?.addEventListener?.('change', () => draw());
   let state: PageState = EMPTY;
@@ -1013,7 +1020,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const draw = (): void => {
     // On a narrow screen the list and the conversation are each a full-width view (page.css); the list shows until a work item is opened.
     root.classList.toggle('listing', view.list || wanted === null);
-    document.title = pageTitle(state.groups);
+    // The dock finds this window by the marker until it has found it (architecture.md § Pane state).
+    document.title = pageTitle(state.groups) + (view.pane?.marker == null ? '' : ` [sb-pane ${view.pane.marker}]`);
     header.draw(state.header, state.groups);
     // A search shows only the rows that match, in every group, open (PRD R63).
     const listed = header.list(state.groups);
@@ -1027,9 +1035,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // terminal holder, or a Codex thread in its daemon, without a terminal.
     mount(note, renderEndedNote(state.session, resuming));
 
-    const side = wide() && state.scope !== null;
+    // While the Chrome pane covers the column, Status, Artifacts and Console go back to the tabs and the column stays empty under it.
+    const columned = wide() && state.scope !== null;
+    const side = columned && view.pane?.shown !== true;
 
-    root.classList.toggle('wide', side);
+    root.classList.toggle('wide', columned);
+    root.classList.toggle('pane-shown', columned && !side);
 
     if (!side) {
       mount(detailHead, null);
@@ -1602,6 +1613,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         break;
       case 'text-reset':
         setTextScale(1);
+        break;
+      case 'pane-pair':
+        void pairPane();
         break;
       case 'toggle-details':
         view.details = !view.details;
@@ -2208,6 +2222,90 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     draw();
   };
 
+  // ---- The Chrome pane (architecture.md § Pane state): the installed page reports its right column, wakes and pairs the extension ----
+  const standalone = (): boolean => deps.standalone?.() ?? (typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches);
+  const toExtension =
+    deps.toExtension ??
+    ((extensionId: string, message: Record<string, unknown>): Promise<unknown> => {
+      const runtime = (globalThis as { chrome?: { runtime?: { sendMessage?(id: string, message: unknown, callback: (answer: unknown) => void): void; lastError?: unknown } } }).chrome?.runtime;
+
+      if (runtime?.sendMessage === undefined) {
+        return Promise.resolve(null);
+      }
+
+      return new Promise((resolve) => runtime.sendMessage!(extensionId, message, (answer) => resolve(runtime.lastError === undefined ? (answer ?? null) : null)));
+    });
+  const detail = root.querySelector<HTMLElement>('#detail')!;
+  let paneSent = 'null';
+  const reportPane = (): void => {
+    const on = view.pane?.enabled === true && standalone() && state.key !== null && state.scope !== null && wide();
+    const box = on ? detail.getBoundingClientRect() : null;
+    const rect = box === null || box.width === 0 ? null : { left: box.left, top: box.top, width: box.width, height: box.height, dpr: window.devicePixelRatio || 1, innerWidth: window.innerWidth, innerHeight: window.innerHeight };
+    const text = JSON.stringify(rect);
+
+    if (text !== paneSent) {
+      paneSent = text;
+      void post('pane-rect', { rect });
+    }
+  };
+  const paneColumn = typeof ResizeObserver === 'function' ? new ResizeObserver(() => reportPane()) : null;
+
+  paneColumn?.observe(detail);
+  window.addEventListener('resize', () => reportPane());
+  // A move to a monitor of another scale changes devicePixelRatio without a resize of the column in CSS pixels.
+  const watchScale = (): void => {
+    if (typeof window.matchMedia === 'function') {
+      window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`).addEventListener?.(
+        'change',
+        () => {
+          reportPane();
+          watchScale();
+        },
+        { once: true },
+      );
+    }
+  };
+
+  watchScale();
+
+  const wake = (): void => {
+    if (view.pane?.enabled === true && view.pane.extension === 'none' && view.pane.extensionId !== undefined && standalone()) {
+      void toExtension(view.pane.extensionId, { type: 'wake' });
+    }
+  };
+  const paneWake = setInterval(wake, PANE_WAKE_MS);
+  let paneWasOn = false;
+  const paneChanged = (): void => {
+    const on = view.pane?.enabled === true;
+
+    // A new stream's key has no report yet; turning the pane on starts one.
+    if (on !== paneWasOn) {
+      paneWasOn = on;
+      paneSent = on ? '' : paneSent;
+    }
+
+    wake();
+    reportPane();
+  };
+  const pairPane = async (): Promise<void> => {
+    view.paneNote = 'Pairing…';
+    draw();
+
+    const answer = await post('pane-pair', {});
+    const token = answer.body['token'];
+    const extensionId = answer.body['extensionId'];
+
+    if (answer.status !== 200 || typeof token !== 'string' || typeof extensionId !== 'string') {
+      view.paneNote = String(answer.body['error'] ?? `Pairing failed (status ${answer.status}).`);
+    } else {
+      const reply = (await toExtension(extensionId, { type: 'pair', token })) as { ok?: unknown; error?: unknown } | null;
+
+      view.paneNote = reply === null ? 'The Switchboard Chrome extension is not installed in this browser, or is an older build.' : reply.ok === true ? 'Sent to the Chrome extension.' : String(reply.error ?? 'The Chrome extension refused.');
+    }
+
+    draw();
+  };
+
   // ---- The stream ----
   const source = new deps.EventSource('/v1/conversation/events?page=1');
 
@@ -2236,6 +2334,15 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       }
 
       // Dictation (architecture.md § Dictation): live words show dimmed after the box's text; the hub's draft fills the box unless the operator typed over it.
+      if (type === 'pane') {
+        view.pane = (data['pane'] as PaneView | undefined) ?? null;
+        paneChanged();
+      } else if (type === 'hello' || type === 'scope') {
+        // A new key or work item: the hub reads the column, and the work item's tabs, again.
+        paneSent = view.pane?.enabled === true ? '' : 'null';
+        setTimeout(reportPane, 0);
+      }
+
       if (type === 'words') {
         liveWords.textContent = String(data['text'] ?? '');
         liveWords.hidden = liveWords.textContent === '';
@@ -2292,6 +2399,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     state: () => state,
     close: () => {
       clearInterval(seenTimer);
+      clearInterval(paneWake);
+      paneColumn?.disconnect();
       clearInterval(promptTimer);
       listening.abort();
       listWidth?.disconnect();

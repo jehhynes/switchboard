@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { PANE_EXTENSION_ID } from '@switchboard/core';
 import type { PaneLinkState } from './paneLink.js';
 
 /** The narrowest right column the pane covers, in CSS pixels: a normal Chrome window would not go below about 514 DIP (mechanics M103). */
@@ -21,6 +22,8 @@ export interface PaneRect {
 export interface PanePageView {
   enabled: boolean;
   extension: PaneLinkState;
+  /** The extension the page wakes and hands a pairing token to. */
+  extensionId: string;
   /** The marker the page puts in its title until the dock has found its window. */
   marker: string | null;
   /** The dock shows the pane over this page's column. */
@@ -248,6 +251,7 @@ export class PaneState {
       const view: PanePageView = {
         enabled: this.deps.enabled(),
         extension: this.deps.extension(),
+        extensionId: PANE_EXTENSION_ID,
         marker: key === this.#owner && !this.#found ? this.#marker : null,
         shown: key === this.#owner && show && this.#shown,
         error: key === this.#owner ? this.#error : null,
