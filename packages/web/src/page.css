@@ -25,8 +25,7 @@ button:focus-visible, a:focus-visible, .tab:focus-visible { outline: 1px solid v
 .side { flex: none; width: 100%; display: flex; flex-direction: column; background: var(--vscode-sideBar-background); border-right: 1px solid var(--vscode-sideBar-border, var(--vscode-panel-border)); }
 /* The list's header, as the dock's title row: the title takes what is left, ending in an ellipsis, and the icons keep their width. */
 .side-head { flex: none; }
-.list-header { display: flex; align-items: center; gap: 2px; min-height: 35px; padding: 0 4px 0 20px; }
-.list-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; text-transform: uppercase; color: var(--vscode-foreground); }
+.list-header { display: flex; align-items: center; justify-content: flex-end; gap: 2px; min-height: 35px; padding: 0 4px 0 20px; }
 .header-sources { display: flex; flex: none; }
 .list-header button.icon { flex: none; justify-content: center; min-width: 26px; height: 26px; }
 .source-logo { display: block; width: 16px; height: 16px; }

@@ -150,7 +150,7 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 | H4 | "N held sessions without a work item" above the groups, opening the held sessions window | MainWindow.axaml:458-462 | Missing | |
 | H5 | Needs-you message in the toast when a work item starts needing the operator; a click on it runs that row's click | `ShowNeedsYou` MainWindow.axaml.cs:267 | Missing | The tab title counts Blocked on you instead (`pageTitle` model.ts:107) |
 | H6 | The toast hides after 10 seconds shown with the pointer off it; Dismiss clears it | `CheckStatus` MainWindow.axaml.cs:544 | Missing | no toast |
-| H8 | Title row: Close, More Actions, Auto-hide, Search and the source icons keep their width from the right, the title takes the rest with an ellipsis, and a control that does not fit whole is hidden | `HeaderPanel`, MainWindow.axaml:378-418 | Partly | `renderListHeader` listHeader.ts: the icons keep their width and the title ends in an ellipsis; nothing is hidden for want of room. Close and Auto-hide are Dock only (D3, D6) |
+| H8 | Title row: Close, More Actions, Auto-hide, Search and the source icons keep their width from the right, the title takes the rest with an ellipsis, and a control that does not fit whole is hidden | `HeaderPanel`, MainWindow.axaml:378-418 | Partly | `renderListHeader` listHeader.ts: the icons keep their width at the right; nothing is hidden for want of room. The page has no "Switchboard" title, which the tab or app title already shows (operator's decision). Close and Auto-hide are Dock only (D3, D6) |
 | H7 | Page title counts Blocked on you, "(2) Switchboard" | none | Web only | `pageTitle` model.ts:107 |
 
 ## Connection

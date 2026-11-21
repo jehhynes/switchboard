@@ -212,7 +212,7 @@ export function renderListHeader(header: PageHeader | null, view: HeaderView): s
 
   const more = `<div class="menu-anchor" data-key="more"><button type="button" class="icon more-actions" data-action="list-more" aria-haspopup="menu" aria-expanded="${view.menu === 'more'}" title="More Actions…" aria-label="More Actions"><span class="codicon codicon-ellipsis" aria-hidden="true"></span></button>${view.menu === 'more' ? renderMoreMenu(header) : ''}</div>`;
 
-  return `<div class="list-header"><span class="list-title">Switchboard</span>${icons}${searchButton}${more}</div>${box}${notice}`;
+  return `<div class="list-header">${icons}${searchButton}${more}</div>${box}${notice}`;
 }
 
 /** A More Actions row: its codicon in the gutter, as the dock's menu draws its glyph, then its label. */

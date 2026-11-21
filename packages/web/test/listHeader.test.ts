@@ -77,7 +77,9 @@ describe('the list header (architecture.md § Web page)', () => {
 
     const buttons = [...host.querySelectorAll<HTMLElement>('.source-toggle')];
 
-    expect(host.querySelector('.list-title')?.textContent).toBe('Switchboard');
+    // The page's own title names Switchboard, so the list's header has no label (approved by the operator).
+    expect(host.querySelector('.list-title')).toBeNull();
+    expect(host.querySelector('.list-header')?.textContent).not.toContain('Switchboard');
     expect(buttons.map((one) => one.getAttribute('aria-label'))).toEqual(['gh', 'zoho', 'jira']);
     expect(buttons[0]!.title).toBe('gh: polled\nClick to stop polling gh');
     expect(buttons[0]!.getAttribute('aria-pressed')).toBe('true');
