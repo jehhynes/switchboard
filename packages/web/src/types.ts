@@ -188,6 +188,10 @@ export interface PageHeader {
   folders: string[];
   /** The schedules New ad-hoc session can run now. */
   schedules: Array<{ name: string; playbook: string }>;
+  /** The notice while the terminal holder is from an older build or restarting, and what Restart and resume asks; `confirm` is null while it runs. */
+  holderNotice?: { text: string; confirm: { question: string; detail: string; action: string } | null };
+  /** The last holder restart's result, which the page hides once dismissed, by `at`. */
+  holderResult?: { at: number; text: string; failed: boolean };
 }
 
 /** A prompt the session waits on in its terminal, as the hub read it from the screen (`ScreenPrompt` in the conversation package). */

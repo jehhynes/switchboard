@@ -154,7 +154,8 @@ const PROVIDERS = [
 export type HeaderSheet =
   | { kind: 'adhoc'; opId: string; schedule: string; repo: string; provider: string; providerChosen: boolean; prompt: string; start: boolean; providerNote: string | null; busy: boolean; error: string | null }
   | { kind: 'folder'; opId: string; folder: string; provider: string; providerChosen: boolean; installed: string[] | null; busy: boolean; error: string | null }
-  | { kind: 'later'; title: string };
+  | { kind: 'later'; title: string }
+  | { kind: 'holder'; busy: boolean; error: string | null };
 
 /**
  * What the header has open: a source kind's menu (`source:<kind>`), the range menu (`range`), More Actions (`more`), or nothing; and a sheet over
@@ -166,6 +167,25 @@ export interface HeaderView {
   sheet: HeaderSheet | null;
   /** A refusal the header's last action got, shown under it until dismissed or the next action. */
   notice: string | null;
+  /** The `at` of the holder restart result dismissed last, which stays hidden. */
+  holderDismissed?: number | null;
+}
+
+/**
+ * The terminal holder's notice under the header while it is from an older build or restarting, with Restart and resume, and the last restart's
+ * result until dismissed (architecture.md § Restarting the holder), as the dock shows them above its groups.
+ */
+function holderNotices(header: PageHeader | null, view: HeaderView): string {
+  const notice = header?.holderNotice;
+  const result = header?.holderResult;
+  const restart = notice?.confirm == null ? '' : `<button type="button" class="holder-restart" data-action="list-holder-restart">${escape(notice.confirm.action)}</button>`;
+  const shown = notice === undefined ? '' : `<div class="holder-notice" role="status"><span class="holder-notice-text">${escape(notice.text)}</span>${restart}</div>`;
+  const done =
+    result === undefined || result.at === view.holderDismissed
+      ? ''
+      : `<p class="holder-result${result.failed ? ' failed' : ''}" role="status"><span class="holder-result-text">${escape(result.text)}</span><button type="button" class="icon dismiss" data-action="list-holder-dismiss" title="Dismiss" aria-label="Dismiss"><span class="codicon codicon-close" aria-hidden="true"></span></button></p>`;
+
+  return shown + done;
 }
 
 /**
@@ -212,7 +232,7 @@ export function renderListHeader(header: PageHeader | null, view: HeaderView): s
 
   const more = `<div class="menu-anchor" data-key="more"><button type="button" class="icon more-actions" data-action="list-more" aria-haspopup="menu" aria-expanded="${view.menu === 'more'}" title="More Actions…" aria-label="More Actions"><span class="codicon codicon-ellipsis" aria-hidden="true"></span></button>${view.menu === 'more' ? renderMoreMenu(header) : ''}</div>`;
 
-  return `<div class="list-header">${icons}${searchButton}${more}</div>${box}${notice}`;
+  return `<div class="list-header">${icons}${searchButton}${more}</div>${box}${notice}${holderNotices(header, view)}`;
 }
 
 /** A More Actions row: its codicon in the gutter, as the dock's menu draws its glyph, then its label. */
@@ -277,6 +297,15 @@ export function renderHeaderSheet(sheet: HeaderSheet | null, header: PageHeader 
   const busy = sheet.busy ? ' disabled' : '';
   const cancel = `<button type="button" class="sheet-button secondary" data-action="list-sheet-cancel"${busy}>Cancel</button>`;
   const error = sheet.error === null ? '' : `<p class="sheet-error" role="alert">${escape(sheet.error)}</p>`;
+
+  // Restart and resume asks the hub's question, which follows each list, so a restart begun elsewhere leaves nothing to confirm.
+  if (sheet.kind === 'holder') {
+    const confirm = header?.holderNotice?.confirm ?? null;
+
+    return confirm === null
+      ? frame('Restart the terminal holder', `<p class="sheet-detail">${escape(header?.holderNotice?.text ?? 'The terminal holder runs the installed build.')}</p>${error}`, '<button type="button" class="sheet-button primary" data-action="list-sheet-cancel">Close</button>')
+      : frame(confirm.question, `<p class="sheet-detail">${escape(confirm.detail)}</p>${error}`, `${cancel}<button type="button" class="sheet-button primary" data-action="list-sheet-go"${busy}>${escape(confirm.action)}</button>`);
+  }
   const folders = header?.folders ?? [];
 
   if (sheet.kind === 'folder') {
@@ -590,7 +619,9 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
     redraw();
 
     const answer =
-      sheet.kind === 'adhoc'
+      sheet.kind === 'holder'
+        ? await deps.post('page-holder-restart', { detail: shown?.holderNotice?.confirm?.detail ?? '' })
+        : sheet.kind === 'adhoc'
         ? await deps.post('page-adhoc', sheet.schedule !== '' ? { opId: sheet.opId, schedule: sheet.schedule } : { opId: sheet.opId, prompt: sheet.prompt, repoRoot: sheet.repo, start: sheet.start, provider: sheet.provider })
         : await deps.post('page-folder-conversation', { opId: sheet.opId, folder: sheet.folder, provider: sheet.provider });
 
@@ -622,7 +653,7 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
     const name = field.dataset?.['field'];
     const sheet = view.sheet;
 
-    if (name === undefined || sheet === null || sheet.kind === 'later') {
+    if (name === undefined || sheet === null || sheet.kind === 'later' || sheet.kind === 'holder') {
       return;
     }
 
@@ -689,6 +720,15 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
       }
       case 'list-dismiss':
         view.notice = null;
+        redraw();
+        break;
+      case 'list-holder-restart':
+        view.sheet = { kind: 'holder', busy: false, error: null };
+        redraw();
+        sheetHost.querySelector<HTMLElement>('.sheet-button')?.focus();
+        break;
+      case 'list-holder-dismiss':
+        view.holderDismissed = shown?.holderResult?.at ?? null;
         redraw();
         break;
       case 'list-search':

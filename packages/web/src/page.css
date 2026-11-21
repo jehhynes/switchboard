@@ -60,6 +60,14 @@ svg.source-logo.forum { color: #57ae57; }
 @media (hover: none), (pointer: coarse) { .sheet-select { min-height: 44px; } .more-menu .menu-row { height: 44px; } }
 .list-notice { display: flex; align-items: flex-start; gap: 4px; margin: 0; padding: 4px 4px 4px 20px; color: var(--vscode-editorWarning-foreground); }
 .list-notice-text { flex: 1; min-width: 0; }
+.holder-notice { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 0; padding: 4px 4px 4px 20px; color: var(--vscode-editorWarning-foreground); }
+.holder-notice-text { flex: 1 1 12em; min-width: 0; }
+.holder-restart { flex: none; min-height: 26px; padding: 0 10px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 4px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); cursor: pointer; }
+.holder-restart:hover { background: var(--vscode-button-hoverBackground); }
+.holder-result { display: flex; align-items: flex-start; gap: 4px; margin: 0; padding: 4px 4px 4px 20px; }
+.holder-result.failed { color: var(--vscode-editorWarning-foreground); }
+.holder-result-text { flex: 1; min-width: 0; }
+@media (hover: none), (pointer: coarse) { .holder-restart { min-height: 44px; } }
 @media (hover: none), (pointer: coarse) { .list-header button.icon { min-width: 44px; min-height: 44px; } .list-header { min-height: 44px; } }
 #list { flex: 1; overflow-y: auto; padding-bottom: 12px; }
 #list > .empty { padding: 0 20px; }

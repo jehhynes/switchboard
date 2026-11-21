@@ -341,6 +341,57 @@ describe('the list header (architecture.md § Web page)', () => {
     page.close();
   });
 
+  it('shows the holder notice under the header, asks before Restart and resume, and shows the result until dismissed (architecture.md § Restarting the holder)', async () => {
+    const { page, source } = start();
+    const confirm = { question: 'Restart the terminal holder?', detail: 'This session is not idle, so the restart interrupts its turn: Issue <8> (gh 108).', action: 'Restart and resume' };
+    const holderNotice = { text: 'The terminal holder is from an older build. Restart it to update (1 session will be resumed).', confirm };
+
+    hello(source);
+    expect(root.querySelector('.holder-notice')).toBeNull();
+
+    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ holderNotice }) });
+    expect(root.querySelector('.holder-notice-text')?.textContent).toBe(holderNotice.text);
+    click('.holder-restart');
+    expect(root.querySelector('#list-sheet .sheet-title')?.textContent).toBe('Restart the terminal holder?');
+    expect(root.querySelector('#list-sheet .sheet-detail')?.textContent).toBe(confirm.detail);
+    expect(document.activeElement?.textContent).toBe('Cancel');
+    click('#list-sheet [data-action="list-sheet-cancel"].sheet-button');
+    expect(root.querySelector('#list-sheet .sheet')).toBeNull();
+    expect(posts.filter((one) => one.url.endsWith('/page-holder-restart'))).toEqual([]);
+
+    // A refusal stays in the sheet; a start closes it.
+    answers['/page-holder-restart'] = { status: 409, body: { error: 'The terminal holder is already restarting.' } };
+    click('.holder-restart');
+    click('#list-sheet [data-action="list-sheet-go"]');
+    await flush();
+    await flush();
+    expect(root.querySelector('#list-sheet .sheet-error')?.textContent).toBe('The terminal holder is already restarting.');
+    answers['/page-holder-restart'] = { status: 200, body: { started: true } };
+    click('#list-sheet [data-action="list-sheet-go"]');
+    await flush();
+    await flush();
+    expect(posts.filter((one) => one.url === '/v1/conversation/page-holder-restart').map((one) => one.body['detail'])).toEqual([confirm.detail, confirm.detail]);
+    expect(root.querySelector('#list-sheet .sheet')).toBeNull();
+
+    // While it runs there is nothing to press; the result shows until dismissed, and a later one shows again.
+    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ holderNotice: { text: 'Restarting the terminal holder and resuming its sessions…', confirm: null } }) });
+    expect(root.querySelector('.holder-restart')).toBeNull();
+
+    const holderResult = { at: 5, text: 'The terminal holder restarted and 1 session resumed. 1 session did not resume: gh 109: Claude Code did not start.', failed: true };
+
+    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ holderResult }) });
+    expect(root.querySelector('.holder-notice')).toBeNull();
+    expect(root.querySelector('.holder-result.failed .holder-result-text')?.textContent).toBe(holderResult.text);
+    click('[data-action="list-holder-dismiss"]');
+    expect(root.querySelector('.holder-result')).toBeNull();
+    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ holderResult }) });
+    expect(root.querySelector('.holder-result')).toBeNull();
+    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ holderResult: { at: 6, text: 'The terminal holder restarted.', failed: false } }) });
+    expect(root.querySelector('.holder-result:not(.failed)')?.textContent).toBe('The terminal holder restarted.');
+
+    page.close();
+  });
+
   it("creates an ad-hoc work item from New ad-hoc session as the dock's window does, keeping a refusal in the sheet, or runs a schedule", async () => {
     const { page, source } = start();
 
