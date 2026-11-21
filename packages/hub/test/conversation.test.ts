@@ -1754,6 +1754,10 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
       },
       rowPaste: async (_workItemId, label) => (label === 'Reply' ? 'Dear Ana' : null),
       uploads: join(dir, 'uploads'),
+      rowCommand: (workItemId, label) => {
+        commands.push([workItemId, label]);
+        return label === 'Open changes' ? null : 'The work item no longer offers this.';
+      },
       rowOpen: (workItemId, url) => {
         opens.push([workItemId, url]);
         return url === 'https://gone.test/' ? 'The work item no longer links to this.' : null;
@@ -1773,6 +1777,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     let header: PageHeader = { sources: [{ kind: 'github', enabled: true, title: 'gh: polled\nClick to stop polling gh', sources: [{ name: 'gh', enabled: true }] }], repoRoots: ['D:/w1'], folders: ['D:/w1', dir], schedules: [{ name: 'nightly', playbook: 'dev:sweep' }] };
     const setHeader = (next: typeof header) => void (header = next);
     const opens: Array<[number, string]> = [];
+    const commands: Array<[number, string]> = [];
     const resumed: string[] = [];
     let resumeRefusal: string | null = null;
     const refuseResume = (why: string | null) => void (resumeRefusal = why);
@@ -1789,7 +1794,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
       return { key, frames };
     };
 
-    return { store, view, scopes, service, openPage, focus, actions, opens, resumed, refuseResume, held, sourceCalls, setHeader, events, made, refusePoll };
+    return { store, view, scopes, service, openPage, focus, actions, opens, commands, resumed, refuseResume, held, sourceCalls, setHeader, events, made, refusePoll };
   }
 
   it("runs More Actions' Refresh sources, New ad-hoc session and New conversation in a folder for a page key, in folders and schedules the header offers only", () => {
@@ -1985,6 +1990,24 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     // A session the page cannot talk to takes no file.
     store.updateSession('s3', { codeMode: false });
     expect(service.pageUpload(page.key, 1, 'b.txt', Buffer.from('b'))).toMatchObject({ status: 409 });
+  });
+
+  it("runs a VS Code control only on the page's selected work item, for its scope generation, once per opId", () => {
+    const { scopes, service, openPage, view, commands } = setup();
+    const page = openPage();
+    const window = scopes.open(view.file, view.view);
+
+    expect(service.rowCommand({ window: page.key, scopeGen: 0, opId: 'a', workItemId: 3, label: 'Open changes' }).status).toBe(403);
+    service.select({ window: page.key, opId: 'o', workItemId: 3 });
+    expect(service.rowCommand({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 2, label: 'Open changes' }).status).toBe(403);
+    expect(service.rowCommand({ window, scopeGen: scopes.scope(window)!.scopeGen, opId: 'a', workItemId: 2, label: 'Open changes' }).status).toBe(403);
+    expect(service.rowCommand({ window: page.key, scopeGen: 0, opId: 'a', workItemId: 3, label: 'Open changes' }).status).toBe(409);
+    expect(service.rowCommand({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 3 }).status).toBe(400);
+    expect(commands).toEqual([]);
+    expect(service.rowCommand({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 3, label: 'Open changes' })).toEqual({ status: 200, body: { done: true } });
+    expect(service.rowCommand({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 3, label: 'Open changes' })).toEqual({ status: 200, body: { done: true } });
+    expect(service.rowCommand({ window: page.key, scopeGen: 1, opId: 'b', workItemId: 3, label: 'History' })).toEqual({ status: 409, body: { error: 'The work item no longer offers this.' } });
+    expect(commands).toEqual([[3, 'Open changes'], [3, 'History']]);
   });
 
   it("opens a listed row's link for a page key on any work item, not only the selected one, once per opId, and says why not", () => {

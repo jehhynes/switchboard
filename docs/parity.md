@@ -17,7 +17,7 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 
 ## Open gaps, by value
 
-1. Row controls the page lacks (C8, C9, C15, R12): Open in Claude or Codex and a Codex terminal, Open changes, History, Open report, pool tickets' Start and Triage again, and Enter on a pill.
+1. Row controls the page lacks (C8, C9, C15, R12): Open in Claude or terminal (Open in terminal follows the Console tab, branch `web-terminal`), History (the page has no History view), pool tickets' Start and Triage again, and Enter on a pill.
 2. More Actions' dock windows (H2): Held sessions, Ticket volume report, Show hub log and Open Settings only say to use the dock, and New ad-hoc session and New conversation in a folder cannot choose a folder the hub does not know.
 3. Problems the page never shows (H3, H4, H5): settings, source and voice errors, orphan held sessions, and the needs-you message.
 4. Done's date bands and group state (G5, G6, G8): Done is one flat list, Snoozed starts open, and open or closed choices do not survive a reload.
@@ -79,7 +79,7 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 | R19 | Row separator rule above each row but the first in its band | MainWindow.axaml:169-177 | Partly | page.css:34-35: the first in its group, since Done has no bands (G8) |
 | R20 | Pool tickets (Unstarted, Snoozed) show as rows with Start or Triage again | `poolRow` dock.ts:415 | Missing | Left out because a pool ticket has no conversation (architecture.md § Web page, `pageList` page.ts:305-321); Differs once the operator approves |
 | R21 | No unread count on rows | (dropped in `a7274f7`) | Present | `PageRow` page.ts:205 carries none and `listRow` render.ts:225 draws none |
-| R22 | The selected row's buttons beside lines 2 and 3: main control (Approve in the accent colour, its prompt in the tooltip), Copy, Open report; hidden on other rows and on rows with none | MainWindow.axaml:577-591, 126-134, `mainTitle` rows.ts:139 | Partly | The main control is a button in the conversation header, not on the row (`renderActions` render.ts:94-95); Copy is in the actions menu; Open report is missing |
+| R22 | The selected row's buttons beside lines 2 and 3: main control (Approve in the accent colour, its prompt in the tooltip), Copy, Open report; hidden on other rows and on rows with none | MainWindow.axaml:577-591, 126-134, `mainTitle` rows.ts:139 | Partly | The main control is a button in the conversation header, not on the row (`renderActions` render.ts:94-95); Copy and Open report are in the actions menu |
 
 ## Marks, stripes and colours
 
@@ -98,7 +98,7 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 
 | # | Behaviour | Dock evidence | Web | Web evidence and note |
 |---|---|---|---|---|
-| S1 | A click selects the row and runs its click: the item window and session, a question's Open in Claude or Codex, a terminal, or the focus URL | `Open` MainWindow.axaml.cs:1322, `openOf` dock.ts:603 | Differs | A click selects the work item and opens its conversation in the page (`select` main.ts:837); the operator's design decision 19 (`.wip/voice-design.md` § 11) |
+| S1 | A click selects the row and runs its click: the item window and session, a question's Open in Claude or Codex, a terminal, or the focus URL | `Open` MainWindow.axaml.cs:1322, `openOf` dock.ts:603 | Differs | A click selects the work item and opens its conversation in the page (`select` main.ts:837); the operator's design decision 19 (`.wip/voice-design.md` § 11). The dock's click on the item window is the actions menu's Open in VS Code, which opens or brings forward the row's window through the hub without opening its session |
 | S2 | A second click on the row being switched to is ignored; a click on another row replaces it | MainWindow.axaml.cs:1331-1337 | Present | The latest work item clicked wins (`reconcile` main.ts:862) |
 | S3 | A failed click says why in the status toast | `ShowFailure` MainWindow.axaml.cs:1369 | Partly | A refused select shows over the composer, or over the list with no conversation (main.ts:880-893) |
 | S4 | The row of the VS Code window or session terminal that comes to the front is selected, its group opened and scrolled into view | `SelectWindow` ViewModels.cs:649, `ShowItemWindow` MainWindow.axaml.cs:968 | Differs | The page selects only on its own clicks, as decision 19 has it; the selection is kept in the URL (`#w=`, main.ts:87, 847) |
@@ -118,7 +118,7 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 | C6 | Add comment… | `commentControl` rows.ts:97 | Present | in the notes group, through the input sheet |
 | C7 | Persona submenu with the session's persona checked and Clear pin | `personaControls` app.ts:601, MainWindow.axaml.cs:1477 | Partly | Persona button and roster in the conversation header (render.ts:327-333) |
 | C8 | Open in Claude or Codex, Answer in terminal, Open in terminal | rows.ts:168-205, MainWindow.axaml.cs:1450-1500 | Partly | The Console tab shows a held Claude Code Mode session's terminal and types into it once clicked (`drawConsole` main.ts, `console.ts`; architecture.md § Web page), and a terminal prompt card answers some waits; Open in Claude or Codex, and a terminal for a Codex session, are not on the page |
-| C9 | Open changes, History, Open report (VS Code commands) | `windowCommands` dock.ts:771 | Missing | |
+| C9 | Open changes, History, Open report (VS Code commands) | `windowCommands` dock.ts:771 | Partly | Open changes and Open report in the actions menu: the hub leaves the dock's command for the row's window and starts VS Code on it (`row-command`, `pageCommandOf` page.ts); History is missing, as the page has no History view and does not send it to VS Code |
 | C10 | Open ticket and an Open item per link, more than two in an Open link submenu, labels cut at 48 characters | MainWindow.axaml.cs:1502-1560 | Partly | `renderActions` render.ts, in the actions menu after Copy; the submenu opens in place under Open link rather than beside it, which works at a phone's width |
 | C11 | Copy: one draft copies at once, several open a Copy submenu of labels; `Copied <label>.` in the neutral toast; an unreadable draft says why | `Copy` MainWindow.axaml.cs:1715, menu :1482-1489, `OnCopyClicked` :1762 | Partly | `copyPaste` main.ts:1447: each draft is its own item in the actions menu (render.ts:90), nothing confirms the copy, and a refused clipboard shows the text to copy |
 | C12 | Delete asks first with the hub's question and detail; the focus starts on Cancel and Enter never deletes | `Act` MainWindow.axaml.cs:1630, `ConfirmDialog`, `deleteConfirm` rows.ts:218 | Partly | the sheet asks (render.ts:155-157) but does not put the focus on Cancel |

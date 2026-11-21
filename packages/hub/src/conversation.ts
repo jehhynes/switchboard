@@ -266,6 +266,8 @@ export interface ConversationServiceDeps {
   rowPaste?(workItemId: number, label: string): Promise<string | null>;
   /** The folder the files a page attaches are written to; `UPLOAD_DIR` by default. */
   uploads?: string;
+  /** Runs a VS Code control of a work item's row by its label (Open in VS Code, Open changes, Open report), after checking its dock row offers it now: why not, or null. */
+  rowCommand?(workItemId: number, label: string): string | null;
   /** Opens a work item row's ticket URL or link in the default browser, after checking that its dock row holds it now: why not, or null. */
   rowOpen?(workItemId: number, url: string): string | null;
   log(line: string): void;
@@ -625,6 +627,47 @@ export class ConversationService {
     }
 
     const why = this.deps.rowAction === undefined ? 'This hub runs no actions from the page.' : this.deps.rowAction(workItemId as number, label, { until: (until as number | null | undefined) ?? null, comment: typeof comment === 'string' && comment.trim() !== '' ? comment.trim() : null, text: (text as string | null | undefined) ?? null, choice: (choice as string | null | undefined) ?? null });
+    const answer = why === null ? { status: 200, body: { done: true } } : { status: 409, body: { error: why } };
+
+    this.#rowActions.set(`${window} ${opId}`, answer);
+
+    for (const old of [...this.#rowActions.keys()].slice(0, -100)) {
+      this.#rowActions.delete(old);
+    }
+
+    return answer;
+  }
+
+  /**
+   * `row-command {window, scopeGen, opId, workItemId, label}` (architecture.md § Web page): one of the row's VS Code controls on the page's
+   * selected work item, which opens its window in VS Code through the hub; refused as `row-action` is. A repeated `opId` answers the first result.
+   */
+  rowCommand(body: Record<string, unknown>): { status: number; body: unknown } {
+    const { window, scopeGen, opId, workItemId, label } = body;
+
+    if (typeof window !== 'string' || typeof scopeGen !== 'number' || typeof opId !== 'string' || opId === '' || !Number.isInteger(workItemId) || typeof label !== 'string') {
+      return { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId, label}.' } };
+    }
+
+    const scope = this.deps.windows.isPage(window) ? this.deps.windows.scope(window) : null;
+
+    if (scope === null || scope.workItemId !== workItemId) {
+      return { status: 403, body: { error: 'Not in this window.' } };
+    }
+
+    const refused = refusal(scope, scopeGen, null);
+
+    if (refused !== null) {
+      return refused;
+    }
+
+    const done = this.#rowActions.get(`${window} ${opId}`);
+
+    if (done !== undefined) {
+      return done;
+    }
+
+    const why = this.deps.rowCommand === undefined ? 'This hub opens no VS Code window for the page.' : this.deps.rowCommand(workItemId as number, label);
     const answer = why === null ? { status: 200, body: { done: true } } : { status: 409, body: { error: why } };
 
     this.#rowActions.set(`${window} ${opId}`, answer);

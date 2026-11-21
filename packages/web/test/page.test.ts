@@ -1519,6 +1519,30 @@ describe('the page in use', () => {
     page.close();
   });
 
+  it("runs Open in VS Code, Open changes and Open report through the hub from the menu's opens group, and shows a refusal", async () => {
+    const { page, source } = start();
+    const opens = [{ label: 'Open in VS Code', icon: 'vscode' }, { label: 'Open changes', icon: 'diff-multiple' }, { label: 'Open report', icon: 'symbol-file' }];
+
+    hello(source, { groups: [listGroup('review', [listRow(1, { title: 'Fix it', opens, pastes: ['Reply'], url: 'https://github.com/o/r/issues/1' })])] });
+    click('button.actions');
+    // One group: Copy, then what opens in VS Code, then the ticket, as the dock's opens.
+    expect([...root.querySelectorAll('.actions-menu .menu-row')].map((row) => row.textContent)).toEqual(['Copy Reply', 'Open in VS Code', 'Open changes', 'Open report', 'Open ticket']);
+    expect(root.querySelectorAll('.actions-menu .menu-separator')).toHaveLength(0);
+    expect(root.querySelector('.actions-menu [data-label="Open in VS Code"] .codicon-vscode')).not.toBeNull();
+    click('.actions-menu [data-label="Open changes"]');
+    await flush();
+    expect(posts.find((post) => post.url.endsWith('/row-command'))?.body).toMatchObject({ window: 'pk', scopeGen: 3, workItemId: 1, label: 'Open changes' });
+    expect(root.querySelector('.actions-menu')).toBeNull();
+
+    answers['/row-command'] = { status: 409, body: { error: 'VS Code did not start: Code.exe was not found beside code on PATH.' } };
+    click('button.actions');
+    click('.actions-menu [data-label="Open in VS Code"]');
+    await flush();
+    await flush();
+    expect(root.querySelector('.composer-error-text')!.textContent).toBe('VS Code did not start: Code.exe was not found beside code on PATH.');
+    page.close();
+  });
+
   it("opens a row's ticket and link pills in a new tab, marked as the dock marks them, without selecting the row, and only http or https links", async () => {
     const { page, source, opened } = start();
     const links = [

@@ -35,7 +35,7 @@ import type { Snapshot, WorkItemView } from './snapshot.js';
 import { SnapshotBuilder } from './snapshotBuilder.js';
 import type { Built } from './snapshotBuilder.js';
 import { WindowScopes } from './windows.js';
-import { dockRowOf, PageAccess, pageActionEvent, pageHeader, pageList, pageRow, pasteText, rowOpenUrl } from './page.js';
+import { dockRowOf, PageAccess, pageActionEvent, pageCommandOf, pageHeader, pageList, pageRow, pasteText, rowOpenUrl } from './page.js';
 import { launcher } from './launch.js';
 import type { Launcher } from './launch.js';
 import { pageAsset } from './pageAssets.js';
@@ -536,6 +536,35 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
       return session?.execution === 'app-server' ? runtime.resumeThread(sessionId) : 'This session resumes only in Claude.';
     },
+    // The page's VS Code controls: the dock's command left for the row's window, which VS Code opens or brings forward (architecture.md § Web page).
+    rowCommand: (workItemId, label) => {
+      const row = dockRowOf(views().dock, workItemId);
+      const built = row === null ? { refused: 'The work item is gone.' } : pageCommandOf(row, label);
+
+      if ('refused' in built) {
+        return built.refused;
+      }
+
+      const { destination, command } = built;
+      // A window not open yet shows its tabs once it opens, as one the dock opens does (PRD R72); a folder window has none.
+      const left = [...(row!.window?.file != null && scopes.keysOf(destination).length === 0 ? [{ type: 'openTabs' }] : []), ...(command === null ? [] : [command])].map((one) => windowQueue.recordCommand(one, destination));
+
+      if (left.includes(null)) {
+        left.forEach((id) => id !== null && windowQueue.withdrawCommand(id));
+        return 'The hub could not save the command; see its log.';
+      }
+
+      try {
+        launch.openCode(destination);
+      } catch (error) {
+        left.forEach((id) => windowQueue.withdrawCommand(id!));
+        return `VS Code did not start: ${(error as Error).message}`;
+      }
+
+      askToClaim(destination);
+      deps.log(`page: ${label} for work item ${workItemId} in ${destination}`);
+      return null;
+    },
     // The installed page's link, opened in the default browser only when its row holds it now (architecture.md § Web page).
     rowOpen: (workItemId, url) => {
       const row = dockRowOf(views().dock, workItemId);
@@ -893,6 +922,7 @@ const dockWithRuns = () => {
       '/v1/conversation/prompt-key': async (body) => (isRecord(body) ? conversation.promptKey(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, prompt, key}.' } }),
       '/v1/conversation/page-conversation': async (body) => (isRecord(body) ? conversation.pageConversation(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, provider?}.' } }),
       '/v1/conversation/resume': async (body) => (isRecord(body) ? conversation.resume(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } }),
+      '/v1/conversation/row-command': async (body) => (isRecord(body) ? conversation.rowCommand(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId, label}.' } }),
       '/v1/conversation/row-open': async (body) => (isRecord(body) ? conversation.rowOpen(body) : { status: 400, body: { error: 'Expected {window, opId, workItemId, url}.' } }),
       '/v1/conversation/row-paste': async (body) => (isRecord(body) ? conversation.rowPaste(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId, label}.' } }),
       '/v1/conversation/page-poll': async (body) => (isRecord(body) ? conversation.pagePoll(body) : { status: 400, body: { error: 'Expected {window}.' } }),

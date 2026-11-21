@@ -1533,6 +1533,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       case 'row-paste':
         void copyPaste(button!.dataset['label'] ?? '');
         break;
+      case 'row-command':
+        void runCommand(button!.dataset['label'] ?? '');
+        break;
       case 'open-link':
         // A pill's link opens without selecting its row; the menu's closes the menu.
         openLink(Number(button!.dataset['workItem']), button!.dataset['link'] ?? '');
@@ -2000,6 +2003,26 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       void runAction(row.workItemId, action.label, {});
     }
 
+    draw();
+  };
+  /** A row's VS Code control on the selected work item: the hub opens its window in VS Code, or says why not. */
+  const runCommand = async (label: string): Promise<void> => {
+    const row = selectedRow(state);
+
+    view.actions = false;
+
+    if (row === null || view.acting) {
+      draw();
+      return;
+    }
+
+    view.acting = true;
+    draw();
+
+    const answer = await command('row-command', { workItemId: row.workItemId, label });
+
+    view.acting = false;
+    showError(answer.status === 200 ? null : String(answer.body['error'] ?? `Not done (status ${answer.status}).`));
     draw();
   };
   /** Runs a row action, named by its label, on the selected work item; the hub checks again that its row still offers it. */

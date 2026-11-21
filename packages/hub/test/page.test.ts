@@ -8,7 +8,7 @@ import { listenHub } from '../src/server.js';
 import type { HubServer, PageRoutes } from '../src/server.js';
 import { createHash } from 'node:crypto';
 import { Store } from '@switchboard/core';
-import { artifactFile, cookieValue, dockRowOf, findFiles, knownFolder, pageHeader, loopbackHost, PageAccess, pageCookie, PUBLIC_PAGE_FILES, PAGE_LINK_MS, PAGE_SESSION_MS, PAGE_SESSIONS_KEPT, pageActionEvent, pageActions, pageGroups, pageList, pasteText, rowOpenUrl, tabUrl } from '../src/page.js';
+import { artifactFile, cookieValue, dockRowOf, findFiles, knownFolder, pageHeader, loopbackHost, PageAccess, pageCookie, PUBLIC_PAGE_FILES, PAGE_LINK_MS, PAGE_SESSION_MS, PAGE_SESSIONS_KEPT, pageActionEvent, pageActions, pageCommandOf, pageGroups, pageList, pageOpens, pasteText, rowOpenUrl, tabUrl } from '../src/page.js';
 import { dockView } from '../src/dock.js';
 import type { DockView } from '../src/dock.js';
 import { pageAsset } from '../src/pageAssets.js';
@@ -144,7 +144,8 @@ describe('pageList', () => {
     const ownRow = dock.groups.flatMap((group) => group.rows).find((row) => row.key === 'item:1')!;
 
     expect(list.map((group) => [group.key, group.title, group.glyph])).toEqual(dock.groups.map((group) => [group.key, group.title, group.glyph]));
-    expect(list.flatMap((group) => group.rows).find((row) => row.workItemId === 1)).toEqual({ workItemId: 1, title: 'Fix the badge', priority: ownRow.priority, time: ownRow.time, ticket: ownRow.ticket, sourceKind: ownRow.sourceKind, url: ownRow.url, playbook: ownRow.playbook, links: [], returned: ownRow.returned, comment: ownRow.comment, mark: ownRow.mark, details: ownRow.details, stripe: ownRow.stripe, dim: ownRow.dim, host: null, actions: pageActions(ownRow), main: null, pastes: [], search: ownRow.search });
+    expect(list.flatMap((group) => group.rows).find((row) => row.workItemId === 1)).toEqual({ workItemId: 1, title: 'Fix the badge', priority: ownRow.priority, time: ownRow.time, ticket: ownRow.ticket, sourceKind: ownRow.sourceKind, url: ownRow.url, playbook: ownRow.playbook, links: [], returned: ownRow.returned, comment: ownRow.comment, mark: ownRow.mark, details: ownRow.details, stripe: ownRow.stripe, dim: ownRow.dim, host: null, actions: pageActions(ownRow), main: null, pastes: [], opens: pageOpens(ownRow), search: ownRow.search });
+    expect(pageOpens(ownRow).map((one) => one.label)).toEqual(['Open in VS Code']);
     // Each row in the dock's group, in the dock's order, a hosted conversation with its host's name.
     expect(list.map((group) => group.rows.map((row) => row.workItemId))).toEqual(dock.groups.map((group) => group.rows.map((row) => Number(row.key.slice('item:'.length)))));
     expect(list.flatMap((group) => group.rows).filter((row) => row.host !== null).map((row) => [row.workItemId, row.host]).sort()).toEqual([[4, 'support'], [5, 'x']]);
@@ -274,6 +275,27 @@ describe('pageActions', () => {
       expect(prompted.group).toBe(adhoc.main === 'Start with prompt…' ? 'main' : 'work');
       expect(pageActionEvent(adhoc, 'Start with prompt…', { until: null, comment: null, text: 'Fix the tests' })).toEqual({ event: { type: 'start', workItemId: 2, prompt: 'Fix the tests' } });
     }
+  });
+
+  it("offers Open in VS Code for a row with a window, then the dock's Open changes and Open report, never History or Open in terminal", () => {
+    const worktree = { id: 1, ticketId: 1, path: 'D:/git/wt/101', branch: '101', linkedBy: 'report' as const };
+    const review = rowOf(item(1, { status: 'awaiting-approval', worktree, approvalReport: 'D:/git/wt/101/report.md' }));
+
+    expect(pageOpens(review)).toEqual([{ label: 'Open in VS Code', icon: 'vscode' }, { label: 'Open changes', icon: 'diff-multiple' }, { label: 'Open report', icon: 'symbol-file' }]);
+    expect(review.commands.map((one) => one.label)).toContain('History');
+    expect(pageCommandOf(review, 'Open changes')).toEqual({ destination: review.window!.file, command: review.commands.find((one) => one.label === 'Open changes')!.command });
+    expect(pageCommandOf(review, 'Open report')).toEqual({ destination: review.window!.file, command: { type: 'openUrl', url: 'D:/git/wt/101/report.md' } });
+    expect(pageCommandOf(review, 'Open in VS Code')).toEqual({ destination: review.window!.file, command: null });
+    expect(pageCommandOf(review, 'History')).toEqual({ refused: 'The work item no longer offers this.' });
+    expect(pageCommandOf(review, 'Open in terminal')).toEqual({ refused: 'The work item no longer offers this.' });
+
+    // A row with no window opens nothing in VS Code.
+    const windowless = { window: null, commands: review.commands };
+
+    expect(pageOpens(windowless)).toEqual([]);
+    expect(pageCommandOf(windowless, 'Open changes')).toEqual({ refused: 'The work item no longer offers this.' });
+    // A folder-hosted conversation opens its folder.
+    expect(pageCommandOf({ window: { name: 'f', title: 't', folders: ['D:/w'], file: null, hosted: true, folder: 'D:/w' }, commands: [] }, 'Open in VS Code')).toEqual({ destination: 'D:/w', command: null });
   });
 
   it("opens only the row's own http or https ticket URL or link, marked as the dock marks it", () => {

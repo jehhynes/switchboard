@@ -106,14 +106,15 @@ function clipLabel(label: string): string {
 /**
  * The header's row actions (architecture.md § Web page): the dock's main control as a button, then every control in a menu under an
  * ellipsis, grouped as the dock's row menu is: the main control, the work controls, the state controls, Add comment…, the order controls, what the row opens
- * (Copy, Open ticket and its links, more than two of them in an Open link submenu), then the controls that ask first; empty when the row offers
+ * (Copy, Open in VS Code, Open changes and Open report, Open ticket and its links, more than two of them in an Open link submenu), then the controls that ask first; empty when the row offers
  * none.
  */
 export function renderActions(row: PageRow | null, view: View): string {
   const actions = row?.actions ?? [];
   const pastes = row?.pastes ?? [];
+  const commands = row?.opens ?? [];
 
-  if (row === null || (actions.length === 0 && pastes.length === 0 && row.url === '' && row.links.length === 0)) {
+  if (row === null || (actions.length === 0 && pastes.length === 0 && commands.length === 0 && row.url === '' && row.links.length === 0)) {
     return '';
   }
 
@@ -130,6 +131,7 @@ export function renderActions(row: PageRow | null, view: View): string {
     (view.linkMenu ? row.links.map((one, index) => link(String(index), one.label, null, 'submenu-row')).join('') : '');
   const opens = [
     ...pastes.map((label) => item(`data-action="row-paste" data-label="${escape(label)}"`, 'copy', `Copy ${label}`)),
+    ...commands.map((one) => item(`data-action="row-command" data-label="${escape(one.label)}"`, one.icon, one.label)),
     ...(row.url === '' ? [] : [link('ticket', 'Open ticket', 'link-external')]),
     ...(row.links.length > MENU_LINKS ? [submenu] : row.links.map((one, index) => link(String(index), `Open ${one.label}`, 'link-external'))),
   ];

@@ -237,6 +237,8 @@ export interface PageRow {
   pastes: string[];
   /** What the list's search matches, as the dock's search box does: the title, key, linked pull requests and issues, playbook, group and branch (PRD R63). */
   search: string;
+  /** What the row opens in VS Code, run with `row-command`. */
+  opens: PageOpen[];
 }
 
 /** The dock's actions the page may run through `row-action`, each on one work item. */
@@ -353,6 +355,48 @@ export function pageActionEvent(row: Pick<DockRow, 'controls' | 'main' | 'ticket
   return { event: { ...control.action, [input.field]: text, ...(choice === null ? {} : { [input.choice!.field]: choice }) } };
 }
 
+/** What a row opens in VS Code from the page: the dock's window commands it can run there, and the row's click. */
+export interface PageOpen {
+  label: string;
+  icon: string;
+}
+
+/** The label of the page's counterpart of the dock row's click, which opens its VS Code window. */
+export const OPEN_IN_VSCODE = 'Open in VS Code';
+
+/** Whether a dock row command is one the page runs in VS Code: Open changes and Open report (History and Open in terminal are not on the page). */
+function pageCommand(command: DockRow['commands'][number]): boolean {
+  return command.command['type'] === 'changes' || (command.command['type'] === 'openUrl' && command.label === 'Open report');
+}
+
+/** The window the page's VS Code controls open: an item window's workspace file, or a folder-hosted conversation's folder; null for none. */
+function destinationOf(row: Pick<DockRow, 'window'>): string | null {
+  return row.window?.file ?? row.window?.folder ?? null;
+}
+
+/** What the row opens in VS Code from the page: Open in VS Code when it has a window, then Open changes and Open report as the dock lists them. */
+export function pageOpens(row: Pick<DockRow, 'window' | 'commands'>): PageOpen[] {
+  if (destinationOf(row) === null) {
+    return [];
+  }
+
+  return [{ label: OPEN_IN_VSCODE, icon: 'vscode' }, ...row.commands.filter(pageCommand).map((command) => ({ label: command.label, icon: CONTROL_ICONS.get(command.glyph) ?? 'go-to-file' }))];
+}
+
+/**
+ * What `row-command` runs for a row's VS Code control, by its label: the window to open and the dock's command to leave for it, none for Open in
+ * VS Code; why not when the row no longer offers it.
+ */
+export function pageCommandOf(row: Pick<DockRow, 'window' | 'commands'>, label: string): { destination: string; command: Record<string, unknown> | null } | { refused: string } {
+  const destination = destinationOf(row);
+
+  if (destination === null || !pageOpens(row).some((one) => one.label === label)) {
+    return { refused: 'The work item no longer offers this.' };
+  }
+
+  return { destination, command: label === OPEN_IN_VSCODE ? null : { ...row.commands.find((one) => one.label === label && pageCommand(one))!.command } };
+}
+
 /** The bookmark and the query parameter the dock adds to a link it opens (`Switcher.Marked`), so the Chrome extension groups its tab (PRD R74). */
 const TAB_BOOKMARK = '#switchboard-tab';
 const TAB_PARAMETER = 'switchboard-tab=1';
@@ -458,6 +502,7 @@ export function pageRow(row: DockRow, workItemId: number, host: string | null): 
     actions,
     main: actions.some((one) => one.label === row.main && one.confirm === null) ? row.main : null,
     pastes: row.pastes.map((paste) => paste.label),
+    opens: pageOpens(row),
     search: row.search,
   };
 }

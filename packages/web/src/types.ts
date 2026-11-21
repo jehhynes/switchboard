@@ -161,6 +161,8 @@ export interface PageRow {
   pastes?: string[];
   /** What the list's search matches: the title, key, linked pull requests and issues, playbook, group and branch. */
   search?: string;
+  /** What the row opens in VS Code through the hub, run with `row-command`: Open in VS Code, Open changes and Open report, each with its codicon's name. */
+  opens?: Array<{ label: string; icon: string }>;
 }
 
 /** One header icon: the configured sources of one kind (`DockSourceGroup` in the hub's `dock.ts`). */
