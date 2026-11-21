@@ -117,6 +117,17 @@ describe('drawing', () => {
     expect(renderTimeline(pageState([message('m1', 1, { at: new Date(2025, 11, 31, 9).getTime() })]), newView(), at(20, 12))).toContain('>Wed, Dec 31, 2025</li>');
   });
 
+  it("puts a message's and a reply's metadata on one line under it, the reply's copy button first and the time at the right", () => {
+    const host = document.createElement('div');
+
+    host.innerHTML = renderTimeline(pageState([message('m1', 1, { delivery: 'uncertain', error: 'Check the terminal.' }), reply('r1', 120_000, { tone: 'calm', spoken: { state: 'failed', atMs: null, saidChars: null } })]), newView());
+    expect([...host.querySelector('li[data-id="m1"] > .bubble')!.children].map((child) => child.className)).toEqual(['box', 'meta']);
+    expect([...host.querySelector('li[data-id="m1"] .meta')!.children].map((child) => child.className)).toEqual(['meta-marks', 'stamp']);
+    expect([...host.querySelector('li[data-id="r1"]')!.children].map((child) => child.className)).toEqual(['dot', 'body', 'meta']);
+    expect([...host.querySelector('li[data-id="r1"] .meta-marks')!.children].map((child) => child.className)).toEqual(['copy', 'tone', 'spoken failed']);
+    expect(host.querySelector('li[data-id="r1"] .meta > :last-child')?.className).toBe('stamp');
+  });
+
   it('dims the part of an interrupted passage not heard, and says Not spoken only when speech failed', () => {
     const spoken = (state: ReplyView['spoken']['state']) => renderTimeline(pageState([reply('r1', 1, { opening: 'Fixed it. More.', speak: 'Fixed it.', spoken: { state, atMs: 7_400, saidChars: 3 } })]), newView());
 

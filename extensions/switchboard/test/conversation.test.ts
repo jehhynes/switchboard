@@ -353,12 +353,12 @@ describe('the Conversation view page', () => {
     expect(renderConversation(state([reply('r1', T0)], { more: true }))).toContain('data-action="earlier"');
   });
 
-  it('draws our messages as bubbles on the right, at most 85% wide in the Chat view\'s request bubble colour with a smaller bottom-right corner, with the delivery and the time over them', () => {
+  it('draws our messages as bubbles on the right, at most 85% wide in the Chat view\'s request bubble colour with a smaller bottom-right corner, with its marks and time on one line under them', () => {
     const css = readFileSync(join(__dirname, '../src/webview/conversation.css'), 'utf8');
     const rule = (selector: string) => css.split('\n').find((line) => line.startsWith(`${selector} {`)) ?? '';
 
     expect(rule('.message')).toContain('align-items: flex-end;');
-    expect(rule('.message .box')).toContain('max-width: 85%;');
+    expect(rule('.message .bubble')).toContain('max-width: 85%;');
     expect(rule('.message .box')).toContain('border-radius: 12px 12px 4px 12px;');
     expect(rule('.message .box')).toContain('background: var(--vscode-chat-requestBubbleBackground, var(--vscode-editor-inactiveSelectionBackground,');
     expect(rule('.message .box')).toContain('border: 1px solid var(--vscode-contrastBorder, transparent);');
@@ -368,9 +368,11 @@ describe('the Conversation view page', () => {
     const root = document.createElement('div');
 
     root.innerHTML = renderConversation(state([typed('t1', 'not-sent', 'The session has ended.')]), new Set(), T0);
-    expect([...root.querySelector('li[data-id="t1"]')!.children].map((child) => child.className)).toEqual(['stamp-line', 'box']);
-    // The state comes before the time, so the times stay flush right.
-    expect([...root.querySelector('li[data-id="t1"] > .stamp-line')!.children].map((child) => child.className)).toEqual(['delivery not-sent', 'stamp-dot', 'stamp']);
+    // One line under the bubble, never over it: the state at its left edge, the time at its right, so the times stay flush right.
+    expect([...root.querySelector('li[data-id="t1"] > .bubble')!.children].map((child) => child.className)).toEqual(['box', 'meta']);
+    expect([...root.querySelector('li[data-id="t1"] .meta')!.children].map((child) => child.className)).toEqual(['meta-marks', 'stamp']);
+    expect(root.querySelector('li[data-id="t1"] .meta-marks')!.innerHTML).toContain('class="delivery not-sent"');
+    expect(rule('.meta .stamp')).toContain('margin-left: auto;');
   });
 
   it('shows a time only where the minute changes from the item before, never repeating it under a message and over its reply', () => {
@@ -391,13 +393,14 @@ describe('the Conversation view page', () => {
       at(61),
     );
 
-    const stamps = (id: string) => root.querySelector(`li[data-id="${id}"] > .stamp-line .stamp`)?.textContent ?? null;
+    const stamps = (id: string) => root.querySelector(`li[data-id="${id}"] .meta .stamp`)?.textContent ?? null;
 
     // A note has no time and is not the item before; the minute after it is compared with the reply before it.
     expect(['m1', 'r1', 'n1', 'r2', 'r3', 'm2', 'r4'].map(stamps)).toEqual(['1:47 PM', null, null, null, '1:59 PM', null, '2:00 PM']);
-    // A reply with no time takes no room for one.
-    expect(root.querySelector('li[data-id="r1"] > .stamp-line')).toBeNull();
-    expect([...root.querySelector('li[data-id="m2"]')!.children].map((child) => child.className)).toEqual(['box']);
+    // A reply with no time keeps its line for its copy button, with no time; a message with no time and no marks has no line.
+    expect(root.querySelector('li[data-id="r1"] > .meta .stamp')).toBeNull();
+    expect(root.querySelector('li[data-id="r1"] > .meta > .meta-marks > .copy')).not.toBeNull();
+    expect([...root.querySelector('li[data-id="m2"] > .bubble')!.children].map((child) => child.className)).toEqual(['box']);
   });
 
   it('leaves a reply with no text out of the timeline', () => {
@@ -421,13 +424,14 @@ describe('the Conversation view page', () => {
       at(20, 22, 0),
     );
 
-    const stamps = (id: string) => root.querySelector(`li[data-id="${id}"] > .stamp-line .stamp`)?.textContent ?? null;
+    const stamps = (id: string) => root.querySelector(`li[data-id="${id}"] .meta .stamp`)?.textContent ?? null;
 
     expect(['m1', 'r1', 'n1', 'a1', 'm2', 'r2'].map(stamps)).toEqual(['1:46 PM', '1:47 PM', null, '2:05 PM', '9:00 AM', '9:30 PM']);
     expect(root.querySelector('li[data-id="m1"] time')?.getAttribute('datetime')).toBe(new Date(at(19, 13, 46)).toISOString());
     expect(root.querySelector('li[data-id="m1"] time')?.getAttribute('title')).toMatch(/^2026-11-19 13:46:00 \S+$/);
-    // The stamp sits over a message's bubble, as over a reply, and a slash command shows in the editor font.
-    expect([...root.querySelector('li[data-id="m1"]')!.children].map((child) => child.className)).toEqual(['stamp-line', 'box command']);
+    // The time sits under a message's bubble, as under a reply, and a slash command shows in the editor font.
+    expect([...root.querySelector('li[data-id="m1"] > .bubble')!.children].map((child) => child.className)).toEqual(['box command', 'meta']);
+    expect([...root.querySelector('li[data-id="r1"]')!.children].map((child) => child.className)).toEqual(['dot', 'body', 'meta']);
     expect(root.querySelector('li[data-id="m2"] .box')?.className).toBe('box');
     // A divider before the first turn and before the turn on the next day, which the keys skip: Yesterday and Today.
     expect([...root.querySelectorAll('.timeline > li')].map((li) => li.getAttribute('data-id') ?? li.className)).toEqual(['day', 'm1', 'r1', 'n1', 'a1', 'day', 'm2', 'r2']);
@@ -526,13 +530,13 @@ describe('the Conversation view page', () => {
 
     // A copy button in each code block's frame, and one under each reply read from the transcript.
     const code = root.querySelector<HTMLButtonElement>('li[data-id="r1"] .body > .code-block > button.copy[data-action="copy-code"]')!;
-    const response = root.querySelector<HTMLButtonElement>('li[data-id="r1"] > .actions > button.copy[data-action="copy-reply"]')!;
+    const response = root.querySelector<HTMLButtonElement>('li[data-id="r1"] > .meta > .meta-marks > button.copy[data-action="copy-reply"]:first-child')!;
 
     expect(code.nextElementSibling?.tagName).toBe('PRE');
     expect(code.querySelector('.codicon')?.className).toBe('codicon codicon-copy');
     expect(response.getAttribute('aria-label')).toBe('Copy response to clipboard');
-    expect(root.querySelector('li[data-id="r2"] .actions')).toBeNull();
-    expect(root.querySelector('li[data-id="n1"] .actions')).toBeNull();
+    expect(root.querySelector('li[data-id="r2"] .copy')).toBeNull();
+    expect(root.querySelector('li[data-id="n1"] .meta')).toBeNull();
 
     code.click();
     response.click();
@@ -832,6 +836,18 @@ describe('speech in the view (architecture.md § Voice)', () => {
     expect(expanded).toContain('aria-expanded="true">Show less</button>');
   });
 
+  it("puts all of a reply's metadata on one line under it: the copy button first, the tone and Not spoken, and the time at the right", () => {
+    const root = document.createElement('div');
+
+    root.innerHTML = renderConversation(state([reply('r1', T0, { opening: 'Fixed it.', tone: 'calm and brief', spoken: { state: 'failed', atMs: null, saidChars: null } })]));
+    const item = root.querySelector('li[data-id="r1"]')!;
+
+    expect([...item.children].map((child) => child.className)).toEqual(['dot', 'body', 'meta']);
+    expect([...item.querySelector('.meta-marks')!.children].map((child) => child.className)).toEqual(['copy', 'tone', 'spoken failed']);
+    expect(item.querySelector('.meta > :last-child')?.className).toBe('stamp');
+    expect(item.querySelector('.tone')?.getAttribute('title')).toBe('How the reply sounds when spoken: calm and brief');
+  });
+
   it('dims the part of an interrupted passage not heard, and says Not spoken only when speech failed', () => {
     const spoken = (state_: ReplyView['spoken']['state'], atMs: number | null = null, saidChars: number | null = null) =>
       renderConversation(state([reply('r1', T0, { opening: 'Fixed it. More.', speak: 'Fixed it.', spoken: { state: state_, atMs, saidChars } })]));
@@ -915,9 +931,9 @@ describe('speech in the view (architecture.md § Voice)', () => {
       new Set(),
     );
 
-    expect(html).toContain('<div class="voice-line" title="Dictated in 2 pieces:\nfix the\n(dropped) login · match 0.82 · 118 Hz"><span class="codicon codicon-mic" aria-hidden="true"></span><span>dictated</span></div>');
-    expect(html).toContain('<div class="voice-line" title="Dictated"><span class="codicon codicon-mic" aria-hidden="true"></span><span>partial</span></div>');
-    expect(html.match(/voice-line/g)).toHaveLength(2);
+    expect(html).toContain('<span class="voice-mark" title="Dictated in 2 pieces:\nfix the\n(dropped) login · match 0.82 · 118 Hz"><span class="codicon codicon-mic" aria-hidden="true"></span><span>dictated</span></span>');
+    expect(html).toContain('<span class="voice-mark" title="Dictated"><span class="codicon codicon-mic" aria-hidden="true"></span><span>partial</span></span>');
+    expect(html.match(/voice-mark/g)).toHaveLength(2);
 
     const over = renderConversation(
       state([
@@ -927,7 +943,7 @@ describe('speech in the view (architecture.md § Voice)', () => {
       new Set(),
     );
 
-    expect(over).toContain('<div class="voice-line" title="Dictated\nSpoke over the reply after &#34;The session token&#34;."><span class="codicon codicon-mic" aria-hidden="true"></span><span>dictated · interrupted the reply</span></div>');
+    expect(over).toContain('<span class="voice-mark" title="Dictated\nSpoke over the reply after &#34;The session token&#34;."><span class="codicon codicon-mic" aria-hidden="true"></span><span>dictated · interrupted the reply</span></span>');
     expect(over).toContain('title="Dictated\nSpoke over the reply before its first words."');
   });
 
@@ -1315,19 +1331,20 @@ describe('the composer', () => {
       }),
     );
 
-    const line = (id: string) => root.querySelector(`li[data-id="${id}"] > .stamp-line`);
+    const line = (id: string) => root.querySelector(`li[data-id="${id}"] .meta`);
     const delivery = (id: string) => line(id)?.querySelector('.delivery') ?? null;
 
     expect(['m0', 'm1', 'm2', 'm3', 'm4', 'm5', 'm6'].map((id) => delivery(id)?.textContent ?? null)).toEqual([null, null, null, 'not sent', null, null, 'not sent']);
     expect([...line('m1')!.children].map((child) => child.className)).toEqual(['stamp']);
     expect([...line('m2')!.children].map((child) => child.className)).toEqual(['stamp']);
+    expect([...line('m3')!.children].map((child) => child.className)).toEqual(['meta-marks', 'stamp']);
     expect(delivery('m3')?.getAttribute('title')).toBe('not sent · The session has <ended>.');
-    expect(line('m3')?.textContent).toMatch(/^not sent•\d+:\d\d [AP]M$/);
+    expect(line('m3')?.textContent).toMatch(/^not sent\d+:\d\d [AP]M$/);
     expect(line('m4')).toBeNull();
     expect(line('m5')).toBeNull();
-    expect([...line('m6')!.children].map((child) => child.className)).toEqual(['delivery not-sent']);
-    // Nothing under a bubble.
-    expect([...root.querySelectorAll('.message')].map((li) => li.lastElementChild?.className)).toEqual(['box', 'box', 'box', 'box', 'box', 'box', 'box']);
+    expect([...line('m6')!.children].map((child) => child.className)).toEqual(['meta-marks']);
+    // Nothing over a bubble: the line, when there is one, is under it.
+    expect([...root.querySelectorAll('.message .bubble')].map((bubble) => bubble.firstElementChild?.className)).toEqual(['box', 'box', 'box', 'box', 'box', 'box', 'box']);
   });
 });
 

@@ -61,22 +61,30 @@ button.icon, a.icon { display: inline-flex; align-items: center; border: none; b
 .timeline > li { --pad-top: 8px; position: relative; padding-top: var(--pad-top); padding-bottom: 8px; }
 .timeline > li:first-child { --pad-top: 0px; }
 .timeline > li.message { padding-bottom: 4px; }
-.stamp-line { display: flex; justify-content: flex-end; align-items: center; gap: 4px; color: var(--vscode-descriptionForeground); font-size: 0.85em; line-height: 16px; }
-.reply > .stamp-line { position: absolute; top: 2px; right: 0; }
-.stamp { cursor: default; }
+.stamp { white-space: nowrap; cursor: default; }
+/* The one line under a message or a reply: its marks from the text's left edge, the copy button first on a reply, its time at the right end. */
+.meta { display: flex; align-items: center; gap: 8px; min-height: 16px; margin-top: 4px; color: var(--vscode-descriptionForeground); font-size: 0.85em; line-height: 16px; }
+.meta-marks { display: flex; flex: 1 1 auto; align-items: center; gap: 8px; min-width: 0; overflow: hidden; }
+.meta .stamp { flex: none; margin-left: auto; }
+.meta .codicon { font-size: 12px; }
+.meta .tone { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-style: italic; }
+.meta .spoken, .meta .delivery { display: inline-flex; flex: none; align-items: center; gap: 4px; white-space: nowrap; cursor: default; }
+.meta .copy { flex: none; width: 14px; height: 16px; padding: 0; margin: 0; }
+.meta .copy .codicon { font-size: 14px; }
+.timeline > li.reply:has(> .meta) { padding-bottom: 0; }
 .delivery.uncertain { color: var(--vscode-editorWarning-foreground); }
 .day { display: flex; align-items: center; gap: 10px; color: var(--vscode-disabledForeground); font-size: 0.9em; }
 .day::before, .day::after { content: ""; flex: 1; height: 1px; background: currentColor; opacity: 0.5; }
 .message { display: flex; flex-direction: column; align-items: flex-end; }
-.message .box { max-width: 85%; margin: 4px 0; border-radius: 12px 12px 4px 12px; background: var(--vscode-chat-requestBubbleBackground); padding: 6px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.message .bubble { display: flex; flex-direction: column; align-items: flex-end; max-width: 85%; }
+.message .bubble > .meta { align-self: stretch; }
+.message .box { max-width: 100%; margin: 0; border-radius: 12px 12px 4px 12px; background: var(--vscode-chat-requestBubbleBackground); padding: 6px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .message .box.command { font-family: var(--vscode-editor-font-family); font-size: 0.9em; }
 .message.provisional .box { opacity: 0.7; }
 .reply { padding-left: 30px; }
 .reply .dot { position: absolute; left: 9px; top: calc(var(--pad-top) + 7px); width: 7px; height: 7px; border-radius: 50%; background: var(--vscode-descriptionForeground); }
 .reply.unread .dot { background: var(--vscode-activityBarBadge-background); }
 .reply.aside { color: var(--vscode-descriptionForeground); font-size: 0.92em; }
-.reply .tone, .reply .spoken { color: var(--vscode-descriptionForeground); font-size: 0.85em; }
-.reply .spoken { display: flex; align-items: center; gap: 4px; }
 .passage .unheard { color: var(--vscode-descriptionForeground); opacity: 0.7; }
 .note { text-align: center; color: var(--vscode-descriptionForeground); font-size: 0.92em; }
 .working { display: flex; align-items: center; gap: 6px; padding-left: 3px; font-weight: 500; }
@@ -107,8 +115,7 @@ button.icon, a.icon { display: inline-flex; align-items: center; border: none; b
 .code-block { position: relative; }
 .copy { display: inline-flex; padding: 3px; border: none; border-radius: 4px; background: transparent; color: var(--vscode-descriptionForeground); cursor: pointer; opacity: 0; }
 .code-block > .copy { position: absolute; top: 4px; right: 4px; background: var(--vscode-editor-background); }
-.code-block:hover > .copy, .reply:hover > .actions .copy, .copy:focus-visible { opacity: 1; }
-.actions { height: 18px; }
+.code-block:hover > .copy, .reply:hover .meta .copy, .copy:focus-visible { opacity: 1; }
 
 /* The Status and Artifacts tabs. */
 .status-tab, .artifact-list { max-width: 900px; margin: 0 auto; }

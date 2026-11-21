@@ -137,17 +137,23 @@ export function renderTabs(view: View, state: PageState): string {
   return `<nav class="tabs" role="tablist">${TABS.map(({ tab, label }) => `<button class="tab${tab === view.tab ? ' selected' : ''}" type="button" role="tab" data-tab="${tab}" aria-selected="${tab === view.tab}" tabindex="${tab === view.tab ? 0 : -1}">${label}${badges[tab] === '' ? '' : `<span class="tab-badge">${badges[tab]}</span>`}</button>`).join('')}</nav>`;
 }
 
-function message(item: MessageView, stamped: boolean): string {
-  const failed = item.delivery === 'uncertain' ? `<span class="delivery uncertain" title="${escape(item.error ?? '')}">uncertain</span>` : '';
-  const line = stamped || failed !== '' ? `<div class="stamp-line">${failed}${stamped ? stampTime(item.at) : ''}</div>` : '';
+/** The one line under a message or a reply: its marks on the left, flush with the text, and its time at the right end; empty with neither. */
+function metaLine(marks: string[], at: number | null): string {
+  const left = marks.filter((mark) => mark !== '');
 
-  return `<li class="message${item.provisional ? ' provisional' : ''}" data-id="${escape(item.id)}">${line}<div class="box${/^\/[\w:.-]+(\s|$)/.test(item.text) ? ' command' : ''}">${escape(item.text)}</div></li>`;
+  return left.length === 0 && at === null ? '' : `<div class="meta">${left.length === 0 ? '' : `<span class="meta-marks">${left.join('')}</span>`}${at === null ? '' : stampTime(at)}</div>`;
 }
 
-/** A note under a reply whose speech failed; empty otherwise, since routine speech states show nothing. */
-function spokenLine(item: ReplyView): string {
+function message(item: MessageView, stamped: boolean): string {
+  const failed = item.delivery === 'uncertain' ? `<span class="delivery uncertain" title="${escape(item.error ?? '')}">uncertain</span>` : '';
+
+  return `<li class="message${item.provisional ? ' provisional' : ''}" data-id="${escape(item.id)}"><div class="bubble"><div class="box${/^\/[\w:.-]+(\s|$)/.test(item.text) ? ' command' : ''}">${escape(item.text)}</div>${metaLine([failed], stamped ? item.at : null)}</div></li>`;
+}
+
+/** The mark of a reply whose speech failed; empty otherwise, since routine speech states show nothing. */
+function spokenMark(item: ReplyView): string {
   return item.spoken.state === 'failed'
-    ? '<div class="spoken failed" title="Speaking this reply failed; see the voice log."><span class="codicon codicon-mute" aria-hidden="true"></span><span>Not spoken</span></div>'
+    ? '<span class="spoken failed" title="Speaking this reply failed; see the voice log."><span class="codicon codicon-mute" aria-hidden="true"></span><span>Not spoken</span></span>'
     : '';
 }
 
@@ -172,12 +178,13 @@ function reply(item: ReplyView, earlier: ReplyView | null, view: View, stamped: 
   const expanded = passage === null || expandReplies !== view.open.has(`more:${item.id}`);
   const body = !expanded && passage !== null ? passageHtml(item, passage) : card === '' ? renderMarkdown(item.opening) : withoutQuestions(item.opening, `reply:${item.id}`, view.open);
   const more = passage === null ? '' : `<button class="show-more" type="button" data-action="more" data-reply="${escape(item.id)}" aria-expanded="${expanded}">${expanded ? 'Show less' : 'Show more'}</button>`;
-  const tone = item.tone === null ? '' : `<div class="tone">${escape(item.tone)}</div>`;
+  const tone = item.tone === null ? '' : `<span class="tone" title="${escape(`How the reply sounds when spoken: ${item.tone}`)}">${escape(item.tone)}</span>`;
   const rewritten = earlier === null ? '' : `<details class="fold" data-fold="earlier:${escape(item.id)}"${view.open.has(`earlier:${item.id}`) ? ' open' : ''}><summary>Rewritten</summary><div class="was">${renderMarkdown(earlier.opening)}</div></details>`;
-  const actions = item.provisional ? '' : `<div class="actions">${copyButton('copy-reply', 'Copy response')}</div>`;
+  // The copy button comes first on the line under the reply, then the tone and a speech failure, and the time at the right.
+  const meta = metaLine([item.provisional ? '' : copyButton('copy-reply', 'Copy response'), tone, spokenMark(item)], stamped ? item.at : null);
   const unread = item.unread ? ` unread" data-unread="${escape(item.id)}` : '';
 
-  return `<li class="reply ${item.kind}${unread}" data-id="${escape(item.id)}"${item.speak === null ? '' : ' data-speak="1"'}>${stamped ? `<div class="stamp-line">${stampTime(item.at)}</div>` : ''}<span class="dot"${item.unread ? ' title="Unread"' : ''}></span>${tone}<div class="body">${body}${more}${rewritten}</div>${spokenLine(item)}${card}${actions}</li>`;
+  return `<li class="reply ${item.kind}${unread}" data-id="${escape(item.id)}"${item.speak === null ? '' : ' data-speak="1"'}><span class="dot"${item.unread ? ' title="Unread"' : ''}></span><div class="body">${body}${more}${rewritten}</div>${meta}${card}</li>`;
 }
 
 function artifactRow(artifact: ArtifactView): string {

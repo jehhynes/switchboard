@@ -66,9 +66,14 @@ const STAMP_FULL = new Intl.DateTimeFormat('en-US', { year: 'numeric', month: '2
 const DAY = new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 const DAY_WITH_YEAR = new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
 
-/** The small time over a message or a reply. */
-function stamp(at: number): string {
-  return `<div class="stamp-line">${stampTime(at)}</div>`;
+/**
+ * The one line under a message or a reply with everything about it (architecture.md § Conversation view): its marks on the left, flush with
+ * the text's left edge, and its time at the right end; empty when there is nothing to show.
+ */
+function metaLine(marks: string[], at: number | null): string {
+  const left = marks.filter((mark) => mark !== '');
+
+  return left.length === 0 && at === null ? '' : `<div class="meta">${left.length === 0 ? '' : `<span class="meta-marks">${left.join('')}</span>`}${at === null ? '' : stampTime(at)}</div>`;
 }
 
 function stampTime(at: number): string {
@@ -149,8 +154,8 @@ export function renderMarkdown(text: string): string {
 }
 
 /**
- * One of our messages: its bubble under a line with its time, where the minute changes. Only an error state shows, before the time, with why in the
- * tooltip: a message sent or still sending shows only its time, and today none stays in error, since one not sent leaves the conversation.
+ * One of our messages: its bubble over one line with its marks and, where the minute changes, its time. Only an error state shows, with why in
+ * the tooltip: a message sent or still sending shows only its time, and today none stays in error, since one not sent leaves the conversation.
  */
 function message(item: MessageView, stamped: boolean): string {
   // Only an error state shows: a message sent or still sending shows only its time; one not sent has left the conversation.
@@ -158,19 +163,19 @@ function message(item: MessageView, stamped: boolean): string {
   const why = item.error === null ? '' : ` · ${item.error}`;
   const delivery =
     state === null ? '' : `<span class="delivery ${state}" title="${escape(`${DELIVERY[state]}${why}`)}">${DELIVERY[state]}</span>`;
-  // The state comes before the time, so every time stays flush right in one column.
-  const line = stamped || delivery !== '' ? `<div class="stamp-line">${delivery}${stamped && delivery !== '' ? '<span class="stamp-dot" aria-hidden="true">•</span>' : ''}${stamped ? stampTime(item.at) : ''}</div>` : '';
 
   // A message sent in the terminal while the session was busy waits, dimmed, until Claude reads it.
   const queued = item.provisional && item.origin === 'terminal';
   // A dictated message has a mic glyph, its pieces in the tooltip, and a part sent while it was still being spoken says so (architecture.md § Dictation).
-  const voice = item.origin === 'voice' ? voiceLine(item) : '';
+  const voice = item.origin === 'voice' ? voiceMark(item) : '';
+  // The marks sit at the bubble's left edge and the time at its right, so every time stays flush right in one column.
+  const meta = metaLine([voice, delivery], stamped ? item.at : null);
 
-  return `<li class="message${item.provisional ? ' provisional' : ''}" data-id="${escape(item.id)}" tabindex="-1"${queued ? ' title="Sent; Claude has not read it yet"' : ''}>${line}<div class="box${COMMAND.test(item.text) ? ' command' : ''}">${escape(item.text)}</div>${voice}</li>`;
+  return `<li class="message${item.provisional ? ' provisional' : ''}" data-id="${escape(item.id)}" tabindex="-1"${queued ? ' title="Sent; Claude has not read it yet"' : ''}><div class="bubble"><div class="box${COMMAND.test(item.text) ? ' command' : ''}">${escape(item.text)}</div>${meta}</div></li>`;
 }
 
-/** A dictated message's line under its box: the mic glyph, "partial" for a part of one still being spoken, and its pieces as the tooltip. */
-function voiceLine(item: MessageView): string {
+/** A dictated message's mark: the mic glyph, "partial" for a part of one still being spoken, and its pieces as the tooltip. */
+function voiceMark(item: MessageView): string {
   const pieces = (item.pieces ?? []).map((piece) => `${piece.dropped ? '(dropped) ' : ''}${piece.text}${piece.score === null ? '' : ` · match ${piece.score.toFixed(2)}`}${piece.f0 === null ? '' : ` · ${Math.round(piece.f0)} Hz`}`);
   const dictated = pieces.length === 0 ? 'Dictated' : `Dictated in ${pieces.length} piece${pieces.length === 1 ? '' : 's'}:\n${pieces.join('\n')}`;
   // Spoken over a reply being read aloud, which stopped it (architecture.md § Voice check and barge-in).
@@ -178,13 +183,13 @@ function voiceLine(item: MessageView): string {
   const title = over === '' ? dictated : `${dictated}\n${over}`;
   const label = `${item.partial === true ? 'partial' : 'dictated'}${item.interrupted === undefined ? '' : ' · interrupted the reply'}`;
 
-  return `<div class="voice-line" title="${escape(title)}"><span class="codicon codicon-mic" aria-hidden="true"></span><span>${label}</span></div>`;
+  return `<span class="voice-mark" title="${escape(title)}"><span class="codicon codicon-mic" aria-hidden="true"></span><span>${label}</span></span>`;
 }
 
-/** A note under a reply whose speech failed (architecture.md § Voice); empty otherwise, since routine speech states show nothing. */
-export function spokenLine(item: ReplyView): string {
+/** The mark of a reply whose speech failed (architecture.md § Voice); empty otherwise, since routine speech states show nothing. */
+export function spokenMark(item: ReplyView): string {
   return item.spoken.state === 'failed'
-    ? '<div class="spoken failed" title="Speaking this reply failed; see the voice log."><span class="codicon codicon-mute" aria-hidden="true"></span><span>Not spoken</span></div>'
+    ? '<span class="spoken failed" title="Speaking this reply failed; see the voice log."><span class="codicon codicon-mute" aria-hidden="true"></span><span>Not spoken</span></span>'
     : '';
 }
 
@@ -305,21 +310,22 @@ function reply(item: ReplyView, earlier: ReplyView | null, open: ReadonlySet<str
   const more = folded
     ? `<button class="show-more" type="button" data-action="more" data-reply="${escape(item.id)}" aria-expanded="${expanded}">${expanded ? 'Show less' : 'Show more'}</button>`
     : '';
-  const tone = item.tone === null ? '' : `<div class="tone" title="How the reply sounds when spoken">${escape(item.tone)}</div>`;
+  const tone = item.tone === null ? '' : `<span class="tone" title="${escape(`How the reply sounds when spoken: ${item.tone}`)}">${escape(item.tone)}</span>`;
 
   const rewritten =
     earlier === null
       ? ''
       : `<details class="fold earlier" data-fold="earlier:${escape(item.id)}"${open.has(`earlier:${item.id}`) ? ' open' : ''}><summary>Rewritten</summary><div class="was">${renderMarkdown(earlier.opening)}</div></details>`;
 
-  // A reply read off the screen has no copy button until its transcript copy replaces it, as Claude Code's has none while it streams.
-  const actions = item.provisional ? '' : `<div class="actions">${copyButton('copy-reply', 'Copy response')}</div>`;
+  // A reply read off the screen has no copy button until its transcript copy replaces it, as Claude Code's has none while it streams. The copy
+  // button comes first on the line under the reply, then the tone and a speech failure, and the time at the right.
+  const meta = metaLine([item.provisional ? '' : copyButton('copy-reply', 'Copy response'), tone, spokenMark(item)], stamped ? item.at : null);
 
   // An unread reply's dot takes the badge colour until the view has shown it in a focused window for a second (architecture.md § Unread).
   const unread = item.unread ? ` unread" data-unread="${escape(item.id)}` : '';
   const dot = item.unread ? '<span class="dot" title="Unread"><span class="unread-label">Unread</span></span>' : '<span class="dot"></span>';
 
-  return `<li class="reply ${item.kind}${unread}" data-id="${escape(item.id)}"${passage === null ? '' : ' data-speak="1"'} tabindex="-1">${stamped ? stamp(item.at) : ''}${dot}${tone}<div class="body">${shown}${more}${rewritten}</div>${spokenLine(item)}${card}${actions}</li>`;
+  return `<li class="reply ${item.kind}${unread}" data-id="${escape(item.id)}"${passage === null ? '' : ' data-speak="1"'} tabindex="-1">${dot}<div class="body">${shown}${more}${rewritten}</div>${meta}${card}</li>`;
 }
 
 /**
