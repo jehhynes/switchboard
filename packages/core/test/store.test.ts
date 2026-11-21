@@ -706,11 +706,12 @@ describe('Store', () => {
     store.savePageSession('b', 200);
     store.savePageSession('c', 300);
     store.savePageSession('a', 400);
-    expect(store.pageSession('a')).toEqual({ createdAt: 100, usedAt: 400 });
+    expect(store.pageSession('a')).toEqual({ hash: 'a', createdAt: 100, usedAt: 400, label: '', host: null, login: null });
     expect(store.pageSession('missing')).toBeNull();
+    expect(store.pageSessions().map((one) => one.hash)).toEqual(['a', 'c', 'b']);
     // Used before 250, or not among the 2 used last.
     store.trimPageSessions(250, 2);
-    expect([store.pageSession('a'), store.pageSession('b'), store.pageSession('c')]).toEqual([{ createdAt: 100, usedAt: 400 }, null, { createdAt: 300, usedAt: 300 }]);
+    expect([store.pageSession('a'), store.pageSession('b'), store.pageSession('c')]).toEqual([{ hash: 'a', createdAt: 100, usedAt: 400, label: '', host: null, login: null }, null, { hash: 'c', createdAt: 300, usedAt: 300, label: '', host: null, login: null }]);
     store.trimPageSessions(0, 1);
     expect(store.pageSession('c')).toBeNull();
     store.savePageSession('d', 500);
@@ -719,6 +720,16 @@ describe('Store', () => {
     store.savePageSession('e', 600);
     expect(store.deletePageSessions()).toBe(2);
     expect(store.pageSession('e')).toBeNull();
+    store.close();
+  });
+
+  it('keeps a paired device with its name, host and login, and a later use changes only when it was used', () => {
+    const store = Store.open(join(dir, 'devices.db'));
+
+    store.savePageSession('p', 100, { label: 'Android · Chrome', host: 'pc.tailnet.ts.net', login: 'alex@example.com' });
+    store.savePageSession('p', 900, { label: 'other', host: 'other.ts.net', login: 'mallory@example.com' });
+    expect(store.pageSession('p')).toEqual({ hash: 'p', createdAt: 100, usedAt: 900, label: 'Android · Chrome', host: 'pc.tailnet.ts.net', login: 'alex@example.com' });
+    expect(store.pageSessions()).toEqual([store.pageSession('p')]);
     store.close();
   });
 });

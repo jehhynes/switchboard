@@ -61,7 +61,7 @@ describe('PageAccess', () => {
     const cookie = first.exchange(first.token())!;
     const hash = createHash('sha256').update(cookie).digest('hex');
 
-    expect(store.pageSession(hash)).toEqual({ createdAt: 1_000, usedAt: 1_000 });
+    expect(store.pageSession(hash)).toMatchObject({ createdAt: 1_000, usedAt: 1_000, host: null, login: null });
     expect(store.pageSession(cookie)).toBeNull();
 
     // A new hub reads the same store; its tokens are its own.

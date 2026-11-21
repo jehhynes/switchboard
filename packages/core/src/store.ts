@@ -472,7 +472,25 @@ export const MIGRATIONS = [
     createdAt INTEGER NOT NULL,
     usedAt INTEGER NOT NULL
   );`,
+  // A sign-in's device (architecture.md § Remote access): its name, and for a paired device the remote host and login it was paired through.
+  `ALTER TABLE pageSessions ADD COLUMN label TEXT NOT NULL DEFAULT '';
+  ALTER TABLE pageSessions ADD COLUMN host TEXT;
+  ALTER TABLE pageSessions ADD COLUMN login TEXT;`,
 ];
+
+/** The device a web page sign-in belongs to: its name, and the remote host and login a paired device came through, null on this computer. */
+export interface PageDevice {
+  label: string;
+  host: string | null;
+  login: string | null;
+}
+
+/** A remembered web page sign-in (architecture.md § Web page): its cookie's SHA-256, when it was made and last used, and its device. */
+export interface PageSession extends PageDevice {
+  hash: string;
+  createdAt: number;
+  usedAt: number;
+}
 
 /**
  * An item's place in a session's conversation (`inTranscript`): 0 once its transcript line was read, then `ord`. A withdrawn item, which no
@@ -1665,13 +1683,20 @@ export class Store {
   }
 
   /** A remembered web page sign-in by its cookie's hash (architecture.md § Web page), or null. */
-  pageSession(hash: string): { createdAt: number; usedAt: number } | null {
-    return (this.#db.prepare('SELECT createdAt, usedAt FROM pageSessions WHERE hash = ?').get(hash) as { createdAt: number; usedAt: number } | undefined) ?? null;
+  pageSession(hash: string): PageSession | null {
+    return (this.#db.prepare('SELECT hash, createdAt, usedAt, label, host, login FROM pageSessions WHERE hash = ?').get(hash) as PageSession | undefined) ?? null;
   }
 
-  /** Stores a sign-in, or the time it was last used. */
-  savePageSession(hash: string, at: number): void {
-    this.#db.prepare('INSERT INTO pageSessions (hash, createdAt, usedAt) VALUES (?, ?, ?) ON CONFLICT (hash) DO UPDATE SET usedAt = excluded.usedAt').run(hash, at, at);
+  /** Every remembered sign-in, the one used last first. */
+  pageSessions(): PageSession[] {
+    return this.#db.prepare('SELECT hash, createdAt, usedAt, label, host, login FROM pageSessions ORDER BY usedAt DESC, createdAt DESC').all() as unknown as PageSession[];
+  }
+
+  /** Stores a sign-in with its device, or for one already stored only the time it was last used. */
+  savePageSession(hash: string, at: number, device: PageDevice = { label: '', host: null, login: null }): void {
+    this.#db
+      .prepare('INSERT INTO pageSessions (hash, createdAt, usedAt, label, host, login) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (hash) DO UPDATE SET usedAt = excluded.usedAt')
+      .run(hash, at, at, device.label, device.host, device.login);
   }
 
   /** Forgets one sign-in, or every one without a hash; answers how many. */
