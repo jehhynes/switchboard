@@ -405,7 +405,9 @@ describe('the list header (architecture.md § Web page)', () => {
 
     hello(remote.source);
     click('.more-actions');
-    expect(menuRows()).not.toContain('Pair a device…');
+    // Settings stays on this computer too, and the menu ends with Show hub log rather than a separator.
+    expect(menuRows().slice(-3)).toEqual(['-', 'Refresh sources', 'Show hub log']);
+    expect(root.querySelector('[data-action="list-settings"]')).toBeNull();
     remote.page.close();
 
     const { page, source } = start(true);
@@ -500,6 +502,16 @@ describe('the list header (architecture.md § Web page)', () => {
     source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ holderResult: { at: 6, text: 'The terminal holder restarted.', failed: false } }) });
     expect(root.querySelector('.holder-result:not(.failed)')?.textContent).toBe('The terminal holder restarted.');
 
+    page.close();
+  });
+
+  it('shows the holder notice on a paired device without Restart and resume (architecture.md § Remote access)', () => {
+    const { page, source } = start(false);
+    const holderNotice = { text: 'The terminal holder is from an older build. Restart it to update (1 session will be resumed).', confirm: { question: 'Restart the terminal holder?', detail: 'No session is interrupted.', action: 'Restart and resume' } };
+
+    hello(source, { header: header({ holderNotice }) });
+    expect(root.querySelector('.holder-notice-text')?.textContent).toBe(holderNotice.text);
+    expect(root.querySelector('.holder-restart')).toBeNull();
     page.close();
   });
 

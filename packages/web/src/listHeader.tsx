@@ -15,7 +15,7 @@ export interface ListHeaderDeps {
   /** Opens Settings (architecture.md § Web page), as the dock's Open Settings opens its window. */
   openSettings?(): void;
   now(): number;
-  /** Whether the page is the one on this computer, which may pair devices (architecture.md § Remote access); false on a paired device. */
+  /** Whether the page is the one on this computer, which may pair devices, open Settings and restart the holder (architecture.md § Remote access); false on a paired device. */
   local?: boolean;
 }
 
@@ -199,7 +199,7 @@ export interface HeaderView {
   notice: string | null;
   /** The `at` of the holder restart result dismissed last, which stays hidden. */
   holderDismissed?: number | null;
-  /** Whether More Actions offers Pair a device: only on this computer's page. */
+  /** Whether the page is this computer's, which offers Pair a device, Open Settings and Restart and resume; false on a paired device. */
   local?: boolean;
   /** The last work item that started needing the operator, with the dock's message, shown until it times out or is dismissed (PRD R65). */
   needs?: { workItemId: number; message: string } | null;
@@ -248,8 +248,8 @@ function HeaderNotes({ header }: { header: PageHeader | null }) {
 }
 
 /**
- * The terminal holder's notice under the header while it is from an older build or restarting, with Restart and resume, and the last restart's
- * result until dismissed (architecture.md § Restarting the holder), as the dock shows them above its groups.
+ * The terminal holder's notice under the header while it is from an older build or restarting, with Restart and resume on this computer's page
+ * only, and the last restart's result until dismissed (architecture.md § Restarting the holder), as the dock shows them above its groups.
  */
 function HolderNotices({ header, view }: { header: PageHeader | null; view: HeaderView }) {
   const notice = header?.holderNotice;
@@ -260,7 +260,7 @@ function HolderNotices({ header, view }: { header: PageHeader | null; view: Head
       {notice === undefined ? null : (
         <div class="holder-notice" role="status">
           <span class="holder-notice-text">{notice.text}</span>
-          {notice.confirm == null ? null : (
+          {notice.confirm == null || view.local !== true ? null : (
             <button type="button" class="holder-restart" data-action="list-holder-restart">
               {notice.confirm.action}
             </button>
@@ -403,7 +403,7 @@ const Separator = ({ classes = 'menu-separator' }: { classes?: string }) => <li 
 
 /**
  * More Actions (PRD R71), in the dock's groups: New ad-hoc session… and New conversation in a folder…; Held sessions, and Ticket volume
- * report with a Zoho or Forum source; Refresh sources and Show hub log; then Pair a device, on this computer's page only, and Open Settings. On a phone, where the header has no room for them,
+ * report with a Zoho or Forum source; Refresh sources and Show hub log; then Pair a device and Open Settings, on this computer's page only. On a phone, where the header has no room for them,
  * the source icons come first as a check row per source.
  */
 export function renderMoreMenu(header: PageHeader | null, local = false): VNode {
@@ -431,9 +431,13 @@ export function renderMoreMenu(header: PageHeader | null, local = false): VNode 
       <Separator />
       <MoreRow action="list-poll" icon="refresh" label="Refresh sources" />
       <MoreRow action="list-later-log" icon="output" label="Show hub log" />
-      <Separator />
-      {local ? <MoreRow action="list-devices" icon="device-mobile" label="Pair a device…" /> : null}
-      <MoreRow action="list-settings" icon="settings-gear" label="Open Settings" />
+      {local ? (
+        <>
+          <Separator />
+          <MoreRow action="list-devices" icon="device-mobile" label="Pair a device…" />
+          <MoreRow action="list-settings" icon="settings-gear" label="Open Settings" />
+        </>
+      ) : null}
     </ul>
   );
 }

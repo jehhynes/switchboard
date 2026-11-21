@@ -90,9 +90,10 @@ export const PAGE_COMMANDS = new Set(['send', 'history', 'seen', 'select', 'stat
 
 /**
  * The page commands a device that reaches the page through a remote host may not post (architecture.md § Remote access): pairing and the device
- * list, so a paired device cannot pair others or sign this computer out, and the Chrome pane's, which works only beside this computer's page.
+ * list, so a paired device cannot pair others or sign this computer out; the Chrome pane's, which works only beside this computer's page;
+ * restarting the terminal holder; and Settings', which the operator keeps to this computer.
  */
-export const LOCAL_PAGE_COMMANDS = new Set(['page-pair', 'page-devices', 'page-device-revoke', 'pane-pair', 'pane-rect']);
+export const LOCAL_PAGE_COMMANDS = new Set(['page-pair', 'page-devices', 'page-device-revoke', 'pane-pair', 'pane-rect', 'page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll']);
 
 /** The page routes only the hub token reaches, which the page's own routes never answer. */
 const HUB_PAGE_ROUTES = new Set(['/page/link', '/page/revoke', '/page/pair', '/page/devices']);
