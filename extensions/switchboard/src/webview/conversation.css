@@ -228,7 +228,7 @@ body.vscode-reduce-motion .codicon-modifier-spin { animation: none; }
 .picker-anchor { flex: 1 1 0; min-width: 6em; }
 button.picker { flex: 1 1 auto; min-width: 0; overflow: hidden; display: flex; align-items: center; gap: 6px; border: none; background: transparent; color: inherit; padding: 0 4px; border-radius: var(--vscode-cornerRadius-small, 4px); cursor: pointer; text-align: left; font: inherit; }
 button.picker:hover { background: var(--vscode-toolbar-hoverBackground); }
-button.picker .title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 6px 0; }
+button.picker .title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 6px 0; }
 button.picker > .codicon, button.picker > .provider, button.picker > .count { flex: none; }
 button.picker .count { box-sizing: border-box; min-width: 16px; height: 16px; padding: 0 5px; border-radius: 8px; text-align: center; font-size: 11px; line-height: 16px; color: var(--vscode-activityBarBadge-foreground); background: var(--vscode-activityBarBadge-background); }
 .header > button.icon, .persona-anchor { flex: none; }
@@ -260,7 +260,7 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 .menu-row:hover .menu-note, .menu-row:focus .menu-note { color: inherit; opacity: 0.8; }
 /* A conversation's row: its state codicon stands in the gutter, and the selected one is marked by a highlight, not a check mark, since an idle
    session's codicon is itself a check. */
-.conversation-row > .codicon:first-child { width: 28px; margin-right: -6px; text-align: center; }
+.conversation-row > .codicon:first-child { width: 28px; text-align: center; }
 .conversation-row[aria-checked="true"]:not(:hover):not(:focus) { background: var(--vscode-list-inactiveSelectionBackground, rgba(127, 127, 127, 0.2)); }
 body.vscode-high-contrast .conversation-row[aria-checked="true"], body.vscode-high-contrast-light .conversation-row[aria-checked="true"] { outline: 1px dashed var(--vscode-contrastActiveBorder, currentColor); outline-offset: -1px; }
 .menu-separator { height: 1px; margin: 4px 10px; background: var(--vscode-menu-separatorBackground, var(--vscode-widget-border, rgba(127, 127, 127, 0.35))); }
