@@ -1240,18 +1240,135 @@ describe('Runtime', () => {
   });
 
   it('reconciles at startup and installs hooks when enabled', async () => {
-    const { store, runtime } = setup(config({ installHooks: true }));
+    let now = T0;
+    const { store, runtime, cli } = setup(config({ installHooks: true }), () => now);
     store.insertTicket({ source: 'adhoc', sourceKey: '1', ref: '#1', repo: '', sourceId: null, title: 'x', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: 'D:/x' });
     runtime.send({ type: 'adhoc', prompt: 'Do it', repoRoot: 'D:/scratch', start: true });
     await runtime.settled();
-    store.updateSession('s1', { state: 'starting', shortId: null });
+    store.updateSession('s1', { state: 'starting', shortId: null, nativeSessionId: null });
 
     await runtime.startup();
 
-    expect(store.session('s1')).toMatchObject({ state: 'ended', outcome: 'failed' });
-    expect(store.workItem(1)).toMatchObject({ status: 'failed', error: 'The hub stopped while the session was starting.' });
+    expect(store.session('s1')).toMatchObject({ state: 'starting', outcome: null });
+    expect(store.workItem(1)).toMatchObject({ status: 'running', error: null });
+    now += 120_000;
+    await runtime.readRoster();
+    expect(store.session('s1')).toMatchObject({ state: 'starting', outcome: null, released: false });
+    expect(store.workItem(1)).toMatchObject({ status: 'running', error: null, warning: 'The Claude start is still unconfirmed; inspect claude agents for the label ending · s1, then use Stop to clear this unconfirmed start if needed.' });
+    expect(await runtime.report({ sessionId: 's1', kind: 'done' })).toEqual({ refused: 'The session start is still unconfirmed; retry the report after it is identified.' });
+    expect(store.workItem(1)?.status).toBe('running');
+    cli.roster = [{ id: '00000001', sessionId: '00000001-native', pid: 101, kind: 'background', cwd: 'D:/scratch', name: 'name · s1', state: 'working' }];
+    await runtime.readRoster();
+    expect(store.session('s1')).toMatchObject({ state: 'running', nativeSessionId: '00000001-native', stateDetail: null });
+    expect(store.workItem(1)?.warning).toBeNull();
     expect(Object.keys(JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8')).hooks)).toHaveLength(13);
     expect(runtime.snapshot().errors.hooks).toBeNull();
+  });
+
+  it.each(['clear', 'identified'])('rechecks an unconfirmed start on operator Stop: %s', async result => {
+    let now = T0;
+    const { store, runtime, cli, logs } = setup(config(), () => now);
+    runtime.send({ type: 'adhoc', prompt: 'Do it', repoRoot: 'D:/scratch', start: true });
+    await runtime.settled();
+    store.updateSession('s1', { state: 'starting', shortId: null, nativeSessionId: null });
+    cli.roster = [];
+    await runtime.startup();
+    now += 120_000;
+    await runtime.readRoster();
+    const logCount = logs.filter(line => line.includes('not settled yet')).length;
+    await runtime.readRoster();
+    expect(logs.filter(line => line.includes('not settled yet'))).toHaveLength(logCount);
+    cli.calls = [];
+    if (result === 'identified') cli.roster = [{ id: 'real', sessionId: 'real-native', pid: 101, kind: 'background', cwd: 'D:/scratch', name: 'name · s1', state: 'working' }];
+    runtime.send({ type: 'stop', workItemId: 1 });
+    await runtime.settled();
+    expect(store.session('s1')).toMatchObject({ state: 'ended', released: true });
+    expect(store.workItem(1)?.warning).toBeNull();
+    if (result === 'clear') {
+      expect(cli.calls.filter(call => call[1] === 'stop')).toEqual([]);
+      expect(store.workItem(1)).toMatchObject({ status: 'failed', error: 'Unconfirmed start cleared. No process was stopped; inspect claude agents before retrying.' });
+      expect(await runtime.report({ sessionId: 's1', kind: 'done' })).toEqual({ refused: 'The session failed to start; retry the work item before reporting.' });
+      runtime.send({ type: 'delete', workItemId: 1 });
+      await runtime.settled();
+      expect(store.workItem(1)).toBeNull();
+    } else {
+      expect(cli.calls.some(call => call[1] === 'stop' && call[2] === 'real')).toBe(true);
+      expect(store.workItem(1)?.status).toBe('blocked');
+    }
+  });
+
+  it('keeps an ambiguous start owned when Stop cannot identify its process', async () => {
+    let now = T0;
+    const { store, runtime, cli } = setup(config(), () => now);
+    runtime.send({ type: 'adhoc', prompt: 'Do it', repoRoot: 'D:/scratch', start: true });
+    await runtime.settled();
+    store.updateSession('s1', { state: 'starting', shortId: null, nativeSessionId: null });
+    cli.roster = ['first', 'extra'].map(id => ({ id, sessionId: id + '-native', pid: 101, kind: 'background', cwd: 'D:/scratch', name: 'name · s1', state: 'working' }));
+    await runtime.startup();
+    now += 120_000;
+    cli.calls = [];
+    runtime.send({ type: 'stop', workItemId: 1 });
+    await runtime.settled();
+    expect(store.session('s1')).toMatchObject({ state: 'starting', released: false });
+    expect(cli.calls.some(call => call[1] === 'stop')).toBe(false);
+    expect(store.workItem(1)?.error).toContain('stop the extra session so the original can be recovered');
+    expect(await runtime.report({ sessionId: 's1', kind: 'done' })).toMatchObject({ refused: expect.stringContaining('unconfirmed') });
+    cli.roster = cli.roster.slice(0, 1);
+    await runtime.readRoster();
+    expect(store.session('s1')).toMatchObject({ state: 'running', shortId: 'first' });
+    expect(store.workItem(1)).toMatchObject({ error: null, warning: null });
+  });
+
+  it.each(['before', 'after'])('keeps dock recovery Stop reachable when Mark done clears the item warning %s the deadline', async when => {
+    let now = T0;
+    const { store, runtime, cli } = setup(config(), () => now);
+    runtime.send({ type: 'adhoc', prompt: 'Do it', repoRoot: 'D:/scratch', start: true });
+    await runtime.settled();
+    store.updateSession('s1', { state: 'starting', shortId: null, nativeSessionId: null });
+    cli.roster = [];
+    await runtime.startup();
+    if (when === 'before') runtime.send({ type: 'mark-done', workItemId: 1 });
+    now += 120_000;
+    await runtime.readRoster();
+    if (when === 'after') runtime.send({ type: 'mark-done', workItemId: 1 });
+    expect(store.workItem(1)?.status).toBe('done');
+    const row = runtime.snapshot().workItems.find(item => item.id === 1)!;
+    expect(controlsOf(row).find(control => control.label === 'Stop')?.message).toEqual({ type: 'action', action: { type: 'stop', workItemId: 1 } });
+    runtime.send({ type: 'stop', workItemId: 1 });
+    await runtime.settled();
+    expect(store.session('s1')?.state).toBe('ended');
+    runtime.send({ type: 'delete', workItemId: 1 });
+    await runtime.settled();
+    expect(store.workItem(1)).toBeNull();
+  });
+
+  it.each(['started', 'stopped'])('ignores a stale reconcile result after the session or hub %s', async state => {
+    const { store, runtime, cli } = setup();
+    runtime.send({ type: 'adhoc', prompt: 'Do it', repoRoot: 'D:/scratch', start: true });
+    await runtime.settled();
+    store.updateSession('s1', { state: 'starting', shortId: null, nativeSessionId: null });
+    cli.roster = [];
+    await runtime.startup();
+    cli.roster = [{ id: 'old', sessionId: 'old-native', pid: 101, kind: 'background', cwd: 'D:/scratch', name: 'name · s1', state: 'working' }];
+    const gate = deferred();
+    cli.rosterGate = gate.promise;
+    const reading = runtime.readRoster();
+    await vi.waitFor(() => expect(cli.rosterGate).toBeNull());
+    if (state === 'started') {
+      runtime.send({ type: 'session-started', sessionId: 's1', nativeSessionId: 'new-native', shortId: 'new' });
+      cli.roster = [{ id: 'new', sessionId: 'new-native', pid: 102, kind: 'background', cwd: 'D:/scratch', state: 'working' }];
+    } else {
+      runtime.stop();
+      store.close();
+    }
+    gate.resolve();
+    await expect(reading).resolves.toBeUndefined();
+    if (state === 'started') {
+      expect(store.session('s1')?.nativeSessionId).toBe('new-native');
+      runtime.send({ type: 'session-start-pending', sessionId: 's1', message: 'stale warning' });
+      expect(store.session('s1')?.stateDetail).toBeNull();
+      expect(store.workItem(1)?.warning).toBeNull();
+    }
   });
 
   it("installs both agents' hooks at startup and shows each failure", async () => {

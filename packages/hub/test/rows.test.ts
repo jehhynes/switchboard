@@ -27,6 +27,20 @@ import { item, NOW, pool, session, snapshot, triage } from './views.js';
 
 const labels = (entry: WorkItemView) => controlsOf(entry).map((control) => control.label);
 
+describe('unconfirmed start recovery controls', () => {
+  it('offers Stop for a warned ordinary start, including a done item, and keeps Delete unavailable until it ends', () => {
+    for (const status of ['running', 'done'] as const) {
+      const entry = item(1, { status, warning: status === 'done' ? null : 'Unconfirmed start', sessions: [session({ provider: 'claude', state: 'starting', nativeSessionId: null, shortId: null, stateDetail: 'Unconfirmed start' })] });
+      expect(controlsOf(entry).find(control => control.label === 'Stop')).toEqual({ label: 'Stop', icon: 'debug-stop', message: { type: 'action', action: { type: 'stop', workItemId: 1 } }, confirm: { question: 'Recheck this start?', detail: 'Only an overdue start with no matching session can be cleared without stopping a process. Resolve duplicate sessions in claude agents first. Inspect it before retrying.', action: 'Stop' } });
+      expect(labels(entry)).not.toContain('Delete');
+    }
+  });
+
+  it('does not offer local clearing for an ordinary in-flight start without recovery detail', () => {
+    expect(labels(item(1, { warning: 'Unrelated warning', sessions: [session({ state: 'starting', nativeSessionId: null, shortId: null, stateDetail: null })] }))).not.toContain('Stop');
+  });
+});
+
 describe('groupOf', () => {
   it('puts done first, then unstarted, triaging and queued work, then ready work, then work blocked on the operator, then the rest', () => {
     expect(groupOf(item(1, { status: 'done', sessions: [session({ state: 'waiting' })] }))).toBe('done');

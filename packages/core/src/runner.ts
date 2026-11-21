@@ -40,7 +40,7 @@ export interface MarkerReading {
 export type Reconciled =
   | { sessionId: string; started: { shortId: string; nativeSessionId: string; startPrompt?: true } }
   | { sessionId: string; failed: string }
-  | { sessionId: string; pending: string };
+  | { sessionId: string; pending: string; attention?: true; clearable?: true };
 
 /** Starts, observes and stops the sessions of one agent provider (architecture.md § Components). */
 export interface SessionRunner {

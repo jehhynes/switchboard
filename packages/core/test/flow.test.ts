@@ -368,6 +368,21 @@ describe('triage', () => {
 });
 
 describe('sessions', () => {
+  it.each([true, false])('sets a pending-start warning and clears only its own warning on failure: %s', matching => {
+    const h = new Harness();
+    const start = only(h.act({ type: 'adhoc', prompt: 'Do it', repoRoot: 'D:/scratch', start: true }), 'start-session');
+    h.act({ type: 'session-start-pending', sessionId: start.sessionId, message: 'Unconfirmed start' });
+    expect(h.store.session(start.sessionId)?.stateDetail).toBe('Unconfirmed start');
+    expect(h.item(start.workItemId).warning).toBe('Unconfirmed start');
+    if (!matching) h.store.updateWorkItem(start.workItemId, { warning: 'Keep this warning' });
+    h.act({ type: 'session-start-failed', sessionId: start.sessionId, message: 'Cleared by operator' });
+    expect(h.item(start.workItemId).warning).toBe(matching ? null : 'Keep this warning');
+    expect(h.store.session(start.sessionId)?.stateDetail).toBeNull();
+    h.act({ type: 'session-start-pending', sessionId: start.sessionId, message: 'Stale warning' });
+    expect(h.store.session(start.sessionId)?.stateDetail).toBeNull();
+    expect(h.item(start.workItemId).warning).toBe(matching ? null : 'Keep this warning');
+  });
+
   function running(h: Harness, key = '1', playbook = 'dev:question'): { item: number; session: string } {
     const [triage] = h.poll(...[...h.store.tickets('github').filter((t) => t.assigned).map((t) => issue(t.sourceKey)), issue(key)]);
     const item = (triage as Extract<FlowAction, { type: 'triage' }>).workItemId!;
@@ -631,6 +646,8 @@ describe('sessions', () => {
 
     expect(h.item(1)).toMatchObject({ status: 'failed', error: 'Workspace not trusted' });
     expect(h.store.session(first.sessionId)).toMatchObject({ state: 'ended', outcome: 'failed', outcomeDetail: 'Workspace not trusted' });
+    expect(h.report(first.sessionId, { kind: 'done' }).refused).toBe('The session failed to start; retry the work item before reporting.');
+    expect(h.item(1)).toMatchObject({ status: 'failed', error: 'Workspace not trusted' });
 
     expect(failedAtTriage({ ...h.item(1), triage: h.store.triagesFor(1).at(-1)! })).toBe(false);
     const second = only(h.act({ type: 'retry', workItemId: 1 }), 'start-session');

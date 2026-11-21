@@ -171,8 +171,9 @@ export function controlsOf(item: WorkItemView, mode: OpenVSCode = 'always'): Con
   }
 
   // Processes an ended Code Mode session left can keep it from resuming, so Stop ends them (PRD R95).
-  if (isBackground(session) || (session?.execution === 'app-server' && session.nativeSessionId !== null) || (session === null && (item.leftovers?.length ?? 0) > 0)) {
-    controls.push({ label: 'Stop', icon: 'debug-stop', message: action('stop') });
+  const unconfirmed = session?.state === 'starting' && session.provider === 'claude' && session.codeMode !== true && session.nativeSessionId === null && session.shortId === null && session.stateDetail !== null;
+  if (unconfirmed || isBackground(session) || (session?.execution === 'app-server' && session.nativeSessionId !== null) || (session === null && (item.leftovers?.length ?? 0) > 0)) {
+    controls.push({ label: 'Stop', icon: 'debug-stop', message: action('stop'), ...(unconfirmed ? { confirm: { question: 'Recheck this start?', detail: 'Only an overdue start with no matching session can be cleared without stopping a process. Resolve duplicate sessions in claude agents first. Inspect it before retrying.', action: 'Stop' } } : {}) });
   }
 
   // Retries from the step that failed (PRD R34).

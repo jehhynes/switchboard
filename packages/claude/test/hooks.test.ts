@@ -145,7 +145,7 @@ describe('markerState', () => {
     [{ event: 'Notification', notificationType: 'idle_prompt' }, null],
     [{ event: 'Stop' }, { state: 'idle', detail: null }],
     [{ event: 'Stop', backgroundTasks: 2 }, { state: 'running', detail: BACKGROUND_DETAIL }],
-    [{ event: 'StopFailure', error: 'rate_limit', errorMessage: 'API Error' }, { state: 'failed', detail: 'rate_limit' }],
+    [{ event: 'StopFailure', error: 'rate_limit', errorMessage: 'API Error' }, { state: 'failed', detail: 'rate_limit: API Error' }],
     [{ event: 'StopFailure', errorMessage: 'API Error' }, { state: 'failed', detail: 'API Error' }],
     [{ event: 'SessionEnd' }, null],
   ])('maps %j', (patch, expected) => {

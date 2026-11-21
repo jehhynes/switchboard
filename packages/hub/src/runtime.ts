@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { classify, ClaudeRunner, findTranscript, CodeModeRunner, conversationRules, HOOKS_REQUIRED, readRoster } from '@switchboard/claude';
 import { classifyCodex, CodexRunner, AppServer, AppServerRunner } from '@switchboard/codex';
 import type { Exec } from '@switchboard/claude';
-import type { FlowAction, FlowEvent, FlowResult, HandledWork, MarkerReading, ObservedFork, ObservedSession, PolledTicket, Provider, Session, SessionRunner, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, Worktree } from '@switchboard/core';
+import type { FlowAction, FlowEvent, FlowResult, HandledWork, MarkerReading, ObservedFork, ObservedSession, PolledTicket, Provider, Reconciled, Session, SessionRunner, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, Worktree } from '@switchboard/core';
 import { activeSession, ADHOC_SOURCE, artifactsDir, awaitsRecheck, QUESTION_CARD, RESUME_PROMPT, executableDirOnPath, handle, launchOptions, nothingNew, PROVIDERS, recordRefusal, homeRepo, repoOf, sessionName, deliveredTone, ticketRoot, sessionContract, switchboardHome, triageModel } from '@switchboard/core';
 import { noKind } from './config.js';
 import type { Config } from './config.js';
@@ -165,6 +165,7 @@ export class Runtime {
   private reads = new Map<string, Promise<void>>();
   /** Sessions a stopped hub left starting that a runner could not settle yet. */
   private unreconciled = new Set<string>();
+  private reconcileMessages = new Map<string, string>();
   /** One runner per agent, chosen by each session's provider (PRD R22), and one for Code Mode sessions (PRD R93). */
   private readonly runners: Record<RunnerKey, SessionRunner>;
   /** The terminal holder of this home, connected on first use (PRD R94). */
@@ -416,7 +417,7 @@ export class Runtime {
     return null;
   }
 
-  /** Startup reconciliation (PRD R43): triage the hub abandoned runs again, and a start it abandoned fails. */
+  /** Startup reconciliation (PRD R43): retry abandoned triage and identify interrupted starts. */
   async startup(): Promise<void> {
     await this.checkNode();
 
@@ -499,18 +500,31 @@ export class Runtime {
   }
 
   /** Settles sessions a stopped hub left starting; one the runner cannot tell about yet is asked about again at the next roster read. */
-  private async reconcile(starting: Session[]): Promise<void> {
+  private async reconcile(starting: Session[]): Promise<Reconciled[]> {
+    const results: Reconciled[] = [];
     for (const key of RUNNER_KEYS) {
       const own = starting.filter((session) => runnerKey(session) === key);
 
       for (const result of own.length === 0 ? [] : await this.runners[key].reconcile(own)) {
+        if (this.stopped) return results;
+        if (this.deps.store.session(result.sessionId)?.state !== 'starting') {
+          this.unreconciled.delete(result.sessionId);
+          this.reconcileMessages.delete(result.sessionId);
+          continue;
+        }
+        results.push(result);
         if ('pending' in result) {
           this.unreconciled.add(result.sessionId);
-          this.deps.log(`session ${result.sessionId} left starting by the hub that stopped is not settled yet: ${result.pending}`);
+          if (result.attention === true) this.send({ type: 'session-start-pending', sessionId: result.sessionId, message: result.pending });
+          if (this.reconcileMessages.get(result.sessionId) !== result.pending) {
+            this.deps.log(`session ${result.sessionId} left starting by the hub that stopped is not settled yet: ${result.pending}`);
+            this.reconcileMessages.set(result.sessionId, result.pending);
+          }
           continue;
         }
 
         this.unreconciled.delete(result.sessionId);
+        this.reconcileMessages.delete(result.sessionId);
         this.send(
           'failed' in result
             ? { type: 'session-start-failed', sessionId: result.sessionId, message: result.failed }
@@ -518,6 +532,7 @@ export class Runtime {
         );
       }
     }
+    return results;
   }
 
   start(): void {
@@ -814,13 +829,21 @@ export class Runtime {
 
   private async readRosterOnce(): Promise<void> {
     await this.readSessions();
-    await this.readHeld();
+    if (!this.stopped) await this.readHeld();
   }
 
   private async readSessions(): Promise<void> {
+    for (const id of this.unreconciled) {
+      if (this.deps.store.session(id)?.state !== 'starting') {
+        this.unreconciled.delete(id);
+        this.reconcileMessages.delete(id);
+      }
+    }
     if (this.unreconciled.size > 0) {
       await this.reconcile(this.deps.store.activeSessions().filter((session) => session.state === 'starting' && this.unreconciled.has(session.id)));
     }
+
+    if (this.stopped) return;
 
     // A session being resumed has no launch the read could tell its new process by, so the read leaves it to the next one (PRD R95).
     const sessions = this.deps.store.startedSessions().filter((session) => !this.resuming.has(session.id));
@@ -1438,6 +1461,17 @@ export class Runtime {
 
     if (early !== null) {
       return { refused: early };
+    }
+
+    const recovering = this.deps.store.session(body.sessionId);
+    if (recovering?.state === 'starting' && this.unreconciled.has(recovering.id)) {
+      await this.reconcile([recovering]);
+      if (this.deps.store.session(recovering.id)?.state === 'starting') {
+        const refused = 'The session start is still unconfirmed; retry the report after it is identified.';
+        const { sessionId, ...fields } = body;
+        this.refuseReport(sessionId, fields, refused);
+        return { refused };
+      }
     }
 
     if (body.kind === 'worktree') {
@@ -2400,6 +2434,26 @@ export class Runtime {
   }
 
   private async stopSession(action: Extract<FlowAction, { type: 'stop-session' }>): Promise<void> {
+    if (action.reason === 'operator' && runnerKey(action) === 'claude' && this.unreconciled.has(action.sessionId)) {
+      const session = this.deps.store.session(action.sessionId);
+      if (session?.state === 'starting') {
+        const result = (await this.reconcile([session])).find(entry => entry.sessionId === session.id);
+        if (this.stopped) return;
+        const current = this.deps.store.session(action.sessionId);
+        if (current?.state === 'starting' && current.nativeSessionId === null && current.shortId === null && result !== undefined && 'pending' in result && result.clearable === true) {
+          this.unreconciled.delete(current.id);
+          this.reconcileMessages.delete(current.id);
+          this.send({ type: 'session-start-failed', sessionId: current.id, message: 'Unconfirmed start cleared. No process was stopped; inspect claude agents before retrying.' });
+          return;
+        }
+        if (current?.state === 'starting') {
+          this.send({ type: 'stop-failed', sessionId: current.id, reason: 'operator', shortId: current.shortId, message: result !== undefined && 'pending' in result ? result.pending : 'The session start is still unconfirmed.' });
+          return;
+        }
+        if (current?.state === 'ended') return;
+        if (current !== null) action = { ...action, shortId: current.shortId };
+      }
+    }
     const { leftovers, ...target } = action;
     const failure = await this.runners[runnerKey(action)].stop(leftovers === true ? { ...target, lastTree: this.deps.store.session(action.sessionId)?.lastTree ?? [] } : target, action.reason);
     if (failure?.cancelled === true) {

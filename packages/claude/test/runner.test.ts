@@ -59,7 +59,7 @@ describe('startArgs and shortIdFrom', () => {
       '--settings',
       '{"worktree":{"bgIsolation":"none"}}',
       '-n',
-      'switchboard · dev:develop · github 15619',
+      'switchboard · dev:develop · github 15619 · s1',
       '--model',
       'opus',
       '--append-system-prompt',

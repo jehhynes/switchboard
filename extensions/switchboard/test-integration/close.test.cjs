@@ -158,9 +158,10 @@ describe('Closing done item windows (PRD R76)', () => {
     }
   });
 
-  it('closes when the wait passes with no other event, waiting while focused or while the work is open again', async () => {
+  it('closes when the wait passes with no other event, waiting while focused or while the work is open again', async function () {
     const settings = vscode.workspace.getConfiguration('switchboard');
     const wait = () => new Promise((resolve) => setTimeout(resolve, 400));
+    const deadline = Date.now() + this.timeout() - 1000;
 
     // 0.002 minutes is 120 ms.
     await settings.update('closeDoneWindowsAfterMinutes', 0.002, vscode.ConfigurationTarget.Global);
@@ -179,7 +180,9 @@ describe('Closing done item windows (PRD R76)', () => {
       assert.deepStrictEqual(closed, []);
       await extension.windowStateChanged(false);
       assert.deepStrictEqual(closed, []);
-      await wait();
+      while (closed.length === 0 && Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
       assert.deepStrictEqual(closed, ['workbench.action.closeWindow']);
     } finally {
       await settings.update('closeDoneWindowsAfterMinutes', 0, vscode.ConfigurationTarget.Global);

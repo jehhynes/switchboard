@@ -230,6 +230,11 @@ describe('codeModeEvidence', () => {
     expect(codeModeEvidence(`${ON.head}\r\n● Quoting: Code Mode (experimental) isn't available: x`)).toEqual({ on: true });
   });
 
+  it('reads the Linux banner and refusal with absolute column moves', () => {
+    expect(codeModeEvidence(fixture('linux-on').head)).toEqual({ on: true });
+    expect(codeModeEvidence("Code\u001b[8GMode\u001b[13G(experimental)\u001b[28Gisn't\u001b[34Gavailable: telemetry disabled. Starting with the ordinary tools.")).toEqual({ off: "Code Mode (experimental) isn't available: telemetry disabled. Starting with the ordinary tools." });
+  });
+
   it('reads the refusal without the warning sign and split by escape sequences', () => {
     expect(codeModeEvidence("\u001b[33mCode Mode (experimental) isn't\u001b[0m\r\n available: for now it only works directly")).toEqual({ off: "Code Mode (experimental) isn't available: for now it only works directly" });
   });
@@ -479,6 +484,20 @@ describe('CodeModeRunner.start', () => {
     lookup = { holder };
     holder.failSpawn = 'claude could not be started: File not found';
     expect(await runner().start(ACTION)).toEqual({ error: 'claude could not be started: File not found' });
+  });
+
+  it('names a missing bare executable from the Linux terminal exit', async () => {
+    holder.screens.set('sb-1', { head: '', text: 'execvp(3) failed.: No such file or directory' });
+    holder.spawn = async request => {
+      holder.entries.push({ ...entry(request.session, true), cwd: home });
+      return { session: request.session, pid: 100 };
+    };
+    expect(await runner({ claudePath: () => 'missing-claude' }).start(ACTION)).toEqual({ error: 'Claude Code was not found at missing-claude. Install it or set sessions.claudePath.' });
+  });
+
+  it('names an absolute missing executable before asking the holder to spawn', async () => {
+    const missing = join(home, 'missing', 'claude');
+    expect(await runner({ claudePath: () => missing }).start(ACTION)).toEqual({ error: `Claude Code was not found at ${missing}. Install it or set sessions.claudePath.` });
   });
 
   it('generates the session ID and launch when the action names none', async () => {

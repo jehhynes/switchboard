@@ -39,7 +39,7 @@ export function startArgs(action: StartAction): string[] {
     '--settings',
     JSON.stringify({ worktree: { bgIsolation: 'none' } }),
     '-n',
-    action.name,
+    `${action.name} · ${action.sessionId}`,
     ...(action.model === null ? [] : ['--model', action.model]),
     '--append-system-prompt',
     action.contract,
