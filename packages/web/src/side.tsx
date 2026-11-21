@@ -102,9 +102,6 @@ export function renderArtifactView(key: string, artifact: ArtifactView, doc?: st
   return (
     <div class="artifact-view" data-artifact={artifact.path} data-version={String(artifact.updatedAt)} key={`${artifact.path}@${artifact.updatedAt}`}>
       <div class="artifact-head">
-        <button class="icon" type="button" data-action="close-artifact" title="Back to the list" aria-label="Back">
-          <span class="codicon codicon-arrow-left"></span>
-        </button>
         <span class="artifact-badge">{artifact.kind}</span>
         <span class="artifact-title">{artifact.title}</span>
         {artifact.type === 'markdown' ? (

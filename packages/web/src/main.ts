@@ -3,7 +3,7 @@ import { snoozeChoices } from '@switchboard/core/snooze';
 import type { PageState } from './model.js';
 import { placeMenus } from '@switchboard/conversation/menuPlace';
 import { escape, renderMarkdown } from './markdown.js';
-import { answerText, artifactUrl, bandOpen, browserNote, paneLink, collapsedGroups, complete, firstSnoozeDay, GROUPS_KEY, inputReady, renderMicButton, markdownBody, newView, parseQuestions, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, SIDE_TABS } from './render.js';
+import { answerText, artifactTabsFit, artifactUrl, bandOpen, browserNote, paneLink, collapsedGroups, complete, firstSnoozeDay, GROUPS_KEY, inputReady, renderMicButton, markdownBody, newView, parseQuestions, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, SIDE_TABS } from './render.js';
 import type { CardDraft, PaneView, SideTab, Tab, View } from './render.js';
 import type { ConsoleOptions, MountedConsole } from './console.js';
 import { LIGHT_SCHEME } from './console.js';
@@ -182,9 +182,13 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /** Whether the Browser tab shows: on the installed page while the Chrome pane is on (PRD R113). */
   const browserTab = (): boolean => view.pane?.enabled === true && standalone();
   /** The tab the conversation's pane shows: always the conversation while Status and Artifacts have their own column, and never a Browser tab that is gone. */
-  const mainTab = (): Tab => (wide() || (view.tab === 'browser' && !browserTab()) ? 'conversation' : view.tab);
+  const mainTab = (): Tab => (wide() || (view.tab === 'browser' && !browserTab()) || (view.tab === 'artifacts' && openArtifact() === null) ? 'conversation' : view.tab);
   /** What the column right of the conversation shows: Status in place of a Browser tab that is gone. */
-  const sideTab = (): SideTab => (view.side === 'browser' && !browserTab() ? 'status' : view.side);
+  const sideTab = (): SideTab => ((view.side === 'browser' && !browserTab()) || (view.side === 'artifacts' && openArtifact() === null) ? 'status' : view.side);
+  /** The artifact whose tab is chosen, while the work item still has it; artifacts have no list of their own, only a tab each and a menu. */
+  function openArtifact(): string | null {
+    return view.artifact !== null && state.artifacts.some((one) => one.path === view.artifact) ? view.artifact : null;
+  }
   /**
    * Chooses a tab of the column or of the conversation. Browser is one choice in both layouts, so a page that crosses the wide breakpoint keeps
    * the Chrome pane; another tab chosen in one layout leaves Browser in the other.
@@ -1378,7 +1382,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
-    mount(head, [renderHeader(state, view), side ? null : renderTabs({ ...view, tab: mainTab() }, state, browserTab())]);
+    const strip = { open: openArtifact(), fit: view.artifactFit, menu: view.artifactMenu, now: deps.now() };
+
+    mount(head, [renderHeader(state, view), side ? null : renderTabs({ ...view, tab: mainTab() }, state, browserTab(), strip)]);
 
     const artifact = view.artifact === null ? undefined : state.artifacts.find((one) => one.path === view.artifact);
     const now = deps.now();
@@ -1431,7 +1437,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     drawTab(panel, mainTab());
 
     if (side) {
-      mount(detailHead, renderSideSwitch(sideTab(), state, browserTab()));
+      mount(detailHead, renderSideSwitch(sideTab(), state, browserTab(), strip));
       drawTab(detailBody, sideTab());
     }
     // The composer first, so the conversation is scrolled against its final height.
@@ -1467,8 +1473,34 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   };
   /** Opens each open menu down and to the right of its button, or the other way where the page has no room (`placeMenus`, architecture.md § Menus). */
   const fitMenus = (): void => placeMenus(root, { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight });
+  /**
+   * How many artifact tabs the shown strip fits (`artifactTabsFit`), measured after a draw: its other tabs and the Artifacts button as drawn, and a
+   * fixed width per artifact tab. True when that changes which tabs show, so the strip is drawn once more; a change of the strip's width draws again
+   * (`stripWidth`).
+   */
+  const fitArtifactTabs = (): boolean => {
+    const strip = (wide() ? detailHead : head).querySelector<HTMLElement>('.tabs');
+
+    if (strip === null) {
+      return false;
+    }
+
+    const fixed = [...strip.querySelectorAll<HTMLElement>(':scope > .tab:not(.artifact-tab)')].reduce((sum, tab) => sum + tab.getBoundingClientRect().width, 0);
+    const menu = strip.querySelector<HTMLElement>('.artifact-menu-button')?.getBoundingClientRect().width;
+    const count = state.artifacts.length;
+    const fit = artifactTabsFit(strip.getBoundingClientRect().width, fixed, count, menu || undefined);
+    const changed = Math.min(fit, count) !== Math.min(view.artifactFit, count);
+
+    view.artifactFit = fit;
+    return changed;
+  };
   const draw = (): void => {
     drawRegions();
+
+    if (fitArtifactTabs()) {
+      drawRegions();
+    }
+
     fitMenus();
     reportBrowser();
   };
@@ -2104,6 +2136,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         chooseTab('artifacts');
 
         view.artifact = button!.dataset['path'] ?? null;
+        view.artifactMenu = false;
+        draw();
+        break;
+      case 'artifact-menu':
+        view.artifactMenu = !view.artifactMenu;
         draw();
         break;
       case 'open-console':
@@ -2115,7 +2152,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         draw();
         break;
       case 'close-artifact':
+        // Closing an artifact's tab shows Status; its tab stays while there is room, and the menu lists every artifact.
         view.artifact = null;
+        view.artifactMenu = false;
+        chooseTab('status');
         draw();
         break;
       case 'artifact-window':
@@ -2238,6 +2278,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       draw();
     }
 
+    if (view.artifactMenu && !(event.target instanceof Element && event.target.closest('.artifact-more') !== null)) {
+      view.artifactMenu = false;
+      draw();
+    }
+
     if ((view.picker || view.personas !== null || view.actions || view.providers !== null || view.viewMenu) && !(event.target instanceof Node && head.querySelector('.header')?.contains(event.target) === true)) {
       view.providers = null;
       view.picker = false;
@@ -2248,6 +2293,19 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
   });
   root.addEventListener('keydown', (event) => {
+    // Left and Right, Home and End move between a tab strip's tabs, as in a tab list; Enter or Space then chooses one.
+    const tab = event.target instanceof HTMLElement && event.target.getAttribute('role') === 'tab' ? event.target : null;
+    const tabs = tab === null ? [] : [...(tab.closest('.tabs')?.querySelectorAll<HTMLElement>('[role="tab"]') ?? [])];
+
+    if (tab !== null && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key) && tabs.length > 1) {
+      const at = tabs.indexOf(tab);
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (at + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+
+      tabs[next]!.focus();
+      event.preventDefault();
+      return;
+    }
+
     // Ctrl+Enter goes ahead in an input sheet, whose box takes several lines, as in the dock's dialog.
     if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && view.sheet?.kind === 'input') {
       event.preventDefault();
@@ -2258,6 +2316,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     if (event.key === 'Escape' && view.sheet !== null) {
       view.sheet = null;
       draw();
+      event.stopImmediatePropagation();
+    } else if (event.key === 'Escape' && view.artifactMenu) {
+      view.artifactMenu = false;
+      draw();
+      root.querySelector<HTMLElement>('.artifact-menu-button')?.focus();
       event.stopImmediatePropagation();
     } else if (event.key === 'Escape' && view.rowMenu !== null) {
       const opener = view.rowMenu;
@@ -2767,6 +2830,19 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
   paneColumn?.observe(detailBody);
   paneColumn?.observe(panel);
+  // A strip that widens or narrows fits another number of artifact tabs.
+  let stripWidth = -1;
+  const strips = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
+    const width = (wide() ? detailHead : head).getBoundingClientRect().width;
+
+    if (width !== stripWidth) {
+      stripWidth = width;
+      draw();
+    }
+  }) : null;
+
+  strips?.observe(detailHead);
+  strips?.observe(head);
   reportBrowser = reportPane;
   // Settings and the list header's sheets open and close without the page's draw.
   const settingsShown = typeof MutationObserver === 'function' ? new MutationObserver(() => reportPane()) : null;
@@ -2967,6 +3043,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       clearTimeout(historyChange ?? undefined);
       clearInterval(paneWake);
       paneColumn?.disconnect();
+      strips?.disconnect();
       settingsShown?.disconnect();
       clearInterval(promptTimer);
       clearTimeout(showTimer);

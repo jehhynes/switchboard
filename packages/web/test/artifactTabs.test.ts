@@ -1,0 +1,75 @@
+import { describe, expect, it } from 'vitest';
+import { renderSideSwitch, renderTabs } from '../src/header.js';
+import { ARTIFACT_MENU_WIDTH, ARTIFACT_TAB_WIDTH, ARTIFACT_TABS_MAX, artifactBar, artifactTabsFit, newView } from '../src/render.js';
+import { EMPTY } from '../src/model.js';
+import type { ArtifactView } from '../src/types.js';
+import { html } from './html.js';
+
+const artifact = (index: number): ArtifactView => ({ path: `chat/a${index}.md`, owner: 'chat', kind: 'note', title: `Note ${index}`, ext: 'md', type: 'markdown', updatedAt: 1_000 + index });
+const eight = [0, 1, 2, 3, 4, 5, 6, 7].map(artifact);
+const paths = (markup: string, attribute: string) => [...markup.matchAll(new RegExp(`${attribute}="([^"]+)"`, 'g'))].map((match) => match[1]);
+
+describe('artifactTabsFit', () => {
+  it('shows every tab when they fit without the menu, else as many as fit beside it, at least one and at most the cap', () => {
+    expect(artifactTabsFit(1000, 200, 3)).toBe(3);
+    // 3 tabs need 504 px: in 600 px they do not fit with 200 px of other tabs, so the menu takes its room and 1 tab is left.
+    expect(artifactTabsFit(600, 200, 3)).toBe(Math.floor((600 - 200 - ARTIFACT_MENU_WIDTH) / ARTIFACT_TAB_WIDTH));
+    // No room for even one tab beside the menu: none, and the menu lists them all.
+    expect(artifactTabsFit(300, 250, 8)).toBe(0);
+    // The Artifacts button as drawn, here 60 px, leaves room for one more.
+    expect(artifactTabsFit(700, 200, 8, 60)).toBe(Math.floor((700 - 200 - 60) / ARTIFACT_TAB_WIDTH));
+    expect(artifactTabsFit(5000, 200, 8)).toBe(ARTIFACT_TABS_MAX);
+    expect(artifactTabsFit(0, 0, 8)).toBe(ARTIFACT_TABS_MAX);
+    expect(artifactTabsFit(0, 0, 2)).toBe(2);
+    expect(artifactTabsFit(1000, 200, 0)).toBe(0);
+  });
+});
+
+describe('artifactBar', () => {
+  it('orders the artifacts newest first and puts the open one in place of the last tab when it does not fit', () => {
+    expect(artifactBar(eight, null, 3).tabs.map((one) => one.path)).toEqual(['chat/a7.md', 'chat/a6.md', 'chat/a5.md']);
+    expect(artifactBar(eight, 'chat/a0.md', 3).tabs.map((one) => one.path)).toEqual(['chat/a7.md', 'chat/a6.md', 'chat/a0.md']);
+    expect(artifactBar(eight, 'chat/a6.md', 3).tabs.map((one) => one.path)).toEqual(['chat/a7.md', 'chat/a6.md', 'chat/a5.md']);
+    expect(artifactBar(eight, 'chat/gone.md', 3).tabs).toHaveLength(3);
+    expect(artifactBar(eight, null, 3).ordered.map((one) => one.path)).toEqual(eight.map((one) => one.path).reverse());
+  });
+});
+
+describe('the artifact tabs', () => {
+  const state = { ...EMPTY, connected: true, artifacts: eight };
+
+  it('follow Status, Console and Browser in the column, the open one chosen with a close mark, then Artifacts with the rest', () => {
+    const markup = html(renderSideSwitch('artifacts', state, true, { open: 'chat/a2.md', fit: 3, menu: false, now: 2_000 }));
+
+    expect(paths(markup, 'data-side')).toEqual(['status', 'console', 'browser']);
+    expect(paths(markup, 'data-path')).toEqual(['chat/a7.md', 'chat/a6.md', 'chat/a2.md']);
+    expect(markup).toMatch(/class="tab artifact-tab selected"[^>]*data-path="chat\/a2.md"/);
+    // The close mark is a button of its own beside the tab's, so each takes the keyboard.
+    expect(markup.match(/<button class="tab-close" type="button" data-action="close-artifact" aria-label="Close Note 2"/g)).toHaveLength(1);
+    expect(markup.match(/role="tab"/g)).toHaveLength(6);
+    expect(markup).toContain('+5');
+    expect(markup).not.toContain('artifact-menu" role="menu"');
+  });
+
+  it('choose none while another tab shows, and list every artifact in the open menu, those with a tab dimmed', () => {
+    const markup = html(renderSideSwitch('status', state, false, { open: 'chat/a2.md', fit: 2, menu: true, now: 2_000 }));
+
+    expect(markup).not.toContain('artifact-tab selected');
+    expect(markup).not.toContain('close-artifact');
+    expect(paths(markup.slice(markup.indexOf('artifact-menu" role="menu"')), 'data-path')).toEqual(eight.map((one) => one.path).reverse());
+    expect(markup.match(/menu-row in-bar/g)).toHaveLength(2);
+  });
+
+  it('show no menu when every artifact has a tab, and none at all without artifacts', () => {
+    expect(html(renderSideSwitch('status', { ...state, artifacts: eight.slice(0, 2) }, false, { open: null, fit: 5, menu: false, now: 0 }))).not.toContain('artifact-menu-button');
+    expect(html(renderSideSwitch('status', EMPTY))).not.toContain('artifact-tab');
+  });
+
+  it('end the conversation tab strip on a narrower screen the same way', () => {
+    const markup = html(renderTabs({ ...newView(), tab: 'artifacts' }, state, false, { open: 'chat/a7.md', fit: 1, menu: false, now: 0 }));
+
+    expect(paths(markup, 'data-tab')).toEqual(['conversation', 'status', 'console']);
+    expect(paths(markup, 'data-path')).toEqual(['chat/a7.md']);
+    expect(markup).toContain('+7');
+  });
+});

@@ -2,9 +2,9 @@
 // persona and the view options, and the tabs under it or the switch atop the side column.
 import type { ComponentChildren, VNode } from 'preact';
 import { providerMark } from '@switchboard/conversation/providerIcons';
-import { selectedEntry, selectedRow, stateIcon } from './model.js';
+import { artifactIcon, selectedEntry, selectedRow, stateIcon } from './model.js';
 import type { PageState } from './model.js';
-import { LINK_LABEL_MAX, paneStatus, rowKey, TABS } from './render.js';
+import { ago, artifactBar, LINK_LABEL_MAX, paneStatus, rowKey, TABS } from './render.js';
 import type { SideTab, Tab, View } from './render.js';
 import { trusted } from './trusted.js';
 import type { PageAction, PageRow } from './types.js';
@@ -330,38 +330,101 @@ function TabButton({ selected, label, badge, attrs }: { selected: boolean; label
   );
 }
 
+/** What a strip's artifact tabs show: the open artifact while one shows, how many tabs fit, whether the Artifacts menu is open, and the time for its ages. */
+export interface ArtifactStrip {
+  open: string | null;
+  fit: number;
+  menu: boolean;
+  now: number;
+}
+
 /**
- * The switch at the top of the Status and Artifacts column on a wide screen, drawn as the tabs are, with the same badges; the conversation keeps
- * its own pane beside it.
+ * One tab per artifact after the fixed tabs, newest first, as many as fit (`artifactBar`), the open one with a close mark; then, when some do
+ * not fit, Artifacts with their count, which opens a menu of every artifact, newest first with its kind and age, those with a tab dimmed.
  */
-export function renderSideSwitch(side: SideTab, state: PageState, browser = false): VNode {
+function artifactTabs(state: PageState, strip: ArtifactStrip): ComponentChildren {
+  const { ordered, tabs } = artifactBar(state.artifacts, strip.open, strip.fit);
+  const rest = ordered.length - tabs.length;
+
+  return [
+    ...tabs.map((artifact) => {
+      const selected = artifact.path === strip.open;
+
+      // The tab and its close button are siblings in one cell, so each takes the keyboard on its own.
+      return (
+        <span class={`tab artifact-tab${selected ? ' selected' : ''}`} role="presentation" data-action="artifact" data-path={artifact.path}>
+          <button class="tab-open" type="button" role="tab" aria-selected={selected} tabindex={selected ? 0 : -1} title={`${artifact.title} · ${artifact.kind}`}>
+            <span class={`codicon codicon-${artifactIcon(artifact.type)}`} aria-hidden="true"></span>
+            <span class="tab-label">{artifact.title}</span>
+          </button>
+          {selected ? (
+            <button class="tab-close" type="button" data-action="close-artifact" aria-label={`Close ${artifact.title}`} title="Close">
+              <span class="codicon codicon-close" aria-hidden="true"></span>
+            </button>
+          ) : null}
+        </span>
+      );
+    }),
+    rest === 0 ? null : (
+      <span class="artifact-more">
+        <button class={`tab artifact-menu-button${strip.menu ? ' open' : ''}`} type="button" data-action="artifact-menu" aria-haspopup="menu" aria-expanded={strip.menu} title="Every artifact, newest first">
+          <span class="codicon codicon-files" aria-hidden="true"></span>
+          <span class="tab-label">Artifacts</span>
+          <span class="tab-badge muted">+{rest}</span>
+          <span class="codicon codicon-chevron-down" aria-hidden="true"></span>
+        </button>
+        {strip.menu ? (
+          <div class="menu glass artifact-menu" role="menu" aria-label="Artifacts">
+            {ordered.map((artifact) => (
+              <button class={`menu-row${tabs.includes(artifact) ? ' in-bar' : ''}`} type="button" role="menuitem" data-action="artifact" data-path={artifact.path} title={artifact.path}>
+                <span class="menu-gutter">
+                  <span class={`codicon codicon-${artifactIcon(artifact.type)}`} aria-hidden="true"></span>
+                </span>
+                <span class="title">{artifact.title}</span>
+                <span class="menu-note">{ago(artifact.updatedAt, strip.now)}</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </span>
+    ),
+  ];
+}
+
+/**
+ * The tab strip atop the column right of the conversation on a wide screen: Status, Console and Browser, then a tab per artifact (`artifactTabs`);
+ * the conversation keeps its own pane beside it.
+ */
+export function renderSideSwitch(side: SideTab, state: PageState, browser = false, strip: ArtifactStrip = { open: null, fit: 0, menu: false, now: 0 }): VNode {
   const fresh = state.status?.unread === true;
   const tabs: Array<[SideTab, string, string]> = [
     ['status', 'Status', fresh ? 'New' : ''],
-    ['artifacts', 'Artifacts', ''],
     ['console', 'Console', ''],
     ...(browser ? [['browser', 'Browser', ''] as [SideTab, string, string]] : []),
   ];
 
   return (
-    <nav class="tabs side-switch" role="tablist" aria-label={browser ? 'Status, artifacts, console and browser' : 'Status, artifacts and console'}>
+    <nav class="tabs side-switch" role="tablist" aria-label={browser ? 'Status, console, browser and artifacts' : 'Status, console and artifacts'}>
       {tabs.map(([tab, label, badge]) => (
         <TabButton selected={tab === side} label={label} badge={badge} attrs={{ 'data-side': tab }} />
       ))}
+      {artifactTabs(state, { ...strip, open: side === 'artifacts' ? strip.open : null, fit: strip.fit })}
     </nav>
   );
 }
 
-export function renderTabs(view: View, state: PageState, browser = false): VNode {
+/** The conversation's tab strip on a narrower screen: Conversation, Status, Console and Browser, then a tab per artifact as in the column. */
+export function renderTabs(view: View, state: PageState, browser = false, strip: ArtifactStrip = { open: null, fit: 0, menu: false, now: 0 }): VNode {
   const fresh = state.status?.unread === true;
   // As in the VS Code view: Status has its New badge; the page shows no unread counts.
   const badges: Record<Tab, string> = { conversation: '', status: fresh ? 'New' : '', artifacts: '', console: '', browser: '' };
 
   return (
     <nav class="tabs" role="tablist">
-      {TABS.filter(({ tab }) => browser || tab !== 'browser').map(({ tab, label }) => (
+      {TABS.filter(({ tab }) => tab !== 'artifacts' && (browser || tab !== 'browser')).map(({ tab, label }) => (
         <TabButton selected={tab === view.tab} label={label} badge={badges[tab]} attrs={{ 'data-tab': tab }} />
       ))}
+      {artifactTabs(state, { ...strip, open: view.tab === 'artifacts' ? strip.open : null })}
     </nav>
   );
 }

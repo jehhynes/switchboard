@@ -22,6 +22,45 @@ export const TABS: Array<{ tab: Tab; label: string }> = [
 export type SideTab = 'status' | 'artifacts' | 'console' | 'browser';
 export const SIDE_TABS: readonly SideTab[] = ['status', 'artifacts', 'console', 'browser'];
 
+/** The most artifact tabs a strip shows, whatever its width (PRD R109): the rest are in the Artifacts menu at its end. */
+export const ARTIFACT_TABS_MAX = 5;
+/** The width each artifact tab takes, as `.tab.artifact-tab` in page.css sets it, and the room the Artifacts menu's button takes. */
+export const ARTIFACT_TAB_WIDTH = 168;
+export const ARTIFACT_MENU_WIDTH = 132;
+
+/**
+ * How many artifact tabs fit a strip `stripWidth` pixels wide whose other tabs take `fixedWidth`: all of them when they fit without the menu,
+ * else as many as fit beside the menu, `menuWidth` wide as drawn, none when even one does not, and at most {@link ARTIFACT_TABS_MAX}. An
+ * unmeasured strip, 0 wide, shows the most.
+ */
+export function artifactTabsFit(stripWidth: number, fixedWidth: number, count: number, menuWidth = ARTIFACT_MENU_WIDTH): number {
+  if (stripWidth <= 0) {
+    return Math.min(count, ARTIFACT_TABS_MAX);
+  }
+
+  if (count <= ARTIFACT_TABS_MAX && fixedWidth + count * ARTIFACT_TAB_WIDTH <= stripWidth) {
+    return count;
+  }
+
+  return Math.max(0, Math.min(ARTIFACT_TABS_MAX, count, Math.floor((stripWidth - fixedWidth - menuWidth) / ARTIFACT_TAB_WIDTH)));
+}
+
+/**
+ * The artifacts newest first, and those with a tab: the first `fit`, with the open one in place of the last of them when it is not among them, so
+ * the open artifact always has its tab.
+ */
+export function artifactBar(artifacts: readonly ArtifactView[], open: string | null, fit: number): { ordered: ArtifactView[]; tabs: ArtifactView[] } {
+  const ordered = [...artifacts].sort((a, b) => b.updatedAt - a.updatedAt);
+  const tabs = ordered.slice(0, fit);
+  const shown = open === null ? undefined : ordered.find((artifact) => artifact.path === open);
+
+  if (shown !== undefined && !tabs.includes(shown) && tabs.length > 0) {
+    tabs[tabs.length - 1] = shown;
+  }
+
+  return { ordered, tabs };
+}
+
 /** The narrowest Browser tab the Chrome pane covers, in CSS pixels: the hub's `PANE_MIN_WIDTH` (architecture.md § Pane state). */
 export const BROWSER_MIN_WIDTH = 515;
 
@@ -125,6 +164,9 @@ export interface View {
   /** The Chrome pane as the hub last described it (architecture.md § Pane state), and the outcome of a pairing from this page. */
   pane: PaneView | null;
   paneNote: string | null;
+  /** How many artifact tabs the shown strip fits, measured after each draw, and whether its Artifacts menu is open. */
+  artifactFit: number;
+  artifactMenu: boolean;
 }
 
 /** The hub's `pane` event (architecture.md § Pane state). */
@@ -157,7 +199,7 @@ export type Sheet =
   | { kind: 'snooze'; row: string; label: string; title: string; choices: SnoozeChoice[]; picked: string; date: string; comment: string }
   | { kind: 'text'; title: string; text: string };
 
-export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), bands: new Map(), list: false, drawer: null, actions: false, linkMenu: false, rowMenu: null, sheet: null, acting: false, prompt: null, providers: null, side: 'status', viewMenu: false, details: false, pane: null, paneNote: null });
+export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), bands: new Map(), list: false, drawer: null, actions: false, linkMenu: false, rowMenu: null, sheet: null, acting: false, prompt: null, providers: null, side: 'status', viewMenu: false, details: false, pane: null, paneNote: null, artifactFit: ARTIFACT_TABS_MAX, artifactMenu: false });
 
 /** The longest menu label for a link, as the dock's `LinkLabelMax`; a longer one is cut with an ellipsis and shown whole in its tooltip. */
 export const LINK_LABEL_MAX = 48;

@@ -648,10 +648,10 @@ describe('the Console tab', () => {
   it('is a tab beside Status and Artifacts, and the third of the wide column', () => {
     const state = { ...EMPTY, connected: true, scope, session: session() };
 
-    expect([...html(renderTabs(newView(), state)).matchAll(/data-tab="(\w+)"/g)].map((match) => match[1])).toEqual(['conversation', 'status', 'artifacts', 'console']);
-    expect([...html(renderSideSwitch('console', state)).matchAll(/data-side="(\w+)"/g)].map((match) => match[1])).toEqual(['status', 'artifacts', 'console']);
+    expect([...html(renderTabs(newView(), state)).matchAll(/data-tab="(\w+)"/g)].map((match) => match[1])).toEqual(['conversation', 'status', 'console']);
+    expect([...html(renderSideSwitch('console', state)).matchAll(/data-side="(\w+)"/g)].map((match) => match[1])).toEqual(['status', 'console']);
     expect(html(renderSideSwitch('console', state))).toMatch(/aria-selected="true"[^>]*>Console/);
-    expect([...html(renderSideSwitch('browser', state, true)).matchAll(/data-side="(\w+)"/g)].map((match) => match[1])).toEqual(['status', 'artifacts', 'console', 'browser']);
+    expect([...html(renderSideSwitch('browser', state, true)).matchAll(/data-side="(\w+)"/g)].map((match) => match[1])).toEqual(['status', 'console', 'browser']);
   });
 
   it('says why a session has no console without loading it', () => {

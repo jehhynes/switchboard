@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, onTestFinished, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyEvent, awaitingReply, EMPTY, mentionOf, mentionQuery, commandQuery, shortTitle, timeline, withEarlier } from '../src/model.js';
 import { answerText, answersIn, complete, parseQuestions } from '@switchboard/conversation/questions';
 import { artifactUrl, BROWSER_MIN_WIDTH, browserNote, paneLink, collapsedGroups, newView, renderMicButton, renderVoice, markdownBody } from '../src/render.js';
@@ -676,7 +676,8 @@ describe('the page', () => {
     // And after an artifact opened from its row.
     source.emit('artifact', { artifact: { path: 'chat/a.md', owner: 'chat', kind: 'plan', title: 'Plan', ext: 'md', type: 'markdown', updatedAt: 1_500 } });
     root.querySelector<HTMLElement>('#panel [data-action="artifact"]')!.click();
-    expect(root.querySelector('.tab.selected')?.getAttribute('data-tab')).toBe('artifacts');
+    // The artifact opens in its own tab, chosen.
+    expect(root.querySelector('.tab.selected')?.getAttribute('data-path')).toBe('chat/a.md');
     root.querySelector<HTMLElement>('[data-tab="conversation"]')!.click();
     expect(panel.scrollTop).toBe(50);
     page.close();
@@ -1343,6 +1344,81 @@ describe('the page in use', () => {
     vi.unstubAllGlobals();
   });
 
+  it('fits the artifact tabs to the strip, newest first, and lists every artifact in the Artifacts menu with those in tabs dimmed', async () => {
+    const query = { matches: true, addEventListener: () => {} };
+
+    vi.stubGlobal('matchMedia', vi.fn(() => query));
+    onTestFinished(() => {
+      vi.unstubAllGlobals();
+    });
+
+    const { page, source } = start();
+
+    hello(source);
+
+    for (let index = 0; index < 8; index++) {
+      source.emit('artifact', { artifact: { path: `chat/a${index}.md`, owner: 'chat', kind: 'note', title: `Note ${index}`, ext: 'md', type: 'markdown', updatedAt: 10_000 + index } });
+    }
+
+    // Unmeasured, the strip shows the most tabs, ARTIFACT_TABS_MAX, then Artifacts with the rest.
+    const paths = () => [...root.querySelectorAll<HTMLElement>('#detail .artifact-tab')].map((tab) => tab.dataset['path']);
+
+    expect(paths()).toEqual(['chat/a7.md', 'chat/a6.md', 'chat/a5.md', 'chat/a4.md', 'chat/a3.md']);
+    expect(root.querySelector('#detail .artifact-menu-button .tab-badge')!.textContent).toBe('+5');
+
+    // A 700 px strip whose Status and Console take 200 px fits (700 - 200 - 132) / 168, two tabs beside the menu.
+    vi.spyOn(root.querySelector('#detail .tabs')!, 'getBoundingClientRect').mockReturnValue({ width: 700 } as DOMRect);
+    root.querySelectorAll<HTMLElement>('#detail .tabs > .tab[data-side]').forEach((tab) => vi.spyOn(tab, 'getBoundingClientRect').mockReturnValue({ width: 100 } as DOMRect));
+    click('#detail [data-side="console"]');
+    expect(paths()).toEqual(['chat/a7.md', 'chat/a6.md']);
+
+    // The menu lists all eight, newest first, those with a tab dimmed; picking one shows it in place of the last tab.
+    click('#detail [data-action="artifact-menu"]');
+    const rows = [...root.querySelectorAll<HTMLElement>('#detail .artifact-menu .menu-row')];
+
+    // The hello's own two artifacts are older than the eight.
+    expect(rows.map((row) => row.dataset['path']).slice(0, 8)).toEqual(['chat/a7.md', 'chat/a6.md', 'chat/a5.md', 'chat/a4.md', 'chat/a3.md', 'chat/a2.md', 'chat/a1.md', 'chat/a0.md']);
+    expect(rows).toHaveLength(10);
+    expect(rows.filter((row) => row.classList.contains('in-bar')).map((row) => row.dataset['path'])).toEqual(['chat/a7.md', 'chat/a6.md']);
+    click('#detail .artifact-menu [data-path="chat/a1.md"]');
+    expect(root.querySelector('#detail .artifact-menu')).toBeNull();
+    expect(paths()).toEqual(['chat/a7.md', 'chat/a1.md']);
+    expect(root.querySelector('#detail .tab.selected')!.getAttribute('data-path')).toBe('chat/a1.md');
+    expect(root.querySelector('#detail .artifact-menu-button .tab-badge')!.textContent).toBe('+8');
+
+    // The menu closes on a press elsewhere and on Escape.
+    click('#detail [data-action="artifact-menu"]');
+    root.querySelector('#panel')!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+    root.querySelector('#panel')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    root.querySelector('#panel')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(root.querySelector('#detail .artifact-menu')).toBeNull();
+    click('#detail [data-action="artifact-menu"]');
+    root.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(root.querySelector('#detail .artifact-menu')).toBeNull();
+
+    // Left, Right, Home and End move between the strip's tabs, the artifact tabs among them.
+    const strip = () => [...root.querySelectorAll<HTMLElement>('#detail .tabs [role="tab"]')];
+
+    strip()[0]!.focus();
+    strip()[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    expect(document.activeElement).toBe(strip()[1]);
+    strip()[1]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+    expect((document.activeElement as HTMLElement).closest<HTMLElement>('.artifact-tab')!.dataset['path']).toBe('chat/a1.md');
+    (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    expect(document.activeElement).toBe(strip()[0]);
+    // The open artifact's close button is its own, and shows Status.
+    root.querySelector<HTMLElement>('#detail .tab-close')!.click();
+    expect(root.querySelector('#detail .tab.selected')!.getAttribute('data-side')).toBe('status');
+
+    // An artifact that goes away leaves Status shown.
+    click('#detail .artifact-tab[data-path="chat/a7.md"]');
+    hello(source, { artifacts: [] });
+    expect(root.querySelector('#detail .artifact-tab')).toBeNull();
+    expect(root.querySelector('#detail .tab.selected')!.getAttribute('data-side')).toBe('status');
+    vi.unstubAllGlobals();
+    page.close();
+  });
+
   it('switches tabs, opens artifacts in the page, and draws a Markdown artifact with its pictures from its own folder', async () => {
     const { page, source, mermaid } = start();
 
@@ -1351,9 +1427,10 @@ describe('the page in use', () => {
     click('[data-tab="status"]');
     expect(root.querySelector('#panel')!.innerHTML).toContain('status-tab');
     expect(mermaid).toHaveBeenCalled();
-    click('[data-tab="artifacts"]');
-    expect(root.querySelectorAll('.artifact-list button')).toHaveLength(2);
-    click('[data-path="chat/plan.md"]');
+    // Each artifact has its own tab, newest first, and no Artifacts tab lists them.
+    expect(root.querySelector('[data-tab="artifacts"]')).toBeNull();
+    expect([...root.querySelectorAll<HTMLElement>('#head .artifact-tab')].map((tab) => tab.dataset['path'])).toHaveLength(2);
+    click('#head .artifact-tab[data-path="chat/plan.md"]');
     await flush();
     await flush();
 
@@ -1362,8 +1439,12 @@ describe('the page in use', () => {
     expect(doc).toContain('<h1>Plan</h1>');
     expect(doc).toContain('src="/v1/conversation/artifact/pk/chat/plan/pic.png"');
     expect(doc).not.toContain('x.png');
+    expect(root.querySelector('#head .tab.selected')!.getAttribute('data-path')).toBe('chat/plan.md');
+    // Closing its tab shows Status; the tabs stay.
     click('[data-action="close-artifact"]');
-    click('[data-path="chat/p.html"]');
+    expect(root.querySelector('#head .tab.selected')!.getAttribute('data-tab')).toBe('status');
+    expect(root.querySelectorAll('#head .artifact-tab')).toHaveLength(2);
+    click('#head .artifact-tab[data-path="chat/p.html"]');
     expect(root.querySelector('iframe')!.getAttribute('sandbox')).toBe('allow-scripts');
     click('[data-tab="conversation"]');
     expect(root.querySelector('#composer')!.hasAttribute('hidden')).toBe(false);
@@ -1580,8 +1661,7 @@ describe('the page in use', () => {
 
     answers['/artifact/'] = { status: 200, body: {}, text: '# Plan\n\n[page](p.html) [notes](plan/notes.txt) [up](../x.md) [web](https://example.com/a)\n\n| a | b |\n|---|---|\n| 1 | 2 |' };
     hello(source);
-    click('[data-tab="artifacts"]');
-    click('[data-path="chat/plan.md"]');
+    click('#head .artifact-tab[data-path="chat/plan.md"]');
     await flush();
     await flush();
 
@@ -2239,7 +2319,7 @@ describe('the page in use', () => {
     await flush();
     expect(sent).toEqual([['ext', { type: 'wake' }]]);
     expect(document.title).toMatch(/ \[sb-pane 0123456789ab\]$/);
-    expect([...root.querySelectorAll<HTMLElement>('#detail [data-side]')].map((tab) => tab.dataset['side'])).toEqual(['status', 'artifacts', 'console', 'browser']);
+    expect([...root.querySelectorAll<HTMLElement>('#detail [data-side]')].map((tab) => tab.dataset['side'])).toEqual(['status', 'console', 'browser']);
     // Status is shown, so the pane has no area yet: the page reports none.
     expect(rects()).toEqual([null]);
     expect(root.querySelector('#detail .status-tab')).not.toBeNull();
@@ -2281,7 +2361,7 @@ describe('the page in use', () => {
     query.matches = false;
     // The stubbed media query does not report its change, so another event draws the narrow layout.
     source.emit('pane', { pane: { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: null } });
-    expect([...root.querySelectorAll<HTMLElement>('#head [data-tab]')].map((tab) => tab.dataset['tab'])).toEqual(['conversation', 'status', 'artifacts', 'console', 'browser']);
+    expect([...root.querySelectorAll<HTMLElement>('#head [data-tab]')].map((tab) => tab.dataset['tab'])).toEqual(['conversation', 'status', 'console', 'browser']);
     expect(root.querySelector('#head [aria-selected="true"]')!.textContent).toBe('Browser');
     expect(rects().at(-1)).toMatchObject({ left: 300, top: 120, width: 700, height: 700 });
     click('#head [data-tab="status"]');
@@ -2446,8 +2526,7 @@ describe('the page in use', () => {
     expect(root.classList.contains('wide')).toBe(true);
     expect(root.querySelector('#panel .timeline')).not.toBeNull();
     expect(root.querySelector('#detail .status-tab')).not.toBeNull();
-    click('#detail [data-side="artifacts"]');
-    expect(root.querySelectorAll('#detail .artifact-list button')).toHaveLength(2);
+    expect(root.querySelectorAll('#detail .artifact-tab')).toHaveLength(2);
     // An artifact row in the conversation opens in the column, and the conversation stays.
     click('#panel [data-action="artifact"][data-path="chat/p.html"]');
     expect(root.querySelector('#detail iframe')).not.toBeNull();
