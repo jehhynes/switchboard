@@ -133,47 +133,6 @@ export function inputReady(sheet: Extract<Sheet, { kind: 'input' }>): boolean {
   return sheet.text.trim() !== '' || (sheet.input.choice !== null && sheet.picked !== sheet.input.choice.value);
 }
 
-/** The sheet over the page, or empty: a question with Cancel and its action, Snooze…'s choices, date and comment, or a text to copy. */
-export function renderSheet(sheet: Sheet | null, acting: boolean): string {
-  if (sheet === null) {
-    return '';
-  }
-
-  const busy = acting ? ' disabled' : '';
-  const frame = (title: string, body: string, buttons: string): string =>
-    `<div class="sheet-backdrop" data-action="sheet-cancel"><div class="sheet glass" role="dialog" aria-modal="true" aria-labelledby="sheet-title"><h2 id="sheet-title" class="sheet-title">${escape(title)}</h2>${body}<div class="sheet-buttons">${buttons}</div></div></div>`;
-  const cancel = '<button type="button" class="sheet-button secondary" data-action="sheet-cancel">Cancel</button>';
-
-  if (sheet.kind === 'confirm') {
-    return frame(sheet.action.confirm?.question ?? sheet.action.label, `<p class="sheet-detail">${escape(sheet.action.confirm?.detail ?? '')}</p>`, `${cancel}<button type="button" class="sheet-button primary" data-action="sheet-go"${busy}>${escape(sheet.action.confirm?.action ?? sheet.action.label)}</button>`);
-  }
-
-  if (sheet.kind === 'input') {
-    const { input } = sheet;
-    const choice =
-      input.choice === null
-        ? ''
-        : `<label class="sheet-field"><span class="sheet-label">${escape(input.choice.label)}</span><select class="sheet-select">${input.choice.values.map((value) => `<option value="${escape(value)}"${value === sheet.picked ? ' selected' : ''}>${escape(value)}</option>`).join('')}</select></label>`;
-    const box = `<textarea class="sheet-input${input.text === null ? '' : ' tall'}" aria-label="${escape(input.question)}">${escape(sheet.text)}</textarea>`;
-    const note = `<p class="sheet-note">Ctrl+Enter to ${escape(input.action.toLowerCase().replace(/…$/, ''))}.</p>`;
-    const go = `<button type="button" class="sheet-button primary" data-action="sheet-go"${acting || !inputReady(sheet) ? ' disabled' : ''}>${escape(input.action)}</button>`;
-
-    return frame(input.question, `<p class="sheet-detail">${escape(input.detail)}</p>${choice}${box}${note}`, `${cancel}${go}`);
-  }
-
-  if (sheet.kind === 'text') {
-    return frame(sheet.title, `<p class="sheet-detail">The browser did not allow the clipboard. Select the text and copy it.</p><textarea class="sheet-text" readonly>${escape(sheet.text)}</textarea>`, '<button type="button" class="sheet-button primary" data-action="sheet-cancel">Close</button>');
-  }
-
-  const first = firstSnoozeDay(sheet.choices);
-  const radios = sheet.choices
-    .map((choice, index) => `<label class="sheet-choice"><input type="radio" name="snooze" value="${index}"${sheet.picked === String(index) ? ' checked' : ''}><span>${escape(choice.description === '' ? choice.label : `${choice.label} · ${choice.description}`)}</span></label>`)
-    .join('');
-  const onDate = `<label class="sheet-choice"><input type="radio" name="snooze" value="date"${first === null ? ' disabled' : ''}${sheet.picked === 'date' ? ' checked' : ''}><span>On</span><input type="date" class="snooze-date"${first === null ? ' disabled' : ` min="${first}"`} value="${escape(sheet.date)}" aria-label="Wake date"></label>`;
-  const body = `<fieldset class="sheet-field"><legend>Wake it</legend>${radios}${onDate}</fieldset><label class="sheet-field"><span class="sheet-label">Comment</span><textarea class="snooze-comment" rows="3" placeholder="Comment (optional)">${escape(sheet.comment)}</textarea></label>`;
-
-  return frame(`Snooze ${sheet.title}`, body, `${cancel}<button type="button" class="sheet-button primary" data-action="sheet-go"${busy}>Snooze</button>`);
-}
 
 const DAY = new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 const DAY_WITH_YEAR = new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });

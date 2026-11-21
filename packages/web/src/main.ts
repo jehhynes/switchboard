@@ -2,17 +2,17 @@ import { applyEvent, commandQuery, EMPTY, mentionOf, mentionQuery, pageTitle, ro
 import { snoozeChoices } from '@switchboard/core/snooze';
 import type { PageState } from './model.js';
 import { escape, renderMarkdown } from './markdown.js';
-import { answerText, artifactUrl, complete, firstSnoozeDay, inputReady, renderMicButton, markdownBody, newView, parseQuestions, renderSheet, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, SIDE_TABS } from './render.js';
+import { answerText, artifactUrl, complete, firstSnoozeDay, inputReady, renderMicButton, markdownBody, newView, parseQuestions, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, SIDE_TABS } from './render.js';
 import type { CardDraft, SideTab, Tab, View } from './render.js';
 import type { ConsoleOptions, MountedConsole } from './console.js';
 import type { ArtifactView, ItemView, PageRow, ScreenPrompt } from './types.js';
-import { morph } from './morph.js';
 import { mount, unmount } from './island.js';
 import type { ComponentChild, VNode } from 'preact';
 import { renderList, renderListPane } from './list.js';
 import { menuRows, renderHeader, renderSideSwitch, renderTabs } from './header.js';
 import { renderTimeline } from './timeline.js';
 import { renderArtifacts, renderArtifactView, renderEmpty, renderStatus } from './side.js';
+import { renderSheet } from './sheet.js';
 import { renderComposer, renderComposerMenu, renderEndedNote, renderFrame, renderShared } from './composer.js';
 import { listHeader } from './listHeader.js';
 import { attachments, drawChips } from './attachments.js';
@@ -1017,7 +1017,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     header.draw(state.header, state.groups);
     // A search shows only the rows that match, in every group, open (PRD R63).
     const listed = header.list(state.groups);
-    morph(sheetHost, renderSheet(view.sheet, view.acting));
+    mount(sheetHost, renderSheet(view.sheet, view.acting));
     mount(list, renderListPane(expired, listError, renderList(listed.groups, state.scope?.workItemId ?? null, view.collapsed, listed.filtering, poolMenu()), header.end(listed.groups)));
     // Each draw shows line 2's pills whole until `fitLines` fits them again after the redraw, as a list drawn afresh would.
     list.querySelectorAll('.pill.compact, .pill.omitted').forEach((pill) => pill.classList.remove('compact', 'omitted'));
