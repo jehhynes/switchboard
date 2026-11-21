@@ -21,6 +21,8 @@ import { attachments, drawChips } from './attachments.js';
 import type { Attached } from './attachments.js';
 import { reconnector } from './reconnect.js';
 import { fitPills } from './fit.js';
+import { renderContextMeter } from '@switchboard/conversation/contextMeter';
+import type { ContextMenuState } from '@switchboard/conversation/contextMeter';
 
 /** The stream's event types the page reads. */
 export const EVENTS = ['hello', 'list', 'scope', 'conversations', 'session', 'message', 'reply', 'status', 'artifact', 'unread', 'voice', 'settings', 'progress', 'words', 'draft', 'pane'];
@@ -228,6 +230,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const menu = composerHost.querySelector<HTMLElement>('.composer-menu')!;
   const voiceControls = composerHost.querySelector<HTMLElement>('.voice-controls')!;
   const micSlot = composerHost.querySelector<HTMLElement>('.composer-mic')!;
+  const contextSlot = composerHost.querySelector<HTMLElement>('.context-meter')!;
   const liveWords = composerHost.querySelector<HTMLElement>('.live-words')!;
   const mirror = composerHost.querySelector<HTMLElement>('.live-mirror')!;
   const mirrorText = composerHost.querySelector<HTMLElement>('.mirror-text')!;
@@ -739,6 +742,80 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       void command('mic', { on: button.dataset['on'] === 'true' }).then((answer) => answer.status === 200 || showError(String(answer.body['error'] ?? 'The mic did not change.')));
     }
   });
+  // The context meter's menu (architecture.md § Context meter): closed, open, or asking to confirm Compact, which sends /compact as a chosen
+  // slash command to the session the page shows, leaving the box's draft alone.
+  let contextMenu: ContextMenuState = 'closed';
+  const drawContext = (): void => {
+    const full = state.connected && state.session?.conversation === 'full';
+
+    if (!full && contextMenu === 'confirm') {
+      contextMenu = 'open';
+    }
+
+    mount(contextSlot, state.session === null ? null : renderShared(renderContextMeter(state.session.context, contextMenu, full)));
+  };
+  const setContextMenu = (menu: ContextMenuState, focus: string | null = null): void => {
+    contextMenu = menu;
+    drawContext();
+
+    if (focus !== null) {
+      contextSlot.querySelector<HTMLElement>(`[data-context="${focus}"]`)?.focus();
+    }
+  };
+  const compact = async (): Promise<void> => {
+    const session = state.session;
+
+    setContextMenu('closed', 'toggle');
+
+    if (session === null || session.conversation !== 'full' || !state.connected) {
+      return;
+    }
+
+    const from = draftOf;
+    const answer = await command('send', { sessionId: session.id, launch: session.launch, text: '/compact', command: true });
+    const why = String(answer.body['error'] ?? 'The session did not take /compact.');
+
+    // A refusal shows above the box of the conversation it was sent from, now or when it is selected again.
+    if (answer.status !== 200 && from === draftOf) {
+      showError(why);
+    } else if (answer.status !== 200 && from !== null) {
+      errors.set(from, why);
+    }
+  };
+
+  // A click in the meter can redraw the element it hit, which then is no longer in the slot when the click reaches the document.
+  let slotClick: Event | null = null;
+
+  contextSlot.addEventListener('click', (event) => {
+    slotClick = event;
+    const which = (event.target as HTMLElement).closest<HTMLElement>('[data-context]')?.dataset['context'];
+
+    if (which === 'toggle') {
+      setContextMenu(contextMenu === 'closed' ? 'open' : 'closed');
+    } else if (which === 'compact') {
+      setContextMenu('confirm', 'compact-confirm');
+    } else if (which === 'cancel') {
+      setContextMenu('open', 'compact');
+    } else if (which === 'compact-confirm') {
+      void compact();
+    }
+  });
+  contextSlot.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && contextMenu !== 'closed') {
+      event.stopPropagation();
+      setContextMenu('closed', 'toggle');
+    }
+  });
+  document.addEventListener(
+    'click',
+    (event) => {
+      if (contextMenu !== 'closed' && event !== slotClick && !contextSlot.contains(event.target as Node)) {
+        setContextMenu('closed');
+      }
+    },
+    { signal: listening.signal },
+  );
+
   // The box's focus and draft, for the focus rule of dictation, as the Conversation view tells the hub (architecture.md § Dictation).
   let composerTimer: ReturnType<typeof setTimeout> | undefined;
   const tellHub = (): void => {
@@ -770,6 +847,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       walk = null;
       showError(id === null ? null : (errors.get(id) ?? null));
       closeMenu();
+      contextMenu = 'closed';
       drawAttachments();
 
       if (id !== null) {
@@ -791,6 +869,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // The same controls as the Conversation view's, acting on this computer's voice process (architecture.md § Web page).
     mount(voiceControls, renderShared(renderVoice(state.voice, full)));
     mount(micSlot, full ? renderShared(renderMicButton(state.voice)) : null);
+    drawContext();
     grow();
     refresh();
   };

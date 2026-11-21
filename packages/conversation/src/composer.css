@@ -20,3 +20,22 @@ body.vscode-high-contrast, body.vscode-high-contrast-light { --sb-composer-backg
 .composer .send:hover:not(:disabled) { background: var(--vscode-button-hoverBackground, var(--vscode-button-background)); }
 .composer-tool:disabled, .composer .send:disabled { cursor: not-allowed; opacity: 0.4; }
 .composer-tool .codicon, .composer .send .codicon { font-size: 16px; }
+
+/* The context meter (architecture.md § Context meter): a ring in the footer's controls, drawn as Claude Code's context indicator is, its track the
+   text colour at 15% and its arc the secondary text colour, the warning colour from 80% of the auto-compact threshold and the error colour from
+   95%; an unknown size shows a dashed track. Its menu opens above it on the glass. */
+.context-meter { position: relative; display: flex; flex: none; }
+.context-ring svg { display: block; width: 16px; height: 16px; }
+.context-ring .context-track { stroke: currentColor; stroke-opacity: 0.15; }
+.context-ring .context-arc { stroke: var(--vscode-descriptionForeground); }
+.context-ring.warn .context-arc { stroke: var(--vscode-editorWarning-foreground); }
+.context-ring.full .context-arc { stroke: var(--vscode-errorForeground); }
+.context-ring.unknown .context-track { stroke-opacity: 0.35; stroke-dasharray: 2 2; }
+.context-menu { position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 20; display: flex; flex-direction: column; gap: 4px; width: max-content; min-width: 200px; max-width: 320px; padding: 8px 10px; border-radius: 6px; white-space: normal; }
+.context-line:first-child { color: var(--vscode-foreground); }
+.context-line, .context-confirm { color: var(--vscode-descriptionForeground); }
+.context-actions { display: flex; gap: 6px; margin-top: 4px; }
+.context-action { padding: 2px 10px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 4px; color: var(--vscode-button-secondaryForeground, var(--vscode-foreground)); background: var(--vscode-button-secondaryBackground, transparent); font: inherit; cursor: pointer; }
+.context-action:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground)); }
+.context-action.primary { color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
+.context-action.primary:hover { background: var(--vscode-button-hoverBackground, var(--vscode-button-background)); }

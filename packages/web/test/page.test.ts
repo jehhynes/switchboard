@@ -847,6 +847,63 @@ describe('the page', () => {
     page.close();
   });
 
+it('shows the context meter as one ring in the composer, its numbers in the tooltip, and sends /compact from its menu only after Compact is confirmed (architecture.md § Context meter)', async () => {
+    const { page, source } = start();
+    const context = { used: 150_000, window: 200_000, compactAt: 167_000, model: 'claude-sonnet-4-6' };
+
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ context })], items: [], more: false, status: null, artifacts: [] });
+
+    const slot = root.querySelector<HTMLElement>('.composer-controls .context-meter')!;
+    const ring = () => slot.querySelector<HTMLButtonElement>('button.context-ring')!;
+    const input = root.querySelector('textarea')!;
+
+    expect(ring().textContent).toBe('');
+    expect(ring().classList.contains('warn')).toBe(true);
+    expect(ring().title).toContain('Context: 75% · 150k / 200k tokens');
+    expect(slot.querySelector('.context-menu')).toBeNull();
+    source.emit('session', { session: session({ context: { ...context, used: 20_000 } }) });
+    expect(ring().classList.contains('ok')).toBe(true);
+
+    input.value = 'my draft';
+    ring().click();
+    expect(ring().getAttribute('aria-expanded')).toBe('true');
+    expect(slot.querySelector('.context-menu')!.textContent).toContain('Context: 10% · 20k / 200k tokens');
+    slot.querySelector<HTMLButtonElement>('[data-context="compact"]')!.click();
+    expect(posts.some((post) => post.url.endsWith('/send'))).toBe(false);
+    expect(document.activeElement).toBe(slot.querySelector('[data-context="compact-confirm"]'));
+    slot.querySelector<HTMLButtonElement>('[data-context="cancel"]')!.click();
+    expect(slot.querySelector('[data-context="compact-confirm"]')).toBeNull();
+    slot.querySelector<HTMLButtonElement>('[data-context="compact"]')!.click();
+    slot.querySelector<HTMLButtonElement>('[data-context="compact-confirm"]')!.click();
+    await flush();
+    expect(posts.filter((post) => post.url.endsWith('/send')).map((post) => post.body)).toMatchObject([{ window: 'pk', scopeGen: 3, sessionId: 's', launch: 'L', text: '/compact', command: true }]);
+    expect(slot.querySelector('.context-menu')).toBeNull();
+    expect(input.value).toBe('my draft');
+
+    // Escape and a click elsewhere close the menu.
+    ring().click();
+    slot.querySelector('.context-menu')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(slot.querySelector('.context-menu')).toBeNull();
+    ring().click();
+    document.body.click();
+    expect(slot.querySelector('.context-menu')).toBeNull();
+    page.close();
+  });
+
+  it('shows an unknown context as the empty ring, and offers no Compact for a session the composer cannot talk to', () => {
+    const { page, source } = start();
+
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ conversation: 'read-only', reason: 'Ended.' })], items: [], more: false, status: null, artifacts: [] });
+
+    const slot = root.querySelector<HTMLElement>('.context-meter')!;
+
+    expect(slot.querySelector('button')!.classList.contains('unknown')).toBe(true);
+    slot.querySelector('button')!.click();
+    expect(slot.querySelector('.context-menu')!.textContent).toContain('Context size unknown');
+    expect(slot.querySelector('[data-context="compact"]')).toBeNull();
+    page.close();
+  });
+
   it('disables the composer with the reason for a session it cannot talk to', () => {
     const { page, source } = start();
 

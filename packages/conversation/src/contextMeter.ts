@@ -1,6 +1,7 @@
 /**
- * A session's context size against its model's window and auto-compact threshold (architecture.md § Context meter), which the hub sends and
- * the composer's context meter draws. Imports nothing, for browser bundles.
+ * The composer's context meter (architecture.md § Context meter), drawn alike by the VS Code Conversation view and the web page: a small ring that
+ * fills with the share of the session's context in use, toward its auto-compact threshold, with the numbers in its tooltip and a Compact action
+ * in its menu. Also the hub's reading of a context size against the model's window. Imports nothing, for browser bundles.
  */
 
 /**
@@ -155,4 +156,43 @@ export function contextLines(view: ContextView | null | undefined): string[] {
   }
 
   return lines;
+}
+
+const escape = (text: string): string => text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
+
+/** The ring's circumference: a circle of radius 6 in a 16 by 16 box. */
+const RING = 2 * Math.PI * 6;
+
+/** The menu's state, which each front end keeps: closed, open, or open asking to confirm Compact. */
+export type ContextMenuState = 'closed' | 'open' | 'confirm';
+
+/**
+ * The context meter (architecture.md § Context meter): an icon button with a ring that fills toward the auto-compact threshold, in the
+ * description colour, the warning colour from `CONTEXT_WARN` and the error colour from `CONTEXT_FULL`, dashed while the size is unknown; its
+ * details are its tooltip and accessible name. A click opens its menu: the details and, for a session the composer can talk to (`compact`),
+ * Compact, which asks to confirm before the front end sends `/compact`. Nothing without a session.
+ */
+export function renderContextMeter(view: ContextView | null | undefined, menu: ContextMenuState = 'closed', compact = false): string {
+  const level = contextLevel(view);
+  const fill = view == null ? null : contextFill(view);
+  const details = contextLines(view);
+  const title = details.join('\n');
+  const arc =
+    fill === null
+      ? ''
+      : `<circle class="context-arc" cx="8" cy="8" r="6" fill="none" stroke-width="2" stroke-linecap="round" stroke-dasharray="${(RING * fill).toFixed(2)} ${RING.toFixed(2)}" transform="rotate(-90 8 8)"/>`;
+  const ring = `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><circle class="context-track" cx="8" cy="8" r="6" fill="none" stroke-width="2"/>${arc}</svg>`;
+  const button = `<button class="composer-tool context-ring ${level}" type="button" data-context="toggle" title="${escape(title)}" aria-label="${escape(details.join(' '))}" aria-haspopup="dialog" aria-expanded="${menu !== 'closed'}">${ring}</button>`;
+
+  if (menu === 'closed') {
+    return button;
+  }
+
+  const action = !compact
+    ? ''
+    : menu === 'confirm'
+      ? '<div class="context-confirm">Compact now? The session summarizes the conversation so far and keeps only the summary.</div><div class="context-actions"><button class="context-action primary" type="button" data-context="compact-confirm">Compact</button><button class="context-action" type="button" data-context="cancel">Cancel</button></div>'
+      : '<div class="context-actions"><button class="context-action" type="button" data-context="compact">Compact…</button></div>';
+
+  return `${button}<div class="glass context-menu" role="dialog" aria-label="Context">${details.map((line) => `<div class="context-line">${escape(line)}</div>`).join('')}${action}</div>`;
 }

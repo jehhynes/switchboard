@@ -64,6 +64,7 @@ export function renderComposer(): VNode {
             <button class="composer-tool slash" type="button" title="Show slash commands (/)" aria-label="Show slash commands">
               <span class="slash-glyph">/</span>
             </button>
+            <span class="context-meter"></span>
           </div>
           <div class="voice-controls"></div>
           <span class="composer-mic"></span>
@@ -104,7 +105,7 @@ export function renderComposerMenu(menu: ComposerMenu, active: number): VNode {
   );
 }
 
-/** HTML of the voice controls and the mic, drawn by the renderer the Conversation view shares. */
+/** HTML of the voice controls, the mic and the context meter, drawn by the renderers the Conversation view shares. */
 export function renderShared(html: string): VNode {
   return <>{trusted(html)}</>;
 }

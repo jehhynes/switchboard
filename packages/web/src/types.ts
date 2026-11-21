@@ -4,6 +4,7 @@
  */
 
 import type { Mark } from '@switchboard/core/group';
+import type { ContextView } from '@switchboard/conversation/contextMeter';
 
 export type SessionState = 'starting' | 'running' | 'waiting' | 'idle' | 'ended';
 
@@ -24,6 +25,8 @@ export interface SessionView {
   requests?: NativeRequest[];
   /** While the session waits for a usage or rate limit to reset: when it resumes, and `retry` for the hub's next attempt. */
   limit?: { until: number; retry: boolean } | null;
+  /** The session's context size, null while the hub cannot read it (architecture.md § Context meter). */
+  context?: ContextView | null;
 }
 
 /** A Codex app-server session's pending question or approval, answered with the `answer` command. */
