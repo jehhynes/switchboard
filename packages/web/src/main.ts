@@ -2,7 +2,7 @@ import { applyEvent, commandQuery, EMPTY, mentionOf, mentionQuery, pageTitle, se
 import { snoozeChoices } from '@switchboard/core/snooze';
 import type { PageState } from './model.js';
 import { escape, renderMarkdown } from './markdown.js';
-import { answerText, artifactUrl, complete, firstSnoozeDay, renderEndedNote, renderMicButton, markdownBody, newView, parseQuestions, renderArtifacts, renderArtifactView, renderHeader, renderList, renderSheet, renderStatus, renderTabs, renderTimeline, renderVoice, snoozeDateUntil, TABS } from './render.js';
+import { answerText, artifactUrl, complete, firstSnoozeDay, renderEndedNote, renderMicButton, markdownBody, newView, parseQuestions, renderArtifacts, renderArtifactView, renderHeader, renderList, renderSheet, renderSideSwitch, renderStatus, renderTabs, renderTimeline, renderVoice, snoozeDateUntil, TABS } from './render.js';
 import type { CardDraft, Tab, View } from './render.js';
 import type { ItemView, ScreenPrompt } from './types.js';
 import { morph } from './morph.js';
@@ -19,6 +19,8 @@ export const SENT_NOTE_MS = 4_000;
 export const PROMPT_POLL_MS = 1_000;
 /** How long the box's draft waits before the hub hears it, as in the Conversation view. */
 export const COMPOSER_DRAFT_MS = 300;
+/** From this width Status and Artifacts are a column beside the conversation rather than tabs. */
+export const WIDE_QUERY = '(min-width: 1200px)';
 /** Where the page keeps each work item's draft, over a reload. */
 const DRAFTS = 'switchboard.drafts';
 
@@ -39,7 +41,7 @@ type Answer = { status: number; body: Record<string, unknown> };
 export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageState; close(): void } {
   root.innerHTML =
     '<aside class="side"><div class="side-head">Switchboard</div><div id="list"></div></aside>' +
-    '<main class="main"><div class="back-bar"><button type="button" class="back" data-action="back" aria-label="Back to the work items"><span class="codicon codicon-arrow-left" aria-hidden="true"></span><span>Work items</span></button></div><div id="head"></div><div id="panel" class="scroll"></div><div id="note"></div><div id="composer" hidden></div></main><div id="sheet"></div><div class="live" aria-live="polite"></div>';
+    '<main class="main"><div class="back-bar"><button type="button" class="back" data-action="back" aria-label="Back to the work items"><span class="codicon codicon-arrow-left" aria-hidden="true"></span><span>Work items</span></button></div><div id="head"></div><div id="panel" class="scroll"></div><div id="note"></div><div id="composer" hidden></div></main><aside id="detail" class="detail" aria-label="Status and artifacts"><div class="detail-head"></div><div class="detail-body scroll"></div></aside><div id="sheet"></div><div class="live" aria-live="polite"></div>';
 
   const list = root.querySelector<HTMLElement>('#list')!;
   const head = root.querySelector<HTMLElement>('#head')!;
@@ -47,6 +49,15 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const composerHost = root.querySelector<HTMLElement>('#composer')!;
   const note = root.querySelector<HTMLElement>('#note')!;
   const sheetHost = root.querySelector<HTMLElement>('#sheet')!;
+  const detailHead = root.querySelector<HTMLElement>('#detail .detail-head')!;
+  const detailBody = root.querySelector<HTMLElement>('#detail .detail-body')!;
+  // On a wide screen Status and Artifacts leave the tabs for a column of their own beside the conversation (architecture.md § Web page).
+  const wideQuery = typeof window.matchMedia === 'function' ? window.matchMedia(WIDE_QUERY) : null;
+  const wide = (): boolean => wideQuery?.matches === true;
+  /** The tab the conversation's pane shows: always the conversation while Status and Artifacts have their own column. */
+  const mainTab = (): Tab => (wide() ? 'conversation' : view.tab);
+
+  wideQuery?.addEventListener?.('change', () => draw());
   let state: PageState = EMPTY;
   const view: View = newView();
   /** A select refused while no conversation was shown, which the list shows until the next select. */
@@ -153,7 +164,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /** A message sent from another tab leaves that tab shown, with a short line that it went. */
   const confirmSent = (): void => {
     clearTimeout(sentTimer);
-    sentNote.hidden = view.tab === 'conversation';
+    sentNote.hidden = mainTab() === 'conversation';
 
     if (!sentNote.hidden) {
       sentTimer = setTimeout(() => void (sentNote.hidden = true), SENT_NOTE_MS);
@@ -554,7 +565,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   };
   /** Draws an open Markdown artifact: its text fetched by the page key, its relative pictures from its folder, Mermaid included. */
   const fillArtifact = async (path: string): Promise<void> => {
-    const doc = panel.querySelector<HTMLElement>('.artifact-doc');
+    const doc = root.querySelector<HTMLElement>('.artifact-doc');
 
     if (doc === null || state.key === null) {
       return;
@@ -580,7 +591,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return parts.length < 2 ? null : artifactUrl(key, parts.join('/'));
     };
 
-    if (view.artifact === path && panel.contains(doc)) {
+    if (view.artifact === path && root.contains(doc)) {
       doc.innerHTML = text === null ? '<p class="empty">This artifact could not be read.</p>' : renderMarkdown(markdownBody(text), base);
       drawDiagrams(doc);
     }
@@ -595,20 +606,20 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   let left: { conversation: string; pinned: boolean; top: number } | null = null;
   /** Keeps where the conversation is when the page moves from it to another tab, by a tab or an artifact's row. */
   const leaving = (next: Tab): void => {
-    if (view.tab === 'conversation' && next !== 'conversation' && state.scope !== null) {
+    if (mainTab() === 'conversation' && next !== 'conversation' && state.scope !== null && !wide()) {
       left = { conversation: `${state.scope.scopeGen} ${state.session?.id ?? ''}`, pinned, top: panel.scrollTop };
     }
   };
   const atEnd = (): boolean => panel.scrollHeight - panel.scrollTop - panel.clientHeight < 24;
   const followEnd = (): void => {
-    if (view.tab === 'conversation' && state.scope !== null && pinned && panel.scrollTop < panel.scrollHeight - panel.clientHeight - 1) {
+    if (mainTab() === 'conversation' && state.scope !== null && pinned && panel.scrollTop < panel.scrollHeight - panel.clientHeight - 1) {
       panel.scrollTop = panel.scrollHeight;
       ownTop = panel.scrollTop;
     }
   };
 
   panel.addEventListener('scroll', () => {
-    if (view.tab !== 'conversation') {
+    if (mainTab() !== 'conversation') {
       return;
     }
 
@@ -641,6 +652,15 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // terminal holder, or a Codex thread in its daemon, without a terminal.
     morph(note, renderEndedNote(state.session, resuming));
 
+    const side = wide() && state.scope !== null;
+
+    root.classList.toggle('wide', side);
+
+    if (!side) {
+      morph(detailHead, '');
+      morph(detailBody, '');
+    }
+
     if (state.scope === null) {
       morph(head, '');
       morph(panel, `<p class="empty">${state.connected ? 'Choose a work item on the left.' : 'Connecting to Switchboard…'}</p>`);
@@ -649,40 +669,48 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
-    morph(head, renderHeader(state, view) + renderTabs(view, state));
+    morph(head, renderHeader(state, view) + (side ? '' : renderTabs(view, state)));
 
     const artifact = view.artifact === null ? undefined : state.artifacts.find((one) => one.path === view.artifact);
     const now = deps.now();
-
-    if (view.tab === 'artifacts' && artifact !== undefined && state.key !== null) {
-      // An open artifact stays as it is while other things change, so a frame or a playing video is not reloaded.
-      if (panel.querySelector<HTMLElement>('.artifact-view')?.dataset['artifact'] !== artifact.path) {
-        panel.innerHTML = renderArtifactView(state.key, artifact);
-        void fillArtifact(artifact.path);
+    /** Draws the Status or Artifacts tab, or an open artifact, into a pane; an open artifact stays as it is, so a frame or a video is not reloaded. */
+    const drawTab = (pane: HTMLElement, tab: Tab): void => {
+      if (tab === 'artifacts' && artifact !== undefined && state.key !== null) {
+        if (pane.querySelector<HTMLElement>('.artifact-view')?.dataset['artifact'] !== artifact.path) {
+          pane.innerHTML = renderArtifactView(state.key, artifact);
+          void fillArtifact(artifact.path);
+        }
+      } else {
+        morph(pane, tab === 'status' ? renderStatus(state, view, now) : tab === 'artifacts' ? renderArtifacts(state, now) : renderTimeline(state, view));
+        drawDiagrams(pane);
       }
-    } else {
-      morph(panel, view.tab === 'status' ? renderStatus(state, view, now) : view.tab === 'artifacts' ? renderArtifacts(state, now) : renderTimeline(state, view));
-      drawDiagrams(panel);
-    }
 
-    panel.classList.toggle('framed', view.tab === 'artifacts' && artifact !== undefined);
+      pane.classList.toggle('framed', tab === 'artifacts' && artifact !== undefined);
+    };
+
+    drawTab(panel, mainTab());
+
+    if (side) {
+      morph(detailHead, renderSideSwitch(view.side, state));
+      drawTab(detailBody, view.side);
+    }
     // The composer first, so the conversation is scrolled against its final height.
     updateComposer();
 
     const conversation = `${state.scope.scopeGen} ${state.session?.id ?? ''}`;
-    const showing = `${view.tab} ${conversation}`;
+    const showing = `${mainTab()} ${conversation}`;
 
     if (showing !== shown) {
       shown = showing;
 
       // The conversation comes back where the operator left it, while it is the same conversation; another tab or conversation starts afresh.
-      const kept = view.tab === 'conversation' && left !== null && left.conversation === conversation ? left : null;
+      const kept = mainTab() === 'conversation' && left !== null && left.conversation === conversation ? left : null;
 
       pinned = kept?.pinned ?? true;
-      panel.scrollTop = view.tab !== 'conversation' ? 0 : kept !== null && !kept.pinned ? kept.top : panel.scrollHeight;
+      panel.scrollTop = mainTab() !== 'conversation' ? 0 : kept !== null && !kept.pinned ? kept.top : panel.scrollHeight;
       ownTop = panel.scrollTop;
 
-      if (view.tab === 'conversation') {
+      if (mainTab() === 'conversation') {
         left = null;
       }
     }
@@ -716,13 +744,17 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
-    const box = panel.getBoundingClientRect();
-    const visible = [...panel.querySelectorAll<HTMLElement>('[data-unread]')]
-      .filter((element) => {
-        const rect = element.getBoundingClientRect();
-        const shown = Math.min(rect.bottom, box.bottom) - Math.max(rect.top, box.top);
+    // The conversation's pane, and on a wide screen the Status and Artifacts column beside it.
+    const visible = [panel, ...(wide() ? [detailBody] : [])]
+      .flatMap((pane) => {
+        const box = pane.getBoundingClientRect();
 
-        return box.height === 0 || (shown > 0 && shown >= Math.min(rect.height, box.height) / 2);
+        return [...pane.querySelectorAll<HTMLElement>('[data-unread]')].filter((element) => {
+          const rect = element.getBoundingClientRect();
+          const shown = Math.min(rect.bottom, box.bottom) - Math.max(rect.top, box.top);
+
+          return box.height === 0 || (shown > 0 && shown >= Math.min(rect.height, box.height) / 2);
+        });
       })
       .map((element) => element.dataset['unread']!)
       .filter((id) => !reported.has(id));
@@ -895,6 +927,15 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   // ---- Clicks ----
   root.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
+    const sideTab = target.closest<HTMLElement>('[data-side]')?.dataset['side'];
+
+    if (sideTab === 'status' || sideTab === 'artifacts') {
+      view.side = sideTab;
+      view.artifact = sideTab === 'artifacts' ? view.artifact : null;
+      draw();
+      return;
+    }
+
     const tab = target.closest<HTMLElement>('[data-tab]')?.dataset['tab'] as Tab | undefined;
 
     if (tab !== undefined && TABS.some((one) => one.tab === tab)) {
@@ -999,7 +1040,13 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       }
       case 'artifact':
         leaving('artifacts');
-        view.tab = 'artifacts';
+
+        if (wide()) {
+          view.side = 'artifacts';
+        } else {
+          view.tab = 'artifacts';
+        }
+
         view.artifact = button!.dataset['path'] ?? null;
         draw();
         break;

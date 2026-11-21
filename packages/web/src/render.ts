@@ -47,6 +47,8 @@ export interface View {
   sheet: Sheet | null;
   /** A row action is running, so its controls wait. */
   acting: boolean;
+  /** What the Status and Artifacts column shows on a wide screen. */
+  side: 'status' | 'artifacts';
   /** New conversation…'s provider menu under the dropdown: the providers, null while they load, or why not. */
   providers: { items: Array<{ provider: string; name: string; default: boolean }> | null; error: string | null } | null;
   /** The prompt the session waits on in its terminal, as last read, for the session it was read for; a key being sent waits. */
@@ -59,7 +61,7 @@ export type Sheet =
   | { kind: 'snooze'; workItemId: number; title: string; choices: SnoozeChoice[]; picked: string; date: string; comment: string }
   | { kind: 'text'; title: string; text: string };
 
-export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), list: false, actions: false, sheet: null, acting: false, prompt: null, providers: null });
+export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), list: false, actions: false, sheet: null, acting: false, prompt: null, providers: null, side: 'status' });
 
 /** Each row action's codicon, as the dock draws its controls. */
 const ACTION_ICONS: Record<string, string> = { start: 'play', approve: 'check', retry: 'refresh', stop: 'debug-stop', 'mark-done': 'pass', snooze: 'clockface', restore: 'debug-restart', delete: 'trash' };
@@ -322,6 +324,18 @@ export function renderHeader(state: PageState, view: View): string {
   const personaPart = personaButton === '' ? '' : `<div class="menu-anchor persona-anchor">${personaButton}${personaMenu}</div>`;
 
   return `<header class="header">${picker}${renderActions(selectedRow(state), view)}${personaPart}</header>`;
+}
+
+/**
+ * The switch at the top of the Status and Artifacts column on a wide screen, drawn as the tabs are, with the same badges; the conversation keeps
+ * its own pane beside it.
+ */
+export function renderSideSwitch(side: 'status' | 'artifacts', state: PageState): string {
+  const fresh = state.status?.unread === true;
+  const button = (tab: 'status' | 'artifacts', label: string, badge: string): string =>
+    `<button class="tab${tab === side ? ' selected' : ''}" type="button" role="tab" data-side="${tab}" aria-selected="${tab === side}" tabindex="${tab === side ? 0 : -1}">${label}${badge === '' ? '' : `<span class="tab-badge">${badge}</span>`}</button>`;
+
+  return `<nav class="tabs side-switch" role="tablist" aria-label="Status and artifacts">${button('status', 'Status', fresh ? 'New' : '')}${button('artifacts', 'Artifacts', '')}</nav>`;
 }
 
 export function renderTabs(view: View, state: PageState): string {

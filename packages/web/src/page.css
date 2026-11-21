@@ -369,3 +369,12 @@ button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }
 @keyframes mic-pulse { 50% { opacity: 0.45; } }
 @media (prefers-reduced-motion: reduce) { .composer .mic .codicon { animation: none; } }
 @media (hover: none), (pointer: coarse) { .composer .mic { min-width: 44px; min-height: 44px; } }
+
+/* From 1200 px Status and Artifacts leave the tabs for a column beside the conversation, with its own Status and Artifacts switch; narrower
+   screens keep the tabs. The composer stays with the conversation. */
+.detail { display: none; }
+@media (min-width: 1200px) {
+  #root.wide > .detail { display: flex; flex: none; flex-direction: column; width: clamp(320px, 28vw, 460px); min-width: 0; background: var(--vscode-sideBar-background); border-left: 1px solid var(--vscode-panel-border); }
+  .detail-head { flex: none; min-height: 45px; display: flex; align-items: flex-end; border-bottom: 1px solid var(--vscode-panel-border); }
+  .detail-head .tabs { border-bottom: none; }
+}

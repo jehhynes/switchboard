@@ -953,6 +953,34 @@ describe('the page in use', () => {
     page.close();
   });
 
+  it('puts Status and Artifacts in a column beside the conversation on a wide screen, with their own switch, and keeps the tabs otherwise', async () => {
+    const listeners: Array<() => void> = [];
+    const query = { matches: true, addEventListener: (_type: string, listener: () => void) => listeners.push(listener) };
+
+    vi.stubGlobal('matchMedia', vi.fn(() => query));
+
+    const { page, source } = start();
+
+    hello(source);
+    expect(root.querySelector('#head .tabs')).toBeNull();
+    expect(root.classList.contains('wide')).toBe(true);
+    expect(root.querySelector('#panel .timeline')).not.toBeNull();
+    expect(root.querySelector('#detail .status-tab')).not.toBeNull();
+    click('#detail [data-side="artifacts"]');
+    expect(root.querySelectorAll('#detail .artifact-list button')).toHaveLength(2);
+    // An artifact row in the conversation opens in the column, and the conversation stays.
+    click('#panel [data-action="artifact"][data-path="chat/p.html"]');
+    expect(root.querySelector('#detail iframe')).not.toBeNull();
+    expect(root.querySelector('#panel .timeline')).not.toBeNull();
+
+    query.matches = false;
+    listeners.forEach((listener) => listener());
+    expect(root.querySelector('#head .tabs')).not.toBeNull();
+    expect(root.querySelector('#detail .detail-body')!.innerHTML).toBe('');
+    vi.unstubAllGlobals();
+    page.close();
+  });
+
   it('answers a card with Submit as an ordinary message, and shows a refusal on the card', async () => {
     const { page, source } = start();
 
