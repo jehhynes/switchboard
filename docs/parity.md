@@ -18,7 +18,7 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 ## Open gaps, by value
 
 1. Row controls the page lacks (C8, R12): Open in Claude or Codex and Answer in terminal, and Enter on a pill.
-2. More Actions' dock windows (H2): Held sessions, Ticket volume report and Show hub log only say to use the dock, Settings has only General and Sources (S2, S16 to S18), and New ad-hoc session and New conversation in a folder cannot choose a folder the hub does not know.
+2. More Actions' dock windows (H2): Held sessions, Ticket volume report and Show hub log only say to use the dock, Settings has only General, Sources and Playbooks (S2, S17, S18), and New ad-hoc session and New conversation in a folder cannot choose a folder the hub does not know.
 3. Held sessions (H4): the held-session note shows, but the page has no Held sessions window to open.
 4. Mark colours (M3): the dock and the web page colour marks by different rules; one of them should change.
 5. Keyboard (K2, K4, K5, O3, O4): no arrow-key walk, F8, menu key, drag or Alt+arrow reordering.
@@ -163,7 +163,7 @@ The dock's Settings window (PRD R54, [architecture.md § Settings window](archit
 | # | Behaviour | Dock evidence | Web | Web evidence and note |
 |---|---|---|---|---|
 | S1 | Opened from More Actions' Open Settings; reads settings.json through the hub's config routes | `OpenSettings` MainWindow.axaml.cs, `/config/read` app.ts | Present | `list-settings` listHeader.tsx opens `settings`; the page posts the same routes as the page commands `page-settings-read`, `page-settings-check`, `page-settings-save` and `page-voice-enroll` (app.ts, `PAGE_COMMANDS` server.ts) |
-| S2 | Navigation in a ticket's order: General; Sources; Playbooks by namespace; Schedules; Voice settings and personas; each with its New entries | `SettingsPages.Nav` | Partly | `nav` settingsModel.ts has General and Sources so far |
+| S2 | Navigation in a ticket's order: General; Sources; Playbooks by namespace; Schedules; Voice settings and personas; each with its New entries | `SettingsPages.Nav` | Partly | `nav` settingsModel.ts has General, Sources and Playbooks so far |
 | S3 | A page with unsaved changes shows a dot in the navigation, and one with errors an error mark | `SettingsPages.PageDirty`, `PageHasErrors` | Present | `pageDirty`, `pageHasErrors` settingsModel.ts |
 | S4 | General: Sessions, Claude sessions, Codex sessions, Triage, Dock, Web page (Chrome pane), and a collapsed Advanced section with the executable paths | `SettingsFields.GeneralFields` | Present | `generalFields` settingsModel.ts, with the dock's labels, help, defaults and choices |
 | S5 | General's Dock section starts with Theme, the dock's own theme kept in `dock.json` | `SettingsWindow.DrawPage` | Dock only | the theme colours the dock; the page keeps VS Code's Dark Modern |
@@ -177,7 +177,7 @@ The dock's Settings window (PRD R54, [architecture.md § Settings window](archit
 | S13 | The settings.json path under the title opens the file in VS Code | `SettingsWindow.DrawPage` (`openUrl`) | Partly | the page shows the path as text, since a page cannot open a file in VS Code |
 | S14 | On a phone the navigation is a list that drills into each page, with Back to it | none: a desktop window | Web only | `data-drill` in settings.tsx, settings.css under 768 px |
 | S15 | Sources: a page per source with Kind, the common fields, its kind's own and Advanced; a source that is off noted in the navigation; changing the kind keeping only the common keys; New <kind> source, New source (kind and name) and Remove source | `SettingsFields.SourceFields`, `SettingsEditor.Edit`, `AddSource`, `Create` | Present | `sourceFields`, `nav` settingsModel.ts; `addSource`, `create`, `button` settings.tsx |
-| S16 | Playbooks: a page per playbook, a table page per namespace, New playbook and Delete, which asks naming the open work items | `SettingsFields.PlaybookFieldsOf`, `SettingsPages.NamespacePage` | Missing | |
+| S16 | Playbooks: a page per playbook whose fields follow its kind, reports and agent, an entry it cannot read shown with its error and Delete, a table page per namespace, New playbook and Delete, which asks naming the open work items; an edit undone restores the entry as the file has it | `SettingsFields.PlaybookFieldsOf`, `SettingsPages.NamespacePage`, `SettingsEditor.SetPlaybook`, `Delete` | Present | `playbookFields`, `namespacePage`, `playbookEntry` settingsModel.ts; `setPlaybook`, `editCell`, `askDelete`, `Table` settings.tsx; the table scrolls sideways on a phone |
 | S17 | Schedules: a page per schedule, New schedule and Remove schedule | `SettingsFields.ScheduleFields` | Missing | |
 | S18 | Voice settings with Playbook personas and Assign, Your voice's enrolment, a page per persona, New persona and Remove persona | `SettingsFields.VoiceFields`, `PersonaFields`, `SettingsPages.EnrollmentRow` | Missing | |
 

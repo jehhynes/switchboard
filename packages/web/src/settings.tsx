@@ -2,8 +2,8 @@
 // hub's config routes as page commands. Its state, fields and pages are the dock's, in settingsModel.ts.
 import type { VNode } from 'preact';
 import { mount } from './island.js';
-import { bar, clone, COMMON_SOURCE_KEYS, EditorState, getAt, nav, pageSections, pageView, parseConfig, readField, setAt, sourceKind } from './settingsModel.js';
-import type { Field, FieldView, JsonObject, NavEntry, NewNameView, PageButton, PageView, SectionView } from './settingsModel.js';
+import { applyPlaybookCell, applyPlaybookField, bar, clone, COMMON_SOURCE_KEYS, EditorState, emptyNewPlaybook, getAt, nav, newPlaybookName, pageSections, pageView, parseConfig, playbookEntry, readField, readPlaybook, samePlaybook, setAt, sourceKind } from './settingsModel.js';
+import type { Field, FieldView, Json, JsonObject, NavEntry, NewNameView, PageButton, PageView, PlaybookFields, PlaybookTable, SectionView } from './settingsModel.js';
 
 type Answer = { status: number; body: Record<string, unknown> };
 
@@ -20,8 +20,8 @@ const phone = (): boolean => typeof matchMedia === 'function' && matchMedia('(ma
 /** The draft is checked this long after the last edit, as the dock's. */
 export const CHECK_DELAY_MS = 250;
 
-/** The question Settings asks before closing over unsaved changes. */
-type Ask = { kind: 'close' };
+/** The question Settings asks: before closing over unsaved changes, or before deleting a playbook. */
+type Ask = { kind: 'close' } | { kind: 'delete'; name: string; detail: string };
 
 /** What Settings shows besides the editor's state: whether it is open, which half a phone shows, and what the operator opened. */
 interface View {
@@ -174,12 +174,69 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
     checkSoon();
   };
 
+  /** Drafts a playbook changed by `changeOf`; false when its entry cannot be read or nothing changed. */
+  const setPlaybook = (name: string, changeOf: (playbook: PlaybookFields) => PlaybookFields): boolean => {
+    const current = state;
+    const value = current?.value ?? null;
+    const playbook = current?.playbookValue(name) ?? null;
+
+    if (current === null || value === null || playbook === null) {
+      return false;
+    }
+
+    const next = changeOf(playbook);
+
+    if (samePlaybook(next, playbook)) {
+      return false;
+    }
+
+    let entry: JsonObject = playbookEntry(next);
+    const file = current.fileEntry(name);
+    const onDisk = readPlaybook(file).fields;
+
+    // Undoing an edit restores the entry as the file holds it, so the playbook is no longer marked unsaved.
+    if (onDisk !== null && JSON.stringify(playbookEntry(onDisk)) === JSON.stringify(entry)) {
+      entry = clone(file as JsonObject);
+    }
+
+    current.setDraft(withPlaybook(value, name, entry));
+    return true;
+  };
+
+  /** A checkbox in a namespace page's table, for one of its playbooks. */
+  const editCell = (name: string, path: string, checked: boolean): void => {
+    if (setPlaybook(name, (playbook) => applyPlaybookCell(playbook, path, checked))) {
+      edited();
+    }
+  };
+
   /** A field's new input on the current page: its text, or a checkbox's checked state. */
   const edit = (field: Field, input: string, checked = false): void => {
     const current = state;
     const value = current?.value ?? null;
 
-    if (current === null || value === null || pageSections(current, current.page).length === 0) {
+    if (current === null || value === null) {
+      return;
+    }
+
+    if (current.page === 'new-playbook') {
+      // Text typed on the New playbook page before Create is not a change to the file.
+      current.newPlaybook = { ...current.newPlaybook, playbook: applyPlaybookField(current.newPlaybook.playbook, field.path, input, checked) };
+      view.typing.set(field.path, input);
+      draw();
+      return;
+    }
+
+    if (current.page.startsWith('playbook:')) {
+      if (setPlaybook(current.page.slice('playbook:'.length), (playbook) => applyPlaybookField(playbook, field.path, input, checked))) {
+        view.typing.set(field.path, input);
+        edited();
+      }
+
+      return;
+    }
+
+    if (pageSections(current, current.page).length === 0) {
       return;
     }
 
@@ -243,7 +300,50 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
 
       current.newSource = { name: '', kind: '', touched: false };
       change(setAt(value, `sources.${name}`, kind === name ? {} : { kind }), `source:${name}`);
+      return;
     }
+
+    if (current.page === 'new-playbook') {
+      if (current.newNameError !== null) {
+        current.newPlaybook = { ...current.newPlaybook, touched: true };
+        draw();
+        return;
+      }
+
+      const name = newPlaybookName(current.newPlaybook);
+      const entry = playbookEntry(current.newPlaybook.playbook);
+
+      current.newPlaybook = emptyNewPlaybook();
+      change(withPlaybook(value, name, entry), `playbook:${name}`);
+    }
+  };
+
+  /** Delete on a playbook's page: asks first, naming how many open work items use it, read from the hub now, since they change. */
+  const askDelete = async (): Promise<void> => {
+    const current = state;
+
+    if (current === null || !current.page.startsWith('playbook:')) {
+      return;
+    }
+
+    const name = current.page.slice('playbook:'.length);
+
+    if (!current.hasPlaybook(name)) {
+      return;
+    }
+
+    const answer = await deps.post('page-settings-read', {});
+    const inUse = answer.status === 200 ? parseConfig(answer.body).inUse : current.config.inUse;
+    const count = inUse[name] ?? 0;
+    const removed = 'Save removes it from settings.json.';
+
+    if (state !== current || current.page !== `playbook:${name}`) {
+      return;
+    }
+
+    view.ask = { kind: 'delete', name, detail: count === 0 ? removed : `${count} open work ${count === 1 ? 'item uses' : 'items use'} it. ${removed}` };
+    draw();
+    host.querySelector<HTMLElement>('.settings-ask .sheet-button.secondary')?.focus();
   };
 
   /** The New page's name or kind as typed. */
@@ -254,6 +354,8 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
 
     if (state.page === 'new-source') {
       state.newSource = { ...state.newSource, [part]: text };
+    } else if (state.page === 'new-playbook') {
+      state.newPlaybook = { ...state.newPlaybook, [part === 'namespace' ? 'namespace' : 'name']: text };
     }
 
     draw();
@@ -270,6 +372,9 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
     switch (pressed.command) {
       case 'create':
         create();
+        break;
+      case 'delete':
+        void askDelete();
         break;
       case 'remove-source':
         // Its work items stay, and Discard restores it.
@@ -440,8 +545,29 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
     },
     saveStay: () => void save(),
     discard: closeNow,
+    editCell,
     answer: async (choice) => {
+      const asked = view.ask;
+
       view.ask = null;
+
+      if (asked?.kind === 'delete') {
+        const value = state?.value ?? null;
+
+        if (choice === 'delete' && state !== null && value !== null && state.hasPlaybook(asked.name)) {
+          state.setDraft(withPlaybook(value, asked.name, undefined));
+          state.page = 'general';
+          view.typing.clear();
+          edited();
+          // The page's title takes the focus from the closed question's button.
+          host.querySelector<HTMLElement>('.settings-page-title h2')?.focus();
+        } else {
+          draw();
+          [...host.querySelectorAll<HTMLButtonElement>('.settings-buttons button')].find((one) => one.textContent === 'Delete')?.focus();
+        }
+
+        return;
+      }
 
       if (choice === 'save') {
         if (await save()) {
@@ -515,7 +641,8 @@ interface Handlers {
   save(): void;
   saveStay(): void;
   discard(): void;
-  answer(choice: 'save' | 'discard' | 'keep'): void;
+  answer(choice: 'save' | 'discard' | 'keep' | 'delete'): void;
+  editCell(name: string, path: string, checked: boolean): void;
 }
 
 /** Settings: its header, the navigation and the page side by side (on a phone, one of them), and the bar under both. */
@@ -564,7 +691,7 @@ export function renderSettings(state: EditorState | null, view: View, on: Handle
           </div>
         </div>
       )}
-      {view.ask === null ? null : <AskSheet on={on} />}
+      {view.ask === null ? null : <AskSheet ask={view.ask} on={on} />}
     </div>
   );
 }
@@ -623,6 +750,7 @@ function Page({ state, page, view, on }: { state: EditorState; page: PageView; v
       ))}
       {page.message === null ? null : <p class="settings-message">{page.message}</p>}
       {page.newName === undefined ? null : <NameFields names={page.newName} view={view} on={on} />}
+      {page.table === undefined ? null : <Table table={page.table} on={on} />}
       {page.sections.map((section) => (
         <SectionBlock state={state} section={section} view={view} on={on} />
       ))}
@@ -670,6 +798,96 @@ function SectionBlock({ state, section, view, on }: { state: EditorState; sectio
       {open ? rows : null}
     </section>
   );
+}
+
+/** A namespace's playbooks as rows of checkboxes under grouped column headers; a row's name opens its page. */
+function Table({ table, on }: { table: PlaybookTable; on: Handlers }) {
+  const groups: Array<{ group: string | null; span: number }> = [];
+
+  for (const column of table.columns) {
+    const last = groups[groups.length - 1];
+
+    if (last !== undefined && last.group === column.group) {
+      last.span++;
+    } else {
+      groups.push({ group: column.group, span: 1 });
+    }
+  }
+
+  return (
+    <div class="settings-table-scroll">
+      <table class="settings-table">
+        <thead>
+          {table.columns.some((column) => column.group !== null) ? (
+            <tr>
+              <th></th>
+              {groups.map((one) => (
+                <th colSpan={one.span} class={one.group === null ? undefined : 'settings-table-group'}>
+                  {one.group ?? ''}
+                </th>
+              ))}
+            </tr>
+          ) : null}
+          <tr>
+            <th class="settings-table-name">Name</th>
+            {table.columns.map((column) => (
+              <th title={column.help}>{column.label}</th>
+            ))}
+          </tr>
+        </thead>
+        {table.rows.map((row) => (
+          <tbody data-playbook={row.name}>
+            <tr>
+              <td class="settings-table-name">
+                <button type="button" class="link" title={row.description === '' ? undefined : row.description} onClick={() => on.navigate(`playbook:${row.name}`)}>
+                  {row.label}
+                </button>
+                {row.dirty ? (
+                  <span class="settings-dirty" title="Unsaved changes" aria-label="Unsaved changes">
+                    ●
+                  </span>
+                ) : null}
+              </td>
+              {row.cells.map((cell, index) => (
+                <td>
+                  {cell === null ? null : (
+                    <input
+                      type="checkbox"
+                      aria-label={`${row.label}: ${table.columns[index]!.label}`}
+                      checked={cell.checked}
+                      disabled={!cell.enabled}
+                      onChange={(event) => on.editCell(row.name, table.columns[index]!.path, (event.currentTarget as HTMLInputElement).checked)}
+                    />
+                  )}
+                </td>
+              ))}
+            </tr>
+            {row.errors.length === 0 ? null : (
+              <tr>
+                <td colSpan={table.columns.length + 1}>
+                  <Errors errors={row.errors} />
+                </td>
+              </tr>
+            )}
+          </tbody>
+        ))}
+      </table>
+    </div>
+  );
+}
+
+/** A copy of `root` with a playbook entry set, or removed when `entry` is undefined; an edited entry keeps its place. */
+function withPlaybook(root: JsonObject, name: string, entry: Json | undefined): JsonObject {
+  const copy = clone(root);
+  const playbooks: JsonObject = typeof copy['playbooks'] === 'object' && copy['playbooks'] !== null && !Array.isArray(copy['playbooks']) ? copy['playbooks'] : (copy['playbooks'] = {});
+
+  if (entry === undefined) {
+    delete playbooks[name];
+  } else {
+    playbooks[name] = clone(entry);
+  }
+
+  return copy;
 }
 
 /** Splits fields into runs: each checkbox group's adjacent fields together, every other field alone. */
@@ -860,7 +1078,28 @@ function NameFields({ names, view, on }: { names: NewNameView; view: View; on: H
 }
 
 /** Asks before closing over unsaved changes: Save closes once the file holds them, Discard closes, and Keep editing stays. */
-function AskSheet({ on }: { on: Handlers }) {
+function AskSheet({ ask, on }: { ask: Ask; on: Handlers }) {
+  if (ask.kind === 'delete') {
+    return (
+      <div class="sheet-backdrop settings-ask" onClick={(event) => event.target === event.currentTarget && on.answer('keep')}>
+        <div class="sheet glass" role="alertdialog" aria-modal="true" aria-labelledby="settings-ask-title">
+          <h2 id="settings-ask-title" class="sheet-title">
+            Delete playbook {ask.name}?
+          </h2>
+          <p class="sheet-detail">{ask.detail}</p>
+          <div class="sheet-buttons">
+            <button type="button" class="sheet-button secondary" onClick={() => on.answer('keep')}>
+              Cancel
+            </button>
+            <button type="button" class="sheet-button primary danger" onClick={() => on.answer('delete')}>
+              Delete
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div class="sheet-backdrop settings-ask" onClick={(event) => event.target === event.currentTarget && on.answer('keep')}>
       <div class="sheet glass" role="alertdialog" aria-modal="true" aria-labelledby="settings-ask-title">

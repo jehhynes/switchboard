@@ -232,6 +232,53 @@ export class EditorState {
 
   constructor(public config: EditorConfig) {}
 
+  /** The playbook being created on the New playbook page; `touched` once Create was pressed, so an empty name shows its error. */
+  newPlaybook: NewPlaybook = emptyNewPlaybook();
+
+  /** A playbook's entry as the file holds it. */
+  fileEntry(name: string): Json | undefined {
+    const playbooks = isObject(this.config.settings.value) ? this.config.settings.value['playbooks'] : undefined;
+
+    return isObject(playbooks) && Object.hasOwn(playbooks, name) ? playbooks[name] : undefined;
+  }
+
+  playbookDirty(name: string): boolean {
+    const file = isObject(this.config.settings.value) ? this.config.settings.value['playbooks'] : undefined;
+    const onDisk = isObject(file) && Object.hasOwn(file, name) ? JSON.stringify(file[name]) : 'absent';
+    const drafted = this.hasPlaybook(name) ? JSON.stringify(this.playbookEntry(name) ?? null) : 'absent';
+
+    return this.draft !== null && drafted !== onDisk;
+  }
+
+  /** The playbooks of a namespace, sorted. */
+  namespacePlaybooks(space: string): string[] {
+    return this.playbookNames.filter((name) => name.split(':')[0] === space);
+  }
+
+  /** The check errors of one playbook, without their `playbooks.<name>: ` prefix. */
+  playbookErrors(name: string): string[] {
+    const prefix = `playbooks.${name}: `;
+
+    return this.errors.filter((error) => error.startsWith(prefix)).map((error) => error.slice(prefix.length));
+  }
+
+  /** Why the new playbook's name cannot be used, or null. */
+  get newNameError(): string | null {
+    if (!SEGMENT.test(this.newPlaybook.namespace.trim()) || !SEGMENT.test(this.newPlaybook.name.trim())) {
+      return 'Namespace and name must be lowercase letters, digits and hyphens.';
+    }
+
+    const value = this.value;
+
+    if (value === null || (value['playbooks'] !== undefined && !isObject(value['playbooks']))) {
+      return 'settings.json must hold an object with a playbooks object.';
+    }
+
+    const full = newPlaybookName(this.newPlaybook);
+
+    return this.hasPlaybook(full) ? `A playbook named ${full} already exists.` : null;
+  }
+
   /** The check errors that belong to no playbook in the draft, which the settings pages place. */
   get settingsErrors(): string[] {
     const prefixes = this.playbookNames.map((name) => `playbooks.${name}: `);
@@ -378,6 +425,241 @@ export interface PlaybookFields {
   focus: string | null;
 }
 
+export const EMPTY_PLAYBOOK: PlaybookFields = { description: '', kind: 'task', autoStart: false, requiresWorktree: false, permissionMode: null, model: null, workdir: 'worktree', reports: [], approvalSends: false, rates: false, returnOf: [], template: '', provider: null, focus: null };
+
+/** The New playbook page's namespace, name and playbook, and whether Create was pressed. */
+export interface NewPlaybook {
+  namespace: string;
+  name: string;
+  playbook: PlaybookFields;
+  touched: boolean;
+}
+
+export const emptyNewPlaybook = (): NewPlaybook => ({ namespace: '', name: '', playbook: EMPTY_PLAYBOOK, touched: false });
+
+export const newPlaybookName = (draft: NewPlaybook): string => `${draft.namespace.trim()}:${draft.name.trim()}`;
+
+/** The reports a task playbook can list, in the order the page writes them. */
+export const REPORT_KINDS = ['done', 'approval', 'worktree', 'playbook', 'paste'];
+
+/** The reports a task session can send, as checkbox labels and tooltips. */
+export const REPORT_FIELDS: ReadonlyArray<{ kind: string; label: string; help: string }> = [
+  { kind: 'done', label: 'Done', help: 'The session closes the work item. Off, its turn ends in Ready for review.' },
+  { kind: 'approval', label: 'Approval', help: 'The session can leave a prompt for you to approve, such as one that posts its draft.' },
+  { kind: 'worktree', label: 'Worktree', help: 'The session can link a worktree it creates. Branch names link worktrees without it.' },
+  { kind: 'playbook', label: 'Playbook', help: 'The session can hand its work item to another playbook in the namespace, whose skill it runs.' },
+  { kind: 'paste', label: 'Paste', help: 'The session can name drafted texts, such as a customer reply, that Copy puts on the clipboard on its approval row.' },
+];
+
+export const AUTO_START_HELP = 'Start the session after triage, unless nothing is newer than the ticket’s earlier work item. Off, the work item waits in Unstarted for you to start it.';
+export const REQUIRES_WORKTREE_HELP = 'Run the source’s setup prompt first when the ticket has no worktree.';
+export const FOCUS_HELP = 'The page an item window opens for this playbook’s work, at the earliest comment there that asks for it.';
+export const RETURN_OF_HELP = 'One playbook per line, such as dev:review-pr for dev:review-pr-followup. Returned also counts the ticket’s earlier work items with these playbooks.';
+export const APPROVAL_SENDS_HELP = 'Approve posts or pushes the session’s work. Off, you send it yourself, such as by pasting a reply, and Approve finishes up.';
+export const RATES_HELP = 'Triage stores immediacy and severity, which these instructions must define. Off, it stores neither.';
+export const REPO_ROOT_HELP = 'The session always runs in the source’s repo root. Off, it runs in the ticket’s worktree, else the repo root.';
+
+/** Every field with its value, in one order, for reading one by key and comparing playbooks. */
+export function playbookJson(playbook: PlaybookFields): JsonObject {
+  return {
+    description: playbook.description,
+    kind: playbook.kind,
+    autoStart: playbook.autoStart,
+    requiresWorktree: playbook.requiresWorktree,
+    permissionMode: playbook.permissionMode,
+    model: playbook.model,
+    workdir: playbook.workdir,
+    reports: [...playbook.reports],
+    approvalSends: playbook.approvalSends,
+    rates: playbook.rates,
+    returnOf: [...playbook.returnOf],
+    focus: playbook.focus,
+    provider: playbook.provider,
+    template: playbook.template,
+  };
+}
+
+/** Whether two playbooks have the same fields. */
+export const samePlaybook = (a: PlaybookFields, b: PlaybookFields | null): boolean => b !== null && JSON.stringify(playbookJson(a)) === JSON.stringify(playbookJson(b));
+
+/** The entry the page writes: defaults left out, except `autoStart` and `requiresWorktree` on a task playbook, in `PLAYBOOK_KEYS` order. */
+export function playbookEntry(playbook: PlaybookFields): JsonObject {
+  const task = playbook.kind === 'task';
+  const entry: JsonObject = { description: playbook.description };
+
+  if (!task) {
+    entry['kind'] = playbook.kind;
+  }
+
+  if (task || playbook.autoStart) {
+    entry['autoStart'] = playbook.autoStart;
+  }
+
+  if (task || playbook.requiresWorktree) {
+    entry['requiresWorktree'] = playbook.requiresWorktree;
+  }
+
+  if (playbook.workdir !== 'worktree') {
+    entry['workdir'] = playbook.workdir;
+  }
+
+  if (playbook.reports.length > 0) {
+    entry['reports'] = [...playbook.reports];
+  }
+
+  if (playbook.approvalSends) {
+    entry['approvalSends'] = true;
+  }
+
+  if (playbook.returnOf.length > 0) {
+    entry['returnOf'] = [...playbook.returnOf];
+  }
+
+  if (playbook.focus !== null) {
+    entry['focus'] = playbook.focus;
+  }
+
+  if (playbook.rates) {
+    entry['rates'] = true;
+  }
+
+  if (playbook.provider !== null) {
+    entry['provider'] = playbook.provider;
+  }
+
+  if (playbook.permissionMode !== null) {
+    entry['permissionMode'] = playbook.permissionMode;
+  }
+
+  if (playbook.model !== null) {
+    entry['model'] = playbook.model;
+  }
+
+  entry['template'] = playbook.template;
+  return entry;
+}
+
+/** A playbook with one field changed from its input. */
+export function applyPlaybookField(playbook: PlaybookFields, key: string, input: string, checked = false): PlaybookFields {
+  if (key.startsWith('reports.') && REPORT_KINDS.includes(key.slice('reports.'.length))) {
+    const kind = key.slice('reports.'.length);
+    const listed = [...playbook.reports.filter((report) => report !== kind), ...(checked ? [kind] : [])];
+    const reports = REPORT_KINDS.filter((report) => listed.includes(report));
+
+    // The hub accepts approvalSends only beside the approval report, so the draft drops it with the report.
+    return { ...playbook, reports, approvalSends: playbook.approvalSends && reports.includes('approval') };
+  }
+
+  const orNull = (text: string): string | null => (text === '' ? null : text);
+
+  switch (key) {
+    case 'autoStart':
+      return { ...playbook, autoStart: checked };
+    case 'requiresWorktree':
+      return { ...playbook, requiresWorktree: checked };
+    case 'approvalSends':
+      return { ...playbook, approvalSends: checked };
+    case 'rates':
+      return { ...playbook, rates: checked };
+    case 'provider':
+      return { ...playbook, provider: orNull(input) };
+    case 'focus':
+      return { ...playbook, focus: orNull(input) };
+    case 'permissionMode':
+      return { ...playbook, permissionMode: orNull(input) };
+    case 'model':
+      return { ...playbook, model: orNull(input) };
+    case 'returnOf':
+      return { ...playbook, returnOf: [...new Set(input.split(/[\n,]/).map((line) => line.trim()).filter((line) => line !== ''))] };
+    case 'kind':
+      // The hub accepts reports only on a task playbook and rates only on a triage one, so the draft drops the other kind's keys.
+      return input === 'triage' ? { ...playbook, kind: 'triage', reports: [], approvalSends: false, returnOf: [], focus: null } : { ...playbook, kind: 'task', rates: false };
+    case 'workdir':
+      return { ...playbook, workdir: input === 'repoRoot' ? 'repoRoot' : 'worktree' };
+    case 'description':
+      return { ...playbook, description: input };
+    case 'template':
+      return { ...playbook, template: input };
+    default:
+      return playbook;
+  }
+}
+
+/** A column of a namespace's playbook table: a playbook field path, its header and tooltip, and the header it sits under. */
+export interface TableColumn {
+  path: string;
+  label: string;
+  help: string;
+  group: string | null;
+}
+
+export interface TableCell {
+  checked: boolean;
+  enabled: boolean;
+}
+
+/** The checkbox columns of a namespace's playbook table: the task columns when it has a task playbook, Rates when it has a triage one. */
+export function tableColumns(playbooks: readonly PlaybookFields[]): TableColumn[] {
+  const kinds = new Set(playbooks.map((playbook) => playbook.kind));
+  const columns: TableColumn[] = [];
+
+  if (kinds.has('task')) {
+    columns.push({ path: 'autoStart', label: 'Auto', help: AUTO_START_HELP, group: 'Start' });
+    columns.push({ path: 'requiresWorktree', label: 'Needs worktree', help: REQUIRES_WORKTREE_HELP, group: 'Start' });
+
+    for (const report of REPORT_FIELDS) {
+      columns.push({ path: `reports.${report.kind}`, label: report.label, help: report.help, group: 'Reports' });
+
+      if (report.kind === 'approval') {
+        columns.push({ path: 'approvalSends', label: 'Sends', help: APPROVAL_SENDS_HELP, group: 'Reports' });
+      }
+    }
+
+    columns.push({ path: 'workdir', label: 'Repo root', help: REPO_ROOT_HELP, group: null });
+  }
+
+  if (kinds.has('triage')) {
+    columns.push({ path: 'rates', label: 'Rates', help: RATES_HELP, group: null });
+  }
+
+  return columns;
+}
+
+/** A playbook field's value; a `reports.<kind>` field is whether the playbook lists that report. */
+export function playbookFieldValue(playbook: PlaybookFields, path: string): Json | undefined {
+  return path.startsWith('reports.') ? playbook.reports.includes(path.slice('reports.'.length)) : playbookJson(playbook)[path];
+}
+
+/** A playbook's checkbox in a table column, or null when the column does not apply to its kind. Sends is enabled only with Approval. */
+export function tableCell(playbook: PlaybookFields, path: string): TableCell | null {
+  if (path === 'rates') {
+    return playbook.kind === 'triage' ? { checked: playbook.rates, enabled: true } : null;
+  }
+
+  if (playbook.kind === 'triage') {
+    return null;
+  }
+
+  if (path === 'workdir') {
+    return { checked: playbook.workdir === 'repoRoot', enabled: true };
+  }
+
+  if (path === 'approvalSends') {
+    return { checked: playbook.approvalSends, enabled: playbook.reports.includes('approval') };
+  }
+
+  return { checked: playbookFieldValue(playbook, path) === true, enabled: true };
+}
+
+/** A playbook with a table checkbox changed; Repo root sets the working directory. */
+export const applyPlaybookCell = (playbook: PlaybookFields, path: string, checked: boolean): PlaybookFields =>
+  path === 'workdir' ? applyPlaybookField(playbook, 'workdir', checked ? 'repoRoot' : 'worktree') : applyPlaybookField(playbook, path, '', checked);
+
+/** The field a playbook error names: the key it starts with, or the template. */
+export function playbookFieldOfError(error: string, paths: readonly string[]): string | null {
+  return paths.find((path) => error.startsWith(`${path} `)) ?? (error.toLowerCase().includes('template') ? 'template' : null);
+}
+
 /** The keys of a playbook entry, which the hub accepts and the page has fields for, in the order it writes them. */
 export const PLAYBOOK_KEYS = ['description', 'kind', 'autoStart', 'requiresWorktree', 'workdir', 'reports', 'approvalSends', 'returnOf', 'focus', 'rates', 'provider', 'permissionMode', 'model', 'template'];
 
@@ -457,6 +739,100 @@ export function readPlaybook(node: Json | undefined): { fields: PlaybookFields |
   };
 
   return error === null ? { fields, error: null } : { fields: null, error };
+}
+
+/** A playbook page's fields; what shows depends on its kind, its reports and its agent. */
+export function playbookFields(state: EditorState, playbook: PlaybookFields): Field[] {
+  const setting = (path: string): string | null => {
+    const value = getAt(state.value ?? undefined, path);
+
+    return typeof value === 'string' && value !== '' ? value : null;
+  };
+  const defaultProvider = setting('sessions.provider') ?? 'claude';
+  const codex = (playbook.provider ?? defaultProvider) === 'codex';
+  const mode = setting(codex ? 'sessions.codex.permissionMode' : 'sessions.permissionMode') ?? (codex ? 'bypassPermissions' : 'auto');
+  const model = setting(codex ? 'sessions.codex.model' : 'sessions.model');
+  const modes = codex ? state.config.codexPermissionModes : state.config.permissionModes;
+  const fields: Field[] = [
+    { path: 'description', label: 'Description', kind: 'text', help: 'Tells triage when to choose this playbook. One line.' },
+    {
+      path: 'kind',
+      label: 'Kind',
+      kind: 'select',
+      help: 'A triage playbook holds a source’s classifier instructions and is never chosen for work.',
+      options: [
+        { value: 'task', label: 'task' },
+        { value: 'triage', label: 'triage' },
+      ],
+    },
+  ];
+
+  if (playbook.kind === 'triage') {
+    fields.push({ path: 'rates', label: 'Rates importance', kind: 'boolean', help: RATES_HELP });
+  }
+
+  if (playbook.kind === 'task') {
+    fields.push({ path: 'autoStart', label: 'Automatically', kind: 'boolean', help: AUTO_START_HELP, group: 'Start' });
+    fields.push({ path: 'requiresWorktree', label: 'Needs a worktree', kind: 'boolean', help: REQUIRES_WORKTREE_HELP, group: 'Start' });
+    fields.push(...REPORT_FIELDS.map((report): Field => ({ path: `reports.${report.kind}`, label: report.label, kind: 'boolean', help: report.help, group: 'Reports' })));
+
+    if (playbook.reports.includes('approval')) {
+      fields.push({ path: 'approvalSends', label: 'Approve sends the work', kind: 'boolean', help: APPROVAL_SENDS_HELP });
+    }
+
+    fields.push({
+      path: 'workdir',
+      label: 'Working directory',
+      kind: 'select',
+      help: '',
+      options: [
+        { value: 'worktree', label: 'The ticket’s worktree, else the repo root' },
+        { value: 'repoRoot', label: 'Always the source’s repo root' },
+      ],
+    });
+    fields.push({
+      path: 'provider',
+      label: 'Agent',
+      kind: 'select',
+      help: 'The agent this playbook’s sessions run in.',
+      options: withCurrent([{ value: '', label: `Sessions setting (${providerName(defaultProvider)})` }, ...state.config.providers.map((entry) => ({ value: entry, label: providerName(entry) }))], playbook.provider ?? undefined),
+    });
+    fields.push({
+      path: 'permissionMode',
+      label: 'Permission mode',
+      kind: 'select',
+      help: codex ? 'Commands in Codex’s sandbox cannot use your sign-ins, such as gh’s.' : '',
+      options: withCurrent([{ value: '', label: `Sessions setting (${mode})` }, ...modes.map((entry) => ({ value: entry, label: entry }))], playbook.permissionMode ?? undefined),
+    });
+    fields.push({ path: 'model', label: 'Model', kind: 'text', help: '', placeholder: `Sessions setting (${model ?? (codex ? 'Codex’s default' : 'Claude’s default')})` });
+    fields.push({ path: 'returnOf', label: 'Return of', kind: 'list', help: RETURN_OF_HELP });
+    fields.push({
+      path: 'focus',
+      label: 'Focus page',
+      kind: 'select',
+      help: FOCUS_HELP,
+      options: withCurrent(
+        [
+          { value: '', label: 'Any page' },
+          { value: 'ticket', label: 'The ticket' },
+          { value: 'pr', label: 'The pull request' },
+        ],
+        playbook.focus ?? undefined,
+      ),
+    });
+  }
+
+  fields.push({
+    path: 'template',
+    label: playbook.kind === 'triage' ? 'Classifier instructions' : 'Prompt',
+    kind: 'prompt',
+    help:
+      playbook.kind === 'triage'
+        ? 'The classifier’s system prompt. {{playbooks}} inserts the task playbooks as “- name: description” lines; without it, triage appends them.'
+        : `Variables: ${state.config.templateVariables.map((name) => `{{${name}}}`).join(' ')}. Switchboard adds the commands for the checked reports, with stage and link.`,
+  });
+
+  return fields;
 }
 
 export function generalFields(state: EditorState): Section[] {
@@ -725,11 +1101,29 @@ export function pagePaths(page: string): string[] {
 }
 
 export function pageDirty(state: EditorState, page: string): boolean {
+  if (page.startsWith('namespace:')) {
+    return state.namespacePlaybooks(page.slice('namespace:'.length)).some((name) => state.playbookDirty(name));
+  }
+
+  if (page.startsWith('playbook:')) {
+    return state.playbookDirty(page.slice('playbook:'.length));
+  }
+
   // Text typed on a New page before Create is not a change to the file.
   return state.draft !== null && pagePaths(page).some((path) => json(getAt(state.draft!, path)) !== json(getAt(state.config.settings.value, path)));
 }
 
 export function pageHasErrors(state: EditorState, page: string): boolean {
+  if (page.startsWith('namespace:')) {
+    return state.namespacePlaybooks(page.slice('namespace:'.length)).some((name) => pageHasErrors(state, `playbook:${name}`));
+  }
+
+  if (page.startsWith('playbook:')) {
+    const name = page.slice('playbook:'.length);
+
+    return state.playbookErrors(name).length > 0 || (state.hasPlaybook(name) && state.playbookValue(name) === null);
+  }
+
   return [...errorPages(state).values()].includes(page);
 }
 
@@ -764,6 +1158,19 @@ export function nav(state: EditorState): NavEntry[] {
   }
 
   entries.push(add(state, 'New source', 'new-source'));
+  entries.push(heading('Playbooks'));
+
+  for (const space of state.namespaces) {
+    const page = `namespace:${space}`;
+
+    entries.push({ kind: 'namespace', label: space, page, current: state.page === page, dirty: pageDirty(state, page), errors: pageHasErrors(state, page) });
+
+    for (const name of state.namespacePlaybooks(space)) {
+      entries.push(item(state, `playbook:${name}`, name.includes(':') ? name.slice(name.indexOf(':') + 1) : name));
+    }
+  }
+
+  entries.push(add(state, 'New playbook', 'new-playbook'));
   return entries;
 }
 
@@ -831,8 +1238,15 @@ export interface NewNameView {
   namespaces?: readonly string[];
 }
 
+/** A namespace's playbooks, one row each, with a checkbox per column; a null cell does not apply to the row's kind or unreadable entry. */
+export interface PlaybookTable {
+  columns: TableColumn[];
+  rows: Array<{ name: string; label: string; description: string; cells: Array<TableCell | null>; dirty: boolean; errors: string[] }>;
+}
+
 export interface PageView {
   newName?: NewNameView;
+  table?: PlaybookTable;
   title: string;
   filePath: string | null;
   buttons: PageButton[];
@@ -878,7 +1292,96 @@ export function pageView(state: EditorState): PageView {
     };
   }
 
+  if (page.startsWith('namespace:')) {
+    return namespacePage(state, page.slice('namespace:'.length));
+  }
+
+  if (page === 'new-playbook') {
+    const draft = state.newPlaybook;
+    const { loose, sections } = playbookSections(state, draft.playbook, []);
+
+    return {
+      title: 'New playbook',
+      filePath: null,
+      buttons: [{ command: 'create', label: 'Create', primary: true }],
+      notes: [],
+      errors: loose,
+      message: null,
+      sections,
+      newName: {
+        label: 'Name',
+        help: 'Lowercase letters, digits and hyphens. Create adds the playbook to settings.json when you save.',
+        placeholder: 'develop',
+        name: draft.name,
+        namespace: draft.namespace,
+        namespaces: state.namespaces,
+        error: draft.namespace === '' && draft.name === '' && !draft.touched ? null : state.newNameError,
+      },
+    };
+  }
+
+  if (page.startsWith('playbook:')) {
+    const name = page.slice('playbook:'.length);
+    const path = state.config.settings.path;
+    const blank = { notes: [], sections: [] };
+
+    if (!state.hasPlaybook(name)) {
+      return { title: name, filePath: path, buttons: [], errors: [], message: 'This playbook no longer exists.', ...blank };
+    }
+
+    const buttons: PageButton[] = [{ command: 'delete', label: 'Delete' }];
+    const errors = state.playbookErrors(name);
+    const read = readPlaybook(state.playbookEntry(name));
+
+    if (read.fields === null) {
+      return { title: name, filePath: path, buttons, errors: errors.length > 0 ? errors : [read.error!], message: FIX_ENTRY, ...blank };
+    }
+
+    const { loose, sections } = playbookSections(state, read.fields, errors);
+
+    return { title: name, filePath: path, buttons, notes: [], errors: loose, message: null, sections };
+  }
+
   return settingsPage(state, 'General', generalFields(state), [], []);
+}
+
+const FIX_ENTRY = 'Fix this entry in settings.json in an editor, or delete it.';
+
+/** The errors that name no field, and the playbook's fields with the errors that name each. */
+function playbookSections(state: EditorState, playbook: PlaybookFields, errors: readonly string[]): { loose: string[]; sections: SectionView[] } {
+  const fields = playbookFields(state, playbook);
+  const paths = fields.map((field) => field.path);
+  const loose = errors.filter((error) => playbookFieldOfError(error, paths) === null);
+  const views = fields.map((field) => fieldView(field, playbookFieldValue(playbook, field.path), errors.filter((error) => playbookFieldOfError(error, paths) === field.path)));
+
+  return { loose, sections: [{ heading: '', advanced: false, fields: views }] };
+}
+
+/** A namespace's playbooks as a table of their checkboxes, each row with its own errors. */
+function namespacePage(state: EditorState, space: string): PageView {
+  const names = state.namespacePlaybooks(space);
+  const base = { title: `${space} playbooks`, filePath: null, buttons: [], notes: [], errors: [], sections: [] };
+
+  if (names.length === 0) {
+    return { ...base, message: 'This namespace has no playbooks.' };
+  }
+
+  const playbooks = names.map((name) => ({ name, read: readPlaybook(state.playbookEntry(name)) }));
+  const columns = tableColumns(playbooks.map((entry) => entry.read.fields).filter((fields): fields is PlaybookFields => fields !== null));
+  const rows = playbooks.map((entry) => {
+    const errors = state.playbookErrors(entry.name);
+
+    return {
+      name: entry.name,
+      label: entry.name.slice(entry.name.indexOf(':') + 1),
+      description: entry.read.fields?.description ?? '',
+      cells: columns.map((column) => (entry.read.fields === null ? null : tableCell(entry.read.fields, column.path))),
+      dirty: state.playbookDirty(entry.name),
+      errors: errors.length === 0 && entry.read.error !== null ? [entry.read.error] : errors,
+    };
+  });
+
+  return { ...base, message: null, table: { columns, rows } };
 }
 
 export function settingsPage(state: EditorState, title: string, sections: readonly Section[], buttons: PageButton[], notes: string[]): PageView {
