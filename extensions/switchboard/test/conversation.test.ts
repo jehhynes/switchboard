@@ -250,7 +250,15 @@ describe('the conversation state', () => {
   it('shows a session waiting for a usage limit to reset with a watch and when it resumes (architecture.md § Rate limits)', () => {
     const until = new Date(2026, 10, 20, 13, 21).getTime();
 
-    expect(stateIcon({ ...SESSION, state: 'idle', limit: { until, retry: false } })).toEqual({ icon: 'watch', text: 'Rate limited · resumes 1:21 PM' });
+    // stateIcon reads the clock: the reset is later the same day.
+    vi.useFakeTimers({ toFake: ['Date'], now: until - 3_600_000 });
+
+    try {
+      expect(stateIcon({ ...SESSION, state: 'idle', limit: { until, retry: false } })).toEqual({ icon: 'watch', text: 'Rate limited · resumes 1:21 PM' });
+    } finally {
+      vi.useRealTimers();
+    }
+
     expect(limitText({ until, retry: true }, until)).toBe('Rate limited · retries 1:21 PM');
     expect(limitText({ until, retry: false }, until - 24 * 3_600_000)).toBe('Rate limited · resumes Fri 1:21 PM');
   });
