@@ -269,6 +269,63 @@ describe('the composer extras', () => {
     }
   });
 
+  it('shows the context meter as one ring after the message tools, its numbers in the tooltip, and posts /compact only after Compact is confirmed (architecture.md § Context meter)', () => {
+    const { host, input, reply, show, type, of, error } = page();
+    const context = { used: 150_000, window: 200_000, compactAt: 167_000, model: 'claude-sonnet-4-6' };
+    const slot = host.querySelector<HTMLElement>('.composer-controls .context-meter')!;
+    const ring = () => slot.querySelector<HTMLButtonElement>('button.context-ring')!;
+
+    show(state({ session: { ...SESSION, context } }));
+    expect(host.querySelector('.composer-controls')!.lastElementChild).toBe(slot);
+    expect(ring().textContent).toBe('');
+    expect(ring().classList.contains('warn')).toBe(true);
+    expect(ring().getAttribute('aria-label')).toContain('Context: 75% · 150k / 200k tokens');
+    show(state({ session: { ...SESSION, context: { ...context, used: 20_000 } } }));
+    expect(ring().classList.contains('ok')).toBe(true);
+
+    type('my draft');
+    ring().click();
+    expect(slot.querySelector('.context-menu')!.textContent).toContain('Context: 10% · 20k / 200k tokens');
+    slot.querySelector<HTMLButtonElement>('[data-context="compact"]')!.click();
+    expect(of('send')).toEqual([]);
+    expect(document.activeElement).toBe(slot.querySelector('[data-context="compact-confirm"]'));
+    slot.querySelector<HTMLButtonElement>('[data-context="compact-confirm"]')!.click();
+    expect(of('send')).toEqual([{ type: 'send', id: 2_000_000, text: '/compact', target: { scopeGen: 1, sessionId: 's2', launch: 'l' }, command: true }]);
+    expect(slot.querySelector('.context-menu')).toBeNull();
+    expect(input.value).toBe('my draft');
+    // A refusal shows above the box and leaves the draft.
+    reply({ type: 'sent', id: 2_000_000, error: 'The session has ended.' });
+    expect(error()).toBe('The session has ended.');
+    expect(input.value).toBe('my draft');
+    expect(input.readOnly).toBe(false);
+
+    // A refusal that comes after another conversation was selected waits for its own conversation.
+    const other = { ...SCOPE, workItemId: 3, sessionId: 's3', conversations: [...SCOPE.conversations, { workItemId: 3, title: 'Other', primary: false, sessionId: 's3', state: 'idle' as const, conversation: 'full' as const, unread: 0 }] };
+
+    ring().click();
+    slot.querySelector<HTMLButtonElement>('[data-context="compact"]')!.click();
+    slot.querySelector<HTMLButtonElement>('[data-context="compact-confirm"]')!.click();
+    show(state({ scope: other, session: { ...SESSION, id: 's3', context } }));
+    reply({ type: 'sent', id: 2_000_001, error: 'Compact refused.' });
+    expect(error()).toBeNull();
+    show(state({ scope: { ...other, workItemId: 2, sessionId: 's2' }, session: { ...SESSION, context } }));
+    expect(error()).toBe('Compact refused.');
+
+    // Escape and a click elsewhere close the menu.
+    ring().click();
+    slot.querySelector('.context-menu')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(slot.querySelector('.context-menu')).toBeNull();
+    ring().click();
+    document.body.click();
+    expect(slot.querySelector('.context-menu')).toBeNull();
+
+    // An unknown size is the empty ring, and a session the composer cannot talk to gets no Compact.
+    show(state({ session: { ...SESSION, conversation: 'read-only', reason: 'Ended.', context: null } }));
+    expect(ring().classList.contains('unknown')).toBe(true);
+    ring().click();
+    expect(slot.querySelector('[data-context="compact"]')).toBeNull();
+  });
+
   it("lists the session's commands after a leading slash, fills the chosen one in, and sends it as a command only while the text starts with it", () => {
     const { host, input, menu, reply, show, press, type, of, rows, error } = page();
 

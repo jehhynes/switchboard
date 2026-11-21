@@ -9,6 +9,8 @@ import { selectedEntry, statusLine } from '../conversationModel.js';
 import type { ConversationMessage, SendTarget, Tab } from './conversationRender.js';
 import { startComposerExtras } from './composerExtras.js';
 import { morph } from './morph.js';
+import { renderContextMeter } from '@switchboard/conversation/contextMeter';
+import type { ContextMenuState } from '@switchboard/conversation/contextMeter';
 import type { ExtrasReply } from './composerExtras.js';
 
 interface VsCodeApi {
@@ -288,6 +290,66 @@ function startComposer(
     grow();
     refresh();
   }, (text) => showError(text));
+  // The context meter after the message tools (architecture.md § Context meter): its menu closed, open, or asking to confirm Compact, which
+  // sends /compact as a chosen slash command to the session the page shows, leaving the box's draft alone.
+  const contextSlot = document.createElement('span');
+  let contextMenu: ContextMenuState = 'closed';
+  let contextShown: ConversationState['session'] = null;
+  // Each /compact sent from the meter, with the conversation it was sent from.
+  const compactSends = new Map<number, number | null>();
+  let nextCompact = 2_000_000;
+  // A click in the meter can redraw the element it hit, which then is no longer in the slot when the click reaches the document.
+  let slotClick: Event | null = null;
+  const drawContext = (focus: string | null = null): void => {
+    if (!enabled && contextMenu === 'confirm') {
+      contextMenu = 'open';
+    }
+
+    redraw(contextSlot, contextShown === null ? '' : renderContextMeter(contextShown.context, contextMenu, enabled));
+
+    if (focus !== null) {
+      contextSlot.querySelector<HTMLElement>(`[data-context="${focus}"]`)?.focus();
+    }
+  };
+  const setContextMenu = (menu: ContextMenuState, focus: string | null = null): void => {
+    contextMenu = menu;
+    drawContext(focus);
+  };
+
+  contextSlot.className = 'context-meter';
+  host.querySelector<HTMLElement>('.composer-controls')!.append(contextSlot);
+  contextSlot.addEventListener('click', (event) => {
+    slotClick = event;
+    const which = (event.target as HTMLElement).closest<HTMLElement>('[data-context]')?.dataset['context'];
+
+    if (which === 'toggle') {
+      setContextMenu(contextMenu === 'closed' ? 'open' : 'closed');
+    } else if (which === 'compact') {
+      setContextMenu('confirm', 'compact-confirm');
+    } else if (which === 'cancel') {
+      setContextMenu('open', 'compact');
+    } else if (which === 'compact-confirm') {
+      setContextMenu('closed', 'toggle');
+
+      if (enabled && target !== null) {
+        const id = nextCompact++;
+
+        compactSends.set(id, current);
+        vscode.postMessage({ type: 'send', id, text: '/compact', target, command: true });
+      }
+    }
+  });
+  contextSlot.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && contextMenu !== 'closed') {
+      event.stopPropagation();
+      setContextMenu('closed', 'toggle');
+    }
+  });
+  document.addEventListener('click', (event) => {
+    if (contextMenu !== 'closed' && event !== slotClick && !contextSlot.contains(event.target as Node)) {
+      setContextMenu('closed');
+    }
+  });
   // The voice's controls in one cluster with the mic beside Send (architecture.md § Voice): Stop while speaking and Speak replies, or Talk here
   // in their place while the voice is elsewhere; the message tools stay on the footer's left.
   const voiceControls = document.createElement('div');
@@ -369,6 +431,13 @@ function startComposer(
       // Redrawn only when they change, so a state event between a press and its release does not swallow the click.
       redraw(voiceControls, renderVoiceControls(state.voice, enabled));
       redraw(micSlot, enabled ? renderMicButton(state.voice) : '');
+
+      if (contextShown?.id !== state.session?.id) {
+        contextMenu = 'closed';
+      }
+
+      contextShown = state.session;
+      drawContext();
       speaking = state.voice?.here === true && state.voice.speaking !== null;
       const wasHere = voiceHere;
 
@@ -428,6 +497,21 @@ function startComposer(
       showError(why);
     },
     sent: (id, refusal) => {
+      // A refused /compact from the context meter shows why above the box of the conversation it was sent from; the box's draft stays.
+      if (compactSends.has(id)) {
+        const from = compactSends.get(id)!;
+
+        compactSends.delete(id);
+
+        if (refusal !== null && from === current) {
+          showError(refusal);
+        } else if (refusal !== null && from !== null) {
+          errors.set(from, refusal);
+        }
+
+        return;
+      }
+
       if (id !== sending?.id) {
         return;
       }
