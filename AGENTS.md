@@ -44,6 +44,7 @@ Read and update the document responsible for the decision:
 | [architecture.md](docs/architecture.md) | Packages, component responsibilities, dependencies, state, and protocols |
 | [mechanics.md](docs/mechanics.md) | Dated experiments and source inspections, versions, limitations, and current use (M IDs) |
 | [testing.md](docs/testing.md) | Required checks, test layers, fixture rules, and isolation |
+| [parity.md](docs/parity.md) | Each dock list and row behaviour and whether the web page matches it |
 
 State only Switchboard's own behavior and constraints. Skills that sessions run are outside Switchboard and may change independently: name one only as an example, such as a prompt in a sample setting, and never describe how it works.
 
