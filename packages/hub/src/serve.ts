@@ -8,7 +8,7 @@ import type { BrowserServer } from './browser.js';
 import type { SnoozeByUrl, UnsnoozeByUrl } from './browserSnooze.js';
 import { findHub, readHubRecord } from './discover.js';
 import { holdLock, releaseLock } from './lock.js';
-import { HubRestart, installedBuild, RESTART_CHECK_MS, TAKEOVER_WAIT_MS } from './restart.js';
+import { clearHandover, HubRestart, installedBuild, pendingHandover, RESTART_CHECK_MS, TAKEOVER_WAIT_MS, writeHandover } from './restart.js';
 import type { Successor } from './restart.js';
 import { listenHub } from './server.js';
 import type { PageRoutes, PostContext, Reply } from './server.js';
@@ -136,7 +136,48 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
 
   mkdirSync(switchboardHome(home), { recursive: true });
 
+  // A hub restarting onto a new build hands over to its successor; a hub a window or the dock starts meanwhile waits for that one, since it could
+  // take the lock first, and stops waiting once the handover names no running successor.
+  const awaitSuccessor = async (): Promise<HubRecord | null> => {
+    for (const deadline = Date.now() + (options.restart?.takeoverWaitMs ?? TAKEOVER_WAIT_MS); options.takeover === undefined && Date.now() < deadline; ) {
+      const handover = pendingHandover(home);
+
+      if (handover === null) {
+        return null;
+      }
+
+      const found = await findHub(home);
+
+      if (found !== null && found.pid === handover.pid) {
+        return found;
+      }
+
+      await new Promise((done) => setTimeout(done, 100));
+    }
+
+    return null;
+  };
+
+  const waited = await awaitSuccessor();
+
+  if (waited !== null) {
+    return { existing: waited };
+  }
+
   let lock = await holdLock(home);
+
+  // A start that checked before the old hub named its successor can still take the lock that hub releases; it gives the lock back to the successor.
+  if (lock !== null && options.takeover === undefined && pendingHandover(home) !== null) {
+    await releaseLock(lock);
+
+    const successor = await awaitSuccessor();
+
+    if (successor !== null) {
+      return { existing: successor };
+    }
+
+    lock = await holdLock(home);
+  }
 
   // A successor waits for the hub it takes over from to let go of the lock, unless another hub took it meanwhile.
   for (const deadline = Date.now() + (options.restart?.takeoverWaitMs ?? TAKEOVER_WAIT_MS); lock === null && options.takeover !== undefined; ) {
@@ -237,6 +278,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
 
   // Any record already here belongs to a hub that died, since this process holds the lock.
   writeRecord(path, record);
+  clearHandover(home, process.pid);
 
   /** Remove the record only while it is still this hub's. */
   const unclaim = (): void => {
@@ -272,7 +314,8 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
           installed: installedBuild(restartOptions.bundle),
           quiet: () => (stopping !== undefined ? 'the hub is stopping' : server.inFlight() > 0 ? 'a request is being answered' : (app?.quiet?.() ?? null)),
           successor: () => restartOptions.successor(),
-          handOver: async () => {
+          handOver: async (started) => {
+            writeHandover(home, started.pid);
             server.hold('The hub is restarting onto a new build; try again in a few seconds.');
             await stop('restarting onto the installed build');
 

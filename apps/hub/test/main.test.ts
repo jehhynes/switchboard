@@ -570,7 +570,7 @@ describe('hub entry point', () => {
     // A window: its keeper finds the hub of the installed build and opens /events again when the stream ends, starting no hub itself.
     const opened: string[] = [];
     const keeper = keepHub({
-      ensure: makeEnsure({ find: () => findHub(home), build: () => buildOf(bundle), configDir: () => before.configDir, stop: stopHub, start: () => {}, now: Date.now, sleep: (ms) => new Promise((done) => setTimeout(done, ms)), logPath: hubLogPath(home) }),
+      ensure: makeEnsure({ find: () => findHub(home), build: () => buildOf(bundle), configDir: () => before.configDir, stop: stopHub, start: () => void launch(bundle, {}, ['--idle-ms=60000']), now: Date.now, sleep: (ms) => new Promise((done) => setTimeout(done, ms)), logPath: hubLogPath(home) }),
       open: (found, onEnd) => openEvents(found, onEnd, undefined, (event) => event === 'hello' && opened.push(found.token)),
       now: Date.now,
       sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
@@ -604,6 +604,8 @@ describe('hub entry point', () => {
       expect(old.stdout).toContain(`restarting the hub from build ${before.build} onto build ${after.build}, which is installed`);
       expect(old.stdout).toContain(`hub restart: pid ${after.pid} took over with build ${after.build}`);
       expect(readFileSync(hubLogPath(home), 'utf8')).toContain(`listening on 127.0.0.1:${after.port} as pid ${after.pid}, build ${after.build}`);
+      // The successor took the lock: a hub the window started meanwhile waited for it instead.
+      expect(readFileSync(hubLogPath(home), 'utf8')).not.toContain('A hub is already running');
 
       // The window's keeper connected to the new hub; the dock's stream ended and a new one opens on the new record; a page's ping names the new build.
       await until(() => (opened.includes(after.token) ? true : null), 10_000);

@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path';
 import * as vscode from 'vscode';
 import { hubBundlePath, hubLogPath, resolveConfigDir, switchboardHome } from '@switchboard/core';
 import type { HubRecord } from '@switchboard/core';
-import { buildOf, dockView, findHub, installCarried, keepHub, makeEnsure, openEvents, postToHub, stopHub, windowItems, windowsDir } from '@switchboard/hub';
+import { buildOf, dockView, findHub, installCarried, keepHub, makeEnsure, openEvents, postToHub, stopHub, windowItems, windowsDir, pendingHandover } from '@switchboard/hub';
 import { continueInBackground } from './background.js';
 import { closeDueAt, closeIfDone } from './closeWindow.js';
 import { showDock } from './dockApp.js';
@@ -153,6 +153,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     now: Date.now,
     sleep,
     logPath: hubLogPath(home),
+    handover: () => pendingHandover(home) !== null,
   });
 
   // Every window follows hub.log, so the Output view's channel is current whichever window shows it.

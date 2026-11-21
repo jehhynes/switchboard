@@ -13,10 +13,14 @@ export interface EnsureDeps {
   now(): number;
   sleep(ms: number): Promise<void>;
   logPath: string;
+  /** Whether a restarting hub is handing over to its successor (`pendingHandover`), which is then waited for rather than a hub started. */
+  handover?(): boolean;
 }
 
 export type Ensured = { record: HubRecord } | { failed: string };
 
+/** As long as a successor may take to take over the lock (`TAKEOVER_WAIT_MS`). */
+export const HANDOVER_WAIT_MS = 30_000;
 /** Ground Control measured hub startup at 85–96 ms (GC M25); five seconds allows for slow machines. */
 export const START_TIMEOUT_MS = 5000;
 export const STOP_TIMEOUT_MS = 5000;
@@ -62,6 +66,19 @@ export function makeEnsure(deps: EnsureDeps): () => Promise<Ensured> {
 
       if (gone === null) {
         return { failed: `The running hub (pid ${found.pid}) agreed to stop but is still running.` };
+      }
+    }
+
+    // A restarting hub's successor takes the lock and writes its record within seconds; a hub started now could take the lock first.
+    if (found === null && deps.handover?.() === true) {
+      const successor = await poll(HANDOVER_WAIT_MS, async () => {
+        const candidate = await deps.find();
+
+        return candidate !== null && wanted(candidate) ? candidate : deps.handover?.() === true ? null : false;
+      });
+
+      if (successor !== null && successor !== false) {
+        return { record: successor };
       }
     }
 

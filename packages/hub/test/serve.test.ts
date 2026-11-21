@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { request } from 'node:http';
 import { createServer } from 'node:net';
@@ -11,6 +11,7 @@ import { buildOf } from '../src/bundle.js';
 import { call } from '../src/http.js';
 import { holdLock, releaseLock } from '../src/lock.js';
 import { PageAccess } from '../src/page.js';
+import { handoverPath, writeHandover } from '../src/restart.js';
 import { serveHub } from '../src/serve.js';
 import type { HubApp, ServeResult, ServeOptions, Served } from '../src/serve.js';
 import { tempHome, until } from './helpers.js';
@@ -422,7 +423,7 @@ describe('serveHub restart onto a new build', () => {
           checkMs: 20,
           successor: async () => {
             await hub!.stop('a client asked it to stop');
-            return { cancel: () => cancelled.push('cancel') };
+            return { pid: process.pid, cancel: () => cancelled.push('cancel') };
           },
         },
       }),
@@ -431,6 +432,34 @@ describe('serveHub restart onto a new build', () => {
     await until(() => (cancelled.length > 0 ? true : null));
 
     expect(lines.filter((line) => line.startsWith('stopping') || line.startsWith('hub restart'))).toEqual(['stopping: a client asked it to stop', `hub restart onto build ${buildOf(bundle)} waits: the hub is stopping`]);
+  });
+
+  it('makes a hub started during a handover wait for the successor the handover names, rather than take the lock first', async () => {
+    mkdirSync(switchboardHome(home), { recursive: true });
+    writeHandover(home, process.pid);
+
+    // In one process the successor has this pid too.
+    const window = serve({ browserPort: null });
+
+    await new Promise((done) => setTimeout(done, 200));
+    expect(recordOnDisk()).toBeNull();
+
+    const successor = served(await serve({ takeover: 1, browserPort: null }));
+
+    expect(await window).toEqual({ existing: successor.record });
+    expect(existsSync(handoverPath(home))).toBe(false);
+  });
+
+  it('starts at once over a handover whose successor no longer runs', async () => {
+    mkdirSync(switchboardHome(home), { recursive: true });
+
+    // A successor that died leaves a handover naming a pid that no longer runs, which a start ignores.
+    writeFileSync(handoverPath(home), JSON.stringify({ pid: 2 ** 22 + 12345, at: Date.now() }));
+
+    const started = Date.now();
+
+    served(await serve({ browserPort: null }));
+    expect(Date.now() - started).toBeLessThan(2000);
   });
 
   it('waits while a request is answered or the app is busy, then hands its lock, port and record to the successor and exits', async () => {
@@ -454,7 +483,7 @@ describe('serveHub restart onto a new build', () => {
           checkMs: 20,
           successor: async () => {
             successor = serve({ build: 'b2', takeover: process.pid, browserPort: null, app: async () => app(() => null) });
-            return { cancel: () => {} };
+            return { pid: process.pid, cancel: () => {} };
           },
         },
       }),

@@ -1,5 +1,7 @@
 import { spawn } from 'node:child_process';
-import { closeSync, openSync, statSync } from 'node:fs';
+import { closeSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { switchboardHome } from '@switchboard/core';
 import { buildOf } from './bundle.js';
 
 /** How often the hub looks at the installed bundle and, while a restart waits, whether it is quiet. */
@@ -13,6 +15,8 @@ export const READY_MESSAGE = 'switchboard-hub-ready';
 
 /** A successor that reported ready and waits for the hub lock. */
 export interface Successor {
+  /** Its process ID, which the handover file names. */
+  pid: number;
   /** Ends it, when the old hub cannot hand over after all. */
   cancel(): void;
 }
@@ -27,7 +31,7 @@ export interface RestartDeps {
   /** Starts the hub that takes over; resolves once it is ready, or with why it did not start. */
   successor(): Promise<Successor | { error: string }>;
   /** Refuses new requests, stops this hub so the successor takes its lock, port and record, and exits. */
-  handOver(): Promise<void>;
+  handOver(successor: Successor): Promise<void>;
   log(line: string): void;
 }
 
@@ -99,6 +103,8 @@ export class HubRestart {
 
     this.#running = true;
 
+    let handedTo: Successor;
+
     try {
       this.deps.log(`restarting the hub from build ${this.deps.build} onto build ${installed}${this.#asked ? ', asked by hub.js restart' : ', which is installed'}`);
 
@@ -123,11 +129,12 @@ export class HubRestart {
       }
 
       this.#handedOver = true;
+      handedTo = successor;
     } finally {
       this.#running = false;
     }
 
-    await this.deps.handOver();
+    await this.deps.handOver(handedTo);
   }
 }
 
@@ -216,7 +223,7 @@ export function startSuccessor(options: SuccessorOptions): Promise<Successor | {
 
       child.disconnect();
       child.unref();
-      settle({ cancel: () => child.kill() });
+      settle({ pid: child.pid!, cancel: () => child.kill() });
     });
   });
 }
@@ -225,5 +232,48 @@ export function startSuccessor(options: SuccessorOptions): Promise<Successor | {
 export function reportReady(): void {
   if (process.send !== undefined) {
     process.send(READY_MESSAGE, () => process.disconnect());
+  }
+}
+
+/** `<home>/.switchboard/hub-handover.json`: the successor a restarting hub hands over to, so a hub started meanwhile waits for it. */
+export function handoverPath(home: string): string {
+  return join(switchboardHome(home), 'hub-handover.json');
+}
+
+/** Names the successor before the old hub lets go of the lock. */
+export function writeHandover(home: string, pid: number, now: number = Date.now()): void {
+  const path = handoverPath(home);
+
+  writeFileSync(`${path}.${process.pid}.tmp`, JSON.stringify({ pid, at: now }));
+  renameSync(`${path}.${process.pid}.tmp`, path);
+}
+
+/** Removes the handover once the successor it names holds the lock. */
+export function clearHandover(home: string, pid: number): void {
+  if (pendingHandover(home, () => true)?.pid === pid) {
+    rmSync(handoverPath(home), { force: true });
+  }
+}
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/**
+ * The successor a restart hands over to, while its handover is under `TAKEOVER_WAIT_MS` old and its process runs; null otherwise. A hub, VS Code
+ * window or dock that finds no hub then waits for this one rather than starting its own, which could take the lock first.
+ */
+export function pendingHandover(home: string, running: (pid: number) => boolean = alive, now: number = Date.now()): { pid: number } | null {
+  try {
+    const raw = JSON.parse(readFileSync(handoverPath(home), 'utf8')) as { pid?: unknown; at?: unknown };
+
+    return typeof raw.pid === 'number' && typeof raw.at === 'number' && now - raw.at < TAKEOVER_WAIT_MS && now >= raw.at && running(raw.pid) ? { pid: raw.pid } : null;
+  } catch {
+    return null;
   }
 }

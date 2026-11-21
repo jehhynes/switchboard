@@ -2,7 +2,7 @@ import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildOf } from '../src/bundle.js';
-import { HubRestart, installedBuild, READY_MESSAGE, startSuccessor } from '../src/restart.js';
+import { clearHandover, handoverPath, HubRestart, installedBuild, pendingHandover, READY_MESSAGE, startSuccessor, TAKEOVER_WAIT_MS, writeHandover } from '../src/restart.js';
 import type { RestartDeps, Successor } from '../src/restart.js';
 import { tempHome, until } from './helpers.js';
 
@@ -31,7 +31,7 @@ function fake(): Fake {
   let quiet: string | null = null;
   let successor = async (): Promise<Successor | { error: string }> => {
     calls.push('successor');
-    return { cancel: () => calls.push('cancel') };
+    return { pid: 42, cancel: () => calls.push('cancel') };
   };
 
   return {
@@ -47,7 +47,7 @@ function fake(): Fake {
       installed: () => installed,
       quiet: () => quiet,
       successor: () => successor(),
-      handOver: async () => void calls.push('handOver'),
+      handOver: async (successor) => void calls.push(successor.pid === 42 ? 'handOver' : `handOver to ${successor.pid}`),
       log: (line) => lines.push(line),
     },
   };
@@ -119,7 +119,7 @@ describe('HubRestart', () => {
       successor: async () => {
         hub.calls.push('successor');
         hub.set({ quiet: 'a message is being sent' });
-        return { cancel: () => hub.calls.push('cancel') };
+        return { pid: 42, cancel: () => hub.calls.push('cancel') };
       },
     });
     await restart.check();
@@ -127,7 +127,7 @@ describe('HubRestart', () => {
     expect(hub.calls).toEqual(['successor', 'cancel']);
     expect(hub.lines.at(-1)).toBe('hub restart onto build b2 waits: a message is being sent');
 
-    hub.set({ quiet: null, successor: async () => (hub.calls.push('successor'), { cancel: () => hub.calls.push('cancel') }) });
+    hub.set({ quiet: null, successor: async () => (hub.calls.push('successor'), { pid: 42, cancel: () => hub.calls.push('cancel') }) });
     await restart.check();
 
     expect(hub.calls).toEqual(['successor', 'cancel', 'successor', 'handOver']);
@@ -163,7 +163,7 @@ describe('HubRestart', () => {
     const first = restart.check();
 
     await restart.check();
-    ready({ cancel: () => hub.calls.push('cancel') });
+    ready({ pid: 42, cancel: () => hub.calls.push('cancel') });
     await first;
 
     expect(hub.calls).toEqual(['successor', 'handOver']);
@@ -217,5 +217,27 @@ describe('startSuccessor', () => {
     const silent = script('setTimeout(() => {}, 20000);');
 
     expect(await startSuccessor({ execPath: process.execPath, bundle: silent, args: [], env: process.env, logPath: log, readyMs: 300 })).toEqual({ error: 'the new hub did not report ready within 0.3 seconds' });
+  });
+});
+
+describe('handover', () => {
+  it('names a successor while its handover is fresh and its process runs, and is removed only by that successor', () => {
+    const at = 1_000_000;
+
+    expect(pendingHandover(home, () => true, at)).toBeNull();
+
+    mkdirSync(join(home, '.switchboard'));
+    writeHandover(home, 4242, at);
+
+    expect(pendingHandover(home, () => true, at + 1000)).toEqual({ pid: 4242 });
+    expect(pendingHandover(home, () => false, at + 1000)).toBeNull();
+    expect(pendingHandover(home, () => true, at + TAKEOVER_WAIT_MS)).toBeNull();
+
+    // The check uses the real clock; a handover written now is fresh.
+    writeHandover(home, 4242);
+    clearHandover(home, 99);
+    expect(readFileSync(handoverPath(home), 'utf8')).toContain('4242');
+    clearHandover(home, 4242);
+    expect(() => readFileSync(handoverPath(home), 'utf8')).toThrow();
   });
 });

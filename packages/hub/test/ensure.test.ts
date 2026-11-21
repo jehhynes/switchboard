@@ -7,7 +7,7 @@ const current: HubRecord = { protocol: 1, version: '0.1.0', build: 'b1', configD
 const old: HubRecord = { ...current, build: 'b0', port: 5001, token: 't0', pid: 6 };
 
 /** `find` returns the answers in order and then repeats the last one. */
-function fakes(answers: (HubRecord | null)[], overrides: Partial<Pick<EnsureDeps, 'build' | 'configDir' | 'stop' | 'start'>> = {}) {
+function fakes(answers: (HubRecord | null)[], overrides: Partial<Pick<EnsureDeps, 'build' | 'configDir' | 'stop' | 'start' | 'handover'>> = {}) {
   let time = 0;
 
   return {
@@ -21,6 +21,7 @@ function fakes(answers: (HubRecord | null)[], overrides: Partial<Pick<EnsureDeps
       time += ms;
     },
     logPath: 'C:/home/.switchboard/hub.log',
+    ...(overrides.handover === undefined ? {} : { handover: overrides.handover }),
   };
 }
 
@@ -47,6 +48,19 @@ describe('makeEnsure', () => {
     expect(deps.start).toHaveBeenCalledTimes(1);
     // One check before starting, then one per 100 ms poll for 5 seconds.
     expect(deps.find).toHaveBeenCalledTimes(51);
+  });
+
+  it("waits for a restarting hub's successor instead of starting a hub, and starts one once the handover ends without it", async () => {
+    const waited = fakes([null, null, null, current], { handover: () => true });
+
+    expect(await makeEnsure(waited)()).toEqual({ record: current });
+    expect(waited.start).not.toHaveBeenCalled();
+
+    let handovers = 3;
+    const ended = fakes([null, null, null, null, null, null, current], { handover: () => handovers-- > 0 });
+
+    expect(await makeEnsure(ended)()).toEqual({ record: current });
+    expect(ended.start).toHaveBeenCalledTimes(1);
   });
 
   it('fails when the hub cannot be started', async () => {
