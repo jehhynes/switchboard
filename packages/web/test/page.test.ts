@@ -1565,4 +1565,13 @@ describe("the list's CSS", () => {
     expect(selected[0]).not.toMatch(/box-shadow|outline|border/);
     expect(declarationsOf((selector) => selector === 'button:focus-visible')).toEqual([expect.stringContaining('outline: 1px solid var(--vscode-focusBorder)')]);
   });
+
+  it('caps the conversation on a wide screen and gives the Status and Artifacts column the rest of the width, with no cap of its own', () => {
+    expect(declarationsOf((selector) => selector === '#root.wide > .main')).toEqual(['flex: 0 1 940px;']);
+    const detail = declarationsOf((selector) => selector.startsWith('#root.wide > .detail') || selector === '.detail' || selector.startsWith('.detail .'));
+
+    expect(detail.join(' ')).toContain('flex: 1 1 320px');
+    expect(detail.join(' ')).not.toMatch(/(?<![-\w])width:|clamp\(|max-width: (?!none)/);
+    expect(declarationsOf((selector) => ['.detail .status-tab', '.detail .artifact-list', '.detail .artifact-doc'].includes(selector))).toEqual(['max-width: none;']);
+  });
 });
