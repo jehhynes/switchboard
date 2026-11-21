@@ -3,8 +3,8 @@ import type { ConversationMessage, ConversationReply, ConversationStatus, Interr
 import { artifactsDir, hostKey, PERMISSION_PROMPT, personaById, sessionTone, START_PROMPT, toneVersion, waitsOnLimit } from '@switchboard/core';
 import type { PersonaSettings } from '@switchboard/core';
 import { ArtifactFolder, MAX_MESSAGE_CHARS, NotWritten, interruptNote, messageTags, pasteText } from '@switchboard/conversation';
-import { stepsText } from '@switchboard/conversation';
-import type { Artifact, ConversationChange, HeardTag, InputOutcome, InputSteps, SlashCommand } from '@switchboard/conversation';
+import { promptKeyData, readPrompt, screenRows, stepsText, TYPING_PAUSE_MS } from '@switchboard/conversation';
+import type { Artifact, ConversationChange, HeardTag, InputOutcome, InputSteps, PromptKey, ScreenPrompt, SlashCommand } from '@switchboard/conversation';
 import { SESSION_ENDED, SESSION_RELAUNCHED } from './runtime.js';
 import { canonicalFolder } from './windows.js';
 import { artifactFile, findFiles } from './page.js';
@@ -627,6 +627,139 @@ export class ConversationService {
 
     this.sessionsChanged();
     return { status: 200, body: { resumed: true } };
+  }
+
+  /**
+   * The prompt the page's session waits on in its terminal (architecture.md § Web page): the session, if it is the page's current Code Mode
+   * session waiting on a question or a permission prompt, and the prompt its screen shows, or why not.
+   */
+  async #promptOf(window: string, scopeGen: number, sessionId: string): Promise<{ refused: { status: number; body: { error: string } } } | { session: Session; prompt: ScreenPrompt | null; keyAt: number | null }> {
+    const refused = refusal(this.deps.windows.isPage(window) ? this.deps.windows.scope(window) : null, scopeGen, sessionId);
+
+    if (refused !== null) {
+      return { refused };
+    }
+
+    const session = this.deps.store.session(sessionId);
+
+    if (session === null || session.codeMode !== true) {
+      return { refused: { status: 409, body: { error: 'Only a Code Mode session shows its prompts on the page.' } } };
+    }
+
+    const view = sessionView(session, true, this.deps.hooks());
+
+    if (view.state !== 'waiting' || (view.waitingFor !== 'question' && view.waitingFor !== 'permission')) {
+      return { refused: { status: 409, body: { error: 'The session is not waiting on a prompt.' } } };
+    }
+
+    const snapshot = await this.deps.screen(session.id, 0).catch(() => null);
+
+    if (snapshot === null) {
+      return { refused: { status: 409, body: { error: 'The terminal holder did not show the screen. Answer in the terminal.' } } };
+    }
+
+    return { session, prompt: readPrompt(await screenRows(snapshot)), keyAt: snapshot.keyAt ?? null };
+  }
+
+  /**
+   * `prompt {window, scopeGen, opId, sessionId}`: `{prompt}`, the permission prompt or question form the page's current Code Mode session waits on
+   * as its screen shows it, or null when the screen shows none; refused as `history` is, and with 409 for a session not waiting on one.
+   */
+  async prompt(body: Record<string, unknown>): Promise<{ status: number; body: unknown }> {
+    const { window, scopeGen, sessionId } = body;
+
+    if (typeof window !== 'string' || typeof scopeGen !== 'number' || typeof sessionId !== 'string') {
+      return { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } };
+    }
+
+    const found = await this.#promptOf(window, scopeGen, sessionId);
+
+    return 'refused' in found ? found.refused : { status: 200, body: { prompt: found.prompt } };
+  }
+
+  /** Each `prompt-key`'s answer, kept from when it starts, by page key and `opId`, so a retried key is never pressed twice. */
+  readonly #promptKeys = new Map<string, Promise<{ status: number; body: unknown }>>();
+  /** Each session's prompt keys, one at a time, so a second key is checked against the screen the first one left. */
+  readonly #promptQueues = new Map<string, Promise<unknown>>();
+
+  /**
+   * `prompt-key {window, scopeGen, opId, sessionId, launch, prompt, key}` presses one key on the prompt the page showed: an option's digit,
+   * `escape` or `next` (→ on a question form). It takes the session's input reservation, reads the screen again, and refuses with 409 when
+   * the screen no longer shows that prompt (`prompt` is its id), the key is not one of its own, or a key was typed in a terminal in the last
+   * 1.5 s; a repeated `opId` answers the first result.
+   */
+  async promptKey(body: Record<string, unknown>): Promise<{ status: number; body: unknown }> {
+    const { window, scopeGen, opId, sessionId, launch, prompt, key } = body;
+
+    if (typeof window !== 'string' || typeof scopeGen !== 'number' || typeof opId !== 'string' || opId === '' || typeof sessionId !== 'string' || !(launch === null || typeof launch === 'string') || typeof prompt !== 'string' || typeof key !== 'string' || !/^([1-9]|escape|next)$/.test(key)) {
+      return { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, prompt, key} with key a digit, escape or next.' } };
+    }
+
+    const done = this.#promptKeys.get(`${window} ${opId}`);
+
+    if (done !== undefined) {
+      return done;
+    }
+
+    const queued = this.#promptQueues.get(sessionId) ?? Promise.resolve();
+    const answer = queued.then(() => this.#pressPromptKey(window, scopeGen, sessionId, launch, prompt, key as PromptKey));
+    const settled = answer.then(() => undefined, () => undefined);
+
+    this.#promptQueues.set(sessionId, settled);
+    void settled.then(() => {
+      if (this.#promptQueues.get(sessionId) === settled) {
+        this.#promptQueues.delete(sessionId);
+      }
+    });
+    this.#promptKeys.set(`${window} ${opId}`, answer);
+
+    for (const old of [...this.#promptKeys.keys()].slice(0, -100)) {
+      this.#promptKeys.delete(old);
+    }
+
+    return answer;
+  }
+
+  async #pressPromptKey(window: string, scopeGen: number, sessionId: string, launch: string | null, id: string, key: PromptKey): Promise<{ status: number; body: unknown }> {
+    if ((this.deps.store.session(sessionId)?.launchId ?? null) !== launch) {
+      return { status: 409, body: { error: SESSION_RELAUNCHED } };
+    }
+
+    const reservation = await this.deps.input.reserve(sessionId, launch);
+
+    if ('refused' in reservation) {
+      return { status: 409, body: { error: reservation.refused } };
+    }
+
+    try {
+      const found = await this.#promptOf(window, scopeGen, sessionId);
+
+      if ('refused' in found) {
+        return found.refused;
+      }
+
+      if (found.prompt === null || found.prompt.id !== id) {
+        return { status: 409, body: { error: 'The terminal shows something else now. Answer there, or try again here.' } };
+      }
+
+      const allowed = key === 'escape' || (key === 'next' ? found.prompt.next : found.prompt.options.some((option) => option.key === key));
+
+      if (!allowed) {
+        return { status: 409, body: { error: 'The prompt has no such choice.' } };
+      }
+
+      if (found.keyAt !== null && this.deps.now() - found.keyAt < TYPING_PAUSE_MS) {
+        return { status: 409, body: { error: 'A key was just typed in the terminal. Try again in a moment.' } };
+      }
+
+      await this.deps.input.write(sessionId, promptKeyData(key));
+      this.deps.log(`session ${sessionId}: the page answered its prompt with ${key}`);
+      return { status: 200, body: { done: true } };
+    } catch (error) {
+      return { status: 409, body: { error: `The key was not sent: ${(error as Error).message}` } };
+    } finally {
+      reservation.release();
+    }
   }
 
   /** `row-paste {window, scopeGen, opId, workItemId, label}`: the drafted text Copy offers on the page's selected work item, as `{text}`; it only reads. */

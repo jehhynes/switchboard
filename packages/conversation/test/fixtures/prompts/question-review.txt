@@ -1,0 +1,26 @@
+ ▐▛███▛█   Claude Code v2.1.330
+▝▜██████▀  Haiku 5.5 · Claude Team
+ ▝▝   ▝▝   ~\scratch\proj
+
+⚠ Code Mode (experimental) is off for this session, as you chose. To stop being asked, remove
+  CLAUDE_CODE_EXPERIMENTAL_CODE_MODE from your shell or settings.json.
+
+  Fable 5.2 is here for your longest and toughest coding tasks. It draws down usage faster than Opus 5.5.
+  Switch with /model.
+
+❯ Call the AskUserQuestion tool once with two questions: "Pick a color" (header Color) with options Red and
+  Blue, and "Pick a size" (header Size) with options Small and Large. Then reply with the answers in one
+  line.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+←  ☒ Color  ☒ Size  ✔ Submit  →
+
+Review your answers
+
+ ● Pick a color
+   → Blue
+ ● Pick a size
+   → Small
+
+❯ 1. Submit answers
+  2. Cancel

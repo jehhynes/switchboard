@@ -140,6 +140,14 @@ export interface PageRow {
   pastes?: string[];
 }
 
+/** A prompt the session waits on in its terminal, as the hub read it from the screen (`ScreenPrompt` in the conversation package). */
+export interface ScreenPrompt {
+  id: string;
+  lines: string[];
+  options: Array<{ key: string; label: string; selected: boolean }>;
+  next: boolean;
+}
+
 /** One of the dock's controls on the page (`PageAction` in the hub's `page.ts`), run with `row-action`. */
 export interface PageAction {
   label: string;

@@ -4,7 +4,7 @@ import type { PageState } from './model.js';
 import { escape, renderMarkdown } from './markdown.js';
 import { answerText, artifactUrl, complete, firstSnoozeDay, renderEndedNote, markdownBody, newView, parseQuestions, renderArtifacts, renderArtifactView, renderHeader, renderList, renderSheet, renderStatus, renderTabs, renderTimeline, renderVoice, snoozeDateUntil, TABS } from './render.js';
 import type { CardDraft, Tab, View } from './render.js';
-import type { ItemView } from './types.js';
+import type { ItemView, ScreenPrompt } from './types.js';
 import { morph } from './morph.js';
 
 /** The stream's event types the page reads. */
@@ -15,6 +15,8 @@ const SEEN_CHECK_MS = 250;
 const COMPOSER_MAX_PX = 200;
 /** How long the composer says a message sent from the Status or Artifacts tab went. */
 export const SENT_NOTE_MS = 4_000;
+/** How often the page reads the prompt a session waits on in its terminal while it waits. */
+export const PROMPT_POLL_MS = 1_000;
 /** Where the page keeps each work item's draft, over a reload. */
 const DRAFTS = 'switchboard.drafts';
 
@@ -925,6 +927,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       case 'resume':
         void resume();
         break;
+      case 'prompt-key':
+        void pressPromptKey(button!.dataset['promptKey'] ?? '');
+        break;
       case 'persona-pick':
         view.personas = null;
         draw();
@@ -1110,6 +1115,59 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     if (reply.status !== 200) {
       showError(String(reply.body['error'] ?? 'Codex did not confirm the answer. Check its terminal.'));
     }
+  };
+
+  // ---- Prompts in the terminal (architecture.md § Web page) ----
+  /** Whether the session shown waits on a permission prompt or a question in its terminal, which the page reads from its screen. */
+  const promptWanted = (): boolean => state.session !== null && state.session.state === 'waiting' && (state.session.waitingFor === 'question' || state.session.waitingFor === 'permission') && state.session.provider !== 'codex' && document.visibilityState !== 'hidden';
+  let promptAsking = false;
+  const readPrompt = async (): Promise<void> => {
+    if (!promptWanted() || promptAsking || state.session === null) {
+      if (!promptWanted() && view.prompt !== null && !view.prompt.sending) {
+        view.prompt = null;
+        draw();
+      }
+
+      return;
+    }
+
+    const sessionId = state.session.id;
+
+    promptAsking = true;
+
+    const answer = await command('prompt', { sessionId });
+
+    promptAsking = false;
+
+    if (state.session?.id !== sessionId) {
+      return;
+    }
+
+    const prompt = answer.status === 200 ? ((answer.body['prompt'] as ScreenPrompt | null | undefined) ?? null) : null;
+
+    if (JSON.stringify(prompt) !== JSON.stringify(view.prompt?.prompt ?? null) || view.prompt?.sessionId !== sessionId) {
+      view.prompt = { sessionId, prompt, sending: view.prompt?.sending === true && view.prompt.sessionId === sessionId };
+      draw();
+    }
+  };
+  const promptTimer = setInterval(() => void readPrompt(), PROMPT_POLL_MS);
+  /** Presses one key of the prompt shown; the hub checks again that the screen shows that prompt. */
+  const pressPromptKey = async (key: string): Promise<void> => {
+    const shown = view.prompt;
+
+    if (shown?.prompt == null || shown.sending || state.session === null) {
+      return;
+    }
+
+    shown.sending = true;
+    draw();
+
+    const answer = await command('prompt-key', { sessionId: state.session.id, launch: state.session.launch, prompt: shown.prompt.id, key });
+
+    shown.sending = false;
+    showError(answer.status === 200 ? null : String(answer.body['error'] ?? `The key was not sent (status ${answer.status}).`));
+    draw();
+    void readPrompt();
   };
 
   // ---- Resume (architecture.md § Web page) ----
@@ -1348,6 +1406,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       }
 
       draw();
+
+      if (type === 'session' || type === 'hello') {
+        void readPrompt();
+      }
     });
   }
 
@@ -1366,6 +1428,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     state: () => state,
     close: () => {
       clearInterval(seenTimer);
+      clearInterval(promptTimer);
       source.close();
     },
   };

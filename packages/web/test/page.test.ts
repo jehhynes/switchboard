@@ -857,6 +857,31 @@ describe('the page in use', () => {
     page.close();
   });
 
+  it("shows a Claude session's permission prompt from its screen while it waits, and presses the option clicked for that prompt", async () => {
+    const { page, source } = start();
+    const prompt = { id: 'p1', lines: [' Bash command', ' echo hi', ' Do you want to proceed?', ' ❯ 1. Yes', '   2. No', ' Esc to cancel'], options: [{ key: '1', label: 'Yes', selected: true }, { key: '2', label: 'No', selected: false }], next: false };
+
+    answers['/prompt-key'] = { status: 200, body: { done: true } };
+    answers['/prompt'] = { status: 200, body: { prompt } };
+    hello(source, { sessions: [session({ state: 'waiting', waitingFor: 'permission' })] });
+    await flush();
+    await flush();
+    expect(posts.find((post) => post.url.endsWith('/prompt'))?.body).toMatchObject({ sessionId: 's', scopeGen: 3 });
+    expect(root.querySelector('.prompt-screen')!.textContent).toContain('Do you want to proceed?');
+    expect([...root.querySelectorAll('.prompt-card [data-action="prompt-key"]')].map((button) => button.textContent)).toEqual(['1 Yes', '2 No', 'Cancel (Esc)']);
+    expect(root.querySelector('.working-detail')!.textContent).toBe('Claude asks in its terminal; answer it below.');
+
+    click('.prompt-card [data-prompt-key="2"]');
+    await flush();
+    expect(posts.find((post) => post.url.endsWith('/prompt-key'))?.body).toMatchObject({ sessionId: 's', launch: 'L', prompt: 'p1', key: '2' });
+
+    // Once the session works again the card goes.
+    source.emit('session', { session: session({ state: 'running' }) });
+    await flush();
+    expect(root.querySelector('.prompt-card')).toBeNull();
+    page.close();
+  });
+
   it('answers a card with Submit as an ordinary message, and shows a refusal on the card', async () => {
     const { page, source } = start();
 

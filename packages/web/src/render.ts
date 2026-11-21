@@ -4,7 +4,7 @@ import type { PageState } from './model.js';
 import { copyButton, escape, renderInline, renderMarkdown } from './markdown.js';
 import { answers, answersIn, answerText, cardOutcome, complete, parseQuestions, questionSegments } from '@switchboard/conversation/questions';
 import type { Question, QuestionChoice } from '@switchboard/conversation/questions';
-import type { ArtifactView, MessageView, NativeRequest, PageAction, PageGroup, PageRow, ReplyView, StatusView, VoiceView } from './types.js';
+import type { ArtifactView, MessageView, NativeRequest, PageAction, PageGroup, PageRow, ReplyView, ScreenPrompt, StatusView, VoiceView } from './types.js';
 import type { SnoozeChoice } from '@switchboard/core/snooze';
 import { MARK_ICONS, SPINNING_MARKS } from '@switchboard/core/group';
 
@@ -46,6 +46,8 @@ export interface View {
   sheet: Sheet | null;
   /** A row action is running, so its controls wait. */
   acting: boolean;
+  /** The prompt the session waits on in its terminal, as last read, for the session it was read for; a key being sent waits. */
+  prompt: { sessionId: string; prompt: ScreenPrompt | null; sending: boolean } | null;
 }
 
 /** A sheet: Delete's or Stop's question, Snooze…'s choices, or a drafted text the clipboard refused. */
@@ -54,7 +56,7 @@ export type Sheet =
   | { kind: 'snooze'; workItemId: number; title: string; choices: SnoozeChoice[]; picked: string; date: string; comment: string }
   | { kind: 'text'; title: string; text: string };
 
-export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), list: false, actions: false, sheet: null, acting: false });
+export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), list: false, actions: false, sheet: null, acting: false, prompt: null });
 
 /** Each row action's codicon, as the dock draws its controls. */
 const ACTION_ICONS: Record<string, string> = { start: 'play', approve: 'check', retry: 'refresh', stop: 'debug-stop', 'mark-done': 'pass', snooze: 'clockface', restore: 'debug-restart', delete: 'trash' };
@@ -457,7 +459,8 @@ export function renderTimeline(state: PageState, view: View, now: number = Date.
   const entries = timeline(state.items, state.artifacts);
   const canAnswer = state.connected && state.session.conversation === 'full';
   // After the newest item, so replies written mid-turn show above it.
-  const spinner = turnRow(state.session, awaitingReply(state.items, state.session));
+  const shownPrompt = view.prompt !== null && view.prompt.sessionId === state.session.id ? view.prompt : null;
+  const spinner = turnRow(state.session, awaitingReply(state.items, state.session), shownPrompt?.prompt != null);
   let lastMinute: string | null = null;
   let lastDay: string | null = null;
   const rows = entries.map((entry) => {
@@ -493,7 +496,9 @@ export function renderTimeline(state: PageState, view: View, now: number = Date.
   const asking =
     requests.length > 0
       ? requests.map((request) => renderRequest(request, view.requestValues)).join('')
-      : '';
+      : shownPrompt?.prompt != null && state.session.state === 'waiting'
+        ? renderPrompt(shownPrompt.prompt, state.session.waitingFor, shownPrompt.sending)
+        : '';
 
   return `${notice}${earlier}${rows.length === 0 && spinner === '' ? '<p class="empty">No messages yet. They appear here when you or the session write one.</p>' : `<ol class="timeline" aria-label="Conversation">${rows.join('')}${spinner}</ol>`}${asking}`;
 }
@@ -503,13 +508,13 @@ export function renderTimeline(state: PageState, view: View, now: number = Date.
  * while it waits on the operator in the terminal, "Waiting for your answer", "Waiting for permission" or "Waiting in the terminal" with a still
  * icon in the warning colour, since the page has no terminal to open. A Codex request the page answers draws its own card instead.
  */
-export function turnRow(session: PageState['session'], awaiting: boolean): string {
+export function turnRow(session: PageState['session'], awaiting: boolean, prompted = false): string {
   if (session?.state === 'waiting' && session.waitingFor !== null && (session.requests ?? []).length === 0) {
     const label = session.waitingFor === 'question' ? 'Waiting for your answer' : session.waitingFor === 'permission' ? 'Waiting for permission' : 'Waiting in the terminal';
     const icon = session.waitingFor === 'permission' ? 'shield' : session.waitingFor === 'question' ? 'question' : 'terminal';
     const who = session.provider === 'codex' ? 'Codex' : 'Claude';
 
-    return `<li class="working waiting" role="status"><span class="codicon codicon-${icon}" aria-hidden="true"></span><span class="working-label">${label}</span><span class="working-detail">${who} asks in its terminal; answer it there.</span></li>`;
+    return `<li class="working waiting" role="status"><span class="codicon codicon-${icon}" aria-hidden="true"></span><span class="working-label">${label}</span><span class="working-detail">${who} asks in its terminal; ${prompted ? 'answer it below.' : 'answer it there.'}</span></li>`;
   }
 
   if (!awaiting || session === null) {
@@ -517,6 +522,26 @@ export function turnRow(session: PageState['session'], awaiting: boolean): strin
   }
 
   return `<li class="working"><span class="codicon codicon-loading${session.state === 'waiting' ? '' : ' codicon-modifier-spin'}" aria-hidden="true"></span><span>${session.state === 'starting' ? 'Starting' : 'Thinking'}…</span></li>`;
+}
+
+/**
+ * A permission prompt or question form a Claude session waits on in its terminal, as its screen shows it (architecture.md § Web page): the
+ * prompt's lines, a button per numbered option, which presses its digit, Next (→) on a question form, and Cancel (Esc). Typed answers stay in the
+ * terminal.
+ */
+export function renderPrompt(prompt: ScreenPrompt, waitingFor: string | null, sending: boolean): string {
+  const disabled = sending ? ' disabled' : '';
+  const options = prompt.options
+    .map((option) => `<button type="button" class="prompt-option${option.selected ? ' current' : ''}" data-action="prompt-key" data-prompt-key="${escape(option.key)}"${disabled}><span class="question-letter">${escape(option.key)}</span> ${escape(option.label)}</button>`)
+    .join('');
+  const next = prompt.next ? `<button type="button" class="prompt-option secondary" data-action="prompt-key" data-prompt-key="next"${disabled}>Next →</button>` : '';
+  const cancel = `<button type="button" class="prompt-option secondary" data-action="prompt-key" data-prompt-key="escape"${disabled}>Cancel (Esc)</button>`;
+  const title = waitingFor === 'permission' ? 'Claude asks for permission' : 'Claude asks you';
+
+  return (
+    `<div class="request question-card prompt-card" data-key="prompt" role="group" aria-label="${escape(title)}"><div class="request-title"><span class="codicon codicon-${waitingFor === 'permission' ? 'shield' : 'question'}" aria-hidden="true"></span> ${escape(title)}</div>` +
+    `<pre class="prompt-screen">${escape(prompt.lines.join('\n'))}</pre><div class="prompt-options">${options}</div><div class="question-footer">${next}${cancel}<span class="prompt-note">To type an answer, use the terminal.</span></div></div>`
+  );
 }
 
 const DECISIONS: Record<string, string> = { accept: 'Allow once', acceptForSession: 'Allow for session', decline: 'Decline', cancel: 'Cancel' };

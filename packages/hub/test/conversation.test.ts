@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -353,8 +353,15 @@ class FakeHeld {
   released = 0;
   refuse: string | null = null;
   transcript: (session: string) => string | null = () => null;
+  /** A whole screen to show instead of the input box, and when a terminal last typed. */
+  shown: string[] | null = null;
+  keyAt: number | null = null;
 
   async screen(_session: string): Promise<{ data: string; cols: number; rows: number; rev: number; keyAt: number | null }> {
+    if (this.shown !== null) {
+      return { data: this.shown.join('\r\n'), cols: 110, rows: this.shown.length, rev: this.rev, keyAt: this.keyAt };
+    }
+
     return { data: [this.menu ? '❯ 1. Yes' : '', RULE, `❯ ${this.box === '' ? '\u001b[2mTry "fix it"\u001b[22m' : this.box}`, RULE].join('\r\n'), cols: 40, rows: 5, rev: this.rev, keyAt: null };
   }
 
@@ -1754,7 +1761,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
       return { key, frames };
     };
 
-    return { store, view, scopes, service, openPage, focus, actions, resumed, refuseResume };
+    return { store, view, scopes, service, openPage, focus, actions, resumed, refuseResume, held };
   }
 
   it('starts a page unbound with its key and list, binds it to any work item it selects, and holds it to that work item', () => {
@@ -1871,6 +1878,46 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     refuseResume('Session s3 still has 1 process from its previous run (pid 9). Stop them or wait for them to end.');
     expect(await service.resume({ window: page.key, scopeGen: 1, opId: 'r2', sessionId: 's3' })).toEqual({ status: 409, body: { error: 'Session s3 still has 1 process from its previous run (pid 9). Stop them or wait for them to end.' } });
     expect(resumed).toEqual(['s3', 's3']);
+  });
+
+  it("shows the page its session's permission prompt from the screen and presses only that prompt's keys, under the input reservation", async () => {
+    const { store, service, openPage, held } = setup();
+    const page = openPage();
+    const prompt = readFileSync(join(import.meta.dirname, '..', '..', 'conversation', 'test', 'fixtures', 'prompts', 'permission.txt'), 'utf8').split('\n');
+    const ask = (body: Record<string, unknown> = {}) => service.prompt({ window: page.key, scopeGen: 1, opId: 'p', sessionId: 's3', ...body });
+    const press = (key: string, opId: string, id: string) => service.promptKey({ window: page.key, scopeGen: 1, opId, sessionId: 's3', launch: null, prompt: id, key });
+
+    service.select({ window: page.key, opId: 'o', workItemId: 3 });
+    held.shown = prompt;
+    expect((await ask()).body).toEqual({ error: 'The session is not waiting on a prompt.' });
+    store.updateSession('s3', { state: 'waiting', stateDetail: PERMISSION_PROMPT });
+
+    const shown = ((await ask()).body as { prompt: { id: string; options: Array<{ key: string }> } }).prompt;
+
+    expect(shown.options.map((option) => option.key)).toEqual(['1', '2', '3', '4']);
+    expect((await ask({ sessionId: 's2' })).status).toBe(403);
+    expect((await ask({ scopeGen: 0 })).status).toBe(409);
+
+    // A key for a prompt the screen no longer shows, a choice it lacks, or right after a terminal key is never written.
+    expect((await press('1', 'k1', 'stale')).body).toEqual({ error: 'The terminal shows something else now. Answer there, or try again here.' });
+    expect((await press('7', 'k2', shown.id)).body).toEqual({ error: 'The prompt has no such choice.' });
+    expect((await press('next', 'k3', shown.id)).status).toBe(409);
+    held.keyAt = NOW - 500;
+    expect((await press('1', 'k4', shown.id)).body).toEqual({ error: 'A key was just typed in the terminal. Try again in a moment.' });
+    expect((await press('Enter', 'k5', shown.id)).status).toBe(400);
+    expect(held.writes).toEqual([]);
+
+    held.keyAt = null;
+    // A retry while the first is still pressing gets its answer and presses nothing more.
+    expect(await Promise.all([press('1', 'k6', shown.id), press('1', 'k6', shown.id)])).toEqual([{ status: 200, body: { done: true } }, { status: 200, body: { done: true } }]);
+    expect(await press('escape', 'k7', shown.id)).toEqual({ status: 200, body: { done: true } });
+    expect(held.writes).toEqual(['1', '\u001b']);
+    expect(held.reservations.length).toBe(held.released);
+    expect(held.reservations.at(-1)).toEqual({ sessionId: 's3', launch: null });
+
+    held.refuse = 'The session is ending.';
+    expect((await press('1', 'k8', shown.id)).body).toEqual({ error: 'The session is ending.' });
+    expect(held.writes).toHaveLength(2);
   });
 
   it("unbinds a page whose work item was deleted, raising its scope generation", () => {

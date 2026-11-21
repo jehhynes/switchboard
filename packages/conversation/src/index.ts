@@ -2,6 +2,7 @@ export * from './artifacts.js';
 export * from './commands.js';
 export * from './conversation.js';
 export * from './input.js';
+export * from './prompt.js';
 export * from './screen.js';
 export * from './screenHold.js';
 export * from './screenReader.js';
