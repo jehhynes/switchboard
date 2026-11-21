@@ -651,6 +651,7 @@ describe('the Console tab', () => {
     expect([...html(renderTabs(newView(), state)).matchAll(/data-tab="(\w+)"/g)].map((match) => match[1])).toEqual(['conversation', 'status', 'artifacts', 'console']);
     expect([...html(renderSideSwitch('console', state)).matchAll(/data-side="(\w+)"/g)].map((match) => match[1])).toEqual(['status', 'artifacts', 'console']);
     expect(html(renderSideSwitch('console', state))).toMatch(/aria-selected="true"[^>]*>Console/);
+    expect([...html(renderSideSwitch('browser', state, true)).matchAll(/data-side="(\w+)"/g)].map((match) => match[1])).toEqual(['status', 'artifacts', 'console', 'browser']);
   });
 
   it('says why a session has no console without loading it', () => {

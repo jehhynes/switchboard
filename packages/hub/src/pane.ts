@@ -2,12 +2,12 @@ import { randomBytes } from 'node:crypto';
 import { PANE_EXTENSION_ID } from '@switchboard/core';
 import type { PaneLinkState } from './paneLink.js';
 
-/** The narrowest right column the pane covers, in CSS pixels: a normal Chrome window would not go below about 514 DIP (mechanics M103). */
+/** The narrowest area, the page's Browser tab under its tab strip, the pane covers, in CSS pixels: a normal Chrome window would not go below about 514 DIP (mechanics M103). */
 export const PANE_MIN_WIDTH = 515;
 /** The most links a work item's pane opens; the extension takes no more. */
 export const PANE_MAX_TABS = 20;
 
-/** The page's right column, as `getBoundingClientRect` gives it in CSS pixels, with the page's scale and viewport size. */
+/** The area the pane covers, the page's Browser tab under its tab strip, as `getBoundingClientRect` gives it in CSS pixels, with the page's scale and viewport size. */
 export interface PaneRect {
   left: number;
   top: number;

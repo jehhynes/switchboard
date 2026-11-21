@@ -9,17 +9,58 @@ import type { Question, QuestionChoice } from '@switchboard/conversation/questio
 import type { ArtifactView, MessageView, NativeRequest, PageAction, PageGroup, PageRow, ReplyView, ScreenPrompt, StatusView, VoiceView } from './types.js';
 import type { SnoozeChoice } from '@switchboard/core/snooze';
 
-export type Tab = 'conversation' | 'status' | 'artifacts' | 'console';
+export type Tab = 'conversation' | 'status' | 'artifacts' | 'console' | 'browser';
 export const TABS: Array<{ tab: Tab; label: string }> = [
   { tab: 'conversation', label: 'Conversation' },
   { tab: 'status', label: 'Status' },
   { tab: 'artifacts', label: 'Artifacts' },
   { tab: 'console', label: 'Console' },
+  { tab: 'browser', label: 'Browser' },
 ];
 
 /** What the column right of the conversation shows on a wide screen. */
-export type SideTab = 'status' | 'artifacts' | 'console';
-export const SIDE_TABS: readonly SideTab[] = ['status', 'artifacts', 'console'];
+export type SideTab = 'status' | 'artifacts' | 'console' | 'browser';
+export const SIDE_TABS: readonly SideTab[] = ['status', 'artifacts', 'console', 'browser'];
+
+/** The narrowest Browser tab the Chrome pane covers, in CSS pixels: the hub's `PANE_MIN_WIDTH` (architecture.md § Pane state). */
+export const BROWSER_MIN_WIDTH = 515;
+
+/** Whether the Chrome pane opens a tab for a link: the hub's rule (`paneTabs`), an http or https URL of at most 2,048 characters. */
+export function paneLink(url: string): boolean {
+  try {
+    return ['http:', 'https:'].includes(new URL(url).protocol) && url.length <= 2048;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * What the Browser tab says while the Chrome pane does not cover it (PRD R113), or null while it does: the pane window then lies over the tab's
+ * area, under its tab strip.
+ */
+export function browserNote(pane: PaneView | null, width: number, hasLinks: boolean): string | null {
+  if (pane === null || !pane.enabled || pane.shown) {
+    return null;
+  }
+
+  if (pane.error !== null) {
+    return `The browser stopped: ${pane.error}`;
+  }
+
+  if (pane.extension === 'none') {
+    return 'The Switchboard Chrome extension is not connected. Install or reload it in Chrome to show the work item’s links here.';
+  }
+
+  if (pane.extension === 'unpaired') {
+    return 'Pair the Chrome extension from the view options to show the work item’s links here.';
+  }
+
+  if (!hasLinks) {
+    return 'This work item has no web links to show.';
+  }
+
+  return width < BROWSER_MIN_WIDTH ? `Widen this area to at least ${BROWSER_MIN_WIDTH} pixels to show the browser here.` : 'Opening the work item’s links…';
+}
 
 /**
  * Why the Console tab shows no console for the session (architecture.md § Web page), or null when the terminal holder may hold it: a Codex

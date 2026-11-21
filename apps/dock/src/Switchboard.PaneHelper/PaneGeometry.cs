@@ -1,6 +1,6 @@
 namespace Switchboard.PaneHelper;
 
-/// <summary>The page's right column as the hub passes it on: <c>getBoundingClientRect</c> in CSS pixels, the page's scale and its viewport.</summary>
+/// <summary>The area the pane covers, the page's Browser tab under its tab strip, as the hub passes it on: <c>getBoundingClientRect</c> in CSS pixels, the page's scale and its viewport.</summary>
 public sealed record PaneRect(double Left, double Top, double Width, double Height, double Dpr, double InnerWidth, double InnerHeight);
 
 /// <summary>The hub's <c>pane</c> event: the handshake marker, or null for no pane, and the column, or null to hide the pane.</summary>

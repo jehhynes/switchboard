@@ -3,7 +3,7 @@ import { snoozeChoices } from '@switchboard/core/snooze';
 import type { PageState } from './model.js';
 import { placeMenus } from '@switchboard/conversation/menuPlace';
 import { escape, renderMarkdown } from './markdown.js';
-import { answerText, artifactUrl, bandOpen, collapsedGroups, complete, firstSnoozeDay, GROUPS_KEY, inputReady, renderMicButton, markdownBody, newView, parseQuestions, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, SIDE_TABS } from './render.js';
+import { answerText, artifactUrl, bandOpen, browserNote, paneLink, collapsedGroups, complete, firstSnoozeDay, GROUPS_KEY, inputReady, renderMicButton, markdownBody, newView, parseQuestions, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, SIDE_TABS } from './render.js';
 import type { CardDraft, PaneView, SideTab, Tab, View } from './render.js';
 import type { ConsoleOptions, MountedConsole } from './console.js';
 import { LIGHT_SCHEME } from './console.js';
@@ -138,6 +138,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   // between the list is a drawer. A choice an earlier page kept is dropped.
   localStorage.removeItem('switchboard.layout');
   const wide = (): boolean => wideQuery?.matches === true;
+  // The installed page, as Chrome opens it from its own window; only it reports a column for the Chrome pane (architecture.md § Web page).
+  const standalone = (): boolean => deps.standalone?.() ?? (typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches);
 
   // The work items' and the conversation's widths (architecture.md § Web page), each set on a sash: the work items' on their edge, the
   // conversation's between it and the Status and Artifacts column, which takes the rest of the width.
@@ -176,8 +178,30 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   };
   const listWidth = typeof ResizeObserver === 'function' ? new ResizeObserver(() => fitLines()) : null;
   listWidth?.observe(list);
-  /** The tab the conversation's pane shows: always the conversation while Status and Artifacts have their own column. */
-  const mainTab = (): Tab => (wide() && view.pane?.shown !== true ? 'conversation' : view.tab);
+  /** Whether the Browser tab shows: on the installed page while the Chrome pane is on (PRD R113). */
+  const browserTab = (): boolean => view.pane?.enabled === true && standalone();
+  /** The tab the conversation's pane shows: always the conversation while Status and Artifacts have their own column, and never a Browser tab that is gone. */
+  const mainTab = (): Tab => (wide() || (view.tab === 'browser' && !browserTab()) ? 'conversation' : view.tab);
+  /** What the column right of the conversation shows: Status in place of a Browser tab that is gone. */
+  const sideTab = (): SideTab => (view.side === 'browser' && !browserTab() ? 'status' : view.side);
+  /**
+   * Chooses a tab of the column or of the conversation. Browser is one choice in both layouts, so a page that crosses the wide breakpoint keeps
+   * the Chrome pane; another tab chosen in one layout leaves Browser in the other.
+   */
+  const chooseTab = (tab: Tab): void => {
+    if (tab === 'browser') {
+      view.side = 'browser';
+      view.tab = 'browser';
+    } else if (wide()) {
+      view.side = tab === 'conversation' ? view.side : tab;
+      view.tab = view.tab === 'browser' ? 'conversation' : view.tab;
+    } else {
+      view.tab = tab;
+      view.side = view.side === 'browser' ? (tab === 'conversation' ? 'status' : tab) : view.side;
+    }
+  };
+  /** Reports the Browser tab's area to the hub after each draw, once the pane's report is set up below. */
+  let reportBrowser = (): void => {};
 
   wideQuery?.addEventListener?.('change', () => draw());
   drawerQuery?.addEventListener?.('change', () => draw());
@@ -1333,12 +1357,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // terminal holder, or a Codex thread in its daemon, without a terminal.
     mount(note, renderEndedNote(state.session, resuming));
 
-    // While the Chrome pane covers the column, Status, Artifacts and Console go back to the tabs and the column stays empty under it.
-    const columned = wide() && state.scope !== null;
-    const side = columned && view.pane?.shown !== true;
+    // From the wide layout Status, Artifacts, Console and Browser are a column of their own; the Chrome pane covers the Browser tab's area.
+    const side = wide() && state.scope !== null;
 
-    root.classList.toggle('wide', columned);
-    root.classList.toggle('pane-shown', columned && !side);
+    root.classList.toggle('wide', side);
 
     if (!side) {
       mount(detailHead, null);
@@ -1353,15 +1375,22 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
-    mount(head, [renderHeader(state, view), side ? null : renderTabs(view, state)]);
+    mount(head, [renderHeader(state, view), side ? null : renderTabs({ ...view, tab: mainTab() }, state, browserTab())]);
 
     const artifact = view.artifact === null ? undefined : state.artifacts.find((one) => one.path === view.artifact);
     const now = deps.now();
     /** Draws the Status or Artifacts tab, or an open artifact, into a pane; an open artifact stays as it is, so a frame or a video is not reloaded. */
     const drawTab = (pane: HTMLElement, tab: Tab): void => {
       pane.classList.toggle('console-pane', tab === 'console');
+      pane.classList.toggle('browser-pane', tab === 'browser');
 
-      if (tab === 'console') {
+      if (tab === 'browser') {
+        // The Chrome pane's window lies over this area while it shows; until then the area says why it does not.
+        const row = selectedRow(state);
+        const note = browserNote(view.pane, pane.getBoundingClientRect().width, row !== null && (paneLink(row.url) || row.links.some((link) => paneLink(link.url))));
+
+        drawPane(pane, note === null ? null : renderEmpty(note));
+      } else if (tab === 'console') {
         drawConsole(pane);
       } else if (tab === 'artifacts' && artifact !== undefined && state.key !== null) {
         const kept = artifactDocs.get(docKey(artifact.path));
@@ -1399,8 +1428,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     drawTab(panel, mainTab());
 
     if (side) {
-      mount(detailHead, renderSideSwitch(view.side, state));
-      drawTab(detailBody, view.side);
+      mount(detailHead, renderSideSwitch(sideTab(), state, browserTab()));
+      drawTab(detailBody, sideTab());
     }
     // The composer first, so the conversation is scrolled against its final height.
     updateComposer();
@@ -1438,6 +1467,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const draw = (): void => {
     drawRegions();
     fitMenus();
+    reportBrowser();
   };
 
 
@@ -1860,7 +1890,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const sideTab = target.closest<HTMLElement>('[data-side]')?.dataset['side'];
 
     if (SIDE_TABS.includes(sideTab as SideTab)) {
-      view.side = sideTab as SideTab;
+      chooseTab(sideTab as SideTab);
       view.artifact = sideTab === 'artifacts' ? view.artifact : null;
       draw();
       return;
@@ -1870,7 +1900,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     if (tab !== undefined && TABS.some((one) => one.tab === tab)) {
       leaving(tab);
-      view.tab = tab;
+      chooseTab(tab);
       view.artifact = tab === 'artifacts' ? view.artifact : null;
       draw();
       return;
@@ -2068,11 +2098,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
         leaving('artifacts');
 
-        if (wide()) {
-          view.side = 'artifacts';
-        } else {
-          view.tab = 'artifacts';
-        }
+        chooseTab('artifacts');
 
         view.artifact = button!.dataset['path'] ?? null;
         draw();
@@ -2081,11 +2107,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         closeMenus();
         leaving('console');
 
-        if (wide()) {
-          view.side = 'console';
-        } else {
-          view.tab = 'console';
-        }
+        chooseTab('console');
 
         draw();
         break;
@@ -2704,7 +2726,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   };
 
   // ---- The Chrome pane (architecture.md § Pane state): the installed page reports its right column, wakes and pairs the extension ----
-  const standalone = (): boolean => deps.standalone?.() ?? (typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches);
   const toExtension =
     deps.toExtension ??
     ((extensionId: string, message: Record<string, unknown>): Promise<unknown> => {
@@ -2716,11 +2737,21 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
       return new Promise((resolve) => runtime.sendMessage!(extensionId, message, (answer) => resolve(runtime.lastError === undefined ? (answer ?? null) : null)));
     });
-  const detail = root.querySelector<HTMLElement>('#detail')!;
   let paneSent = 'null';
+  /** The Browser tab's area under its tab strip, while it is the tab shown; the Chrome pane covers it (architecture.md § Web page). */
+  const browserArea = (): HTMLElement | null => {
+    // The pane window stays above the page, so it hides while Settings, a sheet (the page's or the list header's) or History covers the page.
+    const listSheet = root.querySelector('#list-sheet .sheet-backdrop') !== null;
+
+    if (!browserTab() || state.key === null || state.scope === null || view.sheet !== null || listSheet || settingsPane.isOpen() || shownHistory !== null) {
+      return null;
+    }
+
+    return wide() ? (sideTab() === 'browser' ? detailBody : null) : mainTab() === 'browser' ? panel : null;
+  };
   const reportPane = (): void => {
-    const on = view.pane?.enabled === true && standalone() && state.key !== null && state.scope !== null && wide();
-    const box = on ? detail.getBoundingClientRect() : null;
+    const area = browserArea();
+    const box = area === null ? null : area.getBoundingClientRect();
     const rect = box === null || box.width === 0 ? null : { left: box.left, top: box.top, width: box.width, height: box.height, dpr: window.devicePixelRatio || 1, innerWidth: window.innerWidth, innerHeight: window.innerHeight };
     const text = JSON.stringify(rect);
 
@@ -2731,7 +2762,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   };
   const paneColumn = typeof ResizeObserver === 'function' ? new ResizeObserver(() => reportPane()) : null;
 
-  paneColumn?.observe(detail);
+  paneColumn?.observe(detailBody);
+  paneColumn?.observe(panel);
+  reportBrowser = reportPane;
+  // Settings and the list header's sheets open and close without the page's draw.
+  const settingsShown = typeof MutationObserver === 'function' ? new MutationObserver(() => reportPane()) : null;
+
+  settingsShown?.observe(settingsHost, { childList: true, subtree: false, attributes: true });
+  settingsShown?.observe(root.querySelector('#list-sheet')!, { childList: true, subtree: true });
   window.addEventListener('resize', () => reportPane());
   window.addEventListener('resize', fitMenus, { signal: listening.signal });
   // A scroll moves a menu's anchor; a menu's own scrolling does not.
@@ -2921,6 +2959,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       clearTimeout(historyChange ?? undefined);
       clearInterval(paneWake);
       paneColumn?.disconnect();
+      settingsShown?.disconnect();
       clearInterval(promptTimer);
       clearTimeout(showTimer);
       listening.abort();

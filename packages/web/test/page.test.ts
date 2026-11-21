@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyEvent, awaitingReply, EMPTY, mentionOf, mentionQuery, commandQuery, shortTitle, timeline, withEarlier } from '../src/model.js';
 import { answerText, answersIn, complete, parseQuestions } from '@switchboard/conversation/questions';
-import { artifactUrl, collapsedGroups, newView, renderMicButton, renderVoice, markdownBody } from '../src/render.js';
+import { artifactUrl, BROWSER_MIN_WIDTH, browserNote, paneLink, collapsedGroups, newView, renderMicButton, renderVoice, markdownBody } from '../src/render.js';
 import { renderArtifactView } from '../src/side.js';
 import { renderTimeline, turnRow } from '../src/timeline.js';
 import { renderHeader } from '../src/header.js';
@@ -2167,7 +2167,26 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it('reports the right column for the Chrome pane, marks its title, wakes and pairs the extension, and moves Status and Artifacts to the tabs while the pane shows (PRD R113)', async () => {
+  it('says in the Browser tab why the Chrome pane does not cover it, and nothing while it does', () => {
+    const pane = { enabled: true, extension: 'paired' as const, marker: null, shown: false, error: null };
+
+    expect(browserNote({ ...pane, shown: true }, 600, true)).toBeNull();
+    expect(browserNote(null, 600, true)).toBeNull();
+    expect(browserNote({ ...pane, enabled: false }, 600, true)).toBeNull();
+    expect(browserNote({ ...pane, error: 'Gone.' }, 600, true)).toBe('The browser stopped: Gone.');
+    expect(browserNote({ ...pane, extension: 'none' }, 600, true)).toContain('not connected');
+    expect(browserNote({ ...pane, extension: 'unpaired' }, 600, true)).toContain('Pair the Chrome extension');
+    expect(browserNote(pane, 600, false)).toBe('This work item has no web links to show.');
+    expect(browserNote(pane, BROWSER_MIN_WIDTH - 1, true)).toBe('Widen this area to at least 515 pixels to show the browser here.');
+    expect(browserNote(pane, BROWSER_MIN_WIDTH, true)).toBe('Opening the work item’s links…');
+    // Only links the hub opens tabs for count.
+    expect(paneLink('https://github.com/o/r/issues/1')).toBe(true);
+    expect(paneLink('https://%')).toBe(false);
+    expect(paneLink('file:///C:/x')).toBe(false);
+    expect(paneLink(`https://a.test/${'x'.repeat(2048)}`)).toBe(false);
+  });
+
+  it('adds a Browser tab for the Chrome pane, reports its area under the tab strip only while it is chosen, marks the title, and wakes and pairs the extension (PRD R113)', async () => {
     const query = { matches: true, addEventListener: () => {} };
 
     vi.stubGlobal('matchMedia', vi.fn(() => query));
@@ -2188,19 +2207,28 @@ describe('the page in use', () => {
       toExtension: async (id, message) => (sent.push([id, message]), { ok: true }),
     });
     const source = FakeSource.last!;
+    const rects = () => posts.filter((post) => post.url.endsWith('/pane-rect')).map((post) => post.body['rect']);
 
-    vi.spyOn(root.querySelector('#detail')!, 'getBoundingClientRect').mockReturnValue({ left: 1300, top: 40, width: 600, height: 900 } as DOMRect);
+    vi.spyOn(root.querySelector('#detail .detail-body')!, 'getBoundingClientRect').mockReturnValue({ left: 1300, top: 85, width: 600, height: 855 } as DOMRect);
+    vi.spyOn(root.querySelector('#panel')!, 'getBoundingClientRect').mockReturnValue({ left: 300, top: 120, width: 700, height: 700 } as DOMRect);
     hello(source);
     await flush();
-    // Off: nothing reported.
-    expect(posts.filter((post) => post.url.endsWith('/pane-rect'))).toEqual([]);
+    // Off: no Browser tab and nothing reported.
+    expect(root.querySelector('[data-side="browser"]')).toBeNull();
+    expect(rects()).toEqual([]);
 
     source.emit('pane', { pane: { enabled: true, extension: 'none', extensionId: 'ext', marker: '0123456789ab', shown: false, error: null } });
     await flush();
     expect(sent).toEqual([['ext', { type: 'wake' }]]);
     expect(document.title).toMatch(/ \[sb-pane 0123456789ab\]$/);
-    expect(posts.filter((post) => post.url.endsWith('/pane-rect')).at(-1)?.body).toMatchObject({ rect: { left: 1300, top: 40, width: 600, height: 900, dpr: expect.any(Number) } });
+    expect([...root.querySelectorAll<HTMLElement>('#detail [data-side]')].map((tab) => tab.dataset['side'])).toEqual(['status', 'artifacts', 'console', 'browser']);
+    // Status is shown, so the pane has no area yet: the page reports none.
+    expect(rects()).toEqual([null]);
     expect(root.querySelector('#detail .status-tab')).not.toBeNull();
+
+    click('#detail [data-side="browser"]');
+    expect(rects().at(-1)).toMatchObject({ left: 1300, top: 85, width: 600, height: 855, dpr: expect.any(Number) });
+    expect(root.querySelector('#detail .detail-body')!.textContent).toContain('The Switchboard Chrome extension is not connected.');
 
     click('[data-action="view-menu"]');
     expect(root.querySelector('.view-options-menu .pane-note')!.textContent).toBe('Chrome pane: the Switchboard Chrome extension is not connected.');
@@ -2210,29 +2238,68 @@ describe('the page in use', () => {
     expect(sent.at(-1)).toEqual(['ext', { type: 'pair', token: 'tok' }]);
     expect(root.querySelector('.view-options-menu [role="status"]')!.textContent).toBe('Sent to the Chrome extension.');
 
+    // Shown: the tab strip stays, the area under it is empty for the pane window, and Status, Artifacts and Console stay in the column.
     source.emit('pane', { pane: { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: true, error: null } });
     await flush();
     expect(document.title).not.toContain('sb-pane');
-    expect(root.classList.contains('pane-shown')).toBe(true);
     expect(root.classList.contains('wide')).toBe(true);
-    expect(root.querySelector('#head .tabs')).not.toBeNull();
-    expect(root.querySelector('#detail .detail-body')!.innerHTML).toBe('');
+    expect(root.querySelector('#head .tabs')).toBeNull();
+    expect(root.querySelector('#detail .side-switch [aria-selected="true"]')!.textContent).toBe('Browser');
+    expect(root.querySelector('#detail .detail-body')!.textContent).toBe('');
     expect(root.querySelector('[data-action="pane-pair"]')).toBeNull();
-    // The tabs open what they name in the conversation's pane.
-    click('#head [data-tab="status"]');
-    expect(root.querySelector('#panel .status-tab')).not.toBeNull();
-    expect(root.querySelector('#panel .timeline')).toBeNull();
-    click('#head [data-tab="conversation"]');
-    expect(root.querySelector('#panel .timeline')).not.toBeNull();
+
+    // Another tab hides the pane; Browser again shows it.
+    click('#detail [data-side="status"]');
+    expect(rects().at(-1)).toBeNull();
+    expect(root.querySelector('#detail .status-tab')).not.toBeNull();
+    click('#detail [data-side="browser"]');
+    expect(rects().at(-1)).toMatchObject({ left: 1300, width: 600 });
 
     source.emit('pane', { pane: { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: 'The pane would not fit the column.' } });
+    expect(root.querySelector('#detail .detail-body')!.textContent).toBe('The browser stopped: The pane would not fit the column.');
     expect(root.querySelector('.view-options-menu .pane-note')!.textContent).toBe('Chrome pane stopped: The pane would not fit the column.');
-    expect(root.querySelector('#detail .status-tab')).not.toBeNull();
 
-    // Narrower than the column: the page reports none.
+    // Narrow: the tabs are the conversation's, Browser among them and still chosen, and its area is the conversation's pane.
     query.matches = false;
-    window.dispatchEvent(new Event('resize'));
-    expect(posts.filter((post) => post.url.endsWith('/pane-rect')).at(-1)?.body).toMatchObject({ rect: null });
+    // The stubbed media query does not report its change, so another event draws the narrow layout.
+    source.emit('pane', { pane: { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: null } });
+    expect([...root.querySelectorAll<HTMLElement>('#head [data-tab]')].map((tab) => tab.dataset['tab'])).toEqual(['conversation', 'status', 'artifacts', 'console', 'browser']);
+    expect(root.querySelector('#head [aria-selected="true"]')!.textContent).toBe('Browser');
+    expect(rects().at(-1)).toMatchObject({ left: 300, top: 120, width: 700, height: 700 });
+    click('#head [data-tab="status"]');
+    expect(rects().at(-1)).toBeNull();
+    // Status chosen while narrow is the column's choice when wide again.
+    query.matches = true;
+    source.emit('pane', { pane: { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: null } });
+    expect(root.querySelector<HTMLElement>('#detail .side-switch [aria-selected="true"]')!.dataset['side']).toBe('status');
+    expect(rects().at(-1)).toBeNull();
+    click('#detail [data-side="browser"]');
+    expect(rects().at(-1)).toMatchObject({ left: 1300, width: 600 });
+    // A list header's sheet covers the page too: the area goes while it shows and comes back when it closes.
+    click('.more-actions');
+    click('[data-action="list-later-log"]');
+    await flush();
+    expect(root.querySelector('#list-sheet .sheet-backdrop')).not.toBeNull();
+    expect(rects().at(-1)).toBeNull();
+    click('#list-sheet .sheet-button');
+    await flush();
+    expect(root.querySelector('#list-sheet .sheet-backdrop')).toBeNull();
+    expect(rects().at(-1)).toMatchObject({ left: 1300, width: 600 });
+    // Settings covers the page, and the pane window would stay above it: the area goes while Settings shows.
+    click('.more-actions');
+    click('[data-action="list-settings"]');
+    await flush();
+    expect(rects().at(-1)).toBeNull();
+    query.matches = false;
+    source.emit('pane', { pane: { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: null } });
+
+    // Turned off: the Browser tab goes, and the conversation shows in its place.
+    source.emit('pane', { pane: { enabled: false, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: null } });
+    await flush();
+    expect(rects().at(-1)).toBeNull();
+    expect(root.querySelector('#head [data-tab="browser"]')).toBeNull();
+    expect(root.querySelector('#head [aria-selected="true"]')!.textContent).toBe('Conversation');
+    expect(root.querySelector('#panel .timeline')).not.toBeNull();
     vi.unstubAllGlobals();
     page.close();
   });

@@ -334,16 +334,17 @@ function TabButton({ selected, label, badge, attrs }: { selected: boolean; label
  * The switch at the top of the Status and Artifacts column on a wide screen, drawn as the tabs are, with the same badges; the conversation keeps
  * its own pane beside it.
  */
-export function renderSideSwitch(side: SideTab, state: PageState): VNode {
+export function renderSideSwitch(side: SideTab, state: PageState, browser = false): VNode {
   const fresh = state.status?.unread === true;
   const tabs: Array<[SideTab, string, string]> = [
     ['status', 'Status', fresh ? 'New' : ''],
     ['artifacts', 'Artifacts', ''],
     ['console', 'Console', ''],
+    ...(browser ? [['browser', 'Browser', ''] as [SideTab, string, string]] : []),
   ];
 
   return (
-    <nav class="tabs side-switch" role="tablist" aria-label="Status, artifacts and console">
+    <nav class="tabs side-switch" role="tablist" aria-label={browser ? 'Status, artifacts, console and browser' : 'Status, artifacts and console'}>
       {tabs.map(([tab, label, badge]) => (
         <TabButton selected={tab === side} label={label} badge={badge} attrs={{ 'data-side': tab }} />
       ))}
@@ -351,14 +352,14 @@ export function renderSideSwitch(side: SideTab, state: PageState): VNode {
   );
 }
 
-export function renderTabs(view: View, state: PageState): VNode {
+export function renderTabs(view: View, state: PageState, browser = false): VNode {
   const fresh = state.status?.unread === true;
   // As in the VS Code view: Status has its New badge; the page shows no unread counts.
-  const badges: Record<Tab, string> = { conversation: '', status: fresh ? 'New' : '', artifacts: '', console: '' };
+  const badges: Record<Tab, string> = { conversation: '', status: fresh ? 'New' : '', artifacts: '', console: '', browser: '' };
 
   return (
     <nav class="tabs" role="tablist">
-      {TABS.map(({ tab, label }) => (
+      {TABS.filter(({ tab }) => browser || tab !== 'browser').map(({ tab, label }) => (
         <TabButton selected={tab === view.tab} label={label} badge={badges[tab]} attrs={{ 'data-tab': tab }} />
       ))}
     </nav>
