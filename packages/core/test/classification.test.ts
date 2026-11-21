@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Harness, issue, settings } from './flowHarness.js';
 import type { FlowAction } from '../src/flow.js';
-import { weeklyVolume } from '../src/volume.js';
 
 const ticket = (key: string, state = 'other') => ({ ...issue(key, state === 'mine'), inQueue: true, pool: state === 'pool', assigneeId: state });
 const poll = (h: Harness, ...rows: ReturnType<typeof ticket>[]) => h.act({ type: 'poll', source: 'zoho', tickets: rows });
@@ -11,15 +10,14 @@ function succeed(h: Harness, action: FlowAction | undefined) {
 }
 
 describe('retained Support classification', () => {
-  it('classifies other engineers without work, reuses success and exposes it in volume details', () => {
+  it('classifies other engineers without work, reuses success and records the classification', () => {
     const h = new Harness();
     const actions = poll(h, ticket('1'));
     expect(actions).toMatchObject([{ type: 'triage', workItemId: null, rates: true }]);
     expect(succeed(h, actions[0])).toEqual([]);
     expect(h.store.workItemsForTicket(1)).toEqual([]);
     expect(poll(h, ticket('1'))).toEqual([]);
-    const report = weeklyVolume(h.store.volumeData(), h.now, 'zoho');
-    expect(report.weeks[0]?.details.seen[0]?.classification).toEqual({ ticketId: 1, playbook: 'support:defect', immediacy: 'BLOCKING', severity: 'HIGH', at: h.now });
+    expect(h.store.volumeData().classifications).toEqual([{ ticketId: 1, playbook: 'support:defect', immediacy: 'BLOCKING', severity: 'HIGH', at: h.now }]);
     poll(h);
     expect(h.store.volumeData().classifications).toHaveLength(1);
     h.store.close();
@@ -47,7 +45,6 @@ describe('retained Support classification', () => {
     expect(poll(h, ticket('1'))).toEqual([]);
     expect(h.store.poolTriages(1)).toMatchObject([{ error: 'Unavailable' }]);
     expect(h.store.volumeData().classifications).toEqual([]);
-    expect(weeklyVolume(h.store.volumeData(), h.now, 'zoho').weeks[0]?.details.seen[0]?.classification).toBeNull();
     expect(h.store.workItemsForTicket(1)).toEqual([]);
     h.store.close();
   });

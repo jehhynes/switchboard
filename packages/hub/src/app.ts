@@ -43,7 +43,6 @@ import type { Launcher } from './launch.js';
 import { pageAsset } from './pageAssets.js';
 import { PageChanges } from './changes.js';
 import { needsMessage, newlyNeeding, rowFor, targetForUrl } from './needs.js';
-import { volumeReply } from './volume.js';
 import { installedProviders } from './installed.js';
 import { PaneLink } from './paneLink.js';
 import { PaneState, paneRect, paneTabs } from './pane.js';
@@ -1147,7 +1146,6 @@ const dockWithRuns = () => {
 
         return history === null ? { status: 409, body: { error: `Unknown ticket ${body['ticketId']}.` } } : { status: 200, body: history };
       },
-      '/volume': async (body) => volumeReply(store, deps.now(), body),
       '/v1/conversation/send': async (body) => (isRecord(body) ? conversation.send(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, text, command?}.' } }),
       // `installed` lets the dock skip its provider choice when only one CLI is found (PRD R104).
       '/v1/conversation/providers': async () => ({ status: 200, body: { defaultProvider: config.settings.sessions.provider, installed: await installedProviders(config.settings.sessions) } }),

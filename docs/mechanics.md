@@ -538,7 +538,7 @@ These mechanisms are planned but not yet verified for Switchboard:
 - **Results:** the two queue-only tickets had no work items. Each source's initial poll produced zero arrivals and retained every returned ticket. An isolated loopback hub serving `/volume` returned 401 without authorization and 200 with its token, with 12 weekly rows. Zoho and Forum logs are `.wip/support-live.log` and `.wip/support-live-forum.log`.
 - **Presentation:** an isolated native preview of the production `VolumeWindow`, using the scratch hub and database, displayed 20 tickets in the current partial week and unavailable previous weeks. Visual inspection found and corrected unwrapped help text; the corrected table and coverage text were inspected again. Count clicks, drill-down links, source filters, delayed refreshes and failure states are covered by Avalonia headless tests; the native preview was used for visual inspection.
 - **Automated checks:** `npm run verify` and `npm run test:integration`; final outputs are kept in `.wip/support-verify.log` and `.wip/support-integration.log`. Core tests cover retention, baseline and DST counts; source fixtures assert no additional scope-history/audit reads for other engineers. Integration uses the isolated real VS Code host.
-- **Current use:** R84; the existing source polls and ticket history provide observed weekly volume. These checks do not establish complete historical source coverage or activity while the hub is off.
+- **Current use:** R84's recording; the existing source polls and ticket history provide the observed queue. The `/volume` route and `VolumeWindow` checked here are removed. These checks do not establish complete historical source coverage or activity while the hub is off.
 
 ## M42. Codex triage
 

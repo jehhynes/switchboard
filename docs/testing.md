@@ -151,6 +151,6 @@ R85 tests cover registration before queue entry, unchanged assignments across st
 
 ## Support volume
 
-Core tests verify observed queue retention, initial baseline, assignment transfers, work-item deletion, identity consolidation, failed polls, coverage gaps, distinct-ticket counts and timezone/DST boundaries. Source fixtures verify all fetched Support tickets are retained with no additional history/audit reads for other engineers. Hub tests cover filter validation and bounded detail responses; dock headless tests cover counts, unavailable weeks, source filtering, ticket links and failed refreshes. Live acceptance uses isolated storage and read-only source polling; it must not pick or start any Support ticket.
+Core tests verify the recorded evidence: observed queue retention, the initial baseline, assignment transfers, work-item deletion, identity consolidation, failed polls and coverage gaps. Source fixtures verify all fetched Support tickets are retained with no additional history/audit reads for other engineers. Live acceptance uses isolated storage and read-only source polling; it must not pick or start any Support ticket.
 
-Support classification tests cover priority and shared concurrency, other-assignee isolation, failure and cancellation, departure while waiting, assignment changes, durable classifications after deletion, migration from existing triages, and classifications in volume details.
+Support classification tests cover priority and shared concurrency, other-assignee isolation, failure and cancellation, departure while waiting, assignment changes, durable classifications after deletion, and migration from existing triages.
