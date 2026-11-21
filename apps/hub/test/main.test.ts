@@ -47,7 +47,7 @@ function launch(entry: string, extra: Record<string, string | undefined>, args: 
     delete env[key];
   }
 
-  const child = spawn(process.execPath, [entry, ...args, `--home=${home}`, ...(['report', 'register', 'attach', 'holder'].includes(args[0] ?? '') ? [] : ['--browser-port=0', '--page-port=0'])], { windowsHide: true, env });
+  const child = spawn(process.execPath, [entry, ...args, `--home=${home}`, ...(['report', 'register', 'attach', 'holder', 'restart'].includes(args[0] ?? '') ? [] : ['--browser-port=0', '--page-port=0'])], { windowsHide: true, env });
   let stdout = '';
   let stderr = '';
 
@@ -614,6 +614,47 @@ describe('hub entry point', () => {
       expect(JSON.parse(await get(after.port, '/page/ping'))).toEqual({ build: after.build });
     } finally {
       keeper.dispose();
+      await start('--stop').exited;
+    }
+  }, 60_000);
+  it('restarts the hub on hub.js restart and waits for the new one, with exit codes for no hub and no installed bundle', async () => {
+    const none = await start('restart').exited;
+
+    expect(none.code).toBe(2);
+    expect(none.stderr).toBe('The Switchboard hub is not running.\n');
+
+    // A hub run from the built entry point, with nothing installed in its home, has no bundle to restart onto.
+    start('--idle-ms=60000');
+
+    const plain = await recorded();
+    const refused = await start('restart').exited;
+
+    expect(refused.code).toBe(3);
+    expect(refused.stderr).toBe('Refused: No hub bundle is installed.\n');
+    expect((await start('restart', 'now').exited).code).toBe(1);
+    await start('--stop').exited;
+    await until(() => (record() === null ? true : null));
+
+    const bundle = hubBundlePath(home);
+
+    writeFileSync(bundle, `import(${JSON.stringify(pathToFileURL(main).href)});\n`);
+    launch(bundle, {}, ['--idle-ms=60000']);
+
+    const before = await until(() => {
+      const found = record();
+
+      return found !== null && found.pid !== plain.pid ? found : null;
+    });
+
+    try {
+      const restarted = await start('restart').exited;
+      const after = record()!;
+
+      expect(restarted.code).toBe(0);
+      expect(after.pid).not.toBe(before.pid);
+      expect(after.build).toBe(before.build);
+      expect(restarted.stdout).toBe(`Restarting the hub (pid ${before.pid}, build ${before.build}) onto build ${before.build}.\nRestarted: pid ${after.pid}, build ${after.build}.\n`);
+    } finally {
       await start('--stop').exited;
     }
   }, 60_000);

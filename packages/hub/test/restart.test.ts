@@ -133,6 +133,26 @@ describe('HubRestart', () => {
     expect(hub.calls).toEqual(['successor', 'cancel', 'successor', 'handOver']);
   });
 
+  it('restarts when asked even onto its own build, answering what it waits for, and refuses with no bundle installed or once handed over', async () => {
+    const hub = fake();
+    const restart = new HubRestart(hub.deps);
+
+    hub.set({ installed: null });
+    expect(restart.request()).toEqual({ refused: 'No hub bundle is installed.' });
+
+    hub.set({ installed: 'b1', quiet: 'a triage is running' });
+    expect(restart.request()).toEqual({ installed: 'b1', waiting: 'a triage is running' });
+    await restart.check();
+    expect(hub.calls).toEqual([]);
+
+    hub.set({ quiet: null });
+    await restart.check();
+
+    expect(hub.calls).toEqual(['successor', 'handOver']);
+    expect(hub.lines).toEqual(['hub restart asked by hub.js restart', 'hub restart onto build b1 waits: a triage is running', 'restarting the hub from build b1 onto build b1, asked by hub.js restart']);
+    expect(restart.request()).toEqual({ refused: 'The hub is already restarting.' });
+  });
+
   it('runs one restart at a time', async () => {
     const hub = fake();
     const restart = new HubRestart(hub.deps);

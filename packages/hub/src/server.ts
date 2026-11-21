@@ -16,6 +16,8 @@ export interface Reply {
 export interface HubServerOptions {
   identity: HubIdentity;
   onShutdown(): void;
+  /** `POST /restart`, from `hub.js restart`: restarts the hub onto the installed build once it is quiet (architecture.md § Hub lifecycle). */
+  onRestart?(): Reply;
   /** Handlers for authorized `POST` paths, given the parsed JSON body and what only the server knows. */
   post?: Record<string, (body: unknown, context?: PostContext) => Promise<Reply>>;
   /**
@@ -224,7 +226,8 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
 
   /** Counts a `POST` until its answer, or answers it 503 while the hub hands over; true when it was answered. */
   const admit = (request: IncomingMessage, response: ServerResponse): boolean => {
-    if (request.method !== 'POST') {
+    // `/restart` asks for the restart itself, so it does not hold the restart off.
+    if (request.method !== 'POST' || request.url === '/restart') {
       return false;
     }
 
@@ -909,6 +912,11 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     } else if (request.method === 'POST' && path === '/shutdown') {
       json(response, 200, { stopping: true });
       options.onShutdown();
+    } else if (request.method === 'POST' && path === '/restart' && options.onRestart !== undefined) {
+      const reply = options.onRestart();
+
+      request.resume();
+      json(response, reply.status, reply.body);
     } else if (request.method === 'POST' && options.post?.[path] !== undefined) {
       const handler = options.post[path];
 

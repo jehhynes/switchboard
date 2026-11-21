@@ -167,6 +167,11 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
     identity: { hub: HUB_NAME, protocol: PROTOCOL, version, pid: process.pid },
     build,
     onShutdown: () => void stop('a client asked it to stop').then(() => exit(0)),
+    onRestart: () => {
+      const asked = restart?.request() ?? { refused: 'This hub cannot restart itself.' };
+
+      return 'refused' in asked ? { status: 409, body: { error: asked.refused } } : { status: 200, body: { build, ...asked } };
+    },
     ...(app === undefined
       ? {}
       : {

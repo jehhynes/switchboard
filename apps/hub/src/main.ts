@@ -314,16 +314,61 @@ async function web(home: string, rest: readonly string[]): Promise<number> {
   return 0;
 }
 
+/** How long `hub.js restart` waits for the new hub. */
+const RESTART_WAIT_MS = 60_000;
+
+/**
+ * Restarts the running hub onto the installed bundle once it is quiet, and waits for the new hub (architecture.md § Hub lifecycle). Exit codes: 0
+ * restarted, 1 usage, 2 no hub, 3 refused, 4 not restarted within 60 seconds.
+ */
+async function restart(home: string, rest: readonly string[]): Promise<number> {
+  if (rest.length > 0) {
+    process.stderr.write('Usage: hub.js restart\n');
+    return 1;
+  }
+
+  const hub = await findHub(home, REPORT_TIMEOUT_MS);
+  const reply = hub === null ? null : await postToHub(hub, '/restart', {}, REPORT_TIMEOUT_MS);
+
+  if (hub === null || reply === null) {
+    process.stderr.write(`${noHub(home)}.\n`);
+    return 2;
+  }
+
+  if (reply.status !== 200) {
+    process.stderr.write(`Refused: ${reply.error ?? `status ${reply.status}`}\n`);
+    return 3;
+  }
+
+  const { installed, waiting } = reply.body as { installed: string; waiting: string | null };
+
+  process.stdout.write(`Restarting the hub (pid ${hub.pid}, build ${hub.build}) onto build ${installed}${waiting === null ? '' : `; it waits until it is quiet: ${waiting}`}.\n`);
+
+  for (const deadline = Date.now() + RESTART_WAIT_MS; Date.now() < deadline; ) {
+    await new Promise((done) => setTimeout(done, 250));
+
+    const found = await findHub(home);
+
+    if (found !== null && found.token !== hub.token) {
+      process.stdout.write(`Restarted: pid ${found.pid}, build ${found.build}.\n`);
+      return 0;
+    }
+  }
+
+  process.stderr.write(`The hub has not restarted within ${RESTART_WAIT_MS / 1000} seconds; it restarts once it is quiet. See ${hubLogPath(home)}.\n`);
+  return 4;
+}
+
 /** Returns an exit code, or -1 to keep serving. */
 async function main(argv: readonly string[]): Promise<number> {
   const bundle = process.argv[1];
 
-  if (argv[0] === 'report' || argv[0] === 'register' || argv[0] === 'attach' || argv[0] === 'holder' || argv[0] === 'web') {
+  if (argv[0] === 'report' || argv[0] === 'register' || argv[0] === 'attach' || argv[0] === 'holder' || argv[0] === 'web' || argv[0] === 'restart') {
     // A session runs `<home>/.switchboard/hub.js report …`, so the bundle's location names its home; the extension's own bundle names none.
     const home = flag(argv, 'home') || bundleHome(bundle, homedir());
     const rest = argv.slice(1).filter((argument) => !argument.startsWith('--home'));
 
-    const commands = { report, register, attach, holder, web };
+    const commands = { report, register, attach, holder, web, restart };
 
     return commands[argv[0] as keyof typeof commands](home, rest);
   }

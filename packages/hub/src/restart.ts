@@ -32,11 +32,13 @@ export interface RestartDeps {
 }
 
 /**
- * Restarts the hub onto the installed bundle when that is another build, once the hub is quiet
+ * Restarts the hub onto the installed bundle when that is another build, or when `hub.js restart` asks, once the hub is quiet
  * (architecture.md § Hub lifecycle). `check` runs on a timer.
  */
 export class HubRestart {
-  /** An installed build whose successor did not start, tried again only once another build is installed. */
+  /** `hub.js restart` asked, so the restart runs whatever build is installed. */
+  #asked = false;
+  /** An installed build whose successor did not start, tried again only when asked or once another build is installed. */
   #failed: string | null = null;
   /** The reason last logged for waiting, so each is logged once. */
   #waiting: string | null = null;
@@ -45,9 +47,31 @@ export class HubRestart {
 
   constructor(private readonly deps: RestartDeps) {}
 
-  /** Whether a restart is due: another build is installed, other than one whose successor did not start. */
+  /** `POST /restart`: restarts once quiet; answers the installed build and what the restart waits for, or why not. */
+  request(): { installed: string; waiting: string | null } | { refused: string } {
+    const installed = this.deps.installed();
+
+    if (installed === null) {
+      return { refused: 'No hub bundle is installed.' };
+    }
+
+    if (this.#handedOver) {
+      return { refused: 'The hub is already restarting.' };
+    }
+
+    this.#asked = true;
+    this.deps.log('hub restart asked by hub.js restart');
+
+    const waiting = this.#running ? null : this.deps.quiet();
+
+    void this.check();
+
+    return { installed, waiting };
+  }
+
+  /** Whether a restart is due: another build is installed, or one was asked for. */
   #due(installed: string | null): boolean {
-    return installed !== null && installed !== this.deps.build && installed !== this.#failed;
+    return installed !== null && (this.#asked || (installed !== this.deps.build && installed !== this.#failed));
   }
 
   async check(): Promise<void> {
@@ -76,13 +100,14 @@ export class HubRestart {
     this.#running = true;
 
     try {
-      this.deps.log(`restarting the hub from build ${this.deps.build} onto build ${installed}, which is installed`);
+      this.deps.log(`restarting the hub from build ${this.deps.build} onto build ${installed}${this.#asked ? ', asked by hub.js restart' : ', which is installed'}`);
 
       const successor = await this.deps.successor();
 
       if ('error' in successor) {
         this.deps.log(`hub restart failed: ${successor.error}; this hub keeps running`);
         this.#failed = installed;
+        this.#asked = false;
         this.#waiting = null;
         return;
       }
