@@ -629,9 +629,12 @@ describe('the page', () => {
     source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1), listRow(2)])], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
     expect(root.classList.contains('listing')).toBe(false);
 
-    const back = root.querySelector<HTMLElement>('.back-bar button.back')!;
+    // Back is the header's first button, before the work items' toggle, which CSS shows in its place from 768 px; no bar of its own.
+    const back = root.querySelector<HTMLElement>('.header > button.back-toggle')!;
 
-    expect(back.getAttribute('aria-label')).toBe('Back to the work items');
+    expect(back.getAttribute('aria-label')).toBe('Back to work items');
+    expect(back.nextElementSibling!.classList.contains('list-toggle')).toBe(true);
+    expect(root.querySelector('.back-bar')).toBeNull();
     back.click();
     expect(root.classList.contains('listing')).toBe(true);
     expect(document.activeElement).toBe(root.querySelector('[data-work-item="1"]'));
@@ -1768,6 +1771,22 @@ describe("the list's CSS", () => {
     expect(selected[0]).toContain('background: var(--vscode-list-activeSelectionBackground)');
     expect(selected[0]).not.toMatch(/box-shadow|outline|border/);
     expect(declarationsOf((selector) => selector === 'button:focus-visible')).toEqual([expect.stringContaining('outline: 1px solid var(--vscode-focusBorder)')]);
+  });
+
+  it('swaps Back and the work items\' toggle and shows the work items\' sash by the page\'s width alone', () => {
+    const narrow = css.slice(0, css.indexOf('@media (min-width: 768px)'));
+
+    // Selectors that outrank button.icon's display, which kept the toggle on a phone's width.
+    expect(declarationsOf((selector) => selector === '.header > .list-toggle')).toEqual(['display: none;', 'display: inline-flex;']);
+    expect(declarationsOf((selector) => selector === '.header > .back-toggle')).toEqual(['display: none;']);
+    expect(declarationsOf((selector) => selector === '.side-sash')).toEqual(['display: block;']);
+    expect(narrow).not.toMatch(/\.side-sash \{ display: block/);
+    const wide = css.split('@media (min-width: 768px) {').slice(1).map((block) => block.slice(0, block.indexOf('\n}'))).join('\n');
+
+    for (const rule of ['.header > .back-toggle { display: none; }', '.header > .list-toggle { display: inline-flex; }', '.side-sash { display: block; }']) {
+      expect(wide).toContain(rule);
+      expect(narrow).not.toContain(rule);
+    }
   });
 
   it('caps the conversation on a wide screen and gives the Status and Artifacts column the rest of the width, with no cap of its own', () => {

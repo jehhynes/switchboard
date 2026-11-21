@@ -80,12 +80,11 @@ button:focus-visible, a:focus-visible, .tab:focus-visible { outline: 1px solid v
 .row-details .row-detail.error { color: var(--vscode-errorForeground); }
 /*
  * Phone first: under 768 px the list and the conversation are each a full-width view, the list until a work item is opened, the conversation
- * with a Back bar to the list; touch targets are at least 44 px tall. From 768 px the list is the side column and Back goes.
+ * with a Back button at the start of its header in place of the work items' toggle; touch targets are at least 44 px tall. From 768 px the
+ * list is the side column and the toggle takes Back's place. Every switch is by the page's width alone, so a desktop window narrowed to a
+ * phone's width gets the phone's layout.
  */
 #root.listing > .main, #root:not(.listing) > .side { display: none; }
-.back-bar { flex: none; border-bottom: 1px solid var(--vscode-panel-border); }
-button.back { display: flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 14px 0 10px; border: none; background: transparent; color: var(--vscode-foreground); cursor: pointer; }
-button.back:hover { background: var(--vscode-toolbar-hoverBackground); }
 /* A sash resizes the pane before it (resizer in main.ts, which keeps the width in --side-width or --chat-width), drawn as VS Code's:
    invisible until hovered, dragged or focused, then a 4 px line in the sash colour over the edge, taking no width of its own. The work
    items' sash shows from 768 px, the conversation's only beside the Status and Artifacts column. */
@@ -99,7 +98,6 @@ button.back:hover { background: var(--vscode-toolbar-hoverBackground); }
   .side-sash { display: block; }
   #root.list-hidden > .side-sash { display: none; }
   #root.listing > .main, #root:not(.listing) > .side { display: flex; }
-  .back-bar { display: none; }
 }
 /* With a mouse, the group headers can be as compact as the dock's. */
 @media (min-width: 768px) and (pointer: fine) {
@@ -461,9 +459,11 @@ button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }
 
 /* The side columns' toggles (architecture.md § Web page): from 768 px the work items can be hidden, from 1200 px the Status and Artifacts column;
    a phone keeps the list and the conversation as separate views. */
-.layout-toggle { flex: none; }
-.list-toggle { display: none; }
+/* .header > raises them over button.icon's display. */
+.layout-toggle, .back-toggle { flex: none; }
+.header > .list-toggle { display: none; }
 @media (min-width: 768px) {
-  .list-toggle { display: inline-flex; }
+  .header > .list-toggle { display: inline-flex; }
+  .header > .back-toggle { display: none; }
   #root.list-hidden > .side { display: none; }
 }

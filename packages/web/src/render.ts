@@ -366,7 +366,7 @@ export function renderHeader(state: PageState, view: View, layout: Layout = { li
   const personaMenu = menu === null ? '' : `<ul class="glass menu persona-menu align-right" role="menu" aria-label="Persona">${rows}</ul>`;
   const personaPart = personaButton === '' ? '' : `<div class="menu-anchor persona-anchor">${personaButton}${personaMenu}</div>`;
 
-  return `<header class="header">${layoutToggle('list', layout.list)}${picker}${renderActions(selectedRow(state), view)}${personaPart}${layout.detail === null ? '' : layoutToggle('detail', layout.detail)}</header>`;
+  return `<header class="header"><button type="button" class="icon back-toggle" data-action="back" title="Back to work items" aria-label="Back to work items"><span class="codicon codicon-arrow-left" aria-hidden="true"></span></button>${layoutToggle('list', layout.list)}${picker}${renderActions(selectedRow(state), view)}${personaPart}${layout.detail === null ? '' : layoutToggle('detail', layout.detail)}</header>`;
 }
 
 /**

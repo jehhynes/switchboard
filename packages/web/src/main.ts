@@ -66,7 +66,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   root.innerHTML =
     '<aside class="side"><div class="side-head">Switchboard</div><div id="list"></div></aside>' +
     `<div class="sash side-sash" role="separator" aria-orientation="vertical" aria-label="Work items width" aria-controls="list" tabindex="0" aria-valuemin="${SIDE_MIN}" aria-valuemax="${SIDE_MAX}" title="Drag to resize; double-click to reset"></div>` +
-    '<main class="main"><div class="back-bar"><button type="button" class="back" data-action="back" aria-label="Back to the work items"><span class="codicon codicon-arrow-left" aria-hidden="true"></span><span>Work items</span></button></div><div id="head"></div><div id="panel" class="scroll"></div><div id="note"></div><div id="composer" hidden></div></main>' +
+    '<main class="main"><div id="head"></div><div id="panel" class="scroll"></div><div id="note"></div><div id="composer" hidden></div></main>' +
     `<div class="sash chat-sash" role="separator" aria-orientation="vertical" aria-label="Conversation width" aria-controls="panel" tabindex="0" aria-valuemin="${CHAT_MIN}" aria-valuemax="${CHAT_MAX}" title="Drag to resize; double-click to reset"></div>` +
     '<aside id="detail" class="detail" aria-label="Status and artifacts"><div class="detail-head"></div><div class="detail-body scroll"></div></aside><div id="sheet"></div><div class="live" aria-live="polite"></div>';
 
