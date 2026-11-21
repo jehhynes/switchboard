@@ -131,8 +131,8 @@ export interface WebSettings {
   /** The port the hub serves the page on, read at hub start, so an installed page keeps its address; 0 serves it only on the hub's own port. */
   port: number;
   /**
-   * The Chrome pane (PRD R113): the installed page's selected work item's ticket and links in a Chrome window the dock keeps on the page's right
-   * column. Experimental and Windows only; off by default.
+   * The Chrome pane (PRD R113): the installed page's selected work item's ticket and links in a Chrome window the pane helper keeps over the
+   * page's Browser tab. Experimental and Windows only; off by default.
    */
   chromePane: boolean;
   /**
