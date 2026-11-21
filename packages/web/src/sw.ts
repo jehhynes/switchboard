@@ -2,8 +2,8 @@
 // answers a page load that cannot reach the hub with the offline page. Everything else, the page's own files, the API and the event stream,
 // goes to the network untouched, so a page is always the one its hub serves.
 
-/** The cache the worker keeps the offline files in; a new name drops the old cache. */
-export const SHELL_CACHE = 'switchboard-shell-v1';
+/** The cache the worker keeps the offline files in; a new name drops the old cache. Raise it whenever a file in `SHELL` changes, so an installed worker is replaced and keeps the new copies. */
+export const SHELL_CACHE = 'switchboard-shell-v2';
 /** The files the worker keeps, which the hub serves without a sign-in. */
 export const SHELL = ['/page/offline.html', '/page/offline.js', '/page/icon-192.png', '/page/icon-512.png', '/page/icon-maskable-512.png', '/page/manifest.webmanifest'];
 /** The page shown when the hub does not answer. */

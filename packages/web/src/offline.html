@@ -15,6 +15,10 @@ main { max-width: 28rem; padding: 24px; text-align: center; }
 img { width: 64px; height: 64px; }
 h1 { font-size: 18px; font-weight: 600; margin: 16px 0 8px; }
 p { margin: 0; color: #9d9d9d; }
+p + p { margin-top: 12px; }
+a.start { display: inline-block; margin-top: 16px; padding: 6px 14px; border-radius: 2px; background: #0078d4; color: #ffffff; text-decoration: none; }
+a.start:hover { background: #026ec1; }
+code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
 @media (prefers-color-scheme: light) {
   :root { color-scheme: light; }
   body { background: {{themeColorLight}}; color: #3b3b3b; }
@@ -26,7 +30,9 @@ p { margin: 0; color: #9d9d9d; }
 <main>
 <img src="icon-192.png" alt="">
 <h1>Switchboard is not running</h1>
-<p>Open VS Code or the dock to start it. This window reconnects by itself.</p>
+<p>This window reconnects by itself once it runs.</p>
+<a class="start" href="switchboard:start">Start Switchboard</a>
+<p>The button works once <code>hub.js autostart on</code> has run. Otherwise run <code>node ~/.switchboard/hub.js start</code>, or open VS Code or the dock.</p>
 </main>
 <script src="offline.js"></script>
 </body>

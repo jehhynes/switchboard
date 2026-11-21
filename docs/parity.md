@@ -187,7 +187,7 @@ The dock's Settings window (PRD R54, [architecture.md § Settings window](archit
 |---|---|---|---|---|
 | N1 | "Connecting to Switchboard…" until the first view | `Show` ViewModels.cs:503-510 | Partly | shown in the conversation pane, not over the list (main.ts:689) |
 | N2 | Without the hub the last rows stay, dimmed to half and disabled; a row menu closes | MainWindow.axaml:210-212, 464; MainWindow.axaml.cs:128 | Partly | the last rows stay but are not dimmed; the page reconnects and reloads by itself (`reconnector` main.ts:1610) and shows an offline page when the hub is down at load |
-| N3 | "Switchboard is not running…" with Start hub | MainWindow.axaml:447-449, `OnStartHubClicked` MainWindow.axaml.cs:2141 | Differs | the hub serves the page (decision 20), so a page cannot start it |
+| N3 | "Switchboard is not running…" with Start hub | MainWindow.axaml:447-449, `OnStartHubClicked` MainWindow.axaml.cs:2141 | Partly | the hub serves the page (decision 20), so the offline page's Start Switchboard opens the `switchboard:` link `hub.js autostart on` registers, which runs `hub.js start` (PRD R117); with no link registered it does nothing, and the page names the command |
 | N4 | An expired sign-in says how to get a new link | none | Web only | main.ts:671 |
 
 ## Keyboard, focus and tooltips

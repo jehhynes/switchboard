@@ -201,6 +201,9 @@ describe('the installable page', () => {
     }
 
     expect(PAGE_ASSETS['offline.html']!.body).toContain('Switchboard is not running');
+    // The Start button opens the link hub.js autostart registers, which starts the hub and passes nothing of the link on (PRD R117).
+    expect(PAGE_ASSETS['offline.html']!.body).toContain('<a class="start" href="switchboard:start">Start Switchboard</a>');
+    expect(PAGE_ASSETS['offline.html']!.body).toContain('<code>node ~/.switchboard/hub.js start</code>');
     expect(PAGE_ASSETS['offline.html']!.body).toMatch(new RegExp(`@media \\(prefers-color-scheme: light\\) \\{[^@]*background: ${lightSideBar}; color: #3b3b3b;`));
     expect(lightSideBar).not.toBe(sideBar);
     expect(SHELL.map((path) => path.slice('/page/'.length)).filter((name) => PAGE_ASSETS[name] === undefined)).toEqual([]);
