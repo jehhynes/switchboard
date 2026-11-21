@@ -252,7 +252,9 @@ body.vscode-high-contrast .conversation-row[aria-checked="true"], body.vscode-hi
 
 /* A question card (architecture.md § Conversation view), measured from Claude Code's question form: a box in the input colours with the input
    border and an 8 px radius, questions 16 px apart in the foreground, options as 4 px rows with a 16 px radio mark, or a checkbox where a question
-   takes several, in the button colour once picked, the letter dimmed before the text, an Other field, and Submit in the button colours. An
+   takes several, in the button colour once picked, the letter and a period dimmed in a column of their own before the text, so a wrapped line starts
+   under the text, an Other field, and Submit in the button colours. The mark is centred on the option's first line (1lh; 2 px where lh is
+   unknown). An
    answered card shows only its answer's picks, the rest dimmed. An unpicked mark takes the theme's checkbox colours: its fill, and its
    foreground at 60% as the border, since Dark Modern's checkbox border is the input background's own grey (about 1.2:1 on it). */
 .question-card { --card-border: var(--vscode-inlineChatInput-border, var(--vscode-input-border, var(--vscode-widget-border, rgba(127, 127, 127, 0.4)))); display: flex; flex-direction: column; gap: 16px; margin: 8px 0 4px; padding: 8px; border: 1px solid var(--card-border); border-radius: 8px; background: var(--vscode-input-background); color: var(--vscode-foreground); }
@@ -264,7 +266,7 @@ body.vscode-high-contrast .conversation-row[aria-checked="true"], body.vscode-hi
 .question-option:hover:not(:disabled), .question-option:focus-visible { outline: none; background: var(--vscode-toolbar-hoverBackground); }
 .question-option:disabled { cursor: default; }
 .question-option.dimmed { opacity: 0.6; }
-.question-mark { display: flex; flex: none; align-items: center; justify-content: center; box-sizing: border-box; width: 16px; height: 16px; margin-top: 2px; border: 1.5px solid color-mix(in srgb, var(--vscode-checkbox-foreground, var(--vscode-foreground)) 60%, transparent); background: var(--vscode-checkbox-background, transparent); }
+.question-mark { display: flex; flex: none; align-items: center; justify-content: center; box-sizing: border-box; width: 16px; height: 16px; margin-top: 2px; margin-top: calc((1lh - 16px) / 2); border: 1.5px solid color-mix(in srgb, var(--vscode-checkbox-foreground, var(--vscode-foreground)) 60%, transparent); background: var(--vscode-checkbox-background, transparent); }
 .question-mark.radio { border-radius: 50%; }
 .question-mark.radio.checked { border-color: var(--vscode-button-background); }
 .radio-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--vscode-button-background); }
@@ -272,7 +274,8 @@ body.vscode-high-contrast .conversation-row[aria-checked="true"], body.vscode-hi
 .question-mark.checkbox.checked { border-color: var(--vscode-button-background); background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
 .question-mark .codicon { font-size: 12px; }
 .question-option-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.question-letter { opacity: 0.6; padding-right: 2px; }
+.question-letter { opacity: 0.6; }
+.question-option .question-letter { flex: none; min-width: 1.4em; }
 .question-option-text code, .question-text code { font-size: 0.95em; }
 .question-other { box-sizing: border-box; width: 100%; margin-top: 6px; padding: 6px 8px; border: 1px solid var(--card-border); border-radius: 4px; outline: none; background: var(--vscode-editor-background); color: var(--vscode-foreground); font: inherit; font-size: 0.9em; }
 .question-other:focus { border-color: var(--vscode-inputOption-activeBorder, var(--vscode-focusBorder)); }

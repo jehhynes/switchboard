@@ -126,9 +126,8 @@ export function questionCard(key: string, questions: readonly Question[], draft:
                 return (
                   <button type="button" class={`question-option${answered && !checked ? ' dimmed' : ''}`} role={question.multi ? 'checkbox' : 'radio'} aria-checked={checked} data-action="pick" data-card={key} data-question={String(index)} data-letter={option.letter} disabled={locked}>
                     <Mark multi={question.multi} checked={checked} />
-                    <span class="question-option-text">
-                      <span class="question-letter">{option.letter}</span> {trusted(renderInline(option.text))}
-                    </span>
+                    <span class="question-letter">{option.letter}.</span>{' '}
+                    <span class="question-option-text">{trusted(renderInline(option.text))}</span>
                   </button>
                 );
               })}

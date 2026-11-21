@@ -403,12 +403,16 @@ body.artifact-window > .artifact-view { height: 100%; }
 .question-option:hover:not(:disabled) { background: var(--vscode-toolbar-hoverBackground); }
 .question-option:disabled { cursor: default; }
 .question-option.dimmed { opacity: 0.6; }
-.question-mark { display: flex; flex: none; align-items: center; justify-content: center; box-sizing: border-box; width: 16px; height: 16px; margin-top: 2px; border: 1.5px solid color-mix(in srgb, var(--vscode-checkbox-foreground, var(--vscode-foreground)) 60%, transparent); background: var(--vscode-checkbox-background, transparent); }
+.question-mark { display: flex; flex: none; align-items: center; justify-content: center; box-sizing: border-box; width: 16px; height: 16px; margin-top: 2px; margin-top: calc((1lh - 16px) / 2); border: 1.5px solid color-mix(in srgb, var(--vscode-checkbox-foreground, var(--vscode-foreground)) 60%, transparent); background: var(--vscode-checkbox-background, transparent); }
 .question-mark.radio { border-radius: 50%; }
 .question-mark.checked { border-color: var(--vscode-button-background); }
 .question-mark.checkbox.checked { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
 .radio-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--vscode-button-background); }
 .question-letter { opacity: 0.6; }
+/* The letter and its period in a column of their own, so a wrapped line starts under the option's text, and the mark centred on the first line
+   (1lh; 2 px where lh is unknown), as in the Conversation view. */
+.question-option .question-letter { flex: none; min-width: 1.4em; }
+.question-option-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .question-other { margin-top: 6px; padding: 6px 8px; border: 1px solid var(--vscode-input-border); border-radius: 4px; outline: none; background: var(--vscode-editor-background); color: inherit; font: inherit; font-size: 0.9em; }
 .question-other:focus { border-color: var(--vscode-inputOption-activeBorder); }
 .question-footer { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }

@@ -51,7 +51,9 @@ describe('question cards in the Conversation view', () => {
     expect(cards).toHaveLength(1);
     expect(cards[0]!.closest('li')?.dataset['id']).toBe('r1');
     expect([...cards[0]!.querySelectorAll('.question-text')].map((one) => one.textContent)).toEqual(['1. Which port?', '2. Keep the old route?']);
-    expect([...cards[0]!.querySelectorAll('.question-option')].map((one) => one.textContent)).toEqual(['A 8765 (recommended)', 'B 8799', 'A Yes', 'B No, remove it', 'C Keep it behind a flag']);
+    expect([...cards[0]!.querySelectorAll('.question-option')].map((one) => one.textContent)).toEqual(['A. 8765 (recommended)', 'B. 8799', 'A. Yes', 'B. No, remove it', 'C. Keep it behind a flag']);
+    // The letter is a column of its own beside the text, so a wrapped line starts under the text, not under the letter.
+    expect([...cards[0]!.querySelectorAll('.question-option')].map((one) => [...one.children].map((child) => child.className))).toEqual(Array(5).fill(['question-mark radio', 'question-letter', 'question-option-text']));
     expect(cards[0]!.querySelectorAll('[role="radiogroup"]')).toHaveLength(2);
     expect(cards[0]!.querySelectorAll('.question-other')).toHaveLength(2);
     expect(cards[0]!.querySelector<HTMLButtonElement>('.question-submit')?.disabled).toBe(true);
@@ -63,6 +65,9 @@ describe('question cards in the Conversation view', () => {
     expect(css).toMatch(/\.question-card \{[^}]*border-radius: 8px;[^}]*background: var\(--vscode-input-background\)/);
     expect(css).toMatch(/\.question-mark\.radio\.checked \{ border-color: var\(--vscode-button-background\); \}/);
     expect(css).toMatch(/\.question-option\.dimmed \{ opacity: 0\.6; \}/);
+    expect(css).toMatch(/\.question-option \.question-letter \{ flex: none; min-width: 1\.4em; \}/);
+    // The mark is centred on the option's first line, not the row's top.
+    expect(css).toMatch(/\.question-mark \{[^}]*height: 16px; margin-top: 2px; margin-top: calc\(\(1lh - 16px\) \/ 2\);/);
   });
 
   it('picks one option per question, clears it when picked again, and sends the answer as an ordinary message on Submit', () => {

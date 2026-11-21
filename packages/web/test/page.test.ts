@@ -119,6 +119,22 @@ describe('question cards in replies', () => {
     host.innerHTML = html(renderTimeline(pageState([reply('r1', 1, { opening: ending }), message('m1', 2, { text: '1B', delivery: 'open' })]), newView()));
     expect(host.querySelector('.question-card')?.className).toBe('question-card');
   });
+
+  it('draws each option letter and its period in a column of their own and centres the mark on the first line', () => {
+    const host = document.createElement('div');
+
+    host.innerHTML = html(renderTimeline(pageState([reply('r1', 1, { opening: ending })]), newView()));
+    const options = [...host.querySelectorAll('.question-option')];
+
+    expect(options.map((one) => one.textContent)).toEqual(['A. 1', 'B. 2']);
+    // A wrapped line starts under the text, not under the letter.
+    expect(options.map((one) => [...one.children].map((child) => child.className))).toEqual(Array(2).fill(['question-mark radio', 'question-letter', 'question-option-text']));
+    const css = readFileSync(join(__dirname, '../src/page.css'), 'utf8');
+
+    expect(css).toMatch(/\.question-option \.question-letter \{ flex: none; min-width: 1\.4em; \}/);
+    expect(css).toMatch(/\.question-option-text \{ flex: 1;/);
+    expect(css).toMatch(/\.question-mark \{[^}]*height: 16px; margin-top: 2px; margin-top: calc\(\(1lh - 16px\) \/ 2\);/);
+  });
 });
 
 describe('drawing', () => {

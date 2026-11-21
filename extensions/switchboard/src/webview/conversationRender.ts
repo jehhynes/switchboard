@@ -275,7 +275,7 @@ export function questionCard(key: string, questions: readonly Question[], draft:
 
         return (
           `<button type="button" class="question-option${checked ? ' checked' : ''}${answered && !checked ? ' dimmed' : ''}" role="${multi ? 'checkbox' : 'radio'}" aria-checked="${checked}" data-action="pick" data-card="${escape(key)}" data-question="${index}" data-letter="${option.letter}"${locked ? ' disabled' : ''} title="${escape(`Answer ${name}`)}">` +
-          `${mark}<span class="question-option-text"><span class="question-letter">${option.letter}</span> ${inlineMarkdown(option.text)}</span></button>`
+          `${mark}<span class="question-letter">${option.letter}.</span> <span class="question-option-text">${inlineMarkdown(option.text)}</span></button>`
         );
       })
       .join('');
