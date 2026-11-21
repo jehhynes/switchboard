@@ -113,6 +113,8 @@ interface Utterance {
   interrupted: Interrupted | null;
   /** Its first pieces while they are a spoken command or its start: not reported until the utterance ends or another piece follows. */
   pending: Array<Extract<VoiceMessage, { type: 'piece' }>>;
+  /** An answer to a spoken alert: nothing of it goes to the hub, and its words go to the alert (architecture.md § Spoken alerts). */
+  answer: boolean;
 }
 
 /** A reply being played while capture runs: words heard then are held back, since they may be its echo, until barge-in says they are the operator's. */
@@ -186,6 +188,8 @@ export class Dictation {
   #pausedByVoice = false;
   /** The pieces in the operator's voice heard while paused, until the words have been quiet for `voice.endPauseMs`; null with none. */
   #paused: { texts: string[]; checks: Array<{ score: number | null; f0: number | null }>; lastAt: number } | null = null;
+  /** A spoken alert waits for its answer: capture runs even with no target or after the idle timeout, and the next utterance is the answer. */
+  #answer: ((text: string | null, cut: boolean) => void) | null = null;
 
   constructor(private readonly deps: DictationDeps) {
     this.#auto = new AutoDuplex(deps.log);
@@ -209,7 +213,7 @@ export class Dictation {
       return 'paused-other-app';
     }
 
-    if (this.#idleOff || this.#target === null) {
+    if ((this.#idleOff || this.#target === null) && this.#answer === null) {
       return 'idle-off';
     }
 
@@ -251,6 +255,50 @@ export class Dictation {
   /** Where the recogniser loaded last runs, or null before one loads. */
   get recognizer(): AsrDevice | null {
     return this.#engine?.engine.device ?? null;
+  }
+
+  /** Whether the operator is speaking: an utterance is open or words are being recognised. */
+  get hearing(): boolean {
+    return this.#utterance !== null || (this.#transcriber?.words ?? '') !== '';
+  }
+
+  /** Another app records from a microphone, as far as the watcher has said. */
+  get otherAppRecording(): boolean {
+    return this.#otherApp === true;
+  }
+
+  /** Voiceprint enrolment records. */
+  get enrolling(): boolean {
+    return this.#enrollment !== null;
+  }
+
+  /**
+   * Whether a spoken alert's answer can be heard (architecture.md § Spoken alerts): the mic is on, with no error, not paused by voice, no other
+   * app recording, the composer not focused and no enrolment. The away and idle timeouts do not count: an answer window listens through them.
+   */
+  get answerable(): boolean {
+    return this.#micOn && this.#error === null && !this.#pausedByVoice && this.#otherApp !== true && !this.#typing && this.#enrollment === null;
+  }
+
+  /**
+   * Listens for a spoken alert's answer: the next utterance goes to `answer` with its words, or null when it was cut off (`cut`) or kept
+   * nothing, and to no session. Null stops listening for one, dropping an answer still open, and capture returns to what it was; `accepted` also ends the idle
+   * stop, since the operator is back.
+   */
+  listen(answer: ((text: string | null, cut: boolean) => void) | null, accepted = false): void {
+    if (answer === null && this.#utterance?.answer === true) {
+      this.#answer = null;
+      this.#cut(true);
+    }
+
+    this.#answer = answer;
+
+    if (accepted) {
+      this.#idleOff = false;
+      this.#armIdle();
+    }
+
+    this.#sync();
   }
 
   /** The operator turned the mic on or off. Turning it on starts again after the idle timeout, an error or a pause by voice. */
@@ -316,7 +364,7 @@ export class Dictation {
 
   /** The voice target changed: an utterance open for the earlier one is closed unsent, and the recogniser loads the new one's terms. */
   target(gen: number, sessionId: string | null, repo: string | null): void {
-    if (this.#utterance !== null && (this.#utterance.gen !== gen || this.#utterance.sessionId !== sessionId)) {
+    if (this.#utterance !== null && !this.#utterance.answer && (this.#utterance.gen !== gen || this.#utterance.sessionId !== sessionId)) {
       this.#cut(true);
     }
 
@@ -474,7 +522,7 @@ export class Dictation {
 
   /** Whether dictation could listen, whatever the last error. */
   #ready(): boolean {
-    return this.#micOn && this.#otherApp === false && !this.#idleOff && this.#target !== null && !this.#typing;
+    return this.#micOn && this.#otherApp === false && !this.#typing && (this.#answer !== null || (!this.#idleOff && this.#target !== null));
   }
 
   /** Whether capture should run: for enrolment, or for dictation. */
@@ -906,7 +954,7 @@ export class Dictation {
       utterance.lastActivity = this.deps.now();
     }
 
-    this.deps.send({ type: 'words', gen: utterance.gen, utteranceId: utterance.id, sessionId: utterance.sessionId, text });
+    this.#sendWords(utterance, { type: 'words', gen: utterance.gen, utteranceId: utterance.id, sessionId: utterance.sessionId, text });
   }
 
   /**
@@ -944,7 +992,9 @@ export class Dictation {
       this.#release(utterance);
     }
 
-    this.deps.send(piece);
+    if (!utterance.answer) {
+      this.deps.send(piece);
+    }
 
     if (check.dropped) {
       this.deps.log(`piece dropped by the voice check (${check.reason === 'pitch' ? 'pitch' : 'score'} ${check.reason === 'pitch' ? `${check.f0} Hz` : check.score}): ${text}`);
@@ -967,7 +1017,10 @@ export class Dictation {
   /** The pieces held as a possible spoken command are dictation after all: they are reported and join the utterance. */
   #release(utterance: Utterance): void {
     for (const piece of utterance.pending.splice(0)) {
-      this.deps.send(piece);
+      if (!utterance.answer) {
+        this.deps.send(piece);
+      }
+
       utterance.pieces.push(piece.text);
       this.deps.vocabulary.used(piece.text);
     }
@@ -1052,8 +1105,11 @@ export class Dictation {
   }
 
   #open(): Utterance | null {
-    if (this.#utterance === null && this.#target !== null) {
-      this.#utterance = { id: this.deps.newId(), gen: this.#target.gen, sessionId: this.#target.sessionId, pieces: [], lastActivity: this.deps.now(), completeAt: null, waitMs: 0, turn: null, words: '', interrupted: null, pending: [] };
+    // While a spoken alert waits for its answer, whatever is said next is that answer, for no session.
+    if (this.#utterance === null && (this.#target !== null || this.#answer !== null)) {
+      const answer = this.#answer !== null;
+
+      this.#utterance = { id: this.deps.newId(), gen: this.#target?.gen ?? 0, sessionId: answer ? '' : this.#target!.sessionId, pieces: [], lastActivity: this.deps.now(), completeAt: null, waitMs: 0, turn: null, words: '', interrupted: null, pending: [], answer };
       this.#report();
     }
 
@@ -1134,7 +1190,7 @@ export class Dictation {
 
       if (rest !== null && utterance.words !== '') {
         utterance.words = '';
-        this.deps.send({ type: 'words', gen: utterance.gen, utteranceId: utterance.id, sessionId: utterance.sessionId, text: '' });
+        this.#sendWords(utterance, { type: 'words', gen: utterance.gen, utteranceId: utterance.id, sessionId: utterance.sessionId, text: '' });
       }
 
       if (!kept) {
@@ -1180,9 +1236,11 @@ export class Dictation {
       }
     }
 
+    const answer = utterance?.answer === true ? this.#answer : null;
+
     if (utterance !== null) {
       if (utterance.words !== '') {
-        this.deps.send({ type: 'words', gen: utterance.gen, utteranceId: utterance.id, sessionId: utterance.sessionId, text: '' });
+        this.#sendWords(utterance, { type: 'words', gen: utterance.gen, utteranceId: utterance.id, sessionId: utterance.sessionId, text: '' });
       }
 
       const endedAt = this.deps.now();
@@ -1193,7 +1251,7 @@ export class Dictation {
       }
 
       // An utterance that kept nothing, all of it dropped by the voice check, ends as cut, so the hub sends nothing and forgets it.
-      this.deps.send({
+      this.#sendWords(utterance, {
         type: 'utterance',
         gen: utterance.gen,
         utteranceId: utterance.id,
@@ -1209,6 +1267,20 @@ export class Dictation {
     this.#utterance = null;
     this.#checks++;
     this.#report();
+
+    if (answer !== null && utterance !== null) {
+      const text = utterance.pieces.join(' ');
+
+      this.deps.log(`alert answer ${utterance.id}: ${final && text !== '' ? `"${text}"` : 'none'}`);
+      answer(final && text !== '' ? text : null, !final);
+    }
+  }
+
+  /** Sends an utterance's report to the hub, unless it is an alert's answer, which goes to no session. */
+  #sendWords(utterance: Utterance, message: Extract<VoiceMessage, { type: 'words' | 'utterance' }>): void {
+    if (!utterance.answer) {
+      this.deps.send(message);
+    }
   }
 
   /** Cuts the open utterance short: the composer took the focus, the mic went off, the voice moved or the device failed. Nothing is sent. */
@@ -1235,15 +1307,19 @@ export class Dictation {
 
     if (utterance !== null) {
       if (utterance.words !== '') {
-        this.deps.send({ type: 'words', gen: utterance.gen, utteranceId: utterance.id, sessionId: utterance.sessionId, text: '' });
+        this.#sendWords(utterance, { type: 'words', gen: utterance.gen, utteranceId: utterance.id, sessionId: utterance.sessionId, text: '' });
       }
 
-      this.deps.send({ type: 'utterance', gen: utterance.gen, utteranceId: utterance.id, sessionId: utterance.sessionId, text: utterance.pieces.join(' '), final: false, interrupted: utterance.interrupted });
+      this.#sendWords(utterance, { type: 'utterance', gen: utterance.gen, utteranceId: utterance.id, sessionId: utterance.sessionId, text: utterance.pieces.join(' '), final: false, interrupted: utterance.interrupted });
     }
 
     this.#transcriber?.end(false);
     this.#utterance = null;
     this.#checks++;
+
+    if (utterance?.answer === true && this.#answer !== null) {
+      this.#answer(null, true);
+    }
   }
 
   /**

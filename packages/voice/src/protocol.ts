@@ -62,6 +62,14 @@ export type EnrollmentState = 'recording' | 'enrolled' | 'failed' | 'cancelled';
 /** Why the voice process turned the mic off on its own: the session locked, the computer went to sleep, or the session disconnected. */
 export type AwayReason = 'locked' | 'asleep' | 'disconnected';
 
+/** What a spoken alert is for (architecture.md § Spoken alerts): a turn finished, or the session waits on a question or a permission prompt. */
+export const ALERT_CAUSES = ['turn-finished', 'question', 'permission'] as const;
+
+export type AlertCause = (typeof ALERT_CAUSES)[number];
+
+/** How a spoken alert ended: answered and read, not answered in time, refused by the answer, or dropped before or during its handshake. */
+export type AlertOutcome = 'announced' | 'unanswered' | 'declined' | 'cancelled';
+
 /** Why the voice target changed: the focus after its debounce, Talk here, or the target dropped (away timeout, or no longer a target). */
 export type ActiveReason = 'focus' | 'talk-here' | 'gone';
 
@@ -80,6 +88,13 @@ export type HubMessage =
   /** Stop speaking: the playing reply is `interrupted` where it stopped, and the queued ones `skipped`. */
   | { type: 'stop' }
   | { type: 'earcon'; kind: 'needs-you' }
+  /**
+   * A session that is not the voice target needs the operator (architecture.md § Spoken alerts): `title` is its work item's title, `persona`
+   * its persona's name or null, `detail` what an answer reads, and `voice`, `style` and `personality` how it is spoken.
+   */
+  | { type: 'alert'; alertId: string; sessionId: string; cause: AlertCause; title: string; persona: string | null; detail: string; voice: TtsVoice; style: SpeechStyle; personality: string | null }
+  /** The alert's cause was resolved: it is dropped, or its handshake ends. */
+  | { type: 'alert-cancel'; alertId: string }
   /**
    * Capture on or off, as the operator set it (architecture.md § Dictation). `restore` marks the hub sending its mic again to a process it
    * connected to, which turns the mic on only if the process has not turned it off on its own since the operator last set it.
@@ -130,7 +145,9 @@ export type VoiceMessage =
    * The operator left the computer, so the process turned the mic off and stopped speech; the mic stays off until the operator turns it on, and
    * a `mic {on: true}` while they are still away is answered with this again (architecture.md § Dictation).
    */
-  | { type: 'mic-off'; reason: AwayReason };
+  | { type: 'mic-off'; reason: AwayReason }
+  /** A spoken alert ended. */
+  | { type: 'alert-done'; alertId: string; sessionId: string; outcome: AlertOutcome };
 
 /** Splits a byte stream into lines; a line over the limit is an error, since the peer is not following the protocol. */
 export class LineReader {
@@ -241,6 +258,20 @@ export function parseHubMessage(line: string): HubMessage | { error: string } {
       return { type: m.type };
     case 'earcon':
       return m.kind === 'needs-you' ? { type: 'earcon', kind: 'needs-you' } : invalid;
+    case 'alert':
+      return isId(m.alertId) &&
+        isId(m.sessionId) &&
+        (ALERT_CAUSES as readonly unknown[]).includes(m.cause) &&
+        isText(m.title) &&
+        (m.persona === null || isText(m.persona)) &&
+        isText(m.detail) &&
+        (TTS_VOICES as readonly unknown[]).includes(m.voice) &&
+        (SPEECH_STYLES as readonly unknown[]).includes(m.style) &&
+        (m.personality === null || isText(m.personality))
+        ? { type: 'alert', alertId: m.alertId, sessionId: m.sessionId, cause: m.cause as AlertCause, title: m.title, persona: m.persona, detail: m.detail, voice: m.voice as TtsVoice, style: m.style as SpeechStyle, personality: m.personality }
+        : invalid;
+    case 'alert-cancel':
+      return isId(m.alertId) ? { type: 'alert-cancel', alertId: m.alertId } : invalid;
     case 'mic':
       return typeof m.on === 'boolean' && (m.restore === undefined || typeof m.restore === 'boolean') ? { type: 'mic', on: m.on, ...(m.restore === true ? { restore: true } : {}) } : invalid;
     case 'typing':

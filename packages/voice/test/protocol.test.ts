@@ -46,4 +46,16 @@ describe('voice protocol', () => {
     expect(parseHubMessage('{"type":"targets","targets":[],"focus":{"sessionId":"s1","via":"window"}}')).toMatchObject({ focus: { sessionId: 's1', via: 'window' } });
     expect(parseHubMessage('{"type":"targets","targets":[],"focus":{"sessionId":"s1","via":"tab"}}')).toEqual({ error: 'Invalid targets message.' });
   });
+
+  it('reads an alert and its cancel, and refuses one with an unknown cause or voice', () => {
+    const alert = { type: 'alert', alertId: 'a1', sessionId: 's1', cause: 'question', title: 'Fix the badge', persona: null, detail: 'Which colour?', voice: 'cedar', style: 'none', personality: null };
+
+    expect(parseHubMessage(JSON.stringify(alert))).toEqual(alert);
+    expect(parseHubMessage(JSON.stringify({ ...alert, persona: 'Tinker', personality: 'Dry.' }))).toMatchObject({ persona: 'Tinker', personality: 'Dry.' });
+    expect(parseHubMessage(JSON.stringify({ ...alert, cause: 'finished' }))).toEqual({ error: 'Invalid alert message.' });
+    expect(parseHubMessage(JSON.stringify({ ...alert, voice: 'nova' }))).toEqual({ error: 'Invalid alert message.' });
+    expect(parseHubMessage(JSON.stringify({ ...alert, detail: 3 }))).toEqual({ error: 'Invalid alert message.' });
+    expect(parseHubMessage('{"type":"alert-cancel","alertId":"a1"}')).toEqual({ type: 'alert-cancel', alertId: 'a1' });
+    expect(parseHubMessage('{"type":"alert-cancel","alertId":""}')).toEqual({ error: 'Invalid alert-cancel message.' });
+  });
 });

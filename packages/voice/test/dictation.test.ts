@@ -186,6 +186,102 @@ const kinds = (sent: Sent[]): string[] =>
   );
 
 describe('Dictation', () => {
+
+  it('hears a spoken alert\'s answer with no target and after the idle timeout, sends none of it to the hub, and returns capture to what it was', async () => {
+    const { dictation, say, quiet, sent, capture, watch, logs, clock } = setup({ settings: { micIdleMinutes: 1 } });
+    const answers: Array<string | null> = [];
+
+    dictation.mic(true);
+    watch.changed!(false, []);
+    await settle();
+    expect([dictation.state, capture.opens, dictation.answerable]).toEqual(['idle-off', 0, true]);
+
+    dictation.listen((text) => answers.push(text));
+    await settle();
+    expect([dictation.state, capture.opens]).toEqual(['listening', 1]);
+    say('yes go ahead', 300);
+    expect(dictation.hearing).toBe(true);
+    quiet(PHRASE_SILENCE_MS + 3_000);
+    expect(answers).toEqual(['yes go ahead']);
+    expect(sent).toEqual([]);
+    expect(logs).toContain('alert answer id1: "yes go ahead"');
+
+    // Stopping listening for an answer stops capture again: there is still no target.
+    dictation.listen(null);
+    expect([dictation.state, capture.stream!.stopped]).toEqual(['idle-off', true]);
+
+    // With a target, after the idle timeout: an answer accepted ends the idle stop, and dictation goes to the session again.
+    dictation.target(1, 's1', null);
+    await settle();
+    clock.advance(60_000);
+    expect(dictation.state).toBe('idle-off');
+    dictation.listen((text) => answers.push(text));
+    await settle();
+    expect(dictation.state).toBe('listening');
+    say('tell me', 200);
+    quiet(PHRASE_SILENCE_MS + 3_000);
+    expect(answers).toEqual(['yes go ahead', 'tell me']);
+    dictation.listen(null, true);
+    await settle();
+    expect(dictation.state).toBe('listening');
+    say('now the session', 200);
+    quiet(PHRASE_SILENCE_MS + 3_000);
+    expect(kinds(sent).at(-1)).toBe('utterance "now the session" final');
+    expect(sent.every((one) => 'sessionId' in one && one.sessionId === 's1')).toBe(true);
+  });
+
+  it('drops an answer still open when listening for one stops, keeps one open across a move of the target, and gives null for one cut short', async () => {
+    const { dictation, say, quiet, sent, listening, watch } = setup();
+    const answers: Array<string | null> = [];
+    const cuts: boolean[] = [];
+
+    await listening();
+    dictation.listen((text, cut) => {
+      answers.push(text);
+      cuts.push(cut);
+    });
+    say('hang on', 200);
+    dictation.listen(null);
+    expect(answers).toEqual([]);
+    expect(sent).toEqual([]);
+
+    dictation.listen((text, cut) => {
+      answers.push(text);
+      cuts.push(cut);
+    });
+    say('sure', 200);
+    dictation.target(2, 's2', 'acme/app');
+    quiet(PHRASE_SILENCE_MS + 3_000);
+    expect(answers).toEqual(['sure']);
+
+    say('wait', 200);
+    watch.changed!(true, ['Teams']);
+    expect(answers).toEqual(['sure', null]);
+    expect(cuts).toEqual([false, true]);
+    expect(dictation.answerable).toBe(false);
+    expect(sent).toEqual([]);
+  });
+
+  it('can hear no answer with the mic off, paused by voice, the composer focused or during an enrolment', async () => {
+    const { dictation, listening, say, quiet } = setup({ voiceprint: fakeVoiceprint() });
+
+    expect(dictation.answerable).toBe(false);
+    await listening();
+    expect(dictation.answerable).toBe(true);
+    dictation.typing(true);
+    expect(dictation.answerable).toBe(false);
+    dictation.typing(false);
+    await settle();
+    say('stop listening', 200);
+    quiet(PHRASE_SILENCE_MS + 3_000);
+    expect(dictation.state).toBe('paused-by-voice');
+    expect(dictation.answerable).toBe(false);
+    dictation.mic(true);
+    expect(dictation.answerable).toBe(true);
+    dictation.enroll('start');
+    expect([dictation.enrolling, dictation.answerable]).toEqual([true, false]);
+  });
+
   it('captures only once the watcher says no other app records, and loads the recogniser with the target repository\'s terms', async () => {
     const { capture, dictation, watch, termsAsked, loads, engine, changed } = setup();
 

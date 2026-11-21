@@ -1,10 +1,11 @@
 import type { VoiceSettings } from '@switchboard/core/settings';
 import { DEFAULT_SETTINGS } from '@switchboard/core/settings';
+import { Alerts } from './alerts.js';
 import { pcm24to16, splitSaid } from './barge.js';
 import type { Dictation } from './dictation.js';
 import type { Output } from './output.js';
 import type { LockEvent, LockWatch } from './lockWatch.js';
-import type { AwayReason, HubMessage, Interrupted, VoiceMessage, VoiceTarget } from './protocol.js';
+import type { AwayReason, HubMessage, Interrupted, VoiceFocus, VoiceMessage, VoiceTarget } from './protocol.js';
 import { PlayedReference } from './reference.js';
 import { Router } from './routing.js';
 import { Speech } from './speech.js';
@@ -56,7 +57,9 @@ export class VoiceService {
   readonly #router: Router;
   readonly #speech: Speech;
   readonly #dictation: Dictation | null;
+  readonly #alerts: Alerts;
   #targets = new Map<string, VoiceTarget>();
+  #focus: VoiceFocus = null;
   /** The audio of the reply playing, kept until there is enough to learn its voice from. */
   #learning: { replyId: string; voice: string; chunks: Buffer[]; bytes: number } | null = null;
   /** Why the operator is away from the computer; while any holds, the mic stays off and nothing plays. */
@@ -74,10 +77,16 @@ export class VoiceService {
         playing: () => {
           const item = this.#speech.playing;
 
+          // An alert line counts too, so words heard over it are held as its possible echo and it never answers itself.
           return item === null ? null : { replyId: item.replyId, text: item.text, voice: item.as?.voice ?? this.#settings.voice };
         },
         playedUntil: () => this.#speech.playedUntil,
         interrupt: () => {
+          // The operator talking over an alert line is its answer: the line plays on, and the utterance names no reply.
+          if (this.#speech.playing?.line !== undefined) {
+            return null;
+          }
+
           const stopped = this.#speech.interrupt();
 
           return stopped === null ? null : { replyId: stopped.item.replyId, ...splitSaid(stopped.item.text, stopped.said) };
@@ -134,7 +143,35 @@ export class VoiceService {
       ...(deps.setTimer === undefined ? {} : { setTimer: deps.setTimer }),
       ...(deps.clearTimer === undefined ? {} : { clearTimer: deps.clearTimer }),
     });
+    this.#alerts = new Alerts({
+      say: (id, text, as, done) => this.#speech.say({ gen: this.#router.gen, replyId: id, sessionId: id, text, tone: null, turn: null, as, line: done }),
+      unsay: (id) => this.#speech.cancel(id),
+      quiet: () => this.#speech.idle,
+      playedUntil: () => this.#speech.playedUntil,
+      hearing: () => this.#dictation?.hearing ?? false,
+      waitReason: () => this.#alertWait(),
+      answerable: () => this.#settings.enabled && this.#away.size === 0 && (this.#dictation?.answerable ?? false),
+      listen: (answer, accepted) => this.#dictation?.listen(answer, accepted),
+      talkHere: (sessionId) => this.#router.talkHere(sessionId),
+      inFocus: (sessionId) => this.#router.target === sessionId || this.#focus?.sessionId === sessionId,
+      settings: () => this.#settings,
+      send: (message) => deps.send(message),
+      now: deps.now,
+      log: deps.log,
+      ...(deps.every === undefined ? {} : { every: deps.every }),
+    });
     this.#lockWatch = deps.watchLock?.((event) => this.#lockChanged(event)) ?? null;
+  }
+
+  /** Why spoken alerts wait now: someone else is talking in the room, another app records, or an enrolment records; null when they may play. */
+  #alertWait(): string | null {
+    const dictation = this.#dictation;
+
+    if (dictation === null) {
+      return null;
+    }
+
+    return dictation.roomHold != null ? 'room hold' : dictation.otherAppRecording ? 'another app is recording' : dictation.enrolling ? 'enrolment' : null;
   }
 
   /** What a newly connected hub is told: the target and the playback state. */
@@ -149,6 +186,7 @@ export class VoiceService {
     switch (message.type) {
       case 'targets':
         this.#targets = new Map(message.targets.map((target) => [target.sessionId, target]));
+        this.#focus = message.focus;
         this.#router.update(message.targets, message.focus);
         return;
       case 'talk-here':
@@ -165,6 +203,10 @@ export class VoiceService {
         // With voice turned off nothing listens, whatever the mic was set to.
         if (!this.#settings.enabled) {
           this.#dictation?.mic(false);
+        }
+
+        if (!this.#settings.enabled || !this.#settings.spokenAlerts) {
+          this.#alerts.cancelAll('spoken alerts are off');
         }
 
         return;
@@ -224,6 +266,17 @@ export class VoiceService {
       case 'earcon':
         this.#speech.earcon();
         return;
+      case 'alert':
+        if (this.#away.size > 0) {
+          this.deps.send({ type: 'alert-done', alertId: message.alertId, sessionId: message.sessionId, outcome: 'cancelled' });
+          return;
+        }
+
+        this.#alerts.add({ alertId: message.alertId, sessionId: message.sessionId, cause: message.cause, title: message.title, persona: message.persona, detail: message.detail, as: { voice: message.voice, style: message.style, personality: message.personality } });
+        return;
+      case 'alert-cancel':
+        this.#alerts.cancel(message.alertId);
+        return;
       default:
         return;
     }
@@ -235,6 +288,7 @@ export class VoiceService {
   }
 
   close(): void {
+    this.#alerts.close();
     this.#lockWatch?.close();
     this.#dictation?.close();
     this.#router.close();
@@ -285,6 +339,7 @@ export class VoiceService {
       this.#dictation?.enroll('cancel');
       this.#dictation?.mic(false);
       this.#speech.mute(true);
+      this.#alerts.cancelAll(AWAY_TEXT[event]);
       this.deps.send({ type: 'mic-off', reason: event });
       return;
     }

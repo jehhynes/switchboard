@@ -267,4 +267,49 @@ describe('Speech', () => {
     expect(speech.interrupt()).toMatchObject({ item: { replyId: 'r4' } });
     expect(speech.interrupt()).toBeNull();
   });
+
+  it('plays an alert line in turn without reporting it to the hub, keeps it through a move of the target, and never lets it skip a reply', async () => {
+    const { tts, speech, states, logs } = setup();
+    const lines: string[] = [];
+    const line = (id: string) => ({ gen: 0, replyId: id, sessionId: id, text: 'Hey Alex? Fix the badge finished.', tone: null, turn: null, line: (state: string) => lines.push(`${id} ${state}`) });
+
+    expect(speech.idle).toBe(true);
+    speech.speak(item('r1', 'm1'));
+    speech.say(line('alert:a1'));
+    speech.speak(item('r2', 'm1'));
+    expect(speech.idle).toBe(false);
+    tts.requests[0]!.finish();
+    await settle();
+    expect(speech.playing?.replyId).toBe('alert:a1');
+
+    // A move stops replies only: the line plays on, and the reply waiting after it is dropped by the move.
+    speech.halt();
+    expect(speech.playing?.replyId).toBe('alert:a1');
+    expect(speech.queued).toHaveLength(0);
+    tts.requests[1]!.audio(4800);
+    await settle();
+    tts.requests[1]!.finish();
+    await settle();
+    expect(lines).toEqual(['alert:a1 played']);
+    expect(states()).toEqual(['r1 played']);
+    expect(logs).toContain('speech: alert line alert:a1 of session alert:a1 played, voice default, 100 ms played, 32 of 32 characters');
+    expect(speech.idle).toBe(true);
+
+    // A reply of an older turn waiting before a line is not skipped for it, and Stop speaking stops a line as a reply.
+    speech.speak(item('r3', 'm2'));
+    speech.speak(item('r4', 'm2'));
+    speech.say(line('alert:a2'));
+    expect(speech.queued.map((one) => one.replyId)).toEqual(['r4', 'alert:a2']);
+    tts.requests[2]!.finish();
+    await settle();
+    expect(speech.playing?.replyId).toBe('r4');
+    speech.stop();
+    expect(lines).toEqual(['alert:a1 played', 'alert:a2 skipped']);
+    expect(states()).toEqual(['r1 played', 'r3 played', 'r4 interrupted']);
+
+    // Muted, a line is skipped.
+    speech.mute(true);
+    speech.say(line('alert:a3'));
+    expect(lines.at(-1)).toBe('alert:a3 skipped');
+  });
 });

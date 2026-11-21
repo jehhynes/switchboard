@@ -363,4 +363,122 @@ describe('VoiceService', () => {
     withCapture.receive({ type: 'enroll', action: 'cancel' });
     expect(calls).toEqual(['start', 'cancel']);
   });
+
+  it('speaks a spoken alert for a session out of focus in its persona\'s voice, moves the voice on an answer and reads the detail, with no reply reports', async () => {
+    const clock = new Clock();
+    const tts = new FakeTts();
+    const output = new FakeOutput();
+    const sent: VoiceMessage[] = [];
+    const calls: string[] = [];
+    let answer: ((text: string | null) => void) | null = null;
+    let lock!: (event: LockEvent) => void;
+    const service = new VoiceService({
+      tts,
+      output,
+      send: (message) => sent.push(message),
+      watchLock: (changed) => {
+        lock = changed;
+        return { close: () => undefined };
+      },
+      dictation: () =>
+        ({
+          state: 'listening',
+          halfDuplex: null,
+          fullDuplex: null,
+          error: null,
+          recognizer: null,
+          roomHold: null,
+          hearing: false,
+          answerable: true,
+          otherAppRecording: false,
+          enrolling: false,
+          listen: (given: ((text: string | null) => void) | null, accepted?: boolean) => {
+            answer = given;
+            calls.push(given === null ? `listen off${accepted === true ? ' accepted' : ''}` : 'listen');
+          },
+          mic: () => undefined,
+          enroll: () => undefined,
+          target: (gen: number, sessionId: string | null) => calls.push(`target ${gen} ${sessionId}`),
+          settingsChanged: () => undefined,
+          reference: () => undefined,
+          close: () => undefined,
+        }) as unknown as import('../src/dictation.js').Dictation,
+      now: clock.now,
+      log: () => undefined,
+      setTimer: clock.setTimer,
+      clearTimer: clock.clearTimer,
+      every: clock.every,
+    });
+    const alert = (alertId: string, sessionId: string) =>
+      service.receive({ type: 'alert', alertId, sessionId, cause: 'turn-finished', title: 'Fix the badge', persona: 'Tinker', detail: 'The badge counts again.', voice: 'cedar', style: 'pair', personality: 'Dry.' });
+    const done = () => sent.filter((one) => one.type === 'alert-done').map((one) => `${(one as { alertId: string }).alertId} ${(one as { outcome: string }).outcome}`);
+
+    service.receive({ type: 'settings', settings: { ...DEFAULT_SETTINGS.voice, enabled: true, operatorName: 'Alex' } });
+    service.receive({ type: 'targets', targets: [{ sessionId: 's1', workItemId: 1 }, { sessionId: 's2', workItemId: 2 }], focus: { sessionId: 's1', via: 'window' } });
+    clock.advance(FOCUS_DEBOUNCE_MS);
+    expect(sent.filter((one) => one.type === 'active').at(-1)).toMatchObject({ sessionId: 's1' });
+
+    // The conversation in focus gets none.
+    alert('a1', 's1');
+    expect(done()).toEqual(['a1 cancelled']);
+
+    alert('a2', 's2');
+    expect(tts.requests.map((one) => [one.text, one.as])).toEqual([['Hey Alex? Tinker finished Fix the badge.', { voice: 'cedar', style: 'pair', personality: 'Dry.' }]]);
+    tts.requests[0]!.audio(4800);
+    tts.requests[0]!.finish();
+    await settle();
+    expect(calls).toEqual(['target 1 s1', 'listen']);
+    answer!('yes');
+    expect(calls.slice(-2)).toEqual(['listen off accepted', 'target 2 s2']);
+    expect(sent.filter((one) => one.type === 'active').at(-1)).toMatchObject({ sessionId: 's2', reason: 'talk-here' });
+    expect(tts.requests[1]!.text).toBe('The badge counts again.');
+    tts.requests[1]!.finish();
+    await settle();
+    expect(done()).toEqual(['a1 cancelled', 'a2 announced']);
+    expect(sent.some((one) => one.type === 'speech' || one.type === 'progress')).toBe(false);
+
+    // While the computer is locked, an alert is dropped at once, and one waiting is dropped by the lock.
+    service.receive({ type: 'speak', gen: 2, replyId: 'r1', sessionId: 's2', text: 'One.', tone: null, turn: 'm1', ...VOICE });
+    alert('a3', 's1');
+    lock('locked');
+    alert('a4', 's1');
+    expect(done()).toEqual(['a1 cancelled', 'a2 announced', 'a3 cancelled', 'a4 cancelled']);
+    lock('unlocked');
+
+    // Turning spoken alerts off drops a waiting one.
+    service.receive({ type: 'speak', gen: 2, replyId: 'r2', sessionId: 's2', text: 'Two.', tone: null, turn: 'm2', ...VOICE });
+    alert('a5', 's1');
+    service.receive({ type: 'settings', settings: { ...DEFAULT_SETTINGS.voice, enabled: true, spokenAlerts: false } });
+    alert('a6', 's1');
+    service.receive({ type: 'alert-cancel', alertId: 'a7' });
+    expect(done().slice(-2)).toEqual(['a5 cancelled', 'a6 cancelled']);
+    service.close();
+  });
+
+  it('shows dictation an alert line as playing, so words over it are held as its echo, and lets talking over it answer without stopping it', async () => {
+    const clock = new Clock();
+    const tts = new FakeTts();
+    let hooks!: { playing(): { replyId: string; text: string; voice: string } | null; interrupt(): unknown };
+    const service = new VoiceService({
+      tts,
+      output: new FakeOutput(),
+      send: () => undefined,
+      dictation: (given) => {
+        hooks = given;
+        return { state: 'listening', halfDuplex: null, fullDuplex: null, error: null, recognizer: null, roomHold: null, hearing: false, answerable: false, otherAppRecording: false, enrolling: false, listen: () => undefined, mic: () => undefined, target: () => undefined, settingsChanged: () => undefined, reference: () => undefined, close: () => undefined } as unknown as import('../src/dictation.js').Dictation;
+      },
+      now: clock.now,
+      log: () => undefined,
+      setTimer: clock.setTimer,
+      clearTimer: clock.clearTimer,
+      every: clock.every,
+    });
+
+    service.receive({ type: 'settings', settings: { ...DEFAULT_SETTINGS.voice, enabled: true, operatorName: 'Alex' } });
+    service.receive({ type: 'alert', alertId: 'a1', sessionId: 's2', cause: 'question', title: 'Fix the badge', persona: null, detail: 'Which colour?', voice: 'cedar', style: 'none', personality: null });
+    expect(hooks.playing()).toEqual({ replyId: 'alert:a1', text: 'Hey Alex? Fix the badge has a question.', voice: 'cedar' });
+    expect(hooks.interrupt()).toBeNull();
+    expect(tts.requests[0]!.cancelled).toBe(false);
+    service.close();
+  });
 });

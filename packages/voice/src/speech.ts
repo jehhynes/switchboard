@@ -20,6 +20,11 @@ export interface SpeechItem {
   turn: string | null;
   /** Its persona's voice, style and personality; the settings' when left out. */
   as?: SpeechVoice;
+  /**
+   * Set on a spoken alert's line (architecture.md § Spoken alerts), which is no reply: what became of it goes to this callback instead of the
+   * hub, a move of the voice target does not stop it, and it never makes a reply of another turn skip.
+   */
+  line?: (state: SpeechState) => void;
 }
 
 export interface SpeechDeps {
@@ -84,6 +89,22 @@ export class Speech {
   /** The replies waiting their turn. */
   get queued(): readonly SpeechItem[] {
     return this.#queue;
+  }
+
+  /** Nothing plays or waits: no reply, alert line or needs-you sound. */
+  get idle(): boolean {
+    return this.#current === null && this.#queue.length === 0 && !this.#chiming && !this.#chimePending;
+  }
+
+  /** A spoken alert's line: it waits for what plays or waits before it, as a reply does; while muted it is `skipped`. */
+  say(item: SpeechItem & { line: (state: SpeechState) => void }): void {
+    if (this.#muted) {
+      this.#unplayed(item, 'skipped');
+      return;
+    }
+
+    this.#queue.push(item);
+    this.#next();
   }
 
   speak(item: SpeechItem): void {
@@ -156,18 +177,25 @@ export class Speech {
     return stopped;
   }
 
-  /** The voice target moved: everything stops and is dropped unreported; the hub marks it stopped by the move. */
+  /**
+   * The voice target moved: every reply stops and is dropped unreported; the hub marks it stopped by the move. An alert line belongs to no target,
+   * so it plays on.
+   */
   halt(): void {
     const current = this.#current;
 
     this.#bargedTurn = null;
 
-    if (current !== null) {
+    if (current !== null && current.item.line === undefined) {
       this.#end(current, null);
     }
 
     for (const item of this.#queue.splice(0)) {
-      this.#logEnd(item, 'stopped-moved', 0, 0);
+      if (item.line === undefined) {
+        this.#logEnd(item, 'stopped-moved', 0, 0);
+      } else {
+        this.#queue.push(item);
+      }
     }
 
     this.#next();
@@ -216,7 +244,7 @@ export class Speech {
     }
 
     // A reply of a newer turn is waiting: this one's moment has passed.
-    if (this.#queue.some((later) => later.turn !== item.turn)) {
+    if (item.line === undefined && this.#queue.some((later) => later.line === undefined && later.turn !== item.turn)) {
       this.#unplayed(item, 'skipped');
       this.#next();
       return;
@@ -327,7 +355,7 @@ export class Speech {
   }
 
   #progress(current: Current): void {
-    if (current.ended || current.startedAt === null) {
+    if (current.ended || current.startedAt === null || current.item.line !== undefined) {
       return;
     }
 
@@ -366,10 +394,18 @@ export class Speech {
   #logEnd(item: SpeechItem, state: SpeechState | 'stopped-moved', playedMs: number, said: number): void {
     const outcome = state === 'stopped-moved' ? 'stopped: voice moved' : state;
 
-    this.deps.log(`speech: reply ${item.replyId} of session ${item.sessionId} ${outcome}, voice ${item.as?.voice ?? 'default'}, ${playedMs} ms played, ${said} of ${item.text.length} characters`);
+    this.deps.log(`speech: ${item.line === undefined ? 'reply' : 'alert line'} ${item.replyId} of session ${item.sessionId} ${outcome}, voice ${item.as?.voice ?? 'default'}, ${playedMs} ms played, ${said} of ${item.text.length} characters`);
   }
 
   #report(item: SpeechItem, state: SpeechState, atMs: number | null, said: number | null): void {
+    if (item.line !== undefined) {
+      if (state !== 'playing') {
+        item.line(state);
+      }
+
+      return;
+    }
+
     this.deps.report({ type: 'speech', gen: item.gen, replyId: item.replyId, sessionId: item.sessionId, state, atMs, said });
   }
 }
