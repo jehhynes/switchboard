@@ -470,7 +470,7 @@
                     </Grid>
                   </Border>
                   <StackPanel IsVisible="{Binding ShowsRows}">
-                    <TextBlock Text="{Binding Empty}" IsVisible="{Binding ShowEmpty}" Classes="empty-state" />
+                    <TextBlock Text="{Binding Empty}" IsVisible="{Binding ShowEmpty}" Classes="empty-state" TextWrapping="Wrap" />
                     <ItemsControl ItemsSource="{Binding Bands}">
                       <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="views:BandViewModel">

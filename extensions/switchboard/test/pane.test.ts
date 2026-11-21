@@ -233,7 +233,7 @@ describe('renderPane (PRD R92)', () => {
     const div = root();
 
     div.innerHTML = renderPane({ items: [], voice: null });
-    expect(div.querySelector('.idle span')!.textContent).toBe('No work item in this window.');
+    expect(div.querySelector('.idle span')!.textContent).toBe('No work item in this window. Open one from the dock to see it here.');
     expect(div.querySelector('button')).toBeNull();
     div.innerHTML = renderPane({ items: [], voice: { icon: 'circle-slash', text: 'Voice not here', tooltip: 'Voice is not in this window.', talkHere: true } });
     expect(div.querySelector('.voice-text')!.textContent).toBe('Voice not here');
@@ -325,10 +325,10 @@ describe('startPane (PRD R92)', () => {
     expect(postMessage).toHaveBeenCalledWith({ type: 'ready' });
 
     window.dispatchEvent(new MessageEvent('message', { data: { type: 'model', model: { items: [], voice: { icon: 'circle-slash', text: 'Voice not here', tooltip: '', talkHere: true } } } }));
-    expect(div.textContent).toContain('No work item in this window.');
+    expect(div.textContent).toContain('No work item in this window. Open one from the dock to see it here.');
 
     window.dispatchEvent(new MessageEvent('message', { data: { type: 'other' } }));
-    expect(div.textContent).toContain('No work item in this window.');
+    expect(div.textContent).toContain('No work item in this window. Open one from the dock to see it here.');
 
     div.querySelector('button')!.click();
     expect(postMessage).toHaveBeenLastCalledWith({ type: 'talk-here' });

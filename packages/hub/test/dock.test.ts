@@ -51,10 +51,10 @@ describe('dockView', () => {
     const view = dockView(snapshot([item(1, { status: 'blocked' }), item(2), item(3, { status: 'unstarted' })], { pool: [pool(4)] }), NOW, W);
 
     expect(view.groups.map((group) => [group.key, group.title, group.empty, group.rows.map((entry) => entry.key)])).toEqual([
-      ['review', 'Ready for review', 'Nothing is ready for review.', []],
+      ['review', 'Ready for review', 'Nothing to review. Finished work appears here for you to check.', []],
       ['blocked', 'Blocked on you', null, ['item:1']],
-      ['progress', 'In progress', 'Nothing is in progress.', ['item:2']],
-      ['unstarted', 'Unstarted', 'Nothing waits to be started.', ['item:3', 'ticket:4']],
+      ['progress', 'In progress', 'Nothing in progress. Work appears here while its session runs.', ['item:2']],
+      ['unstarted', 'Unstarted', 'Nothing to start. New work appears here until its session starts.', ['item:3', 'ticket:4']],
       ['done', 'Done', null, []],
     ]);
     // Blocked on you is left out when empty, as Snoozed is.

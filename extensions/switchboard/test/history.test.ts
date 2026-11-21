@@ -609,7 +609,7 @@ describe('History page', () => {
 
     root.innerHTML = renderHistory(view, { ...EMPTY_UI, query: 'BRANCH' });
     expect(root.querySelectorAll('[data-section="w1"] .entry')).toHaveLength(1);
-    expect(root.querySelector('[data-section="ticket"] .empty')?.textContent).toBe('No entries match the filter.');
+    expect(root.querySelector('[data-section="ticket"] .empty')?.textContent).toBe('No entries match the filter. Clear it to see every entry.');
 
     const states = Array.from({ length: RUN_LIMIT + 1 }, (_, index): Entry => ({ ...view.sections[0]!.entries[5]!, key: `r${index}`, at: T0 + index * 1000 }));
     const long = { ...view, sections: [{ ...view.sections[0]!, entries: states }] };

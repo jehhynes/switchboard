@@ -124,7 +124,7 @@ function sectionHtml(section: Section, ui: HistoryUi, open: boolean): string {
   return `<details class="section" data-section="${escape(section.key)}" data-key="section:${escape(section.key)}"${open ? ' open' : ''}>
 <summary><span class="title">${escape(section.title)}</span>${section.status === '' ? '' : `<span class="status${section.tone === null ? '' : ` tone-${section.tone}`}">${escape(section.status)}</span>`}<span class="count">${escape(count)}</span><span class="facts">${section.facts.map(escape).join(' · ')}</span></summary>
 ${section.prompt === null ? '' : `<div class="prompt"><div class="label">Prompt</div><div class="text">${escape(section.prompt)}</div></div>`}
-${entries.length === 0 ? `<p class="empty">${section.entries.length === 0 ? 'Nothing recorded.' : 'No entries match the filter.'}</p>` : `<ol class="timeline">${timeline(entries, ui)}</ol>`}
+${entries.length === 0 ? `<p class="empty">${section.entries.length === 0 ? 'Nothing recorded yet. Entries appear here as the work runs.' : 'No entries match the filter. Clear it to see every entry.'}</p>` : `<ol class="timeline">${timeline(entries, ui)}</ol>`}
 </details>`;
 }
 

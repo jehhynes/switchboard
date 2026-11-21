@@ -772,12 +772,12 @@ public sealed class MainWindowTests
             .SelectMany((header) => header.GetVisualDescendants().OfType<TextBlock>()).Select((text) => text.Text);
 
         Assert.Equal(["Ready for review", "3", "Blocked on you", "3", "In progress", "0", "Unstarted", "2", "Done", "2"], headerTexts.Where(headers.Contains));
-        Assert.Contains("Nothing is in progress.", texts);
+        Assert.Contains("Nothing in progress. Work appears here while its session runs.", texts);
         Assert.Contains("Issue <7>", texts);
         Assert.Contains("gh 107", texts);
         Assert.Contains("Setup ended without a worktree.", texts);
         Assert.Contains("Answer a question", texts);
-        Assert.DoesNotContain("Nothing waits to be started.", texts);
+        Assert.DoesNotContain("Nothing to start. New work appears here until its session starts.", texts);
     }
 
     [AvaloniaFact]
@@ -1457,7 +1457,7 @@ public sealed class MainWindowTests
     public void Show_EmptyGroup_ShowsItsMessageItalicMutedPaddedAndAlignedWithRowText()
     {
         var (window, _) = Open();
-        var empty = window.GetVisualDescendants().OfType<TextBlock>().Single((text) => text.Text == "Nothing is in progress.");
+        var empty = window.GetVisualDescendants().OfType<TextBlock>().Single((text) => text.Text == "Nothing in progress. Work appears here while its session runs.");
         var rowText = window.GetVisualDescendants().OfType<TextBlock>().First((text) => text.Text == "Issue <7>");
 
         Assert.True(empty.IsEffectivelyVisible);
@@ -1506,6 +1506,10 @@ public sealed class MainWindowTests
         var band = window.GetVisualDescendants().OfType<Border>().First((border) => border.Classes.Contains("band") && border.IsEffectivelyVisible);
         var model = (BandViewModel)band.DataContext!;
         var seen = new List<bool>();
+
+        // The open groups' wrapped empty-state lines can push the band below the list's view.
+        band.BringIntoView();
+        Dispatcher.UIThread.RunJobs();
 
         for (var click = 0; click < 4; click++)
         {

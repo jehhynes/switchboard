@@ -5,7 +5,7 @@
       "key": "review",
       "title": "Ready for review",
       "glyph": "",
-      "empty": "Nothing is ready for review.",
+      "empty": "Nothing to review. Finished work appears here for you to check.",
       "rows": [
         {
           "key": "item:13",
@@ -882,14 +882,14 @@
       "key": "progress",
       "title": "In progress",
       "glyph": "",
-      "empty": "Nothing is in progress.",
+      "empty": "Nothing in progress. Work appears here while its session runs.",
       "rows": []
     },
     {
       "key": "unstarted",
       "title": "Unstarted",
       "glyph": "",
-      "empty": "Nothing waits to be started.",
+      "empty": "Nothing to start. New work appears here until its session starts.",
       "rows": [
         {
           "key": "item:9",

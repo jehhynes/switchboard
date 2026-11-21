@@ -137,7 +137,7 @@ public sealed class HeldSessionsTests
 
         model.Show(Fixtures.View with { Held = null, HeldNote = null });
         Dispatcher.UIThread.RunJobs();
-        Assert.Contains("No held sessions.", Texts(held));
+        Assert.Contains("No held sessions. Code Mode sessions appear here while the terminal holder keeps them.", Texts(held));
         held.Close();
     }
 

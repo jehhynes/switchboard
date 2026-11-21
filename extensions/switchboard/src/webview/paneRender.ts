@@ -38,7 +38,7 @@ export function renderPane(model: PaneModel): string {
       : `<div class="voice" data-key="voice" title="${escape(model.voice.tooltip)}"><span class="codicon codicon-${escape(model.voice.icon)}" aria-hidden="true"></span><span class="voice-text">${escape(model.voice.text)}</span>${model.voice.talkHere ? '<button data-key="talk-here" data-talk-here="" title="Move the voice to this window">Talk here</button>' : ''}</div>`;
 
   if (model.items.length === 0) {
-    return `<div class="idle" data-key="idle"><span>No work item in this window.</span></div>${voice}`;
+    return `<div class="idle" data-key="idle"><span>No work item in this window. Open one from the dock to see it here.</span></div>${voice}`;
   }
 
   return (

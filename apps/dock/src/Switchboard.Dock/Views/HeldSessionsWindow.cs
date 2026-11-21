@@ -22,7 +22,7 @@ public sealed class HeldSessionsWindow : Window
     // Each session's row, kept while the session is held, so a view that changes only its texts keeps its buttons and their focus.
     readonly Dictionary<string, HeldRow> shown = [];
     readonly StackPanel header = Row();
-    readonly TextBlock none = new() { Text = "No held sessions.", Classes = { "muted" } };
+    readonly TextBlock none = new() { Text = "No held sessions. Code Mode sessions appear here while the terminal holder keeps them.", Classes = { "muted" }, TextWrapping = TextWrapping.Wrap };
     readonly TextBlock status = new() { Name = "HeldStatus", TextWrapping = TextWrapping.Wrap, IsVisible = false };
 
     /// <summary>Asks before Stop; tests replace it, as a modal dialog would wait for a click.</summary>

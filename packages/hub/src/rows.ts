@@ -794,7 +794,11 @@ export const GROUP_TITLES: Record<RowGroup, string> = {
 };
 
 /** What an empty group says; Blocked on you is hidden when empty, and Done and Snoozed say nothing. */
-export const GROUP_EMPTY: Partial<Record<RowGroup, string>> = { review: 'Nothing is ready for review.', progress: 'Nothing is in progress.', unstarted: 'Nothing waits to be started.' };
+export const GROUP_EMPTY: Partial<Record<RowGroup, string>> = {
+  review: 'Nothing to review. Finished work appears here for you to check.',
+  progress: 'Nothing in progress. Work appears here while its session runs.',
+  unstarted: 'Nothing to start. New work appears here until its session starts.',
+};
 
 /** A row's `data-row` key: `item:<work item ID>` or `ticket:<pool ticket ID>`. */
 export function rowKeyOf(entry: WorkItemView | PoolView): string {

@@ -348,7 +348,7 @@ describe('the Conversation view page', () => {
     expect(ended).not.toContain('conversation rules');
     expect(ended).toContain('No messages yet.');
     expect(renderConversation(state([], { session: { ...SESSION, conversation: 'none', reason: 'background' } }))).not.toContain('data-action="terminal"');
-    expect(renderConversation({ ...EMPTY_CONVERSATION, connected: true })).toContain('This window has no Switchboard session.');
+    expect(renderConversation({ ...EMPTY_CONVERSATION, connected: true })).toContain('No Switchboard conversation in this window. Open a work item from the dock to work on it here.');
     expect(renderConversation(EMPTY_CONVERSATION)).toContain('Connecting to Switchboard');
     expect(renderConversation(state([reply('r1', T0)], { more: true }))).toContain('data-action="earlier"');
   });
@@ -1436,10 +1436,10 @@ describe('the Status tab', () => {
     // The stage stands in, dimmed, with nothing to open; with neither, a line says so.
     root.innerHTML = renderConversation(state({ status: status('stage-2', 'Reading the inbox code', { fallback: true }) }), new Set(), T0, false, on('status'));
     expect(root.querySelector('.status-tab.fallback .status-body')?.textContent).toBe('Reading the inbox code\n');
-    expect(root.querySelector('.status-tab.fallback .empty')?.textContent).toContain('no status yet');
+    expect(root.querySelector('.status-tab.fallback .empty')?.textContent).toBe("No status yet. Until the session reports one, the work item's stage:");
     expect(root.querySelector('[data-action="status-open"]')).toBeNull();
     root.innerHTML = renderConversation(state(), new Set(), T0, false, on('status'));
-    expect(root.querySelector('.panel > .empty')?.textContent).toBe('The session has posted no status yet. Ask it for one, and its latest shows here.');
+    expect(root.querySelector('.panel > .empty')?.textContent).toBe('No status yet. It appears here when the session reports one.');
   });
 
   it('marks a status that replaced the one before as New for a minute once the Status tab shows it or until it is opened, redraws its age, and posts its tools', () => {
@@ -1731,7 +1731,7 @@ describe('several conversations in a window (architecture.md § Conversation vie
 
     expect(html).toContain('<span class="title" title="support&#60;3&#62;">support&#60;3&#62;</span>');
     expect(html).toContain('data-action="new"');
-    expect(html).toContain('No Switchboard session in this folder yet.');
+    expect(html).toContain('No conversation in this folder yet. Start one with the + button above.');
     expect(html).not.toContain('data-action="picker"');
     expect(html).not.toContain('data-action="terminal"');
 

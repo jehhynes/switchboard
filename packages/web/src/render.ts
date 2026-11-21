@@ -69,7 +69,7 @@ export function ago(at: number, now: number): string {
  */
 export function renderList(groups: readonly PageGroup[], selected: number | null): string {
   if (groups.length === 0) {
-    return '<p class="empty">No work items yet.</p>';
+    return '<p class="empty">No work items yet. They appear here when Switchboard starts one.</p>';
   }
 
   const row = (entry: PageGroup['conversations'][number], hosted: boolean): string => {
@@ -256,7 +256,7 @@ function answerAfter(state: PageState, replyId: string): string | null {
 /** The Conversation tab: why the page cannot talk to the session, earlier messages, and the timeline with its spinner. */
 export function renderTimeline(state: PageState, view: View): string {
   if (state.session === null) {
-    return '<p class="empty">No session has started yet.</p>';
+    return '<p class="empty">No session yet. Messages appear here once the work item\'s session starts.</p>';
   }
 
   const entries = timeline(state.items, state.artifacts);
@@ -299,7 +299,7 @@ export function renderTimeline(state: PageState, view: View): string {
       ? requests.map((request) => renderRequest(request, view.requestValues)).join('')
       : '';
 
-  return `${notice}${earlier}${rows.length === 0 && spinner === '' ? '<p class="empty">No messages yet.</p>' : `<ol class="timeline" aria-label="Conversation">${rows.join('')}${spinner}</ol>`}${asking}`;
+  return `${notice}${earlier}${rows.length === 0 && spinner === '' ? '<p class="empty">No messages yet. They appear here when you or the session write one.</p>' : `<ol class="timeline" aria-label="Conversation">${rows.join('')}${spinner}</ol>`}${asking}`;
 }
 
 /**
@@ -356,7 +356,7 @@ export function renderStatus(state: PageState, view: View, now: number): string 
   const status: StatusView | null = state.status;
 
   if (status === null) {
-    return '<p class="empty">The session has not reported a status yet.</p>';
+    return '<p class="empty">No status yet. It appears here when the session reports one.</p>';
   }
 
   const answer = (): string | null => {
@@ -374,7 +374,7 @@ export function renderStatus(state: PageState, view: View, now: number): string 
 /** The Artifacts tab: the work item's artifacts newest first; a click opens one in the page. */
 export function renderArtifacts(state: PageState, now: number): string {
   if (state.artifacts.length === 0) {
-    return "<p class=\"empty\">The session's artifacts show here as it writes them: plans, reports, comparisons, diagrams, pages and media.</p>";
+    return '<p class="empty">No artifacts yet. They appear here when the session writes one.</p>';
   }
 
   return `<ul class="artifact-list">${state.artifacts.map((artifact) => `<li><button class="artifact-open" type="button" data-action="artifact" data-path="${escape(artifact.path)}" title="${escape(artifact.path)}"><span class="codicon codicon-${artifactIcon(artifact.type)}" aria-hidden="true"></span><span class="artifact-title">${escape(artifact.title)}</span><span class="artifact-kind">${escape(artifact.kind)} · ${ago(artifact.updatedAt, now)}</span></button></li>`).join('')}</ul>`;

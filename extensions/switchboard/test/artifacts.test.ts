@@ -110,7 +110,7 @@ describe('the Artifacts tab', () => {
     expect(root.querySelector('.artifact-kind')?.textContent).toBe('comparison · 6 min ago');
     vi.useRealTimers();
 
-    expect(renderConversation(state(), new Set(), T0, false, { tab: 'artifacts', unopened: new Set() })).toContain("The session's artifacts show here as it writes them");
+    expect(renderConversation(state(), new Set(), T0, false, { tab: 'artifacts', unopened: new Set() })).toContain('No artifacts yet. They appear here when the session writes one.');
   });
 });
 

@@ -485,12 +485,12 @@ export function statusBadge(status: StatusView | null, fresh: boolean): boolean 
  */
 export function renderStatus(status: StatusView | null, fresh: boolean, now: number, card = '', open: ReadonlySet<string> = new Set(), earlier: EarlierStatuses | null = null): string {
   if (status === null) {
-    return '<p class="empty">The session has posted no status yet. Ask it for one, and its latest shows here.</p>';
+    return '<p class="empty">No status yet. It appears here when the session reports one.</p>';
   }
 
   if (status.fallback) {
     return (
-      '<div class="status-tab fallback"><p class="empty">The session has posted no status yet. Until it does, the work item\'s stage:</p>' +
+      '<div class="status-tab fallback"><p class="empty">No status yet. Until the session reports one, the work item\'s stage:</p>' +
       `<div class="status-head"><span class="codicon codicon-pulse" aria-hidden="true"></span><span class="status-label">Stage</span><span class="status-dot" aria-hidden="true">·</span>${age(status.at, now, 'status-age')}</div>` +
       `<div class="status-body body">${renderMarkdown(status.markdown)}</div></div>`
     );
@@ -525,7 +525,7 @@ function earlierStatuses(earlier: EarlierStatuses | null): string {
   const rows = earlier.statuses
     .map((status) => `<li><button type="button" class="earlier-status" data-action="status-earlier" data-status="${escape(status.id)}" title="Open in the Markdown preview"><span class="title">${escape(statusLine(status.markdown) || 'Status')}</span><span class="earlier-time">${escape(EARLIER_TIME.format(status.at))}</span></button></li>`)
     .join('');
-  const foot = earlier.error !== null ? `<p class="question-error" role="alert">${escape(earlier.error)}</p>` : earlier.loading ? '<p class="empty">Loading…</p>' : earlier.statuses.length === 0 ? '<p class="empty">This session has no earlier statuses.</p>' : earlier.more ? '<button type="button" class="earlier-items" data-action="statuses-more">Older statuses</button>' : '';
+  const foot = earlier.error !== null ? `<p class="question-error" role="alert">${escape(earlier.error)}</p>` : earlier.loading ? '<p class="empty">Loading…</p>' : earlier.statuses.length === 0 ? '<p class="empty">No earlier statuses yet. A status moves here when the session reports a newer one.</p>' : earlier.more ? '<button type="button" class="earlier-items" data-action="statuses-more">Older statuses</button>' : '';
 
   return `<section class="earlier-statuses" id="earlier-statuses" aria-label="Earlier statuses"><h3 class="earlier-head">Earlier statuses</h3><ul class="earlier-list">${rows}</ul>${foot}</section>`;
 }
@@ -536,7 +536,7 @@ function earlierStatuses(earlier: EarlierStatuses | null): string {
  */
 export function renderArtifacts(artifacts: readonly ArtifactView[], unopened: ReadonlySet<string>, now: number): string {
   if (artifacts.length === 0) {
-    return "<p class=\"empty\">The session's artifacts show here as it writes them: plans, reports, comparisons, diagrams, pages and media.</p>";
+    return '<p class="empty">No artifacts yet. They appear here when the session writes one.</p>';
   }
 
   const rows = artifacts.map((artifact) => {
@@ -727,7 +727,7 @@ export function turnRow(session: SessionView | null, awaiting: boolean): string 
  */
 export function renderConversation(state: ConversationState, open: ReadonlySet<string> = new Set(), now: number = Date.now(), fresh = false, page: PageView = CONVERSATION_TAB): string {
   if (state.scope === null) {
-    return `<p class="empty">${state.connected ? 'This window has no Switchboard session.' : 'Connecting to Switchboard…'}</p>`;
+    return `<p class="empty">${state.connected ? 'No Switchboard conversation in this window. Open a work item from the dock to work on it here.' : 'Connecting to Switchboard…'}</p>`;
   }
 
   const menu = page.menu ?? null;
@@ -735,7 +735,7 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
 
   // A folder window with no conversation yet: the folder's name and the plus, which starts one (architecture.md § Conversation view).
   if (state.scope.workItemId === null) {
-    return `<header class="header"><span class="title" title="${escape(state.scope.title)}">${escape(state.scope.title)}</span>${plus}</header><p class="empty">No Switchboard session in this folder yet.</p>`;
+    return `<header class="header"><span class="title" title="${escape(state.scope.title)}">${escape(state.scope.title)}</span>${plus}</header><p class="empty">No conversation in this folder yet. Start one with the + button above.</p>`;
   }
 
   const provider = providerMark(state.session?.provider);
@@ -798,7 +798,7 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
   // A Codex session's pending questions and approvals, answered in cards at the end of the conversation.
   const requests = (state.session?.requests ?? []).map((request) => requestCard(request, page.requests ?? NO_REQUESTS)).join('');
   const earlier = state.more ? '<button class="earlier-items" data-action="earlier">Show earlier messages</button>' : '';
-  const body = state.session === null ? '<p class="empty">No session has started yet.</p>' : entries.length === 0 && spinner === '' && requests === '' ? '<p class="empty">No messages yet.</p>' : `<ol class="timeline" tabindex="0" aria-label="Conversation">${entries.join('')}${requests}${spinner}</ol>`;
+  const body = state.session === null ? '<p class="empty">No session yet. Messages appear here once the work item\'s session starts.</p>' : entries.length === 0 && spinner === '' && requests === '' ? '<p class="empty">No messages yet. They appear here when you or the session write one.</p>' : `<ol class="timeline" tabindex="0" aria-label="Conversation">${entries.join('')}${requests}${spinner}</ol>`;
 
   const unopened = state.artifacts.filter((artifact) => page.unopened.has(artifact.path)).length;
   const tabs = renderTabs(page.tab, { conversation: '', status: statusBadge(state.status, fresh) ? 'New' : '', artifacts: unopened === 0 ? '' : String(unopened) });
