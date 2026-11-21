@@ -26,7 +26,7 @@ import { WindowQueue } from './windowQueue.js';
 import { ConversationService, claudePaths, sessionView } from './conversation.js';
 import { CodexConversationAdapter } from './codexConversation.js';
 import { runAppServerDebrief } from '@switchboard/codex';
-import { VoiceControl } from './voice.js';
+import { alertDetail, alertKind, VoiceControl } from './voice.js';
 import { VoiceLink } from './voiceLink.js';
 import { enrolledAt, parseRemote } from '@switchboard/voice';
 import { buildSnapshot } from './snapshot.js';
@@ -376,6 +376,20 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       return session === null ? null : { workItemId: session.workItemId, cwd: session.cwd };
     },
     persona: (sessionId) => personaById(config.settings.voice, store.session(sessionId)?.personaId),
+    // Spoken alerts (architecture.md § Spoken alerts): the work item's title and what an answer reads.
+    alertText: (sessionId, cause) => {
+      const session = store.session(sessionId);
+      const item = session === null ? null : store.workItem(session.workItemId);
+
+      if (session === null || item === null) {
+        return null;
+      }
+
+      const latest = [...store.conversation(sessionId, null, 20, false).items].reverse().find((one) => one.type === 'reply' && one.kind === 'reply' && !one.withdrawn && one.rewrittenBy === null);
+      const reply = latest?.type === 'reply' ? { speak: latest.speak ?? null, opening: latest.opening } : null;
+
+      return { title: store.ticket(item.ticketId)?.title ?? '', detail: alertDetail(cause, session.state === 'waiting', reply, store.latestStatus(sessionId)?.markdown ?? null) };
+    },
     replyChanged: (replyId) => conversation.replyUpdated(replyId),
     notify: (key, type, payload) => conversation.notify(key, type, payload),
     // Dictation (architecture.md § Dictation).
@@ -489,11 +503,19 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       sendDock('needs', { items: needing });
     }
 
+    // Spoken alerts for the live Code Mode sessions' turns and waits; a work item alerted gets no needs-you sound as well (architecture.md § Spoken alerts).
+    const alerted = voice.sessionsChanged(
+      built.snapshot.workItems.flatMap((item) =>
+        item.sessions.flatMap((session) =>
+          session.state !== 'ended' && sessionView(session, true, config.settings.sessions.installHooks).conversation === 'full' ? [{ sessionId: session.id, workItemId: item.id, kind: alertKind(session) }] : [],
+        ),
+      ),
+    );
     // The needs-you sound, for a work item other than the voice target's (architecture.md § Voice).
     const targetSession = voice.target === null ? null : store.session(voice.target);
 
     voice.needsYou(
-      newlyNeedingIds,
+      newlyNeedingIds.filter((id) => !alerted.includes(id)),
       targetSession?.workItemId ?? null,
     );
 

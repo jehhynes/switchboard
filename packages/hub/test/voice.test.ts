@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from '@switchboard/core';
 import type { ConversationReply, Persona, VoiceSettings } from '@switchboard/core';
 import type { HubMessage, VoiceMessage } from '@switchboard/voice';
-import { OPEN_ITS_WINDOW, VOICE_LINGER_MS, VOICE_RESTART_MS, VoiceControl } from '../src/voice.js';
+import { ALERT_DELAY_MS, OPEN_ITS_WINDOW, VOICE_LINGER_MS, VOICE_RESTART_MS, VoiceControl, alertDetail, alertKind } from '../src/voice.js';
 import type { VoiceConnection } from '../src/voiceLink.js';
 import type { WindowScope } from '../src/windows.js';
 
@@ -85,6 +85,7 @@ function setup(patch: Partial<VoiceSettings> = { enabled: true }) {
     full: (sessionId) => full.has(sessionId),
     session: (sessionId) => (['s1', 's2', 's3'].includes(sessionId) ? { workItemId: Number(sessionId.slice(1)), cwd: 'D:/w' } : null),
     persona: (sessionId) => personas.get(sessionId) ?? null,
+    alertText: (sessionId, cause) => (sessionId === 's9' ? null : { title: 'Fix the badge', detail: `${cause} of ${sessionId}` }),
     replyChanged: (id) => void changedReplies.push(`${id} ${replies.get(id)?.spokenState}`),
     notify: (key, type, payload) => void notified.push({ key, type, payload }),
     dockChanged: () => void dockChanges++,
@@ -575,5 +576,130 @@ describe('VoiceControl', () => {
       ['cedar', 'pair', 'Warm.'],
       ['ash', 'deadpan', null],
     ]);
+  });
+});
+
+describe('spoken alerts in the hub', () => {
+  it('reads a session\'s kind from its state and what it waits on', () => {
+    expect(alertKind({ state: 'running', stateDetail: null })).toBe('running');
+    expect(alertKind({ state: 'starting', stateDetail: null })).toBe('running');
+    expect(alertKind({ state: 'idle', stateDetail: null })).toBe('idle');
+    expect(alertKind({ state: 'idle', stateDetail: 'question-card' })).toBe('question');
+    expect(alertKind({ state: 'waiting', stateDetail: null })).toBe('question');
+    expect(alertKind({ state: 'waiting', stateDetail: 'permission-prompt' })).toBe('permission');
+    expect(alertKind({ state: 'waiting', stateDetail: 'start-prompt' })).toBe('other');
+    expect(alertKind({ state: 'failed', stateDetail: 'error' })).toBe('other');
+  });
+
+  it('reads the speak passage, else the reply, else the status, as speech cut at a sentence, and says a wait in the terminal is there', () => {
+    expect(alertDetail('turn-finished', false, { speak: 'The **badge** counts.', opening: 'Long text.' }, 'Status')).toBe('The badge counts.');
+    expect(alertDetail('turn-finished', false, { speak: null, opening: 'Fixed `badge.ts`.\n\nAll green.' }, null)).toBe('Fixed badge.ts. All green.');
+    expect(alertDetail('question', false, { speak: null, opening: ' ' }, '## Which colour?')).toBe('Which colour?');
+    expect(alertDetail('question', false, null, null)).toBe('It is waiting for your answer.');
+    expect(alertDetail('turn-finished', false, null, null)).toBe('It has no reply to read.');
+    expect(alertDetail('question', true, { speak: 'x', opening: 'x' }, null)).toBe('It is waiting for your answer in its terminal.');
+    expect(alertDetail('permission', false, { speak: 'x', opening: 'x' }, null)).toBe('It is waiting for your permission in its terminal.');
+
+    const long = `${'One sentence here. '.repeat(30)}`;
+    const cut = alertDetail('turn-finished', false, { speak: null, opening: long }, null);
+
+    expect(cut.length).toBeLessThanOrEqual(400);
+    expect(cut.endsWith('here.')).toBe(true);
+    expect(alertDetail('turn-finished', false, { speak: null, opening: 'word '.repeat(200) }, null)).toMatch(/word…$/);
+  });
+
+  it('alerts a session out of focus that finishes a turn or starts waiting, after a delay, in its persona\'s voice, and cancels one whose cause passes', async () => {
+    const { control, connections, windows, focus, settle, advance, personas, logs } = setup({ enabled: true, operatorName: 'Alex' });
+    const alerts = () => connections[0]!.sent.filter((message) => message.type === 'alert' || message.type === 'alert-cancel');
+    const run = (kinds: Record<string, 'running' | 'idle' | 'question' | 'permission' | 'other'>) =>
+      control.sessionsChanged(Object.entries(kinds).map(([sessionId, kind]) => ({ sessionId, workItemId: Number(sessionId.slice(1)), kind })));
+
+    windows.set('k1', scope('k1', 1, 's1'));
+    focus('k1');
+    control.update();
+    await settle();
+    personas.set('s2', { id: 'tinker', name: 'Tinker', voice: 'cedar', style: 'pair', personality: 'Dry.' });
+
+    // The first sight of a session waiting alerts nothing.
+    expect(run({ s1: 'running', s2: 'running', s3: 'question' })).toEqual([]);
+
+    // The focused conversation finishing alerts nothing; another does, after the delay.
+    expect(run({ s1: 'idle', s2: 'idle', s3: 'question' })).toEqual([2]);
+    expect(alerts()).toEqual([]);
+    advance(ALERT_DELAY_MS);
+    expect(alerts()).toEqual([
+      { type: 'alert', alertId: expect.any(String), sessionId: 's2', cause: 'turn-finished', title: 'Fix the badge', persona: 'Tinker', detail: 'turn-finished of s2', voice: 'cedar', style: 'pair', personality: 'Dry.' },
+    ]);
+    const first = (alerts()[0] as { alertId: string }).alertId;
+
+    // It starts again: the alert is cancelled. A permission prompt alerts, in the settings' voice without a persona.
+    run({ s1: 'idle', s2: 'running', s3: 'question' });
+    expect(alerts().at(-1)).toEqual({ type: 'alert-cancel', alertId: first });
+    personas.clear();
+    expect(run({ s1: 'idle', s2: 'permission', s3: 'question' })).toEqual([2]);
+    advance(ALERT_DELAY_MS);
+    expect(alerts().at(-1)).toMatchObject({ type: 'alert', sessionId: 's2', cause: 'permission', persona: null, voice: 'marin', style: 'none', personality: null });
+
+    // The process ended it: no cancel goes when its cause passes.
+    const second = (alerts().at(-1) as { alertId: string }).alertId;
+
+    connections[0]!.receive({ type: 'alert-done', alertId: second, sessionId: 's2', outcome: 'unanswered' });
+    expect(logs).toContain(`voice: alert ${second} for session s2 unanswered`);
+    run({ s1: 'idle', s2: 'running', s3: 'question' });
+    expect(alerts().at(-1)).toMatchObject({ type: 'alert', alertId: second });
+
+    // A change within the delay sends nothing, nor does a session that left.
+    expect(run({ s1: 'idle', s2: 'question', s3: 'question' })).toEqual([2]);
+    run({ s1: 'idle', s2: 'running', s3: 'question' });
+    advance(ALERT_DELAY_MS);
+    expect(alerts()).toHaveLength(3);
+    run({ s1: 'idle', s2: 'question', s3: 'question' });
+    run({ s1: 'idle', s3: 'question' });
+    advance(ALERT_DELAY_MS);
+    expect(alerts()).toHaveLength(3);
+
+    // A sent alert of a session that ended is cancelled.
+    run({ s1: 'idle', s2: 'running', s3: 'running' });
+    run({ s1: 'idle', s2: 'running', s3: 'idle' });
+    advance(ALERT_DELAY_MS);
+    const third = (alerts().at(-1) as { alertId: string; sessionId: string });
+    expect(third.sessionId).toBe('s3');
+    run({ s1: 'idle', s2: 'running' });
+    expect(alerts().at(-1)).toEqual({ type: 'alert-cancel', alertId: third.alertId });
+  });
+
+  it('sends no alert for an event turned off, with spoken alerts or voice off, for the voice target, or for a session the store does not have', async () => {
+    const { control, connections, windows, focus, settle, advance, setSettings } = setup({ enabled: true, alertOn: { finished: true, question: false, permission: true } });
+    const alerts = () => connections[0]!.sent.filter((message) => message.type === 'alert');
+    const run = (kinds: Record<string, 'running' | 'idle' | 'question' | 'permission'>) =>
+      control.sessionsChanged(Object.entries(kinds).map(([sessionId, kind]) => ({ sessionId, workItemId: Number(sessionId.slice(1)), kind })));
+
+    windows.set('k1', scope('k1', 1, 's1'));
+    windows.set('k2', scope('k2', 2, 's2'));
+    control.update();
+    await settle();
+    run({ s1: 'running', s2: 'running', s9: 'running' });
+    expect(run({ s1: 'question', s2: 'running', s9: 'idle' })).toEqual([9]);
+    advance(ALERT_DELAY_MS);
+    expect(alerts()).toEqual([]);
+
+    // The voice target gets none, focused or not.
+    connections[0]!.receive({ type: 'active', gen: 1, sessionId: 's2', reason: 'talk-here' });
+    expect(run({ s1: 'question', s2: 'idle', s9: 'idle' })).toEqual([]);
+
+    setSettings({ spokenAlerts: false });
+    expect(run({ s1: 'permission', s2: 'idle', s9: 'idle' })).toEqual([]);
+    setSettings({ spokenAlerts: true, enabled: false });
+    expect(run({ s1: 'running', s2: 'idle', s9: 'idle' })).toEqual([]);
+    expect(run({ s1: 'idle', s2: 'idle', s9: 'idle' })).toEqual([]);
+
+    // Turned off between the change and the send, nothing goes.
+    setSettings({ enabled: true });
+    run({ s1: 'running', s2: 'idle', s9: 'idle' });
+    expect(run({ s1: 'idle', s2: 'idle', s9: 'idle' })).toEqual([1]);
+    setSettings({ spokenAlerts: false });
+    advance(ALERT_DELAY_MS);
+    expect(alerts()).toEqual([]);
+    focus(null);
   });
 });

@@ -1,10 +1,11 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ConversationMessage, ConversationReply, Interruption, Persona, Piece, SpokenState, VoiceSettings } from '@switchboard/core';
+import type { ConversationMessage, ConversationReply, Interruption, Persona, Piece, Session, SpokenState, VoiceSettings } from '@switchboard/core';
+import { PERMISSION_PROMPT, QUESTION_CARD, START_PROMPT } from '@switchboard/core/group';
 import { spokenText } from '@switchboard/conversation';
 import type { HeardTag } from '@switchboard/conversation';
 import { ENROLL_SECONDS } from '@switchboard/voice';
-import type { AwayReason, EnrollmentState, HubMessage, MicState, UtteranceTiming, VoiceMessage, VoiceTarget } from '@switchboard/voice';
+import type { AlertCause, AwayReason, EnrollmentState, HubMessage, MicState, UtteranceTiming, VoiceMessage, VoiceTarget } from '@switchboard/voice';
 import type { VoiceConnection } from './voiceLink.js';
 import type { WindowScope } from './windows.js';
 
@@ -105,6 +106,66 @@ export const VOICE_LINGER_MS = 10 * 60_000;
 export const VOICE_RESTART_MS = 60_000;
 /** What a dock row click answers when its session has no window to talk to. */
 export const OPEN_ITS_WINDOW = 'Open its window to talk to it.';
+/** How long after a session's change an alert for it is sent, so the transcript has given the turn's last reply and a passing state is not called out. */
+export const ALERT_DELAY_MS = 1_500;
+/** The longest detail an alert reads, cut at a sentence. */
+export const ALERT_DETAIL_MAX = 400;
+
+/** What a live session is doing, as spoken alerts read it (architecture.md § Spoken alerts). */
+export type AlertKind = 'running' | 'idle' | 'question' | 'permission' | 'other';
+
+/** A live `full` session's kind, for its alert transitions. */
+export interface AlertSession {
+  sessionId: string;
+  workItemId: number;
+  kind: AlertKind;
+}
+
+/** A session's kind: in a turn, idle after one, waiting on a question (a menu or an unanswered question card) or a permission prompt, or else. */
+export function alertKind(session: Pick<Session, 'state' | 'stateDetail'>): AlertKind {
+  switch (session.state) {
+    case 'starting':
+    case 'running':
+      return 'running';
+    case 'idle':
+      return session.stateDetail === QUESTION_CARD ? 'question' : 'idle';
+    case 'waiting':
+      return session.stateDetail === PERMISSION_PROMPT ? 'permission' : session.stateDetail === START_PROMPT ? 'other' : 'question';
+    default:
+      return 'other';
+  }
+}
+
+/**
+ * What an answered alert reads: a permission prompt or a question menu waits in the session's terminal, which the hub cannot read; otherwise the
+ * latest reply's `[speak]` passage, else its text, else the latest status, as speech without Markdown, cut at a sentence to `ALERT_DETAIL_MAX`.
+ */
+export function alertDetail(cause: AlertCause, inTerminal: boolean, reply: { speak: string | null; opening: string } | null, status: string | null): string {
+  if (cause === 'permission') {
+    return 'It is waiting for your permission in its terminal.';
+  }
+
+  if (cause === 'question' && inTerminal) {
+    return 'It is waiting for your answer in its terminal.';
+  }
+
+  const text = spokenText(reply?.speak ?? (reply !== null && reply.opening.trim() !== '' ? reply.opening : (status ?? '')))
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (text === '') {
+    return cause === 'question' ? 'It is waiting for your answer.' : 'It has no reply to read.';
+  }
+
+  if (text.length <= ALERT_DETAIL_MAX) {
+    return text;
+  }
+
+  const head = text.slice(0, ALERT_DETAIL_MAX);
+  const sentence = Math.max(head.lastIndexOf('. '), head.lastIndexOf('? '), head.lastIndexOf('! '));
+
+  return sentence >= ALERT_DETAIL_MAX / 4 ? head.slice(0, sentence + 1) : `${head.slice(0, head.lastIndexOf(' ') > 0 ? head.lastIndexOf(' ') : ALERT_DETAIL_MAX)}…`;
+}
 
 export interface VoiceControlDeps {
   link: { find(): Promise<VoiceConnection | { error: string }>; connected(): VoiceConnection | null; stop(): void };
@@ -125,6 +186,8 @@ export interface VoiceControlDeps {
   session?(sessionId: string): { workItemId: number; cwd: string | null } | null;
   /** The session's persona, whose voice, style and personality its replies are spoken with; null for the settings' (architecture.md § Personas). */
   persona?(sessionId: string): Persona | null;
+  /** A spoken alert's title, its work item's, and the detail an answer reads (`alertDetail`); null for a session the store does not have. */
+  alertText?(sessionId: string, cause: AlertCause): { title: string; detail: string } | null;
   /** Whether the session is in a turn, when a long dictated message goes in `[partial]` parts. */
   busy?(sessionId: string): boolean;
   /** The text of the session's latest reply, which the turn model reads; null with none. */
@@ -217,6 +280,11 @@ export class VoiceControl {
   /** The live sessions whose terminal window the dock has reported in front, which stay targets while the focus is in another app. */
   readonly #terminals = new Set<string>();
   #enrollment: Omit<EnrollmentView, 'enrolledAt'> = { state: 'idle', endsAt: null, error: null };
+  /** Each live `full` session's kind as last seen, for its alert transitions (architecture.md § Spoken alerts). */
+  readonly #alertKinds = new Map<string, AlertKind>();
+  /** The alert of each session waiting to be sent or sent and not ended, with the kind it was for. */
+  readonly #alerts = new Map<string, { alertId: string; kind: AlertKind; timer: unknown }>();
+  #alertCount = 0;
 
   constructor(private readonly deps: VoiceControlDeps) {}
 
@@ -1027,6 +1095,122 @@ export class VoiceControl {
     return null;
   }
 
+  /**
+   * The live `full` sessions after a change (architecture.md § Spoken alerts): a session that finished a turn, or started waiting on a question
+   * or a permission prompt, gets an alert after `ALERT_DELAY_MS` when spoken alerts are on for that event and it is neither the voice target nor
+   * the focused conversation; one whose kind changes again first, or ends, has its alert cancelled. The first sight of a session alerts nothing.
+   * Returns the work items alerted, which the needs-you sound leaves out.
+   */
+  sessionsChanged(sessions: AlertSession[]): number[] {
+    const alerted: number[] = [];
+    const live = new Set(sessions.map((one) => one.sessionId));
+
+    for (const sessionId of [...this.#alertKinds.keys()].filter((id) => !live.has(id))) {
+      this.#alertKinds.delete(sessionId);
+      this.#cancelAlert(sessionId);
+    }
+
+    for (const one of sessions) {
+      const was = this.#alertKinds.get(one.sessionId);
+
+      this.#alertKinds.set(one.sessionId, one.kind);
+
+      if (was === one.kind) {
+        continue;
+      }
+
+      this.#cancelAlert(one.sessionId);
+
+      const cause: AlertCause | null = one.kind === 'question' || one.kind === 'permission' ? one.kind : one.kind === 'idle' && was === 'running' ? 'turn-finished' : null;
+
+      if (was !== undefined && cause !== null && this.#alerting(one.sessionId, cause)) {
+        const alertId = `${this.deps.now()}-${++this.#alertCount}`;
+        const timer = this.#timer(() => this.#sendAlert(one.sessionId, alertId, cause), ALERT_DELAY_MS);
+
+        this.#alerts.set(one.sessionId, { alertId, kind: one.kind, timer });
+        alerted.push(one.workItemId);
+      }
+    }
+
+    return alerted;
+  }
+
+  /** Whether an alert of this cause goes out for the session now: alerts on for it, a voice process, and the session out of focus. */
+  #alerting(sessionId: string, cause: AlertCause): boolean {
+    const settings = this.deps.settings();
+
+    return (
+      settings.enabled &&
+      settings.spokenAlerts &&
+      settings.alertOn[cause === 'turn-finished' ? 'finished' : cause] &&
+      this.#client !== null &&
+      this.#target.sessionId !== sessionId &&
+      this.#focusedSession() !== sessionId
+    );
+  }
+
+  #sendAlert(sessionId: string, alertId: string, cause: AlertCause): void {
+    const pending = this.#alerts.get(sessionId);
+
+    if (pending?.alertId !== alertId) {
+      return;
+    }
+
+    pending.timer = null;
+
+    const text = this.deps.alertText?.(sessionId, cause) ?? null;
+
+    if (!this.#alerting(sessionId, cause) || text === null) {
+      this.#alerts.delete(sessionId);
+      return;
+    }
+
+    const settings = this.deps.settings();
+    const persona = this.deps.persona?.(sessionId) ?? null;
+
+    this.#client!.send({
+      type: 'alert',
+      alertId,
+      sessionId,
+      cause,
+      title: text.title,
+      persona: persona?.name ?? null,
+      detail: text.detail,
+      voice: persona?.voice ?? settings.voice,
+      style: persona?.style ?? settings.style,
+      personality: persona === null || persona.personality === '' ? null : persona.personality,
+    });
+    this.deps.log(`voice: alert ${alertId} for session ${sessionId}: ${cause}`);
+  }
+
+  /** Drops a session's alert not sent yet, or tells the process to cancel one sent. */
+  #cancelAlert(sessionId: string): void {
+    const alert = this.#alerts.get(sessionId);
+
+    if (alert === undefined) {
+      return;
+    }
+
+    this.#alerts.delete(sessionId);
+
+    if (alert.timer !== null) {
+      if (this.deps.clearTimer === undefined) {
+        clearTimeout(alert.timer as NodeJS.Timeout);
+      } else {
+        this.deps.clearTimer(alert.timer);
+      }
+    } else {
+      this.#client?.send({ type: 'alert-cancel', alertId: alert.alertId });
+    }
+  }
+
+  /** The session of the focused conversation: a session terminal window in front, else the focused window's selected conversation's. */
+  #focusedSession(): string | null {
+    const focused = this.deps.focusedWindow();
+
+    return this.#terminalFocus ?? (focused === null ? null : (this.deps.windows.scope(focused)?.sessionId ?? null));
+  }
+
   /** A work item other than the voice target's started needing the operator: the process plays the needs-you sound. */
   needsYou(workItemIds: number[], targetWorkItem: number | null): void {
     const settings = this.deps.settings();
@@ -1209,6 +1393,13 @@ export class VoiceControl {
         this.deps.log(`voice: mic off: ${MIC_OFF_TEXT[message.reason]}`);
         this.viewsChanged();
         return;
+      case 'alert-done':
+        if (this.#alerts.get(message.sessionId)?.alertId === message.alertId) {
+          this.#alerts.delete(message.sessionId);
+        }
+
+        this.deps.log(`voice: alert ${message.alertId} for session ${message.sessionId} ${message.outcome}`);
+        return;
       case 'command':
         // A spoken command goes to no session: it is only logged (architecture.md § Dictation).
         this.deps.log(`voice: spoken command ${message.command} ("${message.text}")`);
@@ -1355,6 +1546,14 @@ export class VoiceControl {
     this.#offered.clear();
     this.#playing.clear();
     this.#heard.clear();
+
+    // Its alerts are gone with it; one not sent yet goes to the next process.
+    for (const [sessionId, alert] of [...this.#alerts]) {
+      if (alert.timer === null) {
+        this.#alerts.delete(sessionId);
+      }
+    }
+
     this.#dropTerminalDrafts('the voice process stopped');
     this.#stopFlush();
     this.#mic = 'off';
