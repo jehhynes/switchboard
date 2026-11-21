@@ -92,7 +92,7 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 | M5 | The selected row's stripe is full height | MainWindow.axaml:188-190 | Present | page.css:43 |
 | M6 | Selected row in the selection colour | MainWindow.axaml:181-183 | Present | `.row.selected` page.css; the focus ring shows only on a keyboard focus (`button:focus-visible`), as the dock's |
 | M7 | Row hover background | MainWindow.axaml:178-180 | Present | page.css:40 |
-| M8 | Colours from VS Code's Light Modern or Dark Modern, chosen by the dock theme setting (system, VS Code, light, dark) | `ApplyTheme` MainWindow.axaml.cs:1938 | Partly | Dark Modern only (theme.css) |
+| M8 | Colours from VS Code's Light Modern or Dark Modern, chosen by the dock theme setting (system, VS Code, light, dark) | `ApplyTheme` MainWindow.axaml.cs:1938 | Differs | The operator's decision: the page follows the operating system's light or dark setting live (`prefers-color-scheme` in theme.css), with no theme setting and no VS Code choice; its light error, warning and passed colours are VS Code's Light High Contrast values for contrast, darker than the dock's Light Modern ones |
 | M9 | The list's scroll bar shows only while the pointer is over the list | MainWindow.axaml:69-74 | Differs | The operator's decision: the browser's own scrollbar, always shown, thin and in the theme's slider colours (page.css), since a page-drawn overlay thumb dragged and resized badly |
 
 ## Selection and click

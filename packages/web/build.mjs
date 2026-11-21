@@ -24,9 +24,13 @@ const bundle = async (entry) =>
   ).outputFiles[0].text;
 const codicons = dirname(require.resolve('@vscode/codicons/dist/codicon.css'));
 const theme = readFileSync('src/theme.css', 'utf8');
-// The installed page's window and splash take the colour of the page's side bar and header.
-const themeColor = /--vscode-sideBar-background:\s*(#[0-9a-fA-F]{6})/.exec(theme)[1];
-const html = (file) => readFileSync(file, 'utf8').replaceAll('{{themeColor}}', themeColor);
+// The installed page's window and splash take the colour of the page's side bar and header: Dark Modern's, the default, and in the pages'
+// theme-color also Light Modern's while the operating system is set to light. A manifest has no light variant.
+const sideBar = (css) => /--vscode-sideBar-background:\s*(#[0-9a-fA-F]{6})/.exec(css)[1];
+const lightStart = theme.indexOf('@media (prefers-color-scheme: light)');
+const themeColor = sideBar(theme.slice(0, lightStart));
+const themeColorLight = sideBar(theme.slice(lightStart));
+const html = (file) => readFileSync(file, 'utf8').replaceAll('{{themeColorLight}}', themeColorLight).replaceAll('{{themeColor}}', themeColor);
 const text = (mime, body) => ({ mime, body, base64: false });
 const binary = (mime, file) => ({ mime, body: readFileSync(file).toString('base64'), base64: true });
 const manifest = {

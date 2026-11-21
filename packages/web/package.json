@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "The web page the hub serves (architecture.md § Web page): its own front end for the conversation API, drawn with a copy of VS Code's Dark Modern theme. Its build carries the page's files as strings, which the hub serves.",
+  "description": "The web page the hub serves (architecture.md § Web page): its own front end for the conversation API, drawn with copies of VS Code's Dark Modern and Light Modern themes, following the operating system's setting. Its build carries the page's files as strings, which the hub serves.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

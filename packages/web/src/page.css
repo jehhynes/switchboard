@@ -1,5 +1,11 @@
 /* The web page (architecture.md § Web page), drawn as the VS Code Conversation view is, from the theme copy's variables. */
 html, body { height: 100%; margin: 0; }
+/* The page's own colours, which VS Code's theme has no variable for: the dock's in Dark Modern and, with the operating system's light setting,
+   in Light Modern (theme.css). The composer's fill in light follows the Conversation view's light themes (composer.css). */
+:root { --sb-github: #f0f6fc; --sb-pull-request: #a371f7; --sb-source-off: #7a7a7a; }
+@media (prefers-color-scheme: light) {
+  :root { --sb-github: #1f2328; --sb-pull-request: #8250df; --sb-source-off: #8a8a8a; --sb-composer-background: color-mix(in srgb, var(--vscode-input-background) 50%, var(--vscode-sideBar-background)); }
+}
 body { color: var(--vscode-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); line-height: 1.5; }
 /* The installed app's title bar takes the page's colour, so a line along the page's top edge marks where the title bar ends. */
 @media (display-mode: standalone) { body::before { content: ''; position: fixed; inset: 0 0 auto 0; z-index: 1000; height: 1px; background: var(--vscode-titleBar-border, var(--vscode-widget-border)); pointer-events: none; } }
@@ -33,10 +39,10 @@ button:focus-visible, a:focus-visible, .tab:focus-visible { outline: 1px solid v
 .list-header button.icon { flex: none; justify-content: center; min-width: 26px; height: 26px; }
 .source-logo { display: block; width: 16px; height: 16px; }
 .source-logo.forum { width: 24px; }
-svg.source-logo.github { color: #f0f6fc; }
+svg.source-logo.github { color: var(--sb-github); }
 svg.source-logo.zoho { color: #089949; }
 svg.source-logo.forum { color: #57ae57; }
-.source-logo.off, svg.source-logo.off { color: #7a7a7a; }
+.source-logo.off, svg.source-logo.off { color: var(--sb-source-off); }
 .header-separator { flex: none; width: 1px; height: 16px; margin: 0 4px; background: var(--vscode-panel-border); }
 /* The search box and its range under the title row while the search is open (PRD R63). */
 .search-row { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 0 8px 8px 8px; }
@@ -128,7 +134,7 @@ svg.source-logo.forum { color: #57ae57; }
 .row-line .pill.ticket.source-github, .row-line .pill.link.issue { border-color: var(--vscode-foreground); background: color-mix(in srgb, var(--vscode-foreground) 18%, transparent); }
 .row-line .pill.ticket.source-zoho { border-color: #089949; background: color-mix(in srgb, #089949 18%, transparent); }
 .row-line .pill.ticket.source-forum { border-color: #57ae57; background: color-mix(in srgb, #57ae57 18%, transparent); }
-.row-line .pill.link.pr { border-color: #a371f7; background: color-mix(in srgb, #a371f7 18%, transparent); }
+.row-line .pill.link.pr { border-color: var(--sb-pull-request); background: color-mix(in srgb, var(--sb-pull-request) 18%, transparent); }
 .row-line .pill.link.mentioned { border-color: var(--vscode-descriptionForeground); background: color-mix(in srgb, var(--vscode-foreground) 12%, transparent); color: var(--vscode-descriptionForeground); }
 .row-line .pill.returned { border-color: var(--vscode-editorWarning-foreground); background: color-mix(in srgb, var(--vscode-editorWarning-foreground) 18%, transparent); color: var(--vscode-editorWarning-foreground); }
 /* Line 3: the mark, then the details, muted unless they warn or fail, each cut with an ellipsis, with a muted · between them. */
@@ -535,7 +541,7 @@ button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }
 /* The console (architecture.md § Web page): the held session's terminal, with a bar that says whether it watches or types. It fills its pane and
    nothing round it scrolls: the font fits the screen to the pane, so xterm.js's scrollback is the only scroller. */
 .scroll.console-pane { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
-.console { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: #181818; outline: 1px solid transparent; outline-offset: -1px; }
+.console { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--vscode-panel-background); outline: 1px solid transparent; outline-offset: -1px; }
 .console.typing { outline-color: var(--vscode-focusBorder); }
 .console > .empty { padding: 20px; }
 /* One line, so the state's longer text never changes the screen's height and resizes the session again. */

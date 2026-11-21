@@ -126,6 +126,7 @@ describe('the offline page', () => {
 describe('the installable page', () => {
   const theme = PAGE_ASSETS['theme.css']!.body;
   const sideBar = /--vscode-sideBar-background:\s*(#[0-9a-fA-F]{6})/.exec(theme)![1];
+  const lightSideBar = /@media \(prefers-color-scheme: light\)[^@]*--vscode-sideBar-background:\s*(#[0-9a-fA-F]{6})/.exec(theme)![1];
 
   /** A PNG's width and height from its header. */
   const size = (name: string): [number, number] => {
@@ -189,16 +190,19 @@ describe('the installable page', () => {
     expect(own).not.toMatch(/(^|\n)\.menu \{|align-right/);
   });
 
-  it('links the manifest from the page and the offline page, with the theme colour, and serves every file the worker keeps', () => {
+  it('links the manifest from the page and the offline page, with the theme colour, light first while the system is light, and serves every file the worker keeps', () => {
     for (const name of ['index.html', 'offline.html']) {
       const html = PAGE_ASSETS[name]!.body;
 
       expect(html).toContain('<link rel="manifest" href="manifest.webmanifest">');
-      expect(html).toContain(`<meta name="theme-color" content="${sideBar}">`);
-      expect(html).not.toContain('{{themeColor}}');
+      // A browser takes the first theme-color whose media matches, so the light one comes first and Dark Modern's is the fallback.
+      expect(html).toContain(`<meta name="theme-color" media="(prefers-color-scheme: light)" content="${lightSideBar}">\n<meta name="theme-color" content="${sideBar}">`);
+      expect(html).not.toMatch(/\{\{themeColor(Light)?\}\}/);
     }
 
     expect(PAGE_ASSETS['offline.html']!.body).toContain('Switchboard is not running');
+    expect(PAGE_ASSETS['offline.html']!.body).toMatch(new RegExp(`@media \\(prefers-color-scheme: light\\) \\{[^@]*background: ${lightSideBar}; color: #3b3b3b;`));
+    expect(lightSideBar).not.toBe(sideBar);
     expect(SHELL.map((path) => path.slice('/page/'.length)).filter((name) => PAGE_ASSETS[name] === undefined)).toEqual([]);
     expect(PAGE_ASSETS['sw.js']!.mime).toBe('text/javascript; charset=utf-8');
   });

@@ -3,16 +3,23 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="{{themeColorLight}}">
 <meta name="theme-color" content="{{themeColor}}">
 <title>Switchboard</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
 <style>
+:root { color-scheme: dark; }
 body { margin: 0; display: grid; place-items: center; min-height: 100vh; background: {{themeColor}}; color: #cccccc; font: 14px system-ui, sans-serif; }
 main { max-width: 28rem; padding: 24px; text-align: center; }
 img { width: 64px; height: 64px; }
 h1 { font-size: 18px; font-weight: 600; margin: 16px 0 8px; }
 p { margin: 0; color: #9d9d9d; }
+@media (prefers-color-scheme: light) {
+  :root { color-scheme: light; }
+  body { background: {{themeColorLight}}; color: #3b3b3b; }
+  p { color: #3b3b3b; }
+}
 </style>
 </head>
 <body>
