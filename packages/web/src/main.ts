@@ -101,6 +101,8 @@ export interface PageDeps {
   reload?(): void;
   /** Opens a link in a new browser tab; `window.open` without an opener or referrer when left out. */
   openUrl?(url: string): void;
+  /** Whether the page is this computer's, which may pair devices; read from the address's host name when left out. */
+  local?: boolean;
   /** Whether the page runs as the installed app, whose links the hub opens in the default browser; read from `display-mode` when left out. */
   standalone?(): boolean;
   /**
@@ -248,7 +250,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
   };
   // The list's header: the dock header's source icons, search and More Actions (architecture.md § Web page).
-  const header = listHeader(root.querySelector<HTMLElement>('.side-head')!, list, root.querySelector<HTMLElement>('#list-sheet')!, { post: (name, body) => post(name, body), redraw: () => draw(), select: (workItemId) => void select(workItemId), now: () => deps.now() });
+  const header = listHeader(root.querySelector<HTMLElement>('.side-head')!, list, root.querySelector<HTMLElement>('#list-sheet')!, { post: (name, body) => post(name, body), redraw: () => draw(), select: (workItemId) => void select(workItemId), now: () => deps.now(), local: deps.local ?? ['127.0.0.1', 'localhost'].includes(location.hostname) });
   /** A command for the conversation the page shows, refused by the hub when the page has moved on since. */
   const command = (name: string, body: Record<string, unknown> = {}): Promise<Answer> => post(name, { scopeGen: state.scope?.scopeGen ?? -1, ...body });
 

@@ -27,6 +27,7 @@
     "jsdom": "^29.1.1",
     "markdown-it": "^14.3.3",
     "preact": "^11.2.0",
+    "qrcode-generator": "^2.0.4",
     "typescript": "^5.9.0",
     "vitest": "^3.2.7"
   },

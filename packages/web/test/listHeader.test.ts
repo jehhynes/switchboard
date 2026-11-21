@@ -52,7 +52,7 @@ describe('the list header (architecture.md § Web page)', () => {
     vi.useRealTimers();
   });
 
-  const start = () => {
+  const start = (local?: boolean) => {
     const fetch = vi.fn(async (url: string, init?: { body?: string }) => {
       posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) });
 
@@ -63,7 +63,7 @@ describe('the list header (architecture.md § Web page)', () => {
 
       return { status: answer.status, ok: answer.status === 200, json: async () => answer.body, text: async () => '' } as unknown as Response;
     });
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000 });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, ...(local === undefined ? {} : { local }) });
 
     return { page, source: FakeSource.last! };
   };
@@ -306,7 +306,7 @@ describe('the list header (architecture.md § Web page)', () => {
     hello(source);
     click('.more-actions');
     expect(root.querySelector('.more-actions')?.getAttribute('aria-expanded')).toBe('true');
-    expect(menuRows()).toEqual(['gh', 'desk', 'help', '-', 'New ad-hoc session…', 'New conversation in a folder…', '-', 'Held sessions', 'Ticket volume report', '-', 'Refresh sources', 'Show hub log', '-', 'Open Settings']);
+    expect(menuRows()).toEqual(['gh', 'desk', 'help', '-', 'New ad-hoc session…', 'New conversation in a folder…', '-', 'Held sessions', 'Ticket volume report', '-', 'Refresh sources', 'Show hub log', '-', 'Pair a device…', 'Open Settings']);
     // The source rows are the phone's: page.css hides them from 768 px, where the icons are in the header.
     expect([...root.querySelectorAll('.more-menu .more-source')]).toHaveLength(4);
     expect(root.querySelector('.more-menu [data-source="help"]')?.getAttribute('aria-checked')).toBe('false');
@@ -385,6 +385,58 @@ describe('the list header (architecture.md § Web page)', () => {
     // The notes leave with the hub's next list that has none.
     source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header() });
     expect(root.querySelector('.list-note')).toBeNull();
+  });
+
+  it('pairs a device from this computer with a QR code and a code, lists the signed-in devices and signs one out, and offers none of it on a paired device (architecture.md § Remote access)', async () => {
+    const remote = start(false);
+
+    hello(remote.source);
+    click('.more-actions');
+    expect(menuRows()).not.toContain('Pair a device…');
+    remote.page.close();
+
+    const { page, source } = start(true);
+    const pairing = { url: `https://pc.tail.ts.net/page?t=${'a'.repeat(64)}`, code: 'ABCD-EFGH', host: 'pc.tail.ts.net', expiresAt: 10_000 + 5 * 60_000 };
+    const phone = { id: '0123abcd', label: 'Android · Chrome', host: 'pc.tail.ts.net', login: 'alex@example.com', createdAt: 1, usedAt: 1_700_000_000_000, current: false };
+    const own = { id: '89abcdef', label: 'Windows · Edge', host: null, login: null, createdAt: 1, usedAt: 1_700_000_000_000, current: true };
+
+    answers['/page-pair'] = { status: 200, body: pairing };
+    answers['/page-devices'] = { status: 200, body: { devices: [phone, own] } };
+    hello(source);
+    click('.more-actions');
+    click('.more-menu [data-action="list-devices"]');
+    await flush();
+    await flush();
+
+    const sheet = root.querySelector('#list-sheet .sheet')!;
+
+    expect(sheet.querySelector('.sheet-title')?.textContent).toBe('Pair a device');
+    expect(sheet.querySelector('svg.pair-qr path')?.getAttribute('d')).toMatch(/^M\d+ \d+h1v1h-1z/);
+    expect(sheet.querySelector('.pair-code')?.textContent).toBe('ABCD-EFGH');
+    expect(sheet.textContent).toContain('open https://pc.tail.ts.net/ on it and type this code');
+    expect(sheet.textContent).toContain('It works once, for 5 more minutes.');
+    expect([...sheet.querySelectorAll('.device-name')].map((one) => one.textContent)).toEqual(['Android · Chrome', 'Windows · Edge (this browser)']);
+    expect(sheet.querySelector('.device-detail')?.textContent).toMatch(/^pc\.tail\.ts\.net as alex@example\.com · last used /);
+    expect([...sheet.querySelectorAll('.device-detail')][1]?.textContent).toMatch(/^This computer · last used /);
+
+    // Sign out posts the device's ID and lists the devices again.
+    answers['/page-devices'] = { status: 200, body: { devices: [own] } };
+    click('#list-sheet [data-action="list-device-revoke"][data-id="0123abcd"]');
+    await flush();
+    await flush();
+    expect(posts.some((one) => one.url === '/v1/conversation/page-device-revoke' && one.body['id'] === '0123abcd')).toBe(true);
+    expect(root.querySelectorAll('#list-sheet .device')).toHaveLength(1);
+
+    // New code asks again; a refusal says why in the sheet and draws no code.
+    answers['/page-pair'] = { status: 409, body: { error: 'Pairing a device needs remote access.' } };
+    click('#list-sheet [data-action="list-sheet-go"]');
+    await flush();
+    await flush();
+    expect(root.querySelector('#list-sheet .sheet-error')?.textContent).toBe('Pairing a device needs remote access.');
+    expect(root.querySelector('#list-sheet .pair-qr')).toBeNull();
+    click('#list-sheet .sheet-button.primary');
+    expect(root.querySelector('#list-sheet .sheet')).toBeNull();
+    page.close();
   });
 
   it('shows the holder notice under the header, asks before Restart and resume, and shows the result until dismissed (architecture.md § Restarting the holder)', async () => {

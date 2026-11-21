@@ -1,4 +1,5 @@
 import type { ComponentChildren, VNode } from 'preact';
+import qrcode from 'qrcode-generator';
 import { mount } from './island.js';
 import type { PageGroup, PageHeader, PageRow, SourceGroup } from './types.js';
 
@@ -12,6 +13,26 @@ export interface ListHeaderDeps {
   /** Opens a work item's conversation, as a click on its row does. */
   select(workItemId: number): void;
   now(): number;
+  /** Whether the page is the one on this computer, which may pair devices (architecture.md § Remote access); false on a paired device. */
+  local?: boolean;
+}
+
+/** A pairing link the hub gave out (architecture.md § Remote access): its URL, its code and when both stop working. */
+export interface Pairing {
+  url: string;
+  code: string;
+  host: string;
+  expiresAt: number;
+}
+
+/** A signed-in device as the hub lists it. */
+export interface Device {
+  id: string;
+  label: string;
+  host: string | null;
+  login: string | null;
+  usedAt: number;
+  current: boolean;
 }
 
 /** The search box searches once it holds this many characters (PRD R63), as the dock's. */
@@ -161,7 +182,8 @@ export type HeaderSheet =
   | { kind: 'adhoc'; opId: string; schedule: string; repo: string; provider: string; providerChosen: boolean; prompt: string; start: boolean; providerNote: string | null; busy: boolean; error: string | null }
   | { kind: 'folder'; opId: string; folder: string; provider: string; providerChosen: boolean; installed: string[] | null; busy: boolean; error: string | null }
   | { kind: 'later'; title: string }
-  | { kind: 'holder'; busy: boolean; error: string | null };
+  | { kind: 'holder'; busy: boolean; error: string | null }
+  | { kind: 'devices'; pairing: Pairing | null; devices: Device[] | null; busy: boolean; error: string | null };
 
 /**
  * What the header has open: a source kind's menu (`source:<kind>`), the range menu (`range`), More Actions (`more`), or nothing; and a sheet over
@@ -175,6 +197,8 @@ export interface HeaderView {
   notice: string | null;
   /** The `at` of the holder restart result dismissed last, which stays hidden. */
   holderDismissed?: number | null;
+  /** Whether More Actions offers Pair a device: only on this computer's page. */
+  local?: boolean;
   /** The last work item that started needing the operator, with the dock's message, shown until it times out or is dismissed (PRD R65). */
   needs?: { workItemId: number; message: string } | null;
 }
@@ -312,7 +336,7 @@ export function renderListHeader(header: PageHeader | null, view: HeaderView): V
           <button type="button" class="icon more-actions" data-action="list-more" aria-haspopup="menu" aria-expanded={view.menu === 'more'} title="More Actions…" aria-label="More Actions">
             <span class="codicon codicon-ellipsis" aria-hidden="true"></span>
           </button>
-          {view.menu === 'more' ? renderMoreMenu(header) : null}
+          {view.menu === 'more' ? renderMoreMenu(header, view.local === true) : null}
         </div>
       </div>
       {/* The box and the searched range under the title row while the search is open, as the dock's. */}
@@ -377,10 +401,10 @@ const Separator = ({ classes = 'menu-separator' }: { classes?: string }) => <li 
 
 /**
  * More Actions (PRD R71), in the dock's groups: New ad-hoc session… and New conversation in a folder…; Held sessions, and Ticket volume
- * report with a Zoho or Forum source; Refresh sources and Show hub log; then Open Settings. On a phone, where the header has no room for them,
+ * report with a Zoho or Forum source; Refresh sources and Show hub log; then Pair a device, on this computer's page only, and Open Settings. On a phone, where the header has no room for them,
  * the source icons come first as a check row per source.
  */
-export function renderMoreMenu(header: PageHeader | null): VNode {
+export function renderMoreMenu(header: PageHeader | null, local = false): VNode {
   const sources = (header?.sources ?? []).flatMap((group) =>
     group.sources.map((one) => (
       <li role="none" class="more-source">
@@ -406,6 +430,7 @@ export function renderMoreMenu(header: PageHeader | null): VNode {
       <MoreRow action="list-poll" icon="refresh" label="Refresh sources" />
       <MoreRow action="list-later-log" icon="output" label="Show hub log" />
       <Separator />
+      {local ? <MoreRow action="list-devices" icon="device-mobile" label="Pair a device…" /> : null}
       <MoreRow action="list-later-settings" icon="settings-gear" label="Open Settings" />
     </ul>
   );
@@ -413,6 +438,102 @@ export function renderMoreMenu(header: PageHeader | null): VNode {
 
 /** The dock windows More Actions opens that the page does not have yet, by their row's action. */
 export const LATER: Record<string, string> = { 'list-later-held': 'Held sessions', 'list-later-volume': 'Ticket volume report', 'list-later-log': 'Show hub log', 'list-later-settings': 'Open Settings' };
+
+/** A QR code of `text` as an SVG of dark modules on a light square with a quiet zone of 4 modules, which phone cameras read in either theme. */
+export function QrCode({ text }: { text: string }) {
+  const qr = qrcode(0, 'M');
+
+  qr.addData(text);
+  qr.make();
+
+  const count = qr.getModuleCount();
+  const size = count + 8;
+  let path = '';
+
+  for (let row = 0; row < count; row++) {
+    for (let col = 0; col < count; col++) {
+      if (qr.isDark(row, col)) {
+        path += `M${col + 4} ${row + 4}h1v1h-1z`;
+      }
+    }
+  }
+
+  return (
+    <svg class="pair-qr" viewBox={`0 0 ${size} ${size}`} role="img" aria-label="QR code of the pairing link" shape-rendering="crispEdges">
+      <rect width={size} height={size} fill="#ffffff" />
+      <path d={path} fill="#000000" />
+    </svg>
+  );
+}
+
+/** When a device was last used, as the device list says it. */
+function usedText(at: number): string {
+  return new Date(at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+/**
+ * Pair a device (architecture.md § Remote access): the pairing link's QR code and code, how long they work, and the signed-in devices, each
+ * with Sign out.
+ */
+function DevicesSheet({ sheet, now }: { sheet: Extract<HeaderSheet, { kind: 'devices' }>; now: number }) {
+  const pairing = sheet.pairing;
+  const minutes = pairing === null ? 0 : Math.max(0, Math.ceil((pairing.expiresAt - now) / 60_000));
+
+  return (
+    <Frame
+      title="Pair a device"
+      buttons={
+        <>
+          <button type="button" class="sheet-button secondary" data-action="list-sheet-go" disabled={sheet.busy}>
+            New code
+          </button>
+          <button type="button" class="sheet-button primary" data-action="list-sheet-cancel">
+            Close
+          </button>
+        </>
+      }
+    >
+      {pairing === null ? (
+        sheet.busy ? <p class="sheet-detail">Asking Switchboard for a code…</p> : null
+      ) : (
+        <div class="pair" data-key="pair">
+          <QrCode text={pairing.url} />
+          <p class="sheet-detail">
+            Scan this with the device's camera, or open <strong>https://{pairing.host}/</strong> on it and type this code:
+          </p>
+          <p class="pair-code">{pairing.code}</p>
+          <p class="sheet-detail">{minutes > 0 ? `It works once, for ${minutes === 1 ? '1 more minute' : `${minutes} more minutes`}.` : 'It has expired. Choose New code.'}</p>
+        </div>
+      )}
+      {sheet.error === null ? null : <p class="sheet-error" role="alert">{sheet.error}</p>}
+      <h3 class="sheet-label">Signed-in devices</h3>
+      {sheet.devices === null ? (
+        <p class="sheet-detail">Loading…</p>
+      ) : sheet.devices.length === 0 ? (
+        <p class="sheet-detail">No device is signed in.</p>
+      ) : (
+        <ul class="device-list">
+          {sheet.devices.map((one) => (
+            <li class="device" data-key={`device-${one.id}`}>
+              <span class="device-text">
+                <span class="device-name">
+                  {one.label || 'Unknown device'}
+                  {one.current ? ' (this browser)' : ''}
+                </span>
+                <span class="device-detail">
+                  {one.host === null ? 'This computer' : `${one.host} as ${one.login ?? ''}`} · last used {usedText(one.usedAt)}
+                </span>
+              </span>
+              <button type="button" class="sheet-button secondary" data-action="list-device-revoke" data-id={one.id} disabled={sheet.busy}>
+                Sign out
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Frame>
+  );
+}
 
 /** A select's options, the chosen one selected. */
 function Options({ items, chosen }: { items: ReadonlyArray<{ value: string; label: string }>; chosen: string }) {
@@ -460,9 +581,13 @@ function Frame({ title, children, buttons }: { title: string; children: Componen
  * schedules; Repository; Provider; Prompt; Start automatically), New conversation in a folder with the folder and, when both are installed, the
  * provider, or a dock window the page does not have yet.
  */
-export function renderHeaderSheet(sheet: HeaderSheet | null, header: PageHeader | null): VNode | null {
+export function renderHeaderSheet(sheet: HeaderSheet | null, header: PageHeader | null, now = Date.now()): VNode | null {
   if (sheet === null) {
     return null;
+  }
+
+  if (sheet.kind === 'devices') {
+    return <DevicesSheet sheet={sheet} now={now} />;
   }
 
   if (sheet.kind === 'later') {
@@ -647,7 +772,7 @@ export interface ListHeader {
  */
 export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTMLElement, deps: ListHeaderDeps): ListHeader {
   const search: SearchView = { open: false, query: '', filter: '', range: 0, older: [], more: false, pending: false, error: null };
-  const view: HeaderView = { menu: null, search, sheet: null, notice: null };
+  const view: HeaderView = { menu: null, search, sheet: null, notice: null, local: deps.local === true };
   // The repository New ad-hoc session used last, offered first next time while the page is open.
   let lastRepo: string | null = null;
   let ops = 0;
@@ -881,8 +1006,51 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
 
     redraw();
   };
+  /** Asks the hub for a new pairing link, or the devices again, into the open Pair a device sheet; a refusal shows in it. */
+  const pairAgain = async (sheet: Extract<HeaderSheet, { kind: 'devices' }>): Promise<void> => {
+    sheet.busy = true;
+    sheet.error = null;
+    redraw();
+
+    const [pairing, devices] = await Promise.all([deps.post('page-pair', {}), deps.post('page-devices', {})]);
+
+    sheet.busy = false;
+    sheet.pairing = pairing.status === 200 ? (pairing.body as unknown as Pairing) : null;
+    sheet.error = pairing.status === 200 ? null : String(pairing.body['error'] ?? 'Switchboard did not give a code.');
+    sheet.devices = devices.status === 200 ? ((devices.body['devices'] as Device[] | undefined) ?? []) : (sheet.devices ?? []);
+    redraw();
+  };
+  /** Pair a device…: a new pairing link and the signed-in devices. */
+  const openDevices = async (): Promise<void> => {
+    const sheet: Extract<HeaderSheet, { kind: 'devices' }> = { kind: 'devices', pairing: null, devices: null, busy: true, error: null };
+
+    view.sheet = sheet;
+    redraw();
+    sheetHost.querySelector<HTMLElement>('.sheet-button.primary')?.focus();
+    await pairAgain(sheet);
+  };
+  /** Signs one device out, then lists the devices again. */
+  const revokeDevice = async (id: string): Promise<void> => {
+    const sheet = view.sheet;
+
+    if (sheet?.kind !== 'devices' || sheet.busy) {
+      return;
+    }
+
+    sheet.busy = true;
+    sheet.error = null;
+    redraw();
+
+    const answer = await deps.post('page-device-revoke', { id });
+    const devices = await deps.post('page-devices', {});
+
+    sheet.busy = false;
+    sheet.error = answer.status === 200 ? null : String(answer.body['error'] ?? 'The device was not signed out.');
+    sheet.devices = devices.status === 200 ? ((devices.body['devices'] as Device[] | undefined) ?? []) : sheet.devices;
+    redraw();
+  };
   const closeSheet = (): void => {
-    if (view.sheet !== null && view.sheet.kind !== 'later' && view.sheet.busy) {
+    if (view.sheet !== null && view.sheet.kind !== 'later' && view.sheet.kind !== 'devices' && view.sheet.busy) {
       return;
     }
 
@@ -895,6 +1063,11 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
     const sheet = view.sheet;
 
     if (sheet === null || sheet.kind === 'later' || sheet.busy) {
+      return;
+    }
+
+    if (sheet.kind === 'devices') {
+      await pairAgain(sheet);
       return;
     }
 
@@ -937,7 +1110,7 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
     const name = field.dataset?.['field'];
     const sheet = view.sheet;
 
-    if (name === undefined || sheet === null || sheet.kind === 'later' || sheet.kind === 'holder') {
+    if (name === undefined || sheet === null || sheet.kind === 'later' || sheet.kind === 'holder' || sheet.kind === 'devices') {
       return;
     }
 
@@ -959,6 +1132,8 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
 
     if (button?.dataset['action'] === 'list-sheet-go') {
       void sheetGo();
+    } else if (button?.dataset['action'] === 'list-device-revoke') {
+      void revokeDevice(button.dataset['id'] ?? '');
     } else if (button?.dataset['action'] === 'list-sheet-cancel' && (!button.classList.contains('sheet-backdrop') || target === button)) {
       // A press on the sheet itself is not one on its backdrop.
       closeSheet();
@@ -1069,6 +1244,10 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
         view.menu = null;
         void refresh();
         break;
+      case 'list-devices':
+        view.menu = null;
+        void openDevices();
+        break;
       default: {
         const later = LATER[button?.dataset['action'] ?? ''];
 
@@ -1153,7 +1332,7 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
       }
 
       mount(host, renderListHeader(header, view));
-      mount(sheetHost, renderHeaderSheet(view.sheet, header));
+      mount(sheetHost, renderHeaderSheet(view.sheet, header, deps.now()));
     },
     list: (listed) => ({ groups: filterGroups(listed, search.filter, search.older), filtering: search.filter.trim() !== '' }),
     end: (filtered) => renderSearchEnd(search, filtered.every((group) => group.rows.length === 0)),

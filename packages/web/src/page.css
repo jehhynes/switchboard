@@ -64,6 +64,14 @@ svg.source-logo.forum { color: #57ae57; }
 .sheet-select { box-sizing: border-box; width: 100%; min-height: 26px; font: inherit; color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground)); background: var(--vscode-dropdown-background, var(--vscode-input-background)); border: 1px solid var(--vscode-dropdown-border, var(--vscode-input-border, transparent)); border-radius: 2px; }
 .sheet-error { margin: 0 0 12px; color: var(--vscode-errorForeground); }
 .sheet-field .sheet-error { margin: 0; }
+/* Pair a device (architecture.md § Remote access): the QR code on its own light square, the code large enough to type from, then the devices. */
+.pair { display: flex; flex-direction: column; align-items: center; text-align: center; }
+.pair-qr { width: 220px; height: 220px; margin-bottom: 12px; }
+.pair-code { margin: 0 0 8px; font: 600 24px var(--vscode-editor-font-family, monospace); letter-spacing: 2px; user-select: all; }
+.device-list { list-style: none; margin: 0 0 12px; padding: 0; }
+.device { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--vscode-widget-border, transparent); }
+.device-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.device-detail { color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; }
 @media (hover: none), (pointer: coarse) { .sheet-select { min-height: 44px; } .more-menu .menu-row { height: 44px; } }
 .list-notice { display: flex; align-items: flex-start; gap: 4px; margin: 0; padding: 4px 4px 4px 20px; color: var(--vscode-editorWarning-foreground); }
 .list-notice-text { flex: 1; min-width: 0; }
