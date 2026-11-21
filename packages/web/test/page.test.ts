@@ -4,7 +4,10 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyEvent, awaitingReply, EMPTY, mentionOf, mentionQuery, commandQuery, shortTitle, timeline, withEarlier } from '../src/model.js';
 import { answerText, answersIn, complete, parseQuestions } from '@switchboard/conversation/questions';
-import { artifactUrl, newView, renderArtifactView, turnRow, renderHeader, renderList, renderMicButton, renderTimeline, renderVoice, markdownBody } from '../src/render.js';
+import { artifactUrl, newView, renderArtifactView, turnRow, renderMicButton, renderTimeline, renderVoice, markdownBody } from '../src/render.js';
+import { renderHeader } from '../src/header.js';
+import { renderList } from '../src/list.js';
+import { html } from './html.js';
 import { renderMicButton as viewMicButton } from '@switchboard/conversation/voiceControls';
 import { renderMarkdown } from '../src/markdown.js';
 import { CHAT_MAX, CHAT_MIN, SENT_NOTE_MS, SIDE_MAX, SIDE_MIN, startPage, stepScale } from '../src/main.js';
@@ -259,7 +262,7 @@ describe('drawing', () => {
       listGroup('unstarted', [], { empty: 'Nothing waits to be started.' }),
     ];
 
-    root.innerHTML = renderList(groups, 3, new Set());
+    root.innerHTML = html(renderList(groups, 3, new Set()));
 
     expect([...root.querySelectorAll('.group-head')].map((head) => [head.querySelector('.group-title')!.textContent, head.querySelector('.group-count')!.textContent, head.getAttribute('aria-expanded')])).toEqual([
       ['Ready for review', '2', 'true'],
@@ -295,7 +298,7 @@ describe('drawing', () => {
     expect(root.querySelector('[data-work-item="9"] .playbook')!.classList.contains('host')).toBe(true);
     expect(root.querySelector('.count')).toBeNull();
     // The dropdown shows none either.
-    expect(renderHeader({ ...EMPTY, connected: true, scope: { ...scope, conversations: [{ ...scope.conversations[0]!, unread: 3 }] }, session: session(), unread: 3 }, { ...newView(), picker: true })).not.toContain('class="count"');
+    expect(html(renderHeader({ ...EMPTY, connected: true, scope: { ...scope, conversations: [{ ...scope.conversations[0]!, unread: 3 }] }, session: session(), unread: 3 }, { ...newView(), picker: true }))).not.toContain('class="count"');
   });
 
   it("draws a row's three lines from the dock row: priority, title and time; comment, playbook, ticket, links and Returned; mark and details", () => {
@@ -311,7 +314,7 @@ describe('drawing', () => {
     ];
     const full = listRow(1, { priority: 'Priority: P1', time: { text: '2h', title: 'In queue since 11:40' }, url: 'https://github.com/o/r/issues/1', links, returned: 2, comment: { glyph: '\u{ea6b}', title: 'Nov 20\nWaits on Sam' }, mark: { kind: 'limited', glyph: '\u{eba2}', title: 'Rate limited' }, details });
 
-    root.innerHTML = renderList([listGroup('progress', [full, listRow(2)])], null, new Set());
+    root.innerHTML = html(renderList([listGroup('progress', [full, listRow(2)])], null, new Set()));
 
     const row = root.querySelector<HTMLElement>('[data-work-item="1"]')!;
     const [head, line2, line3] = [...row.children] as HTMLElement[];
@@ -354,29 +357,29 @@ describe('drawing', () => {
     const groups = [listGroup('progress', [listRow(1)]), listGroup('done', [listRow(5), listRow(6)])];
 
     expect(newView().collapsed).toEqual(new Set(['done']));
-    root.innerHTML = renderList(groups, 1, newView().collapsed);
+    root.innerHTML = html(renderList(groups, 1, newView().collapsed));
     expect(root.querySelector('[data-group="done"] .group-head')!.getAttribute('aria-expanded')).toBe('false');
     expect(root.querySelector('[data-group="done"] .codicon-chevron-right')).not.toBeNull();
     expect(root.querySelector('[data-group="done"] .group-count')!.textContent).toBe('2');
     expect(root.querySelectorAll('[data-group="done"] .row')).toHaveLength(0);
-    root.innerHTML = renderList(groups, 6, newView().collapsed);
+    root.innerHTML = html(renderList(groups, 6, newView().collapsed));
     expect([...root.querySelectorAll('[data-group="done"] .row')].map((row) => row.getAttribute('data-work-item'))).toEqual(['6']);
-    expect(renderList([listGroup('progress', [])], null, new Set())).toBe('<p class="empty">No work items yet. They appear here when Switchboard starts one.</p>');
+    expect(html(renderList([listGroup('progress', [])], null, new Set()))).toBe('<p class="empty">No work items yet. They appear here when Switchboard starts one.</p>');
   });
 
   it("puts the session's state codicon inside the dropdown's button, before the title, as each option has it", () => {
     const root = document.createElement('div');
 
-    root.innerHTML = renderHeader({ ...EMPTY, connected: true, scope, session: session({ state: 'running' }) }, newView());
+    root.innerHTML = html(renderHeader({ ...EMPTY, connected: true, scope, session: session({ state: 'running' }) }, newView()));
     expect([...root.querySelector('button.picker')!.children].map((child) => child.className)).toEqual(['codicon codicon-loading codicon-modifier-spin state-icon tone-muted', 'title', 'codicon codicon-chevron-down']);
     expect(root.querySelector('.header > .codicon')).toBeNull();
     // The session's provider as its mark inside the button, as on each option that names one, from the same renderer.
-    root.innerHTML = renderHeader({ ...EMPTY, connected: true, scope: { ...scope, conversations: [{ ...scope.conversations[0]!, provider: 'codex' }] }, session: session({ provider: 'codex' }) }, { ...newView(), picker: true });
+    root.innerHTML = html(renderHeader({ ...EMPTY, connected: true, scope: { ...scope, conversations: [{ ...scope.conversations[0]!, provider: 'codex' }] }, session: session({ provider: 'codex' }) }, { ...newView(), picker: true }));
     expect(root.querySelector('.header > .provider')).toBeNull();
     expect(root.querySelector('button.picker > .provider')?.getAttribute('aria-label')).toBe('Codex');
     expect(root.querySelector('.conversation-menu .provider')?.getAttribute('aria-label')).toBe('Codex');
     expect(root.querySelector('button.picker')!.innerHTML).toBe(`${root.querySelector('.conversation-menu [aria-checked="true"]')!.innerHTML}<span class="codicon codicon-chevron-down" aria-hidden="true"></span>`);
-    root.innerHTML = renderHeader({ ...EMPTY, connected: true, scope, session: session() }, newView());
+    root.innerHTML = html(renderHeader({ ...EMPTY, connected: true, scope, session: session() }, newView()));
     expect(root.querySelector('.provider')).toBeNull();
   });
 

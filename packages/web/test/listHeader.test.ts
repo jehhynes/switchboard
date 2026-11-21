@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { startPage } from '../src/main.js';
 import { bareKey, filterGroups, isKey, rangeSince, renderListHeader, SEARCH_DELAY_MS } from '../src/listHeader.js';
+import { html } from './html.js';
 import type { SearchView } from '../src/listHeader.js';
 import type { PageGroup, PageHeader, PageRow, SourceGroup } from '../src/types.js';
 
@@ -73,7 +74,7 @@ describe('the list header (architecture.md § Web page)', () => {
   it("draws each source kind's logo as the dock does, grey while off, with the hub's tooltip, and a tag for a kind without a logo", () => {
     const host = document.createElement('div');
 
-    host.innerHTML = renderListHeader(header({ sources: [github, { ...zoho, enabled: false }, { kind: 'jira', enabled: true, title: 'jira: polled', sources: [{ name: 'jira', enabled: true }] }] }), { menu: null, notice: null, sheet: null, search: closed() });
+    host.innerHTML = html(renderListHeader(header({ sources: [github, { ...zoho, enabled: false }, { kind: 'jira', enabled: true, title: 'jira: polled', sources: [{ name: 'jira', enabled: true }] }] }), { menu: null, notice: null, sheet: null, search: closed() }));
 
     const buttons = [...host.querySelectorAll<HTMLElement>('.source-toggle')];
 
@@ -88,7 +89,7 @@ describe('the list header (architecture.md § Web page)', () => {
     expect(buttons[1]!.querySelector('svg.source-logo.zoho.off')).not.toBeNull();
     expect(buttons[2]!.querySelector('.codicon-tag.source-logo')).not.toBeNull();
     // No sources, no icons.
-    host.innerHTML = renderListHeader(header({ sources: [] }), { menu: null, notice: null, sheet: null, search: closed() });
+    host.innerHTML = html(renderListHeader(header({ sources: [] }), { menu: null, notice: null, sheet: null, search: closed() }));
     expect(host.querySelector('.header-sources')).toBeNull();
   });
 

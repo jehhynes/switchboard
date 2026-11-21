@@ -3,7 +3,9 @@ import { CONSOLE_FONT_PX, CONSOLE_INPUT_CHARS, CONSOLE_MIN_FONT_PX, fittedFont, 
 import type { ConsoleOptions, ConsoleTerm, MountedConsole, TermOptions } from '../src/console.js';
 import { startPage } from '../src/main.js';
 import type { ConsoleModule } from '../src/main.js';
-import { consoleNote, renderSideSwitch, renderTabs, newView } from '../src/render.js';
+import { consoleNote, newView } from '../src/render.js';
+import { renderSideSwitch, renderTabs } from '../src/header.js';
+import { html } from './html.js';
 import { EMPTY } from '../src/model.js';
 import type { SessionView } from '../src/types.js';
 import { PAGE_ASSETS } from '../dist/index.js';
@@ -543,9 +545,9 @@ describe('the Console tab', () => {
   it('is a tab beside Status and Artifacts, and the third of the wide column', () => {
     const state = { ...EMPTY, connected: true, scope, session: session() };
 
-    expect([...renderTabs(newView(), state).matchAll(/data-tab="(\w+)"/g)].map((match) => match[1])).toEqual(['conversation', 'status', 'artifacts', 'console']);
-    expect([...renderSideSwitch('console', state).matchAll(/data-side="(\w+)"/g)].map((match) => match[1])).toEqual(['status', 'artifacts', 'console']);
-    expect(renderSideSwitch('console', state)).toMatch(/aria-selected="true"[^>]*>Console/);
+    expect([...html(renderTabs(newView(), state)).matchAll(/data-tab="(\w+)"/g)].map((match) => match[1])).toEqual(['conversation', 'status', 'artifacts', 'console']);
+    expect([...html(renderSideSwitch('console', state)).matchAll(/data-side="(\w+)"/g)].map((match) => match[1])).toEqual(['status', 'artifacts', 'console']);
+    expect(html(renderSideSwitch('console', state))).toMatch(/aria-selected="true"[^>]*>Console/);
   });
 
   it('says why a session has no console without loading it', () => {

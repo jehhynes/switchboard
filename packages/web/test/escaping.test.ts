@@ -21,6 +21,8 @@ const RULES: Array<[string, RegExp]> = [
 
 /** What a file breaks of the rules. */
 const broken = (text: string): string[] => RULES.flatMap(([rule, pattern]) => (pattern.test(text) ? [rule] : []));
+/** The one part that parses HTML: `trusted` turns the output of markdown-it and the shared renderers, never the hub's or the operator's text, into nodes. */
+const ALLOWED: Record<string, string[]> = { 'trusted.tsx': ['sets innerHTML'] };
 
 describe('escaping by default', () => {
   const parts = readdirSync(SRC, { recursive: true, encoding: 'utf8' }).filter((name) => name.endsWith('.tsx'));
@@ -51,6 +53,7 @@ describe('escaping by default', () => {
   });
 
   it('finds no HTML string in a Preact part', () => {
-    expect(parts.flatMap((name) => broken(readFileSync(join(SRC, name), 'utf8')).map((rule) => `${name} ${rule}`))).toEqual([]);
+    expect(parts.flatMap((name) => broken(readFileSync(join(SRC, name), 'utf8')).filter((rule) => !(ALLOWED[name] ?? []).includes(rule)).map((rule) => `${name} ${rule}`))).toEqual([]);
+    expect(broken(readFileSync(join(SRC, 'trusted.tsx'), 'utf8'))).toEqual(['sets innerHTML']);
   });
 });

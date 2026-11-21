@@ -1,4 +1,3 @@
-import { providerMark } from '@switchboard/conversation/providerIcons';
 import { renderMicButton, renderVoiceControls } from '@switchboard/conversation/voiceControls';
 import { fullTime, metaLine, stamped, stampTime, toneMark, voiceMark } from '@switchboard/conversation/messageMeta';
 import { hasUnspokenText, spokenBody } from '@switchboard/conversation/spokenBubble';
@@ -9,7 +8,6 @@ import { answers, answersIn, answerText, cardOutcome, complete, parseQuestions, 
 import type { Question, QuestionChoice } from '@switchboard/conversation/questions';
 import type { ArtifactView, MessageView, NativeRequest, PageAction, PageGroup, PageRow, ReplyView, ScreenPrompt, StatusView, VoiceView } from './types.js';
 import type { SnoozeChoice } from '@switchboard/core/snooze';
-import { MARK_ICONS, MARK_TONES, SPINNING_MARKS } from '@switchboard/core/group';
 
 export type Tab = 'conversation' | 'status' | 'artifacts' | 'console';
 export const TABS: Array<{ tab: Tab; label: string }> = [
@@ -95,73 +93,12 @@ export type Sheet =
 
 export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), list: false, actions: false, linkMenu: false, rowMenu: null, sheet: null, acting: false, prompt: null, providers: null, side: 'status', textScale: 1, textMenu: false, details: false });
 
-/** The most links the menu lists by themselves; more go in its Open link submenu, as the dock's `MenuLinks`. */
-const MENU_LINKS = 2;
 /** The longest menu label for a link, as the dock's `LinkLabelMax`; a longer one is cut with an ellipsis and shown whole in its tooltip. */
 export const LINK_LABEL_MAX = 48;
-
-/** A link's menu label, cut to `LINK_LABEL_MAX` with an ellipsis. */
-function clipLabel(label: string): string {
-  return label.length > LINK_LABEL_MAX ? `${label.slice(0, LINK_LABEL_MAX - 1).trimEnd()}…` : label;
-}
 
 /** A row's key in the list: `item:<work item ID>`, or a pool ticket's `ticket:<ticket ID>`, as the dock keys its rows. */
 export function rowKey(row: Pick<PageRow, 'workItemId' | 'ticketId'>): string {
   return row.workItemId !== null ? `item:${row.workItemId}` : `ticket:${row.ticketId ?? ''}`;
-}
-
-/**
- * A row's menu, as rows of a `menu` list (architecture.md § Web page), grouped as the dock's row menu is: the main control, the work controls, the
- * state controls, Add comment…, the order controls, what the row opens (Copy, Open in VS Code, Open changes and Open report, Open ticket and its
- * links, more than two of them in an Open link submenu), then the controls that ask first; empty when the row offers none. Each item names its
- * row, so a pool ticket's menu in the list runs as the header's does.
- */
-export function menuRows(row: PageRow, view: Pick<View, 'acting' | 'linkMenu'>): string {
-  const actions = row.actions ?? [];
-  const pastes = row.pastes ?? [];
-  const commands = row.opens ?? [];
-  const key = escape(rowKey(row));
-  const disabled = view.acting ? ' disabled' : '';
-  const item = (attrs: string, icon: string | null, label: string, after = '', classes = ''): string =>
-    `<li role="none"><button type="button" class="menu-row${classes === '' ? '' : ` ${classes}`}" role="menuitem" data-row="${key}" ${attrs}${disabled}><span class="menu-gutter" aria-hidden="true">${icon === null ? '' : `<span class="codicon codicon-${icon}"></span>`}</span><span class="title">${escape(label)}</span>${after}</button></li>`;
-  const act = (action: PageAction): string => item(`data-action="row-action" data-label="${escape(action.label)}"`, action.icon, action.label);
-  const grouped = (group: PageAction['group']): string[] => actions.filter((one) => one.group === group).map(act);
-  // A link's label can be free text a session reported, so a long one is cut, whole in its tooltip, as in the dock's menu.
-  const link = (which: string, label: string, icon: string | null, classes = ''): string =>
-    item(`data-action="open-link" data-link="${which}"${label.length > LINK_LABEL_MAX ? ` title="${escape(label)}"` : ''}`, icon, clipLabel(label), '', classes);
-  const submenu =
-    item(`data-action="link-menu" aria-haspopup="true" aria-expanded="${view.linkMenu}"`, 'link-external', 'Open link', `<span class="codicon codicon-chevron-${view.linkMenu ? 'down' : 'right'}" aria-hidden="true"></span>`) +
-    (view.linkMenu ? row.links.map((one, index) => link(String(index), one.label, null, 'submenu-row')).join('') : '');
-  const opens = [
-    ...pastes.map((label) => item(`data-action="row-paste" data-label="${escape(label)}"`, 'copy', `Copy ${label}`)),
-    // The dock's Open in terminal: the open work item's session on the Console tab.
-    ...(row.terminal === true ? [item('data-action="open-console"', 'terminal', 'Open in terminal')] : []),
-    ...commands.map((one) => item(`data-action="row-command" data-label="${escape(one.label)}"`, one.icon, one.label)),
-    ...(row.url === '' ? [] : [link('ticket', 'Open ticket', 'link-external')]),
-    ...(row.links.length > MENU_LINKS ? [submenu] : row.links.map((one, index) => link(String(index), `Open ${one.label}`, 'link-external'))),
-  ];
-  const groups = [grouped('main'), grouped('work'), grouped('state'), grouped('notes'), grouped('order'), opens, grouped('asking')].filter((group) => group.length > 0);
-
-  return groups.map((group) => group.join('')).join('<li class="menu-separator" role="separator"></li>');
-}
-
-/**
- * The header's row actions (architecture.md § Web page): the dock's main control as a button, then the row's menu (`menuRows`) under an
- * ellipsis; empty when the row offers none.
- */
-export function renderActions(row: PageRow | null, view: View): string {
-  const rows = row === null ? '' : menuRows(row, view);
-
-  if (row === null || rows === '') {
-    return '';
-  }
-
-  const disabled = view.acting ? ' disabled' : '';
-  const main = (row.actions ?? []).find((one) => one.group === 'main');
-  const mainButton = main === undefined ? '' : `<button type="button" class="row-main" data-action="row-action" data-row="${escape(rowKey(row))}" data-label="${escape(main.label)}"${disabled}><span class="codicon codicon-${escape(main.icon)}" aria-hidden="true"></span><span>${escape(main.label)}</span></button>`;
-  const menu = view.actions ? `<ul class="glass menu actions-menu align-right" role="menu" aria-label="Actions">${rows}</ul>` : '';
-
-  return `${mainButton}<div class="menu-anchor actions-anchor"><button type="button" class="actions" data-action="actions" aria-haspopup="menu" aria-expanded="${view.actions}" title="Actions" aria-label="Actions"><span class="codicon codicon-ellipsis" aria-hidden="true"></span></button>${menu}</div>`;
 }
 
 /**
@@ -266,13 +203,6 @@ export function dayLabel(at: number, now: number): string {
   return days === 0 ? 'Today' : days === 1 ? 'Yesterday' : (new Date(at).getFullYear() === new Date(now).getFullYear() ? DAY : DAY_WITH_YEAR).format(at);
 }
 
-/** A codicon with its words as tooltip and name; a session state's, with its tone, is drawn small and muted unless it needs attention. */
-function codicon({ icon, text, tone }: { icon: string; text: string; tone?: string }): string {
-  const [name, modifier] = icon.split('~');
-
-  return `<span class="codicon codicon-${name}${modifier === undefined ? '' : ` codicon-modifier-${modifier}`}${tone === undefined ? '' : ` state-icon tone-${tone}`}" title="${escape(text)}" role="img" aria-label="${escape(text)}"></span>`;
-}
-
 /** How long ago, in the largest whole unit: "just now", "4 min ago", "2 h ago", "3 d ago". */
 export function ago(at: number, now: number): string {
   const minutes = Math.floor((now - at) / 60_000);
@@ -282,198 +212,6 @@ export function ago(at: number, now: number): string {
 
 /** The groups the list shows collapsed until the operator opens them, as the dock does. */
 export const COLLAPSED_GROUPS: readonly string[] = ['done'];
-
-/** The codicon Returned shows, as the dock's pill does. */
-const RETURNED_GLYPH = '\u{eae2}';
-
-/**
- * A pill on line 2: its codicon glyph, if any, then its text, the full name in its tooltip. `icon` names a codicon shown only when the pill
- * shrinks to its icon (`fitPills`), for a pill that has no glyph whole: the ticket key's source, GitHub's mark or a tag. `attrs` makes a pill with
- * a link open it.
- */
-function pill(classes: string, glyph: string | null, text: string, title: string, icon?: string, attrs = ''): string {
-  const shown = glyph === null ? (icon === undefined ? '' : `<span class="codicon codicon-${icon} pill-icon" aria-hidden="true"></span>`) : `<span class="codicon" aria-hidden="true">${escape(glyph)}</span>`;
-
-  return `<span class="pill ${classes}" title="${escape(title)}"${attrs}>${shown}<span class="pill-text">${escape(text)}</span></span>`;
-}
-
-/**
- * A row of the list, drawn as the dock's three lines from the hub's dock row: line 1 the priority dot, the title and the time; line 2 the
- * comment icon, the playbook with its namespace muted (or a hosted conversation's host), the ticket key as a pill in its source's colour, the
- * link pills and Returned, which shrink to their icons when the line is too narrow (`fitPills`, applied by the page); line 3 the mark and the details, a muted " · " between them, in their tones. The dock's stripe is on its left edge.
- */
-function listRow(row: PageRow, selected: boolean, menu: string | null): string {
-  const kind = row.mark?.kind;
-  const mark =
-    row.mark === null || kind === undefined
-      ? ''
-      : `<span class="codicon codicon-${MARK_ICONS[kind]} mark state-icon tone-${MARK_TONES[kind]}${SPINNING_MARKS.has(kind) ? ' codicon-modifier-spin' : ''}${kind === 'failed' ? ' failed' : ''}" role="img" title="${escape(row.mark.title)}" aria-label="${escape(row.mark.title)}"></span>`;
-  const colon = row.playbook.indexOf(':');
-  const playbook =
-    row.host !== null
-      ? `<span class="playbook host" title="${escape(`Hosted by ${row.host}`)}">${escape(row.host)}</span>`
-      : row.playbook === ''
-        ? ''
-        : `<span class="playbook" title="${escape(row.playbook)}">${colon === -1 ? '' : `<span class="namespace">${escape(row.playbook.slice(0, colon + 1))}</span>`}${escape(row.playbook.slice(colon + 1))}</span>`;
-  const classes = ['row', ...(row.stripe === null ? [] : [`stripe-${row.stripe}`]), ...(row.dim ? ['dim'] : []), ...(selected ? ['selected'] : [])].join(' ');
-  const priority = row.priority === null ? '' : `<span class="priority" role="img" title="${escape(row.priority)}" aria-label="${escape(row.priority)}"></span>`;
-  const time = row.time === null ? '' : `<span class="row-time" title="${escape(row.time.title)}">${escape(row.time.text)}</span>`;
-  const comment = row.comment === null ? '' : `<span class="codicon comment" role="img" title="${escape(row.comment.title)}" aria-label="Comments">${escape(row.comment.glyph)}</span>`;
-  // A pill with a link opens it instead of the row's click, as the dock's `OnPillTapped` (PRD R52).
-  const opens = (which: string): string => ` data-action="open-link" data-row="${escape(rowKey(row))}" data-link="${which}"`;
-  const ticket = pill(`ticket source-${escape(row.sourceKind)}`, null, row.ticket, row.url === '' ? row.ticket : `${row.ticket}\n${row.url}`, row.sourceKind === 'github' ? 'github' : 'tag', row.url === '' ? '' : opens('ticket'));
-  const links = row.links
-    .map((link, index) => pill(`link ${link.kind}${link.mentioned ? ' mentioned' : ''}`, link.glyph, link.badge, `${link.label}${link.mentioned ? ', named in the ticket' : ''}\n${link.url}`, undefined, opens(String(index))))
-    .join('');
-  const linkPills = links === '' ? '' : `<span class="row-links">${links}</span>`;
-  const returned = row.returned > 0 ? pill('returned', RETURNED_GLYPH, String(row.returned), `Returned ${row.returned}: earlier work items with this playbook, or one it is a return of, were done for this ticket`) : '';
-  const details = row.details
-    .map((detail, index) => `${index > 0 ? '<span class="row-detail-separator" aria-hidden="true">·</span>' : ''}<span class="row-detail${detail.tone === null ? '' : ` ${detail.tone}`}"${detail.title === null ? '' : ` title="${escape(detail.title)}"`}>${escape(detail.text)}</span>`)
-    .join('');
-
-  // A pool ticket has no conversation to open, so its click opens its menu under it.
-  const click =
-    row.workItemId === null
-      ? `data-action="pool-menu" data-row="${escape(rowKey(row))}" aria-haspopup="menu" aria-expanded="${menu !== null}"`
-      : `data-action="select" data-work-item="${row.workItemId}" aria-current="${selected}"`;
-
-  return (
-    `<li${row.workItemId === null ? ' class="pool-row"' : ''}><button type="button" class="${classes}" ${click} title="${escape(row.title)}">` +
-    `<span class="row-head">${priority}<span class="row-title">${escape(row.title)}</span>${time}</span>` +
-    `<span class="row-line">${comment}${playbook}${ticket}${linkPills}${returned}</span>` +
-    (mark === '' && details === '' ? '' : `<span class="row-line row-details">${mark}${details}</span>`) +
-    '</button>' +
-    (menu === null ? '' : `<ul class="glass menu row-menu align-right" role="menu" aria-label="${escape(`Actions for ${row.ticket}`)}">${menu}</ul>`) +
-    '</li>'
-  );
-}
-
-/**
- * The page's list (architecture.md § Web page): the dock's groups in its order, each a header with its codicon, title and count that opens or
- * collapses it, then its rows; a collapsed group still shows the selected row, so the selection is never hidden. While a search `filtering` it,
- * only the groups with rows show, every one open, and the search's end says when none matched. `menu` is the pool ticket row whose menu is
- * open, by its key, with the menu's rows.
- */
-export function renderList(groups: readonly PageGroup[], selected: number | null, collapsed: ReadonlySet<string>, filtering = false, menu: { row: string; rows: string } | null = null): string {
-  if (groups.every((group) => group.rows.length === 0)) {
-    return filtering ? '' : '<p class="empty">No work items yet. They appear here when Switchboard starts one.</p>';
-  }
-
-  const html = groups.map((group) => {
-    const open = filtering || !collapsed.has(group.key);
-    const rows = (open ? group.rows : group.rows.filter((row) => row.workItemId === selected)).map((row) => listRow(row, row.workItemId !== null && row.workItemId === selected, menu !== null && menu.row === rowKey(row) ? menu.rows : null)).join('');
-    const empty = open && group.rows.length === 0 && group.empty !== null ? `<p class="group-empty">${escape(group.empty)}</p>` : '';
-    const head =
-      `<button type="button" class="group-head" data-action="group" data-group="${escape(group.key)}" aria-expanded="${open}">` +
-      `<span class="codicon codicon-chevron-${open ? 'down' : 'right'}" aria-hidden="true"></span><span class="codicon group-icon" aria-hidden="true">${escape(group.glyph)}</span>` +
-      `<span class="group-title">${escape(group.title)}</span><span class="group-count${group.rows.length === 0 ? ' zero' : ''}" aria-label="${group.rows.length} work items">${group.rows.length}</span></button>`;
-
-    return `<section class="group" data-group="${escape(group.key)}">${head}${rows === '' ? '' : `<ul class="rows">${rows}</ul>`}${empty}</section>`;
-  });
-
-  return `<nav class="work-list" aria-label="Work items">${html.join('')}</nav>`;
-}
-
-/** A menu row's left gutter: a check mark for the chosen row, or nothing, so every row's text starts in one column. */
-function gutter(checked: boolean): string {
-  return `<span class="menu-gutter" aria-hidden="true">${checked ? '<span class="codicon codicon-check"></span>' : ''}</span>`;
-}
-
-/**
- * A conversation as the dropdown's button and each of its rows draw it, from this one renderer so they never differ: its session's state
- * codicon, title and provider's mark. The page shows no unread counts.
- */
-export function conversationLabel(entry: PageState['scope'] extends infer S ? (S extends { conversations: Array<infer E> } ? E : never) : never, state: PageState): string {
-  const selected = entry.workItemId === state.scope?.workItemId;
-  const icon = selected ? stateIcon(state.session?.state, state.session?.waitingFor, state.session?.limit) : stateIcon(entry.state);
-
-  return `${codicon(icon)}<span class="title">${escape(entry.title)}</span>${providerMark(selected ? (state.session?.provider ?? entry.provider) : entry.provider)}`;
-}
-
-/**
- * The header's view options button and its menu: the conversation's text size (smaller, the size, larger, and Reset) and Show message
- * details.
- */
-function textSize(view: View): string {
-  const percent = `${Math.round(view.textScale * 100)}%`;
-  const menu = view.textMenu
-    ? `<div class="glass menu text-size-menu align-right" role="menu" aria-label="View options"><div class="text-size-row"><button type="button" class="icon menu-row" role="menuitem" data-action="text-smaller" title="Smaller (Ctrl+-)" aria-label="Smaller text">A−</button><span class="text-size-value" aria-live="polite">${percent}</span><button type="button" class="icon menu-row" role="menuitem" data-action="text-larger" title="Larger (Ctrl+=)" aria-label="Larger text">A+</button></div><button type="button" class="menu-row" role="menuitem" data-action="text-reset"><span class="menu-gutter" aria-hidden="true"></span><span class="title">Reset text size (Ctrl+0)</span></button><div class="menu-separator" role="separator"></div><button type="button" class="menu-row" role="menuitemcheckbox" aria-checked="${view.details}" data-action="toggle-details"><span class="menu-gutter" aria-hidden="true">${view.details ? '<span class="codicon codicon-check"></span>' : ''}</span><span class="title">Show message details</span></button></div>`
-    : '';
-
-  return `<div class="menu-anchor text-size-anchor"><button type="button" class="icon text-size" data-action="text-menu" aria-haspopup="menu" aria-expanded="${view.textMenu}" title="View options: text size ${percent}" aria-label="View options"><span class="codicon codicon-settings" aria-hidden="true"></span></button>${menu}</div>`;
-}
-
-/** The header: the dropdown of the selected work item's conversations, its button drawn as its rows are, and the persona as an icon. */
-export function renderHeader(state: PageState, view: View): string {
-  const scope = state.scope!;
-  const selected = selectedEntry(state);
-  const title = selected?.title ?? scope.title;
-  const options = scope.conversations
-    .map((entry) => {
-      const chosen = entry.workItemId === scope.workItemId;
-
-      return `<li role="none"><button type="button" class="menu-row conversation-row" role="menuitemradio" aria-checked="${chosen}" data-action="select" data-work-item="${entry.workItemId}">${conversationLabel(entry, state)}</button></li>`;
-    })
-    .join('');
-  const persona = state.session?.persona;
-  const personaButton =
-    persona == null
-      ? state.session?.canPin === true
-        ? `<button type="button" class="persona" data-action="persona" aria-haspopup="menu" aria-expanded="${view.personas !== null}" title="No persona. Click to choose one." aria-label="No persona. Click to choose one."><span class="codicon codicon-person" aria-hidden="true"></span></button>`
-        : ''
-      : `<button type="button" class="persona${persona.tonePending ? ' pending' : ''}" data-action="persona" aria-haspopup="menu" aria-expanded="${view.personas !== null}" title="${escape(`Persona: ${persona.name}${persona.pinned ? ', pinned' : ''}. Click to choose another.`)}" aria-label="${escape(`Persona: ${persona.name}${persona.pinned ? ', pinned' : ''}`)}"><span class="codicon codicon-${persona.pinned ? 'pinned' : 'person'}" aria-hidden="true"></span></button>`;
-  const label = selected === null ? `${codicon(stateIcon(state.session?.state, state.session?.waitingFor, state.session?.limit))}<span class="title">${escape(title)}</span>` : conversationLabel(selected, state);
-  // After a separator, New conversation… as in the Conversation view; it opens the providers under the same button when there is a choice.
-  const providers = view.providers;
-  const newRow = `<li class="menu-separator" role="separator"></li><li role="none"><button type="button" class="menu-row new-row" role="menuitem" data-action="new-conversation">${'<span class="menu-gutter" aria-hidden="true"><span class="codicon codicon-add"></span></span>'}<span class="title">New conversation…</span></button></li>`;
-  const providerRows =
-    providers === null
-      ? ''
-      : providers.error !== null
-        ? `<li class="menu-message" role="none">${escape(providers.error)}</li>`
-        : providers.items === null
-          ? '<li class="menu-message" role="none">Loading…</li>'
-          : providers.items.map((one) => `<li role="none"><button type="button" class="menu-row" role="menuitem" data-action="new-provider" data-provider="${escape(one.provider)}">${gutter(false)}<span class="title">${escape(one.name)}</span>${one.default ? '<span class="menu-note">Default</span>' : ''}</button></li>`).join('');
-  const pickerMenu = providers !== null ? `<ul class="glass menu conversation-menu" role="menu" aria-label="Provider">${providerRows}</ul>` : view.picker ? `<ul class="glass menu conversation-menu" role="menu" aria-label="Conversations">${options}${newRow}</ul>` : '';
-  const picker = `<div class="menu-anchor picker-anchor"><button type="button" class="picker" data-action="picker" aria-haspopup="menu" aria-expanded="${view.picker || providers !== null}" title="${escape(title)}">${label}<span class="codicon codicon-chevron-down" aria-hidden="true"></span></button>${pickerMenu}</div>`;
-
-  const menu = view.personas;
-  const rows =
-    menu === null
-      ? ''
-      : menu.error !== null
-        ? `<li class="menu-message" role="none">${escape(menu.error)}</li>`
-        : menu.items === null
-          ? '<li class="menu-message" role="none">Loading…</li>'
-          : [
-              ...menu.items.map((one) => `<li role="none"><button type="button" class="menu-row" role="menuitemradio" aria-checked="${persona?.id === one.id}" data-action="persona-pick" data-persona="${escape(one.id)}">${gutter(persona?.id === one.id)}<span class="title">${escape(one.name)}</span></button></li>`),
-              persona?.pinned === true ? `<li class="menu-separator" role="separator"></li><li role="none"><button type="button" class="menu-row" role="menuitem" data-action="persona-pick" data-persona="">${gutter(false)}<span class="title">Clear pin</span></button></li>` : '',
-            ].join('');
-  const personaMenu = menu === null ? '' : `<ul class="glass menu persona-menu align-right" role="menu" aria-label="Persona">${rows}</ul>`;
-  const personaPart = personaButton === '' ? '' : `<div class="menu-anchor persona-anchor">${personaButton}${personaMenu}</div>`;
-
-  return `<header class="header"><button type="button" class="icon back-toggle" data-action="back" title="Back to work items" aria-label="Back to work items"><span class="codicon codicon-arrow-left" aria-hidden="true"></span></button>${picker}${renderActions(selectedRow(state), view)}${personaPart}${textSize(view)}</header>`;
-}
-
-/**
- * The switch at the top of the Status and Artifacts column on a wide screen, drawn as the tabs are, with the same badges; the conversation keeps
- * its own pane beside it.
- */
-export function renderSideSwitch(side: SideTab, state: PageState): string {
-  const fresh = state.status?.unread === true;
-  const button = (tab: SideTab, label: string, badge: string): string =>
-    `<button class="tab${tab === side ? ' selected' : ''}" type="button" role="tab" data-side="${tab}" aria-selected="${tab === side}" tabindex="${tab === side ? 0 : -1}">${label}${badge === '' ? '' : `<span class="tab-badge">${badge}</span>`}</button>`;
-
-  return `<nav class="tabs side-switch" role="tablist" aria-label="Status, artifacts and console">${button('status', 'Status', fresh ? 'New' : '')}${button('artifacts', 'Artifacts', '')}${button('console', 'Console', '')}</nav>`;
-}
-
-export function renderTabs(view: View, state: PageState): string {
-  const fresh = state.status?.unread === true;
-  // As in the VS Code view: Status has its New badge; the page shows no unread counts.
-  const badges: Record<Tab, string> = { conversation: '', status: fresh ? 'New' : '', artifacts: '', console: '' };
-
-  return `<nav class="tabs" role="tablist">${TABS.map(({ tab, label }) => `<button class="tab${tab === view.tab ? ' selected' : ''}" type="button" role="tab" data-tab="${tab}" aria-selected="${tab === view.tab}" tabindex="${tab === view.tab ? 0 : -1}">${label}${badges[tab] === '' ? '' : `<span class="tab-badge">${badges[tab]}</span>`}</button>`).join('')}</nav>`;
-}
 
 /**
  * One of our messages: its bubble over its meta line (`metaLine`, shared with the Conversation view). A failed delivery always shows; with

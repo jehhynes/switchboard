@@ -1,5 +1,5 @@
-import { escape } from './markdown.js';
-import { morph } from './morph.js';
+import type { ComponentChildren, VNode } from 'preact';
+import { mount } from './island.js';
 import type { PageGroup, PageHeader, PageRow, SourceGroup } from './types.js';
 
 type Answer = { status: number; body: Record<string, unknown> };
@@ -123,22 +123,28 @@ const LOGOS: Record<string, { viewBox: string; path: string; stroke: boolean; ev
 };
 
 /** A source kind's logo, grey while off; a kind without one shows a tag, so its button is never blank. */
-export function sourceLogo(kind: string, enabled: boolean): string {
+export function SourceLogo({ kind, enabled }: { kind: string; enabled: boolean }) {
   const logo = LOGOS[kind];
   const state = enabled ? '' : ' off';
 
   if (logo === undefined) {
-    return `<span class="codicon codicon-tag source-logo${state}" aria-hidden="true"></span>`;
+    return <span class={`codicon codicon-tag source-logo${state}`} aria-hidden="true"></span>;
   }
 
-  const paint = logo.stroke ? 'fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"' : `fill="currentColor"${logo.evenOdd ? ' fill-rule="evenodd"' : ''}`;
+  const paint = logo.stroke
+    ? { fill: 'none', stroke: 'currentColor', 'stroke-width': '1.3', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'vector-effect': 'non-scaling-stroke' }
+    : { fill: 'currentColor', ...(logo.evenOdd ? { 'fill-rule': 'evenodd' } : {}) };
 
-  return `<svg class="source-logo ${escape(kind)}${state}" viewBox="${logo.viewBox}" aria-hidden="true" focusable="false"><path ${paint} d="${logo.path}"/></svg>`;
+  return (
+    <svg class={`source-logo ${kind}${state}`} viewBox={logo.viewBox} aria-hidden="true" focusable="false">
+      <path {...(paint as Record<string, string>)} d={logo.path} />
+    </svg>
+  );
 }
 
 /** A menu row's left gutter: a check mark for a checked row, or nothing, as the page's other menus draw it. */
-function gutter(checked: boolean): string {
-  return `<span class="menu-gutter" aria-hidden="true">${checked ? '<span class="codicon codicon-check"></span>' : ''}</span>`;
+function Gutter({ checked }: { checked: boolean }) {
+  return <span class="menu-gutter" aria-hidden="true">{checked ? <span class="codicon codicon-check"></span> : null}</span>;
 }
 
 /** The providers a new session can start in, as the dock's provider box lists them. */
@@ -175,106 +181,232 @@ export interface HeaderView {
  * The terminal holder's notice under the header while it is from an older build or restarting, with Restart and resume, and the last restart's
  * result until dismissed (architecture.md § Restarting the holder), as the dock shows them above its groups.
  */
-function holderNotices(header: PageHeader | null, view: HeaderView): string {
+function HolderNotices({ header, view }: { header: PageHeader | null; view: HeaderView }) {
   const notice = header?.holderNotice;
   const result = header?.holderResult;
-  const restart = notice?.confirm == null ? '' : `<button type="button" class="holder-restart" data-action="list-holder-restart">${escape(notice.confirm.action)}</button>`;
-  const shown = notice === undefined ? '' : `<div class="holder-notice" role="status"><span class="holder-notice-text">${escape(notice.text)}</span>${restart}</div>`;
-  const done =
-    result === undefined || result.at === view.holderDismissed
-      ? ''
-      : `<p class="holder-result${result.failed ? ' failed' : ''}" role="status"><span class="holder-result-text">${escape(result.text)}</span><button type="button" class="icon dismiss" data-action="list-holder-dismiss" title="Dismiss" aria-label="Dismiss"><span class="codicon codicon-close" aria-hidden="true"></span></button></p>`;
 
-  return shown + done;
+  return (
+    <>
+      {notice === undefined ? null : (
+        <div class="holder-notice" role="status">
+          <span class="holder-notice-text">{notice.text}</span>
+          {notice.confirm == null ? null : (
+            <button type="button" class="holder-restart" data-action="list-holder-restart">
+              {notice.confirm.action}
+            </button>
+          )}
+        </div>
+      )}
+      {result === undefined || result.at === view.holderDismissed ? null : (
+        <p class={`holder-result${result.failed ? ' failed' : ''}`} role="status">
+          <span class="holder-result-text">{result.text}</span>
+          <button type="button" class="icon dismiss" data-action="list-holder-dismiss" title="Dismiss" aria-label="Dismiss">
+            <span class="codicon codicon-close" aria-hidden="true"></span>
+          </button>
+        </p>
+      )}
+    </>
+  );
 }
 
 /**
  * A source kind's header icon (PRD R3, R71), as the dock's: its logo, grey while every source of the kind is off, and the hub's tooltip. With one
  * source a click turns it on or off; with several it opens a menu with a check row per source, which stays open so several can change.
  */
-function sourceButton(group: SourceGroup, view: HeaderView): string {
+function SourceButton({ group, view }: { group: SourceGroup; view: HeaderView }) {
   const several = group.sources.length > 1;
   const name = several ? group.kind : (group.sources[0]?.name ?? group.kind);
   const open = view.menu === `source:${group.kind}`;
-  const state = several ? `aria-haspopup="menu" aria-expanded="${open}"` : `aria-pressed="${group.enabled}"`;
-  const menu =
-    several && open
-      ? `<ul class="glass menu source-menu" role="menu" aria-label="${escape(`${group.kind} sources`)}">${group.sources
-          .map((one) => `<li role="none"><button type="button" class="menu-row" role="menuitemcheckbox" aria-checked="${one.enabled}" data-action="list-source-entry" data-source="${escape(one.name)}">${gutter(one.enabled)}<span class="title">${escape(one.name)}</span></button></li>`)
-          .join('')}</ul>`
-      : '';
+  const state = several ? { 'aria-haspopup': 'menu' as const, 'aria-expanded': open } : { 'aria-pressed': group.enabled };
 
-  return `<div class="menu-anchor" data-key="source-${escape(group.kind)}"><button type="button" class="icon source-toggle" data-action="list-source" data-kind="${escape(group.kind)}" ${state} title="${escape(group.title)}" aria-label="${escape(name)}">${sourceLogo(group.kind, group.enabled)}</button>${menu}</div>`;
+  return (
+    <div class="menu-anchor" data-key={`source-${group.kind}`}>
+      <button type="button" class="icon source-toggle" data-action="list-source" data-kind={group.kind} {...state} title={group.title} aria-label={name}>
+        <SourceLogo kind={group.kind} enabled={group.enabled} />
+      </button>
+      {several && open ? (
+        <ul class="glass menu source-menu" role="menu" aria-label={`${group.kind} sources`}>
+          {group.sources.map((one) => (
+            <li role="none">
+              <button type="button" class="menu-row" role="menuitemcheckbox" aria-checked={one.enabled} data-action="list-source-entry" data-source={one.name}>
+                <Gutter checked={one.enabled} />
+                <span class="title">{one.name}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
 }
 
 /**
  * The list's header (architecture.md § Web page), as the dock's title row: the title, which takes what is left and ends in an ellipsis, then
  * the source icons; a refusal shows under it.
  */
-export function renderListHeader(header: PageHeader | null, view: HeaderView): string {
+export function renderListHeader(header: PageHeader | null, view: HeaderView): VNode {
   const sources = header?.sources ?? [];
-  const icons = sources.length === 0 ? '' : `<div class="header-sources">${sources.map((group) => sourceButton(group, view)).join('')}</div><span class="header-separator" aria-hidden="true"></span>`;
   const search = view.search;
-  const searchButton = `<button type="button" class="icon search-toggle" data-action="list-search" aria-pressed="${search.open}" title="Search" aria-label="Search"><span class="codicon codicon-search" aria-hidden="true"></span></button>`;
-  const rangeMenu =
-    view.menu === 'range'
-      ? `<ul class="glass menu range-menu" role="menu" aria-label="Search range">${RANGES.map((label, index) => `<li role="none"><button type="button" class="menu-row" role="menuitemradio" aria-checked="${index === search.range}" data-action="list-range-pick" data-range="${index}">${gutter(index === search.range)}<span class="title">${label}</span></button></li>`).join('')}</ul>`
-      : '';
-  // The box and the searched range under the title row while the search is open, as the dock's.
-  const box = search.open
-    ? `<div class="search-row"><div class="search-field"><input type="search" class="search-box" placeholder="Search title, key, PR, playbook, branch" aria-label="Search" value="${escape(search.query)}" autocomplete="off" spellcheck="false"><button type="button" class="icon" data-action="list-search-clear" title="Clear search" aria-label="Clear search"><span class="codicon codicon-close" aria-hidden="true"></span></button></div>` +
-      `<div class="menu-anchor"><button type="button" class="search-range" data-action="list-range" aria-haspopup="menu" aria-expanded="${view.menu === 'range'}" title="Choose how far back to search" aria-label="Search range: ${RANGES[search.range]}"><span>${RANGES[search.range]}</span><span class="codicon codicon-chevron-down" aria-hidden="true"></span></button>${rangeMenu}</div></div>`
-    : '';
-  const notice =
-    view.notice === null
-      ? ''
-      : `<p class="list-notice" role="alert"><span class="list-notice-text">${escape(view.notice)}</span><button type="button" class="icon dismiss" data-action="list-dismiss" title="Dismiss" aria-label="Dismiss"><span class="codicon codicon-close" aria-hidden="true"></span></button></p>`;
 
-  const more = `<div class="menu-anchor" data-key="more"><button type="button" class="icon more-actions" data-action="list-more" aria-haspopup="menu" aria-expanded="${view.menu === 'more'}" title="More Actions…" aria-label="More Actions"><span class="codicon codicon-ellipsis" aria-hidden="true"></span></button>${view.menu === 'more' ? renderMoreMenu(header) : ''}</div>`;
-
-  return `<div class="list-header">${icons}${searchButton}${more}</div>${box}${notice}${holderNotices(header, view)}`;
+  return (
+    <>
+      <div class="list-header">
+        {sources.length === 0 ? null : (
+          <>
+            <div class="header-sources">
+              {sources.map((group) => (
+                <SourceButton key={group.kind} group={group} view={view} />
+              ))}
+            </div>
+            <span class="header-separator" aria-hidden="true"></span>
+          </>
+        )}
+        <button type="button" class="icon search-toggle" data-action="list-search" aria-pressed={search.open} title="Search" aria-label="Search">
+          <span class="codicon codicon-search" aria-hidden="true"></span>
+        </button>
+        <div class="menu-anchor" data-key="more">
+          <button type="button" class="icon more-actions" data-action="list-more" aria-haspopup="menu" aria-expanded={view.menu === 'more'} title="More Actions…" aria-label="More Actions">
+            <span class="codicon codicon-ellipsis" aria-hidden="true"></span>
+          </button>
+          {view.menu === 'more' ? renderMoreMenu(header) : null}
+        </div>
+      </div>
+      {/* The box and the searched range under the title row while the search is open, as the dock's. */}
+      {search.open ? (
+        <div class="search-row">
+          <div class="search-field">
+            <input type="search" class="search-box" placeholder="Search title, key, PR, playbook, branch" aria-label="Search" value={search.query} autocomplete="off" spellcheck={false} />
+            <button type="button" class="icon" data-action="list-search-clear" title="Clear search" aria-label="Clear search">
+              <span class="codicon codicon-close" aria-hidden="true"></span>
+            </button>
+          </div>
+          <div class="menu-anchor">
+            <button type="button" class="search-range" data-action="list-range" aria-haspopup="menu" aria-expanded={view.menu === 'range'} title="Choose how far back to search" aria-label={`Search range: ${RANGES[search.range]}`}>
+              <span>{RANGES[search.range]}</span>
+              <span class="codicon codicon-chevron-down" aria-hidden="true"></span>
+            </button>
+            {view.menu === 'range' ? (
+              <ul class="glass menu range-menu" role="menu" aria-label="Search range">
+                {RANGES.map((label, index) => (
+                  <li role="none">
+                    <button type="button" class="menu-row" role="menuitemradio" aria-checked={index === search.range} data-action="list-range-pick" data-range={String(index)}>
+                      <Gutter checked={index === search.range} />
+                      <span class="title">{label}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+      {view.notice === null ? null : (
+        <p class="list-notice" role="alert">
+          <span class="list-notice-text">{view.notice}</span>
+          <button type="button" class="icon dismiss" data-action="list-dismiss" title="Dismiss" aria-label="Dismiss">
+            <span class="codicon codicon-close" aria-hidden="true"></span>
+          </button>
+        </p>
+      )}
+      <HolderNotices header={header} view={view} />
+    </>
+  );
 }
 
 /** A More Actions row: its codicon in the gutter, as the dock's menu draws its glyph, then its label. */
-function moreRow(action: string, icon: string, label: string): string {
-  return `<li role="none"><button type="button" class="menu-row" role="menuitem" data-action="${action}"><span class="menu-gutter" aria-hidden="true"><span class="codicon codicon-${icon}"></span></span><span class="title">${label}</span></button></li>`;
+function MoreRow({ action, icon, label }: { action: string; icon: string; label: string }) {
+  return (
+    <li role="none">
+      <button type="button" class="menu-row" role="menuitem" data-action={action}>
+        <span class="menu-gutter" aria-hidden="true">
+          <span class={`codicon codicon-${icon}`}></span>
+        </span>
+        <span class="title">{label}</span>
+      </button>
+    </li>
+  );
 }
 
-const SEPARATOR = '<li class="menu-separator" role="separator"></li>';
+const Separator = ({ classes = 'menu-separator' }: { classes?: string }) => <li class={classes} role="separator"></li>;
 
 /**
  * More Actions (PRD R71), in the dock's groups: New ad-hoc session… and New conversation in a folder…; Held sessions, and Ticket volume
  * report with a Zoho or Forum source; Refresh sources and Show hub log; then Open Settings. On a phone, where the header has no room for them,
  * the source icons come first as a check row per source.
  */
-export function renderMoreMenu(header: PageHeader | null): string {
+export function renderMoreMenu(header: PageHeader | null): VNode {
   const sources = (header?.sources ?? []).flatMap((group) =>
-    group.sources.map((one) => `<li role="none" class="more-source"><button type="button" class="menu-row" role="menuitemcheckbox" aria-checked="${one.enabled}" data-action="list-source-entry" data-source="${escape(one.name)}">${gutter(one.enabled)}${sourceLogo(group.kind, one.enabled)}<span class="title">${escape(one.name)}</span></button></li>`),
+    group.sources.map((one) => (
+      <li role="none" class="more-source">
+        <button type="button" class="menu-row" role="menuitemcheckbox" aria-checked={one.enabled} data-action="list-source-entry" data-source={one.name}>
+          <Gutter checked={one.enabled} />
+          <SourceLogo kind={group.kind} enabled={one.enabled} />
+          <span class="title">{one.name}</span>
+        </button>
+      </li>
+    )),
   );
   const volume = (header?.sources ?? []).some((group) => group.kind === 'zoho' || group.kind === 'forum');
-  const rows = [
-    ...(sources.length === 0 ? [] : [...sources, SEPARATOR.replace('class="menu-separator"', 'class="menu-separator more-source"')]),
-    moreRow('list-adhoc', 'add', 'New ad-hoc session…'),
-    moreRow('list-folder', 'folder', 'New conversation in a folder…'),
-    SEPARATOR,
-    moreRow('list-later-held', 'terminal', 'Held sessions'),
-    volume ? moreRow('list-later-volume', 'graph', 'Ticket volume report') : '',
-    SEPARATOR,
-    moreRow('list-poll', 'refresh', 'Refresh sources'),
-    moreRow('list-later-log', 'output', 'Show hub log'),
-    SEPARATOR,
-    moreRow('list-later-settings', 'settings-gear', 'Open Settings'),
-  ];
 
-  return `<ul class="glass menu more-menu align-right" role="menu" aria-label="More Actions">${rows.join('')}</ul>`;
+  return (
+    <ul class="glass menu more-menu align-right" role="menu" aria-label="More Actions">
+      {sources.length === 0 ? null : [...sources, <Separator classes="menu-separator more-source" />]}
+      <MoreRow action="list-adhoc" icon="add" label="New ad-hoc session…" />
+      <MoreRow action="list-folder" icon="folder" label="New conversation in a folder…" />
+      <Separator />
+      <MoreRow action="list-later-held" icon="terminal" label="Held sessions" />
+      {volume ? <MoreRow action="list-later-volume" icon="graph" label="Ticket volume report" /> : null}
+      <Separator />
+      <MoreRow action="list-poll" icon="refresh" label="Refresh sources" />
+      <MoreRow action="list-later-log" icon="output" label="Show hub log" />
+      <Separator />
+      <MoreRow action="list-later-settings" icon="settings-gear" label="Open Settings" />
+    </ul>
+  );
 }
 
 /** The dock windows More Actions opens that the page does not have yet, by their row's action. */
 export const LATER: Record<string, string> = { 'list-later-held': 'Held sessions', 'list-later-volume': 'Ticket volume report', 'list-later-log': 'Show hub log', 'list-later-settings': 'Open Settings' };
 
 /** A select's options, the chosen one selected. */
-function options(items: ReadonlyArray<{ value: string; label: string }>, chosen: string): string {
-  return items.map((item) => `<option value="${escape(item.value)}"${item.value === chosen ? ' selected' : ''}>${escape(item.label)}</option>`).join('');
+function Options({ items, chosen }: { items: ReadonlyArray<{ value: string; label: string }>; chosen: string }) {
+  return (
+    <>
+      {items.map((item) => (
+        <option value={item.value} selected={item.value === chosen}>
+          {item.label}
+        </option>
+      ))}
+    </>
+  );
+}
+
+/** A labelled select of a sheet's field. */
+function Select({ label, field, items, chosen, after }: { label: string; field: string; items: ReadonlyArray<{ value: string; label: string }>; chosen: string; after?: ComponentChildren }) {
+  return (
+    <label class="sheet-field">
+      <span class="sheet-label">{label}</span>
+      <select class="sheet-select" data-field={field}>
+        <Options items={items} chosen={chosen} />
+      </select>
+      {after}
+    </label>
+  );
+}
+
+/** The frame every sheet of the header has: its title, its body and its buttons, over a backdrop that cancels it. */
+function Frame({ title, children, buttons }: { title: string; children: ComponentChildren; buttons: ComponentChildren }) {
+  return (
+    <div class="sheet-backdrop" data-action="list-sheet-cancel">
+      <div class="sheet glass" role="dialog" aria-modal="true" aria-labelledby="list-sheet-title">
+        <h2 id="list-sheet-title" class="sheet-title">
+          {title}
+        </h2>
+        {children}
+        <div class="sheet-buttons">{buttons}</div>
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -282,75 +414,137 @@ function options(items: ReadonlyArray<{ value: string; label: string }>, chosen:
  * schedules; Repository; Provider; Prompt; Start automatically), New conversation in a folder with the folder and, when both are installed, the
  * provider, or a dock window the page does not have yet.
  */
-export function renderHeaderSheet(sheet: HeaderSheet | null, header: PageHeader | null): string {
+export function renderHeaderSheet(sheet: HeaderSheet | null, header: PageHeader | null): VNode | null {
   if (sheet === null) {
-    return '';
+    return null;
   }
-
-  const frame = (title: string, body: string, buttons: string): string =>
-    `<div class="sheet-backdrop" data-action="list-sheet-cancel"><div class="sheet glass" role="dialog" aria-modal="true" aria-labelledby="list-sheet-title"><h2 id="list-sheet-title" class="sheet-title">${escape(title)}</h2>${body}<div class="sheet-buttons">${buttons}</div></div></div>`;
 
   if (sheet.kind === 'later') {
-    return frame(sheet.title, `<p class="sheet-detail">${escape(sheet.title)} is not on the web page yet. Use it from the dock.</p>`, '<button type="button" class="sheet-button primary" data-action="list-sheet-cancel">Close</button>');
+    return (
+      <Frame
+        title={sheet.title}
+        buttons={
+          <button type="button" class="sheet-button primary" data-action="list-sheet-cancel">
+            Close
+          </button>
+        }
+      >
+        <p class="sheet-detail">{sheet.title} is not on the web page yet. Use it from the dock.</p>
+      </Frame>
+    );
   }
 
-  const busy = sheet.busy ? ' disabled' : '';
-  const cancel = `<button type="button" class="sheet-button secondary" data-action="list-sheet-cancel"${busy}>Cancel</button>`;
-  const error = sheet.error === null ? '' : `<p class="sheet-error" role="alert">${escape(sheet.error)}</p>`;
+  const cancel = (
+    <button type="button" class="sheet-button secondary" data-action="list-sheet-cancel" disabled={sheet.busy}>
+      Cancel
+    </button>
+  );
+  const error = sheet.error === null ? null : <p class="sheet-error" role="alert">{sheet.error}</p>;
 
   // Restart and resume asks the hub's question, which follows each list, so a restart begun elsewhere leaves nothing to confirm.
   if (sheet.kind === 'holder') {
     const confirm = header?.holderNotice?.confirm ?? null;
 
-    return confirm === null
-      ? frame('Restart the terminal holder', `<p class="sheet-detail">${escape(header?.holderNotice?.text ?? 'The terminal holder runs the installed build.')}</p>${error}`, '<button type="button" class="sheet-button primary" data-action="list-sheet-cancel">Close</button>')
-      : frame(confirm.question, `<p class="sheet-detail">${escape(confirm.detail)}</p>${error}`, `${cancel}<button type="button" class="sheet-button primary" data-action="list-sheet-go"${busy}>${escape(confirm.action)}</button>`);
+    return confirm === null ? (
+      <Frame
+        title="Restart the terminal holder"
+        buttons={
+          <button type="button" class="sheet-button primary" data-action="list-sheet-cancel">
+            Close
+          </button>
+        }
+      >
+        <p class="sheet-detail">{header?.holderNotice?.text ?? 'The terminal holder runs the installed build.'}</p>
+        {error}
+      </Frame>
+    ) : (
+      <Frame
+        title={confirm.question}
+        buttons={
+          <>
+            {cancel}
+            <button type="button" class="sheet-button primary" data-action="list-sheet-go" disabled={sheet.busy}>
+              {confirm.action}
+            </button>
+          </>
+        }
+      >
+        <p class="sheet-detail">{confirm.detail}</p>
+        {error}
+      </Frame>
+    );
   }
   const folders = header?.folders ?? [];
+  const go = (ready: boolean, label: string) => (
+    <>
+      {cancel}
+      <button type="button" class="sheet-button primary" data-action="list-sheet-go" disabled={!ready}>
+        {label}
+      </button>
+    </>
+  );
 
   if (sheet.kind === 'folder') {
-    const choices = sheet.installed === null ? [] : PROVIDERS.filter((one) => sheet.installed!.length > 1 || sheet.installed!.includes(one.provider));
+    const installed = sheet.installed;
+    const choices = installed === null ? [] : PROVIDERS.filter((one) => installed.length > 1 || installed.includes(one.provider));
     const provider =
-      sheet.installed === null
-        ? '<p class="sheet-detail">Loading the providers…</p>'
-        : sheet.installed.length > 1
-          ? `<label class="sheet-field"><span class="sheet-label">Provider</span><select class="sheet-select" data-field="provider">${options(choices.map((one) => ({ value: one.provider, label: one.name })), sheet.provider)}</select></label>`
-          : '';
-    const ready = !sheet.busy && sheet.folder !== '' && sheet.installed !== null && sheet.installed.length > 0;
-    const body =
-      folders.length === 0
-        ? '<p class="sheet-detail">The hub knows no folders yet. Add a repo root in Settings from the dock.</p>'
-        : `<label class="sheet-field"><span class="sheet-label">Folder</span><select class="sheet-select" data-field="folder">${options([{ value: '', label: 'Choose a folder' }, ...folders.map((one) => ({ value: one, label: one }))], sheet.folder)}</select></label>${provider}`;
+      installed === null ? (
+        <p class="sheet-detail">Loading the providers…</p>
+      ) : installed.length > 1 ? (
+        <Select label="Provider" field="provider" items={choices.map((one) => ({ value: one.provider, label: one.name }))} chosen={sheet.provider} />
+      ) : null;
+    const ready = !sheet.busy && sheet.folder !== '' && installed !== null && installed.length > 0;
 
-    return frame('New conversation in a folder', body + error, `${cancel}<button type="button" class="sheet-button primary" data-action="list-sheet-go"${ready ? '' : ' disabled'}>Create</button>`);
+    return (
+      <Frame title="New conversation in a folder" buttons={go(ready, 'Create')}>
+        {folders.length === 0 ? (
+          <p class="sheet-detail">The hub knows no folders yet. Add a repo root in Settings from the dock.</p>
+        ) : (
+          <>
+            <Select label="Folder" field="folder" items={[{ value: '', label: 'Choose a folder' }, ...folders.map((one) => ({ value: one, label: one }))]} chosen={sheet.folder} />
+            {provider}
+          </>
+        )}
+        {error}
+      </Frame>
+    );
   }
 
   const schedules = header?.schedules ?? [];
   const typed = sheet.schedule === '';
-  const run =
-    schedules.length === 0
-      ? ''
-      : `<label class="sheet-field"><span class="sheet-label">Run</span><select class="sheet-select" data-field="schedule">${options([{ value: '', label: 'A prompt' }, ...schedules.map((one) => ({ value: one.name, label: `Run ${one.name} now · ${one.playbook}` }))], sheet.schedule)}</select></label>`;
-  const fields = typed
-    ? `<label class="sheet-field"><span class="sheet-label">Repository</span><select class="sheet-select" data-field="repo">${options([...(sheet.repo === '' ? [{ value: '', label: 'Choose a repository' }] : []), ...folders.map((one) => ({ value: one, label: one }))], sheet.repo)}</select></label>` +
-      `<label class="sheet-field"><span class="sheet-label">Provider</span><select class="sheet-select" data-field="provider">${options(PROVIDERS.map((one) => ({ value: one.provider, label: one.name })), sheet.provider)}</select>${sheet.providerNote === null ? '' : `<span class="sheet-error">${escape(sheet.providerNote)}</span>`}</label>` +
-      `<label class="sheet-field"><span class="sheet-label">Prompt</span><textarea class="sheet-prompt" data-field="prompt" rows="6" placeholder="What the session should do">${escape(sheet.prompt)}</textarea></label>` +
-      `<label class="sheet-choice"><input type="checkbox" data-field="start"${sheet.start ? ' checked' : ''}><span>Start automatically</span></label>`
-    : '';
   const ready = !sheet.busy && (!typed || (sheet.repo !== '' && sheet.prompt.trim() !== ''));
 
-  return frame('New ad-hoc session', run + fields + error, `${cancel}<button type="button" class="sheet-button primary" data-action="list-sheet-go"${ready ? '' : ' disabled'}>${typed ? 'Create' : 'Run'}</button>`);
+  return (
+    <Frame title="New ad-hoc session" buttons={go(ready, typed ? 'Create' : 'Run')}>
+      {schedules.length === 0 ? null : <Select label="Run" field="schedule" items={[{ value: '', label: 'A prompt' }, ...schedules.map((one) => ({ value: one.name, label: `Run ${one.name} now · ${one.playbook}` }))]} chosen={sheet.schedule} />}
+      {typed ? (
+        <>
+          <Select label="Repository" field="repo" items={[...(sheet.repo === '' ? [{ value: '', label: 'Choose a repository' }] : []), ...folders.map((one) => ({ value: one, label: one }))]} chosen={sheet.repo} />
+          <Select label="Provider" field="provider" items={PROVIDERS.map((one) => ({ value: one.provider, label: one.name }))} chosen={sheet.provider} after={sheet.providerNote === null ? null : <span class="sheet-error">{sheet.providerNote}</span>} />
+          <label class="sheet-field">
+            <span class="sheet-label">Prompt</span>
+            <textarea class="sheet-prompt" data-field="prompt" rows={6} placeholder="What the session should do" value={sheet.prompt}></textarea>
+          </label>
+          <label class="sheet-choice">
+            <input type="checkbox" data-field="start" checked={sheet.start} />
+            <span>Start automatically</span>
+          </label>
+        </>
+      ) : null}
+      {error}
+    </Frame>
+  );
 }
 
 /**
  * The end of a search's results (PRD R63), after the list while the search filters it: what found nothing, Searching… or the hub's refusal, and
  * how to search further back.
  */
-export function renderSearchEnd(search: SearchView, empty: boolean): string {
+export function renderSearchEnd(search: SearchView, empty: boolean): VNode | null {
   const filter = search.filter.trim();
 
   if (!search.open || filter === '') {
-    return '';
+    return null;
   }
 
   const last = RANGES.length - 1;
@@ -358,12 +552,34 @@ export function renderSearchEnd(search: SearchView, empty: boolean): string {
   const noneText = search.range === last ? `No matches for “${filter}”.` : `No matches for “${filter}” in the ${RANGES[search.range]!.toLowerCase()}.`;
   const note = search.error ?? (search.pending ? 'Searching…' : search.more ? `Showing the newest ${search.older.length} matches from before the last 2 weeks. Add words to narrow the search.` : null);
   const links = [
-    search.range < last ? '<button type="button" class="link" data-action="list-search-further">Search further back</button>' : '',
-    none && search.range < last - 1 ? '<button type="button" class="link" data-action="list-search-all">All time</button>' : '',
-    none ? '<button type="button" class="link" data-action="list-search-clear">Clear search</button>' : '',
-  ].join('');
+    search.range < last ? (
+      <button type="button" class="link" data-action="list-search-further">
+        Search further back
+      </button>
+    ) : null,
+    none && search.range < last - 1 ? (
+      <button type="button" class="link" data-action="list-search-all">
+        All time
+      </button>
+    ) : null,
+    none ? (
+      <button type="button" class="link" data-action="list-search-clear">
+        Clear search
+      </button>
+    ) : null,
+  ].filter((one) => one !== null);
 
-  return `<div class="search-end" data-key="search-end">${none ? `<p class="search-none">${escape(noneText)}</p>` : ''}${note === null ? '' : `<p class="search-note" role="status">${escape(note)}</p>`}${links === '' ? '' : `<div class="search-links">${links}</div>`}</div>`;
+  return (
+    <div class="search-end" data-key="search-end" key="search-end">
+      {none ? <p class="search-none">{noneText}</p> : null}
+      {note === null ? null : (
+        <p class="search-note" role="status">
+          {note}
+        </p>
+      )}
+      {links.length === 0 ? null : <div class="search-links">{links}</div>}
+    </div>
+  );
 }
 
 /** The list header's controls, as the page uses them. */
@@ -372,8 +588,8 @@ export interface ListHeader {
   draw(header: PageHeader | null, groups: readonly PageGroup[]): void;
   /** The list to draw: filtered while a search applies, with the rows the hub found before the Done list. */
   list(groups: readonly PageGroup[]): { groups: PageGroup[]; filtering: boolean };
-  /** The end of the search's results, drawn after the list; empty without a search. */
-  end(shown: readonly PageGroup[]): string;
+  /** The end of the search's results, drawn after the list; nothing without a search. */
+  end(shown: readonly PageGroup[]): VNode | null;
   close(): void;
 }
 
@@ -834,8 +1050,8 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
         view.menu = null;
       }
 
-      morph(host, renderListHeader(header, view));
-      morph(sheetHost, renderHeaderSheet(view.sheet, header));
+      mount(host, renderListHeader(header, view));
+      mount(sheetHost, renderHeaderSheet(view.sheet, header));
     },
     list: (listed) => ({ groups: filterGroups(listed, search.filter, search.older), filtering: search.filter.trim() !== '' }),
     end: (filtered) => renderSearchEnd(search, filtered.every((group) => group.rows.length === 0)),

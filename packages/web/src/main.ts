@@ -2,11 +2,15 @@ import { applyEvent, commandQuery, EMPTY, mentionOf, mentionQuery, pageTitle, ro
 import { snoozeChoices } from '@switchboard/core/snooze';
 import type { PageState } from './model.js';
 import { escape, renderMarkdown } from './markdown.js';
-import { answerText, artifactUrl, complete, firstSnoozeDay, inputReady, renderEndedNote, renderMicButton, markdownBody, newView, parseQuestions, renderArtifacts, renderArtifactView, renderHeader, menuRows, renderList, renderSheet, rowKey, renderSideSwitch, renderStatus, renderTabs, renderTimeline, renderVoice, snoozeDateUntil, TABS, consoleNote, SIDE_TABS } from './render.js';
+import { answerText, artifactUrl, complete, firstSnoozeDay, inputReady, renderEndedNote, renderMicButton, markdownBody, newView, parseQuestions, renderArtifacts, renderArtifactView, renderSheet, rowKey, renderStatus, renderTimeline, renderVoice, snoozeDateUntil, TABS, consoleNote, SIDE_TABS } from './render.js';
 import type { CardDraft, SideTab, Tab, View } from './render.js';
 import type { ConsoleOptions, MountedConsole } from './console.js';
 import type { ItemView, PageRow, ScreenPrompt } from './types.js';
 import { morph } from './morph.js';
+import { mount } from './island.js';
+import type { VNode } from 'preact';
+import { renderList, renderListPane } from './list.js';
+import { menuRows, renderHeader, renderSideSwitch, renderTabs } from './header.js';
 import { listHeader } from './listHeader.js';
 import { attachments, drawChips } from './attachments.js';
 import type { Attached } from './attachments.js';
@@ -952,7 +956,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
   /** Draws the state by changing only what differs (`morph`), so the focus, a selection, the scroll position and open menus stay. */
   /** The pool ticket row whose menu is open, with the menu's rows, while the list still has that row. */
-  const poolMenu = (): { row: string; rows: string } | null => {
+  const poolMenu = (): { row: string; rows: VNode[] } | null => {
     const row = view.rowMenu === null ? undefined : state.groups.flatMap((group) => group.rows).find((one) => rowKey(one) === view.rowMenu);
 
     return row === undefined ? null : { row: rowKey(row), rows: menuRows(row, view) };
@@ -965,7 +969,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // A search shows only the rows that match, in every group, open (PRD R63).
     const listed = header.list(state.groups);
     morph(sheetHost, renderSheet(view.sheet, view.acting));
-    morph(list, expired ? '<p class="empty">This page\'s link is no longer valid. Open a new one with Switchboard: Open Web Page in VS Code, or hub.js web.</p>' : (listError === null ? '' : `<p class="list-error" role="alert">${escape(listError)}</p>`) + renderList(listed.groups, state.scope?.workItemId ?? null, view.collapsed, listed.filtering, poolMenu()) + header.end(listed.groups));
+    mount(list, renderListPane(expired, listError, renderList(listed.groups, state.scope?.workItemId ?? null, view.collapsed, listed.filtering, poolMenu()), header.end(listed.groups)));
+    // Each draw shows line 2's pills whole until `fitLines` fits them again after the redraw, as a list drawn afresh would.
+    list.querySelectorAll('.pill.compact, .pill.omitted').forEach((pill) => pill.classList.remove('compact', 'omitted'));
     fitLines();
 
     // An ended session's note sits just above the composer on every tab, with Resume, as in the Conversation view; the page resumes it in the
@@ -977,19 +983,19 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     root.classList.toggle('wide', side);
 
     if (!side) {
-      morph(detailHead, '');
+      mount(detailHead, null);
       morph(detailBody, '');
     }
 
     if (state.scope === null) {
-      morph(head, '');
+      mount(head, null);
       morph(panel, `<p class="empty">${state.connected ? 'Choose a work item on the left.' : 'Connecting to Switchboard…'}</p>`);
       shown = null;
       updateComposer();
       return;
     }
 
-    morph(head, renderHeader(state, view) + (side ? '' : renderTabs(view, state)));
+    mount(head, [renderHeader(state, view), side ? null : renderTabs(view, state)]);
 
     const artifact = view.artifact === null ? undefined : state.artifacts.find((one) => one.path === view.artifact);
     const now = deps.now();
@@ -1025,7 +1031,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     drawTab(panel, mainTab());
 
     if (side) {
-      morph(detailHead, renderSideSwitch(view.side, state));
+      mount(detailHead, renderSideSwitch(view.side, state));
       drawTab(detailBody, view.side);
     }
     // The composer first, so the conversation is scrolled against its final height.
