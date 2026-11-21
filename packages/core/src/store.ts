@@ -466,6 +466,12 @@ export const MIGRATIONS = [
   CREATE INDEX IF NOT EXISTS ticketsBySnoozed ON tickets (snoozed);
   CREATE INDEX IF NOT EXISTS ticketsByPool ON tickets (pool);
   CREATE INDEX IF NOT EXISTS ticketsByRepo ON tickets (source, repo);`,
+  // The web page's remembered sign-ins (architecture.md § Web page): the SHA-256 of each cookie, never the cookie.
+  `CREATE TABLE pageSessions (
+    hash TEXT PRIMARY KEY,
+    createdAt INTEGER NOT NULL,
+    usedAt INTEGER NOT NULL
+  );`,
 ];
 
 /**
@@ -1656,6 +1662,28 @@ export class Store {
         'INSERT INTO windowBindings (file, workItemId, since, scopeGen, selectedWorkItemId, selectedSessionId, ticketId, title) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (file) DO UPDATE SET workItemId = excluded.workItemId, since = excluded.since, scopeGen = excluded.scopeGen, selectedWorkItemId = excluded.selectedWorkItemId, selectedSessionId = excluded.selectedSessionId, ticketId = excluded.ticketId, title = excluded.title',
       )
       .run(binding.file, binding.workItemId, binding.since, binding.scopeGen, binding.selectedWorkItemId ?? null, binding.selectedSessionId ?? null, binding.ticketId ?? null, binding.title ?? null);
+  }
+
+  /** A remembered web page sign-in by its cookie's hash (architecture.md § Web page), or null. */
+  pageSession(hash: string): { createdAt: number; usedAt: number } | null {
+    return (this.#db.prepare('SELECT createdAt, usedAt FROM pageSessions WHERE hash = ?').get(hash) as { createdAt: number; usedAt: number } | undefined) ?? null;
+  }
+
+  /** Stores a sign-in, or the time it was last used. */
+  savePageSession(hash: string, at: number): void {
+    this.#db.prepare('INSERT INTO pageSessions (hash, createdAt, usedAt) VALUES (?, ?, ?) ON CONFLICT (hash) DO UPDATE SET usedAt = excluded.usedAt').run(hash, at, at);
+  }
+
+  /** Forgets one sign-in, or every one without a hash; answers how many. */
+  deletePageSessions(hash?: string): number {
+    const result = hash === undefined ? this.#db.prepare('DELETE FROM pageSessions').run() : this.#db.prepare('DELETE FROM pageSessions WHERE hash = ?').run(hash);
+
+    return Number(result.changes);
+  }
+
+  /** Forgets the sign-ins last used before `usedBefore`, and all but the `keep` used last. */
+  trimPageSessions(usedBefore: number, keep: number): void {
+    this.#db.prepare('DELETE FROM pageSessions WHERE usedAt < ? OR hash NOT IN (SELECT hash FROM pageSessions ORDER BY usedAt DESC, createdAt DESC LIMIT ?)').run(usedBefore, keep);
   }
 
   /**

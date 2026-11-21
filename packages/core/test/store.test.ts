@@ -698,4 +698,27 @@ describe('Store', () => {
     ]);
     expect(store.pastesFor(second.id).map((paste) => paste.file)).toEqual(['D:/case/other.md']);
   });
+
+  it('keeps web page sign-ins by hash, records their use, forgets one or all, and trims the stale and the oldest past the limit', () => {
+    const store = Store.open(join(dir, 'pages.db'));
+
+    store.savePageSession('a', 100);
+    store.savePageSession('b', 200);
+    store.savePageSession('c', 300);
+    store.savePageSession('a', 400);
+    expect(store.pageSession('a')).toEqual({ createdAt: 100, usedAt: 400 });
+    expect(store.pageSession('missing')).toBeNull();
+    // Used before 250, or not among the 2 used last.
+    store.trimPageSessions(250, 2);
+    expect([store.pageSession('a'), store.pageSession('b'), store.pageSession('c')]).toEqual([{ createdAt: 100, usedAt: 400 }, null, { createdAt: 300, usedAt: 300 }]);
+    store.trimPageSessions(0, 1);
+    expect(store.pageSession('c')).toBeNull();
+    store.savePageSession('d', 500);
+    expect(store.deletePageSessions('a')).toBe(1);
+    expect(store.deletePageSessions('a')).toBe(0);
+    store.savePageSession('e', 600);
+    expect(store.deletePageSessions()).toBe(2);
+    expect(store.pageSession('e')).toBeNull();
+    store.close();
+  });
 });

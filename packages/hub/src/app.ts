@@ -1106,7 +1106,7 @@ const dockWithRuns = () => {
     windowState: (key) => scopes.scoped(key, views().snapshot),
     conversation: (key, write) => conversation.open(key, write),
     page: {
-      access: new PageAccess(deps.now),
+      access: new PageAccess(store, deps.now),
       asset: (name) => pageAsset(name, home),
       opened: () => {
         const key = scopes.openPage();

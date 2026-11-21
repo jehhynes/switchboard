@@ -322,6 +322,24 @@ describe('hub entry point', () => {
     }
   });
 
+  it('prints a web page link and signs every browser out through the hub, with exit codes for usage and no hub', async () => {
+    expect(await start('web', 'now').exited).toMatchObject({ code: 1, stderr: 'Usage: hub.js web [revoke]\n' });
+    expect((await start('web').exited).code).toBe(2);
+    expect((await start('web', 'revoke').exited).code).toBe(2);
+    expect(await start('--page-port=soon').exited).toMatchObject({ code: 1, stderr: '--page-port takes a port number, not "soon".\n' });
+
+    const hub = start('--idle-ms=60000');
+    const found = await recorded();
+    const link = await start('web').exited;
+
+    expect(link.code).toBe(0);
+    expect(link.stdout).toMatch(new RegExp(`http://127\\.0\\.0\\.1:${found.port}/page\\?t=[0-9a-f]{64}`));
+    expect(await start('web', 'revoke').exited).toMatchObject({ code: 0, stdout: 'Signed out every browser (0 sign-ins). Open a new link to use the web page again.\n' });
+
+    await start('--stop').exited;
+    expect((await hub.exited).code).toBe(0);
+  });
+
   it('takes --code-mode-idle-ms as a whole number of milliseconds and refuses anything else', async () => {
     expect(await start('--code-mode-idle-ms=soon').exited).toMatchObject({ code: 1, stderr: '--code-mode-idle-ms takes a whole number of milliseconds above 0, not "soon".\n' });
 

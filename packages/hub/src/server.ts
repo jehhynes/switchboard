@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { pipeline } from 'node:stream';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import type { HubIdentity } from '@switchboard/core';
-import { ARTIFACT_CSP, loopbackHost, PAGE_COOKIE, PAGE_CSP } from './page.js';
+import { ARTIFACT_CSP, cookieValue, loopbackHost, PAGE_COOKIE, PAGE_CSP, pageCookie, SIGNED_OUT_HTML } from './page.js';
 import type { PageAccess } from './page.js';
 
 export interface Reply {
@@ -380,6 +380,8 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
   let pagePort: number | null = null;
   let pageNotice: string | null = null;
   let pageReady: Promise<unknown> = Promise.resolve();
+  // Open page streams and the sign-in each opened with, so a revoke ends them all and a sign-in replaced ends its own.
+  const pageStreams = new Map<ServerResponse, string | null>();
   const page = options.page;
 
   /** The web page's routes (architecture.md § Web page); false for any other request. */
@@ -389,7 +391,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     const bearer = request.headers.authorization !== undefined;
     const cookiePost = request.method === 'POST' && !bearer && path.startsWith('/v1/conversation/') && request.headers.cookie !== undefined;
 
-    if (page === undefined || (!isPageRoute && !cookiePost) || (path === '/page/link' && request.method === 'POST')) {
+    if (page === undefined || (!isPageRoute && !cookiePost) || (request.method === 'POST' && (path === '/page/link' || path === '/page/revoke'))) {
       return false;
     }
 
@@ -426,7 +428,8 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     }
 
     if (request.method === 'GET' && path === '/page') {
-      const cookie = page.access.exchange(url.searchParams.get('t') ?? '');
+      const previous = page.access.sessionOf(request.headers.cookie);
+      const cookie = page.access.exchange(url.searchParams.get('t') ?? '', request.headers.cookie);
 
       if (cookie === null) {
         response.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
@@ -434,13 +437,25 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
         return true;
       }
 
-      response.writeHead(303, { 'Set-Cookie': `${PAGE_COOKIE}=${cookie}; HttpOnly; SameSite=Strict; Path=/`, Location: '/page/', 'Cache-Control': 'no-store' });
+      for (const [stream, session] of pageStreams) {
+        if (session !== null && session === previous) {
+          stream.end();
+        }
+      }
+
+      response.writeHead(303, { 'Set-Cookie': pageCookie(cookie), Location: '/page/', 'Cache-Control': 'no-store' });
       response.end();
       return true;
     }
 
     if (!page.access.allows(request.headers.cookie)) {
-      json(response, 401, { error: 'unauthorized' });
+      if (request.method === 'GET' && path === '/page/') {
+        response.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Frame-Options': 'DENY', 'Content-Security-Policy': PAGE_CSP });
+        response.end(SIGNED_OUT_HTML);
+      } else {
+        json(response, 401, { error: 'unauthorized' });
+      }
+
       return true;
     }
 
@@ -452,7 +467,10 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
         return true;
       }
 
-      response.writeHead(200, { 'Content-Type': asset.mime, 'Cache-Control': 'no-cache', 'X-Frame-Options': 'DENY', 'Content-Security-Policy': PAGE_CSP });
+      // Loading the page renews its sign-in's cookie, so a computer in use stays signed in.
+      const renew = path === '/page/' ? { 'Set-Cookie': pageCookie(cookieValue(request.headers.cookie, PAGE_COOKIE)!) } : {};
+
+      response.writeHead(200, { 'Content-Type': asset.mime, 'Cache-Control': 'no-cache', 'X-Frame-Options': 'DENY', 'Content-Security-Policy': PAGE_CSP, ...renew });
       response.end(asset.body);
       return true;
     }
@@ -461,7 +479,10 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       let key: string | null = page.opened();
 
       openConversation(request, response, key);
+      pageStreams.set(response, page.access.sessionOf(request.headers.cookie));
       request.on('close', () => {
+        pageStreams.delete(response);
+
         if (key !== null) {
           options.windowClosed?.(key);
           key = null;
@@ -610,6 +631,15 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       void pageReady.then(() =>
         json(response, 200, { url: `http://127.0.0.1:${pagePort ?? ownPort}/page?t=${page.access.token()}`, ...(pageNotice === null ? {} : { notice: pageNotice }) }),
       );
+    } else if (request.method === 'POST' && path === '/page/revoke' && page !== undefined) {
+      // Signs every browser out of the web page and ends the open pages' streams (architecture.md § Web page).
+      const revoked = page.access.revokeAll();
+
+      for (const stream of pageStreams.keys()) {
+        stream.end();
+      }
+
+      json(response, 200, { revoked });
     } else if (request.method === 'POST' && path === '/shutdown') {
       json(response, 200, { stopping: true });
       options.onShutdown();

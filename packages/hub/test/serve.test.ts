@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
 import { createServer } from 'node:net';
-import { hubRecordPath, parseHubRecord, switchboardHome } from '@switchboard/core';
+import { hubRecordPath, parseHubRecord, Store, switchboardHome } from '@switchboard/core';
 import type { Card } from '@switchboard/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openEvents } from '../src/client.js';
@@ -262,7 +262,8 @@ describe('serveHub', () => {
     it("serves the web page on the app's web.port unless the options name another port, and stops serving it when stopped", async () => {
       const pagePort = await freePort();
       const log = vi.fn();
-      const page = { access: new PageAccess(), asset: () => null, opened: () => 'p', isPage: () => false, list: () => [], files: async () => null, artifact: () => null };
+      const store = Store.open(':memory:');
+      const page = { access: new PageAccess(store), asset: () => null, opened: () => 'p', isPage: () => false, list: () => [], files: async () => null, artifact: () => null };
       const hub = served(await serve({ browserPort: null, log, app: async () => ({ ...app([]), page, pagePort: () => pagePort }) }));
 
       await until(() => (log.mock.calls.some(([line]) => line === `web page on http://127.0.0.1:${pagePort}/page/`) ? true : null));

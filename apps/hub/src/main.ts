@@ -215,14 +215,37 @@ function holder(home: string, argv: readonly string[]): Promise<number> {
   });
 }
 
-/** Prints a one-time link to the web page (architecture.md § Web page). Exit codes: 0 printed, 2 no hub, 3 refused. */
-async function web(home: string): Promise<number> {
+/**
+ * Prints a one-time link to the web page, or with `revoke` signs every browser out of it (architecture.md § Web page). Exit codes: 0 done, 2 no
+ * hub, 3 refused.
+ */
+async function web(home: string, rest: readonly string[]): Promise<number> {
+  const words = rest.filter((argument) => !argument.startsWith('--'));
+  const revoke = words[0] === 'revoke';
+
+  if (words.length > (revoke ? 1 : 0)) {
+    process.stderr.write(`Usage: hub.js web [revoke]\n`);
+    return 1;
+  }
+
   const hub = await findHub(home, REPORT_TIMEOUT_MS);
-  const reply = hub === null ? null : await postToHub(hub, '/page/link', {}, REPORT_TIMEOUT_MS);
+  const reply = hub === null ? null : await postToHub(hub, revoke ? '/page/revoke' : '/page/link', {}, REPORT_TIMEOUT_MS);
 
   if (reply === null) {
     process.stderr.write(`${noHub(home)}.\n`);
     return 2;
+  }
+
+  if (revoke) {
+    const revoked = (reply.body as { revoked?: unknown } | null)?.revoked;
+
+    if (reply.status !== 200 || typeof revoked !== 'number') {
+      process.stderr.write(`Refused: ${reply.error ?? `status ${reply.status}`}\n`);
+      return 3;
+    }
+
+    process.stdout.write(`Signed out every browser (${revoked} sign-ins). Open a new link to use the web page again.\n`);
+    return 0;
   }
 
   const url = (reply.body as { url?: unknown } | null)?.url;
@@ -251,7 +274,7 @@ async function main(argv: readonly string[]): Promise<number> {
     const home = flag(argv, 'home') || bundleHome(bundle, homedir());
     const rest = argv.slice(1).filter((argument) => !argument.startsWith('--home'));
 
-    const commands = { report, register, attach, holder, web: (one: string) => web(one) };
+    const commands = { report, register, attach, holder, web };
 
     return commands[argv[0] as keyof typeof commands](home, rest);
   }

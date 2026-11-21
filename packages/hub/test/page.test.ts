@@ -6,7 +6,9 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { listenHub } from '../src/server.js';
 import type { HubServer, PageRoutes } from '../src/server.js';
-import { artifactFile, cookieValue, dockRowOf, findFiles, loopbackHost, PageAccess, PAGE_LINK_MS, pageActionEvent, pageActions, pageGroups, pageList, pasteText } from '../src/page.js';
+import { createHash } from 'node:crypto';
+import { Store } from '@switchboard/core';
+import { artifactFile, cookieValue, dockRowOf, findFiles, loopbackHost, PageAccess, pageCookie, PAGE_LINK_MS, PAGE_SESSION_MS, PAGE_SESSIONS_KEPT, pageActionEvent, pageActions, pageGroups, pageList, pasteText } from '../src/page.js';
 import { dockView } from '../src/dock.js';
 import type { DockView } from '../src/dock.js';
 import { pageAsset } from '../src/pageAssets.js';
@@ -24,9 +26,19 @@ afterEach(() => {
 });
 
 describe('PageAccess', () => {
+  let store: Store;
+
+  beforeEach(() => {
+    store = Store.open(':memory:');
+  });
+
+  afterEach(() => {
+    store.close();
+  });
+
   it('exchanges a token once, before it expires, for a cookie it then recognises', () => {
     let now = 1_000;
-    const access = new PageAccess(() => now);
+    const access = new PageAccess(store, () => now);
     const token = access.token();
     const cookie = access.exchange(token);
 
@@ -41,6 +53,53 @@ describe('PageAccess', () => {
     now += PAGE_LINK_MS + 1;
     expect(access.exchange(late)).toBeNull();
     expect(access.exchange('never-given')).toBeNull();
+  });
+
+  it('remembers a sign-in across a hub restart by its hash only, until it goes unused for 30 days, renewing it with use', () => {
+    let now = 1_000;
+    const first = new PageAccess(store, () => now);
+    const cookie = first.exchange(first.token())!;
+    const hash = createHash('sha256').update(cookie).digest('hex');
+
+    expect(store.pageSession(hash)).toEqual({ createdAt: 1_000, usedAt: 1_000 });
+    expect(store.pageSession(cookie)).toBeNull();
+
+    // A new hub reads the same store; its tokens are its own.
+    const second = new PageAccess(store, () => now);
+
+    now += PAGE_SESSION_MS - 1;
+    expect(second.allows(`sb_page=${cookie}`)).toBe(true);
+    expect(store.pageSession(hash)?.usedAt).toBe(now);
+    now += PAGE_SESSION_MS;
+    expect(second.allows(`sb_page=${cookie}`)).toBe(true);
+    now += PAGE_SESSION_MS + 1;
+    expect(second.allows(`sb_page=${cookie}`)).toBe(false);
+    expect(store.pageSession(hash)).toBeNull();
+    // A hash itself, sent as the cookie, is not a sign-in.
+    const other = second.exchange(second.token())!;
+
+    expect(second.allows(`sb_page=${createHash('sha256').update(other).digest('hex')}`)).toBe(false);
+  });
+
+  it('replaces the sign-in a browser already holds when it signs in again, keeps the 20 used last, and revokes them all', () => {
+    let now = 1_000;
+    const access = new PageAccess(store, () => now);
+    const old = access.exchange(access.token())!;
+    const renewed = access.exchange(access.token(), `x=1; sb_page=${old}`)!;
+
+    expect(access.allows(`sb_page=${old}`)).toBe(false);
+    expect(access.allows(`sb_page=${renewed}`)).toBe(true);
+
+    const cookies = Array.from({ length: PAGE_SESSIONS_KEPT }, () => {
+      now += 1;
+      return access.exchange(access.token())!;
+    });
+
+    expect(access.allows(`sb_page=${renewed}`)).toBe(false);
+    expect(cookies.every((cookie) => access.allows(`sb_page=${cookie}`))).toBe(true);
+    expect(access.revokeAll()).toBe(PAGE_SESSIONS_KEPT);
+    expect(cookies.some((cookie) => access.allows(`sb_page=${cookie}`))).toBe(false);
+    expect(pageCookie('ab')).toBe(`sb_page=ab; HttpOnly; SameSite=Strict; Path=/; Max-Age=${PAGE_SESSION_MS / 1000}`);
   });
 
   it('reads a cookie by its name and answers the loopback names only', () => {
@@ -245,9 +304,15 @@ function send(port: number, method: string, path: string, headers: Record<string
 
 describe('the web page routes', () => {
   let server: HubServer;
+  let store: Store;
+
+  beforeEach(() => {
+    store = Store.open(':memory:');
+  });
 
   afterEach(async () => {
     await server.close();
+    store.close();
   });
 
   async function serve() {
@@ -261,7 +326,7 @@ describe('the web page routes', () => {
     writeFileSync(join(folder, 'chat', 'page.html'), '<script>1</script>');
 
     const page: PageRoutes = {
-      access: new PageAccess(),
+      access: new PageAccess(store),
       asset: (name) => (name === 'index.html' ? { mime: 'text/html; charset=utf-8', body: '<html>page</html>' } : null),
       opened: () => {
         const key = `page-${++keys}`;
@@ -374,6 +439,84 @@ describe('the web page routes', () => {
     setTimeout(() => holder.close(), 300);
     expect(await freed).toBeNull();
     expect(new URL((JSON.parse((await send(server.port, 'POST', '/page/link', { Authorization: `Bearer ${server.token}` })).body) as { url: string }).url).port).toBe(String(port));
+  });
+
+  it('keeps a sign-in across a hub restart, renews its cookie as the page loads, and says when a browser is not signed in', async () => {
+    const { url } = await serve();
+    const exchange = await send(server.port, 'GET', `${url.pathname}${url.search}`, {});
+    const cookie = String(exchange.headers['set-cookie']).split(';')[0]!;
+
+    expect(String(exchange.headers['set-cookie'])).toContain(`Max-Age=${PAGE_SESSION_MS / 1000}`);
+    await server.close();
+    await serve();
+
+    const shown = await send(server.port, 'GET', '/page/', { Cookie: cookie });
+
+    expect(shown.status).toBe(200);
+    expect(String(shown.headers['set-cookie'])).toBe(pageCookie(cookie.slice('sb_page='.length)));
+
+    const signedOut = await send(server.port, 'GET', '/page/', {});
+
+    expect(signedOut.status).toBe(401);
+    expect(signedOut.headers['content-type']).toBe('text/html; charset=utf-8');
+    expect(signedOut.body).toContain('not signed in to Switchboard');
+    expect(signedOut.headers['set-cookie']).toBeUndefined();
+  });
+
+  it('ends the streams of a sign-in that a new link replaces, and only those', async () => {
+    const { url } = await serve();
+    const signIn = async (cookie?: string): Promise<string> => {
+      const link = new URL((JSON.parse((await send(server.port, 'POST', '/page/link', { Authorization: `Bearer ${server.token}` })).body) as { url: string }).url);
+
+      return String((await send(server.port, 'GET', `${link.pathname}${link.search}`, cookie === undefined ? {} : { Cookie: cookie })).headers['set-cookie']).split(';')[0]!;
+    };
+    const first = String((await send(server.port, 'GET', `${url.pathname}${url.search}`, {})).headers['set-cookie']).split(';')[0]!;
+    const other = await signIn();
+    const open = (cookie: string) => {
+      const state = { ended: false };
+      const stream = request({ host: '127.0.0.1', port: server.port, path: '/v1/conversation/events?page=1', headers: { Host: `127.0.0.1:${server.port}`, Cookie: cookie } }, (response) => {
+        response.resume();
+        response.on('end', () => (state.ended = true));
+      });
+
+      stream.on('error', () => {});
+      stream.end();
+      return state;
+    };
+    const firstStream = open(first);
+    const otherStream = open(other);
+
+    await until(() => (server.clients() === 2 ? true : null));
+
+    const renewed = await signIn(first);
+
+    await until(() => (firstStream.ended ? true : null));
+    expect(otherStream.ended).toBe(false);
+    expect((await send(server.port, 'GET', '/v1/page/list', { Cookie: first })).status).toBe(401);
+    expect((await send(server.port, 'GET', '/v1/page/list', { Cookie: renewed })).status).toBe(200);
+  });
+
+  it('revokes every sign-in only with the hub token and ends the open pages\' streams', async () => {
+    const { url, closed } = await serve();
+    const exchange = await send(server.port, 'GET', `${url.pathname}${url.search}`, {});
+    const cookie = String(exchange.headers['set-cookie']).split(';')[0]!;
+    let ended = false;
+    const stream = request({ host: '127.0.0.1', port: server.port, path: '/v1/conversation/events?page=1', headers: { Host: `127.0.0.1:${server.port}`, Cookie: cookie } }, (response) => {
+      response.resume();
+      response.on('end', () => (ended = true));
+    });
+
+    stream.on('error', () => {});
+    stream.end();
+    await until(() => (server.clients() === 1 ? true : null));
+    expect((await send(server.port, 'POST', '/page/revoke', { Cookie: cookie })).status).toBe(401);
+    expect(ended).toBe(false);
+
+    const revoked = await send(server.port, 'POST', '/page/revoke', { Authorization: `Bearer ${server.token}` });
+
+    expect(JSON.parse(revoked.body)).toEqual({ revoked: 1 });
+    await until(() => (ended && closed.includes('page-1') ? true : null));
+    expect((await send(server.port, 'GET', '/v1/page/list', { Cookie: cookie })).status).toBe(401);
   });
 
   it('exchanges a one-time link for an HttpOnly, SameSite=Strict cookie and serves the page only with it, under its own CSP', async () => {

@@ -1,8 +1,9 @@
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { realpathSync, statSync } from 'node:fs';
 import { basename, isAbsolute, join, relative, sep } from 'node:path';
 import { hostKey, isFolderHost } from '@switchboard/core';
+import type { Store } from '@switchboard/core';
 import { artifactType } from '@switchboard/conversation';
 import { windowOf } from './dock.js';
 import type { DockRow, DockView } from './dock.js';
@@ -13,18 +14,37 @@ import type { Snapshot } from './snapshot.js';
 export const PAGE_COOKIE = 'sb_page';
 /** How long a page link can be opened. */
 export const PAGE_LINK_MS = 2 * 60_000;
-/** The most page cookies kept; the oldest is dropped past it. */
-const PAGE_COOKIES_KEPT = 20;
+/** A sign-in not used for this long is forgotten; also the cookie's Max-Age, renewed each time the page loads. */
+export const PAGE_SESSION_MS = 30 * 24 * 60 * 60_000;
+/** The most sign-ins kept; the one used longest ago is dropped past it. */
+export const PAGE_SESSIONS_KEPT = 20;
+/** How often a sign-in's latest use is written to the store. */
+const PAGE_SESSION_TOUCH_MS = 60 * 60_000;
+
+/** Where the page's sign-ins are kept: the hub's store, by each cookie's SHA-256. */
+export type PageSessions = Pick<Store, 'pageSession' | 'savePageSession' | 'deletePageSessions' | 'trimPageSessions'>;
+
+/** The Set-Cookie value that signs this computer in with a cookie value (architecture.md § Web page). */
+export function pageCookie(value: string): string {
+  return `${PAGE_COOKIE}=${value}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${PAGE_SESSION_MS / 1000}`;
+}
+
+function hashOf(cookie: string): string {
+  return createHash('sha256').update(cookie).digest('hex');
+}
 
 /**
- * The web page's credential (architecture.md § Web page): a one-time token in a link, which the page exchanges for a cookie it cannot read.
- * Both live in the hub's memory only, so a restarted hub needs a new link.
+ * The web page's credential (architecture.md § Web page): a one-time token in a link, which the page exchanges for a cookie it cannot read. Tokens
+ * live in the hub's memory; each cookie is a remembered sign-in for this computer, kept in the store as its hash only, so it outlives a hub restart
+ * until it goes unused for `PAGE_SESSION_MS` or is revoked.
  */
 export class PageAccess {
   readonly #tokens = new Map<string, number>();
-  readonly #cookies: string[] = [];
 
-  constructor(private readonly now: () => number = Date.now) {}
+  constructor(
+    private readonly sessions: PageSessions,
+    private readonly now: () => number = Date.now,
+  ) {}
 
   /** A new one-time token, good for `PAGE_LINK_MS`. */
   token(): string {
@@ -40,8 +60,11 @@ export class PageAccess {
     return token;
   }
 
-  /** The cookie value for a token not used yet and not expired, which it uses up; null otherwise. */
-  exchange(token: string): string | null {
+  /**
+   * A new cookie value for a token not used yet and not expired, which it uses up; null otherwise. The sign-in the request's Cookie header
+   * already holds is forgotten, so signing in again leaves no old cookie valid.
+   */
+  exchange(token: string, header?: string): string | null {
     const until = this.#tokens.get(token);
 
     this.#tokens.delete(token);
@@ -50,34 +73,62 @@ export class PageAccess {
       return null;
     }
 
-    const cookie = randomBytes(32).toString('hex');
+    const previous = cookieValue(header, PAGE_COOKIE);
 
-    this.#cookies.push(cookie);
-
-    if (this.#cookies.length > PAGE_COOKIES_KEPT) {
-      this.#cookies.shift();
+    if (previous !== null) {
+      this.sessions.deletePageSessions(hashOf(previous));
     }
 
+    const cookie = randomBytes(32).toString('hex');
+
+    this.sessions.savePageSession(hashOf(cookie), this.now());
+    this.sessions.trimPageSessions(this.now() - PAGE_SESSION_MS, PAGE_SESSIONS_KEPT);
     return cookie;
   }
 
-  /** Whether a request's Cookie header carries a page cookie this hub gave out. */
+  /** Whether a request's Cookie header carries a sign-in this hub gave out, not revoked and used within `PAGE_SESSION_MS`, which counts as a use. */
   allows(header: string | undefined): boolean {
     const given = cookieValue(header, PAGE_COOKIE);
 
-    if (given === null) {
+    if (given === null || !/^[0-9a-f]{64}$/.test(given)) {
       return false;
     }
 
-    const bytes = Buffer.from(given);
+    const hash = hashOf(given);
+    const session = this.sessions.pageSession(hash);
+    const now = this.now();
 
-    return this.#cookies.some((cookie) => {
-      const known = Buffer.from(cookie);
+    if (session === null) {
+      return false;
+    }
 
-      return known.length === bytes.length && timingSafeEqual(known, bytes);
-    });
+    if (now - session.usedAt > PAGE_SESSION_MS) {
+      this.sessions.deletePageSessions(hash);
+      return false;
+    }
+
+    if (now - session.usedAt >= PAGE_SESSION_TOUCH_MS) {
+      this.sessions.savePageSession(hash, now);
+    }
+
+    return true;
+  }
+
+  /** The stored key of the sign-in a Cookie header names, whether or not it is valid, or null for none. */
+  sessionOf(header: string | undefined): string | null {
+    const given = cookieValue(header, PAGE_COOKIE);
+
+    return given === null ? null : hashOf(given);
+  }
+
+  /** Forgets every sign-in, so every browser needs a new link; answers how many there were. */
+  revokeAll(): number {
+    return this.sessions.deletePageSessions();
   }
 }
+
+/** What `/page/` answers a browser that is not signed in. */
+export const SIGNED_OUT_HTML = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Switchboard</title><style>body{margin:0;display:grid;place-items:center;min-height:100vh;background:#1f1f1f;color:#cccccc;font:14px system-ui,sans-serif}main{max-width:28rem;padding:24px}h1{font-size:18px;font-weight:600;margin:0 0 8px}</style></head><body><main><h1>Not signed in</h1><p>This browser is not signed in to Switchboard. Open the page with Switchboard: Open Web Page in VS Code, or <code>hub.js web</code>.</p></main></body></html>';
 
 /** A cookie's value from a Cookie header, or null. */
 export function cookieValue(header: string | undefined, name: string): string | null {
