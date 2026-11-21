@@ -129,7 +129,7 @@ export function renderHeader(state: PageState, view: View): string {
       ? ''
       : `<button type="button" class="persona${persona.tonePending ? ' pending' : ''}" data-action="persona" aria-haspopup="menu" aria-expanded="${view.personas !== null}" title="${escape(`Persona: ${persona.name}${persona.pinned ? ', pinned' : ''}. Click to choose another.`)}" aria-label="${escape(`Persona: ${persona.name}${persona.pinned ? ', pinned' : ''}`)}"><span class="codicon codicon-${persona.pinned ? 'pinned' : 'person'}" aria-hidden="true"></span></button>`;
   const label = selected === null ? `${codicon(stateIcon(state.session?.state, state.session?.waitingFor, state.session?.limit))}<span class="title">${escape(title)}</span>` : conversationLabel(selected, state);
-  const picker = `<div class="menu-anchor picker-anchor"><button type="button" class="picker" data-action="picker" aria-haspopup="menu" aria-expanded="${view.picker}" title="${escape(title)}">${label}<span class="codicon codicon-chevron-down" aria-hidden="true"></span></button>${view.picker ? `<ul class="menu conversation-menu" role="menu" aria-label="Conversations">${options}</ul>` : ''}</div>`;
+  const picker = `<div class="menu-anchor picker-anchor"><button type="button" class="picker" data-action="picker" aria-haspopup="menu" aria-expanded="${view.picker}" title="${escape(title)}">${label}<span class="codicon codicon-chevron-down" aria-hidden="true"></span></button>${view.picker ? `<ul class="glass menu conversation-menu" role="menu" aria-label="Conversations">${options}</ul>` : ''}</div>`;
 
   const menu = view.personas;
   const rows =
@@ -143,7 +143,7 @@ export function renderHeader(state: PageState, view: View): string {
               ...menu.items.map((one) => `<li role="none"><button type="button" class="menu-row" role="menuitemradio" aria-checked="${persona?.id === one.id}" data-action="persona-pick" data-persona="${escape(one.id)}">${gutter(persona?.id === one.id)}<span class="title">${escape(one.name)}</span></button></li>`),
               persona?.pinned === true ? `<li class="menu-separator" role="separator"></li><li role="none"><button type="button" class="menu-row" role="menuitem" data-action="persona-pick" data-persona="">${gutter(false)}<span class="title">Clear pin</span></button></li>` : '',
             ].join('');
-  const personaMenu = menu === null ? '' : `<ul class="menu persona-menu align-right" role="menu" aria-label="Persona">${rows}</ul>`;
+  const personaMenu = menu === null ? '' : `<ul class="glass menu persona-menu align-right" role="menu" aria-label="Persona">${rows}</ul>`;
   const personaPart = personaButton === '' ? '' : `<div class="menu-anchor persona-anchor">${personaButton}${personaMenu}</div>`;
 
   return `<header class="header">${picker}${personaPart}</header>`;

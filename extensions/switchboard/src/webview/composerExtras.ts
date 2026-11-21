@@ -50,7 +50,7 @@ export function startComposerExtras(host: HTMLElement, input: HTMLTextAreaElemen
   const slash = controls.querySelector<HTMLButtonElement>('button.slash')!;
   const menu = document.createElement('div');
 
-  menu.className = 'composer-menu';
+  menu.className = 'glass composer-menu';
   menu.id = 'composer-menu';
   menu.setAttribute('role', 'listbox');
   menu.hidden = true;

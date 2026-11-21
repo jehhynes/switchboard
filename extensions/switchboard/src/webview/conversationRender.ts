@@ -551,7 +551,7 @@ function earlierStatuses(earlier: EarlierStatuses | null): string {
             ? `${SEPARATOR}<li role="none"><button type="button" class="menu-row" role="menuitem" data-action="statuses-more">${gutter(null)}<span class="title">Older statuses</span></button></li>`
             : '';
 
-  return `<ul class="menu earlier-menu align-right" id="earlier-statuses" data-key="menu-earlier" role="menu" aria-label="Earlier statuses">${rows}${foot}</ul>`;
+  return `<ul class="glass menu earlier-menu align-right" id="earlier-statuses" data-key="menu-earlier" role="menu" aria-label="Earlier statuses">${rows}${foot}</ul>`;
 }
 
 /**
@@ -636,7 +636,7 @@ function picker(state: ConversationState, open: boolean, menu: HeaderMenu | null
     return `<li role="none"><button type="button" class="menu-row" role="menuitemradio" aria-checked="${chosen}" data-action="select" data-work-item="${entry.workItemId}">${gutter(chosen ? 'check' : null)}${conversationLabel(entry, state)}</button></li>`;
   });
   const create = `<li role="none"><button type="button" class="menu-row" role="menuitem" data-action="new" aria-haspopup="menu">${gutter('add')}<span class="title">New conversation…</span></button></li>`;
-  const list = open ? `<ul class="menu conversation-menu" data-key="menu-conversations" role="menu" aria-label="Conversations">${rows.join('')}${rows.length > 0 ? SEPARATOR : ''}${create}</ul>` : '';
+  const list = open ? `<ul class="glass menu conversation-menu" data-key="menu-conversations" role="menu" aria-label="Conversations">${rows.join('')}${rows.length > 0 ? SEPARATOR : ''}${create}</ul>` : '';
   const label = selected === null ? `<span class="codicon codicon-folder" aria-hidden="true"></span><span class="title">${escape(title)}</span>` : conversationLabel(selected, state);
   const button = `<button type="button" class="picker" data-action="picker" aria-haspopup="menu" aria-expanded="${open}" title="${escape(title)}">${label}<span class="codicon codicon-chevron-down" aria-hidden="true"></span></button>`;
 
@@ -692,7 +692,7 @@ function headerMenu(menu: HeaderMenu): string {
               })
               .join('');
 
-  return `<ul class="menu header-menu${menu.kind === 'persona' ? ' align-right' : ''}" data-key="menu-${menu.kind}" role="menu" aria-label="${menu.kind === 'persona' ? 'Persona' : 'New conversation'}">${rows}</ul>`;
+  return `<ul class="glass menu header-menu${menu.kind === 'persona' ? ' align-right' : ''}" data-key="menu-${menu.kind}" role="menu" aria-label="${menu.kind === 'persona' ? 'Persona' : 'New conversation'}">${rows}</ul>`;
 }
 
 const DECISIONS: Record<string, string> = { accept: 'Allow once', acceptForSession: 'Allow for session', decline: 'Decline', cancel: 'Cancel' };
@@ -859,7 +859,7 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
   // Each tab's panel, and each conversation's, is its own node, so a redraw keeps its scroll position and another tab or conversation starts afresh.
   const shownKey = `${state.scope.scopeGen}-${state.session?.id ?? ''}`;
   // The New messages pill sits at the bottom of the conversation's own area, just above the composer, never behind it.
-  const pill = `<button class="pill" type="button" data-action="pill"${page.pill === true ? '' : ' hidden'}>New messages</button>`;
+  const pill = `<button class="glass pill" type="button" data-action="pill"${page.pill === true ? '' : ' hidden'}><span class="pill-dot" aria-hidden="true"></span>New messages</button>`;
   const panel =
     page.tab === 'status'
       ? `<div class="panel" id="panel" data-key="status-${shownKey}" role="tabpanel" aria-labelledby="tab-status">${renderStatus(status, fresh, now, statusCard, open, page.earlier ?? null)}</div>`
