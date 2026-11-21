@@ -476,7 +476,24 @@ export const MIGRATIONS = [
   `ALTER TABLE pageSessions ADD COLUMN label TEXT NOT NULL DEFAULT '';
   ALTER TABLE pageSessions ADD COLUMN host TEXT;
   ALTER TABLE pageSessions ADD COLUMN login TEXT;`,
+  // The web page's tabs per work item (architecture.md § Web page): the right column's chosen tab and the artifact tabs closed, shared by every device.
+  `CREATE TABLE pageTabs (
+    workItemId INTEGER PRIMARY KEY,
+    tab TEXT,
+    closed TEXT NOT NULL DEFAULT '[]'
+  );`,
+  // The web page's choices that hold for every work item, such as Status or Browser to open on (architecture.md § Web page).
+  `CREATE TABLE pagePrefs (name TEXT PRIMARY KEY, value TEXT NOT NULL);`,
 ];
+
+/**
+ * A work item's tabs on the web page: the right column's chosen tab (`status`, `console`, `browser` or `artifact:<path>`, null for the default) and
+ * each artifact whose tab the operator closed, with the version it closed, so a newer version opens its tab again.
+ */
+export interface PageTabs {
+  tab: string | null;
+  closed: Array<{ path: string; updatedAt: number }>;
+}
 
 /** The device a web page sign-in belongs to: its name, and the remote host and login a paired device came through, null on this computer. */
 export interface PageDevice {
@@ -1121,6 +1138,7 @@ export class Store {
     this.#db.prepare('DELETE FROM sessions WHERE workItemId = ?').run(id);
     this.#db.prepare('DELETE FROM pastes WHERE workItemId = ?').run(id);
     this.#db.prepare('DELETE FROM comments WHERE workItemId = ?').run(id);
+    this.#db.prepare('DELETE FROM pageTabs WHERE workItemId = ?').run(id);
     this.#db.prepare('UPDATE workItems SET parentId = NULL WHERE parentId = ?').run(id);
     this.#db.prepare('DELETE FROM workItems WHERE id = ?').run(id);
   }
@@ -1688,6 +1706,42 @@ export class Store {
   }
 
   /** Every remembered sign-in, the one used last first. */
+  /** A work item's tabs on the web page, or null before any was chosen (architecture.md § Web page). */
+  pageTabs(workItemId: number): PageTabs | null {
+    const row = this.#db.prepare('SELECT tab, closed FROM pageTabs WHERE workItemId = ?').get(workItemId) as { tab: string | null; closed: string } | undefined;
+
+    if (row === undefined) {
+      return null;
+    }
+
+    let closed: PageTabs['closed'] = [];
+
+    try {
+      const read: unknown = JSON.parse(row.closed);
+
+      closed = Array.isArray(read) ? read.filter((one): one is { path: string; updatedAt: number } => typeof one?.path === 'string' && typeof one?.updatedAt === 'number') : [];
+    } catch {
+      // A column no reader wrote counts as none closed.
+    }
+
+    return { tab: row.tab, closed };
+  }
+
+  setPageTabs(workItemId: number, tabs: PageTabs): void {
+    this.#db
+      .prepare('INSERT INTO pageTabs (workItemId, tab, closed) VALUES (?, ?, ?) ON CONFLICT (workItemId) DO UPDATE SET tab = excluded.tab, closed = excluded.closed')
+      .run(workItemId, tabs.tab, JSON.stringify(tabs.closed));
+  }
+
+  /** A choice of the web page that holds for every work item, or null when none was made. */
+  pagePref(name: string): string | null {
+    return (this.#db.prepare('SELECT value FROM pagePrefs WHERE name = ?').get(name) as { value: string } | undefined)?.value ?? null;
+  }
+
+  setPagePref(name: string, value: string): void {
+    this.#db.prepare('INSERT INTO pagePrefs (name, value) VALUES (?, ?) ON CONFLICT (name) DO UPDATE SET value = excluded.value').run(name, value);
+  }
+
   pageSessions(): PageSession[] {
     return this.#db.prepare('SELECT hash, createdAt, usedAt, label, host, login FROM pageSessions ORDER BY usedAt DESC, createdAt DESC').all() as unknown as PageSession[];
   }

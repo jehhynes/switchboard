@@ -336,14 +336,18 @@ export interface ArtifactStrip {
   fit: number;
   menu: boolean;
   now: number;
+  /** The artifacts whose tabs the operator closed (`closedArtifacts`). */
+  closed?: ReadonlySet<string>;
 }
 
 /**
- * One tab per artifact after the fixed tabs, newest first, as many as fit (`artifactBar`), the open one with a close mark; then, when some do
- * not fit, Artifacts with their count, which opens a menu of every artifact, newest first with its kind and age, those with a tab dimmed.
+ * One tab per artifact after the fixed tabs, newest first, but those the operator closed, as many as fit (`artifactBar`), each with a close button;
+ * then, when some have no tab, Artifacts with their count, which opens a menu of every artifact, newest first with its kind and age, those with a
+ * tab dimmed and those closed marked so.
  */
 function artifactTabs(state: PageState, strip: ArtifactStrip): ComponentChildren {
-  const { ordered, tabs } = artifactBar(state.artifacts, strip.open, strip.fit);
+  const closed = strip.closed ?? new Set<string>();
+  const { ordered, tabs } = artifactBar(state.artifacts, strip.open, strip.fit, closed);
   const rest = ordered.length - tabs.length;
 
   return [
@@ -357,11 +361,9 @@ function artifactTabs(state: PageState, strip: ArtifactStrip): ComponentChildren
             <span class={`codicon codicon-${artifactIcon(artifact.type)}`} aria-hidden="true"></span>
             <span class="tab-label">{artifact.title}</span>
           </button>
-          {selected ? (
-            <button class="tab-close" type="button" data-action="close-artifact" aria-label={`Close ${artifact.title}`} title="Close">
-              <span class="codicon codicon-close" aria-hidden="true"></span>
-            </button>
-          ) : null}
+          <button class="tab-close" type="button" data-action="close-artifact" data-path={artifact.path} aria-label={`Close ${artifact.title}`} title="Close" tabindex={selected ? 0 : -1}>
+            <span class="codicon codicon-close" aria-hidden="true"></span>
+          </button>
         </span>
       );
     }),
@@ -376,12 +378,12 @@ function artifactTabs(state: PageState, strip: ArtifactStrip): ComponentChildren
         {strip.menu ? (
           <div class="menu glass artifact-menu" role="menu" aria-label="Artifacts">
             {ordered.map((artifact) => (
-              <button class={`menu-row${tabs.includes(artifact) ? ' in-bar' : ''}`} type="button" role="menuitem" data-action="artifact" data-path={artifact.path} title={artifact.path}>
+              <button class={`menu-row${tabs.includes(artifact) ? ' in-bar' : ''}${closed.has(artifact.path) ? ' closed' : ''}`} type="button" role="menuitem" data-action="artifact" data-path={artifact.path} title={artifact.path}>
                 <span class="menu-gutter">
                   <span class={`codicon codicon-${artifactIcon(artifact.type)}`} aria-hidden="true"></span>
                 </span>
                 <span class="title">{artifact.title}</span>
-                <span class="menu-note">{ago(artifact.updatedAt, strip.now)}</span>
+                <span class="menu-note">{closed.has(artifact.path) ? `Closed · ${ago(artifact.updatedAt, strip.now)}` : ago(artifact.updatedAt, strip.now)}</span>
               </button>
             ))}
           </div>

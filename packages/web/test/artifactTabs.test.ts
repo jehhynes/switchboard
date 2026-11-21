@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { renderSideSwitch, renderTabs } from '../src/header.js';
-import { ARTIFACT_MENU_WIDTH, ARTIFACT_TAB_WIDTH, ARTIFACT_TABS_MAX, artifactBar, artifactTabsFit, newView } from '../src/render.js';
+import { ARTIFACT_MENU_WIDTH, ARTIFACT_TAB_WIDTH, ARTIFACT_TABS_MAX, artifactBar, artifactTabsFit, closedArtifacts, newView } from '../src/render.js';
 import { EMPTY } from '../src/model.js';
 import type { ArtifactView } from '../src/types.js';
 import { html } from './html.js';
@@ -8,6 +8,8 @@ import { html } from './html.js';
 const artifact = (index: number): ArtifactView => ({ path: `chat/a${index}.md`, owner: 'chat', kind: 'note', title: `Note ${index}`, ext: 'md', type: 'markdown', updatedAt: 1_000 + index });
 const eight = [0, 1, 2, 3, 4, 5, 6, 7].map(artifact);
 const paths = (markup: string, attribute: string) => [...markup.matchAll(new RegExp(`${attribute}="([^"]+)"`, 'g'))].map((match) => match[1]);
+/** The artifact tabs' paths, from each tab's cell. */
+const tabPaths = (markup: string) => [...markup.matchAll(/role="presentation" data-action="artifact" data-path="([^"]+)"/g)].map((match) => match[1]);
 
 describe('artifactTabsFit', () => {
   it('shows every tab when they fit without the menu, else as many as fit beside it, at least one and at most the cap', () => {
@@ -22,6 +24,12 @@ describe('artifactTabsFit', () => {
     expect(artifactTabsFit(0, 0, 8)).toBe(ARTIFACT_TABS_MAX);
     expect(artifactTabsFit(0, 0, 2)).toBe(2);
     expect(artifactTabsFit(1000, 200, 0)).toBe(0);
+  });
+});
+
+describe('closedArtifacts', () => {
+  it('counts an artifact closed at its version, and open again once a newer version comes', () => {
+    expect([...closedArtifacts(eight, [{ path: 'chat/a1.md', updatedAt: 1_001 }, { path: 'chat/a2.md', updatedAt: 900 }, { path: 'chat/gone.md', updatedAt: 1 }])]).toEqual(['chat/a1.md']);
   });
 });
 
@@ -42,10 +50,12 @@ describe('the artifact tabs', () => {
     const markup = html(renderSideSwitch('artifacts', state, true, { open: 'chat/a2.md', fit: 3, menu: false, now: 2_000 }));
 
     expect(paths(markup, 'data-side')).toEqual(['status', 'console', 'browser']);
-    expect(paths(markup, 'data-path')).toEqual(['chat/a7.md', 'chat/a6.md', 'chat/a2.md']);
+    expect(tabPaths(markup)).toEqual(['chat/a7.md', 'chat/a6.md', 'chat/a2.md']);
     expect(markup).toMatch(/class="tab artifact-tab selected"[^>]*data-path="chat\/a2.md"/);
     // The close mark is a button of its own beside the tab's, so each takes the keyboard.
-    expect(markup.match(/<button class="tab-close" type="button" data-action="close-artifact" aria-label="Close Note 2"/g)).toHaveLength(1);
+    // Each artifact tab has its own close button beside the tab's, so each takes the keyboard; the open one's is in the tab order.
+    expect(markup.match(/<button class="tab-close" type="button" data-action="close-artifact"/g)).toHaveLength(3);
+    expect(markup).toContain('data-path="chat/a2.md" aria-label="Close Note 2" title="Close" tabindex="0"');
     expect(markup.match(/role="tab"/g)).toHaveLength(6);
     expect(markup).toContain('+5');
     expect(markup).not.toContain('artifact-menu" role="menu"');
@@ -55,9 +65,18 @@ describe('the artifact tabs', () => {
     const markup = html(renderSideSwitch('status', state, false, { open: 'chat/a2.md', fit: 2, menu: true, now: 2_000 }));
 
     expect(markup).not.toContain('artifact-tab selected');
-    expect(markup).not.toContain('close-artifact');
+    expect(markup).not.toContain('title="Close" tabindex="0"');
     expect(paths(markup.slice(markup.indexOf('artifact-menu" role="menu"')), 'data-path')).toEqual(eight.map((one) => one.path).reverse());
     expect(markup.match(/menu-row in-bar/g)).toHaveLength(2);
+  });
+
+  it('leave out the closed artifacts but the open one, which the menu marks closed', () => {
+    const closed = new Set(['chat/a7.md', 'chat/a5.md']);
+    const markup = html(renderSideSwitch('artifacts', state, false, { open: 'chat/a5.md', fit: 3, menu: true, now: 2_000, closed }));
+
+    expect(tabPaths(markup)).toEqual(['chat/a6.md', 'chat/a4.md', 'chat/a5.md']);
+    expect(markup.match(/menu-row[^"]*closed/g)).toHaveLength(2);
+    expect(markup).toContain('Closed · ');
   });
 
   it('show no menu when every artifact has a tab, and none at all without artifacts', () => {
@@ -69,7 +88,7 @@ describe('the artifact tabs', () => {
     const markup = html(renderTabs({ ...newView(), tab: 'artifacts' }, state, false, { open: 'chat/a7.md', fit: 1, menu: false, now: 0 }));
 
     expect(paths(markup, 'data-tab')).toEqual(['conversation', 'status', 'console']);
-    expect(paths(markup, 'data-path')).toEqual(['chat/a7.md']);
+    expect(tabPaths(markup)).toEqual(['chat/a7.md']);
     expect(markup).toContain('+7');
   });
 });

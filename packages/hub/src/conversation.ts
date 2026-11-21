@@ -616,6 +616,53 @@ export class ConversationService {
     return why === null ? { status: 200, body: { done: true } } : { status: 409, body: { error: why } };
   }
 
+  /**
+   * `page-tabs {window, workItemId, tab?, close?, reopen?, openOn?}` (architecture.md § Web page): keeps the right column's chosen tab, `console` or
+   * `artifact:<path>`, the tab every work item opens on, `status` or `browser`, for every work item, and closes an artifact's tab at its version, `{path, updatedAt}`, or opens one again by its path, for the page's
+   * work item, one artifact at a time so devices do not overwrite each other, and sends the result to every page showing it as `tabs`. 403 for
+   * a key that is not a page's or another work item.
+   */
+  pageTabs(body: Record<string, unknown>): { status: number; body: unknown } {
+    const { window, workItemId, tab, close, reopen, openOn } = body;
+    const tabOk = tab === undefined || tab === null || (typeof tab === 'string' && /^(console|artifact:.{1,500})$/s.test(tab));
+    const openOnOk = openOn === undefined || openOn === 'status' || openOn === 'browser';
+    const closeOk =
+      close === undefined ||
+      (typeof close === 'object' && close !== null && typeof (close as { path?: unknown }).path === 'string' && (close as { path: string }).path.length > 0 && (close as { path: string }).path.length <= 500 && Number.isFinite((close as { updatedAt?: unknown }).updatedAt));
+    const reopenOk = reopen === undefined || (typeof reopen === 'string' && reopen.length > 0 && reopen.length <= 500);
+
+    if (typeof window !== 'string' || !Number.isInteger(workItemId) || !tabOk || !closeOk || !reopenOk || !openOnOk) {
+      return { status: 400, body: { error: 'Expected {window, workItemId, tab?, close?, reopen?, openOn?}.' } };
+    }
+
+    if (!this.deps.windows.isPage(window) || this.deps.windows.scope(window)?.workItemId !== workItemId) {
+      return { status: 403, body: { error: 'Not in this window.' } };
+    }
+
+    const id = workItemId as number;
+    const kept = this.deps.store.pageTabs(id) ?? { tab: null, closed: [] };
+    const closing = close as { path: string; updatedAt: number } | undefined;
+    const touched = closing?.path ?? (reopen as string | undefined);
+    // At most 500 closed tabs are kept, the latest.
+    const closed = [...kept.closed.filter((one) => one.path !== touched), ...(closing === undefined ? [] : [{ path: closing.path, updatedAt: closing.updatedAt }])].slice(-500);
+    const tabs = { tab: tab === undefined ? kept.tab : (tab as string | null), closed };
+
+    this.deps.store.setPageTabs(id, tabs);
+
+    if (openOn !== undefined) {
+      this.deps.store.setPagePref('openOn', openOn as string);
+    }
+
+    for (const key of this.pages()) {
+      // The sender too: the stream's order makes the last `tabs` the hub's latest, whichever device's request came first.
+      if (this.deps.windows.scope(key)?.workItemId === id) {
+        this.#send(key, 'tabs', { workItemId: id, tabs });
+      }
+    }
+
+    return { status: 200, body: { tabs } };
+  }
+
   /** Each `row-action`'s answer, by page key and `opId`, so a retried one runs once; the last 100. */
   readonly #rowActions = new Map<string, { status: number; body: unknown }>();
 
@@ -1231,6 +1278,8 @@ export class ConversationService {
       artifacts: folder?.list() ?? [],
       ...this.#voiceHello(key),
       ...pageHello,
+      // A page's tabs for its work item, kept for every device (architecture.md § Web page).
+      ...(this.deps.windows.isPage(key) && scope.workItemId !== null ? { tabs: this.deps.store.pageTabs(scope.workItemId), openOn: this.deps.store.pagePref('openOn') } : {}),
     };
   }
 

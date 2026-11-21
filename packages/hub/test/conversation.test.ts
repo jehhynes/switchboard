@@ -1945,6 +1945,45 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     expect(sourceCalls).toEqual([['gh', true], ['gone', true]]);
   });
 
+  it("keeps a page's tabs for its work item in the store, sends them in hello and to the other pages showing it, and refuses another work item", () => {
+    const { service, openPage, scopes, view, store } = setup();
+    const workItemId = store.workItems(0)[0]!.id;
+    const page = openPage();
+    const phone = openPage();
+    const elsewhere = openPage();
+
+    expect(scopes.select(page.key, workItemId)).toBe(true);
+    expect(scopes.select(phone.key, workItemId)).toBe(true);
+    expect(service.hello(page.key)['tabs']).toBeNull();
+
+    expect(service.pageTabs({ window: page.key, workItemId, tab: 'artifact:chat/plan.md' })).toEqual({ status: 200, body: { tabs: { tab: 'artifact:chat/plan.md', closed: [] } } });
+    expect(service.pageTabs({ window: page.key, workItemId, close: { path: 'chat/old.md', updatedAt: 5, extra: 1 } })).toEqual({ status: 200, body: { tabs: { tab: 'artifact:chat/plan.md', closed: [{ path: 'chat/old.md', updatedAt: 5 }] } } });
+    // One artifact at a time: a second device closing another keeps the first, and reopening drops only its own.
+    expect(service.pageTabs({ window: phone.key, workItemId, close: { path: 'chat/b.md', updatedAt: 6 } }).body).toEqual({ tabs: { tab: 'artifact:chat/plan.md', closed: [{ path: 'chat/old.md', updatedAt: 5 }, { path: 'chat/b.md', updatedAt: 6 }] } });
+    expect(service.pageTabs({ window: phone.key, workItemId, reopen: 'chat/b.md' }).body).toEqual({ tabs: { tab: 'artifact:chat/plan.md', closed: [{ path: 'chat/old.md', updatedAt: 5 }] } });
+    expect(store.pageTabs(workItemId)).toEqual({ tab: 'artifact:chat/plan.md', closed: [{ path: 'chat/old.md', updatedAt: 5 }] });
+    expect(service.hello(phone.key)['tabs']).toEqual({ tab: 'artifact:chat/plan.md', closed: [{ path: 'chat/old.md', updatedAt: 5 }] });
+    // Every page showing the work item hears each change, the sender too, in the order the hub took them; a page elsewhere does not.
+    expect(phone.frames.filter((frame) => frame.type === 'tabs')).toHaveLength(4);
+    expect(page.frames.filter((frame) => frame.type === 'tabs')).toHaveLength(4);
+    expect(page.frames.filter((frame) => frame.type === 'tabs').at(-1)).toMatchObject({ workItemId, tabs: { closed: [{ path: 'chat/old.md', updatedAt: 5 }] } });
+    expect(elsewhere.frames.filter((frame) => frame.type === 'tabs')).toEqual([]);
+
+    expect(service.pageTabs({ window: elsewhere.key, workItemId, tab: 'console' }).status).toBe(403);
+    expect(service.pageTabs({ window: scopes.open(view.file, view.view), workItemId, tab: 'console' }).status).toBe(403);
+    // Status or Browser is kept for every work item, and comes in each page's hello.
+    expect(service.pageTabs({ window: page.key, workItemId, openOn: 'browser' }).status).toBe(200);
+    expect(store.pagePref('openOn')).toBe('browser');
+    expect(service.hello(phone.key)['openOn']).toBe('browser');
+    expect(service.pageTabs({ window: page.key, workItemId, tab: 'status' }).status).toBe(400);
+    expect(service.pageTabs({ window: page.key, workItemId, openOn: 'console' }).status).toBe(400);
+    expect(service.pageTabs({ window: page.key, workItemId, tab: 'conversation' }).status).toBe(400);
+    expect(service.pageTabs({ window: page.key, workItemId, close: { path: 3 } }).status).toBe(400);
+    expect(service.pageTabs({ window: page.key, workItemId, reopen: '' }).status).toBe(400);
+    expect(service.pageTabs({ window: page.key, workItemId: 'x', tab: 'console' }).status).toBe(400);
+    expect(store.pageTabs(workItemId)!.tab).toBe('artifact:chat/plan.md');
+  });
+
   it("answers a page's History of a ticket the store knows, with the chips' categories, for a page key only", () => {
     const { service, openPage, scopes, view, store } = setup();
     const page = openPage();

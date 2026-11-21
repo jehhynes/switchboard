@@ -1407,8 +1407,30 @@ describe('the page in use', () => {
     (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
     expect(document.activeElement).toBe(strip()[0]);
     // The open artifact's close button is its own, and shows Status.
-    root.querySelector<HTMLElement>('#detail .tab-close')!.click();
+    root.querySelector<HTMLElement>('#detail .artifact-tab.selected .tab-close')!.click();
     expect(root.querySelector('#detail .tab.selected')!.getAttribute('data-side')).toBe('status');
+    // Closed, its tab is gone for the work item, kept in the hub for every device, and the menu marks it.
+    expect(paths()).not.toContain('chat/a1.md');
+    expect(posts.filter((post) => post.url.endsWith('/page-tabs')).at(-2)?.body).toMatchObject({ workItemId: 1, close: { path: 'chat/a1.md', updatedAt: 10_001 } });
+    const cleared = posts.filter((post) => post.url.endsWith('/page-tabs')).at(-1)!.body;
+
+    expect(cleared).toMatchObject({ workItemId: 1, tab: null });
+    expect(cleared).not.toHaveProperty('openOn');
+    click('#detail [data-action="artifact-menu"]');
+    expect(root.querySelector('#detail .artifact-menu [data-path="chat/a1.md"]')!.classList.contains('closed')).toBe(true);
+    // Choosing it opens its tab again.
+    click('#detail .artifact-menu [data-path="chat/a1.md"]');
+    expect(root.querySelector('#detail .tab.selected')!.getAttribute('data-path')).toBe('chat/a1.md');
+    expect(posts.filter((post) => post.url.endsWith('/page-tabs')).at(-2)?.body).toMatchObject({ workItemId: 1, reopen: 'chat/a1.md' });
+    // Another device closing the open artifact shows Status here.
+    source.emit('tabs', { workItemId: 1, tabs: { tab: null, closed: [{ path: 'chat/a1.md', updatedAt: 10_001 }] } });
+    expect(root.querySelector('#detail .tab.selected')!.getAttribute('data-side')).toBe('status');
+    expect(paths()).not.toContain('chat/a1.md');
+    // Another device closing a tab closes it here too, and a newer version opens it again.
+    source.emit('tabs', { workItemId: 1, tabs: { tab: null, closed: [{ path: 'chat/a7.md', updatedAt: 10_007 }] } });
+    expect(paths()).not.toContain('chat/a7.md');
+    source.emit('artifact', { artifact: { path: 'chat/a7.md', owner: 'chat', kind: 'note', title: 'Note 7', ext: 'md', type: 'markdown', updatedAt: 20_000 } });
+    expect(paths()).toContain('chat/a7.md');
 
     // An artifact that goes away leaves Status shown.
     click('#detail .artifact-tab[data-path="chat/a7.md"]');
@@ -1440,10 +1462,10 @@ describe('the page in use', () => {
     expect(doc).toContain('src="/v1/conversation/artifact/pk/chat/plan/pic.png"');
     expect(doc).not.toContain('x.png');
     expect(root.querySelector('#head .tab.selected')!.getAttribute('data-path')).toBe('chat/plan.md');
-    // Closing its tab shows Status; the tabs stay.
-    click('[data-action="close-artifact"]');
+    // Closing its tab shows Status, and the closed tab goes.
+    click('#head .artifact-tab.selected .tab-close');
     expect(root.querySelector('#head .tab.selected')!.getAttribute('data-tab')).toBe('status');
-    expect(root.querySelectorAll('#head .artifact-tab')).toHaveLength(2);
+    expect(root.querySelectorAll('#head .artifact-tab')).toHaveLength(1);
     click('#head .artifact-tab[data-path="chat/p.html"]');
     expect(root.querySelector('iframe')!.getAttribute('sandbox')).toBe('allow-scripts');
     click('[data-tab="conversation"]');
@@ -2265,7 +2287,7 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it('shows the Browser tab for a work item without a session while the extension is paired, and the operator\'s own tab again for one with a session', async () => {
+  it('opens each work item on Browser when it has no session and links the paired pane can show, else on Status, keeping a choice only within the work item', async () => {
     const query = { matches: true, addEventListener: () => {} };
 
     vi.stubGlobal('matchMedia', vi.fn(() => query));
@@ -2277,39 +2299,70 @@ describe('the page in use', () => {
     const source = FakeSource.last!;
     const chosen = () => root.querySelector<HTMLElement>('#detail .side-switch .tab.selected')?.dataset['side'];
     const paired = { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: null };
+    const linked = (workItemId: number) => [listGroup('progress', [listRow(workItemId, { title: 'Fix it', url: 'https://github.com/o/r/issues/1' })])];
+    const unlinked = (workItemId: number) => [listGroup('progress', [listRow(workItemId, { title: 'Fix it', url: '', links: [] })])];
 
     vi.spyOn(root.querySelector('#detail .detail-body')!, 'getBoundingClientRect').mockReturnValue({ left: 1300, top: 85, width: 600, height: 855 } as DOMRect);
-    // With a session: the operator's own choice, Console here.
-    hello(source);
+    // An unstarted work item with a link: Browser, once the pane's state is known, and its area is reported.
+    hello(source, { sessions: [], groups: linked(1) });
+    expect(chosen()).toBe('status');
     source.emit('pane', { pane: paired });
-    click('#detail [data-side="console"]');
-    expect(chosen()).toBe('console');
-
-    // Without one: Browser, and the column's area is reported for the pane.
-    hello(source, { sessions: [] });
     expect(chosen()).toBe('browser');
     expect(posts.filter((post) => post.url.endsWith('/pane-rect')).at(-1)?.body['rect']).not.toBeNull();
+    // A tab chosen there stays while the work item is open.
+    click('#detail [data-side="console"]');
+    source.emit('pane', { pane: { ...paired, shown: true } });
+    expect(chosen()).toBe('console');
 
-    // A tab chosen there stays chosen for that work item.
-    click('#detail [data-side="status"]');
+    // Another work item: one with a session opens on Status, whatever was chosen before.
+    hello(source, { groups: linked(2), scope: { ...scope, workItemId: 2 } });
     expect(chosen()).toBe('status');
-
-    // Back to a work item with a session: the operator's last choice.
-    hello(source);
+    // One without a session but no link to show opens on Status too.
+    hello(source, { sessions: [], groups: unlinked(3), scope: { ...scope, workItemId: 3 } });
     expect(chosen()).toBe('status');
-
-    // Not paired: no Browser tab takes over.
+    // Not paired: Status.
     source.emit('pane', { pane: { ...paired, extension: 'unpaired' } });
-    hello(source, { sessions: [], scope: { ...scope, workItemId: 9 } });
+    hello(source, { sessions: [], groups: linked(4), scope: { ...scope, workItemId: 4 } });
     expect(chosen()).toBe('status');
 
-    // Narrower, the conversation's tabs do the same.
+    // Narrower: Browser among the conversation's tabs, else the conversation.
     query.matches = false;
     source.emit('pane', { pane: paired });
-    hello(source, { sessions: [], scope: { ...scope, workItemId: 10 } });
+    hello(source, { sessions: [], groups: linked(5), scope: { ...scope, workItemId: 5 } });
     expect(root.querySelector<HTMLElement>('#head .tab.selected')!.dataset['tab']).toBe('browser');
-    hello(source);
-    expect(root.querySelector<HTMLElement>('#head .tab.selected')!.dataset['tab']).not.toBe('browser');
+    hello(source, { groups: linked(6), scope: { ...scope, workItemId: 6 } });
+    expect(root.querySelector<HTMLElement>('#head .tab.selected')!.dataset['tab']).toBe('conversation');
+
+    // A tab the hub kept for a work item comes back when it opens, while it still applies; otherwise the same rule as a first opening.
+    query.matches = true;
+    hello(source, { groups: linked(7), scope: { ...scope, workItemId: 7 }, tabs: { tab: 'console', closed: [] } });
+    expect(chosen()).toBe('console');
+    hello(source, { groups: linked(8), scope: { ...scope, workItemId: 8 }, tabs: { tab: 'artifact:chat/p.html', closed: [] } });
+    expect(root.querySelector('#detail .tab.selected')!.getAttribute('data-path')).toBe('chat/p.html');
+    // Status or Browser is one choice for every work item, kept in the hub: Browser chosen once opens every work item with links on Browser.
+    click('#detail [data-side="browser"]');
+    expect(posts.filter((post) => post.url.endsWith('/page-tabs')).at(-1)?.body).toMatchObject({ workItemId: 8, tab: null, openOn: 'browser' });
+    hello(source, { groups: linked(9), scope: { ...scope, workItemId: 9 }, openOn: 'browser' });
+    expect(chosen()).toBe('browser');
+    // Without links it opens on Status, and the choice stays Browser.
+    hello(source, { groups: unlinked(11), scope: { ...scope, workItemId: 11 }, openOn: 'browser' });
+    expect(chosen()).toBe('status');
+    hello(source, { groups: linked(13), scope: { ...scope, workItemId: 13 }, openOn: 'browser' });
+    expect(chosen()).toBe('browser');
+    // Status chosen: every work item opens on Status, an unstarted one with links too.
+    click('#detail [data-side="status"]');
+    expect(posts.filter((post) => post.url.endsWith('/page-tabs')).at(-1)?.body).toMatchObject({ workItemId: 13, tab: null, openOn: 'status' });
+    hello(source, { sessions: [], groups: linked(14), scope: { ...scope, workItemId: 14 }, openOn: 'status' });
+    expect(chosen()).toBe('status');
+    // The hub sends scope before hello: the work item opens on its hello's kept tab.
+    source.emit('scope', { scope: { ...scope, workItemId: 12 } });
+    hello(source, { groups: linked(12), scope: { ...scope, workItemId: 12 }, tabs: { tab: 'console', closed: [] } });
+    expect(chosen()).toBe('console');
+    hello(source, { groups: linked(10), scope: { ...scope, workItemId: 10 }, tabs: { tab: 'artifact:chat/p.html', closed: [{ path: 'chat/p.html', updatedAt: 99_999 }] } });
+    expect(chosen()).toBe('status');
+    // The operator's choice is kept for the work item in the hub.
+    click('#detail [data-side="console"]');
+    expect(posts.filter((post) => post.url.endsWith('/page-tabs')).at(-1)?.body).toMatchObject({ workItemId: 10, tab: 'console' });
     page.close();
   });
 

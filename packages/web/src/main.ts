@@ -3,7 +3,7 @@ import { snoozeChoices } from '@switchboard/core/snooze';
 import type { PageState } from './model.js';
 import { placeMenus } from '@switchboard/conversation/menuPlace';
 import { escape, renderMarkdown } from './markdown.js';
-import { answerText, artifactTabsFit, artifactUrl, bandOpen, browserNote, paneLink, collapsedGroups, complete, firstSnoozeDay, GROUPS_KEY, inputReady, renderMicButton, markdownBody, newView, parseQuestions, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, SIDE_TABS } from './render.js';
+import { answerText, artifactTabsFit, artifactUrl, bandOpen, browserNote, closedArtifacts, paneLink, collapsedGroups, complete, firstSnoozeDay, GROUPS_KEY, inputReady, renderMicButton, markdownBody, newView, parseQuestions, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, SIDE_TABS } from './render.js';
 import type { CardDraft, PaneView, SideTab, Tab, View } from './render.js';
 import type { ConsoleOptions, MountedConsole } from './console.js';
 import { LIGHT_SCHEME } from './console.js';
@@ -31,7 +31,7 @@ import { askForNotifications, notificationsAllowed, notifyNeeds, playChime } fro
 import type { NeedsItem } from './alerts.js';
 
 /** The stream's event types the page reads. */
-export const EVENTS = ['hello', 'list', 'scope', 'conversations', 'session', 'message', 'reply', 'status', 'artifact', 'unread', 'voice', 'settings', 'progress', 'words', 'draft', 'pane', 'needs', 'show', 'config'];
+export const EVENTS = ['tabs', 'hello', 'list', 'scope', 'conversations', 'session', 'message', 'reply', 'status', 'artifact', 'unread', 'voice', 'settings', 'progress', 'words', 'draft', 'pane', 'needs', 'show', 'config'];
 /** How long the page's title holds the marker the dock finds its window by after a `show` (architecture.md § Dock). */
 export const SHOW_MARKER_MS = 5_000;
 /** How often the page wakes the Chrome extension while the Chrome pane is on and no extension is connected. */
@@ -182,18 +182,90 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /** Whether the Browser tab shows: on the installed page while the Chrome pane is on (PRD R113). */
   const browserTab = (): boolean => view.pane?.enabled === true && standalone();
   /** The tab the conversation's pane shows: always the conversation while Status and Artifacts have their own column, and never a Browser tab that is gone. */
-  /** The work item the operator chose a tab on while the Browser tab had taken over, so it does not take over again until another work item. */
-  let tabChosenFor: number | null = null;
+  const mainTab = (): Tab => (wide() || (view.tab === 'browser' && !browserTab()) || (view.tab === 'artifacts' && openArtifact() === null) ? 'conversation' : view.tab);
+  /** The work item whose tabs were last chosen on its opening, and whether the operator has chosen a tab since. */
+  let openedItem: number | null = null;
+  let tabChosen = false;
+  /** Whether the opening tabs were chosen knowing the pane's state; until then the pane's first event chooses them again. */
+  let paneKnown = false;
   /**
-   * Whether the Browser tab shows in place of the operator's choice: the work item has no session yet, as an unstarted one or a pool ticket, so its
-   * ticket in the paired Chrome pane is all there is to see. The operator's own choice comes back for a work item with a session.
+   * The tabs a work item opens on: Browser when it has no session yet, as an unstarted one or a pool ticket, and links the paired Chrome pane can
+   * show, since its ticket is all there is to see; otherwise Status in the column and the conversation on a narrower page. Nothing is kept from
+   * the work item before; within one, the operator's choice stays.
    */
-  const autoBrowser = (): boolean =>
-    browserTab() && view.pane?.extension === 'paired' && state.scope !== null && state.session === null && tabChosenFor !== state.scope.workItemId;
-  const mainTab = (): Tab =>
-    !wide() && autoBrowser() ? 'browser' : wide() || (view.tab === 'browser' && !browserTab()) || (view.tab === 'artifacts' && openArtifact() === null) ? 'conversation' : view.tab;
+  /** The open work item's tabs as the hub keeps them for every device (`page-tabs`), or null before any was chosen. */
+  let savedTabs: { workItemId: number; tab: string | null; closed: Array<{ path: string; updatedAt: number }> } | null = null;
+  /** The artifacts whose tabs are closed for the open work item. */
+  const closedNow = (): Set<string> => closedArtifacts(state.artifacts, savedTabs?.workItemId === state.scope?.workItemId ? (savedTabs?.closed ?? []) : []);
+  /** Whether a work item opens on Browser: no session yet, as an unstarted one or a pool ticket, and links the paired Chrome pane can show. */
+  /** Whether the Browser tab has something to show: the paired Chrome pane, and links of the work item it can open. */
+  const browserUseful = (): boolean => {
+    const row = selectedRow(state);
+
+    return browserTab() && view.pane?.extension === 'paired' && row !== null && (paneLink(row.url) || row.links.some((link) => paneLink(link.url)));
+  };
+  const browserFirst = (): boolean => browserUseful() && state.session === null;
+  /** The tab every work item opens on, Status or Browser, as the operator last chose it on any device; null before any choice. */
+  let openOn: 'status' | 'browser' | null = null;
+  /**
+   * The tabs a work item opens on: Console or an artifact kept for it while it still applies; otherwise Browser when the operator last chose
+   * Browser and the paired pane has links of the work item to show, or before any choice when it also has no session yet; otherwise Status in the
+   * column and the conversation on a narrower page.
+   */
+  const openTabs = (): void => {
+    const saved = savedTabs?.workItemId === state.scope?.workItemId ? savedTabs?.tab : null;
+    const path = saved?.startsWith('artifact:') === true ? saved.slice('artifact:'.length) : null;
+    const kept: Tab | null = saved === 'console' ? 'console' : path !== null && state.artifacts.some((one) => one.path === path) && !closedNow().has(path) ? 'artifacts' : null;
+    const browser = openOn === 'browser' ? browserUseful() : openOn === null && browserFirst();
+    const chosen: Tab = kept ?? (browser ? 'browser' : 'status');
+
+    view.side = chosen as SideTab;
+    view.tab = chosen === 'status' ? 'conversation' : chosen;
+    view.artifact = chosen === 'artifacts' ? path : null;
+    paneKnown = view.pane !== null;
+  };
+  /**
+   * Keeps the operator's choice in the hub, for every device: Status or Browser as the tab every work item opens on, and Console or an artifact for
+   * the open work item.
+   */
+  const saveTab = (): void => {
+    const workItemId = state.scope?.workItemId ?? null;
+    const shown = wide() ? sideTab() : mainTab();
+
+    if (workItemId === null || shown === 'conversation') {
+      return;
+    }
+
+    if (shown === 'status' || shown === 'browser') {
+      openOn = shown;
+      savedTabs = { workItemId, tab: null, closed: savedTabs?.workItemId === workItemId ? savedTabs.closed : [] };
+      void post('page-tabs', { workItemId, tab: null, openOn: shown });
+      return;
+    }
+
+    const tab = shown === 'artifacts' ? `artifact:${openArtifact() ?? ''}` : shown;
+
+    savedTabs = { workItemId, tab, closed: savedTabs?.workItemId === workItemId ? savedTabs.closed : [] };
+    void post('page-tabs', { workItemId, tab });
+  };
+  /** Closes or opens again an artifact's tab for the open work item, in the hub, for every device. */
+  const setClosed = (path: string, closed: boolean): void => {
+    const workItemId = state.scope?.workItemId ?? null;
+    const artifact = state.artifacts.find((one) => one.path === path);
+
+    if (workItemId === null || artifact === undefined) {
+      return;
+    }
+
+    const kept = (savedTabs?.workItemId === workItemId ? savedTabs.closed : []).filter((one) => one.path !== path);
+    const next = closed ? [...kept, { path, updatedAt: artifact.updatedAt }] : kept;
+
+    savedTabs = { workItemId, tab: savedTabs?.workItemId === workItemId ? savedTabs.tab : null, closed: next };
+    // One artifact at a time, so two devices closing different tabs do not overwrite each other.
+    void post('page-tabs', closed ? { workItemId, close: { path, updatedAt: artifact.updatedAt } } : { workItemId, reopen: path });
+  };
   /** What the column right of the conversation shows: Status in place of a Browser tab that is gone. */
-  const sideTab = (): SideTab => (autoBrowser() ? 'browser' : (view.side === 'browser' && !browserTab()) || (view.side === 'artifacts' && openArtifact() === null) ? 'status' : view.side);
+  const sideTab = (): SideTab => ((view.side === 'browser' && !browserTab()) || (view.side === 'artifacts' && openArtifact() === null) ? 'status' : view.side);
   /** The artifact whose tab is chosen, while the work item still has it; artifacts have no list of their own, only a tab each and a menu. */
   function openArtifact(): string | null {
     return view.artifact !== null && state.artifacts.some((one) => one.path === view.artifact) ? view.artifact : null;
@@ -203,9 +275,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
    * the Chrome pane; another tab chosen in one layout leaves Browser in the other.
    */
   const chooseTab = (tab: Tab): void => {
-    if (autoBrowser()) {
-      tabChosenFor = state.scope?.workItemId ?? null;
-    }
+    tabChosen = true;
 
     if (tab === 'browser') {
       view.side = 'browser';
@@ -215,7 +285,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       view.tab = view.tab === 'browser' ? 'conversation' : view.tab;
     } else {
       view.tab = tab;
-      view.side = view.side === 'browser' ? (tab === 'conversation' ? 'status' : tab) : view.side;
+      // A tab of the column chosen here is the column's choice too; Conversation leaves the column's choice, but Browser.
+      view.side = tab !== 'conversation' ? tab : view.side === 'browser' ? 'status' : view.side;
     }
   };
   /** Reports the Browser tab's area to the hub after each draw, once the pane's report is set up below. */
@@ -1395,7 +1466,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
-    const strip = { open: openArtifact(), fit: view.artifactFit, menu: view.artifactMenu, now: deps.now() };
+    const strip = { open: openArtifact(), fit: view.artifactFit, menu: view.artifactMenu, now: deps.now(), closed: closedNow() };
 
     mount(head, [renderHeader(state, view), side ? null : renderTabs({ ...view, tab: mainTab() }, state, browserTab(), strip)]);
 
@@ -1510,7 +1581,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const draw = (): void => {
     drawRegions();
 
-    if (fitArtifactTabs()) {
+    // Measured again after a draw that changed the tabs, since the Artifacts button may have come or gone; twice at most.
+    for (let again = 0; again < 2 && fitArtifactTabs(); again++) {
       drawRegions();
     }
 
@@ -1941,6 +2013,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       chooseTab(sideTab as SideTab);
       view.artifact = sideTab === 'artifacts' ? view.artifact : null;
       draw();
+      saveTab();
       return;
     }
 
@@ -1951,6 +2024,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       chooseTab(tab);
       view.artifact = tab === 'artifacts' ? view.artifact : null;
       draw();
+      saveTab();
       return;
     }
 
@@ -2150,7 +2224,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
         view.artifact = button!.dataset['path'] ?? null;
         view.artifactMenu = false;
+
+        // Choosing a closed artifact opens its tab again.
+        if (view.artifact !== null && closedNow().has(view.artifact)) {
+          setClosed(view.artifact, false);
+        }
+
         draw();
+        saveTab();
         break;
       case 'artifact-menu':
         view.artifactMenu = !view.artifactMenu;
@@ -2163,14 +2244,35 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         chooseTab('console');
 
         draw();
+        saveTab();
         break;
-      case 'close-artifact':
-        // Closing an artifact's tab shows Status; its tab stays while there is room, and the menu lists every artifact.
-        view.artifact = null;
+      case 'close-artifact': {
+        // Closing an artifact's tab hides it for the work item on every device, until a newer version; the menu still lists it. Closing the
+        // open one shows Status.
+        const path = button!.dataset['path'] ?? openArtifact();
+
+        if (path !== null) {
+          setClosed(path, true);
+        }
+
+        const wasOpen = path === openArtifact();
+
+        if (wasOpen) {
+          view.artifact = null;
+          chooseTab('status');
+        }
+
         view.artifactMenu = false;
-        chooseTab('status');
         draw();
+
+        // The work item's kept artifact goes; Status shows without becoming the choice for every work item.
+        if (wasOpen && state.scope?.workItemId != null) {
+          savedTabs = { workItemId: state.scope.workItemId, tab: null, closed: savedTabs?.closed ?? [] };
+          void post('page-tabs', { workItemId: state.scope.workItemId, tab: null });
+        }
+
         break;
+      }
       case 'artifact-window':
         artifactWindow();
         break;
@@ -3024,6 +3126,35 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
             unsent.delete(old);
           }
         }
+      }
+
+      // The hub's tabs for the work item: in each `hello`, and from another device in `tabs`.
+      if (type === 'hello' && state.scope?.workItemId != null) {
+        const tabs = data['tabs'] as { tab: string | null; closed: Array<{ path: string; updatedAt: number }> } | null | undefined;
+
+        savedTabs = tabs == null ? null : { workItemId: state.scope.workItemId, tab: tabs.tab, closed: tabs.closed };
+        openOn = data['openOn'] === 'status' || data['openOn'] === 'browser' ? data['openOn'] : null;
+      } else if (type === 'tabs' && data['workItemId'] === state.scope?.workItemId) {
+        const tabs = data['tabs'] as { tab: string | null; closed: Array<{ path: string; updatedAt: number }> };
+
+        savedTabs = { workItemId: data['workItemId'] as number, tab: tabs.tab, closed: tabs.closed };
+
+        // The artifact shown here closed on another device: Status shows.
+        if (view.artifact !== null && closedNow().has(view.artifact)) {
+          view.artifact = null;
+          view.side = view.side === 'artifacts' ? 'status' : view.side;
+          view.tab = view.tab === 'artifacts' ? 'status' : view.tab;
+        }
+      }
+
+      // A work item opened anew, or the pane's state known before the operator chose a tab on it: its opening tabs (`openTabs`).
+      const opened = state.scope?.workItemId ?? null;
+
+      // The hub sends `scope` before the `hello` that carries the work item's tabs and artifacts, so a work item opens on its `hello`.
+      if ((type === 'hello' && opened !== openedItem) || (type === 'pane' && !tabChosen && !paneKnown)) {
+        openedItem = opened;
+        tabChosen = false;
+        openTabs();
       }
 
       draw();

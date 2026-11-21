@@ -46,12 +46,21 @@ export function artifactTabsFit(stripWidth: number, fixedWidth: number, count: n
 }
 
 /**
- * The artifacts newest first, and those with a tab: the first `fit`, with the open one in place of the last of them when it is not among them, so
+ * The artifacts whose tabs are closed (architecture.md § Web page): each closed at its version, until a newer version opens its tab again.
+ */
+export function closedArtifacts(artifacts: readonly ArtifactView[], closed: ReadonlyArray<{ path: string; updatedAt: number }>): Set<string> {
+  const at = new Map(closed.map((one) => [one.path, one.updatedAt]));
+
+  return new Set(artifacts.filter((artifact) => at.has(artifact.path) && artifact.updatedAt <= at.get(artifact.path)!).map((artifact) => artifact.path));
+}
+
+/**
+ * The artifacts newest first, and those with a tab: those not closed, the first `fit`, with the open one in place of the last of them when it is not among them, so
  * the open artifact always has its tab.
  */
-export function artifactBar(artifacts: readonly ArtifactView[], open: string | null, fit: number): { ordered: ArtifactView[]; tabs: ArtifactView[] } {
+export function artifactBar(artifacts: readonly ArtifactView[], open: string | null, fit: number, closed: ReadonlySet<string> = new Set()): { ordered: ArtifactView[]; tabs: ArtifactView[] } {
   const ordered = [...artifacts].sort((a, b) => b.updatedAt - a.updatedAt);
-  const tabs = ordered.slice(0, fit);
+  const tabs = ordered.filter((artifact) => !closed.has(artifact.path)).slice(0, fit);
   const shown = open === null ? undefined : ordered.find((artifact) => artifact.path === open);
 
   if (shown !== undefined && !tabs.includes(shown) && tabs.length > 0) {

@@ -699,6 +699,36 @@ describe('Store', () => {
     expect(store.pastesFor(second.id).map((paste) => paste.file)).toEqual(['D:/case/other.md']);
   });
 
+  it("keeps a work item's web page tabs, replaces them whole, reads a malformed closed list as none, and drops them with the work item", () => {
+    const path = join(dir, 'tabs.db');
+    const store = Store.open(path);
+
+    expect(store.pageTabs(7)).toBeNull();
+    store.setPageTabs(7, { tab: 'artifact:chat/plan.md', closed: [{ path: 'chat/old.md', updatedAt: 5 }] });
+    expect(store.pageTabs(7)).toEqual({ tab: 'artifact:chat/plan.md', closed: [{ path: 'chat/old.md', updatedAt: 5 }] });
+    store.setPageTabs(7, { tab: null, closed: [] });
+    expect(store.pageTabs(7)).toEqual({ tab: null, closed: [] });
+    expect(store.pageTabs(8)).toBeNull();
+    // A choice for every work item.
+    expect(store.pagePref('openOn')).toBeNull();
+    store.setPagePref('openOn', 'browser');
+    store.setPagePref('openOn', 'status');
+    expect(store.pagePref('openOn')).toBe('status');
+    store.close();
+
+    const raw = new DatabaseSync(path);
+
+    raw.exec("UPDATE pageTabs SET tab = 'status', closed = '[{\"path\":1},' WHERE workItemId = 7");
+    raw.close();
+
+    const again = Store.open(path);
+
+    expect(again.pageTabs(7)).toEqual({ tab: 'status', closed: [] });
+    again.deleteWorkItem(7);
+    expect(again.pageTabs(7)).toBeNull();
+    again.close();
+  });
+
   it('keeps web page sign-ins by hash, records their use, forgets one or all, and trims the stale and the oldest past the limit', () => {
     const store = Store.open(join(dir, 'pages.db'));
 

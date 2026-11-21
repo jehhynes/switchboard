@@ -1158,6 +1158,8 @@ const dockWithRuns = () => {
       '/v1/conversation/page-adhoc': async (body) => (isRecord(body) ? conversation.pageAdhoc(body) : { status: 400, body: { error: 'Expected {window, opId, prompt, repoRoot, start, provider}.' } }),
       '/v1/conversation/page-folder-conversation': async (body) => (isRecord(body) ? conversation.pageFolderConversation(body) : { status: 400, body: { error: 'Expected {window, opId, folder, provider?}.' } }),
       '/v1/conversation/page-search': async (body) => (isRecord(body) ? conversation.pageSearch(body) : { status: 400, body: { error: 'Expected {window, text, since}.' } }),
+      // The page's tabs for its work item, kept for every device (architecture.md § Web page).
+      '/v1/conversation/page-tabs': async (body) => (isRecord(body) ? conversation.pageTabs(body) : { status: 400, body: { error: 'Expected {window, workItemId, tab?, close?, reopen?, openOn?}.' } }),
       '/v1/conversation/page-source': async (body) => (isRecord(body) ? conversation.pageSource(body) : { status: 400, body: { error: 'Expected {window, name, enabled}.' } }),
       // A one-time token the page hands the Chrome extension to pair it (architecture.md § Pane socket).
       '/v1/conversation/pane-pair': async (body) => {
