@@ -86,6 +86,10 @@ describe('the theme copy', () => {
     expect(css).toMatch(/--sb-tab-strip: color-mix\(in srgb, var\(--sb-tab-surface\), #000 var\(--sb-tab-shade\)\)/);
     expect(css).toMatch(/\.tab\.selected \{[^}]*background: var\(--sb-tab-surface\)/);
     expect(light).toContain('--sb-tab-shade:');
+    // The column's strip fills the header row's height from the top: its tabs stretch, nothing pushes them to the bottom.
+    expect(css).toMatch(/\.detail-head \{[^}]*min-height: 45px;[^}]*align-items: stretch;/);
+    expect(css).not.toMatch(/\.detail-head \{[^}]*align-items: flex-end/);
+    expect(css).toMatch(/\.detail-head \.tab \{[^}]*height: auto;/);
   });
 
   it('gives light its Light Modern surfaces: the conversation white, its bars and the side bar grey, and a selected row that shows and stays readable', () => {
