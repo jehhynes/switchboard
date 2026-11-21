@@ -16,7 +16,7 @@ export interface HubRecord {
   build: string;
   /** The folder holding settings.json. */
   configDir: string;
-  /** The hub's runtime, `process.execPath`: VS Code's Electron when a window started it; the dock starts a hub with it (PRD R71). '' from an older hub. */
+  /** The hub's runtime, `process.execPath`: VS Code's Electron when a window started it, Node.js from `hub.js start`; the dock starts a hub with it (PRD R71). */
   execPath: string;
   port: number;
   token: string;
@@ -59,16 +59,14 @@ export function parseHubRecord(text: string): HubRecord | null {
     typeof raw.build !== 'string' ||
     typeof raw.token !== 'string' ||
     raw.token === '' ||
-    typeof raw.startedAt !== 'string'
+    typeof raw.startedAt !== 'string' ||
+    typeof raw.configDir !== 'string' ||
+    typeof raw.execPath !== 'string'
   ) {
     return null;
   }
 
-  // A record from a hub older than configDir reads as '', so a window replaces that hub.
-  const configDir = typeof raw.configDir === 'string' ? raw.configDir : '';
-  const execPath = typeof raw.execPath === 'string' ? raw.execPath : '';
-
-  return { protocol: raw.protocol, version: raw.version, build: raw.build, configDir, execPath, port: raw.port, token: raw.token, pid: raw.pid, startedAt: raw.startedAt };
+  return { protocol: raw.protocol, version: raw.version, build: raw.build, configDir: raw.configDir, execPath: raw.execPath, port: raw.port, token: raw.token, pid: raw.pid, startedAt: raw.startedAt };
 }
 
 export function parseHubIdentity(text: string): HubIdentity | null {

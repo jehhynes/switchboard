@@ -193,7 +193,7 @@ describe('hub entry point', () => {
     await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
     const { port } = server.address() as AddressInfo;
     mkdirSync(dirname(hubRecordPath(home)), { recursive: true });
-    writeFileSync(hubRecordPath(home), JSON.stringify({ protocol: 1, version: '0.0.0', build: 'b', configDir: home, port, token: 't', pid: process.pid, startedAt: 'now' }));
+    writeFileSync(hubRecordPath(home), JSON.stringify({ protocol: 1, version: '0.0.0', build: 'b', configDir: home, execPath: process.execPath, port, token: 't', pid: process.pid, startedAt: 'now' }));
     try {
       const registered = await startWith({ CLAUDE_CODE_SESSION_ID: 'native' }, 'report', 'handled', 's1', 'https://github.com/o/r/issues/7').exited;
       expect(registered).toMatchObject({ code: 0, stdout: '{"assignmentKey":"I:A"}\n' });
@@ -265,7 +265,7 @@ describe('hub entry point', () => {
     await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
     const { port } = server.address() as AddressInfo;
     mkdirSync(dirname(hubRecordPath(home)), { recursive: true });
-    writeFileSync(hubRecordPath(home), JSON.stringify({ protocol: 1, version: '0.0.0', build: 'b', configDir: home, port, token: 't', pid: process.pid, startedAt: 'now' }));
+    writeFileSync(hubRecordPath(home), JSON.stringify({ protocol: 1, version: '0.0.0', build: 'b', configDir: home, execPath: process.execPath, port, token: 't', pid: process.pid, startedAt: 'now' }));
 
     try {
       expect(await start('report', 'stage', 's1', 'Planning').exited).toMatchObject({ code: 0, stdout: 'recorded\n' });
@@ -291,7 +291,7 @@ describe('hub entry point', () => {
           res.end(answer === 503 ? JSON.stringify({ error: 'The hub is restarting onto a new build; try again in a few seconds.' }) : '{}');
 
           if (answer === 503) {
-            writeFileSync(hubRecordPath(home), JSON.stringify({ protocol: 1, version: '0.0.0', build: 'b2', configDir: home, port: ports[1], token: 'new', pid: process.pid, startedAt: 'now' }));
+            writeFileSync(hubRecordPath(home), JSON.stringify({ protocol: 1, version: '0.0.0', build: 'b2', configDir: home, execPath: process.execPath, port: ports[1], token: 'new', pid: process.pid, startedAt: 'now' }));
           }
         });
       });
@@ -304,7 +304,7 @@ describe('hub entry point', () => {
     }
 
     mkdirSync(dirname(hubRecordPath(home)), { recursive: true });
-    writeFileSync(hubRecordPath(home), JSON.stringify({ protocol: 1, version: '0.0.0', build: 'b1', configDir: home, port: ports[0], token: 'old', pid: process.pid, startedAt: 'now' }));
+    writeFileSync(hubRecordPath(home), JSON.stringify({ protocol: 1, version: '0.0.0', build: 'b1', configDir: home, execPath: process.execPath, port: ports[0], token: 'old', pid: process.pid, startedAt: 'now' }));
 
     try {
       expect(await start('report', 'stage', 's1', 'Planning').exited).toMatchObject({ code: 0, stdout: 'recorded\n' });
@@ -323,7 +323,7 @@ describe('hub entry point', () => {
     const { port } = closed.address() as AddressInfo;
     await new Promise<void>((done) => closed.close(() => done()));
     mkdirSync(dirname(hubRecordPath(home)), { recursive: true });
-    writeFileSync(hubRecordPath(home), JSON.stringify({ protocol: 1, version: '0.0.0', build: 'b', configDir: home, port, token: 't', pid: process.pid, startedAt: 'now' }));
+    writeFileSync(hubRecordPath(home), JSON.stringify({ protocol: 1, version: '0.0.0', build: 'b', configDir: home, execPath: process.execPath, port, token: 't', pid: process.pid, startedAt: 'now' }));
 
     expect(await start('report', 'stage', 's1', 'Planning').exited).toMatchObject({ code: 2, stderr: `The Switchboard hub (pid ${process.pid}) did not answer, so the report was not recorded.\n` });
     expect(await start('report', 'handled', 's1', 'https://github.com/o/r/issues/7').exited).toMatchObject({ code: 2, stderr: `The Switchboard hub (pid ${process.pid}) did not answer.\n` });
@@ -348,7 +348,7 @@ describe('hub entry point', () => {
     await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
     const { port } = server.address() as AddressInfo;
     mkdirSync(dirname(hubRecordPath(home)), { recursive: true });
-    writeFileSync(hubRecordPath(home), JSON.stringify({ protocol: 1, version: '0.0.0', build: 'b', configDir: home, port, token: 't', pid: process.pid, startedAt: 'now' }));
+    writeFileSync(hubRecordPath(home), JSON.stringify({ protocol: 1, version: '0.0.0', build: 'b', configDir: home, execPath: process.execPath, port, token: 't', pid: process.pid, startedAt: 'now' }));
 
     try {
       const refused = await startWith({ CLAUDE_CODE_SESSION_ID: 'old-copy' }, 'report', 'stage', 's1', 'Planning').exited;
@@ -395,7 +395,7 @@ describe('hub entry point', () => {
     await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
     const { port } = server.address() as AddressInfo;
     mkdirSync(dirname(hubRecordPath(home)), { recursive: true });
-    writeFileSync(hubRecordPath(home), JSON.stringify({ protocol: 1, version: '0.0.0', build: 'b', configDir: home, port, token: 't', pid: process.pid, startedAt: 'now' }));
+    writeFileSync(hubRecordPath(home), JSON.stringify({ protocol: 1, version: '0.0.0', build: 'b', configDir: home, execPath: process.execPath, port, token: 't', pid: process.pid, startedAt: 'now' }));
 
     try {
       expect(await startWith(native, 'register', '--title', 'Fix the badge').exited).toMatchObject({
@@ -474,7 +474,7 @@ describe('hub entry point', () => {
     await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
     const { port } = server.address() as AddressInfo;
     mkdirSync(dirname(hubRecordPath(home)), { recursive: true });
-    writeFileSync(hubRecordPath(home), JSON.stringify({ protocol: 1, version: '0.0.0', build: 'b', configDir: home, port, token: 't', pid: process.pid, startedAt: 'now' }));
+    writeFileSync(hubRecordPath(home), JSON.stringify({ protocol: 1, version: '0.0.0', build: 'b', configDir: home, execPath: process.execPath, port, token: 't', pid: process.pid, startedAt: 'now' }));
 
     try {
       const attach = start('attach', 's1');
@@ -530,7 +530,7 @@ describe('hub entry point', () => {
     await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
     const { port } = server.address() as AddressInfo;
     mkdirSync(dirname(hubRecordPath(home)), { recursive: true });
-    writeFileSync(hubRecordPath(home), JSON.stringify({ protocol: 1, version: '0.0.0', build: 'b', configDir: home, port, token: 't', pid: process.pid, startedAt: 'now' }));
+    writeFileSync(hubRecordPath(home), JSON.stringify({ protocol: 1, version: '0.0.0', build: 'b', configDir: home, execPath: process.execPath, port, token: 't', pid: process.pid, startedAt: 'now' }));
 
     try {
       expect(await start('holder', 'list').exited).toMatchObject({ code: 0, stdout: expect.stringMatching(/^Work item +Switchboard ID.*\ngh 7 +s1 +n1 +D:\/git\/widgets +idle +0m +- +1\n$/) });

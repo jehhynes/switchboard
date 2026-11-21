@@ -8,15 +8,6 @@ describe('parseHubRecord', () => {
     expect(parseHubRecord(JSON.stringify(record))).toEqual(record);
   });
 
-  it('reads a record without execPath, from a hub older than the dock starting hubs, as an empty execPath', () => {
-    expect(parseHubRecord(JSON.stringify({ ...record, execPath: undefined }))).toEqual({ ...record, execPath: '' });
-    expect(parseHubRecord(JSON.stringify({ ...record, execPath: 7 }))).toEqual({ ...record, execPath: '' });
-  });
-
-  it('reads a record without configDir, from a hub older than the setting, as an empty configDir', () => {
-    expect(parseHubRecord(JSON.stringify({ ...record, configDir: undefined }))).toEqual({ ...record, configDir: '' });
-  });
-
   it('drops unknown fields', () => {
     expect(parseHubRecord(JSON.stringify({ ...record, extra: true }))).toEqual(record);
   });
@@ -36,6 +27,9 @@ describe('parseHubRecord', () => {
     ['a missing build', JSON.stringify({ ...record, build: undefined })],
     ['a numeric version', JSON.stringify({ ...record, version: 1 })],
     ['a missing startedAt', JSON.stringify({ ...record, startedAt: undefined })],
+    ['a missing configDir', JSON.stringify({ ...record, configDir: undefined })],
+    ['a missing execPath', JSON.stringify({ ...record, execPath: undefined })],
+    ['a numeric execPath', JSON.stringify({ ...record, execPath: 7 })],
   ])('rejects %s', (_, text) => {
     expect(parseHubRecord(text)).toBeNull();
   });
