@@ -35,6 +35,8 @@ const SIDE_WIDTH = 'switchboard.sideWidth';
 /** The conversation's text sizes, as shares of the theme's, and where the page keeps the one chosen. */
 export const TEXT_SCALES = [0.85, 0.9, 1, 1.1, 1.25, 1.5];
 const TEXT_SCALE = 'switchboard.textScale';
+/** Where the page keeps Show message details. */
+const DETAILS = 'switchboard.messageDetails';
 
 /** The next text size up (1) or down (-1) from `scale`, staying at the ends. */
 export function stepScale(scale: number, step: 1 | -1): number {
@@ -173,6 +175,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   wideQuery?.addEventListener?.('change', () => draw());
   let state: PageState = EMPTY;
   const view: View = newView();
+
+  try {
+    view.details = localStorage.getItem(DETAILS) === '1';
+  } catch {
+    // Off without local storage.
+  }
 
   setTextScale(((): number => {
     try {
@@ -1533,6 +1541,21 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         break;
       case 'text-reset':
         setTextScale(1);
+        break;
+      case 'toggle-details':
+        view.details = !view.details;
+
+        try {
+          if (view.details) {
+            localStorage.setItem(DETAILS, '1');
+          } else {
+            localStorage.removeItem(DETAILS);
+          }
+        } catch {
+          // A page without local storage keeps the choice until it reloads.
+        }
+
+        draw();
         break;
       case 'pick': {
         const key = button!.dataset['card']!;

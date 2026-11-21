@@ -1,5 +1,6 @@
 import { providerMark } from '@switchboard/conversation/providerIcons';
 import { renderMicButton, renderVoiceControls } from '@switchboard/conversation/voiceControls';
+import { fullTime, metaLine, stamped, stampTime, toneMark, voiceMark } from '@switchboard/conversation/messageMeta';
 import { artifactIcon, awaitingReply, selectedEntry, selectedRow, stateIcon, timeline } from './model.js';
 import type { PageState } from './model.js';
 import { copyButton, escape, renderInline, renderMarkdown } from './markdown.js';
@@ -52,6 +53,8 @@ export interface View {
   /** The conversation's text size, a share of the theme's, and whether its menu is open. */
   textScale: number;
   textMenu: boolean;
+  /** Whether each message's line shows its time and its optional marks (dictated, tone), kept in local storage. */
+  details: boolean;
   /** New conversation…'s provider menu under the dropdown: the providers, null while they load, or why not. */
   providers: { items: Array<{ provider: string; name: string; default: boolean }> | null; error: string | null } | null;
   /** The prompt the session waits on in its terminal, as last read, for the session it was read for; a key being sent waits. */
@@ -64,7 +67,7 @@ export type Sheet =
   | { kind: 'snooze'; workItemId: number; title: string; choices: SnoozeChoice[]; picked: string; date: string; comment: string }
   | { kind: 'text'; title: string; text: string };
 
-export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), list: false, actions: false, sheet: null, acting: false, prompt: null, providers: null, side: 'status', textScale: 1, textMenu: false });
+export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), list: false, actions: false, sheet: null, acting: false, prompt: null, providers: null, side: 'status', textScale: 1, textMenu: false, details: false });
 
 /** Each row action's codicon, as the dock draws its controls. */
 const ACTION_ICONS: Record<string, string> = { start: 'play', approve: 'check', retry: 'refresh', stop: 'debug-stop', 'mark-done': 'pass', snooze: 'clockface', restore: 'debug-restart', delete: 'trash' };
@@ -173,9 +176,6 @@ export function renderSheet(sheet: Sheet | null, acting: boolean): string {
   return frame(`Snooze ${sheet.title}`, body, `${cancel}<button type="button" class="sheet-button primary" data-action="sheet-go"${busy}>Snooze</button>`);
 }
 
-const STAMP = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', hourCycle: 'h12' });
-/** A time's tooltip, as the VS Code view's: "2026-11-19 13:46:05 EST". */
-const STAMP_FULL = new Intl.DateTimeFormat('en-US', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23', timeZoneName: 'short' });
 const DAY = new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 const DAY_WITH_YEAR = new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
 
@@ -193,13 +193,6 @@ function codicon({ icon, text, tone }: { icon: string; text: string; tone?: stri
   const [name, modifier] = icon.split('~');
 
   return `<span class="codicon codicon-${name}${modifier === undefined ? '' : ` codicon-modifier-${modifier}`}${tone === undefined ? '' : ` state-icon tone-${tone}`}" title="${escape(text)}" role="img" aria-label="${escape(text)}"></span>`;
-}
-
-function stampTime(at: number): string {
-  const parts = Object.fromEntries(STAMP_FULL.formatToParts(at).map((part) => [part.type, part.value]));
-  const full = `${parts['year']}-${parts['month']}-${parts['day']} ${parts['hour']}:${parts['minute']}:${parts['second']} ${parts['timeZoneName']}`;
-
-  return `<time class="stamp" datetime="${new Date(at).toISOString()}" title="${escape(full)}">${STAMP.format(at)}</time>`;
 }
 
 /** How long ago, in the largest whole unit: "just now", "4 min ago", "2 h ago", "3 d ago". */
@@ -320,14 +313,17 @@ function layoutToggle(side: 'list' | 'detail', shown: boolean): string {
   return `<button type="button" class="icon layout-toggle ${side}-toggle" data-action="toggle-${side}" aria-pressed="${shown}" title="${title}" aria-label="${title}"><span class="codicon codicon-layout-sidebar-${side === 'list' ? 'left' : 'right'}${shown ? '' : '-off'}" aria-hidden="true"></span></button>`;
 }
 
-/** The header's Text size button and its menu: smaller, the size, larger, and Reset, for the conversation's text only. */
+/**
+ * The header's view options button and its menu: the conversation's text size (smaller, the size, larger, and Reset) and Show message
+ * details.
+ */
 function textSize(view: View): string {
   const percent = `${Math.round(view.textScale * 100)}%`;
   const menu = view.textMenu
-    ? `<div class="glass menu text-size-menu align-right" role="menu" aria-label="Text size"><div class="text-size-row"><button type="button" class="icon menu-row" role="menuitem" data-action="text-smaller" title="Smaller (Ctrl+-)" aria-label="Smaller text">A−</button><span class="text-size-value" aria-live="polite">${percent}</span><button type="button" class="icon menu-row" role="menuitem" data-action="text-larger" title="Larger (Ctrl+=)" aria-label="Larger text">A+</button></div><button type="button" class="menu-row" role="menuitem" data-action="text-reset"><span class="menu-gutter" aria-hidden="true"></span><span class="title">Reset (Ctrl+0)</span></button></div>`
+    ? `<div class="glass menu text-size-menu align-right" role="menu" aria-label="View options"><div class="text-size-row"><button type="button" class="icon menu-row" role="menuitem" data-action="text-smaller" title="Smaller (Ctrl+-)" aria-label="Smaller text">A−</button><span class="text-size-value" aria-live="polite">${percent}</span><button type="button" class="icon menu-row" role="menuitem" data-action="text-larger" title="Larger (Ctrl+=)" aria-label="Larger text">A+</button></div><button type="button" class="menu-row" role="menuitem" data-action="text-reset"><span class="menu-gutter" aria-hidden="true"></span><span class="title">Reset text size (Ctrl+0)</span></button><div class="menu-separator" role="separator"></div><button type="button" class="menu-row" role="menuitemcheckbox" aria-checked="${view.details}" data-action="toggle-details"><span class="menu-gutter" aria-hidden="true">${view.details ? '<span class="codicon codicon-check"></span>' : ''}</span><span class="title">Show message details</span></button></div>`
     : '';
 
-  return `<div class="menu-anchor text-size-anchor"><button type="button" class="icon text-size" data-action="text-menu" aria-haspopup="menu" aria-expanded="${view.textMenu}" title="Text size: ${percent}" aria-label="Text size"><span class="codicon codicon-text-size" aria-hidden="true"></span></button>${menu}</div>`;
+  return `<div class="menu-anchor text-size-anchor"><button type="button" class="icon text-size" data-action="text-menu" aria-haspopup="menu" aria-expanded="${view.textMenu}" title="View options: text size ${percent}" aria-label="View options"><span class="codicon codicon-settings" aria-hidden="true"></span></button>${menu}</div>`;
 }
 
 /** The header: the dropdown of the selected work item's conversations, its button drawn as its rows are, and the persona as an icon. */
@@ -402,17 +398,15 @@ export function renderTabs(view: View, state: PageState): string {
   return `<nav class="tabs" role="tablist">${TABS.map(({ tab, label }) => `<button class="tab${tab === view.tab ? ' selected' : ''}" type="button" role="tab" data-tab="${tab}" aria-selected="${tab === view.tab}" tabindex="${tab === view.tab ? 0 : -1}">${label}${badges[tab] === '' ? '' : `<span class="tab-badge">${badges[tab]}</span>`}</button>`).join('')}</nav>`;
 }
 
-/** The one line under a message or a reply: its marks on the left, flush with the text, and its time at the right end; empty with neither. */
-function metaLine(marks: string[], at: number | null): string {
-  const left = marks.filter((mark) => mark !== '');
-
-  return left.length === 0 && at === null ? '' : `<div class="meta">${left.length === 0 ? '' : `<span class="meta-marks">${left.join('')}</span>`}${at === null ? '' : stampTime(at)}</div>`;
-}
-
-function message(item: MessageView, stamped: boolean): string {
+/**
+ * One of our messages: its bubble over its meta line (`metaLine`, shared with the Conversation view). A failed delivery always shows; with
+ * message details on, a dictated message's mark too. A message with no meta line has its time as the bubble's tooltip.
+ */
+function message(item: MessageView, stamped: boolean, details: boolean): string {
   const failed = item.delivery === 'uncertain' ? `<span class="delivery uncertain" title="${escape(item.error ?? '')}">uncertain</span>` : '';
+  const meta = metaLine([voiceMark(item, details), failed], item.at, stamped);
 
-  return `<li class="message${item.provisional ? ' provisional' : ''}" data-id="${escape(item.id)}"><div class="bubble"><div class="box${/^\/[\w:.-]+(\s|$)/.test(item.text) ? ' command' : ''}">${escape(item.text)}</div>${metaLine([failed], stamped ? item.at : null)}</div></li>`;
+  return `<li class="message${item.provisional ? ' provisional' : ''}" data-id="${escape(item.id)}"><div class="bubble"${meta === '' ? ` title="${escape(fullTime(item.at))}"` : ''}><div class="box${/^\/[\w:.-]+(\s|$)/.test(item.text) ? ' command' : ''}">${escape(item.text)}</div>${meta}</div></li>`;
 }
 
 /** The mark of a reply whose speech failed; empty otherwise, since routine speech states show nothing. */
@@ -443,10 +437,10 @@ function reply(item: ReplyView, earlier: ReplyView | null, view: View, stamped: 
   const expanded = passage === null || expandReplies !== view.open.has(`more:${item.id}`);
   const body = !expanded && passage !== null ? passageHtml(item, passage) : card === '' ? renderMarkdown(item.opening) : withoutQuestions(item.opening, `reply:${item.id}`, view.open);
   const more = passage === null ? '' : `<button class="show-more" type="button" data-action="more" data-reply="${escape(item.id)}" aria-expanded="${expanded}">${expanded ? 'Show less' : 'Show more'}</button>`;
-  const tone = item.tone === null ? '' : `<span class="tone" title="${escape(`How the reply sounds when spoken: ${item.tone}`)}">${escape(item.tone)}</span>`;
+  const tone = toneMark(item.tone, view.details);
   const rewritten = earlier === null ? '' : `<details class="fold" data-fold="earlier:${escape(item.id)}"${view.open.has(`earlier:${item.id}`) ? ' open' : ''}><summary>Rewritten</summary><div class="was">${renderMarkdown(earlier.opening)}</div></details>`;
-  // The copy button comes first on the line under the reply, then the tone and a speech failure, and the time at the right.
-  const meta = metaLine([item.provisional ? '' : copyButton('copy-reply', 'Copy response'), tone, spokenMark(item)], stamped ? item.at : null);
+  // The copy button comes first on the line under the reply, then the tone with message details on and a speech failure, and the time at the right.
+  const meta = metaLine([item.provisional ? '' : copyButton('copy-reply', 'Copy response'), tone, spokenMark(item)], item.at, stamped);
   const unread = item.unread ? ` unread" data-unread="${escape(item.id)}` : '';
 
   return `<li class="reply ${item.kind}${unread}" data-id="${escape(item.id)}"${item.speak === null ? '' : ' data-speak="1"'}><span class="dot"${item.unread ? ' title="Unread"' : ''}></span><div class="body">${body}${more}${rewritten}</div>${meta}${card}</li>`;
@@ -546,7 +540,6 @@ export function renderTimeline(state: PageState, view: View, now: number = Date.
   // After the newest item, so replies written mid-turn show above it.
   const shownPrompt = view.prompt !== null && view.prompt.sessionId === state.session.id ? view.prompt : null;
   const spinner = turnRow(state.session, awaitingReply(state.items, state.session), shownPrompt?.prompt != null);
-  let lastMinute: string | null = null;
   let lastDay: string | null = null;
   const rows = entries.map((entry) => {
     if (entry.type === 'artifact') {
@@ -559,18 +552,13 @@ export function renderTimeline(state: PageState, view: View, now: number = Date.
 
     lastDay = entry.type === 'message' || lastDay === null ? day : lastDay;
 
+    // The first item after a day's divider shows its time; with message details on, every item does.
     const timed = entry.type === 'message' || entry.item.kind !== 'note';
-    const minute = `${day} ${STAMP.format(entry.item.at)}`;
-    const stamped = timed && (minute !== lastMinute || divider !== '');
-
-    if (timed) {
-      lastMinute = minute;
-    }
-
+    const shown = stamped(timed, view.details, divider !== '');
     const html =
       entry.type === 'message'
-        ? message(entry.item, stamped)
-        : reply(entry.item, entry.earlier, view, stamped, entry.item.kind === 'reply' ? cardOf(`reply:${entry.item.id}`, entry.item.opening, answerAfter(state, entry.item.id), view, canAnswer) : '', state.expandReplies);
+        ? message(entry.item, shown, view.details)
+        : reply(entry.item, entry.earlier, view, shown, entry.item.kind === 'reply' ? cardOf(`reply:${entry.item.id}`, entry.item.opening, answerAfter(state, entry.item.id), view, canAnswer) : '', state.expandReplies);
 
     return divider + html;
   });

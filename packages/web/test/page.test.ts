@@ -122,10 +122,40 @@ describe('drawing', () => {
     expect(renderTimeline(pageState([message('m1', 1, { at: new Date(2025, 11, 31, 9).getTime() })]), newView(), at(20, 12))).toContain('>Wed, Dec 31, 2025</li>');
   });
 
+  it('shows the time only on the first item after a day\'s divider, and the optional marks and every time only with message details on', () => {
+    const at = (hour: number, minute = 0): number => new Date(2026, 10, 20, hour, minute).getTime();
+    const items = [
+      message('m1', 1, { at: at(9), origin: 'voice', pieces: [{ text: 'hello there', score: 0.91, f0: 140, dropped: false }] }),
+      reply('r1', 2, { at: at(9, 5), tone: 'calm' }),
+      message('m2', 3, { at: at(10), delivery: 'uncertain', error: 'Check the terminal.' }),
+      message('m3', 4, { at: at(11) }),
+    ];
+    const host = document.createElement('div');
+    const stamps = (): string[] => [...host.querySelectorAll('.timeline > li[data-id]')].map((li) => `${li.getAttribute('data-id')}:${li.querySelector('.stamp')?.textContent ?? '-'}`);
+
+    host.innerHTML = renderTimeline(pageState(items), newView(), at(12));
+    expect(stamps()).toEqual(['m1:9:00 AM', 'r1:-', 'm2:-', 'm3:-']);
+    // Off: no Dictated or tone, but the copy button and the error mark stay, and the time is the line's or the bubble's tooltip.
+    expect(host.querySelector('.voice-mark')).toBeNull();
+    expect(host.querySelector('.tone')).toBeNull();
+    expect(host.querySelector('li[data-id="r1"] .copy')).not.toBeNull();
+    expect(host.querySelector('li[data-id="m2"] .delivery.uncertain')).not.toBeNull();
+    expect(host.querySelector('li[data-id="r1"] .meta')!.getAttribute('title')).toMatch(/^2026-11-20 09:05:00 /);
+    expect(host.querySelector('li[data-id="m3"] .meta')).toBeNull();
+    expect(host.querySelector('li[data-id="m3"] .bubble')!.getAttribute('title')).toMatch(/^2026-11-20 11:00:00 /);
+
+    host.innerHTML = renderTimeline(pageState(items), { ...newView(), details: true }, at(12));
+    expect(stamps()).toEqual(['m1:9:00 AM', 'r1:9:05 AM', 'm2:10:00 AM', 'm3:11:00 AM']);
+    expect(host.querySelector('li[data-id="m1"] .voice-mark')!.textContent).toBe('dictated');
+    expect(host.querySelector('li[data-id="m1"] .voice-mark')!.getAttribute('title')).toBe('Dictated in 1 piece:\nhello there · match 0.91 · 140 Hz');
+    expect(host.querySelector('li[data-id="r1"] .tone')!.textContent).toBe('calm');
+    expect(host.querySelector('li[data-id="r1"] .meta')!.hasAttribute('title')).toBe(false);
+  });
+
   it("puts a message's and a reply's metadata on one line under it, the reply's copy button first and the time at the right", () => {
     const host = document.createElement('div');
 
-    host.innerHTML = renderTimeline(pageState([message('m1', 1, { delivery: 'uncertain', error: 'Check the terminal.' }), reply('r1', 120_000, { tone: 'calm', spoken: { state: 'failed', atMs: null, saidChars: null } })]), newView());
+    host.innerHTML = renderTimeline(pageState([message('m1', 1, { delivery: 'uncertain', error: 'Check the terminal.' }), reply('r1', 120_000, { tone: 'calm', spoken: { state: 'failed', atMs: null, saidChars: null } })]), { ...newView(), details: true });
     expect([...host.querySelector('li[data-id="m1"] > .bubble')!.children].map((child) => child.className)).toEqual(['box', 'meta']);
     expect([...host.querySelector('li[data-id="m1"] .meta')!.children].map((child) => child.className)).toEqual(['meta-marks', 'stamp']);
     expect([...host.querySelector('li[data-id="r1"]')!.children].map((child) => child.className)).toEqual(['dot', 'body', 'meta']);
@@ -1133,7 +1163,23 @@ describe('the page in use', () => {
     click('.header button.picker');
     expect(root.querySelector('.text-size-menu')).toBeNull();
     click('.header button.picker');
+
+    // Show message details, in the same menu, kept.
+    click('.header button.text-size');
+    expect(root.querySelector('[data-action="toggle-details"]')!.getAttribute('aria-checked')).toBe('false');
+    click('[data-action="toggle-details"]');
+    expect(localStorage.getItem('switchboard.messageDetails')).toBe('1');
+    expect(root.querySelector('[data-action="toggle-details"]')!.getAttribute('aria-checked')).toBe('true');
     page.close();
+
+    const again = start();
+
+    hello(again.source);
+    click('.header button.text-size');
+    expect(root.querySelector('[data-action="toggle-details"]')!.getAttribute('aria-checked')).toBe('true');
+    click('[data-action="toggle-details"]');
+    expect(localStorage.getItem('switchboard.messageDetails')).toBeNull();
+    again.page.close();
   });
 
   it("resizes the work items from their sash by dragging and the arrow keys, within limits, keeps the width, and resets it on a double-click", () => {

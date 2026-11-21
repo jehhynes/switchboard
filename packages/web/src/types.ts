@@ -71,6 +71,10 @@ export interface MessageView {
   text: string;
   delivery: 'open' | 'sent' | 'uncertain' | 'not-sent' | null;
   error: string | null;
+  /** A dictated message's pieces with their voice checks, a part sent while still being spoken, and the reply it spoke over (architecture.md § Dictation). */
+  pieces?: Array<{ text: string; score: number | null; f0: number | null; dropped: boolean }>;
+  partial?: boolean;
+  interrupted?: { replyId: string; said: string; rest: string };
 }
 
 export interface ReplyView {
