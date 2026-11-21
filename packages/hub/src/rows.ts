@@ -195,7 +195,7 @@ export function controlsOf(item: WorkItemView, mode: OpenVSCode = 'always'): Con
 
   // Runs in the item window, not the hub (PRD R57).
   if (item.worktree !== null) {
-    controls.push({ label: 'Open Changes', icon: 'diff-multiple', message: { type: 'changes', path: item.worktree.path, key: ticketKey(item.ticket), title: item.ticket.title } });
+    controls.push({ label: 'Open changes', icon: 'diff-multiple', message: { type: 'changes', path: item.worktree.path, key: ticketKey(item.ticket), title: item.ticket.title } });
   }
 
   const terminal = terminalCommand(item);
@@ -296,7 +296,7 @@ export function moveControls(item: WorkItemView, order: number[]): Control[] {
 
 /**
  * A pool row's controls: Start once triage has chosen a playbook, which the pick starts (PRD R48), or Triage again after a failed triage,
- * then Snooze, Restore and History. `main` is the one the row shows as a button.
+ * then Snooze, Unsnooze and History. `main` is the one the row shows as a button.
  */
 export function poolControls(entry: PoolView): { main: Control | null; controls: Control[] } {
   const { ticket, triage } = entry;
@@ -357,14 +357,14 @@ export const PROVIDER_NAMES: Record<Provider, string> = { claude: 'Claude', code
 
 
 /**
- * Snooze… for a ticket, and Restore when it is snoozed, so a snoozed ticket can take a new wake time without waking first (PRD R49).
+ * Snooze… for a ticket, and Unsnooze when it is snoozed, so a snoozed ticket can take a new wake time without waking first (PRD R49).
  * Snooze… carries no wake time or comment: the dock asks for them in its snooze dialog before it posts the action.
  */
 function snoozeControls(ticket: { id: number; snoozed: boolean }): Control[] {
   const controls: Control[] = [{ label: 'Snooze…', icon: 'clockface', message: { type: 'action', action: { type: 'snooze', ticketId: ticket.id } } }];
 
   if (ticket.snoozed) {
-    controls.push({ label: 'Restore', icon: 'debug-restart', message: { type: 'action', action: { type: 'restore', ticketId: ticket.id } } });
+    controls.push({ label: 'Unsnooze', icon: 'debug-restart', message: { type: 'action', action: { type: 'restore', ticketId: ticket.id } } });
   }
 
   return controls;

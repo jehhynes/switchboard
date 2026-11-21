@@ -84,7 +84,7 @@ public sealed class InPlaceUpdateTests
 
         more.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         Dispatcher.UIThread.RunJobs();
-        more.ContextMenu!.Items.OfType<MenuItem>().Single((item) => (string)item.Header! == "Held Sessions").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        more.ContextMenu!.Items.OfType<MenuItem>().Single((item) => (string)item.Header! == "Held sessions").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
         Dispatcher.UIThread.RunJobs();
 
         return window.HeldWindow!;

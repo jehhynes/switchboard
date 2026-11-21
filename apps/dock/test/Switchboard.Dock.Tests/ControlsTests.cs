@@ -805,7 +805,7 @@ public sealed class ControlsTests
     {
         var (window, model) = Open();
 
-        Choose(window, "New Ad-hoc Session…");
+        Choose(window, "New ad-hoc session…");
         var dialog = DialogOf(window);
 
         Assert.True(Named<ComboBox>(dialog, "AdhocRepoBox").IsVisible);
@@ -827,7 +827,7 @@ public sealed class ControlsTests
     {
         var (window, _) = Open();
 
-        Choose(window, "New Ad-hoc Session…");
+        Choose(window, "New ad-hoc session…");
         var dialog = DialogOf(window);
 
         Named<TextBox>(dialog, "AdhocPromptBox").Text = "Check the log";
@@ -844,7 +844,7 @@ public sealed class ControlsTests
     {
         hub.DefaultProvider = "codex";
         var (window, _) = Open();
-        Choose(window, "New Ad-hoc Session…");
+        Choose(window, "New ad-hoc session…");
         var dialog = DialogOf(window);
         var provider = Named<ComboBox>(dialog, "AdhocProvider");
         Assert.Equal("codex", ((ProviderDialog.Option)provider.SelectedItem!).Id);
@@ -861,7 +861,7 @@ public sealed class ControlsTests
     {
         hub.ProviderError = "Provider lookup failed.";
         var (window, _) = Open();
-        Choose(window, "New Ad-hoc Session…");
+        Choose(window, "New ad-hoc session…");
         var dialog = DialogOf(window);
         var reason = Named<TextBlock>(dialog, "AdhocProviderError");
 
@@ -883,11 +883,11 @@ public sealed class ControlsTests
     {
         hub.DefaultProvider = "codex";
         var (window, _) = Open();
-        Choose(window, "New Ad-hoc Session…");
+        Choose(window, "New ad-hoc session…");
         Click(Named<Button>(DialogOf(window), "AdhocCancel"));
 
         hub.ProviderError = "Provider lookup failed.";
-        Choose(window, "New Ad-hoc Session…");
+        Choose(window, "New ad-hoc session…");
         var dialog = DialogOf(window);
 
         Assert.Equal("codex", ((ProviderDialog.Option)Named<ComboBox>(dialog, "AdhocProvider").SelectedItem!).Id);
@@ -905,7 +905,7 @@ public sealed class ControlsTests
         window.NewSession().GetAwaiter().GetResult();
 
         hub.ProviderError = "Provider lookup failed.";
-        Choose(window, "New Ad-hoc Session…");
+        Choose(window, "New ad-hoc session…");
         var dialog = DialogOf(window);
 
         Assert.Equal("Provider lookup failed. Using Codex, the default.", Named<TextBlock>(dialog, "AdhocProviderError").Text);
@@ -916,14 +916,14 @@ public sealed class ControlsTests
     public void Adhoc_Opened_FocusesTheFirstFieldThatShows()
     {
         var (window, _) = Open();
-        Choose(window, "New Ad-hoc Session…");
+        Choose(window, "New ad-hoc session…");
         var dialog = DialogOf(window);
 
         Assert.Same(Named<ComboBox>(dialog, "AdhocRunBox"), dialog.FocusManager!.GetFocusedElement());
         Click(Named<Button>(dialog, "AdhocCancel"));
 
         var (other, _) = Open(Fixtures.View with { Schedules = [] });
-        Choose(other, "New Ad-hoc Session…");
+        Choose(other, "New ad-hoc session…");
         var plain = DialogOf(other);
 
         Assert.Same(Named<ComboBox>(plain, "AdhocRepoBox"), plain.FocusManager!.GetFocusedElement());
@@ -934,7 +934,7 @@ public sealed class ControlsTests
     public void Adhoc_Fields_AreLabelledRunRepositoryProviderAndPrompt()
     {
         var (window, _) = Open();
-        Choose(window, "New Ad-hoc Session…");
+        Choose(window, "New ad-hoc session…");
         var dialog = DialogOf(window);
         string? LabelOf(string field) => Named<StackPanel>(dialog, field).Children.OfType<TextBlock>().First().Text;
 
@@ -949,7 +949,7 @@ public sealed class ControlsTests
         string? picked = "D:/scratch/tool";
         window.PickFolder = (_) => Task.FromResult<string?>(picked);
 
-        Choose(window, "New Ad-hoc Session…");
+        Choose(window, "New ad-hoc session…");
         var dialog = DialogOf(window);
         var repos = Named<ComboBox>(dialog, "AdhocRepoBox");
 
@@ -972,7 +972,7 @@ public sealed class ControlsTests
         Click(Named<Button>(dialog, "AdhocCreate"));
         Assert.Contains("\"repoRoot\":\"D:/scratch/tool\"", Assert.Single(hub.Calls));
 
-        Choose(window, "New Ad-hoc Session…");
+        Choose(window, "New ad-hoc session…");
         var again = DialogOf(window);
 
         Assert.Equal(["D:/git/widgets", "D:/git/support", "D:/scratch/tool", AdhocDialog.ChooseFolder], Named<ComboBox>(again, "AdhocRepoBox").ItemsSource!.Cast<string>());
@@ -985,7 +985,7 @@ public sealed class ControlsTests
     {
         var (window, model) = Open();
 
-        Choose(window, "New Ad-hoc Session…");
+        Choose(window, "New ad-hoc session…");
         var dialog = DialogOf(window);
         var run = Named<ComboBox>(dialog, "AdhocRunBox");
 
@@ -1019,7 +1019,7 @@ public sealed class ControlsTests
     {
         var (window, model) = Open(Fixtures.View with { RepoRoots = [] });
 
-        Choose(window, "New Ad-hoc Session…");
+        Choose(window, "New ad-hoc session…");
         var dialog = DialogOf(window);
 
         Assert.Equal(1, Named<ComboBox>(dialog, "AdhocRunBox").SelectedIndex);
@@ -1044,7 +1044,7 @@ public sealed class ControlsTests
     {
         var (window, _) = Open(Fixtures.View with { RepoRoots = [], Schedules = [] });
 
-        Choose(window, "New Ad-hoc Session…");
+        Choose(window, "New ad-hoc session…");
         var dialog = DialogOf(window);
 
         Assert.Equal([AdhocDialog.ChooseFolder], Named<ComboBox>(dialog, "AdhocRepoBox").ItemsSource!.Cast<string>());
@@ -1058,7 +1058,7 @@ public sealed class ControlsTests
     {
         var (window, model) = Open();
 
-        Choose(window, "New Ad-hoc Session…");
+        Choose(window, "New ad-hoc session…");
         var dialog = DialogOf(window);
 
         Named<TextBox>(dialog, "AdhocPromptBox").Text = "Check the log";
@@ -1078,7 +1078,7 @@ public sealed class ControlsTests
     {
         var (window, _) = Open();
 
-        Choose(window, "New Ad-hoc Session…");
+        Choose(window, "New ad-hoc session…");
         var dialog = DialogOf(window);
 
         Named<TextBox>(dialog, "AdhocPromptBox").Text = "   ";
@@ -1095,7 +1095,7 @@ public sealed class ControlsTests
     {
         var (window, _) = Open(Fixtures.View with { RepoRoots = ["D:/git/widgets"] });
 
-        Choose(window, "New Ad-hoc Session…");
+        Choose(window, "New ad-hoc session…");
         var dialog = DialogOf(window);
 
         Assert.True(Named<ComboBox>(dialog, "AdhocRepoBox").IsEffectivelyVisible);
@@ -1113,7 +1113,7 @@ public sealed class ControlsTests
         Click(more);
 
         Assert.True(more.ContextMenu!.IsOpen);
-        Assert.Equal(["New Ad-hoc Session…", "New Session in a Folder…", "", "Held Sessions", "Ticket Volume Report", "", "Refresh Sources", "Show Hub Log", "", "Open Settings"], more.ContextMenu.Items.OfType<Control>().Select((item) => item is MenuItem named ? (string)named.Header! : Assert.IsType<Separator>(item) is not null ? "" : "?"));
+        Assert.Equal(["New ad-hoc session…", "New Session in a Folder…", "", "Held sessions", "Ticket volume report", "", "Refresh sources", "Show hub log", "", "Open Settings"], more.ContextMenu.Items.OfType<Control>().Select((item) => item is MenuItem named ? (string)named.Header! : Assert.IsType<Separator>(item) is not null ? "" : "?"));
         Assert.All(more.ContextMenu.Items.OfType<MenuItem>(), (item) => Assert.NotNull(item.Icon));
     }
 
@@ -1125,7 +1125,7 @@ public sealed class ControlsTests
 
         Click(more);
 
-        Assert.Equal(["New Ad-hoc Session…", "New Session in a Folder…", "Held Sessions", "Refresh Sources", "Show Hub Log", "Open Settings"], more.ContextMenu!.Items.OfType<MenuItem>().Select((item) => (string)item.Header!));
+        Assert.Equal(["New ad-hoc session…", "New Session in a Folder…", "Held sessions", "Refresh sources", "Show hub log", "Open Settings"], more.ContextMenu!.Items.OfType<MenuItem>().Select((item) => (string)item.Header!));
     }
 
     [AvaloniaFact]
@@ -1133,7 +1133,7 @@ public sealed class ControlsTests
     {
         var (window, model) = Open();
 
-        Choose(window, "Refresh Sources");
+        Choose(window, "Refresh sources");
 
         Assert.Equal(["poll"], hub.Calls);
         Assert.Null(model.Status);
@@ -1145,7 +1145,7 @@ public sealed class ControlsTests
         var (window, model) = Open();
         hub.PollReply = "No source is polled. Turn one on in the header.";
 
-        Choose(window, "Refresh Sources");
+        Choose(window, "Refresh sources");
 
         Assert.Equal("No source is polled. Turn one on in the header.", model.Status);
     }
@@ -1155,7 +1155,7 @@ public sealed class ControlsTests
     {
         var (window, _) = Open();
 
-        Choose(window, "Show Hub Log");
+        Choose(window, "Show hub log");
 
         Assert.Equal(["none {\"type\":\"log\"}"], actions.Runs);
         Assert.Empty(hub.Calls);
@@ -1351,7 +1351,7 @@ public sealed class ControlsTests
     {
         var (window, _) = Open();
 
-        Choose(window, "New Ad-hoc Session…");
+        Choose(window, "New ad-hoc session…");
         var dialog = DialogOf(window);
         var create = Named<Button>(dialog, "AdhocCreate");
 
@@ -1374,7 +1374,7 @@ public sealed class ControlsTests
     {
         var (window, _) = Open();
 
-        Choose(window, "New Ad-hoc Session…");
+        Choose(window, "New ad-hoc session…");
         var dialog = DialogOf(window);
 
         Named<TextBox>(dialog, "AdhocPromptBox").Text = "Check the log";

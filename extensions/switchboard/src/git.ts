@@ -155,7 +155,7 @@ function sideUri(side: DiffSide | null): vscode.Uri | undefined {
 }
 
 /**
- * A multi-diff editor that Open Changes opened for the ticket, by the ticket key that starts its title, since the ticket's title can change.
+ * A multi-diff editor that Open changes opened for the ticket, by the ticket key that starts its title, since the ticket's title can change.
  * Its input type is not in the stable API, so the `textDiffs` field identifies it.
  */
 function isChangesTab(tab: vscode.Tab, key: string): boolean {

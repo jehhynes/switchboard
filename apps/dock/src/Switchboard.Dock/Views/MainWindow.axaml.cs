@@ -1432,7 +1432,7 @@ public sealed partial class MainWindow : Window
 
     /// <summary>
     /// The row's menu (PRD R71), in groups with a separator between them: the row's main action; its work (Start, Approve, Retry, Stop and the
-    /// other hub controls); its state (Mark done or Reopen, Snooze… or Restore); its notes (Add comment…, Persona); its order in Ready for review;
+    /// other hub controls); its state (Mark done or Reopen, Snooze… or Unsnooze); its notes (Add comment…, Persona); its order in Ready for review;
     /// what it opens (Copy, Open in terminal, the window commands, Open ticket and its links); and Delete, or any control that asks first, last.
     /// </summary>
     internal List<Control> MenuOf(DockRow row)
@@ -1865,20 +1865,20 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// The header's More Actions menu in groups with a separator between each: New Ad-hoc Session and New Session in a Folder; Held Sessions
-    /// (PRD R94) and Ticket Volume Report when a Zoho or Forum source is configured; Refresh Sources, which polls each source that is on now, and
-    /// Show Hub Log, which shows the hub log in the VS Code window used last; then Open Settings, last.
+    /// The header's More Actions menu in groups with a separator between each: New ad-hoc session and New Session in a Folder; Held sessions
+    /// (PRD R94) and Ticket volume report when a Zoho or Forum source is configured; Refresh sources, which polls each source that is on now, and
+    /// Show hub log, which shows the hub log in the VS Code window used last; then Open Settings, last.
     /// </summary>
     internal List<Control> HeaderMenu() =>
     [
-        Item("New Ad-hoc Session…", NewAdhoc, AddGlyph),
+        Item("New ad-hoc session…", NewAdhoc, AddGlyph),
         Item("New Session in a Folder…", NewSession, FolderGlyph),
         new Separator(),
-        Item("Held Sessions", OpenHeld, TerminalGlyph),
-        .. model.Sources.Any((source) => source.IsZoho || source.IsForum) ? [Item("Ticket Volume Report", OpenVolume, GraphGlyph)] : Array.Empty<Control>(),
+        Item("Held sessions", OpenHeld, TerminalGlyph),
+        .. model.Sources.Any((source) => source.IsZoho || source.IsForum) ? [Item("Ticket volume report", OpenVolume, GraphGlyph)] : Array.Empty<Control>(),
         new Separator(),
-        Item("Refresh Sources", async () => model.Status = await hub.Poll(), RefreshGlyph),
-        Item("Show Hub Log", () => Run(null, new JsonObject { ["type"] = "log" }), OutputGlyph),
+        Item("Refresh sources", async () => model.Status = await hub.Poll(), RefreshGlyph),
+        Item("Show hub log", () => Run(null, new JsonObject { ["type"] = "log" }), OutputGlyph),
         new Separator(),
         Item("Open Settings", OpenSettings, SettingsGlyph),
     ];
@@ -1995,7 +1995,7 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Opens the New Ad-hoc Session window (PRD R6); the work item starts only when Start automatically is checked. Its Repository list offers the
+    /// Opens the New ad-hoc session window (PRD R6); the work item starts only when Start automatically is checked. Its Repository list offers the
     /// repo roots, the folders chosen before and Choose a folder…, which picks any folder and keeps it among the recent ones.
     /// </summary>
     async Task NewAdhoc()
@@ -2023,7 +2023,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>The default provider the hub named last, which New Ad-hoc Session falls back to when the hub cannot list the providers.</summary>
+    /// <summary>The default provider the hub named last, which New ad-hoc session falls back to when the hub cannot list the providers.</summary>
     string? knownProvider;
 
     /// <summary>Opens the Settings window (PRD R54), or brings the open one forward.</summary>

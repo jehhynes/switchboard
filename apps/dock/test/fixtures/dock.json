@@ -272,7 +272,7 @@
           "pastes": [],
           "commands": [
             {
-              "label": "Open Changes",
+              "label": "Open changes",
               "glyph": "",
               "command": {
                 "type": "changes",

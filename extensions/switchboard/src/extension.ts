@@ -58,7 +58,7 @@ export interface SwitchboardApi {
   claim(hub: HubRecord, run?: (command: WindowCommand) => Promise<unknown>): Promise<string | null>;
   /** Opens what a History entry links, as a click on it does, through `hub` when given, which may be null for no hub. */
   historyLink(link: { type: string; [key: string]: unknown }, hub?: HubRecord | null): Promise<unknown>;
-  /** Runs a command the dock leaves for a window: Open Changes, History, Open report or Show Hub Log (PRD R71). */
+  /** Runs a command the dock leaves for a window: Open changes, History, Open report or Show hub log (PRD R71). */
   run(command: WindowCommand): Promise<unknown>;
   /** Opens a URL or file as an item window's tab; the suite's window is not an item window (PRD R72). */
   openTab(target: string): Promise<void>;

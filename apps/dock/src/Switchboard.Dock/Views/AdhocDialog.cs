@@ -7,7 +7,7 @@ using Switchboard.Dock.Hub;
 namespace Switchboard.Dock.Views;
 
 /// <summary>
-/// The modal New Ad-hoc Session window (PRD R6). &lt;c&gt;AdhocCreate&lt;/c&gt; sends the prompt, or runs the schedule chosen in &lt;c&gt;AdhocRunBox&lt;/c&gt; now (PRD R82);
+/// The modal New ad-hoc session window (PRD R6). &lt;c&gt;AdhocCreate&lt;/c&gt; sends the prompt, or runs the schedule chosen in &lt;c&gt;AdhocRunBox&lt;/c&gt; now (PRD R82);
 /// a refusal keeps the window open with the hub's reason.
 /// </summary>
 static class AdhocDialog
@@ -30,7 +30,7 @@ static class AdhocDialog
         Func<string, Task<string?>>? run = null, string defaultProvider = "claude", string? providerError = null, IReadOnlyList<string>? recent = null,
         Func<Window, Task<string?>>? pickFolder = null, Action<string>? remember = null, bool defaultKnown = true)
     {
-        var shell = new DialogShell(owner, "New Ad-hoc Session", 500);
+        var shell = new DialogShell(owner, "New ad-hoc session", 500);
         var dialog = shell.Window;
         var choices = schedules ?? [];
         var runBox = new ComboBox

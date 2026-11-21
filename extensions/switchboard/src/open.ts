@@ -396,7 +396,7 @@ async function claim(record: HubRecord, run: (command: WindowCommand) => Promise
     await showSession(sessionId, providerOf(body?.provider)).then(undefined, (error: unknown) => void vscode.window.showErrorMessage(`Switchboard: ${String(error)}`));
   }
 
-  // Commands the dock left for this window: Open Changes, History and Open report (PRD R71).
+  // Commands the dock left for this window: Open changes, History and Open report (PRD R71).
   await runEach(commands.filter((command) => command.type !== 'openTabs'));
 
   return { answered: reply?.status === 200, sessionId };

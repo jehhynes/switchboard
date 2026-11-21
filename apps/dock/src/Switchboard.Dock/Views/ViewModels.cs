@@ -143,7 +143,7 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
     /// <summary>The repos an ad-hoc prompt can run in, the first being the default (PRD R6).</summary>
     public ObservableCollection<string> RepoRoots { get; } = [];
 
-    /// <summary>The schedules the New Ad-hoc Session window can run now (PRD R82).</summary>
+    /// <summary>The schedules the New ad-hoc session window can run now (PRD R82).</summary>
     public IReadOnlyList<ScheduleEntry> Schedules { get; private set; } = [];
 
     IReadOnlyList<DockHeld> held = [];
@@ -417,14 +417,14 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
         }
     }
 
-    /// <summary>Keeps a folder New Ad-hoc Session's Choose a folder… picked, newest first, so its list offers it again.</summary>
+    /// <summary>Keeps a folder New ad-hoc session's Choose a folder… picked, newest first, so its list offers it again.</summary>
     public void RememberFolder(string folder)
     {
         settings.RecentFolders = [folder, .. settings.RecentFolders.Where((kept) => !string.Equals(kept, folder, StringComparison.OrdinalIgnoreCase)).Take(DockSettings.RecentFolderCount - 1)];
         SaveSettings();
     }
 
-    /// <summary>The repo the New Ad-hoc Session window offers first: the last one used, else the first repo root.</summary>
+    /// <summary>The repo the New ad-hoc session window offers first: the last one used, else the first repo root.</summary>
     public string? AdhocRepo
     {
         get => adhocRepo;

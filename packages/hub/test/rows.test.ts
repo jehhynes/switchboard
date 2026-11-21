@@ -372,7 +372,7 @@ describe('poolControls', () => {
     expect(labels(pool(3))).toEqual(['Start', ['Start', 'Start with guidance…', 'Snooze…', 'History']]);
     expect(labels(pool(3, { triage: triage({ playbook: null, error: 'timed out' }) }))).toEqual(['Triage again', ['Triage again', 'Snooze…', 'History']]);
     expect(labels(pool(3, { triage: triage({ playbook: null, endedAt: null }) }))).toEqual([null, ['Snooze…', 'History']]);
-    expect(labels(pool(3, { ticket: { ...pool(3).ticket, snoozed: true } }))).toEqual(['Start', ['Start', 'Start with guidance…', 'Snooze…', 'Restore', 'History']]);
+    expect(labels(pool(3, { ticket: { ...pool(3).ticket, snoozed: true } }))).toEqual(['Start', ['Start', 'Start with guidance…', 'Snooze…', 'Unsnooze', 'History']]);
     expect(poolControls(pool(3)).main?.message).toEqual({ type: 'action', action: { type: 'pick', ticketId: 3 } });
     expect(poolControls(pool(3)).controls[1]).toMatchObject({ message: { type: 'action', action: { type: 'pick', ticketId: 3 } }, input: { field: 'guidance', action: 'Start' } });
   });

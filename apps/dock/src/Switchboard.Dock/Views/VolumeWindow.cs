@@ -25,7 +25,7 @@ public sealed class VolumeWindow : Window
     {
         this.hub = hub;
         this.actions = actions;
-        Title = "Ticket Volume Report";
+        Title = "Ticket volume report";
         Width = 1200;
         Height = 750;
         MinWidth = 800;
@@ -39,7 +39,7 @@ public sealed class VolumeWindow : Window
         var hint = new TextBlock { Text = "Observed active queue, Monday to Sunday. Select a count to list its tickets." };
 
         hint.Bind(TextBlock.ForegroundProperty, this.GetResourceObservable("DockMuted"));
-        page.Children.Add(new TextBlock { Text = "Ticket Volume Report", FontSize = 16, FontWeight = FontWeight.SemiBold });
+        page.Children.Add(new TextBlock { Text = "Ticket volume report", FontSize = 16, FontWeight = FontWeight.SemiBold });
         page.Children.Add(hint);
         page.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, Children = { source, refresh } });
         page.Children.Add(status);

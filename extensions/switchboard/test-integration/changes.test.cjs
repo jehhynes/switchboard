@@ -6,10 +6,10 @@ const { join } = require('node:path');
 const vscode = require('vscode');
 
 /**
- * The private Git and workbench calls behind a row's Open Changes (PRD R57, mechanics M21), against a
+ * The private Git and workbench calls behind a row's Open changes (PRD R57, mechanics M21), against a
  * scratch clone and worktree. changesPlan's decisions are tested in test/changes.test.ts.
  */
-describe('a worktree row\'s Open Changes', () => {
+describe('a worktree row\'s Open changes', () => {
   let scratch;
   let clone;
   let worktree;

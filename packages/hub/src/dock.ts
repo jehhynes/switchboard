@@ -231,7 +231,7 @@ export interface DockRow {
   mainTitle: string | null;
   /** The drafted texts Copy offers on an `awaiting-approval` row (PRD R60); empty otherwise. */
   pastes: { label: string; file: string }[];
-  /** The controls that run in VS Code, each with the message a window runs: Open Changes, Open in terminal, History, Open report. */
+  /** The controls that run in VS Code, each with the message a window runs: Open changes, Open in terminal, History, Open report. */
   commands: { label: string; glyph: string; command: Record<string, unknown> }[];
   /** What the search box matches: the title, key, linked pull requests and issues, playbook, group and branch (PRD R63, R71). */
   search: string;
@@ -273,7 +273,7 @@ export interface DockView {
   sources: DockSourceGroup[];
   /** The repos an ad-hoc prompt can run in, the first being the default (PRD R6). */
   repoRoots: string[];
-  /** The schedules the New Ad-hoc Session window can run now (PRD R82). */
+  /** The schedules the New ad-hoc session window can run now (PRD R82). */
   schedules: { name: string; playbook: string }[];
   /** The snapshot's held sessions, orphans first (PRD R94); absent when the holder holds none. */
   held?: DockHeld[];

@@ -30,7 +30,7 @@ public sealed class DockSettings
     [System.Text.Json.Serialization.JsonIgnore]
     public Platform.DockEdge DockEdge => Edge == "right" ? Platform.DockEdge.Right : Platform.DockEdge.Left;
 
-    /// <summary>The folders, newest first, that New Ad-hoc Session's Choose a folder… picked outside the repo roots, which its list offers again.</summary>
+    /// <summary>The folders, newest first, that New ad-hoc session's Choose a folder… picked outside the repo roots, which its list offers again.</summary>
     public List<string> RecentFolders { get; set; } = [];
 
     /// <summary>How many chosen folders <see cref="RecentFolders"/> keeps.</summary>

@@ -1009,7 +1009,7 @@ public sealed class MainWindowTests
         var menu = window.MenuOf(Fixtures.Row("item:7"));
 
         Assert.Equal(
-            ["Mark done", "Snooze…", "", "Add comment…", "", "Move to top", "Move up", "Move down", "", "Open Changes", "Open in terminal", "History", "Open ticket", "Open PR #19002", "Open gh 20087", "", "Delete"],
+            ["Mark done", "Snooze…", "", "Add comment…", "", "Move to top", "Move up", "Move down", "", "Open changes", "Open in terminal", "History", "Open ticket", "Open PR #19002", "Open gh 20087", "", "Delete"],
             menu.Select((item) => item is MenuItem named ? (string)named.Header! : ""));
         Assert.All(menu.Where((item) => item is not MenuItem), (item) => Assert.IsType<Separator>(item));
         Assert.Null(Entry(menu, "Snooze…").ItemsSource);

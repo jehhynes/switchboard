@@ -33,7 +33,7 @@ public sealed class HeldSessionsWindow : Window
         this.model = model;
         this.hub = hub;
         this.actions = actions;
-        Title = "Held Sessions";
+        Title = "Held sessions";
         Width = 1400;
         Height = 500;
         FontSize = 13;
@@ -43,7 +43,7 @@ public sealed class HeldSessionsWindow : Window
         var about = new TextBlock { Text = "Code Mode sessions the terminal holder keeps alive, with or without a work item. Stop ends a session's process.", TextWrapping = TextWrapping.Wrap };
 
         about.Bind(TextBlock.ForegroundProperty, this.GetResourceObservable("DockMuted"));
-        page.Children.Add(new TextBlock { Text = "Held Sessions", FontSize = 16, FontWeight = FontWeight.SemiBold });
+        page.Children.Add(new TextBlock { Text = "Held sessions", FontSize = 16, FontWeight = FontWeight.SemiBold });
         page.Children.Add(about);
         page.Children.Add(status);
         page.Children.Add(rows);
