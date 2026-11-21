@@ -318,6 +318,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
       pane.changed();
     },
     unopened: () => artifacts.unopenedPaths(),
+    details: { get: () => context.globalState.get<boolean>('switchboard.messageDetails') === true, set: (on) => context.globalState.update('switchboard.messageDetails', on) },
     log: (line) => hubLog.appendLine(`[conversation] ${line}`),
   });
   const paneClick = (message: PaneMessage): Promise<unknown> => {

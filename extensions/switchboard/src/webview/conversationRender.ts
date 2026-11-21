@@ -4,6 +4,7 @@ import type { ArtifactView, ConversationEntry, ItemView, MessageView, ReplyView,
 /** A Codex session's pending question or approval, as the hub sends it. */
 type NativeRequest = NonNullable<SessionView['requests']>[number];
 import { providerMark } from '@switchboard/conversation/providerIcons';
+import { fullTime, metaLine, stamped, toneMark, voiceMark } from '@switchboard/conversation/messageMeta';
 import { artifactIcon, awaitingReply, selectedEntry, stateIcon, statusLine, timeline } from '../conversationModel.js';
 import type { ConversationState } from '../conversationModel.js';
 import { answers, answersIn, answerText, cardOutcome, complete, parseQuestions, questionSegments } from '@switchboard/conversation/questions';
@@ -59,33 +60,9 @@ function statusAnswer(items: readonly ItemView[], status: StatusView): string | 
 /** What a typed message's line under its box says (architecture.md § Conversation view). */
 const DELIVERY = { open: 'sending', sent: 'sent', 'not-sent': 'not sent', uncertain: 'delivery unknown; check before resending' } as const;
 
-/** A stamp's time, as Claude Code's panel shows it: "1:46 PM". */
-const STAMP = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', hourCycle: 'h12' });
-/** A stamp's tooltip: "2026-11-19 13:46:05 EST". */
-const STAMP_FULL = new Intl.DateTimeFormat('en-US', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23', timeZoneName: 'short' });
 const DAY = new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 const DAY_WITH_YEAR = new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
 
-/**
- * The one line under a message or a reply with everything about it (architecture.md § Conversation view): its marks on the left, flush with
- * the text's left edge, and its time at the right end; empty when there is nothing to show.
- */
-function metaLine(marks: string[], at: number | null): string {
-  const left = marks.filter((mark) => mark !== '');
-
-  return left.length === 0 && at === null ? '' : `<div class="meta">${left.length === 0 ? '' : `<span class="meta-marks">${left.join('')}</span>`}${at === null ? '' : stampTime(at)}</div>`;
-}
-
-function stampTime(at: number): string {
-  return `<time class="stamp" datetime="${new Date(at).toISOString()}" title="${escape(fullTime(at))}">${STAMP.format(at)}</time>`;
-}
-
-/** Every time tooltip: "2026-11-19 13:46:05 EST". */
-function fullTime(at: number): string {
-  const parts = Object.fromEntries(STAMP_FULL.formatToParts(at).map((part) => [part.type, part.value]));
-
-  return `${parts['year']}-${parts['month']}-${parts['day']} ${parts['hour']}:${parts['minute']}:${parts['second']} ${parts['timeZoneName']}`;
-}
 
 /** The local calendar day of a time, to tell when a turn starts on another day. */
 function dayOf(at: number): string {
@@ -154,10 +131,10 @@ export function renderMarkdown(text: string): string {
 }
 
 /**
- * One of our messages: its bubble over one line with its marks and, where the minute changes, its time. Only an error state shows, with why in
- * the tooltip: a message sent or still sending shows only its time, and today none stays in error, since one not sent leaves the conversation.
+ * One of our messages: its bubble over its meta line (`metaLine`, shared with the web page). Only an error state shows always, with why in the
+ * tooltip; with message details on, a dictated message's mark too. A message with no meta line has its time as the bubble's tooltip.
  */
-function message(item: MessageView, stamped: boolean): string {
+function message(item: MessageView, stamped: boolean, details: boolean): string {
   // Only an error state shows: a message sent or still sending shows only its time; one not sent has left the conversation.
   const state = item.origin === 'typed' && (item.delivery === 'not-sent' || item.delivery === 'uncertain') ? item.delivery : null;
   const why = item.error === null ? '' : ` · ${item.error}`;
@@ -166,24 +143,10 @@ function message(item: MessageView, stamped: boolean): string {
 
   // A message sent in the terminal while the session was busy waits, dimmed, until Claude reads it.
   const queued = item.provisional && item.origin === 'terminal';
-  // A dictated message has a mic glyph, its pieces in the tooltip, and a part sent while it was still being spoken says so (architecture.md § Dictation).
-  const voice = item.origin === 'voice' ? voiceMark(item) : '';
   // The marks sit at the bubble's left edge and the time at its right, so every time stays flush right in one column.
-  const meta = metaLine([voice, delivery], stamped ? item.at : null);
+  const meta = metaLine([voiceMark(item, details), delivery], item.at, stamped);
 
-  return `<li class="message${item.provisional ? ' provisional' : ''}" data-id="${escape(item.id)}" tabindex="-1"${queued ? ' title="Sent; Claude has not read it yet"' : ''}><div class="bubble"><div class="box${COMMAND.test(item.text) ? ' command' : ''}">${escape(item.text)}</div>${meta}</div></li>`;
-}
-
-/** A dictated message's mark: the mic glyph, "partial" for a part of one still being spoken, and its pieces as the tooltip. */
-function voiceMark(item: MessageView): string {
-  const pieces = (item.pieces ?? []).map((piece) => `${piece.dropped ? '(dropped) ' : ''}${piece.text}${piece.score === null ? '' : ` · match ${piece.score.toFixed(2)}`}${piece.f0 === null ? '' : ` · ${Math.round(piece.f0)} Hz`}`);
-  const dictated = pieces.length === 0 ? 'Dictated' : `Dictated in ${pieces.length} piece${pieces.length === 1 ? '' : 's'}:\n${pieces.join('\n')}`;
-  // Spoken over a reply being read aloud, which stopped it (architecture.md § Voice check and barge-in).
-  const over = item.interrupted === undefined ? '' : item.interrupted.said === '' ? 'Spoke over the reply before its first words.' : `Spoke over the reply after "${item.interrupted.said}".`;
-  const title = over === '' ? dictated : `${dictated}\n${over}`;
-  const label = `${item.partial === true ? 'partial' : 'dictated'}${item.interrupted === undefined ? '' : ' · interrupted the reply'}`;
-
-  return `<span class="voice-mark" title="${escape(title)}"><span class="codicon codicon-mic" aria-hidden="true"></span><span>${label}</span></span>`;
+  return `<li class="message${item.provisional ? ' provisional' : ''}" data-id="${escape(item.id)}" tabindex="-1"${queued ? ' title="Sent; Claude has not read it yet"' : ''}><div class="bubble"${meta === '' && !queued ? ` title="${escape(fullTime(item.at))}"` : ''}><div class="box${COMMAND.test(item.text) ? ' command' : ''}">${escape(item.text)}</div>${meta}</div></li>`;
 }
 
 /** The mark of a reply whose speech failed (architecture.md § Voice); empty otherwise, since routine speech states show nothing. */
@@ -210,7 +173,7 @@ export { renderMicButton, renderVoiceControls } from '@switchboard/conversation/
 /** The fold key of a reply's Show more, which flips its start, collapsed in focused mode or expanded with `voice.expandReplies`. */
 export const moreKey = (id: string): string => `more:${id}`;
 
-function reply(item: ReplyView, earlier: ReplyView | null, open: ReadonlySet<string>, stamped: boolean, card = '', expandReplies = false): string {
+function reply(item: ReplyView, earlier: ReplyView | null, open: ReadonlySet<string>, stamped: boolean, card = '', expandReplies = false, details = false): string {
   if (item.kind === 'note') {
     return `<li class="note" data-id="${escape(item.id)}" tabindex="-1">${escape(item.opening)}</li>`;
   }
@@ -223,7 +186,7 @@ function reply(item: ReplyView, earlier: ReplyView | null, open: ReadonlySet<str
   const more = folded
     ? `<button class="show-more" type="button" data-action="more" data-reply="${escape(item.id)}" aria-expanded="${expanded}">${expanded ? 'Show less' : 'Show more'}</button>`
     : '';
-  const tone = item.tone === null ? '' : `<span class="tone" title="${escape(`How the reply sounds when spoken: ${item.tone}`)}">${escape(item.tone)}</span>`;
+  const tone = toneMark(item.tone, details);
 
   const rewritten =
     earlier === null
@@ -232,7 +195,7 @@ function reply(item: ReplyView, earlier: ReplyView | null, open: ReadonlySet<str
 
   // A reply read off the screen has no copy button until its transcript copy replaces it, as Claude Code's has none while it streams. The copy
   // button comes first on the line under the reply, then the tone and a speech failure, and the time at the right.
-  const meta = metaLine([item.provisional ? '' : copyButton('copy-reply', 'Copy response'), tone, spokenMark(item)], stamped ? item.at : null);
+  const meta = metaLine([item.provisional ? '' : copyButton('copy-reply', 'Copy response'), tone, spokenMark(item)], item.at, stamped);
 
   // An unread reply's dot takes the badge colour until the view has shown it in a focused window for a second (architecture.md § Unread).
   const unread = item.unread ? ` unread" data-unread="${escape(item.id)}` : '';
@@ -377,6 +340,8 @@ export interface PageView {
   earlier?: EarlierStatuses | null;
   /** The Codex requests' answers and refusals. */
   requests?: RequestDrafts;
+  /** Show message details: every item's time and the optional marks (`messageMeta`), the user's choice kept by the extension. */
+  details?: boolean;
 }
 
 /** The Status tab's list of the session's earlier statuses, newest first, while it is open; `more` while older ones can be loaded. */
@@ -733,8 +698,6 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
   const spinner = turnRow(state.session, awaitingReply(state.items, state.session));
   // A turn starts at each message; the first item shown, and each turn that starts on another day than the turn before it, has a divider.
   let turnDay: string | null = null;
-  // A time shows only where the minute changes from the item before, so a message and the reply to it in the same minute read as one exchange.
-  let lastMinute: string | null = null;
   const entries = shown.map((entry) => {
     if (entry.type === 'artifact') {
       return artifactRow(entry.artifact);
@@ -749,18 +712,13 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
       turnDay = day;
     }
 
-    // A note has no time, and does not count as the item before.
+    // A note has no time; the first item after a day's divider shows its time, and with message details on every item does (`stamped`).
     const timed = entry.type === 'message' || entry.item.kind !== 'note';
-    const minute = `${dayOf(entry.item.at)} ${STAMP.format(entry.item.at)}`;
-    const stamped = timed && (minute !== lastMinute || divider !== '');
-
-    if (timed) {
-      lastMinute = minute;
-    }
+    const shownTime = stamped(timed, page.details === true, divider !== '');
 
     const card = entry.type === 'reply' && entry.item.kind === 'reply' ? cardOf(cardKey('reply', entry.item.id), entry.item.opening, answerAfter(entry.item.id)) : '';
 
-    return divider + (entry.type === 'message' ? message(entry.item, stamped) : reply(entry.item, entry.earlier, open, stamped, card, state.settings.expandReplies));
+    return divider + (entry.type === 'message' ? message(entry.item, shownTime, page.details === true) : reply(entry.item, entry.earlier, open, shownTime, card, state.settings.expandReplies, page.details === true));
   });
   // A Codex session's pending questions and approvals, answered in cards at the end of the conversation.
   const requests = (state.session?.requests ?? []).map((request) => requestCard(request, page.requests ?? NO_REQUESTS)).join('');

@@ -59,6 +59,8 @@ describe('New Claude Session in Editor Tab (PRD R75)', () => {
     assert.deepStrictEqual(shown(menus['view/title']), [
       ['switchboard.newClaudeTab', 'view == claudeVSCodeSidebar || view == claudeVSCodeSidebarSecondary', 'navigation'],
       ['switchboard.continueSidebarInBackground', 'view == claudeVSCodeSidebar || view == claudeVSCodeSidebarSecondary', 'navigation'],
+      ['switchboard.showMessageDetails', '(view == switchboard.conversation || view == switchboard.conversationActivity) && !switchboard.messageDetails', '1_view'],
+      ['switchboard.hideMessageDetails', '(view == switchboard.conversation || view == switchboard.conversationActivity) && switchboard.messageDetails', '1_view'],
     ]);
   });
 });

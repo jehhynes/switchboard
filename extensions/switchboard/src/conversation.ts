@@ -18,6 +18,8 @@ import { warnHub } from './hubNotice.js';
  * in an activity bar container for a VS Code without one, chosen by the `switchboard.noSecondarySidebar` context key.
  */
 export const CONVERSATION_VIEWS = ['switchboard.conversation', 'switchboard.conversationActivity'] as const;
+/** The context key that says message details are shown, for the view's title menu. */
+const DETAILS_CONTEXT = 'switchboard.messageDetails';
 export const NO_SECONDARY_SIDEBAR = 'switchboard.noSecondarySidebar';
 /** The scheme of a status opened in the Markdown preview (architecture.md § Statuses). */
 export const STATUS_SCHEME = 'switchboard-status';
@@ -53,6 +55,8 @@ export interface ConversationViewDeps {
   changed?(state: ConversationState): void;
   /** The paths of the artifacts new or changed since they were last opened in the workspace, which the Artifacts tab marks and counts. */
   unopened?(): string[];
+  /** Show message details, kept for the user across windows (architecture.md § Conversation view); off without it. */
+  details?: { get(): boolean; set(on: boolean): Thenable<void> };
   log(line: string): void;
 }
 
@@ -113,9 +117,12 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
 
   register(): vscode.Disposable {
     void vscode.commands.executeCommand('setContext', NO_SECONDARY_SIDEBAR, !supportsSecondarySidebar(vscode.version));
+    void vscode.commands.executeCommand('setContext', DETAILS_CONTEXT, this.deps.details?.get() === true);
 
     return vscode.Disposable.from(
       ...CONVERSATION_VIEWS.map((id) => vscode.window.registerWebviewViewProvider(id, this)),
+      vscode.commands.registerCommand('switchboard.showMessageDetails', () => this.setDetails(true)),
+      vscode.commands.registerCommand('switchboard.hideMessageDetails', () => this.setDetails(false)),
       vscode.workspace.registerTextDocumentContentProvider(STATUS_SCHEME, this),
       // The page counts an unread item as seen only while this window has the focus (architecture.md § Unread).
       vscode.window.onDidChangeWindowState((state) => this.#post({ type: 'focus', focused: state.focused })),
@@ -405,8 +412,15 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
     }
   }
 
-  #stateMessage(): { type: 'state'; state: ConversationState; unopened: string[] } {
-    return { type: 'state', state: this.#state, unopened: this.deps.unopened?.() ?? [] };
+  #stateMessage(): { type: 'state'; state: ConversationState; unopened: string[]; details: boolean } {
+    return { type: 'state', state: this.#state, unopened: this.deps.unopened?.() ?? [], details: this.deps.details?.get() === true };
+  }
+
+  /** Shows or hides message details (architecture.md § Conversation view), kept for the user, and draws the view again. */
+  async setDetails(on: boolean): Promise<void> {
+    await this.deps.details?.set(on);
+    await vscode.commands.executeCommand('setContext', DETAILS_CONTEXT, on);
+    this.refresh();
   }
 
   /** Draws the state again, as after the artifacts opened in the workspace changed. */

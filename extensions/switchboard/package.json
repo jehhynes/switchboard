@@ -105,6 +105,16 @@
         "category": "Switchboard"
       },
       {
+        "command": "switchboard.showMessageDetails",
+        "title": "Show Message Details",
+        "category": "Switchboard"
+      },
+      {
+        "command": "switchboard.hideMessageDetails",
+        "title": "Hide Message Details",
+        "category": "Switchboard"
+      },
+      {
         "command": "switchboard.openWebPage",
         "title": "Open Web Page",
         "category": "Switchboard"
@@ -192,6 +202,14 @@
           "when": "false"
         },
         {
+          "command": "switchboard.showMessageDetails",
+          "when": "false"
+        },
+        {
+          "command": "switchboard.hideMessageDetails",
+          "when": "false"
+        },
+        {
           "command": "switchboard.newClaudeTab",
           "when": "false"
         },
@@ -246,6 +264,16 @@
           "command": "switchboard.continueSidebarInBackground",
           "when": "view == claudeVSCodeSidebar || view == claudeVSCodeSidebarSecondary",
           "group": "navigation"
+        },
+        {
+          "command": "switchboard.showMessageDetails",
+          "when": "(view == switchboard.conversation || view == switchboard.conversationActivity) && !switchboard.messageDetails",
+          "group": "1_view"
+        },
+        {
+          "command": "switchboard.hideMessageDetails",
+          "when": "(view == switchboard.conversation || view == switchboard.conversationActivity) && switchboard.messageDetails",
+          "group": "1_view"
         }
       ]
     },

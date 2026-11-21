@@ -507,6 +507,8 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
   let tab: Tab = TABS.some((one) => one.tab === saved?.tab) ? saved!.tab! : 'conversation';
   // The artifacts new or changed since they were last opened in the workspace, which the extension keeps.
   let unopened = new Set<string>();
+  /** Show message details, as the extension last sent it. */
+  let details = false;
   let shownIds = new Set<string>();
   let restore = saved?.scroll ?? null;
   // Whether the conversation follows its end: set by the operator's own scrolling, never by a size measured after a layout change, so a composer,
@@ -789,7 +791,7 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     }
 
     startFreshClock();
-    morph(root, renderConversation(state, open, Date.now(), freshUntil > Date.now(), { tab, unopened, cards, pill: unseenBelow, menu, earlier, requests: { values: requestValues, errors: requestErrors, sending: requestSending } }));
+    morph(root, renderConversation(state, open, Date.now(), freshUntil > Date.now(), { tab, unopened, cards, pill: unseenBelow, menu, earlier, requests: { values: requestValues, errors: requestErrors, sending: requestSending }, details }));
     fitMenus(root);
     document.body.dataset['tab'] = tab;
 
@@ -1265,7 +1267,7 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     checkSeen();
   });
 
-  window.addEventListener('message', (event: MessageEvent<{ type: 'state'; state: ConversationState; unopened?: string[] } | { type: 'focus'; focused: boolean } | { type: 'seen-failed'; ids: string[] } | { type: 'sent'; id: number; error: string | null } | { type: 'copied'; id: number; ok: boolean } | { type: 'unsent'; returned: Array<{ text: string; error: string; workItemId: number | null }> } | { type: 'draft'; text: string; workItemId: number | null } | { type: 'words'; text: string } | { type: 'refused'; error: string; workItemId: number | null } | MenuReply | ExtrasReply>) => {
+  window.addEventListener('message', (event: MessageEvent<{ type: 'state'; state: ConversationState; unopened?: string[]; details?: boolean } | { type: 'focus'; focused: boolean } | { type: 'seen-failed'; ids: string[] } | { type: 'sent'; id: number; error: string | null } | { type: 'copied'; id: number; ok: boolean } | { type: 'unsent'; returned: Array<{ text: string; error: string; workItemId: number | null }> } | { type: 'draft'; text: string; workItemId: number | null } | { type: 'words'; text: string } | { type: 'refused'; error: string; workItemId: number | null } | MenuReply | ExtrasReply>) => {
     if (event.data.type === 'files' || event.data.type === 'commands' || event.data.type === 'mentions' || event.data.type === 'image') {
       composer?.receive(event.data);
     } else if (event.data.type === 'draft') {
@@ -1328,6 +1330,7 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     } else if (event.data.type === 'state') {
       state = event.data.state;
       unopened = new Set(event.data.unopened ?? []);
+      details = event.data.details === true;
 
       // A reconnect starts from the hub's state: items reported while the stream was down are reported again if still unread.
       if (state.connected && !wasConnected) {
