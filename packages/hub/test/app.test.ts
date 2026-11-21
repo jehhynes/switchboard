@@ -769,6 +769,10 @@ describe('createHubApp', () => {
     expect(await app.post['/v1/conversation/page-search']!({ window: page, text: 'signing KEY', since: 0 })).toMatchObject({ status: 200, body: { more: false, rows: [{ workItemId: 1, title: 'Rotate the signing key', host: null, search: expect.stringContaining('Rotate the signing key') }] } });
     expect((await app.post['/v1/conversation/page-search']!({ window: 'nobody', text: 'signing', since: 0 })).status).toBe(403);
     expect((await app.post['/v1/conversation/page-search']!({ window: page, text: 'signing' })).status).toBe(400);
+    // The page's New ad-hoc session creates a work item in a repo root, as the dock's does.
+    expect(await app.post['/v1/conversation/page-adhoc']!({ window: page, opId: 'p1', prompt: 'From the page', repoRoot: 'D:/scratch', start: false, provider: 'claude' })).toEqual({ status: 200, body: { done: true } });
+    await app.runtime.settled();
+    expect((app.snapshot() as { workItems: { ticket: { title: string } }[] }).workItems.map((one) => one.ticket.title)).toContain('From the page');
 
     for (const body of [{}, { text: 'x' }, { text: 3, since: 0 }, { text: 'x', since: 'now' }, { text: 'x', since: Number.NaN }]) {
       expect(await app.post['/dock/search']!(body)).toEqual({ status: 400, body: { error: 'Expected {text, since}, the search text and the epoch milliseconds to search from.' } });

@@ -18,13 +18,14 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 ## Open gaps, by value
 
 1. Row controls the page lacks (C4-C6, C8-C10, C15, O5, R12): Reopen, Start with guidance or prompt, Add comment, Open ticket and links, Open in Claude or Codex and a Codex terminal, Open changes, History, Open report, Move, and pool tickets' Start and Triage again.
-2. Problems the page never shows (H3, H4, H5): settings, source and voice errors, orphan held sessions, and the needs-you message.
-3. Done's date bands and group state (G5, G6, G8): Done is one flat list, Snoozed starts open, and open or closed choices do not survive a reload.
-4. Mark colours (M3): the dock and the web page colour marks by different rules; one of them should change.
-5. Keyboard (K2, K4, K5, O3, O4): no arrow-key walk, F8, menu key, drag or Alt+arrow reordering.
-6. Voice mark (R3): the page does not show which row the voice speaks for.
-7. Pool tickets (R20): left out by architecture.md § Web page; the operator approves that as Differs, or the page adds them.
-8. Web-only behaviours the dock lacks (R8, C13, G10, H7): a hosted conversation's host on line 2, Stop asking first, the selected row kept in a collapsed group.
+2. More Actions' dock windows (H2): Held sessions, Ticket volume report, Show hub log and Open Settings only say to use the dock, and New ad-hoc session and New conversation in a folder cannot choose a folder the hub does not know.
+3. Problems the page never shows (H3, H4, H5): settings, source and voice errors, orphan held sessions, and the needs-you message.
+4. Done's date bands and group state (G5, G6, G8): Done is one flat list, Snoozed starts open, and open or closed choices do not survive a reload.
+5. Mark colours (M3): the dock and the web page colour marks by different rules; one of them should change.
+6. Keyboard (K2, K4, K5, O3, O4): no arrow-key walk, F8, menu key, drag or Alt+arrow reordering.
+7. Voice mark (R3): the page does not show which row the voice speaks for.
+8. Pool tickets (R20): left out by architecture.md § Web page; the operator approves that as Differs, or the page adds them.
+9. Web-only behaviours the dock lacks (R8, C13, G10, H7): a hosted conversation's host on line 2, Stop asking first, the selected row kept in a collapsed group.
 
 ## Groups
 
@@ -144,7 +145,7 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 | # | Behaviour | Dock evidence | Web | Web evidence and note |
 |---|---|---|---|---|
 | H1 | Source icons per kind, grey when off; click toggles one source, or opens a check menu for several | `OnSourceClicked` MainWindow.axaml.cs:1787 | Present | `sourceButton` listHeader.ts, `page-source` in conversation.ts; a kind without a logo shows the `tag` codicon where the dock's button is blank; a refusal shows under the header (no toast, H6) |
-| H2 | More Actions: New ad-hoc session…, New conversation in a folder…, Held sessions, Ticket volume report, Refresh sources, Show hub log, Open Settings | `HeaderMenu` MainWindow.axaml.cs:1903 | Partly | New conversation… in the conversation dropdown (render.ts:337) starts one in the selected conversation's host only |
+| H2 | More Actions: New ad-hoc session…, New conversation in a folder…, Held sessions, Ticket volume report, Refresh sources, Show hub log, Open Settings | `HeaderMenu` MainWindow.axaml.cs:1903 | Partly | `renderMoreMenu` listHeader.ts has the dock's items and groups. New ad-hoc session…, New conversation in a folder… and Refresh sources work, but offer only the folders the hub knows (repo roots and conversation hosts), with no Choose a folder…; Held sessions, Ticket volume report, Show hub log and Open Settings say to use the dock. Under 768 px the source icons are check rows at the top of the menu |
 | H3 | Settings, playbook, hook, source and voice errors and setup notes above the groups, in the warning colour | MainWindow.axaml:450-456, `snapshotErrors` rows.ts:844 | Missing | |
 | H4 | "N held sessions without a work item" above the groups, opening the held sessions window | MainWindow.axaml:458-462 | Missing | |
 | H5 | Needs-you message in the toast when a work item starts needing the operator; a click on it runs that row's click | `ShowNeedsYou` MainWindow.axaml.cs:267 | Missing | The tab title counts Blocked on you instead (`pageTitle` model.ts:107) |

@@ -10,6 +10,7 @@ import type { ConversationServiceDeps, ConversationVoice, PersonaView } from '..
 import { dockView, windowOf } from '../src/dock.js';
 import { canonicalFolder, WindowScopes } from '../src/windows.js';
 import { pageList } from '../src/page.js';
+import type { PageHeader } from '../src/page.js';
 import { NOW, item, session, snapshot } from './views.js';
 
 let dir: string;
@@ -1738,6 +1739,15 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
         sourceCalls.push([name, enabled]);
         return name === 'gone' ? 'No source is named gone.' : null;
       },
+      pollSources: () => pollRefusal,
+      operatorEvent: (event) => {
+        events.push(event);
+        return event['prompt'] === 'refuse' ? 'Code Mode sessions need hooks.' : null;
+      },
+      newConversation: (hostWindow, folder, provider) => {
+        made.push([hostWindow, folder, provider]);
+        return { workItemId: 41 };
+      },
       rowAction: (workItemId, action, snooze) => {
         actions.push([workItemId, action, snooze]);
         return action === 'approve' ? 'The work item no longer offers this.' : null;
@@ -1752,7 +1762,11 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     });
     const actions: Array<[number, string, { until: number | null; comment: string | null }]> = [];
     const sourceCalls: Array<[string, boolean]> = [];
-    let header = { sources: [{ kind: 'github', enabled: true, title: 'gh: polled\nClick to stop polling gh', sources: [{ name: 'gh', enabled: true }] }] };
+    const events: Array<Record<string, unknown>> = [];
+    const made: Array<[string, string, string | undefined]> = [];
+    let pollRefusal: string | null = null;
+    const refusePoll = (why: string | null) => void (pollRefusal = why);
+    let header: PageHeader = { sources: [{ kind: 'github', enabled: true, title: 'gh: polled\nClick to stop polling gh', sources: [{ name: 'gh', enabled: true }] }], repoRoots: ['D:/w1'], folders: ['D:/w1', dir], schedules: [{ name: 'nightly', playbook: 'dev:sweep' }] };
     const setHeader = (next: typeof header) => void (header = next);
     const resumed: string[] = [];
     let resumeRefusal: string | null = null;
@@ -1770,8 +1784,49 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
       return { key, frames };
     };
 
-    return { store, view, scopes, service, openPage, focus, actions, resumed, refuseResume, held, sourceCalls, setHeader };
+    return { store, view, scopes, service, openPage, focus, actions, resumed, refuseResume, held, sourceCalls, setHeader, events, made, refusePoll };
   }
+
+  it("runs More Actions' Refresh sources, New ad-hoc session and New conversation in a folder for a page key, in folders and schedules the header offers only", () => {
+    const { service, openPage, events, made, refusePoll, scopes, view } = setup();
+    const page = openPage();
+    const window = scopes.open(view.file, view.view);
+
+    expect(service.pagePoll({ window: page.key })).toEqual({ status: 200, body: { done: true } });
+    refusePoll('Every source is off.');
+    expect(service.pagePoll({ window: page.key })).toEqual({ status: 409, body: { error: 'Every source is off.' } });
+    expect(service.pagePoll({ window }).status).toBe(403);
+
+    // New ad-hoc session: the dock's adhoc event, in a folder the header offers, in any spelling of it.
+    expect(service.pageAdhoc({ window: page.key, opId: 'a1', prompt: 'Look around', repoRoot: 'd:/w1', start: true, provider: 'codex' })).toEqual({ status: 200, body: { done: true } });
+    expect(events).toEqual([{ type: 'adhoc', prompt: 'Look around', repoRoot: 'D:/w1', start: true, provider: 'codex' }]);
+    // A retry creates nothing more.
+    expect(service.pageAdhoc({ window: page.key, opId: 'a1', prompt: 'Look around', repoRoot: 'D:/w1', start: true, provider: 'codex' })).toEqual({ status: 200, body: { done: true } });
+    expect(events).toHaveLength(1);
+    expect(service.pageAdhoc({ window: page.key, opId: 'a2', prompt: 'Look around', repoRoot: 'C:/Windows', start: true, provider: 'claude' })).toEqual({ status: 400, body: { error: 'C:/Windows is not a folder the page offers.' } });
+    expect(service.pageAdhoc({ window: page.key, opId: 'a3', prompt: ' ', repoRoot: 'D:/w1', start: true, provider: 'claude' }).status).toBe(400);
+    expect(service.pageAdhoc({ window: page.key, opId: 'a4', prompt: 'x', repoRoot: 'D:/w1', start: true, provider: 'gpt' }).status).toBe(400);
+    expect(service.pageAdhoc({ window: page.key, opId: 'a5', prompt: 'refuse', repoRoot: 'D:/w1', start: false, provider: 'claude' })).toEqual({ status: 409, body: { error: 'Code Mode sessions need hooks.' } });
+    // A retry after a refusal, with the cause fixed, runs again.
+    expect(service.pageAdhoc({ window: page.key, opId: 'a5', prompt: 'Fixed now', repoRoot: 'D:/w1', start: false, provider: 'claude' })).toEqual({ status: 200, body: { done: true } });
+    expect(events.at(-1)).toMatchObject({ prompt: 'Fixed now' });
+    expect(service.pageAdhoc({ window, opId: 'a6', prompt: 'x', repoRoot: 'D:/w1', start: false, provider: 'claude' }).status).toBe(403);
+    // Or a schedule the header lists, run now.
+    expect(service.pageAdhoc({ window: page.key, opId: 'a7', schedule: 'nightly' })).toEqual({ status: 200, body: { done: true } });
+    expect(events.at(-1)).toEqual({ type: 'run-schedule', name: 'nightly' });
+    expect(service.pageAdhoc({ window: page.key, opId: 'a8', schedule: 'weekly' })).toEqual({ status: 400, body: { error: 'No schedule is named weekly.' } });
+    expect(events).toHaveLength(4);
+
+    // New conversation in a folder: as the dock's, in a folder the header offers.
+    expect(service.pageFolderConversation({ window: page.key, opId: 'c1', folder: dir, provider: 'claude' })).toMatchObject({ status: 200, body: { workItemId: 41 } });
+    expect(made).toHaveLength(1);
+    expect(made[0]![2]).toBe('claude');
+    expect(service.pageFolderConversation({ window: page.key, opId: 'c1', folder: dir })).toMatchObject({ status: 200, body: { workItemId: 41 } });
+    expect(made).toHaveLength(1);
+    expect(service.pageFolderConversation({ window: page.key, opId: 'c2', folder: join(dir, 'projects') })).toEqual({ status: 400, body: { error: `${join(dir, 'projects')} is not a folder the page offers.` } });
+    expect(service.pageFolderConversation({ window, opId: 'c3', folder: dir }).status).toBe(403);
+    expect(made).toHaveLength(1);
+  });
 
   it("sends the list's header with the list, again when only the header changes, and turns a source on or off for a page key only", () => {
     const { service, openPage, sourceCalls, setHeader, scopes, view } = setup();
@@ -1782,7 +1837,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     expect(page.frames.filter((frame) => frame.type === 'list')).toEqual([]);
 
     // A source turned off changes only the header, which still reaches the page.
-    setHeader({ sources: [{ kind: 'github', enabled: false, title: 'gh: not polled', sources: [{ name: 'gh', enabled: false }] }] });
+    setHeader({ sources: [{ kind: 'github', enabled: false, title: 'gh: not polled', sources: [{ name: 'gh', enabled: false }] }], repoRoots: [], folders: [], schedules: [] });
     service.conversationsChanged();
     expect(page.frames.at(-1)).toMatchObject({ type: 'list', header: { sources: [{ enabled: false }] } });
     expect(page.frames.at(-1)!['groups']).toBeInstanceOf(Array);

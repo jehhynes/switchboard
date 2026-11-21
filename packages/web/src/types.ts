@@ -176,6 +176,12 @@ export interface SourceGroup {
 /** What the list's header shows besides the list (`PageHeader` in the hub's `page.ts`). */
 export interface PageHeader {
   sources: SourceGroup[];
+  /** The repos an ad-hoc prompt can run in, the first being the default. */
+  repoRoots: string[];
+  /** The folders New ad-hoc session and New conversation in a folder offer. */
+  folders: string[];
+  /** The schedules New ad-hoc session can run now. */
+  schedules: Array<{ name: string; playbook: string }>;
 }
 
 /** A prompt the session waits on in its terminal, as the hub read it from the screen (`ScreenPrompt` in the conversation package). */

@@ -7,7 +7,7 @@ import { promptKeyData, readPrompt, screenRows, stepsText, TYPING_PAUSE_MS } fro
 import type { Artifact, ConversationChange, HeardTag, InputOutcome, InputSteps, PromptKey, ScreenPrompt, SlashCommand } from '@switchboard/conversation';
 import { SESSION_ENDED, SESSION_RELAUNCHED } from './runtime.js';
 import { canonicalFolder } from './windows.js';
-import { artifactFile, findFiles } from './page.js';
+import { artifactFile, findFiles, knownFolder } from './page.js';
 import { writeUpload } from './uploads.js';
 import type { PageFile, PageHeader, PageListGroup, PageRow } from './page.js';
 import type { ConversationRef, WindowScope, WindowScopes } from './windows.js';
@@ -244,6 +244,10 @@ export interface ConversationServiceDeps {
   pageHeader?(): PageHeader;
   /** Turns one source on or off, as the dock's source icons do: why not, or null. */
   setSource?(name: string, enabled: boolean): string | null;
+  /** Polls each source that is on now, as the dock's Refresh sources does: why not, or null. */
+  pollSources?(): string | null;
+  /** Runs an operator event the page's New ad-hoc session sends, `adhoc` or `run-schedule`, as the dock's `/action` does: why not, or null. */
+  operatorEvent?(event: Record<string, unknown>): string | null;
   /** The Done rows from `since` up to the Done list whose search text holds every word of `text`, as the dock's search further back (PRD R63). */
   searchDone?(text: string, since: number): { rows: PageRow[]; more: boolean };
   /** A page's focus changed: a focused, visible page counts as a focused window for the voice. */
@@ -1065,6 +1069,108 @@ export class ConversationService {
     }
 
     return { status: 200, body: this.deps.searchDone?.(text, since) ?? { rows: [], more: false } };
+  }
+
+  /**
+   * `page-poll {window}` (architecture.md § Web page): More Actions' Refresh sources, which polls each source that is on now, as the dock's
+   * `/poll` does. 403 for a key that is not a page's, 409 with the hub's refusal.
+   */
+  pagePoll(body: Record<string, unknown>): { status: number; body: unknown } {
+    if (typeof body['window'] !== 'string') {
+      return { status: 400, body: { error: 'Expected {window}.' } };
+    }
+
+    if (!this.deps.windows.isPage(body['window'])) {
+      return { status: 403, body: { error: 'Not in this window.' } };
+    }
+
+    const why = this.deps.pollSources === undefined ? 'This hub cannot poll from the page.' : this.deps.pollSources();
+
+    return why === null ? { status: 200, body: { done: true } } : { status: 409, body: { error: why } };
+  }
+
+  /** Each `page-adhoc` that created, by page key and `opId`, so a retried one creates once; the last 100. A refusal is not kept, so a retry after it runs again. */
+  readonly #pageAdhocs = new Map<string, { status: number; body: unknown }>();
+
+  /**
+   * `page-adhoc {window, opId, prompt, repoRoot, start, provider}` or `{window, opId, schedule}` (architecture.md § Web page): More Actions' New
+   * ad-hoc session, which creates an ad-hoc work item (PRD R6), started when `start` is true, or runs a schedule now (PRD R82), as the dock's
+   * window does. Only a folder and a schedule the list header offers are taken (400 otherwise); 403 for a key that is not a page's, 409 with the
+   * flow's refusal. A repeated `opId` answers the first success; one after a refusal runs again.
+   */
+  pageAdhoc(body: Record<string, unknown>): { status: number; body: unknown } {
+    const { window, opId, prompt, repoRoot, start, provider, schedule } = body;
+    const scheduled = schedule !== undefined;
+
+    if (
+      typeof window !== 'string' ||
+      typeof opId !== 'string' ||
+      opId === '' ||
+      opId.length > 200 ||
+      (scheduled
+        ? typeof schedule !== 'string'
+        : typeof prompt !== 'string' || prompt.trim() === '' || prompt.length > MAX_MESSAGE_CHARS || typeof repoRoot !== 'string' || typeof start !== 'boolean' || (provider !== 'claude' && provider !== 'codex'))
+    ) {
+      return { status: 400, body: { error: 'Expected {window, opId, prompt, repoRoot, start, provider} or {window, opId, schedule}.' } };
+    }
+
+    if (!this.deps.windows.isPage(window)) {
+      return { status: 403, body: { error: 'Not in this window.' } };
+    }
+
+    const done = this.#pageAdhocs.get(`${window} ${opId}`);
+
+    if (done !== undefined) {
+      return done;
+    }
+
+    const header = this.deps.pageHeader?.();
+    const folder = scheduled ? null : knownFolder(header?.folders ?? [], repoRoot as string);
+
+    if (scheduled ? !(header?.schedules ?? []).some((one) => one.name === schedule) : folder === null) {
+      return { status: 400, body: { error: scheduled ? `No schedule is named ${String(schedule)}.` : `${String(repoRoot)} is not a folder the page offers.` } };
+    }
+
+    const event = scheduled ? { type: 'run-schedule', name: schedule } : { type: 'adhoc', prompt, repoRoot: folder, start, provider };
+    const why = this.deps.operatorEvent === undefined ? 'This hub creates no work items from the page.' : this.deps.operatorEvent(event);
+    if (why !== null) {
+      return { status: 409, body: { error: why } };
+    }
+
+    const answer = { status: 200, body: { done: true } };
+
+    this.#pageAdhocs.set(`${window} ${opId}`, answer);
+
+    for (const old of [...this.#pageAdhocs.keys()].slice(0, -100)) {
+      this.#pageAdhocs.delete(old);
+    }
+
+    return answer;
+  }
+
+  /**
+   * `page-folder-conversation {window, opId, folder, provider?}` (architecture.md § Web page): More Actions' New conversation in a folder, which
+   * makes a folder-hosted conversation as the dock's does (`dockConversation`), in a folder the list header offers (400 for any other); answers
+   * `{workItemId, folder}`. 403 for a key that is not a page's.
+   */
+  pageFolderConversation(body: Record<string, unknown>): { status: number; body: unknown } {
+    const { window, opId, folder, provider } = body;
+
+    if (typeof window !== 'string' || typeof folder !== 'string') {
+      return { status: 400, body: { error: 'Expected {window, opId, folder, provider?}.' } };
+    }
+
+    if (!this.deps.windows.isPage(window)) {
+      return { status: 403, body: { error: 'Not in this window.' } };
+    }
+
+    const known = knownFolder(this.deps.pageHeader?.().folders ?? [], folder);
+
+    if (known === null) {
+      return { status: 400, body: { error: `${folder} is not a folder the page offers.` } };
+    }
+
+    return this.dockConversation({ folder: known, opId, ...(provider === undefined ? {} : { provider }) });
   }
 
   #pageHello(key: string): Record<string, unknown> {

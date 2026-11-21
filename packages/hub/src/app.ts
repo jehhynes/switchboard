@@ -472,7 +472,18 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
       return pageList(built.dock, built.snapshot);
     },
-    pageHeader: () => pageHeader(views().dock),
+    pageHeader: () => {
+      const built = views();
+
+      return pageHeader(built.dock, built.snapshot);
+    },
+    pollSources: () => runtime.pollNow(),
+    // The page's New ad-hoc session runs the dock's `adhoc` and `run-schedule` events.
+    operatorEvent: (event) => {
+      const parsed = parseAction(event);
+
+      return parsed === null ? 'Unknown action.' : runtime.send(parsed).refused;
+    },
     // The list's search further back, as the dock's (PRD R63); a row whose work item is gone meanwhile is left out.
     searchDone: (text, since) => {
       const found = doneSearch.search(store, views().snapshot, runtime.snapshotInputs(), text, since, windows);
@@ -861,6 +872,9 @@ const dockWithRuns = () => {
       '/v1/conversation/page-conversation': async (body) => (isRecord(body) ? conversation.pageConversation(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, provider?}.' } }),
       '/v1/conversation/resume': async (body) => (isRecord(body) ? conversation.resume(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } }),
       '/v1/conversation/row-paste': async (body) => (isRecord(body) ? conversation.rowPaste(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId, label}.' } }),
+      '/v1/conversation/page-poll': async (body) => (isRecord(body) ? conversation.pagePoll(body) : { status: 400, body: { error: 'Expected {window}.' } }),
+      '/v1/conversation/page-adhoc': async (body) => (isRecord(body) ? conversation.pageAdhoc(body) : { status: 400, body: { error: 'Expected {window, opId, prompt, repoRoot, start, provider}.' } }),
+      '/v1/conversation/page-folder-conversation': async (body) => (isRecord(body) ? conversation.pageFolderConversation(body) : { status: 400, body: { error: 'Expected {window, opId, folder, provider?}.' } }),
       '/v1/conversation/page-search': async (body) => (isRecord(body) ? conversation.pageSearch(body) : { status: 400, body: { error: 'Expected {window, text, since}.' } }),
       '/v1/conversation/page-source': async (body) => (isRecord(body) ? conversation.pageSource(body) : { status: 400, body: { error: 'Expected {window, name, enabled}.' } }),
       '/v1/conversation/page-focus': async (body) => (isRecord(body) ? conversation.pageFocus(body) : { status: 400, body: { error: 'Expected {window, focused}.' } }),

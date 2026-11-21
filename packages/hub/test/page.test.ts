@@ -8,7 +8,7 @@ import { listenHub } from '../src/server.js';
 import type { HubServer, PageRoutes } from '../src/server.js';
 import { createHash } from 'node:crypto';
 import { Store } from '@switchboard/core';
-import { artifactFile, cookieValue, dockRowOf, findFiles, loopbackHost, PageAccess, pageCookie, PUBLIC_PAGE_FILES, PAGE_LINK_MS, PAGE_SESSION_MS, PAGE_SESSIONS_KEPT, pageActionEvent, pageActions, pageGroups, pageList, pasteText } from '../src/page.js';
+import { artifactFile, cookieValue, dockRowOf, findFiles, knownFolder, pageHeader, loopbackHost, PageAccess, pageCookie, PUBLIC_PAGE_FILES, PAGE_LINK_MS, PAGE_SESSION_MS, PAGE_SESSIONS_KEPT, pageActionEvent, pageActions, pageGroups, pageList, pasteText } from '../src/page.js';
 import { dockView } from '../src/dock.js';
 import type { DockView } from '../src/dock.js';
 import { pageAsset } from '../src/pageAssets.js';
@@ -161,6 +161,21 @@ describe('pageList', () => {
       { key: 'unstarted', title: 'Unstarted', glyph: 'u', empty: 'Nothing waits to be started.', rows: [] },
       { key: 'done', title: 'Done', glyph: 'd', empty: null, rows: [expect.objectContaining({ workItemId: 6, host: 'support' })] },
     ]);
+  });
+});
+
+describe('pageHeader', () => {
+  it("offers the dock's sources and schedules, and as folders the repo roots, then each folder that hosts a conversation, once", () => {
+    const byFolder = item(4, { ticket: { ...item(4).ticket, hostWindow: 'D:/git/support' } });
+    const again = item(5, { ticket: { ...item(5).ticket, hostWindow: 'd:/git/Support' } });
+    const byWindow = item(6, { ticket: { ...item(6).ticket, hostWindow: 'C:/sb/windows/x.code-workspace' } });
+    const root = item(7, { ticket: { ...item(7).ticket, hostWindow: 'D:/w1' } });
+    const sources = [{ kind: 'github', enabled: true, title: 'gh: polled', sources: [{ name: 'gh', enabled: true }] }];
+    const header = pageHeader({ sources, repoRoots: ['D:/w1'], schedules: [{ name: 'nightly', playbook: 'dev:sweep' }] }, snapshot([byFolder, again, byWindow, root]));
+
+    expect(header).toEqual({ sources, repoRoots: ['D:/w1'], folders: ['D:/w1', 'D:/git/support'], schedules: [{ name: 'nightly', playbook: 'dev:sweep' }] });
+    expect(knownFolder(header.folders, 'd:/git/support')).toBe('D:/git/support');
+    expect(knownFolder(header.folders, 'D:/git')).toBeNull();
   });
 });
 

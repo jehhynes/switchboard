@@ -86,7 +86,7 @@ export interface ConsoleModule {
  */
 export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageState; close(): void } {
   root.innerHTML =
-    '<aside class="side"><div class="side-head"></div><div id="list"></div></aside>' +
+    '<aside class="side"><div class="side-head"></div><div id="list"></div><div id="list-sheet"></div></aside>' +
     `<div class="sash side-sash" role="separator" aria-orientation="vertical" aria-label="Work items width" aria-controls="list" tabindex="0" aria-valuemin="${SIDE_MIN}" aria-valuemax="${SIDE_MAX}" title="Drag to resize; double-click to reset"></div>` +
     '<main class="main"><div id="head"></div><div id="panel" class="scroll"></div><div id="note"></div><div id="composer" hidden></div></main>' +
     `<div class="sash chat-sash" role="separator" aria-orientation="vertical" aria-label="Conversation width" aria-controls="panel" tabindex="0" aria-valuemin="${CHAT_MIN}" aria-valuemax="${CHAT_MAX}" title="Drag to resize; double-click to reset"></div>` +
@@ -217,8 +217,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return { status: 0, body: { error: `Switchboard did not answer: ${String(error)}` } };
     }
   };
-  // The list's header: the dock header's source icons (architecture.md § Web page).
-  const header = listHeader(root.querySelector<HTMLElement>('.side-head')!, list, { post: (name, body) => post(name, body), redraw: () => draw(), now: () => deps.now() });
+  // The list's header: the dock header's source icons, search and More Actions (architecture.md § Web page).
+  const header = listHeader(root.querySelector<HTMLElement>('.side-head')!, list, root.querySelector<HTMLElement>('#list-sheet')!, { post: (name, body) => post(name, body), redraw: () => draw(), select: (workItemId) => void select(workItemId), now: () => deps.now() });
   /** A command for the conversation the page shows, refused by the hub when the page has moved on since. */
   const command = (name: string, body: Record<string, unknown> = {}): Promise<Answer> => post(name, { scopeGen: state.scope?.scopeGen ?? -1, ...body });
 

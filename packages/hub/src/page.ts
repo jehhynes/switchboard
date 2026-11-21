@@ -358,15 +358,37 @@ export function pageRow(row: DockRow, workItemId: number, host: string | null): 
   };
 }
 
-/** What the page's list header shows besides the list (architecture.md § Web page): the dock header's source icons. */
+/** What the page's list header shows besides the list (architecture.md § Web page): the dock header's source icons and what its More Actions offer. */
 export interface PageHeader {
   /** The configured sources but ad-hoc, by kind, as the dock's header icons show them. */
   sources: DockSourceGroup[];
+  /** The repos an ad-hoc prompt can run in, the first being the default (PRD R6). */
+  repoRoots: string[];
+  /** The folders New ad-hoc session and New conversation in a folder offer: the repo roots, then the folders that host conversations. */
+  folders: string[];
+  /** The schedules New ad-hoc session can run now (PRD R82). */
+  schedules: { name: string; playbook: string }[];
 }
 
-/** The page's list header, from the built dock view, so the page and the dock show the same sources. */
-export function pageHeader(dock: Pick<DockView, 'sources'>): PageHeader {
-  return { sources: dock.sources };
+/**
+ * The page's list header, from the built dock view, so the page and the dock show the same sources. A page cannot browse this computer's
+ * folders, so its folder choices are the ones the hub knows: the repo roots, then each folder a conversation is hosted by, once each.
+ */
+export function pageHeader(dock: Pick<DockView, 'sources' | 'repoRoots' | 'schedules'>, snapshot: Pick<Snapshot, 'workItems'>): PageHeader {
+  const folders = new Map<string, string>();
+
+  for (const folder of [...dock.repoRoots, ...snapshot.workItems.flatMap((item) => (item.ticket.hostWindow != null && isFolderHost(item.ticket.hostWindow) ? [item.ticket.hostWindow] : []))]) {
+    if (!folders.has(hostKey(folder))) {
+      folders.set(hostKey(folder), folder);
+    }
+  }
+
+  return { sources: dock.sources, repoRoots: dock.repoRoots, folders: [...folders.values()], schedules: dock.schedules };
+}
+
+/** The folder of `folders` that names the same folder as `folder`, in any spelling `hostKey` treats as one, or null. */
+export function knownFolder(folders: readonly string[], folder: string): string | null {
+  return folders.find((one) => hostKey(one) === hostKey(folder)) ?? null;
 }
 
 /** A work item's row in the dock's view, or null when no group lists it. */

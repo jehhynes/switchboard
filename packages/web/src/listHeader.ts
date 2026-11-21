@@ -9,6 +9,8 @@ export interface ListHeaderDeps {
   post(name: string, body: Record<string, unknown>): Promise<Answer>;
   /** Draws the page again after the header changed what it shows. */
   redraw(): void;
+  /** Opens a work item's conversation, as a click on its row does. */
+  select(workItemId: number): void;
   now(): number;
 }
 
@@ -139,10 +141,29 @@ function gutter(checked: boolean): string {
   return `<span class="menu-gutter" aria-hidden="true">${checked ? '<span class="codicon codicon-check"></span>' : ''}</span>`;
 }
 
-/** What the header has open: a source kind's menu (`source:<kind>`), the range menu (`range`), or nothing. */
+/** The providers a new session can start in, as the dock's provider box lists them. */
+const PROVIDERS = [
+  { provider: 'claude', name: 'Claude' },
+  { provider: 'codex', name: 'Codex' },
+];
+
+/**
+ * A sheet the header opens over the page: More Actions' New ad-hoc session, New conversation in a folder, or a dock window the page does not
+ * have yet. `opId` stays the same for the sheet's retries, so the hub creates once.
+ */
+export type HeaderSheet =
+  | { kind: 'adhoc'; opId: string; schedule: string; repo: string; provider: string; providerChosen: boolean; prompt: string; start: boolean; providerNote: string | null; busy: boolean; error: string | null }
+  | { kind: 'folder'; opId: string; folder: string; provider: string; providerChosen: boolean; installed: string[] | null; busy: boolean; error: string | null }
+  | { kind: 'later'; title: string };
+
+/**
+ * What the header has open: a source kind's menu (`source:<kind>`), the range menu (`range`), More Actions (`more`), or nothing; and a sheet over
+ * the page.
+ */
 export interface HeaderView {
   menu: string | null;
   search: SearchView;
+  sheet: HeaderSheet | null;
   /** A refusal the header's last action got, shown under it until dismissed or the next action. */
   notice: string | null;
 }
@@ -189,7 +210,107 @@ export function renderListHeader(header: PageHeader | null, view: HeaderView): s
       ? ''
       : `<p class="list-notice" role="alert"><span class="list-notice-text">${escape(view.notice)}</span><button type="button" class="icon dismiss" data-action="list-dismiss" title="Dismiss" aria-label="Dismiss"><span class="codicon codicon-close" aria-hidden="true"></span></button></p>`;
 
-  return `<div class="list-header"><span class="list-title">Switchboard</span>${icons}${searchButton}</div>${box}${notice}`;
+  const more = `<div class="menu-anchor" data-key="more"><button type="button" class="icon more-actions" data-action="list-more" aria-haspopup="menu" aria-expanded="${view.menu === 'more'}" title="More Actions…" aria-label="More Actions"><span class="codicon codicon-ellipsis" aria-hidden="true"></span></button>${view.menu === 'more' ? renderMoreMenu(header) : ''}</div>`;
+
+  return `<div class="list-header"><span class="list-title">Switchboard</span>${icons}${searchButton}${more}</div>${box}${notice}`;
+}
+
+/** A More Actions row: its codicon in the gutter, as the dock's menu draws its glyph, then its label. */
+function moreRow(action: string, icon: string, label: string): string {
+  return `<li role="none"><button type="button" class="menu-row" role="menuitem" data-action="${action}"><span class="menu-gutter" aria-hidden="true"><span class="codicon codicon-${icon}"></span></span><span class="title">${label}</span></button></li>`;
+}
+
+const SEPARATOR = '<li class="menu-separator" role="separator"></li>';
+
+/**
+ * More Actions (PRD R71), in the dock's groups: New ad-hoc session… and New conversation in a folder…; Held sessions, and Ticket volume
+ * report with a Zoho or Forum source; Refresh sources and Show hub log; then Open Settings. On a phone, where the header has no room for them,
+ * the source icons come first as a check row per source.
+ */
+export function renderMoreMenu(header: PageHeader | null): string {
+  const sources = (header?.sources ?? []).flatMap((group) =>
+    group.sources.map((one) => `<li role="none" class="more-source"><button type="button" class="menu-row" role="menuitemcheckbox" aria-checked="${one.enabled}" data-action="list-source-entry" data-source="${escape(one.name)}">${gutter(one.enabled)}${sourceLogo(group.kind, one.enabled)}<span class="title">${escape(one.name)}</span></button></li>`),
+  );
+  const volume = (header?.sources ?? []).some((group) => group.kind === 'zoho' || group.kind === 'forum');
+  const rows = [
+    ...(sources.length === 0 ? [] : [...sources, SEPARATOR.replace('class="menu-separator"', 'class="menu-separator more-source"')]),
+    moreRow('list-adhoc', 'add', 'New ad-hoc session…'),
+    moreRow('list-folder', 'folder', 'New conversation in a folder…'),
+    SEPARATOR,
+    moreRow('list-later-held', 'terminal', 'Held sessions'),
+    volume ? moreRow('list-later-volume', 'graph', 'Ticket volume report') : '',
+    SEPARATOR,
+    moreRow('list-poll', 'refresh', 'Refresh sources'),
+    moreRow('list-later-log', 'output', 'Show hub log'),
+    SEPARATOR,
+    moreRow('list-later-settings', 'settings-gear', 'Open Settings'),
+  ];
+
+  return `<ul class="glass menu more-menu align-right" role="menu" aria-label="More Actions">${rows.join('')}</ul>`;
+}
+
+/** The dock windows More Actions opens that the page does not have yet, by their row's action. */
+export const LATER: Record<string, string> = { 'list-later-held': 'Held sessions', 'list-later-volume': 'Ticket volume report', 'list-later-log': 'Show hub log', 'list-later-settings': 'Open Settings' };
+
+/** A select's options, the chosen one selected. */
+function options(items: ReadonlyArray<{ value: string; label: string }>, chosen: string): string {
+  return items.map((item) => `<option value="${escape(item.value)}"${item.value === chosen ? ' selected' : ''}>${escape(item.label)}</option>`).join('');
+}
+
+/**
+ * A sheet of the header (architecture.md § Web page), drawn as the page's other sheets: New ad-hoc session as the dock's window (Run, with the
+ * schedules; Repository; Provider; Prompt; Start automatically), New conversation in a folder with the folder and, when both are installed, the
+ * provider, or a dock window the page does not have yet.
+ */
+export function renderHeaderSheet(sheet: HeaderSheet | null, header: PageHeader | null): string {
+  if (sheet === null) {
+    return '';
+  }
+
+  const frame = (title: string, body: string, buttons: string): string =>
+    `<div class="sheet-backdrop" data-action="list-sheet-cancel"><div class="sheet glass" role="dialog" aria-modal="true" aria-labelledby="list-sheet-title"><h2 id="list-sheet-title" class="sheet-title">${escape(title)}</h2>${body}<div class="sheet-buttons">${buttons}</div></div></div>`;
+
+  if (sheet.kind === 'later') {
+    return frame(sheet.title, `<p class="sheet-detail">${escape(sheet.title)} is not on the web page yet. Use it from the dock.</p>`, '<button type="button" class="sheet-button primary" data-action="list-sheet-cancel">Close</button>');
+  }
+
+  const busy = sheet.busy ? ' disabled' : '';
+  const cancel = `<button type="button" class="sheet-button secondary" data-action="list-sheet-cancel"${busy}>Cancel</button>`;
+  const error = sheet.error === null ? '' : `<p class="sheet-error" role="alert">${escape(sheet.error)}</p>`;
+  const folders = header?.folders ?? [];
+
+  if (sheet.kind === 'folder') {
+    const choices = sheet.installed === null ? [] : PROVIDERS.filter((one) => sheet.installed!.length > 1 || sheet.installed!.includes(one.provider));
+    const provider =
+      sheet.installed === null
+        ? '<p class="sheet-detail">Loading the providers…</p>'
+        : sheet.installed.length > 1
+          ? `<label class="sheet-field"><span class="sheet-label">Provider</span><select class="sheet-select" data-field="provider">${options(choices.map((one) => ({ value: one.provider, label: one.name })), sheet.provider)}</select></label>`
+          : '';
+    const ready = !sheet.busy && sheet.folder !== '' && sheet.installed !== null && sheet.installed.length > 0;
+    const body =
+      folders.length === 0
+        ? '<p class="sheet-detail">The hub knows no folders yet. Add a repo root in Settings from the dock.</p>'
+        : `<label class="sheet-field"><span class="sheet-label">Folder</span><select class="sheet-select" data-field="folder">${options([{ value: '', label: 'Choose a folder' }, ...folders.map((one) => ({ value: one, label: one }))], sheet.folder)}</select></label>${provider}`;
+
+    return frame('New conversation in a folder', body + error, `${cancel}<button type="button" class="sheet-button primary" data-action="list-sheet-go"${ready ? '' : ' disabled'}>Create</button>`);
+  }
+
+  const schedules = header?.schedules ?? [];
+  const typed = sheet.schedule === '';
+  const run =
+    schedules.length === 0
+      ? ''
+      : `<label class="sheet-field"><span class="sheet-label">Run</span><select class="sheet-select" data-field="schedule">${options([{ value: '', label: 'A prompt' }, ...schedules.map((one) => ({ value: one.name, label: `Run ${one.name} now · ${one.playbook}` }))], sheet.schedule)}</select></label>`;
+  const fields = typed
+    ? `<label class="sheet-field"><span class="sheet-label">Repository</span><select class="sheet-select" data-field="repo">${options([...(sheet.repo === '' ? [{ value: '', label: 'Choose a repository' }] : []), ...folders.map((one) => ({ value: one, label: one }))], sheet.repo)}</select></label>` +
+      `<label class="sheet-field"><span class="sheet-label">Provider</span><select class="sheet-select" data-field="provider">${options(PROVIDERS.map((one) => ({ value: one.provider, label: one.name })), sheet.provider)}</select>${sheet.providerNote === null ? '' : `<span class="sheet-error">${escape(sheet.providerNote)}</span>`}</label>` +
+      `<label class="sheet-field"><span class="sheet-label">Prompt</span><textarea class="sheet-prompt" data-field="prompt" rows="6" placeholder="What the session should do">${escape(sheet.prompt)}</textarea></label>` +
+      `<label class="sheet-choice"><input type="checkbox" data-field="start"${sheet.start ? ' checked' : ''}><span>Start automatically</span></label>`
+    : '';
+  const ready = !sheet.busy && (!typed || (sheet.repo !== '' && sheet.prompt.trim() !== ''));
+
+  return frame('New ad-hoc session', run + fields + error, `${cancel}<button type="button" class="sheet-button primary" data-action="list-sheet-go"${ready ? '' : ' disabled'}>${typed ? 'Create' : 'Run'}</button>`);
 }
 
 /**
@@ -231,9 +352,13 @@ export interface ListHeader {
  * The list's header (architecture.md § Web page): the dock header's source icons and search, drawn into `host` and run from its own clicks and
  * keys, and the search's end, which the page draws in `list`. The page calls `draw` with each state it draws.
  */
-export function listHeader(host: HTMLElement, list: HTMLElement, deps: ListHeaderDeps): ListHeader {
+export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTMLElement, deps: ListHeaderDeps): ListHeader {
   const search: SearchView = { open: false, query: '', filter: '', range: 0, older: [], more: false, pending: false, error: null };
-  const view: HeaderView = { menu: null, search, notice: null };
+  const view: HeaderView = { menu: null, search, sheet: null, notice: null };
+  // The repository New ad-hoc session used last, offered first next time while the page is open.
+  let lastRepo: string | null = null;
+  let ops = 0;
+  const newOp = (): string => `header-${deps.now().toString(36)}-${(++ops).toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   let shown: PageHeader | null = null;
   let groups: readonly PageGroup[] = [];
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -248,7 +373,7 @@ export function listHeader(host: HTMLElement, list: HTMLElement, deps: ListHeade
     redraw();
 
     if (focusOpener && menu !== null) {
-      const opener = menu === 'range' ? host.querySelector<HTMLElement>('.search-range') : [...host.querySelectorAll<HTMLElement>('[data-action="list-source"]')].find((one) => `source:${one.dataset['kind']}` === menu);
+      const opener = menu === 'range' ? host.querySelector<HTMLElement>('.search-range') : menu === 'more' ? host.querySelector<HTMLElement>('.more-actions') : [...host.querySelectorAll<HTMLElement>('[data-action="list-source"]')].find((one) => `source:${one.dataset['kind']}` === menu);
 
       opener?.focus();
     }
@@ -376,6 +501,161 @@ export function listHeader(host: HTMLElement, list: HTMLElement, deps: ListHeade
     }
   };
 
+  // ---- More Actions ----
+  const refresh = async (): Promise<void> => {
+    view.notice = null;
+    redraw();
+
+    const answer = await deps.post('page-poll', {});
+
+    if (answer.status !== 200) {
+      view.notice = String(answer.body['error'] ?? 'The sources were not polled.');
+      redraw();
+    }
+  };
+  const focusSheet = (): void => sheetHost.querySelector<HTMLElement>('textarea, select')?.focus();
+  /** New ad-hoc session…: the repository used last or the first repo root, the default provider, or a schedule when there is no repository. */
+  const openAdhoc = async (): Promise<void> => {
+    const folders = shown?.folders ?? [];
+    const repo = lastRepo !== null && folders.includes(lastRepo) ? lastRepo : (shown?.repoRoots[0] ?? '');
+    const sheet: Extract<HeaderSheet, { kind: 'adhoc' }> = { kind: 'adhoc', opId: newOp(), schedule: repo === '' && (shown?.schedules.length ?? 0) > 0 ? shown!.schedules[0]!.name : '', repo, provider: 'claude', providerChosen: false, prompt: '', start: false, providerNote: null, busy: false, error: null };
+
+    view.sheet = sheet;
+    redraw();
+    focusSheet();
+
+    const answer = await deps.post('providers', {});
+    const named = answer.status === 200 ? String(answer.body['defaultProvider'] ?? '') : '';
+
+    if (view.sheet !== sheet) {
+      return;
+    }
+
+    // A failed lookup leaves Claude selected and usable, and says why beside the box, as the dock's window does. A provider the operator picked
+    // while the hub answered stays.
+    if (named === 'claude' || named === 'codex') {
+      sheet.provider = sheet.providerChosen ? sheet.provider : named;
+    } else {
+      sheet.providerNote = `${String(answer.body['error'] ?? 'The hub did not list the providers.')} Using Claude.`;
+    }
+
+    redraw();
+  };
+  /** New conversation in a folder…: a folder the hub knows, and the provider when both are installed. */
+  const openFolder = async (): Promise<void> => {
+    const sheet: Extract<HeaderSheet, { kind: 'folder' }> = { kind: 'folder', opId: newOp(), folder: '', provider: 'claude', providerChosen: false, installed: null, busy: false, error: null };
+
+    view.sheet = sheet;
+    redraw();
+    focusSheet();
+
+    const answer = await deps.post('providers', {});
+
+    if (view.sheet !== sheet) {
+      return;
+    }
+
+    const installed = answer.status === 200 && Array.isArray(answer.body['installed']) ? (answer.body['installed'] as unknown[]).filter((one): one is string => one === 'claude' || one === 'codex') : null;
+    const named = String(answer.body['defaultProvider'] ?? '');
+
+    if (installed === null || installed.length === 0) {
+      sheet.error = installed === null ? String(answer.body['error'] ?? 'The hub did not list the providers.') : 'Neither Claude nor Codex is installed.';
+      sheet.installed = [];
+    } else {
+      sheet.installed = installed;
+      sheet.provider = installed.length === 1 ? installed[0]! : named === 'codex' ? 'codex' : 'claude';
+    }
+
+    redraw();
+  };
+  const closeSheet = (): void => {
+    if (view.sheet !== null && view.sheet.kind !== 'later' && view.sheet.busy) {
+      return;
+    }
+
+    view.sheet = null;
+    redraw();
+    host.querySelector<HTMLElement>('.more-actions')?.focus();
+  };
+  /** Create, or Run: sends the sheet; a refusal keeps it open with the hub's reason, as the dock's windows do. */
+  const sheetGo = async (): Promise<void> => {
+    const sheet = view.sheet;
+
+    if (sheet === null || sheet.kind === 'later' || sheet.busy) {
+      return;
+    }
+
+    sheet.busy = true;
+    sheet.error = null;
+    redraw();
+
+    const answer =
+      sheet.kind === 'adhoc'
+        ? await deps.post('page-adhoc', sheet.schedule !== '' ? { opId: sheet.opId, schedule: sheet.schedule } : { opId: sheet.opId, prompt: sheet.prompt, repoRoot: sheet.repo, start: sheet.start, provider: sheet.provider })
+        : await deps.post('page-folder-conversation', { opId: sheet.opId, folder: sheet.folder, provider: sheet.provider });
+
+    sheet.busy = false;
+
+    if (answer.status !== 200) {
+      sheet.error = String(answer.body['error'] ?? 'Switchboard did not answer.');
+      redraw();
+      return;
+    }
+
+    if (sheet.kind === 'adhoc' && sheet.schedule === '') {
+      lastRepo = sheet.repo;
+    }
+
+    if (view.sheet === sheet) {
+      view.sheet = null;
+    }
+
+    redraw();
+
+    if (sheet.kind === 'folder' && typeof answer.body['workItemId'] === 'number') {
+      deps.select(answer.body['workItemId']);
+    }
+  };
+  /** A sheet's field changed: kept, so a redraw shows it as typed. */
+  const fieldChanged = (event: Event): void => {
+    const field = event.target as HTMLInputElement;
+    const name = field.dataset?.['field'];
+    const sheet = view.sheet;
+
+    if (name === undefined || sheet === null || sheet.kind === 'later') {
+      return;
+    }
+
+    const value = name === 'start' ? field.checked : field.value;
+
+    (sheet as unknown as Record<string, unknown>)[name] = value;
+
+    if (name === 'provider') {
+      sheet.providerChosen = true;
+    }
+    redraw();
+  };
+
+  sheetHost.addEventListener('input', fieldChanged);
+  sheetHost.addEventListener('change', fieldChanged);
+  sheetHost.addEventListener('click', (event) => {
+    const target = event.target as HTMLElement;
+    const button = target.closest<HTMLElement>('[data-action]');
+
+    if (button?.dataset['action'] === 'list-sheet-go') {
+      void sheetGo();
+    } else if (button?.dataset['action'] === 'list-sheet-cancel' && (!button.classList.contains('sheet-backdrop') || target === button)) {
+      // A press on the sheet itself is not one on its backdrop.
+      closeSheet();
+    }
+  });
+  sheetHost.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.stopPropagation();
+      closeSheet();
+    }
+  });
+
   const clicked = (event: Event): void => {
     const button = (event.target as HTMLElement).closest<HTMLElement>('[data-action]');
 
@@ -433,6 +713,32 @@ export function listHeader(host: HTMLElement, list: HTMLElement, deps: ListHeade
       case 'list-search-all':
         setRange(RANGES.length - 1);
         break;
+      case 'list-more':
+        view.menu = view.menu === 'more' ? null : 'more';
+        redraw();
+        break;
+      case 'list-adhoc':
+        view.menu = null;
+        void openAdhoc();
+        break;
+      case 'list-folder':
+        view.menu = null;
+        void openFolder();
+        break;
+      case 'list-poll':
+        view.menu = null;
+        void refresh();
+        break;
+      default: {
+        const later = LATER[button?.dataset['action'] ?? ''];
+
+        if (later !== undefined) {
+          view.menu = null;
+          view.sheet = { kind: 'later', title: later };
+          redraw();
+          sheetHost.querySelector<HTMLElement>('.sheet-button')?.focus();
+        }
+      }
     }
   };
 
@@ -489,6 +795,7 @@ export function listHeader(host: HTMLElement, list: HTMLElement, deps: ListHeade
       }
 
       morph(host, renderListHeader(header, view));
+      morph(sheetHost, renderHeaderSheet(view.sheet, header));
     },
     list: (listed) => ({ groups: filterGroups(listed, search.filter, search.older), filtering: search.filter.trim() !== '' }),
     end: (filtered) => renderSearchEnd(search, filtered.every((group) => group.rows.length === 0)),
