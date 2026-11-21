@@ -1340,3 +1340,12 @@ Source inspection of the Claude Code VS Code extension 2.1.328 (`extension.js`, 
 
 Current use: [architecture.md](architecture.md) § Context meter.
 
+## M106. Claude Code's terminal colours, 2026-11-21
+
+Source inspection of Claude Code 2.1.330 (`claude.exe`), and its output in a pseudo-terminal at 100 by 30 with `COLORTERM=truecolor` and the default theme, recorded with a scratch `CLAUDE_CONFIG_DIR`.
+
+- Claude Code draws for its own theme setting (`theme`: `dark` by default, `light`, their colour-blind and `-ansi` variants), never for the terminal's colours. The `dark` theme's colours are 24-bit: a sent message's row `48;2;55;55;55` with its text `38;2;255;255;255`, the logo's background `48;2;0;0;0`, secondary text `38;2;153;153;153` and the mode line `38;2;255;193;7`. Only the `-ansi` themes use the palette.
+- A terminal's palette therefore cannot recolour the `dark` theme: on a light background its message rows and logo stay dark blocks with white text, and its grey and amber text falls to about 2.8:1 and 1.6:1 against #F8F8F8.
+
+Current use: the web page's console keeps Dark Modern's terminal colours in both schemes ([architecture.md](architecture.md) § Web page).
+

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CONSOLE_FONT_PX, CONSOLE_INPUT_CHARS, CONSOLE_MIN_FONT_PX, CONSOLE_THEMES, fittedFont, fittedSize, keptModes, LIGHT_SCHEME, mountConsole } from '../src/console.js';
+import { CONSOLE_FONT_PX, CONSOLE_INPUT_CHARS, CONSOLE_MIN_FONT_PX, CONSOLE_THEME, fittedFont, fittedSize, keptModes, LIGHT_SCHEME, mountConsole } from '../src/console.js';
 import type { ConsoleOptions, ConsoleTerm, MountedConsole, TermOptions } from '../src/console.js';
 import { startPage } from '../src/main.js';
 import type { ConsoleModule } from '../src/main.js';
@@ -162,38 +162,17 @@ function mounted(type: ConsoleOptions['type'] = async () => null) {
 describe("the console's colours", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("draws in VS Code's terminal colours for the system's scheme and changes them when the scheme changes, until disposed", () => {
-    const listeners: Array<() => void> = [];
-    const asked: string[] = [];
-    const scheme = {
-      matches: true,
-      addEventListener: (_type: string, listener: () => void) => listeners.push(listener),
-      removeEventListener: (_type: string, listener: () => void) => listeners.splice(listeners.indexOf(listener), 1),
-    };
+  it("draws in Dark Modern's terminal colours whatever the system's scheme, on a background that matches its own", () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === LIGHT_SCHEME, addEventListener: () => {}, removeEventListener: () => {} }));
 
-    vi.stubGlobal('matchMedia', (query: string) => (asked.push(query), query === LIGHT_SCHEME ? scheme : { matches: false, addEventListener: () => {}, removeEventListener: () => {} }));
-
-    const { term, console } = mounted();
-
-    expect(asked).toContain(LIGHT_SCHEME);
-    expect(term.created.theme).toEqual(CONSOLE_THEMES.light);
-    expect(term.created.theme).toMatchObject({ background: '#f8f8f8', foreground: '#3b3b3b' });
-    scheme.matches = false;
-    listeners.forEach((listener) => listener());
-    expect(term.options.theme).toEqual(CONSOLE_THEMES.dark);
-    expect(term.options.theme).toMatchObject({ background: '#181818', foreground: '#cccccc' });
-    console.dispose();
-    expect(listeners).toEqual([]);
-  });
-
-  it("draws in Dark Modern's colours where the browser cannot tell the scheme, and its background matches the console's own", () => {
     const { term } = mounted();
-    const css = PAGE_ASSETS['theme.css']!.body;
-    const light = css.indexOf('@media (prefers-color-scheme: light)');
+    const css = PAGE_ASSETS['page.css']!.body;
 
-    expect(term.created.theme).toEqual(CONSOLE_THEMES.dark);
-    expect(css.slice(0, light)).toContain(`--vscode-panel-background: ${CONSOLE_THEMES.dark.background!.toUpperCase()};`);
-    expect(css.slice(light)).toContain(`--vscode-panel-background: ${CONSOLE_THEMES.light.background!.toUpperCase()};`);
+    expect(term.created.theme).toEqual(CONSOLE_THEME);
+    expect(term.created.theme).toMatchObject({ background: '#181818', foreground: '#cccccc', white: '#e5e5e5' });
+    expect(css).toMatch(new RegExp(`\\.console \\{[^}]*color-scheme: dark;[^}]*background: ${CONSOLE_THEME.background!};`, 'i'));
+    // The light scheme's block never gives the console another background.
+    expect(/@media \(prefers-color-scheme: light\) \{\s*:root \{([^}]*)\}/.exec(css)?.[1]).not.toMatch(/console/);
   });
 });
 

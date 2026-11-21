@@ -69,7 +69,7 @@ describe('the theme copy', () => {
     }
   });
 
-  it("draws the page's own colours, the console's background and the composer's light fill from variables that follow the scheme", () => {
+  it("draws the page's own colours and the composer's light fill from variables that follow the scheme", () => {
     const css = PAGE_ASSETS['page.css']!.body;
     const light = /@media \(prefers-color-scheme: light\) \{\s*:root \{([^}]*)\}/.exec(css)?.[1] ?? '';
 
@@ -77,7 +77,6 @@ describe('the theme copy', () => {
       expect(light, name).toContain(`${name}:`);
     }
 
-    expect(css).not.toMatch(/#f0f6fc;\s*\}|#a371f7 18%|background: #181818/);
-    expect(css).toMatch(/\.console \{[^}]*background: var\(--vscode-panel-background\)/);
+    expect(css).not.toMatch(/#f0f6fc;\s*\}|#a371f7 18%/);
   });
 });

@@ -61,52 +61,32 @@ export const REPORT_MODES: ReadonlySet<number> = new Set([9, 1000, 1001, 1002, 1
 const MOUSE_REPORT = /^\u001b\[(?:M[\s\S]{3}|<\d+;\d+;\d+[mM])$/;
 /** The fonts the console draws with: VS Code's editor font. */
 const FONT_FAMILY = 'Consolas, "Courier New", monospace';
-/** VS Code's Dark Modern and Light Modern terminal colours, with VS Code's dark and light defaults for those the themes leave out. */
-export const CONSOLE_THEMES: Readonly<Record<'dark' | 'light', Readonly<Record<string, string>>>> = {
-  dark: {
-    background: '#181818',
-    foreground: '#cccccc',
-    cursor: '#cccccc',
-    selectionBackground: '#264f78',
-    black: '#000000',
-    red: '#cd3131',
-    green: '#0dbc79',
-    yellow: '#e5e510',
-    blue: '#2472c8',
-    magenta: '#bc3fbc',
-    cyan: '#11a8cd',
-    white: '#e5e5e5',
-    brightBlack: '#666666',
-    brightRed: '#f14c4c',
-    brightGreen: '#23d18b',
-    brightYellow: '#f5f543',
-    brightBlue: '#3b8eea',
-    brightMagenta: '#d670d6',
-    brightCyan: '#29b8db',
-    brightWhite: '#e5e5e5',
-  },
-  light: {
-    background: '#f8f8f8',
-    foreground: '#3b3b3b',
-    cursor: '#005fb8',
-    selectionBackground: '#add6ff',
-    black: '#000000',
-    red: '#cd3131',
-    green: '#107c10',
-    yellow: '#949800',
-    blue: '#0451a5',
-    magenta: '#bc05bc',
-    cyan: '#0598bc',
-    white: '#555555',
-    brightBlack: '#666666',
-    brightRed: '#f14c4c',
-    brightGreen: '#14ce14',
-    brightYellow: '#b5ba00',
-    brightBlue: '#3b8eea',
-    brightMagenta: '#d670d6',
-    brightCyan: '#29b8db',
-    brightWhite: '#a5a5a5',
-  },
+/**
+ * VS Code's Dark Modern terminal colours, with VS Code's dark defaults for those it leaves out, in both of the page's schemes. Claude Code draws
+ * for its own theme, dark unless the operator picks another, much of it in 24-bit colours such as its message and logo backgrounds and its grey
+ * and amber text, which no light palette can map (mechanics M106), so a light console showed dark blocks and unreadable text.
+ */
+export const CONSOLE_THEME: Readonly<Record<string, string>> = {
+  background: '#181818',
+  foreground: '#cccccc',
+  cursor: '#cccccc',
+  selectionBackground: '#264f78',
+  black: '#000000',
+  red: '#cd3131',
+  green: '#0dbc79',
+  yellow: '#e5e510',
+  blue: '#2472c8',
+  magenta: '#bc3fbc',
+  cyan: '#11a8cd',
+  white: '#e5e5e5',
+  brightBlack: '#666666',
+  brightRed: '#f14c4c',
+  brightGreen: '#23d18b',
+  brightYellow: '#f5f543',
+  brightBlue: '#3b8eea',
+  brightMagenta: '#d670d6',
+  brightCyan: '#29b8db',
+  brightWhite: '#e5e5e5',
 };
 /** The media query under which the page draws Light Modern (theme.css). */
 export const LIGHT_SCHEME = '(prefers-color-scheme: light)';
@@ -160,15 +140,8 @@ export function mountConsole(host: HTMLElement, createTerm: (options: TermOption
   foot.hidden = true;
   foot.append(note, reconnect);
   host.replaceChildren(screen, foot);
-  // The terminal's colours follow the operating system's light or dark setting, as the page's do, and change with it.
-  const scheme = typeof matchMedia === 'function' ? matchMedia(LIGHT_SCHEME) : null;
-  const colours = (): Record<string, string> => ({ ...CONSOLE_THEMES[scheme?.matches === true ? 'light' : 'dark'] });
-  const term = createTerm({ fontSize: CONSOLE_FONT_PX, fontFamily: FONT_FAMILY, scrollback: 10_000, cursorBlink: false, theme: colours() });
-  const recolour = (): void => {
-    term.options.theme = colours();
-  };
+  const term = createTerm({ fontSize: CONSOLE_FONT_PX, fontFamily: FONT_FAMILY, scrollback: 10_000, cursorBlink: false, theme: { ...CONSOLE_THEME } });
 
-  scheme?.addEventListener('change', recolour);
   let source: EventSource | null = null;
   let ended = false;
   let typing = false;
@@ -499,7 +472,6 @@ export function mountConsole(host: HTMLElement, createTerm: (options: TermOption
       source?.close();
       resized?.disconnect();
       scale?.removeEventListener('change', rescaled);
-      scheme?.removeEventListener('change', recolour);
 
       if (scaleTimer !== null) {
         clearTimeout(scaleTimer);
