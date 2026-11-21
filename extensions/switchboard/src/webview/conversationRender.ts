@@ -644,11 +644,13 @@ function picker(state: ConversationState, open: boolean, menu: HeaderMenu | null
 
 /**
  * The header's persona button (architecture.md § Personas): an icon, `pinned` or `person`, with the persona's name in its tooltip and accessible
- * name, which opens the list to pin another; nothing for a session with none.
+ * name, which opens the list to pin another; a plain `person` for a session with none that can take a pin; nothing otherwise.
  */
-export function personaButton(persona: SessionView['persona'] | undefined, expanded = false): string {
+export function personaButton(persona: SessionView['persona'] | undefined, expanded = false, canPin = false): string {
   if (persona == null) {
-    return '';
+    const none = 'No persona. Click to choose one.';
+
+    return canPin ? `<button type="button" class="persona" data-action="persona" aria-haspopup="menu" aria-expanded="${expanded}" title="${none}" aria-label="${none}"><span class="codicon codicon-person" aria-hidden="true"></span></button>` : '';
   }
 
   const title = [`Persona: ${persona.name}${persona.pinned ? ', pinned to this session' : ''}.`, persona.tonePending ? 'Its tone changes when the session next resumes or compacts.' : '', 'Click to choose another.'].filter((part) => part !== '').join(' ');
@@ -789,7 +791,8 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
   }
 
   // The header: the dropdown, the persona as an icon, and Open in terminal (voice-design report IA-1).
-  const persona = state.session?.persona == null ? '' : `<div class="menu-anchor persona-anchor">${personaButton(state.session.persona, menu?.kind === 'persona')}${menu?.kind === 'persona' ? headerMenu(menu) : ''}</div>`;
+  const personaIcon = personaButton(state.session?.persona, menu?.kind === 'persona', state.session?.canPin === true);
+  const persona = personaIcon === '' ? '' : `<div class="menu-anchor persona-anchor">${personaIcon}${menu?.kind === 'persona' ? headerMenu(menu) : ''}</div>`;
   const header = `<header class="header">${picker(state, open.has(PICKER), menu)}${persona}${state.session?.conversation === 'none' ? '' : '<button class="icon" data-action="terminal" title="Open in terminal" aria-label="Open in terminal"><span class="codicon codicon-terminal"></span></button>'}</header>`;
   // An ended session's reason sits just above the composer it disables, on every tab, with Resume; any other reason heads the conversation.
   // A Codex session that ended has no reason, since a message resumes it, but gets the note and Resume too.

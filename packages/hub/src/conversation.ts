@@ -45,6 +45,11 @@ export interface SessionView {
    */
   persona: { id: string; name: string; pinned: boolean; tonePending: boolean } | null;
   /**
+   * The operator can pin a persona to the session from the header, with or without one now: `voice.enabled` is on, the roster is not empty, and
+   * it is a Code Mode or app-server session. Absent from an older hub.
+   */
+  canPin?: boolean;
+  /**
    * While the session waits for a usage or rate limit to reset (architecture.md § Rate limits): when it resumes, and `retry` when that is the hub's
    * next attempt rather than the reset. Absent from an older hub.
    */
@@ -121,6 +126,7 @@ export function sessionView(session: Session, current: boolean, hooks: boolean, 
     conversation,
     reason,
     persona: personaOf(session, personas),
+    canPin: personas !== null && personas.enabled && personas.personas.length > 0 && (session.codeMode === true || session.execution === 'app-server'),
     limit: limitOf(session),
   };
 }

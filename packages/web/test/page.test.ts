@@ -414,6 +414,34 @@ describe('the page', () => {
     page.close();
   });
 
+  it('shows a plain persona button for a session with none that can take a pin, and pins from its roster', async () => {
+    const fetch = vi.fn(async (url: string, init?: { body?: string }) => {
+      posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) });
+
+      return { status: 200, ok: true, json: async () => (url.endsWith('/personas') ? { personas: [{ id: 'nova', name: 'Nova' }] } : {}), text: async () => '' } as unknown as Response;
+    });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000 });
+    const source = FakeSource.last!;
+
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: null, canPin: false })], items: [], more: false, status: null, artifacts: [] });
+    expect(root.querySelector('button.persona')).toBeNull();
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: null, canPin: true })], items: [], more: false, status: null, artifacts: [] });
+
+    const button = root.querySelector<HTMLElement>('button.persona')!;
+
+    expect(button.title).toBe('No persona. Click to choose one.');
+    expect(button.getAttribute('aria-label')).toBe('No persona. Click to choose one.');
+    expect(button.querySelector('.codicon-person')).not.toBeNull();
+    button.click();
+    await flush();
+    await flush();
+    expect([...root.querySelectorAll('.persona-menu .menu-row')].map((one) => [one.textContent, one.getAttribute('aria-checked')])).toEqual([['Nova', 'false']]);
+    root.querySelector<HTMLElement>('.persona-menu button[data-persona="nova"]')!.click();
+    await flush();
+    expect(posts.find((post) => post.url.endsWith('/persona'))?.body).toMatchObject({ sessionId: 's', personaId: 'nova' });
+    page.close();
+  });
+
   it('brings the conversation back where the operator left it after the Status tab', () => {
     const { page, source } = start();
 

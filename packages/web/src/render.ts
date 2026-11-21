@@ -162,7 +162,9 @@ export function renderHeader(state: PageState, view: View): string {
   const persona = state.session?.persona;
   const personaButton =
     persona == null
-      ? ''
+      ? state.session?.canPin === true
+        ? `<button type="button" class="persona" data-action="persona" aria-haspopup="menu" aria-expanded="${view.personas !== null}" title="No persona. Click to choose one." aria-label="No persona. Click to choose one."><span class="codicon codicon-person" aria-hidden="true"></span></button>`
+        : ''
       : `<button type="button" class="persona${persona.tonePending ? ' pending' : ''}" data-action="persona" aria-haspopup="menu" aria-expanded="${view.personas !== null}" title="${escape(`Persona: ${persona.name}${persona.pinned ? ', pinned' : ''}. Click to choose another.`)}" aria-label="${escape(`Persona: ${persona.name}${persona.pinned ? ', pinned' : ''}`)}"><span class="codicon codicon-${persona.pinned ? 'pinned' : 'person'}" aria-hidden="true"></span></button>`;
   const label = selected === null ? `${codicon(stateIcon(state.session?.state, state.session?.waitingFor, state.session?.limit))}<span class="title">${escape(title)}</span>` : conversationLabel(selected, state);
   const picker = `<div class="menu-anchor picker-anchor"><button type="button" class="picker" data-action="picker" aria-haspopup="menu" aria-expanded="${view.picker}" title="${escape(title)}">${label}<span class="codicon codicon-chevron-down" aria-hidden="true"></span></button>${view.picker ? `<ul class="glass menu conversation-menu" role="menu" aria-label="Conversations">${options}</ul>` : ''}</div>`;

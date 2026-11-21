@@ -1601,6 +1601,23 @@ describe('sessionView', () => {
     expect(sessionView(session({ codeMode: true, personaId: 'vega' }), true, true, settings).persona).toBeNull();
     expect(sessionView(session({ codeMode: true, personaId: 'nova' }), true, true).persona).toBeNull();
   });
+
+  it('lets the header pin a persona to a Code Mode or app-server session without one, only with voice on and a roster (architecture.md § Personas)', () => {
+    const nova = { id: 'nova', name: 'Nova', voice: 'cedar', style: 'pair', personality: 'Warm.' } as const;
+    const settings: PersonaView = { enabled: true, personas: [nova], playbookPersonas: {} };
+
+    // A session from before the roster, an app-server one, an ended one and one whose persona left the roster can take a pin.
+    expect(sessionView(session({ codeMode: true, personaId: null }), true, true, settings)).toMatchObject({ persona: null, canPin: true });
+    expect(sessionView(session({ execution: 'app-server', personaId: null }), true, true, settings)).toMatchObject({ persona: null, canPin: true });
+    expect(sessionView(session({ codeMode: true, state: 'ended', personaId: null }), true, true, settings).canPin).toBe(true);
+    expect(sessionView(session({ codeMode: true, personaId: 'vega' }), true, true, settings)).toMatchObject({ persona: null, canPin: true });
+    expect(sessionView(session({ codeMode: true, personaId: 'nova' }), true, true, settings).canPin).toBe(true);
+    // Not a background or registered session, which the flow refuses to pin, nor with voice off, an empty roster or no settings.
+    expect(sessionView(session({ personaId: null }), true, true, settings).canPin).toBe(false);
+    expect(sessionView(session({ codeMode: true }), true, true, { ...settings, enabled: false }).canPin).toBe(false);
+    expect(sessionView(session({ codeMode: true }), true, true, { ...settings, personas: [] }).canPin).toBe(false);
+    expect(sessionView(session({ codeMode: true }), true, true).canPin).toBe(false);
+  });
 });
 
 describe('ConversationService artifacts', () => {

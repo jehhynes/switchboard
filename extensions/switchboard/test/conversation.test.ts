@@ -353,6 +353,22 @@ describe('the Conversation view page', () => {
     expect(renderConversation(state([]))).not.toContain('class="persona');
   });
 
+  it('shows a plain persona button for a session with none that can take a pin, and none for one that cannot (architecture.md § Personas)', () => {
+    const root = document.createElement('div');
+
+    root.innerHTML = renderConversation(state([], { session: { ...SESSION, persona: null, canPin: true } }));
+
+    const button = root.querySelector<HTMLButtonElement>('header button.persona')!;
+
+    expect(button.dataset['action']).toBe('persona');
+    expect(button.className).toBe('persona');
+    expect(button.title).toBe('No persona. Click to choose one.');
+    expect(button.getAttribute('aria-label')).toBe('No persona. Click to choose one.');
+    expect(button.querySelector('.codicon-person')).not.toBeNull();
+    expect(button.querySelector('.codicon-pinned')).toBeNull();
+    expect(renderConversation(state([], { session: { ...SESSION, persona: null, canPin: false } }))).not.toContain('class="persona');
+  });
+
   it('says why the view cannot talk to a session, and when there is nothing to show', () => {
     const ended = renderConversation(state([], { session: { ...SESSION, state: 'ended', conversation: 'read-only', reason: 'The session has ended. Open it in the terminal to resume it.' } }));
 
@@ -2127,6 +2143,20 @@ describe('inline menus and lists instead of quick picks (architecture.md § Conv
     root.querySelector<HTMLButtonElement>('button.persona')!.click();
     send({ type: 'menu', id: posted.at(-1)!['id'], items: [], error: 'The hub did not answer.' });
     expect(root.querySelector('.header-menu')?.textContent).toBe('The hub did not answer.');
+  });
+
+  it('opens the roster from the plain persona button of a session with none and pins the one picked', () => {
+    const { root, posted, send } = start();
+
+    send({ type: 'state', state: applyEvent(EMPTY_CONVERSATION, hello([reply('r1', T0)], { sessions: [{ ...SESSION, persona: null, canPin: true }] })) });
+    root.querySelector<HTMLButtonElement>('button.persona')!.click();
+
+    const asked = posted.find((one) => one['type'] === 'personas')!;
+
+    send({ type: 'menu', id: asked['id'], items: [{ value: 'nova', label: 'Nova', note: '', current: false }], error: null });
+    expect(root.querySelector('.header-menu [aria-checked="true"]')).toBeNull();
+    root.querySelector<HTMLButtonElement>('.header-menu button')!.click();
+    expect(posted.at(-1)).toEqual({ type: 'persona', personaId: 'nova', target: { scopeGen: 1, sessionId: 's2' } });
   });
 
   it('lists the earlier statuses in a menu under the history button, pages back with Older statuses, and opens one in the preview', () => {
