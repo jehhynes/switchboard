@@ -2037,7 +2037,7 @@ public sealed partial class MainWindow : Window
 
         if (config is null)
         {
-            model.Status = "Settings need the hub.";
+            model.Status = "Switchboard is not running, so Settings cannot open.";
             return;
         }
 
@@ -2078,7 +2078,7 @@ public sealed partial class MainWindow : Window
         }
         if (hub is not IVolumeHub volume)
         {
-            model.Status = "Ticket volume needs the hub.";
+            model.Status = "Switchboard is not running, so the ticket volume report cannot open.";
             return;
         }
         var window = new VolumeWindow(volume, actions);

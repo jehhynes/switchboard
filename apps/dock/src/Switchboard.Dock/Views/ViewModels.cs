@@ -1189,7 +1189,7 @@ public sealed class RowViewModel(DockRow row) : Observable
 
     public bool HasCopy => row.Pastes.Count > 0;
 
-    public string CopyTitle => row.Pastes.Count == 1 ? $"Copy {row.Pastes[0].Label}" : "Copy…";
+    public string CopyTitle => row.Pastes.Count == 1 ? $"Copy {row.Pastes[0].Label}" : "Copy a draft…";
 
     public DockCommand? Report => row.Commands.FirstOrDefault((command) => command.Label == "Open report");
 
@@ -1198,7 +1198,7 @@ public sealed class RowViewModel(DockRow row) : Observable
     /// <summary>Whether the row has any button, so a row without one keeps its full width on hover.</summary>
     public bool HasActions => HasMain || HasCopy || HasReport;
 
-    public string ReportTitle => Report?.Command["url"]?.GetValue<string>() is { } file ? Path.GetFileName(file) : "";
+    public string ReportTitle => Report?.Command["url"]?.GetValue<string>() is { } file ? $"Open report ({Path.GetFileName(file)})" : "";
 
     public bool StripeWarning => row.Stripe == Tone.Warning;
 

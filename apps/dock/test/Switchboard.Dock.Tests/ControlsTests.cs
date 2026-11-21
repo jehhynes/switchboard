@@ -258,7 +258,7 @@ public sealed class ControlsTests
     public void ReportButton_ApprovalRow_RunsOpenReportInVsCode()
     {
         var (window, model) = Open();
-        var report = RowOf(window, "item:10").GetVisualDescendants().OfType<Button>().Single((button) => ToolTip.GetTip(button) as string == "reply.md");
+        var report = RowOf(window, "item:10").GetVisualDescendants().OfType<Button>().Single((button) => ToolTip.GetTip(button) as string == "Open report (reply.md)");
 
         actions.RunReply = "Open a VS Code window first; this runs in VS Code.";
         Click(report);
@@ -1197,6 +1197,32 @@ public sealed class ControlsTests
         Assert.Equal(["Customer reply", "Private note"], copy.ItemsSource!.Cast<MenuItem>().Select((item) => (string)item.Header!));
     }
 
+    [AvaloniaFact]
+    public void CopyButton_SeveralDrafts_SaysCopyADraft()
+    {
+        var view = Fixtures.View with
+        {
+            Groups = Fixtures.View.Groups.Select((group) => group with { Rows = group.Rows.Select((row) => row.Key == "item:10" ? row with { Pastes = [new DockPaste("Customer reply", "a.md"), new DockPaste("Private note", "b.md")] } : row).ToList() }).ToList(),
+        };
+        var (window, _) = Open(view);
+
+        Assert.Single(RowOf(window, "item:10").GetVisualDescendants().OfType<Button>(), (button) => ToolTip.GetTip(button) as string == "Copy a draft…");
+    }
+
+    [AvaloniaFact]
+    public void OpenSettings_NoConfigHub_SaysSwitchboardIsNotRunning()
+    {
+        var model = new DockViewModel(new DockSettings(), (_) => { });
+        var window = new MainWindow(model, null, hub, actions, docked: false);
+
+        model.Show(Fixtures.View);
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+        Choose(window, "Open Settings");
+
+        Assert.Equal("Switchboard is not running, so Settings cannot open.", model.Status);
+    }
+
     /// <summary>The recorded question row as the hub sends it with review: Answer in terminal attaches, and the menu's Open in terminal runs in the dock.</summary>
     static DockRow ReviewQuestion()
     {
@@ -1408,7 +1434,7 @@ public sealed class ControlsTests
         window.MouseUp(point, MouseButton.Left);
         Dispatcher.UIThread.RunJobs();
         // Open report runs in VS Code.
-        Click(RowOf(window, "item:10").GetVisualDescendants().OfType<Button>().Single((button) => ToolTip.GetTip(button) as string == "reply.md"));
+        Click(RowOf(window, "item:10").GetVisualDescendants().OfType<Button>().Single((button) => ToolTip.GetTip(button) as string == "Open report (reply.md)"));
 
         Assert.Equal(["item:7"], actions.Clicked.Select((row) => row.Key));
         Assert.True(actions.Cancels[0].IsCancellationRequested);
