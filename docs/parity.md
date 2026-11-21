@@ -17,7 +17,7 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 
 ## Open gaps, by value
 
-1. Row controls the page lacks (C5, C6, C8, C9, C15, R12): Start with guidance or prompt, Add comment, Open in Claude or Codex and a Codex terminal, Open changes, History, Open report, pool tickets' Start and Triage again, and Enter on a pill.
+1. Row controls the page lacks (C8, C9, C15, R12): Open in Claude or Codex and a Codex terminal, Open changes, History, Open report, pool tickets' Start and Triage again, and Enter on a pill.
 2. More Actions' dock windows (H2): Held sessions, Ticket volume report, Show hub log and Open Settings only say to use the dock, and New ad-hoc session and New conversation in a folder cannot choose a folder the hub does not know.
 3. Problems the page never shows (H3, H4, H5): settings, source and voice errors, orphan held sessions, and the needs-you message.
 4. Done's date bands and group state (G5, G6, G8): Done is one flat list, Snoozed starts open, and open or closed choices do not survive a reload.
@@ -111,11 +111,11 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 | # | Behaviour | Dock evidence | Web | Web evidence and note |
 |---|---|---|---|---|
 | C1 | Right-click or Menu key opens the row's menu, at the pointer or the row's corner | `OnRowContext` MainWindow.axaml.cs:1379 | Partly | The selected work item's controls are under an ellipsis in the conversation header (`renderActions` render.ts:75); no menu on the row itself |
-| C2 | Menu groups, separated: main action; work; state; notes; order; opens; controls that ask first | `MenuOf` MainWindow.axaml.cs:1438 | Partly | Main, work, state, order, opens and asking, separated (`pageActions` page.ts, `renderActions` render.ts); no notes group yet |
+| C2 | Menu groups, separated: main action; work; state; notes; order; opens; controls that ask first | `MenuOf` MainWindow.axaml.cs:1438 | Partly | Main, work, state, notes (Add comment…), order, opens and asking, separated (`pageActions` page.ts, `menuRows` render.ts); no Persona submenu, whose pin is the header's persona button (C7) |
 | C3 | Start, Approve, Retry, Stop, Mark done, Snooze…, Unsnooze, Delete | `controlsOf` rows.ts:148 | Present | `PAGE_ACTIONS` page.ts:237 |
 | C4 | Reopen on a done row | rows.ts:186 | Present | `PAGE_ACTIONS` page.ts, with the state controls |
-| C5 | Start with guidance… and Start with prompt… (text, playbook choice) | `guidedStart`, `promptedStart` rows.ts:82-94, `InputDialog` | Missing | controls with `input` are left out (page.ts:255) |
-| C6 | Add comment… | `commentControl` rows.ts:97 | Missing | same |
+| C5 | Start with guidance… and Start with prompt… (text, playbook choice) | `guidedStart`, `promptedStart` rows.ts:82-94, `InputDialog` | Present | `pageActions` page.ts sends `input`; the input sheet (`renderSheet` render.ts) asks as `InputDialog` does, and the hub fills the fields (`pageActionEvent`) |
+| C6 | Add comment… | `commentControl` rows.ts:97 | Present | in the notes group, through the input sheet |
 | C7 | Persona submenu with the session's persona checked and Clear pin | `personaControls` app.ts:601, MainWindow.axaml.cs:1477 | Partly | Persona button and roster in the conversation header (render.ts:327-333) |
 | C8 | Open in Claude or Codex, Answer in terminal, Open in terminal | rows.ts:168-205, MainWindow.axaml.cs:1450-1500 | Partly | The Console tab shows a held Claude Code Mode session's terminal and types into it once clicked (`drawConsole` main.ts, `console.ts`; architecture.md § Web page), and a terminal prompt card answers some waits; Open in Claude or Codex, and a terminal for a Codex session, are not on the page |
 | C9 | Open changes, History, Open report (VS Code commands) | `windowCommands` dock.ts:771 | Missing | |

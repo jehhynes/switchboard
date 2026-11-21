@@ -1764,7 +1764,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
       },
       log: () => {},
     });
-    const actions: Array<[number, string, { until: number | null; comment: string | null }]> = [];
+    const actions: Array<[number, string, { until: number | null; comment: string | null; text?: string | null; choice?: string | null }]> = [];
     const sourceCalls: Array<[string, boolean]> = [];
     const events: Array<Record<string, unknown>> = [];
     const made: Array<[string, string, string | undefined]> = [];
@@ -1950,7 +1950,14 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     expect(service.rowAction({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 3, label: 'Snooze…', until: 5, comment: '  later ' })).toEqual({ status: 200, body: { done: true } });
     expect(service.rowAction({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 3, label: 'Snooze…', until: 5 })).toEqual({ status: 200, body: { done: true } });
     expect(service.rowAction({ window: page.key, scopeGen: 1, opId: 'b', workItemId: 3, label: 'Approve' })).toEqual({ status: 409, body: { error: 'The work item no longer offers this.' } });
-    expect(actions).toEqual([[3, 'Snooze…', { until: 5, comment: 'later' }], [3, 'Approve', { until: null, comment: null }]]);
+    expect(service.rowAction({ window: page.key, scopeGen: 1, opId: 'c', workItemId: 3, label: 'Add comment…', text: 'Asked Ana', choice: null }).status).toBe(200);
+    expect(service.rowAction({ window: page.key, scopeGen: 1, opId: 'd', workItemId: 3, label: 'Add comment…', text: 5 }).status).toBe(400);
+    expect(service.rowAction({ window: page.key, scopeGen: 1, opId: 'd', workItemId: 3, label: 'Add comment…', text: 'x'.repeat(100_001) }).status).toBe(400);
+    expect(actions).toEqual([
+      [3, 'Snooze…', { until: 5, comment: 'later', text: null, choice: null }],
+      [3, 'Approve', { until: null, comment: null, text: null, choice: null }],
+      [3, 'Add comment…', { until: null, comment: null, text: 'Asked Ana', choice: null }],
+    ]);
 
     expect(await service.rowPaste({ window: page.key, scopeGen: 1, opId: 'c', workItemId: 3, label: 'Reply' })).toEqual({ status: 200, body: { text: 'Dear Ana' } });
     expect((await service.rowPaste({ window: page.key, scopeGen: 1, opId: 'c', workItemId: 3, label: 'Other' })).status).toBe(409);

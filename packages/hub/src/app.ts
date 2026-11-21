@@ -512,16 +512,17 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       return error;
     },
     // The page's row actions run as the dock's, rechecked against the row as it is now (architecture.md § Web page).
-    rowAction: (workItemId, label, snooze) => {
+    rowAction: (workItemId, label, extra) => {
       const row = dockRowOf(views().dock, workItemId);
-      const event = row === null ? null : pageActionEvent(row, label, snooze);
-      const parsed = event === null ? null : parseAction(event);
+      const built = row === null ? { refused: 'The work item is gone.' } : pageActionEvent(row, label, extra);
 
-      if (parsed === null) {
-        return row === null ? 'The work item is gone.' : 'The work item no longer offers this.';
+      if ('refused' in built) {
+        return built.refused;
       }
 
-      return runtime.send(parsed).refused;
+      const parsed = parseAction(built.event);
+
+      return parsed === null ? 'The work item no longer offers this.' : runtime.send(parsed).refused;
     },
     // The page's Resume: the attach terminal's resume of a Code Mode session, without the terminal, or a Codex app-server thread's.
     resumeSession: async (sessionId) => {

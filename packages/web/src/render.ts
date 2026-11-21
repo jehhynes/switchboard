@@ -84,8 +84,9 @@ export interface View {
   prompt: { sessionId: string; prompt: ScreenPrompt | null; sending: boolean } | null;
 }
 
-/** A sheet: Delete's or Stop's question, Snooze…'s choices, or a drafted text the clipboard refused. */
+/** A sheet: Delete's or Stop's question, Snooze…'s choices, a control's text (and choice) as the dock's input dialog asks for it, or a drafted text the clipboard refused. */
 export type Sheet =
+  | { kind: 'input'; workItemId: number; label: string; input: NonNullable<PageAction['input']>; text: string; picked: string }
   | { kind: 'confirm'; workItemId: number; action: PageAction }
   | { kind: 'snooze'; workItemId: number; label: string; title: string; choices: SnoozeChoice[]; picked: string; date: string; comment: string }
   | { kind: 'text'; title: string; text: string };
@@ -104,7 +105,7 @@ function clipLabel(label: string): string {
 
 /**
  * The header's row actions (architecture.md § Web page): the dock's main control as a button, then every control in a menu under an
- * ellipsis, grouped as the dock's row menu is: the main control, the work controls, the state controls, the order controls, what the row opens
+ * ellipsis, grouped as the dock's row menu is: the main control, the work controls, the state controls, Add comment…, the order controls, what the row opens
  * (Copy, Open ticket and its links, more than two of them in an Open link submenu), then the controls that ask first; empty when the row offers
  * none.
  */
@@ -132,7 +133,7 @@ export function renderActions(row: PageRow | null, view: View): string {
     ...(row.url === '' ? [] : [link('ticket', 'Open ticket', 'link-external')]),
     ...(row.links.length > MENU_LINKS ? [submenu] : row.links.map((one, index) => link(String(index), `Open ${one.label}`, 'link-external'))),
   ];
-  const groups = [grouped('main'), grouped('work'), grouped('state'), grouped('order'), opens, grouped('asking')].filter((group) => group.length > 0);
+  const groups = [grouped('main'), grouped('work'), grouped('state'), grouped('notes'), grouped('order'), opens, grouped('asking')].filter((group) => group.length > 0);
   const rows = groups.map((group) => group.join('')).join('<li class="menu-separator" role="separator"></li>');
   const main = actions.find((one) => one.group === 'main');
   const mainButton = main === undefined ? '' : `<button type="button" class="row-main" data-action="row-action" data-label="${escape(main.label)}"${disabled}><span class="codicon codicon-${escape(main.icon)}" aria-hidden="true"></span><span>${escape(main.label)}</span></button>`;
@@ -184,6 +185,11 @@ export function snoozeDateUntil(date: string, choices: readonly SnoozeChoice[]):
   return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), wake.getHours(), wake.getMinutes()).getTime();
 }
 
+/** Whether an input sheet can go ahead: with a text, or with a choice changed from the one chosen at first, as the dock's dialog. */
+export function inputReady(sheet: Extract<Sheet, { kind: 'input' }>): boolean {
+  return sheet.text.trim() !== '' || (sheet.input.choice !== null && sheet.picked !== sheet.input.choice.value);
+}
+
 /** The sheet over the page, or empty: a question with Cancel and its action, Snooze…'s choices, date and comment, or a text to copy. */
 export function renderSheet(sheet: Sheet | null, acting: boolean): string {
   if (sheet === null) {
@@ -197,6 +203,19 @@ export function renderSheet(sheet: Sheet | null, acting: boolean): string {
 
   if (sheet.kind === 'confirm') {
     return frame(sheet.action.confirm?.question ?? sheet.action.label, `<p class="sheet-detail">${escape(sheet.action.confirm?.detail ?? '')}</p>`, `${cancel}<button type="button" class="sheet-button primary" data-action="sheet-go"${busy}>${escape(sheet.action.confirm?.action ?? sheet.action.label)}</button>`);
+  }
+
+  if (sheet.kind === 'input') {
+    const { input } = sheet;
+    const choice =
+      input.choice === null
+        ? ''
+        : `<label class="sheet-field"><span class="sheet-label">${escape(input.choice.label)}</span><select class="sheet-select">${input.choice.values.map((value) => `<option value="${escape(value)}"${value === sheet.picked ? ' selected' : ''}>${escape(value)}</option>`).join('')}</select></label>`;
+    const box = `<textarea class="sheet-input${input.text === null ? '' : ' tall'}" aria-label="${escape(input.question)}">${escape(sheet.text)}</textarea>`;
+    const note = `<p class="sheet-note">Ctrl+Enter to ${escape(input.action.toLowerCase().replace(/…$/, ''))}.</p>`;
+    const go = `<button type="button" class="sheet-button primary" data-action="sheet-go"${acting || !inputReady(sheet) ? ' disabled' : ''}>${escape(input.action)}</button>`;
+
+    return frame(input.question, `<p class="sheet-detail">${escape(input.detail)}</p>${choice}${box}${note}`, `${cancel}${go}`);
   }
 
   if (sheet.kind === 'text') {

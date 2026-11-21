@@ -240,15 +240,27 @@ export interface PageRow {
 }
 
 /** The dock's actions the page may run through `row-action`, each on one work item. */
-export const PAGE_ACTIONS = ['start', 'approve', 'retry', 'stop', 'mark-done', 'reopen', 'snooze', 'restore', 'move', 'reset-position', 'delete'] as const;
+export const PAGE_ACTIONS = ['start', 'approve', 'retry', 'stop', 'mark-done', 'reopen', 'snooze', 'restore', 'comment', 'move', 'reset-position', 'delete'] as const;
 export type PageActionType = (typeof PAGE_ACTIONS)[number];
 
 /** The groups of the dock's row menu (`MenuOf`), in its order, with a separator between them; what the row opens comes before `asking`. */
-export type PageActionGroup = 'main' | 'work' | 'state' | 'order' | 'asking';
+export type PageActionGroup = 'main' | 'work' | 'state' | 'notes' | 'order' | 'asking';
+
+/** The text a control asks for before it runs, without the action fields it fills, which stay in the hub: the dock's input dialog. */
+export interface PageInput {
+  question: string;
+  detail: string;
+  /** The label of the button that goes ahead. */
+  action: string;
+  /** The text the box starts with, such as Start with prompt…'s prompt; null for an empty box. */
+  text: string | null;
+  /** A choice beside the text, such as Start with guidance…'s playbook, `value` chosen at first; null for none. */
+  choice: { label: string; value: string; values: string[] } | null;
+}
 
 /**
  * One control the page offers: its dock label, which names it in `row-action`, the action it runs, its codicon, its group in the dock's menu,
- * and what the page asks first.
+ * what the page asks first, and the text it asks for.
  */
 export interface PageAction {
   label: string;
@@ -256,6 +268,7 @@ export interface PageAction {
   icon: string;
   group: PageActionGroup;
   confirm: { question: string; detail: string; action: string } | null;
+  input: PageInput | null;
 }
 
 /** The dock's state controls, which change what the work item waits for (`StateActions` in the dock). */
@@ -264,46 +277,80 @@ const STATE_ACTIONS = new Set<string>(['mark-done', 'reopen', 'snooze', 'restore
 const ORDER_ACTIONS = new Set<string>(['move', 'reset-position']);
 /** Each control glyph's codicon name, for the page, which draws codicons by name. */
 const CONTROL_ICONS = new Map<string, string>(Object.entries(CONTROL_GLYPHS).map(([name, glyph]) => [glyph, name]));
+/** The longest text a control's input takes from the page, such as an edited prompt. */
+export const MAX_INPUT_CHARS = 100_000;
 
 /**
- * The page's controls for a dock row: the dock's hub controls whose action is in `PAGE_ACTIONS` and that ask for no text, grouped and ordered as
- * the dock's menu: the row's main control, its work, its state, its order in Ready for review, then the controls that ask first. Stop asks first on
+ * The page's controls for a dock row: the dock's hub controls whose action is in `PAGE_ACTIONS`, grouped and ordered as the dock's menu: the row's
+ * main control, its work, its state, its notes (Add comment…), its order in Ready for review, then the controls that ask first. Stop asks first on
  * the page, as Delete does in the dock.
  */
 export function pageActions(row: Pick<DockRow, 'controls' | 'main' | 'ticket'>): PageAction[] {
-  const offered = row.controls.filter((control) => (PAGE_ACTIONS as readonly string[]).includes(String(control.action['type'])) && control.input === undefined && control.group === undefined);
+  const offered = row.controls.filter((control) => (PAGE_ACTIONS as readonly string[]).includes(String(control.action['type'])) && control.group === undefined);
   const main = offered.find((control) => control.label === row.main && control.confirm === undefined);
   const groupOf = (control: DockRow['controls'][number]): PageActionGroup => {
     const type = String(control.action['type']);
 
-    return control === main ? 'main' : control.confirm !== undefined ? 'asking' : STATE_ACTIONS.has(type) ? 'state' : ORDER_ACTIONS.has(type) ? 'order' : 'work';
+    return control === main ? 'main' : control.confirm !== undefined ? 'asking' : STATE_ACTIONS.has(type) ? 'state' : ORDER_ACTIONS.has(type) ? 'order' : type === 'comment' ? 'notes' : 'work';
   };
-  const order: PageActionGroup[] = ['main', 'work', 'state', 'order', 'asking'];
+  const order: PageActionGroup[] = ['main', 'work', 'state', 'notes', 'order', 'asking'];
 
   return offered
     .map((control) => {
       const action = String(control.action['type']) as PageActionType;
       const confirm = control.confirm ?? (action === 'stop' ? { question: `Stop ${row.ticket}?`, detail: 'Switchboard stops its running session, and the work item waits for you as Stopped by you.', action: 'Stop' } : null);
+      const input = control.input === undefined ? null : { question: control.input.question, detail: control.input.detail, action: control.input.action, text: control.input.text ?? null, choice: control.input.choice === undefined ? null : { label: control.input.choice.label, value: control.input.choice.value, values: [...control.input.choice.values] } };
 
-      return { label: control.label, action, icon: CONTROL_ICONS.get(control.glyph) ?? 'circle-outline', group: groupOf(control), confirm };
+      return { label: control.label, action, icon: CONTROL_ICONS.get(control.glyph) ?? 'circle-outline', group: groupOf(control), confirm, input };
     })
     .sort((a, b) => order.indexOf(a.group) - order.indexOf(b.group));
 }
 
+/** What the page sends with a control: Snooze's wake time and comment, and the text and choice a control with an input asks for. */
+export interface PageActionExtra {
+  until: number | null;
+  comment: string | null;
+  text?: string | null;
+  choice?: string | null;
+}
+
 /**
- * The action `row-action` posts for a work item's dock row, by the control's label: the hub's own control's action, never the page's, with Snooze's
- * `until` and `comment`; null when the row no longer offers it.
+ * The action `row-action` posts for a work item's dock row, by the control's label: the hub's own control's action, never the page's, with
+ * Snooze's `until` and `comment`, and an input's text and changed choice set as the fields the hub's control names, as the dock's input dialog
+ * sets them; why not when the row no longer offers it or the answer does not do (a text or a changed choice is needed, and a choice must be one
+ * offered).
  */
-export function pageActionEvent(row: Pick<DockRow, 'controls' | 'main' | 'ticket'>, label: string, snooze: { until: number | null; comment: string | null }): Record<string, unknown> | null {
+export function pageActionEvent(row: Pick<DockRow, 'controls' | 'main' | 'ticket'>, label: string, extra: PageActionExtra): { event: Record<string, unknown> } | { refused: string } {
   const offered = pageActions(row).find((one) => one.label === label);
 
   if (offered === undefined) {
-    return null;
+    return { refused: 'The work item no longer offers this.' };
   }
 
-  const control = row.controls.find((one) => one.label === label && one.input === undefined && one.group === undefined)!;
+  const control = row.controls.find((one) => one.label === label && one.group === undefined)!;
 
-  return offered.action === 'snooze' ? { ...control.action, until: snooze.until, ...(snooze.comment === null ? {} : { comment: snooze.comment }) } : { ...control.action };
+  if (offered.action === 'snooze') {
+    return { event: { ...control.action, until: extra.until, ...(extra.comment === null ? {} : { comment: extra.comment }) } };
+  }
+
+  const input = control.input;
+
+  if (input === undefined) {
+    return { event: { ...control.action } };
+  }
+
+  const text = (extra.text ?? '').trim();
+  const choice = input.choice === undefined || extra.choice == null || extra.choice === input.choice.value ? null : extra.choice;
+
+  if (choice !== null && !input.choice!.values.includes(choice)) {
+    return { refused: `Choose one of the offered ${input.choice!.label.toLowerCase()}s.` };
+  }
+
+  if (text === '' && choice === null) {
+    return { refused: `${input.question} needs a text.` };
+  }
+
+  return { event: { ...control.action, [input.field]: text, ...(choice === null ? {} : { [input.choice!.field]: choice }) } };
 }
 
 /** The bookmark and the query parameter the dock adds to a link it opens (`Switcher.Marked`), so the Chrome extension groups its tab (PRD R74). */

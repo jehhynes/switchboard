@@ -199,8 +199,10 @@ export interface PageAction {
   /** Its codicon's name. */
   icon: string;
   /** Its group in the dock's row menu, which draws a separator between groups. */
-  group: 'main' | 'work' | 'state' | 'order' | 'asking';
+  group: 'main' | 'work' | 'state' | 'notes' | 'order' | 'asking';
   confirm: { question: string; detail: string; action: string } | null;
+  /** The text it asks for first, as the dock's input dialog: the box's first text and a choice beside it, such as the playbook; null for none. */
+  input: { question: string; detail: string; action: string; text: string | null; choice: { label: string; value: string; values: string[] } | null } | null;
 }
 
 /** One group of the page's list: a dock group, in the dock's order, or `conversations`, the hosted conversations, last. */

@@ -2,7 +2,7 @@ import { applyEvent, commandQuery, EMPTY, mentionOf, mentionQuery, pageTitle, ro
 import { snoozeChoices } from '@switchboard/core/snooze';
 import type { PageState } from './model.js';
 import { escape, renderMarkdown } from './markdown.js';
-import { answerText, artifactUrl, complete, firstSnoozeDay, renderEndedNote, renderMicButton, markdownBody, newView, parseQuestions, renderArtifacts, renderArtifactView, renderHeader, renderList, renderSheet, renderSideSwitch, renderStatus, renderTabs, renderTimeline, renderVoice, snoozeDateUntil, TABS, consoleNote, SIDE_TABS } from './render.js';
+import { answerText, artifactUrl, complete, firstSnoozeDay, inputReady, renderEndedNote, renderMicButton, markdownBody, newView, parseQuestions, renderArtifacts, renderArtifactView, renderHeader, renderList, renderSheet, renderSideSwitch, renderStatus, renderTabs, renderTimeline, renderVoice, snoozeDateUntil, TABS, consoleNote, SIDE_TABS } from './render.js';
 import type { CardDraft, SideTab, Tab, View } from './render.js';
 import type { ConsoleOptions, MountedConsole } from './console.js';
 import type { ItemView, ScreenPrompt } from './types.js';
@@ -1732,6 +1732,13 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
   });
   root.addEventListener('keydown', (event) => {
+    // Ctrl+Enter goes ahead in an input sheet, whose box takes several lines, as in the dock's dialog.
+    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && view.sheet?.kind === 'input') {
+      event.preventDefault();
+      void sheetGo();
+      return;
+    }
+
     if (event.key === 'Escape' && view.sheet !== null) {
       view.sheet = null;
       draw();
@@ -1978,6 +1985,13 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
+    if (action.input !== null && action.input !== undefined) {
+      view.sheet = { kind: 'input', workItemId: row.workItemId, label: action.label, input: action.input, text: action.input.text ?? '', picked: action.input.choice?.value ?? '' };
+      draw();
+      sheetHost.querySelector<HTMLTextAreaElement>('.sheet-input')?.focus();
+      return;
+    }
+
     if (action.action === 'snooze') {
       view.sheet = { kind: 'snooze', workItemId: row.workItemId, label: action.label, title: row.title, choices: snoozeChoices(new Date(deps.now())), picked: '0', date: '', comment: '' };
     } else if (action.confirm !== null) {
@@ -2009,6 +2023,15 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     if (sheet.kind === 'confirm') {
       await runAction(sheet.workItemId, sheet.action.label, {});
+    } else if (sheet.kind === 'input') {
+      if (!inputReady(sheet)) {
+        sheetHost.querySelector<HTMLTextAreaElement>('.sheet-input')?.focus();
+        return;
+      }
+
+      const choice = sheet.input.choice !== null && sheet.picked !== sheet.input.choice.value ? sheet.picked : null;
+
+      await runAction(sheet.workItemId, sheet.label, { text: sheet.text.trim(), ...(choice === null ? {} : { choice }) });
     } else if (sheet.kind === 'snooze') {
       const picked = sheet.picked;
       const until = picked === 'date' ? snoozeDateUntil(sheet.date, sheet.choices) : (sheet.choices[Number(picked)]?.until ?? null);
@@ -2060,6 +2083,23 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const keepSheet = (event: Event): void => {
     const field = event.target as HTMLInputElement | HTMLTextAreaElement;
     const sheet = view.sheet;
+
+    // An input sheet keeps its text and choice, and enables its button as the dock's dialog does, without a redraw under the caret.
+    if (sheet?.kind === 'input') {
+      if (field.classList.contains('sheet-input')) {
+        sheet.text = field.value;
+      } else if (field.classList.contains('sheet-select')) {
+        sheet.picked = field.value;
+      }
+
+      const go = sheetHost.querySelector<HTMLButtonElement>('[data-action="sheet-go"]');
+
+      if (go !== null) {
+        go.disabled = view.acting || !inputReady(sheet);
+      }
+
+      return;
+    }
 
     if (sheet?.kind !== 'snooze') {
       return;

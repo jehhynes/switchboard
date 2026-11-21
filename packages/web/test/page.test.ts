@@ -1380,12 +1380,12 @@ describe('the page in use', () => {
   it("runs the selected work item's row actions from the header: the main button, Stop and Delete after their question, Snooze with a choice, and Copy", async () => {
     const { page, source } = start();
     const actions = [
-      { label: 'Approve', action: 'approve', icon: 'check', group: 'main' as const, confirm: null },
-      { label: 'Stop', action: 'stop', icon: 'debug-stop', group: 'work' as const, confirm: { question: 'Stop gh 1?', detail: 'It stops.', action: 'Stop' } },
-      { label: 'Mark done', action: 'mark-done', icon: 'pass', group: 'state' as const, confirm: null },
-      { label: 'Snooze…', action: 'snooze', icon: 'clockface', group: 'state' as const, confirm: null },
-      { label: 'Move up', action: 'move', icon: 'arrow-up', group: 'order' as const, confirm: null },
-      { label: 'Delete', action: 'delete', icon: 'trash', group: 'asking' as const, confirm: { question: 'Delete gh 1?', detail: 'Gone.', action: 'Delete' } },
+      { label: 'Approve', action: 'approve', icon: 'check', group: 'main' as const, confirm: null, input: null },
+      { label: 'Stop', action: 'stop', icon: 'debug-stop', group: 'work' as const, confirm: { question: 'Stop gh 1?', detail: 'It stops.', action: 'Stop' }, input: null },
+      { label: 'Mark done', action: 'mark-done', icon: 'pass', group: 'state' as const, confirm: null, input: null },
+      { label: 'Snooze…', action: 'snooze', icon: 'clockface', group: 'state' as const, confirm: null, input: null },
+      { label: 'Move up', action: 'move', icon: 'arrow-up', group: 'order' as const, confirm: null, input: null },
+      { label: 'Delete', action: 'delete', icon: 'trash', group: 'asking' as const, confirm: { question: 'Delete gh 1?', detail: 'Gone.', action: 'Delete' }, input: null },
     ];
     const clipboard = vi.fn(async () => undefined);
 
@@ -1453,6 +1453,69 @@ describe('the page in use', () => {
     click('button.actions');
     click('#list [data-work-item="1"]');
     expect(root.querySelector('.actions-menu')).toBeNull();
+    page.close();
+  });
+
+  it("asks for a control's text in a sheet as the dock's input dialog, with its choice, and sends the text and a changed choice by the control's label", async () => {
+    const { page, source } = start();
+    const guided = { label: 'Start with guidance…', action: 'start', icon: 'comment', group: 'work' as const, confirm: null, input: { question: 'Start with guidance', detail: 'It ends the prompt.', action: 'Start', text: null, choice: { label: 'Playbook', value: 'dev:build', values: ['dev:build', 'dev:fix'] } } };
+    const prompted = { label: 'Start with prompt…', action: 'start', icon: 'edit', group: 'main' as const, confirm: null, input: { question: 'Start with prompt', detail: 'The session runs it.', action: 'Start', text: 'Fix the build', choice: null } };
+    const comment = { label: 'Add comment…', action: 'comment', icon: 'comment', group: 'notes' as const, confirm: null, input: { question: 'Add comment', detail: 'Kept here.', action: 'Add', text: null, choice: null } };
+    const type = (selector: string, value: string) => {
+      const field = root.querySelector<HTMLTextAreaElement | HTMLSelectElement>(selector)!;
+
+      field.value = value;
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+      field.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+
+    answers['/row-action'] = { status: 200, body: { done: true } };
+    hello(source, { groups: [listGroup('unstarted', [listRow(1, { title: 'Fix it', actions: [prompted, guided, comment], main: 'Start with prompt…' })])] });
+    // A main control that asks for text opens its sheet, with the text it starts with.
+    click('.header .row-main');
+    expect(root.querySelector('.sheet-title')!.textContent).toBe('Start with prompt');
+    expect(root.querySelector<HTMLTextAreaElement>('.sheet-input')!.value).toBe('Fix the build');
+    expect(document.activeElement).toBe(root.querySelector('.sheet-input'));
+    type('.sheet-input', 'Fix the tests');
+    root.querySelector('.sheet-input')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }));
+    await flush();
+    expect(posts.filter((post) => post.url.endsWith('/row-action')).at(-1)?.body).toMatchObject({ workItemId: 1, label: 'Start with prompt…', text: 'Fix the tests' });
+    expect(root.querySelector('.sheet')).toBeNull();
+
+    click('button.actions');
+    // Add comment… is its own group, as the dock's notes.
+    expect(root.querySelectorAll('.actions-menu .menu-separator')).toHaveLength(2);
+    click('.actions-menu [data-label="Start with guidance…"]');
+    expect(root.querySelector<HTMLSelectElement>('.sheet-select')!.value).toBe('dev:build');
+    // Neither a text nor a changed choice: the button waits, as the dock's.
+    expect(root.querySelector<HTMLButtonElement>('.sheet [data-action="sheet-go"]')!.disabled).toBe(true);
+    type('.sheet-select', 'dev:fix');
+    expect(root.querySelector<HTMLButtonElement>('.sheet [data-action="sheet-go"]')!.disabled).toBe(false);
+    posts = [];
+    click('.sheet [data-action="sheet-go"]');
+    await flush();
+    expect(posts.find((post) => post.url.endsWith('/row-action'))?.body).toMatchObject({ label: 'Start with guidance…', text: '', choice: 'dev:fix' });
+
+    click('button.actions');
+    click('.actions-menu [data-label="Add comment…"]');
+    type('.sheet-input', '   ');
+    expect(root.querySelector<HTMLButtonElement>('.sheet [data-action="sheet-go"]')!.disabled).toBe(true);
+    type('.sheet-input', ' Asked Ana ');
+    // A stream event redraws the page; the text stays.
+    source.emit('list', { groups: [listGroup('unstarted', [listRow(1, { title: 'Fix it', actions: [prompted, guided, comment], main: 'Start with prompt…' })])] });
+    expect(root.querySelector<HTMLTextAreaElement>('.sheet-input')!.value).toBe(' Asked Ana ');
+    posts = [];
+    click('.sheet [data-action="sheet-go"]');
+    await flush();
+    expect(posts.find((post) => post.url.endsWith('/row-action'))?.body).toMatchObject({ label: 'Add comment…', text: 'Asked Ana' });
+    expect(posts.find((post) => post.url.endsWith('/row-action'))?.body).not.toHaveProperty('choice');
+
+    // Cancel posts nothing.
+    click('button.actions');
+    click('.actions-menu [data-label="Add comment…"]');
+    posts = [];
+    click('.sheet [data-action="sheet-cancel"]');
+    expect(posts).toEqual([]);
     page.close();
   });
 

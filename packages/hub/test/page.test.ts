@@ -205,11 +205,10 @@ describe('pageActions', () => {
   it("offers the dock's Start, Approve, Retry, state controls and Delete in its menu order, its main control, and asks before Stop and Delete", () => {
     const unstarted = rowOf(item(1, { status: 'unstarted' }));
 
-    expect(pageActions(unstarted).map((one) => one.label)).toEqual(['Start', 'Mark done', 'Snooze…', 'Delete']);
+    expect(pageActions(unstarted).map((one) => one.label)).toEqual(['Start', 'Start with guidance…', 'Mark done', 'Snooze…', 'Add comment…', 'Delete']);
     expect(pageActions(unstarted).find((one) => one.action === 'delete')?.confirm).toEqual(unstarted.controls.find((one) => one.label === 'Delete')!.confirm);
-    // Start with guidance… asks for text, Add comment… is a note and History opens VS Code, so the page leaves them out.
-    expect(unstarted.controls.map((one) => one.label)).toEqual(expect.arrayContaining(['Start with guidance…', 'Add comment…']));
-    expect(pageActions(rowOf(item(2, { status: 'awaiting-approval' })))[0]).toEqual({ label: 'Approve', action: 'approve', icon: 'check', group: 'main', confirm: null });
+    expect(pageActions(unstarted).map((one) => one.group)).toEqual(['main', 'work', 'state', 'state', 'notes', 'asking']);
+    expect(pageActions(rowOf(item(2, { status: 'awaiting-approval' })))[0]).toEqual({ label: 'Approve', action: 'approve', icon: 'check', group: 'main', confirm: null, input: null });
     expect(pageActions(rowOf(item(3, { status: 'failed' }))).map((one) => one.action)).toContain('retry');
 
     const running = rowOf(item(4, { status: 'running', sessions: [session({ id: 's4', workItemId: 4, codeMode: true, state: 'running' })] }));
@@ -222,20 +221,22 @@ describe('pageActions', () => {
   it("builds the action from the row's own control, adds only Snooze's wake time and comment, and refuses one the row does not offer", () => {
     const row = rowOf(item(1, { status: 'unstarted' }));
 
-    expect(pageActionEvent(row, 'Start', { until: 5, comment: 'x' })).toEqual({ type: 'start', workItemId: 1 });
-    expect(pageActionEvent(row, 'Snooze…', { until: 5, comment: 'later' })).toEqual({ type: 'snooze', ticketId: row.controls.find((one) => one.label === 'Snooze…')!.action['ticketId'], until: 5, comment: 'later' });
-    expect(pageActionEvent(row, 'Snooze…', { until: null, comment: null })).not.toHaveProperty('comment');
-    expect(pageActionEvent(row, 'Approve', { until: null, comment: null })).toBeNull();
-    expect(pageActionEvent(row, 'Reopen', { until: null, comment: null })).toBeNull();
+    const none = { refused: 'The work item no longer offers this.' };
+
+    expect(pageActionEvent(row, 'Start', { until: 5, comment: 'x', text: 'ignored' })).toEqual({ event: { type: 'start', workItemId: 1 } });
+    expect(pageActionEvent(row, 'Snooze…', { until: 5, comment: 'later' })).toEqual({ event: { type: 'snooze', ticketId: row.controls.find((one) => one.label === 'Snooze…')!.action['ticketId'], until: 5, comment: 'later' } });
+    expect((pageActionEvent(row, 'Snooze…', { until: null, comment: null }) as { event: object }).event).not.toHaveProperty('comment');
+    expect(pageActionEvent(row, 'Approve', { until: null, comment: null })).toEqual(none);
+    expect(pageActionEvent(row, 'Reopen', { until: null, comment: null })).toEqual(none);
     // An action type is not a label.
-    expect(pageActionEvent(row, 'start', { until: null, comment: null })).toBeNull();
+    expect(pageActionEvent(row, 'start', { until: null, comment: null })).toEqual(none);
   });
 
   it("offers Reopen with the state controls, and Ready for review's Move and Reset position as the order group, each running the row's own move", () => {
     const done = rowOf(item(1, { status: 'done', doneAt: NOW, reopenable: true }));
 
-    expect(pageActions(done).map((one) => [one.label, one.group, one.icon])).toEqual([['Reopen', 'state', 'issue-reopened'], ['Delete', 'asking', 'trash']]);
-    expect(pageActionEvent(done, 'Reopen', { until: null, comment: null })).toEqual({ type: 'reopen', workItemId: 1 });
+    expect(pageActions(done).map((one) => [one.label, one.group, one.icon])).toEqual([['Reopen', 'state', 'issue-reopened'], ['Add comment…', 'notes', 'comment'], ['Delete', 'asking', 'trash']]);
+    expect(pageActionEvent(done, 'Reopen', { until: null, comment: null })).toEqual({ event: { type: 'reopen', workItemId: 1 } });
 
     const review = dockView(snapshot([item(1, { status: 'awaiting-approval', readyAt: NOW - 3 }), item(2, { status: 'awaiting-approval', readyAt: NOW - 2, orderAt: NOW }), item(3, { status: 'awaiting-approval', readyAt: NOW - 1 })]), NOW, WINDOWS);
     const ids = review.groups.find((group) => group.key === 'review')!.rows.map((row) => Number(row.key.slice('item:'.length)));
@@ -245,9 +246,34 @@ describe('pageActions', () => {
     expect(moves.map((one) => one.label)).toEqual(['Move to top', 'Move up', 'Move down', ...(middle.controls.some((one) => one.label === 'Reset position') ? ['Reset position'] : [])]);
     expect(moves.map((one) => one.icon).slice(0, 3)).toEqual(['arrow-circle-up', 'arrow-up', 'arrow-down']);
     // The order group comes after the state controls and before Delete, as in the dock's menu.
-    expect(pageActions(middle).map((one) => one.group)).toEqual([...pageActions(middle).map((one) => one.group)].sort((a, b) => ['main', 'work', 'state', 'order', 'asking'].indexOf(a) - ['main', 'work', 'state', 'order', 'asking'].indexOf(b)));
-    expect(pageActionEvent(middle, 'Move down', { until: null, comment: null })).toEqual({ type: 'move', workItemId: ids[1], after: ids[2] });
-    expect(pageActionEvent(middle, 'Move to top', { until: null, comment: null })).toEqual({ type: 'move', workItemId: ids[1], after: null });
+    expect(pageActions(middle).map((one) => one.group).filter((group, index, all) => all.indexOf(group) === index)).toEqual(['main', 'work', 'state', 'notes', 'order', 'asking'].filter((group) => pageActions(middle).some((one) => one.group === group)));
+    expect(pageActionEvent(middle, 'Move down', { until: null, comment: null })).toEqual({ event: { type: 'move', workItemId: ids[1], after: ids[2] } });
+    expect(pageActionEvent(middle, 'Move to top', { until: null, comment: null })).toEqual({ event: { type: 'move', workItemId: ids[1], after: null } });
+  });
+
+  it("asks for the dock's input text, sets it and a changed choice as the hub's own fields, and refuses a blank text or a choice not offered", () => {
+    const row = rowOf(item(1, { status: 'unstarted', playbook: 'dev:build', playbookChoices: ['dev:build', 'dev:fix'] }));
+    const guided = pageActions(row).find((one) => one.label === 'Start with guidance…')!;
+
+    // The page gets the question, never the field names.
+    expect(guided.input).toEqual({ question: 'Start with guidance', detail: expect.any(String), action: 'Start', text: null, choice: { label: 'Playbook', value: 'dev:build', values: ['dev:build', 'dev:fix'] } });
+    expect(guided.input).not.toHaveProperty('field');
+    expect(guided.input?.choice).not.toHaveProperty('field');
+    expect(pageActionEvent(row, 'Start with guidance…', { until: null, comment: null, text: '  Use the staging DB ', choice: 'dev:build' })).toEqual({ event: { type: 'start', workItemId: 1, guidance: 'Use the staging DB' } });
+    expect(pageActionEvent(row, 'Start with guidance…', { until: null, comment: null, text: '', choice: 'dev:fix' })).toEqual({ event: { type: 'start', workItemId: 1, guidance: '', playbook: 'dev:fix' } });
+    expect(pageActionEvent(row, 'Start with guidance…', { until: null, comment: null, text: '   ', choice: 'dev:build' })).toEqual({ refused: 'Start with guidance needs a text.' });
+    expect(pageActionEvent(row, 'Start with guidance…', { until: null, comment: null, text: 'x', choice: 'ops:wipe' })).toEqual({ refused: 'Choose one of the offered playbooks.' });
+    expect(pageActionEvent(row, 'Add comment…', { until: null, comment: null, text: 'Asked Ana' })).toEqual({ event: { type: 'comment', workItemId: 1, text: 'Asked Ana' } });
+    expect(pageActionEvent(row, 'Add comment…', { until: null, comment: null })).toEqual({ refused: 'Add comment needs a text.' });
+
+    const adhoc = rowOf(item(2, { status: 'unstarted', playbook: null, ticket: { ...item(2).ticket, source: 'adhoc', sourceKey: '9', url: '' }, prompt: 'Fix the build' } as never));
+    const prompted = pageActions(adhoc).find((one) => one.label === 'Start with prompt…');
+
+    if (prompted !== undefined) {
+      expect(prompted.input?.text).toBe('Fix the build');
+      expect(prompted.group).toBe(adhoc.main === 'Start with prompt…' ? 'main' : 'work');
+      expect(pageActionEvent(adhoc, 'Start with prompt…', { until: null, comment: null, text: 'Fix the tests' })).toEqual({ event: { type: 'start', workItemId: 2, prompt: 'Fix the tests' } });
+    }
   });
 
   it("opens only the row's own http or https ticket URL or link, marked as the dock marks it", () => {
