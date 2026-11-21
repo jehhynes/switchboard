@@ -172,6 +172,13 @@ describe('the installable page', () => {
     expect(css.indexOf(shared)).toBeLessThan(css.indexOf(own));
     expect(own).not.toMatch(/(^|\n)\.composer \{[^}]*(background|border|border-radius)\s*:/);
     expect(own).not.toMatch(/(^|\n)\.composer-footer \{/);
+
+    // The conversation dropdown's fill and its selected row come from picker.css, shared too.
+    const picker = readFileSync(createRequire(import.meta.url).resolve('@switchboard/conversation/picker.css'), 'utf8');
+
+    expect(css.indexOf(picker)).toBeGreaterThanOrEqual(0);
+    expect(css.indexOf(picker)).toBeLessThan(css.indexOf(own));
+    expect(own).not.toMatch(/button\.picker:hover|\.conversation-row\[aria-checked="true"\]/);
   });
 
   it('links the manifest from the page and the offline page, with the theme colour, and serves every file the worker keeps', () => {

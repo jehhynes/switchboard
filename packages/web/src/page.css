@@ -162,8 +162,8 @@ svg.source-logo.forum { color: #57ae57; }
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--vscode-sideBar-background); }
 .header { position: relative; display: flex; align-items: center; gap: 4px; padding: 6px 6px 6px 12px; border-bottom: 1px solid var(--vscode-panel-border); user-select: none; }
 .picker-anchor { flex: 1 1 0; min-width: 6em; }
-button.picker { flex: 1 1 auto; min-width: 0; overflow: hidden; display: flex; align-items: center; gap: 6px; border: none; background: transparent; color: inherit; padding: 6px 4px; border-radius: 4px; cursor: pointer; text-align: left; font-weight: 500; }
-button.picker:hover, button.persona:hover, button.icon:hover, a.icon:hover { background: var(--vscode-toolbar-hoverBackground); }
+button.picker { flex: 1 1 auto; min-width: 0; overflow: hidden; display: flex; align-items: center; gap: 6px; border: none; color: inherit; padding: 6px 6px; cursor: pointer; text-align: left; font-weight: 500; }
+button.persona:hover, button.icon:hover, a.icon:hover { background: var(--vscode-toolbar-hoverBackground); }
 button.picker .title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 button.picker > .codicon, button.picker > .provider, button.picker > .count, .persona-anchor, .header > button.icon { flex: none; }
 .provider { flex: none; display: inline-flex; align-items: center; color: var(--vscode-foreground); font-size: 16px; }
@@ -194,7 +194,6 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 .menu-row:hover .menu-note, .menu-row:focus .menu-note { color: inherit; opacity: 0.8; }
 /* A conversation's row: its state codicon stands in the gutter, and the selected one is marked by a highlight, not a check mark. */
 .conversation-row > .codicon:first-child { width: 28px; text-align: center; }
-.conversation-row[aria-checked="true"]:not(:hover):not(:focus) { background: var(--vscode-list-inactiveSelectionBackground, rgba(127, 127, 127, 0.2)); }
 .menu-row.submenu-row { padding-left: 16px; }
 .pool-row { position: relative; }
 .pool-row > .row-menu { top: calc(100% - 4px); right: 8px; }

@@ -399,6 +399,23 @@ describe('the Conversation view page', () => {
     expect(css).not.toMatch(/(^|\n)\.composer-footer \{/);
   });
 
+  it('draws the conversation dropdown from the picker.css it shares with the web page: one filled control, its hovered row grey and the selected one blue', () => {
+    const css = readFileSync(join(__dirname, '../src/webview/conversation.css'), 'utf8');
+    const shared = readFileSync(require.resolve('@switchboard/conversation/picker.css'), 'utf8');
+    const rule = (text: string, selector: string) => text.split('\n').find((line) => line.startsWith(`${selector} {`)) ?? '';
+
+    expect(rule(shared, 'button.picker')).toContain('background: var(--sb-picker-background);');
+    expect(rule(shared, 'button.picker')).not.toContain('border:');
+    expect(shared).toContain('--sb-picker-background: color-mix(in srgb, var(--vscode-foreground) 6%, transparent);');
+    expect(rule(shared, '.conversation-menu .menu-row:hover, .conversation-menu .menu-row:focus')).toContain('background: var(--vscode-list-hoverBackground');
+    expect(rule(shared, '.conversation-row[aria-checked="true"], .conversation-row[aria-checked="true"]:hover, .conversation-row[aria-checked="true"]:focus')).toContain('background: var(--sb-picker-selected);');
+    expect(shared).toContain('--sb-picker-selected: color-mix(in srgb, var(--vscode-focusBorder) 32%, transparent);');
+    // The view's own CSS leaves the button's fill and the selected row to the shared file.
+    expect(rule(css, 'button.picker')).not.toMatch(/background|border-radius/);
+    expect(css).not.toMatch(/(^|\n)button\.picker:hover \{/);
+    expect(css).not.toMatch(/(^|\n)\.conversation-row\[aria-checked="true"\]:not/);
+  });
+
   it('draws our messages as bubbles on the right, at most 85% wide in the web page\'s message blue with a smaller bottom-right corner, with its marks and time on one line under them', () => {
     const css = readFileSync(join(__dirname, '../src/webview/conversation.css'), 'utf8');
     const shared = readFileSync(require.resolve('@switchboard/conversation/bubbles.css'), 'utf8');

@@ -32,7 +32,8 @@
       "default": "./dist/spokenBubble.js"
     },
     "./bubbles.css": "./src/bubbles.css",
-    "./composer.css": "./src/composer.css"
+    "./composer.css": "./src/composer.css",
+    "./picker.css": "./src/picker.css"
   },
   "scripts": {
     "build": "tsc -b",

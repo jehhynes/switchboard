@@ -1,0 +1,14 @@
+/* The header's conversation dropdown, shared by the VS Code Conversation view and the web page, whose builds put this file before their own
+   styles (architecture.md § Conversation view). At rest the button is drawn as one control: a rounded fill a little lighter than the side bar,
+   with no border, holding the state icon, the title, the provider's mark and the chevron; hover lifts it a little more. In its menu a hovered
+   row is grey and the selected conversation blue, the focus colour as a selected work item's row is in the page's list, in every theme. */
+:root {
+  --sb-picker-background: color-mix(in srgb, var(--vscode-foreground) 6%, transparent);
+  --sb-picker-hover: color-mix(in srgb, var(--vscode-foreground) 11%, transparent);
+  --sb-picker-selected: color-mix(in srgb, var(--vscode-focusBorder) 32%, transparent);
+}
+button.picker { background: var(--sb-picker-background); border-radius: 6px; }
+button.picker:hover, button.picker[aria-expanded="true"] { background: var(--sb-picker-hover); }
+body.vscode-high-contrast button.picker, body.vscode-high-contrast-light button.picker { background: transparent; outline: 1px solid var(--vscode-contrastBorder, transparent); outline-offset: -1px; }
+.conversation-menu .menu-row:hover, .conversation-menu .menu-row:focus { background: var(--vscode-list-hoverBackground, rgba(127, 127, 127, 0.15)); color: inherit; }
+.conversation-row[aria-checked="true"], .conversation-row[aria-checked="true"]:hover, .conversation-row[aria-checked="true"]:focus { background: var(--sb-picker-selected); color: var(--vscode-list-activeSelectionForeground, inherit); }
