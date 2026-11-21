@@ -72,8 +72,8 @@ describe('Settings playbooks (architecture.md § Settings window)', () => {
 
     const labels = texts('.settings-nav-entry .settings-nav-label');
 
-    expect(labels.slice(labels.indexOf('dev'))).toEqual(['dev', 'build', 'triage', 'ops', 'broken', '+ New playbook']);
-    expect(texts('.settings-nav-heading')).toEqual(['Sources', 'Playbooks']);
+    expect(labels.slice(labels.indexOf('dev'), labels.indexOf('+ New playbook') + 1)).toEqual(['dev', 'build', 'triage', 'ops', 'broken', '+ New playbook']);
+    expect(texts('.settings-nav-heading').slice(0, 2)).toEqual(['Sources', 'Playbooks']);
     expect(entry('broken').querySelector('.settings-errors')).not.toBeNull();
     expect(entry('ops').querySelector('.settings-errors')).not.toBeNull();
     expect(entry('build').querySelector('.settings-errors')).toBeNull();

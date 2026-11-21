@@ -253,6 +253,20 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
       view.typing.set(field.path, input);
     }
 
+    // A weekday and a day of the month are different values, so a new period starts without the old one's day; by hand takes no time.
+    const schedule = /^(schedules\.[^.]+)\.every$/.exec(field.path)?.[1];
+
+    if (schedule !== undefined) {
+      next = setAt(next, `${schedule}.day`, undefined);
+
+      if (input === '') {
+        next = setAt(next, `${schedule}.at`, undefined);
+      }
+
+      view.typing.delete(`${schedule}.day`);
+      view.typing.delete(`${schedule}.at`);
+    }
+
     current.setDraft(next);
     edited();
   };
@@ -300,6 +314,20 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
 
       current.newSource = { name: '', kind: '', touched: false };
       change(setAt(value, `sources.${name}`, kind === name ? {} : { kind }), `source:${name}`);
+      return;
+    }
+
+    if (current.page === 'new-schedule') {
+      if (current.newScheduleError !== null) {
+        current.newSchedule = { ...current.newSchedule, touched: true };
+        draw();
+        return;
+      }
+
+      const name = current.newSchedule.name.trim();
+
+      current.newSchedule = { name: '', touched: false };
+      change(setAt(value, `schedules.${name}`, {}), `schedule:${name}`);
       return;
     }
 
@@ -354,6 +382,8 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
 
     if (state.page === 'new-source') {
       state.newSource = { ...state.newSource, [part]: text };
+    } else if (state.page === 'new-schedule') {
+      state.newSchedule = { ...state.newSchedule, name: text };
     } else if (state.page === 'new-playbook') {
       state.newPlaybook = { ...state.newPlaybook, [part === 'namespace' ? 'namespace' : 'name']: text };
     }
@@ -375,6 +405,10 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
         break;
       case 'delete':
         void askDelete();
+        break;
+      case 'remove-schedule':
+        // Its work items stay, and Discard restores it.
+        change(setAt(value, `schedules.${pressed.argument!}`, undefined), 'general');
         break;
       case 'remove-source':
         // Its work items stay, and Discard restores it.

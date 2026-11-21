@@ -255,6 +255,33 @@ export class EditorState {
     return this.playbookNames.filter((name) => name.split(':')[0] === space);
   }
 
+  /** The name typed on the New schedule page, and whether Create was pressed, so an empty name shows its error. */
+  newSchedule = { name: '', touched: false };
+
+  /** The schedule names in the settings being edited, in file order. */
+  get scheduleNames(): string[] {
+    const schedules = this.value?.['schedules'];
+
+    return isObject(schedules) ? Object.keys(schedules) : [];
+  }
+
+  /** Why the new schedule's name cannot be used, or null. */
+  get newScheduleError(): string | null {
+    const name = this.newSchedule.name.trim();
+
+    if (!SEGMENT.test(name)) {
+      return 'The name must be lowercase letters, digits and hyphens.';
+    }
+
+    const value = this.value;
+
+    if (value === null || (value['schedules'] !== undefined && !isObject(value['schedules']))) {
+      return 'settings.json must hold an object with a schedules object.';
+    }
+
+    return this.scheduleNames.includes(name) ? `A schedule named ${name} already exists.` : null;
+  }
+
   /** The check errors of one playbook, without their `playbooks.<name>: ` prefix. */
   playbookErrors(name: string): string[] {
     const prefix = `playbooks.${name}: `;
@@ -1035,6 +1062,45 @@ export function sourceFields(state: EditorState, name: string): Section[] {
   return sections;
 }
 
+const WEEKDAYS: FieldOption[] = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].map((day) => ({ value: day, label: day }));
+
+/** A schedule's fields (PRD R82); the day and time show only for the period that uses them. */
+export function scheduleFields(state: EditorState, name: string): Section[] {
+  const path = `schedules.${name}`;
+  const value = state.value ?? undefined;
+  const period = getAt(value, `${path}.every`);
+  const every = typeof period === 'string' ? period : '';
+  const tasks = state.playbookNames.filter((entry) => state.playbookValue(entry)?.kind === 'task').map((entry) => ({ value: entry, label: entry }));
+  const fields: Field[] = [
+    { path: `${path}.playbook`, label: 'Playbook', kind: 'select', help: 'The task playbook each run starts. It cannot need a worktree.', options: withCurrent([{ value: '', label: 'None' }, ...tasks], getAt(value, `${path}.playbook`)) },
+    { path: `${path}.repoRoot`, label: 'Repo root', kind: 'text', help: 'The directory its sessions run in.' },
+    {
+      path: `${path}.every`,
+      label: 'Runs',
+      kind: 'select',
+      help: 'Off, it runs only when you choose it in New ad-hoc session.',
+      options: [
+        { value: '', label: 'Only by hand' },
+        { value: 'day', label: 'Every day' },
+        { value: 'week', label: 'Every week' },
+        { value: 'month', label: 'Every month' },
+      ],
+    },
+  ];
+
+  if (every === 'week') {
+    fields.push({ path: `${path}.day`, label: 'Day', kind: 'select', help: '', options: withCurrent(WEEKDAYS, getAt(value, `${path}.day`)) });
+  } else if (every === 'month') {
+    fields.push({ path: `${path}.day`, label: 'Day of the month', kind: 'integer', help: '1 to 31. A month without that day runs on its last day.' });
+  }
+
+  if (every !== '') {
+    fields.push({ path: `${path}.at`, label: 'Time', kind: 'text', help: 'Local time, 24-hour. A run whose time passed while Switchboard was stopped starts once when it starts again.', placeholder: '09:00' });
+  }
+
+  return [{ heading: 'Schedule', fields }];
+}
+
 /** The sections of a settings page, by its name; none for a page this file does not know. */
 export function pageSections(state: EditorState, page: string): Section[] {
   if (page === 'general') {
@@ -1045,12 +1111,16 @@ export function pageSections(state: EditorState, page: string): Section[] {
     return sourceFields(state, page.slice('source:'.length));
   }
 
+  if (page.startsWith('schedule:')) {
+    return scheduleFields(state, page.slice('schedule:'.length));
+  }
+
   return [];
 }
 
 /** The settings pages the navigation offers, each of which owns the errors that name its fields. */
 export function settingsPages(state: EditorState): string[] {
-  return ['general', ...state.sourceNames.map((name) => `source:${name}`)];
+  return ['general', ...state.sourceNames.map((name) => `source:${name}`), ...state.scheduleNames.map((name) => `schedule:${name}`)];
 }
 
 /** Every settings field path, with the page that shows it. */
@@ -1097,7 +1167,7 @@ export function errorPages(state: EditorState): Map<string, string | null> {
 
 /** The parts of settings.json a page edits, by which the navigation marks it unsaved. */
 export function pagePaths(page: string): string[] {
-  return page === 'general' ? ['sessions', 'triage', 'dock', 'web'] : page.startsWith('source:') ? [`sources.${page.slice('source:'.length)}`] : [];
+  return page === 'general' ? ['sessions', 'triage', 'dock', 'web'] : page.startsWith('source:') ? [`sources.${page.slice('source:'.length)}`] : page.startsWith('schedule:') ? [`schedules.${page.slice('schedule:'.length)}`] : [];
 }
 
 export function pageDirty(state: EditorState, page: string): boolean {
@@ -1171,6 +1241,9 @@ export function nav(state: EditorState): NavEntry[] {
   }
 
   entries.push(add(state, 'New playbook', 'new-playbook'));
+  entries.push(heading('Schedules'));
+  entries.push(...state.scheduleNames.map((name) => item(state, `schedule:${name}`, name)));
+  entries.push(add(state, 'New schedule', 'new-schedule'));
   return entries;
 }
 
@@ -1294,6 +1367,29 @@ export function pageView(state: EditorState): PageView {
 
   if (page.startsWith('namespace:')) {
     return namespacePage(state, page.slice('namespace:'.length));
+  }
+
+  if (page.startsWith('schedule:')) {
+    const name = page.slice('schedule:'.length);
+
+    return state.scheduleNames.includes(name)
+      ? settingsPage(state, name, scheduleFields(state, name), [{ command: 'remove-schedule', label: 'Remove schedule', argument: name }], [])
+      : { title: name, filePath: state.config.settings.path, buttons: [], notes: [], errors: [], message: 'This schedule no longer exists.', sections: [] };
+  }
+
+  if (page === 'new-schedule') {
+    const { name, touched } = state.newSchedule;
+
+    return {
+      title: 'New schedule',
+      filePath: null,
+      buttons: [{ command: 'create', label: 'Create', primary: true }],
+      notes: [],
+      errors: [],
+      message: null,
+      sections: [],
+      newName: { label: 'Name', help: 'Lowercase letters, digits and hyphens. Create adds the schedule to settings.json when you save.', placeholder: 'cleanup-worktrees', name, error: name === '' && !touched ? null : state.newScheduleError },
+    };
   }
 
   if (page === 'new-playbook') {
