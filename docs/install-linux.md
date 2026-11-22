@@ -1,12 +1,12 @@
 # Install on Linux
 
-This guide covers a source build on Ubuntu 26.04 x86_64 with GNOME, Wayland/XWayland and PipeWire. It was checked on 2026-11-20. Other distributions need equivalent packages. Linux voice recognition currently uses the CPU; the CUDA setup described in architecture.md is Windows-only.
+This guide covers a source build on Ubuntu 26.04 x86_64 with GNOME, Wayland with XWayland, and PipeWire; other distributions need equivalent packages. Voice recognition on Linux runs on the CPU, because the GPU recogniser needs Windows ([architecture.md § Dictation](architecture.md#dictation)).
 
 ## System dependencies
 
-Use Node.js 22.13 or newer, npm, the .NET 10 SDK, Git, VS Code and the CLI for each provider you use. Node 24.22.1, .NET 10.0.115 and Codex 0.171.0 were used for verification. Older Codex versions may not support the app-server protocol Switchboard uses.
+Use Node.js 22.13 or newer, npm, the .NET 10 SDK, Git, VS Code and the CLI of each provider you use. Older Codex CLIs may lack the app-server protocol Switchboard uses; [mechanics.md](mechanics.md) M112 to M115 record the versions tested on Linux.
 
-On Ubuntu 26.04, these packages are available from the distribution repositories:
+On Ubuntu 26.04 the distribution repositories provide:
 
 ```bash
 sudo apt update
@@ -15,9 +15,9 @@ sudo apt install git curl ca-certificates tar bzip2 python3 build-essential \
   libfontconfig1 libx11-6 libxext6 xwayland libglib2.0-bin ptyxis
 ```
 
-Install [VS Code for Linux](https://code.visualstudio.com/docs/setup/linux) before invoking `code`. For Codex sessions, follow the [official Codex CLI installation and sign-in instructions](https://developers.openai.com/codex/cli/); only the selected provider's CLI and sign-in are required. Claude is optional for a Codex-only setup. Provider installation is separate from the repository's `npm ci`.
+Install [VS Code for Linux](https://code.visualstudio.com/docs/setup/linux) before running `code`. Install and sign in to the CLI of each provider you use, such as the [Codex CLI](https://developers.openai.com/codex/cli/); Claude is not needed for a Codex-only setup, and `npm ci` installs no provider CLI. For other sources, see [Node.js downloads](https://nodejs.org/en/download) and [Microsoft's Ubuntu .NET instructions](https://learn.microsoft.com/dotnet/core/install/linux-ubuntu-install); do not mix the distribution's and Microsoft's .NET package feeds.
 
-If Node is already installed through another manager, keep that installation instead of adding a second one. Set `sessions.nodePath` to its absolute executable path if a VS Code launched from GNOME cannot find that manager's `node` on PATH. Check the versions used by your shell and VS Code:
+If Node.js comes from a version manager, keep that installation rather than adding a second one, and set `sessions.nodePath` to its absolute executable path when VS Code started from GNOME cannot find `node` on PATH. Check the versions your shell and VS Code use:
 
 ```bash
 node --version
@@ -33,9 +33,7 @@ command -v claude
 pactl info
 ```
 
-`pactl` is needed to pause dictation while another app records audio. `gdbus` watches logind for lock, sleep and session changes. The dock uses XWayland and the GNOME extension for window and terminal focus. `ptyxis` is the tested external terminal. Use your provider's own sign-in before starting sessions; Codex sign-in does not provide the speech API key.
-
-Sources: [Node.js downloads](https://nodejs.org/en/download), [Microsoft's Ubuntu .NET instructions](https://learn.microsoft.com/dotnet/core/install/linux-ubuntu-install), and the package candidates from Ubuntu 26.04. Do not mix distribution and Microsoft .NET package feeds.
+`pactl` lets dictation pause while another app records audio. `gdbus` watches logind for lock, sleep and session changes. The dock runs under XWayland and uses the GNOME Shell extension to find and raise windows and to follow terminal focus. `ptyxis` is the terminal Switchboard opens. A provider sign-in does not supply the speech API key ([Speech API key and first use](#speech-api-key-and-first-use)).
 
 ## Build and install Switchboard
 
@@ -50,17 +48,19 @@ code --install-extension extensions/switchboard/switchboard-0.0.0.vsix --force
 npm run publish --workspace @switchboard/gnome-shell
 ```
 
-The integration tests require a graphical session. Run them from your GNOME login, or an isolated compositor as described in mechanics M39.
+The integration tests need a graphical session: run them from your GNOME login, or in an isolated compositor as in [mechanics.md](mechanics.md) M39.
 
-The extension package script uses `--no-dependencies`; build before packaging. Reload VS Code when ready. GNOME Shell loads the published extension at the next login; logging out ends desktop sessions, so choose when to do that.
+Packaging does not build (`--no-dependencies`), so build before packaging. Reload VS Code when ready. GNOME Shell loads the published extension at the next login; logging out ends desktop sessions, so choose when.
 
-Close the running dock before publishing it:
+Publish the dock, closing it first if it is running, because it holds its files open:
 
 ```bash
 npm run publish --workspace @switchboard/dock
 ```
 
-Start `~/.switchboard/dock/Switchboard.Dock`. See [AGENTS.md](../AGENTS.md) for deployment rules and [testing.md](testing.md) for the verification contract. Optional native npm dependencies must install successfully; missing `node-pty` prevents held terminals, and missing voice native packages prevents voice. If npm blocks an install script, inspect its warning and approve the specific required package before rebuilding; do not disable script checks globally.
+Start `~/.switchboard/dock/Switchboard.Dock`. To reinstall after a change, see [AGENTS.md § Reinstalling after a change](../AGENTS.md#reinstalling-after-a-change); for checks, see [testing.md](testing.md).
+
+Optional native npm dependencies must install: without `node-pty` there are no held terminals, and without the voice native packages there is no voice. If npm blocks an install script, read its warning and approve that package before rebuilding; do not turn off script checks globally.
 
 For browser integration:
 
@@ -68,13 +68,13 @@ For browser integration:
 npm run lint --workspace @switchboard/firefox
 ```
 
-Load `extensions/chrome/dist` unpacked in Chrome, or `extensions/firefox/dist/manifest.json` temporarily in Firefox's `about:debugging`. A permanent Firefox installation needs the signing procedure in [architecture.md](architecture.md).
+Load `extensions/chrome/dist` unpacked in Chrome, or `extensions/firefox/dist/manifest.json` temporarily from Firefox's `about:debugging`. A permanent Firefox install needs the signed build ([architecture.md § Browser extension](architecture.md#browser-extension)).
 
 ## Local voice models
 
-The model files are separate from npm packages and the VSIX. Default location: `~/.switchboard/voice/models/`. For an isolated Switchboard home, use its `voice/models` instead. Do not put them inside a hashed voice build folder.
+The models are not in the npm packages or the VSIX. They go in `~/.switchboard/voice/models/`, or `voice/models` in an isolated Switchboard home, never inside a voice build folder.
 
-Allow at least 3 GB of free space while downloading and extracting. The recognition and speaker downloads below total about 468 MiB. Preserve existing models and voiceprints; the commands install only the named files. The recognition archive and speaker model come from [sherpa-onnx's releases](https://github.com/k2-fsa/sherpa-onnx/releases); model details are in the [Nemotron documentation](https://k2-fsa.github.io/sherpa/onnx/nemo/nemotron-streaming.html). Each model has its own upstream license.
+Allow at least 3 GB free while downloading and extracting; the recognition and speaker downloads total about 468 MiB. The commands add only the named files, keeping existing models and voiceprints. The recognition archive and speaker model come from [sherpa-onnx's releases](https://github.com/k2-fsa/sherpa-onnx/releases); see the [Nemotron documentation](https://k2-fsa.github.io/sherpa/onnx/nemo/nemotron-streaming.html) for the model. Each model has its own upstream licence.
 
 Create a download folder and fetch the exact assets:
 
@@ -96,7 +96,7 @@ sha256sum --check SHA256SUMS
 )
 ```
 
-Continue only when both hashes match. Stop the voice process before replacing any existing model files. For a first installation:
+Continue only when both hashes match. Stop the voice process before replacing existing model files. For a first installation:
 
 ```bash
 (
@@ -111,7 +111,7 @@ cp wespeaker_en_voxceleb_resnet34_LM.onnx "$voice_models/"
 )
 ```
 
-The installed recognition and speaker models have this layout:
+The installed models have this layout:
 
 ```text
 ~/.switchboard/voice/models/
@@ -124,13 +124,13 @@ The installed recognition and speaker models have this layout:
 └── wespeaker_en_voxceleb_resnet34_LM.onnx
 ```
 
-Nemotron recognises speech; WeSpeaker provides speaker embeddings. Switchboard generates the hotword vocabulary from `tokens.txt`. Speaker enrolment is separate from installing the speaker model.
+Nemotron recognises speech; WeSpeaker computes speaker embeddings. Switchboard builds the hotword vocabulary from `tokens.txt`. Installing the speaker model does not enrol your voice.
 
 ### Optional turn model: separate permission required
 
-The published [LiveKit model licence](https://huggingface.co/livekit/turn-detector/blob/87e35fcb1e60a569bea70346191c4886ea92e281/LICENSE) restricts use to LiveKit Agents. Switchboard loads the model directly with ONNX Runtime. Install it only if you have separate permission covering that standalone use. Otherwise leave it absent: dictation uses the existing pause timer.
+The [LiveKit model licence](https://huggingface.co/livekit/turn-detector/blob/87e35fcb1e60a569bea70346191c4886ea92e281/LICENSE) restricts use to LiveKit Agents, and Switchboard loads the model directly with ONNX Runtime. Install it only with separate permission for that standalone use; without it, dictation ends a turn on the pause timer.
 
-With that permission, use the multilingual `v0.4.1-intl` model pinned to commit `87e35fcb1e60a569bea70346191c4886ea92e281`. The repository's current `main` has a different layout. This adds about 389 MiB of downloads. The two large-file hashes below are upstream LFS identifiers; the remaining hashes were checked against files at the pinned revision.
+With that permission, use the multilingual `v0.4.1-intl` model pinned to commit `87e35fcb1e60a569bea70346191c4886ea92e281`, because the commands below need the files at that revision's paths. It adds about 389 MiB of downloads. The two large-file hashes below are upstream LFS identifiers; the others were checked against the files at the pinned revision.
 
 ```bash
 (
@@ -159,11 +159,11 @@ done
 )
 ```
 
-The turn worker reads `livekit-turn-detector/onnx/model_q8.onnx`, `tokenizer.json`, `tokenizer_config.json` and optional `languages.json`. Keep them from the same revision. Preserve the downloaded licence alongside them. Restart the voice process after adding the turn model, as described below.
+The turn worker reads `onnx/model_q8.onnx`, `tokenizer.json`, `tokenizer_config.json` and, optionally, `languages.json` under `livekit-turn-detector/`. Keep them from the same revision, with the licence beside them, and restart the voice process after adding them ([Speech API key and first use](#speech-api-key-and-first-use)).
 
 ## Speech API key and first use
 
-Speech output reads `OPENAI_TTS_API_KEY` from `~/.claude/secrets/openai-tts.env`. This is a separate API credential, not a Codex subscription token. Create or edit the file locally without putting the key in shell history or repository files:
+Speech output reads `OPENAI_TTS_API_KEY` from `~/.claude/secrets/openai-tts.env`. It is an API credential, separate from a Codex subscription, and local models load without it. Create the file without putting the key in shell history or a repository:
 
 ```bash
 mkdir -p "$HOME/.claude/secrets"
@@ -172,18 +172,25 @@ chmod 700 "$HOME/.claude/secrets"
 chmod 600 "$HOME/.claude/secrets/openai-tts.env"
 ```
 
-Use a local editor to add `OPENAI_TTS_API_KEY=` followed by the key. Keep any existing secret-file contents. This credential is required for speech output, not local model loading.
+Add `OPENAI_TTS_API_KEY=` followed by the key in a local editor, keeping the file's other contents.
 
-Enable Voice in Switchboard's settings, choose the input and output devices, and use **Enroll my voice**. The turn model is selected at voice-process startup. After adding recognition or speaker assets, stop listening and start it again to reload recognition. For a complete voice-process restart, first check that no reply is playing or microphone capture is in use; read the PID from `~/.switchboard/voice.json`, verify it belongs to Switchboard's voice process, and send that PID `SIGTERM`. The hub supervises it and starts it again within a minute. Restarting VS Code alone may leave it running. Check `~/.switchboard/voice.log` for recogniser selection or missing-file errors. Never delete models, voiceprints or the operator's running voice process as a test cleanup step.
+Enable Voice in Switchboard's settings, choose the input and output devices, and use **Enroll my voice**.
+
+The voice process picks up new models as follows:
+
+- Recognition model: stop listening and start again.
+- Speaker model added after the voice process first needed it, or the turn model: restart the voice process.
+
+To restart the voice process, check that no reply is playing and no capture is in use, read the PID from `~/.switchboard/voice.json`, check that it is Switchboard's voice process, and send it `SIGTERM`. The hub starts it again within a minute. Restarting VS Code alone may leave it running. `~/.switchboard/voice.log` shows which recogniser loaded and any missing-file errors. Never delete models, voiceprints or your running voice process as a test cleanup step.
 
 ## Verification and troubleshooting
 
-- `npm run verify` proves builds, types, isolated tests and coverage; it does not prove that the local models can load or that audio devices work.
-- No recognition: verify all four Nemotron files and the exact directory name. An empty directory or an ONNX download saved as a Git LFS pointer is not a model.
-- Turn-model errors: check the pinned revision, all five checksums and the `onnx/model_q8.onnx` layout. Without separate permission, leave this model absent and use the pause timer.
-- Other-app pause missing: `pactl -f json list source-outputs` and `pactl subscribe` must work in the environment that starts the voice process. A user-local `pactl` must be on that process's PATH.
-- Terminal voice focus stale: publish the GNOME extension and log in again. Its D-Bus interface must include `TerminalUnfocused`.
-- Missing native library: use `ldd` on the failing `.node` or `.so` file and install the distribution package for each `not found` entry. Do not copy Windows DLLs into a Linux build.
-- Playback fails with no key: configure the separate TTS credential; reinstalling the models cannot repair authentication.
+- `npm run verify` checks builds, types, isolated tests and coverage; it does not show that the local models load or that the audio devices work.
+- No recognition: check the exact directory name and its four files (`encoder.int8.onnx`, `decoder.int8.onnx`, `joiner.int8.onnx`, `tokens.txt`). An empty directory, or an ONNX file saved as a Git LFS pointer, is not a model.
+- Turn-model errors: check the pinned revision, all five checksums and the `onnx/model_q8.onnx` path. Without separate permission, leave the model out and use the pause timer.
+- Dictation does not pause for another app: `pactl -f json list source-outputs` and `pactl subscribe` must work in the environment that starts the voice process; a user-local `pactl` must be on that process's PATH.
+- Terminal voice focus stale: publish the GNOME Shell extension and log in again; its D-Bus interface must include `TerminalUnfocused`.
+- Missing native library: run `ldd` on the failing `.node` or `.so` file and install the distribution package for each `not found` entry. Do not copy Windows DLLs into a Linux build.
+- Playback fails with no key: configure the speech API key; reinstalling models does not fix authentication.
 
-For live acceptance, test a short dictated phrase, a reply through the chosen speakers, another app taking the microphone, and leaving a session terminal. Then test enrolment, barge-in and room hold. Model-loading checks alone do not validate recognition accuracy, speaker identity or acoustic echo cancellation. See [testing.md](testing.md) and [mechanics.md](mechanics.md) for the recorded checks and their limits.
+For live acceptance, test a short dictated phrase, a reply through the chosen speakers, another app taking the microphone, and leaving a session terminal; then enrolment, barge-in and room hold. Model-loading checks do not validate recognition accuracy, speaker identity or echo cancellation. See [testing.md](testing.md) and [mechanics.md](mechanics.md) for the recorded checks and their limits.
