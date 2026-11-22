@@ -12,7 +12,7 @@ import { renderList } from '../src/list.js';
 import { html } from './html.js';
 import { REPLAY_TIP, SPEAKING_TIP, renderMicButton as viewMicButton } from '@switchboard/conversation/voiceControls';
 import { renderMarkdown } from '../src/markdown.js';
-import { CHAT_MAX, CHAT_MIN, DRAWER_HIDE_MS, DRAWER_REVEAL_MS, loadMermaid, PANE_SHOW_DELAY_MS, PIN_SNAP, SENT_NOTE_MS, SHOW_MARKER_MS, SIDE_COLLAPSE, SIDE_MAX, SIDE_MIN, startPage, SWIPE_OPEN } from '../src/main.js';
+import { CHAT_MAX, CHAT_MIN, DRAWER_HIDE_MS, DRAWER_REVEAL_MS, loadMermaid, PANE_SHOW_DELAY_MS, SENT_NOTE_MS, SHOW_MARKER_MS, SIDE_MAX, SIDE_MIN, startPage, SWIPE_OPEN } from '../src/main.js';
 import { DETAIL_MIN } from '../src/layout.js';
 import { RECONNECT_MS } from '../src/reconnect.js';
 import type { ArtifactView, MessageView, PageGroup, PageRow, ReplyView, SessionView } from '@switchboard/protocol';
@@ -1485,7 +1485,7 @@ describe('the page', () => {
     phone.page.close();
     expect(document.documentElement.classList.contains('phone')).toBe(false);
 
-    // An iPad Air on its side, 1180 px wide, gets the drawer beside the conversation, and a swipe stays.
+    // An iPad Air on its side, 1180 px wide, gets the pinned list beside the conversation, and a swipe stays.
     vi.stubGlobal('screen', { width: 820, height: 1180 });
     window.innerWidth = 1180;
     history.replaceState(null, '', '#');
@@ -1499,7 +1499,8 @@ describe('the page', () => {
     root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
     await flush();
     tablet.source.emit('hello', { key: 'pk', groups, scope, sessions: [session()], items: [reply('r1', 1)], more: false, status: null, artifacts: [] });
-    expect(root.classList.contains('drawers')).toBe(true);
+    expect(root.classList.contains('drawers')).toBe(false);
+    expect(root.querySelector('.list-pin')).not.toBeNull();
     expect(history.state).not.toEqual({ switchboardConversation: true });
     swipe(root.querySelector('#panel .timeline')!);
     expect(root.classList.contains('listing')).toBe(false);
@@ -2605,14 +2606,18 @@ describe('the page in use', () => {
     expect(localStorage.getItem('switchboard.sideWidth')).toBe('300');
     sash.dispatchEvent(new MouseEvent('pointermove', { clientX: 5_000, bubbles: true }));
     expect(width()).toBe(`${SIDE_MAX}px`);
-    // Under its least width, but not past the snap, the list stops at its least width.
-    sash.dispatchEvent(new MouseEvent('pointermove', { clientX: SIDE_COLLAPSE, bubbles: true }));
+    // Dragged to the page's edge, the list stops at its least width and stays pinned: a drag never makes it a drawer.
+    sash.dispatchEvent(new MouseEvent('pointermove', { clientX: 0, bubbles: true }));
     expect(width()).toBe(`${SIDE_MIN}px`);
-    expect(sash.classList.contains('snapping')).toBe(false);
     sash.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
     expect(root.classList.contains('resizing')).toBe(false);
+    expect(root.classList.contains('drawers')).toBe(false);
     expect(localStorage.getItem('switchboard.sideWidth')).toBe(String(SIDE_MIN));
     expect(localStorage.getItem('switchboard.listCollapsed')).toBeNull();
+    sash.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+    sash.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+    expect(width()).toBe(`${SIDE_MIN}px`);
+    expect(root.classList.contains('drawers')).toBe(false);
     // A move after the drag ended changes nothing.
     sash.dispatchEvent(new MouseEvent('pointermove', { clientX: 400, bubbles: true }));
     expect(width()).toBe(`${SIDE_MIN}px`);
@@ -3899,8 +3904,9 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it('hides the list in a drawer at tablet widths while a work item is open, shown by its button or a resting pointer and hidden as the dock auto-hides', () => {
+  it('hides the unpinned list in a drawer while a work item is open, shown by its button or a resting pointer and hidden as the dock auto-hides', () => {
     vi.useFakeTimers();
+    localStorage.setItem('switchboard.listCollapsed', '1');
     window.innerWidth = 1024;
     history.replaceState(null, '', '#w=1');
 
@@ -3929,6 +3935,7 @@ describe('the page in use', () => {
     // The button shows it, with the focus on the open work item's row, and it stays while the pointer is elsewhere.
     toggle().click();
     expect(isOpen()).toBe(true);
+    expect(root.classList.contains('drawer-held')).toBe(true);
     expect(toggle().getAttribute('aria-expanded')).toBe('true');
     expect(document.activeElement).toBe(root.querySelector('[data-work-item="1"]'));
     vi.advanceTimersByTime(2_000);
@@ -3947,6 +3954,16 @@ describe('the page in use', () => {
     expect(isOpen()).toBe(true);
     root.querySelector('#panel')!.dispatchEvent(new Event('pointerdown', { bubbles: true }));
     expect(isOpen()).toBe(false);
+    expect(root.classList.contains('drawer-held')).toBe(false);
+    // The backdrop under it takes a press outside, which then only hides it.
+    toggle().click();
+    const backdrop = root.querySelector<HTMLElement>('.drawer-backdrop')!;
+
+    backdrop.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    expect(isOpen()).toBe(true);
+    backdrop.click();
+    expect(isOpen()).toBe(false);
+    expect(document.activeElement).not.toBe(root.querySelector('[data-work-item="1"]'));
     toggle().click();
     toggle().dispatchEvent(new Event('pointerdown', { bubbles: true }));
     toggle().click();
@@ -3969,6 +3986,8 @@ describe('the page in use', () => {
     sliver.dispatchEvent(new Event('pointerenter'));
     vi.advanceTimersByTime(DRAWER_REVEAL_MS);
     expect(isOpen()).toBe(true);
+    // Shown by the pointer, it has no backdrop, as the dock's auto-hide has none.
+    expect(root.classList.contains('drawer-held')).toBe(false);
     // Shown that way, it stays while the pointer is over it, and hides 0.4 s after the pointer leaves, unless the search box has the focus.
     vi.advanceTimersByTime(2_000);
     expect(isOpen()).toBe(true);
@@ -4038,7 +4057,7 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it('shows the list as a column only while it, the conversation and the column fit, and brings a column back only past its need', () => {
+  it('keeps the pinned list a column at every width outside the phone, folding the column into tabs, and brings a column back only past its need', () => {
     window.innerWidth = 1440;
 
     const { page, source } = start();
@@ -4047,25 +4066,22 @@ describe('the page in use', () => {
     hello(source);
     // The list's default 340 px, the conversation's 640 and the column's 360 fit 1440 px.
     expect(columns()).toBe('list + column');
-    // Under 1340 px they do not: the list leaves first, and the conversation and the column keep the room.
+    // Under 1340 px they do not: the column folds into the tabs, and the pinned list stays.
     resizeTo(1339);
-    expect(columns()).toBe('drawer + column');
-    // The list comes back only 40 px past its need, so a width at the edge does not flap; then it stays until it no longer fits.
+    expect(columns()).toBe('list + tabs');
+    expect(root.querySelector('#head .tabs')).not.toBeNull();
+    // The column comes back only 40 px past its need, so a width at the edge does not flap; then it stays until it no longer fits.
     resizeTo(1360);
-    expect(columns()).toBe('drawer + column');
+    expect(columns()).toBe('list + tabs');
     resizeTo(1380);
     expect(columns()).toBe('list + column');
     resizeTo(1340);
     expect(columns()).toBe('list + column');
-    // Under 1000 px the column folds into the tabs, and comes back from 1040 px.
-    resizeTo(999);
-    expect(columns()).toBe('drawer + tabs');
-    expect(root.querySelector('#head .tabs')).not.toBeNull();
-    resizeTo(1020);
-    expect(columns()).toBe('drawer + tabs');
-    resizeTo(1040);
-    expect(columns()).toBe('drawer + column');
-    expect(root.querySelector('#head .tabs')).toBeNull();
+    // The Surface's portrait width keeps the list too.
+    resizeTo(912);
+    expect(columns()).toBe('list + tabs');
+    resizeTo(768);
+    expect(columns()).toBe('list + tabs');
     // A phone has separate views, with neither.
     resizeTo(700);
     expect(root.classList.contains('drawers')).toBe(false);
@@ -4073,7 +4089,7 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it("counts the list's kept width, and stops its sash where the list would no longer fit", () => {
+  it("counts the pinned list's kept width, and stops its sash where the conversation, and the column while it shows, keep what they need", () => {
     localStorage.setItem('switchboard.sideWidth', '400');
     window.innerWidth = 1366;
 
@@ -4081,34 +4097,24 @@ describe('the page in use', () => {
     const sash = root.querySelector<HTMLElement>('.side-sash')!;
 
     hello(source);
-    // 400 + 640 + 360 is more than 1366 px, which the default 340 px list would fit.
-    expect(root.classList.contains('drawers')).toBe(true);
-    resizeTo(1440);
+    // 400 + 640 + 360 is more than 1366 px, which the default 340 px list would fit: the column folds, and the list stays a column.
     expect(root.classList.contains('drawers')).toBe(false);
-    // End stops at 1440 - 640 - 360 px rather than SIDE_MAX, so the list stays a column.
+    expect(root.classList.contains('wide')).toBe(false);
+    resizeTo(1440);
+    expect(root.classList.contains('wide')).toBe(true);
+    // End stops at 1440 - 640 - 360 px rather than SIDE_MAX, so the column stays.
     sash.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
     expect(localStorage.getItem('switchboard.sideWidth')).toBe('440');
+    expect(root.classList.contains('wide')).toBe(true);
+    // With the column folded, End stops where the conversation keeps CHAT_MIN.
+    resizeTo(912);
+    sash.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+    expect(localStorage.getItem('switchboard.sideWidth')).toBe(String(912 - CHAT_MIN));
     expect(root.classList.contains('drawers')).toBe(false);
-    // Reset to the default 340 px at 1300 px, a list kept at 200 px no longer fits: the list becomes a drawer at once, with its sliver drawn,
-    // and the focus leaves the hidden sash for the Work items button.
-    localStorage.setItem('switchboard.sideWidth', '200');
     page.close();
-    history.replaceState(null, '', '#w=1');
-    window.innerWidth = 1300;
-    const again = start();
-
-    hello(again.source);
-    expect(root.classList.contains('drawers')).toBe(false);
-    const reset = root.querySelector<HTMLElement>('.side-sash')!;
-
-    reset.focus();
-    reset.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
-    expect(root.classList.contains('drawers')).toBe(true);
-    expect(document.activeElement).toBe(root.querySelector('.header > .list-toggle'));
-    again.page.close();
   });
 
-  it("brings the list back as a column when the conversation is narrowed on its sash, and sends it to the drawer when widened again", () => {
+  it('brings the column back when the conversation is narrowed on its sash, and folds it when widened again', () => {
     window.innerWidth = 1300;
 
     const { page, source } = start();
@@ -4116,139 +4122,81 @@ describe('the page in use', () => {
 
     hello(source);
     // The default 340 px list, the conversation at 640 px and the column at 360 px do not fit 1300 px.
-    expect(root.classList.contains('drawers')).toBe(true);
-    expect(root.classList.contains('wide')).toBe(true);
+    expect(root.classList.contains('drawers')).toBe(false);
+    expect(root.classList.contains('wide')).toBe(false);
     sash.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
     expect(localStorage.getItem('switchboard.chatWidth')).toBe(String(CHAT_MIN));
     // 340 + 400 + 360 px fit.
-    expect(root.classList.contains('drawers')).toBe(false);
     expect(root.classList.contains('wide')).toBe(true);
     sash.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
-    expect(root.classList.contains('drawers')).toBe(true);
+    expect(root.classList.contains('wide')).toBe(false);
+    expect(root.classList.contains('drawers')).toBe(false);
     page.close();
   });
 
-  it("hides the list in the drawer when its sash is dragged past the snap, saying so while dragged, and keeps that on the device", () => {
-    localStorage.setItem('switchboard.sideWidth', '300');
+  it('unpins the list into the drawer and pins it back from the pin at its header, from a click or the keyboard, keeping the choice on the device', () => {
     window.innerWidth = 1440;
     history.replaceState(null, '', '#w=1');
 
     const { page, source } = start();
-    const side = root.querySelector<HTMLElement>('.side')!;
-    const sash = root.querySelector<HTMLElement>('.side-sash')!;
+    const pin = () => root.querySelector<HTMLButtonElement>('.side-head .list-pin')!;
 
     hello(source);
-    vi.spyOn(side, 'getBoundingClientRect').mockImplementation(() => ({ left: 0, width: parseFloat(root.style.getPropertyValue('--side-width')) || 300 }) as DOMRect);
+    // Pinned by default: a column, and the pin offers to unpin it.
     expect(root.classList.contains('drawers')).toBe(false);
-    sash.dispatchEvent(new MouseEvent('pointerdown', { button: 0, clientX: 300, bubbles: true }));
-    sash.dispatchEvent(new MouseEvent('pointermove', { clientX: SIDE_COLLAPSE - 1, bubbles: true }));
-    expect(sash.classList.contains('snapping')).toBe(true);
-    expect(sash.dataset['snap']).toBe('Release to hide the work items');
-    expect(root.classList.contains('snap')).toBe(true);
-    // Back over the snap point, the note goes.
-    sash.dispatchEvent(new MouseEvent('pointermove', { clientX: SIDE_COLLAPSE + 1, bubbles: true }));
-    expect(sash.classList.contains('snapping')).toBe(false);
-    sash.dispatchEvent(new MouseEvent('pointermove', { clientX: 10, bubbles: true }));
-    sash.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
-    expect(sash.classList.contains('snapping')).toBe(false);
-    expect(root.classList.contains('snap')).toBe(false);
-    // The list is in the drawer though it fits, and keeps the width it had before the drag.
+    expect(pin().getAttribute('aria-label')).toBe('Unpin sidebar');
+    expect(pin().title).toBe('Unpin sidebar');
+    expect(pin().querySelector('.codicon-pinned')).not.toBeNull();
+    // Unpinned, the list is a drawer at any width, hidden, with the focus on the button that shows it.
+    pin().focus();
+    pin().click();
     expect(root.classList.contains('drawers')).toBe(true);
+    expect(root.classList.contains('drawer-open')).toBe(false);
     expect(localStorage.getItem('switchboard.listCollapsed')).toBe('1');
-    expect(localStorage.getItem('switchboard.sideWidth')).toBe('300');
-    expect(root.style.getPropertyValue('--side-width')).toBe('300px');
     expect(document.activeElement).toBe(root.querySelector('.header > .list-toggle'));
+    expect(pin().getAttribute('aria-label')).toBe('Pin sidebar');
+    expect(pin().querySelector('.codicon-pin')).not.toBeNull();
+    resizeTo(1920);
+    expect(root.classList.contains('drawers')).toBe(true);
+    // A reload keeps it unpinned.
     page.close();
 
-    // A reload keeps it; a wider page does too.
-    window.innerWidth = 1920;
     const again = start();
 
     hello(again.source);
     expect(root.classList.contains('drawers')).toBe(true);
-    // Status and Artifacts take the room the list left.
-    expect(root.classList.contains('wide')).toBe(true);
-    again.page.close();
-  });
-
-  it("hides the list from the keyboard with Left or Home at its least width", () => {
-    localStorage.setItem('switchboard.sideWidth', String(SIDE_MIN + 16));
-    window.innerWidth = 1440;
-    history.replaceState(null, '', '#w=1');
-
-    const { page, source } = start();
-    const sash = root.querySelector<HTMLElement>('.side-sash')!;
-
-    hello(source);
-    sash.focus();
-    sash.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
-    expect(localStorage.getItem('switchboard.sideWidth')).toBe(String(SIDE_MIN));
-    expect(root.classList.contains('drawers')).toBe(false);
-    sash.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
-    expect(root.classList.contains('drawers')).toBe(true);
-    expect(localStorage.getItem('switchboard.listCollapsed')).toBe('1');
-    expect(localStorage.getItem('switchboard.sideWidth')).toBe(String(SIDE_MIN));
-    page.close();
-  });
-
-  it("pins the list back as a column when the open drawer's sash is dragged wider past the snap, only where it then fits", () => {
-    localStorage.setItem('switchboard.sideWidth', '300');
-    localStorage.setItem('switchboard.listCollapsed', '1');
-    window.innerWidth = 1440;
-    history.replaceState(null, '', '#w=1');
-
-    const { page, source } = start();
-    const side = root.querySelector<HTMLElement>('.side')!;
-    const sash = root.querySelector<HTMLElement>('.drawer-sash')!;
-
-    hello(source);
-    vi.spyOn(side, 'getBoundingClientRect').mockImplementation(() => ({ left: 0, width: parseFloat(root.style.getPropertyValue('--side-width')) || 300 }) as DOMRect);
-    expect(root.classList.contains('drawers')).toBe(true);
+    // Pinned from the open drawer, by Enter on the pin as a button takes it, the list is a column again, with the focus still on the pin.
     click('.header > .list-toggle');
     expect(root.classList.contains('drawer-open')).toBe(true);
-    expect(sash.parentElement).toBe(side);
-    sash.dispatchEvent(new MouseEvent('pointerdown', { button: 0, clientX: 300, bubbles: true }));
-    sash.dispatchEvent(new MouseEvent('pointermove', { clientX: 300 + PIN_SNAP - 1, bubbles: true }));
-    expect(sash.classList.contains('snapping')).toBe(false);
-    // The drawer widens as it is dragged, and keeps open while the pointer is outside it.
-    expect(root.style.getPropertyValue('--side-width')).toBe(`${300 + PIN_SNAP - 1}px`);
-    // 1440 - 640 - 360 leaves the list at most 440 px as a column; past that the release would not show it, so no snap.
-    sash.dispatchEvent(new MouseEvent('pointermove', { clientX: 441, bubbles: true }));
-    expect(sash.classList.contains('snapping')).toBe(false);
-    sash.dispatchEvent(new MouseEvent('pointermove', { clientX: 300 + PIN_SNAP, bubbles: true }));
-    expect(sash.classList.contains('snapping')).toBe(true);
-    expect(sash.dataset['snap']).toBe('Release to keep the work items open');
-    sash.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+    pin().focus();
+    pin().click();
     expect(root.classList.contains('drawers')).toBe(false);
     expect(root.classList.contains('drawer-open')).toBe(false);
     expect(localStorage.getItem('switchboard.listCollapsed')).toBeNull();
-    expect(localStorage.getItem('switchboard.sideWidth')).toBe(String(300 + PIN_SNAP));
-    expect(document.activeElement).toBe(root.querySelector('.side-sash'));
-    page.close();
+    expect(document.activeElement).toBe(pin());
+    // With no work item open the unpinned list stays the side column, so the pin stays where it was pressed.
+    pin().click();
+    history.replaceState(null, '', '#');
+    again.page.close();
+    const listing = start();
+
+    hello(listing.source, { scope: null, sessions: [], items: [] });
+    expect(root.classList.contains('listing')).toBe(true);
+    expect(root.querySelector('.list-pin')!.getAttribute('aria-label')).toBe('Pin sidebar');
+    listing.page.close();
   });
 
-  it("pins the drawer wherever the list then fits, without the slack a list that left by width needs", () => {
-    localStorage.setItem('switchboard.sideWidth', '300');
-    localStorage.setItem('switchboard.listCollapsed', '1');
-    window.innerWidth = 1360;
-    history.replaceState(null, '', '#w=1');
+  it('has no pin in the phone\'s layout, where the list is its own view', () => {
+    window.innerWidth = 700;
 
     const { page, source } = start();
-    const side = root.querySelector<HTMLElement>('.side')!;
-    const sash = root.querySelector<HTMLElement>('.drawer-sash')!;
 
     hello(source);
-    vi.spyOn(side, 'getBoundingClientRect').mockImplementation(() => ({ left: 0, width: parseFloat(root.style.getPropertyValue('--side-width')) || 300 }) as DOMRect);
-    click('.header > .list-toggle');
-    sash.dispatchEvent(new MouseEvent('pointerdown', { button: 0, clientX: 300, bubbles: true }));
-    // 361 + 640 + 360 px is more than 1360; 348 + 640 + 360 px fits, though not with LAYOUT_SLACK more.
-    sash.dispatchEvent(new MouseEvent('pointermove', { clientX: 361, bubbles: true }));
-    expect(sash.classList.contains('snapping')).toBe(false);
-    sash.dispatchEvent(new MouseEvent('pointermove', { clientX: 300 + PIN_SNAP, bubbles: true }));
-    expect(sash.classList.contains('snapping')).toBe(true);
-    sash.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+    expect(document.documentElement.classList.contains('phone')).toBe(true);
+    // page.css hides it in the phone's layout; an unpinned choice kept on a wider window does not make a phone's list a drawer.
+    localStorage.setItem('switchboard.listCollapsed', '1');
+    resizeTo(699);
     expect(root.classList.contains('drawers')).toBe(false);
-    expect(localStorage.getItem('switchboard.listCollapsed')).toBeNull();
     page.close();
   });
 
@@ -4266,69 +4214,34 @@ describe('the page in use', () => {
     hello(source);
     vi.spyOn(side, 'getBoundingClientRect').mockImplementation(() => ({ left: 0, width: parseFloat(width()) || 300 }) as DOMRect);
     sash.dispatchEvent(new MouseEvent('pointerdown', { button: 0, clientX: 300, bubbles: true }));
-    sash.dispatchEvent(new MouseEvent('pointermove', { clientX: 10, bubbles: true }));
-    expect(sash.classList.contains('snapping')).toBe(true);
-    sash.dispatchEvent(new MouseEvent('pointercancel', { bubbles: true }));
-    expect(sash.classList.contains('snapping')).toBe(false);
-    expect(root.classList.contains('resizing')).toBe(false);
-    expect(root.classList.contains('drawers')).toBe(false);
-    expect(localStorage.getItem('switchboard.listCollapsed')).toBeNull();
-    expect(width()).toBe('300px');
-    sash.dispatchEvent(new MouseEvent('pointerdown', { button: 0, clientX: 300, bubbles: true }));
     sash.dispatchEvent(new MouseEvent('pointermove', { clientX: 380, bubbles: true }));
+    expect(width()).toBe('380px');
     sash.dispatchEvent(new MouseEvent('pointercancel', { bubbles: true }));
+    expect(root.classList.contains('resizing')).toBe(false);
     expect(width()).toBe('300px');
     expect(localStorage.getItem('switchboard.sideWidth')).toBe('300');
 
-    // The drawer's sash: a cancelled drag past the pin neither pins nor keeps its width.
-    sash.focus();
-    sash.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
-    sash.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
-    expect(root.classList.contains('drawers')).toBe(true);
+    // The open drawer's sash sets the same width, and a cancelled drag keeps nothing there either.
+    click('.side-head .list-pin');
     click('.header > .list-toggle');
-    const kept = localStorage.getItem('switchboard.sideWidth');
-    drawerSash.dispatchEvent(new MouseEvent('pointerdown', { button: 0, clientX: 200, bubbles: true }));
-    drawerSash.dispatchEvent(new MouseEvent('pointermove', { clientX: 300, bubbles: true }));
-    expect(drawerSash.classList.contains('snapping')).toBe(true);
+    drawerSash.dispatchEvent(new MouseEvent('pointerdown', { button: 0, clientX: 300, bubbles: true }));
+    drawerSash.dispatchEvent(new MouseEvent('pointermove', { clientX: 420, bubbles: true }));
     drawerSash.dispatchEvent(new MouseEvent('pointercancel', { bubbles: true }));
+    expect(width()).toBe('300px');
+    drawerSash.dispatchEvent(new MouseEvent('pointerdown', { button: 0, clientX: 300, bubbles: true }));
+    drawerSash.dispatchEvent(new MouseEvent('pointermove', { clientX: 420, bubbles: true }));
+    drawerSash.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+    // A release only sets the width: the drawer stays open and unpinned.
+    expect(localStorage.getItem('switchboard.sideWidth')).toBe('420');
     expect(root.classList.contains('drawers')).toBe(true);
-    expect(localStorage.getItem('switchboard.listCollapsed')).toBe('1');
-    expect(localStorage.getItem('switchboard.sideWidth')).toBe(kept);
-    page.close();
-  });
-
-  it("only resizes the open drawer on a release short of the pin, and pins it from the keyboard past the snap", () => {
-    localStorage.setItem('switchboard.sideWidth', '300');
-    localStorage.setItem('switchboard.listCollapsed', '1');
-    window.innerWidth = 1440;
-    history.replaceState(null, '', '#w=1');
-
-    const { page, source } = start();
-    const side = root.querySelector<HTMLElement>('.side')!;
-    const sash = root.querySelector<HTMLElement>('.drawer-sash')!;
-
-    hello(source);
-    vi.spyOn(side, 'getBoundingClientRect').mockImplementation(() => ({ left: 0, width: parseFloat(root.style.getPropertyValue('--side-width')) || 300 }) as DOMRect);
-    click('.header > .list-toggle');
-    sash.dispatchEvent(new MouseEvent('pointerdown', { button: 0, clientX: 300, bubbles: true }));
-    sash.dispatchEvent(new MouseEvent('pointermove', { clientX: 320, bubbles: true }));
-    sash.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
-    expect(localStorage.getItem('switchboard.sideWidth')).toBe('320');
-    expect(localStorage.getItem('switchboard.listCollapsed')).toBe('1');
     expect(root.classList.contains('drawer-open')).toBe(true);
-    sash.focus();
-    // The drawer opened at 300 px: Right to 336 and 352 px stays a drawer; past 348 px it pins.
-    sash.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
-    expect(root.classList.contains('drawers')).toBe(true);
-    sash.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
-    expect(root.classList.contains('drawers')).toBe(false);
-    expect(localStorage.getItem('switchboard.listCollapsed')).toBeNull();
-    expect(document.activeElement).toBe(root.querySelector('.side-sash'));
+    expect(localStorage.getItem('switchboard.listCollapsed')).toBe('1');
     page.close();
   });
 
   it('shows the drawer on a touch swiping right from the left edge, not on a mouse, a short or a mostly vertical swipe', () => {
     window.innerWidth = 1024;
+    localStorage.setItem('switchboard.listCollapsed', '1');
     history.replaceState(null, '', '#w=1');
 
     const { page, source } = start();
@@ -4364,11 +4277,12 @@ describe('the page in use', () => {
     const { page, source } = start();
 
     hello(source);
-    expect(root.classList.contains('drawers')).toBe(false);
-    // A width kept elsewhere is taken as it is, and a narrower page then makes the list a drawer.
+    expect(root.classList.contains('wide')).toBe(true);
+    // A width kept elsewhere is taken as it is, and a narrower page then folds the column, keeping the list a column.
     resizeTo(1400);
     expect(root.style.getPropertyValue('--side-width')).toBe('440px');
-    expect(root.classList.contains('drawers')).toBe(true);
+    expect(root.classList.contains('drawers')).toBe(false);
+    expect(root.classList.contains('wide')).toBe(false);
     page.close();
   });
 
@@ -4906,6 +4820,29 @@ describe("the list's CSS", () => {
     expect(declarationsOf((selector) => selector === ':where(html:not(.phone)) .header > .back-toggle')).toEqual(['display: none;']);
     expect(declarationsOf((selector) => selector === ':where(html:not(.phone)) .side-sash')).toEqual(['display: block;']);
     expect(declarationsOf((selector) => selector === '.header > .back-toggle' || selector === '.side-sash')).toEqual([]);
+  });
+
+  it('stacks the page\'s layers by one scale: the sashes over the top bars, a bar\'s open menu over the sashes, and the drawer and its backdrop over all of them', () => {
+    const scale = Object.fromEntries([...css.matchAll(/--sb-z-([a-z-]+): (\d+);/g)].map(([, name, value]) => [name, Number(value)]));
+    const order = ['bar', 'sash', 'bar-menu', 'sliver', 'drawer-backdrop', 'drawer', 'sheet', 'persona', 'settings', 'settings-sheet', 'top-line', 'top-band'];
+
+    expect(Object.keys(scale).sort()).toEqual([...order].sort());
+    expect(order.map((name) => scale[name])).toEqual(order.map((name) => scale[name]).sort((a, b) => a! - b!));
+    expect(new Set(Object.values(scale)).size).toBe(order.length);
+    expect(declarationsOf((selector) => selector === '.header')).toContainEqual(expect.stringContaining('z-index: var(--sb-z-bar)'));
+    expect(declarationsOf((selector) => selector === '.sash')).toEqual([expect.stringContaining('z-index: var(--sb-z-sash)')]);
+    expect(css).toContain(':is(.header, .list-header, .hist-bar, .tabs):has([role="menu"]) { z-index: var(--sb-z-bar-menu); }');
+    expect(declarationsOf((selector) => selector === ':where(html:not(.phone)) #root.drawers:not(.listing):not(.history) > .side')).toEqual([expect.stringContaining('z-index: var(--sb-z-drawer)')]);
+    expect(declarationsOf((selector) => selector === '.drawer-backdrop')).toEqual([expect.stringContaining('z-index: var(--sb-z-drawer-backdrop)')]);
+    // The backdrop shows only under a drawer opened by its button, a key or a swipe, not one a resting pointer showed.
+    expect(declarationsOf((selector) => selector === ':where(html:not(.phone)) #root.drawers.drawer-held:not(.listing):not(.history) > .drawer-backdrop')).toEqual(['display: block;']);
+    // No page-level layer keeps a number of its own outside the scale.
+    expect(css).not.toMatch(/\.(sash|sliver|sheet-backdrop|persona-backdrop|composer-menu)\b[^{]*\{[^}]*z-index: \d/);
+  });
+
+  it('hides the list\'s pin in the phone\'s layout, and drops the snap a drag once had', () => {
+    expect(declarationsOf((selector) => selector === ':where(html.phone) .list-header > .list-pin')).toEqual(['display: none;']);
+    expect(css).not.toMatch(/snapping|#root\.snap\b|data-snap/);
   });
 
   it("switches the phone's layout by the document's phone class alone, which isPhone sets, never by a media query on the width", () => {

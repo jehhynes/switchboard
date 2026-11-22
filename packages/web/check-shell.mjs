@@ -44,6 +44,8 @@ if (browsers.length === 0) {
 // The page with a fake stream and fetch in place of the hub's: a work item with a long conversation, one with none, and the list.
 const fake = `<script>
 const view = new URLSearchParams(location.search).get('view');
+// The drawer view unpins the list, which is otherwise pinned as a column outside the phone's layout.
+if (view === 'drawer') localStorage.setItem('switchboard.listCollapsed', '1'); else localStorage.removeItem('switchboard.listCollapsed');
 const now = Date.now();
 const row = (id, title, patch = {}) => ({ workItemId: id, ticketId: id, title, priority: null, time: null, ticket: 'gh ' + id, sourceKind: 'github', url: '', playbook: 'dev:build', links: [], returned: 0, comment: null, mark: null, details: [], stripe: null, dim: false, host: null, actions: [], main: null, pastes: [], search: '', opens: [], terminal: false, band: null, voice: null, history: null, ...patch });
 const remove = { label: 'Delete', action: 'delete', icon: 'trash', group: 'state', confirm: { question: 'Delete Fix it?', detail: 'It goes for good.', action: 'delete' }, input: null };

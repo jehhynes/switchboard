@@ -22,6 +22,8 @@ export interface ListHeaderDeps {
   local?: boolean;
   /** Voice on this phone (architecture.md § Remote access), on a paired device's page only: where it is, its last error, and the tap that moves it. */
   phoneVoice?: { state(): PhoneVoiceState; error(): string | null; toggle(): void };
+  /** Whether the list is pinned as a column rather than a drawer (architecture.md § Web page), for its pin button, whose click the page takes. */
+  pinned?(): boolean;
 }
 
 /** A pairing link the hub gave out (architecture.md § Remote access): its URL, its code and when both stop working. */
@@ -211,6 +213,8 @@ export interface HeaderView {
   phoneVoice?: PhoneVoiceState | null;
   /** The last work item that started needing the operator, with the dock's message, shown until it times out or is dismissed (PRD R65). */
   needs?: { workItemId: number; message: string } | null;
+  /** Whether the list is pinned, for the pin button at the header's end; left out, the header has no pin. */
+  pinned?: boolean;
 }
 
 /** How long the needs-you message shows on a visible page with the pointer off it, as the dock's status toast. */
@@ -353,6 +357,12 @@ export function renderListHeader(header: PageHeader | null, view: HeaderView): V
           </button>
           {view.menu === 'more' ? renderMoreMenu(header, view.local === true, view.phoneVoice ?? null) : null}
         </div>
+        {/* Outside the phone's layout (page.css), as VS Code's and the dock's pin: pinned, the list is a column; unpinned, a drawer. */}
+        {view.pinned === undefined ? null : (
+          <button type="button" class="icon list-pin" data-action="list-pin" title={view.pinned ? 'Unpin sidebar' : 'Pin sidebar'} aria-label={view.pinned ? 'Unpin sidebar' : 'Pin sidebar'} aria-controls="list">
+            <span class={`codicon codicon-${view.pinned ? 'pinned' : 'pin'}`} aria-hidden="true"></span>
+          </button>
+        )}
       </div>
       {/* The box and the searched range under the title row while the search is open, as the dock's. */}
       {search.open ? (
@@ -1407,6 +1417,10 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
       }
 
       view.phoneVoice = view.local === true ? null : (deps.phoneVoice?.state() ?? null);
+
+      if (deps.pinned !== undefined) {
+        view.pinned = deps.pinned();
+      }
 
       const voiceError = view.local === true ? null : (deps.phoneVoice?.error() ?? null);
 

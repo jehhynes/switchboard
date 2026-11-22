@@ -12,7 +12,7 @@ import { mount, unmount } from './island.js';
 import type { ComponentChild, VNode } from 'preact';
 import { renderList, renderListPane } from './list.js';
 import { menuRows, renderHeader, renderSideSwitch, renderTabs } from './header.js';
-import { CHAT_MIN, chatNeed, DETAIL_MIN, fitLayout, isPhone, sideWidth, type Layout } from './layout.js';
+import { CHAT_MIN, chatNeed, fitLayout, isPhone, sideLimit, sideWidth, type Layout } from './layout.js';
 import { pageCards, renderTimeline } from './timeline.js';
 import { renderArtifacts, renderArtifactView, renderEmpty, renderStatus } from './side.js';
 import { renderPersonaDialog } from './personas.js';
@@ -62,12 +62,6 @@ export const SIDE_MAX = 600;
 export { CHAT_MIN };
 export const CHAT_MAX = 1600;
 const SASH_STEP = 16;
-/**
- * The list's sash snaps it into the drawer when dragged to under this width, half its least, as VS Code's side bar snaps closed; the open
- * drawer's sash pins it back as a column when dragged `PIN_SNAP` wider than it was.
- */
-export const SIDE_COLLAPSE = SIDE_MIN / 2;
-export const PIN_SNAP = 48;
 /** How far right a touch from the page's left edge must move, more across than down, to show the drawer. */
 export const SWIPE_OPEN = 40;
 /** A pill shrunk to its icon, as the dock's: its 1 px borders and 6 px padding each side round a 14 px codicon, or the key's 12 px logo; and the space between line 2's items. */
@@ -75,8 +69,8 @@ const COMPACT_PILL = 28;
 const COMPACT_KEY = 26;
 const PILL_GAP = 6;
 const SIDE_WIDTH = 'switchboard.sideWidth';
-/** Where this device keeps the list hidden in the drawer, a choice made on the list's sash. */
-const LIST_COLLAPSED = 'switchboard.listCollapsed';
+/** Where this device keeps the list unpinned, in the drawer: '1', under the key an earlier page kept the list hidden by its sash. */
+const LIST_UNPINNED = 'switchboard.listCollapsed';
 /** Where the page keeps Show message details. */
 const DETAILS = 'switchboard.messageDetails';
 /** Where an earlier page kept the conversation's text size, which is now fixed; removed on load. */
@@ -159,49 +153,35 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const detailHead = root.querySelector<HTMLElement>('#detail .detail-head')!;
   const detailBody = root.querySelector<HTMLElement>('#detail .detail-body')!;
   const historyHost = root.querySelector<HTMLElement>('#history')!;
-  // The open work item takes the room first (layout.ts): the list is a column only while it, the conversation and the Status and Artifacts
-  // column all fit and the operator has not hidden it on its sash, and a drawer otherwise; Status and Artifacts are a column only while they and
-  // the conversation fit, and tabs otherwise. A layout choice an earlier page kept is dropped.
+  // The open work item takes the room first (layout.ts): the list is a column while the operator keeps it pinned, and a drawer otherwise;
+  // Status and Artifacts are a column only while they and the conversation fit, and tabs otherwise. A layout choice an earlier page kept is
+  // dropped.
   localStorage.removeItem('switchboard.layout');
   let layout: Layout | null = null;
   const wide = (): boolean => layout?.wide === true;
   // The installed page, as Chrome opens it from its own window; only it reports a column for the Chrome pane (architecture.md § Web page).
   const standalone = (): boolean => deps.standalone?.() ?? (typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches);
 
-  // The work items' and the conversation's widths (architecture.md § Web page), each set on a sash: the work items' on their edge, the
-  // conversation's between it and the Status and Artifacts column, which takes the rest of the width.
-  // The list's sash stops where the list would leave the conversation and the column less than they need, so a drag never turns it into a
-  // drawer by width; dragged well past its least width it snaps into the drawer instead, as VS Code's side bar snaps closed, and the open
-  // drawer's own sash dragged wider pins it back as a column, a choice this device keeps.
-  const sideSashElement = root.querySelector<HTMLElement>('.side-sash')!;
-  const drawerSashElement = root.querySelector<HTMLElement>('.drawer-sash')!;
-  let listCollapsed = ((): boolean => {
+  // The work items' and the conversation's widths (architecture.md § Web page), each set on a sash: the work items' on their edge, or on the
+  // open drawer's, the conversation's between it and the Status and Artifacts column, which takes the rest of the width. A drag only sets a
+  // width: the list's sash stops where the conversation, and the column while it shows, keep what they need, and only the list's pin button
+  // makes it a drawer.
+  let listPinned = ((): boolean => {
     try {
-      return localStorage.getItem(LIST_COLLAPSED) === '1';
+      return localStorage.getItem(LIST_UNPINNED) !== '1';
     } catch {
-      return false;
+      return true;
     }
   })();
-  /** The drawer's width when it last opened, from which its sash's keys count the pin. */
-  let drawerFrom = 0;
-  /** Whether the list fits as a column at `width` px, with no slack: a pin is the operator's choice, not a width settling near a boundary. */
-  const fitsPinned = (width: number): boolean => fitLayout(window.innerWidth, sideWidth(width, window.innerWidth), layout === null ? null : { ...layout, list: true }, chatNeed(chatSash.width()), false, isPhone()).list;
-  /** Hides the list in the drawer, or pins it back as a column, keeping the choice on this device; the focus follows the sash it was on. */
-  const collapseList = (collapse: boolean): void => {
-    const focused = document.activeElement;
-
-    listCollapsed = collapse;
-
-    // A pinned list shows wherever it fits, without the slack a list that left by width needs to come back.
-    if (!collapse && layout !== null) {
-      layout = { ...layout, list: true };
-    }
+  /** Pins the list as a column, or unpins it into the drawer, keeping the choice on this device; the focus stays on the pin, or goes to the button that shows a list it hid. */
+  const pinList = (pin: boolean): void => {
+    listPinned = pin;
 
     try {
-      if (collapse) {
-        localStorage.setItem(LIST_COLLAPSED, '1');
+      if (pin) {
+        localStorage.removeItem(LIST_UNPINNED);
       } else {
-        localStorage.removeItem(LIST_COLLAPSED);
+        localStorage.setItem(LIST_UNPINNED, '1');
       }
     } catch {
       // A page without local storage keeps the choice until it reloads.
@@ -210,57 +190,25 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     relayout();
     draw();
 
-    if (focused === sideSashElement && drawerMode()) {
+    if (drawerMode() && view.drawer === null) {
       head.querySelector<HTMLElement>('.list-toggle')?.focus();
-    } else if (focused === drawerSashElement && !drawerMode()) {
-      sideSashElement.focus();
+    } else {
+      root.querySelector<HTMLElement>('.side-head .list-pin')?.focus();
     }
   };
-  const sideSash = resizer(root, [sideSashElement, drawerSashElement], root.querySelector<HTMLElement>('.side')!, {
+  const sideSash = resizer(root, [root.querySelector<HTMLElement>('.side-sash')!, root.querySelector<HTMLElement>('.drawer-sash')!], root.querySelector<HTMLElement>('.side')!, {
     property: '--side-width',
     key: SIDE_WIDTH,
     min: SIDE_MIN,
     max: SIDE_MAX,
-    limit: () => (layout?.list === true ? window.innerWidth - chatNeed(chatSash.width()) - DETAIL_MIN : SIDE_MAX),
-    snaps: new Map([
-      [
-        sideSashElement,
-        {
-          label: 'Release to hide the work items',
-          keep: false,
-          test: (raw: number) => raw < SIDE_COLLAPSE,
-          key: (key: string, before: number) => before <= SIDE_MIN && (key === 'ArrowLeft' || key === 'Home'),
-          take: () => collapseList(true),
-        },
-      ],
-      [
-        drawerSashElement,
-        {
-          label: 'Release to keep the work items open',
-          keep: true,
-          // Pinned only where the list then fits as a column, so a release that snaps always shows it.
-          test: (raw: number, start: number) => raw >= start + PIN_SNAP && fitsPinned(raw),
-          key: (_key: string, _before: number, after: number) => after >= drawerFrom + PIN_SNAP && fitsPinned(after),
-          take: () => collapseList(false),
-        },
-      ],
-    ]),
+    limit: () => (layout?.list === true ? sideLimit(window.innerWidth, wide(), chatNeed(chatSash.width())) : SIDE_MAX),
     changed: () => {
-      if (!relayout()) {
-        return;
-      }
-
-      const focused = document.activeElement === sideSashElement;
-
-      draw();
-
-      // A reset that makes the list a drawer hides the sash the focus is on; the focus goes to the button that shows the list.
-      if (focused && drawerMode()) {
-        head.querySelector<HTMLElement>('.list-toggle')?.focus();
+      if (relayout()) {
+        draw();
       }
     },
   });
-  // The conversation's width counts in the layout too (chatNeed): narrowed, it can bring the list or the column back.
+  // The conversation's width counts in the layout too (chatNeed): narrowed, it can bring the column back.
   const chatSash = resizer(root, root.querySelector<HTMLElement>('.chat-sash')!, root.querySelector<HTMLElement>('.main')!, {
     property: '--chat-width',
     key: CHAT_WIDTH,
@@ -275,18 +223,18 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /** Whether the last layout was the phone's (`isPhone`), which the document's `phone` class gives page.css and settings.css. */
   let phone = false;
   /**
-   * Works out the columns again from the phone's layout, the page's width, the list's and the conversation's kept widths and the list's
-   * collapse, and sets the classes; true when they changed.
+   * Works out the columns again from the phone's layout, the page's width, the list's and the conversation's kept widths and the list's pin,
+   * and sets the classes; true when they changed.
    */
   const relayout = (): boolean => {
     const nextPhone = isPhone();
-    const next = fitLayout(window.innerWidth, sideWidth(sideSash.width(), window.innerWidth), layout, chatNeed(chatSash.width()), listCollapsed, nextPhone);
+    const next = fitLayout(window.innerWidth, sideWidth(sideSash.width(), window.innerWidth), layout, chatNeed(chatSash.width()), listPinned, nextPhone);
     const changed = layout === null || next.list !== layout.list || next.wide !== layout.wide || nextPhone !== phone;
 
     layout = next;
     phone = nextPhone;
     document.documentElement.classList.toggle('phone', phone);
-    // Outside the phone's layout, while the list does not fit, it is a drawer (page.css), shown only with a work item open.
+    // Outside the phone's layout, an unpinned list is a drawer (page.css), shown only with a work item open.
     root.classList.toggle('drawers', !phone && !next.list);
 
     return changed;
@@ -662,6 +610,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     local,
     openSettings: () => settingsPane.open(),
     reload: () => (deps.reload ?? (() => location.reload()))(),
+    pinned: () => listPinned,
     ...(phoneVoice === null ? {} : { phoneVoice: { state: () => phoneVoice.state, error: () => phoneVoice.error, toggle: () => (phoneVoice.state === 'off' ? phoneVoice.start() : phoneVoice.stop()) } }),
   });
   /** A command for the conversation the page shows, refused by the hub when the page has moved on since. */
@@ -1765,6 +1714,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   // ---- The work items' drawer (architecture.md § Web page), shown and hidden as the dock's auto-hide ----
   const drawer = root.querySelector<HTMLElement>('.side')!;
   const sliver = root.querySelector<HTMLElement>('.sliver')!;
+  // Under a drawer opened by its button or a key, a backdrop takes the press outside it, so the press closes the drawer and does nothing else.
+  const backdrop = root.querySelector<HTMLElement>('.drawer-backdrop')!;
   /** Whether the list is a drawer: outside the phone's layout while it does not fit and a work item's conversation is open; History, opened from the list, keeps it a column. */
   const drawerMode = (): boolean => root.classList.contains('drawers') && !(view.list || wanted === null) && shownHistory === null;
   let revealTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1816,7 +1767,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     dropDrawer();
     view.drawer = how;
     overDrawer = how === 'hover';
-    drawerFrom = drawer.getBoundingClientRect().width;
     idleMs = 0;
 
     if (how === 'hover') {
@@ -1889,12 +1839,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   document.addEventListener(
     'pointerdown',
     (event) => {
-      if (view.drawer !== null && event.target instanceof Node && !drawer.contains(event.target) && !sheetHost.contains(event.target) && head.querySelector('.list-toggle')?.contains(event.target) !== true) {
+      if (view.drawer !== null && event.target instanceof Node && event.target !== backdrop && !drawer.contains(event.target) && !sheetHost.contains(event.target) && head.querySelector('.list-toggle')?.contains(event.target) !== true) {
         closeDrawer();
       }
     },
     { signal: listening.signal },
   );
+
+  backdrop.addEventListener('click', () => closeDrawer());
 
   /**
    * Draws the hidden list's sliver, as the dock's `SliverBars`: each row's coloured stripe at its height, cut to the list's view and left out
@@ -1991,6 +1943,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
 
     root.classList.toggle('drawer-open', view.drawer !== null);
+    root.classList.toggle('drawer-held', view.drawer === 'open');
     fitSliver();
 
     if (dropped && drawer.contains(document.activeElement) && getComputedStyle(drawer).display === 'none') {
@@ -2778,6 +2731,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     switch (action) {
       case 'select':
         void select(Number(button!.dataset['workItem']));
+        break;
+      case 'list-pin':
+        pinList(!listPinned);
         break;
       case 'drawer':
         if (view.drawer === null) {
@@ -4222,19 +4178,6 @@ export function loadMermaid(): Promise<boolean> {
   });
 }
 
-/** A sash's snap (architecture.md § Web page): a drag past a point, or a key, that does something other than set a width. */
-interface Snap {
-  /** The note the sash shows while a release would snap. */
-  label: string;
-  /** Whether the width dragged to is kept when it snaps; otherwise the width from before the drag stays. */
-  keep: boolean;
-  /** Whether a drag to `raw` px wide, started at `start` px, snaps. */
-  test(raw: number, start: number): boolean;
-  /** Whether a key, moving the width from `before` to `after` px, snaps. */
-  key(key: string, before: number, after: number): boolean;
-  take(): void;
-}
-
 /**
  * A sash that sets a pane's width (architecture.md § Web page): dragged, or with Left and Right (`SASH_STEP`, four times that with Shift), Home
  * and End while it has the focus; the width goes into a CSS property on the root, kept in local storage under `key` and set before the page
@@ -4242,15 +4185,13 @@ interface Snap {
  */
 /**
  * Lets a sash set its pane's width, between `min` and `max`, kept in local storage under `key`; a drag or a key stops at `limit()` too, though
- * never below `min`, while a kept width is taken as it is. A sash with a snap shows its note while a release would snap, by the
- * `snapping` class and `data-snap`, and the root's `snap` class, and takes it on release. `changed` runs after each width kept. Returns the
- * width set, or null for the default.
+ * never below `min`, while a kept width is taken as it is. `changed` runs after each width kept. Returns the width set, or null for the default.
  */
 function resizer(
   root: HTMLElement,
   sashes: HTMLElement | HTMLElement[],
   pane: HTMLElement,
-  { property, key, min, max, limit, changed, snaps }: { property: string; key: string; min: number; max: number; limit?: () => number; changed?: () => void; snaps?: Map<HTMLElement, Snap> },
+  { property, key, min, max, limit, changed }: { property: string; key: string; min: number; max: number; limit?: () => number; changed?: () => void },
 ): { width(): number | null } {
   const all = Array.isArray(sashes) ? sashes : [sashes];
   /** The width set, or null for the default. */
@@ -4290,17 +4231,6 @@ function resizer(
       changed?.();
     }
   };
-  const showSnap = (sash: HTMLElement, snap: Snap | undefined, on: boolean): void => {
-    sash.classList.toggle('snapping', on);
-    root.classList.toggle('snap', on);
-
-    if (on && snap !== undefined) {
-      sash.dataset['snap'] = snap.label;
-    } else {
-      delete sash.dataset['snap'];
-    }
-  };
-
   set(((): number | null => {
     try {
       const kept = Number(localStorage.getItem(key));
@@ -4312,8 +4242,6 @@ function resizer(
   })(), false);
 
   for (const sash of all) {
-    const snap = snaps?.get(sash);
-
     sash.addEventListener('pointerdown', (event) => {
       if (event.button !== 0) {
         return;
@@ -4327,38 +4255,18 @@ function resizer(
 
       const left = pane.getBoundingClientRect().left;
       const cap = most();
-      const start = drawn();
       const before = width;
-      let snapped = false;
-      const move = (next: PointerEvent): void => {
-        const raw = next.clientX - left;
-
-        snapped = snap?.test(raw, start) === true;
-        showSnap(sash, snap, snapped);
-        set(raw, false, cap);
-      };
+      const move = (next: PointerEvent): void => set(next.clientX - left, false, cap);
       const end = (event: PointerEvent): void => {
         sash.removeEventListener('pointermove', move);
         sash.removeEventListener('pointerup', end);
         sash.removeEventListener('pointercancel', end);
         sash.classList.remove('dragging');
         root.classList.remove('resizing');
-        showSnap(sash, snap, false);
 
-        // A drag the browser cancelled keeps nothing: the width goes back to where it was, and nothing snaps.
+        // A drag the browser cancelled keeps nothing: the width goes back to where it was.
         if (event.type === 'pointercancel') {
           set(before, false);
-          return;
-        }
-
-        if (snapped && snap !== undefined) {
-          if (snap.keep) {
-            set(drawn(), true, cap);
-          } else {
-            set(before, false);
-          }
-
-          snap.take();
           return;
         }
 
@@ -4379,17 +4287,7 @@ function resizer(
       if (next !== undefined) {
         event.preventDefault();
         event.stopPropagation();
-
-        if (snap?.key(event.key, now, next) === true && !snap.keep) {
-          snap.take();
-          return;
-        }
-
         set(next, true, Math.max(cap, Math.min(max, now)));
-
-        if (snap?.key(event.key, now, drawn()) === true) {
-          snap.take();
-        }
       }
     });
   }

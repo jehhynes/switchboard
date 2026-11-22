@@ -204,13 +204,13 @@ describe('the installable page', () => {
     // the top, opaque and z-index 10, so iOS's top-edge hit test (4 px down) finds it, paints the status bar in its colour and drops its blur.
     expect(css).toContain(':root { --sb-top: env(safe-area-inset-top); }\n');
     expect(css).not.toMatch(/--sb-top: max\(/);
-    expect(css).toContain('.header, .list-header, .hist-bar, .settings-head, .persona-head { position: sticky; top: 0; z-index: 10; }');
+    expect(css).toContain('.header, .list-header, .hist-bar, .settings-head, .persona-head { position: sticky; top: 0; z-index: var(--sb-z-bar); }');
     expect(css).toMatch(/(^|\n)\.header \{[^}]*background: var\(--sb-bar-background\);/);
     expect(css).not.toMatch(/(^|\n)\.header \{[^}]*position: relative/);
     expect(css).toMatch(/(^|\n)\.list-header \{[^}]*background: var\(--sb-bar-background\);/);
     expect(css).toMatch(/(^|\n)\.hist-bar \{[^}]*background: var\(--vscode-sideBar-background\);/);
     expect(css).toMatch(/(^|\n)\.settings-head \{[^}]*background: var\(--vscode-sideBar-background\);/);
-    expect(css).toMatch(/#safe-top \{[^}]*position: fixed; inset: 0 0 auto 0; z-index: 1001; height: var\(--sb-top\); background: var\(--sb-bar-background\);/);
+    expect(css).toMatch(/#safe-top \{[^}]*position: fixed; inset: 0 0 auto 0; z-index: var\(--sb-z-top-band\); height: var\(--sb-top\); background: var\(--sb-bar-background\);/);
     expect(css).toMatch(/#root \{[^}]*padding: var\(--sb-top\) env\(safe-area-inset-right\) 0 env\(safe-area-inset-left\);/);
     expect(css).toMatch(/#root\.drawers:not\(\.listing\):not\(\.history\) > \.side \{[^}]*padding-top: var\(--sb-top\);/);
     // Only the band's own definition reads the inset; every top edge reads the band.

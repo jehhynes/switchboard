@@ -23,13 +23,13 @@ export interface Layout {
 }
 
 /**
- * The list's width as page.css draws it: the width kept on its sash, or `clamp(260px, 30vw, 340px)`, at least 200 px and at most half the page,
- * the least winning as CSS's `min-width` does over `max-width`.
+ * The list's width as page.css draws it: the width kept on its sash, or `clamp(260px, 30vw, 340px)`, at least 200 px and at most half the page
+ * and what leaves the conversation `CHAT_MIN`, the least winning as CSS's `min-width` does over `max-width`.
  */
 export function sideWidth(kept: number | null, width: number): number {
   const wanted = kept ?? Math.min(340, Math.max(260, width * 0.3));
 
-  return Math.max(200, Math.min(wanted, width / 2));
+  return Math.max(200, Math.min(wanted, width / 2, width - CHAT_MIN));
 }
 
 /**
@@ -57,17 +57,24 @@ export function isPhone(): boolean {
 }
 
 /**
- * The columns that fit `width`: the list only while it is not collapsed into the drawer and it, the conversation at `chat` (`chatNeed`) and the
- * column at `DETAIL_MIN` all fit, and the column only while the conversation and it fit beside whatever the list takes. A column shown at
- * `before` stays until it no longer fits; one hidden comes back only `LAYOUT_SLACK` past its need. The phone's layout (`phone`) shows neither.
+ * The columns at `width`: the list whenever it is pinned, whatever the width, and a drawer otherwise; the column only while the conversation at
+ * `chat` (`chatNeed`) and it, at `DETAIL_MIN`, fit beside whatever the pinned list takes. A column shown at `before` stays until it no longer
+ * fits; one hidden comes back only `LAYOUT_SLACK` past its need. The phone's layout (`phone`) shows neither.
  */
-export function fitLayout(width: number, list: number, before: Layout | null, chat = CHAT_FIT, collapsed = false, phone = phoneLayout(width, 0)): Layout {
+export function fitLayout(width: number, list: number, before: Layout | null, chat = CHAT_FIT, pinned = true, phone = phoneLayout(width, 0)): Layout {
   if (phone) {
     return { list: false, wide: false };
   }
 
-  const fits = (need: number, was: boolean | undefined): boolean => width >= need + (before === null || was === true ? 0 : LAYOUT_SLACK);
-  const showList = !collapsed && fits(list + chat + DETAIL_MIN, before?.list);
+  const need = (pinned ? list : 0) + chat + DETAIL_MIN;
 
-  return { list: showList, wide: fits((showList ? list : 0) + chat + DETAIL_MIN, before?.wide) };
+  return { list: pinned, wide: width >= need + (before === null || before.wide ? 0 : LAYOUT_SLACK) };
+}
+
+/**
+ * The most the list's sash may set while the list is pinned at `width`: what leaves the conversation its least width beside it, and, while
+ * the Status and Artifacts column shows (`wide`), the conversation at `chat` and the column at `DETAIL_MIN`, so a drag never folds the column.
+ */
+export function sideLimit(width: number, wide: boolean, chat = CHAT_FIT): number {
+  return width - (wide ? chat + DETAIL_MIN : CHAT_MIN);
 }
