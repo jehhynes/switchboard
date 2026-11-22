@@ -13,7 +13,7 @@ import type { ComponentChild, VNode } from 'preact';
 import { renderList, renderListPane } from './list.js';
 import { menuRows, renderHeader, renderSideSwitch, renderTabs } from './header.js';
 import { CHAT_MIN, chatNeed, DETAIL_MIN, fitLayout, isPhone, sideWidth, type Layout } from './layout.js';
-import { renderTimeline } from './timeline.js';
+import { pageCards, renderTimeline } from './timeline.js';
 import { renderArtifacts, renderArtifactView, renderEmpty, renderStatus } from './side.js';
 import { renderPersonaDialog } from './personas.js';
 import { renderSheet } from './sheet.js';
@@ -456,6 +456,26 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       view.tab = tab;
       // A tab of the column chosen here is the column's choice too; Conversation leaves the column's choice, but Browser.
       view.side = tab !== 'conversation' ? tab : view.side === 'browser' ? 'status' : view.side;
+    }
+  };
+  /**
+   * Shows what an answer links to, a card or the message that answered it (PRD R103): on the tab that holds it when no tab shown does, scrolled
+   * into view and flashed for a moment.
+   */
+  const showLinked = (tab: Tab, find: () => HTMLElement | null): void => {
+    if (find() === null) {
+      leaving(tab);
+      chooseTab(tab);
+      view.artifact = null;
+      draw();
+      saveTab();
+    }
+
+    const target = find();
+
+    if (target !== null) {
+      target.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+      flash(target);
     }
   };
   /** Whether a web link can open in the Chrome pane: it runs for this computer's installed page, paired and not stopped. */
@@ -2643,7 +2663,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const draft = cardDraft(key);
     const questions = cardQuestions(key);
 
-    if (!complete(questions, draft.choices) || draft.sending || state.session === null || state.session.conversation !== 'full') {
+    // A card answered, skipped or superseded takes no answer, though an Enter in its field could still reach here.
+    if (!complete(questions, draft.choices) || draft.sending || state.session === null || state.session.conversation !== 'full' || pageCards(state).cards.get(key)?.outcome != null) {
       return;
     }
 
@@ -3013,6 +3034,15 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       }
       case 'answer':
         void submitCard(button!.dataset['card']!);
+        break;
+      case 'goto-card': {
+        const key = button!.dataset['targetCard']!;
+
+        showLinked('conversation', () => [...document.querySelectorAll<HTMLElement>('.question-card')].find((card) => card.dataset['cardKey'] === key) ?? null);
+        break;
+      }
+      case 'goto-message':
+        showLinked('conversation', () => [...document.querySelectorAll<HTMLElement>('.timeline li.message')].find((one) => one.dataset['id'] === button!.dataset['target']) ?? null);
         break;
       case 'request-option':
         view.requestValues.set(button!.dataset['field']!, button!.dataset['value']!);
@@ -4074,6 +4104,17 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 }
 
 /** Whether a history entry's state marks a phone's conversation (`CONVERSATION_ENTRY`). */
+/** How long a card or a message an answer links to stays highlighted. */
+const FLASH_MS = 1_600;
+
+/** Highlights a card or a message an answer links to for a moment, as the Conversation view does. */
+function flash(element: HTMLElement): void {
+  element.classList.remove('linked');
+  void element.offsetWidth;
+  element.classList.add('linked');
+  setTimeout(() => element.classList.remove('linked'), FLASH_MS);
+}
+
 function conversationEntry(state: unknown): boolean {
   return typeof state === 'object' && state !== null && (state as Record<string, unknown>)[CONVERSATION_ENTRY] === true;
 }

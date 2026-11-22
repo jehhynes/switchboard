@@ -1,6 +1,6 @@
 import type { ConversationState } from '../conversationModel.js';
 import { EMPTY_CONVERSATION } from '../conversationModel.js';
-import { ago, moreKey, PICKER, renderConversation, renderMicButton, renderVoiceControls, replyText, TABS } from './conversationRender.js';
+import { ago, moreKey, PICKER, renderConversation, renderMicButton, renderVoiceControls, replyText, TABS, viewCards } from './conversationRender.js';
 import type { CardDraft, EarlierStatuses, HeaderMenu } from './conversationRender.js';
 import type { StatusView } from '@switchboard/hub';
 import { answerText, complete, parseQuestions } from '@switchboard/conversation/questions';
@@ -40,6 +40,8 @@ interface PageState {
   command?: string | null;
 }
 
+/** How long a card or a message an answer links to stays highlighted. */
+const LINKED_MS = 1_600;
 /** How long the composer says a message sent from the Status or Artifacts tab went. */
 export const SENT_NOTE_MS = 4_000;
 /** How long a copy button shows its check. */
@@ -621,6 +623,8 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
   let nextCopy = 1;
   // The question cards' choices by card key, and the cards whose answer is being sent by send ID, numbered apart from the composer's.
   const cards = new Map<string, CardDraft>();
+  /** The card or message an answer link went to, highlighted until `until`. */
+  let linked: { selector: string; until: number } | null = null;
   const cardSends = new Map<number, string>();
   let nextCardSend = 1_000_000;
   /** The questions a card asks, read again from the reply or status it belongs to. */
@@ -647,7 +651,8 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     const questions = cardQuestions(key);
     const text = draft === undefined || !complete(questions, draft.choices) ? '' : answerText(questions, draft.choices);
 
-    if (draft === undefined || text === '' || draft.sending || draft.sent !== null || state.scope === null || state.session === null || !state.connected || state.session.conversation !== 'full') {
+    // A card answered, skipped or superseded takes no answer, though an Enter in its field could still reach here.
+    if (draft === undefined || text === '' || draft.sending || draft.sent !== null || state.scope === null || state.session === null || !state.connected || state.session.conversation !== 'full' || viewCards(state).cards.get(key)?.outcome != null) {
       return;
     }
 
@@ -889,6 +894,10 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
 
     startFreshClock();
     morph(root, renderConversation(state, open, Date.now(), freshUntil > Date.now(), { tab, unopened, cards, pill: unseenBelow, menu, earlier, requests: { values: requestValues, errors: requestErrors, sending: requestSending }, details }));
+    // A redraw sets each node's class as drawn; the highlight a link gave goes back on in the same task, so it shows on unbroken.
+    if (linked !== null && linked.until > Date.now()) {
+      root.querySelector(linked.selector)?.classList.add('linked');
+    }
     fitMenus(root);
     document.body.dataset['tab'] = tab;
 
@@ -960,6 +969,31 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     draw();
     save();
     root.querySelector<HTMLElement>(`[role="tab"][data-tab="${tab}"]`)?.focus();
+  };
+
+  /**
+   * Shows what an answer links to, a card or the message that answered it (PRD R103): on its tab, scrolled into view and highlighted for a moment.
+   * The conversation then stays where it was taken, as after the operator's own scrolling.
+   */
+  const showLinked = (on: Tab, selector: string): void => {
+    selectTab(on);
+
+    const target = root.querySelector<HTMLElement>(selector);
+
+    if (target === null) {
+      return;
+    }
+
+    pinned = false;
+    target.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+    target.classList.remove('linked');
+    void target.offsetWidth;
+    target.classList.add('linked');
+    linked = { selector, until: Date.now() + LINKED_MS };
+    setTimeout(() => {
+      linked = null;
+      root.querySelector(selector)?.classList.remove('linked');
+    }, LINKED_MS);
   };
 
   root.addEventListener('click', (event) => {
@@ -1088,6 +1122,12 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
       draw();
     } else if (action === 'answer') {
       submitCard(button!.dataset['card']!);
+    } else if (action === 'goto-card') {
+      const key = button!.dataset['targetCard'] ?? '';
+
+      showLinked('conversation', `.question-card[data-card="${CSS.escape(key)}"]`);
+    } else if (action === 'goto-message') {
+      showLinked('conversation', `.timeline li.message[data-id="${CSS.escape(button!.dataset['target'] ?? '')}"]`);
     } else if (action === 'more') {
       // Show more and Show less flip the reply from where it starts (architecture.md § Voice).
       const key = moreKey(button!.dataset['reply'] ?? '');

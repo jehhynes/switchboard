@@ -44,7 +44,8 @@ describe('question cards in the Conversation view', () => {
   it('draws a card under a reply that asks lettered questions, as Claude Code\'s question form, and none under an aside or a plain reply', () => {
     const root = document.createElement('div');
 
-    root.innerHTML = renderConversation(state([reply('r1', T0, ASKED), reply('r2', T0 + 1, 'Done.'), reply('r3', T0 + 2, '[aside] x\n\n1. Q?\n- A) a\n- B) b', { kind: 'aside' })]));
+    // An aside after the card leaves it answerable.
+    root.innerHTML = renderConversation(state([reply('r2', T0 - 1, 'Done.'), reply('r1', T0, ASKED), reply('r3', T0 + 2, '[aside] x\n\n1. Q?\n- A) a\n- B) b', { kind: 'aside' })]));
 
     const cards = root.querySelectorAll('.question-card');
 
@@ -213,6 +214,72 @@ describe('question cards in the Conversation view', () => {
     expect(root.querySelectorAll('.status-tab .status-body ol > li')).toHaveLength(2);
     expect(root.querySelector('.question-card')).toBeNull();
     expect(root.querySelector('.questions-fold')).toBeNull();
+  });
+
+  it('links an answer to its card both ways: a quoted line per question over the message, and the answer under the card, each going to the other', () => {
+    const { show, root } = page();
+    const scrolled: string[] = [];
+
+    HTMLElement.prototype.scrollIntoView = function (this: HTMLElement) {
+      scrolled.push(this.dataset['card'] ?? this.dataset['id'] ?? '');
+    };
+    show(state([reply('r1', T0, ASKED), message('m1', T0 + 1, '1B, 2 Other: keep it a week')]));
+
+    const ref = root.querySelector<HTMLButtonElement>('li[data-id="m1"] .bubble > .answer-ref')!;
+
+    expect([...ref.querySelectorAll('.answer-ref-line')].map((line) => [line.querySelector('.answer-ref-question')!.textContent, line.querySelector('.answer-ref-answer')!.textContent])).toEqual([
+      ['1. Which port?', '→ B) 8799'],
+      ['2. Keep the old route?', '→ Other: keep it a week'],
+    ]);
+    expect(root.querySelector('li[data-id="m1"] .box')?.textContent).toBe('1B, 2 Other: keep it a week');
+    ref.click();
+    expect(scrolled).toEqual(['reply:r1']);
+    expect(root.querySelector('.question-card')!.classList.contains('linked')).toBe(true);
+    // The highlight stays on over a redraw.
+    show(state([reply('r1', T0, ASKED), message('m1', T0 + 1, '1B, 2 Other: keep it a week')]));
+    expect(root.querySelector('.question-card')!.classList.contains('linked')).toBe(true);
+
+    const link = root.querySelector<HTMLButtonElement>('.question-card .question-link')!;
+
+    expect(root.querySelector('.question-card .question-state')?.textContent).toBe('Answered');
+    expect(link.textContent).toBe('1B, 2 Other: keep it a week');
+    link.click();
+    expect(scrolled).toEqual(['reply:r1', 'm1']);
+    expect(root.querySelector('li[data-id="m1"]')!.classList.contains('linked')).toBe(true);
+    // A message that skipped the card, and one before it, link nothing.
+    show(state([message('m0', T0 - 1, '1A'), reply('r1', T0, ASKED), message('m1', T0 + 1, 'Later.')]));
+    expect(root.querySelector('.answer-ref')).toBeNull();
+    expect(root.querySelector('.question-link')).toBeNull();
+  });
+
+  it('supersedes an unanswered card with a later reply, which then takes no answer, and keeps an aside from doing so', () => {
+    const { show, root, option, sends } = page();
+
+    show(state([reply('r1', T0, ASKED), reply('r2', T0 + 1, 'Ignore the question I asked; I found the port.')]));
+
+    const card = root.querySelector<HTMLElement>('.question-card')!;
+
+    expect(card.className).toBe('question-card superseded');
+    expect(card.getAttribute('aria-label')).toBe('Questions, superseded');
+    expect(card.querySelector('.question-state')?.textContent).toBe('Superseded: a later reply came after these questions');
+    expect(card.querySelector('.question-submit, .question-other')).toBeNull();
+    expect(option(0, 'A').disabled).toBe(true);
+    option(0, 'A').click();
+    expect(root.querySelector('.question-card [aria-checked="true"]')).toBeNull();
+    // A message after it that does not answer it leaves it superseded, with no link; one that still answers it, as one sent before the later
+    // reply, is linked to it.
+    show(state([reply('r1', T0, ASKED), reply('r2', T0 + 1, 'Ignore it.'), message('m1', T0 + 2, 'Good.')]));
+    expect(root.querySelector('.question-card')?.className).toBe('question-card superseded');
+    expect(root.querySelector('.answer-ref')).toBeNull();
+    show(state([reply('r1', T0, ASKED), reply('r2', T0 + 1, 'Ignore it.'), message('m1', T0 + 2, '1A')]));
+    expect(root.querySelector('.question-card')?.className).toBe('question-card answered');
+    expect(root.querySelector('li[data-id="m1"] .answer-ref')).not.toBeNull();
+    expect(sends()).toEqual([]);
+    // A reply that asks again is the one answerable card.
+    show(state([reply('r1', T0, ASKED), reply('r2', T0 + 1, ASKED)]));
+    expect([...root.querySelectorAll('.question-card')].map((one) => one.className)).toEqual(['question-card superseded', 'question-card']);
+    show(state([reply('r1', T0, ASKED), reply('r2', T0 + 1, 'Checking.', { kind: 'aside' })]));
+    expect(root.querySelector('.question-card')?.className).toBe('question-card');
   });
 
   it('says the session waits for an answer or a permission in the terminal while a menu holds it, with Open in terminal', () => {

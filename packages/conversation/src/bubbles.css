@@ -23,3 +23,27 @@ body.vscode-high-contrast .speech-bubble, body.vscode-high-contrast-light .speec
 /* A reply that starts with a bubble moves its dot down by the bubble's border and padding, and by half of what its larger text adds to the
    first line's height (1.5 × 10% / 2 of the reply's size), level with the bubble's first line. */
 .reply:has(> .body > .speech-bubble:first-child) { --dot-shift: calc(7px + 0.075em); }
+
+/* Above a message that answered a question card: a quoted line per question answered, which goes to the card. Each line keeps to one line, the
+   question giving way before the answer. */
+.answer-ref { display: flex; flex-direction: column; gap: 1px; box-sizing: border-box; max-width: 100%; margin: 0 0 4px auto; padding: 2px 8px; border: none; border-left: 2px solid var(--vscode-textBlockQuote-border, var(--vscode-button-background, #0078d4)); border-radius: 2px; background: transparent; color: var(--vscode-descriptionForeground); font: inherit; font-size: 0.85em; text-align: left; cursor: pointer; }
+.answer-ref:hover, .answer-ref:focus-visible { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, 0.15)); outline: none; }
+.answer-ref-line { display: flex; gap: 4px; min-width: 0; white-space: nowrap; }
+.answer-ref-mark { flex: none; }
+.answer-ref-question { flex: 0 1 auto; min-width: 2em; overflow: hidden; text-overflow: ellipsis; }
+.answer-ref-answer { flex: 0 1000 auto; min-width: 4em; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+
+/* A card's link to the message that answered it, at the end of its footer. */
+.question-link { display: inline-flex; align-items: center; gap: 4px; max-width: 60%; padding: 2px 6px; border: none; border-radius: 4px; background: transparent; color: var(--vscode-textLink-foreground, var(--vscode-button-background, #0078d4)); font: inherit; font-size: 0.85em; cursor: pointer; }
+.question-link:hover, .question-link:focus-visible { text-decoration: underline; outline: none; background: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, 0.15)); }
+.question-link > :first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* A card superseded by a later reply can no longer be answered, and is dimmed. */
+.question-card.superseded { opacity: 0.6; }
+
+/* A card or a message an answer link went to, highlighted for a moment. */
+@keyframes sb-linked { from { box-shadow: 0 0 0 2px var(--vscode-focusBorder, #0078d4); } to { box-shadow: 0 0 0 2px transparent; } }
+.linked { animation: sb-linked 1.6s ease-out; border-radius: 8px; }
+.message.linked { animation: none; }
+.message.linked .box { animation: sb-linked 1.6s ease-out; }
+@media (prefers-reduced-motion: reduce) { .linked, .message.linked .box { animation: none; outline: 2px solid var(--vscode-focusBorder, #0078d4); } }

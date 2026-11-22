@@ -8,8 +8,8 @@ import { fullTime, metaLine, spokenMark, stamped, toneMark, voiceMark } from '@s
 import { hasUnspokenText, spokenBody } from '@switchboard/conversation/spokenBubble';
 import { artifactIcon, awaitingReply, selectedEntry, stateIcon, statusLine, timeline } from '../conversationModel.js';
 import type { ConversationState } from '../conversationModel.js';
-import { answersCard, answersIn, answerText, cardOutcome, complete, parseQuestions, questionSegments, withoutEndingQuestions } from '@switchboard/conversation/questions';
-import type { Question, QuestionChoice } from '@switchboard/conversation/questions';
+import { answersIn, answerText, cardLinks, complete, questionSegments, withoutEndingQuestions } from '@switchboard/conversation/questions';
+import type { AnswerLine, CardLinks, CardSettled, QuestionChoice } from '@switchboard/conversation/questions';
 
 /** What the page posts to the extension. */
 export type ConversationMessage =
@@ -127,7 +127,14 @@ export function renderMarkdown(text: string): string {
  * One of our messages: its bubble over its meta line (`metaLine`, shared with the web page). Only an error state shows always, with why in the
  * tooltip; with message details on, a dictated message's mark too. A message with no meta line has its time as the bubble's tooltip.
  */
-function message(item: MessageView, stamped: boolean, details: boolean): string {
+/** Above a message that answered a card: a quoted line per question it answered, which goes to the card. */
+function answerReference(key: string, lines: readonly AnswerLine[]): string {
+  const shown = lines.map((line) => `<span class="answer-ref-line"><span class="answer-ref-mark" aria-hidden="true">↳</span><span class="answer-ref-question">${escape(line.question)}</span><span class="answer-ref-answer">→ ${escape(line.answer)}</span></span>`).join('');
+
+  return `<button type="button" class="answer-ref" data-action="goto-card" data-target-card="${escape(key)}" title="Show the questions">${shown}</button>`;
+}
+
+function message(item: MessageView, stamped: boolean, details: boolean, answered: ReadonlyArray<{ key: string; lines: AnswerLine[] }> = []): string {
   // Only an error state shows: a message sent or still sending shows only its time; one not sent has left the conversation.
   const state = item.origin === 'typed' && (item.delivery === 'not-sent' || item.delivery === 'uncertain') ? item.delivery : null;
   const why = item.error === null ? '' : ` · ${item.error}`;
@@ -139,7 +146,7 @@ function message(item: MessageView, stamped: boolean, details: boolean): string 
   // The marks sit at the bubble's left edge and the time at its right, so every time stays flush right in one column.
   const meta = metaLine([voiceMark(item, details), delivery], item.at, stamped);
 
-  return `<li class="message${item.provisional ? ' provisional' : ''}" data-id="${escape(item.id)}" tabindex="-1"${queued ? ' title="Sent; Claude has not read it yet"' : ''}><div class="bubble"${meta === '' && !queued ? ` title="${escape(fullTime(item.at))}"` : ''}><div class="box${COMMAND.test(item.text) ? ' command' : ''}">${escape(item.text)}</div>${meta}</div></li>`;
+  return `<li class="message${item.provisional ? ' provisional' : ''}" data-id="${escape(item.id)}" tabindex="-1"${queued ? ' title="Sent; Claude has not read it yet"' : ''}><div class="bubble"${meta === '' && !queued ? ` title="${escape(fullTime(item.at))}"` : ''}>${answered.map((one) => answerReference(one.key, one.lines)).join('')}<div class="box${COMMAND.test(item.text) ? ' command' : ''}">${escape(item.text)}</div>${meta}</div></li>`;
 }
 
 // The voice controls are drawn by one renderer with the web page's (architecture.md § Voice).
@@ -243,11 +250,12 @@ function inlineMarkdown(text: string): string {
  * as rows with a radio mark, or a checkbox where it takes several, the letter dimmed before the text, an Other field, and Submit. Answered, by
  * Submit or by any later message, it greys out and shows the choices that message gave. It takes no answer while the composer could not send.
  */
-export function questionCard(key: string, questions: readonly Question[], draft: CardDraft | undefined, answer: string | null, canAnswer: boolean): string {
-  // A later message answers the card only when it answers its questions; one that ignores them sets the card aside, Skipped, with no picks.
-  const outcome = cardOutcome(answer, questions);
+export function questionCard(key: string, settled: CardSettled, draft: CardDraft | undefined, canAnswer: boolean): string {
+  // A later message answers the card only when it answers its questions; one that ignores them sets the card aside, Skipped, and a later reply
+  // first supersedes it (`cardLinks`); either way it shows no picks.
+  const { questions, outcome, message: answer } = settled;
   const answered = outcome !== null;
-  const choices = outcome === 'answered' ? answersIn(answer!, questions) : answered ? new Map<number, QuestionChoice>() : (draft?.choices ?? new Map<number, QuestionChoice>());
+  const choices = outcome === 'answered' ? answersIn(answer!.text, questions) : answered ? new Map<number, QuestionChoice>() : (draft?.choices ?? new Map<number, QuestionChoice>());
   const locked = answered || !canAnswer || draft?.sending === true || draft?.sent != null;
   const blocks = questions.map((question, index) => {
     const choice = choices.get(index);
@@ -271,13 +279,24 @@ export function questionCard(key: string, questions: readonly Question[], draft:
     return `<div class="question-block"><div class="question-text">${label}${inlineMarkdown(question.text)}</div><div class="question-options" role="${multi ? 'group' : 'radiogroup'}">${options}${other}</div></div>`;
   });
   const text = complete(questions, choices) ? answerText(questions, choices) : '';
-  const footer = answered
-    ? `<div class="question-footer"><span class="question-state">${outcome === 'answered' ? 'Answered' : 'Skipped: your next message did not answer these questions'}</span></div>`
+  const footer =
+    outcome === 'answered'
+      ? `<div class="question-footer"><span class="question-state">Answered</span><button type="button" class="question-link" data-action="goto-message" data-target="${escape(answer!.id)}" title="Show your answer"><span>${escape(answerText(questions, choices).replace(/\n/g, ', '))}</span><span class="codicon codicon-arrow-down" aria-hidden="true"></span></button></div>`
+      : answered
+    ? `<div class="question-footer"><span class="question-state">${LEFT[outcome]}</span></div>`
     : !canAnswer
       ? ''
       : `<div class="question-footer">${draft?.error == null ? '' : `<span class="question-error" role="alert">${escape(draft.error)}</span>`}<button type="button" class="question-submit" data-action="answer" data-card="${escape(key)}"${locked || text === '' ? ' disabled' : ''} title="${escape(text === '' ? 'Answer every question first' : `Send "${text}"`)}">${draft?.sending === true || draft?.sent != null ? 'Sending…' : 'Submit'}</button></div>`;
 
-  return `<div class="question-card${answered ? ` ${outcome}` : ''}" data-card="${escape(key)}" role="group" aria-label="${outcome === 'answered' ? 'Questions, answered' : outcome === 'skipped' ? 'Questions, skipped' : 'Questions'}">${blocks.join('')}${footer}</div>`;
+  return `<div class="question-card${answered ? ` ${outcome}` : ''}" data-card="${escape(key)}" role="group" aria-label="${answered ? `Questions, ${outcome}` : 'Questions'}">${blocks.join('')}${footer}</div>`;
+}
+
+/** What a card's footer says once it cannot be answered. */
+const LEFT = { skipped: 'Skipped: your next message did not answer these questions', superseded: 'Superseded: a later reply came after these questions' } as const;
+
+/** The cards of the view's conversation and how each was left (`cardLinks`). */
+export function viewCards(state: ConversationState): CardLinks {
+  return cardLinks(state.items);
 }
 
 /** An artifact as a one-line row where it was written: it opens, it does not expand (architecture.md § Conversation view). */
@@ -665,20 +684,14 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
     ? ''
     : `<div class="session-note" role="status"><span class="codicon codicon-stop-circle state-icon tone-muted" aria-hidden="true"></span><span class="session-note-text">${escape(state.session!.reason ?? 'The session has ended. A message or Resume continues it.')}</span>${state.session!.conversation === 'none' ? '' : '<button type="button" class="terminal-question-open" data-action="terminal" title="Resume the session in its terminal">Resume</button>'}</div>`;
   const shown = timeline(state.items, state.artifacts);
-  // A card's answer is the first message after the reply or status that asks it, sent with Submit or typed (voice-design § 5).
+  // A card's answer is the first message after the reply or status that asks it, sent with Submit or typed (voice-design § 5), found in
+  // conversation order, not the timeline's, where a rewrite takes the place of the reply it rewrote.
   const canAnswer = state.connected && state.session?.conversation === 'full';
-  // Found in conversation order, not the timeline's, where a rewrite takes the place of the reply it rewrote.
-  const answerAfter = (replyId: string): string | null => {
-    // A message still on its way, which may come back not sent, leaves the card as it is.
-    const from = state.items.findIndex((item) => item.id === replyId);
-    const later = state.items.slice(from + 1).find((item) => item.type === 'message' && answersCard(item, state.items[from]?.at ?? 0));
+  const links = viewCards(state);
+  const cardOf = (key: string): string => {
+    const settled = links.cards.get(key);
 
-    return later?.type === 'message' ? later.text : null;
-  };
-  const cardOf = (key: string, markdown: string, answer: string | null): string => {
-    const questions = parseQuestions(markdown);
-
-    return questions.length === 0 ? '' : questionCard(key, questions, page.cards?.get(key), answer, canAnswer);
+    return settled === undefined ? '' : questionCard(key, settled, page.cards?.get(key), canAnswer);
   };
   // The turn's row after the newest item, so replies written mid-turn show above it; it has no data-id, so the keys skip it.
   const spinner = turnRow(state.session, awaitingReply(state.items, state.session));
@@ -703,9 +716,9 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
     const timed = entry.type === 'message' || entry.item.kind !== 'note';
     const shownTime = stamped(timed, page.details === true, divider !== '');
 
-    const card = entry.type === 'reply' && entry.item.kind === 'reply' ? cardOf(cardKey('reply', entry.item.id), entry.item.opening, answerAfter(entry.item.id)) : '';
+    const card = entry.type === 'reply' && entry.item.kind === 'reply' ? cardOf(cardKey('reply', entry.item.id)) : '';
 
-    return divider + (entry.type === 'message' ? message(entry.item, shownTime, page.details === true) : reply(entry.item, entry.earlier, open, shownTime, card, state.settings.expandReplies, page.details === true));
+    return divider + (entry.type === 'message' ? message(entry.item, shownTime, page.details === true, links.answers.get(entry.item.id)) : reply(entry.item, entry.earlier, open, shownTime, card, state.settings.expandReplies, page.details === true));
   });
   // A Codex session's pending questions and approvals, answered in cards at the end of the conversation.
   const requests = (state.session?.requests ?? []).map((request) => requestCard(request, page.requests ?? NO_REQUESTS)).join('');

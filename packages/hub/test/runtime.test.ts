@@ -2936,11 +2936,12 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
 
   it('finds a card after more replies than one page, and takes no message still being typed as its answer (PRD R103)', () => {
     const store = Store.open(':memory:');
-    const reply = (id: string, opening: string, at: number) => store.addReply({ id, sessionId: 's1', workItemId: 1, at, kind: 'reply', answers: null, opening, source: 'transcript', replaces: null, rewrittenBy: null, withdrawn: false, transcriptUuid: id });
+    const reply = (id: string, opening: string, at: number, kind: 'reply' | 'aside' = 'reply') => store.addReply({ id, sessionId: 's1', workItemId: 1, at, kind, answers: null, opening, source: 'transcript', replaces: null, rewrittenBy: null, withdrawn: false, transcriptUuid: id });
 
     store.addMessage({ id: 'm1', sessionId: 's1', workItemId: 1, at: T0, origin: 'terminal', text: 'Go', transcriptUuid: 'm1', provisional: false, withdrawn: false, delivery: null, error: null, opId: null, pastedAt: null });
     reply('card', '1. Which?\n   - A) One\n   - B) Two', T0 + 1);
-    for (let index = 0; index < 150; index++) reply(`r${index}`, `Step ${index}.`, T0 + 2 + index);
+    // Asides, which leave the card answerable; a reply with text would supersede it.
+    for (let index = 0; index < 150; index++) reply(`r${index}`, `Step ${index}.`, T0 + 2 + index, 'aside');
     expect(questionCardOpen(store, 's1')).toBe(true);
 
     // A notice an earlier run left queued, placed after everything, dated before the card.

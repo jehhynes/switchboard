@@ -3,8 +3,8 @@
 import type { VNode } from 'preact';
 import { fullTime, metaLine, spokenMark, stamped, toneMark, voiceMark } from '@switchboard/conversation/messageMeta';
 import { hasUnspokenText, spokenBody } from '@switchboard/conversation/spokenBubble';
-import { answersCard, answersIn, cardOutcome, complete, parseQuestions, withoutEndingQuestions } from '@switchboard/conversation/questions';
-import type { Question, QuestionChoice } from '@switchboard/conversation/questions';
+import { answerText, answersIn, cardLinks, complete, withoutEndingQuestions } from '@switchboard/conversation/questions';
+import type { AnswerLine, CardLinks, CardSettled, QuestionChoice } from '@switchboard/conversation/questions';
 import { artifactIcon, awaitingReply, timeline } from './model.js';
 import type { PageState } from './model.js';
 import { copyButton, renderInline, renderMarkdown } from './markdown.js';
@@ -17,16 +17,36 @@ import type { ArtifactView, MessageView, NativeRequest, ReplyView, ScreenPrompt 
  * One of our messages: its bubble over its meta line (`metaLine`, shared with the Conversation view). A failed delivery always shows; with
  * message details on, a dictated message's mark too. A message with no meta line has its time as the bubble's tooltip.
  */
-function Message({ item, stamped: shown, details }: { item: MessageView; stamped: boolean; details: boolean }) {
+function Message({ item, stamped: shown, details, answered }: { item: MessageView; stamped: boolean; details: boolean; answered: Array<{ key: string; lines: AnswerLine[] }> }) {
   const meta = metaLine([voiceMark(item, details), deliveryMark(item)], item.at, shown);
 
   return (
     <li class={`message${item.provisional ? ' provisional' : ''}`} data-id={item.id}>
       <div class="bubble" title={meta === '' ? fullTime(item.at) : undefined}>
+        {answered.map((one) => (
+          <AnswerReference key={one.key} card={one.key} lines={one.lines} />
+        ))}
         <div class={`box${/^\/[\w:.-]+(\s|$)/.test(item.text) ? ' command' : ''}`}>{item.text}</div>
         {trusted(meta)}
       </div>
     </li>
+  );
+}
+
+/** Above a message that answered a card: a quoted line per question it answered, which goes to the card. */
+function AnswerReference({ card, lines }: { card: string; lines: AnswerLine[] }) {
+  return (
+    <button type="button" class="answer-ref" data-action="goto-card" data-target-card={card} title="Show the questions">
+      {lines.map((line) => (
+        <span class="answer-ref-line">
+          <span class="answer-ref-mark" aria-hidden="true">
+            ↳
+          </span>
+          <span class="answer-ref-question">{line.question}</span>
+          <span class="answer-ref-answer">→ {line.answer}</span>
+        </span>
+      ))}
+    </button>
   );
 }
 
@@ -101,16 +121,21 @@ function Mark({ multi, checked }: { multi: boolean; checked: boolean }) {
   );
 }
 
-/** A question card: each question with its options as radio or checkbox rows, an Other field, and Submit; greyed with its picks once answered. */
-export function questionCard(key: string, questions: readonly Question[], draft: CardDraft | undefined, answer: string | null, canAnswer: boolean): VNode {
-  // A later message answers the card only when it answers its questions; one that ignores them sets it aside, Skipped, with no picks.
-  const outcome = cardOutcome(answer, questions);
+/** What a card's footer says once it cannot be answered. */
+const LEFT = { skipped: 'Skipped: your next message did not answer these questions', superseded: 'Superseded: a later reply came after these questions' } as const;
+
+/**
+ * A question card: each question with its options as radio or checkbox rows, an Other field, and Submit; greyed with its picks and a link to
+ * the message once answered, and with none once skipped or superseded (`cardLinks`).
+ */
+export function questionCard(key: string, settled: CardSettled, draft: CardDraft | undefined, canAnswer: boolean): VNode {
+  const { questions, outcome, message } = settled;
   const answered = outcome !== null;
-  const choices = outcome === 'answered' ? answersIn(answer!, questions) : answered ? new Map<number, QuestionChoice>() : (draft?.choices ?? new Map<number, QuestionChoice>());
+  const choices = outcome === 'answered' ? answersIn(message!.text, questions) : answered ? new Map<number, QuestionChoice>() : (draft?.choices ?? new Map<number, QuestionChoice>());
   const locked = answered || !canAnswer || draft?.sending === true || draft?.sent != null;
 
   return (
-    <div class={`question-card${answered ? ` ${outcome}` : ''}`} data-card-key={key}>
+    <div class={`question-card${answered ? ` ${outcome}` : ''}`} data-card-key={key} role="group" aria-label={answered ? `Questions, ${outcome}` : 'Questions'}>
       {questions.map((question, index) => {
         const choice = choices.get(index);
 
@@ -142,8 +167,16 @@ export function questionCard(key: string, questions: readonly Question[], draft:
         );
       })}
       <div class="question-footer">
-        {answered ? (
-          <span class="question-state">{outcome === 'answered' ? 'Answered' : 'Skipped: your next message did not answer these questions'}</span>
+        {outcome === 'answered' ? (
+          <>
+            <span class="question-state">Answered</span>
+            <button type="button" class="question-link" data-action="goto-message" data-target={message!.id} title="Show your answer">
+              <span>{answerText(questions, choices).replace(/\n/g, ', ')}</span>
+              <span class="codicon codicon-arrow-down" aria-hidden="true"></span>
+            </button>
+          </>
+        ) : answered ? (
+          <span class="question-state">{LEFT[outcome]}</span>
         ) : !canAnswer ? null : (
           <>
             {draft?.error ? <span class="question-error">{draft.error}</span> : null}
@@ -158,19 +191,16 @@ export function questionCard(key: string, questions: readonly Question[], draft:
   );
 }
 
-/** The card of a reply's or a status's questions, answered by the first message after it; null without questions. */
-export function cardOf(key: string, markdown: string, answer: string | null, view: View, canAnswer: boolean): VNode | null {
-  const questions = parseQuestions(markdown);
-
-  return questions.length === 0 ? null : questionCard(key, questions, view.cards.get(key), answer, canAnswer);
+/** The cards of the page's conversation and how each was left (`cardLinks`). */
+export function pageCards(state: PageState): CardLinks {
+  return cardLinks(state.items);
 }
 
-/** The text of the first message after a reply, which answers its card (`answersCard`). */
-function answerAfter(state: PageState, replyId: string): string | null {
-  const from = state.items.findIndex((item) => item.id === replyId);
-  const later = from === -1 ? undefined : state.items.slice(from + 1).find((item) => item.type === 'message' && answersCard(item, state.items[from]!.at));
+/** The card with this key, as `pageCards` found it; null for a reply or status that asks no questions. */
+export function cardOf(key: string, links: CardLinks, view: View, canAnswer: boolean): VNode | null {
+  const settled = links.cards.get(key);
 
-  return later?.type === 'message' ? later.text : null;
+  return settled === undefined ? null : questionCard(key, settled, view.cards.get(key), canAnswer);
 }
 
 /** The local midnight starting the day of a time. */
@@ -188,6 +218,7 @@ export function renderTimeline(state: PageState, view: View, now: number = Date.
 
   const entries = timeline(state.items, state.artifacts);
   const canAnswer = state.connected && state.session.conversation === 'full';
+  const links = pageCards(state);
   // After the newest item, so replies written mid-turn show above it.
   const shownPrompt = view.prompt !== null && view.prompt.sessionId === state.session.id ? view.prompt : null;
   const spinner = turnRow(state.session, awaitingReply(state.items, state.session), shownPrompt?.prompt != null);
@@ -214,9 +245,9 @@ export function renderTimeline(state: PageState, view: View, now: number = Date.
     const shown = stamped(timed, view.details, divider !== null);
     const row =
       entry.type === 'message' ? (
-        <Message key={entry.item.id} item={entry.item} stamped={shown} details={view.details} />
+        <Message key={entry.item.id} item={entry.item} stamped={shown} details={view.details} answered={links.answers.get(entry.item.id) ?? []} />
       ) : (
-        <Reply key={entry.item.id} item={entry.item} earlier={entry.earlier} view={view} stamped={shown} card={entry.item.kind === 'reply' ? cardOf(`reply:${entry.item.id}`, entry.item.opening, answerAfter(state, entry.item.id), view, canAnswer) : null} expandReplies={state.expandReplies} />
+        <Reply key={entry.item.id} item={entry.item} earlier={entry.earlier} view={view} stamped={shown} card={entry.item.kind === 'reply' ? cardOf(`reply:${entry.item.id}`, links, view, canAnswer) : null} expandReplies={state.expandReplies} />
       );
 
     return divider === null ? [row] : [divider, row];

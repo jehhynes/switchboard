@@ -348,7 +348,8 @@ export type CardItem =
 
 /**
  * Whether a session's conversation holds a question card no message has answered yet (PRD R103): a reply, not an aside, a note or one a rewrite
- * replaced, or the newest status, that asks lettered questions and comes after the newest message. Any message answers every card before it,
+ * replaced, or the newest status, that asks lettered questions and comes after the newest message, with no later reply taking its place
+ * (`supersedes`). Any message answers every card before it,
  * as in the view, except a message still `open`, not yet typed, which may yet come back not sent. `items` are in conversation order, from the
  * newest answering message on; `status` is the newest status, with the reply it was written in.
  */
@@ -358,6 +359,10 @@ export function unansweredCard(items: readonly CardItem[], status: { replyId: st
 
   for (const item of items) {
     if (item.type === 'reply') {
+      if (supersedes(item)) {
+        asked = null;
+      }
+
       if ((item.kind === 'reply' && !item.withdrawn && item.rewrittenBy === null && asks(item.opening)) || (status !== null && item.id === status.replyId && asks(status.markdown))) {
         asked = item.at ?? 0;
       }
@@ -367,6 +372,15 @@ export function unansweredCard(items: readonly CardItem[], status: { replyId: st
   }
 
   return asked !== null;
+}
+
+/**
+ * Whether a reply takes the place of the cards before it that no message has settled, so only the newest reply's card can be answered: a reply,
+ * not an aside or a note, that a rewrite has not replaced, was not withdrawn and has text besides a status, as when a session says to ignore a
+ * question it asked.
+ */
+export function supersedes(item: CardItem): boolean {
+  return item.type === 'reply' && item.kind === 'reply' && !item.withdrawn && item.rewrittenBy === null && item.opening.trim() !== '';
 }
 
 /** Whether a conversation item answers the cards before it, for `unansweredCard`: a message that is not withdrawn and has left the composer's queue. */
@@ -380,4 +394,134 @@ export function answers(item: CardItem): boolean {
  */
 export function answersCard(item: CardItem, askedAt: number): boolean {
   return answers(item) && !(item.type === 'message' && item.provisional === true && item.at !== undefined && item.at < askedAt);
+}
+
+/** A conversation item as `cardLinks` reads it: a message with its text, or a reply with the text a card is drawn from. */
+export type LinkItem =
+  | { type: 'message'; id: string; text: string; withdrawn: boolean; delivery?: string | null; provisional?: boolean; at: number }
+  | { type: 'reply'; id: string; kind: 'reply' | 'aside' | 'note'; opening: string; rewrittenBy: string | null; withdrawn: boolean; at: number };
+
+/** How a card was left: answered or skipped by the message after it (`cardOutcome`), or superseded by a later reply (`supersedes`). */
+export type CardState = 'answered' | 'skipped' | 'superseded';
+
+/** One card: its questions, how it was left, null while it can be answered, and the message that answered or skipped it. */
+export interface CardSettled {
+  questions: Question[];
+  outcome: CardState | null;
+  message: { id: string; text: string } | null;
+}
+
+/** One question a message answered, as its reference line shows it: the question with its number, and the options or Other text chosen. */
+export interface AnswerLine {
+  question: string;
+  answer: string;
+}
+
+/** The cards of a conversation (`cardLinks`). */
+export interface CardLinks {
+  /** Each card by key: `reply:<reply ID>`. */
+  cards: Map<string, CardSettled>;
+  /** For each message that answered cards, by message ID: each card's key with what the message chose for its questions, in card order. */
+  answers: Map<string, Array<{ key: string; lines: AnswerLine[] }>>;
+  /** The newest card that can still be answered, by key; null for none. */
+  open: string | null;
+}
+
+/** Inline Markdown as plain text for a reference line: link text without its target, and no bold, italic or code marks. */
+function plain(text: string): string {
+  return text
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\*\*|__|`/g, '')
+    .replace(/(^|[^\w*])\*(\S(?:.*?\S)?)\*(?!\w)/g, '$1$2')
+    .trim();
+}
+
+/** What a message chose for each question of a card, as reference lines. */
+export function answerLines(questions: readonly Question[], choices: ReadonlyMap<number, QuestionChoice>): AnswerLine[] {
+  return questions.flatMap((question, index) => {
+    const choice = choices.get(index);
+    const picked = question.options.filter((option) => choice?.letters.includes(option.letter)).map((option) => `${option.letter}) ${plain(option.text)}`);
+    const answer = [...picked, ...(choice === undefined || choice.other === '' ? [] : [`Other: ${choice.other}`])].join(', ');
+
+    return answer === '' ? [] : [{ question: `${question.number === null ? '' : `${question.number}. `}${plain(question.text)}`, answer }];
+  });
+}
+
+/**
+ * The question cards of a conversation in conversation order, and how each was left (PRD R103): each reply's, not an aside's or a note's nor
+ * one a rewrite replaced or withdrawn; a status's questions get no card. The first message after a card that answers it (`answersCard`) settles
+ * it, answered or skipped (`cardOutcome`); a later reply first (`supersedes`) leaves it superseded, so only the newest reply's card can be answered; the next message still answers it when it answers no
+ * newer card but its questions, as one sent before that reply but read after it. Each message that answered cards links back to them.
+ */
+export function cardLinks(items: readonly LinkItem[]): CardLinks {
+  const cards = new Map<string, CardSettled>();
+  const answered = new Map<string, Array<{ key: string; lines: AnswerLine[] }>>();
+  let waiting: Array<{ key: string; at: number }> = [];
+  const ask = (key: string, markdown: string, at: number): void => {
+    const questions = parseQuestions(markdown);
+
+    if (questions.length > 0) {
+      cards.set(key, { questions, outcome: null, message: null });
+      waiting.push({ key, at });
+    }
+  };
+
+  const settle = (message: Extract<LinkItem, { type: 'message' }>): void => {
+    waiting = waiting.filter(({ key, at }) => {
+      if (!answersCard(message, at)) {
+        return true;
+      }
+
+      const card = cards.get(key)!;
+      const choices = answersIn(message.text, card.questions);
+
+      card.outcome = choices.size > 0 ? 'answered' : 'skipped';
+      card.message = { id: message.id, text: message.text };
+
+      if (choices.size > 0) {
+        answered.set(message.id, [...(answered.get(message.id) ?? []), { key, lines: answerLines(card.questions, choices) }]);
+      }
+
+      return false;
+    });
+  };
+  // The cards superseded since the last message: a message that still answers one, as one sent before the reply that superseded it but read
+  // after it, is linked to it.
+  let superseded: Array<{ key: string; at: number }> = [];
+
+  for (const item of items) {
+    if (item.type === 'reply') {
+      if (supersedes(item)) {
+        for (const one of waiting) {
+          cards.get(one.key)!.outcome = 'superseded';
+        }
+
+        superseded = [...superseded, ...waiting];
+        waiting = [];
+      }
+
+      if (item.kind === 'reply' && !item.withdrawn && item.rewrittenBy === null) {
+        ask(`reply:${item.id}`, item.opening, item.at);
+      }
+    } else if (answers(item)) {
+      settle(item);
+
+      // Only cards this message could have answered (`answersCard`): a notice queued before a card neither answers it nor ends its chance.
+      const eligible = superseded.filter(({ at }) => answersCard(item, at));
+      const late = answered.has(item.id) ? undefined : [...eligible].reverse().find(({ key }) => answersIn(item.text, cards.get(key)!.questions).size > 0)?.key;
+
+      if (late !== undefined) {
+        const card = cards.get(late)!;
+        const choices = answersIn(item.text, card.questions);
+
+        card.outcome = 'answered';
+        card.message = { id: item.id, text: item.text };
+        answered.set(item.id, [{ key: late, lines: answerLines(card.questions, choices) }]);
+      }
+
+      superseded = superseded.filter((one) => !eligible.includes(one));
+    }
+  }
+
+  return { cards, answers: answered, open: waiting.at(-1)?.key ?? null };
 }

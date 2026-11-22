@@ -618,7 +618,7 @@ body.artifact-window > .artifact-view { height: 100%; }
 @media (hover: none), (pointer: coarse) {
   .code-block > .copy { opacity: 1; }
   .meta .copy { display: none; }
-  button.picker, .tab, .composer-tool, .send, .voice-controls .ghost, .row, .group-head, .question-option, .show-more, .earlier-items, .question-submit, .artifact-open, .artifact-head .icon, .composer-error .dismiss { min-height: 44px; }
+  button.picker, .tab, .composer-tool, .send, .voice-controls .ghost, .row, .group-head, .question-option, .show-more, .earlier-items, .question-submit, .question-link, .artifact-open, .artifact-head .icon, .composer-error .dismiss { min-height: 44px; }
   .composer-tool, .send, .voice-controls .ghost.icon, .artifact-head .icon, .composer-error .dismiss { min-width: 44px; }
   .attachments { gap: 12px 8px; }
   .attachment { min-height: 28px; }

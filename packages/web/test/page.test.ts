@@ -4301,6 +4301,36 @@ describe('the page in use', () => {
     page.close();
   });
 
+  it('links an answer and its card both ways, each going to the other and highlighting it, and supersedes a card with a later reply', () => {
+    const { page, source } = start();
+    const scrolled: string[] = [];
+    const asked = '1. Move this work to a Code Mode session?\n   - A) Not now, keep it here\n   - B) Yes';
+
+    HTMLElement.prototype.scrollIntoView = function (this: HTMLElement) {
+      scrolled.push(this.dataset['cardKey'] ?? this.dataset['id'] ?? '');
+    };
+    hello(source, { items: [reply('r1', 2, { opening: asked }), message('m1', 3, { text: '1A' })] });
+
+    const ref = root.querySelector<HTMLButtonElement>('li[data-id="m1"] .bubble > .answer-ref')!;
+
+    expect(ref.textContent).toBe('↳1. Move this work to a Code Mode session?→ A) Not now, keep it here');
+    click('li[data-id="m1"] .answer-ref');
+    expect(scrolled).toEqual(['reply:r1']);
+    expect(root.querySelector('.question-card')!.classList.contains('linked')).toBe(true);
+    expect(root.querySelector('.question-card .question-link')!.textContent).toBe('1A');
+    click('.question-card .question-link');
+    expect(scrolled).toEqual(['reply:r1', 'm1']);
+    expect(root.querySelector('li[data-id="m1"]')!.classList.contains('linked')).toBe(true);
+
+    // A later reply withdraws the question: the card is superseded and takes no answer.
+    hello(source, { items: [reply('r1', 2, { opening: asked }), reply('r2', 3, { opening: 'Ignore the question I asked.' })] });
+    expect(root.querySelector('.question-card')!.className).toBe('question-card superseded');
+    expect(root.querySelector('.question-card .question-state')!.textContent).toBe('Superseded: a later reply came after these questions');
+    expect(root.querySelector<HTMLButtonElement>('[data-action="pick"]')!.disabled).toBe(true);
+    expect(root.querySelector('.question-submit, .question-other')).toBeNull();
+    page.close();
+  });
+
   it('answers a card with Submit as an ordinary message, and shows a refusal on the card', async () => {
     const { page, source } = start();
 

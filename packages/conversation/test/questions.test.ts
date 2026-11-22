@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { answersIn, answerText, complete, parseQuestions, unansweredCard , cardOutcome, questionLines, questionSegments, withoutEndingQuestions } from '../src/questions.js';
-import type { CardItem, QuestionChoice } from '../src/questions.js';
+import { answersIn, answerText, complete, parseQuestions, unansweredCard , cardOutcome, questionLines, questionSegments, withoutEndingQuestions, cardLinks } from '../src/questions.js';
+import type { CardItem, CardLinks, LinkItem, QuestionChoice } from '../src/questions.js';
 
 /** The shape the conversation rules show, with a second question. */
 const ASKED = 'Two things before I start:\n\n1. Which port?\n   - A) 8765 (recommended)\n   - B) 8799\n2. **Keep the old route?**\n   - A) Yes\n   - B) No, remove it\n   - C) Keep it behind a flag\n\nSay if neither fits.';
@@ -105,7 +105,10 @@ describe('an unanswered card (PRD R103)', () => {
   it('is a reply after the newest message that asks lettered questions', () => {
     expect(unansweredCard([message(), reply('r1', ASKED)], null)).toBe(true);
     expect(unansweredCard([reply('r1', ASKED)], null)).toBe(true);
-    expect(unansweredCard([message(), reply('r1', ASKED), reply('r2', 'Working on it.')], null)).toBe(true);
+    // An aside or a reply that is only a status after it leaves it open; a reply with text supersedes it (`supersedes`).
+    expect(unansweredCard([message(), reply('r1', ASKED), reply('r2', 'Working on it.', { kind: 'aside' }), reply('r3', '')], null)).toBe(true);
+    expect(unansweredCard([message(), reply('r1', ASKED), reply('r2', 'Ignore the question I asked.')], null)).toBe(false);
+    expect(unansweredCard([message(), reply('r1', ASKED), reply('r2', 'Ignore that.'), reply('r3', ASKED)], null)).toBe(true);
     // A withdrawn message never reached Claude, so it answers nothing.
     expect(unansweredCard([reply('r1', ASKED), message(true)], null)).toBe(true);
     // Nor does one still waiting to be typed, which may come back not sent.
@@ -137,6 +140,64 @@ describe('an unanswered card (PRD R103)', () => {
     expect(unansweredCard([message(), reply('r1', '')], { replyId: 'r1', markdown: 'Done.' })).toBe(false);
     // A status whose reply is older than the items read is answered by the message read after it.
     expect(unansweredCard([message(), reply('r2', 'Ok.')], { replyId: 'r1', markdown: ASKED })).toBe(false);
+  });
+});
+
+describe('how each card was left, and the links between cards and answers (PRD R103)', () => {
+  const message = (id: string, text: string, patch: Partial<Extract<LinkItem, { type: 'message' }>> = {}): LinkItem => ({ type: 'message', id, text, withdrawn: false, delivery: 'sent', at: 0, ...patch });
+  const reply = (id: string, opening: string, patch: Partial<Extract<LinkItem, { type: 'reply' }>> = {}): LinkItem => ({ type: 'reply', id, kind: 'reply', opening, rewrittenBy: null, withdrawn: false, at: 0, ...patch });
+  const outcomes = (links: CardLinks): Array<[string, string | null, string | null]> => [...links.cards].map(([key, card]) => [key, card.outcome, card.message?.id ?? null]);
+
+  it('links a typed or sent answer and its card both ways, with the options and Other text chosen', () => {
+    const links = cardLinks([reply('r1', ASKED), message('m1', '1B, 2 Other: keep it for a week')]);
+
+    expect(outcomes(links)).toEqual([['reply:r1', 'answered', 'm1']]);
+    expect(links.answers.get('m1')).toEqual([{ key: 'reply:r1', lines: [{ question: '1. Which port?', answer: 'B) 8799' }, { question: '2. Keep the old route?', answer: 'Other: keep it for a week' }] }]);
+    expect(links.open).toBeNull();
+    // Several options of one question, and only the questions answered.
+    expect(cardLinks([reply('r1', ASKED), message('m1', '2A and 2C')]).answers.get('m1')![0]!.lines).toEqual([{ question: '2. Keep the old route?', answer: 'A) Yes, C) Keep it behind a flag' }]);
+    // Marks in a question or an option are dropped from its line.
+    expect(cardLinks([reply('r1', '1. Use **[the docs](d.md)**?\n   - A) `yes` *now*\n   - B) No')]).cards.get('reply:r1')!.questions[0]!.text).toBe('Use **[the docs](d.md)**?');
+    expect(cardLinks([reply('r1', '1. Use **[the docs](d.md)**?\n   - A) `yes` *now*\n   - B) No'), message('m1', '1A')]).answers.get('m1')![0]!.lines).toEqual([{ question: '1. Use the docs?', answer: 'A) yes now' }]);
+  });
+
+  it('skips a card the next message ignores, with no link from that message, and leaves a card open under a message not yet sent', () => {
+    const skipped = cardLinks([reply('r1', ASKED), message('m1', 'Do the docs first.')]);
+
+    expect(outcomes(skipped)).toEqual([['reply:r1', 'skipped', 'm1']]);
+    expect(skipped.answers.size).toBe(0);
+    expect(cardLinks([reply('r1', ASKED), message('m1', '1A', { delivery: 'open' })])).toMatchObject({ open: 'reply:r1', answers: new Map() });
+    expect(cardLinks([reply('r1', ASKED, { at: 500 }), message('m1', '1A', { provisional: true, at: 100 })]).open).toBe('reply:r1');
+  });
+
+  it('supersedes an unanswered card with a later reply, so only the newest reply\'s card is answerable, but not with an aside, a note or a status alone', () => {
+    const links = cardLinks([reply('r1', ASKED), reply('r2', 'Ignore the question I asked; I found the port.'), message('m1', 'Good.')]);
+
+    expect(outcomes(links)).toEqual([['reply:r1', 'superseded', null]]);
+    expect(links.answers.size).toBe(0);
+    expect(links.open).toBeNull();
+    expect(outcomes(cardLinks([reply('r1', ASKED), reply('r2', 'Asking again.\n\n1. Port?\n   - A) 1\n   - B) 2'), message('m1', '1A')]))).toEqual([['reply:r1', 'superseded', null], ['reply:r2', 'answered', 'm1']]);
+    expect(cardLinks([reply('r1', ASKED), reply('r2', 'Checking.', { kind: 'aside' }), reply('r3', 'Note.', { kind: 'note' }), reply('r4', ''), reply('r5', 'Gone.', { withdrawn: true })]).open).toBe('reply:r1');
+    // An answer queued before the later reply, shown after it until the session reads it, still answers the card it saw, and no newer one; read
+    // after the reply, it answers the newer card, as the session takes it.
+    const queued = cardLinks([reply('r1', ASKED, { at: 10 }), reply('r2', 'Still working.\n\n1. Port?\n   - A) 1\n   - B) 2', { at: 30 }), message('m1', '1A', { provisional: true, delivery: null, at: 20 })]);
+
+    expect(outcomes(queued)).toEqual([['reply:r1', 'answered', 'm1'], ['reply:r2', null, null]]);
+    expect(queued.answers.get('m1')!.map((one) => one.key)).toEqual(['reply:r1']);
+    expect(outcomes(cardLinks([reply('r1', ASKED, { at: 10 }), reply('r2', 'Still working.\n\n1. Port?\n   - A) 1\n   - B) 2', { at: 30 }), message('m1', '1A', { at: 40 })]))).toEqual([['reply:r1', 'superseded', null], ['reply:r2', 'answered', 'm1']]);
+    // With no newer card, the next message that answers a superseded card is linked to it, sent before the reply or after; one that does not
+    // leaves it superseded.
+    expect(outcomes(cardLinks([reply('r1', ASKED, { at: 10 }), reply('r2', 'Done.', { at: 30 }), message('m1', '2B', { at: 40 })]))).toEqual([['reply:r1', 'answered', 'm1']]);
+    expect(outcomes(cardLinks([reply('r1', ASKED, { at: 10 }), reply('r2', 'Done.', { at: 30 }), message('m1', 'Thanks.', { at: 40 }), message('m2', '1A', { at: 50 })]))).toEqual([['reply:r1', 'superseded', null]]);
+    // A message queued before the card neither answers it nor ends the chance of the answer queued after it.
+    const notice = { provisional: true, delivery: null };
+
+    expect(outcomes(cardLinks([reply('r1', ASKED, { at: 10 }), reply('r2', 'Done.', { at: 20 }), message('m0', '1A', { ...notice, at: 5 })]))).toEqual([['reply:r1', 'superseded', null]]);
+    expect(outcomes(cardLinks([reply('r1', ASKED, { at: 10 }), reply('r2', 'Done.', { at: 20 }), message('m0', 'Agents stopped.', { ...notice, at: 5 }), message('m1', '1A', { ...notice, at: 15 })]))).toEqual([['reply:r1', 'answered', 'm1']]);
+    // A settled card stays as its message left it.
+    expect(outcomes(cardLinks([reply('r1', ASKED), message('m1', '1A'), reply('r2', 'Done.')]))).toEqual([['reply:r1', 'answered', 'm1']]);
+    // A rewrite draws the card in place of the reply it replaced, which has none.
+    expect(outcomes(cardLinks([reply('r1', ASKED, { rewrittenBy: 'r2' }), reply('r2', ASKED)]))).toEqual([['reply:r2', null, null]]);
   });
 });
 
