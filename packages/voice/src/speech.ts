@@ -8,6 +8,8 @@ import type { Speaking, SpeechVoice } from './tts.js';
 export const PROGRESS_MS = 150;
 /** Speech's pace at speed 1, for the share of a passage said before its audio has all come. */
 const MS_PER_CHAR = 65;
+/** The longest a reply waits on words not yet known to be the operator's, so speech that never stops, as a television's, cannot hold it for good. */
+export const HOLD_MAX_MS = 30_000;
 /** Why a reply did not play, or stopped, as its speech outcome says it. */
 const SPOKEN_OVER = 'its turn was spoken over';
 const CANCELLED = 'cancelled by the hub';
@@ -42,6 +44,13 @@ export interface SpeechDeps {
   now(): number;
   log(line: string): void;
   every?(run: () => void, ms: number): { stop(): void };
+  /**
+   * How long a reply about to start waits for the operator to stop speaking, in milliseconds, 0 or left out when it may start; `verified` when
+   * the words it waits on passed the voice check, which {@link HOLD_MAX_MS} does not cut short.
+   */
+  hold?(): { ms: number; verified: boolean };
+  setTimer?(run: () => void, ms: number): unknown;
+  clearTimer?(timer: unknown): void;
 }
 
 interface Current {
@@ -75,6 +84,9 @@ export class Speech {
   /** The needs-you sound's playback while it plays, and a count that muting raises so a sound still opening never plays. */
   #chimePlayback: Playback | null = null;
   #chimeRun = 0;
+  /** The wait for the operator to stop speaking before the next reply starts, and the reply it was logged for. */
+  #holdTimer: unknown = null;
+  #held: { item: SpeechItem; since: number } | null = null;
 
   constructor(private readonly deps: SpeechDeps) {}
 
@@ -269,6 +281,30 @@ export class Speech {
     if (item.line === undefined && this.#queue.some((later) => later.line === undefined && later.turn !== item.turn)) {
       this.#unplayed(item, 'skipped', 'a reply of a newer turn waits');
       this.#next();
+      return;
+    }
+
+    // The operator is speaking, or just spoke: the reply waits, so it never starts over them (architecture.md § Dictation).
+    const hold = item.line === undefined ? (this.deps.hold?.() ?? { ms: 0, verified: false }) : { ms: 0, verified: false };
+    const wait = hold.ms;
+
+    // Held per offer: a replay of the same reply waits afresh.
+    if (this.#held?.item !== item) {
+      this.#held = wait > 0 ? { item, since: this.deps.now() } : null;
+
+      if (wait > 0) {
+        this.deps.log(`speech: reply ${item.replyId} of session ${item.sessionId} waits while the operator speaks`);
+      }
+    }
+
+    if (wait > 0 && !hold.verified && this.deps.now() - this.#held!.since >= HOLD_MAX_MS) {
+      this.deps.log(`speech: reply ${item.replyId} of session ${item.sessionId} waited ${HOLD_MAX_MS} ms for the operator and plays`);
+    } else if (wait > 0) {
+      this.#queue.unshift(item);
+      this.#holdTimer ??= (this.deps.setTimer ?? ((run, ms) => setTimeout(run, ms)))(() => {
+        this.#holdTimer = null;
+        this.#next();
+      }, hold.verified ? wait : Math.max(1, Math.min(wait, HOLD_MAX_MS - (this.deps.now() - this.#held!.since))));
       return;
     }
 

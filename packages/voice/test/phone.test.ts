@@ -619,6 +619,78 @@ describe('VoiceService dictating from the phone', () => {
     expect(sent.filter((one) => one.type === 'utterance' && one.final)).toEqual([expect.objectContaining({ text: 'and one more thing', interrupted: expect.objectContaining({ replyId: 'r1' }) })]);
   });
 
+  it('holds a reply that comes in a short pause until the operator has finished, so the thought goes on in one utterance', async () => {
+    const { clock, tts, sent, service, phoneSays, logs } = setup();
+
+    service.receive({ type: 'device', device: 'phone' });
+    service.receive({ type: 'mic', on: true });
+    service.receive({ type: 'phone-state', busy: false });
+    await settle();
+    phoneSays('we are still having', 1_000);
+    // A 0.6 s pause, in which the reply to something said before is ready to play.
+    phoneSays('we are still having', 600);
+    service.receive({ type: 'speak', gen: 1, replyId: 'r1', sessionId: 's1', text: 'Here is what I found.', tone: null, turn: 'm1', ...VOICE });
+    await settle();
+    expect(tts.requests).toHaveLength(0);
+    expect(logs).toContain('speech: reply r1 of session s1 waits while the operator speaks');
+
+    // The thought goes on: nothing plays over it, and it ends as one utterance.
+    phoneSays('we are still having audio issues', 1_000);
+    expect(tts.requests).toHaveLength(0);
+    phoneSays('we are still having audio issues', 4_000);
+    await settle();
+    expect(sent.filter((one) => one.type === 'utterance')).toEqual([expect.objectContaining({ text: 'we are still having audio issues', final: true, interrupted: null })]);
+    // Quiet for the hold since the last word: the reply plays now.
+    clock.advance(500);
+    await settle();
+    expect(tts.requests).toHaveLength(1);
+    expect(sent.filter((one) => one.type === 'speech' && one.replyId === 'r1').map((one) => (one as { state: string }).state)).not.toContain('interrupted');
+  });
+
+  it('holds no reply for another voice\'s words, nor while listening is paused by voice', async () => {
+    const voiceprint = {
+      enrolled: true,
+      replyVoiceScore: () => null,
+      unavailable: () => null,
+      enroll: () => ({ windows: 0, f0: 0 }),
+      learnVoice: () => undefined,
+      check: (_audio: Float32Array, text: string) => (text.includes('someone') ? { score: 0.2, f0: 220, dropped: true, reason: 'another voice' } : { score: 0.9, f0: 110, dropped: false, reason: null }),
+    };
+    const { clock, tts, sent, service, phoneSays, logs, mic } = setup(voiceprint);
+    const speak = (replyId: string): void => service.receive({ type: 'speak', gen: 1, replyId, sessionId: 's1', text: 'Done.', tone: null, turn: replyId, ...VOICE });
+
+    service.receive({ type: 'device', device: 'phone' });
+    service.receive({ type: 'mic', on: true });
+    service.receive({ type: 'phone-state', busy: false });
+    await settle();
+    phoneSays('someone else talking', 600);
+    phoneSays('someone else talking', 1_000);
+    await settle();
+    expect(logs.some((line) => line.startsWith('piece dropped by the voice check'))).toBe(true);
+    speak('r1');
+    await settle();
+    expect(tts.requests).toHaveLength(1);
+    tts.requests[0]!.audio(Math.round(100 * BYTES_PER_MS));
+    tts.requests[0]!.finish();
+    await settle();
+
+    const play = sent.find((one) => one.type === 'phone-play') as { id: number };
+
+    service.receive({ type: 'phone-played', id: play.id, ms: 100, done: true });
+    await settle();
+    clock.advance(2_000);
+
+    // Paused by voice, talk in the room is no dictation and holds nothing.
+    phoneSays('stop listening', 600);
+    phoneSays('stop listening', 4_000);
+    await settle();
+    expect(mic()?.mic).toBe('paused-by-voice');
+    phoneSays('just chatting here', 600);
+    speak('r2');
+    await settle();
+    expect(tts.requests).toHaveLength(2);
+  });
+
   it('keeps the mic off with no device, and refuses enrolment away from this computer', async () => {
     const { sent, service, logs, mic } = setup();
 

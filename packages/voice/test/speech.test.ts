@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { needsYouChime } from '../src/output.js';
 import type { VoiceMessage } from '../src/protocol.js';
-import { PROGRESS_MS, Speech } from '../src/speech.js';
+import { HOLD_MAX_MS, PROGRESS_MS, Speech } from '../src/speech.js';
 import type { SpeechItem } from '../src/speech.js';
 import { Clock, FakeOutput, FakeTts, settle } from './fakes.js';
 
@@ -341,5 +341,79 @@ describe('Speech', () => {
     speech.mute('away: computer locked');
     speech.say(line('alert:a3'));
     expect(lines.at(-1)).toBe('alert:a3 skipped');
+  });
+
+  it('holds a reply while the operator speaks, starts it once they are quiet, and skips it for a newer turn offered meanwhile', async () => {
+    const clock = new Clock();
+    const tts = new FakeTts();
+    const output = new FakeOutput();
+    const logs: string[] = [];
+    let holdUntil = 0;
+    const speech = new Speech({
+      tts,
+      output,
+      device: () => null,
+      report: () => undefined,
+      failed: () => undefined,
+      now: clock.now,
+      log: (line) => logs.push(line),
+      every: clock.every,
+      hold: () => ({ ms: Math.max(0, holdUntil - clock.now()), verified: true }),
+      setTimer: clock.setTimer,
+      clearTimer: clock.clearTimer,
+    });
+
+    holdUntil = clock.now() + 1_500;
+    speech.speak(item('r1'));
+    expect(tts.requests).toHaveLength(0);
+    expect(speech.playedUntil).toBe(-Infinity);
+    expect(logs).toEqual(['speech: reply r1 of session s1 waits while the operator speaks']);
+
+    // The operator goes on: the wait runs on, logged once.
+    clock.advance(1_000);
+    holdUntil = clock.now() + 1_500;
+    clock.advance(600);
+    expect(tts.requests).toHaveLength(0);
+    clock.advance(1_000);
+    await settle();
+    expect(tts.requests).toHaveLength(1);
+    expect(logs).toHaveLength(1);
+
+    // A reply waiting while the operator speaks is skipped when the answer to what they said next comes.
+    tts.requests[0]!.finish();
+    await settle();
+    holdUntil = clock.now() + 1_500;
+    speech.speak(item('r2', 'm2'));
+    speech.speak(item('r3', 'm3'));
+    clock.advance(1_600);
+    await settle();
+    expect(tts.requests.map((request) => request.text)).toEqual(['Fixed the badge.', 'Fixed the badge.']);
+    expect(logs.some((line) => line.startsWith('speech: reply r2 of session s1 skipped (a reply of a newer turn waits)'))).toBe(true);
+  });
+
+  it('plays a reply held ${HOLD_MAX_MS} ms on words not known to be the operator\'s, but waits on the operator\'s however long', async () => {
+    const clock = new Clock();
+    let verified = false;
+    const tts = new FakeTts();
+    const logs: string[] = [];
+    const speech = new Speech({ tts, output: new FakeOutput(), device: () => null, report: () => undefined, failed: () => undefined, now: clock.now, log: (line) => logs.push(line), every: clock.every, hold: () => ({ ms: 10_000, verified }), setTimer: clock.setTimer, clearTimer: clock.clearTimer });
+
+    speech.speak(item('r1'));
+    clock.advance(HOLD_MAX_MS - 1);
+    expect(tts.requests).toHaveLength(0);
+    clock.advance(1);
+    expect(tts.requests).toHaveLength(1);
+    expect(logs).toEqual(['speech: reply r1 of session s1 waits while the operator speaks', `speech: reply r1 of session s1 waited ${HOLD_MAX_MS} ms for the operator and plays`]);
+
+    // The operator's own words hold a reply past the limit; the same reply offered again waits afresh.
+    tts.requests[0]!.finish();
+    await settle();
+    verified = true;
+    speech.speak(item('r1'));
+    clock.advance(HOLD_MAX_MS * 2);
+    expect(tts.requests).toHaveLength(1);
+    verified = false;
+    clock.advance(10_000);
+    expect(tts.requests).toHaveLength(2);
   });
 });

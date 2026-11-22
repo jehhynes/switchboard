@@ -169,6 +169,9 @@ export class VoiceService {
       now: deps.now,
       log: deps.log,
       ...(deps.every === undefined ? {} : { every: deps.every }),
+      hold: () => this.#dictation?.replyHold?.() ?? { ms: 0, verified: false },
+      ...(deps.setTimer === undefined ? {} : { setTimer: deps.setTimer }),
+      ...(deps.clearTimer === undefined ? {} : { clearTimer: deps.clearTimer }),
     });
     this.#router = new Router({
       changed: (gen, sessionId, reason) => {

@@ -18,6 +18,11 @@ import type { Voiceprint } from './voiceprint.js';
 
 /** How often an open message is checked for its end. */
 export const TURN_TICK_MS = 100;
+/**
+ * A reply waits to start until the operator has said nothing for this long, and while an utterance is open, so it never starts over the
+ * operator mid-thought (mechanics.md M127); a reply playing is stopped by talking over it instead.
+ */
+export const REPLY_HOLD_MS = 1_500;
 /** A barge-in's words are recognised again from this long before the voice that passed the check. */
 const BARGE_PREROLL = 0.3 * ASR_RATE;
 /** After a reply ends, audio still this loud in its last 0.6 s keeps the words held and checked for up to `TAIL_HOLD_MS`. */
@@ -173,6 +178,9 @@ export class Dictation {
   #deaf = false;
   /** Why the open capture is half-duplex, or null while it listens as the voice plays (`duplexMode`). */
   #halfDuplex: string | null = null;
+  /** When the operator's words last changed, for {@link REPLY_HOLD_MS}, and when words that then passed the voice check last did. */
+  #lastWordAt = -Infinity;
+  #keptWordAt = -Infinity;
   /** Why the open capture listens while the voice plays though it cancels no echo; null otherwise. */
   #fullDuplex: string | null = null;
   /** Under `voice.duplex` `auto`, capture that cancels no echo checks whether the voice's playback reaches it. */
@@ -274,6 +282,26 @@ export class Dictation {
   /** Whether the operator is speaking: an utterance is open or words are being recognised. */
   get hearing(): boolean {
     return this.#utterance !== null || (this.#transcriber?.words ?? '') !== '';
+  }
+
+  /**
+   * How long a reply about to start waits for the operator, in milliseconds, 0 when it may start: while an utterance is open or words are being
+   * recognised, and until {@link REPLY_HOLD_MS} after the last word heard.
+   */
+  replyHold(): { ms: number; verified: boolean } {
+    // Paused by voice, nothing heard is dictation, so nothing holds a reply.
+    if (this.#stream === null || this.#pausedByVoice) {
+      return { ms: 0, verified: false };
+    }
+
+    const now = this.deps.now();
+    const quiet = Math.max(0, this.#lastWordAt + REPLY_HOLD_MS - now);
+    const utterance = this.#utterance;
+    // An utterance with words that passed the voice check is the operator's; one holding only another voice's pieces does not count.
+    const open = utterance !== null && utterance.pieces.length + utterance.pending.length > 0;
+    const live = (this.#transcriber?.words ?? '') !== '';
+
+    return { ms: open || live ? Math.max(quiet, TURN_TICK_MS * 2) : quiet, verified: open || this.#keptWordAt + REPLY_HOLD_MS > now };
   }
 
   /** Another app records from a microphone, as far as the watcher has said. */
@@ -1050,6 +1078,7 @@ export class Dictation {
     if (utterance !== null) {
       utterance.interrupted = interrupted;
       utterance.lastActivity = this.deps.now();
+      this.#lastWordAt = utterance.lastActivity;
 
       if (transcriber.words !== '') {
         this.#words(transcriber.words);
@@ -1108,6 +1137,7 @@ export class Dictation {
     // Words settling into a piece are not speech: counting them would put off every message's end by the piece's pause.
     if (text !== '') {
       utterance.lastActivity = this.deps.now();
+      this.#lastWordAt = utterance.lastActivity;
     }
 
     this.#sendWords(utterance, { type: 'words', gen: utterance.gen, utteranceId: utterance.id, sessionId: utterance.sessionId, text });
@@ -1155,6 +1185,8 @@ export class Dictation {
     if (check.dropped) {
       this.deps.log(`piece dropped by the voice check (${check.reason === 'pitch' ? 'pitch' : 'score'} ${check.reason === 'pitch' ? `${check.f0} Hz` : check.score}): ${text}`);
       this.#roomVoice(audio);
+      // Another voice's words hold no reply.
+      this.#lastWordAt = this.#keptWordAt;
 
       // An end the turn model judged on words that included these is judged again without them.
       if (utterance.completeAt !== null) {
@@ -1167,6 +1199,7 @@ export class Dictation {
 
     utterance.pieces.push(text);
     this.deps.vocabulary.used(text);
+    this.#keptWordAt = this.#lastWordAt;
     return true;
   }
 
