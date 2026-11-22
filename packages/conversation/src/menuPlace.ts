@@ -1,5 +1,5 @@
 /**
- * Where a menu opens (architecture.md § Menus), for the Conversation view and the web page alike: under the element that holds it, their left
+ * Where a menu opens (architecture.md § Conversation view, Menus), for the Conversation view and the web page alike: under the element that holds it, their left
  * edges lined up, so it extends right and down as a desktop menu does; lined up with that element's right edge instead only when it would pass
  * the viewport's right edge and has more room that way, and above it only when it would pass the bottom and has more room above. Imports
  * nothing, for browser bundles.

@@ -863,7 +863,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     const unalerted = newlyNeedingIds.filter((id) => !alerted.includes(id));
     const chimed = voice.needsYou(unalerted, targetSession?.workItemId ?? null);
 
-    // One surface, `alerts.surface`, shows each needs-you message: a web page or the dock (architecture.md § Needs you).
+    // One surface, `alerts.surface`, shows each needs-you message: a web page or the dock (architecture.md § Dock, Needs you).
     if (needing.length > 0) {
       const page = pageTargets.alerting(config.settings.alerts.surface);
 

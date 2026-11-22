@@ -56,7 +56,7 @@ const COMPOSER_MAX_PX = 200;
 /** How long the composer waits after the last key before it tells the hub its draft (architecture.md § Dictation). */
 export const COMPOSER_DRAFT_MS = 300;
 
-/** Opens each open menu down and to the right of its button, or the other way where the view has no room (`placeMenus`, architecture.md § Menus). */
+/** Opens each open menu down and to the right of its button, or the other way where the view has no room (`placeMenus`, architecture.md § Conversation view, Menus). */
 function fitMenus(root: HTMLElement): void {
   placeMenus(root, { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight });
 }

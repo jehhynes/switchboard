@@ -1755,7 +1755,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     dropConsoles();
     changes.drop();
   };
-  /** Opens each open menu down and to the right of its button, or the other way where the page has no room (`placeMenus`, architecture.md § Menus). */
+  /** Opens each open menu down and to the right of its button, or the other way where the page has no room (`placeMenus`, architecture.md § Conversation view, Menus). */
   const fitMenus = (): void => placeMenus(root, { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight });
   /**
    * How many artifact tabs the shown strip fits (`artifactTabsFit`), measured after a draw: its other tabs and the Artifacts button as drawn, and a

@@ -1,4 +1,4 @@
-/* Where every menu opens, in the Conversation view and the web page alike (architecture.md § Menus): under the element that holds it, left edges
+/* Where every menu opens, in the Conversation view and the web page alike (architecture.md § Conversation view, Menus): under the element that holds it, left edges
    lined up; `placeMenus` (menuPlace.ts) adds flip-x to line it up with that element's right edge, or flip-y to open it above, when it would
    pass the viewport's edge. */
 .menu-anchor { position: relative; display: flex; min-width: 0; }
