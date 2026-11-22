@@ -370,7 +370,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /**
    * The tabs a work item opens on: Console or an artifact kept for it while it still applies; otherwise Browser when the paired pane has links of
    * the work item to show and the operator last chose Browser, or the work item has no status report yet, or before any choice when it also has no
-   * session yet; otherwise Status in the column and the conversation on a narrower page.
+   * session yet; otherwise Status. That is the column's tab; where the column folds into the conversation's tabs, the work item opens on the
+   * Conversation tab.
    */
   const openTabs = (): void => {
     const saved = savedTabs?.workItemId === state.scope?.workItemId ? savedTabs?.tab : null;
@@ -382,7 +383,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const chosen: Tab = kept ?? (browser ? 'browser' : 'status');
 
     view.side = chosen as SideTab;
-    view.tab = chosen === 'status' ? 'conversation' : chosen;
+    view.tab = !wide() || chosen === 'status' ? 'conversation' : chosen;
     view.artifact = chosen === 'artifacts' ? path : null;
     paneKnown = view.pane !== null || !paneLocal();
   };
@@ -2367,6 +2368,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       history.replaceState(history.state, '', `#w=${workItemId}`);
     }
 
+    // Where the column folds into the conversation's tabs, the work item already open shows its Conversation tab again; another opens on it
+    // with its hello (`openTabs`), so a refused select leaves the open work item's tab as it was.
+    if (state.scope?.workItemId === workItemId && !wide()) {
+      view.tab = 'conversation';
+    }
+
     if (state.scope?.workItemId === workItemId && !selectInFlight) {
       acked = workItemId;
       draw();
@@ -2473,6 +2480,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       if (conversationEntry(event.state)) {
         if (listing) {
           view.list = false;
+          view.tab = 'conversation';
           draw();
         }
 

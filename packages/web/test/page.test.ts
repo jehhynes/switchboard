@@ -3241,11 +3241,15 @@ describe('the page in use', () => {
     hello(source, { sessions: [], groups: linked(4), scope: { ...scope, workItemId: 4 } });
     expect(chosen()).toBe('status');
 
-    // Narrower: Browser among the conversation's tabs, else the conversation.
+    // Narrower, the column folded into the conversation's tabs: the conversation, with Browser among the tabs, and Browser the column's choice.
     resizeTo(900);
     source.emit('pane', { pane: paired });
     hello(source, { sessions: [], groups: linked(5), scope: { ...scope, workItemId: 5 } });
-    expect(root.querySelector<HTMLElement>('#head .tab.selected')!.dataset['tab']).toBe('browser');
+    expect(root.querySelector<HTMLElement>('#head .tab.selected')!.dataset['tab']).toBe('conversation');
+    expect(root.querySelector('#head [data-tab="browser"]')).not.toBeNull();
+    resizeTo(1920);
+    expect(chosen()).toBe('browser');
+    resizeTo(900);
     hello(source, { groups: linked(6), scope: { ...scope, workItemId: 6 } });
     expect(root.querySelector<HTMLElement>('#head .tab.selected')!.dataset['tab']).toBe('conversation');
 
@@ -3277,10 +3281,10 @@ describe('the page in use', () => {
     expect(chosen()).toBe('browser');
     hello(source, { groups: unlinked(17), scope: { ...scope, workItemId: 17 }, openOn: 'status', status: null });
     expect(chosen()).toBe('status');
-    // Narrower: Browser among the conversation's tabs.
+    // Narrower: the conversation, whatever the column would show.
     resizeTo(900);
     hello(source, { groups: linked(18), scope: { ...scope, workItemId: 18 }, openOn: 'status', status: null });
-    expect(root.querySelector<HTMLElement>('#head .tab.selected')!.dataset['tab']).toBe('browser');
+    expect(root.querySelector<HTMLElement>('#head .tab.selected')!.dataset['tab']).toBe('conversation');
     resizeTo(1920);
     // The hub sends scope before hello: the work item opens on its hello's kept tab.
     source.emit('scope', { scope: { ...scope, workItemId: 12 } });
@@ -3291,6 +3295,72 @@ describe('the page in use', () => {
     // The operator's choice is kept for the work item in the hub.
     click('#detail [data-side="console"]');
     expect(posts.filter((post) => post.url.endsWith('/page-tabs')).at(-1)?.body).toMatchObject({ workItemId: 10, tab: 'console' });
+    page.close();
+  });
+
+  it("opens every work item on the Conversation tab in the phone's layout, whatever tab it kept or the column would show, and keeps a tab chosen until another work item opens", async () => {
+    window.innerWidth = 375;
+    history.replaceState(null, '', '#');
+    onTestFinished(() => {
+      vi.unstubAllGlobals();
+    });
+
+    let refuse = false;
+    const answer = (url: string) => (refuse && url.endsWith('/select') ? 409 : 200);
+    const open = () => startPage(root, { fetch: (async (url: string, init?: { body?: string }) => (posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) }), { status: answer(url), ok: answer(url) === 200, json: async () => ({}), text: async () => '' })) as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, standalone: () => true, toExtension: async () => ({ ok: true }) });
+    let page = open();
+    let source = FakeSource.last!;
+    const shown = () => root.querySelector<HTMLElement>('#head .tab.selected')?.dataset['tab'];
+    const paired = { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: null };
+    const rows = [listGroup('progress', [listRow(1, { title: 'Fix it', url: 'https://github.com/o/r/issues/1' }), listRow(2, { title: 'Side', url: 'https://github.com/o/r/issues/2' })])];
+    // Each opening rule that picks another tab: an artifact kept for the work item, Browser chosen for every work item, no status report yet.
+    const kept = { groups: rows, openOn: 'browser', status: null, tabs: { tab: 'artifact:chat/p.html', closed: [] } };
+
+    hello(source, { ...kept, scope: null });
+    source.emit('pane', { pane: paired });
+    click('[data-work-item="1"]');
+    await flush();
+    hello(source, kept);
+    source.emit('pane', { pane: paired });
+    expect(root.classList.contains('listing')).toBe(false);
+    expect(shown()).toBe('conversation');
+
+    // A tab chosen there stays while the work item is open.
+    click('#head [data-tab="status"]');
+    source.emit('pane', { pane: { ...paired, shown: true } });
+    expect(shown()).toBe('status');
+
+    // Back to the list and the same work item again: the conversation, with no new hello.
+    click('.header > button.back-toggle');
+    expect(root.classList.contains('listing')).toBe(true);
+    click('[data-work-item="1"]');
+    expect(root.classList.contains('listing')).toBe(false);
+    expect(shown()).toBe('conversation');
+
+    // Another work item, as from the header's list: the conversation.
+    click('#head [data-tab="status"]');
+    click('.header > button.back-toggle');
+    click('[data-work-item="2"]');
+    await flush();
+    hello(source, { ...kept, scope: { ...scope, workItemId: 2 }, tabs: { tab: 'console', closed: [] } });
+    expect(shown()).toBe('conversation');
+
+    // A work item the hub refuses to open leaves the open one's tab as it was.
+    click('#head [data-tab="status"]');
+    click('.header > button.back-toggle');
+    refuse = true;
+    click('[data-work-item="1"]');
+    await flush();
+    refuse = false;
+    expect(shown()).toBe('status');
+
+    // A reload: the conversation.
+    page.close();
+    page = open();
+    source = FakeSource.last!;
+    hello(source, { ...kept, scope: { ...scope, workItemId: 2 } });
+    source.emit('pane', { pane: paired });
+    expect(shown()).toBe('conversation');
     page.close();
   });
 
