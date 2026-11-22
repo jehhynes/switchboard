@@ -1467,3 +1467,14 @@ Current use: the console's resync after each fit ([architecture.md](architecture
   - Each `assistant` line's `message.model` names the model, such as `claude-opus-5-5`; Claude's own notes have `<synthetic>`.
 - **Not verified:** whether a session that left Code Mode would write `"replMode":false`; Linux.
 - **Current use:** `transcriptLaunch`, which picks how an ended registered session resumes (architecture.md § Code Mode sessions, Registered sessions).
+
+## M118. A queued notice Claude never received, 2026-11-22
+
+- **Versions:** Claude Code CLI 2.1.327 to 2.1.330 on Windows 11 Pro 10.0.26300; one of the operator's terminal transcripts, read only, and strings in the 2.1.330 binary.
+- **Inspection:** the transcript's `queue-operation` lines counted by operation and fields; the lines around a stopped-agents notice that a resumed session's conversation showed as an operator message dated three days earlier; the `enqueuePendingNotification` calls in the binary.
+- **Result:**
+  - When the operator stops background agents, Claude Code queues `2 background agents were stopped by the user: "…", "…".` or `Background agent "…" was stopped by the user.` as a `task-notification`, followed by a `system` line with subtype `agents_killed`. The queue line records only `type`, `operation`, `timestamp`, `sessionId` and `content`, as every one of the 22,016 `enqueue` lines with content does, so it does not say that the entry is a notification. Several other notifications are queued as plain text too, such as Ultraplan's and Ultrareview's.
+  - A notification Claude takes is recorded as a `queued_command` attachment with `commandMode` `task-notification` and `origin` `{"kind":"task-notification"}` (128 seen). This one was never taken: the run exited right after it, and the next run, three days later, recorded no `dequeue`, `remove` or receipt for it. A queue entry left at exit is not carried into the resumed run.
+  - Claude Code also removes a queued message with `reason` `delivered_to_agent` (13 seen) when it goes to another agent, and the main conversation never receives it.
+- **Not verified:** whether Claude Code ever takes the operator's queued messages out of order.
+- **Current use:** the stopped-agents notice is left out of the conversation, and a queued message still waiting when a message sent after it is received is withdrawn (architecture.md § Reading a session).

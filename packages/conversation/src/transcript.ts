@@ -8,7 +8,7 @@ import { stripMessageTags } from './tags.js';
  */
 export type TranscriptEntry =
   | { kind: 'reply'; uuid: string | null; at: number; text: string; /** The API message's ID: Claude Code writes one line per content block. */ messageId: string | null }
-  | { kind: 'message'; uuid: string | null; at: number; text: string }
+  | { kind: 'message'; uuid: string | null; at: number; text: string; /** Received from Claude Code's queue mid-turn, not as a prompt. */ queued?: true }
   | { kind: 'sent'; uuid: null; at: number; text: string };
 
 type Json = Record<string, unknown>;
@@ -17,6 +17,13 @@ const isObject = (value: unknown): value is Json => typeof value === 'object' &&
 
 /** Text Claude Code itself puts in a user entry: a command's output, a shell escape, a reminder or an interruption note. */
 const NOT_TYPED = /^\s*(<local-command-|<bash-(input|stdout|stderr)>|<system-reminder>|<task-notification>|\[Request interrupted|Caveat: The messages below)/;
+
+/**
+ * The notice Claude Code queues as plain text when the operator stops background agents. Its queue line names no origin and does not say it
+ * is a notification (mechanics M118), so the text decides there and in a line from before Claude Code wrote origins; a line from the operator
+ * with the same words is theirs.
+ */
+const AGENTS_STOPPED = /^\s*(Background agent ".*" was stopped by the user\.|\d+ background agents were stopped by the user: )/;
 
 /** Text in a queue line that Claude Code put there, such as a task notification, a poll event or a message from another session. */
 const NOT_SENT = /^\s*(<|\[Cross-session delivery notice\])/;
@@ -125,7 +132,7 @@ export function parseLine(line: string): { entry: TranscriptEntry | null; assist
     const content = raw['content'];
 
     // A paste of several lines starts with its `pasted_content` tag, which is the operator's text, not Claude Code's.
-    if (raw['operation'] === 'enqueue' && typeof content === 'string' && content.trim() !== '' && !NOT_TYPED.test(unwrapPasted(content)) && !NOT_SENT.test(unwrapPasted(content))) {
+    if (raw['operation'] === 'enqueue' && typeof content === 'string' && content.trim() !== '' && !NOT_TYPED.test(unwrapPasted(content)) && !NOT_SENT.test(unwrapPasted(content)) && !AGENTS_STOPPED.test(content)) {
       return { entry: { kind: 'sent', uuid: null, at: at ?? 0, text: typedText(content) }, assistantAt: null, uuid: null, parent: null, at, received: null };
     }
 
@@ -139,8 +146,8 @@ export function parseLine(line: string): { entry: TranscriptEntry | null; assist
     const text = contentText(attachment['prompt']);
     const human = (attachment['origin'] === undefined ? attachment['commandMode'] === 'prompt' : fromHuman(attachment['origin'])) && !side;
 
-    if (text !== null && text.trim() !== '' && human && !NOT_TYPED.test(text)) {
-      return { ...line_, entry: { kind: 'message', uuid, at: at ?? 0, text: typedText(text) }, assistantAt: null, at, received: typedText(text) };
+    if (text !== null && text.trim() !== '' && human && !NOT_TYPED.test(text) && !(attachment['origin'] === undefined && AGENTS_STOPPED.test(text))) {
+      return { ...line_, entry: { kind: 'message', uuid, at: at ?? 0, text: typedText(text), queued: true }, assistantAt: null, at, received: typedText(text) };
     }
 
     return { ...none, ...line_, at, received: text === null ? null : typedText(text) };
@@ -151,7 +158,7 @@ export function parseLine(line: string): { entry: TranscriptEntry | null; assist
     // Claude Code 2.1.326 and later name who wrote a user line; an earlier one is read by its text alone.
     const human = raw['origin'] === undefined || fromHuman(raw['origin']);
 
-    if (text !== null && text.trim() !== '' && human && !side && !NOT_TYPED.test(text)) {
+    if (text !== null && text.trim() !== '' && human && !side && !NOT_TYPED.test(text) && !(raw['origin'] === undefined && AGENTS_STOPPED.test(text))) {
       return { ...line_, entry: { kind: 'message', uuid, at: at ?? 0, text: typedText(text) }, assistantAt: null, at, received: typedText(text) };
     }
 

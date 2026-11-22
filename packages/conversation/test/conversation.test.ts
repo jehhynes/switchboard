@@ -1,4 +1,4 @@
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -363,6 +363,69 @@ describe('SessionConversation', () => {
 
     conversation.end();
     expect(items()[1]).toMatchObject({ text: 'Never read', withdrawn: true });
+  });
+
+  it('never shows the stopped-agents notice an earlier run queued and exited with, and answers the next run\'s message with its reply', () => {
+    const { conversation, path, items, changes } = setup();
+
+    // Scrubbed lines of a real transcript: the notice is the earlier run's last queue line, dated three days before the resumed run's message.
+    copyFileSync(join(import.meta.dirname, 'fixtures', 'transcripts', 'agents-stopped.jsonl'), path);
+    conversation.readTranscript(path);
+
+    const shown = items();
+
+    expect(shown.map((item) => [item.type, item.type === 'message' ? item.text : item.opening, item.type === 'message' && item.provisional, item.withdrawn])).toEqual([
+      ['message', 'Start the two background agents.', false, false],
+      ['reply', 'Both agents are running.', false, false],
+      ['message', 'Hello again', false, false],
+      ['reply', 'Hello.', false, false],
+    ]);
+    expect(shown[3]).toMatchObject({ answers: shown[2]!.id });
+    expect(changes.filter((change) => change.type === 'message')).toHaveLength(2);
+  });
+
+  it('withdraws a message queued before one Claude received and never received itself, and keeps one queued after it', () => {
+    const { store, conversation, path, append, items } = setup();
+    const shown = () => items().map((item) => `${item.type === 'message' ? `${item.text}${item.provisional ? ' (sent)' : ''}` : item.opening}${item.withdrawn ? ' (withdrawn)' : ''}`);
+
+    // An earlier run exits with "Lost" queued; the next run's first message is typed at idle.
+    append(user('u1', T0, 'First?'), enqueue(T0 + 1000, 'Lost'));
+    conversation.readTranscript(path);
+    expect(shown()).toEqual(['First?', 'Lost (sent)']);
+
+    append(user('u2', T0 + 86_400_000, 'Next day?'));
+    conversation.readTranscript(path);
+    expect(shown()).toEqual(['First?', 'Lost (sent) (withdrawn)', 'Next day?']);
+
+    // "Before" and "After" are queued mid-turn and only "After" is received: "Before" was passed over; a later one still waits.
+    append(enqueue(T0 + 86_401_000, 'Before'), enqueue(T0 + 86_402_000, 'After'), enqueue(T0 + 86_403_000, 'Later'), queued('q1', T0 + 86_404_000, 'After'));
+    conversation.readTranscript(path);
+    expect(shown()).toEqual(['First?', 'Lost (sent) (withdrawn)', 'Next day?', 'Before (sent) (withdrawn)', 'After', 'Later (sent)']);
+
+    // A message typed from the view passes over a terminal message queued before its paste, not one queued after it.
+    const typed = { sessionId: 's1', workItemId: 7, origin: 'typed' as const, transcriptUuid: null, provisional: true, withdrawn: false, error: null, delivery: 'open' as const, opId: 'op1' };
+
+    store.addMessage({ ...typed, id: 'm-typed', at: T0 + 86_410_000, text: 'From the view', pastedAt: T0 + 86_410_000 });
+    append(enqueue(T0 + 86_411_000, 'Typed after'), user('u3', T0 + 86_412_000, 'From the view'));
+    conversation.readTranscript(path);
+    expect(store.message('m-typed')).toMatchObject({ provisional: false, withdrawn: false });
+    expect(shown().filter((line) => line.startsWith('Later') || line.startsWith('Typed after'))).toEqual(['Later (sent) (withdrawn)', 'Typed after (sent)']);
+  });
+
+  it('passes over queued messages by the order of their queue lines, not their times, and not for a queued command no queue line matches', () => {
+    const { conversation, path, append, items } = setup();
+    const waiting = () => items().filter((item) => item.type === 'message' && item.provisional && !item.withdrawn).map((item) => (item.type === 'message' ? item.text : ''));
+
+    append(user('u1', T0, 'First?'));
+    // "Second" is queued after "First queued" although its line carries an earlier time; receiving "First queued" leaves it waiting.
+    append(enqueue(T0 + 5000, 'First queued'), enqueue(T0 + 1000, 'Second'), queued('q1', T0 + 6000, 'First queued'));
+    conversation.readTranscript(path);
+    expect(waiting()).toEqual(['Second']);
+
+    // A queued command that matches no queue line, such as one Claude Code reworded, cannot say where it was queued.
+    append(queued('q2', T0 + 7000, 'Reworded'));
+    conversation.readTranscript(path);
+    expect(waiting()).toEqual(['Second']);
   });
 
   it("links each reply to the operator's message on its parentUuid chain, past tool calls, other lines and made-up assistant lines", () => {

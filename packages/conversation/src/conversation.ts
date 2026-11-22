@@ -347,6 +347,20 @@ export class SessionConversation extends ConversationLog {
     }
   }
 
+  /**
+   * Claude Code delivers the operator's queued messages in the order they were queued, so a terminal message added before `before` (an `ord`,
+   * the order its queue line was read in) that is still waiting when a message queued after it is received never will be: an earlier run exited
+   * with it queued, or it went to another agent (mechanics M118).
+   */
+  #withdrawPassed(before: number, except?: string): void {
+    for (const message of this.deps.store.provisionalMessages(this.sessionId)) {
+      if (message.origin === 'terminal' && message.id !== except && message.ord < before) {
+        this.deps.store.updateMessage(message.id, { withdrawn: true });
+        this.deps.onChange({ type: 'message', message: this.deps.store.message(message.id)! });
+      }
+    }
+  }
+
   #entry(entry: TranscriptEntry): void {
     if (entry.kind === 'sent') {
       // The queue line of a message typed from the view: Claude has it and receives it later, where it then takes its place.
@@ -379,6 +393,8 @@ export class SessionConversation extends ConversationLog {
       const typed = this.#typed(entry.text, entry.at);
 
       if (typed !== undefined) {
+        // Typed from the view, it was added when it was pasted, after the terminal messages queued before it.
+        this.#withdrawPassed(typed.ord);
         this.deps.store.updateMessage(typed.id, { at: entry.at, transcriptUuid: entry.uuid, provisional: false, delivery: 'sent', error: null });
         this.deps.store.placeLast(typed.id);
         this.lastMessage = typed.id;
@@ -394,6 +410,12 @@ export class SessionConversation extends ConversationLog {
       // A message sent while Claude was busy moves to where Claude received it.
       const sent = this.#sent(entry.text);
       const id = sent?.id ?? `m-${this.deps.newId()}`;
+
+      // A prompt line comes when nothing is queued, so every message still waiting was passed over; a queued command that matches no queue line
+      // cannot say where it was queued, so it passes over nothing.
+      if (sent !== undefined || entry.queued !== true) {
+        this.#withdrawPassed(sent?.ord ?? Infinity, sent?.id);
+      }
 
       if (sent === undefined) {
         this.deps.store.addMessage({ id, sessionId: this.sessionId, workItemId: this.workItemId, at: entry.at, origin: 'terminal', text: entry.text, transcriptUuid: entry.uuid, provisional: false, withdrawn: false, delivery: null, error: null, opId: null, pastedAt: null });

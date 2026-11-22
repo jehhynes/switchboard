@@ -51,6 +51,21 @@ describe('parseLine on messages', () => {
     expect(parseLine(JSON.stringify({ type: 'queue-operation', operation: 'remove', reason: 'absorbed_mid_turn', timestamp: at, content: 'Hi' }))).toMatchObject({ entry: null, received: null });
     expect(parseLine(JSON.stringify({ type: 'queue-operation', operation: 'enqueue', timestamp: at, content: '<event nonce="x">' }))).toMatchObject({ entry: null });
   });
+
+  it("reads Claude Code's notice of stopped background agents as no message, queued or in a line without an origin, but not the operator quoting it", () => {
+    const enqueue = (content: string) => parseLine(JSON.stringify({ type: 'queue-operation', operation: 'enqueue', timestamp: at, content }));
+    const several = '2 background agents were stopped by the user: "One", "Two".';
+    const one = 'Background agent "One" was stopped by the user.';
+
+    expect(enqueue(several)).toMatchObject({ entry: null });
+    expect(enqueue(one)).toMatchObject({ entry: null });
+    expect(parseLine(JSON.stringify({ type: 'user', uuid: 'u', timestamp: at, message: { content: one } }))).toMatchObject({ entry: null, received: one });
+    expect(enqueue(`I got this: ${several}`)).toMatchObject({ entry: { kind: 'sent', text: `I got this: ${several}` } });
+    // The operator sending the notice's words verbatim, from a line that names them as its origin.
+    expect(parseLine(JSON.stringify({ type: 'user', uuid: 'u', timestamp: at, origin: { kind: 'human' }, message: { content: several } }))).toMatchObject({ entry: { kind: 'message', text: several } });
+    expect(parseLine(JSON.stringify({ type: 'attachment', uuid: 'q', timestamp: at, attachment: { type: 'queued_command', prompt: several, commandMode: 'prompt', origin: { kind: 'human' } } }))).toMatchObject({ entry: { kind: 'message', text: several, queued: true } });
+    expect(parseLine(JSON.stringify({ type: 'user', uuid: 'u', timestamp: at, origin: { kind: 'human' }, message: { content: `[spoken] I got this: ${several}` } }))).toMatchObject({ entry: { kind: 'message', text: `I got this: ${several}` } });
+  });
 });
 
 describe('readLines', () => {
