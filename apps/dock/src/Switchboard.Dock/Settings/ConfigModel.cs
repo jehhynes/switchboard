@@ -290,12 +290,12 @@ public sealed record EnrollReply(string? Error, Enrollment? Enrollment);
 /// A device signed in to the web page (architecture.md § Remote access): its ID, the first 8 hex characters of the stored hash; its name; the
 /// remote host and Tailscale login it signs in through, both null for this computer; and when it was last used, in epoch milliseconds.
 /// </summary>
-public sealed record PairedDevice(string Id, string Label, string? Host, string? Login, long UsedAt)
+public sealed record PairedDevice(string Id, string Label, string? Host, string? Login, long UsedAt, bool Voice = false)
 {
     /// <summary>The devices of a <c>/page/devices</c> answer; an entry without an ID is left out.</summary>
     public static IReadOnlyList<PairedDevice> ParseList(JsonNode? node) =>
         node is JsonArray list
-            ? list.OfType<JsonObject>().Select((entry) => new PairedDevice(Text(entry, "id") ?? "", Text(entry, "label") ?? "", Text(entry, "host"), Text(entry, "login"), entry["usedAt"] is JsonValue used && used.TryGetValue<long>(out var at) ? at : 0)).Where((device) => device.Id != "").ToList()
+            ? list.OfType<JsonObject>().Select((entry) => new PairedDevice(Text(entry, "id") ?? "", Text(entry, "label") ?? "", Text(entry, "host"), Text(entry, "login"), entry["usedAt"] is JsonValue used && used.TryGetValue<long>(out var at) ? at : 0, entry["voice"] is JsonValue voice && voice.TryGetValue<bool>(out var allowed) && allowed)).Where((device) => device.Id != "").ToList()
             : [];
 
     internal static string? Text(JsonObject value, string key) => value[key] is JsonValue text && text.TryGetValue<string>(out var read) ? read : null;
@@ -339,4 +339,7 @@ public interface IConfigHub
 
     /// <summary>Signs one device out of the web page by its ID; returns why not, or null.</summary>
     Task<string?> RevokeDevice(string id) => Task.FromResult<string?>("This hub cannot sign a device out; restart Switchboard.");
+
+    /// <summary>Allows or forbids voice on a paired device by its ID (architecture.md § Remote access); returns why not, or null.</summary>
+    Task<string?> AllowVoice(string id, bool allow) => Task.FromResult<string?>("This hub cannot allow voice on a device; restart Switchboard.");
 }

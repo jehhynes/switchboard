@@ -69,9 +69,9 @@ public static class SettingsPages
         "Now keep talking about anything, in your usual voice, until the minute is up.",
     ];
 
-    /// <summary>A paired device's second line, as the web page's device list: where it signs in from and when it was last used.</summary>
+    /// <summary>A paired device's second line, as the web page's device list: where it signs in from, when it was last used, and whether voice is allowed on it.</summary>
     public static string DeviceDetail(PairedDevice device) =>
-        $"{(device.Host is null ? "This computer" : $"{device.Host} as {device.Login ?? ""}")} · last used {DateTimeOffset.FromUnixTimeMilliseconds(device.UsedAt).ToLocalTime():yyyy-MM-dd HH:mm}";
+        $"{(device.Host is null ? "This computer" : $"{device.Host} as {device.Login ?? ""}")} · last used {DateTimeOffset.FromUnixTimeMilliseconds(device.UsedAt).ToLocalTime():yyyy-MM-dd HH:mm}{(device.Voice ? " · voice allowed" : "")}";
 
     /// <summary>How long a pairing link and code still work, as the web page's Pair a device says it.</summary>
     public static string PairingLeft(Pairing pairing, DateTimeOffset now)

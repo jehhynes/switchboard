@@ -408,6 +408,13 @@ public sealed class HubClient(string switchboardHome, HubStarter? starter = null
         return status == HttpStatusCode.OK ? null : failure ?? RefusalOf(reply?.ToJsonString() ?? "") ?? $"The hub answered {(int?)status}.";
     }
 
+    public async Task<string?> AllowVoice(string id, bool allow)
+    {
+        var (status, reply, failure) = await Send("/page/voice", new JsonObject { ["id"] = id, ["allow"] = allow });
+
+        return status == HttpStatusCode.OK ? null : failure ?? RefusalOf(reply?.ToJsonString() ?? "") ?? $"The hub answered {(int?)status}.";
+    }
+
     /// <summary>A write's refusal: the <c>errors</c> of a 409, else the failure; empty, with the reply, when the hub wrote the file.</summary>
     async Task<(IReadOnlyList<string> Errors, JsonNode? Reply)> Written(string path, JsonObject body)
     {

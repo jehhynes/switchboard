@@ -107,10 +107,10 @@ public sealed class SettingsEditor(IConfigHub hub, Func<CancellationToken, Task>
     public event Action? DevicesChanged;
 
     /// <summary>
-    /// General's paired devices: lists them, with <paramref name="pair"/> a new pairing link first, and with <paramref name="revoke"/> after
-    /// signing that device out. Nothing of it changes settings.json.
+    /// General's paired devices: lists them, with <paramref name="pair"/> a new pairing link first, with <paramref name="revoke"/> after
+    /// signing that device out, and with <paramref name="voice"/> after allowing or forbidding voice on it. Nothing of it changes settings.json.
     /// </summary>
-    public async Task ListDevices(bool pair = false, string? revoke = null)
+    public async Task ListDevices(bool pair = false, string? revoke = null, (string Id, bool Allow)? voice = null)
     {
         var mine = ++deviceRequests;
 
@@ -118,7 +118,7 @@ public sealed class SettingsEditor(IConfigHub hub, Func<CancellationToken, Task>
         DevicesError = null;
         DevicesChanged?.Invoke();
 
-        var refused = revoke is null ? null : await hub.RevokeDevice(revoke);
+        var refused = revoke is not null ? await hub.RevokeDevice(revoke) : voice is { } change ? await hub.AllowVoice(change.Id, change.Allow) : null;
         var paired = pair ? await hub.Pair() : null;
         var listed = await hub.Devices();
 

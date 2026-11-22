@@ -550,12 +550,25 @@ public sealed class SettingsWindow : Window
                     Tinted(new TextBlock { Text = SettingsPages.DeviceDetail(device), TextWrapping = TextWrapping.Wrap, FontSize = 12 }, "DockMuted"),
                 },
             };
-            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Children = { text, signOut } };
+            var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
+            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Children = { text, buttons } };
             var id = device.Id;
+
+            // Voice on a phone (architecture.md § Remote access): only a paired device's, allowed from this computer only.
+            if (device.Host is not null)
+            {
+                var allow = !device.Voice;
+                var voice = new Button { Name = $"Voice:{device.Id}", Content = allow ? "Allow voice" : "Forbid voice", IsEnabled = !editor.DevicesBusy, VerticalAlignment = VerticalAlignment.Center };
+
+                ToolTip.SetTip(voice, allow ? "Let this device use the voice with its own microphone and speaker" : "Stop this device using the voice; its voice connection closes");
+                voice.Click += async (_, _) => await editor.ListDevices(voice: (id, allow));
+                buttons.Children.Add(voice);
+            }
 
             ToolTip.SetTip(signOut, "Sign this device out of the web page");
             signOut.Click += async (_, _) => await editor.ListDevices(revoke: id);
-            Grid.SetColumn(signOut, 1);
+            buttons.Children.Add(signOut);
+            Grid.SetColumn(buttons, 1);
             devicesList.Children.Add(row);
         }
 

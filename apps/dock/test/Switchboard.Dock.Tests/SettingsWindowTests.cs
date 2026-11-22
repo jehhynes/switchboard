@@ -69,6 +69,8 @@ public sealed class SettingsWindowTests
         var own = new PairedDevice("89abcdef", "Windows · Edge", null, null, now);
 
         hub.DevicesReplies.Enqueue(new DevicesReply(null, [phone, own]));
+        hub.DevicesReplies.Enqueue(new DevicesReply(null, [phone with { Voice = true }, own]));
+        hub.DevicesReplies.Enqueue(new DevicesReply(null, [phone, own]));
         hub.DevicesReplies.Enqueue(new DevicesReply(null, [own]));
 
         var (window, _) = Open();
@@ -82,6 +84,18 @@ public sealed class SettingsWindowTests
         Assert.Contains(texts, (text) => text.StartsWith("This computer · last used ", StringComparison.Ordinal));
         // The devices follow Remote access's fields.
         Assert.True(texts.IndexOf("Remote access") < texts.IndexOf("Paired devices"));
+
+        // Voice is allowed only on a paired device, and the list then says so; a refusal shows why.
+        Assert.DoesNotContain(window.GetVisualDescendants().OfType<Button>(), (button) => button.Name == "Voice:89abcdef");
+        Assert.Equal("Allow voice", Named("Voice:0123abcd").Content);
+        Click(Named("Voice:0123abcd"));
+        Assert.Contains("voice 0123abcd True", hub.Calls);
+        Assert.Contains(Texts(window), (text) => text.EndsWith(" · voice allowed", StringComparison.Ordinal));
+        Assert.Equal("Forbid voice", Named("Voice:0123abcd").Content);
+        hub.VoiceReplies.Enqueue("No paired device has the ID 0123abcd.");
+        Click(Named("Voice:0123abcd"));
+        Assert.Contains("voice 0123abcd False", hub.Calls);
+        Assert.Contains("No paired device has the ID 0123abcd.", Texts(window));
 
         Click(Named("SignOut:0123abcd"));
         Assert.Contains("revoke 0123abcd", hub.Calls);

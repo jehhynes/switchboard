@@ -409,20 +409,25 @@ public sealed class HubClientTests
     {
         using var server = new LoopbackHub((start, body, stream) =>
             start.Contains("/page/devices", StringComparison.Ordinal)
-                ? LoopbackHub.Reply(stream, 200, "{\"devices\":[{\"id\":\"0123abcd\",\"label\":\"Android · Chrome\",\"host\":\"pc.tail.ts.net\",\"login\":\"alex@example.com\",\"createdAt\":1,\"usedAt\":2},{\"id\":\"89abcdef\",\"label\":\"Windows · Edge\",\"host\":null,\"login\":null,\"createdAt\":1,\"usedAt\":3},{\"label\":\"no id\"}]}")
+                ? LoopbackHub.Reply(stream, 200, "{\"devices\":[{\"id\":\"0123abcd\",\"label\":\"Android · Chrome\",\"host\":\"pc.tail.ts.net\",\"login\":\"alex@example.com\",\"createdAt\":1,\"usedAt\":2,\"voice\":true},{\"id\":\"89abcdef\",\"label\":\"Windows · Edge\",\"host\":null,\"login\":null,\"createdAt\":1,\"usedAt\":3},{\"label\":\"no id\"}]}")
                 : start.Contains("/page/pair", StringComparison.Ordinal)
                     ? LoopbackHub.Reply(stream, 409, "{\"error\":\"Pairing a device needs remote access.\"}")
-                    : body.Contains("0123abcd", StringComparison.Ordinal) ? LoopbackHub.Reply(stream, 200, "{\"revoked\":1}") : LoopbackHub.Reply(stream, 404, "{\"error\":\"No device has the ID 99999999.\"}"));
+                    : start.Contains("/page/voice", StringComparison.Ordinal)
+                        ? body.Contains("0123abcd", StringComparison.Ordinal) ? LoopbackHub.Reply(stream, 200, "{\"voice\":false}") : LoopbackHub.Reply(stream, 404, "{\"error\":\"No paired device has the ID 89abcdef.\"}")
+                        : body.Contains("0123abcd", StringComparison.Ordinal) ? LoopbackHub.Reply(stream, 200, "{\"revoked\":1}") : LoopbackHub.Reply(stream, 404, "{\"error\":\"No device has the ID 99999999.\"}"));
         using var client = new HubClient(HomeFor(server));
 
         var listed = await client.Devices();
 
         Assert.Null(listed.Error);
-        Assert.Equal([new PairedDevice("0123abcd", "Android · Chrome", "pc.tail.ts.net", "alex@example.com", 2), new PairedDevice("89abcdef", "Windows · Edge", null, null, 3)], listed.Devices!);
+        Assert.Equal([new PairedDevice("0123abcd", "Android · Chrome", "pc.tail.ts.net", "alex@example.com", 2, Voice: true), new PairedDevice("89abcdef", "Windows · Edge", null, null, 3)], listed.Devices!);
         Assert.Equal(new PairReply("Pairing a device needs remote access.", null), await client.Pair());
         Assert.Null(await client.RevokeDevice("0123abcd"));
         Assert.Equal("No device has the ID 99999999.", await client.RevokeDevice("99999999"));
         Assert.Contains("POST /page/revoke HTTP/1.1 {\"id\":\"0123abcd\"}", server.Requests);
+        Assert.Null(await client.AllowVoice("0123abcd", false));
+        Assert.Equal("No paired device has the ID 89abcdef.", await client.AllowVoice("89abcdef", true));
+        Assert.Contains("POST /page/voice HTTP/1.1 {\"id\":\"0123abcd\",\"allow\":false}", server.Requests);
         Assert.Equal("Switchboard is not running.", (await new HubClient(Fixtures.TempFolder()).Devices()).Error);
     }
 

@@ -123,7 +123,7 @@ export const PAGE_COMMANDS = new Set(['page-voice-state', 'page-device-voice', '
 export const LOCAL_PAGE_COMMANDS = new Set(['page-pair', 'page-devices', 'page-device-revoke', 'page-device-voice', 'pane-pair', 'pane-rect', 'page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll']);
 
 /** The page routes only the hub token reaches, which the page's own routes never answer. */
-const HUB_PAGE_ROUTES = new Set(['/page/link', '/page/revoke', '/page/pair', '/page/devices']);
+const HUB_PAGE_ROUTES = new Set(['/page/link', '/page/revoke', '/page/pair', '/page/devices', '/page/voice']);
 
 /** The page commands the hub answers itself: pairing a device, the device list and voice on a device (architecture.md § Remote access). */
 const DEVICE_COMMANDS = new Set(['page-pair', 'page-devices', 'page-device-revoke', 'page-device-voice', 'page-voice-state']);
@@ -1161,6 +1161,16 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       const reply = devices();
 
       json(response, reply.status, reply.body);
+    } else if (request.method === 'POST' && path === '/page/voice' && page !== undefined) {
+      // Allows or forbids voice on a paired device, for the dock's Settings window (architecture.md § Remote access).
+      readJson(request).then(
+        (body) => {
+          const reply = deviceVoice(body);
+
+          json(response, reply.status, reply.body);
+        },
+        (error: Error) => json(response, 400, { error: error.message }),
+      );
     } else if (request.method === 'POST' && path === '/shutdown') {
       json(response, 200, { stopping: true });
       options.onShutdown();

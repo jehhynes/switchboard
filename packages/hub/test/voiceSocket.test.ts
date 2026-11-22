@@ -324,8 +324,12 @@ describe('the voice socket on the page origin', () => {
     // The phone cannot allow itself, even naming its own ID.
     expect((await post('page-device-voice', { ...REMOTE, Cookie: phone, Origin: PHONE_ORIGIN }, { window: phonePage.key, id: idOf(phone), allow: true })).status).toBe(403);
     expect(JSON.parse((await post('page-voice-state', { ...REMOTE, Cookie: phone, Origin: PHONE_ORIGIN }, { window: phonePage.key })).body)).toEqual({ allowed: false, error: VOICE_NOT_ALLOWED });
-    // Nor does a hub-token request reach the page command.
+    // Nor does a hub-token request reach the page command; the hub token has its own route, /page/voice, which the dock uses.
     expect((await send(server.port, 'POST', '/v1/conversation/page-device-voice', { Authorization: `Bearer ${server.token}`, 'Content-Type': 'application/json' }, { id: idOf(phone), allow: true })).status).not.toBe(200);
+    expect((await send(server.port, 'POST', '/page/voice', { 'Content-Type': 'application/json', Cookie: localCookie, Origin: `http://127.0.0.1:${server.port}` }, { id: idOf(phone), allow: true })).status).toBe(401);
+    expect((await send(server.port, 'POST', '/page/voice', { Authorization: `Bearer ${server.token}`, 'Content-Type': 'application/json' }, { id: idOf(phone), allow: 'yes' })).status).toBe(400);
+    expect((await send(server.port, 'POST', '/page/voice', { Authorization: `Bearer ${server.token}`, 'Content-Type': 'application/json' }, { id: '00000000', allow: true })).status).toBe(404);
+    expect(JSON.parse((await send(server.port, 'POST', '/page/voice', { Authorization: `Bearer ${server.token}`, 'Content-Type': 'application/json' }, { id: idOf(phone), allow: false })).body)).toEqual({ voice: false });
 
     expect(JSON.parse((await allow(phone, true)).body)).toEqual({ voice: true });
     expect(JSON.parse((await post('page-voice-state', { ...REMOTE, Cookie: phone, Origin: PHONE_ORIGIN }, { window: phonePage.key })).body)).toEqual({ allowed: true, error: null });

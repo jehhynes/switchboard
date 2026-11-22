@@ -535,6 +535,16 @@ sealed class FakeConfigHub : Switchboard.Dock.Settings.IConfigHub
         return Task.FromResult<string?>(null);
     }
 
+    /// <summary>Each voice permission request's refusal, or null; an empty queue answers none.</summary>
+    public Queue<string?> VoiceReplies { get; } = new();
+
+    public Task<string?> AllowVoice(string id, bool allow)
+    {
+        Calls.Add($"voice {id} {allow}");
+
+        return Task.FromResult(VoiceReplies.Count > 0 ? VoiceReplies.Dequeue() : null);
+    }
+
     /// <summary>Each enrolment request's reply; an empty queue answers an idle enrolment with no voiceprint.</summary>
     public Queue<Switchboard.Dock.Settings.EnrollReply> EnrollReplies { get; } = new();
 
