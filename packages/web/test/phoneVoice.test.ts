@@ -392,7 +392,7 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
     expect(nodes[0]!.disconnected).toBe(true);
   });
 
-  it('loses the voice when the page stays hidden or the phone takes its audio for good, and keeps it when the page comes back in time', async () => {
+  it('loses the voice without an error when the page stays hidden, with why when the phone takes its audio for good, and keeps it when the page comes back in time', async () => {
     const { voice, sockets, contexts, timers, hide, advance } = setup();
 
     voice.start();
@@ -406,7 +406,8 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
 
     hide(true);
     timers.at(-1)!.run();
-    expect([voice.state, voice.error]).toEqual(['off', 'The page was hidden, so the voice left this phone.']);
+    // Leaving the page plainly ends talking, so nothing says why.
+    expect([voice.state, voice.error]).toEqual(['off', null]);
     expect(sockets[0]!.closedWith).toBe(1000);
     expect(contexts[0]!.closed).toBe(true);
     // It stays off when the page shows again.
@@ -751,6 +752,72 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
       sockets[0]!.closeFromHub(4001, 'Voice moved to another device.');
       expect(tracks[0]!.stopped).toBe(true);
       expect(voice.micOpen).toBe(false);
+    });
+
+    it('says nothing of a Mic on still opening when a hidden page loses the voice', async () => {
+      const { voice, sockets, timers, hide, media } = setup();
+
+      voice.start();
+      sockets[0]!.open();
+      sockets[0]!.message({ type: 'welcome', at: 0 });
+
+      let open!: (stream: PhoneMicStream) => void;
+
+      media(() => new Promise((resolve) => (open = resolve)));
+
+      const late = voice.micOn();
+
+      hide(true);
+      timers.at(-1)!.run();
+
+      const track = new FakeTrack();
+
+      open({ getAudioTracks: () => [track] });
+      // Empty: the voice left without a word, so the page shows no reason.
+      expect(await late).toBe('');
+      expect([voice.state, voice.error, track.stopped, voice.micOpen]).toEqual(['off', null, true, false]);
+
+      // So too when the microphone's request then fails.
+      hide(false);
+      voice.start();
+      sockets[1]!.open();
+      sockets[1]!.message({ type: 'welcome', at: 0 });
+
+      let refuse!: (error: Error) => void;
+
+      media(() => new Promise((_resolve, reject) => (refuse = reject)));
+
+      const refused = voice.micOn();
+
+      hide(true);
+      timers.at(-1)!.run();
+      refuse(Object.assign(new Error('denied'), { name: 'NotAllowedError' }));
+      expect(await refused).toBe('');
+
+      // A later Stop's own cut-short Mic on still says why.
+      hide(false);
+      voice.start();
+      sockets[2]!.open();
+      sockets[2]!.message({ type: 'welcome', at: 0 });
+      media(() => new Promise((resolve) => (open = resolve)));
+
+      const stopped = voice.micOn();
+
+      voice.stop();
+      open({ getAudioTracks: () => [new FakeTrack()] });
+      expect(await stopped).toBe('The voice left this phone.');
+
+      // As does one whose microphone request then fails.
+      voice.start();
+      sockets[3]!.open();
+      sockets[3]!.message({ type: 'welcome', at: 0 });
+      media(() => new Promise((_resolve, reject) => (refuse = reject)));
+
+      const stoppedRefused = voice.micOn();
+
+      voice.stop();
+      refuse(Object.assign(new Error('denied'), { name: 'NotAllowedError' }));
+      expect(await stoppedRefused).toBe('The phone did not allow the microphone.');
     });
 
     it('releases the microphone when the hub\'s mic turns off after it was on, and says why it could not open', async () => {

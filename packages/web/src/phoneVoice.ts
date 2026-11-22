@@ -110,7 +110,7 @@ export interface PhoneVoiceDeps {
 /** The phone side of the voice socket: opening it, its `hello`, the clock pings and why it closed. */
 export class PhoneVoice {
   state: PhoneVoiceState = 'off';
-  /** Why the voice is off after it was on or asked for, or null. */
+  /** Why the voice is off after it was on or asked for, or null, as after a hidden page lost it, which needs no word: leaving the page plainly ends talking. */
   error: string | null = null;
   /** The hub's clock less the phone's, from the fastest ping, or null before one. */
   offset: number | null = null;
@@ -123,6 +123,8 @@ export class PhoneVoice {
   /** The playback node once its worklet loaded; commands wait for it in order. */
   #node: Promise<PhoneAudioNode | null> = Promise.resolve(null);
   #hiddenTimer: unknown = null;
+  /** The voice left this phone without a word, as a hidden page loses it, so a Mic on it cuts short says nothing either. */
+  #quiet = false;
   /** While the audio context is interrupted or suspended: since when, and the next resume's timer. */
   #recovering: { since: number; timer: unknown; why: string } | null = null;
   /** The microphone while Mic on holds it, and its capture node once connected. */
@@ -152,7 +154,7 @@ export class PhoneVoice {
 
   /**
    * A hidden page loses the voice after {@link HIDDEN_MS}, and it stays off when the page comes back (PRD R119): iOS mutes and suspends a
-   * hidden page's audio, so the phone could not play or hear.
+   * hidden page's audio, so the phone could not play or hear. It goes without an error, since leaving the page plainly ends talking.
    */
   #visibility(): void {
     const hidden = this.deps.hidden?.() ?? document.visibilityState === 'hidden';
@@ -167,7 +169,7 @@ export class PhoneVoice {
 
     this.#hiddenTimer ??= (this.deps.setTimer ?? ((run, ms) => setTimeout(run, ms)))(() => {
       this.#hiddenTimer = null;
-      this.#lose('The page was hidden, so the voice left this phone.');
+      this.#lose(null);
     }, HIDDEN_MS);
   }
 
@@ -319,13 +321,19 @@ export class PhoneVoice {
     });
   }
 
-  /** The voice left this phone on its own: closed, with why. */
-  #lose(why: string): void {
+  /** Why Mic on did not open: the voice's error, an empty string when the voice left without a word, else `fallback`. */
+  #why(fallback: string): string {
+    return this.error ?? (this.#quiet && this.state === 'off' ? '' : fallback);
+  }
+
+  /** The voice left this phone on its own: closed, with why, or null when that needs no word. */
+  #lose(why: string | null): void {
     const socket = this.#socket;
 
     this.#run++;
     this.#stopped();
     this.error = why;
+    this.#quiet = why === null;
     socket?.close(1000);
     this.deps.changed();
   }
@@ -377,6 +385,7 @@ export class PhoneVoice {
     this.#welcome = deferred();
     this.state = 'connecting';
     this.error = null;
+    this.#quiet = false;
     this.#resuming = {
       from: key,
       timer: (this.deps.setTimer ?? ((run, ms) => setTimeout(run, ms)))(() => this.#lose('Switchboard restarted, and the voice did not come back to this phone.'), RESUME_MS),
@@ -402,6 +411,7 @@ export class PhoneVoice {
     this.#socket = socket;
     this.state = 'connecting';
     this.error = null;
+    this.#quiet = false;
     this.#best = Infinity;
     this.offset = null;
     socket.binaryType = 'arraybuffer';
@@ -506,6 +516,7 @@ export class PhoneVoice {
     this.#run++;
     this.#stopped();
     this.error = null;
+    this.#quiet = false;
     socket?.close(1000);
     this.deps.changed();
   }
@@ -518,8 +529,9 @@ export class PhoneVoice {
   /**
    * Mic on on this phone, called from its tap (PRD R119): takes the voice to this phone first when it is not here, sets the audio session to
    * play and record before asking for the microphone, as iOS needs to keep replies on the loudspeaker, opens it with iOS's echo cancellation,
-   * and connects it to the capture worklet. Resolves null once the microphone is open and the voice socket welcomed, else why not. `step`
-   * hears when each part was done, for the hub log's timing of the start: those this tap started, and the microphone's permission.
+   * and connects it to the capture worklet. Resolves null once the microphone is open and the voice socket welcomed, else why not, which is
+   * empty when the voice left without a word, as a hidden page loses it. `step` hears when each part was done, for the hub log's timing of the
+   * start: those this tap started, and the microphone's permission.
    */
   async micOn(step: (name: string, at: number) => void = () => undefined): Promise<string | null> {
     if (this.#mic !== null) {
@@ -535,7 +547,7 @@ export class PhoneVoice {
     const welcome = this.#welcome;
 
     if (this.state === 'off' || welcome === null) {
-      return this.error ?? 'The voice did not open on this phone.';
+      return this.#why('The voice did not open on this phone.');
     }
 
     const run = ++this.#micRun;
@@ -552,6 +564,9 @@ export class PhoneVoice {
     } catch (error) {
       if (run === this.#micRun) {
         this.#playbackSession();
+      } else if (this.error === null && this.#quiet && (this.state as PhoneVoiceState) === 'off') {
+        // The voice left without a word while the microphone was asked for, so its refusal says nothing either.
+        return '';
       }
 
       return (error as Error).name === 'NotAllowedError' ? 'The phone did not allow the microphone.' : 'The phone\'s microphone did not open.';
@@ -571,7 +586,7 @@ export class PhoneVoice {
       }
 
       if (run !== this.#micRun) {
-        return (this.state as PhoneVoiceState) === 'off' ? (this.error ?? 'The voice left this phone.') : 'The mic was turned off.';
+        return (this.state as PhoneVoiceState) === 'off' ? this.#why('The voice left this phone.') : 'The mic was turned off.';
       }
 
       return 'The phone\'s microphone did not open.';
@@ -589,19 +604,19 @@ export class PhoneVoice {
 
     // Released meanwhile, perhaps with a newer attempt holding the microphone now: that one is left alone.
     if (this.#mic !== mic) {
-      return this.error ?? 'The mic was turned off.';
+      return this.#why('The mic was turned off.');
     }
 
     if (!welcomed) {
       this.micOff();
-      return this.error ?? 'The voice did not open on this phone.';
+      return this.#why('The voice did not open on this phone.');
     }
 
     const context = this.#context;
     const loaded = await this.#node;
 
     if (this.#mic !== mic) {
-      return this.error ?? 'The mic was turned off.';
+      return this.#why('The mic was turned off.');
     }
 
     // The parts the tap that took the voice to this phone started, in the order they were done.
@@ -615,7 +630,7 @@ export class PhoneVoice {
 
     if (context === null || loaded === null) {
       this.micOff();
-      return this.error ?? 'The phone could not load the voice\'s audio.';
+      return this.#why('The phone could not load the voice\'s audio.');
     }
 
     let node: PhoneCaptureNode;

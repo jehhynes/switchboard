@@ -1248,6 +1248,15 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
           return;
         }
 
+        // The voice left without a word, as a hidden page loses it: the mic is off with nothing to say.
+        if (error === '') {
+          micOpening = false;
+          micStart.clear();
+          micTiming = null;
+          draw();
+          return;
+        }
+
         if (error !== null) {
           micOpening = false;
           failed(error);
