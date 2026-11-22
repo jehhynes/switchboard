@@ -600,6 +600,8 @@ body.artifact-window > .artifact-view { height: 100%; }
 .header > button.row-main { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 8px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 4px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); cursor: pointer; white-space: nowrap; }
 .header > button.row-main:hover { background: var(--vscode-button-hoverBackground); }
 .header > button.row-main:disabled, .menu-row:disabled { opacity: 0.5; cursor: default; }
+/* On a phone the header has no room for the main control; the Actions menu under the ellipsis starts with it (menuRows). */
+@media (width < 768px) { .header > button.row-main { display: none; } }
 .actions-anchor { flex: none; }
 button.actions { display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: none; background: transparent; color: var(--vscode-icon-foreground); padding: 0; border-radius: 4px; cursor: pointer; }
 button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }

@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { PAGE_ASSETS } from '../dist/index.js';
 import { renderMarkdown } from '../src/markdown.js';
+import { menuRows } from '../src/header.js';
+import { html } from './html.js';
+import type { PageAction, PageRow } from '@switchboard/protocol';
 
 // The page's rules for a phone's screen (architecture.md § Web page), read from the built page.css.
 const css = PAGE_ASSETS['page.css']!.body;
@@ -53,4 +56,16 @@ describe('the page on a phone', () => {
     expect(touch?.[2]).toContain('font-size: 20px; line-height: 1;');
   });
 
+  it("hides the header's main control under 768 px, and the Actions menu starts with it whatever it is", () => {
+    expect(css).toContain('@media (width < 768px) { .header > button.row-main { display: none; } }');
+
+    for (const label of ['Approve', 'Mark done', 'Resume', 'Open in Claude', 'Answer in terminal']) {
+      const main = { label, icon: 'check', group: 'main' } as PageAction;
+      const row = { workItemId: 1, ticketId: null, ticket: 'gh 1', url: '', links: [], actions: [{ label: 'Stop', icon: 'debug-stop', group: 'state' } as PageAction, main], pastes: [], opens: [], terminal: false, history: null } as unknown as PageRow;
+      const host = document.createElement('ul');
+
+      host.innerHTML = html(menuRows(row, { acting: false, linkMenu: false }));
+      expect(host.querySelector('[data-action="row-action"]')?.getAttribute('data-label')).toBe(label);
+    }
+  });
 });
