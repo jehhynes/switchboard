@@ -1,4 +1,4 @@
-// Checks the console's layout in a real headless Chrome or Edge (testing.md § Web page console check): xterm.js's own scrollbar is its only
+// Checks the console's layout in a real headless Chrome or Edge (testing.md § Test layers): xterm.js's own scrollbar is its only
 // scroller, and its screen stays inside the pane, for sessions larger than the pane, drawn there at once or after the pane narrows.
 // Run `npm run build` first; the browser is SWITCHBOARD_CHROME, else Chrome or Edge where they install.
 import { spawn } from 'node:child_process';
