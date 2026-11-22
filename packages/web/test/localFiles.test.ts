@@ -93,7 +93,7 @@ describe('web links with the Chrome pane', () => {
   });
 
   const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
-  const start = (options: { installed: boolean; paneOpen?: number; width?: number }) => {
+  const start = (options: { installed: boolean; paneOpen?: number; width?: number; local?: boolean; error?: string }) => {
     const posts: Array<{ url: string; body: Record<string, unknown> }> = [];
     const opened: string[] = [];
     const fetch = vi.fn(async (url: string, init?: { body?: string }) => {
@@ -103,7 +103,7 @@ describe('web links with the Chrome pane', () => {
 
       return { status, ok: status === 200, json: async () => (status === 200 ? {} : { error: 'The Chrome pane is not connected.' }) } as unknown as Response;
     });
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, standalone: () => options.installed, openUrl: (url) => opened.push(url), toExtension: async () => ({ ok: true }) });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, standalone: () => options.installed, local: options.local ?? true, openUrl: (url) => opened.push(url), toExtension: async () => ({ ok: true }) });
     const source = FakeSource.last!;
     const scope = { kind: 'page', key: 'pk', folder: 'D:/w', title: 'Fix it', scopeGen: 3, conversations: [{ workItemId: 1, title: 'Fix it', primary: true, sessionId: 's', state: 'idle', conversation: 'full', unread: 0 }], workItemId: 1, cwd: 'D:/w', sessionId: 's' };
     const session = { id: 's', title: 'Task', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, persona: null };
@@ -116,7 +116,7 @@ describe('web links with the Chrome pane', () => {
     window.innerWidth = 1600;
     window.dispatchEvent(new Event('resize'));
     source.emit('hello', { key: 'pk', groups: [{ key: 'progress', title: 'In progress', glyph: '', empty: null, rows: [row] }], scope, sessions: [session], items: [reply], more: false, status: null, artifacts: [], unread: 0 });
-    source.emit('pane', { pane: { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: null } });
+    source.emit('pane', { pane: { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: options.error ?? null } });
     return { posts, opened };
   };
   const clickLink = (): MouseEvent => {
@@ -159,6 +159,23 @@ describe('web links with the Chrome pane', () => {
     expect(clickLink().defaultPrevented).toBe(false);
     expect(posts.filter((post) => post.url.endsWith('/pane-open'))).toEqual([]);
     expect(opened).toEqual([]);
+  });
+
+  it("leaves a web link to the device's browser on an installed page on another device, whose pane is the computer's", async () => {
+    const remote = start({ installed: true, local: false });
+
+    await flush();
+    expect(clickLink().defaultPrevented).toBe(false);
+    expect(remote.posts.filter((post) => post.url.endsWith('/pane-open'))).toEqual([]);
+    expect(root.querySelector('[data-side="browser"]')).toBeNull();
+  });
+
+  it('leaves a web link to the browser while the pane has stopped', async () => {
+    const stopped = start({ installed: true, error: 'The pane would not fit the column.' });
+
+    await flush();
+    expect(clickLink().defaultPrevented).toBe(false);
+    expect(stopped.posts.filter((post) => post.url.endsWith('/pane-open'))).toEqual([]);
   });
 
   it('leaves a web link to the browser on a page that is not the installed app', async () => {

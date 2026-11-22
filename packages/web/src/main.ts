@@ -439,12 +439,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       view.side = tab !== 'conversation' ? tab : view.side === 'browser' ? 'status' : view.side;
     }
   };
-  /** Whether a web link can open in the Chrome pane: the Browser tab is offered on this computer's installed page and the extension is paired. */
+  /** Whether a web link can open in the Chrome pane: it runs for this computer's installed page, paired and not stopped. */
   const paneReady = (): boolean => {
     // The Browser tab's area must be wide enough for the pane, or the link would wait unseen; it opens in a new browser tab instead.
     const area = (wide() ? detailBody : panel).getBoundingClientRect().width;
 
-    return browserTab() && view.pane?.extension === 'paired' && state.scope !== null && state.key !== null && area >= BROWSER_MIN_WIDTH;
+    return paneWorks() && state.scope !== null && state.key !== null && area >= BROWSER_MIN_WIDTH;
   };
   /**
    * Opens a web link of the conversation in the Chrome pane (`pane-open`, architecture.md § Pane state) and shows the Browser tab, where the
