@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { PING_MS, PhoneVoice } from '../src/phoneVoice.js';
+import { HIDDEN_MS, PING_MS, PhoneVoice } from '../src/phoneVoice.js';
+import type { PhoneAudioContext, PhoneAudioNode } from '../src/phoneVoice.js';
+import type { PlayCommand, PlayReport } from '../src/voiceWorklet.js';
 
 /** A WebSocket the test drives: what the page sent, and the hub's side as calls. */
 class FakeSocket {
@@ -35,6 +37,54 @@ class FakeSocket {
 
 const flush = () => new Promise((done) => setTimeout(done, 0));
 
+/** An audio context the test reads: what was resumed, loaded and closed. */
+class FakeContext implements PhoneAudioContext {
+  state = 'running';
+  baseLatency = 0.005;
+  outputLatency = 0.015;
+  readonly destination = 'speaker';
+  readonly loaded: string[] = [];
+  resumed = 0;
+  closed = false;
+  onstatechange: (() => void) | null = null;
+  readonly audioWorklet = { addModule: async (url: string) => void this.loaded.push(url) };
+
+  async resume(): Promise<void> {
+    this.resumed++;
+  }
+
+  async close(): Promise<void> {
+    this.closed = true;
+  }
+
+  change(state: string): void {
+    this.state = state;
+    this.onstatechange?.();
+  }
+}
+
+class FakeNode implements PhoneAudioNode {
+  readonly commands: PlayCommand[] = [];
+  connected: unknown = null;
+  disconnected = false;
+  readonly port = {
+    postMessage: (message: PlayCommand) => void this.commands.push(message),
+    onmessage: null as ((event: { data: PlayReport }) => void) | null,
+  };
+
+  connect(destination: unknown): void {
+    this.connected = destination;
+  }
+
+  disconnect(): void {
+    this.disconnected = true;
+  }
+
+  report(report: PlayReport): void {
+    this.port.onmessage?.({ data: report });
+  }
+}
+
 describe('voice on this phone (architecture.md § Remote access)', () => {
   afterEach(() => vi.useRealTimers());
 
@@ -44,7 +94,33 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
     let answer = { status: 200, body: { allowed: false, error: 'Voice is not allowed on this device.' } as Record<string, unknown> };
     let now = 1_000;
     let changes = 0;
+    let hidden = false;
+    let visibility: () => void = () => undefined;
+    const contexts: FakeContext[] = [];
+    const nodes: FakeNode[] = [];
+    const timers: Array<{ run: () => void; ms: number; cleared: boolean }> = [];
     const voice = new PhoneVoice({
+      context: () => {
+        const context = new FakeContext();
+
+        contexts.push(context);
+        return context;
+      },
+      node: () => {
+        const node = new FakeNode();
+
+        nodes.push(node);
+        return node;
+      },
+      hidden: () => hidden,
+      onVisibility: (changed) => (visibility = changed),
+      setTimer: (run, ms) => {
+        const timer = { run, ms, cleared: false };
+
+        timers.push(timer);
+        return timer;
+      },
+      clearTimer: (timer) => void ((timer as { cleared: boolean }).cleared = true),
       key: () => key,
       post: async (name, body) => {
         posts.push({ name, body });
@@ -61,7 +137,21 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
       },
     });
 
-    return { voice, sockets, posts, changes: () => changes, advance: (ms: number) => (now += ms), answer: (next: typeof answer) => (answer = next) };
+    return {
+      voice,
+      sockets,
+      posts,
+      contexts,
+      nodes,
+      timers,
+      changes: () => changes,
+      advance: (ms: number) => (now += ms),
+      answer: (next: typeof answer) => (answer = next),
+      hide: (on: boolean) => {
+        hidden = on;
+        visibility();
+      },
+    };
   }
 
   it('opens the voice socket on the page origin with its page key, says hello, and is on at the welcome', () => {
@@ -150,6 +240,9 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
     // An answer about a refused socket that comes after the voice was asked for again is dropped.
     let late!: (answer: { status: number; body: Record<string, unknown> }) => void;
     const slow = new PhoneVoice({
+      context: () => new FakeContext(),
+      node: () => new FakeNode(),
+      onVisibility: () => undefined,
       key: () => 'page-8',
       post: () => new Promise((resolve) => (late = resolve)),
       changed: () => undefined,
@@ -177,5 +270,128 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
     voice.stop();
     sockets[5]!.closeFromHub(1000, 'late');
     expect(voice.error).toBeNull();
+  });
+
+  it('opens the phone\'s speaker in the tap and plays the hub\'s playbacks through the worklet in order, reporting heard time less the output latency', async () => {
+    const { voice, sockets, contexts, nodes, timers } = setup();
+
+    voice.start();
+    // The context is made and resumed in the tap itself, as iOS needs.
+    expect(contexts).toHaveLength(1);
+    expect(contexts[0]!.resumed).toBe(1);
+    expect(contexts[0]!.loaded).toEqual(['https://pc.tail.ts.net/page/voice-worklet.js']);
+
+    const socket = sockets[0]!;
+
+    socket.open();
+    socket.message({ type: 'welcome', at: 0 });
+    // Commands sent before the worklet loaded wait for it, in order.
+    socket.message({ type: 'play', id: 3 });
+
+    const frame = new ArrayBuffer(5 + 6);
+    const view = new DataView(frame);
+
+    view.setUint8(0, 1);
+    view.setUint32(1, 3, true);
+    view.setInt16(5, 100, true);
+    view.setInt16(7, -100, true);
+    view.setInt16(9, 32767, true);
+    socket.onmessage?.({ data: frame });
+    // Another kind of frame, or one too short, is dropped.
+    socket.onmessage?.({ data: new ArrayBuffer(3) });
+    socket.message({ type: 'end', id: 3 });
+    socket.message({ type: 'flush', id: 3 });
+    await flush();
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0]!.connected).toBe('speaker');
+    expect(nodes[0]!.commands.map((one) => (one.type === 'pcm' ? ['pcm', one.id, [...one.samples]] : [one.type, one.id]))).toEqual([
+      ['open', 3],
+      ['pcm', 3, [100, -100, 32767]],
+      ['end', 3],
+      ['flush', 3],
+    ]);
+
+    // 4800 frames at 24 kHz is 200 ms; the output's 20 ms latency is not heard yet.
+    nodes[0]!.report({ type: 'played', id: 3, frames: 4_800, done: false, underruns: 0 });
+    expect(socket.sent.at(-1)).toEqual({ type: 'played', id: 3, ms: 180, done: false });
+    // The end is reported once the latency passed.
+    nodes[0]!.report({ type: 'played', id: 3, frames: 7_200, done: true, underruns: 1 });
+    expect(socket.sent.at(-1)).toEqual({ type: 'played', id: 3, ms: 180, done: false });
+    expect(timers.at(-1)!.ms).toBeCloseTo(20);
+    timers.at(-1)!.run();
+    expect(socket.sent.at(-1)).toEqual({ type: 'played', id: 3, ms: 300, done: true });
+
+    voice.stop();
+    await flush();
+    expect(contexts[0]!.closed).toBe(true);
+    expect(nodes[0]!.disconnected).toBe(true);
+  });
+
+  it('loses the voice when the page stays hidden or the phone takes its audio, and keeps it when the page comes back in time', async () => {
+    const { voice, sockets, contexts, timers, hide } = setup();
+
+    voice.start();
+    sockets[0]!.open();
+    sockets[0]!.message({ type: 'welcome', at: 0 });
+    hide(true);
+    expect(timers.at(-1)!.ms).toBe(HIDDEN_MS);
+    hide(false);
+    expect(timers.at(-1)!.cleared).toBe(true);
+    expect(voice.state).toBe('on');
+
+    hide(true);
+    timers.at(-1)!.run();
+    expect([voice.state, voice.error]).toEqual(['off', 'The page was hidden, so the voice left this phone.']);
+    expect(sockets[0]!.closedWith).toBe(1000);
+    expect(contexts[0]!.closed).toBe(true);
+    // It stays off when the page shows again.
+    hide(false);
+    expect(voice.state).toBe('off');
+
+    voice.start();
+    sockets[1]!.open();
+    sockets[1]!.message({ type: 'welcome', at: 0 });
+    contexts[1]!.change('suspended');
+    expect(voice.state).toBe('on');
+    contexts[1]!.change('interrupted');
+    expect([voice.state, voice.error]).toEqual(['off', 'The phone took its audio, as for a call, so the voice left this phone.']);
+  });
+
+  it('drops a report from a context it closed since, and loses the voice when the phone does not start its audio', async () => {
+    const { voice, sockets, contexts, nodes } = setup();
+
+    voice.start();
+    sockets[0]!.open();
+    sockets[0]!.message({ type: 'welcome', at: 0 });
+    await flush();
+    voice.stop();
+    voice.start();
+    sockets[1]!.open();
+    sockets[1]!.message({ type: 'welcome', at: 0 });
+    await flush();
+    nodes[0]!.report({ type: 'played', id: 1, frames: 2_400, done: false, underruns: 0 });
+    expect(sockets[1]!.sent.filter((one) => (one as { type: string }).type === 'played')).toEqual([]);
+    voice.stop();
+
+    // A resume the phone refuses.
+    contexts.length = 0;
+    const refusing = new FakeContext();
+
+    refusing.resume = () => Promise.reject(new Error('not allowed'));
+    const failing = new PhoneVoice({
+      context: () => refusing,
+      node: () => new FakeNode(),
+      onVisibility: () => undefined,
+      key: () => 'page-9',
+      post: async () => ({ status: 200, body: {} }),
+      changed: () => undefined,
+      now: () => 0,
+      origin: () => 'https://pc.tail.ts.net',
+      socket: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+
+    failing.start();
+    await flush();
+    expect([failing.state, failing.error]).toEqual(['off', 'The phone did not start its audio.']);
   });
 });

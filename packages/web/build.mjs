@@ -96,6 +96,8 @@ const assets = {
   'index.html': text('text/html; charset=utf-8', html('src/index.html')),
   // The page imports the diff viewer from the build it was built with (`__DIFF_BUILD__`).
   'page.js': text('text/javascript; charset=utf-8', await bundle('src/entry.ts', { __DIFF_BUILD__: JSON.stringify(diffBuild) })),
+  // The phone's audio worklet (architecture.md § Remote access, Voice on a phone), loaded when the voice moves to a phone.
+  'voice-worklet.js': text('text/javascript; charset=utf-8', await bundle('src/voiceWorklet.ts')),
   // The console's script and xterm.js's styles, loaded only when a console first shows.
   'console.js': text('text/javascript; charset=utf-8', await bundle('src/consoleEntry.ts')),
   'xterm.css': text('text/css; charset=utf-8', readFileSync(require.resolve('@xterm/xterm/css/xterm.css'), 'utf8')),
