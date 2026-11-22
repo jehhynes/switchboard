@@ -309,7 +309,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const listWidth = typeof ResizeObserver === 'function' ? new ResizeObserver(() => fitLines()) : null;
   listWidth?.observe(list);
   /** Whether the Browser tab shows: on the installed page while the Chrome pane is on (PRD R113). */
-  /** Whether this page can drive the Chrome pane: only a page on this computer posts its area (`pane-rect` is a local command). */
+  /** Whether this page can drive the browser pane: only a page on this computer posts its area (`pane-rect` is a local command). */
   const paneLocal = (): boolean => deps.local ?? ['127.0.0.1', 'localhost'].includes(location.hostname);
   const browserTab = (): boolean => view.pane?.enabled === true && standalone() && paneLocal();
   /** The work item whose conversation's web links this page opened in the Chrome pane (`pane-open`), which then has links to show too. */

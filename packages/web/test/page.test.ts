@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, onTestFinished, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyEvent, awaitingReply, EMPTY, mentionOf, mentionQuery, commandQuery, timeline, withEarlier } from '../src/model.js';
 import { answerText, answersIn, complete, parseQuestions } from '@switchboard/conversation/questions';
-import { artifactUrl, BROWSER_MIN_WIDTH, browserNote, paneLink, collapsedGroups, newView, renderMicButton, renderVoice, markdownBody } from '../src/render.js';
+import { artifactUrl, BROWSER_MIN_WIDTH, browserNote, paneLink, paneStatus, collapsedGroups, newView, renderMicButton, renderVoice, markdownBody } from '../src/render.js';
 import { renderArtifactView } from '../src/side.js';
 import { renderTimeline, turnRow } from '../src/timeline.js';
 import { renderHeader } from '../src/header.js';
@@ -3126,6 +3126,12 @@ describe('the page in use', () => {
     expect(browserNote({ ...pane, extension: 'unpaired' }, BROWSER_MIN_WIDTH, true, true)).toContain('Pair the Chrome extension');
     expect(browserNote(pane, BROWSER_MIN_WIDTH, false, true)).toBe('This work item has no web links to show.');
     expect(browserNote(pane, BROWSER_MIN_WIDTH - 1, true, true)).toContain('Widen this area');
+    // The view options menu names the browser pane and the extension it is paired with.
+    expect(paneStatus(null)).toBeNull();
+    expect(paneStatus({ ...pane, enabled: false })).toBeNull();
+    expect(paneStatus(pane)).toBe('Browser pane: paired with the Chrome extension.');
+    expect(paneStatus({ ...pane, shown: true })).toBe('Browser pane: showing, paired with the Chrome extension.');
+    expect(paneStatus({ ...pane, extension: 'unpaired' })).toBe('Browser pane: the Chrome extension is not paired.');
     // Only links the hub opens tabs for count.
     expect(paneLink('https://github.com/o/r/issues/1')).toBe(true);
     expect(paneLink('https://%')).toBe(false);
@@ -3176,7 +3182,7 @@ describe('the page in use', () => {
     expect(root.querySelector('#detail .detail-body')!.textContent).toContain('The Switchboard Chrome extension is not connected.');
 
     click('[data-action="view-menu"]');
-    expect(root.querySelector('.view-options-menu .pane-note')!.textContent).toBe('Chrome pane: the Switchboard Chrome extension is not connected.');
+    expect(root.querySelector('.view-options-menu .pane-note')!.textContent).toBe('Browser pane: the Switchboard Chrome extension is not connected.');
     click('[data-action="pane-pair"]');
     await flush();
     await flush();
@@ -3208,7 +3214,7 @@ describe('the page in use', () => {
     source.emit('pane', { pane: { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: 'The pane would not fit the column.' } });
     expect(root.querySelector('#detail .detail-body')!.textContent).toBe('The browser stopped: The pane would not fit the column.');
     click('[data-action="view-menu"]');
-    expect(root.querySelector('.view-options-menu .pane-note')!.textContent).toBe('Chrome pane stopped: The pane would not fit the column.');
+    expect(root.querySelector('.view-options-menu .pane-note')!.textContent).toBe('Browser pane stopped: The pane would not fit the column.');
     click('[data-action="view-menu"]');
     await new Promise((resolve) => setTimeout(resolve, PANE_SHOW_DELAY_MS + 20));
 

@@ -199,17 +199,17 @@ export interface PaneView {
   error: string | null;
 }
 
-/** What the view options menu says of the Chrome pane, or null while it is off. */
+/** What the view options menu says of the browser pane, or null while it is off. */
 export function paneStatus(pane: PaneView | null): string | null {
   if (pane === null || !pane.enabled) {
     return null;
   }
 
   if (pane.error !== null) {
-    return `Chrome pane stopped: ${pane.error}`;
+    return `Browser pane stopped: ${pane.error}`;
   }
 
-  return pane.extension === 'none' ? 'Chrome pane: the Switchboard Chrome extension is not connected.' : pane.extension === 'unpaired' ? 'Chrome pane: the Chrome extension is not paired.' : pane.shown ? 'Chrome pane: showing.' : 'Chrome pane: paired.';
+  return pane.extension === 'none' ? 'Browser pane: the Switchboard Chrome extension is not connected.' : pane.extension === 'unpaired' ? 'Browser pane: the Chrome extension is not paired.' : pane.shown ? 'Browser pane: showing, paired with the Chrome extension.' : 'Browser pane: paired with the Chrome extension.';
 }
 
 /** A sheet: Delete's or Stop's question, Snooze…'s choices, a control's text (and choice) as the dock's input dialog asks for it, or a drafted text the clipboard refused. */
