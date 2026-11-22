@@ -410,14 +410,12 @@ describe('drawing', () => {
     expect(first.querySelector('.mark')!.className).toBe('codicon codicon-eye mark');
     expect(first.querySelector('.mark')!.getAttribute('aria-label')).toBe('Review, then approve');
     expect(first.querySelector('.pill')!.className).toBe('pill ticket source-github');
-    // The ticket key's icon shows only when the pill shrinks to it: its source's logo, the dock's path.
-    expect(first.querySelector('.pill .pill-icon')!.getAttribute('class')).toBe('source-logo github pill-icon');
-    expect(first.querySelector('.pill .pill-icon path')!.getAttribute('d')).toMatch(/^M12 \.297c-6\.63 0-12 5\.373-12 12/);
+    // The ticket key is its text alone: it never shrinks to an icon.
+    expect(first.querySelector('.pill')!.innerHTML).toBe('<span class="pill-text">gh 1</span>');
     expect(first.querySelector('.playbook')!.innerHTML).toBe('<span class="namespace">dev:</span>build');
     expect(root.querySelector('[data-work-item="2"]')!.className).toBe('row stripe-warning dim');
     expect(root.querySelectorAll('.voice-mark')).toHaveLength(0);
     expect(root.querySelector('[data-work-item="2"] .pill')!.className).toBe('pill ticket source-zoho');
-    expect(root.querySelector('[data-work-item="2"] .pill .pill-icon')!.getAttribute('class')).toBe('source-logo zoho pill-icon');
     expect(root.querySelector('[data-work-item="2"] .playbook')!.innerHTML).toBe('triage');
     // A running mark spins, as the dock's does; a failed one is marked for the error colour, and no mark takes a tone.
     expect(root.querySelector('[data-work-item="3"] .mark')!.className).toBe('codicon codicon-loading mark codicon-modifier-spin');
@@ -465,14 +463,14 @@ describe('drawing', () => {
     expect(head!.querySelector('.row-time')!.textContent).toBe('2h');
     expect(head!.querySelector('.row-time')!.getAttribute('title')).toBe('In queue since 11:40');
     // Line 2 in the dock's order, each pill's whole name and URL in its tooltip.
-    expect([...line2!.children].map((child) => child.className)).toEqual(['codicon comment', 'playbook', 'pill ticket source-github', 'row-links', 'pill returned']);
-    expect([...line2!.querySelectorAll('.row-links > .pill')].map((child) => child.className)).toEqual(['pill link pr', 'pill link issue mentioned']);
+    expect([...line2!.children].map((child) => child.className)).toEqual(['codicon comment', 'playbook', 'pill ticket source-github', 'row-links']);
+    expect([...line2!.querySelectorAll('.row-links > .pill')].map((child) => child.className)).toEqual(['pill link pr', 'pill link issue mentioned', 'pill returned']);
     expect(line2!.querySelector('.comment')!.getAttribute('title')).toBe('Nov 20\nWaits on Sam');
     expect(line2!.querySelector('.ticket')!.getAttribute('title')).toBe('gh 1\nhttps://github.com/o/r/issues/1');
     expect(line2!.querySelector('.pr')!.textContent).toBe('\u{ea64}19002');
     expect(line2!.querySelector('.pr')!.getAttribute('title')).toBe('PR #19002\nhttps://github.com/o/r/pull/19002');
-    // An issue's pill has no icon whole, and the issues codicon when it shrinks to its icon, as the dock's.
-    expect([...line2!.querySelectorAll('.issue .codicon')].map((one) => one.className)).toEqual(['codicon codicon-issues pill-icon']);
+    // An issue's pill is its key alone, with no icon.
+    expect(line2!.querySelectorAll('.issue .codicon')).toHaveLength(0);
     expect(line2!.querySelector('.issue')!.getAttribute('title')).toBe('gh 18800, named in the ticket\nhttps://github.com/o/r/issues/18800');
     expect(line2!.querySelector('.returned .pill-text')!.textContent).toBe('2');
     // Line 3: the mark, then each detail in its tone with a muted separator between them, never before the first.
@@ -2459,32 +2457,47 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it("shrinks line 2's pills to their icons when a row is too narrow, after a redraw of the list, and whole again when it widens", async () => {
+  it("draws line 2's pills the same on every redraw, however narrow the row, without measuring them (page.css, Line 2)", async () => {
     const { page, source } = start();
-    let line = 150;
-    const width = (element: HTMLElement): number => (element.classList.contains('row-line') ? line : element.classList.contains('pill') ? 80 : element.classList.contains('comment') ? 16 : 0);
+    // Widths that would not fit: a 150 px line, 80 px pills and a 100 px playbook.
+    const widths = vi.fn((element: HTMLElement): number => (element.classList.contains('row-line') ? 150 : element.classList.contains('pill') ? 80 : element.classList.contains('playbook') ? 100 : 0));
 
-    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
-      return width(this);
-    });
-    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
-      return width(this);
-    });
-    vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function (this: HTMLElement) {
-      return this.classList.contains('playbook') ? 100 : 0;
-    });
-    hello(source, { groups: [listGroup('progress', [listRow(1, { links: [{ kind: 'pr', badge: '#12', label: 'Pull request 12', url: 'https://x/12', glyph: '\u{ea64}', mentioned: false }] })])] });
+    for (const property of ['clientWidth', 'offsetWidth', 'scrollWidth'] as const) {
+      vi.spyOn(HTMLElement.prototype, property, 'get').mockImplementation(function (this: HTMLElement) {
+        return widths(this);
+      });
+    }
+    const groups = [listGroup('progress', [listRow(1, { links: [{ kind: 'pr', badge: '21510', label: 'PR #21510', url: 'https://x/21510', glyph: '\u{ea64}', mentioned: false }, { kind: 'url', badge: 'Design notes', label: 'Design notes', url: 'https://x/notes', glyph: '\u{eb15}', mentioned: false }], returned: 2 })])];
+
+    hello(source, { groups });
     await flush();
+    await new Promise((done) => setTimeout(done, 20));
 
-    const pills = (): string[] => [...root.querySelectorAll('[data-work-item="1"] .pill')].map((one) => one.className.replace(/^pill /, ''));
+    const line = (): string => root.querySelector('[data-work-item="1"] .row-line:not(.row-details)')!.outerHTML;
+    const first = line();
+    const changes: string[] = [];
+    const watch = new MutationObserver((records) => records.forEach((record) => changes.push(`${record.type} ${(record.target as Element).className ?? ''} ${record.attributeName ?? ''}`)));
 
-    // 100 px playbook + two 80 px pills + 2 gaps is 272: both pills shrink, the playbook gives way to 60 px.
-    expect(pills()).toEqual(['ticket source-github compact', 'link pr compact']);
-    expect(root.querySelector('[data-work-item="1"] .pill.ticket')!.getAttribute('title')).toBe('gh 1');
-    line = 400;
-    source.emit('list', { groups: [listGroup('progress', [listRow(1, { title: 'Renamed', links: [{ kind: 'pr', badge: '#12', label: 'Pull request 12', url: 'https://x/12', glyph: '\u{ea64}', mentioned: false }] })])] });
-    await flush();
-    expect(pills()).toEqual(['ticket source-github', 'link pr']);
+    watch.observe(root.querySelector('#list')!, { subtree: true, attributes: true, childList: true, characterData: true });
+    // A busy hub resends the same list with every session event.
+    for (let again = 0; again < 5; again++) {
+      source.emit('list', { groups });
+      await flush();
+      await new Promise((done) => setTimeout(done, 20));
+    }
+    watch.disconnect();
+
+    expect(changes).toEqual([]);
+    expect(line()).toBe(first);
+    // Every pill whole, its text shown: the key's number, the PR's number, the link's label and Returned's count.
+    expect([...root.querySelectorAll('[data-work-item="1"] .pill')].map((pill) => [pill.className, pill.querySelector('.pill-text')!.textContent])).toEqual([
+      ['pill ticket source-github', 'gh 1'],
+      ['pill link pr', '21510'],
+      ['pill link url', 'Design notes'],
+      ['pill returned', '2'],
+    ]);
+    // The page reads no width of line 2: its CSS alone decides what shows.
+    expect(widths.mock.calls.filter(([element]) => element.closest('.row-line') !== null)).toEqual([]);
     page.close();
   });
 
@@ -4945,7 +4958,17 @@ describe("the list's CSS", () => {
     // Pills 18 px tall with 14 px icons and 12 px text; a key's logo 12 px; GitHub's key in the dock's GitHub colour, not the foreground.
     expect(one('.row-line .pill')).toMatch(/height: 18px;.*font-size: 12px/);
     expect(one('.row-line .pill .codicon')).toBe('flex: none; font-size: 14px;');
-    expect(one('.row-line .pill .source-logo')).toContain('width: 12px; height: 12px');
+    // Line 2 by CSS alone: the playbook and pills keep their width and are never cut; the links' one-line box shrinks, its second line clipped,
+    // so a link that does not fit drops out whole.
+    expect(declarationsOf((each) => each === '.row-line .playbook')).toContain('flex: none; max-width: 100%; overflow-wrap: anywhere;');
+    expect(declarationsOf((each) => each === '.row-line .playbook').join(' ')).not.toMatch(/ellipsis|min-width|flex-shrink|flex: 0 1/);
+    expect(one('.row-line .comment + .playbook')).toBe('max-width: calc(100% - 22px);');
+    expect(one('.row-line .pill')).toMatch(/^flex: none;/);
+    expect(one('.row-line .row-links')).toBe('flex: 1 1 0; min-width: 0; margin-left: -6px; display: flex; flex-wrap: wrap; height: 18px; overflow: hidden;');
+    // Where the playbook and the key do not fit on one line, the key wraps under the playbook rather than being cut.
+    expect(one('.row-line:not(.row-details)')).toBe('flex-wrap: wrap; row-gap: 3px; height: auto; min-height: 18px;');
+    // An empty first item, so even the first pill wraps away rather than being cut.
+    expect(one('.row-line .row-links::before')).toBe("content: ''; height: 18px;");
     expect(declarationsOf((each) => each === '.row-line .pill.ticket.source-github')).toEqual(['border-color: var(--sb-github); background: color-mix(in srgb, var(--sb-github) 18%, transparent);']);
     // Marks in the foreground, Failed in the dock's error colour; the muted texts in the dock's grey, #717171 in Light Modern.
     expect(one('.row-details .mark')).toBe('font-size: 14px;');

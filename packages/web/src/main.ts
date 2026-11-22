@@ -29,7 +29,6 @@ import { settings } from './settings.js';
 import { attachments, drawChips } from './attachments.js';
 import type { Attached } from './attachments.js';
 import { reconnector } from './reconnect.js';
-import { fitPills } from './fit.js';
 import { renderContextMeter } from '@switchboard/conversation/contextMeter';
 import type { ContextMenuState } from '@switchboard/conversation/contextMeter';
 import { EMPTY_HISTORY_UI, renderHistory } from './history.js';
@@ -72,10 +71,6 @@ export const CHAT_MAX = 1600;
 const SASH_STEP = 16;
 /** How far right a touch from the page's left edge must move, more across than down, to show the drawer. */
 export const SWIPE_OPEN = 40;
-/** A pill shrunk to its icon, as the dock's: its 1 px borders and 6 px padding each side round a 14 px codicon, or the key's 12 px logo; and the space between line 2's items. */
-const COMPACT_PILL = 28;
-const COMPACT_KEY = 26;
-const PILL_GAP = 6;
 const SIDE_WIDTH = 'switchboard.sideWidth';
 /** Where this device keeps the list unpinned, in the drawer: '1', under the key an earlier page kept the list hidden by its sash. */
 const LIST_UNPINNED = 'switchboard.listCollapsed';
@@ -265,39 +260,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   };
 
   relayout();
-  // Line 2's pills shrink to their icons when a row is too narrow, as the dock's do: one pass over every row once a frame at most, after a
-  // redraw of the list or a change of its width, which reads every width before it changes any class, so the layout is computed once.
-  let fitting = false;
-  const fitLines = (): void => {
-    if (fitting) {
-      return;
-    }
-
-    fitting = true;
-    (typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (run: () => void) => setTimeout(run, 0))(() => {
-      fitting = false;
-
-      const lines = [...list.querySelectorAll<HTMLElement>('.row-line:not(.row-details)')];
-
-      for (const line of lines) {
-        line.querySelectorAll('.pill.compact, .pill.omitted').forEach((pill) => pill.classList.remove('compact', 'omitted'));
-      }
-
-      const plans = lines.map((line) => {
-        const pills = [...line.querySelectorAll<HTMLElement>('.pill')];
-        const playbook = line.querySelector<HTMLElement>('.playbook');
-        const others = [...line.children].filter((child) => child !== playbook && !child.classList.contains('pill') && !child.classList.contains('row-links')).map((child) => (child as HTMLElement).offsetWidth);
-
-        return { pills, fit: fitPills(line.clientWidth, others, playbook?.scrollWidth ?? 0, pills.map((pill) => ({ width: pill.offsetWidth, compact: pill.classList.contains('ticket') ? COMPACT_KEY : COMPACT_PILL, returned: pill.classList.contains('returned') })), PILL_GAP) };
-      });
-
-      for (const { pills, fit } of plans) {
-        pills.forEach((pill, index) => fit[index] !== 'full' && pill.classList.add(fit[index]!));
-      }
-    });
-  };
-  const listWidth = typeof ResizeObserver === 'function' ? new ResizeObserver(() => fitLines()) : null;
-  listWidth?.observe(list);
   /** Whether the Browser tab shows: on the installed page while the Chrome pane is on (PRD R113). */
   /** Whether this page can drive the browser pane: only a page on this computer posts its area (`pane-rect` is a local command). */
   const paneLocal = (): boolean => deps.local ?? ['127.0.0.1', 'localhost'].includes(location.hostname);
@@ -658,8 +620,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const chips = composerHost.querySelector<HTMLElement>('.attachments')!;
   // Document listeners end with the page.
   const listening = new AbortController();
-  // A pill's width changes once the codicon font loads, so the lines are fitted again then.
-  document.fonts?.addEventListener?.('loadingdone', () => fitLines(), { signal: listening.signal });
   // The draft the hub last sent for dictation, per session, so a newer one replaces it in the box but never text typed over it, and one that came
   // while a message was being sent, which fills the box once the send answered.
   const hubDrafts = new Map<string, string>();
@@ -1985,9 +1945,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     mount(personaHost, renderPersonaDialog(state.session?.persona, view.personas));
     coverForPersonas(view.personas !== null);
     mount(list, renderListPane(expired, listError, renderList(listed.groups, state.scope?.workItemId ?? null, view.collapsed, listed.filtering, poolMenu(), view.bands, !paneWorks()), header.end(listed.groups)));
-    // Each draw shows line 2's pills whole until `fitLines` fits them again after the redraw, as a list drawn afresh would.
-    list.querySelectorAll('.pill.compact, .pill.omitted').forEach((pill) => pill.classList.remove('compact', 'omitted'));
-    fitLines();
 
     // An ended session's note sits just above the composer on every tab, with Resume, as in the Conversation view; the page resumes it in the
     // terminal holder, or a Codex thread in its daemon, without a terminal.
@@ -4289,7 +4246,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       micTiming = null;
       listening.abort();
       dropDrawer();
-      listWidth?.disconnect();
       dropFileIcons();
       header.close();
       source.close();

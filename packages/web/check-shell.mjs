@@ -1,6 +1,7 @@
 // Checks the page's shell at iPhone sizes and an iPad's in a real headless Chrome or Edge (testing.md § Web page shell check): in the installed
 // app's standalone mode, portrait and landscape, light and dark, the list, a conversation, an empty one, History, Settings, the drawer, a sheet
-// and the persona dialog.
+// and the persona dialog, and the list at 200 px. Line 2's playbook or host is never cut, its pills are whole or left out whole, the ticket
+// key always shows, and line 2 paints the same while the same list is sent again.
 // Nothing outside the scrollers can move: the document is exactly the viewport, nothing reaches past it outside a scroller, every scroller keeps
 // a drag to itself or hands it to the pane around it, and the page outside the scrollers takes no pan. Chrome has no display-mode emulation, so the page's standalone rules are
 // applied to every width here, and safe-area insets come from the DevTools protocol.
@@ -21,7 +22,7 @@ const SIZES = [
   { device: 'iphone', orientation: 'landscape', width: 852, height: 393, screen: [852, 393], insets: { top: 0, bottom: 21, left: 59, right: 59 }, phone: true },
   { device: 'ipad', orientation: 'landscape', width: 1180, height: 796, screen: [1180, 820], insets: { top: 0, bottom: 20, left: 0, right: 0 }, phone: false },
 ];
-const VIEWS = ['list', 'conversation', 'empty', 'history', 'settings', 'drawer', 'sheet', 'persona'];
+const VIEWS = ['list', 'narrow', 'conversation', 'empty', 'history', 'settings', 'drawer', 'sheet', 'persona'];
 const report = process.argv.includes('--report');
 /** --shots <dir> saves a screenshot of each view there. */
 const shots = process.argv.includes('--shots') ? process.argv[process.argv.indexOf('--shots') + 1] : null;
@@ -49,8 +50,14 @@ if (view === 'drawer') localStorage.setItem('switchboard.listCollapsed', '1'); e
 const now = Date.now();
 const row = (id, title, patch = {}) => ({ workItemId: id, ticketId: id, title, priority: null, time: null, ticket: 'gh ' + id, sourceKind: 'github', url: '', playbook: 'dev:build', links: [], returned: 0, comment: null, mark: null, details: [], stripe: null, dim: false, host: null, actions: [], main: null, pastes: [], search: '', opens: [], terminal: false, band: null, voice: null, history: null, ...patch });
 const remove = { label: 'Delete', action: 'delete', icon: 'trash', group: 'state', confirm: { question: 'Delete Fix it?', detail: 'It goes for good.', action: 'delete' }, input: null };
-const groups = [{ key: 'progress', title: 'In progress', glyph: '\u{ea70}', empty: null, rows: [row(1, 'Fix it', { history: { ticketId: 1, key: 'gh 1' }, actions: [remove] }), row(2, 'Another thing')] }];
-const open = view !== 'list' && view !== 'settings';
+// The second row's line 2 holds more pills than fit beside its long playbook, so some drop out.
+const pr = (n) => ({ label: 'PR #' + n, url: 'https://github.com/o/r/pull/' + n, kind: 'pr', badge: String(n), glyph: '\u{ea64}', mentioned: false });
+const crowded = { ticket: 'gh 21509', playbook: 'dev:address-pr-review', comment: { glyph: '\u{ea6b}', title: 'A comment' }, links: [pr(21512), pr(21513), pr(21514), pr(21515), { label: 'Design notes', url: 'https://example.com/notes', kind: 'url', badge: 'Design notes', glyph: '\u{eb15}', mentioned: false }], returned: 2 };
+const groups = [{ key: 'progress', title: 'In progress', glyph: '\u{ea70}', empty: null, rows: [row(1, 'Fix it', { history: { ticketId: 1, key: 'gh 1' }, actions: [remove] }), row(2, 'Another thing', crowded), row(3, 'Hosted', { host: 'a-very-long-host-name.example.com', ticket: 'gh 21510', comment: { glyph: '\u{ea6b}', title: 'A comment' } })] }];
+const listing = view === 'list' || view === 'narrow';
+const open = !listing && view !== 'settings';
+// The list at its narrowest, 200 px, where line 2 wraps.
+if (view === 'narrow') document.head.insertAdjacentHTML('beforeend', '<style>#list { width: 200px !important; min-width: 0 !important; max-width: none !important; flex: none !important; }</style>');
 const scope = open ? { kind: 'page', key: 'k', folder: 'D:/w', title: 'Fix it', scopeGen: 3, conversations: [{ workItemId: 1, title: 'Fix it', primary: true, sessionId: 's', state: 'idle', conversation: 'full', unread: 0 }], workItemId: 1, cwd: 'D:/w', sessionId: 's' } : null;
 const session = { id: 's', title: 'Task session s', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, persona: view === 'persona' ? { id: 'nova', name: 'Nova', pinned: true, tonePending: false } : null, canPin: true };
 const personas = [{ id: 'nova', name: 'Nova', voice: 'cedar', style: 'pair', personality: 'Warm and brief, with a dry joke now and then.' }, { id: 'iris', name: 'Iris', voice: 'marin', style: 'none', personality: '' }];
@@ -61,13 +68,27 @@ for (let i = 0; view !== 'empty' && open && i < 30; i++) {
 }
 history.replaceState(null, '', location.search + (open ? '#w=1' : '#'));
 class FakeSource {
-  constructor() { this.listeners = {}; setTimeout(() => this.emit('hello', { key: 'pk', groups, scope, sessions: open ? [session] : [], items, more: false, status: null, artifacts: [], unread: 0 }), 20); }
+  constructor() {
+    this.listeners = {};
+    setTimeout(() => this.emit('hello', { key: 'pk', groups, scope, sessions: open ? [session] : [], items, more: false, status: null, artifacts: [], unread: 0 }), 20);
+    if (listing) setInterval(() => this.emit('list', { groups }), 120);
+  }
   addEventListener(type, listener) { (this.listeners[type] ??= []).push(listener); }
   removeEventListener() {}
   close() {}
   emit(type, data) { for (const listener of this.listeners[type] ?? []) listener({ data: JSON.stringify({ type, ...data }) }); }
 }
 window.EventSource = FakeSource;
+// On the list, the same list again every 120 ms, as a busy hub sends it, and line 2 as each frame starts, that is as the last frame painted it.
+if (listing) {
+  window.__line2 = [];
+  const sample = () => {
+    const lines = [...document.querySelectorAll('#list .row-line:not(.row-details)')];
+    if (lines.length > 0) window.__line2.push(lines.map((line) => line.innerHTML + [...line.querySelectorAll('.pill')].map((pill) => pill.getBoundingClientRect().width).join()).join('|'));
+    requestAnimationFrame(sample);
+  };
+  requestAnimationFrame(sample);
+}
 window.fetch = async (url) => ({ status: 200, ok: true, headers: new Headers(), json: async () => (String(url).endsWith('/personas') ? { personas } : {}), text: async () => '' });
 const matchMedia = window.matchMedia.bind(window);
 window.matchMedia = (query) => (query.includes('display-mode: standalone') ? { matches: true, media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} } : matchMedia(query));
@@ -118,6 +139,23 @@ const measure = `(() => {
     })(),
     bar: (() => { const probe = document.createElement('div'); probe.style.background = 'var(--sb-bar-background)'; document.body.append(probe); const colour = getComputedStyle(probe).backgroundColor; probe.remove(); return colour; })(),
     band: document.getElementById('safe-top').getBoundingClientRect().height,
+    // Line 2 of each shown row: a pill is whole inside its line and its box, or wholly outside them, left out; the ticket key always whole.
+    line2: window.__line2 ? { samples: window.__line2.length, ways: new Set(window.__line2).size } : null,
+    names: [...document.querySelectorAll('#list .row-line .playbook')].filter(shown).map((name) => { const box = name.getBoundingClientRect(); const edge = name.closest('.row-line').getBoundingClientRect(); const icon = name.previousElementSibling?.classList.contains('comment') ? name.previousElementSibling.getBoundingClientRect() : null; return { text: name.textContent, alone: icon !== null && icon.bottom <= box.top + 0.5, cut: name.scrollWidth > name.clientWidth + 0.5 || box.right > edge.right + 0.5 || box.bottom > edge.bottom + 0.5 }; }),
+    pills: [...document.querySelectorAll('#list .row-line:not(.row-details)')].filter(shown).flatMap((line) => {
+      const edge = line.getBoundingClientRect();
+
+      return [...line.querySelectorAll('.pill')].map((pill) => {
+        const box = pill.getBoundingClientRect();
+        const holder = pill.parentElement.getBoundingClientRect();
+        const right = Math.min(edge.right, holder.right);
+        const bottom = Math.min(edge.bottom, holder.bottom);
+        const inside = box.left >= edge.left - 0.5 && box.right <= right + 0.5 && box.top >= edge.top - 0.5 && box.bottom <= bottom + 0.5;
+        const outside = box.left >= right - 0.5 || box.top >= bottom - 0.5;
+
+        return { text: pill.textContent, ticket: pill.classList.contains('ticket'), state: inside ? 'whole' : outside ? 'out' : 'cut' };
+      });
+    }),
     tops: { header: top('.header'), listHeader: top('.list-header'), historyBar: top('.hist-bar'), settingsHead: top('.settings-head'), personaHead: top('.persona-head'), tabs: top('.tabs'), panel: top('#panel'), list: top('#list') },
   };
 })()`;
@@ -144,6 +182,19 @@ function failures(view, size, m) {
   if (m.touchAction !== 'pinch-zoom') out.push('the page outside the scrollers takes a pan or no pinch (body touch-action ' + m.touchAction + ')');
   // No band above the bars: under the opaque status bar the top inset is 0, and each view's top bar starts at the page's top edge.
   if (m.band !== 0) out.push('a ' + m.band + ' px band above the bars');
+  // A redraw with the same rows paints line 2 the same.
+  if (m.line2 !== null) {
+    if (m.line2.samples < 3) out.push('line 2 was sampled in ' + m.line2.samples + ' frames, too few to check');
+    if (m.line2.ways > 1) out.push('line 2 painted ' + m.line2.ways + ' different ways while the same list was sent again');
+    if (m.pills.filter((pill) => pill.ticket).length !== 3) out.push('line 2 shows ' + m.pills.filter((pill) => pill.ticket).length + ' ticket keys, not 3');
+  }
+  for (const name of m.names) {
+    if (name.cut) out.push('line 2\'s playbook or host ' + name.text + ' is cut');
+    if (name.alone) out.push('line 2\'s comment icon is alone on a line above ' + name.text);
+  }
+  for (const pill of m.pills) {
+    if (pill.state === 'cut' || (pill.ticket && pill.state !== 'whole')) out.push('line 2\'s pill ' + pill.text + ' is ' + (pill.state === 'cut' ? 'cut' : 'left out'));
+  }
   for (const [bar, top] of Object.entries(m.tops)) {
     // The dialogs, Settings and the persona dialog, outside the phone's layout sit inside the dimmed page's margin.
     if ((['header', 'listHeader', 'historyBar'].includes(bar) || (['settingsHead', 'personaHead'].includes(bar) && size.phone)) && top !== null && top !== 0) out.push('the ' + bar + ' starts ' + top + ' px down');
