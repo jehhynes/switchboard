@@ -312,6 +312,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /** Whether this page can drive the browser pane: only a page on this computer posts its area (`pane-rect` is a local command). */
   const paneLocal = (): boolean => deps.local ?? ['127.0.0.1', 'localhost'].includes(location.hostname);
   const browserTab = (): boolean => view.pane?.enabled === true && standalone() && paneLocal();
+  /** Whether this page's browser pane is paired and running, so it shows the links and the list's pills are labels. */
+  const paneWorks = (): boolean => browserTab() && view.pane?.extension === 'paired' && view.pane.error === null;
   /** The work item whose conversation's web links this page opened in the Chrome pane (`pane-open`), which then has links to show too. */
   let paneOpened: number | null = null;
   /** Whether the open work item has links the Chrome pane can show: its own, or a web link of its conversation opened there. */
@@ -1802,7 +1804,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // A search shows only the rows that match, in every group, open (PRD R63).
     const listed = header.list(state.groups);
     mount(sheetHost, renderSheet(view.sheet, view.acting));
-    mount(list, renderListPane(expired, listError, renderList(listed.groups, state.scope?.workItemId ?? null, view.collapsed, listed.filtering, poolMenu(), view.bands), header.end(listed.groups)));
+    mount(list, renderListPane(expired, listError, renderList(listed.groups, state.scope?.workItemId ?? null, view.collapsed, listed.filtering, poolMenu(), view.bands, !paneWorks()), header.end(listed.groups)));
     // Each draw shows line 2's pills whole until `fitLines` fits them again after the redraw, as a list drawn afresh would.
     list.querySelectorAll('.pill.compact, .pill.omitted').forEach((pill) => pill.classList.remove('compact', 'omitted'));
     fitLines();
@@ -2585,7 +2587,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         void runCommand(button!.dataset['label'] ?? '');
         break;
       case 'open-link':
-        // An Open item of the header's or a pool row's menu; it closes the menu.
+        // A pill's link, without the browser pane, opens without selecting its row; an Open item of the header's or a pool row's menu closes the menu.
         openLink(button!.dataset['row'] ?? '', button!.dataset['link'] ?? '');
         break;
       case 'row-history': {

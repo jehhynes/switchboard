@@ -2470,17 +2470,16 @@ describe('the page in use', () => {
     await flush();
     expect(posts.find((post) => post.url.endsWith('/pool-action'))?.body).toMatchObject({ ticketId: 9, label: 'Snooze…', until: expect.any(Number) });
 
-    // The menu closes on Escape and on a press outside it; its pill is a label, a click on it the row's, which opens the menu.
+    // The menu closes on Escape and on a press outside it, and without the browser pane its pill opens the ticket without opening the menu.
     row().click();
     root.querySelector('#list .row-menu .menu-row')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     expect(root.querySelector('#list .row-menu')).toBeNull();
     row().click();
     document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
     expect(root.querySelector('#list .row-menu')).toBeNull();
-    expect(root.querySelector('#list .pill[data-action]')).toBeNull();
     row().querySelector<HTMLElement>('.pill.ticket')!.click();
-    expect(opened).toEqual([]);
-    expect(root.querySelector('#list .row-menu')).not.toBeNull();
+    expect(opened).toEqual(['https://github.com/o/r/issues/9']);
+    expect(root.querySelector('#list .row-menu')).toBeNull();
     page.close();
   });
 
@@ -2511,7 +2510,34 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it("draws a row's ticket and link pills as labels with the name and URL in their tooltips, a click on one selecting the row and opening nothing", async () => {
+  it("opens a row's ticket and link pills in a new tab without selecting the row while the page has no browser pane, and only http or https links", async () => {
+    const { page, source, opened } = start();
+    const links = [
+      { label: 'PR #5', url: 'https://github.com/o/r/pull/5', kind: 'pr' as const, badge: '5', glyph: '\u{ea64}', mentioned: false },
+      { label: 'Notes', url: 'https://example.test/a?b=1#top', kind: 'url' as const, badge: 'Notes', glyph: null, mentioned: false },
+      { label: 'Bad', url: 'javascript:alert(1)', kind: 'url' as const, badge: 'Bad', glyph: null, mentioned: false },
+    ];
+
+    hello(source, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it' }), listRow(2, { title: 'Other', url: 'https://github.com/o/r/issues/2', links })])] });
+    // The pane is on but not paired, so it shows no links.
+    source.emit('pane', { pane: { enabled: true, extension: 'unpaired', extensionId: 'ext', marker: null, shown: false, error: null } });
+    posts = [];
+    click('#list [data-work-item="2"] .pill.ticket');
+    click('#list [data-work-item="2"] .pill.link.pr');
+    click('#list [data-work-item="2"] .pill.link[title^="Notes"]');
+    click('#list [data-work-item="2"] .pill.link[title^="Bad"]');
+    await flush();
+    expect(opened).toEqual(['https://github.com/o/r/issues/2', 'https://github.com/o/r/pull/5', 'https://example.test/a?b=1#top']);
+    // The pill's click is not the row's: nothing is selected.
+    expect(posts.filter((post) => post.url.endsWith('/select'))).toEqual([]);
+    expect(root.querySelector('#list .row.selected')?.getAttribute('data-work-item')).toBe('1');
+    // A row without a ticket URL, such as an ad-hoc one, has a ticket pill that opens nothing.
+    expect(root.querySelector('#list [data-work-item="1"] .pill.ticket')!.hasAttribute('data-action')).toBe(false);
+    page.close();
+  });
+
+  it("draws a row's ticket and link pills as labels while the paired browser pane shows the links, a click on one selecting the row and opening nothing", async () => {
+    installed = true;
     const { page, source, opened } = start();
     const links = [
       { label: 'PR #5', url: 'https://github.com/o/r/pull/5', kind: 'pr' as const, badge: '5', glyph: '\u{ea64}', mentioned: false },
@@ -2519,6 +2545,14 @@ describe('the page in use', () => {
     ];
 
     hello(source, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it' }), listRow(2, { title: 'Other', url: 'https://github.com/o/r/issues/2', links })])] });
+    source.emit('pane', { pane: { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: null } });
+    expect(root.querySelectorAll('#list .pill[data-action]')).toHaveLength(0);
+    // A pane that stops, or turns off, leaves the links to the pills until it runs again.
+    source.emit('pane', { pane: { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: 'Gone.' } });
+    expect(root.querySelectorAll('#list [data-work-item="2"] .pill[data-action="open-link"]')).toHaveLength(3);
+    source.emit('pane', { pane: { enabled: false, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: null } });
+    expect(root.querySelectorAll('#list [data-work-item="2"] .pill[data-action="open-link"]')).toHaveLength(3);
+    source.emit('pane', { pane: { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: null } });
     expect(root.querySelectorAll('#list .pill[data-action]')).toHaveLength(0);
     expect(root.querySelector('#list [data-work-item="2"] .pill.link.pr')!.getAttribute('title')).toBe('PR #5\nhttps://github.com/o/r/pull/5');
     expect(root.querySelector('#list [data-work-item="2"] .pill.ticket')!.getAttribute('title')).toContain('https://github.com/o/r/issues/2');
@@ -2655,12 +2689,15 @@ describe('the page in use', () => {
     const links = [{ label: 'PR #5', url: 'https://github.com/o/r/pull/5', kind: 'pr' as const, badge: '5', glyph: null, mentioned: false }];
 
     hello(FakeSource.last!, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', links })])] });
+    // The computer's pane is paired, which a page on another device leaves aside: its pills open their links.
+    FakeSource.last!.emit('pane', { pane: { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: null } });
     posts = [];
     click('button.actions');
     click('.actions-menu [data-link="0"]');
+    click('#list [data-work-item="1"] .pill.link.pr');
     await flush();
     expect(posts.map((post) => post.url)).not.toContain('/v1/conversation/row-open');
-    expect(opened).toEqual(['https://github.com/o/r/pull/5']);
+    expect(opened).toEqual(['https://github.com/o/r/pull/5', 'https://github.com/o/r/pull/5']);
     page.close();
 
     // Left to the browser, the link opens in a new tab without an opener or referrer.

@@ -11,11 +11,11 @@ const RETURNED_GLYPH = '\u{eae2}';
 /**
  * A pill on line 2: its codicon glyph, if any, then its text, the full name in its tooltip. `icon` is shown only when the pill shrinks to its
  * icon (`fitPills`), for a pill that has no glyph whole: the ticket key's source logo, drawn as the dock's, or an issue's or a link's codicon.
- * A pill is a label only: a click on it is the row's click, and its links open from the Browser tab and the row's menu.
+ * `opens` makes a pill with a link open it; without it the pill is a label, a click on it the row's, while the browser pane shows the links.
  */
-function Pill({ classes, glyph, text, title, icon }: { classes: string; glyph: string | null; text: string; title: string; icon?: ComponentChildren }) {
+function Pill({ classes, glyph, text, title, icon, opens }: { classes: string; glyph: string | null; text: string; title: string; icon?: ComponentChildren; opens?: Record<string, string> }) {
   return (
-    <span class={`pill ${classes}`} title={title}>
+    <span class={`pill ${classes}`} title={title} {...opens}>
       {glyph === null ? (icon ?? null) : <span class="codicon" aria-hidden="true">{glyph}</span>}
       <span class="pill-text">{text}</span>
     </span>
@@ -28,7 +28,7 @@ function Pill({ classes, glyph, text, title, icon }: { classes: string; glyph: s
  * link pills and Returned, which shrink to their icons when the line is too narrow (`fitPills`, applied by the page); line 3 the mark and the
  * details, a muted " · " between them, in their tones. The dock's stripe is on its left edge.
  */
-function Row({ row, selected, menu }: { row: PageRow; selected: boolean; menu: ComponentChildren | null }) {
+function Row({ row, selected, menu, pillsOpen }: { row: PageRow; selected: boolean; menu: ComponentChildren | null; pillsOpen: boolean }) {
   const kind = row.mark?.kind;
   const mark =
     row.mark === null || kind === undefined ? null : (
@@ -46,6 +46,8 @@ function Row({ row, selected, menu }: { row: PageRow; selected: boolean; menu: C
     );
   const classes = ['row', ...(row.stripe === null ? [] : [`stripe-${row.stripe}`]), ...(row.dim ? ['dim'] : []), ...(selected ? ['selected'] : [])].join(' ');
   const key = rowKey(row);
+  // Without the browser pane a pill with a link opens it instead of the row's click, as the dock's `OnPillTapped` (PRD R52).
+  const opens = (which: string): Record<string, string> => (pillsOpen ? { 'data-action': 'open-link', 'data-row': key, 'data-link': which } : {});
   const details = row.details.map((detail, index) => [
     index > 0 ? <span class="row-detail-separator" aria-hidden="true">·</span> : null,
     <span class={`row-detail${detail.tone === null ? '' : ` ${detail.tone}`}`} title={detail.title ?? undefined}>{detail.text}</span>,
@@ -72,11 +74,11 @@ function Row({ row, selected, menu }: { row: PageRow; selected: boolean; menu: C
         <span class="row-line">
           {row.comment === null ? null : <span class="codicon comment" role="img" title={row.comment.title} aria-label="Comments">{row.comment.glyph}</span>}
           {playbook}
-          <Pill classes={`ticket source-${row.sourceKind}`} glyph={null} text={row.ticket} title={row.url === '' ? row.ticket : `${row.ticket}\n${row.url}`} icon={<SourceLogo kind={row.sourceKind} enabled extra="pill-icon" />} />
+          <Pill classes={`ticket source-${row.sourceKind}`} glyph={null} text={row.ticket} title={row.url === '' ? row.ticket : `${row.ticket}\n${row.url}`} icon={<SourceLogo kind={row.sourceKind} enabled extra="pill-icon" />} opens={row.url === '' ? {} : opens('ticket')} />
           {row.links.length === 0 ? null : (
             <span class="row-links">
               {row.links.map((link, index) => (
-                <Pill classes={`link ${link.kind}${link.mentioned ? ' mentioned' : ''}`} glyph={link.glyph} text={link.badge} title={`${link.label}${link.mentioned ? ', named in the ticket' : ''}\n${link.url}`} icon={link.glyph === null ? <span class={`codicon codicon-${link.kind === 'issue' ? 'issues' : 'link-external'} pill-icon`} aria-hidden="true"></span> : undefined} />
+                <Pill classes={`link ${link.kind}${link.mentioned ? ' mentioned' : ''}`} glyph={link.glyph} text={link.badge} title={`${link.label}${link.mentioned ? ', named in the ticket' : ''}\n${link.url}`} icon={link.glyph === null ? <span class={`codicon codicon-${link.kind === 'issue' ? 'issues' : 'link-external'} pill-icon`} aria-hidden="true"></span> : undefined} opens={opens(String(index))} />
               ))}
             </span>
           )}
@@ -123,7 +125,7 @@ export function bandRuns(rows: readonly PageRow[]): Array<{ band: string | null;
  * open, by its key, with the menu's rows. An open group's rows with a band, Done's, sit under their band's heading, a muted label with its count
  * and a rule that opens or closes it (`bands`, else `OPEN_BANDS`); a closed band still shows the selected row, and a search opens every band.
  */
-export function renderList(groups: readonly PageGroup[], selected: number | null, collapsed: ReadonlySet<string>, filtering = false, menu: { row: string; rows: ComponentChildren } | null = null, bands: ReadonlyMap<string, boolean> = new Map()): VNode | null {
+export function renderList(groups: readonly PageGroup[], selected: number | null, collapsed: ReadonlySet<string>, filtering = false, menu: { row: string; rows: ComponentChildren } | null = null, bands: ReadonlyMap<string, boolean> = new Map(), pillsOpen = false): VNode | null {
   if (groups.every((group) => group.rows.length === 0)) {
     return filtering ? null : <p class="empty">No work items yet. They appear here when Switchboard starts one.</p>;
   }
@@ -137,7 +139,7 @@ export function renderList(groups: readonly PageGroup[], selected: number | null
           shown.length === 0 ? null : (
             <ul class="rows">
               {shown.map((row) => (
-                <Row key={rowKey(row)} row={row} selected={row.workItemId !== null && row.workItemId === selected} menu={menu !== null && menu.row === rowKey(row) ? menu.rows : null} />
+                <Row key={rowKey(row)} row={row} selected={row.workItemId !== null && row.workItemId === selected} menu={menu !== null && menu.row === rowKey(row) ? menu.rows : null} pillsOpen={pillsOpen} />
               ))}
             </ul>
           );
