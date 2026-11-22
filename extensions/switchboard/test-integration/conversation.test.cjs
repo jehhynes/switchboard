@@ -75,6 +75,29 @@ describe('the Conversation view', () => {
     await vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
   });
 
+  it("sets voice.expandReplies in the config folder's settings.json from the view's Expand and Collapse Spoken Replies, and follows the hub's reload", async () => {
+    const extension = await vscode.extensions.getExtension('switchboard.switchboard').activate();
+    const { readFileSync } = require('node:fs');
+    const { join } = require('node:path');
+    const file = join(process.env.SWITCHBOARD_TEST_HOME, 'repo', 'switchboard', 'settings.json');
+    const expandReplies = () => {
+      try {
+        return JSON.parse(readFileSync(file, 'utf8')).voice?.expandReplies;
+      } catch {
+        return undefined;
+      }
+    };
+
+    await until(() => extension.conversation().connected, 'the view never connected');
+    assert.strictEqual(extension.conversation().settings.expandReplies, false);
+    await vscode.commands.executeCommand('switchboard.expandSpokenReplies');
+    assert.strictEqual(expandReplies(), true);
+    await until(() => extension.conversation().settings.expandReplies === true, 'the window never took voice.expandReplies on');
+    await vscode.commands.executeCommand('switchboard.collapseSpokenReplies');
+    assert.strictEqual(expandReplies(), false);
+    await until(() => extension.conversation().settings.expandReplies === false, 'the window never took voice.expandReplies off');
+  });
+
   it("lists the composer's files under the window's folder without case, leaving out excluded folders, with the folders above them", async () => {
     const extension = await vscode.extensions.getExtension('switchboard.switchboard').activate();
     const folder = vscode.workspace.workspaceFolders[0].uri;

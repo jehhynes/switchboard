@@ -160,8 +160,11 @@ function PaneRows({ view }: { view: View }) {
   );
 }
 
-/** The header's view options button and its menu: Show message details, and the Chrome pane's state and pairing while it is on. */
-function ViewOptions({ view }: { view: View }) {
+/**
+ * The header's view options button and its menu: Show message details, Expand spoken replies on this computer's page, and the Chrome pane's
+ * state and pairing while it is on.
+ */
+function ViewOptions({ view, expandReplies }: { view: View; expandReplies: boolean }) {
   return (
     <div class="menu-anchor view-options-anchor">
       <button type="button" class="icon view-options" data-action="view-menu" aria-haspopup="menu" aria-expanded={view.viewMenu} title="View options" aria-label="View options">
@@ -173,6 +176,12 @@ function ViewOptions({ view }: { view: View }) {
             <Gutter checked={view.details} />
             <span class="title">Show message details</span>
           </button>
+          {view.settingsHere ? (
+            <button type="button" class="menu-row" role="menuitemcheckbox" aria-checked={expandReplies} data-action="toggle-expand-replies">
+              <Gutter checked={expandReplies} />
+              <span class="title">Expand spoken replies</span>
+            </button>
+          ) : null}
           <PaneRows view={view} />
         </div>
       ) : null}
@@ -316,7 +325,7 @@ export function renderHeader(state: PageState, view: View): VNode {
           )}
         </div>
       )}
-      <ViewOptions view={view} />
+      <ViewOptions view={view} expandReplies={state.expandReplies} />
     </header>
   );
 }

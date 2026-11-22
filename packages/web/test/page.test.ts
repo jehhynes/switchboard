@@ -2123,7 +2123,7 @@ describe('the page in use', () => {
     expect(root.querySelector('.view-options-menu')).toBeNull();
     click('.header button.view-options');
     expect(root.querySelector('.header button.view-options')!.getAttribute('title')).toBe('View options');
-    expect([...root.querySelectorAll('.view-options-menu .menu-row')].map((row) => row.textContent!.trim())).toEqual(['Show message details']);
+    expect([...root.querySelectorAll('.view-options-menu .menu-row')].map((row) => row.textContent!.trim())).toEqual(['Show message details', 'Expand spoken replies']);
     expect(root.querySelector('.view-options-menu .menu-separator')).toBeNull();
     root.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     expect(root.querySelector('.view-options-menu')).toBeNull();
@@ -3893,6 +3893,62 @@ describe('the page in use', () => {
     other.dispatchEvent(new Event('input', { bubbles: true }));
     expect(root.querySelector<HTMLButtonElement>('.question-submit')!.disabled).toBe(false);
     page.close();
+  });
+
+  it("sets voice.expandReplies from View options' Expand spoken replies on this computer's page, follows the hub's settings, and leaves it out on a paired device", async () => {
+    const { page, source } = start();
+    const expandRow = () => root.querySelector('[data-action="toggle-expand-replies"]');
+
+    hello(source, { items: [reply('r1', 2, { opening: 'Whole reply.', speak: 'Short.' })] });
+    expect(root.querySelector('#panel')!.textContent).not.toContain('Whole reply.');
+    click('.header button.view-options');
+    expect(expandRow()!.getAttribute('aria-checked')).toBe('false');
+    expect(expandRow()!.getAttribute('role')).toBe('menuitemcheckbox');
+    click('[data-action="toggle-expand-replies"]');
+    await flush();
+    expect(posts.filter((post) => post.url.endsWith('/expand-replies')).map((post) => post.body)).toEqual([expect.objectContaining({ window: 'pk', on: true })]);
+    // The checkbox and the replies follow settings.json as the hub reloads it, not the click.
+    expect(expandRow()!.getAttribute('aria-checked')).toBe('false');
+    source.emit('settings', { settings: { expandReplies: true, diffLayout: 'auto', diffWrap: 'auto' } });
+    expect(expandRow()!.getAttribute('aria-checked')).toBe('true');
+    expect(root.querySelector('#panel')!.textContent).toContain('Whole reply.');
+
+    // A second click before the hub's settings event reverses the first; the saves go one at a time, so the last click's value is the one kept.
+    let answer = () => {};
+    const sent = () => posts.filter((post) => post.url.endsWith('/expand-replies')).map((post) => post.body['on']);
+
+    answers['/expand-replies'] = { status: 200, body: {}, wait: new Promise<void>((done) => (answer = done)) };
+    click('[data-action="toggle-expand-replies"]');
+    click('[data-action="toggle-expand-replies"]');
+    click('[data-action="toggle-expand-replies"]');
+    click('[data-action="toggle-expand-replies"]');
+    await flush();
+    expect(sent()).toEqual([true, false]);
+    delete answers['/expand-replies'];
+    answer();
+    await flush();
+    await flush();
+    expect(sent()).toEqual([true, false, true]);
+    source.emit('settings', { settings: { expandReplies: true, diffLayout: 'auto', diffWrap: 'auto' } });
+
+    // A refusal shows why, and the setting stays as it was.
+    answers['/expand-replies'] = { status: 409, body: { error: 'settings.json is not valid JSON: Unexpected token.' } };
+    click('[data-action="toggle-expand-replies"]');
+    await flush();
+    await flush();
+    expect(posts.filter((post) => post.url.endsWith('/expand-replies')).at(-1)!.body).toMatchObject({ on: false });
+    expect(root.querySelector('.composer-error-text')!.textContent).toBe('settings.json is not valid JSON: Unexpected token.');
+    expect(expandRow()!.getAttribute('aria-checked')).toBe('true');
+    page.close();
+
+    // A paired device may not change settings.json (architecture.md § Remote access), so its menu has Show message details only.
+    const fetch = vi.fn(async () => ({ status: 200, ok: true, json: async () => ({}), text: async () => '' }) as unknown as Response);
+    const paired = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, local: false });
+
+    hello(FakeSource.last!, { settings: { expandReplies: true } });
+    click('.header button.view-options');
+    expect([...root.querySelectorAll('.view-options-menu .menu-row')].map((row) => row.textContent!.trim())).toEqual(['Show message details']);
+    paired.close();
   });
 
   it('opens the dropdown, selects another conversation, pages back, and folds a focused reply', async () => {

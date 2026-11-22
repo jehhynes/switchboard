@@ -177,6 +177,8 @@ export interface View {
   viewMenu: boolean;
   /** Whether each message's line shows its time and its optional marks (dictated, tone), kept in local storage. */
   details: boolean;
+  /** Whether the page may change settings.json, so the view options menu offers Expand spoken replies: this computer's page, not a paired device's. */
+  settingsHere: boolean;
   /** New conversation…'s provider menu under the dropdown: the providers, null while they load, or why not. */
   providers: { items: Array<{ provider: string; name: string; default: boolean }> | null; error: string | null } | null;
   /** The prompt the session waits on in its terminal, as last read, for the session it was read for; a key being sent waits. */
@@ -219,7 +221,7 @@ export type Sheet =
   | { kind: 'snooze'; row: string; label: string; title: string; choices: SnoozeChoice[]; picked: string; date: string; comment: string }
   | { kind: 'text'; title: string; text: string };
 
-export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), bands: new Map(), list: false, drawer: null, actions: false, linkMenu: false, rowMenu: null, sheet: null, acting: false, prompt: null, providers: null, side: 'status', viewMenu: false, details: false, pane: null, paneNote: null, artifactFit: ARTIFACT_TABS_MAX, artifactMenu: false });
+export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), bands: new Map(), list: false, drawer: null, actions: false, linkMenu: false, rowMenu: null, sheet: null, acting: false, prompt: null, providers: null, side: 'status', viewMenu: false, details: false, settingsHere: false, pane: null, paneNote: null, artifactFit: ARTIFACT_TABS_MAX, artifactMenu: false });
 
 /** The longest menu label for a link, as the dock's `LinkLabelMax`; a longer one is cut with an ellipsis and shown whole in its tooltip. */
 export const LINK_LABEL_MAX = 48;

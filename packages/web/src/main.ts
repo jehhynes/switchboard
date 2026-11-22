@@ -569,6 +569,35 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   window.addEventListener('focus', () => void settingsPane.reload());
   document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && void settingsPane.reload());
   const local = deps.local ?? ['127.0.0.1', 'localhost'].includes(location.hostname);
+
+  view.settingsHere = local;
+  /**
+   * The value Expand spoken replies was last clicked to, until the hub's `settings` event or a refusal, so a quick second click reverses the
+   * first, and the value of the save in flight; saves go one at a time, so a later click's value is the one the file keeps.
+   */
+  let expandAsked: boolean | null = null;
+  let expandSending: boolean | null = null;
+  const sendExpand = async (): Promise<void> => {
+    let on = expandAsked!;
+
+    for (;;) {
+      expandSending = on;
+      const answer = await post('expand-replies', { on });
+
+      expandSending = null;
+
+      if (answer.status !== 200) {
+        expandAsked = expandAsked === on ? null : expandAsked;
+        showError(String(answer.body['error'] ?? `Expand spoken replies did not change (status ${answer.status}).`));
+      }
+
+      if (expandAsked === null || expandAsked === on) {
+        return;
+      }
+
+      on = expandAsked;
+    }
+  };
   // Each Mic on tap on a paired device and each leaving of the conversation is counted, so a mic still opening when the page left is not turned
   // on, and a late answer to an older tap leaves a newer tap's mic alone.
   let micTaps = 0;
@@ -2802,6 +2831,15 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
         draw();
         break;
+      case 'toggle-expand-replies':
+        // voice.expandReplies in settings.json; the checkbox and the replies follow the hub's `settings` event once the file is reloaded.
+        expandAsked = !(expandAsked ?? state.expandReplies);
+
+        if (expandSending === null) {
+          void sendExpand();
+        }
+
+        break;
       case 'pick': {
         const key = button!.dataset['card']!;
         const index = Number(button!.dataset['question']);
@@ -3693,6 +3731,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       }
 
       // settings.json changed on disk: Settings reads it again, keeping unsaved edits under the dock's changed-on-disk warning (PRD R54).
+      // With no save in flight, the hub's settings hold what Expand spoken replies asked for, or a newer change.
+      if ((type === 'settings' || type === 'hello') && expandSending === null) {
+        expandAsked = null;
+      }
+
       if (type === 'config') {
         void settingsPane.reload();
       }

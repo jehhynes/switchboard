@@ -1033,6 +1033,34 @@ const dockWithRuns = () => {
 
       return result.errors.length === 0 ? { status: 200, body: { saved: true, version: result.version } } : { status: 409, body: { errors: result.errors } };
     },
+    // The view options menu's Expand spoken replies (architecture.md § Conversation view): sets `voice.expandReplies` in settings.json as a
+    // Settings save would, leaving the rest of the file as it is; the reload sends every window and page the new value.
+    expandReplies: async (body: unknown) => {
+      const on = isRecord(body) ? body['on'] : undefined;
+
+      if (typeof on !== 'boolean') {
+        return { status: 400, body: { error: 'Expected {on}.' } };
+      }
+
+      const file = readConfigFile(configDir);
+
+      if (file.error !== null || !isRecord(file.value)) {
+        return { status: 409, body: { error: file.error ?? 'settings.json is not a JSON object. Fix it in Settings.' } };
+      }
+
+      // A file Settings could not save is left for Settings to fix, so no invalid entry, such as a voice that is not an object, is dropped here.
+      const invalid = checkSettings(file.value, runtime.enabledSources(), store.homeRepos());
+
+      if (invalid.length > 0) {
+        return { status: 409, body: { error: invalid.join(' ') } };
+      }
+
+      const voiceIn = file.value['voice'];
+      const value = { ...file.value, voice: { ...(isRecord(voiceIn) ? voiceIn : {}), expandReplies: on } };
+      const result = saveSettings(configDir, value, file.version, runtime.enabledSources(), store.homeRepos());
+
+      return result.errors.length === 0 ? { status: 200, body: { expandReplies: on } } : { status: 409, body: { error: result.errors.join(' ') } };
+    },
   };
 
   const debriefTimer = setInterval(() => void debriefs.scan(), DEBRIEF_SCAN_MS);
@@ -1538,6 +1566,8 @@ const dockWithRuns = () => {
       '/v1/conversation/page-voice-enroll': settingsRoutes.enroll,
       '/v1/conversation/page-settings-check': settingsRoutes.check,
       '/v1/conversation/page-settings-save': settingsRoutes.save,
+      // Expand spoken replies, from a window's view title menu (hub token) or this computer's page's view options menu (page command).
+      '/v1/conversation/expand-replies': settingsRoutes.expandReplies,
       '/action': async (body) => {
         const event = parseAction(body);
 

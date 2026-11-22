@@ -61,6 +61,8 @@ describe('New Claude Session in Editor Tab (PRD R75)', () => {
       ['switchboard.continueSidebarInBackground', 'view == claudeVSCodeSidebar || view == claudeVSCodeSidebarSecondary', 'navigation'],
       ['switchboard.showMessageDetails', '(view == switchboard.conversation || view == switchboard.conversationActivity) && !switchboard.messageDetails', '1_view'],
       ['switchboard.hideMessageDetails', '(view == switchboard.conversation || view == switchboard.conversationActivity) && switchboard.messageDetails', '1_view'],
+      ['switchboard.expandSpokenReplies', '(view == switchboard.conversation || view == switchboard.conversationActivity) && !switchboard.expandReplies', '1_view'],
+      ['switchboard.collapseSpokenReplies', '(view == switchboard.conversation || view == switchboard.conversationActivity) && switchboard.expandReplies', '1_view'],
     ]);
   });
 });
