@@ -1485,6 +1485,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       const parts = [...folder];
       let decoded: string;
 
+      // A scheme, a drive or a rooted path names no artifact: such a link opens in a file tab.
+      if (/^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith('/') || target.startsWith('\\')) {
+        return null;
+      }
+
       try {
         decoded = decodeURIComponent(target.split(/[?#]/)[0]!);
       } catch {

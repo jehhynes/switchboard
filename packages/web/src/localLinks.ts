@@ -15,20 +15,43 @@ export interface LocalFileData {
 }
 
 /**
+ * The path a `file:` URI names, still percent-encoded: `file:///D:/a.ts`, `file:/D:/a.ts` and `file://localhost/D:/a.ts` give `D:/a.ts`,
+ * `file:///home/a.ts` gives `/home/a.ts`, and `file://host/share/a.ts` the UNC path `//host/share/a.ts`.
+ */
+export function fileUriPath(uri: string): string {
+  let rest = uri.slice('file:'.length);
+
+  if (rest.startsWith('//')) {
+    const slash = rest.indexOf('/', 2);
+    const host = rest.slice(2, slash === -1 ? undefined : slash);
+
+    rest = slash === -1 ? '' : rest.slice(slash);
+
+    if (host !== '' && host.toLowerCase() !== 'localhost') {
+      return `//${host}${rest}`;
+    }
+  }
+
+  return /^\/[a-z](?::|%3a)/i.test(rest) ? rest.slice(1) : rest;
+}
+
+/**
  * A link's target as the hub reads it, with the line it names: `#L<n>` (or `#L<n>-L<m>`, `#L<n>C<c>`), or `:<n>` after a file name, and
- * the target percent-decoded as markdown-it encoded it, a `file:` URI left whole for the hub; null for a link to a place in the same text.
+ * the target percent-decoded as markdown-it encoded it, a `file:` URI as the path it names; null for a link to a place in the same text.
  */
 export function linkTarget(href: string): { path: string; line: number | null } | null {
   const at = href.indexOf('#');
   const fragment = at === -1 ? '' : href.slice(at + 1);
   let path = at === -1 ? href : href.slice(0, at);
 
-  if (!/^file:/i.test(path)) {
-    try {
-      path = decodeURIComponent(path);
-    } catch {
-      // A malformed escape stays as written.
-    }
+  if (/^file:/i.test(path)) {
+    path = fileUriPath(path);
+  }
+
+  try {
+    path = decodeURIComponent(path);
+  } catch {
+    // A malformed escape stays as written.
   }
 
   const named = /^L(\d+)/.exec(fragment);

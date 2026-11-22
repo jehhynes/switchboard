@@ -2725,7 +2725,7 @@ describe('the page in use', () => {
   it("draws a Markdown artifact's links as claude-collab does, redraws a new version in place, and opens it as drawn in a new window", async () => {
     const { page, source } = start();
 
-    answers['/artifact/'] = { status: 200, body: {}, text: '# Plan\n\n[page](p.html) [notes](plan/notes.txt) [up](../x.md) [web](https://example.com/a)\n\n| a | b |\n|---|---|\n| 1 | 2 |' };
+    answers['/artifact/'] = { status: 200, body: {}, text: '# Plan\n\n[page](p.html) [notes](plan/notes.txt) [up](../x.md) [web](https://example.com/a) [uri](file:///D:/w/src/a.ts#L3)\n\n| a | b |\n|---|---|\n| 1 | 2 |' };
     hello(source);
     click('#head .artifact-tab[data-path="chat/plan.md"]');
     await flush();
@@ -2739,6 +2739,8 @@ describe('the page in use', () => {
     expect(doc.querySelector('a[data-path="chat/p.html"]')!.getAttribute('data-action')).toBe('artifact');
     expect(doc.querySelector('a[href$="plan/notes.txt"]')!.getAttribute('target')).toBe('_blank');
     expect(doc.querySelector('a.path-link')!.textContent).toBe('up');
+    // A file: URI names no artifact: it opens in a file tab.
+    expect([...doc.querySelectorAll<HTMLElement>('a.path-link')].map((one) => one.dataset['target'])).toEqual(['../x.md', 'file:///D:/w/src/a.ts#L3']);
     expect(doc.querySelector('a[href="https://example.com/a"]')!.getAttribute('target')).toBe('_blank');
 
     // A new version is fetched again and keeps the reader's place.

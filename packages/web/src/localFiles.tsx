@@ -208,7 +208,7 @@ export class LocalFilesController {
 
   /**
    * Handles a click on a local file link, a file tab or a folder's entry; false for any other click. A paired device's page opens links too: the
-   * hub sends it only files in the session's working folder and says why it refuses any other (architecture.md § Remote access).
+   * hub sends it only files in the session's working folder and its work item's checkouts, and says why it refuses any other (architecture.md § Remote access).
    */
   click(target: HTMLElement): boolean {
     const button = target.closest<HTMLElement>('[data-action]');

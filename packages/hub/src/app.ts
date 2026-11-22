@@ -4,7 +4,7 @@ import type { FSWatcher } from 'node:fs';
 import { dirname, join, posix, win32 } from 'node:path';
 import { homedir } from 'node:os';
 import { claudeSettingsPath, readRoster, spawnExec } from '@switchboard/claude';
-import { hostKey, hubBundlePath, NEW_CONVERSATION_TITLE, PANE_EXTENSION_ID, personaById, Store, switchboardHome } from '@switchboard/core';
+import { hostKey, hubBundlePath, NEW_CONVERSATION_TITLE, PANE_EXTENSION_ID, personaById, Store, switchboardHome, ticketRoot } from '@switchboard/core';
 import { CODEX_PERMISSION_MODES, PERMISSION_MODES, PROVIDERS, resumesHeld, TEMPLATE_VARIABLES } from '@switchboard/core';
 import type { FlowEvent, SourceSettings, ViewSettings } from '@switchboard/core';
 import { githubSource } from '@switchboard/github';
@@ -47,7 +47,7 @@ import { needsMessage, newlyNeeding, rowFor, targetForUrl } from './needs.js';
 import { installedProviders } from './installed.js';
 import { PaneLink } from './paneLink.js';
 import { PaneState, paneRect, paneTabs } from './pane.js';
-import { localRoots, openLocalFile } from './localFiles.js';
+import { localRoots, mainCheckout, openLocalFile } from './localFiles.js';
 import { PaneHelper, spawnPaneHelper } from './paneHelper.js';
 import type { PaneHelperDeps } from './paneHelper.js';
 import { currentHolderBuild, PANE_HELPER_INSTALL, paneHelperRecordPath, reserveHolderBuild } from './holderInstall.js';
@@ -1701,9 +1701,17 @@ const dockWithRuns = () => {
           return null;
         }
 
-        // The conversation's folders: its own, and each of its work item's sessions' working folder and scratchpad (architecture.md § Web page);
-        // for a paired device, only the current session's working folder (architecture.md § Remote access).
-        return openLocalFile(localRoots(scope, store.sessionsFor(scope.workItemId), scope.sessionId, paired), target);
+        // The conversation's folders: its own, each of its work item's sessions' working folder and scratchpad, and its ticket's worktree and
+        // repository root (architecture.md § Web page); for a paired device, only the current session's working folder and those checkouts
+        // (architecture.md § Remote access).
+        const ticketId = store.workItem(scope.workItemId)?.ticketId;
+        const ticket = ticketId === undefined ? null : store.ticket(ticketId);
+        const root = ticket === null ? null : ticketRoot(config.settings, ticket, store.reposBySource());
+        const worktree = ticketId === undefined ? null : (store.worktreeFor(ticketId)?.path ?? null);
+        // A reported worktree may belong to another repository than the ticket's root names, so its own main checkout counts too.
+        const checkouts = [worktree, worktree === null ? null : await mainCheckout(worktree), root !== null && 'root' in root ? root.root : null];
+
+        return openLocalFile(localRoots(scope, store.sessionsFor(scope.workItemId), scope.sessionId, paired, checkouts), target);
       },
       upload: (key, scopeGen, name, bytes) => conversation.pageUpload(key, scopeGen, name, bytes),
       console: (key, sessionId, send, end) => pageConsole.open(key, sessionId, send, end),

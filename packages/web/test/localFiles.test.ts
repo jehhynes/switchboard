@@ -36,12 +36,37 @@ describe('local file link targets', () => {
     expect(linkTarget('src/a.ts:7')).toEqual({ path: 'src/a.ts', line: 7 });
     expect(linkTarget('src/a.ts:7:3')).toEqual({ path: 'src/a.ts', line: 7 });
     expect(linkTarget('D:/git/my%20file.md')).toEqual({ path: 'D:/git/my file.md', line: null });
-    expect(linkTarget('file:///D:/git/a%20b.ts#L3')).toEqual({ path: 'file:///D:/git/a%20b.ts', line: 3 });
+    expect(linkTarget('file:///D:/git/a%20b.ts#L3')).toEqual({ path: 'D:/git/a b.ts', line: 3 });
     expect(linkTarget('.wip/shots/')).toEqual({ path: '.wip/shots/', line: null });
     // A drive alone is no line; a link to a place in the same text names no file.
     expect(linkTarget('C:5')).toEqual({ path: 'C:5', line: null });
     expect(linkTarget('#usage')).toBeNull();
     expect(linkTarget('a%zz.md')).toEqual({ path: 'a%zz.md', line: null });
+  });
+
+  it('reads a file: URI as the path it names, with its line or range, a drive, a rooted path, localhost or a UNC share', () => {
+    expect(linkTarget('file:///D:/git/switchboard/packages/hub/src/changes.ts#L280')).toEqual({ path: 'D:/git/switchboard/packages/hub/src/changes.ts', line: 280 });
+    expect(linkTarget('file:///D:/git/a.ts#L10-L20')).toEqual({ path: 'D:/git/a.ts', line: 10 });
+    expect(linkTarget('FILE:///d%3A/My%20Docs/%E2%9C%93.md')).toEqual({ path: 'd:/My Docs/✓.md', line: null });
+    expect(linkTarget('file:/D:/a.ts')).toEqual({ path: 'D:/a.ts', line: null });
+    expect(linkTarget('file://localhost/D:/a.ts#L2')).toEqual({ path: 'D:/a.ts', line: 2 });
+    expect(linkTarget('file:///home/operator/notes.md')).toEqual({ path: '/home/operator/notes.md', line: null });
+    expect(linkTarget('file://server/share/a.txt')).toEqual({ path: '//server/share/a.txt', line: null });
+    // An encoded # is part of the name, not a fragment.
+    expect(linkTarget('file:///D:/a%23b.ts#L4')).toEqual({ path: 'D:/a#b.ts', line: 4 });
+    expect(linkTarget('file:///D:/a%zz.ts')).toEqual({ path: 'D:/a%zz.ts', line: null });
+  });
+
+  it('makes a file: URI in a reply a local file link, as markdown-it would otherwise drop it to text', () => {
+    const host = document.createElement('div');
+
+    host.innerHTML = renderMarkdown('[changes.ts:280](file:///D:/git/switchboard/packages/hub/src/changes.ts#L280) and [notes](file:///D:/My%20Docs/n.md)');
+
+    expect([...host.querySelectorAll<HTMLElement>('a.path-link')].map((one) => [one.textContent, one.dataset['action'], one.dataset['target']])).toEqual([
+      ['changes.ts:280', 'local-file', 'file:///D:/git/switchboard/packages/hub/src/changes.ts#L280'],
+      ['notes', 'local-file', 'file:///D:/My%20Docs/n.md'],
+    ]);
+    expect(host.querySelector('a[href]')).toBeNull();
   });
 
   it('joins a relative link to its file\'s folder', () => {
@@ -234,7 +259,7 @@ describe('local file tabs', () => {
   });
 
   const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
-  const text = 'See [Review](.wip/review.md) · [9 screenshots](D:/w/.wip/shots/), [code](src/a.ts#L42), [pdf](doc.pdf), [log](big.log), [out](../secret.txt) and [site](https://example.com/a).';
+  const text = 'See [Review](.wip/review.md) · [9 screenshots](D:/w/.wip/shots/), [code](src/a.ts#L42), [pdf](doc.pdf), [log](big.log), [out](../secret.txt), [uri](file:///D:/w/src/a%20b.ts#L7-L9), [far](file:///E:/other/x.ts#L5) and [site](https://example.com/a).';
   const start = (local = true) => {
     const fetch = vi.fn(async (url: string) => {
       gets.push(url);
@@ -321,6 +346,17 @@ describe('local file tabs', () => {
     expect(root.querySelector('.local-view .empty')!.textContent).toBe('No such file in this conversation’s folders.');
   });
 
+  it('opens a file: URI link in a file tab at its line, asking the hub for the decoded path', async () => {
+    answers['D:/w/src/a b.ts'] = { status: 200, body: file({ path: 'D:/w/src/a b.ts', name: 'a b.ts', contents: 'const b = 2;' }) };
+    start();
+    link('uri').click();
+    await flush();
+    await flush();
+    expect(localGets()).toEqual([localFileUrl('pk', 'D:/w/src/a b.ts')]);
+    expect(files).toEqual([{ path: 'D:/w/src/a b.ts', contents: 'const b = 2;', line: 7 }]);
+    expect(tabs()).toEqual([['a b.ts', true]]);
+  });
+
   it('opens a focused link with Enter, leaves web links to the browser, and closes the tabs when the conversation changes', async () => {
     const { source, scope } = start();
 
@@ -348,7 +384,7 @@ describe('local file tabs', () => {
   });
 
   it("opens a link on a paired device's page too, and shows why the hub refuses a folder or a file outside the working folder", async () => {
-    const refusal = { status: 404, body: { error: 'On a paired device, only files in the session’s working folder open, not folders or files elsewhere.' } };
+    const refusal = { status: 404, body: { error: 'On a paired device, only files in the session’s working folder and its work item’s worktree and repository open, not folders or files elsewhere.' } };
 
     answers['D:/w/.wip/shots/'] = refusal;
     answers['../secret.txt'] = refusal;
@@ -367,6 +403,12 @@ describe('local file tabs', () => {
     link('out').click();
     await flush();
     expect(root.querySelector('.local-view .empty')!.textContent).toBe(refusal.body.error);
-    expect(tabs()).toEqual([['review.md', false], ['shots', false], ['secret.txt', true]]);
+
+    // A file: URI outside what the device may read is still a link, and its tab says why.
+    answers['E:/other/x.ts'] = refusal;
+    link('far').click();
+    await flush();
+    expect(root.querySelector('.local-view .empty')!.textContent).toBe(refusal.body.error);
+    expect(tabs()).toEqual([['review.md', false], ['shots', false], ['secret.txt', false], ['x.ts', true]]);
   });
 });

@@ -3,12 +3,13 @@ import MarkdownIt from 'markdown-it';
 /** Raw HTML off, so a reply's text can never inject markup; tables, code spans and fences as GitHub draws them. */
 const markdown = new MarkdownIt({ html: false, linkify: true, breaks: false });
 
-/** Which link targets open in the browser: web pages; a path opens in the page's file tab, and any other scheme shows as text. */
+/** Which link targets open in the browser: web pages; a path or a `file:` URI opens in the page's file tab, and any other scheme shows as text. */
 export function webLink(url: string): boolean {
   return /^https?:\/\//i.test(url.trim());
 }
 
-markdown.validateLink = (url) => webLink(url) || !/^[a-z][a-z0-9+.-]*:/i.test(url.trim()) || /^[a-z]:/i.test(url.trim());
+// markdown-it's own check refuses `file:`, which agents use for a file on another drive or outside the working folder.
+markdown.validateLink = (url) => webLink(url) || !/^[a-z][a-z0-9+.-]*:/i.test(url.trim()) || /^(?:[a-z]:|file:)/i.test(url.trim());
 
 export function escape(text: string): string {
   return text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
