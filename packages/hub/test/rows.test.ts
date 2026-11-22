@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { groupOf, PERMISSION_PROMPT, START_PROMPT } from '@switchboard/core/group';
+import { SETUP_AT_LIMIT } from '@switchboard/core/limit';
 import {
   ANSWER_IN_TERMINAL,
   clockOf,
@@ -553,6 +554,24 @@ describe('limitTexts (architecture.md § Rate limits)', () => {
     expect(limitTexts(item(1, { status: 'running', sessions: [session({ state: 'running', rateLimit: limit })] }), NOW)).toEqual([]);
     expect(limitTexts(item(1, { status: 'running', sessions: [session({ codeMode: true, state: 'running', rateLimit: limit })] }), NOW)).toEqual([]);
     expect(limitTexts(item(1, { status: 'running', sessions: [session({ codeMode: true, state: 'idle' })] }), NOW)).toEqual([]);
+  });
+
+  it('tells the operator to retry a setup blocked at a limit after the reset', () => {
+    const setup = item(1, { status: 'blocked', error: SETUP_AT_LIMIT, sessions: [session({ kind: 'setup', state: 'ended', released: true, rateLimit: limit })] });
+
+    expect(limitTexts(setup, NOW)).toEqual([{ text: `Rate limited · resets ${time(RESET)}`, title: `${limit.message}\nRetry setup after the reset.` }]);
+  });
+
+  it('shows a setup blocked at a limit as a wait on the operator, in Blocked on you with a warning stripe, and offers Retry as its main control (PRD R111)', () => {
+    const setup = item(1, { status: 'blocked', error: SETUP_AT_LIMIT, sessions: [session({ kind: 'setup', state: 'ended', released: true, rateLimit: limit })] });
+
+    expect(groupOf(setup)).toBe('blocked');
+    expect(stripeOf(setup)).toBe('warning');
+    expect(mainControl(setup)?.label).toBe('Retry');
+    expect(controlsOf(setup).find((control) => control.label === 'Retry')?.message).toEqual({ type: 'action', action: { type: 'retry', workItemId: 1 } });
+    // Resumed, the setup session goes on, so Retry would start a second one; blocked for another cause, the work item has nothing to retry.
+    expect(labels({ ...setup, sessions: [session({ kind: 'setup', state: 'running', rateLimit: limit })] })).not.toContain('Retry');
+    expect(labels(item(1, { status: 'blocked', error: 'The turn ended without a done report.', sessions: [session({ state: 'ended' })] }))).not.toContain('Retry');
   });
 
   it('names another day by its weekday', () => {

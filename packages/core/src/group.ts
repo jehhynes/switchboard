@@ -1,5 +1,5 @@
 import type { DoneReason, Session, Triage, WorkItem } from './model.js';
-import { waitsOnLimit } from './limit.js';
+import { SETUP_AT_LIMIT, waitsOnLimit } from './limit.js';
 
 // Imports only types and `limit.ts`, which imports only types, so the History webview and the Chrome extension can bundle it for a browser through `@switchboard/core/group`.
 
@@ -112,6 +112,11 @@ function idleConversation(item: Grouped): boolean {
 /** The work item failed because its latest triage failed, so Retry triages it again and it waits in Unstarted (PRD R27, R34). */
 export function failedAtTriage(item: Pick<WorkItem, 'status'> & { triage: Pick<Triage, 'error'> | null }): boolean {
   return item.status === 'failed' && item.triage?.error != null;
+}
+
+/** Retry applies (PRD R34): the work item failed, or its setup stopped at a usage limit, which blocks it as a wait rather than failing it (PRD R111). */
+export function retries(item: Pick<WorkItem, 'status' | 'error'>): boolean {
+  return item.status === 'failed' || (item.status === 'blocked' && item.error === SETUP_AT_LIMIT);
 }
 
 /** The latest session while it has not ended; an earlier session left open idle in VS Code is not the work item's (PRD R17). */

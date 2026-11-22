@@ -16,6 +16,9 @@ export const MAX_ATTEMPTS = 6;
 /** Or this long after the first attempt was due. */
 export const GIVE_UP_MS = 26 * 3_600_000;
 
+/** Why a setup session that ended at a usage limit blocks its work item, a wait rather than a failure, which Retry runs again (PRD R111). */
+export const SETUP_AT_LIMIT = 'Setup stopped at a usage limit. Retry it after the reset.';
+
 /** The text the hub types to continue a session, Claude Code's own (mechanics M100). */
 export const CONTINUE_TEXT = 'Your usage limit has reset. Continue the task you were working on when the limit was reached; do not repeat work that is already complete.';
 

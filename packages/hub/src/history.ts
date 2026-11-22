@@ -443,7 +443,7 @@ class Builder {
     entry.lines = lines;
     entry.stateChange = (event.type === 'marker' || event.type === 'roster') && changes.length === 1 && sessionChange !== undefined && state !== 'ended' && !('shortId' in sessionChange.fields);
     entry.tone =
-      entry.refused !== null || status === 'failed' || state === 'failed'
+      entry.refused !== null || status === 'failed' || (state === 'failed' && entry.tone !== 'warning')
         ? 'error'
         : (entry.tone ?? (status === 'blocked' || state === 'waiting' ? 'warning' : status === 'done' ? 'success' : status === 'awaiting-approval' || status === 'finished' ? 'accent' : null));
 
@@ -577,9 +577,12 @@ class Builder {
           return { category: 'session', ...prompt, detail: null };
         }
 
-        // A turn that ended at a usage or rate limit (architecture.md § Rate limits).
-        if (event.type === 'marker' && typeof detail['limit'] === 'object' && detail['limit'] !== null) {
-          return { category: 'session', icon: 'watch', text: `${name} stopped at a usage limit`, detail: limitDetail(detail['limit'] as Record<string, unknown>) };
+        // A turn that ended at a usage or rate limit waits for its reset, so it is a warning, not a failure (architecture.md § Rate limits).
+        // A failed rate_limit turn with no reading is a usage limit with no reset time, as the flow reads it.
+        if (event.type === 'marker' && ((typeof detail['limit'] === 'object' && detail['limit'] !== null) || (after === 'failed' && said === 'rate_limit'))) {
+          const limit = typeof detail['limit'] === 'object' && detail['limit'] !== null ? (detail['limit'] as Record<string, unknown>) : {};
+
+          return { category: 'session', icon: 'watch', text: `${name} stopped at a usage limit`, detail: limitDetail(limit), tone: 'warning' };
         }
 
         const known = texts[str(after)] ?? { text: `${name}: ${str(after)}`, icon: 'terminal' };
@@ -620,7 +623,7 @@ class Builder {
       case 'move-cancelled':
         return { category: 'session', icon: 'circle-slash', text: `${capital(session)} stayed in its tab, whose process did not exit` };
       case 'limit-found':
-        return { category: 'session', icon: 'watch', text: `${capital(session)} stopped at a usage limit`, detail: limitDetail(detail['limit'] as Record<string, unknown>) };
+        return { category: 'session', icon: 'watch', text: `${capital(session)} stopped at a usage limit`, detail: limitDetail(detail['limit'] as Record<string, unknown>), tone: 'warning' };
       case 'limit-attempt':
         return detail['error'] == null
           ? { category: 'session', icon: 'debug-continue', text: `Switchboard typed the continue text into ${session} after its usage limit`, detail: `Attempt ${str(detail['attempt'])}` }

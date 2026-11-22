@@ -1,7 +1,7 @@
 import type { Playbook } from './playbook.js';
-import { activeSession, failedAtTriage, groupOf, ownPrompt, QUESTION_CARD, resumesHeld, reviewKey, START_PROMPT, waitsOnCard, waitsOnPermission, waitsToStart } from './group.js';
+import { activeSession, failedAtTriage, groupOf, retries, ownPrompt, QUESTION_CARD, resumesHeld, reviewKey, START_PROMPT, waitsOnCard, waitsOnPermission, waitsToStart } from './group.js';
 import { heldSlots, queueWaits } from './queue.js';
-import { backoff, givesUp, limitFor, MAX_ATTEMPTS, providerLimitUntil, waitsOnLimit } from './limit.js';
+import { backoff, givesUp, limitFor, MAX_ATTEMPTS, providerLimitUntil, SETUP_AT_LIMIT, waitsOnLimit } from './limit.js';
 import { latestDue, SCHEDULE_SOURCE, scheduleText } from './schedule.js';
 import { homeRepo, isRootPattern, repoOf, repoRoots, samePath, ticketRoot } from './repo.js';
 import type { PermissionMode, Provider, ScheduleSettings, Settings } from './settings.js';
@@ -34,7 +34,7 @@ const EMPTY_TRIAGE = { context: null, playbook: null, immediacy: null, severity:
 export const MESSAGES = {
   stopped: 'Stopped by you.',
   setupWithoutWorktree: 'Setup ended without a worktree.',
-  setupAtLimit: 'Setup stopped at a usage limit. Retry it after the reset.',
+  setupAtLimit: SETUP_AT_LIMIT,
   turnAtLimit: 'The turn stopped at a usage limit. Open the session to continue it after the reset.',
   limitSkipped: 'You typed in the session during its usage-limit wait, so Switchboard did not continue it.',
   limitGaveUp: `The session stopped at a usage limit, and ${MAX_ATTEMPTS} attempts to continue it did not start a turn.`,
@@ -1865,8 +1865,11 @@ class Flow {
         return;
       }
 
-      if (item.unassignedAt === null && this.store.worktreeFor(item.ticketId) === null) {
-        this.fail(item, session.rateLimit != null ? MESSAGES.setupAtLimit : MESSAGES.setupWithoutWorktree);
+      // A usage limit is a wait, not a failure, so it blocks the work item until the operator retries after the reset (PRD R111).
+      if (item.unassignedAt === null && this.store.worktreeFor(item.ticketId) === null && session.rateLimit != null) {
+        this.block(item, MESSAGES.setupAtLimit);
+      } else if (item.unassignedAt === null && this.store.worktreeFor(item.ticketId) === null) {
+        this.fail(item, MESSAGES.setupWithoutWorktree);
       } else {
         this.finishSetup(item, session);
       }
@@ -1890,7 +1893,8 @@ class Flow {
 
   /**
    * A setup session the operator resumed, such as one opened in Claude to answer its question (PRD R70), keeps its process while the tab is open,
-   * so its turn end decides setup. A resume after setup failed because the process was gone, as at a logout, retries it.
+   * so its turn end decides setup. A resume after setup failed because the process was gone, as at a logout, or blocked, as at a usage limit,
+   * retries it; a work item failed at a usage limit before such a stop blocked it is retried the same way.
    */
   private setupState(item: WorkItem, session: Session, state: LiveState, resumed: boolean): void {
     if (resumed && ((item.status === 'failed' && (item.error === MESSAGES.setupWithoutWorktree || item.error === MESSAGES.setupAtLimit)) || item.status === 'blocked')) {
@@ -2797,11 +2801,11 @@ class Flow {
   }
 
   /**
-   * PRD R34: a work item that failed at triage triages again; any other failure queues it, so its next start runs setup, the approved prompt
-   * or the task session, as before it failed. Its playbook, approval, guidance and readiness stay.
+   * PRD R34: a work item that failed at triage triages again; any other failure, or a setup blocked at a usage limit (PRD R111), queues it, so
+   * its next start runs setup, the approved prompt or the task session, as before it failed. Its playbook, approval, guidance and readiness stay.
    */
   private retry(item: WorkItem): void {
-    if (item.status !== 'failed') {
+    if (!retries(item)) {
       throw new Refusal('The work item has not failed.');
     }
 

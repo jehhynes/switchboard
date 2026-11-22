@@ -1,4 +1,4 @@
-import { activeSession, adhocLabel, blocksOnYou, groupOf, holdsSlot, ownPrompt, reviewOrder, triageLabel, turnOf, waitsOnPermission, waitsOnQuestion, waitsToStart } from '@switchboard/core/group';
+import { activeSession, adhocLabel, blocksOnYou, groupOf, holdsSlot, ownPrompt, retries, reviewOrder, triageLabel, turnOf, waitsOnPermission, waitsOnQuestion, waitsToStart } from '@switchboard/core/group';
 import type { OpenVSCode, Provider, TicketBlocker } from '@switchboard/core';
 import { waitsOnLimit } from '@switchboard/core/limit';
 import type { Group } from '@switchboard/core/group';
@@ -127,7 +127,7 @@ export function mainControl(item: WorkItemView, mode: OpenVSCode = 'always'): Co
   }
 
   // An ad-hoc or task work item's Start opens its prompt first (PRD R77).
-  const wanted = item.status === 'unstarted' ? (ownPrompt(item) === null ? 'Start' : 'Start with prompt…') : item.status === 'awaiting-approval' ? 'Approve' : item.status === 'failed' ? 'Retry' : null;
+  const wanted = item.status === 'unstarted' ? (ownPrompt(item) === null ? 'Start' : 'Start with prompt…') : item.status === 'awaiting-approval' ? 'Approve' : retries(item) ? 'Retry' : null;
 
   return controls.find((control) => control.label === wanted) ?? null;
 }
@@ -180,8 +180,8 @@ export function controlsOf(item: WorkItemView, mode: OpenVSCode = 'always'): Con
     controls.push({ label: 'Stop', icon: 'debug-stop', message: action('stop'), ...(unconfirmed ? { confirm: { question: 'Recheck this start?', detail: 'Only an overdue start with no matching session can be cleared without stopping a process. Resolve duplicate sessions in claude agents first. Inspect it before retrying.', action: 'Stop' } } : {}) });
   }
 
-  // Retries from the step that failed (PRD R34).
-  if (item.status === 'failed' && session === null) {
+  // Retries from the step that failed, or setup that stopped at a usage limit (PRD R34, R111).
+  if (retries(item) && session === null) {
     controls.push({ label: 'Retry', icon: 'refresh', message: action('retry') });
   }
 
@@ -680,7 +680,9 @@ export function limitTexts(item: WorkItemView, now: number): { text: string; tit
 
   // A background session is released after its turn, so its blocked work item shows the reset until it passes.
   if (!held) {
-    return limit.resetsAt === null || limit.resetsAt <= now || item.status !== 'blocked' ? [] : [{ text: `Rate limited · resets ${limitTime(limit.resetsAt, now)}`, title: [...lines, 'Open the session to continue it after the reset.'].join('\n') }];
+    const next = session.kind === 'setup' ? 'Retry setup after the reset.' : 'Open the session to continue it after the reset.';
+
+    return limit.resetsAt === null || limit.resetsAt <= now || item.status !== 'blocked' ? [] : [{ text: `Rate limited · resets ${limitTime(limit.resetsAt, now)}`, title: [...lines, next].join('\n') }];
   }
 
   if (!waitsOnLimit(session)) {

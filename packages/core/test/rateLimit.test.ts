@@ -246,14 +246,64 @@ describe('a background session at a limit (display only)', () => {
     expect(h.store.session(id)!.rateLimit).toMatchObject({ resetsAt: RESET });
   });
 
-  it('fails a setup whose process ended at a limit with a cause that says to retry after the reset', () => {
+  it('blocks, not fails, a setup whose process ended at a limit, and Retry runs setup again', () => {
     const h = new Harness();
     const [triage] = h.poll(issue('15619'));
     const id = h.started(h.triaged(triage, 'dev:develop')[0]);
 
     h.act({ type: 'marker', sessionId: id, state: 'failed', detail: 'rate_limit', limit: USAGE });
     h.act({ type: 'roster', sessions: [] });
-    expect(h.item(1)).toMatchObject({ status: 'failed', error: MESSAGES.setupAtLimit });
+    expect(h.item(1)).toMatchObject({ status: 'blocked', error: MESSAGES.setupAtLimit });
+    expect(mark(h, 1)).toBe('blocked');
+
+    const again = h.act({ type: 'retry', workItemId: 1 }).find((action) => action.type === 'start-session');
+
+    expect(again).toMatchObject({ kind: 'setup' });
+    expect(h.item(1)).toMatchObject({ status: 'setup', error: null });
+  });
+
+  it('returns a setup blocked at a limit to setup when its session resumes, as a failed one did', () => {
+    const h = new Harness();
+    const [triage] = h.poll(issue('15619'));
+    const id = h.started(h.triaged(triage, 'dev:develop')[0]);
+
+    h.act({ type: 'marker', sessionId: id, state: 'failed', detail: 'rate_limit', limit: USAGE });
+    h.act({ type: 'roster', sessions: [] });
+    h.act({ type: 'roster', sessions: [{ sessionId: id, state: 'running', detail: null, interactive: true }] });
+    expect(h.item(1)).toMatchObject({ status: 'setup', error: null });
+  });
+
+  it('still retries and resumes a setup that failed at a limit before it blocked', () => {
+    for (const resume of [false, true]) {
+      const h = new Harness();
+      const [triage] = h.poll(issue('15619'));
+      const id = h.started(h.triaged(triage, 'dev:develop')[0]);
+
+      h.act({ type: 'marker', sessionId: id, state: 'failed', detail: 'rate_limit', limit: USAGE });
+      h.act({ type: 'roster', sessions: [] });
+      h.store.updateWorkItem(1, { status: 'failed' });
+
+      if (resume) {
+        h.act({ type: 'roster', sessions: [{ sessionId: id, state: 'running', detail: null, interactive: true }] });
+      } else {
+        expect(h.act({ type: 'retry', workItemId: 1 })).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'start-session', kind: 'setup' })]));
+      }
+
+      expect(h.item(1)).toMatchObject({ status: 'setup', error: null });
+    }
+  });
+
+  it('refuses Retry on a work item blocked for another cause', () => {
+    const h = new Harness();
+    const [triage] = h.poll(issue('7'));
+
+    h.triaged(triage, 'dev:question');
+    const id = h.started(h.act({ type: 'start', workItemId: 1 })[0]);
+
+    h.act({ type: 'marker', sessionId: id, state: 'failed', detail: 'rate_limit', limit: USAGE });
+    expect(h.item(1)).toMatchObject({ status: 'blocked', error: MESSAGES.turnAtLimit });
+    h.act({ type: 'roster', sessions: [] });
+    expect(h.send({ type: 'retry', workItemId: 1 }).refused).toBe('The work item has not failed.');
   });
 });
 
