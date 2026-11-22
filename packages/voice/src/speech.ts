@@ -8,6 +8,9 @@ import type { Speaking, SpeechVoice } from './tts.js';
 export const PROGRESS_MS = 150;
 /** Speech's pace at speed 1, for the share of a passage said before its audio has all come. */
 const MS_PER_CHAR = 65;
+/** Why a reply did not play, or stopped, as its speech outcome says it. */
+const SPOKEN_OVER = 'its turn was spoken over';
+const CANCELLED = 'cancelled by the hub';
 
 /** A reply's passage to speak, of the generation it was offered in. */
 export interface SpeechItem {
@@ -66,7 +69,8 @@ export class Speech {
   #bargedTurn: string | null = null;
   /** When the last reply or needs-you sound stopped playing. */
   #quietSince = -Infinity;
-  #muted = false;
+  /** Why nothing may play now, or null while it may. */
+  #muted: string | null = null;
   /** The needs-you sound's playback while it plays, and a count that muting raises so a sound still opening never plays. */
   #chimePlayback: Playback | null = null;
   #chimeRun = 0;
@@ -98,8 +102,8 @@ export class Speech {
 
   /** A spoken alert's line: it waits for what plays or waits before it, as a reply does; while muted it is `skipped`. */
   say(item: SpeechItem & { line: (state: SpeechState) => void }): void {
-    if (this.#muted) {
-      this.#unplayed(item, 'skipped');
+    if (this.#muted !== null) {
+      this.#unplayed(item, 'skipped', this.#muted);
       return;
     }
 
@@ -108,13 +112,13 @@ export class Speech {
   }
 
   speak(item: SpeechItem): void {
-    if (this.#muted) {
-      this.#unplayed(item, 'skipped');
+    if (this.#muted !== null) {
+      this.#unplayed(item, 'skipped', this.#muted);
       return;
     }
 
     if (this.#bargedTurn !== null && item.turn === this.#bargedTurn) {
-      this.#report(item, 'skipped', null, null);
+      this.#unplayed(item, 'skipped', SPOKEN_OVER);
       return;
     }
 
@@ -128,7 +132,7 @@ export class Speech {
     const current = this.#current;
 
     if (current?.item.replyId === replyId) {
-      this.#end(current, 'skipped');
+      this.#end(current, 'skipped', null, null, CANCELLED);
       this.#next();
       return;
     }
@@ -138,13 +142,13 @@ export class Speech {
     if (at !== -1) {
       const [item] = this.#queue.splice(at, 1);
 
-      this.#unplayed(item!, 'skipped');
+      this.#unplayed(item!, 'skipped', CANCELLED);
     }
   }
 
   /** Stop speaking: the playing reply is `interrupted` where it stopped, and the waiting ones `skipped`. */
   stop(): void {
-    this.#stop();
+    this.#stop('Stop speaking');
   }
 
   /**
@@ -152,13 +156,13 @@ export class Speech {
    * only the answer to what the operator said is heard. The playing reply and how much of its passage played, or null with none playing.
    */
   interrupt(): { item: SpeechItem; atMs: number; said: number } | null {
-    const stopped = this.#stop();
+    const stopped = this.#stop(SPOKEN_OVER);
 
     this.#bargedTurn = stopped?.item.turn ?? null;
     return stopped;
   }
 
-  #stop(): { item: SpeechItem; atMs: number; said: number } | null {
+  #stop(why: string): { item: SpeechItem; atMs: number; said: number } | null {
     const current = this.#current;
     let stopped: { item: SpeechItem; atMs: number; said: number } | null = null;
 
@@ -166,11 +170,11 @@ export class Speech {
       const { atMs, said } = this.#position(current);
 
       stopped = { item: current.item, atMs, said };
-      this.#end(current, 'interrupted', atMs, said);
+      this.#end(current, 'interrupted', atMs, said, why);
     }
 
     for (const item of this.#queue.splice(0)) {
-      this.#unplayed(item, 'skipped');
+      this.#unplayed(item, 'skipped', why);
     }
 
     this.#next();
@@ -203,22 +207,25 @@ export class Speech {
 
   /**
    * Nothing plays while muted, as while the operator is away from the computer (architecture.md § Dictation): muting stops as Stop speaking does
-   * and drops a waiting needs-you sound; a reply offered while muted is `skipped` and a needs-you sound dropped.
+   * and drops a waiting needs-you sound; a reply offered while muted is `skipped` and a needs-you sound dropped. `why` names the cause in what
+   * it stops or skips, such as "no device: the phone that had the voice left"; null unmutes.
    */
-  mute(on: boolean): void {
-    this.#muted = on;
+  mute(why: string | null): void {
+    const was = this.#muted;
 
-    if (on) {
+    this.#muted = why;
+
+    if (why !== null && was === null) {
       this.#chimePending = false;
       this.#chimeRun++;
       this.#chimePlayback?.stop();
-      this.#stop();
+      this.#stop(why);
     }
   }
 
   /** The needs-you sound: now, or after the reply playing now. */
   earcon(): void {
-    if (this.#muted) {
+    if (this.#muted !== null) {
       return;
     }
 
@@ -245,7 +252,7 @@ export class Speech {
 
     // A reply of a newer turn is waiting: this one's moment has passed.
     if (item.line === undefined && this.#queue.some((later) => later.line === undefined && later.turn !== item.turn)) {
-      this.#unplayed(item, 'skipped');
+      this.#unplayed(item, 'skipped', 'a reply of a newer turn waits');
       this.#next();
       return;
     }
@@ -375,10 +382,10 @@ export class Speech {
   }
 
   /** Ends the current reply, stopping its speech and playback; reports `state` unless it is null, which a move's stop is. */
-  #end(current: Current, state: SpeechState | null, atMs: number | null = null, said: number | null = null): void {
+  #end(current: Current, state: SpeechState | null, atMs: number | null = null, said: number | null = null, why: string | null = null): void {
     const at = this.#position(current);
 
-    this.#logEnd(current.item, state ?? 'stopped-moved', atMs ?? at.atMs, said ?? at.said);
+    this.#logEnd(current.item, state ?? 'stopped-moved', atMs ?? at.atMs, said ?? at.said, why);
     current.ended = true;
     current.ticker?.stop();
     current.speaking?.cancel();
@@ -390,24 +397,24 @@ export class Speech {
     }
 
     if (state !== null) {
-      this.#report(current.item, state, atMs, said);
+      this.#report(current.item, state, atMs, said, why);
     }
   }
 
   /** A waiting reply dropped before it played. */
-  #unplayed(item: SpeechItem, state: SpeechState): void {
-    this.#logEnd(item, state, 0, 0);
-    this.#report(item, state, null, null);
+  #unplayed(item: SpeechItem, state: SpeechState, why: string): void {
+    this.#logEnd(item, state, 0, 0, why);
+    this.#report(item, state, null, null, why);
   }
 
   /** One line in the voice log for each reply whose speech ended, so the operator can see what was spoken, cut off, skipped or failed. */
-  #logEnd(item: SpeechItem, state: SpeechState | 'stopped-moved', playedMs: number, said: number): void {
-    const outcome = state === 'stopped-moved' ? 'stopped: voice moved' : state;
+  #logEnd(item: SpeechItem, state: SpeechState | 'stopped-moved', playedMs: number, said: number, why: string | null = null): void {
+    const outcome = state === 'stopped-moved' ? 'stopped: voice moved' : why === null ? state : `${state} (${why})`;
 
     this.deps.log(`speech: ${item.line === undefined ? 'reply' : 'alert line'} ${item.replyId} of session ${item.sessionId} ${outcome}, voice ${item.as?.voice ?? 'default'}, ${playedMs} ms played, ${said} of ${item.text.length} characters`);
   }
 
-  #report(item: SpeechItem, state: SpeechState, atMs: number | null, said: number | null): void {
+  #report(item: SpeechItem, state: SpeechState, atMs: number | null, said: number | null, why: string | null = null): void {
     if (item.line !== undefined) {
       if (state !== 'playing') {
         item.line(state);
@@ -416,7 +423,7 @@ export class Speech {
       return;
     }
 
-    this.deps.report({ type: 'speech', gen: item.gen, replyId: item.replyId, sessionId: item.sessionId, state, atMs, said });
+    this.deps.report({ type: 'speech', gen: item.gen, replyId: item.replyId, sessionId: item.sessionId, state, atMs, said, ...(why === null ? {} : { reason: why }) });
   }
 }
 

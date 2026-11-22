@@ -132,6 +132,7 @@ export interface VoiceView {
   halfDuplex?: string;
   fullDuplex?: string;
   roomHold?: boolean;
+  deviceOff?: boolean;
 }
 
 /** A row of the page's list: the dock row's three lines, mark and stripe (`PageRow` in the hub's `page.ts`). */

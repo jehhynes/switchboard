@@ -130,7 +130,10 @@ export type VoiceMessage =
   | { type: 'welcome'; protocol: number; build: string; pid: number; features: string[] }
   | { type: 'error'; message: string }
   | { type: 'active'; gen: number; sessionId: string | null; reason: ActiveReason }
-  | { type: 'speech'; gen: number; replyId: string; sessionId: string; state: SpeechState; atMs: number | null; said: number | null }
+  /** Where the voice's microphone and speaker are, in the greeting: a hub that started again after the phone left learns that none has them. */
+  | { type: 'device'; device: VoiceDevice }
+  /** `reason`, on a reply `skipped` or `interrupted` by the voice process itself, says why, such as "no device: the phone that had the voice left". */
+  | { type: 'speech'; gen: number; replyId: string; sessionId: string; state: SpeechState; atMs: number | null; said: number | null; reason?: string }
   | { type: 'progress'; gen: number; replyId: string; sessionId: string; chars: number; atMs: number }
   /**
    * Capture's state and the last capture, playback or speech failure, or null; `device` the capture device in use, or null; `recognizer` where

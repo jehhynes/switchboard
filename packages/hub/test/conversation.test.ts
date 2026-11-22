@@ -1074,8 +1074,8 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     const voice: ConversationVoice = {
       shown: (key) => ({ enabled: true, here: key === 'k1', mic: 'off', speaking: null, speakReplies: true, error: null, recognizer: null }),
       settings: () => ({ expandReplies: true, diffLayout: 'auto', diffWrap: 'auto' }),
-      spokenFor: (sessionId, command) => {
-        calls.push(`spokenFor ${sessionId} ${command}`);
+      spokenFor: (sessionId, command, key) => {
+        calls.push(`spokenFor ${sessionId} ${command} ${key ?? 'none'}`);
         return command ? { spoken: false, expressive: false } : spoken;
       },
       replyChanged: (reply) => void calls.push(`reply ${reply.opening}`),
@@ -1107,7 +1107,8 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     expect(service.send(body(mine.key, { opId: 'op-2', text: '/compact', command: true }))).toMatchObject({ status: 200, body: { message: { spokenRequested: false } } });
     await settled(() => expect(store.message('m-2')?.delivery).toBe('sent'));
     expect(held.writes[2]).toBe('\u001b[200~/compact\u001b[201~');
-    expect(calls.filter((call) => call.startsWith('spokenFor'))).toEqual(['spokenFor s2 false', 'spokenFor s2 true']);
+    // A typed message names the window it came from, which can take the voice back to this computer.
+    expect(calls.filter((call) => call.startsWith('spokenFor'))).toEqual([`spokenFor s2 false ${mine.key}`, `spokenFor s2 true ${mine.key}`]);
   });
 
   it("lists the personas and pins one to the window's session only, with the header showing it at once (architecture.md § Personas)", () => {

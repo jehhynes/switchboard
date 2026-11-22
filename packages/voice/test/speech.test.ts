@@ -22,13 +22,13 @@ const item = (replyId: string, turn: string | null = 'm1', text = 'Fixed the bad
 
 describe('Speech', () => {
   it('stops a needs-you sound that plays when muted, never plays one still opening, and skips replies until unmuted', async () => {
-    const { tts, output, speech, states } = setup();
+    const { tts, output, speech, states, reports, logs } = setup();
 
     speech.earcon();
     await settle();
     expect(output.playbacks).toHaveLength(1);
     output.playbacks[0]!.hold = new Promise(() => undefined);
-    speech.mute(true);
+    speech.mute('no device: the phone that had the voice left');
     expect(output.playbacks[0]!.stopped).toBe(true);
 
     // A sound whose device is still opening when muted never writes.
@@ -39,7 +39,7 @@ describe('Speech', () => {
     const second = new Speech({ tts, output: held, device: () => null, report: () => undefined, failed: () => undefined, now: () => 0, log: () => undefined });
 
     second.earcon();
-    second.mute(true);
+    second.mute('away: computer locked');
     open();
     await settle();
     expect(slow.playbacks[0]!.written).toHaveLength(0);
@@ -50,8 +50,11 @@ describe('Speech', () => {
 
     speech.speak(item('r1'));
     expect(states()).toEqual(['r1 skipped']);
+    // Why it was skipped goes to the hub and the log.
+    expect(reports.at(-1)).toEqual({ type: 'speech', gen: 3, replyId: 'r1', sessionId: 's1', state: 'skipped', atMs: null, said: null, reason: 'no device: the phone that had the voice left' });
+    expect(logs.at(-1)).toBe('speech: reply r1 of session s1 skipped (no device: the phone that had the voice left), voice default, 0 ms played, 0 of 16 characters');
     expect(tts.requests).toHaveLength(0);
-    speech.mute(false);
+    speech.mute(null);
     speech.speak(item('r2'));
     expect(tts.requests).toHaveLength(1);
   });
@@ -78,8 +81,8 @@ describe('Speech', () => {
     speech.halt();
     expect(logs.filter(said)).toEqual([
       'speech: reply r1 of session s1 played, voice marin, 1000 ms played, 100 of 100 characters',
-      'speech: reply r2 of session s1 interrupted, voice default, 400 ms played, 4 of 10 characters',
-      'speech: reply r3 of session s1 skipped, voice default, 0 ms played, 0 of 16 characters',
+      'speech: reply r2 of session s1 interrupted (Stop speaking), voice default, 400 ms played, 4 of 10 characters',
+      'speech: reply r3 of session s1 skipped (Stop speaking), voice default, 0 ms played, 0 of 16 characters',
       'speech: reply r4 of session s1 stopped: voice moved, voice default, 0 ms played, 0 of 16 characters',
       'speech: reply r5 of session s1 stopped: voice moved, voice default, 0 ms played, 0 of 16 characters',
     ]);
@@ -242,7 +245,7 @@ describe('Speech', () => {
     expect(failures).toEqual(['No OpenAI key', 'no device', 'speech connection closed', 'no device']);
   });
   it('stops the playing reply on a barge-in with how much of it played, skips the rest of its turn, and plays the next turn\'s replies', async () => {
-    const { clock, tts, speech, states } = setup();
+    const { clock, tts, speech, states, reports, logs } = setup();
 
     speech.speak(item('r1', 'm1', 'x'.repeat(100)));
     speech.speak(item('r2', 'm1'));
@@ -260,6 +263,8 @@ describe('Speech', () => {
     // A later reply of the turn spoken over is not heard; the answer to the interrupting message is.
     speech.speak(item('r3', 'm1'));
     expect(states().at(-1)).toBe('r3 skipped');
+    expect(reports.at(-1)).toMatchObject({ replyId: 'r3', reason: 'its turn was spoken over' });
+    expect(logs.at(-1)).toBe('speech: reply r3 of session s1 skipped (its turn was spoken over), voice default, 0 ms played, 0 of 16 characters');
     speech.speak(item('r4', 'm2'));
     expect(speech.playing?.replyId).toBe('r4');
     speech.speak(item('r5', 'm1'));
@@ -308,7 +313,7 @@ describe('Speech', () => {
     expect(states()).toEqual(['r1 played', 'r3 played', 'r4 interrupted']);
 
     // Muted, a line is skipped.
-    speech.mute(true);
+    speech.mute('away: computer locked');
     speech.say(line('alert:a3'));
     expect(lines.at(-1)).toBe('alert:a3 skipped');
   });

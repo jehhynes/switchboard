@@ -30,6 +30,11 @@ export interface VoiceView {
   recognizer: 'gpu' | 'cpu' | null;
   /** Only while the voice is here and a room hold runs: dictated turns stay in the composer (architecture.md § Voice check and barge-in). */
   roomHold?: true;
+  /**
+   * Only in a window or page on this computer while the voice is here and no device has it, after the phone left: nothing plays or listens
+   * until Talk here, the mic or a typed message takes it back (PRD R119).
+   */
+  deviceOff?: true;
   /** Only while the voice is here and its capture cancels no echo but listens anyway: why, such as "echo check: none heard"; talking over a reply then stops it. */
   fullDuplex?: string;
 }
@@ -316,6 +321,11 @@ export class VoiceControl {
   /** Where the voice's microphone and speaker are, and the page key of the phone that has it (PRD R119). */
   #device: VoiceDevice = 'computer';
   #phoneKey: string | null = null;
+  /**
+   * Whether this hub has chosen the device itself: a move, or an action on this computer that takes the voice back. Until then, a voice process
+   * that greets it with another device keeps the voice off; after, the hub's own device wins.
+   */
+  #deviceChosen = false;
   /** The mic state the rows' mark last showed (`micLive`). */
   #micLiveShown = false;
   /** Whether the voice process has the phone's capture open, so the phone's audio is relayed. */
@@ -416,6 +426,8 @@ export class VoiceControl {
 
   /** The voice comes back to this computer from the phone, or from none, by an action taken on this computer. */
   #takeBack(key: string | null): void {
+    this.#deviceChosen = true;
+
     if (this.#device === 'computer' || (key !== null && key === this.#phoneKey)) {
       return;
     }
@@ -436,6 +448,7 @@ export class VoiceControl {
     }
 
     this.#device = device;
+    this.#deviceChosen = true;
     // The voice process turns the mic off with any move, closing what it captured from; the operator turns it on where the voice is now.
     this.#micOn = false;
     this.#phoneCapture = false;
@@ -457,9 +470,19 @@ export class VoiceControl {
     return this.deps.settings().enabled ? (this.#processError ?? this.#audioError) : null;
   }
 
-  /** Whether a message typed to this session now asks for a spoken reply, and an expressive one; never for a slash command. */
-  spokenFor(sessionId: string, command: boolean): { spoken: boolean; expressive: boolean } {
+  /**
+   * Whether a message typed to this session now asks for a spoken reply, and an expressive one; never for a slash command. One typed in a window
+   * or page on this computer (`key`) to the voice target's session after the phone left takes the voice back here, as Talk here does, so its
+   * reply is heard (PRD R119).
+   */
+  spokenFor(sessionId: string, command: boolean, key: string | null = null): { spoken: boolean; expressive: boolean } {
     const settings = this.deps.settings();
+
+    if (key !== null && this.#device === 'none' && this.deps.remotePage?.(key) !== true && settings.enabled && this.#client !== null && this.#target.sessionId === sessionId) {
+      this.#takeBack(key);
+      this.update();
+    }
+
     const spoken = !command && settings.enabled && this.speakReplies && this.#client !== null && this.#target.sessionId === sessionId;
 
     return { spoken, expressive: spoken && settings.expressive };
@@ -483,6 +506,7 @@ export class VoiceControl {
       ...(here && this.#halfDuplex !== null ? { halfDuplex: this.#halfDuplex } : {}),
       ...(here && this.#roomHeld() ? { roomHold: true as const } : {}),
       ...(here && this.#fullDuplex !== null ? { fullDuplex: this.#fullDuplex } : {}),
+      ...(here && this.#device === 'none' && this.deps.remotePage?.(key) !== true ? { deviceOff: true as const } : {}),
     };
   }
 
@@ -1568,6 +1592,23 @@ export class VoiceControl {
       case 'utterance':
         this.#utterance(message);
         return;
+      case 'device':
+        // A hub that started again begins on this computer, while the voice process kept the device it had: the phone that had the voice left
+        // with the hub that stopped, so the voice stays off until the operator takes it back (PRD R119, decision 1). Once this hub chose the
+        // device itself, as Talk here before the greeting came, its own device wins.
+        if (message.device !== this.#device) {
+          const had = message.device === 'phone' ? 'the phone' : message.device === 'none' ? 'no device' : 'this computer';
+
+          if (this.#deviceChosen) {
+            this.deps.log(`voice: device ${this.#device}: the voice process had ${had} when the hub connected, and is told this hub's device`);
+            this.#client?.send({ type: 'device', device: this.#device });
+          } else if (message.device !== 'computer') {
+            this.#setDevice('none', `the voice process had ${had} when the hub connected`);
+            this.update();
+          }
+        }
+
+        return;
       case 'speech': {
         if (message.gen !== this.#target.gen || !this.#offered.has(message.replyId)) {
           return;
@@ -1580,7 +1621,7 @@ export class VoiceControl {
         } else if (FINAL.has(message.state)) {
           const offered = this.#offered.get(message.replyId)!;
 
-          this.#logSpeech(message.replyId, offered, message.state, message.atMs ?? offered.atMs, message.said ?? offered.said);
+          this.#logSpeech(message.replyId, offered, message.reason === undefined ? message.state : `${message.state} (${message.reason})`, message.atMs ?? offered.atMs, message.said ?? offered.said);
           this.#offered.delete(message.replyId);
 
           if (this.#playing.get(message.sessionId) === message.replyId) {

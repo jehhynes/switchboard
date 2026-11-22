@@ -289,7 +289,8 @@ export interface ConversationVoice {
   shown(key: string): VoiceView;
   /** The settings the view and the web page read. */
   settings(): ViewSettings;
-  spokenFor(sessionId: string, command: boolean): { spoken: boolean; expressive: boolean };
+  /** `key`: the window or page a typed message comes from, which can take the voice back to this computer; null for any other message. */
+  spokenFor(sessionId: string, command: boolean, key?: string | null): { spoken: boolean; expressive: boolean };
   replyChanged(reply: ConversationReply): void;
   talkHere(key: string): string | null;
   stopSpeaking(key: string): string | null;
@@ -1744,7 +1745,7 @@ export class ConversationService {
     options: { opId: string; command: boolean; pieces: Piece[] | null; partial: boolean; auto?: boolean; olderToo?: boolean; interrupted?: Interruption | null; guard?: () => string | null },
   ): ConversationMessage {
     const sessionId = session.id;
-    const { spoken, expressive } = this.deps.voice?.spokenFor(sessionId, options.command || options.partial) ?? { spoken: false, expressive: false };
+    const { spoken, expressive } = this.deps.voice?.spokenFor(sessionId, options.command || options.partial, options.pieces === null ? window : null) ?? { spoken: false, expressive: false };
     const dictated = options.pieces === null ? null : options.partial ? 'partial' : 'voice';
     const added: Omit<ConversationMessage, 'ord'> = {
       id: `m-${this.deps.newId()}`,

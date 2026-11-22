@@ -664,7 +664,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     voice: {
       shown: (key) => voice.shown(key),
       settings: () => viewSettings(),
-      spokenFor: (sessionId, command) => voice.spokenFor(sessionId, command),
+      spokenFor: (sessionId, command, key) => voice.spokenFor(sessionId, command, key ?? null),
       replyChanged: (reply) => voice.replyChanged(reply),
       talkHere: (key) => voice.talkHere(key),
       stopSpeaking: (key) => voice.stopSpeaking(key),

@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { DEVICE_OFF_TIP } from '@switchboard/conversation/voiceControls';
 import type { ArtifactView, ItemView, MessageView, ReplyView, SessionView, StatusView, ScopeView, VoiceView } from '@switchboard/hub';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -135,6 +136,8 @@ describe('the conversation state', () => {
     expect(voiceStatus({ ...voice, enabled: false })).toBeNull();
     expect(voiceStatus({ ...voice, here: false })).toEqual({ text: '$(circle-slash) Voice not here', tooltip: 'Voice is not in this window. Click to talk here.', command: 'switchboard.talkHere', warning: false });
     expect(voiceStatus({ ...voice, error: 'no device' })).toMatchObject({ text: '$(warning) Voice', command: 'switchboard.showVoiceLog', warning: true });
+    // After the phone left: the voice is off until Talk here takes it back.
+    expect(voiceStatus({ ...voice, deviceOff: true as const })).toEqual({ text: '$(circle-slash) Voice off', tooltip: DEVICE_OFF_TIP, command: 'switchboard.talkHere', warning: true });
     expect(voiceStatus({ ...voice, speaking: 'r1' })).toMatchObject({ text: '$(unmute) Speaking', command: 'switchboard.stopSpeaking' });
     // The mic (architecture.md § Dictation).
     expect(voiceStatus(voice)).toEqual({ text: '$(mic) Mic off', tooltip: 'Click to turn the mic on.', command: 'switchboard.toggleMicrophone', warning: false });
@@ -1050,6 +1053,17 @@ describe('speech in the view (architecture.md § Voice)', () => {
     ]);
     // Capture's error is the mic button's tooltip, not text in the footer.
     expect(renderVoiceControls({ ...VOICE, mic: 'unavailable', error: 'no <device>' })).not.toContain('device');
+
+    // After the phone left, a voice here with no device says so beside Speak replies, and its click is Talk here.
+    show(state([reply('r1', T0, { opening: 'Done. More.', speak: 'Done.' })], { voice: { ...VOICE, deviceOff: true as const } }));
+    const off = controls().querySelector<HTMLButtonElement>('[data-voice="talk-here"]')!;
+
+    expect(off.textContent).toBe('Voice is off — Talk here');
+    expect(off.getAttribute('title')).toBe(DEVICE_OFF_TIP);
+    expect(controls().querySelector('[data-voice="speak-replies"]')).not.toBeNull();
+    off.click();
+    expect(posted.at(-1)).toEqual({ type: 'talk-here' });
+    expect(renderVoiceControls({ ...VOICE, deviceOff: true, here: false })).not.toContain('Voice is off');
   });
 
   it('marks a dictated message with the mic glyph, "partial" for a part sent while it was spoken, and its pieces in the tooltip', () => {

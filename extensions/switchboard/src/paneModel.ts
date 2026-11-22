@@ -70,7 +70,7 @@ export interface PaneWindow {
 /** The pane's model for the window opened from `file`; a window that is not an item window has no items (PRD R92). */
 export function paneModel(snapshot: Snapshot | null, file: string | null, windows: string, now: number, here: PaneWindow = { status: null, voice: null }): PaneModel {
   const shown = voiceStatus(here.voice);
-  const voice = shown === null ? null : { icon: /^\$\(([\w-]+)\)/.exec(shown.text)?.[1] ?? 'mic', text: shown.text.replace(/^\$\([\w-]+\)\s*/, ''), tooltip: shown.tooltip, talkHere: here.voice?.here === false };
+  const voice = shown === null ? null : { icon: /^\$\(([\w-]+)\)/.exec(shown.text)?.[1] ?? 'mic', text: shown.text.replace(/^\$\([\w-]+\)\s*/, ''), tooltip: shown.tooltip, talkHere: here.voice?.here === false || here.voice?.deviceOff === true };
 
   if (snapshot === null) {
     return { items: [], voice };

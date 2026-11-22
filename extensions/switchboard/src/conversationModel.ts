@@ -1,4 +1,4 @@
-import { PAUSED_BY_VOICE_TIP, ROOM_HOLD_TIP } from '@switchboard/conversation/voiceControls';
+import { DEVICE_OFF_TIP, PAUSED_BY_VOICE_TIP, ROOM_HOLD_TIP } from '@switchboard/conversation/voiceControls';
 import { SESSION_ICONS, SESSION_TONES, sessionIcon } from '@switchboard/core/group';
 import type { IconTone } from '@switchboard/core/group';
 import type { SessionIcon } from '@switchboard/core/group';
@@ -327,6 +327,11 @@ export function voiceStatus(voice: VoiceView | null): { text: string; tooltip: s
 
   if (!voice.here) {
     return { text: '$(circle-slash) Voice not here', tooltip: 'Voice is not in this window. Click to talk here.', command: 'switchboard.talkHere', warning: false };
+  }
+
+  // After the phone left, no device has the voice: nothing plays or listens until it is taken back (PRD R119).
+  if (voice.deviceOff === true) {
+    return { text: '$(circle-slash) Voice off', tooltip: DEVICE_OFF_TIP, command: 'switchboard.talkHere', warning: true };
   }
 
   if (voice.error !== null) {

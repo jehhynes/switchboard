@@ -240,6 +240,7 @@ describe('VoiceService', () => {
     expect(service.greeting()).toEqual([
       { type: 'active', gen: 0, sessionId: null, reason: 'gone' },
       { type: 'audio', mic: 'off', engine: 'fake', device: null, recognizer: null, error: null },
+      { type: 'device', device: 'computer' },
     ]);
     service.receive({ type: 'settings', settings: { ...DEFAULT_SETTINGS.voice, enabled: true, voice: 'cedar', speed: 1.5, outputDevice: 'USB' } });
     expect(tts.configured).toEqual([{ voice: 'cedar', style: 'none', speed: 1.5, expressive: false }]);

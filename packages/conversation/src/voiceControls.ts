@@ -16,6 +16,8 @@ export interface VoiceControlsView {
   halfDuplex?: string;
   fullDuplex?: string;
   roomHold?: boolean;
+  /** The voice is here but no device has it, after the phone left: nothing plays or listens until it is taken back. */
+  deviceOff?: boolean;
 }
 
 /** Where the controls are drawn, which their Talk here tooltip names. */
@@ -23,6 +25,8 @@ export type VoicePlace = 'window' | 'page';
 
 /** The mic's tooltip while the operator paused it by voice. */
 export const PAUSED_BY_VOICE_TIP = 'Paused: you said "stop listening". Say "start listening", or click to listen again.';
+/** Talk here's tooltip while the voice is here but no device has it. */
+export const DEVICE_OFF_TIP = 'Voice is off: the phone that had it left, so replies are not spoken. Click to speak them on this computer; the mic stays off.';
 /** The mic's tooltip while a room hold keeps dictation in the box. */
 export const ROOM_HOLD_TIP = 'Held: someone else is talking in the room, so dictation stays in the box until you press Enter.';
 
@@ -34,7 +38,8 @@ function escape(text: string): string {
  * The composer footer's voice controls (architecture.md § Voice), ghost icon buttons as in Claude Code's footer, in one cluster with the mic
  * beside Send: Stop while this window's session speaks and Speak replies as a speaker toggle while the voice is here; one Talk here in their
  * place while it is elsewhere, only for a session it can speak for (`live`). Nothing while voice is off. `place` names where it is drawn: a VS Code
- * window or the web page, which control the same voice process on this computer.
+ * window or the web page, which control the same voice process on this computer. While the voice is here but no device has it, after the phone
+ * left, "Voice is off — Talk here" stands before Speak replies, so a reply is not skipped unnoticed.
  */
 export function renderVoiceControls(voice: VoiceControlsView | null, live = true, place: VoicePlace = 'window'): string {
   if (voice === null || !voice.enabled) {
@@ -55,7 +60,12 @@ export function renderVoiceControls(voice: VoiceControlsView | null, live = true
       ? `<button class="ghost talk-here" type="button" data-key="voice-talk-here" data-voice="talk-here" title="The voice is not ${place === 'page' ? 'on this page' : 'in this window'}. Click to move it here.">Talk here</button>`
       : '';
 
-  return voice.here ? `${stop}${speakReplies}` : talkHere;
+  const deviceOff =
+    voice.here && voice.deviceOff === true
+      ? `<button class="ghost talk-here" type="button" data-key="voice-talk-here" data-voice="talk-here" title="${escape(DEVICE_OFF_TIP)}">Voice is off — Talk here</button>`
+      : '';
+
+  return voice.here ? `${deviceOff}${stop}${speakReplies}` : talkHere;
 }
 
 /** A mic glyph: slashed while off, outlined, or filled; with a badge while paused, or while half-duplex capture holds it for a reply playing. */

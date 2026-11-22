@@ -209,10 +209,11 @@ describe('the packaged voice process (architecture.md § Voice)', () => {
 
     expect(client.welcome).toMatchObject({ protocol: 1, build: 'package-test', pid: record.pid });
     client.onMessage((message) => messages.push(message));
-    await until(() => (messages.length >= 2 ? true : null), 'greeting');
+    await until(() => (messages.length >= 3 ? true : null), 'greeting');
     expect(messages).toEqual([
       { type: 'active', gen: 0, sessionId: null, reason: 'gone' },
       { type: 'audio', mic: 'off', engine: 'decibri', device: null, recognizer: null, error: null },
+      { type: 'device', device: 'computer' },
     ]);
 
     const closed = new Promise((resolve) => client.onClose(resolve));

@@ -297,8 +297,8 @@ describe('VoiceService with the voice on the phone', () => {
     expect(sent).toContainEqual({ type: 'phone-stalled', reason: PHONE_STALLED });
   });
 
-  it('turns the mic off and plays nothing once the phone left, until the voice is on a device again', async () => {
-    const { tts, sent, service, speak, speechOf, calls } = setup();
+  it('turns the mic off and plays nothing once the phone left, says why, and tells a hub that connects, until the voice is on a device again', async () => {
+    const { tts, sent, service, speak, speechOf, calls, logs } = setup();
 
     service.receive({ type: 'device', device: 'phone' });
     speak('r1');
@@ -310,10 +310,14 @@ describe('VoiceService with the voice on the phone', () => {
     expect(speechOf('r1').at(-1)?.[0]).toBe('interrupted');
     expect(calls).toContain('mic false');
 
-    // Nothing plays with no device: not on this computer's speakers either.
+    // Nothing plays with no device: not on this computer's speakers either, and the outcome says why.
     speak('r2');
     expect(speechOf('r2')).toEqual([['skipped', null]]);
+    expect(sent.filter((one) => one.type === 'speech').at(-1)).toMatchObject({ replyId: 'r2', reason: 'no device: the phone that had the voice left' });
+    expect(logs).toContain('speech: reply r2 of session s1 skipped (no device: the phone that had the voice left), voice marin, 0 ms played, 0 of 36 characters');
     expect(tts.requests).toHaveLength(1);
+    // A hub started again learns that no device has the voice.
+    expect(service.greeting().at(-1)).toEqual({ type: 'device', device: 'none' });
     service.receive({ type: 'earcon', kind: 'needs-you' });
     await settle();
     expect(sent.filter((one) => one.type === 'phone-play')).toHaveLength(1);
@@ -321,6 +325,12 @@ describe('VoiceService with the voice on the phone', () => {
     service.receive({ type: 'device', device: 'phone' });
     speak('r3');
     expect(tts.requests).toHaveLength(2);
+
+    // Back on this computer it plays there.
+    service.receive({ type: 'device', device: 'computer' });
+    speak('r4');
+    expect(tts.requests).toHaveLength(3);
+    expect(service.greeting().at(-1)).toEqual({ type: 'device', device: 'computer' });
   });
 
   it('keeps the voice on the phone when this computer locks or disconnects, but not when it sleeps', async () => {

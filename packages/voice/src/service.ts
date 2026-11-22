@@ -213,11 +213,15 @@ export class VoiceService {
     return dictation.roomHold != null ? 'room hold' : dictation.otherAppRecording ? 'another app is recording' : dictation.enrolling ? 'enrolment' : null;
   }
 
-  /** What a newly connected hub is told: the target and the playback state. */
+  /**
+   * What a newly connected hub is told: the target, the playback state and the device. A hub that started again knows no device of its own, so
+   * it learns here that the phone that had the voice left (PRD R119, decision 1).
+   */
   greeting(): VoiceMessage[] {
     return [
       { type: 'active', gen: this.#router.gen, sessionId: this.#router.target, reason: this.#router.target === null ? 'gone' : 'focus' },
       this.#audio(),
+      { type: 'device', device: this.#device },
     ];
   }
 
@@ -453,7 +457,7 @@ export class VoiceService {
     this.#device = device;
     this.deps.log(`voice device: ${device === 'none' ? 'none, the phone left' : device === 'phone' ? 'the phone' : 'this computer'} (was ${from})`);
     // Muting stops what plays, the needs-you sound too, and drops what waits; the new device's mute follows below.
-    this.#speech.mute(true);
+    this.#speech.mute('the voice moved');
 
     // The mic goes off with any move, and with it the device it captured from: the operator turns it on where the voice is now.
     this.#dictation?.enroll('cancel');
@@ -505,7 +509,9 @@ export class VoiceService {
 
   /** Nothing plays while the operator is away from the device that has the voice, or no device has it. */
   #syncMute(): void {
-    this.#speech.mute(this.#device === 'none' || this.#away.size > 0);
+    const away = [...this.#away][0];
+
+    this.#speech.mute(this.#device === 'none' ? 'no device: the phone that had the voice left' : away !== undefined ? `away: ${AWAY_TEXT[away]}` : null);
   }
 
   #failed(error: string | null): void {

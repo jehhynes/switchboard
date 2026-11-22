@@ -375,6 +375,45 @@ describe('VoiceControl with the voice on a phone (PRD R119)', () => {
     expect(control.pageMaySound('phone')).toBe(false);
   });
 
+  it('shows the voice off only on this computer after the phone left, and lets no message typed on a paired page take it back', async () => {
+    const { control, connections, sentOf } = setup();
+
+    control.update();
+    await settle();
+    control.phoneOpened('phone');
+    connections[0]!.receive({ type: 'active', gen: 1, sessionId: 's2', reason: 'talk-here' });
+    expect(control.view('phone').deviceOff).toBeUndefined();
+    control.phoneClosed('closed by the page');
+
+    // The phone's page is told nothing of this computer's voice; a message typed there leaves the voice off.
+    expect(control.view('phone')).toMatchObject({ here: true });
+    expect(control.view('phone').deviceOff).toBeUndefined();
+    expect(control.spokenFor('s2', false, 'phone').spoken).toBe(true);
+    expect(control.device).toBe('none');
+    expect(sentOf('device').at(-1)).toEqual({ type: 'device', device: 'none' });
+
+    // A window on this computer showing the target says the voice is off.
+    connections[0]!.receive({ type: 'active', gen: 2, sessionId: 's1', reason: 'talk-here' });
+    expect(control.view('pc')).toMatchObject({ here: true, deviceOff: true });
+  });
+
+  it('keeps the voice off when a hub started again finds the voice process still on the phone, whose socket closed with the old hub', async () => {
+    const { control, connections, sentOf, logs, closed } = setup();
+
+    control.update();
+    await settle();
+    connections[0]!.receive({ type: 'device', device: 'phone' });
+    expect(control.device).toBe('none');
+    expect(sentOf('device')).toEqual([{ type: 'device', device: 'none' }]);
+    expect(logs).toContain('voice: device none: the voice process had the phone when the hub connected');
+    expect(closed).toEqual([]);
+
+    // A phone that took the voice in this hub is not moved by the greeting of a process that reconnects.
+    control.phoneOpened('phone');
+    connections[0]!.receive({ type: 'device', device: 'none' });
+    expect(control.device).toBe('phone');
+  });
+
   it('takes the voice back to this computer with Voice on the computer, only from this computer\'s page', async () => {
     const { control, closed, sentOf } = setup();
 

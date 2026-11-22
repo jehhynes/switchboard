@@ -413,8 +413,8 @@ describe('VoiceControl', () => {
     connections[0]!.receive({ type: 'speech', gen: 1, replyId: 'r1', sessionId: 's1', state: 'played', atMs: 1200, said: 5 });
     connections[0]!.receive({ type: 'speech', gen: 1, replyId: 'r2', sessionId: 's1', state: 'playing', atMs: 0, said: 0 });
     connections[0]!.receive({ type: 'progress', gen: 1, replyId: 'r2', sessionId: 's1', chars: 3, atMs: 450 });
-    // A cancel reports no position; the last progress says how far it played.
-    connections[0]!.receive({ type: 'speech', gen: 1, replyId: 'r2', sessionId: 's1', state: 'skipped', atMs: null, said: null });
+    // A cancel reports no position; the last progress says how far it played. Why it was skipped goes in the outcome.
+    connections[0]!.receive({ type: 'speech', gen: 1, replyId: 'r2', sessionId: 's1', state: 'skipped', atMs: null, said: null, reason: 'cancelled by the hub' });
     connections[0]!.receive({ type: 'speech', gen: 1, replyId: 'r3', sessionId: 's1', state: 'playing', atMs: 0, said: 0 });
     connections[0]!.receive({ type: 'progress', gen: 1, replyId: 'r3', sessionId: 's1', chars: 2, atMs: 300 });
     // A report of another generation is no outcome.
@@ -425,9 +425,118 @@ describe('VoiceControl', () => {
     connections[0]!.drop();
     expect(speech()).toEqual([
       'voice: reply r1 of session s1 played, voice marin, 1200 ms played, 5 characters said',
-      'voice: reply r2 of session s1 skipped, voice marin, 450 ms played, 3 characters said',
+      'voice: reply r2 of session s1 skipped (cancelled by the hub), voice marin, 450 ms played, 3 characters said',
       'voice: reply r3 of session s1 stopped: voice moved, voice marin, 300 ms played, 2 characters said',
       'voice: reply r4 of session s1 failed: the voice process stopped, voice marin, 0 ms played, 0 characters said',
+    ]);
+  });
+
+  it('keeps the voice off when a hub started again finds the voice process with no device, says so in the window, and takes it back with a typed message, Talk here or Voice on the computer', async () => {
+    const { control, connections, windows, reply, settle, logs, focus } = setup();
+    const sent = (type: string): HubMessage[] => connections[0]!.sent.filter((one) => one.type === type);
+
+    windows.set('k1', scope('k1', 1, 's1'));
+    focus('k1');
+    control.update();
+    await settle();
+    connections[0]!.receive({ type: 'active', gen: 1, sessionId: 's1', reason: 'talk-here' });
+    // A hub on this computer and a process on this computer agree: nothing changes.
+    connections[0]!.receive({ type: 'device', device: 'computer' });
+    expect(control.device).toBe('computer');
+    expect(sent('device')).toEqual([]);
+    expect(control.view('k1').deviceOff).toBeUndefined();
+
+    // The phone left before this hub started, so the process it connects to greets it with no device (PRD R119, decision 1).
+    connections[0]!.receive({ type: 'device', device: 'none' });
+    expect(control.device).toBe('none');
+    expect(sent('device')).toEqual([{ type: 'device', device: 'none' }]);
+    expect(logs).toContain('voice: device none: the voice process had no device when the hub connected');
+    expect(control.view('k1')).toMatchObject({ here: true, mic: 'off', deviceOff: true });
+
+    // The reply it skips says why.
+    control.replyChanged(reply('r1'));
+    connections[0]!.receive({ type: 'speech', gen: 1, replyId: 'r1', sessionId: 's1', state: 'skipped', atMs: null, said: null, reason: 'no device: the phone that had the voice left' });
+    expect(logs).toContain('voice: reply r1 of session s1 skipped (no device: the phone that had the voice left), voice marin, 0 ms played, 0 characters said');
+
+    // A message typed with no window, or to a session that is not the target, leaves it off.
+    expect(control.spokenFor('s1', false, null).spoken).toBe(true);
+    expect(control.spokenFor('s2', false, 'k1').spoken).toBe(false);
+    expect(control.device).toBe('none');
+
+    // A message typed in this computer's window to the target takes it back, with the mic still off, so its reply is heard.
+    expect(control.spokenFor('s1', false, 'k1')).toEqual({ spoken: true, expressive: false });
+    expect(control.device).toBe('computer');
+    expect(sent('device').at(-1)).toEqual({ type: 'device', device: 'computer' });
+    expect(sent('mic')).toEqual([]);
+    expect(control.view('k1').deviceOff).toBeUndefined();
+
+    expect(sent('device')).toEqual([
+      { type: 'device', device: 'none' },
+      { type: 'device', device: 'computer' },
+    ]);
+
+    // Talk here takes it back, and so does Voice on the computer, each in a hub that started again the same way.
+    for (const take of [(one: VoiceControl) => one.talkHere('k1'), (one: VoiceControl) => one.toComputer('k1')]) {
+      const again = setup();
+
+      again.windows.set('k1', scope('k1', 1, 's1'));
+      again.focus('k1');
+      again.control.update();
+      await again.settle();
+      again.connections[0]!.receive({ type: 'active', gen: 1, sessionId: 's1', reason: 'talk-here' });
+      again.connections[0]!.receive({ type: 'device', device: 'none' });
+      expect(again.control.view('k1').deviceOff).toBe(true);
+      expect(take(again.control)).toBeNull();
+      expect(again.control.device).toBe('computer');
+      expect(again.connections[0]!.sent.filter((one) => one.type === 'device').at(-1)).toEqual({ type: 'device', device: 'computer' });
+      expect(again.connections[0]!.sent.filter((one) => one.type === 'mic')).toEqual([]);
+    }
+
+    expect(sent('mic')).toEqual([]);
+  });
+
+  it('keeps the voice on this computer when Talk here comes before the greeting of a process that kept no device', async () => {
+    const { control, connections, windows, settle, logs, focus, advance } = setup();
+
+    windows.set('k1', scope('k1', 1, 's1'));
+    focus('k1');
+    control.update();
+    await settle();
+    expect(control.talkHere('k1')).toBeNull();
+    connections[0]!.receive({ type: 'device', device: 'none' });
+    expect(control.device).toBe('computer');
+    expect(connections[0]!.sent.filter((one) => one.type === 'device')).toEqual([{ type: 'device', device: 'computer' }]);
+    expect(logs).toContain("voice: device computer: the voice process had no device when the hub connected, and is told this hub's device");
+
+    // Once this hub chose the device, a process that reconnects with an older one is told the hub's, whichever it is.
+    connections[0]!.drop();
+    advance(VOICE_RESTART_MS);
+    await settle();
+    connections[1]!.receive({ type: 'device', device: 'none' });
+    expect(control.device).toBe('computer');
+    expect(connections[1]!.sent.filter((one) => one.type === 'device')).toEqual([{ type: 'device', device: 'computer' }]);
+  });
+
+  it('keeps the voice on this computer when it is taken back from none while a process that kept none reconnects, before its greeting', async () => {
+    const { control, connections, windows, settle, focus, advance } = setup();
+
+    windows.set('k1', scope('k1', 1, 's1'));
+    focus('k1');
+    control.update();
+    await settle();
+    connections[0]!.receive({ type: 'device', device: 'none' });
+    expect(control.device).toBe('none');
+    connections[0]!.drop();
+    advance(VOICE_RESTART_MS);
+    await settle();
+    // Voice on the computer while the new connection's greeting is still to come.
+    expect(control.toComputer('k1')).toBeNull();
+    connections[1]!.receive({ type: 'device', device: 'none' });
+    expect(control.device).toBe('computer');
+    expect(connections[1]!.sent.filter((one) => one.type === 'device')).toEqual([
+      { type: 'device', device: 'none' },
+      { type: 'device', device: 'computer' },
+      { type: 'device', device: 'computer' },
     ]);
   });
 
