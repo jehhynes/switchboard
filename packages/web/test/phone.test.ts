@@ -60,6 +60,18 @@ describe('the page on a phone', () => {
     expect(touch?.[2]).toContain('font-size: 20px; line-height: 1;');
   });
 
+  it("marks a source's check row on only by its check: a tap or click leaves no tint, keyboard focus an outline, a hovering pointer the hover grey", () => {
+    const rows = ':is(.source-menu, .more-source) .menu-row';
+
+    expect(css).toContain(`${rows} { -webkit-tap-highlight-color: transparent; }`);
+    // The menus' selection colours on hover and focus are cleared, so a focused row that is off looks as it does unfocused.
+    expect(css).toContain(`${rows}:is(:hover, :focus) { outline: none; background: transparent; color: inherit; }`);
+    expect(css).toContain(`${rows}:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }`);
+    // Only a pointer that hovers tints the row, so a tap leaves no sticky hover; the tint is grey, never the selection colour.
+    expect(css).toContain(`@media (hover: hover) { ${rows}:hover { background: var(--vscode-list-hoverBackground); } }`);
+    expect(css.indexOf(`${rows}:is(:hover, :focus)`)).toBeGreaterThan(css.indexOf('.menu-row:hover, .menu-row:focus {'));
+  });
+
   it("hides the header's main control under 768 px, and the Actions menu starts with it whatever it is", () => {
     expect(css).toContain('@media (width < 768px) { .header > button.row-main { display: none; } }');
 
