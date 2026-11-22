@@ -47,6 +47,10 @@ class FakeView {
   getScrollHeight(): number {
     return 3000;
   }
+  rendered: Array<{ id: string; element: HTMLElement }> = [];
+  getRenderedItems(): Array<{ id: string; element: HTMLElement }> {
+    return this.rendered;
+  }
   cleanUp(): void {
     this.cleaned = true;
   }
@@ -117,12 +121,14 @@ describe('visibleRange', () => {
 });
 
 describe('mountChanges', () => {
-  const mounted = (rows = [row('a.ts'), row('b.ts'), row('c.png', 'M', null, null)]) => {
+  const mounted = (rows = [row('a.ts'), row('b.ts'), row('c.png', 'M', null, null)], host = document.createElement('div')) => {
+    const onHeader = vi.fn();
+    const headerPrefix = (path: string) => Object.assign(document.createElement('span'), { textContent: `prefix ${path}` });
     const loadSides = vi.fn(async (path: string) => ({ path, status: 'M', patch, old: 'one\ntwo\nthree\n', new: 'one\nTWO\nthree\n', binary: false, tooLarge: null }));
     const onLine = vi.fn();
-    const mount = mountChanges(document.createElement('div'), rows, { layout: 'split', wrap: false, loadSides, onLine });
+    const mount = mountChanges(host, rows, { layout: 'split', wrap: false, loadSides, onLine, onHeader, headerPrefix });
 
-    return { mount, view: views.at(-1)!, loadSides, onLine };
+    return { mount, view: views.at(-1)!, loadSides, onLine, onHeader, host };
   };
 
   it('MountChanges_WithRows_DrawsEachAsAPlaceholderInOrder', () => {
@@ -244,5 +250,29 @@ describe('mountChanges', () => {
     expect(view.options).toMatchObject({ diffStyle: 'unified', overflow: 'wrap' });
     mount.dispose();
     expect(view.cleaned).toBe(true);
+  });
+
+  it('HeaderClick_AwayFromThePagesControls_NamesTheFile', () => {
+    const { view, onHeader, host, mount } = mounted();
+    const element = document.createElement('div');
+    const header = document.createElement('div');
+    const button = document.createElement('button');
+    const body = document.createElement('div');
+
+    header.setAttribute('data-diffs-header', 'default');
+    header.append(button);
+    element.append(header, body);
+    host.append(element);
+    view.rendered = [{ id: 'b.ts', element }];
+
+    header.click();
+    button.click();
+    body.click();
+    expect(onHeader.mock.calls).toEqual([['b.ts']]);
+    expect((view.options['renderHeaderPrefix'] as (diff: unknown) => Element | null)(view.items[1]!.fileDiff)!.textContent).toBe('prefix b.ts');
+
+    mount.dispose();
+    header.click();
+    expect(onHeader).toHaveBeenCalledTimes(1);
   });
 });

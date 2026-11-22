@@ -47,8 +47,11 @@ export interface ChangesMountOptions {
   loadSides(path: string): Promise<DiffData | null>;
   /** A line number was clicked in a file's diff: the old side's or the new side's line. */
   onLine?(path: string, side: 'old' | 'new', line: number): void;
-  /** What a file's own header shows after its counts. */
+  /** What a file's own header shows after its counts, and before its name. */
   headerMeta?(path: string): HTMLElement | null;
+  headerPrefix?(path: string): HTMLElement | null;
+  /** A file's own header was clicked, away from the page's controls in it. */
+  onHeader?(path: string): void;
 }
 
 export interface ChangesMount {

@@ -300,6 +300,11 @@ export function mountChanges(host: HTMLElement, rows: ChangesRowInput[], mount: 
         return fileDiff.type === 'rename-pure' ? { oldFile: null, newFile } : { oldFile: { name: data.from ?? data.path, contents: lf(data.old ?? '', data.patch) }, newFile };
       },
       renderHeaderFilenameSuffix: headerSuffix,
+      renderHeaderPrefix: (fileDiff: FileDiffMetadata) => {
+        const path = kinds.get(fileDiff)?.path;
+
+        return path === undefined ? null : (mount.headerPrefix?.(path) ?? null);
+      },
       renderHeaderMetadata: (fileDiff: FileDiffMetadata) => {
         const path = kinds.get(fileDiff)?.path;
 
@@ -323,8 +328,24 @@ export function mountChanges(host: HTMLElement, rows: ChangesRowInput[], mount: 
     items.set(row.path, withCollapse(placeholder(row)));
   }
 
+  // A click on a file's own header, but not on the page's controls in it, names the file (`onHeader`).
+  const headerClick = (event: Event): void => {
+    const trail = event.composedPath();
+
+    if (trail.some((one) => one instanceof Element && one.matches('label, input, button, a')) || !trail.some((one) => one instanceof Element && one.hasAttribute('data-diffs-header'))) {
+      return;
+    }
+
+    const item = view.getRenderedItems().find((one) => trail.includes(one.element));
+
+    if (item !== undefined) {
+      mount.onHeader?.(item.id);
+    }
+  };
+
   view.setup(host);
   resize?.observe(host);
+  host.addEventListener('click', headerClick);
   drawAll();
 
   return {
@@ -425,6 +446,7 @@ export function mountChanges(host: HTMLElement, rows: ChangesRowInput[], mount: 
     set: (layout, wrap) => view.setOptions(optionsFor(layout, wrap)),
     dispose: () => {
       cancelAnimationFrame(frame);
+      host.removeEventListener('click', headerClick);
       unsubscribe();
       resize?.disconnect();
       view.cleanUp();

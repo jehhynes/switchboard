@@ -78,4 +78,8 @@
 .change-item.viewed .change-name, .change-item.viewed .change-dir { opacity: 0.6; }
 /* Pierre stops pointer events on its headers while the view scrolls; the tick takes them still, so a tap just after a fling lands. */
 .diff-viewed { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; pointer-events: auto; }
+/* A file's collapse chevron, before its name; a collapsed file's header expands it too. */
+.diff-chevron { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; margin-right: 2px; padding: 0; border: none; border-radius: 4px; background: transparent; color: var(--vscode-foreground); cursor: pointer; pointer-events: auto; }
+.diff-chevron:hover { background: var(--vscode-toolbar-hoverBackground); }
+@media (hover: none), (pointer: coarse) { .diff-chevron { width: 36px; height: 36px; } }
 @media (hover: none), (pointer: coarse) { .change-viewed { width: 44px; height: 44px; } .change-viewed input, .diff-viewed input { width: 20px; height: 20px; } }

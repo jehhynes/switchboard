@@ -72,7 +72,7 @@ describe('the Changes list', () => {
   let module: DiffModule | null;
   let diffAnswers: Record<string, { status: number; body: unknown }>;
   /** What each mountChanges was given and asked, and the rows the fake view says are on screen. */
-  type FakeChanges = { meta: (path: string) => HTMLElement | null; rows: string[]; layout: string; wrap: boolean; layouts: string[]; scrolls: string[]; sets: Array<[string, string]>; collapsed: string[]; disposed: boolean; onLine?: (path: string, side: 'old' | 'new', line: number) => void; loadSides: (path: string) => Promise<unknown>; want: () => void };
+  type FakeChanges = { header: (path: string) => void; meta: (path: string) => HTMLElement | null; rows: string[]; layout: string; wrap: boolean; layouts: string[]; scrolls: string[]; sets: Array<[string, string]>; collapsed: string[]; disposed: boolean; onLine?: (path: string, side: 'old' | 'new', line: number) => void; loadSides: (path: string) => Promise<unknown>; want: () => void };
   const changesMounts: FakeChanges[] = [];
   let visible: { first: number; last: number } | null;
   let etags: Record<string, () => string>;
@@ -110,6 +110,7 @@ describe('the Changes list', () => {
         const listeners: Array<() => void> = [];
         const fake: FakeChanges = {
           meta: (path) => options.headerMeta?.(path) ?? null,
+          header: (path) => options.onHeader?.(path),
           rows: rows.map((row) => row.path),
           layout: options.layout,
           wrap: options.wrap,
@@ -125,7 +126,7 @@ describe('the Changes list', () => {
 
         changesMounts.push(fake);
         // As the viewer puts each file's header element in its own header.
-        host.replaceChildren(...rows.map((row) => options.headerMeta?.(row.path)).filter((one): one is HTMLElement => one != null));
+        host.replaceChildren(...rows.flatMap((row) => [options.headerPrefix?.(row.path), options.headerMeta?.(row.path)]).filter((one): one is HTMLElement => one != null));
         return {
           setRows: (next) => (fake.rows = next.map((row) => row.path)),
           setRow: (path, content) => fake.sets.push([path, content === null ? 'placeholder' : 'note' in content ? content.note : 'diff']),
@@ -475,6 +476,46 @@ describe('the Changes list', () => {
     await flush();
     await flush();
     expect(diffGets().filter((one) => one.includes('docs%2Fa.md') && one.endsWith('sides=0'))).toHaveLength(2);
+  });
+
+  it('Chevron_InAFilesHeader_CollapsesAndExpandsThatFile', async () => {
+    start();
+    await openRow(0);
+
+    const chevron = (path: string) => root.querySelector<HTMLElement>(`.diff-host .diff-chevron[data-path="${path}"]`)!;
+
+    expect([...root.querySelectorAll<HTMLElement>('.diff-host .diff-chevron')].map((one) => one.dataset['path'])).toEqual(['docs/a.md', 'src/new.ts', 'logo.png']);
+    expect(chevron('docs/a.md').getAttribute('aria-expanded')).toBe('true');
+    chevron('docs/a.md').click();
+    expect(changesMounts[0]!.collapsed).toEqual(['docs/a.md true']);
+    expect(chevron('docs/a.md').getAttribute('aria-expanded')).toBe('false');
+    expect(chevron('docs/a.md').querySelector('.codicon-chevron-right')).not.toBeNull();
+    chevron('docs/a.md').click();
+    expect(changesMounts[0]!.collapsed).toEqual(['docs/a.md true', 'docs/a.md false']);
+    expect(chevron('docs/a.md').getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('CollapsedHeader_AfterCollapseAll_ExpandsThatFileAlone', async () => {
+    start();
+    await openRow(0);
+    button().click();
+    await flush();
+    root.querySelector<HTMLElement>('[data-action="changes-collapse-all"]')!.click();
+    expect(root.querySelectorAll('.diff-host .diff-chevron[aria-expanded="false"]')).toHaveLength(3);
+
+    changesMounts[0]!.header('src/new.ts');
+    expect(changesMounts[0]!.collapsed.at(-1)).toBe('src/new.ts false');
+    expect([...root.querySelectorAll<HTMLElement>('.diff-host .diff-chevron')].map((one) => one.getAttribute('aria-expanded'))).toEqual(['false', 'true', 'false']);
+
+    // A header click on a file that shows changes nothing.
+    const before = changesMounts[0]!.collapsed.length;
+
+    changesMounts[0]!.header('src/new.ts');
+    expect(changesMounts[0]!.collapsed).toHaveLength(before);
+
+    // Collapse all and Expand all still apply to every file.
+    root.querySelector<HTMLElement>('[data-action="changes-expand-all"]')!.click();
+    expect(root.querySelectorAll('.diff-host .diff-chevron[aria-expanded="true"]')).toHaveLength(3);
   });
 
   it('ChangesMenu_Buttons_HideViewedCollapseAndExpandEveryFile', async () => {

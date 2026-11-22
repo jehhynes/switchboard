@@ -312,6 +312,15 @@ function DiffTools({ row }: { row: ChangeRow | undefined }): VNode | null {
   );
 }
 
+/** A file's collapse chevron, before its name in its own header: down while its diff shows, right while it is collapsed to its header. */
+function Chevron({ path, collapsed }: { path: string; collapsed: boolean }): VNode {
+  return (
+    <button class="diff-chevron" type="button" data-action="diff-collapse" data-path={path} aria-expanded={!collapsed} aria-label={collapsed ? `Expand ${path}` : `Collapse ${path}`} title={collapsed ? 'Expand' : 'Collapse'}>
+      <span class={`codicon codicon-chevron-${collapsed ? 'right' : 'down'}`} aria-hidden="true"></span>
+    </button>
+  );
+}
+
 /** An element the viewer puts in a file's own header. */
 function slot(): HTMLElement {
   const element = document.createElement('span');
@@ -345,6 +354,8 @@ export class ChangesController {
   #fileMount: { host: HTMLElement; mount: DiffMount | null } | null = null;
   /** Each file's header element the viewer shows after its counts, by path, drawn again on every draw. */
   readonly #metas = new Map<string, HTMLElement>();
+  /** Each file's header element the viewer shows before its name, by path, drawn again on every draw. */
+  readonly #prefixes = new Map<string, HTMLElement>();
 
   constructor(private readonly deps: ChangesDeps) {}
 
@@ -490,6 +501,17 @@ export class ChangesController {
 
       this.#collapsed = collapse ? new Set(this.view.list?.rows.map((row) => row.path)) : new Set();
       this.#rows().forEach((row) => this.#mount?.mount.setCollapsed(row.path, collapse));
+      this.deps.draw();
+      return true;
+    }
+
+    if (action === 'diff-collapse') {
+      const toggled = target.closest<HTMLElement>('[data-path]')?.dataset['path'];
+
+      if (toggled !== undefined) {
+        this.#setCollapsed(toggled, !this.#collapsed.has(toggled));
+      }
+
       return true;
     }
 
@@ -863,6 +885,7 @@ export class ChangesController {
 
   #unmount(): void {
     this.#metas.clear();
+    this.#prefixes.clear();
     this.#mount?.mount.dispose();
     this.#mount = null;
     this.#fileMount?.mount?.dispose();
@@ -922,6 +945,42 @@ export class ChangesController {
     for (const [path, element] of this.#metas) {
       mount(element, <DiffTools row={this.view.list?.rows.find((one) => one.path === path)} />);
     }
+
+    for (const [path, element] of this.#prefixes) {
+      mount(element, <Chevron path={path} collapsed={this.#collapsed.has(path)} />);
+    }
+  }
+
+  /** A file's header element before its name, holding its collapse chevron. */
+  #prefix(path: string): HTMLElement {
+    let element = this.#prefixes.get(path);
+
+    if (element === undefined) {
+      element = slot();
+      this.#prefixes.set(path, element);
+      mount(element, <Chevron path={path} collapsed={this.#collapsed.has(path)} />);
+    }
+
+    return element;
+  }
+
+  /** Collapses or expands a file of the Changes tab, keeping that for when the viewer mounts again, and turns its chevron. */
+  #setCollapsed(path: string, collapsed: boolean): void {
+    if (collapsed) {
+      this.#collapsed.add(path);
+    } else {
+      this.#collapsed.delete(path);
+    }
+
+    this.#mount?.mount.setCollapsed(path, collapsed);
+    this.deps.draw();
+  }
+
+  /** A collapsed file's header clicked, away from its controls: it expands. */
+  #headerClicked(path: string): void {
+    if (this.#collapsed.has(path)) {
+      this.#setCollapsed(path, false);
+    }
   }
 
   /** A file's header element after its counts, holding its Viewed tick. */
@@ -960,7 +1019,7 @@ export class ChangesController {
       host.replaceChildren();
       this.#mount?.mount.dispose();
 
-      const mount = module.mountChanges(host, rows, { layout: shown.layout, wrap: shown.wrap, loadSides: (path) => this.#loadSides(path), onLine: (path, side, line) => this.openFileView(path, side, line), headerMeta: (path) => this.#meta(path) });
+      const mount = module.mountChanges(host, rows, { layout: shown.layout, wrap: shown.wrap, loadSides: (path) => this.#loadSides(path), onLine: (path, side, line) => this.openFileView(path, side, line), headerMeta: (path) => this.#meta(path), headerPrefix: (path) => this.#prefix(path), onHeader: (path) => this.#headerClicked(path) });
 
       this.#mount = { host, mount, layout: `${shown.layout} ${shown.wrap}`, paths: rows.map(rowShape) };
 
