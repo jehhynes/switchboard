@@ -511,6 +511,13 @@ export const MIGRATIONS = [
      ON CONFLICT (ticketId) DO UPDATE SET revision = revision + 1;`,
   // Voice on a paired device (architecture.md § Remote access): allowed only from this computer, per sign-in, so revoking or pairing anew drops it.
   `ALTER TABLE pageSessions ADD COLUMN voice INTEGER NOT NULL DEFAULT 0;`,
+  // Registered sessions (PRD R81), which resume in the terminal holder once ended, known from the register event's session insert, and a held
+  // session that runs without Code Mode (architecture.md § Code Mode sessions).
+  `ALTER TABLE sessions ADD COLUMN registered INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE sessions ADD COLUMN withoutCodeMode INTEGER NOT NULL DEFAULT 0;
+  UPDATE sessions SET registered = 1
+    WHERE EXISTS (SELECT 1 FROM changes c JOIN events e ON e.id = c.eventId
+      WHERE c.entity = 'session' AND c.op = 'insert' AND c.entityId = sessions.id AND e.type = 'register');`,
 ];
 
 /**
@@ -546,7 +553,7 @@ const REPLY_PLACE = "(source = 'screen' AND withdrawn = 0)";
 /** A reply that counts as unread (`countsUnread`) and was not seen. */
 const UNREAD_REPLY = "seenAt IS NULL AND withdrawn = 0 AND rewrittenBy IS NULL AND kind <> 'note' AND opening <> ''";
 
-const BOOLEANS = new Set(['assigned', 'pool', 'snoozed', 'released', 'releasing', 'approvalHeld', 'external', 'mentioned', 'codeMode', 'promptless', 'personaPinned']);
+const BOOLEANS = new Set(['assigned', 'pool', 'snoozed', 'released', 'releasing', 'approvalHeld', 'external', 'mentioned', 'codeMode', 'promptless', 'personaPinned', 'registered', 'withoutCodeMode']);
 /** Stored as comma-separated text. */
 const LISTS = new Set(['reports', 'retiredIds']);
 /** Stored as JSON text. */
@@ -711,8 +718,9 @@ const UNLOGGED: Record<string, ReadonlySet<string>> = {
   // The register event names an external session, and its end already shows when it was cleared.
   // The background event and its result name a move (PRD R89); its fields are bookkeeping.
   // The session-started event names a Code Mode session; its launch and last process tree are bookkeeping (PRD R93, R95).
+  // The register event names a registered session, and the resume that holds it says whether it runs without Code Mode (PRD R81).
   // The persona event names a pin; the version of the tone section a prompt got is bookkeeping (architecture.md § Personas).
-  sessions: new Set(['stateAt', 'releasing', 'question', 'retiredIds', 'external', 'move', 'movedAt', 'codeMode', 'launchId', 'lastTree', 'promptless', 'personaVersion', 'personaPinned', 'instructionsHash', 'instructionsCompactionId', 'rateLimit']),
+  sessions: new Set(['stateAt', 'releasing', 'question', 'retiredIds', 'external', 'move', 'movedAt', 'codeMode', 'launchId', 'lastTree', 'promptless', 'personaVersion', 'personaPinned', 'instructionsHash', 'instructionsCompactionId', 'rateLimit', 'registered', 'withoutCodeMode']),
   triages: new Set(),
   worktrees: new Set(),
   links: new Set(['reportedAt']),

@@ -1,5 +1,5 @@
 import type { Playbook } from './playbook.js';
-import { activeSession, failedAtTriage, groupOf, ownPrompt, QUESTION_CARD, reviewKey, START_PROMPT, waitsOnCard, waitsOnPermission, waitsToStart } from './group.js';
+import { activeSession, failedAtTriage, groupOf, ownPrompt, QUESTION_CARD, resumesHeld, reviewKey, START_PROMPT, waitsOnCard, waitsOnPermission, waitsToStart } from './group.js';
 import { heldSlots, queueWaits } from './queue.js';
 import { backoff, givesUp, limitFor, MAX_ATTEMPTS, providerLimitUntil, waitsOnLimit } from './limit.js';
 import { latestDue, SCHEDULE_SOURCE, scheduleText } from './schedule.js';
@@ -213,7 +213,8 @@ export type FlowEvent =
    */
   | { type: 'held-idle'; sessionId: string }
   /** `POST /attach` is about to resume this ended Code Mode session under this launch, stored first so a hub restart during the spawn can recognize it (PRD R95). */
-  | { type: 'held-resuming'; sessionId: string; launchId: string }
+  /** `adopt`: an ended registered session becomes held as its resume starts, in Code Mode only when it ran in it (PRD R81). */
+  | { type: 'held-resuming'; sessionId: string; launchId: string; adopt?: { codeMode: boolean } }
   /**
    * `POST /attach` resumed this ended Code Mode session in the holder under a new launch, or the hub found it live under its stored launch (PRD R95),
    * or the hub resumed this ended Codex app-server thread under a new launch (PRD R107).
@@ -494,6 +495,8 @@ function detailOf(store: Store, event: FlowEvent): Record<string, unknown> | nul
       return { shortId: event.shortId, ...(event.startPrompt ? { startPrompt: true } : {}), ...(event.launchId === undefined ? {} : { launchId: event.launchId }) };
     case 'held-resumed':
       return { launchId: event.launchId };
+    case 'held-resuming':
+      return event.adopt === undefined ? null : { codeMode: event.adopt.codeMode };
     case 'session-start-failed':
       return { message: event.message };
     case 'marker':
@@ -708,7 +711,7 @@ class Flow {
       case 'held-idle':
         return this.heldIdle(event.sessionId);
       case 'held-resuming':
-        return this.heldResuming(event.sessionId, event.launchId);
+        return this.heldResuming(event.sessionId, event.launchId, event.adopt);
       case 'held-resumed':
         return this.heldResumed(event.sessionId, event.launchId);
       case 'report':
@@ -1119,6 +1122,7 @@ class Flow {
       movedAt: null,
       codeMode: false,
       launchId: null,
+      registered: true,
     });
   }
 
@@ -2101,8 +2105,14 @@ class Flow {
     }
   }
 
-  private heldResuming(sessionId: string, launchId: string): void {
-    const session = this.store.session(sessionId);
+  private heldResuming(sessionId: string, launchId: string, adopt?: { codeMode: boolean }): void {
+    let session = this.store.session(sessionId);
+
+    // A registered session becomes held as its resume starts; its later resumes keep the mode (PRD R81, mechanics M68).
+    if (session !== null && adopt !== undefined && resumesHeld(session)) {
+      this.store.updateSession(sessionId, { codeMode: true, withoutCodeMode: !adopt.codeMode });
+      session = this.store.session(sessionId);
+    }
 
     if (session?.codeMode === true && session.state === 'ended') {
       // The resume's prompt carries the tone section as the settings have it now.

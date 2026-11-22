@@ -374,3 +374,11 @@ export interface Card {
   /** The URLs of the ticket's links (PRD R52), so a pull request page finds its ticket (PRD R69). A hub older than R69 sends none. */
   links?: string[];
 }
+
+/**
+ * An ended registered Claude session (PRD R81) that is not held yet: opening it resumes it in the terminal holder, where it becomes a held session
+ * (PRD R95).
+ */
+export function resumesHeld(session: Pick<Session, 'registered' | 'codeMode' | 'provider' | 'state' | 'nativeSessionId'>): boolean {
+  return session.registered === true && session.codeMode !== true && session.provider === 'claude' && session.state === 'ended' && session.nativeSessionId !== null;
+}

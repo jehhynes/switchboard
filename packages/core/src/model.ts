@@ -223,8 +223,18 @@ export interface Session {
   move: SessionMove | null;
   /** When the last move ended, so a roster read that started before it does not change the session. */
   movedAt: number | null;
-  /** Runs in Claude Code's Code Mode in the terminal holder, as `sessions.codeMode` said at its start; its resumes keep it (PRD R93). Absent reads as false. */
+  /**
+   * Held in the terminal holder, in Claude Code's Code Mode as `sessions.codeMode` said at its start, unless `withoutCodeMode`; its resumes keep it
+   * (PRD R93, R95). Absent reads as false.
+   */
   codeMode?: boolean;
+  /**
+   * A held session that runs without Code Mode: a registered session that did not run in Code Mode, resumed in the holder as a plain `claude`,
+   * since Claude resumes a session only in the mode it ran in (PRD R81, mechanics M68, M112). Absent reads as false.
+   */
+  withoutCodeMode?: boolean;
+  /** Registered by the operator from their own Claude session (PRD R81); once ended it resumes in the terminal holder. Absent reads as false. */
+  registered?: boolean;
   /** Codex app-server; null or absent preserves the existing exec/holder session. */
   execution?: 'app-server' | null;
   /** Hash of the complete developer instructions delivered to a Codex app-server thread. */

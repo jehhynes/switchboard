@@ -156,6 +156,26 @@ describe('Store', () => {
     store.close();
   });
 
+  it('marks the sessions the register event inserted as registered when upgrading, and no other (PRD R81)', () => {
+    const version = MIGRATIONS.findIndex((migration) => migration.includes('ADD COLUMN registered'));
+    const path = join(dir, 'registered.db');
+    const raw = new DatabaseSync(path);
+    raw.exec(MIGRATIONS.slice(0, version).join(';'));
+    raw.exec(`PRAGMA user_version = ${version};
+      INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'adhoc', '1', 'One', '', 1, ''), (2, 'adhoc', '2', 'Two', '', 1, '');
+      INSERT INTO workItems (id, ticketId, status, createdAt, statusAt) VALUES (1, 1, 'running', 1, 1), (2, 2, 'running', 2, 2);
+      INSERT INTO sessions (id, workItemId, kind, provider, cwd, state, stateAt, startedAt, released) VALUES ('s1', 1, 'task', 'claude', 'D:/a', 'ended', 1, 1, 1), ('s2', 2, 'task', 'claude', 'D:/b', 'ended', 2, 2, 1);
+      INSERT INTO events (id, at, type, actor) VALUES (1001, 1, 'register', 'operator'), (1002, 2, 'adhoc', 'operator');
+      INSERT INTO changes (eventId, ticketId, workItemId, sessionId, entity, entityId, op, fields) VALUES
+        (1001, 1, 1, 's1', 'session', 's1', 'insert', '{}'), (1002, 2, 2, 's2', 'session', 's2', 'insert', '{}');`);
+    raw.close();
+
+    const store = Store.open(path);
+
+    expect([store.session('s1'), store.session('s2')].map((session) => [session!.registered, session!.withoutCodeMode])).toEqual([[true, false], [false, false]]);
+    store.close();
+  });
+
   it("keeps a task report's prompt as its reported prompt when upgrading, and none for another work item (PRD R68, R77)", () => {
     const version = MIGRATIONS.findIndex((migration) => migration.includes('ADD COLUMN reportedPrompt'));
     const path = join(dir, 'reported.db');

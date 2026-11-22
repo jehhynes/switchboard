@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { FlowAction, PolledTicket } from '../src/flow.js';
 import { MESSAGES, nothingNew, UNCONFIRMED_DONE } from '../src/flow.js';
+import { resumesHeld } from '../src/group.js';
 import { failedAtTriage } from '../src/group.js';
 import { HOUR, Harness, MINUTE, REPORT, T0, issue, playbooks, settings } from './flowHarness.js';
 import { heldSlots } from '../src/queue.js';
@@ -1651,6 +1652,41 @@ describe('registered sessions (PRD R81)', () => {
 
     h.act({ type: 'roster', sessions: [] });
     expect(h.store.session('s1')).toMatchObject({ state: 'ended', external: false });
+  });
+
+  it('becomes a held session, without Code Mode when it ran without it, once its resume in the holder starts (PRD R81, R95)', () => {
+    const h = new Harness();
+    register(h);
+    expect(h.store.session('s1')).toMatchObject({ registered: true, codeMode: false });
+
+    // While it runs in the operator's window, or without an adopting resume, nothing changes.
+    h.act({ type: 'held-resuming', sessionId: 's1', launchId: 'l1', adopt: { codeMode: false } });
+    expect(h.store.session('s1')).toMatchObject({ codeMode: false, launchId: null });
+
+    h.act({ type: 'roster', sessions: [] });
+    expect(resumesHeld(h.store.session('s1')!)).toBe(true);
+    h.act({ type: 'held-resuming', sessionId: 's1', launchId: 'l1' });
+    expect(h.store.session('s1')).toMatchObject({ codeMode: false, launchId: null });
+
+    h.act({ type: 'held-resuming', sessionId: 's1', launchId: 'l2', adopt: { codeMode: false } });
+    expect(h.store.session('s1')).toMatchObject({ state: 'ended', codeMode: true, withoutCodeMode: true, launchId: 'l2' });
+    expect(resumesHeld(h.store.session('s1')!)).toBe(false);
+
+    h.act({ type: 'held-resumed', sessionId: 's1', launchId: 'l2' });
+    expect(h.store.session('s1')).toMatchObject({ state: 'idle', released: false, endedAt: null, launchId: 'l2' });
+  });
+
+  it('becomes a Code Mode held session when it ran in Code Mode, and an ad-hoc session never adopts', () => {
+    const h = new Harness();
+    register(h);
+    h.act({ type: 'roster', sessions: [] });
+
+    h.act({ type: 'held-resuming', sessionId: 's1', launchId: 'l1', adopt: { codeMode: true } });
+    expect(h.store.session('s1')).toMatchObject({ codeMode: true, withoutCodeMode: false, launchId: 'l1' });
+
+    h.store.updateSession('s1', { registered: false, codeMode: false });
+    h.act({ type: 'held-resuming', sessionId: 's1', launchId: 'l3', adopt: { codeMode: true } });
+    expect(h.store.session('s1')).toMatchObject({ codeMode: false, launchId: 'l1' });
   });
 
   it('refuses Stop, because the session runs in the operator window', () => {
