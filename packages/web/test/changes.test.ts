@@ -238,18 +238,32 @@ describe('the Changes list', () => {
     source.emit('hello', { key: 'pk', groups: [], scope: scope(), sessions: [session], items: [], more: false, status: null, artifacts: [], unread: 0 });
     return { page, source };
   };
-  const button = () => root.querySelector<HTMLElement>('.changes-button')!;
+  const button = () => root.querySelector<HTMLElement>('.changes-tab')!;
+  const filesButton = () => root.querySelector<HTMLElement>('.changes-files')!;
+  const listGets = () => gets.filter((one) => one.startsWith('/v1/conversation/changes'));
+  /** Opens the Changes tab and its Files menu. */
+  const openList = async () => {
+    button().click();
+    await flush();
+    filesButton().click();
+    await flush();
+  };
 
-  it('reads the list when its menu opens and draws each row with its name, folder, counts and status', async () => {
+  it('ChangesTab_Chosen_ReadsTheListAndItsFilesMenuDrawsEachRowWithItsNameFolderCountsAndStatus', async () => {
     start();
-    expect(root.querySelector('.changes-menu')).toBeNull();
+    expect(root.querySelectorAll('.changes-tab')).toHaveLength(1);
+    expect(button().querySelector('.tab-badge')).toBeNull();
     expect(gets).toEqual([]);
 
     button().click();
+    filesButton().click();
     expect(root.querySelector('.changes-menu')!.textContent).toContain('Reading the changes');
     await flush();
 
-    expect(gets).toEqual(['/v1/conversation/changes?window=pk']);
+    expect(listGets()).toEqual(['/v1/conversation/changes?window=pk']);
+    // One Changes item in the strip, ever.
+    expect(root.querySelectorAll('.changes-tab')).toHaveLength(1);
+    expect(root.querySelector('.changes-button, .tab-close[data-action="diff-close"]')).toBeNull();
 
     const rows = [...root.querySelectorAll<HTMLElement>('.change-row')];
 
@@ -262,21 +276,22 @@ describe('the Changes list', () => {
     expect(root.querySelector('.changes-note')!.textContent).toBe('3 files · +3 −1 · 1 viewed');
     expect(root.querySelector<HTMLElement>('.changes-note')!.title).toBe('Since 0123456');
     expect([...root.querySelectorAll<HTMLInputElement>('.change-viewed input')].map((box) => box.checked)).toEqual([false, true, false]);
-    expect(button().querySelector('.tab-badge')!.textContent).toBe('3');
+    expect(button().querySelector('.tab-badge')!.textContent).toBe('1/3');
+    expect(button().getAttribute('aria-label')).toBe('Changes, 1 of 3 files viewed');
   });
 
-  it('reads it again on Refresh and closes on Escape or a press outside it', async () => {
+  it('reads it again on Refresh, and its Files menu closes on Escape or a press outside it', async () => {
     start();
-    button().click();
-    await flush();
+    await openList();
     root.querySelector<HTMLElement>('[data-action="changes-refresh"]')!.click();
     await flush();
-    expect(gets).toHaveLength(2);
+    expect(listGets()).toHaveLength(2);
 
     root.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     expect(root.querySelector('.changes-menu')).toBeNull();
+    expect(document.activeElement).toBe(filesButton());
 
-    button().click();
+    filesButton().click();
     await flush();
     expect(root.querySelector('.changes-menu')).not.toBeNull();
     root.querySelector<HTMLElement>('.change-row')!.dispatchEvent(new Event('pointerdown', { bubbles: true }));
@@ -290,28 +305,27 @@ describe('the Changes list', () => {
 
     answers.push({ status: 200, body: structuredClone(LIST) }, { status: 200, body: only }, { status: 200, body: { ...only, rows: [], shown: 0, total: 0 } });
     start();
-    button().click();
-    await flush();
+    await openList();
 
     const toggle = () => root.querySelector<HTMLButtonElement>('[data-action="changes-uncommitted"]')!;
 
     expect(toggle().getAttribute('aria-pressed')).toBe('false');
     expect(toggle().title).toBe('Show uncommitted changes only');
-    expect(button().title).toBe("The worktree's changes since its base");
+    expect(button().title).toBe("Every changed file's diff since the base");
 
     toggle().click();
     expect(root.querySelector('.changes-empty')!.textContent).toBe('Reading the changes…');
     await flush();
-    expect(gets.at(-1)).toBe('/v1/conversation/changes?window=pk&uncommitted=1');
+    expect(listGets().at(-1)).toBe('/v1/conversation/changes?window=pk&uncommitted=1');
     expect(localStorage.getItem(UNCOMMITTED_KEY)).toBe('1');
     expect(toggle().getAttribute('aria-pressed')).toBe('true');
     expect(toggle().title).toBe('Show all changes since the base');
     expect(toggle().querySelector('.codicon-filter-filled')).not.toBeNull();
     expect(root.querySelectorAll('.change-row')).toHaveLength(2);
     expect(root.querySelector<HTMLElement>('.changes-note')!.title).toBe('Uncommitted changes, against HEAD');
-    expect(button().querySelector('.tab-badge')!.textContent).toBe('2');
-    expect(button().getAttribute('aria-label')).toBe('Changes list, 2 uncommitted files');
-    expect(button().title).toBe("The worktree's uncommitted changes");
+    expect(button().querySelector('.tab-badge')!.textContent).toBe('1/2');
+    expect(button().getAttribute('aria-label')).toBe('Changes, 1 of 2 uncommitted files viewed');
+    expect(button().title).toBe("Every uncommitted file's diff");
 
     // A tick names the list it was shown in.
     root.querySelectorAll<HTMLElement>('.change-viewed input')[0]!.click();
@@ -326,7 +340,7 @@ describe('the Changes list', () => {
 
     toggle().click();
     await flush();
-    expect(gets.at(-1)).toBe('/v1/conversation/changes?window=pk');
+    expect(listGets().at(-1)).toBe('/v1/conversation/changes?window=pk');
     expect(localStorage.getItem(UNCOMMITTED_KEY)).toBeNull();
     expect(root.querySelectorAll('.change-row')).toHaveLength(3);
   });
@@ -338,7 +352,7 @@ describe('the Changes list', () => {
 
     button().click();
     await flush();
-    expect(gets).toEqual(['/v1/conversation/changes?window=pk&uncommitted=1']);
+    expect(listGets()).toEqual(['/v1/conversation/changes?window=pk&uncommitted=1']);
     expect(root.querySelector('[data-action="changes-uncommitted"]')!.getAttribute('aria-pressed')).toBe('true');
 
     source.emit('scope', { scope: scope(4, 2) });
@@ -346,15 +360,15 @@ describe('the Changes list', () => {
     expect(root.querySelector('.changes-menu')).toBeNull();
     button().click();
     await flush();
-    expect(gets).toEqual(['/v1/conversation/changes?window=pk&uncommitted=1', '/v1/conversation/changes?window=pk&uncommitted=1']);
+    expect(listGets()).toEqual(['/v1/conversation/changes?window=pk&uncommitted=1', '/v1/conversation/changes?window=pk&uncommitted=1']);
   });
 
   it("says why when the hub refuses, and says when the worktree matches its base", async () => {
     answers.push({ status: 409, body: { error: 'D:/w is not in a git repository.' } }, { status: 200, body: { ...LIST, rows: [], shown: 0, total: 0 } });
     start();
-    button().click();
-    await flush();
+    await openList();
     expect(root.querySelector('.changes-empty.error')!.textContent).toBe('D:/w is not in a git repository.');
+    expect(root.querySelector('.diff-host')!.textContent).toBe('D:/w is not in a git repository.');
 
     root.querySelector<HTMLElement>('[data-action="changes-refresh"]')!.click();
     await flush();
@@ -366,8 +380,7 @@ describe('the Changes list', () => {
     const held = new Promise<void>((resolve) => (release = resolve));
     const { source } = start();
 
-    button().click();
-    await flush();
+    await openList();
     expect(root.querySelectorAll('.change-row')).toHaveLength(3);
 
     source.emit('scope', { scope: scope(4, 2) });
@@ -382,26 +395,25 @@ describe('the Changes list', () => {
     release();
     await flush();
     await flush();
-    expect(gets).toHaveLength(2);
+    expect(listGets()).toHaveLength(2);
     expect(button().querySelector('.tab-badge')).toBeNull();
   });
 
-  it("reads an open menu's list again when the session's turn ends", async () => {
+  it("reads an opened Changes tab's list again when the session's turn ends", async () => {
     const { source } = start();
 
     button().click();
     await flush();
     source.emit('session', { session: { ...session, state: 'running' } });
     await flush();
-    expect(gets).toHaveLength(1);
+    expect(listGets()).toHaveLength(1);
     source.emit('session', { session: { ...session, state: 'idle' } });
     await flush();
-    expect(gets).toHaveLength(2);
+    expect(listGets()).toHaveLength(2);
   });
 
   const openRow = async (index: number) => {
-    button().click();
-    await flush();
+    await openList();
     root.querySelectorAll<HTMLElement>('.change-row')[index]!.click();
     await flush();
     await flush();
@@ -409,21 +421,23 @@ describe('the Changes list', () => {
   };
   const diffGets = () => gets.filter((one) => one.startsWith('/v1/conversation/diff'));
 
-  it('ChangesTab_PickingARow_OpensOneTabScrolledToThatFileWithNothingAboveTheDiffs', async () => {
+  it('ChangesTab_PickingAFile_ScrollsTheOneTabToItUnderItsBar', async () => {
     start();
     await openRow(1);
 
     expect(root.querySelector('.changes-menu')).toBeNull();
-    expect([...root.querySelectorAll('.diff-tab .tab-label')].map((one) => one.textContent)).toEqual(['Changes']);
-    expect(root.querySelector('.diff-tab .tab-badge')!.textContent).toBe('1/3');
-    expect(root.querySelector('.diff-tab')!.classList.contains('selected')).toBe(true);
+    expect([...root.querySelectorAll('.changes-tab .tab-label')].map((one) => one.textContent)).toEqual(['Changes']);
+    expect(root.querySelector('.changes-tab .tab-badge')!.textContent).toBe('1/3');
+    expect(root.querySelector('.changes-tab')!.classList.contains('selected')).toBe(true);
     expect(changesMounts).toHaveLength(1);
     expect(changesMounts[0]!.rows).toEqual(['docs/a.md', 'src/new.ts', 'logo.png']);
     expect(changesMounts[0]!.scrolls).toEqual(['src/new.ts']);
     // A phone's width (test/setup.ts): stacked and wrapped.
     expect(changesMounts[0]).toMatchObject({ layout: 'stacked', wrap: true });
-    // Nothing above the diffs: the view holds the viewer's host alone, and each file's own header carries only its Viewed tick from the page.
-    expect([...root.querySelector('.diff-view')!.children].map((one) => one.className)).toEqual(['diff-host']);
+    // The bar, then the diffs; each file's own header carries only its Viewed tick from the page.
+    expect([...root.querySelector('.diff-view')!.children].map((one) => one.className)).toEqual(['changes-bar', 'diff-host']);
+    expect(root.querySelector('.changes-bar .changes-note')!.textContent).toBe('3 files · +3 −1 · 1 viewed');
+    expect([...root.querySelectorAll<HTMLElement>('.changes-bar [data-action]')].map((one) => one.dataset['action'])).toEqual(['changes-menu', 'changes-uncommitted', 'changes-hide-viewed', 'changes-collapse-all', 'changes-expand-all', 'changes-refresh']);
     expect(root.querySelector('.diff-head')).toBeNull();
     expect([...root.querySelectorAll<HTMLInputElement>('.diff-host .diff-viewed input')].map((box) => [box.dataset['path'], box.checked])).toEqual([
       ['docs/a.md', false],
@@ -435,7 +449,7 @@ describe('the Changes list', () => {
     root.querySelectorAll<HTMLElement>('.diff-host .diff-viewed input')[0]!.click();
     await flush();
     expect(gets.at(-1)).toBe('VIEWED docs/a.md h-a true 3');
-    expect(root.querySelector('.diff-tab .tab-badge')!.textContent).toBe('2/3');
+    expect(root.querySelector('.changes-tab .tab-badge')!.textContent).toBe('2/3');
     expect(root.querySelectorAll<HTMLInputElement>('.diff-host .diff-viewed input')[0]!.checked).toBe(true);
 
     // Picking another row scrolls the same tab.
@@ -443,12 +457,21 @@ describe('the Changes list', () => {
     expect(changesMounts).toHaveLength(1);
     expect(changesMounts[0]!.scrolls).toEqual(['src/new.ts', 'docs/a.md']);
 
-    // Closing the tab ends the viewer and goes back to the conversation.
-    root.querySelector<HTMLElement>('.diff-tab .tab-close')!.click();
+    // Another tab ends the viewer; choosing Changes again shows the same one tab, its list not read again.
+    const reads = listGets().length;
+
+    root.querySelector<HTMLElement>('[data-tab="conversation"]')!.click();
     await flush();
-    expect(root.querySelector('.diff-tab')).toBeNull();
     expect(root.querySelector('.diff-view')).toBeNull();
     expect(changesMounts[0]!.disposed).toBe(true);
+    expect(root.querySelectorAll('.changes-tab')).toHaveLength(1);
+    button().click();
+    await flush();
+    await flush();
+    expect(root.querySelectorAll('.changes-tab')).toHaveLength(1);
+    expect(root.querySelector('.changes-tab')!.classList.contains('selected')).toBe(true);
+    expect(changesMounts).toHaveLength(2);
+    expect(listGets()).toHaveLength(reads);
   });
 
   it('ChangesTab_ForTheFilesInView_ReadsEachPatchAloneAndDrawsItOrWhyNot', async () => {
@@ -726,7 +749,7 @@ describe('the Changes list', () => {
     expect(changesMounts[0]!.collapsed).not.toContain('docs/a.md true');
     source.emit('viewed', { workItemId: 1, path: 'logo.png', hash: 'h-logo', viewed: true });
     expect(changesMounts[0]!.collapsed.at(-1)).toBe('logo.png true');
-    expect(root.querySelector('.diff-tab .tab-badge')!.textContent).toBe('3/3');
+    expect(root.querySelector('.changes-tab .tab-badge')!.textContent).toBe('3/3');
 
     // Cleared there again: the file collapsed for its tick opens.
     source.emit('viewed', { workItemId: 1, path: 'logo.png', hash: 'h-logo', viewed: false });
@@ -814,8 +837,6 @@ describe('the Changes list', () => {
     }
 
     expect(diffGets().map((one) => /path=([^&]*)/.exec(one)![1])).toEqual(['small.ts', 'big.ts']);
-    root.querySelector<HTMLElement>('.changes-button')!.click();
-    await flush();
     root.querySelector<HTMLElement>('[data-action="changes-refresh"]')!.click();
     await flush();
     await flush();
@@ -890,8 +911,8 @@ describe('the Changes list', () => {
     press('n');
     expect(changesMounts[0]!.scrolls.at(-1)).toBe('docs/a.md:90');
 
-    // Closing the tab forgets where n went; from line 20, p goes back to 3.
-    root.querySelector<HTMLElement>('.diff-tab .tab-close')!.click();
+    // Choosing the tab again forgets where n went; from line 20, p goes back to 3.
+    root.querySelector<HTMLElement>('[data-tab="conversation"]')!.click();
     await openRow(0);
     topLines = { 'docs/a.md': 20 };
     root.querySelector<HTMLElement>('.diff-view')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', bubbles: true, cancelable: true }));
@@ -923,7 +944,7 @@ describe('the Changes list', () => {
   it('ChangesMenu_Buttons_HideViewedCollapseAndExpandEveryFile', async () => {
     start();
     await openRow(0);
-    button().click();
+    filesButton().click();
     await flush();
     root.querySelector<HTMLElement>('[data-action="changes-hide-viewed"]')!.click();
     expect(changesMounts[0]!.rows).toEqual(['docs/a.md', 'logo.png']);
@@ -943,15 +964,13 @@ describe('the Changes list', () => {
   it('ChangesTab_UncommittedOnlyToggled_DropsTheDiffsAndReadsThemAgainstHead', async () => {
     const only = structuredClone({ ...LIST, base: null, uncommitted: true });
 
-    // The menu's read, the tab's and the menu's again, then the uncommitted list.
-    answers.push({ status: 200, body: structuredClone(LIST) }, { status: 200, body: structuredClone(LIST) }, { status: 200, body: structuredClone(LIST) }, { status: 200, body: only });
+    // The tab's read, then the uncommitted list.
+    answers.push({ status: 200, body: structuredClone(LIST) }, { status: 200, body: only });
     start();
     await openRow(0);
     expect(diffGets()[0]).toBe('/v1/conversation/diff?window=pk&path=docs%2Fa.md&sides=0');
     expect(diffGets().some((one) => one.includes('uncommitted'))).toBe(false);
 
-    button().click();
-    await flush();
     root.querySelector<HTMLElement>('[data-action="changes-uncommitted"]')!.click();
     await flush();
     await flush();
@@ -976,13 +995,11 @@ describe('the Changes list', () => {
     let release: () => void = () => {};
 
     moduleGate = new Promise<void>((resolve) => (release = resolve));
-    answers.push({ status: 200, body: structuredClone(LIST) }, { status: 200, body: structuredClone(LIST) }, { status: 200, body: structuredClone(LIST) }, { status: 200, body: { ...LIST, rows: [], shown: 0, total: 0, base: null, uncommitted: true } });
+    answers.push({ status: 200, body: structuredClone(LIST) }, { status: 200, body: { ...LIST, rows: [], shown: 0, total: 0, base: null, uncommitted: true } });
     start();
     await openRow(0);
     expect(root.querySelector('.diff-host')!.textContent).toBe('Loading the diff viewer…');
 
-    button().click();
-    await flush();
     root.querySelector<HTMLElement>('[data-action="changes-uncommitted"]')!.click();
     await flush();
     release();
@@ -998,8 +1015,7 @@ describe('the Changes list', () => {
     const held = new Promise<void>((resolve) => (answer = resolve));
 
     start();
-    button().click();
-    await flush();
+    await openList();
 
     const box = () => root.querySelectorAll<HTMLElement>('.change-viewed input')[0]!;
 
@@ -1068,8 +1084,7 @@ describe('the Changes list', () => {
     const { source } = start();
 
     source.emit('list', { groups: [{ key: 'progress', title: 'progress', glyph: '', empty: null, rows: [listRow({ opens: [{ label: 'Open in VS Code', icon: 'vscode' }] })] }] });
-    button().click();
-    await flush();
+    await openList();
     // It stays in the work item's Actions menu only.
     expect(root.querySelector('.changes-menu')).not.toBeNull();
     expect(root.querySelector('.changes-menu [data-label="Open in VS Code"], .changes-open')).toBeNull();
@@ -1119,14 +1134,11 @@ describe('the Changes list', () => {
   it('ticks a file viewed at the hash it was shown with, follows another device, and takes back a refused tick', async () => {
     const { source } = start();
 
-    button().click();
-    await flush();
+    await openList();
     root.querySelectorAll<HTMLElement>('.change-viewed input')[0]!.click();
     await flush();
     expect(gets.at(-1)).toBe('VIEWED docs/a.md h-a true 3');
     expect(root.querySelectorAll<HTMLInputElement>('.change-viewed input')[0]!.checked).toBe(true);
-    // Ticking does not open the Changes tab.
-    expect(root.querySelector('.diff-tab')).toBeNull();
 
     // Another device clears it at that hash; one at another hash, or for another work item, changes nothing.
     source.emit('viewed', { workItemId: 1, path: 'docs/a.md', hash: 'other', viewed: false });
@@ -1146,8 +1158,7 @@ describe('the Changes list', () => {
 
   it('sends a file\'s ticks one at a time, ending on the last click', async () => {
     start();
-    button().click();
-    await flush();
+    await openList();
 
     const box = () => root.querySelectorAll<HTMLElement>('.change-viewed input')[0]!;
 
@@ -1178,7 +1189,8 @@ describe('the Changes list', () => {
 
     await openRow(0);
     source.emit('hello', { key: 'pk', groups: [], scope: scope(4, 2), sessions: [session], items: [], more: false, status: null, artifacts: [], unread: 0 });
-    expect(root.querySelector('.diff-tab')).toBeNull();
+    expect(root.querySelector('.changes-tab.selected')).toBeNull();
+    expect(root.querySelector('.changes-tab .tab-badge')).toBeNull();
     expect(root.querySelector('.diff-view')).toBeNull();
     expect(changesMounts[0]!.disposed).toBe(true);
   });

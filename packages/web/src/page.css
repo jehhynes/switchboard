@@ -400,25 +400,24 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 .tab.artifact-menu-button { border-right: none; border-left: 1px solid var(--vscode-panel-border); padding: 0 10px; }
 .tab.artifact-menu-button.open { color: var(--vscode-panelTitle-activeForeground); background: var(--sb-tab-surface); }
 .tab-badge.muted { color: var(--vscode-badge-foreground); background: var(--vscode-badge-background); }
-/* The strip never wraps. Narrower than 600 px it keeps its own tabs whole and shows Artifacts and Changes as their icons with their counts, each
-   still opening its list, and the Changes tab as its icon and close mark, only while chosen, the Changes list opening it. Under 360 px its tabs'
-   padding shrinks. */
+/* The strip never wraps. Narrower than 600 px it keeps its own tabs whole, shows Artifacts as its icon with its count, still opening its list,
+   the Changes tab as its icon with how many files are viewed of all, and a file tab only while chosen. Under 360 px its tabs' padding shrinks. */
 @container (max-width: 600px) {
-  .tab.artifact-menu-button .tab-label, .tab.artifact-menu-button .codicon-chevron-down, .tab.changes-button .tab-label, .tab.changes-button .codicon-chevron-down, .tab.diff-tab .tab-label, .tab.diff-tab .tab-badge { display: none; }
-  .tab.artifact-menu-button, .tab.changes-button { padding: 0 10px; }
+  .tab.artifact-menu-button .tab-label, .tab.artifact-menu-button .codicon-chevron-down, .tab.changes-tab .tab-label, .tab.diff-tab .tab-label, .tab.diff-tab .tab-badge { display: none; }
+  .tab.artifact-menu-button, .tab.changes-tab { padding: 0 10px; }
   .tab.diff-tab:not(.selected) { display: none; }
   .tab.diff-tab.selected { flex: none; border-left: 1px solid var(--vscode-panel-border); }
-  .tab.diff-tab.selected, .tab.changes-button { margin-left: auto; }
-  .tab.diff-tab.selected ~ .tab.changes-button, .artifact-more ~ .tab.diff-tab.selected, .artifact-more ~ .tab.changes-button { margin-left: 0; }
+  .tab.diff-tab.selected, .tab.changes-tab { margin-left: auto; }
+  .tab.diff-tab.selected ~ .tab.changes-tab, .artifact-more ~ .tab.diff-tab.selected, .artifact-more ~ .tab.changes-tab { margin-left: 0; }
   /* A file tab keeps its name, cut to the room left. */
   .tab.local-tab .tab-label { display: inline; }
   .tab.local-tab.selected { flex: 0 1 auto; min-width: 0; }
 }
-@media (hover: none), (pointer: coarse) { .tab.artifact-menu-button, .tab.changes-button { min-width: 44px; justify-content: center; } }
+@media (hover: none), (pointer: coarse) { .tab.artifact-menu-button, .tab.changes-tab { min-width: 44px; justify-content: center; } }
 @container (max-width: 360px) {
   .tab { padding: 0 9px; }
   .tab > .unread-dot { top: 8px; right: 0; }
-  .tab.artifact-menu-button, .tab.changes-button { padding: 0 8px; }
+  .tab.artifact-menu-button, .tab.changes-tab { padding: 0 8px; }
 }
 /* The Artifacts menu's rows share its columns, so each artifact's kind lines up under the one above: the title takes the room left and is cut
    first, and a kind longer than a word is cut at 14 characters so it cannot crowd the title out. The menu may reach past its strip, up to 480 px and the viewport's width, so on a viewport under 520 px, as on a phone, it leaves the kind
@@ -691,8 +690,8 @@ body.artifact-window > .artifact-view { height: 100%; }
 }
 /* On a touch screen every icon button in the bars, inside a menu's anchor or not, is at least 44 px square, with its glyph at 20 px, centred. */
 @media (hover: none), (pointer: coarse) {
-  :is(.header, .list-header, .hist-bar, .settings-head, .persona-head, .artifact-head, .changes-head) :is(button.icon, a.icon, button.actions) { min-width: 44px; min-height: 44px; align-items: center; justify-content: center; }
-  :is(.header, .list-header, .hist-bar, .settings-head, .persona-head, .artifact-head, .changes-head) :is(button.icon, a.icon, button.actions) > .codicon { font-size: 20px; line-height: 1; }
+  :is(.header, .list-header, .hist-bar, .settings-head, .persona-head, .artifact-head, .changes-bar) :is(button.icon, a.icon, button.actions) { min-width: 44px; min-height: 44px; align-items: center; justify-content: center; }
+  :is(.header, .list-header, .hist-bar, .settings-head, .persona-head, .artifact-head, .changes-bar) :is(button.icon, a.icon, button.actions) > .codicon { font-size: 20px; line-height: 1; }
 }
 /* A narrow screen gives the conversation its width: less padding round the timeline and the composer. */
 @media (max-width: 600px) {
@@ -844,8 +843,7 @@ a.sheet-button { display: inline-flex; align-items: center; text-decoration: non
 /* Maximized (main.ts), the column covers the whole page, the list and the conversation too, which keep their places under it; its strip's last
    button restores it. */
 .tab.panel-max { flex: none; justify-content: center; padding: 0 10px; border-right: none; border-left: 1px solid var(--vscode-panel-border); cursor: pointer; }
-@media (hover: none), (pointer: coarse) { .tab.panel-max { min-width: 44px; } }
-:where(html:not(.phone)) #root.wide.maximized > .detail { position: fixed; inset: var(--sb-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); z-index: var(--sb-z-maximized); min-width: 0; border-left: none; }
+@media (hover: none), (pointer: coarse) { .tab.panel-max { min-width: 44px; } }:where(html:not(.phone)) #root.wide.maximized > .detail { position: fixed; inset: var(--sb-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); z-index: var(--sb-z-maximized); min-width: 0; border-left: none; }
 /* The column's tab strip starts at the column's top, with no band above, and its tabs keep their own height. One pixel of the strip above
    them keeps the chosen tab's top edge off the window's top edge, which the window's frame can cover. */
 :where(html:not(.phone)) .detail-head { flex: none; display: flex; align-items: flex-start; padding-top: 1px; border-bottom: 1px solid var(--vscode-panel-border); }

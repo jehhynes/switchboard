@@ -4,7 +4,7 @@ import { ARTIFACT_MENU_WIDTH, ARTIFACT_TAB_WIDTH, ARTIFACT_TABS_MAX, artifactBar
 import { EMPTY } from '../src/model.js';
 import type { ArtifactView } from '@switchboard/protocol';
 import { html } from './html.js';
-import { changesButton, newChanges } from '../src/changes.js';
+import { changesTab, newChanges } from '../src/changes.js';
 import { PAGE_ASSETS } from '../dist/index.js';
 
 const artifact = (index: number): ArtifactView => ({ path: `chat/a${index}.md`, owner: 'chat', kind: 'note', title: `Note ${index}`, ext: 'md', type: 'markdown', updatedAt: 1_000 + index });
@@ -114,17 +114,25 @@ describe('the tab strip on a narrow screen', () => {
   const css = PAGE_ASSETS['page.css']!.body;
   const narrow = /@container \(max-width: 600px\) \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
 
-  it('never wraps, and under 600 px shows Artifacts, Changes and the Changes tab as their icons and counts, the tab only while chosen', () => {
+  it('never wraps, and under 600 px shows Artifacts and the Changes tab as their icons and counts, and a file tab only while chosen', () => {
     // A size container is a stacking context: the strip stands above the pane after it, so the Artifacts menu inside it does too.
     expect(css).toMatch(/\.tabs \{ position: relative; z-index: 3; display: flex; flex-wrap: nowrap; container-type: inline-size;/);
-    expect(narrow).toContain('.tab.artifact-menu-button .tab-label, .tab.artifact-menu-button .codicon-chevron-down, .tab.changes-button .tab-label, .tab.changes-button .codicon-chevron-down, .tab.diff-tab .tab-label, .tab.diff-tab .tab-badge { display: none; }');
-    // The Changes tab keeps its icon and close mark whole.
+    expect(narrow).toContain('.tab.artifact-menu-button .tab-label, .tab.artifact-menu-button .codicon-chevron-down, .tab.changes-tab .tab-label, .tab.diff-tab .tab-label, .tab.diff-tab .tab-badge { display: none; }');
+    // The Changes tab is never hidden; a file tab keeps its icon and close mark whole.
+    expect(narrow).not.toMatch(/\.changes-tab(?![^{]*\.tab-label)[^{]*\{[^}]*display: none/);
     expect(narrow).toContain('.tab.diff-tab.selected { flex: none;');
     expect(narrow).toContain('.tab.diff-tab:not(.selected) { display: none; }');
     // Conversation, Status, Console and Browser are never hidden.
     expect(narrow).not.toMatch(/\.tab(\[data-tab|\.selected|:not\(\.diff-tab)[^{]*\{[^}]*display: none/);
     expect(css).toMatch(/@container \(max-width: 360px\) \{\n  \.tab \{ padding: 0 9px; \}/);
-    expect(css).toMatch(/@media \(hover: none\), \(pointer: coarse\) \{ \.tab\.artifact-menu-button, \.tab\.changes-button \{ min-width: 44px;/);
+    expect(css).toMatch(/@media \(hover: none\), \(pointer: coarse\) \{ \.tab\.artifact-menu-button, \.tab\.changes-tab \{ min-width: 44px;/);
+  });
+
+  it('ChangesBar_OnATouchScreenUnder480px_PutsTheNoteOnARowOfItsOwn', () => {
+    const changes = PAGE_ASSETS['page.css']!.body;
+
+    expect(changes).toMatch(/\.changes-bar \{[^}]*display: flex; flex-wrap: wrap;/);
+    expect(changes).toContain('@media (hover: none), (pointer: coarse) { @container (max-width: 479px) { .changes-files { margin-right: auto; } .changes-note { order: 1; flex-basis: 100%;');
   });
 
   it('lines up the Artifacts menu kinds in a column, cutting the title first, and leaves the kind out on a viewport under 520 px', () => {
@@ -137,12 +145,12 @@ describe('the tab strip on a narrow screen', () => {
     expect(css.match(/\.menu-kind[^{]*\{[^}]*display: none/g)).toHaveLength(1);
   });
 
-  it('names the Artifacts and Changes buttons with their counts, as their labels may be hidden', () => {
+  it('names the Artifacts button and the Changes tab with their counts, as their labels may be hidden', () => {
     const state = { ...EMPTY, artifacts: eight };
 
     expect(html(renderTabs(newView(), state, false, { open: null, fit: 1, menu: false, now: 0 }))).toContain('aria-label="Artifacts, 7 more"');
-    expect(html(changesButton(newChanges()))).toContain('aria-label="Changes list"');
-    expect(html(changesButton({ ...newChanges(), list: { total: 3, rows: [] } as never }))).toContain('aria-label="Changes list, 3 files"');
+    expect(html(changesTab(newChanges(), false))).toContain('aria-label="Changes"');
+    expect(html(changesTab({ ...newChanges(), list: { total: 3, rows: [{ viewed: true }] } as never }, true))).toContain('aria-label="Changes, 1 of 3 files viewed"');
   });
 });
 
