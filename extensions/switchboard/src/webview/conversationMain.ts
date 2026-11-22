@@ -5,7 +5,7 @@ import type { CardDraft, EarlierStatuses, HeaderMenu } from './conversationRende
 import type { StatusView } from '@switchboard/hub';
 import { answerText, complete, parseQuestions } from '@switchboard/conversation/questions';
 import { placeMenus } from '@switchboard/conversation/menuPlace';
-import { selectedEntry, statusLine } from '../conversationModel.js';
+import { statusLine } from '../conversationModel.js';
 import type { ConversationMessage, SendTarget, Tab } from './conversationRender.js';
 import { startComposerExtras } from './composerExtras.js';
 import { morph } from './morph.js';
@@ -53,24 +53,8 @@ export const STATUS_NEW_MS = 60_000;
 const STATUS_AGE_MS = 30_000;
 /** The tallest the composer grows before it scrolls, as Claude Code's. */
 const COMPOSER_MAX_PX = 200;
-/** The longest title the placeholder names before it is cut. */
-const PLACEHOLDER_TITLE_CHARS = 40;
 /** How long the composer waits after the last key before it tells the hub its draft (architecture.md § Dictation). */
 export const COMPOSER_DRAFT_MS = 300;
-
-/** The work item's title for the placeholder: without leading tags such as "[Feedback]", cut at a word to fit one line. */
-export function shortTitle(title: string): string {
-  const bare = title.replace(/^(\s*\[[^\]]*\])+\s*/, '').trim() || title.trim();
-
-  if (bare.length <= PLACEHOLDER_TITLE_CHARS) {
-    return bare;
-  }
-
-  const cut = bare.slice(0, PLACEHOLDER_TITLE_CHARS + 1);
-  const space = cut.lastIndexOf(' ');
-
-  return (space > PLACEHOLDER_TITLE_CHARS / 2 ? cut.slice(0, space) : cut.slice(0, PLACEHOLDER_TITLE_CHARS)).trimEnd();
-}
 
 /** Opens each open menu down and to the right of its button, or the other way where the view has no room (`placeMenus`, architecture.md § Menus). */
 function fitMenus(root: HTMLElement): void {
@@ -427,7 +411,7 @@ function startComposer(
       // A window with no selected conversation, such as a folder window before its first, has no composer.
       host.hidden = state.scope === null || state.scope.workItemId === null;
       input.disabled = !enabled;
-      input.placeholder = enabled ? `Message ${shortTitle(selectedEntry(state)?.title ?? state.scope?.title ?? '')}…` : (state.session?.reason ?? (state.connected ? 'No session has started yet.' : 'Connecting to Switchboard…'));
+      input.placeholder = enabled ? 'Message…' : (state.session?.reason ?? (state.connected ? 'No session has started yet.' : 'Connecting to Switchboard…'));
       // Redrawn only when they change, so a state event between a press and its release does not swallow the click.
       redraw(voiceControls, renderVoiceControls(state.voice, enabled));
       redraw(micSlot, enabled ? renderMicButton(state.voice) : '');

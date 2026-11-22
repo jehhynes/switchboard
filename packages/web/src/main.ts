@@ -1,4 +1,4 @@
-import { applyEvent, commandQuery, EMPTY, mentionOf, mentionQuery, pageTitle, rowLink, selectedEntry, selectedRow, sentTexts, shortTitle, tabUrl, withEarlier } from './model.js';
+import { applyEvent, commandQuery, EMPTY, mentionOf, mentionQuery, pageTitle, rowLink, selectedRow, sentTexts, tabUrl, withEarlier } from './model.js';
 import { snoozeChoices } from '@switchboard/core/snooze';
 import type { PageState } from './model.js';
 import { placeMenus } from '@switchboard/conversation/menuPlace';
@@ -1101,7 +1101,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     input.disabled = !full;
     attachButton.disabled = !full;
     input.placeholder = full
-      ? `Message ${shortTitle(selectedEntry(state)?.title ?? state.scope?.title ?? '')}…`
+      ? 'Message…'
       : state.session?.state === 'ended' && state.session.conversation !== 'none'
         ? 'Resume the session to send a message.'
         : (state.session?.reason ?? (state.connected ? 'No session has started yet.' : 'Connecting to Switchboard…'));

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { afterEach, onTestFinished, beforeEach, describe, expect, it, vi } from 'vitest';
-import { applyEvent, awaitingReply, EMPTY, mentionOf, mentionQuery, commandQuery, shortTitle, timeline, withEarlier } from '../src/model.js';
+import { applyEvent, awaitingReply, EMPTY, mentionOf, mentionQuery, commandQuery, timeline, withEarlier } from '../src/model.js';
 import { answerText, answersIn, complete, parseQuestions } from '@switchboard/conversation/questions';
 import { artifactUrl, BROWSER_MIN_WIDTH, browserNote, paneLink, collapsedGroups, newView, renderMicButton, renderVoice, markdownBody } from '../src/render.js';
 import { renderArtifactView } from '../src/side.js';
@@ -69,7 +69,6 @@ describe('the page model', () => {
     expect(mentionQuery('mail@x')).toBeNull();
     expect(commandQuery('/rev')).toBe('rev');
     expect(commandQuery('hi /rev')).toBeNull();
-    expect(shortTitle('[Feedback] Make the inbox badge count only unread conversations')).toBe('Make the inbox badge count only unread');
   });
 });
 
@@ -891,7 +890,8 @@ describe('the page', () => {
     const input = root.querySelector('textarea')!;
 
     expect(input.disabled).toBe(false);
-    expect(input.placeholder).toBe('Message Fix it…');
+    // The same short placeholder in every conversation, not its title.
+    expect(input.placeholder).toBe('Message…');
     input.value = 'hello there';
     input.dispatchEvent(new Event('input'));
     expect(JSON.parse(localStorage.getItem('switchboard.drafts')!)).toEqual({ 1: 'hello there' });

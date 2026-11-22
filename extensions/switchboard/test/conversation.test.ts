@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { applyEvent, awaitingReply, EMPTY_CONVERSATION, isWorking, lastSpokenReply, limitText, micOn, selectedEntry, stateIcon, statusLine, timeline, totalUnread, voiceStatus, withEarlier } from '../src/conversationModel.js';
 import type { ConversationState, Entry } from '../src/conversationModel.js';
 import { linkTarget, previewLinks, supportsSecondarySidebar } from '../src/links.js';
-import { SENT_NOTE_MS, shortTitle, startConversation, STATUS_NEW_MS } from '../src/webview/conversationMain.js';
+import { SENT_NOTE_MS, startConversation, STATUS_NEW_MS } from '../src/webview/conversationMain.js';
 import { ago, linkAllowed, personaButton, PICKER, renderConversation, renderMarkdown, renderMicButton, renderVoiceControls, withoutQuestions } from '../src/webview/conversationRender.js';
 import type { Tab } from '../src/webview/conversationRender.js';
 
@@ -1279,7 +1279,8 @@ describe('the composer', () => {
 
     show(state());
     expect(input.disabled).toBe(false);
-    expect(input.placeholder).toBe('Message Fix the <inbox> badge…');
+    // The same short placeholder in every conversation: the header already names it.
+    expect(input.placeholder).toBe('Message…');
 
     input.value = 'Fix it\nplease';
     // Shift+Enter is a new line, left to the box.
@@ -1343,13 +1344,6 @@ describe('the composer', () => {
     expect(send.disabled).toBe(true);
     send.click();
     expect(posted.filter((message) => message.type === 'send')).toHaveLength(1);
-  });
-
-  it('names the work item in the placeholder without its leading tags, cut at a word', () => {
-    expect(shortTitle('[Feedback] Event Time-slot no longer a Choice to select for UI')).toBe('Event Time-slot no longer a Choice to');
-    expect(shortTitle('[Support][Bug]  Fix the badge')).toBe('Fix the badge');
-    expect(shortTitle('[Only a tag]')).toBe('[Only a tag]');
-    expect(shortTitle('A'.repeat(60))).toBe('A'.repeat(40));
   });
 
   it("keeps the text and shows the hub's refusal above the box until it is dismissed", () => {
@@ -1994,7 +1988,7 @@ describe('several conversations in a window (architecture.md § Conversation vie
     input.value = 'Draft for the work item';
     show(hosted);
     expect(input.value).toBe('');
-    expect(input.placeholder).toBe('Message New session…');
+    expect(input.placeholder).toBe('Message…');
     input.value = 'Draft for the new session';
 
     // A message of the work item's conversation that was not sent goes back to that draft only.

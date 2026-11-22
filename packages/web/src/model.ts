@@ -276,20 +276,6 @@ export function selectedEntry(state: PageState): ConversationEntry | null {
   return state.scope?.conversations.find((entry) => entry.workItemId === state.scope?.workItemId) ?? null;
 }
 
-/** A title for the composer's placeholder: without leading tags such as "[Feedback]", cut at a word after 40 characters. */
-export function shortTitle(title: string): string {
-  const bare = title.replace(/^(\s*\[[^\]]*\])+\s*/, '').trim() || title.trim();
-
-  if (bare.length <= 40) {
-    return bare;
-  }
-
-  const cut = bare.slice(0, 41);
-  const space = cut.lastIndexOf(' ');
-
-  return (space > 20 ? cut.slice(0, space) : cut.slice(0, 40)).trimEnd();
-}
-
 /** The typed messages of the session, oldest first, which Up and Down walk. */
 export function sentTexts(items: readonly ItemView[]): string[] {
   return items.flatMap((item) => (item.type === 'message' && !item.withdrawn && item.origin !== 'terminal' ? [item.text] : []));
