@@ -621,7 +621,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
   const servePage = (request: IncomingMessage, response: ServerResponse, url: URL): boolean => {
     const path = url.pathname;
     const isUpload = request.method === 'POST' && path === '/v1/conversation/upload';
-    const logUpload = (outcome: string, location: string, bytes: number): void => options.log?.(`web upload: ${outcome}, ${location}, declared ${request.headers['content-length'] ?? 'none'}, transfer ${request.headers['transfer-encoding'] ?? 'none'}, received ${bytes > MAX_UPLOAD_BYTES ? '>10 MB' : bytes}`);
+    const logUpload = (outcome: string, location: string, bytes: number): void => options.log?.(`web upload: ${outcome}, ${location}${url.searchParams.get('retry') === '1' ? ', retry' : ''}, declared ${request.headers['content-length'] ?? 'none'}, transfer ${request.headers['transfer-encoding'] ?? 'none'}, received ${bytes > MAX_UPLOAD_BYTES ? '>10 MB' : bytes}`);
     const isPageRoute = path === '/' || path === '/page' || path.startsWith('/page/') || path === '/v1/page/list' || path.startsWith('/v1/browser/') || path.startsWith('/v1/conversation/artifact/') || (path === '/v1/conversation/events' && url.searchParams.has('page')) || path === '/v1/conversation/files' || path === '/v1/conversation/console' || (path.startsWith('/v1/conversation/') && (CHANGE_ROUTES.has(path.slice('/v1/conversation/'.length)) || LOCAL_FILE_ROUTES.has(path.slice('/v1/conversation/'.length))));
     const bearer = request.headers.authorization !== undefined;
     const cookiePost = request.method === 'POST' && !bearer && path.startsWith('/v1/conversation/') && (request.headers.cookie !== undefined || isUpload);

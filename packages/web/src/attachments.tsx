@@ -90,13 +90,25 @@ export function attachments(deps: AttachmentDeps): Attachments {
     let error: string | null = null;
 
     try {
-      const response = await deps.fetch(`/v1/conversation/upload?window=${encodeURIComponent(key)}&scopeGen=${scopeGen}&name=${encodeURIComponent(entry.name)}`, {
+      const send = (retry: boolean) => deps.fetch(`/v1/conversation/upload?window=${encodeURIComponent(key)}&scopeGen=${scopeGen}&name=${encodeURIComponent(entry.name)}${retry ? '&retry=1' : ''}`, {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': file.type === '' ? 'application/octet-stream' : file.type },
         body: file,
         signal: entry.abort!.signal,
       });
+      let response: Response;
+
+      try {
+        response = await send(false);
+      } catch (failure) {
+        if (!(failure instanceof TypeError) || entry.abort?.signal.aborted === true) {
+          throw failure;
+        }
+
+        response = await send(true);
+      }
+
       const body = (await response.json().catch(() => ({}))) as { path?: unknown; image?: unknown; error?: unknown };
 
       if (response.status === 401) {

@@ -1406,6 +1406,7 @@ describe('the web page routes', () => {
 
     expect(chunked.status).toBe(200);
     expect(JSON.parse(chunked.body)).toEqual({ path: 'C:\\Temp\\a.txt', image: false });
+    expect((await sendBytes(server.port, `${path}&retry=1`, { Cookie: cookie, Origin: origin }, bytes)).status).toBe(200);
 
     const large = await sendBytes(server.port, path, { Cookie: cookie, Origin: origin }, Buffer.alloc(0), 10 * 1024 * 1024 + 1);
 
@@ -1416,6 +1417,7 @@ describe('the web page routes', () => {
     expect(largeChunked.status).toBe(413);
     expect(JSON.parse(largeChunked.body)).toEqual({ error: 'notes one.txt is larger than 10 MB.' });
     expect(uploadLogs).toContain('web upload: 200, local, declared none, transfer chunked, received 5');
+    expect(uploadLogs).toContain('web upload: 200, local, retry, declared 5, transfer none, received 5');
     expect(uploadLogs).toContain('web upload: 413, local, declared none, transfer chunked, received >10 MB');
     expect(uploadLogs.filter((line) => line === 'web upload: 401, local, declared 5, transfer none, received 0')).toHaveLength(2);
     expect(uploadLogs.filter((line) => line === 'web upload: 403, unknown, declared 5, transfer none, received 0')).toHaveLength(1);
@@ -1424,7 +1426,7 @@ describe('the web page routes', () => {
     // A window's GET, or the hub token, reaches no upload: the route is the page's alone.
     expect((await send(server.port, 'GET', path, { Cookie: cookie })).status).toBe(401);
     expect((await sendBytes(server.port, path, { Authorization: `Bearer ${server.token}` }, bytes)).status).toBe(404);
-    expect(uploaded).toEqual([{ key: 'page-1', scopeGen: 3, name: 'notes one.txt', bytes: 'hello' }, { key: 'page-1', scopeGen: 3, name: 'notes one.txt', bytes: 'hello' }]);
+    expect(uploaded).toEqual(Array(3).fill({ key: 'page-1', scopeGen: 3, name: 'notes one.txt', bytes: 'hello' }));
   });
 
   it("serves a page's artifact by the page key alone, only from where its page signed in, sandboxed with no network, and nothing outside its folder", async () => {
