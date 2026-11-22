@@ -394,7 +394,7 @@ describe('PhoneCapture (architecture.md § Remote access, Voice on a phone)', ()
 });
 
 describe('VoiceService dictating from the phone', () => {
-  function setup() {
+  function setup(voiceprint?: unknown) {
     const clock = new Clock();
     const tts = new FakeTts();
     const output = new FakeOutput();
@@ -420,6 +420,7 @@ describe('VoiceService dictating from the phone', () => {
             return { close: () => void computerWatches.push('close') };
           }) as DictationDeps['watchMicUse']),
           settings: () => service.settings,
+          ...(voiceprint === undefined ? {} : { voiceprint: voiceprint as import('../src/voiceprint.js').Voiceprint }),
           send: hooks.send,
           playing: hooks.playing,
           playedUntil: hooks.playedUntil,
@@ -534,4 +535,73 @@ describe('VoiceService dictating from the phone', () => {
     expect(mic()?.mic ?? 'off').toBe('off');
   });
 
+
+  it('plays a spoken alert on the phone and takes its answer from the phone\'s microphone, sending nothing to a session', async () => {
+    const { clock, tts, sent, service, phoneSays } = setup();
+
+    service.receive({ type: 'targets', targets: [{ sessionId: 's1', workItemId: 1 }, { sessionId: 's2', workItemId: 2 }], focus: null });
+    service.receive({ type: 'device', device: 'phone' });
+    service.receive({ type: 'mic', on: true });
+    service.receive({ type: 'phone-state', busy: false });
+    await settle();
+    service.receive({ type: 'alert', alertId: 'a1', sessionId: 's2', cause: 'turn-finished', title: 'Fix the badge', persona: null, detail: 'The badge is fixed.', ...VOICE });
+
+    for (let round = 0; round < 10 && tts.requests.length === 0; round++) {
+      clock.advance(500);
+      await settle();
+    }
+
+    // The alert's line plays on the phone, not this computer's speaker.
+    expect(tts.requests).toHaveLength(1);
+    tts.requests[0]!.audio(Math.round(300 * BYTES_PER_MS));
+    tts.requests[0]!.finish();
+    await settle();
+
+    const play = sent.find((one) => one.type === 'phone-play') as { id: number };
+
+    expect(play).toBeDefined();
+    service.receive({ type: 'phone-played', id: play.id, ms: 300, done: true });
+    await settle();
+    clock.advance(300);
+    await settle();
+
+    // The answer comes from the phone; it goes to no session.
+    phoneSays('yes', 600);
+    phoneSays('yes', 4_000);
+    await settle();
+    expect(sent.filter((one) => one.type === 'utterance')).toEqual([]);
+    expect(tts.requests.length).toBeGreaterThan(1);
+    expect(sent.filter((one) => one.type === 'active').at(-1)).toMatchObject({ sessionId: 's2', reason: 'talk-here' });
+  });
+
+  it('checks the phone\'s pieces against the existing voiceprint, dropping another voice', async () => {
+    const checked: string[] = [];
+    const voiceprint = {
+      enrolled: true,
+      replyVoiceScore: () => null,
+      unavailable: () => null,
+      enroll: () => ({ windows: 0, f0: 0 }),
+      learnVoice: () => undefined,
+      check: (_audio: Float32Array, text: string) => {
+        checked.push(text);
+        return text.includes('someone') ? { score: 0.2, f0: 220, dropped: true, reason: 'another voice' } : { score: 0.9, f0: 110, dropped: false, reason: null };
+      },
+    };
+    const { sent, service, phoneSays } = setup(voiceprint);
+
+    service.receive({ type: 'device', device: 'phone' });
+    service.receive({ type: 'mic', on: true });
+    service.receive({ type: 'phone-state', busy: false });
+    await settle();
+    phoneSays('someone else talking', 600);
+    phoneSays('someone else talking', 4_000);
+    await settle();
+    expect(checked).toContain('someone else talking');
+    expect(sent.filter((one) => one.type === 'utterance' && one.final)).toEqual([]);
+
+    phoneSays('ship it', 600);
+    phoneSays('ship it', 4_000);
+    await settle();
+    expect(sent.filter((one) => one.type === 'utterance' && one.final)).toEqual([expect.objectContaining({ text: 'ship it' })]);
+  });
 });
