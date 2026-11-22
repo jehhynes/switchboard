@@ -196,7 +196,7 @@ describe('personas in the flow (architecture.md § Personas)', () => {
     h.settings = withRoster();
 
     h.store.updateSession(action.sessionId, { codeMode: false });
-    expect(h.send({ type: 'persona', sessionId: action.sessionId, personaId: 'nova' }).refused).toBe('Only a Code Mode session has a persona.');
+    expect(h.send({ type: 'persona', sessionId: action.sessionId, personaId: 'nova' }).refused).toBe('Only a Code Mode or Codex app-server session has a persona.');
   });
 
   it('records the tone section a resume or the contract hook delivers', () => {

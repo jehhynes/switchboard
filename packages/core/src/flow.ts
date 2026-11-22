@@ -2129,7 +2129,7 @@ class Flow {
   }
 
   /**
-   * Pins a persona to a Code Mode session, or clears its pin, which gives it the persona a start would resolve now (architecture.md § Personas).
+   * Pins a persona to a Code Mode or Codex app-server session, or clears its pin, which gives it the persona a start would resolve now (architecture.md § Personas).
    * Its voice changes from the next spoken reply; its tone section waits for the next resume or compaction.
    */
   private pinPersona(sessionId: string, personaId: string | null): void {
@@ -2137,7 +2137,7 @@ class Flow {
     const voice = this.context.settings.voice;
 
     if (!persistent(session)) {
-      throw new Refusal('Only a Code Mode session has a persona.');
+      throw new Refusal('Only a Code Mode or Codex app-server session has a persona.');
     }
 
     // Personas are part of voice, so a dock menu shown before voice was turned off pins nothing.
