@@ -2943,6 +2943,9 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
     for (let index = 0; index < 150; index++) reply(`r${index}`, `Step ${index}.`, T0 + 2 + index);
     expect(questionCardOpen(store, 's1')).toBe(true);
 
+    // A notice an earlier run left queued, placed after everything, dated before the card.
+    store.addMessage({ id: 'm-q', sessionId: 's1', workItemId: 1, at: T0 - 1, origin: 'terminal', text: 'Stopped.', transcriptUuid: null, provisional: true, withdrawn: false, delivery: null, error: null, opId: null, pastedAt: null });
+    expect(questionCardOpen(store, 's1')).toBe(true);
     store.addMessage({ id: 'm2', sessionId: 's1', workItemId: 1, at: T0 + 500, origin: 'typed', text: '1A', transcriptUuid: null, provisional: true, withdrawn: false, delivery: 'open', error: null, opId: 'o', pastedAt: null });
     expect(questionCardOpen(store, 's1')).toBe(true);
     store.updateMessage('m2', { delivery: 'sent', provisional: false });

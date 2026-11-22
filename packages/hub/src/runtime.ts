@@ -3124,7 +3124,8 @@ export function questionCardOpen(store: Store, sessionId: string): boolean {
   let page = store.conversation(sessionId, null, QUESTION_CARD_PAGE, false);
   let items = page.items;
 
-  while (page.more && !items.some(answers) && items.length > 0) {
+  // A provisional message shows after the transcript's items however long ago it was queued, so it cannot say whether the card before it is answered.
+  while (page.more && !items.some((item) => answers(item) && !(item.type === 'message' && item.provisional)) && items.length > 0) {
     page = store.conversation(sessionId, items[0]!.id, QUESTION_CARD_PAGE, false);
     items = [...page.items, ...items];
   }
