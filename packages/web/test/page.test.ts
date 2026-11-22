@@ -2526,6 +2526,18 @@ describe('the page in use', () => {
     expect(posts.filter((post) => post.url.endsWith('/page-tabs')).at(-1)?.body).toMatchObject({ workItemId: 13, tab: null, openOn: 'status' });
     hello(source, { sessions: [], groups: linked(14), scope: { ...scope, workItemId: 14 }, openOn: 'status' });
     expect(chosen()).toBe('status');
+    // A work item with no status report yet, or only its stage, opens on Browser when it has links, whatever was chosen; without links on Status.
+    hello(source, { groups: linked(15), scope: { ...scope, workItemId: 15 }, openOn: 'status', status: null });
+    expect(chosen()).toBe('browser');
+    hello(source, { groups: linked(16), scope: { ...scope, workItemId: 16 }, openOn: 'status', status: { id: 'stage-16', sessionId: 's', at: 5_000, markdown: 'Planning', fallback: true, unread: false } });
+    expect(chosen()).toBe('browser');
+    hello(source, { groups: unlinked(17), scope: { ...scope, workItemId: 17 }, openOn: 'status', status: null });
+    expect(chosen()).toBe('status');
+    // Narrower: Browser among the conversation's tabs.
+    resizeTo(900);
+    hello(source, { groups: linked(18), scope: { ...scope, workItemId: 18 }, openOn: 'status', status: null });
+    expect(root.querySelector<HTMLElement>('#head .tab.selected')!.dataset['tab']).toBe('browser');
+    resizeTo(1920);
     // The hub sends scope before hello: the work item opens on its hello's kept tab.
     source.emit('scope', { scope: { ...scope, workItemId: 12 } });
     hello(source, { groups: linked(12), scope: { ...scope, workItemId: 12 }, tabs: { tab: 'console', closed: [] } });

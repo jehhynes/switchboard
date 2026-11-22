@@ -257,15 +257,17 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /** The tab every work item opens on, Status or Browser, as the operator last chose it on any device; null before any choice. */
   let openOn: 'status' | 'browser' | null = null;
   /**
-   * The tabs a work item opens on: Console or an artifact kept for it while it still applies; otherwise Browser when the operator last chose
-   * Browser and the paired pane has links of the work item to show, or before any choice when it also has no session yet; otherwise Status in the
-   * column and the conversation on a narrower page.
+   * The tabs a work item opens on: Console or an artifact kept for it while it still applies; otherwise Browser when the paired pane has links of
+   * the work item to show and the operator last chose Browser, or the work item has no status report yet, or before any choice when it also has no
+   * session yet; otherwise Status in the column and the conversation on a narrower page.
    */
   const openTabs = (): void => {
     const saved = savedTabs?.workItemId === state.scope?.workItemId ? savedTabs?.tab : null;
     const path = saved?.startsWith('artifact:') === true ? saved.slice('artifact:'.length) : null;
     const kept: Tab | null = saved === 'console' && showConsole() ? 'console' : path !== null && state.artifacts.some((one) => one.path === path) && !closedNow().has(path) ? 'artifacts' : null;
-    const browser = openOn === 'browser' ? browserUseful() : openOn === null && browserFirst();
+    // A work item with no status report yet, its stage at most on Status, opens on Browser whatever was chosen before.
+    const reported = state.status !== null && !state.status.fallback;
+    const browser = openOn === 'browser' || !reported ? browserUseful() : openOn === null && browserFirst();
     const chosen: Tab = kept ?? (browser ? 'browser' : 'status');
 
     view.side = chosen as SideTab;
