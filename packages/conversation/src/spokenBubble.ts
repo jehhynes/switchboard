@@ -1,6 +1,6 @@
 /**
- * A reply's spoken passage drawn as a chat bubble on the left, by the VS Code Conversation view and the web page alike (architecture.md
- * § Conversation view, Speech). Imports only the tag reader, which imports nothing, for browser bundles.
+ * A reply's primary response (its spoken passage when Speak replies is on) drawn as a chat bubble on the left, and the rest as smaller details,
+ * by the VS Code Conversation view and the web page alike, whether or not it was spoken (architecture.md § Conversation view, Speech). Imports only the tag reader, which imports nothing, for browser bundles.
  */
 import { spokenText } from './tags.js';
 
@@ -13,7 +13,7 @@ export interface SpokenPart {
 }
 
 /**
- * A reply's text cut round its `[speak]` passages, in order. `speak` is the passages joined with spaces, as the reader stores it
+ * A reply's text cut round its primary response, or an older reply's `[speak]` passages, in order. `speak` is the passages joined with spaces, as the reader stores it
  * (`splitSpeak`) without where they were, so each passage is the longest run of its words found in `opening` after the passage before it,
  * at its first place, as a passage is usually the reply's opening. Text that repeats a passage word for word can take its place. Null when a
  * passage is not found, so the reply shows as written.
@@ -130,5 +130,9 @@ export function spokenBody(opening: string, speak: string, said: number | null, 
   // The voice reads the passages as one text, joined with a space, so each passage starts one character after the spoken text before it.
   const spokenAt = (at: number): number => (at === 0 ? 0 : spokenText(speak.slice(0, at)).length + 1);
 
-  return parts.map((part, index) => (part.spoken ? spokenBubble(part.text, said === null ? null : said - spokenAt(part.at), render) : render.markdown(part.text, index === parts.length - 1))).join('');
+  return parts
+    .map((part, index) =>
+      part.spoken ? spokenBubble(part.text, said === null ? null : said - spokenAt(part.at), render) : `<div class="reply-details">${render.markdown(part.text, index === parts.length - 1)}</div>`,
+    )
+    .join('');
 }

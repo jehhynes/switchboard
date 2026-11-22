@@ -75,7 +75,7 @@ describe('the Conversation view', () => {
     await vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
   });
 
-  it("sets voice.expandReplies in the config folder's settings.json from the view's Expand and Collapse Spoken Replies, and follows the hub's reload", async () => {
+  it("sets voice.expandReplies in the config folder's settings.json from the view's Expand and Collapse Replies, and follows the hub's reload", async () => {
     const extension = await vscode.extensions.getExtension('switchboard.switchboard').activate();
     const { readFileSync } = require('node:fs');
     const { join } = require('node:path');

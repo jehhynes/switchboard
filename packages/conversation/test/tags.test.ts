@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { endsInOpenTag, interruptNote, keyOf, messageTags, parseReply, splitHeard, splitRewrite, splitSpeak, splitStatus, splitTone, spokenText, stripAside, stripMessageTags } from '../src/tags.js';
+import { PRIMARY_SHORT_MAX, endsInOpenTag, interruptNote, keyOf, messageTags, parseReply, splitHeard, splitPrimary, splitRewrite, splitSpeak, splitStatus, splitTone, spokenText, stripAside, stripMessageTags } from '../src/tags.js';
 import { typedText } from '../src/transcript.js';
 
 describe('reply tags', () => {
@@ -13,11 +13,44 @@ describe('reply tags', () => {
   });
 
   it('parses a reply into its kind, rewrite, text and status, keeps any other bracketed word as text', () => {
-    expect(parseReply('[rewrite] Both done.\n\n- a\n- b')).toEqual({ kind: 'reply', rewrite: true, opening: 'Both done.\n\n- a\n- b', status: null, speak: null, tone: null, heard: [] });
-    expect(parseReply('Done.\n[details]\nx')).toEqual({ kind: 'reply', rewrite: false, opening: 'Done.\n[details]\nx', status: null, speak: null, tone: null, heard: [] });
+    expect(parseReply('[rewrite] Both done.\n\n- a\n- b')).toEqual({ kind: 'reply', rewrite: true, opening: 'Both done.\n\n- a\n- b', status: null, speak: 'Both done.', tone: null, heard: [] });
+    expect(parseReply('Done.\n[details]\nx')).toEqual({ kind: 'reply', rewrite: false, opening: 'Done.\n\nx', status: null, speak: 'Done.', tone: null, heard: [] });
     expect(parseReply('[aside] Reading files.')).toEqual({ kind: 'aside', rewrite: false, opening: 'Reading files.', status: null, speak: null, tone: null, heard: [] });
-    expect(parseReply('[rewrite] Fixed.\n\n[status]\n## Done\n- the badge')).toEqual({ kind: 'reply', rewrite: true, opening: 'Fixed.', status: '## Done\n- the badge', speak: null, tone: null, heard: [] });
+    expect(parseReply('[rewrite] Fixed.\n\n[status]\n## Done\n- the badge')).toEqual({ kind: 'reply', rewrite: true, opening: 'Fixed.', status: '## Done\n- the badge', speak: 'Fixed.', tone: null, heard: [] });
     expect(parseReply('[status]\nAll green.')).toEqual({ kind: 'reply', rewrite: false, opening: '', status: 'All green.', speak: null, tone: null, heard: [] });
+  });
+
+  it('takes the primary response before a [details] line, spoken or not, and with none a short reply whole or a long one\'s first paragraph', () => {
+    // Everything before the [details] line is primary, everything after it details; the line itself is shown nowhere.
+    expect(splitPrimary('Fixed the badge.\n\n[details]\n- one\n- two')).toEqual({ primary: 'Fixed the badge.', text: 'Fixed the badge.\n\n- one\n- two' });
+    expect(parseReply('Two lines.\nStill primary.\n  [DETAILS]  \nMore.')).toMatchObject({ opening: 'Two lines.\nStill primary.\n\nMore.', speak: 'Two lines.\nStill primary.' });
+    // A [details] line first leaves no primary response; one quoted inline, in code or indented as code is text.
+    expect(splitPrimary('[details]\nOnly details.')).toEqual({ primary: null, text: 'Only details.' });
+    expect(splitPrimary('Use the `[details]` line.')).toEqual({ primary: 'Use the `[details]` line.', text: 'Use the `[details]` line.' });
+    expect(splitPrimary('```md\n[details]\n```')).toEqual({ primary: null, text: '```md\n[details]\n```' });
+    expect(splitPrimary('Done.\n\n    [details]\n\nEnd.').text).toBe('Done.\n\n    [details]\n\nEnd.');
+    // No [details] line: a short reply with no structure is all primary, even across paragraphs.
+    const short = 'Done, the badge is fixed.\n\nThe tests pass.';
+
+    expect(short.length).toBeLessThanOrEqual(PRIMARY_SHORT_MAX);
+    expect(splitPrimary(short)).toEqual({ primary: short, text: short });
+    // A longer one's primary response is its first paragraph, as if [details] followed it.
+    const long = `Done, the badge is fixed.\n\n${'More words about it. '.repeat(25).trim()}`;
+
+    expect(long.length).toBeGreaterThan(PRIMARY_SHORT_MAX);
+    expect(splitPrimary(long)).toEqual({ primary: 'Done, the badge is fixed.', text: long });
+    // A short reply with a list, a table or code is not all primary: its primary response stops at the structure.
+    expect(splitPrimary('Two files changed:\n- a.ts\n- b.ts').primary).toBe('Two files changed:');
+    expect(splitPrimary('Done.\n\n| a | b |\n|---|---|').primary).toBe('Done.');
+    expect(splitPrimary('Done.\n\n```\nx\n```').primary).toBe('Done.');
+    expect(splitPrimary('Done.\n\n    const secret = 1').primary).toBe('Done.');
+    expect(splitPrimary('    const secret = 1\n\nDone.').primary).toBeNull();
+    // A reply that opens with structure, such as a question list, has none.
+    expect(splitPrimary('1. **Pick.** Which? {#pick}\n   - A) One\n   - B) Two').primary).toBeNull();
+    expect(splitPrimary('## Heading\nText').primary).toBeNull();
+    // An aside has none, and an older reply's [speak] passage stands over the rule.
+    expect(parseReply('[aside] Reading files.').speak).toBeNull();
+    expect(parseReply('Intro.\n\n[speak]Said.[/speak]').speak).toBe('Said.');
   });
 
   it('reads the [speak] passage and the tone line, and leaves their markers out of the text the view shows', () => {
@@ -125,7 +158,7 @@ describe('reply tags', () => {
     expect(endsInOpenTag('Done. [asi')).toBe(true);
     expect(endsInOpenTag('Done. [rewr')).toBe(true);
     expect(endsInOpenTag('Done.\n[sta')).toBe(true);
-    expect(endsInOpenTag('Done. [deta')).toBe(false);
+    expect(endsInOpenTag('Done. [deta')).toBe(true);
     expect(endsInOpenTag('Done. <!--x')).toBe(true);
     expect(endsInOpenTag('Done. <!')).toBe(true);
     expect(endsInOpenTag('Done. [ok]')).toBe(false);

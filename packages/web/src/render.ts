@@ -183,7 +183,7 @@ export interface View {
   viewMenu: boolean;
   /** Whether each message's line shows its time and its optional marks (dictated, tone), kept in local storage. */
   details: boolean;
-  /** Whether the page may change settings.json, so the view options menu offers Expand spoken replies: this computer's page, not a paired device's. */
+  /** Whether the page may change settings.json, so the view options menu offers Expand replies: this computer's page, not a paired device's. */
   settingsHere: boolean;
   /** New conversation…'s provider menu under the dropdown: the providers, null while they load, or why not. */
   providers: { items: Array<{ provider: string; name: string; default: boolean }> | null; error: string | null } | null;

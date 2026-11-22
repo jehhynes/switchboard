@@ -840,7 +840,7 @@ describe('createHubApp', () => {
     expect(await app.post['/v1/conversation/page-voice-computer']!({ window: 'page-unknown' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
   });
 
-  it('sets voice.expandReplies in settings.json for Expand spoken replies, keeping the rest of the file, and refuses a file it cannot save', async () => {
+  it('sets voice.expandReplies in settings.json for Expand replies, keeping the rest of the file, and refuses a file it cannot save', async () => {
     writeSettings({ sessions: { installHooks: false }, voice: { voice: 'cedar' } });
     const app = await start();
     const path = join(temp.home, '.switchboard', 'settings.json');

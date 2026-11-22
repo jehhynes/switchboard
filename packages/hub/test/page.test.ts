@@ -1083,7 +1083,7 @@ describe('the web page routes', () => {
     // A code typed on this computer is not a link.
     expect((await send(server.port, 'GET', `/page?code=${code}`, {})).status).toBe(403);
 
-    // A paired device posts from its own origin and may not pair, list devices, drive the browser pane, open a link on this computer, restart the holder, use Settings or set Expand spoken replies.
+    // A paired device posts from its own origin and may not pair, list devices, drive the browser pane, open a link on this computer, restart the holder, use Settings or set Expand replies.
     expect((await post('page-source', { ...ts, Cookie: phone, Origin: here })).status).toBe(403);
     expect((await post('page-source', { ...ts, Cookie: phone, Origin: 'https://pc.tail.ts.net' })).status).toBe(200);
     for (const command of ['page-pair', 'page-devices', 'page-device-revoke', 'row-open', 'page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer', 'expand-replies']) {

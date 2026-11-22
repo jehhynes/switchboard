@@ -1054,7 +1054,7 @@ const dockWithRuns = () => {
 
       return result.errors.length === 0 ? { status: 200, body: { saved: true, version: result.version } } : { status: 409, body: { errors: result.errors } };
     },
-    // The view options menu's Expand spoken replies (architecture.md § Conversation view): sets `voice.expandReplies` in settings.json as a
+    // The view options menu's Expand replies (architecture.md § Conversation view): sets `voice.expandReplies` in settings.json as a
     // Settings save would, leaving the rest of the file as it is; the reload sends every window and page the new value.
     expandReplies: async (body: unknown) => {
       const on = isRecord(body) ? body['on'] : undefined;
@@ -1610,7 +1610,7 @@ const dockWithRuns = () => {
       '/v1/conversation/page-voice-enroll': settingsRoutes.enroll,
       '/v1/conversation/page-settings-check': settingsRoutes.check,
       '/v1/conversation/page-settings-save': settingsRoutes.save,
-      // Expand spoken replies, from a window's view title menu (hub token) or this computer's page's view options menu (page command).
+      // Expand replies, from a window's view title menu (hub token) or this computer's page's view options menu (page command).
       '/v1/conversation/expand-replies': settingsRoutes.expandReplies,
       '/action': async (body) => {
         const event = parseAction(body);

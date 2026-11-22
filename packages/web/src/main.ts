@@ -536,7 +536,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
   view.settingsHere = local;
   /**
-   * The value Expand spoken replies was last clicked to, until the hub's `settings` event or a refusal, so a quick second click reverses the
+   * The value Expand replies was last clicked to, until the hub's `settings` event or a refusal, so a quick second click reverses the
    * first, and the value of the save in flight; saves go one at a time, so a later click's value is the one the file keeps.
    */
   let expandAsked: boolean | null = null;
@@ -552,7 +552,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
       if (answer.status !== 200) {
         expandAsked = expandAsked === on ? null : expandAsked;
-        showError(String(answer.body['error'] ?? `Expand spoken replies did not change (status ${answer.status}).`));
+        showError(String(answer.body['error'] ?? `Expand replies did not change (status ${answer.status}).`));
       }
 
       if (expandAsked === null || expandAsked === on) {
@@ -4066,7 +4066,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       }
 
       // settings.json changed on disk: Settings reads it again, keeping unsaved edits under the dock's changed-on-disk warning (PRD R54).
-      // With no save in flight, the hub's settings hold what Expand spoken replies asked for, or a newer change.
+      // With no save in flight, the hub's settings hold what Expand replies asked for, or a newer change.
       if ((type === 'settings' || type === 'hello') && expandSending === null) {
         expandAsked = null;
       }

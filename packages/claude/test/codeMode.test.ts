@@ -94,13 +94,18 @@ describe('Code Mode command', () => {
     expect(env['PATH']).toBeUndefined();
   });
 
-  it('appends conversation rules that name only the tags the view reads, aside, rewrite and status, and set no reply length or shape', () => {
-    // The question shape is the one exception (PRD R103): a card's usefulness depends on its content.
+  it('appends conversation rules that name only the tags the view reads, details, aside, rewrite and status, and set no reply length or shape but the primary response', () => {
+    // The question shape (PRD R103) and the primary response that opens every reply are the exceptions: a card's usefulness depends on its
+    // content, and the view shows the primary response first, whether or not it is spoken.
     const questions = RULES.slice(RULES.indexOf('- Use a question card only'), RULES.indexOf("- Don't ask the operator with AskUserQuestion"));
-    const rest = RULES.replace(questions, '');
+    const primary = RULES.slice(RULES.indexOf('- Open every reply'), RULES.indexOf('\n', RULES.indexOf('- Open every reply')) + 1);
+    const tagged = RULES.replace(questions, '');
+    const rest = tagged.replace(primary, '');
 
-    expect(rest.match(/\[[a-z]+\]/g)?.filter((tag, index, all) => all.indexOf(tag) === index)).toEqual(['[aside]', '[rewrite]', '[status]']);
-    expect(RULES).toContain('they do not change how you write, except how you ask the operator a question, below');
+    expect(primary).toContain('put a `[details]` line of its own after the primary response and the rest after it');
+    expect(primary).toContain('A reply with no `[details]` line is all primary when it is short; otherwise the view takes its first paragraph as primary.');
+    expect(tagged.match(/\[[a-z]+\]/g)?.filter((tag, index, all) => all.indexOf(tag) === index)).toEqual(['[details]', '[aside]', '[rewrite]', '[status]']);
+    expect(RULES).toContain('they do not change how you write, except how you open a reply and how you ask the operator a question, below');
     expect(rest).not.toMatch(/\d+ words\b|\bsentences\b|short answer|\blines\b|one line|don't paste/i);
     // A turn may write several replies between tool calls; the rules give only the reason text before a tool call is lost (decision 24).
     expect(RULES).not.toMatch(/end of (your|the) turn/i);
@@ -128,16 +133,14 @@ describe('Code Mode command', () => {
     expect(RULES).toContain('Ask in a reply instead, as above.');
   });
 
-  it('adds the spoken-reply section only with voice on: [spoken], the [speak] passage and the tone line, setting no reply length or shape', () => {
+  it('adds the spoken-reply section only with voice on: [spoken], the primary response read aloud and the tone line, setting no reply length or shape', () => {
     const voiced = conversationRules(ARTIFACTS, true);
 
     expect(RULES).not.toContain('[speak]');
     expect(RULES).not.toContain('## Spoken replies');
     expect(voiced).toContain(`${RULES.slice(0, RULES.indexOf('## Artifacts'))}## Spoken replies\n`);
-    expect(voiced).toContain('A message from the operator that starts with `[spoken]` will have its reply heard. Write that reply exactly as you would otherwise');
-    expect(voiced).toContain('putting `[speak]` before it and `[/speak]` after it');
-    expect(voiced).toContain('they are read in the order you write them');
-    expect(voiced).toContain('A reply with no marked passage is not read aloud.');
+    expect(voiced).toContain("A message from the operator that starts with `[spoken]` will have its reply's primary response, the part before its `[details]` line, read aloud; the details never are. Write that reply exactly as you would any other.");
+    expect(voiced).not.toContain('[speak]');
     expect(voiced).toContain('`[tone: …]` alone on its first line');
     expect(voiced.endsWith(RULES.slice(RULES.indexOf('## Artifacts')))).toBe(true);
     expect(codeModePrompt(ARTIFACTS, true).endsWith(voiced)).toBe(true);

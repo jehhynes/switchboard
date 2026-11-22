@@ -217,7 +217,7 @@ export interface VoiceSettings {
   speed: number;
   /** Tag spoken messages `[expressive]`, so Claude writes a tone line, and read with it. */
   expressive: boolean;
-  /** Start a reply with a `[speak]` passage expanded instead of showing the passage first (focused mode). */
+  /** Start a reply with details expanded instead of showing its primary response first (focused mode). */
   expandReplies: boolean;
   /** Minutes with the focus outside every scoped window after which the voice drops its target. */
   awayMinutes: number;

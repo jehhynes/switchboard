@@ -25,7 +25,7 @@ export interface ConversationState {
   unread: number;
   /** This window's voice state (architecture.md § Voice); null from a hub without voice. */
   voice: VoiceView | null;
-  /** The one setting the view reads: whether a reply with a `[speak]` passage starts expanded. */
+  /** The one setting the view reads: whether a reply with details after its primary response starts expanded. */
   settings: { expandReplies: boolean };
   /** The session's questions as the hub keeps them (PRD R103): the open count, the oldest open card and the card drafts; null from an older hub. */
   questions?: QuestionsView | null;

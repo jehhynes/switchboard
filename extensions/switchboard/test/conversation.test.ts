@@ -1006,8 +1006,9 @@ describe('speech in the view (architecture.md § Voice)', () => {
     expect(kinds('r2')).toEqual(['bubble:Same.']);
     expect(bodyOf('r3').querySelector('.speech-bubble')).toBeNull();
     root.querySelector<HTMLButtonElement>('li[data-id="r1"] .show-more')!.click();
-    // The text around the passage stays plain, and the passage is not shown a second time.
-    expect(kinds('r1')).toEqual(['p', 'bubble:Fixed it.', 'ul', 'button']);
+    // The text around the passage shows as smaller details, and the passage is not shown a second time.
+    expect(kinds('r1')).toEqual(['div', 'bubble:Fixed it.', 'div', 'button']);
+    expect([...bodyOf('r1').querySelectorAll(':scope > .reply-details')].map((details) => details.firstElementChild!.tagName.toLowerCase())).toEqual(['p', 'ul']);
     expect(bodyOf('r1').textContent!.match(/Fixed it\./g)).toHaveLength(1);
     // The metadata line stays one line under the whole reply.
     expect([...root.querySelector('li[data-id="r1"]')!.children].map((child) => child.className)).toEqual(['dot', 'body', 'meta']);
@@ -1016,6 +1017,7 @@ describe('speech in the view (architecture.md § Voice)', () => {
     const rule = (selector: string) => css.split('\n').find((line) => line.startsWith(`${selector} {`)) ?? '';
 
     expect(rule('.speech-bubble')).toContain('max-width: 80%;');
+    expect(rule('.reply-details')).toContain('font-size: 92%;');
     expect(rule('.speech-bubble')).toContain('border-radius: 12px 12px 12px 4px;');
     expect(rule('.speech-bubble')).toContain('background: var(--sb-speech-bubble);');
     // The spoken passage reads at 110% of the reply's text, and the dot moves down by half of what that adds to the first line.

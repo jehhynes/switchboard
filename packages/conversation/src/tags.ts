@@ -83,7 +83,66 @@ export function splitTone(text: string): { tone: string | null; text: string } {
   return { tone: tone === '' ? null : tone, text: text.slice(match[0].length) };
 }
 
-/** A `[speak]` or `[/speak]` marker. */
+/** A `[details]` line: up to three spaces in, since four or more make an indented code block. */
+const DETAILS_LINE = /^ {0,3}\[details\][ \t]*$/i;
+
+/** A line that is only the details tag, kept apart when the screen's wrapped lines are joined. */
+export const isDetailsLine = (line: string): boolean => DETAILS_LINE.test(line);
+
+/**
+ * A reply with no `[details]` line up to this many characters, with no list, table, code, heading, quote or rule, is all primary: about three
+ * sentences. A longer one's primary response is its first paragraph.
+ */
+export const PRIMARY_SHORT_MAX = 400;
+
+/** A line that starts Markdown structure, where a primary response taken without a `[details]` line stops (claude-collab `tts.js` `STRUCTURE`). */
+const STRUCTURE = /^\s*(?:`{3,}|~{3,}|#{1,6}\s|[-*+•]\s|\d+[.)]\s|\||>|(?:[-*_][ \t]*){3,}$)/;
+/** A line indented as code, which starts an indented code block at the start of a paragraph. */
+const INDENTED = /^(?: {4,}|\t)\S/;
+
+/**
+ * A reply's primary response (architecture.md § Conversation), from claude-collab's `[details]` line: the text before its first `[details]`
+ * line outside fenced code, with the rest its details. With no such line, a short reply (`PRIMARY_SHORT_MAX`) is all primary, and a longer one's
+ * is its first paragraph; either stops at the first list, table, code block, heading, quote or rule. Null when nothing comes before it. `text` is
+ * the reply without the `[details]` line.
+ */
+export function splitPrimary(text: string): { primary: string | null; text: string } {
+  const lines = text.split('\n');
+  let fence: string | null = null;
+
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index]!;
+    const open = FENCE.exec(line);
+
+    if (open !== null) {
+      if (fence === null) {
+        fence = open[1]!;
+      } else if (open[1]![0] === fence[0] && open[1]!.length >= fence.length && /^ {0,3}[`~]+\s*$/.test(line)) {
+        fence = null;
+      }
+
+      continue;
+    }
+
+    if (fence === null && DETAILS_LINE.test(line)) {
+      const before = lines.slice(0, index).join('\n').trim();
+      const after = lines.slice(index + 1).join('\n').trim();
+
+      return { primary: before === '' ? null : before, text: [before, after].filter((part) => part !== '').join('\n\n') };
+    }
+  }
+
+  // Only blank lines go from the start, so a first line indented as code stays indented.
+  const trimmed = text.replace(/^(?:[ \t]*\n)+/, '').trimEnd();
+  const short = trimmed.length <= PRIMARY_SHORT_MAX && !trimmed.split('\n').some((line) => STRUCTURE.test(line) || INDENTED.test(line));
+  const first = short ? trimmed.split('\n') : trimmed.split(/\n[ \t]*\n/)[0]!.split('\n');
+  const end = first.findIndex((line, index) => STRUCTURE.test(line) || (index === 0 && INDENTED.test(line)));
+  const primary = (end === -1 ? first : first.slice(0, end)).join('\n').trim();
+
+  return { primary: primary === '' ? null : primary, text: trimmed };
+}
+
+/** A `[speak]` or `[/speak]` marker, which replies marked their spoken passage with before the `[details]` line; still read in older replies. */
 const SPEAK_MARK = /\[(\/?)speak\]/gi;
 
 /** The ranges of fenced code blocks and inline code spans, where a marker is only text. */
@@ -120,7 +179,7 @@ function codeRanges(text: string): Array<[number, number]> {
 }
 
 /**
- * The passage Claude marked to be read aloud, `[speak]`…`[/speak]` (voice-design decision 21), and the text with every marker removed, a
+ * The passage an older reply marked to be read aloud, `[speak]`…`[/speak]` (voice-design decision 21), and the text with every marker removed, a
  * marker alone on its line with its line. Several passages are joined; a `[speak]` with no `[/speak]` after it marks nothing. A marker in
  * inline code or a fenced code block, such as "the `[speak]` rule", is text, and a text with no marker is returned as it is.
  */
@@ -184,7 +243,10 @@ export interface ParsedReply {
   /** Empty for a reply that is only a status. */
   opening: string;
   status: string | null;
-  /** The `[speak]` passage, whose markers `opening` leaves out; null with none. */
+  /**
+   * The primary response (`splitPrimary`), shown as a bubble and read aloud while Speak replies is on, which `opening` holds too, without the
+   * `[details]` line; an older reply's `[speak]` passage, whose markers `opening` leaves out. Null for an aside or a reply with none.
+   */
   speak: string | null;
   /** The tone line, which `opening` leaves out; null with none. */
   tone: string | null;
@@ -236,9 +298,11 @@ export function parseReply(text: string): ParsedReply {
   const { rewrite, text: rewritten } = splitRewrite(before.text);
   const after = before.tone === null ? splitTone(rewritten) : { tone: null, text: rewritten };
   const { heard, text: unheard } = splitHeard(after.text);
-  const { speak, text: body } = splitSpeak(unheard);
+  const marked = splitSpeak(unheard);
+  // An older reply's [speak] passage stands; any other reply's primary response is what comes before its [details] line.
+  const { primary, text: body } = marked.speak !== null ? { primary: marked.speak, text: marked.text } : splitPrimary(marked.text);
 
-  return { kind: aside ? 'aside' : 'reply', rewrite: rewrite && !aside, opening: body.trim(), status, speak, tone: before.tone ?? after.tone, heard };
+  return { kind: aside ? 'aside' : 'reply', rewrite: rewrite && !aside, opening: body.trim(), status, speak: aside ? null : primary, tone: before.tone ?? after.tone, heard };
 }
 
 /**
@@ -318,7 +382,7 @@ export function keyOf(text: string): string {
   return squash(body) || bareOf(body);
 }
 
-const TAG_WORDS = ['aside', 'rewrite', 'status', 'speak', '/speak', 'tone'];
+const TAG_WORDS = ['aside', 'rewrite', 'status', 'details', 'speak', '/speak', 'tone'];
 
 /**
  * Whether the text's last line ends in a tag or an HTML comment still being drawn, such as "Done. <!--as" or "[asi": read now, it would be

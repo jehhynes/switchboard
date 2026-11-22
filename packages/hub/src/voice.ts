@@ -156,7 +156,7 @@ export function alertKind(session: Pick<Session, 'state' | 'stateDetail'>): Aler
 
 /**
  * What an answered alert reads: a permission prompt or a question menu waits in the session's terminal, which the hub cannot read; otherwise the
- * latest reply's `[speak]` passage, else its text, else the latest status, as speech without Markdown, cut at a sentence to `ALERT_DETAIL_MAX`.
+ * latest reply's primary response, else its text, else the latest status, as speech without Markdown, cut at a sentence to `ALERT_DETAIL_MAX`.
  */
 export function alertDetail(cause: AlertCause, inTerminal: boolean, reply: { speak: string | null; opening: string } | null, status: string | null, questions: { count: number; first: string } | null = null): string {
   const base = alertText(cause, inTerminal, reply, status);
@@ -1004,7 +1004,7 @@ export class VoiceControl {
   }
 
   /**
-   * A reply was added or changed: it is offered for speech when it is the transcript copy of a reply with a `[speak]` passage, answering a message
+   * A reply was added or changed: it is offered for speech when it is the transcript copy of a reply with a primary response, answering a message
    * that asked for a spoken reply, in the voice target's session, while Speak replies is on (architecture.md § Voice); a rewritten one that was
    * offered is cancelled.
    */
@@ -1685,7 +1685,7 @@ export class VoiceControl {
     }
 
     if (reply.speak == null) {
-      return 'This reply has no spoken passage.';
+      return 'This reply has nothing to read aloud.';
     }
 
     // One request per reply at a time, so its reports stay its own.

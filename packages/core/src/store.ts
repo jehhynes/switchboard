@@ -433,7 +433,7 @@ export const MIGRATIONS = [
   // message keeps the launch it was sent to, so one a stopped hub left being typed is settled only there.
   `ALTER TABLE messages ADD COLUMN launch TEXT;
   UPDATE messages SET delivery = 'sent', error = NULL WHERE delivery = 'uncertain';`,
-  // Speech out (architecture.md § Voice): a message typed with [spoken], and a reply's [speak] passage, tone line and what became of its speech.
+  // Speech out (architecture.md § Voice): a message typed with [spoken], and a reply's primary response (`speak`), tone line and what became of its speech.
   `ALTER TABLE messages ADD COLUMN spokenRequested INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE replies ADD COLUMN speak TEXT;
   ALTER TABLE replies ADD COLUMN tone TEXT;

@@ -281,7 +281,9 @@ describe('drawing', () => {
 
     view.open.add('more:r1');
     host.innerHTML = html(renderTimeline(pageState(items), view));
-    expect(kinds('r1')).toEqual(['p', 'bubble:Fixed it.', 'ul', 'button']);
+    // The text around the passage shows as smaller details.
+    expect(kinds('r1')).toEqual(['div', 'bubble:Fixed it.', 'div', 'button']);
+    expect([...host.querySelectorAll('li[data-id="r1"] > .body > .reply-details')].map((details) => details.firstElementChild!.tagName.toLowerCase())).toEqual(['p', 'ul']);
     expect(host.querySelector('li[data-id="r1"] > .body')!.textContent!.match(/Fixed it\./g)).toHaveLength(1);
     expect([...host.querySelector('li[data-id="r1"]')!.children].map((child) => child.className)).toEqual(['dot', 'body', 'meta']);
   });
@@ -2591,7 +2593,7 @@ describe('the page in use', () => {
     expect(root.querySelector('.view-options-menu')).toBeNull();
     click('.header button.view-options');
     expect(root.querySelector('.header button.view-options')!.getAttribute('title')).toBe('View options');
-    expect([...root.querySelectorAll('.view-options-menu .menu-row')].map((row) => row.textContent!.trim())).toEqual(['Show message details', 'Expand spoken replies']);
+    expect([...root.querySelectorAll('.view-options-menu .menu-row')].map((row) => row.textContent!.trim())).toEqual(['Show message details', 'Expand replies']);
     expect(root.querySelector('.view-options-menu .menu-separator')).toBeNull();
     root.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     expect(root.querySelector('.view-options-menu')).toBeNull();
@@ -4587,7 +4589,7 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it("sets voice.expandReplies from View options' Expand spoken replies on this computer's page, follows the hub's settings, and leaves it out on a paired device", async () => {
+  it("sets voice.expandReplies from View options' Expand replies on this computer's page, follows the hub's settings, and leaves it out on a paired device", async () => {
     const { page, source } = start();
     const expandRow = () => root.querySelector('[data-action="toggle-expand-replies"]');
 

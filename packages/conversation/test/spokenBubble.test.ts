@@ -39,7 +39,7 @@ describe('the spoken passage bubble', () => {
 
   it('draws each passage once: only the bubble while folded, else the bubble in its place among the rest', () => {
     expect(spokenBody('Done.\n\nMore.', 'Done.', null, true, render)).toBe('<div class="speech-bubble"><md>Done.</md></div>');
-    expect(spokenBody('Done.\n\nMore.', 'Done.', null, false, render)).toBe('<div class="speech-bubble"><md>Done.</md></div><md last>More.</md>');
+    expect(spokenBody('Done.\n\nMore.', 'Done.', null, false, render)).toBe('<div class="speech-bubble"><md>Done.</md></div><div class="reply-details"><md last>More.</md></div>');
     expect(spokenBody('Done.', 'Done.', null, false, render)).toBe('<div class="speech-bubble"><md>Done.</md></div>');
     // A passage not found in the text: the text as written, with no bubble, rather than the passage twice.
     expect(spokenBody('Something else.', 'Done.', null, false, render)).toBe('<md last>Something else.</md>');
@@ -50,7 +50,7 @@ describe('the spoken passage bubble', () => {
     const two = spokenBody('One <b>.\n\nMid.\n\nTwo.', 'One <b>. Two.', 10, false, render);
 
     // All of the first passage heard, as Markdown; the second cut after its first character.
-    expect(two).toBe('<div class="speech-bubble"><md>One <b>.</md></div><md>Mid.</md><div class="speech-bubble"><p class="passage">T<span class="unheard">wo.</span></p></div>');
+    expect(two).toBe('<div class="speech-bubble"><md>One <b>.</md></div><div class="reply-details"><md>Mid.</md></div><div class="speech-bubble"><p class="passage">T<span class="unheard">wo.</span></p></div>');
     expect(spokenBody('One.\n\nTwo.', 'One. Two.', 2, false, render)).toContain('<p class="passage"><span class="unheard">Two.</span></p>');
     expect(spokenBody('Fixed <b>.', 'Fixed <b>.', 2, true, render)).toContain('<span class="unheard">xed &lt;b>.</span>');
     // The voice counts the characters it read, without the Markdown's marks: seven heard of "Hello world, again." end after "w".

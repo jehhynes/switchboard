@@ -184,7 +184,7 @@ function PersonaRow({ session }: { session: PageState['session'] }) {
 }
 
 /**
- * The header's view options button and its menu: Show message details, Expand spoken replies on this computer's page, the persona, and the Chrome
+ * The header's view options button and its menu: Show message details, Expand replies on this computer's page, the persona, and the Chrome
  * pane's state and pairing while it is on.
  */
 function ViewOptions({ view, expandReplies, session }: { view: View; expandReplies: boolean; session: PageState['session'] }) {
@@ -202,7 +202,7 @@ function ViewOptions({ view, expandReplies, session }: { view: View; expandRepli
           {view.settingsHere ? (
             <button type="button" class="menu-row" role="menuitemcheckbox" aria-checked={expandReplies} data-action="toggle-expand-replies">
               <Gutter checked={expandReplies} />
-              <span class="title">Expand spoken replies</span>
+              <span class="title">Expand replies</span>
             </button>
           ) : null}
           <PersonaRow session={session} />

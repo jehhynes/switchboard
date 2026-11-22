@@ -116,12 +116,12 @@
       },
       {
         "command": "switchboard.expandSpokenReplies",
-        "title": "Expand Spoken Replies",
+        "title": "Expand Replies",
         "category": "Switchboard"
       },
       {
         "command": "switchboard.collapseSpokenReplies",
-        "title": "Collapse Spoken Replies",
+        "title": "Collapse Replies",
         "category": "Switchboard"
       },
       {

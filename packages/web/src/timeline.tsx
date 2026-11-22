@@ -67,7 +67,7 @@ function Reply({ item, earlier, view, stamped: shown, card, expandReplies }: { i
     );
   }
 
-  // Focused mode, as in the Conversation view: a reply with a [speak] passage shows the passage first and the whole reply behind Show more. The
+  // Focused mode, as in the Conversation view: a reply shows its primary response first, spoken or not, and its details behind Show more. The
   // passage is a bubble on the left, in its place when the whole reply shows; after the operator spoke over it, the part not heard is dimmed.
   const passage = item.kind === 'reply' && item.speak !== null && item.speak.trim() !== '' ? item.speak : null;
   // Question ids and withdraw lines are for the view and the session, not the operator.

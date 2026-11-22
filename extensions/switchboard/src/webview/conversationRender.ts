@@ -167,7 +167,7 @@ function reply(item: ReplyView, earlier: ReplyView | null, open: ReadonlySet<str
     return `<li class="note" data-id="${escape(item.id)}" tabindex="-1">${escape(item.opening)}</li>`;
   }
 
-  // Focused mode (voice-design decision 21): a reply with a [speak] passage shows the passage first, the whole reply behind Show more. The
+  // Focused mode (voice-design decision 21): a reply shows its primary response first, spoken or not, its details behind Show more. The
   // passage is a bubble on the left, in its place when the whole reply shows; after the operator spoke over it, the part not heard is dimmed.
   const passage = item.kind === 'reply' && item.speak !== null && item.speak.trim() !== '' ? item.speak : null;
   // Question ids and withdraw lines are for the view and the session, not the operator.

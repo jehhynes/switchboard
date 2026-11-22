@@ -368,6 +368,7 @@ describe('VoiceControl', () => {
 
     // Not offered: a screen copy, an unasked reply, another session's, one with no passage, an aside.
     control.replyChanged(reply('r0', { source: 'screen' }));
+    // Every reply has a primary response now, so one answering a message without [spoken] is never offered for it.
     control.replyChanged(reply('r0', { answers: 'm0' }));
     control.replyChanged(reply('r0', { sessionId: 's2' }));
     control.replyChanged(reply('r0', { speak: null }));
@@ -605,7 +606,7 @@ describe('VoiceControl', () => {
     expect(connections[0]!.sent.at(-1)).toEqual({ type: 'stop' });
     expect(control.replay('k2', 'r1')).toBe('Not in this window.');
     reply('r5', { speak: null });
-    expect(control.replay('k1', 'r5')).toBe('This reply has no spoken passage.');
+    expect(control.replay('k1', 'r5')).toBe('This reply has nothing to read aloud.');
     expect(control.replay('k1', 'r1')).toBeNull();
     expect(connections[0]!.sent.at(-1)).toMatchObject({ type: 'speak', replyId: 'r1', gen: 1 });
     // Not again while it is spoken.

@@ -149,7 +149,7 @@ export const PAGE_COMMANDS = new Set(['page-voice-state', 'page-device-voice', '
 /**
  * The page commands a device that reaches the page through a remote host may not post (architecture.md § Remote access): pairing and the device
  * list, so a paired device cannot pair others or sign this computer out; the Chrome pane's, which works only beside this computer's page;
- * restarting the terminal holder; and Settings' and Expand spoken replies, which change settings.json, which the operator keeps to this computer.
+ * restarting the terminal holder; and Settings' and Expand replies, which change settings.json, which the operator keeps to this computer.
  */
 export const LOCAL_PAGE_COMMANDS = new Set(['page-pair', 'page-devices', 'page-device-revoke', 'page-device-voice', 'pane-pair', 'pane-rect', 'pane-open', 'row-open', 'page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer', 'expand-replies']);
 

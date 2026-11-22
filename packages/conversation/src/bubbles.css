@@ -23,6 +23,11 @@ body.vscode-high-contrast .speech-bubble, body.vscode-high-contrast-light .speec
 /* A reply that starts with a bubble moves its dot down by the bubble's border and padding, and by half of what its larger text adds to the
    first line's height (1.5 × 10% / 2 of the reply's size), level with the bubble's first line. */
 .reply:has(> .body > .speech-bubble:first-child) { --dot-shift: calc(7px + 0.075em); }
+/* The rest of a reply after its primary response, its details, smaller than the reply's own size, as claude-collab showed what came after
+   `[details]`. */
+.reply-details { font-size: 92%; }
+.reply-details > :first-child { margin-top: 0; }
+.reply-details > :last-child { margin-bottom: 0; }
 
 /* Above a message that answered a question card: a quoted line per question answered, which goes to the card. Each line keeps to one line, the
    question giving way before the answer. */
