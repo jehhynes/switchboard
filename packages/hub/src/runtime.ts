@@ -2956,7 +2956,7 @@ export class Runtime {
           return;
         }
 
-        // Delete during a Code Mode start removes the row while the holder spawns, so the process is ended here (PRD R76, R95).
+        // Delete during a Code Mode start removes the row while the holder spawns, so the process is ended here (PRD R120, R95).
         if (!('error' in result) && (action.codeMode === true || action.execution === 'app-server') && this.deps.store.session(action.sessionId) === null) {
           const failure = await runner.stop({ sessionId: action.sessionId, shortId: result.shortId }, 'operator');
 
@@ -3071,7 +3071,7 @@ export class Runtime {
 
       await this.findSetupWorktrees();
     } else if (this.deps.store.session(action.sessionId) === null) {
-      // Delete removed the session row, so the flow has nowhere to show the failure (PRD R76).
+      // Delete removed the session row, so the flow has nowhere to show the failure (PRD R120).
       this.deps.log(`stop of deleted session ${action.sessionId} (${action.shortId}) failed; it may still be running: ${failure.error}`);
     }
 

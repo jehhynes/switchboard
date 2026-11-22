@@ -137,7 +137,7 @@ describe('controlsOf', () => {
     });
   });
 
-  it('asks before Delete, naming the session it stops, and offers no Delete while a session starts (PRD R76)', () => {
+  it('asks before Delete, naming the session it stops, and offers no Delete while a session starts (PRD R120)', () => {
     const confirm = (entry: WorkItemView) => controlsOf(entry).find((control) => control.label === 'Delete')?.confirm ?? null;
     const kept = "Switchboard deletes the work item, its sessions and its history. The ticket, its worktree and Claude's session files stay.";
     const returns = 'The ticket gets a new work item only when it is assigned to you again.';
@@ -247,7 +247,7 @@ describe('Code Mode sessions (PRD R95)', () => {
     }
   });
 
-  it('offers Delete while it starts, saying that Delete stops it, unlike a starting background session (PRD R76)', () => {
+  it('offers Delete while it starts, saying that Delete stops it, unlike a starting background session (PRD R120)', () => {
     const starting = item(7, { sessions: [held({ state: 'starting', shortId: null })] });
     const remove = controlsOf(starting).find((control) => control.label === 'Delete');
 

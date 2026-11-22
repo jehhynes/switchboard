@@ -240,7 +240,7 @@ describe('History model', () => {
     expect(texts(ticket!.entries)).toEqual(['Switchboard first saw the ticket, assigned to you']);
   });
 
-  it('shows a deleted work item only as the delete in the Ticket section (PRD R76)', () => {
+  it('shows a deleted work item only as the delete in the Ticket section (PRD R120)', () => {
     const run = approvedRun();
 
     run.send({ type: 'delete', workItemId: 1 });

@@ -208,7 +208,7 @@ export function controlsOf(item: WorkItemView, mode: OpenVSCode = 'always'): Con
     controls.push({ label: 'Open in terminal', icon: 'terminal', message: terminal });
   }
 
-  // A starting session has no short ID to stop yet, except a Code Mode one, which the hub ends in the terminal holder (PRD R76).
+  // A starting session has no short ID to stop yet, except a Code Mode one, which the hub ends in the terminal holder (PRD R120).
   const heldStart = session?.state === 'starting' && (session.codeMode === true || (session.execution === 'app-server' && session.nativeSessionId !== null));
 
   if (session?.state !== 'starting' || heldStart) {
@@ -218,7 +218,7 @@ export function controlsOf(item: WorkItemView, mode: OpenVSCode = 'always'): Con
   return [...controls, historyControl(item.ticket)];
 }
 
-/** What Delete asks before it deletes the work item (PRD R76). */
+/** What Delete asks before it deletes the work item (PRD R120). */
 function deleteConfirm(item: WorkItemView, stops: boolean): NonNullable<Control['confirm']> {
   const detail = [
     stops ? 'Its running session is stopped.' : null,

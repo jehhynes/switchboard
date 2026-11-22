@@ -1295,7 +1295,7 @@ describe('Runtime', () => {
     expect(store.workItem(1)).toMatchObject({ status: 'blocked', error: 'Stopped by you.' });
   });
 
-  it('logs a failed stop of a deleted work item, which has no row to show it (PRD R76)', async () => {
+  it('logs a failed stop of a deleted work item, which has no row to show it (PRD R120)', async () => {
     const { store, cli, source, runtime, logs } = setup();
     source.result = { tickets: [issue('8')] };
     await runtime.pollSource('github');

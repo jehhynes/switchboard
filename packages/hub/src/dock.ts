@@ -209,7 +209,7 @@ export interface DockRow {
   terminal: DockTerminal | null;
   /**
    * The hub controls in the right-click menu, each with its codicon glyph and the action the dock posts to `/action`; Snooze carries no wake time.
-   * A control with `confirm` posts only after the operator confirms, such as Delete (PRD R76); one with `input` posts the text the operator
+   * A control with `confirm` posts only after the operator confirms, such as Delete (PRD R120); one with `input` posts the text the operator
    * enters as the action's `field`, such as Start with guidance… (PRD R77), and with `choice`, a changed choice as the action's `choice.field`,
    * such as Start with guidance…'s playbook (PRD R35).
    */

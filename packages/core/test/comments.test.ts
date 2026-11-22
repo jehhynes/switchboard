@@ -30,7 +30,7 @@ describe('Comments (PRD R87)', () => {
     expect(h.store.commentsFor(1)).toEqual([]);
   });
 
-  it('deletes the comments with their work item (PRD R76)', () => {
+  it('deletes the comments with their work item (PRD R120)', () => {
     const h = new Harness();
     h.poll(issue('1'));
     h.act({ type: 'comment', workItemId: 1, text: 'Note' });

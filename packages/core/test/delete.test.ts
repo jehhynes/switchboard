@@ -11,7 +11,7 @@ function running(h: Harness): string {
   return h.started(h.act({ type: 'start', workItemId: 1 })[0]);
 }
 
-describe('delete (PRD R76)', () => {
+describe('delete (PRD R120)', () => {
   it('stops a background session, deletes the work item with its sessions and triages, and refuses the stopped session afterwards', () => {
     const h = new Harness();
     const session = running(h);

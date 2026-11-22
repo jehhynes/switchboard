@@ -254,5 +254,5 @@ public sealed record DockInput(string Question, string Detail, string Field, str
 /// <summary>A list of <paramref name="Values"/> with <paramref name="Value"/> selected; a changed choice is set as the action's <paramref name="Field"/>, such as Start's playbook (PRD R35).</summary>
 public sealed record DockChoice(string Field, string Label, string Value, IReadOnlyList<string> Values);
 
-/// <summary>A question the dock asks before it posts a control's action, such as Delete's (PRD R76); <paramref name="Action"/> labels the button that goes ahead.</summary>
+/// <summary>A question the dock asks before it posts a control's action, such as Delete's (PRD R120); <paramref name="Action"/> labels the button that goes ahead.</summary>
 public sealed record DockConfirm(string Question, string Detail, string Action);

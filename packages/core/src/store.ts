@@ -1108,7 +1108,7 @@ export class Store {
     return this.#one('SELECT * FROM workItems WHERE id = ?', id);
   }
 
-  /** Deletes a work item with its triages, sessions, pastes, comments and activity, so History does not show it (PRD R10, R76); its children keep no parent. */
+  /** Deletes a work item with its triages, sessions, pastes, comments and activity, so History does not show it (PRD R10, R120); its children keep no parent. */
   deleteWorkItem(id: number): void {
     this.#bump(this.workItem(id)?.ticketId ?? null);
 

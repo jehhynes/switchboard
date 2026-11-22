@@ -572,7 +572,7 @@ function subjectOf(store: Store, event: FlowEvent): Pick<EventRecord, 'ticketId'
     return session === null ? none : ofItem(session.workItemId, session.id);
   }
 
-  // The ticket's log keeps the delete, because the work item's own log is deleted with it (PRD R76).
+  // The ticket's log keeps the delete, because the work item's own log is deleted with it (PRD R120).
   if (event.type === 'delete') {
     return { ...none, ticketId: store.workItem(event.workItemId)?.ticketId ?? null };
   }
@@ -1227,7 +1227,7 @@ class Flow {
   private insertAdhoc(prompt: string | null, title: string, repoRoot: string, parentId: number | null, status: 'queued' | 'unstarted' | 'running', hostWindow: string | null = null, provider?: Provider): WorkItem {
     const keys = this.store.adhocKeys().map(Number);
     const sourceKey = String(Math.max(0, ...keys) + 1);
-    // A follow-up keeps its origin when Delete clears its parentId (PRD R27, R76).
+    // A follow-up keeps its origin when Delete clears its parentId (PRD R27, R120).
     const ticket = this.store.insertTicket({ source: ADHOC_SOURCE, sourceKey, ref: `#${sourceKey}`, sourceId: parentId === null ? null : 'task', title, url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: this.now, lastPolledAt: null, repoRoot, ...(hostWindow === null ? {} : { hostWindow }) });
     const queued = status === 'queued';
 
@@ -2324,7 +2324,7 @@ class Flow {
   }
 
   /**
-   * PRD R76: stops a session running in its background process, then deletes the work item. A starting session has no short ID to stop yet; a
+   * PRD R120: stops a session running in its background process, then deletes the work item. A starting session has no short ID to stop yet; a
    * session the operator resumed is theirs, so it keeps running, and its later reports are refused as from an unknown session.
    */
   private delete(item: WorkItem): void {
