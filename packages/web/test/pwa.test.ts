@@ -219,6 +219,13 @@ describe('the installable page', () => {
     expect(Buffer.from(PAGE_ASSETS['apple-touch-icon.png']!.body, 'base64')[25]).toBe(2);
   });
 
+  it("keeps the list's pinned group headers off a touch screen's overlay scrollbar, which iOS draws under them", () => {
+    const css = PAGE_ASSETS['page.css']!.body;
+
+    expect(css).toMatch(/@media \(hover: none\), \(pointer: coarse\) \{ \.group-head \{ width: calc\(100% - var\(--sb-overlay-scrollbar\)\); \} \}/);
+    expect(css).toMatch(/^:root \{ --sb-overlay-scrollbar: 10px;/m);
+  });
+
   it('links the manifest from the page and the offline page, with the theme colour, light first while the system is light, and serves every file the worker keeps', () => {
     for (const name of ['index.html', 'offline.html']) {
       const html = PAGE_ASSETS[name]!.body;
