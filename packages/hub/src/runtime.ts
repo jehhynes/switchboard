@@ -2,12 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, statSync, watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { classify, ClaudeRunner, CODE_MODE_IDLE_MS, findTranscript, CodeModeRunner, conversationRules, HOOKS_REQUIRED, readRoster, readTranscriptLimit } from '@switchboard/claude';
+import { classify, ClaudeRunner, CODE_MODE_IDLE_MS, findTranscript, CodeModeRunner, conversationRules, HOOKS_REQUIRED, readRoster, readTranscriptLaunch, readTranscriptLimit } from '@switchboard/claude';
 import { classifyCodex, CodexRunner, AppServer, AppServerRunner } from '@switchboard/codex';
 import type { Exec } from '@switchboard/claude';
-import type { FlowAction, FlowEvent, FlowResult, HandledWork, LimitReading, MarkerReading, SessionLimit, ObservedFork, ObservedSession, PolledTicket, Provider, PullRequestStatus, WorkItemStatus, Session, SessionRunner, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, Worktree, Reconciled } from '@switchboard/core';
+import type { FlowAction, FlowEvent, FlowResult, HandledWork, LimitReading, MarkerReading, SessionLimit, ObservedFork, ObservedSession, PermissionMode, PolledTicket, Provider, PullRequestStatus, WorkItemStatus, Session, SessionRunner, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, Worktree, Reconciled } from '@switchboard/core';
 import { CONTINUE_TEXT, givesUp, waitsOnLimit } from '@switchboard/core';
-import { activeSession, ADHOC_SOURCE, artifactsDir, awaitsRecheck, QUESTION_CARD, RESUME_PROMPT, executableDirOnPath, handle, launchOptions, nothingNew, PROVIDERS, recordRefusal, homeRepo, repoOf, sessionName, deliveredTone, ticketRoot, sessionContract, switchboardHome, triageModel } from '@switchboard/core';
+import { activeSession, ADHOC_SOURCE, artifactsDir, awaitsRecheck, QUESTION_CARD, RESUME_PROMPT, executableDirOnPath, handle, launchOptions, nothingNew, PROVIDERS, recordRefusal, homeRepo, repoOf, resumesHeld, sessionName, deliveredTone, ticketRoot, sessionContract, switchboardHome, triageModel } from '@switchboard/core';
 import { noKind } from './config.js';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
@@ -2468,7 +2468,8 @@ export class Runtime {
 
     const name = first.shortId ?? sessionId;
 
-    if (first.codeMode !== true) {
+    // An ended registered session resumes in the holder and becomes held there (PRD R81).
+    if (first.codeMode !== true && !resumesHeld(first)) {
       return { refused: `Session ${name} is not a Code Mode session; open it in Claude.`, status: 409 };
     }
 
@@ -2686,6 +2687,32 @@ export class Runtime {
     }
   }
 
+  /**
+   * How an ended registered session resumes in the holder (PRD R81): refused while Claude's roster lists it with a process, as in the operator's
+   * window, since a resume would run a second copy (mechanics M18), and without a transcript to resume; otherwise in Code Mode only when it ran in
+   * Code Mode, with the permission mode and model it last ran with, where the transcript recorded them (mechanics M117).
+   */
+  private async registeredLaunch(session: Session, name: string): Promise<{ codeMode: boolean; permissionMode: PermissionMode | null; model: string | null } | { refused: string }> {
+    if (session.nativeSessionId === null) {
+      return { refused: 'The session never started, so it cannot be resumed.' };
+    }
+
+    if (this.deps.store.sessionsFor(session.workItemId).at(-1)?.id !== session.id) {
+      return { refused: 'A newer session of this work item started; this one cannot resume.' };
+    }
+
+    const live = this.runners.claude.live === undefined ? { error: 'The Claude runner cannot read the roster.' } : await this.runners.claude.live(session.nativeSessionId);
+
+    if (live !== null) {
+      return { refused: 'error' in live ? `Switchboard could not check that session ${name} no longer runs elsewhere: ${live.error}` : `Session ${name} still runs in another Claude window; close it there, then resume it here.` };
+    }
+
+    const transcript = findTranscript(join(dirname(this.deps.claudeSettings), 'projects'), session.cwd, session.nativeSessionId);
+    const launch = transcript === null ? null : readTranscriptLaunch(transcript.path);
+
+    return launch ?? { refused: `Claude keeps no transcript of session ${name}, so it cannot be resumed.` };
+  }
+
   /** Spawns the ended session again; roster reads leave it alone meanwhile, since they cannot tell its new process from its old launch. */
   private async resume(session: Session, name: string, answer: () => AttachResult, refuse: (refused: string, status?: 404 | 409) => AttachResult): Promise<AttachResult> {
     const store = this.deps.store;
@@ -2698,7 +2725,19 @@ export class Runtime {
 
     const ticket = store.ticket(item.ticketId)!;
     const playbook = item.playbook === null ? null : (this.config.playbooks.get(item.playbook) ?? null);
-    const options = launchOptions(this.config.settings, playbook, session.kind, session.provider);
+    const defaults = launchOptions(this.config.settings, playbook, session.kind, session.provider);
+    const registered = session.registered === true ? await this.registeredLaunch(session, name) : null;
+
+    if (registered !== null && 'refused' in registered) {
+      return refuse(registered.refused);
+    }
+
+    // A newer session may have started during the roster read.
+    if (registered !== null && store.sessionsFor(session.workItemId).at(-1)?.id !== sessionId) {
+      return refuse('A newer session of this work item started; this one cannot resume.');
+    }
+
+    const options = { permissionMode: registered?.permissionMode ?? defaults.permissionMode, model: registered?.model ?? defaults.model };
 
     this.resuming.add(sessionId);
 
@@ -2706,18 +2745,32 @@ export class Runtime {
       // Stored before the spawn, so a hub that stops during it finds the live process under this launch.
       const launchId = this.runners.codeMode.newLaunchId?.() ?? randomUUID();
 
-      this.send({ type: 'held-resuming', sessionId, launchId });
+      this.send({ type: 'held-resuming', sessionId, launchId, ...(registered === null || session.codeMode === true ? {} : { adopt: { codeMode: registered.codeMode } }) });
 
+      // A roster read during the registered session's checks may have found it running again, so the flow did not hold it.
+      const held = store.session(sessionId);
+
+      if (held === null) {
+        return refuse(`No session ${sessionId}.`, 404);
+      }
+
+      if (held.codeMode !== true || held.state !== 'ended') {
+        return refuse(`Session ${name} changed while it resumed; try again.`);
+      }
+
+      const contract = sessionContract(session.id, this.reportCommand, session.reports, session.provider);
       const resumed = this.runners.codeMode.resumeHeld === undefined
         ? { error: 'The Code Mode runner cannot resume sessions.' }
         : await this.runners.codeMode.resumeHeld(
-            session,
+            held,
             options.permissionMode,
             options.model,
             `${sessionName(session.kind, item, ticket)} ${session.nativeSessionId ?? ''}`,
             launchId,
             // A session started with no prompt that ended before its first message starts again with its contract (mechanics M87).
-            session.promptless === true ? { contract: sessionContract(session.id, this.reportCommand, session.reports, session.provider), name: sessionName(session.kind, item, ticket) } : undefined,
+            session.promptless === true ? { contract, name: sessionName(session.kind, item, ticket) } : undefined,
+            // A registered session's contract was only in its conversation (PRD R81).
+            registered === null ? undefined : contract,
           );
 
       if ('error' in resumed) {

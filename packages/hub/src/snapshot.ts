@@ -3,7 +3,7 @@
  * inputs, so the hub can build it in a worker thread with its own read-only connection and keep its main thread free.
  */
 import type { Comment, Link, OpenTerminal, OpenVSCode, Paste, Playbook, Provider, PullRequestStatus, QueueWait, Session, Settings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
-import { effectiveFocus, heldSlots, homeRepo, itemProvider, playbookChoices, PROVIDERS, queueWaits, reopenRefusal, repoRoots, SCHEDULE_SOURCE, ADHOC_SOURCE } from '@switchboard/core';
+import { effectiveFocus, heldSlots, homeRepo, itemProvider, playbookChoices, PROVIDERS, queueWaits, reopenRefusal, repoRoots, resumesHeld, SCHEDULE_SOURCE, ADHOC_SOURCE } from '@switchboard/core';
 import type { HeldSession, HolderState } from './held.js';
 import { doneSince } from './rows.js';
 import type { RepoKeys } from './rows.js';
@@ -174,7 +174,8 @@ const leftoversOf = (latest: Session | undefined): { leftovers?: number[] } => {
         ticket,
         triage: triages.at(-1) ?? null,
         focus: effectiveFocus(triages, ticket.url),
-        sessions: store.sessionsFor(item.id).map(({ lastTree: _lastTree, ...session }) => session),
+        // An ended registered session resumes in the terminal holder, so its row opens it as an ended held session (PRD R81, R95).
+        sessions: store.sessionsFor(item.id).map(({ lastTree: _lastTree, ...session }) => (resumesHeld(session) ? { ...session, codeMode: true } : session)),
         ...leftoversOf(store.sessionsFor(item.id).at(-1)),
         worktree: store.worktreeFor(item.ticketId),
         links: store.linksFor(item.ticketId),

@@ -1,7 +1,7 @@
 // The History view's model (PRD R59), which the extension's History tab and the web page's History both draw. Imports only types and
 // browser-safe modules, so the History webview bundles it through `@switchboard/hub/history`.
 import type { HistoryChange, HistoryEvent, Session, TicketHistory, WorkItemStatus } from '@switchboard/core';
-import { adhocLabel, DONE_WORDS, PERMISSION_PROMPT, START_PROMPT } from '@switchboard/core/group';
+import { adhocLabel, DONE_WORDS, PERMISSION_PROMPT, resumesHeld, START_PROMPT } from '@switchboard/core/group';
 import { ticketKey } from './rows.js';
 
 /** The filter chips of History (PRD R59). */
@@ -151,10 +151,10 @@ const str = (value: unknown): string => (value === null || value === undefined ?
 /**
  * What a click on a session opens: the session in Claude, unless it runs in its background process, lives in the operator's window it was
  * registered from (PRD R81), or has no native ID yet; then null. A Code Mode session opens in its attach terminal in every state, by its
- * Switchboard session ID (PRD R95).
+ * Switchboard session ID (PRD R95), and so does an ended registered session, which resumes in the holder (PRD R81).
  */
 export function sessionOpen(session: Session): EntryLink['open'] | null {
-  if (session.codeMode === true) {
+  if (session.codeMode === true || resumesHeld(session)) {
     return { type: 'open', sessionId: session.id, cwd: session.cwd, provider: 'claude', codeMode: true };
   }
 
@@ -223,8 +223,8 @@ class Builder {
       return [];
     }
 
-    return session?.codeMode === true
-      ? [{ label: 'Open in terminal', icon: 'terminal', title: `Attach to Code Mode ${this.sessionName(sessionId)} in a terminal`, open }]
+    return session !== undefined && (session.codeMode === true || resumesHeld(session))
+      ? [{ label: 'Open in terminal', icon: 'terminal', title: `Attach to ${session.registered === true ? '' : 'Code Mode '}${this.sessionName(sessionId)} in a terminal`, open }]
       : [{ label: `Open in ${name}`, icon: 'comment-discussion', title: `Open ${this.sessionName(sessionId)} in ${name}`, open }];
   }
 

@@ -1355,6 +1355,26 @@ describe('createHubApp', () => {
     expect(view.held?.[0]?.terminal).toMatchObject(run);
   });
 
+  it('turns a claimed open of an ended registered session into its attach terminal, which resumes it in the holder (PRD R81)', async () => {
+    writeSettings({ sessions: { installHooks: false, nodePath: '/opt/node/bin/node' }, sources: { adhoc: { repoRoot: 'D:/scratch' } }, dock: { openTerminal: 'app' } });
+    const node: Exec = async (file, args, options) => noCli(file === '/opt/node/bin/node' ? 'node' : file, args, options);
+    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: node } });
+    closers.push(() => app.close());
+    app.runtime.send({ type: 'adhoc', prompt: 'registered', repoRoot: 'D:/scratch', start: false });
+    app.runtime['deps'].store.insertSession({
+      id: 'reg-1', workItemId: 1, kind: 'task', provider: 'claude', cwd: 'D:/scratch', state: 'ended', stateAt: 0, stateDetail: null, outcome: null, outcomeDetail: null, startedAt: 0, endedAt: 0, released: true, releasing: false,
+      question: null, reports: [], retiredIds: [], pendingFork: null, external: false, move: null, movedAt: null, nativeSessionId: 'r-native', shortId: 'r-native', codeMode: false, launchId: null, registered: true,
+    });
+    const file = (app.dock() as { groups: { rows: { window: { file: string } | null }[] }[] }).groups.flatMap((group) => group.rows)[0]!.window!.file;
+    const window = app.windowOpened!(file);
+
+    expect(await app.post['/open']!({ sessionId: 'reg-1', cwd: 'D:/scratch', workspace: file })).toMatchObject({ status: 200 });
+    expect(await app.post['/claim']!({ folder: 'D:/scratch', workspace: file, window })).toEqual({
+      status: 200,
+      body: { sessionId: null, provider: null, commands: [expect.objectContaining({ type: 'terminal', sessionId: 'reg-1', codeMode: true, args: [join(temp.home, '.switchboard', 'hub.js'), 'attach', 'reg-1'] })] },
+    });
+  });
+
   it('answers posts through the server', async () => {
     writeSettings({ sessions: { installHooks: false, claudePath: '/opt/claude/bin/claude', codexPath: '/opt/codex/bin/codex' } });
     const logs: string[] = [];

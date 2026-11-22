@@ -1,4 +1,5 @@
 import type { Session } from '@switchboard/core';
+import { resumesHeld } from '@switchboard/core';
 import { refusal } from './conversation.js';
 import { SESSION_RELAUNCHED } from './runtime.js';
 import type { HeldViewHandlers } from './runtime.js';
@@ -27,11 +28,11 @@ export interface PageConsoleDeps {
 export type ConsoleSend = (event: string, data: unknown) => boolean;
 
 /**
- * Why a session has no console on the page, or null when the terminal holder holds it: a Code Mode session, or Codex's terminal app on a Codex
- * app-server session's thread, which the hub starts in the holder when a console opens.
+ * Why a session has no console on the page, or null when the terminal holder holds it: a Code Mode session, an ended registered one, which
+ * resumes there (PRD R81), or Codex's terminal app on a Codex app-server session's thread, which the hub starts in the holder when a console opens.
  */
 export function noConsole(session: Session): string | null {
-  if (session.codeMode === true || (session.execution === 'app-server' && session.nativeSessionId !== null)) {
+  if (session.codeMode === true || resumesHeld(session) || (session.execution === 'app-server' && session.nativeSessionId !== null)) {
     return null;
   }
 

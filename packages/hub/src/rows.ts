@@ -141,7 +141,10 @@ export function mainTitle(item: WorkItemView, control: Control): string {
     return `Approve: runs ${item.approvalPrompt}`;
   }
 
-  return control.icon === 'terminal' && item.sessions.at(-1)?.codeMode === true ? `${control.label}: attaches to the Code Mode session` : control.label;
+  const latest = item.sessions.at(-1);
+
+  // A registered session may run without Code Mode once held (PRD R81).
+  return control.icon === 'terminal' && latest?.codeMode === true ? `${control.label}: attaches to the ${latest.registered === true ? 'session in the terminal holder' : 'Code Mode session'}` : control.label;
 }
 
 /** The controls that apply to a work item (PRD R27); with `dock.openVSCode: review`, Answer in terminal replaces Open in Claude or Codex. */

@@ -286,6 +286,9 @@ describe('History model', () => {
     // A registered session opens only once it has left the operator's window (PRD R81).
     expect(sessionOpen({ ...session, state: 'idle', released: true, external: true })).toBeNull();
     expect(sessionOpen({ ...session, state: 'ended', released: true, external: false })).toEqual({ type: 'open', sessionId: 'native-1', cwd: 'D:/git/widgets', provider: 'claude' });
+    // An ended registered session resumes in the terminal holder, by its Switchboard session ID (PRD R81).
+    expect(sessionOpen({ ...session, state: 'ended', released: true, registered: true })).toEqual({ type: 'open', sessionId: session.id, cwd: 'D:/git/widgets', provider: 'claude', codeMode: true });
+    expect(sessionOpen({ ...session, state: 'idle', released: true, external: true, registered: true })).toBeNull();
     expect(sessionOpen({ ...session, state: 'idle', released: true, releasing: true })).toBeNull();
   });
 

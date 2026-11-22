@@ -1,6 +1,6 @@
 import { countsUnread, inTranscript } from '@switchboard/core';
 import type { ConversationMessage, ConversationReply, ConversationStatus, Interruption, Piece, Provider, Session, SpokenState, Store } from '@switchboard/core';
-import { artifactsDir, hostKey, PERMISSION_PROMPT, personaById, sessionTone, START_PROMPT, toneVersion, waitsOnLimit } from '@switchboard/core';
+import { artifactsDir, hostKey, PERMISSION_PROMPT, personaById, resumesHeld, sessionTone, START_PROMPT, toneVersion, waitsOnLimit } from '@switchboard/core';
 import type { PersonaSettings, ViewSettings } from '@switchboard/core';
 import { ArtifactFolder, MAX_MESSAGE_CHARS, NotWritten, interruptNote, messageTags, pasteText } from '@switchboard/conversation';
 import { promptKeyData, readPrompt, screenRows, stepsText, TYPING_PAUSE_MS } from '@switchboard/conversation';
@@ -108,7 +108,9 @@ export function sessionView(session: Session, current: boolean, hooks: boolean, 
   const waitingFor = session.state !== 'waiting' ? null : session.stateDetail === PERMISSION_PROMPT ? 'permission' : session.stateDetail === START_PROMPT ? 'start-prompt' : 'question';
   // A message to an ended app-server session resumes its thread first (PRD R107); an ended Code Mode session resumes through its attach terminal.
   const resumable = session.execution === 'app-server' && session.nativeSessionId !== null;
-  const conversation = session.codeMode !== true && session.execution !== 'app-server' ? 'none' : (session.state === 'ended' && !resumable) || (session.codeMode === true && !hooks) ? 'read-only' : 'full';
+  // An ended registered session resumes in the holder as an ended Code Mode session does (PRD R81).
+  const held = session.codeMode === true || resumesHeld(session);
+  const conversation = !held && session.execution !== 'app-server' ? 'none' : (session.state === 'ended' && !resumable) || (session.codeMode === true && !hooks) ? 'read-only' : 'full';
   const reason =
     conversation === 'none'
       ? `This session runs in the background; open it in ${session.provider === 'codex' ? 'Codex' : 'Claude'} to talk to it.`

@@ -3268,7 +3268,7 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
     }
 
     /** A held Code Mode session s1 and a holder whose list the test sets; `now` is settable. */
-    async function attaching(codeMode: SessionRunner, cfg = config({ installHooks: true })) {
+    async function attaching(codeMode: SessionRunner, cfg = config({ installHooks: true }), claude: SessionRunner = fakeRunner()) {
       const clock = { now: T0 };
       const entries: SessionEntry[] = [held('s1')];
       const connection: HolderConnection = {
@@ -3286,7 +3286,7 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
       mkdirSync(join(home, '.switchboard'), { recursive: true });
       writeFileSync(recordPath(join(home, '.switchboard')), JSON.stringify({ protocol: 1, build: 'b', port: 4100, token: 'holder-token', pid: 4243, startedAt: '2026-11-18T00:00:00.000Z' }));
 
-      const context = setup(cfg, () => clock.now, { claude: fakeRunner(), codeMode }, new FakeCodex(), {}, { holder: { connect: async () => connection, lockHeld: async () => true } });
+      const context = setup(cfg, () => clock.now, { claude, codeMode }, new FakeCodex(), {}, { holder: { connect: async () => connection, lockHeld: async () => true } });
 
       context.runtime.send({ type: 'adhoc', prompt: 'held', repoRoot: 'D:/git/widgets', start: true });
       await context.runtime.settled();
@@ -3335,6 +3335,130 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
       store.updateSession('s1', { codeMode: false });
       expect(await runtime.attach('s1')).toEqual({ refused: 'Session s1-short is not a Code Mode session; open it in Claude.', status: 409 });
       runtime.stop();
+    });
+
+    describe('an ended registered session (PRD R81)', () => {
+      const transcript = (lines: Array<Record<string, unknown>>) => {
+        const dir = join(home, '.claude', 'projects', 'D--git-widgets');
+
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, 's1-native.jsonl'), lines.map((line) => JSON.stringify(line)).join('\n'));
+      };
+      const assistant = (model: string) => ({ type: 'assistant', message: { model, role: 'assistant', content: [] }, sessionId: 's1-native' });
+
+      function capturing() {
+        const calls: Array<{ withoutCodeMode: boolean | undefined; permissionMode: string; model: string | null; contract: string | undefined }> = [];
+        const codeMode = resumer({
+          resumeHeld: async (session, permissionMode, model, _label, launchId, _fresh, contract) => {
+            calls.push({ withoutCodeMode: session.withoutCodeMode, permissionMode, model, contract });
+            return { launchId: launchId ?? 'launch-x' };
+          },
+        });
+
+        return { codeMode, calls };
+      }
+
+      /** s1 as a registered session that ended in the operator's window; `live` is what Claude's roster says of it. */
+      async function registeredEnded(live: Awaited<ReturnType<NonNullable<SessionRunner['live']>>>) {
+        const { codeMode, calls } = capturing();
+        const context = await attaching(codeMode, config({ installHooks: true, permissionMode: 'auto', model: 'haiku' }), fakeRunner({ live: async () => live }));
+
+        endIt(context);
+        context.store.updateSession('s1', { codeMode: false, launchId: null, registered: true });
+
+        return { ...context, calls };
+      }
+
+      it('resumes it in the holder without Code Mode, with its contract and the mode and model its transcript recorded, and holds it from then on', async () => {
+        const context = await registeredEnded(null);
+        transcript([{ type: 'user', message: { role: 'user', content: 'hi' }, permissionMode: 'bypassPermissions', sessionId: 's1-native' }, assistant('claude-sonnet-5')]);
+
+        // Until then its row and its page offer it as an ended held session.
+        expect(context.runtime.snapshot().workItems[0]!.sessions[0]).toMatchObject({ codeMode: true, registered: true });
+
+        expect(await context.runtime.attach('s1')).toEqual(HOLDER);
+        expect(context.calls).toEqual([{ withoutCodeMode: true, permissionMode: 'bypassPermissions', model: 'claude-sonnet-5', contract: expect.stringMatching(/^Report to Switchboard with these commands:\n/) }]);
+        expect(context.store.session('s1')).toMatchObject({ state: 'idle', codeMode: true, withoutCodeMode: true, released: false });
+        context.runtime.stop();
+      });
+
+      it('resumes one that ran in Code Mode with Code Mode, and falls back to the settings for what the transcript did not record', async () => {
+        const context = await registeredEnded(null);
+        transcript([{ type: 'repl-mode', replMode: true, sessionId: 's1-native' }]);
+
+        expect(await context.runtime.attach('s1')).toEqual(HOLDER);
+        expect(context.calls).toEqual([{ withoutCodeMode: false, permissionMode: 'auto', model: 'haiku', contract: expect.any(String) }]);
+        expect(context.store.session('s1')).toMatchObject({ codeMode: true, withoutCodeMode: false });
+        context.runtime.stop();
+      });
+
+      it('refuses while Claude lists it with a process, when the roster cannot be read, and without a transcript, and leaves it as it was', async () => {
+        const running = await registeredEnded({ shortId: 's1-short', cwd: 'D:/git/widgets' });
+        transcript([assistant('claude-sonnet-5')]);
+        expect(await running.runtime.attach('s1')).toEqual({ refused: 'Session s1-short still runs in another Claude window; close it there, then resume it here.', status: 409 });
+        running.runtime.stop();
+
+        const unread = await registeredEnded({ error: 'claude agents timed out' });
+        expect(await unread.runtime.attach('s1')).toEqual({ refused: 'Switchboard could not check that session s1-short no longer runs elsewhere: claude agents timed out', status: 409 });
+        unread.runtime.stop();
+
+        rmSync(join(home, '.claude', 'projects'), { recursive: true, force: true });
+        const missing = await registeredEnded(null);
+        expect(await missing.runtime.attach('s1')).toEqual({ refused: 'Claude keeps no transcript of session s1-short, so it cannot be resumed.', status: 409 });
+        expect(missing.calls).toEqual([]);
+        expect(missing.store.session('s1')).toMatchObject({ state: 'ended', codeMode: false });
+        missing.runtime.stop();
+      });
+
+      it('does not spawn when a roster read finds it running again while its checks run, nor for an older session of its work item', async () => {
+        const { codeMode, calls } = capturing();
+        let context: Awaited<ReturnType<typeof attaching>> | undefined;
+        const claude = fakeRunner({
+          live: async () => {
+            context!.store.updateSession('s1', { state: 'running', endedAt: null });
+            return null;
+          },
+        });
+
+        context = await attaching(codeMode, config({ installHooks: true }), claude);
+        endIt(context);
+        context.store.updateSession('s1', { codeMode: false, launchId: null, registered: true });
+        transcript([assistant('claude-sonnet-5')]);
+
+        expect(await context.runtime.attach('s1')).toEqual({ refused: 'Session s1-short changed while it resumed; try again.', status: 409 });
+        expect(calls).toEqual([]);
+        expect(context.store.session('s1')).toMatchObject({ codeMode: false });
+        context.runtime.stop();
+
+        const { codeMode: second, calls: secondCalls } = capturing();
+        let racing: Awaited<ReturnType<typeof attaching>> | undefined;
+        racing = await attaching(second, config({ installHooks: true }), fakeRunner({
+          live: async () => {
+            racing!.store.insertSession({ ...racing!.store.session('s1')!, id: 's3', startedAt: T0 + 1, registered: false, nativeSessionId: 's3-native' });
+            return null;
+          },
+        }));
+        endIt(racing);
+        racing.store.updateSession('s1', { codeMode: false, launchId: null, registered: true });
+        expect(await racing.runtime.attach('s1')).toEqual({ refused: 'A newer session of this work item started; this one cannot resume.', status: 409 });
+        expect(secondCalls).toEqual([]);
+        expect(racing.store.session('s1')).toMatchObject({ codeMode: false });
+        racing.runtime.stop();
+
+        const older = await registeredEnded(null);
+        older.store.insertSession({ ...older.store.session('s1')!, id: 's2', startedAt: T0 + 1, registered: false, nativeSessionId: 's2-native' });
+        expect(await older.runtime.attach('s1')).toEqual({ refused: 'A newer session of this work item started; this one cannot resume.', status: 409 });
+        older.runtime.stop();
+      });
+
+      it('refuses a registered session that still runs in the operator window, as any session that is not held', async () => {
+        const context = await registeredEnded(null);
+
+        context.store.updateSession('s1', { state: 'idle', endedAt: null, external: true });
+        expect(await context.runtime.attach('s1')).toEqual({ refused: 'Session s1-short is not a Code Mode session; open it in Claude.', status: 409 });
+        expect(context.runtime.snapshot().workItems[0]!.sessions[0]).toMatchObject({ codeMode: false });
+        context.runtime.stop();
+      });
     });
 
     it('refuses with the holder lookup failure', async () => {

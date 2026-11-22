@@ -5,7 +5,7 @@ import { dirname, join, posix, win32 } from 'node:path';
 import { homedir } from 'node:os';
 import { claudeSettingsPath, readRoster, spawnExec } from '@switchboard/claude';
 import { hostKey, hubBundlePath, NEW_CONVERSATION_TITLE, PANE_EXTENSION_ID, personaById, Store, switchboardHome } from '@switchboard/core';
-import { CODEX_PERMISSION_MODES, PERMISSION_MODES, PROVIDERS, TEMPLATE_VARIABLES } from '@switchboard/core';
+import { CODEX_PERMISSION_MODES, PERMISSION_MODES, PROVIDERS, resumesHeld, TEMPLATE_VARIABLES } from '@switchboard/core';
 import type { FlowEvent, SourceSettings, ViewSettings } from '@switchboard/core';
 import { githubSource } from '@switchboard/github';
 import { zohoSource } from '@switchboard/zoho';
@@ -379,11 +379,14 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     return window === null ? null : (window.file ?? window.folder ?? null);
   };
 
-  /** The attach terminal command for a claimed open of a Code Mode session, which the Claude view refuses (PRD R95); null for any other session. */
+  /**
+   * The attach terminal command for a claimed open of a Code Mode session, which the Claude view refuses (PRD R95), or of an ended registered
+   * session, which resumes in the holder (PRD R81); null for any other session.
+   */
   const codeModeOpen = (sessionId: string): Record<string, unknown> | null => {
     const session = store.session(sessionId) ?? store.sessionByNativeId(sessionId);
     if (session?.execution === 'app-server') return { type: 'conversation' };
-    const item = session?.codeMode === true ? store.workItem(session.workItemId) : null;
+    const item = session !== null && (session.codeMode === true || resumesHeld(session)) ? store.workItem(session.workItemId) : null;
     const ticket = item === null ? null : store.ticket(item.ticketId);
 
     return session === null || ticket === null ? null : codeModeTerminal(ticket, session);
@@ -751,11 +754,12 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
       return parsed === null ? 'The work item no longer offers this.' : runtime.send(parsed).refused;
     },
-    // The page's Resume: the attach terminal's resume of a Code Mode session, without the terminal, or a Codex app-server thread's.
+    // The page's Resume: the attach terminal's resume of a Code Mode session or an ended registered one, without the terminal, or a Codex
+    // app-server thread's.
     resumeSession: async (sessionId) => {
       const session = store.session(sessionId);
 
-      if (session?.codeMode === true) {
+      if (session !== null && (session.codeMode === true || resumesHeld(session))) {
         const result = await runtime.attach(sessionId);
 
         return 'refused' in result ? result.refused : null;
