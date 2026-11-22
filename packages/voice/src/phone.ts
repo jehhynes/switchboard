@@ -16,12 +16,6 @@ export const PHONE_STALLED = 'The phone stopped playing the voice.';
 
 type PhoneSend = (message: Extract<VoiceMessage, { type: 'phone-play' | 'phone-pcm' | 'phone-end' | 'phone-flush' }>) => void;
 
-/**
- * Why phone capture starts half-duplex: iOS cancels the echo of the page's own playback, but how much is left is measured first by the echo
- * check under `voice.duplex` `auto`, against the phone's played reports.
- */
-export const PHONE_HALF_DUPLEX = "the phone's echo cancellation is not measured";
-
 export interface PhoneCaptureDeps {
   send(message: Extract<VoiceMessage, { type: 'phone-capture' }>): void;
 }
@@ -48,9 +42,11 @@ export class PhoneCapture implements Capture {
           this.deps.send({ type: 'phone-capture', on: false });
         }
       },
-      halfDuplex: PHONE_HALF_DUPLEX,
+      // iOS's voice processing cancels the echo of the page's own playback, so the phone listens while the voice plays and talking over a reply
+      // stops it, as on capture that cancels the echo here; the reply voice's print and the held words reject what echo is left (mechanics.md M127).
+      halfDuplex: null,
       remote: false,
-      // The phone cancels its own playback's echo; the echo check takes the reference from the service.
+      // The phone cancels its own playback's echo, so nothing here needs the audio played.
       reference: () => undefined,
     };
   }

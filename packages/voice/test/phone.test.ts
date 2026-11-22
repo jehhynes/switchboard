@@ -3,7 +3,7 @@ import { DEFAULT_SETTINGS } from '@switchboard/core/settings';
 import type { LockEvent } from '../src/lockWatch.js';
 import { Dictation } from '../src/dictation.js';
 import type { DictationDeps } from '../src/dictation.js';
-import { PHONE_CHUNK_MS, PHONE_HALF_DUPLEX, PHONE_LEAD_MS, PHONE_STALL_MS, PHONE_STALLED, PhoneCapture, PhoneOutput } from '../src/phone.js';
+import { PHONE_CHUNK_MS, PHONE_LEAD_MS, PHONE_STALL_MS, PHONE_STALLED, PhoneCapture, PhoneOutput } from '../src/phone.js';
 import { parseHubMessage } from '../src/protocol.js';
 import type { VoiceMessage } from '../src/protocol.js';
 import { VoiceService } from '../src/service.js';
@@ -419,8 +419,8 @@ describe('PhoneCapture (architecture.md § Remote access, Voice on a phone)', ()
     const stream = await capture.open(null, (pcm) => heard.push(pcm.length), (error) => errors.push(error.message));
 
     expect(sent).toEqual([{ type: 'phone-capture', on: true }]);
-    // It starts half-duplex, for the echo check to measure, and is no Remote Desktop capture.
-    expect([stream.halfDuplex, stream.remote]).toEqual([PHONE_HALF_DUPLEX, false]);
+    // The phone cancels its own playback's echo, so it listens while the voice plays; it is no Remote Desktop capture.
+    expect([stream.halfDuplex, stream.remote]).toEqual([null, false]);
     capture.pcm(Buffer.alloc(641));
     capture.pcm(Buffer.alloc(1));
     expect(heard).toEqual([640]);
@@ -530,7 +530,9 @@ describe('VoiceService dictating from the phone', () => {
     service.receive({ type: 'phone-state', busy: false });
     await settle();
     expect(sent.filter((one) => one.type === 'phone-capture')).toEqual([{ type: 'phone-capture', on: true }]);
-    expect(mic()).toMatchObject({ mic: 'listening', halfDuplex: expect.stringContaining(PHONE_HALF_DUPLEX) });
+    expect(mic()?.mic).toBe('listening');
+    // The phone cancels its own playback's echo: it listens while the voice plays, so talking over a reply stops it.
+    expect(mic()?.halfDuplex).toBeUndefined();
     expect(computer.opens).toBe(0);
 
     phoneSays('ship the fix', 500);
@@ -575,6 +577,46 @@ describe('VoiceService dictating from the phone', () => {
     service.receive({ type: 'mic', on: true });
     await settle();
     expect(computer.opens).toBe(0);
+  });
+
+  it('listens while a reply plays on the phone, so talking over it stops the reply and the words are heard, not cut', async () => {
+    const { clock, tts, sent, service, phoneSays, logs, mic, engine } = setup();
+
+    service.receive({ type: 'device', device: 'phone' });
+    service.receive({ type: 'mic', on: true });
+    service.receive({ type: 'phone-state', busy: false });
+    await settle();
+    expect(logs).toContain('listening: full duplex (echo cancelled)');
+    service.receive({ type: 'speak', gen: 1, replyId: 'r1', sessionId: 's1', text: 'Tests passed and the build is ready to ship.', tone: null, turn: 'm1', ...VOICE });
+    await settle();
+    tts.requests[0]!.audio(Math.round(3_000 * BYTES_PER_MS));
+    await settle();
+
+    const play = sent.find((one) => one.type === 'phone-play') as { id: number };
+
+    service.receive({ type: 'phone-played', id: play.id, ms: 200, done: false });
+    // The operator goes on with the thought while the reply starts, loud enough to be heard: the reply stops, and nothing is dropped or cut.
+    const loud = Buffer.alloc(3_200);
+
+    for (let at = 0; at < loud.length; at += 2) {
+      loud.writeInt16LE(Math.round(Math.sin(at / 9) * 8_000), at);
+    }
+
+    engine.text = 'and one more thing';
+
+    for (let at = 0; at < 1_500; at += 100) {
+      service.receive({ type: 'phone-mic', pcm: loud.toString('base64') });
+      clock.advance(100);
+    }
+    await settle();
+    expect(sent.filter((one) => one.type === 'speech' && one.replyId === 'r1').map((one) => (one as { state: string }).state)).toEqual(['playing', 'interrupted']);
+    expect(logs.filter((line) => line.startsWith('listening paused'))).toEqual([]);
+    expect(mic()?.halfDuplex).toBeUndefined();
+    engine.held = '';
+    phoneSays('and one more thing', 4_000);
+    await settle();
+    clock.advance(100);
+    expect(sent.filter((one) => one.type === 'utterance' && one.final)).toEqual([expect.objectContaining({ text: 'and one more thing', interrupted: expect.objectContaining({ replyId: 'r1' }) })]);
   });
 
   it('keeps the mic off with no device, and refuses enrolment away from this computer', async () => {
