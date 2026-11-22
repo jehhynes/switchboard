@@ -343,20 +343,20 @@ describe('pageList', () => {
     const ownRow = dock.groups.flatMap((group) => group.rows).find((row) => row.key === 'item:1')!;
 
     expect(list.map((group) => [group.key, group.title, group.glyph])).toEqual(dock.groups.map((group) => [group.key, group.title, group.glyph]));
-    expect(list.flatMap((group) => group.rows).find((row) => row.workItemId === 1)).toEqual({ workItemId: 1, ticketId: null, title: 'Fix the badge', priority: ownRow.priority, time: ownRow.time, ticket: ownRow.ticket, sourceKind: ownRow.sourceKind, url: ownRow.url, playbook: ownRow.playbook, links: [], returned: ownRow.returned, comment: ownRow.comment, mark: ownRow.mark, details: ownRow.details, stripe: ownRow.stripe, dim: ownRow.dim, host: null, actions: pageActions(ownRow), main: null, pastes: [], opens: pageOpens(ownRow), terminal: expect.any(Boolean), search: ownRow.search, band: null, voice: null, history: { ticketId: own.ticket.id, key: ownRow.ticket } });
+    expect(list.flatMap((group) => group.rows).find((row) => row.workItemId === 1)).toEqual({ workItemId: 1, ticketId: null, title: 'Fix the badge', priority: ownRow.priority, time: ownRow.time, ticket: ownRow.ticket, sourceKind: ownRow.sourceKind, url: ownRow.url, playbook: ownRow.playbook, links: [], returned: ownRow.returned, comment: ownRow.comment, mark: ownRow.mark, details: ownRow.details, stripe: ownRow.stripe, dim: ownRow.dim, host: null, actions: pageActions(ownRow), main: null, pastes: [], opens: pageOpens(ownRow), search: ownRow.search, band: null, voice: null, history: { ticketId: own.ticket.id, key: ownRow.ticket } });
     // The voice target's row alone has the mic mark, as the dock's.
     const marked = pageList(dock, view, { row: 'item:1', glyph: '\u{ec12}', title: 'Voice is set to this session. Mic on.' }).flatMap((group) => group.rows);
 
     expect(marked.filter((row) => row.voice !== null).map((row) => [row.workItemId, row.voice])).toEqual([[1, { glyph: '\u{ec12}', title: 'Voice is set to this session. Mic on.' }]]);
     expect(pageOpens(ownRow).map((one) => one.label)).toEqual(['Open in VS Code']);
-    // The dock's menu has Open in terminal for a session it can attach to or resume, and the page's opens its Console tab for it.
-    expect(list.flatMap((group) => group.rows).find((row) => row.workItemId === 1)?.terminal).toBe(ownRow.terminal !== null || ownRow.commands.some((one) => one.command['type'] === 'terminal'));
+    // The dock's menu has Open in terminal for a session it can attach to or resume; the page leaves it out, as its Console tab shows that terminal.
     const codeMode = item(7, { status: 'running', sessions: [session({ id: 's7', workItemId: 7, codeMode: true, state: 'running' })] });
-    const fresh = item(8, { status: 'unstarted', sessions: [] });
-    const rows78 = pageList(dockView(snapshot([codeMode, fresh]), NOW, WINDOWS), snapshot([codeMode, fresh])).flatMap((group) => group.rows);
+    const dock7 = dockView(snapshot([codeMode]), NOW, WINDOWS);
+    const dockRow7 = dockRowOf(dock7, 7)!;
+    const page7 = pageList(dock7, snapshot([codeMode])).flatMap((group) => group.rows).find((row) => row.workItemId === 7)!;
 
-    expect(rows78.find((row) => row.workItemId === 7)?.terminal).toBe(true);
-    expect(rows78.find((row) => row.workItemId === 8)?.terminal).toBe(false);
+    expect(dockRow7.terminal !== null || dockRow7.commands.some((one) => one.command['type'] === 'terminal')).toBe(true);
+    expect([...page7.opens, ...page7.actions].map((one) => one.label)).not.toContain('Open in terminal');
     // Each row in the dock's group, in the dock's order, a hosted conversation with its host's name.
     expect(list.map((group) => group.rows.map((row) => row.workItemId))).toEqual(dock.groups.map((group) => group.rows.map((row) => Number(row.key.slice('item:'.length)))));
     expect(list.flatMap((group) => group.rows).filter((row) => row.host !== null).map((row) => [row.workItemId, row.host]).sort()).toEqual([[4, 'support'], [5, 'x']]);
@@ -423,7 +423,7 @@ describe('pageList pool rows', () => {
     const rows = pageList(dock, view).flatMap((group) => group.rows);
     const nine = rows.find((row) => row.ticketId === 9)!;
 
-    expect(nine).toMatchObject({ workItemId: null, ticketId: 9, title: ticket.title, url: 'https://github.com/o/r/issues/9', main: 'Start', opens: [], host: null, terminal: false, history: { ticketId: 9, key: poolRowOf(dock, 9)!.ticket } });
+    expect(nine).toMatchObject({ workItemId: null, ticketId: 9, title: ticket.title, url: 'https://github.com/o/r/issues/9', main: 'Start', opens: [], host: null, history: { ticketId: 9, key: poolRowOf(dock, 9)!.ticket } });
     expect(nine.actions.map((one) => [one.label, one.group])).toEqual([['Start', 'main'], ['Start with guidance…', 'work'], ['Snooze…', 'state']]);
     expect(pageActionEvent(poolRowOf(dock, 9)!, 'Start', { until: null, comment: null })).toEqual({ event: { type: 'pick', ticketId: 9 } });
     expect(pageActionEvent(poolRowOf(dock, 9)!, 'Start with guidance…', { until: null, comment: null, text: 'Use staging', choice: 'dev:fix' })).toEqual({ event: { type: 'pick', ticketId: 9, guidance: 'Use staging', playbook: 'dev:fix' } });
@@ -457,7 +457,7 @@ describe('pageActions', () => {
   const WINDOWS = 'C:/sb/windows';
   const rowOf = (one: ReturnType<typeof item>) => dockRowOf(dockView(snapshot([one]), NOW, WINDOWS), one.id)!;
 
-  it("offers the dock's Start, Approve, Retry, state controls and Delete in its menu order, its main control, and asks before Stop and Delete", () => {
+  it("offers the dock's Start, Approve, Retry, state controls and Delete in its menu order, its main control, and asks before Stop session and Delete", () => {
     const unstarted = rowOf(item(1, { status: 'unstarted' }));
 
     expect(pageActions(unstarted).map((one) => one.label)).toEqual(['Start', 'Start with guidance…', 'Mark done', 'Snooze…', 'Add comment…', 'Delete']);
@@ -469,7 +469,7 @@ describe('pageActions', () => {
     const running = rowOf(item(4, { status: 'running', sessions: [session({ id: 's4', workItemId: 4, codeMode: true, state: 'running' })] }));
     const stop = pageActions(running).find((one) => one.action === 'stop');
 
-    expect(stop?.confirm).toMatchObject({ action: 'Stop', question: `Stop ${running.ticket}?` });
+    expect(stop?.confirm).toMatchObject({ action: 'Stop session', question: `Stop the session for ${running.ticket}?` });
     expect(pageActions(running).map((one) => one.action).at(-1)).toBe('delete');
   });
 
@@ -531,13 +531,14 @@ describe('pageActions', () => {
     }
   });
 
-  it("offers Open in VS Code for a row with a window, then the dock's Open changes and Open report, never History or Open in terminal", () => {
+  it("offers Open in VS Code for a row with a window, then the dock's Open report, never History, Open changes or Open in terminal", () => {
     const worktree = { id: 1, ticketId: 1, path: 'D:/git/wt/101', branch: '101', linkedBy: 'report' as const };
     const review = rowOf(item(1, { status: 'awaiting-approval', worktree, approvalReport: 'D:/git/wt/101/report.md' }));
 
-    expect(pageOpens(review)).toEqual([{ label: 'Open in VS Code', icon: 'vscode' }, { label: 'Open changes', icon: 'diff-multiple' }, { label: 'Open report', icon: 'symbol-file' }]);
-    expect(review.commands.map((one) => one.label)).toContain('History');
-    expect(pageCommandOf(review, 'Open changes')).toEqual({ destination: review.window!.file, command: review.commands.find((one) => one.label === 'Open changes')!.command });
+    expect(pageOpens(review)).toEqual([{ label: 'Open in VS Code', icon: 'vscode' }, { label: 'Open report', icon: 'symbol-file' }]);
+    // The dock offers History and Open changes; the page shows History itself and its Changes tab replaces Open changes.
+    expect(review.commands.map((one) => one.label)).toEqual(expect.arrayContaining(['History', 'Open changes']));
+    expect(pageCommandOf(review, 'Open changes')).toEqual({ refused: 'The work item no longer offers this.' });
     expect(pageCommandOf(review, 'Open report')).toEqual({ destination: review.window!.file, command: { type: 'openUrl', url: 'D:/git/wt/101/report.md' } });
     expect(pageCommandOf(review, 'Open in VS Code')).toEqual({ destination: review.window!.file, command: null });
     expect(pageCommandOf(review, 'History')).toEqual({ refused: 'The work item no longer offers this.' });
@@ -547,7 +548,7 @@ describe('pageActions', () => {
     const windowless = { window: null, commands: review.commands };
 
     expect(pageOpens(windowless)).toEqual([]);
-    expect(pageCommandOf(windowless, 'Open changes')).toEqual({ refused: 'The work item no longer offers this.' });
+    expect(pageCommandOf(windowless, 'Open report')).toEqual({ refused: 'The work item no longer offers this.' });
     // A folder-hosted conversation opens its folder.
     expect(pageCommandOf({ window: { name: 'f', title: 't', folders: ['D:/w'], file: null, hosted: true, folder: 'D:/w' }, commands: [] }, 'Open in VS Code')).toEqual({ destination: 'D:/w', command: null });
   });

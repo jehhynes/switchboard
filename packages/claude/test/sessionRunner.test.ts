@@ -148,7 +148,7 @@ describe('ClaudeRunner', () => {
 
   it('keeps overdue or renamed starts owned and pending, and keeps failed reads pending', async () => {
     const exec = vi.fn<Exec>().mockResolvedValue(ran({ stdout: '[]' }));
-    expect(await runner(exec, { now: () => 120_000 }).reconcile([session({ state: 'starting', shortId: null, nativeSessionId: null })])).toEqual([{ sessionId: 's1', pending: 'The Claude start is still unconfirmed; inspect claude agents for the label ending · s1, then use Stop to clear this unconfirmed start if needed.', attention: true, clearable: true }]);
+    expect(await runner(exec, { now: () => 120_000 }).reconcile([session({ state: 'starting', shortId: null, nativeSessionId: null })])).toEqual([{ sessionId: 's1', pending: 'The Claude start is still unconfirmed; inspect claude agents for the label ending · s1, then use Stop session to clear this unconfirmed start if needed.', attention: true, clearable: true }]);
     exec.mockResolvedValue(ran({ code: 1, stderr: 'unavailable' }));
     expect(await runner(exec).reconcile([session({ state: 'starting' })])).toMatchObject([{ sessionId: 's1', pending: expect.any(String) }]);
   });

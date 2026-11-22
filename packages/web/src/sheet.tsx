@@ -1,4 +1,4 @@
-// The sheet over the page (architecture.md § Web page): Delete's or Stop's question, Snooze…'s choices, a control's text as the dock's input
+// The sheet over the page (architecture.md § Web page): Delete's or Stop session's question, Snooze…'s choices, a control's text as the dock's input
 // dialog asks for it, or a drafted text the clipboard refused.
 import type { ComponentChildren, VNode } from 'preact';
 import { firstSnoozeDay, inputReady } from './render.js';

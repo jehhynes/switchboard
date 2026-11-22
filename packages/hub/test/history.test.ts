@@ -185,7 +185,7 @@ describe('History model', () => {
       'Session 9e8d7c6b finished its turn',
     ]);
     expect(entries[6]).toMatchObject({ detail: 'Session abc12345 is retired.', lines: ['session 9e8d7c6b: ended → running', 'Status: Blocked → Running'] });
-    expect(entries[4]!.lines).toContain('Fork 9e8d7c6b waits for the background session to be released; Stop releases one waiting on a question');
+    expect(entries[4]!.lines).toContain('Fork 9e8d7c6b waits for the background session to be released; Stop session releases one waiting on a question');
   });
 
   it('says a triage waits for Start when nothing is newer than the earlier work item (PRD R80)', () => {

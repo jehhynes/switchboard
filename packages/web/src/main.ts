@@ -3017,22 +3017,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         view.artifactMenu = !view.artifactMenu;
         draw();
         break;
-      case 'open-console':
-        closeMenus();
-
-        // Without a console to show there is no Console tab, and the tab shown and the kept choice stay.
-        if (!showConsole()) {
-          draw();
-          break;
-        }
-
-        leaving('console');
-
-        chooseTab('console');
-
-        draw();
-        saveTab();
-        break;
       case 'close-artifact': {
         // Closing an artifact's tab hides it for the work item on every device, until a newer version; the menu still lists it. Closing the
         // open one shows Status.

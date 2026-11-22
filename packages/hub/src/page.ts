@@ -480,8 +480,6 @@ export interface PageRow {
   opens: PageOpen[];
   /** A Done row's date band, such as `Today`, or an older Done row's month, such as `October 2026` (PRD R27); null in the other groups. */
   band: string | null;
-  /** Whether the dock's menu has Open in terminal for the row, which the page's menu offers as its Console tab. */
-  terminal: boolean;
   /** Line 1's mic mark, before the time, on the voice target's row, as the dock shows it; null on the others. */
   voice: { glyph: string; title: string } | null;
   /** The ticket whose History the row's menu opens, as the dock's History command names it: its ID and key; null when the dock offers none. */
@@ -538,7 +536,7 @@ export const MAX_INPUT_CHARS = 100_000;
 
 /**
  * The page's controls for a dock row: the dock's hub controls whose action is in `PAGE_ACTIONS`, grouped and ordered as the dock's menu: the row's
- * main control, its work, its state, its notes (Add comment…), its order in Ready for review, then the controls that ask first. Stop asks first on
+ * main control, its work, its state, its notes (Add comment…), its order in Ready for review, then the controls that ask first. Stop session asks first on
  * the page, as Delete does in the dock.
  */
 export function pageActions(row: Pick<DockRow, 'controls' | 'main' | 'ticket'>): PageAction[] {
@@ -554,7 +552,7 @@ export function pageActions(row: Pick<DockRow, 'controls' | 'main' | 'ticket'>):
   return offered
     .map((control) => {
       const action = String(control.action['type']) as PageActionType;
-      const confirm = control.confirm ?? (action === 'stop' ? { question: `Stop ${row.ticket}?`, detail: 'Switchboard stops its running session, and the work item waits for you as Stopped by you.', action: 'Stop' } : null);
+      const confirm = control.confirm ?? (action === 'stop' ? { question: `Stop the session for ${row.ticket}?`, detail: 'Switchboard stops its running session, and the work item waits for you as Stopped by you.', action: 'Stop session' } : null);
       const input = control.input === undefined ? null : { question: control.input.question, detail: control.input.detail, action: control.input.action, text: control.input.text ?? null, choice: control.input.choice === undefined ? null : { label: control.input.choice.label, value: control.input.choice.value, values: [...control.input.choice.values] } };
 
       return { label: control.label, action, icon: CONTROL_ICONS.get(control.glyph) ?? 'circle-outline', group: groupOf(control), confirm, input };
@@ -618,9 +616,12 @@ export interface PageOpen {
 /** The label of the page's counterpart of the dock row's click, which opens its VS Code window. */
 export const OPEN_IN_VSCODE = 'Open in VS Code';
 
-/** Whether a dock row command is one the page runs in VS Code: Open changes and Open report; the page shows History and Open in terminal itself. */
+/**
+ * Whether a dock row command is one the page runs in VS Code: Open report. The page shows History itself, and leaves out Open changes and Open in
+ * terminal, which its Changes and Console tabs replace.
+ */
 function pageCommand(command: DockRow['commands'][number]): boolean {
-  return command.command['type'] === 'changes' || (command.command['type'] === 'openUrl' && command.label === 'Open report');
+  return command.command['type'] === 'openUrl' && command.label === 'Open report';
 }
 
 /** The window the page's VS Code controls open: an item window's workspace file, or a folder-hosted conversation's folder; null for none. */
@@ -628,7 +629,7 @@ function destinationOf(row: Pick<DockRow, 'window'>): string | null {
   return row.window?.file ?? row.window?.folder ?? null;
 }
 
-/** What the row opens in VS Code from the page: Open in VS Code when it has a window, then Open changes and Open report as the dock lists them. */
+/** What the row opens in VS Code from the page: Open in VS Code when it has a window, then Open report when the dock lists it. */
 export function pageOpens(row: Pick<DockRow, 'window' | 'commands'>): PageOpen[] {
   if (destinationOf(row) === null) {
     return [];
@@ -747,7 +748,6 @@ export function pageRow(row: DockRow, workItemId: number | null, host: string | 
     main: actions.some((one) => one.label === row.main && one.confirm === null) ? row.main : null,
     pastes: row.pastes.map((paste) => paste.label),
     opens: pageOpens(row),
-    terminal: workItemId !== null && (row.terminal !== null || row.commands.some((command) => command.command['type'] === 'terminal')),
     search: row.search,
     band: row.band,
     voice: null,

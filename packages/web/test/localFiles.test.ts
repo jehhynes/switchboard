@@ -110,7 +110,7 @@ describe('web links with the Chrome pane', () => {
     const session = { id: 's', title: 'Task', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, persona: null };
     const reply = { type: 'reply', id: 'r1', sessionId: 's', at: 1_000, ord: 1, provisional: false, kind: 'reply', answers: null, opening: 'See [the docs](https://example.com/docs).', rewrittenBy: null, withdrawn: false, unread: false, speak: null, tone: null, spoken: { state: 'none', atMs: null, saidChars: null } };
     // A work item with no links of its own, so only the opened link gives the Browser tab something to show.
-    const row = { workItemId: 1, ticketId: null, title: 'Fix it', priority: null, time: null, ticket: 'gh 1', sourceKind: 'github', url: '', playbook: 'dev:build', links: [], returned: 0, comment: null, mark: null, details: [], stripe: null, dim: false, host: null, actions: [], main: null, pastes: [], search: '', opens: [], terminal: false, band: null, voice: null, history: null };
+    const row = { workItemId: 1, ticketId: null, title: 'Fix it', priority: null, time: null, ticket: 'gh 1', sourceKind: 'github', url: '', playbook: 'dev:build', links: [], returned: 0, comment: null, mark: null, details: [], stripe: null, dim: false, host: null, actions: [], main: null, pastes: [], search: '', opens: [], band: null, voice: null, history: null };
 
     pages.push(page);
     vi.spyOn(root.querySelector('#detail .detail-body')!, 'getBoundingClientRect').mockReturnValue({ left: 1000, top: 40, width: options.width ?? 600, height: 800 } as DOMRect);

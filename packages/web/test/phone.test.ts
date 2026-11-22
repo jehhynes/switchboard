@@ -149,7 +149,7 @@ describe('the page on a phone', () => {
 
     for (const label of ['Approve', 'Mark done', 'Resume', 'Open in Claude', 'Answer in terminal']) {
       const main = { label, icon: 'check', group: 'main' } as PageAction;
-      const row = { workItemId: 1, ticketId: null, ticket: 'gh 1', url: '', links: [], actions: [{ label: 'Stop', icon: 'debug-stop', group: 'state' } as PageAction, main], pastes: [], opens: [], terminal: false, history: null } as unknown as PageRow;
+      const row = { workItemId: 1, ticketId: null, ticket: 'gh 1', url: '', links: [], actions: [{ label: 'Stop session', icon: 'debug-stop', group: 'state' } as PageAction, main], pastes: [], opens: [], history: null } as unknown as PageRow;
       const host = document.createElement('ul');
 
       host.innerHTML = html(menuRows(row, { acting: false, linkMenu: false }));

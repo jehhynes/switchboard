@@ -2036,7 +2036,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
       uploads: join(dir, 'uploads'),
       rowCommand: (workItemId, label) => {
         commands.push([workItemId, label]);
-        return label === 'Open changes' ? null : 'The work item no longer offers this.';
+        return label === 'Open report' ? null : 'The work item no longer offers this.';
       },
       poolAction: (ticketId, label, extra) => {
         pools.push([ticketId, label, extra]);
@@ -2374,17 +2374,17 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     const page = openPage();
     const window = scopes.open(view.file, view.view);
 
-    expect(service.rowCommand({ window: page.key, scopeGen: 0, opId: 'a', workItemId: 3, label: 'Open changes' }).status).toBe(403);
+    expect(service.rowCommand({ window: page.key, scopeGen: 0, opId: 'a', workItemId: 3, label: 'Open report' }).status).toBe(403);
     service.select({ window: page.key, opId: 'o', workItemId: 3 });
-    expect(service.rowCommand({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 2, label: 'Open changes' }).status).toBe(403);
-    expect(service.rowCommand({ window, scopeGen: scopes.scope(window)!.scopeGen, opId: 'a', workItemId: 2, label: 'Open changes' }).status).toBe(403);
-    expect(service.rowCommand({ window: page.key, scopeGen: 0, opId: 'a', workItemId: 3, label: 'Open changes' }).status).toBe(409);
+    expect(service.rowCommand({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 2, label: 'Open report' }).status).toBe(403);
+    expect(service.rowCommand({ window, scopeGen: scopes.scope(window)!.scopeGen, opId: 'a', workItemId: 2, label: 'Open report' }).status).toBe(403);
+    expect(service.rowCommand({ window: page.key, scopeGen: 0, opId: 'a', workItemId: 3, label: 'Open report' }).status).toBe(409);
     expect(service.rowCommand({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 3 }).status).toBe(400);
     expect(commands).toEqual([]);
-    expect(service.rowCommand({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 3, label: 'Open changes' })).toEqual({ status: 200, body: { done: true } });
-    expect(service.rowCommand({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 3, label: 'Open changes' })).toEqual({ status: 200, body: { done: true } });
+    expect(service.rowCommand({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 3, label: 'Open report' })).toEqual({ status: 200, body: { done: true } });
+    expect(service.rowCommand({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 3, label: 'Open report' })).toEqual({ status: 200, body: { done: true } });
     expect(service.rowCommand({ window: page.key, scopeGen: 1, opId: 'b', workItemId: 3, label: 'History' })).toEqual({ status: 409, body: { error: 'The work item no longer offers this.' } });
-    expect(commands).toEqual([[3, 'Open changes'], [3, 'History']]);
+    expect(commands).toEqual([[3, 'Open report'], [3, 'History']]);
   });
 
   it("opens a listed row's link for a page key on any work item, not only the selected one, once per opId, and says why not", () => {

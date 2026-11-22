@@ -5,7 +5,7 @@ import { providerMark } from '@switchboard/conversation/providerIcons';
 import { FileIcon } from './fileIcons.js';
 import { selectedEntry, selectedRow, stateIcon } from './model.js';
 import type { PageState } from './model.js';
-import { ago, artifactBar, hasConsole, LINK_LABEL_MAX, paneStatus, rowKey, TABS } from './render.js';
+import { ago, artifactBar, LINK_LABEL_MAX, paneStatus, rowKey, TABS } from './render.js';
 import type { SideTab, Tab, View } from './render.js';
 import { trusted } from './trusted.js';
 import type { PageAction, PageRow } from '@switchboard/protocol';
@@ -34,11 +34,11 @@ const Separator = () => <li class="menu-separator" role="separator"></li>;
 
 /**
  * A row's menu, as rows of a `menu` list (architecture.md § Web page), grouped as the dock's row menu is: the main control, the work controls, the
- * state controls, Add comment…, the order controls, what the row opens (Copy, Open in VS Code, Open changes and Open report, History, Open ticket and its
+ * state controls, Add comment…, the order controls, what the row opens (Copy, Open in VS Code and Open report, History, Open ticket and its
  * links, more than two of them in an Open link submenu), then the controls that ask first; empty when the row offers none. Each item names its
  * row, so a pool ticket's menu in the list runs as the header's does.
  */
-export function menuRows(row: PageRow, view: Pick<View, 'acting' | 'linkMenu'>, console = true): VNode[] {
+export function menuRows(row: PageRow, view: Pick<View, 'acting' | 'linkMenu'>): VNode[] {
   const actions = row.actions;
   const pastes = row.pastes;
   const commands = row.opens;
@@ -63,8 +63,6 @@ export function menuRows(row: PageRow, view: Pick<View, 'acting' | 'linkMenu'>, 
   ];
   const opens = [
     ...pastes.map((label) => item({ 'data-action': 'row-paste', 'data-label': label }, 'copy', `Copy ${label}`)),
-    // The dock's Open in terminal: the open work item's session on the Console tab, while it has one to show.
-    ...(row.terminal && console ? [item({ 'data-action': 'open-console' }, 'terminal', 'Open in terminal')] : []),
     ...commands.map((one) => item({ 'data-action': 'row-command', 'data-label': one.label }, one.icon, one.label)),
     // The dock's History, which the page shows in the conversation's place.
     ...(row.history === null ? [] : [item({ 'data-action': 'row-history' }, 'history', 'History')]),
@@ -80,8 +78,8 @@ export function menuRows(row: PageRow, view: Pick<View, 'acting' | 'linkMenu'>, 
  * The header's row actions (architecture.md § Web page): the dock's main control as a button, then the row's menu (`menuRows`) under an
  * ellipsis; nothing when the row offers none.
  */
-function Actions({ row, view, console }: { row: PageRow | null; view: View; console: boolean }) {
-  const rows = row === null ? [] : menuRows(row, view, console);
+function Actions({ row, view }: { row: PageRow | null; view: View }) {
+  const rows = row === null ? [] : menuRows(row, view);
 
   if (row === null || rows.length === 0) {
     return null;
@@ -296,7 +294,7 @@ export function renderHeader(state: PageState, view: View): VNode {
         </button>
         {pickerMenu}
       </div>
-      <Actions row={selectedRow(state)} view={view} console={hasConsole(state.session)} />
+      <Actions row={selectedRow(state)} view={view} />
       <ViewOptions view={view} expandReplies={state.expandReplies} session={state.session} />
     </header>
   );

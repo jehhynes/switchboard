@@ -169,7 +169,7 @@ export class AppServerRunner implements SessionRunner {
           const turns = await this.history(threadId);
           if (turns.some(turn => items(turn).some(item => item['clientId'] === `sb-start-${action.sessionId}`))) return { nativeSessionId: threadId, shortId: threadId };
         } catch { /* Keep the start pending until the daemon can confirm it. */ }
-        return { nativeSessionId: threadId, shortId: threadId, pending: 'The first Codex message is unconfirmed. Switchboard will check again; Stop or Delete before retrying.' };
+        return { nativeSessionId: threadId, shortId: threadId, pending: 'The first Codex message is unconfirmed. Switchboard will check again; Stop session or Delete before retrying.' };
       }
       return { error: `Codex app-server start failed: ${String(error)}` };
     }
@@ -388,7 +388,7 @@ export class AppServerRunner implements SessionRunner {
         if (reason === 'release') return { error: 'The Codex thread started a new turn; release was cancelled.', cancelled: true };
         const turns = await this.history(threadId);
         const active = turns.filter(t => t['status'] === 'inProgress');
-        if (active.length === 0) return { error: 'Codex has not identified its running turn; try Stop again.' };
+        if (active.length === 0) return { error: 'Codex has not identified its running turn; try Stop session again.' };
         for (const turn of active) await this.deps.server.request('turn/interrupt', { threadId, turnId: turn['id'] });
       }
       this.#subscriptions.set(threadId, (this.#subscriptions.get(threadId) ?? 0) + 1);
@@ -408,7 +408,7 @@ export class AppServerRunner implements SessionRunner {
         await this.follow(session);
         const history = await this.history(session.nativeSessionId);
         if (session.promptless !== true && !history.some(t => items(t).some(i => i['clientId'] === `sb-start-${session.id}`))) {
-          results.push({ sessionId: session.id, pending: 'The first Codex message is unconfirmed. Stop or Delete before retrying.' });
+          results.push({ sessionId: session.id, pending: 'The first Codex message is unconfirmed. Stop session or Delete before retrying.' });
         } else results.push({ sessionId: session.id, started: { shortId: session.nativeSessionId, nativeSessionId: session.nativeSessionId } });
       } catch (error) { results.push({ sessionId: session.id, pending: String(error) }); }
     }

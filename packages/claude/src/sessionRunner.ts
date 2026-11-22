@@ -194,7 +194,7 @@ export class ClaudeRunner implements SessionRunner {
       if (matches.length > 1) return { sessionId: session.id, pending: 'More than one Claude background session matches this start; inspect claude agents and stop the extra session so the original can be recovered.', attention: true as const };
       return this.deps.now() - session.startedAt < LAUNCH_TIMEOUT_MS + START_TIMEOUT_MS
         ? { sessionId: session.id, pending: 'Waiting for the Claude background session to appear in the roster.' }
-        : { sessionId: session.id, pending: `The Claude start is still unconfirmed; inspect claude agents for the label ending · ${session.id}, then use Stop to clear this unconfirmed start if needed.`, attention: true as const, ...(matches.length === 0 ? { clearable: true as const } : {}) };
+        : { sessionId: session.id, pending: `The Claude start is still unconfirmed; inspect claude agents for the label ending · ${session.id}, then use Stop session to clear this unconfirmed start if needed.`, attention: true as const, ...(matches.length === 0 ? { clearable: true as const } : {}) };
 
     });
   }

@@ -34,13 +34,13 @@ describe('unconfirmed start recovery controls', () => {
   it('offers Stop for a warned ordinary start, including a done item, and keeps Delete unavailable until it ends', () => {
     for (const status of ['running', 'done'] as const) {
       const entry = item(1, { status, warning: status === 'done' ? null : 'Unconfirmed start', sessions: [session({ provider: 'claude', state: 'starting', nativeSessionId: null, shortId: null, stateDetail: 'Unconfirmed start' })] });
-      expect(controlsOf(entry).find(control => control.label === 'Stop')).toEqual({ label: 'Stop', icon: 'debug-stop', message: { type: 'action', action: { type: 'stop', workItemId: 1 } }, confirm: { question: 'Recheck this start?', detail: 'Only an overdue start with no matching session can be cleared without stopping a process. Resolve duplicate sessions in claude agents first. Inspect it before retrying.', action: 'Stop' } });
+      expect(controlsOf(entry).find(control => control.label === 'Stop session')).toEqual({ label: 'Stop session', icon: 'debug-stop', message: { type: 'action', action: { type: 'stop', workItemId: 1 } }, confirm: { question: 'Recheck this start?', detail: 'Only an overdue start with no matching session can be cleared without stopping a process. Resolve duplicate sessions in claude agents first. Inspect it before retrying.', action: 'Stop session' } });
       expect(labels(entry)).not.toContain('Delete');
     }
   });
 
   it('does not offer local clearing for an ordinary in-flight start without recovery detail', () => {
-    expect(labels(item(1, { warning: 'Unrelated warning', sessions: [session({ state: 'starting', nativeSessionId: null, shortId: null, stateDetail: null })] }))).not.toContain('Stop');
+    expect(labels(item(1, { warning: 'Unrelated warning', sessions: [session({ state: 'starting', nativeSessionId: null, shortId: null, stateDetail: null })] }))).not.toContain('Stop session');
   });
 });
 
@@ -63,7 +63,7 @@ describe('controlsOf', () => {
   it('shows only the controls that apply, with no session controls and no Change playbook', () => {
     expect(labels(item(1, { status: 'unstarted' }))).toEqual(['Start', 'Start with guidance…', 'Mark done', 'Snooze…', 'Add comment…', 'Delete', 'History']);
     expect(labels(item(1, { status: 'awaiting-approval' }))).toEqual(['Approve', 'Mark done', 'Snooze…', 'Add comment…', 'Delete', 'History']);
-    expect(labels(item(1, { sessions: [session()] }))).toEqual(['Stop', 'Mark done', 'Snooze…', 'Add comment…', 'Open in terminal', 'Delete', 'History']);
+    expect(labels(item(1, { sessions: [session()] }))).toEqual(['Stop session', 'Mark done', 'Snooze…', 'Add comment…', 'Open in terminal', 'Delete', 'History']);
     expect(labels(item(1, { sessions: [session({ state: 'starting', shortId: null })] }))).toEqual(['Mark done', 'Snooze…', 'Add comment…', 'History']);
     expect(labels(item(1, { status: 'blocked', sessions: [session({ state: 'ended' })] }))).toEqual(['Mark done', 'Snooze…', 'Add comment…', 'Open in terminal', 'Delete', 'History']);
     expect(labels(item(1, { status: 'finished', sessions: [session({ state: 'ended' })] }))).toEqual(['Mark done', 'Snooze…', 'Add comment…', 'Open in terminal', 'Delete', 'History']);
@@ -156,7 +156,7 @@ describe('controlsOf', () => {
 
     expect(openQuestion(waiting)).toBeNull();
     expect(labels(waiting)).not.toContain('Open in Claude');
-    expect(labels(waiting)).toContain('Stop');
+    expect(labels(waiting)).toContain('Stop session');
     expect(mainControl(waiting)?.label).not.toBe('Open in Claude');
   });
 
@@ -165,7 +165,7 @@ describe('controlsOf', () => {
 
     expect(openQuestion(waiting)).toBeNull();
     expect(labels(waiting)).not.toContain('Open in Claude');
-    expect(labels(waiting)).toContain('Stop');
+    expect(labels(waiting)).toContain('Stop session');
     expect(mainControl(waiting)).toMatchObject({ label: 'Open in terminal', message: { type: 'terminal', shortId: 'aaaa1111', active: false } });
     expect(startPromptText(waiting)).toEqual([{ text: 'Waits on a prompt before it starts', title: "Claude asks before the session starts, such as to approve the project's MCP servers. Open in terminal to answer it." }]);
     expect(startPromptText(item(7, { sessions: [session({ state: 'waiting' })] }))).toEqual([]);
@@ -177,7 +177,7 @@ describe('controlsOf', () => {
 
     expect(openQuestion(waiting)).toBeNull();
     expect(labels(waiting)).not.toContain('Open in Claude');
-    expect(labels(waiting)).toContain('Stop');
+    expect(labels(waiting)).toContain('Stop session');
     expect(mainControl(waiting)).toMatchObject({ label: 'Open in terminal', message: { type: 'terminal', shortId: 'aaaa1111', active: false } });
     expect(mainControl(waiting, 'review')).toBe(ANSWER_IN_TERMINAL);
     expect(startPromptText(waiting)).toEqual([{ text: 'Waits on a permission prompt', title: 'Claude asks to approve a tool call. Open in terminal to answer it; stopping the session would drop the prompt.' }]);
@@ -198,7 +198,7 @@ describe('controlsOf', () => {
     expect(terminal(item(7, { sessions: [session({ state: 'starting', shortId: null })] }))).toBeNull();
     // Its release stop has not finished, so its background process may still hold it.
     expect(terminal(item(7, { sessions: [session({ state: 'idle', released: true, releasing: true, provider: 'codex' })] }))).toBeNull();
-    expect(labels(item(7, { sessions: [session({ state: 'idle', released: true, releasing: true })] }))).toContain('Stop');
+    expect(labels(item(7, { sessions: [session({ state: 'idle', released: true, releasing: true })] }))).toContain('Stop session');
     expect(terminal(item(7, { sessions: [session({ state: 'ended', nativeSessionId: null })] }))).toBeNull();
     expect(terminal(item(7))).toBeNull();
   });
@@ -258,7 +258,7 @@ describe('Code Mode sessions (PRD R95)', () => {
   });
 
   it('offers Stop while held, after its turn too, and no main control while it runs or after its turn', () => {
-    expect(labels(item(7, { sessions: [held({ state: 'idle' })] }))).toContain('Stop');
+    expect(labels(item(7, { sessions: [held({ state: 'idle' })] }))).toContain('Stop session');
     expect(mainControl(item(7, { sessions: [held()] }))).toBeNull();
     expect(mainControl(item(7, { status: 'blocked', sessions: [held({ state: 'idle' })] }))).toBeNull();
   });
@@ -266,8 +266,8 @@ describe('Code Mode sessions (PRD R95)', () => {
   it('offers Stop on an ended session only while the resume guard found leftover processes', () => {
     const ended = item(7, { status: 'blocked', sessions: [held({ state: 'ended' })] });
 
-    expect(labels(ended)).not.toContain('Stop');
-    expect(controlsOf({ ...ended, leftovers: [4242] }).find((control) => control.label === 'Stop')?.message).toEqual({ type: 'action', action: { type: 'stop', workItemId: 7 } });
+    expect(labels(ended)).not.toContain('Stop session');
+    expect(controlsOf({ ...ended, leftovers: [4242] }).find((control) => control.label === 'Stop session')?.message).toEqual({ type: 'action', action: { type: 'stop', workItemId: 7 } });
   });
 
   it('names the Code Mode session in the start and permission prompt tooltips', () => {

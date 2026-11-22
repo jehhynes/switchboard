@@ -47,7 +47,7 @@
           "terminal": null,
           "controls": [
             {
-              "label": "Stop",
+              "label": "Stop session",
               "glyph": "",
               "action": {
                 "type": "stop",
@@ -652,7 +652,7 @@
           "terminal": null,
           "controls": [
             {
-              "label": "Stop",
+              "label": "Stop session",
               "glyph": "",
               "action": {
                 "type": "stop",
@@ -783,7 +783,7 @@
           "terminal": null,
           "controls": [
             {
-              "label": "Stop",
+              "label": "Stop session",
               "glyph": "",
               "action": {
                 "type": "stop",

@@ -174,10 +174,10 @@ export function controlsOf(item: WorkItemView, mode: OpenVSCode = 'always'): Con
     controls.push(mode === 'review' ? ANSWER_IN_TERMINAL : { label: `Open in ${PROVIDER_NAMES[question.provider]}`, icon: 'comment-discussion', message: question });
   }
 
-  // Processes an ended Code Mode session left can keep it from resuming, so Stop ends them (PRD R95).
+  // Processes an ended Code Mode session left can keep it from resuming, so Stop session ends them (PRD R95).
   const unconfirmed = session?.state === 'starting' && session.provider === 'claude' && session.codeMode !== true && session.nativeSessionId === null && session.shortId === null && session.stateDetail !== null;
   if (unconfirmed || isBackground(session) || (session?.execution === 'app-server' && session.nativeSessionId !== null) || (session === null && (item.leftovers?.length ?? 0) > 0)) {
-    controls.push({ label: 'Stop', icon: 'debug-stop', message: action('stop'), ...(unconfirmed ? { confirm: { question: 'Recheck this start?', detail: 'Only an overdue start with no matching session can be cleared without stopping a process. Resolve duplicate sessions in claude agents first. Inspect it before retrying.', action: 'Stop' } } : {}) });
+    controls.push({ label: 'Stop session', icon: 'debug-stop', message: action('stop'), ...(unconfirmed ? { confirm: { question: 'Recheck this start?', detail: 'Only an overdue start with no matching session can be cleared without stopping a process. Resolve duplicate sessions in claude agents first. Inspect it before retrying.', action: 'Stop session' } } : {}) });
   }
 
   // Retries from the step that failed, or setup that stopped at a usage limit (PRD R34, R111).
@@ -321,7 +321,7 @@ function historyControl(ticket: { id: number; source: string; sourceKey: string 
 type SessionView = WorkItemView['sessions'][number];
 
 /**
- * A session running in its background process, including one whose release stop has not finished or failed, so Stop stays offered; a released
+ * A session running in its background process, including one whose release stop has not finished or failed, so Stop session stays offered; a released
  * session that is active again was resumed elsewhere, such as in a VS Code tab.
  */
 export function isBackground(session: SessionView | null): session is SessionView & { shortId: string } {
@@ -330,7 +330,7 @@ export function isBackground(session: SessionView | null): session is SessionVie
 
 /**
  * A session waiting on the operator in its background process, which Open in Claude or Codex stops and opens in a tab (PRD R70). While a fork
- * waits for its release (PRD R78) Stop is offered instead, as Open would open the retired copy; a hub older than forks sends no `pendingFork`.
+ * waits for its release (PRD R78) Stop session is offered instead, as Open would open the retired copy; a hub older than forks sends no `pendingFork`.
  * A session waiting on a prompt before it starts has nothing to open in a tab yet (PRD R41), and stopping one that waits on a permission prompt
  * drops the prompt (PRD R70).
  */

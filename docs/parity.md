@@ -21,7 +21,7 @@ The dock's list is in `apps/dock/src/Switchboard.Dock/Views/`, the page's in `pa
 2. More Actions' dock windows (H2): Held sessions and Show hub log only say to use the dock, and New ad-hoc session and New conversation in a folder cannot choose a folder the hub does not know.
 3. Held sessions (H4): the held-session note shows, but the page has no Held sessions window to open.
 4. Keyboard (K2, K4, K5, O3, O4): no arrow-key walk, F8, menu key, drag or Alt+arrow reordering.
-5. Web-only behaviours the dock lacks (R8, C13, G10, H7): a hosted conversation's host on line 2, Stop asking first, the selected row kept in a collapsed group.
+5. Web-only behaviours the dock lacks (R8, C13, G10, H7): a hosted conversation's host on line 2, Stop session asking first, the selected row kept in a collapsed group.
 
 ## Groups
 
@@ -113,17 +113,17 @@ The dock's list is in `apps/dock/src/Switchboard.Dock/Views/`, the page's in `pa
 |---|---|---|---|
 | C1 | Right-click or Menu key opens the row's menu, at the pointer or the row's corner | Partly | The selected work item's controls are under an ellipsis in the conversation header; no menu on the row itself |
 | C2 | Menu groups, separated: main action; work; state; notes; order; opens; controls that ask first | Partly | The same groups, in the same order; no Persona submenu, whose pin is in the persona dialog (C7) |
-| C3 | Start, Approve, Retry, Stop, Mark done, Snooze…, Unsnooze, Delete | Present | |
+| C3 | Start, Approve, Retry, Stop session, Mark done, Snooze…, Unsnooze, Delete | Present | |
 | C4 | Reopen on a done row | Present | With the state controls |
 | C5 | Start with guidance… and Start with prompt… (text, playbook choice) | Present | The page's input sheet asks as the dock's dialog does |
 | C6 | Add comment… | Present | In the notes group |
 | C7 | Persona submenu with the session's persona checked and Clear pin | Partly | The page's conversation header's view options menu has a persona row naming the session's persona, pinned or resolved at its start, or None; it opens the persona dialog, which lists each persona with its voice, style and personality, marks the current one and has Clear pin while one is pinned. The dock keeps its submenu and the VS Code Conversation view its header's persona button, since neither has the page's dialog to share |
-| C8 | Open in Claude or Codex, Answer in terminal, Open in terminal | Partly | Open in terminal is in the actions menu whenever the dock's menu has it, and opens the page's Console tab, which shows and types into a held Claude Code Mode session's terminal or the Codex terminal the hub holds for a Codex session ([architecture.md § Web page](architecture.md#web-page), [§ Codex runner](architecture.md#codex-runner)); a terminal prompt card answers some waits; on both, an ended registered Claude session is offered as an ended held session, which Open in terminal and the row's click resume (PRD R81). Open in Claude or Codex and Answer in terminal are not on the page |
-| C9 | Open changes, History, Open report (VS Code commands) | Partly | Open changes and Open report in the actions menu start VS Code on the row's window. History, in the actions menu and a pool ticket's menu, opens the page's own History with the VS Code History tab's content; of its links the page opens only http and https URLs, while a session, worktree or file opens only from VS Code or the dock |
+| C8 | Open in Claude or Codex, Answer in terminal, Open in terminal | Partly | Open in terminal is not in the actions menu (the operator's decision, 2026-11-22), because the page's Console tab shows and types into the same terminal: a held Claude Code Mode session's terminal or the Codex terminal the hub holds for a Codex session ([architecture.md § Web page](architecture.md#web-page), [§ Codex runner](architecture.md#codex-runner)); a terminal prompt card answers some waits; on both, an ended registered Claude session is offered as an ended held session, which the row's click resumes (PRD R81). Open in Claude or Codex and Answer in terminal are not on the page |
+| C9 | Open changes, History, Open report (VS Code commands) | Partly | Open report in the actions menu starts VS Code on the row's window. Open changes is not in the actions menu (the operator's decision, 2026-11-22), because the page's Changes list shows the worktree's changes (PRD R118). History, in the actions menu and a pool ticket's menu, opens the page's own History with the VS Code History tab's content; of its links the page opens only http and https URLs, while a session, worktree or file opens only from VS Code or the dock |
 | C10 | Open ticket and an Open item per link, more than two in an Open link submenu, labels cut at 48 characters | Partly | In the actions menu; the submenu opens in place under Open link rather than beside it, which works at a phone's width |
 | C11 | Copy: one draft copies at once, several open a Copy submenu of labels; `Copied <label>.` in the neutral toast; an unreadable draft says why | Partly | Each draft is its own item in the actions menu, nothing confirms the copy, and a refused clipboard shows the text to copy |
 | C12 | Delete asks first with the hub's question and detail; the focus starts on Cancel and Enter never deletes | Partly | The page's sheet asks but does not put the focus on Cancel |
-| C13 | Stop asks first | Web only | The dock's Stop runs at once |
+| C13 | Stop session asks first | Web only | The dock's Stop session runs at once |
 | C14 | Snooze… dialog: the hub's choices, a date from the earliest timed choice waking at its time of day, a comment; Cancel posts nothing | Present | |
 | C15 | Triage again and Start on a pool row | Present | In the pool row's menu, with Start with guidance… and Snooze… or Unsnooze |
 | C16 | A control acts only on the hub's current view; with no hub the dock refuses it | Present | The hub checks the row still offers it |

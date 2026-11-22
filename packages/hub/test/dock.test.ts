@@ -239,7 +239,7 @@ describe('dockView', () => {
         confirm: { question: 'Delete gh 107?', detail: expect.stringContaining('Switchboard deletes the work item') as string, action: 'Delete' },
       },
     ]);
-    expect(row(item(7, { sessions: [session()] })).controls.map((control) => control.label)).toEqual(['Stop', 'Mark done', 'Snooze…', 'Add comment…', 'Delete']);
+    expect(row(item(7, { sessions: [session()] })).controls.map((control) => control.label)).toEqual(['Stop session', 'Mark done', 'Snooze…', 'Add comment…', 'Delete']);
   });
 
   it("shows a snoozed row's wake time and then its comment on line 3, on one line and cut with the whole text as the tooltip (PRD R49)", () => {
@@ -638,7 +638,7 @@ describe('dockView of Code Mode sessions (PRD R95)', () => {
     const row = shown(item(7, { sessions: [held({ state: 'waiting' })] }));
 
     expect(row.commands.find((command) => command.label === 'Open in terminal')?.command).toEqual({ type: 'terminal', provider: 'claude', sessionId: 's1', cwd: 'D:/git/widgets', name: 'gh 107', shortId: 'aaaa1111', active: false, codeMode: true });
-    expect(row.controls.map((control) => control.label)).toContain('Stop');
+    expect(row.controls.map((control) => control.label)).toContain('Stop session');
     expect(row.open?.type).not.toBe('question');
   });
 });

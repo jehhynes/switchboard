@@ -358,7 +358,7 @@ class Builder {
           break;
         case 'session.pendingFork':
           if (after !== null) {
-            lines.push(`Fork ${str(after)} waits for the background session to be released; Stop releases one waiting on a question`);
+            lines.push(`Fork ${str(after)} waits for the background session to be released; Stop session releases one waiting on a question`);
           }
           break;
         // Shown with the status, state, outcome or snooze they belong to, or internal.

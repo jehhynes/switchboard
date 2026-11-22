@@ -1325,7 +1325,7 @@ describe('Runtime', () => {
     now += 120_000;
     await runtime.readRoster();
     expect(store.session('s1')).toMatchObject({ state: 'starting', outcome: null, released: false });
-    expect(store.workItem(1)).toMatchObject({ status: 'running', error: null, warning: 'The Claude start is still unconfirmed; inspect claude agents for the label ending · s1, then use Stop to clear this unconfirmed start if needed.' });
+    expect(store.workItem(1)).toMatchObject({ status: 'running', error: null, warning: 'The Claude start is still unconfirmed; inspect claude agents for the label ending · s1, then use Stop session to clear this unconfirmed start if needed.' });
     expect(await runtime.report({ sessionId: 's1', kind: 'done' })).toEqual({ refused: 'The session start is still unconfirmed; retry the report after it is identified.' });
     expect(store.workItem(1)?.status).toBe('running');
     cli.roster = [{ id: '00000001', sessionId: '00000001-native', pid: 101, kind: 'background', cwd: 'D:/scratch', name: 'name · s1', state: 'working' }];
@@ -1404,7 +1404,7 @@ describe('Runtime', () => {
     if (when === 'after') runtime.send({ type: 'mark-done', workItemId: 1 });
     expect(store.workItem(1)?.status).toBe('done');
     const row = runtime.snapshot().workItems.find(item => item.id === 1)!;
-    expect(controlsOf(row).find(control => control.label === 'Stop')?.message).toEqual({ type: 'action', action: { type: 'stop', workItemId: 1 } });
+    expect(controlsOf(row).find(control => control.label === 'Stop session')?.message).toEqual({ type: 'action', action: { type: 'stop', workItemId: 1 } });
     runtime.send({ type: 'stop', workItemId: 1 });
     await runtime.settled();
     expect(store.session('s1')?.state).toBe('ended');
@@ -3918,11 +3918,11 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
       endIt(context);
       context.store.updateSession('s1', { lastTree: tree });
       expect(shown().leftovers).toBeUndefined();
-      expect(controlsOf(shown()).map((control) => control.label)).not.toContain('Stop');
+      expect(controlsOf(shown()).map((control) => control.label)).not.toContain('Stop session');
 
       await context.runtime.attach('s1');
       expect(shown().leftovers).toEqual([100]);
-      expect(controlsOf(shown()).find((control) => control.label === 'Stop')?.message).toEqual({ type: 'action', action: { type: 'stop', workItemId: 1 } });
+      expect(controlsOf(shown()).find((control) => control.label === 'Stop session')?.message).toEqual({ type: 'action', action: { type: 'stop', workItemId: 1 } });
 
       expect(context.runtime.send({ type: 'stop', workItemId: 1 }).refused).toBeNull();
       await context.runtime.settled();
@@ -4585,7 +4585,7 @@ describe("Codex terminals in the holder (architecture.md § Codex runner)", () =
   }
 
   it("ends the session's terminal after a Stop, and not after a Stop that failed", async () => {
-    let failure: { error: string } | null = { error: 'Codex has not identified its running turn; try Stop again.' };
+    let failure: { error: string } | null = { error: 'Codex has not identified its running turn; try Stop session again.' };
     const h = await codexSession(async () => failure);
 
     h.store.updateSession('s1', { state: 'running' });

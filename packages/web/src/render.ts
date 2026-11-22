@@ -220,7 +220,7 @@ export function paneStatus(pane: PaneView | null): string | null {
   return pane.extension === 'none' ? 'Browser pane: the Switchboard Chrome extension is not connected.' : pane.extension === 'unpaired' ? 'Browser pane: the Chrome extension is not paired.' : pane.shown ? 'Browser pane: showing, paired with the Chrome extension.' : 'Browser pane: paired with the Chrome extension.';
 }
 
-/** A sheet: Delete's or Stop's question, Snooze…'s choices, a control's text (and choice) as the dock's input dialog asks for it, or a drafted text the clipboard refused. */
+/** A sheet: Delete's or Stop session's question, Snooze…'s choices, a control's text (and choice) as the dock's input dialog asks for it, or a drafted text the clipboard refused. */
 export type Sheet =
   | { kind: 'input'; row: string; label: string; input: NonNullable<PageAction['input']>; text: string; picked: string }
   | { kind: 'confirm'; row: string; action: PageAction }

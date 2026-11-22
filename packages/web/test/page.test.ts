@@ -22,7 +22,7 @@ const message = (id: string, ord: number, patch: Partial<MessageView> = {}): Mes
 const reply = (id: string, ord: number, patch: Partial<ReplyView> = {}): ReplyView => ({ type: 'reply', id, sessionId: 's', at: 1_000 + ord, ord, provisional: false, kind: 'reply', answers: null, opening: `reply ${id}`, rewrittenBy: null, withdrawn: false, unread: false, speak: null, tone: null, spoken: { state: 'none', atMs: null, saidChars: null }, ...patch });
 const session = (patch: Partial<SessionView> = {}): SessionView => ({ id: 's', title: 'Task session s', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, persona: null, ...patch });
 const scope = { kind: 'page' as const, key: 'k', folder: 'D:/w', title: 'Fix it', scopeGen: 3, conversations: [{ workItemId: 1, title: 'Fix it', primary: true, sessionId: 's', state: 'idle' as const, conversation: 'full' as const, unread: 0 }], workItemId: 1, cwd: 'D:/w', sessionId: 's' };
-const listRow = (workItemId: number, patch: Partial<PageRow> = {}): PageRow => ({ workItemId, ticketId: null, title: `Item ${workItemId}`, priority: null, time: null, ticket: `gh ${workItemId}`, sourceKind: 'github', url: '', playbook: 'dev:build', links: [], returned: 0, comment: null, mark: null, details: [], stripe: null, dim: false, host: null, actions: [], main: null, pastes: [], search: '', opens: [], terminal: false, band: null, voice: null, history: null, ...patch });
+const listRow = (workItemId: number, patch: Partial<PageRow> = {}): PageRow => ({ workItemId, ticketId: null, title: `Item ${workItemId}`, priority: null, time: null, ticket: `gh ${workItemId}`, sourceKind: 'github', url: '', playbook: 'dev:build', links: [], returned: 0, comment: null, mark: null, details: [], stripe: null, dim: false, host: null, actions: [], main: null, pastes: [], search: '', opens: [], band: null, voice: null, history: null, ...patch });
 const listGroup = (key: string, rows: PageRow[], patch: Partial<PageGroup> = {}): PageGroup => ({ key, title: key, glyph: '\u{ea70}', empty: null, rows, ...patch });
 const artifact = (path: string, type: ArtifactView['type'], ext: string): ArtifactView => ({ path, owner: 'chat', kind: 'page', title: path, ext, type, updatedAt: 1_500 });
 /** Sets the page's width and tells the page, as a window resize does. */
@@ -2821,11 +2821,11 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it("runs the selected work item's row actions from the header: the main button, Stop and Delete after their question, Snooze with a choice, and Copy", async () => {
+  it("runs the selected work item's row actions from the header: the main button, Stop session and Delete after their question, Snooze with a choice, and Copy", async () => {
     const { page, source } = start();
     const actions = [
       { label: 'Approve', action: 'approve', icon: 'check', group: 'main' as const, confirm: null, input: null },
-      { label: 'Stop', action: 'stop', icon: 'debug-stop', group: 'work' as const, confirm: { question: 'Stop gh 1?', detail: 'It stops.', action: 'Stop' }, input: null },
+      { label: 'Stop session', action: 'stop', icon: 'debug-stop', group: 'work' as const, confirm: { question: 'Stop the session for gh 1?', detail: 'It stops.', action: 'Stop session' }, input: null },
       { label: 'Mark done', action: 'mark-done', icon: 'pass', group: 'state' as const, confirm: null, input: null },
       { label: 'Snooze…', action: 'snooze', icon: 'clockface', group: 'state' as const, confirm: null, input: null },
       { label: 'Move up', action: 'move', icon: 'arrow-up', group: 'order' as const, confirm: null, input: null },
@@ -2843,14 +2843,14 @@ describe('the page in use', () => {
 
     click('button.actions');
     // The dock's menu groups: main, work, state, order, what the row opens, and what asks first.
-    expect([...root.querySelectorAll('.actions-menu .menu-row')].map((row) => row.textContent)).toEqual(['Approve', 'Stop', 'Mark done', 'Snooze…', 'Move up', 'Copy Reply', 'Delete']);
+    expect([...root.querySelectorAll('.actions-menu .menu-row')].map((row) => row.textContent)).toEqual(['Approve', 'Stop session', 'Mark done', 'Snooze…', 'Move up', 'Copy Reply', 'Delete']);
     expect(root.querySelectorAll('.actions-menu .menu-separator')).toHaveLength(5);
     click('.actions-menu [data-label="Move up"]');
     await flush();
     expect(posts.filter((post) => post.url.endsWith('/row-action')).at(-1)?.body).toMatchObject({ workItemId: 1, label: 'Move up' });
     click('button.actions');
-    click('.actions-menu [data-label="Stop"]');
-    expect(root.querySelector('.sheet-title')!.textContent).toBe('Stop gh 1?');
+    click('.actions-menu [data-label="Stop session"]');
+    expect(root.querySelector('.sheet-title')!.textContent).toBe('Stop the session for gh 1?');
     posts = [];
     click('.sheet [data-action="sheet-cancel"]');
     expect(root.querySelector('.sheet')).toBeNull();
@@ -2963,19 +2963,19 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it("runs Open in VS Code, Open changes and Open report through the hub from the menu's opens group, and shows a refusal", async () => {
+  it("runs Open in VS Code and Open report through the hub from the menu's opens group, and shows a refusal", async () => {
     const { page, source } = start();
-    const opens = [{ label: 'Open in VS Code', icon: 'vscode' }, { label: 'Open changes', icon: 'diff-multiple' }, { label: 'Open report', icon: 'symbol-file' }];
+    const opens = [{ label: 'Open in VS Code', icon: 'vscode' }, { label: 'Open report', icon: 'symbol-file' }];
 
     hello(source, { groups: [listGroup('review', [listRow(1, { title: 'Fix it', opens, pastes: ['Reply'], url: 'https://github.com/o/r/issues/1' })])] });
     click('button.actions');
     // One group: Copy, then what opens in VS Code, then the ticket, as the dock's opens.
-    expect([...root.querySelectorAll('.actions-menu .menu-row')].map((row) => row.textContent)).toEqual(['Copy Reply', 'Open in VS Code', 'Open changes', 'Open report', 'Open ticket']);
+    expect([...root.querySelectorAll('.actions-menu .menu-row')].map((row) => row.textContent)).toEqual(['Copy Reply', 'Open in VS Code', 'Open report', 'Open ticket']);
     expect(root.querySelectorAll('.actions-menu .menu-separator')).toHaveLength(0);
     expect(root.querySelector('.actions-menu [data-label="Open in VS Code"] .codicon-vscode')).not.toBeNull();
-    click('.actions-menu [data-label="Open changes"]');
+    click('.actions-menu [data-label="Open report"]');
     await flush();
-    expect(posts.find((post) => post.url.endsWith('/row-command'))?.body).toMatchObject({ window: 'pk', scopeGen: 3, workItemId: 1, label: 'Open changes' });
+    expect(posts.find((post) => post.url.endsWith('/row-command'))?.body).toMatchObject({ window: 'pk', scopeGen: 3, workItemId: 1, label: 'Open report' });
     expect(root.querySelector('.actions-menu')).toBeNull();
 
     answers['/row-command'] = { status: 409, body: { error: 'VS Code did not start: Code.exe was not found beside code on PATH.' } };
@@ -3054,30 +3054,13 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it("opens the Console tab for the dock's Open in terminal, after Copy in the opens group", async () => {
+  it("offers no Open in terminal, which the Console tab replaces, while the session has a console", async () => {
     const { page, source } = start();
 
-    hello(source, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', pastes: ['Reply'], terminal: true, opens: [{ label: 'Open in VS Code', icon: 'vscode' }] })])] });
+    hello(source, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', pastes: ['Reply'], opens: [{ label: 'Open in VS Code', icon: 'vscode' }] })])] });
+    expect(root.querySelector('[data-tab="console"]')).not.toBeNull();
     click('button.actions');
-    expect([...root.querySelectorAll('.actions-menu .menu-row')].map((row) => row.textContent)).toEqual(['Copy Reply', 'Open in terminal', 'Open in VS Code']);
-    posts = [];
-    click('.actions-menu [data-action="open-console"]');
-    expect(root.querySelector('[data-tab="console"]')!.getAttribute('aria-selected')).toBe('true');
-    expect(root.querySelector('.actions-menu')).toBeNull();
-    // It opens a tab of the page; nothing is posted for it.
-    expect(posts.filter((post) => post.url.includes('/row-'))).toEqual([]);
-
-    // Nor while the session has no console to show, as once it has ended.
-    source.emit('session', { session: session({ state: 'ended', conversation: 'read-only' }) });
-    click('button.actions');
-    expect(root.querySelector('.actions-menu [data-action="open-console"]')).toBeNull();
-    click('button.actions');
-    source.emit('session', { session: session() });
-
-    // A row the dock offers no terminal for has no such item.
-    source.emit('list', { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', pastes: ['Reply'] })])] });
-    click('button.actions');
-    expect(root.querySelector('.actions-menu [data-action="open-console"]')).toBeNull();
+    expect([...root.querySelectorAll('.actions-menu .menu-row')].map((row) => row.textContent)).toEqual(['Copy Reply', 'Open in VS Code']);
     page.close();
   });
 

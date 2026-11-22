@@ -1499,7 +1499,7 @@ public sealed partial class MainWindow : Window
     static readonly HashSet<string> OrderActions = ["move", "reset-position"];
 
     /// <summary>
-    /// The row's menu (PRD R71), in groups with a separator between them: the row's main action; its work (Start, Approve, Retry, Stop and the
+    /// The row's menu (PRD R71), in groups with a separator between them: the row's main action; its work (Start, Approve, Retry, Stop session and the
     /// other hub controls); its state (Mark done or Reopen, Snooze… or Unsnooze); its notes (Add comment…, Persona); its order in Ready for review;
     /// what it opens (Copy, Open in terminal, the window commands, Open ticket and its links); and Delete, or any control that asks first, last.
     /// </summary>
