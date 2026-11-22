@@ -444,6 +444,8 @@ export interface DiffView {
   new: string | null;
   binary: boolean;
   tooLarge: 'sides' | 'patch' | null;
+  /** True when the sides were not asked for (`readDiff`'s `withSides` false): the patch alone, its unchanged lines read only on request. */
+  partial?: true;
 }
 
 const DIFF_ARGS = ['diff', '--no-ext-diff', '--no-textconv', '--no-color', '--no-relative', '--src-prefix=a/', '--dst-prefix=b/'];
@@ -465,13 +467,17 @@ async function readSide(changes: WorktreeChanges, side: { path: string; ref: str
   return readCapped(real, SIDE_MAX_BYTES);
 }
 
+/** git's line for a binary file in a patch, which it prints in place of hunks. */
+const BINARY_PATCH = /^(Binary files .* differ|GIT binary patch)$/m;
+
 /**
  * One change row's diff, `path` being its path now (a deleted file's at the base): git's patch, from `git diff --no-index` against nothing for
- * an untracked file and `git diff -M1% <base>` limited to the row's paths otherwise, so a rename pairs as the row does, and both whole sides;
- * null for a path that is not one of the rows. Only the rows' own paths are read: a git-side path as `<base>:<path>`, never a ref the
- * caller names, and a disk-side path by real path inside the worktree.
+ * an untracked file and `git diff -M1% <base>` limited to the row's paths otherwise, so a rename pairs as the row does, and, unless
+ * `withSides` is false, both whole sides; null for a path that is not one of the rows. Only the rows' own paths are read: a git-side path as
+ * `<base>:<path>`, never a ref the caller names, and a disk-side path by real path inside the worktree. Without the sides no side is read:
+ * a binary file is known by git's numstat or its patch's binary line.
  */
-export async function readDiff(changes: WorktreeChanges, path: string, git: Git = nodeGit): Promise<DiffView | null> {
+export async function readDiff(changes: WorktreeChanges, path: string, git: Git = nodeGit, withSides = true): Promise<DiffView | null> {
   const row = changes.view.rows.find((one) => one.path === path);
   const sides = changes.sides.get(path);
 
@@ -479,17 +485,43 @@ export async function readDiff(changes: WorktreeChanges, path: string, git: Git 
     return null;
   }
 
-  const base: DiffView = { path, ...(row.from === undefined ? {} : { from: row.from }), status: row.status, patch: null, old: null, new: null, binary: false, tooLarge: null };
+  const base: DiffView = { path, ...(row.from === undefined ? {} : { from: row.from }), status: row.status, patch: null, old: null, new: null, binary: false, tooLarge: null, ...(withSides ? {} : { partial: true as const }) };
+  const paths = [...new Set([sides.original?.path, sides.modified?.path].filter((one): one is string => one !== undefined))];
+  const patchRead = () =>
+    sides.untracked
+      ? git([...DIFF_ARGS, '--no-index', '--', '/dev/null', path], changes.root, { maxBytes: PATCH_MAX_BYTES })
+      : git([...DIFF_ARGS, '-M1%', changes.ref, '--', ...paths], changes.root, { maxBytes: PATCH_MAX_BYTES });
+
+  if (!withSides) {
+    if (row.binary) {
+      return { ...base, binary: true };
+    }
+
+    const patch = await patchRead();
+    const patchOk = patch.code === 0 || (sides.untracked && patch.code === 1);
+
+    if (patch.tooLarge) {
+      return { ...base, tooLarge: 'patch' };
+    }
+
+    if (!patchOk || patch.stdout.length === 0) {
+      return base;
+    }
+
+    const text = patch.stdout.toString('utf8');
+
+    return BINARY_PATCH.test(text) ? { ...base, binary: true } : { ...base, patch: text };
+  }
+
   const [old, now] = await Promise.all([sides.original === null ? null : readSide(changes, sides.original, git), sides.modified === null ? null : readSide(changes, sides.modified, git)]);
 
+  // Known binary before git diff runs, so a binary file never waits on it.
   if ((old instanceof Buffer && looksBinary(old)) || (now instanceof Buffer && looksBinary(now)) || row.binary) {
     return { ...base, binary: true };
   }
 
-  const paths = [...new Set([sides.original?.path, sides.modified?.path].filter((one): one is string => one !== undefined))];
-  const patch = sides.untracked
-    ? await git([...DIFF_ARGS, '--no-index', '--', '/dev/null', path], changes.root, { maxBytes: PATCH_MAX_BYTES })
-    : await git([...DIFF_ARGS, '-M1%', changes.ref, '--', ...paths], changes.root, { maxBytes: PATCH_MAX_BYTES });
+  const patch = await patchRead();
+
   // `--no-index` exits 1 when the files differ, as they always do here.
   const patchOk = patch.code === 0 || (sides.untracked && patch.code === 1);
 
@@ -620,12 +652,13 @@ export class PageChanges {
   }
 
   /**
-   * `GET /v1/conversation/diff?window=<page key>&path=<path>`: one change row's `DiffView`, for a path that is one of the selected conversation's
-   * change rows now; 400 for a path that is not a plain relative one, 404 for one that is no row.
+   * `GET /v1/conversation/diff?window=<page key>&path=<path>[&sides=0]`: one change row's `DiffView`, for a path that is one of the selected
+   * conversation's change rows now, with both sides, or with `sides` `0` the patch alone; 400 for a path that is not a plain relative one or
+   * another `sides`, 404 for one that is no row.
    */
-  async diff(key: string, path: unknown): Promise<ChangesReply> {
-    if (!relativePath(path)) {
-      return { status: 400, body: { error: 'Expected a path relative to the worktree.' } };
+  async diff(key: string, path: unknown, sides: unknown = null): Promise<ChangesReply> {
+    if (!relativePath(path) || (sides !== null && sides !== '0' && sides !== '1')) {
+      return { status: 400, body: { error: 'Expected a path relative to the worktree, and sides 0 or 1.' } };
     }
 
     const scope = unscoped(this.deps, key);
@@ -635,7 +668,7 @@ export class PageChanges {
     }
 
     const read = await readChanges(scope.cwd!, this.deps.git, false);
-    const diff = 'error' in read ? null : await readDiff(read, path, this.deps.git);
+    const diff = 'error' in read ? null : await readDiff(read, path, this.deps.git, sides !== '0');
 
     if (!same(this.deps, key, scope)) {
       return { status: 409, body: { error: CONVERSATION_MOVED } };

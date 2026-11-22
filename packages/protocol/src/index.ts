@@ -335,6 +335,8 @@ export interface DiffData {
   binary: boolean;
   /** Why the sides or the patch were left out: `sides` when only the patch came, `patch` when nothing did. */
   tooLarge: 'sides' | 'patch' | null;
+  /** True for the patch alone, asked for with `sides=0`: the sides are read with a full `diff` when an unchanged region is expanded. */
+  partial?: true;
 }
 
 /** The `file` answer: a file read whole, on disk or at the base. */

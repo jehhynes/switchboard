@@ -2,7 +2,7 @@ import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'n
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { DIFF_MAX_BYTES, fileInside, PageChanges, parseNameStatus, parseNumstat, readCapped, readChanges, readDiff, readFileView, relativePath, SIDE_MAX_BYTES } from '../src/changes.js';
+import { DIFF_MAX_BYTES, fileInside, nodeGit, PageChanges, parseNameStatus, parseNumstat, readCapped, readChanges, readDiff, readFileView, relativePath, SIDE_MAX_BYTES } from '../src/changes.js';
 import type { ChangesView, WorktreeChanges } from '../src/changes.js';
 import type { WindowScope } from '../src/windows.js';
 import { isolateGit, makeRepo } from './gitFixture.js';
@@ -333,6 +333,68 @@ describe('readDiff', () => {
   });
 });
 
+describe('readDiff without sides', () => {
+  const read = async (root: string) => (await readChanges(root, nodeGit, false)) as WorktreeChanges;
+  /** nodeGit, recording each git command's arguments. */
+  const recording = () => {
+    const calls: string[][] = [];
+
+    return { calls, git: ((args, cwd, options) => (calls.push(args), nodeGit(args, cwd, options))) as typeof nodeGit };
+  };
+
+  it('ReadDiff_WithoutSides_RunsOnlyGitDiffAndSendsThePatch', async () => {
+    const changes = await read(busyRepo().root);
+    const { calls, git } = recording();
+    const edited = await readDiff(changes, 'edited.md', git, false);
+
+    expect(edited).toEqual({ path: 'edited.md', status: 'M', patch: expect.stringContaining('-line 2\n+changed'), old: null, new: null, binary: false, tooLarge: null, partial: true });
+    expect(calls.map((args) => args[0])).toEqual(['diff']);
+  });
+
+  it('ReadDiff_WithoutSides_KeepsRenameDeletionAndUntrackedPatches', async () => {
+    const changes = await read(busyRepo().root);
+
+    expect(await readDiff(changes, 'src/new-name.ts', nodeGit, false)).toMatchObject({ from: 'src/old-name.ts', status: 'R', old: null, new: null, partial: true, patch: expect.stringContaining('rename from src/old-name.ts\nrename to src/new-name.ts') });
+    expect(await readDiff(changes, 'gone.txt', nodeGit, false)).toMatchObject({ status: 'D', old: null, new: null, patch: expect.stringContaining('deleted file mode') });
+    expect(await readDiff(changes, 'notes/new.txt', nodeGit, false)).toMatchObject({ status: 'U', old: null, new: null, patch: expect.stringContaining('+++ b/notes/new.txt') });
+  });
+
+  it('ReadDiff_WithoutSidesForBinaryFiles_SendsBinaryWithoutBytes', async () => {
+    const repo = busyRepo();
+
+    repo.write('tracked.bin', Buffer.from([0, 1, 2]));
+    repo.git('add', 'tracked.bin');
+    repo.git('commit', '-qm', 'bin');
+    repo.write('tracked.bin', Buffer.from([0, 9, 9, 9]));
+
+    const changes = await read(repo.root);
+
+    // An untracked file has no numstat count, so its patch's binary line tells.
+    expect(await readDiff(changes, 'image.bin', nodeGit, false)).toEqual({ path: 'image.bin', status: 'U', patch: null, old: null, new: null, binary: true, tooLarge: null, partial: true });
+    expect(await readDiff(changes, 'tracked.bin', nodeGit, false)).toMatchObject({ binary: true, patch: null });
+  });
+
+  it('ReadDiff_WithoutSidesForASideOverItsCap_SendsThePatchUnmarked', async () => {
+    const big = lines(Math.ceil(SIDE_MAX_BYTES / 10));
+    const repo = makeRepo({ 'big.txt': big });
+
+    repo.write('big.txt', big.replace('line 5\n', 'changed\n'));
+
+    const changes = await read(repo.root);
+
+    // With the sides it would say they were left out; without them no side is read, so nothing is too large.
+    expect(await readDiff(changes, 'big.txt')).toMatchObject({ tooLarge: 'sides' });
+    expect(await readDiff(changes, 'big.txt', nodeGit, false)).toMatchObject({ tooLarge: null, partial: true, patch: expect.stringContaining('-line 5\n+changed') });
+  });
+
+  it('ReadDiff_WithoutSidesForAPatchOverItsCap_SendsNothing', async () => {
+    const repo = makeRepo({ 'big.txt': 'a\n' });
+
+    repo.write('big.txt', 'x'.repeat(SIDE_MAX_BYTES + 10) + '\n');
+    expect(await readDiff(await read(repo.root), 'big.txt', nodeGit, false)).toMatchObject({ tooLarge: 'patch', patch: null, partial: true });
+  });
+});
+
 describe('PageChanges.diff', () => {
   const scope = (cwd: string): WindowScope => ({ kind: 'page', key: 'p1', folder: cwd, title: 'T', scopeGen: 1, conversations: [], workItemId: 7, cwd, sessionId: 's1' });
 
@@ -347,6 +409,19 @@ describe('PageChanges.diff', () => {
     expect((await changes.diff('p1', null)).status).toBe(400);
     expect(await changes.diff('p1', 'src/kept.ts')).toEqual({ status: 404, body: { error: 'src/kept.ts is not one of the changes now.' } });
     expect((await new PageChanges({ isPage: () => false, scope: () => scope(repo.root) }).diff('p1', 'edited.md')).status).toBe(403);
+  });
+
+  it('Diff_WithSidesZero_AnswersThePatchAloneWithItsOwnETag', async () => {
+    const repo = busyRepo();
+    const changes = new PageChanges({ isPage: () => true, scope: () => scope(repo.root) });
+    const full = await changes.diff('p1', 'edited.md');
+    const alone = await changes.diff('p1', 'edited.md', '0');
+
+    expect(alone).toMatchObject({ status: 200, body: { path: 'edited.md', old: null, new: null, partial: true }, etag: expect.stringMatching(/^[0-9a-f]{32}$/) });
+    expect(alone.etag).not.toBe(full.etag);
+    expect(full.body).not.toHaveProperty('partial');
+    expect(await changes.diff('p1', 'edited.md', '1')).toEqual(full);
+    expect((await changes.diff('p1', 'edited.md', 'no')).status).toBe(400);
   });
 });
 

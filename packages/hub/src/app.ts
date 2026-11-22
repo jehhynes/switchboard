@@ -1586,7 +1586,7 @@ const dockWithRuns = () => {
         route === 'changes'
           ? pageChanges.changes(key)
           : route === 'diff'
-            ? pageChanges.diff(key, query.get('path'))
+            ? pageChanges.diff(key, query.get('path'), query.get('sides'))
             : route === 'file'
               ? pageChanges.file(key, query.get('path'), query.get('side'))
               : Promise.resolve({ status: 404, body: { error: 'not found' } }),
