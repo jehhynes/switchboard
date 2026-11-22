@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
-import { ARTIFACTS_ENV, artifactsDir, START_PROMPT } from '@switchboard/core';
+import { ARTIFACTS_ENV, artifactsDir, PERMISSION_MODES, START_PROMPT } from '@switchboard/core';
 import type { LiveState, StopReason, MarkerReading, ObservedFork, ObservedSession, PermissionMode, Reconciled, Session, SessionRunner, SessionTarget, StartAction, StartResult } from '@switchboard/core';
 import { killTree, processTable } from '@switchboard/holder';
 import type { ProcessRow, SessionEntry, SpawnRequest } from '@switchboard/holder';
@@ -29,6 +29,10 @@ const COLS = 120;
 const ROWS = 40;
 
 export const HOOKS_REQUIRED = 'Code Mode sessions need sessions.installHooks.';
+/** The credential variables only Code Mode must drop (mechanics M64). */
+const CREDENTIALS = /^(ANTHROPIC_AUTH_TOKEN|ANTHROPIC_CUSTOM_HEADERS|ANTHROPIC_API_KEY)$/i;
+/** The variable that turns Code Mode on (mechanics M63). */
+const CODE_MODE_VARIABLE = 'CLAUDE_CODE_EXPERIMENTAL_CODE_MODE';
 
 /**
  * Removed from the hub's environment: VS Code's runtime, Node.js options, credentials (mechanics M64), and the markers a parent Claude session
@@ -40,18 +44,21 @@ const REMOVED =
 /**
  * The environment of a Code Mode session's process, from the hub's: Code Mode on, the direct API, the launch, the work item's artifact folder
  * (`CLAUDE_ARTIFACTS_DIR`), and an absolute `sessions.claudePath`'s folder first on PATH. `CLAUDE_CONFIG_DIR` passes through as for background
- * sessions.
+ * sessions. A held session without Code Mode (`codeMode` false) gets neither Code Mode nor the direct API and keeps the credential variables, so
+ * it runs as the operator's own `claude` does (PRD R81).
  */
-export function codeModeEnvironment(base: NodeJS.ProcessEnv, launchId: string, claudePath: string, artifacts: string): Record<string, string> {
+export function codeModeEnvironment(base: NodeJS.ProcessEnv, launchId: string, claudePath: string, artifacts: string, codeMode = true): Record<string, string> {
   const env: Record<string, string> = {};
 
   for (const [name, value] of Object.entries(base)) {
-    if (value !== undefined && !REMOVED.test(name)) {
+    if (value !== undefined && (!REMOVED.test(name) || (!codeMode && CREDENTIALS.test(name))) && (codeMode || name.toUpperCase() !== CODE_MODE_VARIABLE)) {
       env[name] = value;
     }
   }
 
-  return { ...env, ...executableDirOnPath(claudePath, env), CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: '1', ANTHROPIC_BASE_URL: DIRECT_API, SWITCHBOARD_LAUNCH: launchId, [ARTIFACTS_ENV]: artifacts };
+  const mode = codeMode ? { [CODE_MODE_VARIABLE]: '1', ANTHROPIC_BASE_URL: DIRECT_API } : {};
+
+  return { ...env, ...executableDirOnPath(claudePath, env), ...mode, SWITCHBOARD_LAUNCH: launchId, [ARTIFACTS_ENV]: artifacts };
 }
 
 /**
@@ -90,10 +97,13 @@ export function codeModePrompt(artifacts: string, voice = false, tone: string | 
  * `--settings` overrides user settings, so a gateway or credential there cannot apply; empty strings remove the credential variables, so the
  * session uses the subscription sign-in (mechanics M64). `viewMode: "focus"` starts the terminal in Focus view and adds the CLI's "Focus mode"
  * prompt section, which the panel's Focus view section requires. `tui: "default"` keeps the classic renderer, whose finished output scrolls into
- * the scrollback the screen copy reads, over a user setting of `fullscreen` (architecture.md § Conversation).
+ * the scrollback the screen copy reads, over a user setting of `fullscreen` (architecture.md § Conversation). A held session without Code Mode
+ * keeps the operator's API settings, gateway and credentials included.
  */
-export function codeModeSettings(): string {
-  return JSON.stringify({ env: { ANTHROPIC_BASE_URL: DIRECT_API, ANTHROPIC_API_KEY: '', ANTHROPIC_AUTH_TOKEN: '', ANTHROPIC_CUSTOM_HEADERS: '' }, viewMode: 'focus', tui: 'default' });
+export function codeModeSettings(codeMode = true): string {
+  const view = { viewMode: 'focus', tui: 'default' };
+
+  return JSON.stringify(codeMode ? { env: { ANTHROPIC_BASE_URL: DIRECT_API, ANTHROPIC_API_KEY: '', ANTHROPIC_AUTH_TOKEN: '', ANTHROPIC_CUSTOM_HEADERS: '' }, ...view } : view);
 }
 
 /**
@@ -120,10 +130,95 @@ export function codeModeStartArgs(action: Pick<StartAction, 'permissionMode' | '
 /**
  * A promptless resume, which reads as idle until the operator types (mechanics M68). Claude resends the start's system prompt until a
  * compaction, which renders it again from this process's flags (mechanics M30), so the resume appends `codeModePrompt`; the contract hook
- * restores the contract after a compaction.
+ * restores the contract after a compaction. A registered session's start had no contract in its system prompt, so `held.contract` puts it
+ * first, and `held.codeMode` false resumes one that ran without Code Mode (PRD R81).
  */
-export function codeModeResumeArgs(nativeSessionId: string, permissionMode: PermissionMode, model: string | null, artifacts: string, voice = false, tone: string | null = null): string[] {
-  return ['--resume', nativeSessionId, '--permission-mode', permissionMode, ...(model === null ? [] : ['--model', model]), '--append-system-prompt', codeModePrompt(artifacts, voice, tone), '--settings', codeModeSettings()];
+export function codeModeResumeArgs(
+  nativeSessionId: string,
+  permissionMode: PermissionMode,
+  model: string | null,
+  artifacts: string,
+  voice = false,
+  tone: string | null = null,
+  held: { codeMode?: boolean; contract?: string } = {},
+): string[] {
+  const prompt = codeModePrompt(artifacts, voice, tone);
+
+  return [
+    '--resume',
+    nativeSessionId,
+    '--permission-mode',
+    permissionMode,
+    ...(model === null ? [] : ['--model', model]),
+    '--append-system-prompt',
+    held.contract === undefined ? prompt : `${held.contract}\n\n${prompt}`,
+    '--settings',
+    codeModeSettings(held.codeMode ?? true),
+  ];
+}
+
+/** How a registered session last ran, from its transcript (mechanics M117); null fields were not recorded. */
+export interface TranscriptLaunch {
+  codeMode: boolean;
+  permissionMode: PermissionMode | null;
+  model: string | null;
+}
+
+/**
+ * Reads a transcript's text from its end: Code Mode from the last `repl-mode` line, which only a Code Mode session writes, the mode of the last
+ * `permission-mode` line or user line that has one, with Claude's older `default` read as `manual`, and the last assistant line's model, skipping Claude's own
+ * `<synthetic>` notes (mechanics M117).
+ */
+export function transcriptLaunch(text: string): TranscriptLaunch {
+  const lines = text.split('\n');
+  let codeMode: boolean | null = null;
+  let permissionMode: PermissionMode | null | undefined;
+  let model: string | null | undefined;
+
+  for (let index = lines.length - 1; index >= 0 && (codeMode === null || permissionMode === undefined || model === undefined); index--) {
+    const line = lines[index]!;
+    const kind =
+      /^\{"type":"(repl-mode|permission-mode)"/.exec(line)?.[1] ??
+      (permissionMode === undefined && line.includes('"type":"user"') && line.includes('"permissionMode"') ? 'user' : null) ??
+      (model === undefined && line.includes('"type":"assistant"') ? 'assistant' : null);
+
+    if (kind === null) {
+      continue;
+    }
+
+    let entry: Record<string, unknown>;
+
+    try {
+      entry = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+
+    if (kind === 'repl-mode' && codeMode === null && typeof entry['replMode'] === 'boolean') {
+      codeMode = entry['replMode'];
+    } else if ((kind === 'permission-mode' || (kind === 'user' && entry['type'] === 'user')) && permissionMode === undefined && typeof entry['permissionMode'] === 'string') {
+      const mode = entry['permissionMode'] === 'default' ? 'manual' : entry['permissionMode'];
+
+      permissionMode = (PERMISSION_MODES as readonly string[]).includes(mode) ? (mode as PermissionMode) : null;
+    } else if (kind === 'assistant' && entry['type'] === 'assistant') {
+      const named = (entry['message'] as { model?: unknown } | undefined)?.model;
+
+      if (typeof named === 'string' && named !== '' && named !== '<synthetic>') {
+        model = named;
+      }
+    }
+  }
+
+  return { codeMode: codeMode ?? false, permissionMode: permissionMode ?? null, model: model ?? null };
+}
+
+/** `transcriptLaunch` of the transcript at `path`, or null when it cannot be read. */
+export function readTranscriptLaunch(path: string): TranscriptLaunch | null {
+  try {
+    return transcriptLaunch(readFileSync(path, 'utf8'));
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -359,15 +454,17 @@ export class CodeModeRunner implements SessionRunner {
   /**
    * Resumes an ended session in the holder with a new launch; the session keeps the mode, model and permission mode it started with. A session
    * started with no prompt that ended before its first message has no transcript, which `claude --resume` refuses, so with `fresh`, its contract
-   * and name, it starts again under its session ID with no prompt (mechanics M87).
+   * and name, it starts again under its session ID with no prompt (mechanics M87). A registered session's `contract` goes first in the appended
+   * prompt, and one that ran without Code Mode (`withoutCodeMode`) resumes without it (PRD R81).
    */
   async resumeHeld(
-    session: Pick<Session, 'id' | 'nativeSessionId' | 'cwd' | 'workItemId'>,
+    session: Pick<Session, 'id' | 'nativeSessionId' | 'cwd' | 'workItemId' | 'withoutCodeMode'>,
     permissionMode: PermissionMode,
     model: string | null,
     label: string,
     launch?: string,
     fresh?: { contract: string; name: string },
+    contract?: string,
   ): Promise<{ launchId: string } | { error: string }> {
     if (session.nativeSessionId === null) {
       return { error: 'The session never started, so it cannot be resumed.' };
@@ -376,16 +473,17 @@ export class CodeModeRunner implements SessionRunner {
     const launchId = launch ?? this.newId();
     const artifacts = artifactsDir(session.cwd, session.workItemId);
     const again = fresh !== undefined && this.deps.transcriptExists?.(session.cwd, session.nativeSessionId) === false;
+    const codeMode = session.withoutCodeMode !== true;
     const tone = this.deps.tone?.(session.id) ?? null;
     const args = again
       ? codeModeStartArgs({ permissionMode, name: fresh.name, model, contract: fresh.contract, prompt: '', cwd: session.cwd, workItemId: session.workItemId, ...(tone === null ? {} : { tone }) }, session.nativeSessionId, this.deps.voice?.() === true)
-      : codeModeResumeArgs(session.nativeSessionId, permissionMode, model, artifacts, this.deps.voice?.() === true, tone);
-    const spawned = await this.spawn(session.id, label, args, session.cwd, launchId, artifacts);
+      : codeModeResumeArgs(session.nativeSessionId, permissionMode, model, artifacts, this.deps.voice?.() === true, tone, { codeMode, ...(contract === undefined ? {} : { contract }) });
+    const spawned = await this.spawn(session.id, label, args, session.cwd, launchId, artifacts, codeMode);
 
     return 'error' in spawned ? spawned : { launchId };
   }
 
-  private async spawn(session: string, label: string, args: string[], cwd: string, launchId: string, artifacts: string): Promise<{ holder: HolderAccess } | { error: string }> {
+  private async spawn(session: string, label: string, args: string[], cwd: string, launchId: string, artifacts: string, codeMode = true): Promise<{ holder: HolderAccess } | { error: string }> {
     const found = await this.deps.holder(true);
 
     if (!('holder' in found)) {
@@ -402,7 +500,7 @@ export class CodeModeRunner implements SessionRunner {
     (this.deps.makeArtifactsDir ?? makeArtifactsDir)(artifacts);
 
     try {
-      await found.holder.spawn({ session, label, file, args, cwd, env: codeModeEnvironment(this.deps.environment ?? process.env, launchId, claudePath, artifacts), cols: COLS, rows: ROWS });
+      await found.holder.spawn({ session, label, file, args, cwd, env: codeModeEnvironment(this.deps.environment ?? process.env, launchId, claudePath, artifacts, codeMode), cols: COLS, rows: ROWS });
     } catch (error) {
       return { error: (error as Error).message };
     }

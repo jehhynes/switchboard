@@ -230,7 +230,7 @@ export interface Session {
   codeMode?: boolean;
   /**
    * A held session that runs without Code Mode: a registered session that did not run in Code Mode, resumed in the holder as a plain `claude`,
-   * since Claude resumes a session only in the mode it ran in (PRD R81, mechanics M68, M112). Absent reads as false.
+   * since Claude resumes a session only in the mode it ran in (PRD R81, mechanics M68, M117). Absent reads as false.
    */
   withoutCodeMode?: boolean;
   /** Registered by the operator from their own Claude session (PRD R81); once ended it resumes in the terminal holder. Absent reads as false. */

@@ -76,14 +76,18 @@ export interface SessionRunner {
    * the terminal holder is gone, so its sessions end through `holder-lost` (PRD R94), and `idle` for held sessions past the idle limit.
    */
   heldActivity?(sessionId: string): Promise<{ clients: number; lastInputAt: number | null; lastOutputAt?: number | null } | { error: string }>;
-  /** The Code Mode runner only: resumes an ended session in the holder under a new launch (PRD R95). */
+  /**
+   * The Code Mode runner only: resumes an ended session in the holder under a new launch (PRD R95); `contract` goes in a registered session's
+   * appended prompt, which its start never had (PRD R81).
+   */
   resumeHeld?(
-    session: Pick<Session, 'id' | 'nativeSessionId' | 'cwd' | 'workItemId'>,
+    session: Pick<Session, 'id' | 'nativeSessionId' | 'cwd' | 'workItemId' | 'withoutCodeMode'>,
     permissionMode: PermissionMode,
     model: string | null,
     label: string,
     launchId?: string,
     fresh?: { contract: string; name: string },
+    contract?: string,
   ): Promise<{ launchId: string } | { error: string }>;
   /** The Code Mode runner only: a new launch ID for a resume, which the hub stores before the spawn (PRD R95). */
   newLaunchId?(): string;

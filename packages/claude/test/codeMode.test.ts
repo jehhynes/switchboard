@@ -19,7 +19,9 @@ import {
   codeModeSettings,
   codeModeStartArgs,
   makeArtifactsDir,
+  readTranscriptLaunch,
   showsStartPrompt,
+  transcriptLaunch,
 } from '../src/codeMode.js';
 import type { CodeModeRunnerDeps, HolderAccess, HolderLookup } from '../src/codeMode.js';
 import { conversationRules } from '../src/conversationRules.js';
@@ -71,6 +73,13 @@ describe('Code Mode command', () => {
       SWITCHBOARD_LAUNCH: LAUNCH,
       CLAUDE_ARTIFACTS_DIR: 'D:/w/.wip/artifacts/w7',
     });
+  });
+
+  it('builds a held session without Code Mode with neither Code Mode nor the direct API, even when the hub has them, and keeps the credentials (PRD R81)', () => {
+    const env = codeModeEnvironment({ PATH: 'C:/bin', CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: '1', ANTHROPIC_BASE_URL: 'http://127.0.0.1:8318', ANTHROPIC_API_KEY: 'key' }, LAUNCH, 'claude', ARTIFACTS, false);
+
+    expect(env).toEqual({ PATH: 'C:/bin', ANTHROPIC_BASE_URL: 'http://127.0.0.1:8318', ANTHROPIC_API_KEY: 'key', SWITCHBOARD_LAUNCH: LAUNCH, CLAUDE_ARTIFACTS_DIR: ARTIFACTS });
+    expect(codeModeSettings(false)).toBe('{"viewMode":"focus","tui":"default"}');
   });
 
   it('puts an absolute claudePath\'s folder first on PATH', () => {
@@ -200,6 +209,11 @@ describe('Code Mode command', () => {
   it("resumes with no prompt, keeping the permission mode, model and settings, and appends the panel's sections for after a compaction", () => {
     expect(codeModeResumeArgs(NATIVE, 'manual', 'opus', ARTIFACTS)).toEqual(['--resume', NATIVE, '--permission-mode', 'manual', '--model', 'opus', '--append-system-prompt', PROMPT, '--settings', SETTINGS]);
     expect(codeModeResumeArgs(NATIVE, 'auto', null, ARTIFACTS)).toEqual(['--resume', NATIVE, '--permission-mode', 'auto', '--append-system-prompt', PROMPT, '--settings', SETTINGS]);
+  });
+
+  it("resumes a registered session with its contract first in the appended prompt, and without Code Mode's settings when it ran without it (PRD R81)", () => {
+    expect(codeModeResumeArgs(NATIVE, 'auto', null, ARTIFACTS, false, null, { contract: 'Report with …' })).toEqual(['--resume', NATIVE, '--permission-mode', 'auto', '--append-system-prompt', `Report with …\n\n${PROMPT}`, '--settings', SETTINGS]);
+    expect(codeModeResumeArgs(NATIVE, 'auto', null, ARTIFACTS, false, null, { codeMode: false, contract: 'Report with …' }).at(-1)).toBe('{"viewMode":"focus","tui":"default"}');
   });
 
   it('runs claude.exe on Windows when the path names no extension', () => {
@@ -695,6 +709,19 @@ describe('CodeModeRunner stop, resume and reconcile', () => {
     expect(runner().markers([session({ promptless: true })]).get(NATIVE)?.observed).toEqual({ state: 'idle', detail: null });
   });
 
+  it('resumes a registered session without Code Mode with its contract, and one that ran in Code Mode with Code Mode (PRD R81)', async () => {
+    const artifacts = join('D:/work', '.wip', 'artifacts', 'w1');
+
+    expect(await runner({ environment: { PATH: 'C:/bin', CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: '1' } }).resumeHeld(session({ withoutCodeMode: true }), 'auto', null, 'label', 'l1', undefined, 'Report with …')).toEqual({ launchId: 'l1' });
+    expect(holder.spawned[0]!.args).toEqual(codeModeResumeArgs(NATIVE, 'auto', null, artifacts, false, null, { codeMode: false, contract: 'Report with …' }));
+    expect(holder.spawned[0]!.env).not.toHaveProperty('CLAUDE_CODE_EXPERIMENTAL_CODE_MODE');
+    expect(holder.spawned[0]!.env).not.toHaveProperty('ANTHROPIC_BASE_URL');
+
+    expect(await runner().resumeHeld(session({ withoutCodeMode: false }), 'auto', null, 'label', 'l2', undefined, 'Report with …')).toEqual({ launchId: 'l2' });
+    expect(holder.spawned[1]!.args).toEqual(codeModeResumeArgs(NATIVE, 'auto', null, artifacts, false, null, { contract: 'Report with …' }));
+    expect(holder.spawned[1]!.env).toMatchObject({ CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: '1', ANTHROPIC_BASE_URL: 'https://api.anthropic.com' });
+  });
+
   it('resumes an ended session in the holder with a new launch and no prompt', async () => {
     expect(await runner().resumeHeld(session(), 'auto', 'haiku', 'label')).toEqual({ launchId: 'new-id' });
     expect(holder.spawned[0]).toMatchObject({ session: 'sb-1', label: 'label', args: codeModeResumeArgs(NATIVE, 'auto', 'haiku', join('D:/work', '.wip', 'artifacts', 'w1')), env: { SWITCHBOARD_LAUNCH: 'new-id', CLAUDE_ARTIFACTS_DIR: join('D:/work', '.wip', 'artifacts', 'w1') } });
@@ -910,5 +937,47 @@ describe('CodeModeRunner attach support (PRD R95)', () => {
 
   it('fails a leftover stop when the process table cannot be read', async () => {
     expect(await runner({ processes: async () => ({ error: 'Access is denied.' }) }).stop({ sessionId: 'sb-1', shortId: null, lastTree: TREE }, 'operator')).toEqual({ error: 'The process table could not be read: Access is denied.' });
+  });
+});
+
+describe('transcriptLaunch (mechanics M117)', () => {
+  const line = (entry: Record<string, unknown>) => JSON.stringify(entry);
+  const user = (permissionMode: string) => line({ parentUuid: null, type: 'user', message: { role: 'user', content: 'hi' }, permissionMode, sessionId: NATIVE });
+  const assistant = (model: string) => line({ parentUuid: 'u', type: 'assistant', message: { model, role: 'assistant', content: [] }, sessionId: NATIVE });
+
+  it('reads Code Mode from the last repl-mode line, and the last permission mode and model', () => {
+    const text = [
+      line({ type: 'mode', mode: 'normal', sessionId: NATIVE }),
+      line({ type: 'repl-mode', replMode: true, sessionId: NATIVE }),
+      line({ type: 'permission-mode', permissionMode: 'plan', sessionId: NATIVE }),
+      user('plan'),
+      assistant('claude-opus-5-5'),
+      line({ type: 'permission-mode', permissionMode: 'auto', sessionId: NATIVE }),
+      assistant('<synthetic>'),
+      '',
+    ].join('\n');
+
+    expect(transcriptLaunch(text)).toEqual({ codeMode: true, permissionMode: 'auto', model: 'claude-opus-5-5' });
+  });
+
+  it("reads a VS Code panel session, which writes no repl-mode or permission-mode line, from its user lines, with Claude's older default as manual", () => {
+    expect(transcriptLaunch([user('bypassPermissions'), assistant('claude-sonnet-5'), user('default'), assistant('claude-haiku-5-5')].join('\n'))).toEqual({ codeMode: false, permissionMode: 'manual', model: 'claude-haiku-5-5' });
+  });
+
+  it('records nothing it cannot read: an unknown mode, malformed lines and an empty transcript', () => {
+    expect(transcriptLaunch([user('somethingNew'), '{"type":"repl-mode",', assistant('<synthetic>')].join('\n'))).toEqual({ codeMode: false, permissionMode: null, model: null });
+    expect(transcriptLaunch('')).toEqual({ codeMode: false, permissionMode: null, model: null });
+  });
+
+  it('reads a transcript file, and none that is missing', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'switchboard-transcript-'));
+
+    try {
+      writeFileSync(join(dir, 't.jsonl'), line({ type: 'repl-mode', replMode: true, sessionId: NATIVE }));
+      expect(readTranscriptLaunch(join(dir, 't.jsonl'))).toEqual({ codeMode: true, permissionMode: null, model: null });
+      expect(readTranscriptLaunch(join(dir, 'missing.jsonl'))).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
