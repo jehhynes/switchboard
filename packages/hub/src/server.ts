@@ -25,6 +25,7 @@ export interface Reply {
 export interface HubServerOptions {
   identity: HubIdentity;
   onShutdown(): void;
+  log?(line: string): void;
   /** `POST /restart`, from `hub.js restart`: restarts the hub onto the installed build once it is quiet (architecture.md § Hub lifecycle). */
   onRestart?(): Reply;
   /** Handlers for authorized `POST` paths, given the parsed JSON body and what only the server knows. */
@@ -761,6 +762,10 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     }
 
     if (!page.access.allows(request.headers.cookie, origin)) {
+      if (request.method === 'POST' && path === '/v1/conversation/upload') {
+        options.log?.(`web upload: 401, ${remote ? 'remote' : 'local'}, declared ${request.headers['content-length'] ?? 'none'}, transfer ${request.headers['transfer-encoding'] ?? 'none'}, received 0`);
+      }
+
       if (request.method === 'GET' && path === '/page/') {
         response.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Frame-Options': 'DENY', 'Content-Security-Policy': remote ? PAIR_CSP : PAGE_CSP });
         response.end(remote ? pairHtml(false) : SIGNED_OUT_HTML);
@@ -968,11 +973,15 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       return true;
     }
 
-    // A file the composer attaches: its bytes as the body, with its length, from the page's own origin, for a page key, at most 10 MB.
+    // A file the composer attaches: its bytes as the body, from the page's own origin, for a page key, at most 10 MB.
     if (request.method === 'POST' && path === '/v1/conversation/upload') {
-      const length = Number(request.headers['content-length']);
+      const declared = request.headers['content-length'];
+      const length = declared === undefined ? null : Number(declared);
+      const transfer = request.headers['transfer-encoding'] ?? 'none';
+      const logUpload = (outcome: string, bytes: number): void => options.log?.(`web upload: ${outcome}, ${remote ? 'remote' : 'local'}, declared ${declared ?? 'none'}, transfer ${transfer}, received ${bytes > MAX_UPLOAD_BYTES ? '>10 MB' : bytes}`);
       const refuse = (status: number, error: string): void => {
         // The body is not read, so the connection closes rather than wait for it.
+        logUpload(String(status), 0);
         response.setHeader('Connection', 'close');
         json(response, status, { error });
       };
@@ -981,25 +990,45 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
         refuse(403, 'The page posts only from its own origin.');
       } else if (!page.isPage(window)) {
         refuse(403, 'Not in this window.');
-      } else if (!Number.isSafeInteger(length) || request.headers['transfer-encoding'] !== undefined) {
-        refuse(411, 'Send the file with its length.');
-      } else if (length > MAX_UPLOAD_BYTES) {
+      } else if (length !== null && (!Number.isSafeInteger(length) || length < 0)) {
+        refuse(400, 'The file length is invalid.');
+      } else if (length !== null && length > MAX_UPLOAD_BYTES) {
         refuse(413, `${url.searchParams.get('name') || 'The file'} is larger than 10 MB.`);
       } else {
         const chunks: Buffer[] = [];
+        let size = 0;
 
-        request.on('data', (chunk: Buffer) => chunks.push(chunk));
+        request.on('data', (chunk: Buffer) => {
+          size = Math.min(MAX_UPLOAD_BYTES + 1, size + chunk.length);
+
+          if (size <= MAX_UPLOAD_BYTES) {
+            chunks.push(chunk);
+          } else {
+            chunks.length = 0;
+          }
+        });
         request.on('end', () => {
           if (!stillAllowed()) {
+            logUpload('403', size);
             json(response, 403, { error: 'Remote access no longer allows this device.' });
+            return;
+          }
+
+          if (size > MAX_UPLOAD_BYTES) {
+            logUpload('413', size);
+            json(response, 413, { error: `${url.searchParams.get('name') || 'The file'} is larger than 10 MB.` });
             return;
           }
 
           const reply = page.upload(window, Number(url.searchParams.get('scopeGen') ?? NaN), url.searchParams.get('name') ?? '', Buffer.concat(chunks));
 
+          logUpload(String(reply.status), size);
           json(response, reply.status, reply.body);
         });
-        request.on('error', () => response.destroy());
+        request.on('error', () => {
+          logUpload('request error', size);
+          response.destroy();
+        });
       }
 
       return true;
