@@ -21,4 +21,19 @@ describe('the page on a phone', () => {
     expect(phone).not.toContain('off-conversation');
   });
 
+  it('wraps a very long link, path or word anywhere, and keeps code blocks, tables and media inside the conversation', () => {
+    const url = `https://example.com/${'segment'.repeat(60)}?q=${'x'.repeat(200)}`;
+    const markup = renderMarkdown(`See ${url} and D:/${'folder/'.repeat(40)}file.ts`);
+
+    // The link stays one unbroken word: the page wraps it, the Markdown does not cut it.
+    expect(markup).toContain(`href="${url}"`);
+    expect(markup).toContain(`>${url}</a>`);
+    expect(css).toMatch(/(^|\n)\.body \{ overflow-wrap: anywhere; \}/);
+    expect(css).toMatch(/\.body pre \{[^}]*overflow-x: auto;/);
+    expect(css).toMatch(/\.body table \{ display: block; max-width: 100%; overflow-x: auto;/);
+    expect(css).toContain('.body img, .body video, .body svg, .body iframe { max-width: 100%; }');
+    expect(css).toMatch(/\.message \.box \{[^}]*overflow-wrap: anywhere;/);
+    expect(css).toMatch(/\.main \{[^}]*min-width: 0;/);
+  });
+
 });
