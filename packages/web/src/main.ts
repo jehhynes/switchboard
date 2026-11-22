@@ -12,7 +12,7 @@ import { mount, unmount } from './island.js';
 import type { ComponentChild, VNode } from 'preact';
 import { renderList, renderListPane } from './list.js';
 import { menuRows, renderHeader, renderSideSwitch, renderTabs } from './header.js';
-import { CHAT_MIN, chatNeed, DETAIL_MIN, fitLayout, sideWidth, TABLET_MIN, type Layout } from './layout.js';
+import { CHAT_MIN, chatNeed, DETAIL_MIN, fitLayout, isPhone, sideWidth, type Layout } from './layout.js';
 import { renderTimeline } from './timeline.js';
 import { renderArtifacts, renderArtifactView, renderEmpty, renderStatus } from './side.js';
 import { renderSheet } from './sheet.js';
@@ -175,7 +175,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /** The drawer's width when it last opened, from which its sash's keys count the pin. */
   let drawerFrom = 0;
   /** Whether the list fits as a column at `width` px, with no slack: a pin is the operator's choice, not a width settling near a boundary. */
-  const fitsPinned = (width: number): boolean => fitLayout(window.innerWidth, sideWidth(width, window.innerWidth), layout === null ? null : { ...layout, list: true }, chatNeed(chatSash.width())).list;
+  const fitsPinned = (width: number): boolean => fitLayout(window.innerWidth, sideWidth(width, window.innerWidth), layout === null ? null : { ...layout, list: true }, chatNeed(chatSash.width()), false, isPhone()).list;
   /** Hides the list in the drawer, or pins it back as a column, keeping the choice on this device; the focus follows the sash it was on. */
   const collapseList = (collapse: boolean): void => {
     const focused = document.activeElement;
@@ -262,14 +262,22 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       }
     },
   });
-  /** Works out the columns again from the page's width, the list's and the conversation's kept widths and the list's collapse, and sets the root's classes; true when they changed. */
+  /** Whether the last layout was the phone's (`isPhone`), which the document's `phone` class gives page.css and settings.css. */
+  let phone = false;
+  /**
+   * Works out the columns again from the phone's layout, the page's width, the list's and the conversation's kept widths and the list's
+   * collapse, and sets the classes; true when they changed.
+   */
   const relayout = (): boolean => {
-    const next = fitLayout(window.innerWidth, sideWidth(sideSash.width(), window.innerWidth), layout, chatNeed(chatSash.width()), listCollapsed);
-    const changed = layout === null || next.list !== layout.list || next.wide !== layout.wide;
+    const nextPhone = isPhone();
+    const next = fitLayout(window.innerWidth, sideWidth(sideSash.width(), window.innerWidth), layout, chatNeed(chatSash.width()), listCollapsed, nextPhone);
+    const changed = layout === null || next.list !== layout.list || next.wide !== layout.wide || nextPhone !== phone;
 
     layout = next;
-    // From tablet width, while the list does not fit, it is a drawer (page.css), shown only with a work item open.
-    root.classList.toggle('drawers', window.innerWidth >= TABLET_MIN && !next.list);
+    phone = nextPhone;
+    document.documentElement.classList.toggle('phone', phone);
+    // Outside the phone's layout, while the list does not fit, it is a drawer (page.css), shown only with a work item open.
+    root.classList.toggle('drawers', !phone && !next.list);
 
     return changed;
   };
@@ -1568,7 +1576,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   // ---- The work items' drawer (architecture.md § Web page), shown and hidden as the dock's auto-hide ----
   const drawer = root.querySelector<HTMLElement>('.side')!;
   const sliver = root.querySelector<HTMLElement>('.sliver')!;
-  /** Whether the list is a drawer: from tablet width while it does not fit and a work item's conversation is open; History, opened from the list, keeps it a column. */
+  /** Whether the list is a drawer: outside the phone's layout while it does not fit and a work item's conversation is open; History, opened from the list, keeps it a column. */
   const drawerMode = (): boolean => root.classList.contains('drawers') && !(view.list || wanted === null) && shownHistory === null;
   let revealTimer: ReturnType<typeof setTimeout> | null = null;
   let drawerTick: ReturnType<typeof setInterval> | null = null;
@@ -1762,9 +1770,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // On a narrow screen the list and the conversation are each a full-width view (page.css); the list shows until a work item is opened.
     const listing = shownHistory === null && (view.list || wanted === null);
 
-    // Leaving the conversation for the list on a phone's width (Back, a swipe right or the browser's back, all through back(), or a refused
+    // Leaving the conversation for the list in the phone's layout (Back, a swipe right or the browser's back, all through back(), or a refused
     // open) leaves the work item, so a mic on for it turns off and a phone's microphone is released; what plays goes on (PRD R119).
-    const leftConversation = listing && !wasListing && window.innerWidth < TABLET_MIN && ((state.voice?.here === true && state.voice.mic !== 'off') || micOpening);
+    const leftConversation = listing && !wasListing && isPhone() && ((state.voice?.here === true && state.voice.mic !== 'off') || micOpening);
 
     wasListing = listing;
 
@@ -1783,7 +1791,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     root.classList.toggle('history', shownHistory !== null);
     mount(historyHost, shownHistory === null ? null : renderHistory(shownHistory));
 
-    // The drawer is only from tablet width while the list does not fit, with a work item open; the focus leaves a list that a phone's width now
+    // The drawer is only outside the phone's layout while the list does not fit, with a work item open; the focus leaves a list that the phone's layout now
     // hides for Back.
     const dropped = view.drawer !== null && !drawerMode();
 
@@ -2287,7 +2295,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     newFrom = null;
     view.artifact = null;
     // On a phone, a conversation opened from the list is a history entry of its own, which the browser's back, as Android's back button, leaves.
-    if (listing && window.innerWidth < TABLET_MIN && !conversationEntry(history.state)) {
+    if (listing && isPhone() && !conversationEntry(history.state)) {
       history.pushState({ [CONVERSATION_ENTRY]: true }, '', `#w=${workItemId}`);
     } else {
       history.replaceState(history.state, '', `#w=${workItemId}`);
@@ -2379,7 +2387,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
       backPending = false;
 
-      if (wanted === null || window.innerWidth >= TABLET_MIN) {
+      if (wanted === null || !isPhone()) {
         return;
       }
 
@@ -2418,12 +2426,13 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     root,
     host: root.querySelector<HTMLElement>('.main')!,
     under: drawer,
-    enabled: () => window.innerWidth < TABLET_MIN && !root.classList.contains('listing') && shownHistory === null && document.querySelector('.menu, [role="menu"], [role="listbox"]:not([hidden]), .sheet-backdrop, .settings-backdrop') === null,
+    enabled: () => isPhone() && !root.classList.contains('listing') && shownHistory === null && document.querySelector('.menu, [role="menu"], [role="listbox"]:not([hidden]), .sheet-backdrop, .settings-backdrop') === null,
     back,
     reducedMotion: () => typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
   });
 
   listening.signal.addEventListener('abort', stopSwipe);
+  listening.signal.addEventListener('abort', () => document.documentElement.classList.remove('phone'));
 
   // ---- Cards ----
   const cardQuestions = (key: string): ReturnType<typeof parseQuestions> => {

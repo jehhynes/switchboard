@@ -2,6 +2,7 @@
 // hub's config routes as page commands. Its state, fields and pages are the dock's, in settingsModel.ts.
 import type { VNode } from 'preact';
 import { mount } from './island.js';
+import { isPhone } from './layout.js';
 import { QrCode, usedText } from './listHeader.js';
 import type { Device, Pairing } from './listHeader.js';
 import { applyPlaybookCell, applyPlaybookField, bar, enrollmentActive, enrollmentRow, parseEnrollment, clone, COMMON_SOURCE_KEYS, EditorState, emptyNewPlaybook, getAt, nav, newPlaybookName, pageSections, pageView, parseConfig, playbookEntry, readField, readPlaybook, samePlaybook, setAt, sourceKind } from './settingsModel.js';
@@ -16,8 +17,6 @@ export interface SettingsDeps {
   closed?(): void;
 }
 
-/** Whether the page is as narrow as a phone's, where the navigation and the page each take the screen (settings.css). */
-const phone = (): boolean => typeof matchMedia === 'function' && matchMedia('(max-width: 767px)').matches;
 
 /** How often Settings asks how a running enrolment stands. */
 export const ENROLL_POLL_MS = 1_000;
@@ -442,7 +441,7 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
     edited();
 
     // On a phone the navigation, such as New <kind> source that made the change, is hidden now, so the page's title takes the focus.
-    if (phone()) {
+    if (isPhone()) {
       host.querySelector<HTMLElement>('.settings-page-title h2')?.focus();
     }
   };
@@ -778,7 +777,7 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
     host.querySelector<HTMLElement>('.settings-page')?.scrollTo?.({ top: 0 });
 
     // On a phone the navigation, which had the focus, is hidden now, so the page's title takes it.
-    if (phone()) {
+    if (isPhone()) {
       host.querySelector<HTMLElement>('.settings-page-title h2')?.focus();
     }
   };

@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { CHAT_FIT, CHAT_MIN, chatNeed, DETAIL_MIN, fitLayout, LAYOUT_SLACK, sideWidth } from '../src/layout.js';
+import { describe, expect, it, vi } from 'vitest';
+import { CHAT_FIT, CHAT_MIN, chatNeed, DETAIL_MIN, fitLayout, isPhone, LAYOUT_SLACK, phoneLayout, sideWidth } from '../src/layout.js';
 
 describe('the page layout', () => {
   it("draws the list as page.css does: the kept width, or 30% of the page between 260 and 340 px, at least 200 px and at most half the page", () => {
@@ -32,6 +32,79 @@ describe('the page layout', () => {
     ]);
     // A phone's width has separate views, with neither column.
     expect(fitLayout(767, 260, null)).toEqual({ list: false, wide: false });
+  });
+
+  it("draws the phone's layout on every phone in either orientation, and the tablet's or the desktop's on every tablet and desktop as before", () => {
+    // Screen sizes in CSS pixels, portrait first; the installed app's viewport is the screen's width in each orientation.
+    const devices: [string, number, number][] = [
+      ['iPhone SE', 375, 667],
+      ['iPhone 13 and 14', 390, 844],
+      ['iPhone 15 and 16 Pro', 393, 852],
+      ['iPhone 15 Pro Max', 430, 932],
+      ['iPhone 16 Pro Max', 440, 956],
+      ['Galaxy S24', 360, 780],
+      ['Pixel 8', 412, 915],
+      ['iPad mini', 744, 1133],
+      ['iPad Air 11"', 820, 1180],
+      ['iPad Pro 11"', 834, 1210],
+      ['iPad Pro 13"', 1032, 1376],
+      ['Surface Pro', 912, 1368],
+      ['Laptop', 768, 1366],
+      ['Desktop', 1080, 1920],
+    ];
+    const at = (width: number, short: number): string => {
+      const phone = phoneLayout(width, short);
+      const { list, wide } = fitLayout(width, sideWidth(null, width), null, CHAT_FIT, false, phone);
+
+      return phone ? 'phone' : `${list ? 'list' : 'drawer'} + ${wide ? 'column' : 'tabs'}`;
+    };
+
+    expect(devices.map(([name, short, long]) => [name, at(short, short), at(long, short)])).toEqual([
+      ['iPhone SE', 'phone', 'phone'],
+      ['iPhone 13 and 14', 'phone', 'phone'],
+      ['iPhone 15 and 16 Pro', 'phone', 'phone'],
+      ['iPhone 15 Pro Max', 'phone', 'phone'],
+      ['iPhone 16 Pro Max', 'phone', 'phone'],
+      ['Galaxy S24', 'phone', 'phone'],
+      ['Pixel 8', 'phone', 'phone'],
+      // The iPad mini's portrait width is under 768 px, as before.
+      ['iPad mini', 'phone', 'drawer + column'],
+      ['iPad Air 11"', 'drawer + tabs', 'drawer + column'],
+      ['iPad Pro 11"', 'drawer + tabs', 'drawer + column'],
+      ['iPad Pro 13"', 'drawer + column', 'list + column'],
+      ['Surface Pro', 'drawer + tabs', 'list + column'],
+      ['Laptop', 'drawer + tabs', 'list + column'],
+      ['Desktop', 'drawer + column', 'list + column'],
+    ]);
+    // A desktop window narrowed under 768 px gets the phone's layout by its width alone, and an unknown screen counts by the width.
+    expect(phoneLayout(767, 1080)).toBe(true);
+    expect(phoneLayout(768, 1080)).toBe(false);
+    expect(phoneLayout(844, 0)).toBe(false);
+    expect(phoneLayout(844, 499)).toBe(true);
+    expect(phoneLayout(844, 500)).toBe(false);
+  });
+
+  it("reads the screen's short side for isPhone, whichever way the device is turned", () => {
+    const width = window.innerWidth;
+
+    try {
+      window.innerWidth = 932;
+      vi.stubGlobal('screen', { width: 430, height: 932 });
+      expect(isPhone()).toBe(true);
+      vi.stubGlobal('screen', { width: 932, height: 430 });
+      expect(isPhone()).toBe(true);
+      vi.stubGlobal('screen', { width: 1366, height: 1024 });
+      window.innerWidth = 1366;
+      expect(isPhone()).toBe(false);
+      // jsdom's screen is 0 by 0: unknown, so the width decides.
+      vi.unstubAllGlobals();
+      expect(isPhone()).toBe(false);
+      window.innerWidth = 700;
+      expect(isPhone()).toBe(true);
+    } finally {
+      window.innerWidth = width;
+      vi.unstubAllGlobals();
+    }
   });
 
   it("counts the list's own width: a wider list needs a wider page", () => {

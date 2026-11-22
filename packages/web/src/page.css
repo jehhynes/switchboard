@@ -68,11 +68,11 @@ button:focus-visible, a:focus-visible, .tab:focus-visible { outline: 1px solid v
 .side-head { flex: none; }
 .list-header { display: flex; align-items: center; justify-content: flex-end; gap: 2px; min-height: 35px; padding: 0 4px 0 20px; background: var(--sb-bar-background); }
 /* On a phone the list is its own view and no window title names the app, so the header starts with the icon and "Switchboard", which take
-   what is left and end in an ellipsis; from 768 px the window or tab title shows it. */
+   what is left and end in an ellipsis; outside the phone's layout the window or tab title shows it. */
 .list-title { display: none; }
 /* On a phone the list is the whole width, so it has no border at its right, which would make the page 1 px wider than the screen. */
-@media (width < 768px) { .side { border-right: none; } }
-@media (width < 768px) { .list-title { display: flex; flex: 1; align-items: center; gap: 6px; min-width: 0; font-weight: 600; } }
+:where(html.phone) .side { border-right: none; }
+:where(html.phone) .list-title { display: flex; flex: 1; align-items: center; gap: 6px; min-width: 0; font-weight: 600; }
 .list-title-icon { flex: none; width: 16px; height: 16px; }
 .list-title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .header-sources { display: flex; flex: none; }
@@ -98,9 +98,9 @@ svg.source-logo.forum { color: #57ae57; }
 .search-links { display: flex; flex-wrap: wrap; gap: 12px; }
 @media (hover: none), (pointer: coarse) { .search-box { height: 44px; } .search-range, .search-end button.link { min-height: 44px; } }
 .menu-row .source-logo { flex: none; margin-right: 2px; }
-/* On a phone the source icons leave the title row for the top of More Actions, as check rows; from 768 px they are in the row. */
-@media (width < 768px) { .list-header .header-sources, .list-header .header-separator { display: none; } }
-@media (min-width: 768px) { .more-menu .more-source { display: none; } }
+/* On a phone the source icons leave the title row for the top of More Actions, as check rows; outside the phone's layout they are in the row. */
+:where(html.phone) .list-header .header-sources, :where(html.phone) .list-header .header-separator { display: none; }
+:where(html:not(.phone)) .more-menu .more-source { display: none; }
 .sheet-select { box-sizing: border-box; width: 100%; min-height: 26px; font: inherit; color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground)); background: var(--vscode-dropdown-background, var(--vscode-input-background)); border: 1px solid var(--vscode-dropdown-border, var(--vscode-input-border, transparent)); border-radius: 2px; }
 .sheet-error { margin: 0 0 12px; color: var(--vscode-errorForeground); }
 .sheet-field .sheet-error { margin: 0; }
@@ -232,22 +232,21 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 .row-details .row-detail-separator { flex: none; color: var(--sb-row-muted); }
 .row-details .row-detail.warning { color: var(--vscode-editorWarning-foreground); }
 /*
- * Phone first: under 768 px the list and the conversation are each a full-width view, the list until a work item is opened, the conversation
- * with a Back button at the start of its header; touch targets are at least 44 px tall. From 768 px the open work item takes the room first:
- * the list is the side column only while it, the conversation and the Status and Artifacts column all fit (`fitLayout` in layout.ts, which
- * sets #root.drawers otherwise), and a drawer over the conversation's left edge (below) otherwise, shown by the header's Work items button in
+ * Phone first: in the phone's layout (html.phone, set by main.ts from `isPhone` in layout.ts: under 768 px wide, or a phone's screen in
+ * either orientation) the list and the conversation are each a full-width view, the list until a work item is opened, the conversation with a
+ * Back button at the start of its header; touch targets are at least 44 px tall. Outside it the open work item takes the room first: the list
+ * is the side column only while it, the conversation and the Status and Artifacts column all fit (`fitLayout` in layout.ts, which sets
+ * #root.drawers otherwise), and a drawer over the conversation's left edge (below) otherwise, shown by the header's Work items button in
  * Back's place, and in the drawer whatever the width once the operator hides it on its sash (main.ts). With no work item open it is the side
- * column from 768 px. Every other switch is by the page's width and the kept widths alone, so a desktop window narrowed to a phone's width gets
- * the phone's layout.
+ * column. Every other switch is by the page's width and the kept widths alone, so a desktop window narrowed to a phone's width gets the
+ * phone's layout.
  */
 #root.listing > .main, #root:not(.listing) > .side { display: none; }
 /* Swipe right to go back (swipeBack.ts): while the conversation is dragged right, the list shows under it across the screen, shaded and moved
    left until the conversation leaves, as iOS's navigation shows the view below. swipeBack.ts sets the transforms and the shade's opacity. */
-@media (max-width: 767px) {
-  #root.swiping:not(.listing) > .side { box-sizing: border-box; display: flex; position: fixed; inset: 0; z-index: 1; padding: var(--sb-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); will-change: transform; }
-  #root.swiping > .main { position: relative; z-index: 3; will-change: transform; box-shadow: 0 0 12px rgba(0, 0, 0, 0.35); }
-  #root.swiping { user-select: none; -webkit-user-select: none; }
-}
+:where(html.phone) #root.swiping:not(.listing) > .side { box-sizing: border-box; display: flex; position: fixed; inset: 0; z-index: 1; padding: var(--sb-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); will-change: transform; }
+:where(html.phone) #root.swiping > .main { position: relative; z-index: 3; will-change: transform; box-shadow: 0 0 12px rgba(0, 0, 0, 0.35); }
+:where(html.phone) #root.swiping { user-select: none; -webkit-user-select: none; }
 .swipe-shade { position: fixed; inset: 0; z-index: 2; background: #000; opacity: 0; pointer-events: none; }
 /* A sash resizes the pane before it (resizer in main.ts, which keeps the width in --side-width or --chat-width), drawn as VS Code's:
    invisible until hovered, dragged or focused, then a 4 px line in the sash colour over the edge, taking no width of its own. The work
@@ -257,11 +256,9 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 .sash.dragging { transition: none; }
 #root.resizing { cursor: col-resize; user-select: none; }
 #root.resizing iframe { pointer-events: none; }
-@media (min-width: 768px) {
-  .side { width: var(--side-width, clamp(260px, 30vw, 340px)); min-width: 200px; max-width: 50vw; }
-  .side-sash { display: block; }
-  #root.listing > .main, #root:not(.listing) > .side { display: flex; }
-}
+:where(html:not(.phone)) .side { width: var(--side-width, clamp(260px, 30vw, 340px)); min-width: 200px; max-width: 50vw; }
+:where(html:not(.phone)) .side-sash { display: block; }
+:where(html:not(.phone)) #root.listing > .main, :where(html:not(.phone)) #root:not(.listing) > .side { display: flex; }
 /*
  * The drawer, as the dock's auto-hide (architecture.md § Web page): hidden, the list keeps its layout off the page's left edge, and a 3 px
  * sliver there shows each row's stripe at its height (fitSliver in main.ts). Shown, it lies over the conversation at the list's width and
@@ -276,15 +273,13 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 /* On a touch screen the sliver takes touches 16 px in from the edge, so a swipe right from the edge shows the drawer (main.ts). */
 .sliver { touch-action: pan-y; }
 @media (pointer: coarse) { .sliver::after { content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 16px; } }
-@media (min-width: 768px) {
-  #root.drawers:not(.listing):not(.history) > .side { box-sizing: border-box; position: fixed; top: 0; bottom: 0; left: 0; z-index: 30; padding-top: var(--sb-top); padding-left: env(safe-area-inset-left); visibility: hidden; transform: translateX(-100%); }
-  #root.drawers:not(.listing):not(.history) > .side-sash { display: none; }
-  #root.drawers.drawer-open:not(.listing):not(.history) > .side { visibility: visible; transform: none; transition: transform 0.15s ease-out; box-shadow: 0 0 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36)); }
-  #root.drawers:not(.listing):not(.history):not(.drawer-open) > .sliver { display: block; }
-  #root.drawers:not(.listing):not(.history) .header > .list-toggle { display: inline-flex; }
-  /* The open drawer's own sash, on its right edge: dragged wider past PIN_SNAP it pins the list back as a column (main.ts). */
-  #root.drawers.drawer-open:not(.listing):not(.history) > .side > .drawer-sash { display: block; }
-}
+:where(html:not(.phone)) #root.drawers:not(.listing):not(.history) > .side { box-sizing: border-box; position: fixed; top: 0; bottom: 0; left: 0; z-index: 30; padding-top: var(--sb-top); padding-left: env(safe-area-inset-left); visibility: hidden; transform: translateX(-100%); }
+:where(html:not(.phone)) #root.drawers:not(.listing):not(.history) > .side-sash { display: none; }
+:where(html:not(.phone)) #root.drawers.drawer-open:not(.listing):not(.history) > .side { visibility: visible; transform: none; transition: transform 0.15s ease-out; box-shadow: 0 0 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36)); }
+:where(html:not(.phone)) #root.drawers:not(.listing):not(.history):not(.drawer-open) > .sliver { display: block; }
+:where(html:not(.phone)) #root.drawers:not(.listing):not(.history) .header > .list-toggle { display: inline-flex; }
+/* The open drawer's own sash, on its right edge: dragged wider past PIN_SNAP it pins the list back as a column (main.ts). */
+:where(html:not(.phone)) #root.drawers.drawer-open:not(.listing):not(.history) > .side > .drawer-sash { display: block; }
 .side { position: relative; }
 .side > .drawer-sash { position: absolute; top: 0; bottom: 0; right: 0; margin: 0; }
 /* A drag that would snap, hiding the list in the drawer or pinning it back, says so beside the sash; the list dims while a release hides it. */
@@ -293,8 +288,8 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 #root.snap > .side:has(+ .side-sash.snapping) { opacity: 0.45; }
 @media (prefers-reduced-motion: reduce) { #root.drawers.drawer-open:not(.listing):not(.history) > .side { transition: none; } }
 /* With a mouse, the group headers can be as compact as the dock's. */
-@media (min-width: 768px) and (pointer: fine) {
-  .work-list { --group-head-height: 32px; }
+@media (pointer: fine) {
+  :where(html:not(.phone)) .work-list { --group-head-height: 32px; }
 }
 
 /* The conversation, as the Conversation view: header, tabs, the tab's panel and the composer. */
@@ -675,7 +670,7 @@ body.artifact-window > .artifact-view { height: 100%; }
 .header > button.row-main:hover { background: var(--vscode-button-hoverBackground); }
 .header > button.row-main:disabled, .menu-row:disabled { opacity: 0.5; cursor: default; }
 /* On a phone the header has no room for the main control; the Actions menu under the ellipsis starts with it (menuRows). */
-@media (width < 768px) { .header > button.row-main { display: none; } }
+:where(html.phone) .header > button.row-main { display: none; }
 .actions-anchor { flex: none; }
 button.actions { display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: none; background: transparent; color: var(--vscode-icon-foreground); padding: 0; border-radius: 4px; cursor: pointer; }
 button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }
@@ -748,17 +743,15 @@ button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }
 @media (height < 800px) {
   #root.off-conversation:not(:has(#composer:focus-within, #composer .composer-error:not([hidden]))) #note, #root.off-conversation:not(:has(#composer:focus-within, #composer .composer-error:not([hidden]))) #composer { display: none; }
 }
-@media (min-width: 768px) {
-  #root.wide > .main { flex: 0 1 var(--chat-width, 940px); }
-  #root.wide > .chat-sash { display: block; }
-  #root.wide > .detail { display: flex; flex: 1 1 360px; flex-direction: column; min-width: 360px; background: var(--vscode-sideBar-background); border-left: 1px solid var(--vscode-panel-border); }
-  /* The column's tab strip starts at the column's top, with no band above, and its tabs keep their own height. One pixel of the strip above
-     them keeps the chosen tab's top edge off the window's top edge, which the window's frame can cover. */
-  .detail-head { flex: none; display: flex; align-items: flex-start; padding-top: 1px; border-bottom: 1px solid var(--vscode-panel-border); }
-  .detail-head { background: var(--sb-tab-strip); }
-  .detail-head .tabs { flex: 1; min-width: 0; border-bottom: none; }
-  .detail .status-tab, .detail .artifact-list, .detail .artifact-doc { max-width: none; }
-}
+:where(html:not(.phone)) #root.wide > .main { flex: 0 1 var(--chat-width, 940px); }
+:where(html:not(.phone)) #root.wide > .chat-sash { display: block; }
+:where(html:not(.phone)) #root.wide > .detail { display: flex; flex: 1 1 360px; flex-direction: column; min-width: 360px; background: var(--vscode-sideBar-background); border-left: 1px solid var(--vscode-panel-border); }
+/* The column's tab strip starts at the column's top, with no band above, and its tabs keep their own height. One pixel of the strip above
+   them keeps the chosen tab's top edge off the window's top edge, which the window's frame can cover. */
+:where(html:not(.phone)) .detail-head { flex: none; display: flex; align-items: flex-start; padding-top: 1px; border-bottom: 1px solid var(--vscode-panel-border); }
+:where(html:not(.phone)) .detail-head { background: var(--sb-tab-strip); }
+:where(html:not(.phone)) .detail-head .tabs { flex: 1; min-width: 0; border-bottom: none; }
+:where(html:not(.phone)) .detail .status-tab, :where(html:not(.phone)) .detail .artifact-list, :where(html:not(.phone)) .detail .artifact-doc { max-width: none; }
 
 /* Session state icons (architecture.md § Conversation view): one size and weight, a 13 px glyph in a fixed 16 px column centred on the text,
    muted unless the state needs the operator, a limit holds it, or it failed (IconTone in packages/core/src/group.ts); a smooth small spinner. */
@@ -771,9 +764,7 @@ button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }
 /* Back to the work items, only on a phone, where the list and the conversation are separate views (architecture.md § Web page). */
 /* .header > raises it over button.icon's display. */
 .back-toggle { flex: none; }
-@media (min-width: 768px) {
-  .header > .back-toggle { display: none; }
-}
+:where(html:not(.phone)) .header > .back-toggle { display: none; }
 .view-options-anchor { flex: none; }
 
 /* The console (architecture.md § Web page): the held session's terminal, with no bar above it: the focus border shows that it types. It fills its pane and

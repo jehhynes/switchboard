@@ -160,7 +160,7 @@ export interface View {
   bands: Map<string, boolean>;
   /** Whether a narrow screen shows the list rather than the conversation: after Back, or before a work item is opened. */
   list: boolean;
-  /** The work items' drawer, from tablet width until the list column fits: shown by its button or a key ('open'), by a pointer resting on its sliver ('hover'), or hidden (null). Never kept. */
+  /** The work items' drawer, outside the phone's layout until the list column fits: shown by its button or a key ('open'), by a pointer resting on its sliver ('hover'), or hidden (null). Never kept. */
   drawer: 'open' | 'hover' | null;
   /** Whether the header's actions menu is open, and in it the Open link submenu. */
   actions: boolean;

@@ -1,5 +1,5 @@
-// Checks the page's shell at iPhone sizes in a real headless Chrome or Edge (testing.md § Web page shell check): in the installed app's
-// standalone mode, portrait and landscape, light and dark, the list, a conversation, an empty one, History, Settings, the drawer and a sheet.
+// Checks the page's shell at iPhone sizes and an iPad's in a real headless Chrome or Edge (testing.md § Web page shell check): in the installed
+// app's standalone mode, portrait and landscape, light and dark, the list, a conversation, an empty one, History, Settings, the drawer and a sheet.
 // Nothing outside the scrollers can move: the document is exactly the viewport, nothing reaches past it outside a scroller, every scroller keeps
 // a drag to itself, and the page outside the scrollers takes no pan. Chrome has no display-mode emulation, so the page's standalone rules are
 // applied to every width here, and safe-area insets come from the DevTools protocol.
@@ -11,10 +11,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PAGE_ASSETS } from './dist/index.js';
 
-/** iPhone 16 Pro in the installed app under the opaque status bar: 393 by 852 pt, less the 59 pt status bar in portrait; none in landscape. */
+/**
+ * iPhone 16 Pro in the installed app under the opaque status bar: 393 by 852 pt, less the 59 pt status bar in portrait; none in landscape. Both
+ * draw the phone's layout. iPad Air 11" on its side, 1180 by 820 pt less its 24 pt status bar, draws the drawer.
+ */
 const SIZES = [
-  { orientation: 'portrait', width: 393, height: 793, insets: { top: 0, bottom: 34, left: 0, right: 0 } },
-  { orientation: 'landscape', width: 852, height: 393, insets: { top: 0, bottom: 21, left: 59, right: 59 } },
+  { device: 'iphone', orientation: 'portrait', width: 393, height: 793, screen: [393, 852], insets: { top: 0, bottom: 34, left: 0, right: 0 }, phone: true },
+  { device: 'iphone', orientation: 'landscape', width: 852, height: 393, screen: [852, 393], insets: { top: 0, bottom: 21, left: 59, right: 59 }, phone: true },
+  { device: 'ipad', orientation: 'landscape', width: 1180, height: 796, screen: [1180, 820], insets: { top: 0, bottom: 20, left: 0, right: 0 }, phone: false },
 ];
 const VIEWS = ['list', 'conversation', 'empty', 'history', 'settings', 'drawer', 'sheet'];
 const report = process.argv.includes('--report');
@@ -78,6 +82,7 @@ const measure = `(() => {
   const top = (selector) => { const node = [...document.querySelectorAll(selector)].find(shown); return node ? Math.round(node.getBoundingClientRect().top * 100) / 100 : null; };
   return {
     root: document.getElementById('root').className,
+    phone: root.classList.contains('phone'),
     document: { height: root.scrollHeight, client: root.clientHeight, width: root.scrollWidth, clientWidth: root.clientWidth, body: document.body.scrollHeight, bodyClient: document.body.clientHeight },
     touchAction: getComputedStyle(document.body).touchAction,
     past, scrollers,
@@ -133,13 +138,13 @@ function failures(view, size, m) {
   // No band above the bars: under the opaque status bar the top inset is 0, and each view's top bar starts at the page's top edge.
   if (m.band !== 0) out.push('a ' + m.band + ' px band above the bars');
   for (const [bar, top] of Object.entries(m.tops)) {
-    // The dialog Settings, from 768 px wide, sits inside the dimmed page's margin.
-    if ((['header', 'listHeader', 'historyBar'].includes(bar) || (bar === 'settingsHead' && size.width < 768)) && top !== null && top !== 0) out.push('the ' + bar + ' starts ' + top + ' px down');
+    // The dialog Settings, outside the phone's layout, sits inside the dimmed page's margin.
+    if ((['header', 'listHeader', 'historyBar'].includes(bar) || (bar === 'settingsHead' && size.phone)) && top !== null && top !== 0) out.push('the ' + bar + ' starts ' + top + ' px down');
   }
   // In portrait, under the status bar, WebKit finds the view's own solid top bar at the top edge, in the bars' colour, and paints the status bar in
   // it instead of blurring the page's top. An open sheet's dimmed backdrop is viewport-sized, which keeps the colour WebKit had. Landscape has no
-  // status bar, so no colour is painted there, and its bars, inside the notch's insets, are under 90% of the width.
-  if (size.orientation === 'portrait') {
+  // status bar, so no colour is painted there, and its bars, inside the notch's insets, are under 90% of the width. The iPad is not checked for it.
+  if (size.device === 'iphone' && size.orientation === 'portrait') {
     const edge = m.edge;
     const own = view === 'sheet' ? edge.kind === 'viewport' : edge.kind === 'bar' && /^[a-z]+\.(header|list-header|hist-bar|settings-head)(\.|$)/.test(edge.name ?? '');
 
@@ -215,15 +220,15 @@ try {
   for (const scheme of ['dark', 'light']) {
     for (const size of SIZES) {
       for (const view of VIEWS) {
-        // A phone's portrait width shows the list or the conversation, never a drawer.
-        if (view === 'drawer' && size.orientation === 'portrait') continue;
-        await send('Emulation.setDeviceMetricsOverride', { width: size.width, height: size.height, deviceScaleFactor: 3, mobile: true });
+        // A phone shows the list or the conversation, never a drawer, in either orientation.
+        if (view === 'drawer' && size.phone) continue;
+        await send('Emulation.setDeviceMetricsOverride', { width: size.width, height: size.height, screenWidth: size.screen[0], screenHeight: size.screen[1], deviceScaleFactor: size.phone ? 3 : 2, mobile: true });
         await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
         await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: scheme }, { name: 'hover', value: 'none' }, { name: 'pointer', value: 'coarse' }] });
         await send('Emulation.setSafeAreaInsetsOverride', { insets: size.insets });
         await send('Page.navigate', { url: base + '?view=' + view });
         await evaluate('new Promise((done) => { const wait = () => (document.querySelector("#root .header, #root .list-header") ? setTimeout(done, 200) : setTimeout(wait, 50)); wait(); })');
-        const name = scheme + ' ' + size.orientation + ' ' + view;
+        const name = scheme + ' ' + size.device + ' ' + size.orientation + ' ' + view;
         const steps = OPEN[view] ?? [];
         const missing = [];
 
@@ -235,6 +240,10 @@ try {
         await wait(200);
         const m = await evaluate(measure);
         const found = missing.length > 0 ? ['could not open the view: no ' + missing.join(', ')] : failures(view, size, m);
+
+        // The phone's layout by the device, never the drawer on a phone; the tablet's on the iPad.
+        if (m.phone !== size.phone) found.push((size.phone ? 'no' : 'the') + " phone's layout on the " + size.device + ' at ' + size.width + ' px');
+        if (size.phone && /\bdrawers\b/.test(m.root)) found.push('the list is a drawer on a phone');
 
         // A drag on the long conversation still scrolls it, one on the header moves nothing, and nor does one on an empty conversation.
         if (view === 'conversation' || view === 'empty') {

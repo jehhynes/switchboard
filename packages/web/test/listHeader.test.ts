@@ -311,7 +311,7 @@ describe('the list header (architecture.md § Web page)', () => {
     click('.more-actions');
     expect(root.querySelector('.more-actions')?.getAttribute('aria-expanded')).toBe('true');
     expect(menuRows()).toEqual(['gh', 'desk', 'help', '-', 'New ad-hoc session…', 'New conversation in a folder…', '-', 'Held sessions', '-', 'Refresh sources', 'Reload', 'Show hub log', '-', 'Pair a device…', 'Open Settings']);
-    // The source rows are the phone's: page.css hides them from 768 px, where the icons are in the header.
+    // The source rows are the phone's: page.css hides them outside the phone's layout, where the icons are in the header.
     expect([...root.querySelectorAll('.more-menu .more-source')]).toHaveLength(4);
     expect(root.querySelector('.more-menu [data-source="help"]')?.getAttribute('aria-checked')).toBe('false');
     click('.more-menu [data-source="help"]');

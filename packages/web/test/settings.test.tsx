@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { CHECK_DELAY_MS, settings } from '../src/settings.js';
 import { EditorState, fieldOfError, getAt, parseConfig, readField, setAt, withCurrent } from '../src/settingsModel.js';
 
@@ -488,14 +488,20 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     expect(host.querySelector('.settings')?.getAttribute('data-drill')).toBe('nav');
     expect(document.activeElement?.textContent).toContain('General');
 
-    // At a phone's width the page's title takes the focus from the hidden navigation, also after an Add entry.
-    const media = vi.spyOn(window, 'matchMedia').mockReturnValue({ matches: true } as MediaQueryList);
+    // In the phone's layout, here a phone on its side, the page's title takes the focus from the hidden navigation, also after an Add entry.
+    const width = window.innerWidth;
+
+    vi.stubGlobal('screen', { width: 390, height: 844 });
+    window.innerWidth = 844;
+    onTestFinished(() => {
+      window.innerWidth = width;
+      vi.unstubAllGlobals();
+    });
 
     [...host.querySelectorAll<HTMLButtonElement>('.settings-nav-entry')].find((one) => one.textContent?.includes('New GitHub source'))!.click();
     await settle();
     expect(document.activeElement).toBe(host.querySelector('.settings-page-title h2'));
     expect(document.activeElement?.textContent).toBe('GitHub');
-    media.mockRestore();
   });
 
   it('shows a field\'s help under it when its info icon is tapped, as well as in its tooltip', async () => {

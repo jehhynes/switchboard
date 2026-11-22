@@ -797,7 +797,7 @@ describe('the page', () => {
     source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1), listRow(2)])], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
     expect(root.classList.contains('listing')).toBe(false);
 
-    // Back is the header's first button, which CSS hides from 768 px; the Work items button after it shows only where the list is a drawer.
+    // Back is the header's first button, which CSS hides outside the phone's layout; the Work items button after it shows only where the list is a drawer.
     const back = root.querySelector<HTMLElement>('.header > button.back-toggle')!;
 
     expect(back.getAttribute('aria-label')).toBe('Back to work items');
@@ -986,6 +986,92 @@ describe('the page', () => {
     expect(mics().at(-1)).toBe(true);
     window.innerWidth = width;
     paired.close();
+  });
+
+  it("draws the phone's layout on a phone on its side, wider than 768 px, and the tablet's on an iPad (isPhone)", async () => {
+    history.replaceState(null, '', '#');
+
+    const width = window.innerWidth;
+    const groups = [listGroup('progress', [listRow(1), listRow(2)])];
+    const mics = () => posts.filter((post) => post.url.endsWith('/mic')).map((post) => post.body['on']);
+    let t = 0;
+    const swipe = (target: Element): void => {
+      // Fake timers fake performance too, so its clock is mocked after them.
+      vi.useFakeTimers();
+      vi.spyOn(performance, 'now').mockImplementation(() => t);
+      for (const [type, x] of [['touchstart', 150], ['touchmove', 165], ['touchmove', 330]] as const) {
+        const event = new Event(type, { bubbles: true, cancelable: true });
+
+        Object.defineProperty(event, 'touches', { value: [{ clientX: x, clientY: 200 }] });
+        t += 16;
+        target.dispatchEvent(event);
+      }
+
+      target.dispatchEvent(Object.defineProperty(new Event('touchend', { bubbles: true }), 'touches', { value: [] }));
+      vi.advanceTimersByTime(400);
+      vi.useRealTimers();
+    };
+
+    onTestFinished(() => {
+      window.innerWidth = width;
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    });
+    // An iPhone 14 on its side: 844 px wide, its screen 390 by 844.
+    vi.stubGlobal('screen', { width: 390, height: 844 });
+    window.innerWidth = 844;
+
+    const phone = start();
+
+    phone.source.emit('hello', { key: 'pk', groups, scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    expect(document.documentElement.classList.contains('phone')).toBe(true);
+    root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
+    await flush();
+    phone.source.emit('hello', { key: 'pk', groups, scope, sessions: [session()], items: [reply('r1', 1)], more: false, status: null, artifacts: [] });
+    // Separate views, no drawer, and the conversation a history entry of its own, as in portrait.
+    expect(root.classList.contains('listing')).toBe(false);
+    expect(root.classList.contains('drawers')).toBe(false);
+    expect(history.state).toEqual({ switchboardConversation: true });
+    // Back leaves the work item, so the mic on for it turns off.
+    phone.source.emit('voice', { voice: { enabled: true, here: true, mic: 'listening', speaking: null, speakReplies: true, error: null } });
+    root.querySelector<HTMLElement>('.header > button.back-toggle')!.click();
+    await flush();
+    expect(root.classList.contains('listing')).toBe(true);
+    expect(mics()).toEqual([false]);
+    // A swipe right over the conversation goes back too.
+    root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
+    expect(root.classList.contains('listing')).toBe(false);
+    swipe(root.querySelector('#panel .timeline')!);
+    expect(root.classList.contains('listing')).toBe(true);
+    phone.page.close();
+    expect(document.documentElement.classList.contains('phone')).toBe(false);
+
+    // An iPad Air on its side, 1180 px wide, gets the drawer beside the conversation, and a swipe stays.
+    vi.stubGlobal('screen', { width: 820, height: 1180 });
+    window.innerWidth = 1180;
+    history.replaceState(null, '', '#');
+    root = document.createElement('div');
+    document.body.replaceChildren(root);
+
+    const tablet = start();
+
+    tablet.source.emit('hello', { key: 'pk', groups, scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    expect(document.documentElement.classList.contains('phone')).toBe(false);
+    root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
+    await flush();
+    tablet.source.emit('hello', { key: 'pk', groups, scope, sessions: [session()], items: [reply('r1', 1)], more: false, status: null, artifacts: [] });
+    expect(root.classList.contains('drawers')).toBe(true);
+    expect(history.state).not.toEqual({ switchboardConversation: true });
+    swipe(root.querySelector('#panel .timeline')!);
+    expect(root.classList.contains('listing')).toBe(false);
+
+    // Turned to portrait, 820 px wide, it keeps the tablet's layout; a window narrowed under 768 px gets the phone's.
+    resizeTo(820);
+    expect(document.documentElement.classList.contains('phone')).toBe(false);
+    resizeTo(700);
+    expect(document.documentElement.classList.contains('phone')).toBe(true);
+    expect(root.classList.contains('drawers')).toBe(false);
+    tablet.page.close();
   });
 
   it('goes back to the list on a phone with a swipe right over the conversation, as Back does, but not over a menu or from a wider page', async () => {
@@ -4096,11 +4182,11 @@ describe("the list's CSS", () => {
   const declarationsOf = (pick: (selector: string) => boolean): string[] =>
     [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, selectors]) => selectors!.split(',').some((selector) => pick(selector.trim()))).map(([, , body]) => body!.trim());
 
-  it('shows the app\'s title in the list header only under 768 px, taking the room the icons leave', () => {
-    expect(declarationsOf((selector) => selector === '.list-title')).toEqual(['display: none;', expect.stringContaining('display: flex; flex: 1;')]);
-    // Every width under 768 px, a zoomed 767.5 px included, which a max-width of 767 px would miss.
-    expect(css).toMatch(/@media \(width < 768px\) \{ \.list-title \{ display: flex; flex: 1;[^}]*min-width: 0;/);
-    expect(css).toMatch(/@media \(width < 768px\) \{ \.list-header \.header-sources, \.list-header \.header-separator \{ display: none; \} \}/);
+  it('shows the app\'s title in the list header only in the phone\'s layout, taking the room the icons leave', () => {
+    expect(declarationsOf((selector) => selector === '.list-title')).toEqual(['display: none;']);
+    expect(declarationsOf((selector) => selector === ':where(html.phone) .list-title')).toEqual([expect.stringMatching(/^display: flex; flex: 1;.*min-width: 0;/)]);
+    expect(css).toContain(':where(html.phone) .list-header .header-sources, :where(html.phone) .list-header .header-separator { display: none; }');
+    expect(css).toContain(':where(html:not(.phone)) .more-menu .more-source { display: none; }');
     expect(declarationsOf((selector) => selector === '.list-title-text')).toEqual([expect.stringContaining('text-overflow: ellipsis')]);
   });
 
@@ -4146,20 +4232,23 @@ describe("the list's CSS", () => {
     expect(one('.row-time')).toContain('color: var(--sb-row-muted)');
   });
 
-  it('hides Back and shows the work items\' sash by the page\'s width alone, with no kept list toggle', () => {
-    const narrow = css.slice(0, css.indexOf('@media (min-width: 768px)'));
-
+  it('hides Back and shows the work items\' sash outside the phone\'s layout alone, with no kept list toggle', () => {
     expect(css).not.toMatch(/layout-toggle|list-hidden/);
-    // A selector that outranks button.icon's display.
-    expect(declarationsOf((selector) => selector === '.header > .back-toggle')).toEqual(['display: none;']);
-    expect(declarationsOf((selector) => selector === '.side-sash')).toEqual(['display: block;']);
-    expect(narrow).not.toMatch(/\.side-sash \{ display: block/);
-    const wide = css.split('@media (min-width: 768px) {').slice(1).map((block) => block.slice(0, block.indexOf('\n}'))).join('\n');
+    // A selector that outranks button.icon's display; :where() adds nothing to it, as the media query it replaced did not.
+    expect(declarationsOf((selector) => selector === ':where(html:not(.phone)) .header > .back-toggle')).toEqual(['display: none;']);
+    expect(declarationsOf((selector) => selector === ':where(html:not(.phone)) .side-sash')).toEqual(['display: block;']);
+    expect(declarationsOf((selector) => selector === '.header > .back-toggle' || selector === '.side-sash')).toEqual([]);
+  });
 
-    for (const rule of ['.header > .back-toggle { display: none; }', '.side-sash { display: block; }']) {
-      expect(wide).toContain(rule);
-      expect(narrow).not.toContain(rule);
+  it("switches the phone's layout by the document's phone class alone, which isPhone sets, never by a media query on the width", () => {
+    for (const name of ['page.css', 'settings.css']) {
+      const sheet = readFileSync(join(__dirname, '../src', name), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+
+      expect(sheet, name).not.toMatch(/@media[^{]*\b(7\d\d)px/);
+      expect(sheet.replaceAll(':where(html.phone)', '').replaceAll(':where(html:not(.phone))', ''), name).not.toContain('.phone');
     }
+    // The selectors the class gives are only these two, which add nothing to a rule's specificity.
+    expect(new Set(css.match(/:where\([^)]*phone[^)]*\)\)?/g))).toEqual(new Set([':where(html.phone)', ':where(html:not(.phone))']));
   });
 
   it('gives the notes above the composer its edges, corners and an 8 px gap', () => {
@@ -4191,9 +4280,9 @@ describe("the list's CSS", () => {
     // A row or menu scrolled into view lands below the pinned header, which is as tall as the variable says.
     expect(declarationsOf((selector) => selector === '.work-list .row')).toEqual(['scroll-margin-top: var(--group-head-height);']);
     expect(declarationsOf((selector) => selector === '.work-list').join(' ')).toContain('--group-head-height: 44px');
-    const wide = css.split('@media (min-width: 768px) and (pointer: fine) {').slice(1).map((block) => block.slice(0, block.indexOf('\n}'))).join('\n');
+    const fine = css.split('@media (pointer: fine) {').slice(1).map((block) => block.slice(0, block.indexOf('\n}'))).join('\n');
 
-    expect(wide).toContain('.work-list { --group-head-height: 32px; }');
+    expect(fine).toContain(':where(html:not(.phone)) .work-list { --group-head-height: 32px; }');
   });
 
   it("keeps the pinned group headers the list's full width, the list a stacking context so iOS draws its scroll indicator over them", () => {
@@ -4216,21 +4305,21 @@ describe("the list's CSS", () => {
     expect(bubbles).toMatch(/\n\.speech-bubble \{[^}]*font-size: 110%;/);
   });
 
-  it('makes the list a drawer with its sliver and button from 768 px where #root.drawers says it does not fit, while a work item is open, sliding in and hiding at once', () => {
+  it("makes the list a drawer with its sliver and button outside the phone's layout where #root.drawers says it does not fit, while a work item is open, sliding in and hiding at once", () => {
     expect(declarationsOf((selector) => selector === '.header > .list-toggle')).toEqual(['display: none;']);
-    // No fixed width decides it: a phone never gets the drawer, and from 768 px only the class the layout sets does.
+    // No fixed width decides it: a phone never gets the drawer, and outside the phone's layout only the class the layout sets does.
     expect(css).not.toMatch(/@media \(\d+px <= width < /);
-    const block = css.split('@media (min-width: 768px) {').slice(1).map((one) => one.slice(0, one.indexOf('\n}'))).find((one) => one.includes('#root.drawers'))!;
 
     for (const rule of ['#root.drawers:not(.listing):not(.history) > .side-sash { display: none; }', '#root.drawers:not(.listing):not(.history):not(.drawer-open) > .sliver { display: block; }', '#root.drawers:not(.listing):not(.history) .header > .list-toggle { display: inline-flex; }']) {
-      expect(block).toContain(rule);
+      expect(css).toContain(`\n:where(html:not(.phone)) ${rule}`);
     }
 
+    expect(css).not.toMatch(/(^|\n)#root\.drawers/);
     // Hidden, the list keeps its layout off the left edge, so its rows can be measured for the sliver.
-    expect(block).toMatch(/#root\.drawers:not\(\.listing\):not\(\.history\) > \.side \{[^}]*position: fixed;[^}]*visibility: hidden; transform: translateX\(-100%\);/);
+    expect(css).toMatch(/:where\(html:not\(\.phone\)\) #root\.drawers:not\(\.listing\):not\(\.history\) > \.side \{[^}]*position: fixed;[^}]*visibility: hidden; transform: translateX\(-100%\);/);
     // Only the shown drawer has a transition, so it slides in and hides at once, as the dock does.
-    expect(declarationsOf((selector) => selector === '#root.drawers:not(.listing):not(.history) > .side').join(' ')).not.toContain('transition');
-    expect(declarationsOf((selector) => selector === '#root.drawers.drawer-open:not(.listing):not(.history) > .side').join(' ')).toContain('transition: transform 0.15s ease-out');
+    expect(declarationsOf((selector) => selector === ':where(html:not(.phone)) #root.drawers:not(.listing):not(.history) > .side').join(' ')).not.toContain('transition');
+    expect(declarationsOf((selector) => selector === ':where(html:not(.phone)) #root.drawers.drawer-open:not(.listing):not(.history) > .side').join(' ')).toContain('transition: transform 0.15s ease-out');
     expect(declarationsOf((selector) => selector === '.sliver').join(' ')).toMatch(/position: fixed;.*left: env\(safe-area-inset-left\);.*width: 3px;/);
   });
 
@@ -4247,19 +4336,21 @@ describe("the list's CSS", () => {
   });
 
   it('puts Status and Artifacts beside the conversation only where #root.wide says they fit, never on a phone', () => {
-    expect(css).toContain('@media (min-width: 768px) {\n  #root.wide > .main');
+    expect(css).toContain('\n:where(html:not(.phone)) #root.wide > .main {');
+    expect(css).not.toMatch(/(^|\n)#root\.wide/);
   });
 
   it('caps the conversation on a wide screen and gives the Status and Artifacts column the rest of the width, with no cap of its own', () => {
-    expect(declarationsOf((selector) => selector === '#root.wide > .main')).toEqual(['flex: 0 1 var(--chat-width, 940px);']);
+    expect(declarationsOf((selector) => selector === ':where(html:not(.phone)) #root.wide > .main')).toEqual(['flex: 0 1 var(--chat-width, 940px);']);
     // With the column hidden the conversation keeps that width, centred.
     expect(declarationsOf((selector) => selector === '.timeline').join(' ')).toContain('max-width: calc(var(--chat-width, 940px) - 40px)');
     expect(declarationsOf((selector) => selector === '#composer').join(' ')).toContain('max-width: var(--chat-width, 940px)');
-    const detail = declarationsOf((selector) => selector.startsWith('#root.wide > .detail') || selector === '.detail' || selector.startsWith('.detail .'));
+    const unprefixed = (selector: string): string => selector.replace(':where(html:not(.phone)) ', '');
+    const detail = declarationsOf((selector) => unprefixed(selector).startsWith('#root.wide > .detail') || unprefixed(selector) === '.detail' || unprefixed(selector).startsWith('.detail .'));
 
     expect(detail.join(' ')).toContain(`flex: 1 1 ${DETAIL_MIN}px`);
     expect(detail.join(' ')).toContain(`min-width: ${DETAIL_MIN}px`);
     expect(detail.join(' ')).not.toMatch(/(?<![-\w])width:|clamp\(|max-width: (?!none)/);
-    expect(declarationsOf((selector) => ['.detail .status-tab', '.detail .artifact-list', '.detail .artifact-doc'].includes(selector))).toEqual(['max-width: none;']);
+    expect(declarationsOf((selector) => ['.detail .status-tab', '.detail .artifact-list', '.detail .artifact-doc'].includes(unprefixed(selector)))).toEqual(['max-width: none;']);
   });
 });

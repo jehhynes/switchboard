@@ -329,7 +329,7 @@ export function renderListHeader(header: PageHeader | null, view: HeaderView): V
   return (
     <>
       <div class="list-header">
-        {/* Shown only under 768 px (page.css), where the list is its own view and no window title names the app. */}
+        {/* Shown only in the phone's layout (page.css), where the list is its own view and no window title names the app. */}
         <span class="list-title">
           <img class="list-title-icon" src="icon-192.png" alt="" width="16" height="16" />
           <span class="list-title-text">Switchboard</span>

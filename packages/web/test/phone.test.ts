@@ -113,8 +113,8 @@ describe('the page on a phone', () => {
     expect(css.indexOf(`${rows}:is(:hover, :focus)`)).toBeGreaterThan(css.indexOf('.menu-row:hover, .menu-row:focus {'));
   });
 
-  it("hides the header's main control under 768 px, and the Actions menu starts with it whatever it is", () => {
-    expect(css).toContain('@media (width < 768px) { .header > button.row-main { display: none; } }');
+  it("hides the header's main control in the phone's layout, and the Actions menu starts with it whatever it is", () => {
+    expect(css).toContain(':where(html.phone) .header > button.row-main { display: none; }');
 
     for (const label of ['Approve', 'Mark done', 'Resume', 'Open in Claude', 'Answer in terminal']) {
       const main = { label, icon: 'check', group: 'main' } as PageAction;
