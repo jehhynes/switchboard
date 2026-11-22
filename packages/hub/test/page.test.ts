@@ -15,6 +15,7 @@ import { artifactFile, cookieValue, deviceLabel, PAIR_CODE_TRIES, PAIR_MS, PAIR_
 import { dockView } from '../src/dock.js';
 import type { DockView } from '../src/dock.js';
 import { pageAsset } from '../src/pageAssets.js';
+import { LOCAL_FILES_COMPUTER_ONLY, openLocalFile } from '../src/localFiles.js';
 import { item, NOW, session, snapshot, triage } from './views.js';
 import { until } from './helpers.js';
 
@@ -724,6 +725,7 @@ describe('the web page routes', () => {
       files: async (key) => (key === 'page-1' ? [{ path: 'a.ts', dir: false }] : null),
       changes: async (route, key, query) => (route === 'changes' && key === 'page-1' ? { status: 200, body: { rows: 'x'.repeat(2000), q: query.get('q') }, etag: 'e1' } : { status: 403, body: { error: 'Not in this window.' } }),
       artifact: (key, name) => (key === 'page-1' ? artifactFile(folder, name) : null),
+      localFile: async (key, target) => (key === 'page-1' ? openLocalFile({ cwd: folder, folders: [folder], sessionIds: [] }, target) : null),
       upload: (key, scopeGen, name, bytes) => {
         uploaded.push({ key, scopeGen, name, bytes: Buffer.from(bytes).toString('utf8') });
         return { status: 200, body: { path: 'C:\\Temp\\a.txt', image: false } };
@@ -1327,6 +1329,70 @@ describe('the web page routes', () => {
     stream.destroy();
     await until(() => (server.clients() === 0 ? true : null));
     expect((await send(server.port, 'GET', '/v1/conversation/artifact/page-1/chat/page.html', {})).status).toBe(404);
+  });
+
+  it("serves a local file a link names only to this computer's page, for its own page key, with the cookie, and nothing outside its folders", async () => {
+    const { url } = await serve();
+    const cookie = String((await send(server.port, 'GET', `${url.pathname}${url.search}`, {})).headers['set-cookie']).split(';')[0]!;
+    const folder = join(dir, 'w1');
+
+    writeFileSync(join(folder, 'notes.md'), '# Notes');
+    writeFileSync(join(folder, 'shot.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    writeFileSync(join(folder, 'logo.svg'), '<svg xmlns="http://www.w3.org/2000/svg"><script>1</script></svg>');
+    writeFileSync(join(dir, 'secret.txt'), 'secret');
+
+    const stream = request({ host: '127.0.0.1', port: server.port, path: '/v1/conversation/events?page=1', headers: { Host: `127.0.0.1:${server.port}`, Cookie: cookie } }, (response) => response.resume());
+
+    stream.on('error', () => {});
+    stream.end();
+    await until(() => (server.clients() === 1 ? true : null));
+
+    const get = (path: string, headers: Record<string, string> = { Cookie: cookie }) => send(server.port, 'GET', path, headers);
+    const shown = await get('/v1/conversation/local-file?window=page-1&path=notes.md');
+
+    expect(shown.status).toBe(200);
+    expect(JSON.parse(shown.body)).toMatchObject({ kind: 'markdown', name: 'notes.md', contents: '# Notes' });
+    expect(shown.headers['cache-control']).toBe('no-cache');
+
+    const picture = await get('/v1/conversation/local-file-raw?window=page-1&path=shot.png');
+
+    expect(picture.status).toBe(200);
+    expect(picture.headers['content-type']).toBe('image/png');
+    expect(picture.headers['x-content-type-options']).toBe('nosniff');
+    expect(picture.headers['content-security-policy']).toBeUndefined();
+    // An SVG's scripts run with an opaque origin and no network, as an artifact's do, should it be opened on its own.
+    expect((await get('/v1/conversation/local-file-raw?window=page-1&path=logo.svg')).headers['content-security-policy']).toMatch(/^sandbox allow-scripts; default-src 'none'/);
+    // Text goes only as the page's own view of it, never as a document of this origin.
+    expect((await get('/v1/conversation/local-file-raw?window=page-1&path=notes.md')).status).toBe(404);
+    expect((await get(`/v1/conversation/local-file?window=page-1&path=${encodeURIComponent('../secret.txt')}`)).status).toBe(404);
+    expect((await get(`/v1/conversation/local-file?window=page-1&path=${encodeURIComponent(join(dir, 'secret.txt'))}`)).status).toBe(404);
+    expect((await get(`/v1/conversation/local-file-raw?window=page-1&path=${encodeURIComponent('../secret.txt')}`)).status).toBe(404);
+    // Without the cookie, or for a key no stream of this sign-in holds, nothing.
+    expect((await get('/v1/conversation/local-file?window=page-1&path=notes.md', {})).status).toBe(401);
+    expect((await get('/v1/conversation/local-file?window=page-2&path=notes.md')).status).toBe(403);
+
+    // Another browser's sign-in on this computer cannot read through this page's key.
+    const second = new URL((JSON.parse((await send(server.port, 'POST', '/page/link', { Authorization: `Bearer ${server.token}` })).body) as { url: string }).url);
+    const other = String((await send(server.port, 'GET', `${second.pathname}${second.search}`, {})).headers['set-cookie']).split(';')[0]!;
+
+    expect(other).toMatch(/^sb_page=/);
+    expect((await get('/v1/conversation/local-file?window=page-1&path=notes.md', { Cookie: other })).status).toBe(403);
+
+    // A paired device gets no local file (architecture.md § Remote access).
+    const ts = { Host: 'pc.tail.ts.net', 'X-Forwarded-Proto': 'https', 'X-Forwarded-For': '100.64.0.2', 'Tailscale-User-Login': 'alex@example.com' };
+
+    remoteAccess = { hosts: ['pc.tail.ts.net'], logins: ['alex@example.com'] };
+
+    const pairing = new URL((JSON.parse((await send(server.port, 'POST', '/page/pair', { Authorization: `Bearer ${server.token}` })).body) as { url: string }).url);
+    const phone = String((await send(server.port, 'GET', `${pairing.pathname}${pairing.search}`, ts)).headers['set-cookie']).split(';')[0]!;
+    const remote = await get('/v1/conversation/local-file?window=page-1&path=notes.md', { ...ts, Cookie: phone });
+
+    expect(remote.status).toBe(403);
+    expect(JSON.parse(remote.body)).toEqual({ error: LOCAL_FILES_COMPUTER_ONLY });
+    expect((await get('/v1/conversation/local-file-raw?window=page-1&path=shot.png', { ...ts, Cookie: phone })).status).toBe(403);
+    stream.destroy();
+    await until(() => (server.clients() === 0 ? true : null));
+    expect((await get('/v1/conversation/local-file?window=page-1&path=notes.md')).status).toBe(403);
   });
 
   it("streams a page's console only with its cookie, for its page key and shown session, and takes its keys only from the page's origin", async () => {

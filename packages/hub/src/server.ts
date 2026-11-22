@@ -9,6 +9,8 @@ import type { HubIdentity } from '@switchboard/core';
 import { ARTIFACT_CSP, CONSOLE_QUEUE_BYTES, cookieValue, deviceId, deviceLabel, PAGE_COOKIE, PAGE_CSP, pageCookie, pageOrigin, PAIR_CSP, pairHtml, PUBLIC_PAGE_FILES, SIGNED_OUT_HTML } from './page.js';
 import type { PageAccess, PageOrigin, RemoteAccess } from './page.js';
 import { MAX_UPLOAD_BYTES } from './uploads.js';
+import { LOCAL_FILES_COMPUTER_ONLY, rawMime } from './localFiles.js';
+import type { LocalOpened } from './localFiles.js';
 import { isWebSocketUpgrade } from './paneSocket.js';
 import { VOICE_SOCKET_PATH } from './voiceSocket.js';
 import type { VoiceDevice } from './voiceSocket.js';
@@ -91,6 +93,11 @@ export interface PageRoutes {
   changes?(route: string, key: string, query: URLSearchParams, ifNoneMatch: string | undefined): Promise<Reply & { etag?: string }>;
   /** Voice on a paired device (architecture.md § Remote access); without it the hub refuses every voice socket. */
   voice?: PageVoice;
+  /**
+   * A local file or folder a link in the page's selected conversation names (architecture.md § Web page), by its real path, read only inside
+   * that conversation's folders and scratchpads; null for any other.
+   */
+  localFile?(key: string, target: string): Promise<LocalOpened | null>;
 }
 
 /** The voice socket's side of the page routes: whether voice is on, and the sockets the server accepted and asks to close. */
@@ -104,6 +111,9 @@ export interface PageVoice {
 
 /** The page's read-only change routes, under `/v1/conversation/` (architecture.md § Web page). */
 export const CHANGE_ROUTES = new Set(['changes', 'diff', 'file']);
+
+/** The page's local file routes, under `/v1/conversation/`: a file's view and a picture's or PDF's bytes (architecture.md § Web page). */
+export const LOCAL_FILE_ROUTES = new Set(['local-file', 'local-file-raw']);
 
 /** The least JSON body sent gzipped to a client that takes it. */
 const GZIP_MIN_BYTES = 1024;
@@ -588,7 +598,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
   /** The web page's routes (architecture.md § Web page); false for any other request. */
   const servePage = (request: IncomingMessage, response: ServerResponse, url: URL): boolean => {
     const path = url.pathname;
-    const isPageRoute = path === '/' || path === '/page' || path.startsWith('/page/') || path === '/v1/page/list' || path.startsWith('/v1/conversation/artifact/') || (path === '/v1/conversation/events' && url.searchParams.has('page')) || path === '/v1/conversation/files' || path === '/v1/conversation/console' || (path.startsWith('/v1/conversation/') && CHANGE_ROUTES.has(path.slice('/v1/conversation/'.length)));
+    const isPageRoute = path === '/' || path === '/page' || path.startsWith('/page/') || path === '/v1/page/list' || path.startsWith('/v1/conversation/artifact/') || (path === '/v1/conversation/events' && url.searchParams.has('page')) || path === '/v1/conversation/files' || path === '/v1/conversation/console' || (path.startsWith('/v1/conversation/') && (CHANGE_ROUTES.has(path.slice('/v1/conversation/'.length)) || LOCAL_FILE_ROUTES.has(path.slice('/v1/conversation/'.length))));
     const bearer = request.headers.authorization !== undefined;
     const cookiePost = request.method === 'POST' && !bearer && path.startsWith('/v1/conversation/') && request.headers.cookie !== undefined;
 
@@ -858,6 +868,46 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
 
       void page.changes(path.slice('/v1/conversation/'.length), window, url.searchParams, typeof ifNoneMatch === 'string' ? ifNoneMatch : undefined).then(
         (reply) => jsonCompressed(request, response, reply),
+        (error: unknown) => json(response, 500, { error: String(error) }),
+      );
+      return true;
+    }
+
+    // A local file a link names (architecture.md § Web page): only on this computer, for a page key of this sign-in's own stream.
+    if (request.method === 'GET' && LOCAL_FILE_ROUTES.has(path.slice('/v1/conversation/'.length))) {
+      const raw = path.endsWith('-raw');
+
+      if (remote) {
+        json(response, 403, { error: LOCAL_FILES_COMPUTER_ONLY });
+        return true;
+      }
+
+      if (page.localFile === undefined || !page.isPage(window) || pageKeyOrigins.get(window) !== originOf(origin) || pageKeySessions.get(window) !== page.access.sessionOf(request.headers.cookie)) {
+        json(response, 403, { error: 'Not in this window.' });
+        return true;
+      }
+
+      void page.localFile(window, url.searchParams.get('path') ?? '').then(
+        (found) => {
+          const mime = found === null ? null : rawMime(found.real);
+
+          if (found === null) {
+            json(response, 404, { error: 'No such file in this conversation’s folders.' });
+          } else if (!raw || mime === null || found.handle === null || found.view.tooLarge || found.view.size === null) {
+            void found.handle?.close();
+
+            if (raw) {
+              json(response, 404, { error: 'Only a picture or a PDF is sent as a file.' });
+            } else {
+              jsonCompressed(request, response, { status: 200, body: found.view });
+            }
+          } else {
+            // A picture shows in an img and a PDF in a frame of the page; an SVG's scripts get an opaque origin, as an artifact's do. The bytes
+            // come from the handle the check was made on.
+            response.writeHead(200, { 'Content-Type': mime, 'Content-Length': found.view.size, 'Cache-Control': 'no-store', 'Content-Disposition': 'inline', ...(mime === 'image/svg+xml' ? { 'Content-Security-Policy': ARTIFACT_CSP } : {}) });
+            pipeline(found.handle.createReadStream({ start: 0, end: Math.max(0, found.view.size - 1) }), response, () => {});
+          }
+        },
         (error: unknown) => json(response, 500, { error: String(error) }),
       );
       return true;
