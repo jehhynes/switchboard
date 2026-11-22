@@ -434,7 +434,14 @@ export class PhoneVoice {
     track.onunmute = () => this.#sendBusy();
     track.onended = () => this.#sendBusy();
 
-    if (!(await welcome.promise) || this.#mic !== mic) {
+    const welcomed = await welcome.promise;
+
+    // Released meanwhile, perhaps with a newer attempt holding the microphone now: that one is left alone.
+    if (this.#mic !== mic) {
+      return this.error ?? 'The mic was turned off.';
+    }
+
+    if (!welcomed) {
       this.micOff();
       return this.error ?? 'The voice did not open on this phone.';
     }
@@ -442,7 +449,11 @@ export class PhoneVoice {
     const context = this.#context;
     const loaded = await this.#node;
 
-    if (this.#mic !== mic || context === null || loaded === null) {
+    if (this.#mic !== mic) {
+      return this.error ?? 'The mic was turned off.';
+    }
+
+    if (context === null || loaded === null) {
       this.micOff();
       return this.error ?? 'The phone could not load the voice\'s audio.';
     }

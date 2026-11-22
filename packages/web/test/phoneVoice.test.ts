@@ -602,6 +602,26 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
       expect(session.type).toBe('playback');
     });
 
+    it('leaves a newer Mic on\'s microphone alone when an older one, released meanwhile, finishes last', async () => {
+      const { voice, sockets, tracks, captures } = setup();
+      const first = voice.micOn();
+
+      await flush();
+      // Released before the socket is welcomed, then opened again.
+      voice.micOff();
+
+      const second = voice.micOn();
+
+      await flush();
+      sockets[0]!.open();
+      sockets[0]!.message({ type: 'welcome', at: 0 });
+      expect(await second).toBeNull();
+      expect(await first).toBe('The mic was turned off.');
+      expect(tracks.map((one) => one.stopped)).toEqual([true, false]);
+      expect(voice.micOpen).toBe(true);
+      expect(captures).toHaveLength(1);
+    });
+
     it('opens no microphone when the voice cannot open on this phone', async () => {
       const { voice, sockets, tracks, captures } = setup();
       const opened = voice.micOn();
