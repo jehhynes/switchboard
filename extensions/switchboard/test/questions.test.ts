@@ -250,6 +250,7 @@ describe('question cards in the Conversation view', () => {
     show(state([message('m0', T0 - 1, '1A'), reply('r1', T0, ASKED), message('m1', T0 + 1, 'Later.')]));
     expect(root.querySelector('.answer-ref')).toBeNull();
     expect(root.querySelector('.question-link')).toBeNull();
+    delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
   });
 
   it('supersedes an unanswered card with a later reply, which then takes no answer, and keeps an aside from doing so', () => {
@@ -280,6 +281,62 @@ describe('question cards in the Conversation view', () => {
     expect([...root.querySelectorAll('.question-card')].map((one) => one.className)).toEqual(['question-card superseded', 'question-card']);
     show(state([reply('r1', T0, ASKED), reply('r2', T0 + 1, 'Checking.', { kind: 'aside' })]));
     expect(root.querySelector('.question-card')?.className).toBe('question-card');
+  });
+
+  it('shows how many questions wait over the composer while the answerable card is off screen, and goes to it on a click', () => {
+    const { show, root, host } = page();
+    const scrolled: string[] = [];
+    let cardTop = -500;
+    const rect = (top: number, height: number) => ({ top, bottom: top + height, height, left: 0, right: 100, width: 100, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+    const original = Element.prototype.getBoundingClientRect;
+
+    HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+      return this.classList.contains('scroll') ? rect(0, 400) : this.classList.contains('question-card') ? rect(cardTop, 200) : rect(0, 0);
+    };
+    HTMLElement.prototype.scrollIntoView = function (this: HTMLElement) {
+      scrolled.push(this.dataset['card'] ?? '');
+    };
+
+    try {
+      const chip = () => host.querySelector<HTMLElement>('.question-waiting');
+
+      show(state([reply('r1', T0, ASKED), reply('r2', T0 + 1, 'Checking the ports.', { kind: 'aside' })]));
+      expect(chip()!.hidden).toBe(false);
+      expect(chip()!.textContent).toBe('2 questions waiting');
+      chip()!.click();
+      expect(scrolled).toEqual(['reply:r1']);
+      // In view, it hides; scrolled away again, it shows.
+      cardTop = 100;
+      root.querySelector('.scroll')!.dispatchEvent(new Event('scroll'));
+      expect(chip()!.hidden).toBe(true);
+      cardTop = 390;
+      root.querySelector('.scroll')!.dispatchEvent(new Event('scroll'));
+      expect(chip()!.hidden).toBe(false);
+      // Over the composer on another tab too, where the card is not shown; a click goes back to it.
+      root.querySelector<HTMLElement>('[role="tab"][data-tab="artifacts"]')!.click();
+      expect(chip()!.hidden).toBe(false);
+      chip()!.click();
+      expect(root.querySelector('[role="tab"][data-tab="conversation"]')?.getAttribute('aria-selected')).toBe('true');
+      expect(scrolled).toEqual(['reply:r1', 'reply:r1']);
+      // Answered, skipped or superseded, or while the view cannot answer, there is none.
+      for (const [items, patch] of [
+        [[reply('r1', T0, ASKED), message('m1', T0 + 1, '1A')], {}],
+        [[reply('r1', T0, ASKED), message('m1', T0 + 1, 'Later.')], {}],
+        [[reply('r1', T0, ASKED), reply('r2', T0 + 1, 'Never mind.')], {}],
+        [[reply('r1', T0, ASKED)], { connected: false }],
+        [[reply('r1', T0, ASKED)], { session: { ...SESSION, state: 'ended' as const, conversation: 'read-only' as const } }],
+      ] as Array<[ItemView[], Partial<ConversationState>]>) {
+        show(state(items, patch));
+        expect(chip()!.hidden).toBe(true);
+      }
+      // A status's questions get no card, so no chip.
+      show(state([reply('r1', T0, '')], { status: { id: 'st-r1', sessionId: 's2', at: T0, markdown: '1. Go?\n   - A) Yes\n   - B) No', fallback: false, unread: false } }));
+      expect(chip()!.hidden).toBe(true);
+    } finally {
+      // Own properties shadow Element.prototype's, which other tests stub.
+      delete (HTMLElement.prototype as Partial<HTMLElement>).getBoundingClientRect;
+      delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
+    }
   });
 
   it('says the session waits for an answer or a permission in the terminal while a menu holds it, with Open in terminal', () => {

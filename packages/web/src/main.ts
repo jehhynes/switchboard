@@ -1675,6 +1675,41 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     followEnd();
   };
 
+  /**
+   * Shows the questions-waiting chip over the composer while the newest card that can be answered is not in view, as when the asides after it
+   * pushed it up or another tab is shown (PRD R103).
+   */
+  let waitingFrom: { items: PageState['items']; links: ReturnType<typeof pageCards> } | null = null;
+  const showWaiting = (): void => {
+    const chip = composerHost.querySelector<HTMLElement>('.question-waiting')!;
+
+    if (waitingFrom?.items !== state.items) {
+      waitingFrom = { items: state.items, links: pageCards(state) };
+    }
+
+    const key = waitingFrom.links.open;
+
+    // A card the page cannot answer, while the composer could not send, has no chip.
+    if (key === null || !state.connected || state.session?.conversation !== 'full') {
+      chip.hidden = true;
+      return;
+    }
+
+    const count = waitingFrom.links.cards.get(key)!.questions.length;
+    const shown = `<span class="codicon codicon-question" aria-hidden="true"></span>${count} question${count === 1 ? '' : 's'} waiting`;
+
+    if (chip.dataset['targetCard'] !== key || chip.innerHTML !== shown) {
+      chip.dataset['targetCard'] = key;
+      chip.innerHTML = shown;
+    }
+
+    const card = [...document.querySelectorAll<HTMLElement>('.question-card')].find((one) => one.dataset['cardKey'] === key);
+
+    chip.hidden = card !== undefined && inView(card, panel);
+  };
+
+  panel.addEventListener('scroll', showWaiting);
+  window.addEventListener('resize', showWaiting, { signal: listening.signal });
   panel.addEventListener('scroll', () => {
     if (mainTab() !== 'conversation') {
       return;
@@ -2098,6 +2133,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     followEnd();
     checkSeen();
+    showWaiting();
     dropConsoles();
     changes.drop();
     localFiles.drop();
@@ -4104,6 +4140,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 }
 
 /** Whether a history entry's state marks a phone's conversation (`CONVERSATION_ENTRY`). */
+/** Whether enough of an element shows in its scrolling area to be seen: all of it, or 40 px of a taller one. */
+function inView(element: HTMLElement, area: HTMLElement): boolean {
+  const box = element.getBoundingClientRect();
+  const shown = area.getBoundingClientRect();
+
+  return box.height > 0 && Math.min(box.bottom, shown.bottom) - Math.max(box.top, shown.top) >= Math.min(box.height, 40);
+}
+
 /** How long a card or a message an answer links to stays highlighted. */
 const FLASH_MS = 1_600;
 

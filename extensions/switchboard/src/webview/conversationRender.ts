@@ -291,6 +291,11 @@ export function questionCard(key: string, settled: CardSettled, draft: CardDraft
   return `<div class="question-card${answered ? ` ${outcome}` : ''}" data-card="${escape(key)}" role="group" aria-label="${answered ? `Questions, ${outcome}` : 'Questions'}">${blocks.join('')}${footer}</div>`;
 }
 
+/** What the chip over the composer says while a card can still be answered (PRD R103); the web page's says the same. */
+export function questionsWaiting(count: number): string {
+  return `<span class="codicon codicon-question" aria-hidden="true"></span>${count} question${count === 1 ? '' : 's'} waiting`;
+}
+
 /** What a card's footer says once it cannot be answered. */
 const LEFT = { skipped: 'Skipped: your next message did not answer these questions', superseded: 'Superseded: a later reply came after these questions' } as const;
 

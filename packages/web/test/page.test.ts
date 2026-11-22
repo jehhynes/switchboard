@@ -4328,7 +4328,63 @@ describe('the page in use', () => {
     expect(root.querySelector('.question-card .question-state')!.textContent).toBe('Superseded: a later reply came after these questions');
     expect(root.querySelector<HTMLButtonElement>('[data-action="pick"]')!.disabled).toBe(true);
     expect(root.querySelector('.question-submit, .question-other')).toBeNull();
+    delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
     page.close();
+  });
+
+  it('shows how many questions wait over the composer while the answerable card is off screen, and goes to it on a click', () => {
+    window.innerWidth = 700;
+
+    const { page, source } = start();
+    const scrolled: string[] = [];
+    let cardTop = -500;
+    const rect = (top: number, height: number) => ({ top, bottom: top + height, height, left: 0, right: 100, width: 100, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+    const original = Element.prototype.getBoundingClientRect;
+    const asked = '1. Port?\n   - A) 1\n   - B) 2';
+
+    HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+      return this.id === 'panel' ? rect(0, 400) : this.classList.contains('question-card') ? rect(cardTop, 200) : original.call(this);
+    };
+    HTMLElement.prototype.scrollIntoView = function (this: HTMLElement) {
+      scrolled.push(this.dataset['cardKey'] ?? '');
+    };
+
+    try {
+      const chip = () => root.querySelector<HTMLElement>('#composer > .question-waiting');
+
+      hello(source, { items: [reply('r1', 2, { opening: asked }), reply('r2', 3, { opening: 'Checking.', kind: 'aside' })] });
+      expect(chip()!.hidden).toBe(false);
+      expect(chip()!.textContent).toBe('1 question waiting');
+      click('#composer .question-waiting');
+      expect(scrolled).toEqual(['reply:r1']);
+      cardTop = 100;
+      root.querySelector('#panel')!.dispatchEvent(new Event('scroll'));
+      expect(chip()!.hidden).toBe(true);
+      cardTop = -500;
+      root.querySelector('#panel')!.dispatchEvent(new Event('scroll'));
+      expect(chip()!.hidden).toBe(false);
+      // On another tab, where the card is not shown, too; a click goes back to it.
+      cardTop = 100;
+      root.querySelector<HTMLElement>('[data-tab="status"]')!.click();
+      expect(chip()!.hidden).toBe(false);
+      click('#composer .question-waiting');
+      expect(root.classList.contains('off-conversation')).toBe(false);
+      expect(scrolled).toEqual(['reply:r1', 'reply:r1']);
+      expect(chip()!.hidden).toBe(true);
+      // Answered or superseded, or while the page cannot answer, there is none.
+      hello(source, { items: [reply('r1', 2, { opening: asked }), message('m1', 3, { text: '1B' })] });
+      expect(chip()!.hidden).toBe(true);
+      hello(source, { items: [reply('r1', 2, { opening: asked }), reply('r2', 3, { opening: 'Never mind.' })] });
+      expect(chip()!.hidden).toBe(true);
+      hello(source, { items: [reply('r1', 2, { opening: asked })], sessions: [session({ conversation: 'read-only' })] });
+      expect(chip()!.hidden).toBe(true);
+    } finally {
+      // Own properties shadow Element.prototype's, which other tests stub.
+      delete (HTMLElement.prototype as Partial<HTMLElement>).getBoundingClientRect;
+      delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
+      resizeTo(1024);
+      page.close();
+    }
   });
 
   it('answers a card with Submit as an ordinary message, and shows a refusal on the card', async () => {

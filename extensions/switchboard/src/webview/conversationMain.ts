@@ -1,6 +1,6 @@
 import type { ConversationState } from '../conversationModel.js';
 import { EMPTY_CONVERSATION } from '../conversationModel.js';
-import { ago, moreKey, PICKER, renderConversation, renderMicButton, renderVoiceControls, replyText, TABS, viewCards } from './conversationRender.js';
+import { ago, moreKey, PICKER, questionsWaiting, renderConversation, renderMicButton, renderVoiceControls, replyText, TABS, viewCards } from './conversationRender.js';
 import type { CardDraft, EarlierStatuses, HeaderMenu } from './conversationRender.js';
 import type { StatusView } from '@switchboard/hub';
 import { answerText, complete, parseQuestions } from '@switchboard/conversation/questions';
@@ -38,6 +38,14 @@ interface PageState {
   tab?: Tab;
   draft?: string;
   command?: string | null;
+}
+
+/** Whether enough of an element shows in its scrolling area to be seen: all of it, or 40 px of a taller one. */
+function inView(element: HTMLElement, area: HTMLElement): boolean {
+  const box = element.getBoundingClientRect();
+  const shown = area.getBoundingClientRect();
+
+  return box.height > 0 && Math.min(box.bottom, shown.bottom) - Math.max(box.top, shown.top) >= Math.min(box.height, 40);
 }
 
 /** How long a card or a message an answer links to stays highlighted. */
@@ -950,6 +958,7 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     }
 
     checkSeen();
+    showWaiting();
   };
 
   /** Shows a tab, keeping the conversation's scroll position for when it is shown again. */
@@ -970,6 +979,57 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     save();
     root.querySelector<HTMLElement>(`[role="tab"][data-tab="${tab}"]`)?.focus();
   };
+
+  // The chip over the composer, on every tab, and the cards it was last worked out from.
+  const waitingChip = composerHost === undefined ? null : document.createElement('button');
+  let links: { items: ConversationState['items']; links: ReturnType<typeof viewCards> } | null = null;
+
+  if (waitingChip !== null) {
+    waitingChip.type = 'button';
+    waitingChip.className = 'glass question-waiting';
+    waitingChip.title = 'Go to the questions';
+    waitingChip.hidden = true;
+    waitingChip.addEventListener('click', () => {
+      const key = waitingChip.dataset['targetCard'] ?? '';
+
+      showLinked('conversation', `.question-card[data-card="${CSS.escape(key)}"]`);
+      showWaiting();
+    });
+    composerHost!.prepend(waitingChip);
+  }
+
+  /**
+   * Shows the questions-waiting chip over the composer while the newest card that can be answered is not in view, as when the asides after it
+   * pushed it up or another tab is shown (PRD R103).
+   */
+  function showWaiting(): void {
+    if (waitingChip === null) {
+      return;
+    }
+
+    if (links?.items !== state.items) {
+      links = { items: state.items, links: viewCards(state) };
+    }
+
+    const key = links.links.open;
+
+    // A card the view cannot answer, while the composer could not send, has no chip.
+    if (key === null || !state.connected || state.session?.conversation !== 'full') {
+      waitingChip.hidden = true;
+      return;
+    }
+
+    const shown = questionsWaiting(links.links.cards.get(key)!.questions.length);
+
+    if (waitingChip.dataset['targetCard'] !== key || waitingChip.innerHTML !== shown) {
+      waitingChip.dataset['targetCard'] = key;
+      waitingChip.innerHTML = shown;
+    }
+
+    const card = [...root.querySelectorAll<HTMLElement>('.question-card')].find((one) => one.dataset['card'] === key);
+
+    waitingChip.hidden = card !== undefined && inView(card, card.closest<HTMLElement>('.scroll') ?? root);
+  }
 
   /**
    * Shows what an answer links to, a card or the message that answered it (PRD R103): on its tab, scrolled into view and highlighted for a moment.
@@ -1394,10 +1454,12 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
 
       save();
       checkSeen();
+      showWaiting();
     },
     true,
   );
   window.addEventListener('resize', checkSeen);
+  window.addEventListener('resize', showWaiting);
   window.addEventListener('resize', () => fitMenus(root));
   // A scroll moves a menu's anchor; a menu's own scrolling does not.
   document.addEventListener('scroll', (event) => (event.target instanceof Element && event.target.closest('.menu') !== null ? undefined : fitMenus(root)), true);
