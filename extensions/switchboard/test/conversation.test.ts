@@ -961,6 +961,9 @@ describe('speech in the view (architecture.md § Voice)', () => {
     // The spoken passage reads at 110% of the reply's text, and the dot moves down by half of what that adds to the first line.
     expect(rule('.speech-bubble')).toContain('font-size: 110%;');
     expect(rule('.reply:has(> .body > .speech-bubble:first-child)')).toContain('--dot-shift: calc(7px + 0.075em);');
+    // Our messages' bubbles, slash commands included, read at the same 110%, so every bubble's text is one size.
+    expect(rule('.message .box')).toBe('.message .box { font-size: 110%; }');
+    expect(css).not.toContain('.message .box.command');
     // That 110% is of the theme's size only while the reply and the message around a bubble keep it.
     const view = readFileSync(join(__dirname, '../src/webview/conversation.css'), 'utf8');
 
@@ -968,6 +971,8 @@ describe('speech in the view (architecture.md § Voice)', () => {
     for (const parent of [".timeline",".timeline > li",".reply",".reply .body",".message",".message .bubble",".message .box"]) {
       expect(view.split('\n').filter((line) => line.startsWith(`${parent} {`)).join(' ')).not.toContain('font-size');
     }
+    // The view's own command rule sets only the font, so a slash command's bubble keeps the shared 110%.
+    expect(view.split('\n').filter((line) => line.startsWith('.message .box.command {')).join(' ')).not.toContain('font-size');
     expect(css).toContain('--sb-speech-bubble: color-mix(in srgb, var(--vscode-editor-inactiveSelectionBackground, rgba(127, 127, 127, 0.2)) 75%, var(--vscode-sideBar-background));');
     expect(rule('body.vscode-high-contrast .speech-bubble, body.vscode-high-contrast-light .speech-bubble')).toContain('background: transparent;');
   });

@@ -4624,7 +4624,7 @@ describe("the list's CSS", () => {
     expect(css).not.toContain('--sb-overlay-scrollbar');
   });
 
-  it("draws replies, our messages and the composer at the theme's text size, with no size of their own, and spoken bubbles at 110% from the shared bubbles.css", () => {
+  it("draws replies and the composer at the theme's text size, with no size of their own, and every bubble, our messages' and spoken ones, at 110% from the shared bubbles.css", () => {
     expect(css).not.toContain('--chat-scale');
     // The bubble's 110% is of the reply's size, so the reply and the message around it keep the theme's.
     for (const parent of [".timeline",".timeline > li",".reply",".reply .body",".message",".message .bubble",".message .box"]) {
@@ -4635,6 +4635,10 @@ describe("the list's CSS", () => {
     const bubbles = readFileSync(createRequire(import.meta.url).resolve('@switchboard/conversation/bubbles.css'), 'utf8');
 
     expect(bubbles).toMatch(/\n\.speech-bubble \{[^}]*font-size: 110%;/);
+    expect(bubbles).toContain('\n.message .box { font-size: 110%; }');
+    // A slash command's bubble keeps that 110%: the page's own command rule sets only the font.
+    expect(bubbles).not.toContain('.message .box.command');
+    expect(declarationsOf((selector) => selector === '.message .box.command').join(' ')).not.toContain('font-size');
   });
 
   it("makes the list a drawer with its sliver and button outside the phone's layout where #root.drawers says it does not fit, while a work item is open, sliding in and hiding at once", () => {

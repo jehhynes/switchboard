@@ -64,7 +64,7 @@ button:focus-visible, li:focus-visible, .timeline:focus-visible, summary:focus-v
 .message .box { box-sizing: border-box; max-width: 100%; margin: 0; border: 1px solid var(--vscode-contrastBorder, transparent); border-radius: 12px 12px 4px 12px; background: var(--sb-message-bubble); color: var(--vscode-foreground); padding: 6px 12px; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
 /* In high contrast themes the bubble is only its contrast border, since a tint of their button colour is too strong for their text. */
 body.vscode-high-contrast .message .box, body.vscode-high-contrast-light .message .box { background: transparent; }
-.message .box.command { font-family: var(--vscode-editor-font-family, monospace); font-size: 0.9em; }
+.message .box.command { font-family: var(--vscode-editor-font-family, monospace); }
 .message.provisional .box { opacity: 0.7; }
 /* A reply's dot, and the line that joins the dots of replies in a row, as in Claude Code's timeline. */
 .reply { padding-left: 30px; }
