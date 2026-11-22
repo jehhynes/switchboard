@@ -425,6 +425,9 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 .artifact-menu { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; max-width: min(480px, calc(100vw - 16px)); }
 .artifact-menu .menu-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; column-gap: 0; }
 .artifact-menu .menu-row.in-bar .title { color: var(--vscode-descriptionForeground); }
+/* A title cut with an ellipsis, then the unread dot of an artifact this device has not opened, as a conversation's row has it. */
+.artifact-menu .title { display: flex; align-items: center; gap: 6px; }
+.artifact-menu .title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .artifact-menu .menu-gutter { margin-right: 6px; }
 .artifact-menu .menu-kind { max-width: 14ch; overflow: hidden; text-overflow: ellipsis; margin-left: 24px; color: var(--vscode-descriptionForeground); }
 .artifact-menu .menu-row:is(:hover, :focus) .menu-kind { color: inherit; opacity: 0.8; }

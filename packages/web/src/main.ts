@@ -3,7 +3,7 @@ import { snoozeChoices } from '@switchboard/core/snooze';
 import type { PageState } from './model.js';
 import { MENU_MAX_WIDTH, placeMenus } from '@switchboard/conversation/menuPlace';
 import { escape, renderMarkdown, webLink } from './markdown.js';
-import { artifactShow, artifactTabsFit, artifactUrl, textArtifactHtml, bandOpen, browserNote, BROWSER_MIN_WIDTH, closedArtifacts, paneLink, collapsedGroups, firstSnoozeDay, GROUPS_KEY, inputReady, renderMicButton, markdownBody, newView, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, hasConsole, SIDE_TABS } from './render.js';
+import { ARTIFACTS_SEEN, artifactShow, artifactTabsFit, artifactUrl, openArtifactsSeen, parseArtifactsSeen, unreadArtifacts, textArtifactHtml, bandOpen, browserNote, BROWSER_MIN_WIDTH, closedArtifacts, paneLink, collapsedGroups, firstSnoozeDay, GROUPS_KEY, inputReady, renderMicButton, markdownBody, newView, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, hasConsole, SIDE_TABS } from './render.js';
 import type { CardDraft, PaneView, SideTab, Tab, View } from './render.js';
 import type { ConsoleOptions, MountedConsole } from './console.js';
 import { LIGHT_SCHEME } from './console.js';
@@ -294,6 +294,40 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
    */
   /** The open work item's tabs as the hub keeps them for every device (`page-tabs`), or null before any was chosen. */
   let savedTabs: { workItemId: number; tab: string | null; closed: Array<{ path: string; updatedAt: number }> } | null = null;
+  /** Which artifacts this device has opened (`ArtifactsSeen`), read again when another of its pages keeps a change. */
+  const readArtifactsSeen = (): ReturnType<typeof parseArtifactsSeen> | null => {
+    try {
+      return parseArtifactsSeen(localStorage.getItem(ARTIFACTS_SEEN));
+    } catch {
+      // Without local storage the page keeps them for itself.
+      return null;
+    }
+  };
+  let artifactsSeen = readArtifactsSeen() ?? {};
+  /**
+   * Keeps artifacts of the open work item opened on this device, added to what its other pages kept since, so two pages opening different ones
+   * keep both.
+   */
+  const artifactsOpened = (paths: readonly string[]): void => {
+    const workItemId = state.scope?.workItemId;
+
+    if (workItemId == null) {
+      return;
+    }
+
+    const kept = readArtifactsSeen() ?? artifactsSeen;
+    const next = openArtifactsSeen(kept, workItemId, paths);
+
+    artifactsSeen = next ?? kept;
+
+    if (next !== null) {
+      try {
+        localStorage.setItem(ARTIFACTS_SEEN, JSON.stringify(next));
+      } catch {
+        // Kept for this page only.
+      }
+    }
+  };
   /** The artifacts whose tabs are closed for the open work item. */
   const closedNow = (): Set<string> => closedArtifacts(state.artifacts, savedTabs?.workItemId === state.scope?.workItemId ? (savedTabs?.closed ?? []) : []);
   /** Whether a work item opens on Browser: no session yet, as an unstarted one or a pool ticket, and links the paired Chrome pane can show. */
@@ -632,6 +666,18 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const chips = composerHost.querySelector<HTMLElement>('.attachments')!;
   // Document listeners end with the page.
   const listening = new AbortController();
+
+  // Another of this device's pages opened an artifact.
+  window.addEventListener(
+    'storage',
+    (event) => {
+      if (event.key === ARTIFACTS_SEEN) {
+        artifactsSeen = readArtifactsSeen() ?? artifactsSeen;
+        draw();
+      }
+    },
+    { signal: listening.signal },
+  );
   // The draft the hub last sent for dictation, per session, so a newer one replaces it in the box but never text typed over it, and one that came
   // while a message was being sent, which fills the box once the send answered.
   const hubDrafts = new Map<string, string>();
@@ -2000,7 +2046,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
-    const strip = { open: openArtifact(), fit: view.artifactFit, menu: view.artifactMenu, now: deps.now(), closed: closedNow() };
+    const shownArtifact = openArtifact();
+
+    // Opened only while it shows: not under the phone's list or a History.
+    if (shownArtifact !== null && (side ? sideTab() : mainTab()) === 'artifacts' && !(isPhone() && root.classList.contains('listing')) && !root.classList.contains('history')) {
+      artifactsOpened([shownArtifact]);
+    }
+
+    const strip = { open: shownArtifact, fit: view.artifactFit, menu: view.artifactMenu, now: deps.now(), closed: closedNow(), unread: unreadArtifacts(state.artifacts, state.scope.workItemId ?? null, artifactsSeen) };
 
     // The file tabs, then the one Changes tab, last so it keeps its place as file tabs come and go.
     const changeTabs = (shown: Tab): ComponentChild[] => [localTabs(localFiles.view, shown === 'file', true), changesTab(changes.view, shown === 'diff', localFiles.view.tabs.length === 0)];
@@ -4069,6 +4122,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
       if (type === 'hello') {
         expired = false;
+
+        // The artifacts a work item has when this device first sees it count as opened; only later ones are new.
+        if (state.scope?.workItemId != null && (readArtifactsSeen() ?? artifactsSeen)[String(state.scope.workItemId)] === undefined) {
+          artifactsOpened(state.artifacts.map((artifact) => artifact.path));
+        }
 
         // A new stream has a new key, unbound: the page selects its work item again.
         if (state.key !== keyBefore) {

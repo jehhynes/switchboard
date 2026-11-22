@@ -56,6 +56,45 @@ export function closedArtifacts(artifacts: readonly ArtifactView[], closed: Read
 }
 
 /**
+ * Which artifacts this device has opened, kept in local storage under {@link ARTIFACTS_SEEN} (architecture.md § Web page): the paths opened, by
+ * work item. A work item's artifacts the device first saw count as opened, so the dot marks only artifacts written since, by the hub's own file
+ * times, whatever the device's clock says.
+ */
+export type ArtifactsSeen = Record<string, string[]>;
+
+export const ARTIFACTS_SEEN = 'switchboard.artifactsSeen';
+
+/** The kept {@link ArtifactsSeen}, its readable entries, or none when nothing readable was kept. */
+export function parseArtifactsSeen(text: string | null): ArtifactsSeen {
+  try {
+    const read: unknown = JSON.parse(text ?? 'null');
+
+    if (typeof read === 'object' && read !== null && !Array.isArray(read)) {
+      return Object.fromEntries(Object.entries(read).filter((entry): entry is [string, string[]] => Array.isArray(entry[1]) && entry[1].every((path) => typeof path === 'string')));
+    }
+  } catch {
+    // None below.
+  }
+
+  return {};
+}
+
+/** The work item's artifacts this device has not opened; none for a work item it has not seen yet. */
+export function unreadArtifacts(artifacts: readonly ArtifactView[], workItemId: number | null, seen: ArtifactsSeen): Set<string> {
+  const opened = workItemId === null ? undefined : seen[String(workItemId)];
+
+  return opened === undefined ? new Set() : new Set(artifacts.filter((artifact) => !opened.includes(artifact.path)).map((artifact) => artifact.path));
+}
+
+/** `seen` with the paths opened for the work item, an empty list recording it as seen, or null when nothing changes. */
+export function openArtifactsSeen(seen: ArtifactsSeen, workItemId: number, paths: readonly string[]): ArtifactsSeen | null {
+  const opened = seen[String(workItemId)];
+  const added = paths.filter((path) => !(opened ?? []).includes(path));
+
+  return opened !== undefined && added.length === 0 ? null : { ...seen, [String(workItemId)]: [...(opened ?? []), ...added] };
+}
+
+/**
  * The artifacts newest first, and those with a tab: those not closed, the first `fit`, with the open one in place of the last of them when it is not among them, so
  * the open artifact always has its tab.
  */
