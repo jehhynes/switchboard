@@ -594,6 +594,46 @@ describe('the page', () => {
     page.close();
   });
 
+  it('brings the conversation to its end on a send, wherever the operator had scrolled, and follows the turn row and the reply after it', async () => {
+    const { page, source } = start();
+    const panel = root.querySelector<HTMLElement>('#panel')!;
+    const input = root.querySelector<HTMLTextAreaElement>('#composer textarea')!;
+    const sized = (height: number) => {
+      Object.defineProperty(panel, 'scrollHeight', { value: height, configurable: true });
+      Object.defineProperty(panel, 'clientHeight', { value: 100, configurable: true });
+    };
+
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [reply('r1', 1)], more: false, status: null, artifacts: [] });
+    sized(500);
+    panel.scrollTop = 50;
+    panel.dispatchEvent(new Event('scroll'));
+    input.value = 'Next?';
+    input.dispatchEvent(new Event('input'));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(panel.scrollTop).toBe(500);
+    // Scrolled away while the send is on its way, the conversation stays where the operator put it until the next send.
+    panel.scrollTop = 200;
+    panel.dispatchEvent(new Event('scroll'));
+    await flush();
+    await flush();
+    expect(posts.some((post) => post.url.endsWith('/send'))).toBe(true);
+    expect(panel.scrollTop).toBe(200);
+    input.value = 'And then?';
+    input.dispatchEvent(new Event('input'));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(panel.scrollTop).toBe(500);
+    await flush();
+    await flush();
+    // The sent message, then the reply, grow the conversation; it stays at its end.
+    sized(700);
+    source.emit('message', { message: message('m1', 2, { text: 'Next?' }) });
+    expect(panel.scrollTop).toBe(700);
+    sized(900);
+    source.emit('reply', { reply: reply('r2', 3) });
+    expect(panel.scrollTop).toBe(900);
+    page.close();
+  });
+
   it('keeps the composer on every tab, says Sent after a send from the Status tab, and shows an ended session\'s reason above the composer', async () => {
     const { page, source } = start();
     const composer = root.querySelector<HTMLElement>('#composer')!;

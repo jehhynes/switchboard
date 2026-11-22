@@ -892,6 +892,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     const sent = command('send', { ...target, text, ...(asCommand ? { command: true } : {}) });
 
+    toEnd();
+
     // Sending hands the box back to the voice, so dictation resumes, as in the Conversation view (architecture.md § Dictation).
     if (state.voice?.here === true && !['off', 'idle-off', 'unavailable'].includes(state.voice.mic) && document.activeElement === input) {
       input.blur();
@@ -913,6 +915,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       if (id !== null) {
         mine.add(id);
       }
+
 
       if (from === draftOf) {
         input.value = dictated !== null && dictated.sessionId === target.sessionId ? dictated.text : '';
@@ -1566,6 +1569,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       panel.scrollTop = panel.scrollHeight;
       ownTop = panel.scrollTop;
     }
+  };
+  /** A send brings the conversation to its end, wherever the operator had scrolled, and keeps it there for the sent message, the turn row and the reply. */
+  const toEnd = (): void => {
+    pinned = true;
+    followEnd();
   };
 
   panel.addEventListener('scroll', () => {
@@ -2538,6 +2546,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     draft.sent = answerText(questions, draft.choices);
     draft.error = null;
     draw();
+    toEnd();
 
     const answer = await command('send', { sessionId: state.session.id, launch: state.session.launch, text: draft.sent });
     const id = (answer.body['message'] as { id?: string } | undefined)?.id ?? null;
