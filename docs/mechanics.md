@@ -1478,3 +1478,13 @@ Current use: the console's resync after each fit ([architecture.md](architecture
   - Claude Code also removes a queued message with `reason` `delivered_to_agent` (13 seen) when it goes to another agent, and the main conversation never receives it.
 - **Not verified:** whether Claude Code ever takes the operator's queued messages out of order.
 - **Current use:** the stopped-agents notice is left out of the conversation, and a queued message still waiting when a message sent after it is received is withdrawn (architecture.md § Reading a session).
+
+## M119. Resuming a session that ran without Code Mode with Code Mode on, 2026-11-22
+
+- **Versions:** Claude Code CLI 2.1.330 (native build), Haiku 5.5, on Windows 11 Pro 10.0.26300; node-pty 1.1.0 and @xterm/headless at 120 × 40, as the holder runs a session.
+- **Experiment:** in a scratch git repository with the operator's `~/.claude`, a session was started without Code Mode (`claude --session-id <uuid> --permission-mode auto --model haiku --settings {"tui":"default"} <prompt with a code word>`), with Claude's parent-session markers removed from the environment, and its process ended after the reply. It was then resumed as a Code Mode resume runs (`claude --resume <uuid>` with `CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1`, `ANTHROPIC_BASE_URL` set to the direct API and `codeModeSettings()`), with a prompt asking for the code word and a shell command; then once more with `--fork-session` added.
+- **Result:**
+  - Both resumes started, kept the conversation (the code word came back) and left the transcript readable, but neither turned Code Mode on: the banner had no `Code Mode (experimental) is on` line, Claude printed `Code Mode is on, but this session isn't using it, so it continues with the ordinary tools. New sessions use Code Mode.`, the model called `PowerShell` directly rather than `REPL`, and neither transcript, the resumed one or the fork's new one, got a `repl-mode` line.
+  - With M68, which records the refusal to resume a Code Mode session without Code Mode, Claude keeps a session in the mode it started in, either way; only a new session starts in Code Mode.
+- **Not verified:** Linux; a session started in the VS Code panel.
+- **Current use:** a registered session resumes in the mode its transcript records (`transcriptLaunch`, architecture.md § Code Mode sessions, Registered sessions).
