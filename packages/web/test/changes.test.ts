@@ -98,6 +98,9 @@ describe('the Changes list', () => {
         host.replaceChildren(...(options.prefix === undefined ? [] : [options.prefix]), shown, ...(options.suffix === undefined ? [] : [options.suffix]));
         return { set: (layout, wrap) => fileSets.push(`${layout} ${wrap}`), dispose: () => {} };
       },
+      mountChanges: () => {
+        throw new Error('The diff tabs do not draw the Changes tab.');
+      },
     };
   });
 

@@ -27,8 +27,52 @@ export interface DiffMount {
   dispose(): void;
 }
 
+/** What the Changes tab's viewer knows of a row before its diff is read: enough for its header and a placeholder of about its height. */
+export interface ChangesRowInput {
+  path: string;
+  from?: string;
+  status: string;
+  additions: number | null;
+  deletions: number | null;
+  binary: boolean;
+}
+
+/** A row's content in the Changes tab: its diff as read, a note in its place (binary, too large, a refusal), or a placeholder while unread. */
+export type RowContent = { data: DiffData } | { note: string } | null;
+
+export interface ChangesMountOptions {
+  layout: 'split' | 'stacked';
+  wrap: boolean;
+  /** Reads a file's diff with both sides, when an unchanged region of its patch-only diff is expanded; null when it cannot be read. */
+  loadSides(path: string): Promise<DiffData | null>;
+  /** A line number was clicked in a file's diff: the old side's or the new side's line. */
+  onLine?(path: string, side: 'old' | 'new', line: number): void;
+}
+
+export interface ChangesMount {
+  /** Replaces the rows, in order: a path kept keeps its content, a new one starts as a placeholder. */
+  setRows(rows: ChangesRowInput[]): void;
+  /** Shows a row's diff, a note, or a placeholder (null), of `lines` lines when given, else of its estimated height. */
+  setRow(path: string, content: RowContent, lines?: number): void;
+  setCollapsed(path: string, collapsed: boolean): void;
+  scrollToFile(path: string): void;
+  /** The row whose header is at the top of the view, or null for none. */
+  current(): string | null;
+  /** The indexes of the first and last rows that meet the view, or null with no rows. */
+  visible(): { first: number; last: number } | null;
+  /** Calls `listener` once a frame at most while the view scrolls or resizes. */
+  onWant(listener: () => void): void;
+  /** A row's drawn height in pixels, or undefined when it is not a row. */
+  heightOf(path: string): number | undefined;
+  /** How many diff lines `pixels` of a row's height holds, for a placeholder that keeps that height. */
+  linesFor(pixels: number): number;
+  set(layout: 'split' | 'stacked', wrap: boolean): void;
+  dispose(): void;
+}
+
 /** What `diff.js` exports. */
 export interface DiffModule {
   mountDiff(host: HTMLElement, data: DiffData, version: string, options: DiffMountOptions): DiffMount | null;
   mountFile(host: HTMLElement, data: FileData, version: string, options: FileMountOptions): DiffMount;
+  mountChanges(host: HTMLElement, rows: ChangesRowInput[], options: ChangesMountOptions): ChangesMount;
 }
