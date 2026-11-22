@@ -3182,6 +3182,25 @@ describe('the page in use', () => {
     page.close();
   });
 
+  it('shows a paired device\'s mic off while the voice is elsewhere, so its tap can take the voice to the phone (PRD R119)', () => {
+    const fetch = vi.fn(async () => ({ status: 200, ok: true, json: async () => ({}), text: async () => '' }) as unknown as Response);
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, local: false });
+    const source = FakeSource.last!;
+
+    hello(source);
+    source.emit('voice', { voice: { enabled: true, here: false, mic: 'off', speaking: null, speakReplies: true, error: null } });
+    expect(root.querySelector('.composer-mic [data-voice="mic"]')?.getAttribute('data-on')).toBe('true');
+    page.close();
+
+    // This computer's page shows Talk here instead, as the Conversation view does.
+    const local = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, local: true });
+
+    hello(FakeSource.last!);
+    FakeSource.last!.emit('voice', { voice: { enabled: true, here: false, mic: 'off', speaking: null, speakReplies: true, error: null } });
+    expect(root.querySelector('.composer-mic [data-voice="mic"]')).toBeNull();
+    local.close();
+  });
+
   it('marks an unread reply seen once it has shown for a second on a focused page', async () => {
     vi.useFakeTimers();
 

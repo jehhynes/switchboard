@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { HIDDEN_MS, PING_MS, PhoneVoice } from '../src/phoneVoice.js';
-import type { PhoneAudioContext, PhoneAudioNode } from '../src/phoneVoice.js';
+import { HIDDEN_MS, MIC_CONSTRAINTS, MIC_FRAME, PING_MS, PhoneVoice } from '../src/phoneVoice.js';
+import type { PhoneAudioContext, PhoneAudioNode, PhoneCaptureNode, PhoneMicStream, PhoneMicTrack } from '../src/phoneVoice.js';
 import type { PlayCommand, PlayReport } from '../src/voiceWorklet.js';
 
 /** A WebSocket the test drives: what the page sent, and the hub's side as calls. */
@@ -14,8 +14,15 @@ class FakeSocket {
 
   constructor(readonly url: string) {}
 
-  send(data: string): void {
-    this.sent.push(JSON.parse(data));
+  /** Binary frames the page sent, as bytes. */
+  readonly binary: number[][] = [];
+
+  send(data: string | ArrayBuffer): void {
+    if (typeof data === 'string') {
+      this.sent.push(JSON.parse(data));
+    } else {
+      this.binary.push([...new Uint8Array(data)]);
+    }
   }
 
   close(code: number): void {
@@ -85,6 +92,38 @@ class FakeNode implements PhoneAudioNode {
   }
 }
 
+class FakeTrack implements PhoneMicTrack {
+  muted = false;
+  readyState = 'live';
+  stopped = false;
+  onmute: (() => void) | null = null;
+  onunmute: (() => void) | null = null;
+  onended: (() => void) | null = null;
+
+  stop(): void {
+    this.stopped = true;
+    this.readyState = 'ended';
+  }
+
+  mute(on: boolean): void {
+    this.muted = on;
+    (on ? this.onmute : this.onunmute)?.();
+  }
+}
+
+class FakeCaptureNode implements PhoneCaptureNode {
+  readonly port = { onmessage: null as ((event: { data: Int16Array }) => void) | null };
+  disconnected = false;
+
+  disconnect(): void {
+    this.disconnected = true;
+  }
+
+  frame(samples: number[]): void {
+    this.port.onmessage?.({ data: Int16Array.from(samples) });
+  }
+}
+
 describe('voice on this phone (architecture.md § Remote access)', () => {
   afterEach(() => vi.useRealTimers());
 
@@ -99,7 +138,26 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
     const contexts: FakeContext[] = [];
     const nodes: FakeNode[] = [];
     const timers: Array<{ run: () => void; ms: number; cleared: boolean }> = [];
+    const tracks: FakeTrack[] = [];
+    const captures: FakeCaptureNode[] = [];
+    const asked: unknown[] = [];
+    let media: () => Promise<PhoneMicStream> = async () => {
+      const track = new FakeTrack();
+
+      tracks.push(track);
+      return { getAudioTracks: () => [track] };
+    };
     const voice = new PhoneVoice({
+      media: (constraints) => {
+        asked.push(constraints);
+        return media();
+      },
+      capture: () => {
+        const node = new FakeCaptureNode();
+
+        captures.push(node);
+        return node;
+      },
       context: () => {
         const context = new FakeContext();
 
@@ -139,6 +197,10 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
 
     return {
       voice,
+      tracks,
+      captures,
+      asked,
+      media: (next: () => Promise<PhoneMicStream>) => (media = next),
       sockets,
       posts,
       contexts,
@@ -393,5 +455,161 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
     failing.start();
     await flush();
     expect([failing.state, failing.error]).toEqual(['off', 'The phone did not start its audio.']);
+  });
+
+  describe('the phone\'s microphone (PRD R119)', () => {
+    const session = { type: 'auto' };
+
+    function withSession(): void {
+      session.type = 'auto';
+      Object.defineProperty(navigator, 'audioSession', { value: session, configurable: true });
+    }
+
+    afterEach(() => void Reflect.deleteProperty(navigator, 'audioSession'));
+
+    it('opens in the mic\'s tap, taking the voice here first, and sends 20 ms frames only while the voice captures and the phone can hear', async () => {
+      withSession();
+
+      const { voice, sockets, tracks, captures, asked } = setup();
+      const opened = voice.micOn();
+
+      // The socket, the audio and the microphone are all asked for in the tap itself, the session set to record first.
+      expect(sockets).toHaveLength(1);
+      expect(asked).toEqual([MIC_CONSTRAINTS]);
+      expect(session.type).toBe('play-and-record');
+      await flush();
+      expect(captures).toEqual([]);
+      sockets[0]!.open();
+      sockets[0]!.message({ type: 'welcome', at: 0 });
+      expect(await opened).toBeNull();
+      expect(voice.micOpen).toBe(true);
+      expect(captures).toHaveLength(1);
+      expect(sockets[0]!.sent.filter((one) => (one as { type: string }).type === 'state')).toEqual([{ type: 'state', busy: false }]);
+
+      // Frames wait for the voice process's capture.
+      captures[0]!.frame([1, -2]);
+      expect(sockets[0]!.binary).toEqual([]);
+      sockets[0]!.message({ type: 'capture', on: true });
+      captures[0]!.frame([1, -2]);
+      expect(sockets[0]!.binary).toEqual([[MIC_FRAME, 1, 0, 254, 255]]);
+
+      // A call mutes the track: the hub hears it is busy and no frame goes out until it is back.
+      tracks[0]!.mute(true);
+      captures[0]!.frame([3]);
+      expect(sockets[0]!.sent.at(-1)).toEqual({ type: 'state', busy: true });
+      tracks[0]!.mute(false);
+      expect(sockets[0]!.sent.at(-1)).toEqual({ type: 'state', busy: false });
+      sockets[0]!.message({ type: 'capture', on: false });
+      captures[0]!.frame([4]);
+      expect(sockets[0]!.binary).toHaveLength(1);
+
+      // Mic off releases the microphone and plays at full loudness again; the voice stays on the phone.
+      voice.micOff();
+      expect([tracks[0]!.stopped, captures[0]!.disconnected, voice.micOpen, voice.state]).toEqual([true, true, false, 'on']);
+      expect(session.type).toBe('playback');
+      expect(sockets[0]!.sent.at(-1)).toEqual({ type: 'state', busy: true });
+    });
+
+    it('tells the hub at once when the page is hidden, and releases the microphone when the voice leaves the phone', async () => {
+      const { voice, sockets, tracks, hide } = setup();
+
+      voice.start();
+      sockets[0]!.open();
+      sockets[0]!.message({ type: 'welcome', at: 0 });
+      expect(await voice.micOn()).toBeNull();
+      hide(true);
+      expect(sockets[0]!.sent.at(-1)).toEqual({ type: 'state', busy: true });
+      hide(false);
+      expect(sockets[0]!.sent.at(-1)).toEqual({ type: 'state', busy: false });
+
+      sockets[0]!.closeFromHub(4001, 'Voice moved to another device.');
+      expect(tracks[0]!.stopped).toBe(true);
+      expect(voice.micOpen).toBe(false);
+    });
+
+    it('releases the microphone when the hub\'s mic turns off after it was on, and says why it could not open', async () => {
+      const { voice, sockets, tracks, media } = setup();
+
+      voice.start();
+      sockets[0]!.open();
+      sockets[0]!.message({ type: 'welcome', at: 0 });
+      expect(await voice.micOn()).toBeNull();
+      // Off before the hub's mic came on is the hub catching up, not a release.
+      voice.viewMic('off');
+      expect(voice.micOpen).toBe(true);
+      voice.viewMic('listening');
+      voice.viewMic('off');
+      expect([voice.micOpen, tracks[0]!.stopped]).toEqual([false, true]);
+
+      media(() => Promise.reject(Object.assign(new Error('denied'), { name: 'NotAllowedError' })));
+      expect(await voice.micOn()).toBe('The phone did not allow the microphone.');
+      media(() => Promise.reject(new Error('no device')));
+      expect(await voice.micOn()).toBe("The phone's microphone did not open.");
+      expect(voice.micOpen).toBe(false);
+
+      // Mic off while the microphone is still opening keeps nothing of it.
+      let open!: (stream: PhoneMicStream) => void;
+
+      media(() => new Promise((resolve) => (open = resolve)));
+
+      const late = voice.micOn();
+
+      voice.micOff();
+
+      const track = new FakeTrack();
+
+      open({ getAudioTracks: () => [track] });
+      expect(await late).toBe('The mic was turned off.');
+      expect([track.stopped, voice.micOpen]).toEqual([true, false]);
+    });
+
+    it('releases the microphone when the capture worklet cannot connect it, and when the phone gives no track', async () => {
+      withSession();
+
+      const failing = new PhoneVoice({
+        context: () => new FakeContext(),
+        node: () => new FakeNode(),
+        media: async () => ({ getAudioTracks: () => [track] }),
+        capture: () => {
+          throw new Error('no worklet');
+        },
+        onVisibility: () => undefined,
+        hidden: () => false,
+        key: () => 'page-10',
+        post: async () => ({ status: 200, body: {} }),
+        changed: () => undefined,
+        now: () => 0,
+        origin: () => 'https://pc.tail.ts.net',
+        socket: (url) => {
+          const made = new FakeSocket(url);
+
+          queueMicrotask(() => {
+            made.open();
+            made.message({ type: 'welcome', at: 0 });
+          });
+          return made as unknown as WebSocket;
+        },
+      });
+      const track = new FakeTrack();
+
+      expect(await failing.micOn()).toBe('The phone could not connect its microphone to the voice.');
+      expect([track.stopped, failing.micOpen, session.type]).toEqual([true, false, 'playback']);
+
+      const { voice, media } = setup();
+
+      media(async () => ({ getAudioTracks: () => [] }));
+      expect(await voice.micOn()).toBe("The phone's microphone did not open.");
+      expect(session.type).toBe('playback');
+    });
+
+    it('opens no microphone when the voice cannot open on this phone', async () => {
+      const { voice, sockets, tracks, captures } = setup();
+      const opened = voice.micOn();
+
+      sockets[0]!.closeFromHub(4003, 'Voice is not allowed on this device.');
+      expect(await opened).toBe('Voice is not allowed on this device.');
+      expect(tracks.every((one) => one.stopped)).toBe(true);
+      expect(captures).toEqual([]);
+    });
   });
 });

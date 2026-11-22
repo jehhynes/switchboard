@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PLAY_RATE, PlayQueue, REPORT_MS, START_AFTER_UNDERRUN_MS, START_MS } from '../src/voiceWorklet.js';
+import { CAPTURE_RATE, CaptureResampler, FRAME_SAMPLES, PLAY_RATE, PlayQueue, REPORT_MS, START_AFTER_UNDERRUN_MS, START_MS } from '../src/voiceWorklet.js';
 import type { PlayReport } from '../src/voiceWorklet.js';
 
 const QUANTUM = 128;
@@ -85,5 +85,68 @@ describe('the phone\'s playback worklet (architecture.md § Remote access, Voice
     queue.command({ type: 'open', id: 4 });
     queue.command({ type: 'pcm', id: 4, samples: pcm(START_MS + 10) });
     expect(render()).toBe(false);
+  });
+});
+
+describe('CaptureResampler (architecture.md § Remote access, Voice on a phone)', () => {
+  /** Feeds `seconds` of a sine at `hz` and `rate` in render quanta; answers the frames emitted, joined. */
+  function resample(rate: number, hz: number, seconds = 0.5, amplitude = 0.5): { frames: Int16Array[]; samples: Int16Array } {
+    const frames: Int16Array[] = [];
+    const resampler = new CaptureResampler(rate, (frame) => frames.push(frame));
+    const total = Math.round(rate * seconds);
+
+    for (let at = 0; at < total; at += QUANTUM) {
+      const block = new Float32Array(Math.min(QUANTUM, total - at));
+
+      for (let index = 0; index < block.length; index++) {
+        block[index] = Math.sin((2 * Math.PI * hz * (at + index)) / rate) * amplitude;
+      }
+
+      resampler.push(block);
+    }
+
+    const samples = new Int16Array(frames.length * FRAME_SAMPLES);
+
+    frames.forEach((frame, index) => samples.set(frame, index * FRAME_SAMPLES));
+    return { frames, samples };
+  }
+
+  const rms = (samples: Int16Array, from: number): number => Math.sqrt(samples.subarray(from).reduce((sum, value) => sum + (value / 32768) ** 2, 0) / (samples.length - from));
+
+  it('turns 48 kHz and 44.1 kHz input into 20 ms frames of 16 kHz audio, keeping speech and its loudness', () => {
+    for (const rate of [48_000, 44_100]) {
+      const { frames, samples } = resample(rate, 1_000);
+
+      // Half a second is 25 frames, less the filter's delay.
+      expect(frames.length).toBeGreaterThanOrEqual(24);
+      expect(frames.length).toBeLessThanOrEqual(25);
+      expect(frames.every((frame) => frame.length === FRAME_SAMPLES)).toBe(true);
+      // A 1 kHz sine at half scale keeps its RMS (0.354) and crosses zero 2,000 times a second at 16 kHz.
+      expect(rms(samples, 400)).toBeCloseTo(0.5 / Math.SQRT2, 2);
+
+      let crossings = 0;
+
+      for (let index = 401; index < samples.length; index++) {
+        if (samples[index - 1]! < 0 !== samples[index]! < 0) {
+          crossings++;
+        }
+      }
+
+      expect((crossings * CAPTURE_RATE) / (samples.length - 401)).toBeCloseTo(2_000, -2);
+    }
+  });
+
+  it('filters out what 16 kHz audio cannot hold, rather than folding it into speech', () => {
+    // 12 kHz would fold to 4 kHz without the filter.
+    expect(rms(resample(48_000, 12_000).samples, 400)).toBeLessThan(0.005);
+    // 3 kHz, well inside speech, passes.
+    expect(rms(resample(48_000, 3_000).samples, 400)).toBeGreaterThan(0.34);
+  });
+
+  it('clips input over full scale instead of wrapping it', () => {
+    const { samples } = resample(48_000, 500, 0.2, 1.5);
+
+    expect(Math.max(...samples)).toBe(32767);
+    expect(Math.min(...samples)).toBeGreaterThanOrEqual(-32767);
   });
 });

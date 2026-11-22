@@ -947,9 +947,39 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   micSlot.addEventListener('click', (event) => {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-voice="mic"]');
 
-    if (button !== null) {
-      void command('mic', { on: button.dataset['on'] === 'true' }).then((answer) => answer.status === 200 || showError(String(answer.body['error'] ?? 'The mic did not change.')));
+    if (button === null) {
+      return;
     }
+
+    const on = button.dataset['on'] === 'true';
+    const refused = (answer: Answer): void => void (answer.status === 200 || showError(String(answer.body['error'] ?? 'The mic did not change.')));
+
+    // On a paired device the mic is this phone's (PRD R119): its tap opens the phone's microphone, taking the voice here first.
+    if (phoneVoice !== null) {
+      if (!on) {
+        phoneVoice.micOff();
+        void command('mic', { on: false }).then(refused);
+        return;
+      }
+
+      void phoneVoice.micOn().then(async (error) => {
+        if (error !== null) {
+          showError(error);
+          return;
+        }
+
+        const answer = await command('mic', { on: true });
+
+        if (answer.status !== 200) {
+          phoneVoice.micOff();
+        }
+
+        refused(answer);
+      });
+      return;
+    }
+
+    void command('mic', { on }).then(refused);
   });
   // The context meter's menu (architecture.md § Context meter): closed, open, or asking to confirm Compact, which sends /compact as a chosen
   // slash command to the session the page shows, leaving the box's draft alone.
@@ -1077,7 +1107,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         : (state.session?.reason ?? (state.connected ? 'No session has started yet.' : 'Connecting to Switchboard…'));
     // The same controls as the Conversation view's, acting on this computer's voice process (architecture.md § Web page).
     mount(voiceControls, renderShared(renderVoice(state.voice, full)));
-    mount(micSlot, full ? renderShared(renderMicButton(state.voice)) : null);
+    // On a paired device the mic shows while the voice is elsewhere too, off: its tap takes the voice to this phone (PRD R119).
+    const micView = phoneVoice !== null && state.voice?.enabled === true && !state.voice.here ? { ...state.voice, here: true, mic: 'off' as const, error: null } : state.voice;
+
+    mount(micSlot, full ? renderShared(renderMicButton(micView)) : null);
+    // The hub's mic turned off while the voice is here, as by Mic off in another of this phone's views: the phone's microphone is released too.
+    if (state.voice?.here === true) {
+      phoneVoice?.viewMic(state.voice.mic);
+    }
     drawContext();
     grow();
     refresh();

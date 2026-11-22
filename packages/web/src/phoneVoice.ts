@@ -13,6 +13,31 @@ type Answer = { status: number; body: Record<string, unknown> };
 export const HIDDEN_MS = 3_000;
 /** The first byte of the hub's binary frame of a playback's PCM, as `PHONE_PCM_FRAME` in the hub. */
 const PCM_FRAME = 1;
+/** The first byte of the page's binary frame of its microphone's PCM, as `PHONE_MIC_FRAME` in the hub. */
+export const MIC_FRAME = 2;
+/** What the page asks of the phone's microphone: iOS's voice processing, which cancels the page's own playback, at the hardware's rate. */
+export const MIC_CONSTRAINTS = { audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } } as const;
+
+/** The microphone's track: whether iOS muted it (a call, Siri), and the way to release it. */
+export interface PhoneMicTrack {
+  readonly muted: boolean;
+  readonly readyState: string;
+  onmute: (() => void) | null;
+  onunmute: (() => void) | null;
+  onended: (() => void) | null;
+  stop(): void;
+}
+
+/** The microphone's stream, as `getUserMedia` gives it. */
+export interface PhoneMicStream {
+  getAudioTracks(): PhoneMicTrack[];
+}
+
+/** The capture worklet's node with the microphone connected: its 16 kHz frames, and the way to disconnect both. */
+export interface PhoneCaptureNode {
+  readonly port: { onmessage: ((event: { data: Int16Array }) => void) | null };
+  disconnect(): void;
+}
 
 /** The parts of the browser's audio the page uses; the browser's, fakes in tests. */
 export interface PhoneAudioContext {
@@ -57,6 +82,10 @@ export interface PhoneVoiceDeps {
   context?(): PhoneAudioContext;
   /** Makes the playback node once the worklet loaded; the browser's `AudioWorkletNode` when left out. */
   node?(context: PhoneAudioContext): PhoneAudioNode;
+  /** Opens the microphone; `navigator.mediaDevices.getUserMedia` when left out. */
+  media?(constraints: typeof MIC_CONSTRAINTS): Promise<PhoneMicStream>;
+  /** Connects the microphone to the capture worklet once it loaded; the browser's nodes when left out. */
+  capture?(context: PhoneAudioContext, stream: PhoneMicStream): PhoneCaptureNode;
   /** Whether the page is hidden, and a way to hear it change; the document's when left out. */
   hidden?(): boolean;
   onVisibility?(changed: () => void): void;
@@ -80,6 +109,18 @@ export class PhoneVoice {
   /** The playback node once its worklet loaded; commands wait for it in order. */
   #node: Promise<PhoneAudioNode | null> = Promise.resolve(null);
   #hiddenTimer: unknown = null;
+  /** The microphone while Mic on holds it, and its capture node once connected. */
+  #mic: { stream: PhoneMicStream; track: PhoneMicTrack; node: PhoneCaptureNode | null } | null = null;
+  /** Rises at each microphone open and release, so a late open after a release keeps nothing. */
+  #micRun = 0;
+  /** The hub's voice has the phone's capture open, so frames go out. */
+  #capturing = false;
+  /** The busy state the hub was last told: true until the page says otherwise. */
+  #busySent = true;
+  /** The hub's mic was seen on since this microphone opened, so a later off releases it. */
+  #micSeenOn = false;
+  /** The socket's welcome, which a microphone opened in the same tap waits for. */
+  #welcome: { promise: Promise<boolean>; resolve(on: boolean): void } | null = null;
 
   constructor(private readonly deps: PhoneVoiceDeps) {
     const onVisibility = deps.onVisibility ?? ((changed: () => void) => document.addEventListener('visibilitychange', changed));
@@ -93,6 +134,9 @@ export class PhoneVoice {
    */
   #visibility(): void {
     const hidden = this.deps.hidden?.() ?? document.visibilityState === 'hidden';
+
+    // A hidden page cannot be heard: nothing of what it hears goes on, at once, before the voice leaves it.
+    this.#sendBusy();
 
     if (!hidden || this.state === 'off') {
       this.#clearHidden();
@@ -217,6 +261,7 @@ export class PhoneVoice {
 
     this.#run++;
     this.#socket = socket;
+    this.#welcome = deferred();
     this.state = 'connecting';
     this.error = null;
     this.#best = Infinity;
@@ -246,10 +291,18 @@ export class PhoneVoice {
         return;
       }
 
+      if (type === 'capture' && typeof message['on'] === 'boolean') {
+        this.#capturing = message['on'];
+        return;
+      }
+
       if (message['type'] === 'welcome') {
         welcomed = true;
         this.state = 'on';
         this.#pings(socket);
+        this.#welcome?.resolve(true);
+        this.#busySent = true;
+        this.#sendBusy();
         this.deps.changed();
       } else if (message['type'] === 'pong' && typeof message['t'] === 'number' && typeof message['at'] === 'number') {
         const now = this.deps.now();
@@ -311,6 +364,190 @@ export class PhoneVoice {
     this.deps.changed();
   }
 
+  /** Whether the phone's microphone is open, as Mic on opened it. */
+  get micOpen(): boolean {
+    return this.#mic !== null;
+  }
+
+  /**
+   * Mic on on this phone, called from its tap (PRD R119): takes the voice to this phone first when it is not here, sets the audio session to
+   * play and record before asking for the microphone, as iOS needs to keep replies on the loudspeaker, opens it with iOS's echo cancellation,
+   * and connects it to the capture worklet. Resolves null once the microphone is open and the voice socket welcomed, else why not.
+   */
+  async micOn(): Promise<string | null> {
+    if (this.#mic !== null) {
+      return null;
+    }
+
+    if (this.state === 'off') {
+      this.start();
+    }
+
+    const welcome = this.#welcome;
+
+    if (this.state === 'off' || welcome === null) {
+      return this.error ?? 'The voice did not open on this phone.';
+    }
+
+    const run = ++this.#micRun;
+    const session = (navigator as Navigator & { audioSession?: { type: string } }).audioSession;
+
+    if (session !== undefined) {
+      session.type = 'play-and-record';
+    }
+
+    let stream: PhoneMicStream;
+
+    try {
+      stream = await (this.deps.media?.(MIC_CONSTRAINTS) ?? (navigator.mediaDevices.getUserMedia(MIC_CONSTRAINTS) as unknown as Promise<PhoneMicStream>));
+    } catch (error) {
+      if (run === this.#micRun) {
+        this.#playbackSession();
+      }
+
+      return (error as Error).name === 'NotAllowedError' ? 'The phone did not allow the microphone.' : 'The phone\'s microphone did not open.';
+    }
+
+    const track = stream.getAudioTracks()[0];
+
+    if (run !== this.#micRun || track === undefined) {
+      for (const one of stream.getAudioTracks()) {
+        one.stop();
+      }
+
+      if (run === this.#micRun) {
+        this.#playbackSession();
+      }
+
+      if (run !== this.#micRun) {
+        return (this.state as PhoneVoiceState) === 'off' ? (this.error ?? 'The voice left this phone.') : 'The mic was turned off.';
+      }
+
+      return 'The phone\'s microphone did not open.';
+    }
+
+    const mic: { stream: PhoneMicStream; track: PhoneMicTrack; node: PhoneCaptureNode | null } = { stream, track, node: null };
+
+    this.#mic = mic;
+    this.#micSeenOn = false;
+    track.onmute = () => this.#sendBusy();
+    track.onunmute = () => this.#sendBusy();
+    track.onended = () => this.#sendBusy();
+
+    if (!(await welcome.promise) || this.#mic !== mic) {
+      this.micOff();
+      return this.error ?? 'The voice did not open on this phone.';
+    }
+
+    const context = this.#context;
+    const loaded = await this.#node;
+
+    if (this.#mic !== mic || context === null || loaded === null) {
+      this.micOff();
+      return this.error ?? 'The phone could not load the voice\'s audio.';
+    }
+
+    let node: PhoneCaptureNode;
+
+    try {
+      node = this.deps.capture?.(context, stream) ?? browserCapture(context, stream);
+    } catch {
+      this.micOff();
+      return 'The phone could not connect its microphone to the voice.';
+    }
+
+    node.port.onmessage = (event) => this.#frame(mic, event.data);
+    mic.node = node;
+    this.#sendBusy();
+    this.deps.changed();
+    return null;
+  }
+
+  /** Mic off on this phone: the microphone is released, so iOS's indicator and audio routing match, and the audio session plays again. */
+  micOff(): void {
+    this.#micRun++;
+    this.#releaseMic();
+    this.#sendBusy();
+    this.deps.changed();
+  }
+
+  /** The hub's mic as this page's voice view shows it: off after it was on while this phone's microphone is open releases the microphone. */
+  viewMic(mic: string): void {
+    if (this.#mic === null) {
+      return;
+    }
+
+    if (mic !== 'off') {
+      this.#micSeenOn = true;
+    } else if (this.#micSeenOn) {
+      this.micOff();
+    }
+  }
+
+  #releaseMic(): void {
+    const mic = this.#mic;
+
+    this.#mic = null;
+    this.#micSeenOn = false;
+
+    if (mic === null) {
+      return;
+    }
+
+    mic.node?.disconnect();
+    mic.track.onmute = null;
+    mic.track.onunmute = null;
+    mic.track.onended = null;
+
+    for (const track of mic.stream.getAudioTracks()) {
+      track.stop();
+    }
+
+    this.#playbackSession();
+  }
+
+  /** Back to playback only, so replies play at full loudness once the microphone is closed, while the voice stays on this phone. */
+  #playbackSession(): void {
+    const session = (navigator as Navigator & { audioSession?: { type: string } }).audioSession;
+
+    if (session !== undefined && this.#context !== null) {
+      session.type = 'playback';
+    }
+  }
+
+  /** Whether nothing of the phone's microphone can be heard: none open, its track muted or ended, or the page hidden. */
+  #busy(): boolean {
+    const mic = this.#mic;
+    const hidden = this.deps.hidden?.() ?? document.visibilityState === 'hidden';
+
+    return mic === null || mic.node === null || mic.track.muted || mic.track.readyState === 'ended' || hidden;
+  }
+
+  /** Tells the hub when the busy state changed, once the socket is welcomed. */
+  #sendBusy(): void {
+    const busy = this.#busy();
+
+    if (this.state === 'on' && this.#socket !== null && busy !== this.#busySent) {
+      this.#busySent = busy;
+      this.#socket.send(JSON.stringify({ type: 'state', busy }));
+    }
+  }
+
+  /** A 20 ms frame from the capture worklet: sent while the hub's voice has the phone's capture open and the microphone can be heard. */
+  #frame(mic: { node: PhoneCaptureNode | null }, samples: Int16Array): void {
+    const socket = this.#socket;
+
+    if (this.#mic !== mic || socket === null || this.state !== 'on' || !this.#capturing || this.#busy()) {
+      return;
+    }
+
+    const frame = new Uint8Array(1 + samples.byteLength);
+
+    frame[0] = MIC_FRAME;
+    frame.set(new Uint8Array(samples.buffer, samples.byteOffset, samples.byteLength), 1);
+    socket.send(frame.buffer);
+  }
+
   /** A binary frame from the hub: a playback's PCM after its kind and number. */
   #binary(data: ArrayBuffer): void {
     const view = new DataView(data);
@@ -331,8 +568,14 @@ export class PhoneVoice {
     this.#ping = setInterval(ping, PING_MS);
   }
 
-  /** Ends the pings, the hidden wait and the audio: the node, the context, and the audio session back to the browser's choice. */
+  /** Ends the pings, the hidden wait and the audio: the microphone, the node, the context, and the audio session back to the browser's choice. */
   #stopped(): void {
+    this.#micRun++;
+    this.#releaseMic();
+    this.#capturing = false;
+    this.#welcome?.resolve(false);
+    this.#welcome = null;
+
     if (this.#ping !== null) {
       clearInterval(this.#ping);
       this.#ping = null;
@@ -360,4 +603,29 @@ export class PhoneVoice {
     this.#socket = null;
     this.state = 'off';
   }
+}
+
+function deferred(): { promise: Promise<boolean>; resolve(on: boolean): void } {
+  let resolve!: (on: boolean) => void;
+  const promise = new Promise<boolean>((done) => (resolve = done));
+
+  return { promise, resolve };
+}
+
+/** The browser's microphone source connected to the capture worklet, whose silent output keeps it pulled by the speaker. */
+function browserCapture(context: PhoneAudioContext, stream: PhoneMicStream): PhoneCaptureNode {
+  const audio = context as unknown as AudioContext;
+  const source = audio.createMediaStreamSource(stream as unknown as MediaStream);
+  const node = new AudioWorkletNode(audio, 'sb-capture', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1], channelCount: 1, channelCountMode: 'explicit' });
+
+  source.connect(node);
+  node.connect(audio.destination);
+
+  return {
+    port: node.port as unknown as PhoneCaptureNode['port'],
+    disconnect: () => {
+      source.disconnect();
+      node.disconnect();
+    },
+  };
 }

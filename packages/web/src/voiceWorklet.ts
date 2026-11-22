@@ -1,7 +1,7 @@
 /**
  * The phone's audio worklet (architecture.md § Remote access, Voice on a phone), loaded by the page as `/page/voice-worklet.js`. `sb-play`
  * plays the voice's 24 kHz PCM at the context's rate through a queue with a start buffer, reports how much it played, and drops what it holds
- * at once on a flush.
+ * at once on a flush; `sb-capture` turns the phone's microphone into 16 kHz frames for the voice.
  */
 
 /** The rate the voice's speech comes at. */
@@ -138,6 +138,102 @@ export class PlayQueue {
   }
 }
 
+/** The rate the phone's microphone goes to the voice at, and the length of each frame it sends, 20 ms. */
+export const CAPTURE_RATE = 16_000;
+export const FRAME_SAMPLES = 320;
+/** The low-pass filter's cut-off before resampling: below the 8 kHz Nyquist rate of 16 kHz audio, with room for the filter's roll-off. */
+export const CAPTURE_CUTOFF_HZ = 7_000;
+
+/**
+ * The microphone's audio at the context's rate (48 kHz on an iPhone, which records badly into a 16 kHz context) as 16 kHz 16-bit frames of
+ * {@link FRAME_SAMPLES}: a windowed-sinc low-pass filter evaluated at each output position, interpolated between input samples for a rate
+ * that is not a whole multiple.
+ */
+export class CaptureResampler {
+  readonly #taps: Float32Array;
+  readonly #half: number;
+  readonly #step: number;
+  /** Input not yet passed by the filter's window; `#pos` is the next output's position in it, fractional. */
+  #buffer: Float32Array;
+  #pos: number;
+  readonly #frame = new Int16Array(FRAME_SAMPLES);
+  #filled = 0;
+
+  constructor(
+    inputRate: number,
+    private readonly emit: (frame: Int16Array) => void,
+  ) {
+    this.#step = inputRate / CAPTURE_RATE;
+    this.#half = Math.max(8, Math.ceil(8 * this.#step));
+
+    const cutoff = Math.min(CAPTURE_CUTOFF_HZ, 0.45 * inputRate) / inputRate;
+    const length = 2 * this.#half + 1;
+    const taps = new Float32Array(length);
+    let sum = 0;
+
+    for (let index = 0; index < length; index++) {
+      const x = index - this.#half;
+      const sinc = x === 0 ? 2 * cutoff : Math.sin(2 * Math.PI * cutoff * x) / (Math.PI * x);
+      // Blackman window.
+      const window = 0.42 - 0.5 * Math.cos((2 * Math.PI * index) / (length - 1)) + 0.08 * Math.cos((4 * Math.PI * index) / (length - 1));
+
+      taps[index] = sinc * window;
+      sum += taps[index]!;
+    }
+
+    for (let index = 0; index < length; index++) {
+      taps[index] = taps[index]! / sum;
+    }
+
+    this.#taps = taps;
+    // Silence before the first sample, so the first output has a whole window.
+    this.#buffer = new Float32Array(this.#half);
+    this.#pos = this.#half;
+  }
+
+  /** Takes one block of input; emits each frame as it fills. */
+  push(input: Float32Array): void {
+    const buffer = new Float32Array(this.#buffer.length + input.length);
+
+    buffer.set(this.#buffer);
+    buffer.set(input, this.#buffer.length);
+    this.#buffer = buffer;
+
+    while (Math.floor(this.#pos) + 1 + this.#half < buffer.length) {
+      const whole = Math.floor(this.#pos);
+      const fraction = this.#pos - whole;
+      const at = this.#filter(whole);
+      const value = fraction === 0 ? at : at + (this.#filter(whole + 1) - at) * fraction;
+
+      this.#frame[this.#filled++] = Math.round(Math.max(-1, Math.min(1, value)) * 32767);
+
+      if (this.#filled === FRAME_SAMPLES) {
+        this.emit(this.#frame.slice());
+        this.#filled = 0;
+      }
+
+      this.#pos += this.#step;
+    }
+
+    const drop = Math.floor(this.#pos) - this.#half;
+
+    if (drop > 0) {
+      this.#buffer = buffer.slice(drop);
+      this.#pos -= drop;
+    }
+  }
+
+  #filter(center: number): number {
+    let sum = 0;
+
+    for (let index = 0; index < this.#taps.length; index++) {
+      sum += this.#taps[index]! * this.#buffer[center - this.#half + index]!;
+    }
+
+    return sum;
+  }
+}
+
 declare const registerProcessor: ((name: string, processor: unknown) => void) | undefined;
 declare const sampleRate: number;
 declare class AudioWorkletProcessor {
@@ -164,6 +260,23 @@ if (typeof registerProcessor === 'function') {
           for (const other of channels.slice(1)) {
             other.set(channels[0]);
           }
+        }
+
+        return true;
+      }
+    },
+  );
+  // The phone's microphone, resampled to 16 kHz frames posted to the page; it plays nothing.
+  registerProcessor(
+    'sb-capture',
+    class extends AudioWorkletProcessor {
+      readonly resampler = new CaptureResampler(sampleRate, (frame) => this.port.postMessage(frame, [frame.buffer]));
+
+      process(inputs: Float32Array[][]): boolean {
+        const channel = inputs[0]?.[0];
+
+        if (channel !== undefined) {
+          this.resampler.push(channel);
         }
 
         return true;
