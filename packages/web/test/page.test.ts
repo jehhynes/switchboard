@@ -684,7 +684,7 @@ describe('the page', () => {
 
     const row = root.querySelector<HTMLElement>('.view-options-menu [data-action="persona"]')!;
 
-    expect(row.querySelector('.title')?.textContent).toBe('Persona: Nova…');
+    expect(row.querySelector('.title')?.textContent).toBe('Persona: Nova');
     expect(row.querySelector('.menu-note')?.textContent).toBe('Pinned');
     expect(row.querySelector('.codicon-pinned')).not.toBeNull();
     expect(row.getAttribute('aria-haspopup')).toBe('dialog');
@@ -762,7 +762,7 @@ describe('the page', () => {
     page.close();
   });
 
-  it('offers Persona… for a session with none only when it can take a pin, and pins from the dialog', async () => {
+  it('names the persona the session has, pinned or not, or None, offering it only when it can take a pin, and pins from the dialog', async () => {
     const fetch = vi.fn(async (url: string, init?: { body?: string }) => {
       posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) });
 
@@ -779,7 +779,14 @@ describe('the page', () => {
 
     const row = root.querySelector<HTMLElement>('.view-options-menu [data-action="persona"]')!;
 
-    expect(row.querySelector('.title')?.textContent).toBe('Persona…');
+    expect(row.querySelector('.title')?.textContent).toBe('Persona: None');
+    expect(row.querySelector('.menu-note')).toBeNull();
+    // A persona resolved at the start, from the playbook or the pool, is named with no pin.
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: { id: 'iris', name: 'Iris', pinned: false, tonePending: false }, canPin: true })], items: [], more: false, status: null, artifacts: [] });
+    expect(root.querySelector('.view-options-menu [data-action="persona"] .title')?.textContent).toBe('Persona: Iris');
+    expect(root.querySelector('.view-options-menu [data-action="persona"] .menu-note')).toBeNull();
+    expect(root.querySelector('.view-options-menu [data-action="persona"] .codicon-person')).not.toBeNull();
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: null, canPin: true })], items: [], more: false, status: null, artifacts: [] });
     expect(row.title).toBe('No persona. Choose one for this session.');
     expect(row.querySelector('.codicon-person')).not.toBeNull();
     row.click();

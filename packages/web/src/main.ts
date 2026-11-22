@@ -2030,7 +2030,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       }
     }
   }
-  /** Closes the persona dialog and gives the focus back to the view options button, under which Persona… opened it. */
+  /** Closes the persona dialog and gives the focus back to the view options button, under which the persona row opened it. */
   const closePersonas = (): void => {
     view.personas = null;
     draw();
@@ -3482,7 +3482,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
   };
 
-  /** Persona… in the view options menu: the roster in the persona dialog, from which a pick pins a persona to the session. */
+  /** The view options menu's persona row: the roster in the persona dialog, from which a pick pins a persona to the session. */
   const choosePersona = async (): Promise<void> => {
     view.viewMenu = false;
     view.picker = false;

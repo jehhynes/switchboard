@@ -1,5 +1,5 @@
 // The conversation's header (architecture.md § Web page): the dropdown of the selected work item's conversations, the row's actions, the
-// view options with Persona…, and the tabs under it or the switch atop the side column.
+// view options with the persona, and the tabs under it or the switch atop the side column.
 import type { ComponentChildren, VNode } from 'preact';
 import { providerMark } from '@switchboard/conversation/providerIcons';
 import { FileIcon } from './fileIcons.js';
@@ -161,8 +161,8 @@ function PaneRows({ view }: { view: View }) {
 }
 
 /**
- * The view options menu's Persona… row, which opens the persona dialog, while the session has a persona or can take a pin: the persona's name,
- * the pin icon and Pinned while one is pinned, dimmed while its tone waits for a resume.
+ * The view options menu's persona row, which opens the persona dialog, while the session has a persona or can take a pin: always the persona it
+ * speaks with, pinned or resolved at its start, or None; the pin icon and Pinned while one is pinned, dimmed while its tone waits for a resume.
  */
 function PersonaRow({ session }: { session: PageState['session'] }) {
   const persona = session?.persona;
@@ -178,7 +178,7 @@ function PersonaRow({ session }: { session: PageState['session'] }) {
         <span class="menu-gutter" aria-hidden="true">
           <span class={`codicon codicon-${persona?.pinned === true ? 'pinned' : 'person'}`}></span>
         </span>
-        <span class="title">{persona == null ? 'Persona…' : `Persona: ${persona.name}…`}</span>
+        <span class="title">{`Persona: ${persona?.name ?? 'None'}`}</span>
         {persona?.pinned === true ? <span class="menu-note">Pinned</span> : null}
       </button>
     </>
@@ -186,7 +186,7 @@ function PersonaRow({ session }: { session: PageState['session'] }) {
 }
 
 /**
- * The header's view options button and its menu: Show message details, Expand spoken replies on this computer's page, Persona…, and the Chrome
+ * The header's view options button and its menu: Show message details, Expand spoken replies on this computer's page, the persona, and the Chrome
  * pane's state and pairing while it is on.
  */
 function ViewOptions({ view, expandReplies, session }: { view: View; expandReplies: boolean; session: PageState['session'] }) {
