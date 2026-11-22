@@ -341,6 +341,10 @@ export class ChangesController {
   /** The file to bring to the top once the viewer has mounted. */
   #jump: string | null = null;
   #collapsed = new Set<string>();
+  /** The files collapsed because they are ticked viewed, which expand again when the tick goes, as it does when the file changes. */
+  readonly #viewedCollapsed = new Set<string>();
+  /** Whether the next mount collapses the viewed files: only when the tab opens, so a file the operator expanded stays so across remounts. */
+  #collapseViewed = false;
   #file: FileOpen | null = null;
   /** The pane the Changes tab drew into, watched so Auto follows a pane resized past 900 px without a redraw. */
   #resize: ResizeObserver | null = null;
@@ -431,6 +435,15 @@ export class ChangesController {
 
   /** Gives the viewer the rows shown now, drops held diffs of rows that went, and reads what the view wants. */
   #syncRows(): void {
+    // A file collapsed for its tick expands once the tick is gone, as when the file changed since it was ticked.
+    for (const path of [...this.#viewedCollapsed]) {
+      if (this.view.list?.rows.find((one) => one.path === path)?.viewed !== true) {
+        this.#viewedCollapsed.delete(path);
+        this.#collapsed.delete(path);
+        this.#mount?.mount.setCollapsed(path, false);
+      }
+    }
+
     const rows = this.#rows();
     const paths = new Set(this.view.list?.rows.map((row) => row.path) ?? []);
 
@@ -494,6 +507,7 @@ export class ChangesController {
       const collapse = action === 'changes-collapse-all';
 
       this.#collapsed = collapse ? new Set(this.view.list?.rows.map((row) => row.path)) : new Set();
+      this.#viewedCollapsed.clear();
       this.#rows().forEach((row) => this.#mount?.mount.setCollapsed(row.path, collapse));
       this.deps.draw();
       this.#pump();
@@ -544,6 +558,10 @@ export class ChangesController {
   /** Opens the Changes tab, or shows it, at a file's diff when `path` names one; opening it reads the list again. */
   openChanges(path: string | null): void {
     const opening = !this.view.tab;
+
+    if (opening) {
+      this.#collapseViewed = true;
+    }
 
     this.view.tab = true;
     this.view.menu = false;
@@ -794,6 +812,7 @@ export class ChangesController {
     }
 
     row.viewed = row.viewed !== true;
+    this.#tickCollapse(path, row.viewed);
     this.#viewedChanged();
 
     // One post at a time per file, the last click's choice sent once the one on its way answers, so the hub ends where the page shows.
@@ -811,6 +830,7 @@ export class ChangesController {
 
         if (answer.status !== 200) {
           row.viewed = !sent;
+          this.#setCollapsed(path, row.viewed, true);
           this.view.error = String(answer.body['error'] ?? `Switchboard answered ${answer.status}.`);
           this.#viewedChanged();
           void this.refresh();
@@ -831,7 +851,46 @@ export class ChangesController {
 
     if (row !== undefined && typeof data['viewed'] === 'boolean') {
       row.viewed = data['viewed'];
+
+      // Collapsed only while off screen, so nothing is pulled from under the reader.
+      if (row.viewed && !this.#onScreen(row.path)) {
+        this.#setCollapsed(row.path, true, true);
+      } else if (!row.viewed && this.#viewedCollapsed.has(row.path)) {
+        // A file collapsed for its tick opens when another device clears it.
+        this.#setCollapsed(row.path, false);
+      }
+
       this.#viewedChanged();
+    }
+  }
+
+  /** Whether a row of the Changes tab meets the view now. */
+  #onScreen(path: string): boolean {
+    const visible = this.#mount?.mount.visible() ?? null;
+    const index = this.#rows().findIndex((one) => one.path === path);
+
+    return visible !== null && index >= visible.first && index <= visible.last;
+  }
+
+  /**
+   * A tick collapses the file and an untick expands it in place, as on a pull request; a file ticked while its header was at the top brings the
+   * next file's header there, so reading goes on downward.
+   */
+  #tickCollapse(path: string, viewed: boolean): void {
+    const mounted = this.#mount;
+    const top = viewed && mounted !== null && mounted.mount.current() === path;
+
+    this.#setCollapsed(path, viewed, true);
+
+    if (top) {
+      // The next file after it in the list that the tab still shows: with viewed files hidden, the ticked file has already left the tab.
+      const all = this.view.list?.rows ?? [];
+      const shown = new Set(this.#rows().map((one) => one.path));
+      const next = all.slice(all.findIndex((one) => one.path === path) + 1).find((one) => shown.has(one.path));
+
+      if (next !== undefined) {
+        mounted.mount.scrollToFile(next.path);
+      }
     }
   }
 
@@ -957,7 +1016,13 @@ export class ChangesController {
   }
 
   /** Collapses or expands a file of the Changes tab, keeping that for when the viewer mounts again, and turns its chevron. */
-  #setCollapsed(path: string, collapsed: boolean): void {
+  #setCollapsed(path: string, collapsed: boolean, byTick = false): void {
+    if (byTick && collapsed) {
+      this.#viewedCollapsed.add(path);
+    } else {
+      this.#viewedCollapsed.delete(path);
+    }
+
     if (collapsed) {
       this.#collapsed.add(path);
     } else {
@@ -1013,6 +1078,16 @@ export class ChangesController {
       this.#mount?.mount.dispose();
 
       const mount = module.mountChanges(host, rows, { layout: shown.layout, wrap: shown.wrap, loadSides: (path) => this.#loadSides(path), onLine: (path, side, line) => this.openFileView(path, side, line), headerMeta: (path) => this.#meta(path), headerPrefix: (path) => this.#prefix(path), onHeader: (path) => this.#headerClicked(path) });
+
+      // Viewed files start collapsed when the tab opens, as on a pull request.
+      if (this.#collapseViewed) {
+        this.#collapseViewed = false;
+
+        for (const row of rows.filter((one) => one.viewed === true)) {
+          this.#collapsed.add(row.path);
+          this.#viewedCollapsed.add(row.path);
+        }
+      }
 
       this.#mount = { host, mount, layout: `${shown.layout} ${shown.wrap}`, paths: rows.map(rowShape) };
 

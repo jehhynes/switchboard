@@ -75,6 +75,8 @@ describe('the Changes list', () => {
   type FakeChanges = { header: (path: string) => void; meta: (path: string) => HTMLElement | null; rows: string[]; layout: string; wrap: boolean; layouts: string[]; scrolls: string[]; sets: Array<[string, string]>; collapsed: string[]; disposed: boolean; onLine?: (path: string, side: 'old' | 'new', line: number) => void; loadSides: (path: string) => Promise<unknown>; want: () => void };
   const changesMounts: FakeChanges[] = [];
   let visible: { first: number; last: number } | null;
+  /** The row the fake view says has its header at the top. */
+  let current: string | null;
   let etags: Record<string, () => string>;
   let notModified: Set<string>;
   let ifNoneMatch: string[];
@@ -83,6 +85,7 @@ describe('the Changes list', () => {
     mounts.length = 0;
     changesMounts.length = 0;
     visible = { first: 0, last: 0 };
+    current = null;
     etags = {};
     notModified = new Set();
     ifNoneMatch = [];
@@ -132,7 +135,7 @@ describe('the Changes list', () => {
           setRow: (path, content) => fake.sets.push([path, content === null ? 'placeholder' : 'note' in content ? content.note : 'diff']),
           setCollapsed: (path, collapsed) => fake.collapsed.push(`${path} ${collapsed}`),
           scrollToFile: (path) => fake.scrolls.push(path),
-          current: () => null,
+          current: () => current,
           visible: () => visible,
           onWant: (listener) => listeners.push(listener),
           heightOf: () => 100,
@@ -365,6 +368,8 @@ describe('the Changes list', () => {
   it('ChangesTab_ForTheFilesInView_ReadsEachPatchAloneAndDrawsItOrWhyNot', async () => {
     diffAnswers['src/new.ts'] = { status: 404, body: { error: 'src/new.ts is not one of the changes now.' } };
     diffAnswers['logo.png'] = { status: 200, body: { path: 'logo.png', status: 'U', patch: null, old: null, new: null, binary: true, tooLarge: null, partial: true } };
+    // None viewed, so none starts collapsed and unread.
+    answers.push({ status: 200, body: { ...LIST, rows: LIST.rows.map((row) => ({ ...row, viewed: false })) } }, { status: 200, body: { ...LIST, rows: LIST.rows.map((row) => ({ ...row, viewed: false })) } });
     start();
     visible = { first: 0, last: 1 };
     await openRow(0);
@@ -522,11 +527,12 @@ describe('the Changes list', () => {
     expect([...root.querySelectorAll<HTMLElement>('.diff-host .diff-chevron')].map((one) => one.dataset['path'])).toEqual(['docs/a.md', 'src/new.ts', 'logo.png']);
     expect(chevron('docs/a.md').getAttribute('aria-expanded')).toBe('true');
     chevron('docs/a.md').click();
-    expect(changesMounts[0]!.collapsed).toEqual(['docs/a.md true']);
+    // The viewed file started collapsed.
+    expect(changesMounts[0]!.collapsed).toEqual(['src/new.ts true', 'docs/a.md true']);
     expect(chevron('docs/a.md').getAttribute('aria-expanded')).toBe('false');
     expect(chevron('docs/a.md').querySelector('.codicon-chevron-right')).not.toBeNull();
     chevron('docs/a.md').click();
-    expect(changesMounts[0]!.collapsed).toEqual(['docs/a.md true', 'docs/a.md false']);
+    expect(changesMounts[0]!.collapsed).toEqual(['src/new.ts true', 'docs/a.md true', 'docs/a.md false']);
     expect(chevron('docs/a.md').getAttribute('aria-expanded')).toBe('true');
   });
 
@@ -582,6 +588,115 @@ describe('the Changes list', () => {
     expect(diffGets().map((one) => /path=([^&]*)/.exec(one)![1])).toEqual(['f3.ts']);
   });
 
+  it('ViewedTick_InAHeader_CollapsesTheFileAndUntickingExpandsIt', async () => {
+    start();
+    await openRow(0);
+
+    const box = (index: number) => root.querySelectorAll<HTMLElement>('.diff-host .diff-viewed input')[index]!;
+
+    // A viewed file starts collapsed when the tab opens.
+    expect(changesMounts[0]!.collapsed).toEqual(['src/new.ts true']);
+    box(0).click();
+    await flush();
+    expect(changesMounts[0]!.collapsed.at(-1)).toBe('docs/a.md true');
+    // Not at the top, so the view stays where it is.
+    expect(changesMounts[0]!.scrolls).toEqual(['docs/a.md']);
+    box(0).click();
+    await flush();
+    expect(changesMounts[0]!.collapsed.at(-1)).toBe('docs/a.md false');
+  });
+
+  it('ViewedTick_OnTheFileAtTheTop_BringsTheNextFileUp', async () => {
+    start();
+    await openRow(0);
+    current = 'docs/a.md';
+    root.querySelectorAll<HTMLElement>('.diff-host .diff-viewed input')[0]!.click();
+    await flush();
+    expect(changesMounts[0]!.collapsed.at(-1)).toBe('docs/a.md true');
+    expect(changesMounts[0]!.scrolls.at(-1)).toBe('src/new.ts');
+  });
+
+  it('ViewedTick_Refused_ExpandsTheFileAgain', async () => {
+    start();
+    await openRow(2);
+    root.querySelectorAll<HTMLElement>('.diff-host .diff-viewed input')[2]!.click();
+    for (let index = 0; index < 4; index++) {
+      await flush();
+    }
+
+    expect(changesMounts[0]!.collapsed.slice(-2)).toEqual(['logo.png true', 'logo.png false']);
+  });
+
+  it('ViewedEvent_FromAnotherDevice_CollapsesOnlyAFileOffScreen', async () => {
+    const { source } = start();
+
+    await openRow(0);
+    visible = { first: 0, last: 0 };
+    source.emit('viewed', { workItemId: 1, path: 'docs/a.md', hash: 'h-a', viewed: true });
+    expect(changesMounts[0]!.collapsed).not.toContain('docs/a.md true');
+    source.emit('viewed', { workItemId: 1, path: 'logo.png', hash: 'h-logo', viewed: true });
+    expect(changesMounts[0]!.collapsed.at(-1)).toBe('logo.png true');
+    expect(root.querySelector('.diff-tab .tab-badge')!.textContent).toBe('3/3');
+
+    // Cleared there again: the file collapsed for its tick opens.
+    source.emit('viewed', { workItemId: 1, path: 'logo.png', hash: 'h-logo', viewed: false });
+    expect(changesMounts[0]!.collapsed.at(-1)).toBe('logo.png false');
+  });
+
+  it('ViewedTick_AtTheTopWithViewedHidden_BringsTheNextShownFileUp', async () => {
+    // A file before the ticked one, so a jump back to the tab's first file would show.
+    const four = { ...LIST, rows: [{ ...LIST.rows[0]!, path: 'a-first.md', hash: 'h-0' }, ...LIST.rows], shown: 4, total: 4 };
+
+    answers.push(...[0, 1, 2].map(() => ({ status: 200, body: structuredClone(four) })));
+    start();
+    await openRow(1);
+    button().click();
+    await flush();
+    root.querySelector<HTMLElement>('[data-action="changes-hide-viewed"]')!.click();
+    document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    current = 'docs/a.md';
+    root.querySelector<HTMLElement>('.diff-host .diff-viewed input[data-path="docs/a.md"]')!.click();
+    await flush();
+    // src/new.ts is viewed and hidden, so logo.png comes up, never a file before it.
+    expect(changesMounts[0]!.scrolls.at(-1)).toBe('logo.png');
+  });
+
+  it('ViewedCollapse_WhenTheTickGoesWithAChange_ExpandsButAnExpandedFileStaysOpen', async () => {
+    const { source } = start();
+
+    await openRow(0);
+    // Expanded by the operator: a list read again keeps it so.
+    changesMounts[0]!.header('src/new.ts');
+    expect(changesMounts[0]!.collapsed.at(-1)).toBe('src/new.ts false');
+    source.emit('session', { session: { ...session, state: 'running' } });
+    source.emit('session', { session: { ...session, state: 'idle' } });
+    await flush();
+    await flush();
+    expect(changesMounts[0]!.collapsed.at(-1)).toBe('src/new.ts false');
+
+    // Collapsed by its tick (unticked and ticked again), then the file changed and the hub dropped the tick: it expands.
+    root.querySelectorAll<HTMLElement>('.diff-host .diff-viewed input')[1]!.click();
+    for (let index = 0; index < 4; index++) {
+      await flush();
+    }
+
+    root.querySelectorAll<HTMLElement>('.diff-host .diff-viewed input')[1]!.click();
+    for (let index = 0; index < 4; index++) {
+      await flush();
+    }
+
+    expect(changesMounts[0]!.collapsed.at(-1)).toBe('src/new.ts true');
+    answers.push({ status: 200, body: { ...LIST, rows: LIST.rows.map((row) => (row.path === 'src/new.ts' ? { ...row, hash: 'h-new2', viewed: false } : row)) } });
+    source.emit('session', { session: { ...session, state: 'running' } });
+    source.emit('session', { session: { ...session, state: 'idle' } });
+    for (let index = 0; index < 4; index++) {
+      await flush();
+    }
+
+    expect(changesMounts[0]!.collapsed).toContain('src/new.ts false');
+    expect(changesMounts[0]!.collapsed.lastIndexOf('src/new.ts false')).toBeGreaterThan(changesMounts[0]!.collapsed.lastIndexOf('src/new.ts true'));
+  });
+
   it('ChangesMenu_Buttons_HideViewedCollapseAndExpandEveryFile', async () => {
     start();
     await openRow(0);
@@ -591,9 +706,10 @@ describe('the Changes list', () => {
     expect(changesMounts[0]!.rows).toEqual(['docs/a.md', 'logo.png']);
     expect(root.querySelector('[data-action="changes-hide-viewed"]')!.getAttribute('aria-pressed')).toBe('true');
     root.querySelector<HTMLElement>('[data-action="changes-collapse-all"]')!.click();
-    expect(changesMounts[0]!.collapsed).toEqual(['docs/a.md true', 'logo.png true']);
+    // The viewed file started collapsed; it is hidden now, so only the others collapse.
+    expect(changesMounts[0]!.collapsed).toEqual(['src/new.ts true', 'docs/a.md true', 'logo.png true']);
     root.querySelector<HTMLElement>('[data-action="changes-expand-all"]')!.click();
-    expect(changesMounts[0]!.collapsed.slice(2)).toEqual(['docs/a.md false', 'logo.png false']);
+    expect(changesMounts[0]!.collapsed.slice(3)).toEqual(['docs/a.md false', 'logo.png false']);
 
     // Picking a hidden viewed file shows the viewed files again.
     root.querySelectorAll<HTMLElement>('.change-row')[1]!.click();
