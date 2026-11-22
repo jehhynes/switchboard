@@ -521,7 +521,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Not verified:** installing the signed `.xpi` from `about:addons` by hand, and any permission prompt it shows; granting the host permissions again by hand in `about:addons` after Remove; the add-on's own `browser.permissions.getAll()`; requests to a hub from the signed copy; Ctrl+C from a terminal outside VS Code, whose label snap Firefox accepts.
 - **Current use:** the Firefox workspace's `dev`, `lint` and `sign` scripts, loading `dist/` over the signed copy, and the manifest's description length (architecture.md § Browser extension).
 
-## M41. Observed Support volume retention
+## M123. Observed Support volume retention
 
 - **Date:** 2026-10-18.
 - **Versions:** Node 24.14.0, VS Code 1.142.0 (`6d62b1d5dace93a33b3a6d3eca1317bd5e15bcb1`), Claude CLI 2.1.301. No agent session or hook was used for these source/volume checks.
