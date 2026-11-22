@@ -649,22 +649,15 @@ describe('the Changes list', () => {
     expect(changesMounts[0]!.layouts.at(-1)).toBe('stacked false');
   });
 
-  it("offers the work item's Open in VS Code in the menu's head while its row does, which the header's control runs", async () => {
+  it("ChangesMenu_WhileTheRowOffersOpenInVsCode_HasNoOpenInVsCode", async () => {
     const { source } = start();
 
+    source.emit('list', { groups: [{ key: 'progress', title: 'progress', glyph: '', empty: null, rows: [listRow({ opens: [{ label: 'Open in VS Code', icon: 'vscode' }] })] }] });
     button().click();
     await flush();
-    expect(root.querySelector('.changes-open')).toBeNull();
-
-    source.emit('list', { groups: [{ key: 'progress', title: 'progress', glyph: '', empty: null, rows: [listRow({ opens: [{ label: 'Open in VS Code', icon: 'vscode' }] })] }] });
-    const open = root.querySelector<HTMLElement>('.changes-menu .changes-open')!;
-
-    expect(open.dataset['action']).toBe('row-command');
-    expect(open.dataset['label']).toBe('Open in VS Code');
-    open.click();
-    await flush();
-    expect(JSON.parse(gets.at(-1)!.slice('POST '.length))).toMatchObject({ window: 'pk', scopeGen: 3, workItemId: 1, label: 'Open in VS Code' });
-    expect(root.querySelector('.changes-menu')).toBeNull();
+    // It stays in the work item's Actions menu only.
+    expect(root.querySelector('.changes-menu')).not.toBeNull();
+    expect(root.querySelector('.changes-menu [data-label="Open in VS Code"], .changes-open')).toBeNull();
   });
 
   it('says so when the diff viewer cannot load', async () => {

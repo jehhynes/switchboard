@@ -17,9 +17,6 @@
 .changes-head button.icon:hover { background: var(--vscode-toolbar-hoverBackground); }
 .changes-head button.icon:disabled { cursor: default; opacity: 0.6; }
 .changes-head button.icon[aria-pressed="true"] { background: var(--vscode-toolbar-activeBackground, var(--vscode-toolbar-hoverBackground)); }
-/* The work item's Open in VS Code, the header's own, beside Refresh. */
-.changes-open { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 4px; background: var(--vscode-button-secondaryBackground, transparent); color: var(--vscode-button-secondaryForeground, var(--vscode-foreground)); font: inherit; font-size: 12px; cursor: pointer; }
-.changes-open:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground)); }
 .changes-rows { flex: 1; min-height: 0; overflow-y: auto; margin: 0; padding: 0 0 var(--sb-end); list-style: none; }
 .change-row { display: flex; align-items: center; gap: 6px; box-sizing: border-box; height: 22px; padding: 0 6px 0 8px; border-radius: 4px; white-space: nowrap; }
 .change-row > .codicon { flex: none; font-size: 14px; }
@@ -38,7 +35,7 @@
 .status-C .change-status, .status-C .change-name { color: var(--sb-git-conflict); }
 .changes-empty { margin: 0; padding: 8px; color: var(--vscode-descriptionForeground); white-space: normal; }
 .changes-empty.error { color: var(--vscode-errorForeground); }
-@media (hover: none), (pointer: coarse) { .change-row { height: 44px; } .changes-head button.icon { width: 44px; height: 44px; } .changes-open { height: 44px; } }
+@media (hover: none), (pointer: coarse) { .change-row { height: 44px; } .changes-head button.icon { width: 44px; height: 44px; } }
 /* The Changes tab, drawn as an artifact's tab: its name, how many files are viewed of all, and a close mark. */
 .tab.diff-tab { box-sizing: border-box; max-width: 200px; padding: 0 6px 0 0; }
 .tab.diff-tab .tab-label { overflow: hidden; text-overflow: ellipsis; }

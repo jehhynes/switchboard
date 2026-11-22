@@ -164,10 +164,10 @@ function HeadButton({ action, icon, label, pressed, disabled }: { action: string
 }
 
 /**
- * The Changes menu while open, under the strip: its note, Hide viewed, Collapse all, Expand all, Open in VS Code for the work item's window
- * while its row offers it, and Refresh, then the rows, or why there are none.
+ * The Changes menu while open, under the strip: its note, Hide viewed, Collapse all, Expand all and Refresh, then the rows, or why there are
+ * none. Open in VS Code is in the work item's Actions menu, not here.
  */
-export function renderChangesMenu(changes: ChangesView, openInVsCode = false): VNode | null {
+export function renderChangesMenu(changes: ChangesView): VNode | null {
   if (!changes.menu) {
     return null;
   }
@@ -202,12 +202,6 @@ export function renderChangesMenu(changes: ChangesView, openInVsCode = false): V
         <HeadButton action="changes-hide-viewed" icon={changes.hideViewed ? 'eye-closed' : 'eye'} label={changes.hideViewed ? 'Show viewed files' : 'Hide viewed files'} pressed={changes.hideViewed} disabled={empty} />
         <HeadButton action="changes-collapse-all" icon="collapse-all" label="Collapse all" disabled={empty} />
         <HeadButton action="changes-expand-all" icon="expand-all" label="Expand all" disabled={empty} />
-        {openInVsCode ? (
-          <button class="changes-open" type="button" data-action="row-command" data-label="Open in VS Code" title="Open the worktree in its VS Code window">
-            <span class="codicon codicon-vscode" aria-hidden="true"></span>
-            Open in VS Code
-          </button>
-        ) : null}
         <button class="icon" type="button" data-action="changes-refresh" title="Refresh" aria-label="Refresh" disabled={changes.loading}>
           <span class={`codicon codicon-refresh${changes.loading ? ' codicon-modifier-spin' : ''}`} aria-hidden="true"></span>
         </button>
@@ -514,12 +508,6 @@ export class ChangesController {
       }
 
       return true;
-    }
-
-    // Open in VS Code in the menu's head is the header's own control, which the page runs; the menu closes.
-    if (action === 'row-command') {
-      this.view.menu = false;
-      return false;
     }
 
     const path = target.closest<HTMLElement>('[data-path]')?.dataset['path'];
