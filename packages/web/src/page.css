@@ -418,8 +418,17 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
   .tab > .unread-dot { top: 8px; right: 0; }
   .tab.artifact-menu-button, .tab.changes-button { padding: 0 8px; }
 }
+/* The Artifacts menu's rows share its columns, so each artifact's kind lines up under the one above: the title takes the room left and is cut
+   first, and a kind longer than a word is cut at 14 characters so it cannot crowd the title out. The menu may reach past its strip, up to 480 px and the viewport's width, so on a viewport under 520 px, as on a phone, it leaves the kind
+   out rather than cut the title further. */
+.artifact-menu { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; max-width: min(480px, calc(100vw - 16px)); }
+.artifact-menu .menu-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; column-gap: 0; }
 .artifact-menu .menu-row.in-bar .title { color: var(--vscode-descriptionForeground); }
+.artifact-menu .menu-gutter { margin-right: 6px; }
+.artifact-menu .menu-kind { max-width: 14ch; overflow: hidden; text-overflow: ellipsis; margin-left: 24px; color: var(--vscode-descriptionForeground); }
+.artifact-menu .menu-row:is(:hover, :focus) .menu-kind { color: inherit; opacity: 0.8; }
 .artifact-menu .menu-note { margin-left: 12px; }
+@media (max-width: 519.98px) { .artifact-menu .menu-kind { display: none; } }
 .tab-badge { box-sizing: border-box; min-width: 16px; height: 16px; padding: 0 5px; border-radius: 8px; font-size: 11px; line-height: 16px; text-align: center; text-transform: none; color: var(--vscode-activityBarBadge-foreground); background: var(--vscode-activityBarBadge-background); }
 .scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 20px 20px calc(16px + var(--sb-end)); touch-action: pan-y pinch-zoom; }
 /* Chrome and Edge move a touch that starts near a box with a :hover or :active style, such as a tab strip, onto that box (touch adjustment),

@@ -5,10 +5,10 @@
  * nothing, for browser bundles.
  */
 
-/** The least room a menu leaves to the viewport's edge, its narrowest and widest, and its greatest height (`.menu`'s `max-height`). */
+/** The least room a menu leaves to the viewport's edge, its narrowest and widest unless it sets its own, and its greatest height (`.menu`'s `max-height`). */
 const MARGIN = 8;
 const MIN_WIDTH = 160;
-const MAX_WIDTH = 360;
+export const MENU_MAX_WIDTH = 360;
 const MAX_HEIGHT = 420;
 
 export interface Box {
@@ -31,9 +31,9 @@ export interface MenuPlace {
 
 /**
  * Where a menu opens from `anchor` in a viewport of `view`, given `menu` as drawn in its default place: its offset from the anchor's left edge
- * and from its bottom (the gap, or a menu's own inset) is kept on the side it flips to.
+ * and from its bottom (the gap, or a menu's own inset) is kept on the side it flips to. `widest` is the most it may take, as its CSS allows.
  */
-export function menuPlace(anchor: Box, menu: Box & { width: number; height: number }, view: { width: number; height: number }): MenuPlace {
+export function menuPlace(anchor: Box, menu: Box & { width: number; height: number }, view: { width: number; height: number }, widest = MENU_MAX_WIDTH): MenuPlace {
   const inset = menu.left - anchor.left;
   const gap = menu.top - anchor.bottom;
   const right = view.width - menu.left - MARGIN;
@@ -46,7 +46,7 @@ export function menuPlace(anchor: Box, menu: Box & { width: number; height: numb
   return {
     flipX,
     flipY,
-    maxWidth: Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Math.floor(flipX ? left : right))),
+    maxWidth: Math.max(MIN_WIDTH, Math.min(widest, Math.floor(flipX ? left : right))),
     // No least height: in a view too short for a few rows, the menu scrolls within the room rather than pass the edge.
     maxHeight: Math.max(0, Math.min(MAX_HEIGHT, Math.floor(view.height * 0.6), Math.floor(flipY ? above : below))),
   };
@@ -62,9 +62,10 @@ export interface MenuElement {
 
 /**
  * Places each open `.menu` under `root` (`menuPlace`), measured from its default place under its parent, the element it opens from; nothing
- * before the viewport has a size, as in a test's DOM. Run after each draw, a resize and a scroll, which moves a menu's anchor.
+ * before the viewport has a size, as in a test's DOM. Run after each draw, a resize and a scroll, which moves a menu's anchor. `widest` reads a
+ * menu's own widest, as its CSS `max-width` sets it, once its size from the last draw is cleared.
  */
-export function placeMenus(root: { querySelectorAll(selector: string): Iterable<MenuElement> }, view: { width: number; height: number }): void {
+export function placeMenus(root: { querySelectorAll(selector: string): Iterable<MenuElement> }, view: { width: number; height: number }, widest: (menu: MenuElement) => number = () => MENU_MAX_WIDTH): void {
   if (view.width === 0 || view.height === 0) {
     return;
   }
@@ -75,7 +76,7 @@ export function placeMenus(root: { querySelectorAll(selector: string): Iterable<
     menu.style.maxHeight = '';
 
     const anchor = (menu.parentElement ?? menu).getBoundingClientRect();
-    const place = menuPlace(anchor, menu.getBoundingClientRect(), view);
+    const place = menuPlace(anchor, menu.getBoundingClientRect(), view, widest(menu));
 
     menu.classList.toggle('flip-x', place.flipX);
     menu.classList.toggle('flip-y', place.flipY);

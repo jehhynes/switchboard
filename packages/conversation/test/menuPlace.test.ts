@@ -90,6 +90,18 @@ describe('placing the open menus', () => {
     expect(left.style.maxWidth).toBe('360px');
   });
 
+  it("takes a menu's own widest in place of the default, still within the room", () => {
+    const wide = new FakeMenu({ getBoundingClientRect: () => box(10, 10, 30, 20) }, { width: 450, height: 100 });
+    const cramped = new FakeMenu({ getBoundingClientRect: () => box(500, 10, 30, 20) }, { width: 450, height: 100 });
+
+    placeMenus({ querySelectorAll: () => [wide, cramped] }, VIEW, () => 480);
+    expect(wide.style.maxWidth).toBe('480px');
+    // 800 - 500 - 8 px to the right, 530 - 8 to the left: it flips and takes 480.
+    expect(cramped.style.maxWidth).toBe('480px');
+    expect([...cramped.classes]).toContain('flip-x');
+    expect(menuPlace(box(500, 10, 30, 20), under(box(500, 10, 30, 20), 200, 100), VIEW, 480)).toMatchObject({ flipX: false, maxWidth: 292 });
+  });
+
   it('leaves the menus alone before the viewport has a size', () => {
     const menu = new FakeMenu({ getBoundingClientRect: () => box(760, 10, 30, 20) }, { width: 200, height: 100 });
 

@@ -1,7 +1,7 @@
 import { applyEvent, commandQuery, EMPTY, mentionOf, mentionQuery, pageTitle, rowLink, selectedRow, sentTexts, tabUrl, withEarlier } from './model.js';
 import { snoozeChoices } from '@switchboard/core/snooze';
 import type { PageState } from './model.js';
-import { placeMenus } from '@switchboard/conversation/menuPlace';
+import { MENU_MAX_WIDTH, placeMenus } from '@switchboard/conversation/menuPlace';
 import { escape, renderMarkdown, webLink } from './markdown.js';
 import { artifactShow, artifactTabsFit, artifactUrl, textArtifactHtml, bandOpen, browserNote, BROWSER_MIN_WIDTH, closedArtifacts, paneLink, collapsedGroups, firstSnoozeDay, GROUPS_KEY, inputReady, renderMicButton, markdownBody, newView, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, hasConsole, SIDE_TABS } from './render.js';
 import type { CardDraft, PaneView, SideTab, Tab, View } from './render.js';
@@ -2079,7 +2079,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     localFiles.drop();
   };
   /** Opens each open menu down and to the right of its button, or the other way where the page has no room (`placeMenus`, architecture.md § Conversation view, Menus). */
-  const fitMenus = (): void => placeMenus(root, { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight });
+  // A menu may set a wider max-width of its own, as the Artifacts menu does for its kind column.
+  const fitMenus = (): void =>
+    placeMenus(root, { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight }, (menu) => parseFloat(getComputedStyle(menu as unknown as Element).maxWidth) || MENU_MAX_WIDTH);
   /**
    * How many artifact tabs the shown strip fits (`artifactTabsFit`), measured after a draw: its other tabs and the Artifacts button as drawn, and a
    * fixed width per artifact tab. True when that changes which tabs show, so the strip is drawn once more; a change of the strip's width draws again

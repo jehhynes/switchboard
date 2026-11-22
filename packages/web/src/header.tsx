@@ -329,8 +329,8 @@ export interface ArtifactStrip {
 
 /**
  * One tab per artifact after the fixed tabs, newest first, but those the operator closed, as many as fit (`artifactBar`), each with a close button;
- * then, when some have no tab, Artifacts with their count, which opens a menu of every artifact, newest first with its kind and age, those with a
- * tab dimmed and those closed marked so.
+ * then, when some have no tab, Artifacts with their count, which opens a menu of every artifact, newest first with its title, kind and age in
+ * columns, those with a tab dimmed and those closed marked so.
  */
 function artifactTabs(state: PageState, strip: ArtifactStrip): ComponentChildren {
   const closed = strip.closed ?? new Set<string>();
@@ -364,15 +364,20 @@ function artifactTabs(state: PageState, strip: ArtifactStrip): ComponentChildren
         </button>
         {strip.menu ? (
           <div class="menu glass artifact-menu" role="menu" aria-label="Artifacts">
-            {ordered.map((artifact) => (
-              <button class={`menu-row${tabs.includes(artifact) ? ' in-bar' : ''}${closed.has(artifact.path) ? ' closed' : ''}`} type="button" role="menuitem" data-action="artifact" data-path={artifact.path} title={artifact.path}>
-                <span class="menu-gutter">
-                  <FileIcon path={artifact.path} />
-                </span>
-                <span class="title">{artifact.title}</span>
-                <span class="menu-note">{closed.has(artifact.path) ? `Closed · ${ago(artifact.updatedAt, strip.now)}` : ago(artifact.updatedAt, strip.now)}</span>
-              </button>
-            ))}
+            {ordered.map((artifact) => {
+              const note = closed.has(artifact.path) ? `Closed · ${ago(artifact.updatedAt, strip.now)}` : ago(artifact.updatedAt, strip.now);
+
+              return (
+                <button class={`menu-row${tabs.includes(artifact) ? ' in-bar' : ''}${closed.has(artifact.path) ? ' closed' : ''}`} type="button" role="menuitem" data-action="artifact" data-path={artifact.path} title={artifact.path} aria-label={`${artifact.title}, ${artifact.kind}, ${note}`}>
+                  <span class="menu-gutter">
+                    <FileIcon path={artifact.path} />
+                  </span>
+                  <span class="title">{artifact.title}</span>
+                  <span class="menu-kind">{artifact.kind}</span>
+                  <span class="menu-note">{note}</span>
+                </button>
+              );
+            })}
           </div>
         ) : null}
       </span>

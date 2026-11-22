@@ -72,6 +72,21 @@ describe('the artifact tabs', () => {
     expect(markup.match(/menu-row in-bar/g)).toHaveLength(2);
   });
 
+  it("show each artifact's title, kind and age in the menu, and its title and kind in its tab's tooltip", () => {
+    const kinds = [{ ...artifact(1), kind: 'plan', title: 'Rollout plan' }, { ...artifact(2), kind: 'report', title: 'Load test' }, ...eight.slice(3)];
+    const markup = html(renderSideSwitch('status', { ...state, artifacts: kinds }, false, { open: null, fit: 1, menu: true, now: 1_001 + 3 * 60_000 }));
+    const menu = new DOMParser().parseFromString(markup, 'text/html').querySelector('.artifact-menu')!;
+    const row = menu.querySelector('[data-path="chat/a1.md"]')!;
+
+    expect([...row.children].map((cell) => cell.className)).toEqual(['menu-gutter', 'title', 'menu-kind', 'menu-note']);
+    expect(row.querySelector('.title')!.textContent).toBe('Rollout plan');
+    expect(row.querySelector('.menu-kind')!.textContent).toBe('plan');
+    expect(row.querySelector('.menu-note')!.textContent).toBe('3 min ago');
+    expect(row.getAttribute('aria-label')).toBe('Rollout plan, plan, 3 min ago');
+    expect(menu.querySelector('[data-path="chat/a2.md"] .menu-kind')!.textContent).toBe('report');
+    expect(markup).toContain('title="Note 7 · note"');
+  });
+
   it('leave out the closed artifacts but the open one, which the menu marks closed', () => {
     const closed = new Set(['chat/a7.md', 'chat/a5.md']);
     const markup = html(renderSideSwitch('artifacts', state, false, { open: 'chat/a5.md', fit: 3, menu: true, now: 2_000, closed }));
@@ -110,6 +125,16 @@ describe('the tab strip on a narrow screen', () => {
     expect(narrow).not.toMatch(/\.tab(\[data-tab|\.selected|:not\(\.diff-tab)[^{]*\{[^}]*display: none/);
     expect(css).toMatch(/@container \(max-width: 360px\) \{\n  \.tab \{ padding: 0 9px; \}/);
     expect(css).toMatch(/@media \(hover: none\), \(pointer: coarse\) \{ \.tab\.artifact-menu-button, \.tab\.changes-button \{ min-width: 44px;/);
+  });
+
+  it('lines up the Artifacts menu kinds in a column, cutting the title first, and leaves the kind out on a viewport under 520 px', () => {
+    expect(css).toContain('.artifact-menu { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto;');
+    expect(css).toContain('.artifact-menu .menu-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid;');
+    expect(css).toContain('@media (max-width: 519.98px) { .artifact-menu .menu-kind { display: none; } }');
+    // A long front matter kind is cut rather than crowd the title out.
+    expect(css).toContain('.artifact-menu .menu-kind { max-width: 14ch; overflow: hidden; text-overflow: ellipsis;');
+    // Wider strips keep the kind: no other rule hides it.
+    expect(css.match(/\.menu-kind[^{]*\{[^}]*display: none/g)).toHaveLength(1);
   });
 
   it('names the Artifacts and Changes buttons with their counts, as their labels may be hidden', () => {
