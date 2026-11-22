@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import headless from '@xterm/headless';
+import { menuCursor } from './input.js';
 
 /**
  * A prompt Claude Code shows in its terminal and waits on, as the web page shows it (architecture.md § Web page): a permission prompt or an
@@ -21,6 +22,8 @@ export type PromptKey = `${number}` | 'escape' | 'next';
 
 const RULE = /^\s*[─━]{10,}/;
 const OPTION = /^\s*(❯\s*)?(\d)\.\s+(.*?)\s*$/;
+/** An option as Claude Code draws it without `TERM`, its cursor ">" (mechanics M121), read only on a screen `menuCursor` takes for a menu. */
+const ASCII_OPTION = /^\s*([❯>]\s*)?(\d)\.\s+(.*?)\s*$/;
 const TABS = /^\s*←.*→\s*$/;
 
 /** Reads the prompt on the visible screen's rows, or null when none is shown: no numbered option 1, or none with the cursor and no "Esc to cancel" or "Enter to …" line. */
@@ -32,13 +35,14 @@ export function readPrompt(rows: readonly string[]): ScreenPrompt | null {
   }
 
   let first = -1;
+  const option = menuCursor(lines) ? ASCII_OPTION : OPTION;
 
   for (let index = lines.length - 1; index >= 0 && first === -1; index--) {
-    first = OPTION.exec(lines[index]!)?.[2] === '1' ? index : -1;
+    first = option.exec(lines[index]!)?.[2] === '1' ? index : -1;
   }
 
   // A menu has the cursor on one of its options, or says how to answer it, as the input guard reads a menu (screenState.menu).
-  if (first === -1 || !lines.slice(first).some((line) => /^\s*❯\s*\d\.\s/.test(line) || /Esc to (cancel|exit|go back)|Enter to (confirm|select)/i.test(line))) {
+  if (first === -1 || !(menuCursor(lines.slice(first)) || lines.slice(first).some((line) => /Esc to (cancel|exit|go back)|Enter to (confirm|select)/i.test(line)))) {
     return null;
   }
 
@@ -53,7 +57,7 @@ export function readPrompt(rows: readonly string[]): ScreenPrompt | null {
   let expected = 1;
 
   for (const line of lines.slice(first)) {
-    const match = OPTION.exec(line);
+    const match = option.exec(line);
 
     if (match === null || Number(match[2]) !== expected) {
       continue;

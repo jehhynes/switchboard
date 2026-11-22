@@ -35,6 +35,16 @@ describe('readPrompt', () => {
     expect(review.id).not.toBe(form.id);
   });
 
+  it('reads a permission prompt drawn without TERM, its cursor ">", and takes a quoted list for none (mechanics M121)', () => {
+    const ascii = screen('permission').map((line) => line.replace('❯', '>'));
+    const prompt = readPrompt(ascii)!;
+
+    expect(prompt.options.map((option) => [option.key, option.selected])).toEqual([['1', true], ['2', false], ['3', false], ['4', false]]);
+    expect(readPrompt(['● Steps:', '', '> 1. Build', '> 2. Test', ''])).toBeNull();
+    // The cursor on the last option, with the help line cut off.
+    expect(readPrompt([' Do you want to proceed?', '   1. Yes', ' > 2. No'])!.options).toEqual([{ key: '1', label: 'Yes', selected: false }, { key: '2', label: 'No', selected: true }]);
+  });
+
   it('shows the checks of a multi-select question in its labels, and finds nothing once the form is answered', () => {
     expect(readPrompt(screen('multi-select'))!.options.map((option) => option.label)).toEqual(['[✔] Apple', '[ ] Pear', '[✔] Plum', 'Chat about this']);
     expect(readPrompt(screen('answered'))).toBeNull();

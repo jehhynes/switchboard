@@ -68,6 +68,15 @@ describe('readInputScreen', () => {
     // A draft whose first line is empty still holds text on the lines below it.
     expect(await readInputScreen({ data: [RULE, '❯ ', '  second line', RULE].join('\r\n'), cols: 40, rows: 6 })).toMatchObject({ draft: 'second line' });
     expect(await readInputScreen({ data: [RULE, '❯ one', '  two', RULE, '  ⏵⏵ auto mode on'].join('\r\n'), cols: 40, rows: 6 })).toMatchObject({ draft: 'one\ntwo' });
+    // Without TERM, Claude Code 2.1.330 draws the prompt as ">" (hub.log 2026-11-22: no input box on any held session's screen); a quoted line
+    // that is not under a rule is not the box.
+    expect(await readInputScreen({ data: ['> quoted', '', RULE, '> hello there', RULE, '  ⏵⏵ auto mode on'].join('\r\n'), cols: 40, rows: 6 })).toEqual({ menu: false, draft: 'hello there', box: `${RULE}\n> hello there\n${RULE}` });
+    expect(await readInputScreen({ data: ['> quoted', '', RULE, '> \u001b[2mTry "fix the build"\u001b[22m', RULE].join('\r\n'), cols: 40, rows: 6 })).toMatchObject({ draft: '', box: `${RULE}\n>\n${RULE}` });
+    expect(await readInputScreen({ data: ['> quoted', 'more'].join('\r\n'), cols: 40, rows: 6 })).toEqual({ menu: false, draft: '', box: '' });
+    // Its menu cursor is ">" too; a quoted numbered list is no menu.
+    expect((await readInputScreen({ data: [' Do you want to proceed?', ' > 1. Yes', '   2. No'].join('\r\n'), cols: 40, rows: 6 })).menu).toBe(true);
+    expect((await readInputScreen({ data: [' Do you want to proceed?', '   1. Yes', ' > 2. No'].join('\r\n'), cols: 40, rows: 6 })).menu).toBe(true);
+    expect((await readInputScreen({ data: ['● Steps:', '> 1. Build', '> 2. Test'].join('\r\n'), cols: 40, rows: 6 })).menu).toBe(false);
   });
 
   it('blocks on a menu, a draft and a key typed in a terminal within 1.5 seconds', () => {

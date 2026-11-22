@@ -43,7 +43,7 @@ const REMOVED =
 
 /**
  * The environment of a Code Mode session's process, from the hub's: Code Mode on, the direct API, the launch, the work item's artifact folder
- * (`CLAUDE_ARTIFACTS_DIR`), and an absolute `sessions.claudePath`'s folder first on PATH. `CLAUDE_CONFIG_DIR` passes through as for background
+ * (`CLAUDE_ARTIFACTS_DIR`), `TERM` for the holder's xterm, and an absolute `sessions.claudePath`'s folder first on PATH. `CLAUDE_CONFIG_DIR` passes through as for background
  * sessions. A held session without Code Mode (`codeMode` false) gets neither Code Mode nor the direct API and keeps the credential variables, so
  * it runs as the operator's own `claude` does (PRD R81).
  */
@@ -58,7 +58,8 @@ export function codeModeEnvironment(base: NodeJS.ProcessEnv, launchId: string, c
 
   const mode = codeMode ? { [CODE_MODE_VARIABLE]: '1', ANTHROPIC_BASE_URL: DIRECT_API } : {};
 
-  return { ...env, ...executableDirOnPath(claudePath, env), ...mode, SWITCHBOARD_LAUNCH: launchId, [ARTIFACTS_ENV]: artifacts };
+  // The holder emulates an xterm; without TERM, as under VS Code on Windows, Claude Code draws its prompt as ">" and its warnings in ASCII.
+  return { ...env, ...executableDirOnPath(claudePath, env), ...mode, TERM: 'xterm-256color', SWITCHBOARD_LAUNCH: launchId, [ARTIFACTS_ENV]: artifacts };
 }
 
 /**

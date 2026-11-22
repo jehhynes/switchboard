@@ -58,6 +58,8 @@ describe('Code Mode command', () => {
         CLAUDE_CODE_GIT_BASH_PATH: 'C:/git/bin/bash.exe',
         CLAUDE_CODE_MESSAGING_PORT: '9',
         CLAUDE_CODE_NO_FLICKER: '1',
+        // The holder's terminal is an xterm, whatever the hub's says.
+        TERM: 'dumb',
       },
       LAUNCH,
       'claude',
@@ -71,6 +73,7 @@ describe('Code Mode command', () => {
       CLAUDE_CODE_GIT_BASH_PATH: 'C:/git/bin/bash.exe',
       CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: '1',
       ANTHROPIC_BASE_URL: 'https://api.anthropic.com',
+      TERM: 'xterm-256color',
       SWITCHBOARD_LAUNCH: LAUNCH,
       CLAUDE_ARTIFACTS_DIR: 'D:/w/.wip/artifacts/w7',
     });
@@ -79,7 +82,7 @@ describe('Code Mode command', () => {
   it('builds a held session without Code Mode with neither Code Mode nor the direct API, even when the hub has them, and keeps the credentials (PRD R81)', () => {
     const env = codeModeEnvironment({ PATH: 'C:/bin', CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: '1', ANTHROPIC_BASE_URL: 'http://127.0.0.1:8318', ANTHROPIC_API_KEY: 'key' }, LAUNCH, 'claude', ARTIFACTS, false);
 
-    expect(env).toEqual({ PATH: 'C:/bin', ANTHROPIC_BASE_URL: 'http://127.0.0.1:8318', ANTHROPIC_API_KEY: 'key', SWITCHBOARD_LAUNCH: LAUNCH, CLAUDE_ARTIFACTS_DIR: ARTIFACTS });
+    expect(env).toEqual({ PATH: 'C:/bin', ANTHROPIC_BASE_URL: 'http://127.0.0.1:8318', ANTHROPIC_API_KEY: 'key', TERM: 'xterm-256color', SWITCHBOARD_LAUNCH: LAUNCH, CLAUDE_ARTIFACTS_DIR: ARTIFACTS });
     expect(codeModeSettings(false)).toBe('{"viewMode":"focus","tui":"default"}');
   });
 
@@ -404,7 +407,7 @@ describe('CodeModeRunner.start', () => {
         file: 'claude',
         args: codeModeStartArgs(ACTION, NATIVE),
         cwd: 'D:/work',
-        env: { PATH: 'C:/bin', CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: '1', ANTHROPIC_BASE_URL: 'https://api.anthropic.com', SWITCHBOARD_LAUNCH: LAUNCH, CLAUDE_ARTIFACTS_DIR: join('D:/work', '.wip', 'artifacts', 'w1') },
+        env: { PATH: 'C:/bin', CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: '1', ANTHROPIC_BASE_URL: 'https://api.anthropic.com', TERM: 'xterm-256color', SWITCHBOARD_LAUNCH: LAUNCH, CLAUDE_ARTIFACTS_DIR: join('D:/work', '.wip', 'artifacts', 'w1') },
         cols: 120,
         rows: 40,
       },

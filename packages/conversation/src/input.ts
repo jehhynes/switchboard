@@ -59,6 +59,20 @@ export function pasteText(text: string, command = false): string {
   return (command ? /^[!#&]/ : /^[/!#&]/).test(clean) ? `\\${clean}` : clean;
 }
 
+/**
+ * The input box's prompt line: "❯", or ">" as Claude Code draws it without `TERM` (a session started before Switchboard set it); a line right under
+ * a rule, so a quoted line elsewhere is not taken for it.
+ */
+const PROMPT = /^[❯>] ?(.*)$/;
+
+/**
+ * Whether the lines show a numbered menu's cursor: "❯ 1." or, as Claude Code draws it without `TERM`, "> 1." with another option line near it,
+ * above or below, that has nothing before its number, which a quoted list ("> 1." over "> 2.") does not have.
+ */
+export function menuCursor(lines: readonly string[]): boolean {
+  return lines.some((line, index) => /^\s*❯\s*\d+\.\s/.test(line) || (/^\s*>\s*\d+\.\s/.test(line) && [...lines.slice(Math.max(0, index - 11), index), ...lines.slice(index + 1, index + 12)].some((other) => /^\s+\d+\.\s/.test(other))));
+}
+
 /** What the visible screen says about typing, from Claude Code's classic renderer (claude-collab `session.js` `screenState`). */
 export const screenState = {
   /**
@@ -68,7 +82,7 @@ export const screenState = {
   menu: (text: string): boolean => {
     const shown = text.split('\n').filter((line) => !/continuing automatically/i.test(line)).join('\n');
 
-    return /^\s*❯\s*\d+\.\s/m.test(shown) || /Esc to (cancel|exit|go back)|Enter to (confirm|select)/i.test(shown);
+    return menuCursor(shown.split('\n')) || /Esc to (cancel|exit|go back)|Enter to (confirm|select)/i.test(shown);
   },
   /**
    * Text typed but not sent: every line of the input box, from the "❯" line right under a rule to the next rule, read with dim cells (the
@@ -78,7 +92,7 @@ export const screenState = {
     const lines = undimmed.split('\n');
 
     for (let index = lines.length - 1; index > 0; index--) {
-      const match = /^❯ ?(.*)$/.exec(lines[index]!);
+      const match = PROMPT.exec(lines[index]!);
 
       if (match === null || !/^─{10,}/.test(lines[index - 1] ?? '')) {
         continue;
@@ -100,7 +114,7 @@ export const screenState = {
     const lines = undimmed.split('\n');
 
     for (let index = lines.length - 1; index > 0; index--) {
-      if (!/^❯/.test(lines[index]!) || !/^─{10,}/.test(lines[index - 1] ?? '')) {
+      if (!PROMPT.test(lines[index]!) || !/^─{10,}/.test(lines[index - 1] ?? '')) {
         continue;
       }
 
