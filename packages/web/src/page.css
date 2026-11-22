@@ -270,6 +270,8 @@ button.picker > .codicon, button.picker > .provider, button.picker > .count, .pe
 button.persona { display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: none; background: transparent; color: var(--vscode-descriptionForeground); padding: 0; border-radius: 4px; cursor: pointer; }
 button.persona.pending .codicon { opacity: 0.6; }
 button.icon, a.icon { display: inline-flex; align-items: center; border: none; background: transparent; color: var(--vscode-icon-foreground); padding: 3px; border-radius: 4px; cursor: pointer; }
+/* Every icon button in the header, inside a menu's anchor or not, is 26 px square, as Actions and the persona are. */
+.header button.icon { justify-content: center; min-width: 26px; height: 26px; }
 /* Floating layers that overlap content (menus, the @ and / lists, the New messages pill) share one glass, as VS Code's own context menu: the
    menu colour mostly opaque over a blur of what is behind, a hairline border and a soft shadow; fully opaque where backdrop-filter is missing. */
 .glass { --glass-fill: var(--vscode-menu-background, var(--vscode-editorWidget-background, var(--vscode-sideBar-background))); background: color-mix(in srgb, var(--glass-fill) 88%, transparent); color: var(--vscode-menu-foreground, var(--vscode-foreground)); -webkit-backdrop-filter: blur(8px) saturate(1.2); backdrop-filter: blur(8px) saturate(1.2); border: 1px solid var(--vscode-menu-border, var(--vscode-widget-border, rgba(127, 127, 127, 0.35))); box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36)); }
@@ -558,8 +560,8 @@ body.artifact-window > .artifact-view { height: 100%; }
 @media (hover: none), (pointer: coarse) {
   .code-block > .copy { opacity: 1; }
   .meta .copy { display: none; }
-  button.picker, button.persona, .header > button.icon, .tab, .composer-tool, .send, .voice-controls .ghost, .row, .group-head, .question-option, .show-more, .earlier-items, .question-submit, .artifact-open, .artifact-head .icon, .composer-error .dismiss { min-height: 44px; }
-  button.persona, .header > button.icon, .composer-tool, .send, .voice-controls .ghost.icon, .artifact-head .icon, .composer-error .dismiss { min-width: 44px; }
+  button.picker, button.persona, .tab, .composer-tool, .send, .voice-controls .ghost, .row, .group-head, .question-option, .show-more, .earlier-items, .question-submit, .artifact-open, .artifact-head .icon, .composer-error .dismiss { min-height: 44px; }
+  button.persona, .composer-tool, .send, .voice-controls .ghost.icon, .artifact-head .icon, .composer-error .dismiss { min-width: 44px; }
   .attachments { gap: 12px 8px; }
   .attachment { min-height: 28px; }
   .attachment-remove { position: relative; }
@@ -577,9 +579,9 @@ body.artifact-window > .artifact-view { height: 100%; }
 @media (max-width: 600px) and (height < 800px) {
   #root.off-conversation:not(:has(#composer:focus-within, #composer .composer-error:not([hidden]))) > .main { padding-bottom: env(safe-area-inset-bottom); }
 }
-/* On a touch screen the bars' icon buttons draw their glyphs at 20 px, centred in the 44 px target. */
+/* On a touch screen every icon button in the bars, inside a menu's anchor or not, is at least 44 px square, with its glyph at 20 px, centred. */
 @media (hover: none), (pointer: coarse) {
-  :is(.header, .list-header, .hist-bar, .settings-head, .artifact-head, .changes-head, .diff-head) :is(button.icon, a.icon, button.actions, button.persona) { align-items: center; justify-content: center; }
+  :is(.header, .list-header, .hist-bar, .settings-head, .artifact-head, .changes-head, .diff-head) :is(button.icon, a.icon, button.actions, button.persona) { min-width: 44px; min-height: 44px; align-items: center; justify-content: center; }
   :is(.header, .list-header, .hist-bar, .settings-head, .artifact-head, .changes-head, .diff-head) :is(button.icon, a.icon, button.actions, button.persona) > .codicon { font-size: 20px; line-height: 1; }
 }
 /* A narrow screen gives the conversation its width: less padding round the timeline and the composer, and wider bubbles. */
