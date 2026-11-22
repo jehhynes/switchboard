@@ -26,7 +26,11 @@ body { color: var(--vscode-foreground); background: var(--vscode-editor-backgrou
    indicator. Every inset is 0 on a desktop and under an opaque status bar, where the band is the installed app's 12 px alone. */
 #safe-top { position: fixed; inset: 0 0 auto 0; z-index: 1001; height: var(--sb-top); background: var(--sb-bar-background); pointer-events: none; }
 #root { box-sizing: border-box; display: flex; height: 100%; padding: var(--sb-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); background: var(--sb-bar-background); }
-.side, .main, .detail, #history { padding-bottom: env(safe-area-inset-bottom); }
+/* The bottom: every scroller runs to the screen's bottom edge, under the home indicator, as a native list does, and pads the end of its content
+   by --sb-end, the home indicator's inset, so its last item still scrolls clear of it. Under a shown composer the inset is 0: the composer
+   is the bottom (its footer's buttons move in from the rounded corners instead, below). */
+:root { --sb-end: env(safe-area-inset-bottom); }
+.main:has(#composer:not([hidden])) { --sb-end: 0px; }
 .codicon { font: normal normal normal 14px/1 codicon; display: inline-block; text-decoration: none; text-rendering: auto; -webkit-font-smoothing: antialiased; user-select: none; }
 .codicon-modifier-spin { animation: codicon-spin 1.5s steps(30) infinite; }
 @keyframes codicon-spin { 100% { transform: rotate(360deg); } }
@@ -119,7 +123,7 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 @media (hover: none), (pointer: coarse) { .list-header button.icon { min-width: 44px; min-height: 44px; } .list-header { min-height: 44px; } }
 /* The list is a stacking context, so iOS WebKit composites the pinned group headers (z-index 2) inside the list's scroll view, below its
    scroll indicator; otherwise they belong to an outer stacking context, sit above the scroll view and cover the indicator. */
-#list { flex: 1; overflow-y: auto; isolation: isolate; padding-bottom: 12px; touch-action: pan-y pinch-zoom; }
+#list { flex: 1; overflow-y: auto; isolation: isolate; padding-bottom: calc(12px + var(--sb-end)); touch-action: pan-y pinch-zoom; }
 #list > .empty { padding: 0 20px; }
 .work-list { --group-head-height: 44px; }
 .work-list ul { list-style: none; margin: 0; padding: 0; }
@@ -363,8 +367,8 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 .artifact-menu .menu-row.in-bar .title { color: var(--vscode-descriptionForeground); }
 .artifact-menu .menu-note { margin-left: 12px; }
 .tab-badge { box-sizing: border-box; min-width: 16px; height: 16px; padding: 0 5px; border-radius: 8px; font-size: 11px; line-height: 16px; text-align: center; text-transform: none; color: var(--vscode-activityBarBadge-foreground); background: var(--vscode-activityBarBadge-background); }
-.scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 20px 20px 16px; touch-action: pan-y pinch-zoom; }
-.scroll.framed { display: flex; flex-direction: column; padding: 0; }
+.scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 20px 20px calc(16px + var(--sb-end)); touch-action: pan-y pinch-zoom; }
+.scroll.framed { display: flex; flex-direction: column; padding: 0 0 var(--sb-end); }
 
 /* The timeline. */
 /* The conversation is as wide as the width set on its sash (--chat-width), 940 px by default, less the pane's padding. */
@@ -447,7 +451,7 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 .artifact-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .artifact-head { display: flex; align-items: center; gap: 6px; padding: 4px 12px; border-bottom: 1px solid var(--vscode-panel-border); }
 .artifact-frame { flex: 1; width: 100%; border: 0; background: #fff; }
-.artifact-doc { flex: 1; overflow-y: auto; padding: 8px 20px 60px; max-width: 900px; width: 100%; box-sizing: border-box; margin: 0 auto; }
+.artifact-doc { flex: 1; overflow-y: auto; padding: 8px 20px calc(60px + var(--sb-end)); max-width: 900px; width: 100%; box-sizing: border-box; margin: 0 auto; }
 /* The head shows the kind as a badge before the title, and a Markdown artifact is typeset as claude-collab's artifact viewer does, in the
    theme's colours: 15 px text, headings, code, tables and quotes as there. */
 .artifact-badge { flex: none; font-size: 12px; font-weight: 600; line-height: 16px; padding: 1px 6px; border: 1px solid currentColor; border-radius: 4px; color: var(--vscode-editorWarning-foreground); }
@@ -588,9 +592,9 @@ body.artifact-window > .artifact-view { height: 100%; }
   .composer-input { font-size: 16px; }
   input:not([type="checkbox"], [type="radio"], [type="file"]), textarea, select { font-size: 16px !important; }
 }
-/* Where a short screen hides a phone's composer off the Conversation tab (below), the conversation keeps the home indicator's inset. */
-@media (max-width: 600px) and (height < 800px) {
-  #root.off-conversation:not(:has(#composer:focus-within, #composer .composer-error:not([hidden]))) > .main { padding-bottom: env(safe-area-inset-bottom); }
+/* Where a short screen hides the composer off the Conversation tab (below), the other tabs' scrollers keep the home indicator's inset. */
+@media (height < 800px) {
+  #root.off-conversation:not(:has(#composer:focus-within, #composer .composer-error:not([hidden]))) > .main { --sb-end: env(safe-area-inset-bottom); }
 }
 /* On a touch screen every icon button in the bars, inside a menu's anchor or not, is at least 44 px square, with its glyph at 20 px, centred. */
 @media (hover: none), (pointer: coarse) {
@@ -599,12 +603,14 @@ body.artifact-window > .artifact-view { height: 100%; }
 }
 /* A narrow screen gives the conversation its width: less padding round the timeline and the composer, and wider bubbles. */
 @media (max-width: 600px) {
-  .scroll { padding: 12px 12px 12px; }
-  /* On a phone the composer is as wide as the screen and sits on its bottom edge, the home indicator's inset inside it, and the notes above
-     it share its edges. */
+  .scroll { padding: 12px 12px calc(12px + var(--sb-end)); }
+  /* On a phone the composer is as wide as the screen and sits on its bottom edge, and the notes above it share its edges. Rather than keep a
+     strip as tall as the home indicator's inset below it, its footer's end buttons keep in from the screen's rounded corners by that inset,
+     less the side's own inset (0 in portrait), and its buttons sit 14 px up, just clear of the home indicator (5 px tall, 8 px above the edge),
+     which lies under the footer's middle. */
   #composer, #note { padding: 0; }
-  #composer .composer { border-width: 1px 0 0; border-radius: 0; box-shadow: none; padding-bottom: env(safe-area-inset-bottom); }
-  .main:has(#composer:not([hidden])) { padding-bottom: 0; }
+  #composer .composer { border-width: 1px 0 0; border-radius: 0; box-shadow: none; }
+  #composer .composer-footer { padding-left: max(5px, calc(env(safe-area-inset-bottom) - env(safe-area-inset-left))); padding-right: max(5px, calc(env(safe-area-inset-bottom) - env(safe-area-inset-right))); padding-bottom: max(5px, min(14px, env(safe-area-inset-bottom))); }
   .session-note, .composer-error { border-left: none; border-right: none; border-radius: 0; }
   .composer-sent { padding: 0 12px; }
   .message .bubble { max-width: 92%; }
@@ -718,7 +724,7 @@ button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }
 
 /* The console (architecture.md § Web page): the held session's terminal, with no bar above it: the focus border shows that it types. It fills its pane and
    nothing round it scrolls: the font fits the screen to the pane, so xterm.js's scrollback is the only scroller. */
-.scroll.console-pane { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+.scroll.console-pane { display: flex; flex-direction: column; padding: 0 0 var(--sb-end); overflow: hidden; background: #181818; }
 /* The console stays in Dark Modern's colours in both schemes, as its terminal does (console.ts), so its note, its button and its scrollbars take
    Dark Modern's values too. */
 .console { --vscode-foreground: #CCCCCC; --vscode-errorForeground: #F85149; --vscode-button-border: #ffffff1a; --vscode-button-secondaryBackground: #00000000; --vscode-button-secondaryForeground: #CCCCCC; --vscode-scrollbarSlider-background: rgba(121, 121, 121, 0.4); --vscode-scrollbarSlider-hoverBackground: rgba(100, 100, 100, 0.7); --vscode-scrollbarSlider-activeBackground: rgba(191, 191, 191, 0.4); color-scheme: dark; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; color: var(--vscode-foreground); background: #181818; position: relative; isolation: isolate; }
@@ -748,7 +754,7 @@ button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }
 .hist-bar-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .hist-bar button.icon { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 26px; padding: 0; border: none; border-radius: 4px; background: transparent; color: var(--vscode-foreground); cursor: pointer; }
 .hist-bar button.icon:hover { background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)); }
-.hist-body { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 24px 48px; }
+.hist-body { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 24px calc(48px + var(--sb-end)); }
 .hist-body > * { max-width: 1100px; margin-left: auto; margin-right: auto; }
 .history-view button:not(.icon) { display: inline-flex; align-items: center; gap: 5px; font: inherit; cursor: pointer; border: 1px solid var(--vscode-button-border, transparent); border-radius: 4px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); padding: 2px 8px; line-height: 18px; }
 .history-view button:not(.icon):hover { background: var(--vscode-button-secondaryHoverBackground); }

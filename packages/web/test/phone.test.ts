@@ -11,17 +11,36 @@ const css = PAGE_ASSETS['page.css']!.body;
 const phone = /@media \(max-width: 600px\) \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
 
 describe('the page on a phone', () => {
-  it('puts the composer across the whole width on the bottom edge, the home indicator inside it, and the notes on its edges', () => {
+  it('puts the composer across the whole width on the bottom edge, its end buttons in from the corners and just above the home indicator, and the notes on its edges', () => {
     expect(phone).toContain('#composer, #note { padding: 0; }');
-    expect(phone).toContain('#composer .composer { border-width: 1px 0 0; border-radius: 0; box-shadow: none; padding-bottom: env(safe-area-inset-bottom); }');
-    // The conversation's own bottom inset goes while the composer holds it, so it is not counted twice.
-    expect(phone).toContain('.main:has(#composer:not([hidden])) { padding-bottom: 0; }');
+    // No strip as tall as the home indicator's inset below the composer.
+    expect(phone).toContain('#composer .composer { border-width: 1px 0 0; border-radius: 0; box-shadow: none; }');
+    expect(css).not.toMatch(/#composer[^{]*\{[^}]*padding-bottom: env\(safe-area-inset-bottom\)/);
+    expect(phone).toContain('#composer .composer-footer { padding-left: max(5px, calc(env(safe-area-inset-bottom) - env(safe-area-inset-left))); padding-right: max(5px, calc(env(safe-area-inset-bottom) - env(safe-area-inset-right))); padding-bottom: max(5px, min(14px, env(safe-area-inset-bottom))); }');
     expect(phone).toContain('.session-note, .composer-error { border-left: none; border-right: none; border-radius: 0; }');
-    // Where a short screen hides the composer off the Conversation tab, by the same condition, the conversation keeps the inset.
-    expect(css).toContain('#root.off-conversation:not(:has(#composer:focus-within, #composer .composer-error:not([hidden]))) #composer { display: none; }');
-    // Only under 800 px of height, where that rule hides it: a taller phone keeps the composer, with the inset inside it.
-    expect(css).toContain('@media (max-width: 600px) and (height < 800px) {\n  #root.off-conversation:not(:has(#composer:focus-within, #composer .composer-error:not([hidden]))) > .main { padding-bottom: env(safe-area-inset-bottom); }\n}');
     expect(phone).not.toContain('off-conversation');
+  });
+
+  it('runs every scroller to the bottom edge, padding the end of its content by the home indicator\'s inset unless a composer is below it', () => {
+    // No column keeps a strip at its bottom.
+    expect(css).not.toMatch(/\.side, \.main, \.detail, #history \{ padding-bottom/);
+    expect(css).toContain(':root { --sb-end: env(safe-area-inset-bottom); }\n.main:has(#composer:not([hidden])) { --sb-end: 0px; }');
+    expect(css).toMatch(/#list \{[^}]*padding-bottom: calc\(12px \+ var\(--sb-end\)\);/);
+    expect(css).toMatch(/(^|\n)\.scroll \{[^}]*padding: 20px 20px calc\(16px \+ var\(--sb-end\)\);/);
+    expect(phone).toContain('.scroll { padding: 12px 12px calc(12px + var(--sb-end)); }');
+    expect(css).toMatch(/\.artifact-doc \{[^}]*padding: 8px 20px calc\(60px \+ var\(--sb-end\)\);/);
+    expect(css).toMatch(/\.hist-body \{[^}]*padding: 16px 24px calc\(48px \+ var\(--sb-end\)\);/);
+    expect(css).toMatch(/\.changes-rows \{[^}]*padding: 0 0 var\(--sb-end\);/);
+    expect(css).toMatch(/\.diff-host \{[^}]*padding-bottom: var\(--sb-end\);/);
+    expect(css).toMatch(/\.scroll\.console-pane \{[^}]*padding: 0 0 var\(--sb-end\);/);
+    // A framed HTML or PDF artifact scrolls inside its frame, so the frame ends above the inset.
+    expect(css).toContain('.scroll.framed { display: flex; flex-direction: column; padding: 0 0 var(--sb-end); }');
+    // Where a short screen hides the composer off the Conversation tab, by the same condition, the other tabs keep the inset.
+    expect(css).toContain('#root.off-conversation:not(:has(#composer:focus-within, #composer .composer-error:not([hidden]))) #composer { display: none; }');
+    expect(css).toContain('@media (height < 800px) {\n  #root.off-conversation:not(:has(#composer:focus-within, #composer .composer-error:not([hidden]))) > .main { --sb-end: env(safe-area-inset-bottom); }\n}');
+    // Full-screen Settings runs to the edge too, its bar holding the inset.
+    expect(css).toContain('.settings-backdrop { padding: var(--sb-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);');
+    expect(css).toContain('.settings-bar { flex-wrap: wrap; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); }');
   });
 
   it('wraps a very long link, path or word anywhere, and keeps code blocks, tables and media inside the conversation', () => {

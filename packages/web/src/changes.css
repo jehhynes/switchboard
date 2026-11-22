@@ -20,7 +20,7 @@
 /* The work item's Open in VS Code, the header's own, beside Refresh. */
 .changes-open { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 4px; background: var(--vscode-button-secondaryBackground, transparent); color: var(--vscode-button-secondaryForeground, var(--vscode-foreground)); font: inherit; font-size: 12px; cursor: pointer; }
 .changes-open:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground)); }
-.changes-rows { flex: 1; min-height: 0; overflow-y: auto; margin: 0; padding: 0; list-style: none; }
+.changes-rows { flex: 1; min-height: 0; overflow-y: auto; margin: 0; padding: 0 0 var(--sb-end); list-style: none; }
 .change-row { display: flex; align-items: center; gap: 6px; box-sizing: border-box; height: 22px; padding: 0 6px 0 8px; border-radius: 4px; white-space: nowrap; }
 .change-row > .codicon { flex: none; font-size: 14px; }
 .change-name { flex: none; max-width: 60%; overflow: hidden; text-overflow: ellipsis; }
@@ -55,7 +55,7 @@
 .diff-back { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; margin-right: 2px; border: none; border-radius: 4px; background: transparent; color: var(--vscode-foreground); cursor: pointer; vertical-align: middle; }
 .diff-back:hover { background: var(--vscode-toolbar-hoverBackground); }
 .diff-host > .empty .diff-back { margin-right: 6px; }
-.diff-host { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain;
+.diff-host { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding-bottom: var(--sb-end);
   --diffs-font-family: var(--vscode-editor-font-family);
   --diffs-header-font-family: var(--vscode-font-family);
   --diffs-font-size: 14px; --diffs-line-height: 19px;

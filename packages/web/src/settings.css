@@ -82,8 +82,9 @@ textarea.settings-text.prompt { font-family: var(--vscode-editor-font-family, mo
 .settings .sheet-backdrop { z-index: 70; }
 /* On a phone the navigation and the page are each the whole screen: the list first, a page after a tap, and Back to the list. */
 @media (max-width: 767px) {
-  /* Full screen, it keeps out of the safe areas, which take the side bar's colour as the page's bars do. */
-  .settings-backdrop { padding: var(--sb-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); background: var(--vscode-sideBar-background); }
+  /* Full screen, it keeps out of the top and side safe areas, which take the side bar's colour as the page's bars do; the bar runs to the
+     bottom edge with the home indicator's inset inside it, as a native toolbar does. */
+  .settings-backdrop { padding: var(--sb-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); background: var(--vscode-sideBar-background); }
   .settings { width: 100%; height: 100%; border: none; border-radius: 0; box-shadow: none; }
   .settings-nav { width: auto; flex: 1; border-right: none; }
   .settings[data-drill="nav"] .settings-page, .settings[data-drill="page"] .settings-nav { display: none; }
@@ -94,7 +95,7 @@ textarea.settings-text.prompt { font-family: var(--vscode-editor-font-family, mo
   .settings-row { grid-template-columns: minmax(0, 1fr); }
   .settings-select { min-width: 0; width: 100%; }
   .settings-page { padding: 12px; }
-  .settings-bar { flex-wrap: wrap; padding: 8px 12px; }
+  .settings-bar { flex-wrap: wrap; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); }
 }
 @media (hover: none), (pointer: coarse) {
   .settings-head button.icon, .settings-info { min-width: 44px; min-height: 44px; }

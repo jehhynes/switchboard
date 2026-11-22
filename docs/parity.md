@@ -39,6 +39,7 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 | G10 | A collapsed group or closed Done band still shows the selected row | none: a closed group or band hides every row | Web only | `renderList` list.tsx |
 | G11 | A list with no rows at all says so | none: each group shows its empty text | Web only | "No work items yet…" render.ts:267 |
 | G12 | The heading of the group at the list's top stays pinned there, on an opaque bar and keeping its toggle and count, while the group's rows scroll under it, until the next group's heading pushes it up; a row scrolled into view by the keyboard or a selection lands below it | `PinGroupHeads`, `Reveal` MainWindow.axaml.cs | Present | `.group-head` `position: sticky` page.css, the gap after a group inside its section (`.group::after`), `scroll-margin-top` on rows and the pool row menu; it spans the list's full width, and `#list`'s `isolation: isolate` keeps iOS's scroll indicator over it |
+| G13 | The list runs to the bottom edge of a phone's screen, under the home indicator, and its last row scrolls clear of it | none: a desktop window has no home indicator | Web only | `#list` pads its end by `--sb-end`, page.css (architecture.md § Web page, iPhone and iPad) |
 
 ## Order
 

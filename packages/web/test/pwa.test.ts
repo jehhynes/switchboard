@@ -208,10 +208,9 @@ describe('the installable page', () => {
     expect(css).toMatch(/#root\.drawers:not\(\.listing\):not\(\.history\) > \.side \{[^}]*padding-top: var\(--sb-top\);/);
     // Only the band's own definitions read the inset; every top edge reads the band.
     expect(css.match(/env\(safe-area-inset-top\)/g)).toHaveLength(2);
-    expect(css).toMatch(/\.side, \.main, \.detail, #history \{ padding-bottom: env\(safe-area-inset-bottom\); \}/);
     expect(css).toMatch(/\.sheet-backdrop \{[^}]*padding: max\(16px, var\(--sb-top\)\)/);
     expect(css).toMatch(/\.settings-backdrop \{[^}]*padding: max\(24px, var\(--sb-top\)\)/);
-    expect(css).toMatch(/\.settings-backdrop \{ padding: var\(--sb-top\) env\(safe-area-inset-right\) env\(safe-area-inset-bottom\) env\(safe-area-inset-left\);/);
+    expect(css).toMatch(/\.settings-backdrop \{ padding: var\(--sb-top\) env\(safe-area-inset-right\) 0 env\(safe-area-inset-left\);/);
     // The bars are opaque in both schemes, so the band and the header they meet are one colour.
     expect(css).toMatch(/^:root \{[^}]*--sb-bar-background: var\(--vscode-sideBar-background\);/m);
 
