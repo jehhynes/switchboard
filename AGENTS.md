@@ -7,7 +7,7 @@ Switchboard replaces Ground Control (`D:\git\ground-control`), which no longer r
 ## Workflow
 
 1. Read the relevant docs and implementation. Write a plan, including verification, before coding.
-2. Implement the change and update affected docs in the same task. Test new behavior according to [testing.md](docs/testing.md).
+2. Implement the change and, in the same task, update the documents it affects as [Documentation](#documentation) directs. Test new behavior according to [testing.md](docs/testing.md).
 3. Review the change with the `cross-check` skill, so the other provider reviews it, before you report the task as done or ask for acceptance. Cover requirements, correctness, regressions, and UI behavior where applicable. Fix or answer each finding before you report the task as done.
 4. Complete the required checks. For executable changes to the extension or hub, [rebuild and reinstall](#reinstalling-after-a-change).
 5. Commit each self-contained story or task after review, verification, and acceptance by the operator or the product manager session.
@@ -36,19 +36,19 @@ Use concise, direct wording everywhere in this repository, including code, ident
 
 ## Documentation
 
-Read and update the document responsible for the decision:
+Read the document that covers the decision:
 
-| Document | Owns |
+| Document | Covers |
 |---|---|
-| [prd.md](docs/prd.md) | Product behavior, scope, requirements (R IDs), delivery order, and implementation gaps |
-| [architecture.md](docs/architecture.md) | Packages, component responsibilities, dependencies, state, and protocols |
-| [mechanics.md](docs/mechanics.md) | Dated experiments and source inspections, versions, limitations, and current use (M IDs) |
-| [testing.md](docs/testing.md) | Required checks, test layers, fixture rules, and isolation |
+| [prd.md](docs/prd.md) | Product scope, goals, design rules, terms and requirements (R IDs) |
+| [architecture.md](docs/architecture.md) | Components, their responsibilities, boundaries, data ownership, protocols and the rationale for core decisions |
+| [mechanics.md](docs/mechanics.md) | Dated experiments and source inspections (M IDs) |
 | [parity.md](docs/parity.md) | Each dock list and row behaviour and whether the web page matches it |
+| [testing.md](docs/testing.md) | Required checks, test layers, fixture rules, isolation and live acceptance |
+| [install-linux.md](docs/install-linux.md) | Installing Switchboard on Linux |
 
-State only Switchboard's own behavior and constraints. Skills that sessions run are outside Switchboard and may change independently: name one only as an example, such as a prompt in a sample setting, and never describe how it works.
-
-Replace superseded text in place. Record the decision and its constraint; omit discussion history, discarded proposals, and changelog prose. Distinguish current implementation, future requirements, and experimental evidence. An experiment does not imply product support. Re-verify version-fragile mechanisms after upgrading Claude Code, its VS Code extension, or VS Code.
+- Invoke the `update-docs` skill ([.claude/skills/update-docs/SKILL.md](.claude/skills/update-docs/SKILL.md)) to create, revise or retire a document under `docs/`, or to decide whether a change needs a documentation update; it owns what each document holds and leaves out.
+- Re-verify the version-fragile mechanisms in mechanics.md after upgrading Claude Code, its VS Code extension, or VS Code.
 
 ## Verification
 
