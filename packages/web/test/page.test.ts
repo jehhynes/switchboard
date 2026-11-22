@@ -12,7 +12,7 @@ import { renderList } from '../src/list.js';
 import { html } from './html.js';
 import { renderMicButton as viewMicButton } from '@switchboard/conversation/voiceControls';
 import { renderMarkdown } from '../src/markdown.js';
-import { CHAT_MAX, CHAT_MIN, DRAWER_HIDE_MS, DRAWER_REVEAL_MS, loadMermaid, PANE_SHOW_DELAY_MS, SENT_NOTE_MS, SHOW_MARKER_MS, SIDE_MAX, SIDE_MIN, startPage } from '../src/main.js';
+import { CHAT_MAX, CHAT_MIN, DRAWER_HIDE_MS, DRAWER_REVEAL_MS, loadMermaid, PANE_SHOW_DELAY_MS, PIN_SNAP, SENT_NOTE_MS, SHOW_MARKER_MS, SIDE_COLLAPSE, SIDE_MAX, SIDE_MIN, startPage } from '../src/main.js';
 import { DETAIL_MIN } from '../src/layout.js';
 import type { ArtifactView, MessageView, PageGroup, PageRow, ReplyView, SessionView } from '@switchboard/protocol';
 
@@ -2080,11 +2080,14 @@ describe('the page in use', () => {
     expect(localStorage.getItem('switchboard.sideWidth')).toBe('300');
     sash.dispatchEvent(new MouseEvent('pointermove', { clientX: 5_000, bubbles: true }));
     expect(width()).toBe(`${SIDE_MAX}px`);
-    sash.dispatchEvent(new MouseEvent('pointermove', { clientX: 50, bubbles: true }));
+    // Under its least width, but not past the snap, the list stops at its least width.
+    sash.dispatchEvent(new MouseEvent('pointermove', { clientX: SIDE_COLLAPSE, bubbles: true }));
     expect(width()).toBe(`${SIDE_MIN}px`);
+    expect(sash.classList.contains('snapping')).toBe(false);
     sash.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
     expect(root.classList.contains('resizing')).toBe(false);
     expect(localStorage.getItem('switchboard.sideWidth')).toBe(String(SIDE_MIN));
+    expect(localStorage.getItem('switchboard.listCollapsed')).toBeNull();
     // A move after the drag ended changes nothing.
     sash.dispatchEvent(new MouseEvent('pointermove', { clientX: 400, bubbles: true }));
     expect(width()).toBe(`${SIDE_MIN}px`);
@@ -3447,6 +3450,205 @@ describe('the page in use', () => {
     expect(root.classList.contains('wide')).toBe(true);
     sash.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
     expect(root.classList.contains('drawers')).toBe(true);
+    page.close();
+  });
+
+  it("hides the list in the drawer when its sash is dragged past the snap, saying so while dragged, and keeps that on the device", () => {
+    localStorage.setItem('switchboard.sideWidth', '300');
+    window.innerWidth = 1440;
+    history.replaceState(null, '', '#w=1');
+
+    const { page, source } = start();
+    const side = root.querySelector<HTMLElement>('.side')!;
+    const sash = root.querySelector<HTMLElement>('.side-sash')!;
+
+    hello(source);
+    vi.spyOn(side, 'getBoundingClientRect').mockImplementation(() => ({ left: 0, width: parseFloat(root.style.getPropertyValue('--side-width')) || 300 }) as DOMRect);
+    expect(root.classList.contains('drawers')).toBe(false);
+    sash.dispatchEvent(new MouseEvent('pointerdown', { button: 0, clientX: 300, bubbles: true }));
+    sash.dispatchEvent(new MouseEvent('pointermove', { clientX: SIDE_COLLAPSE - 1, bubbles: true }));
+    expect(sash.classList.contains('snapping')).toBe(true);
+    expect(sash.dataset['snap']).toBe('Release to hide the work items');
+    expect(root.classList.contains('snap')).toBe(true);
+    // Back over the snap point, the note goes.
+    sash.dispatchEvent(new MouseEvent('pointermove', { clientX: SIDE_COLLAPSE + 1, bubbles: true }));
+    expect(sash.classList.contains('snapping')).toBe(false);
+    sash.dispatchEvent(new MouseEvent('pointermove', { clientX: 10, bubbles: true }));
+    sash.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+    expect(sash.classList.contains('snapping')).toBe(false);
+    expect(root.classList.contains('snap')).toBe(false);
+    // The list is in the drawer though it fits, and keeps the width it had before the drag.
+    expect(root.classList.contains('drawers')).toBe(true);
+    expect(localStorage.getItem('switchboard.listCollapsed')).toBe('1');
+    expect(localStorage.getItem('switchboard.sideWidth')).toBe('300');
+    expect(root.style.getPropertyValue('--side-width')).toBe('300px');
+    expect(document.activeElement).toBe(root.querySelector('.header > .list-toggle'));
+    page.close();
+
+    // A reload keeps it; a wider page does too.
+    window.innerWidth = 1920;
+    const again = start();
+
+    hello(again.source);
+    expect(root.classList.contains('drawers')).toBe(true);
+    // Status and Artifacts take the room the list left.
+    expect(root.classList.contains('wide')).toBe(true);
+    again.page.close();
+  });
+
+  it("hides the list from the keyboard with Left or Home at its least width", () => {
+    localStorage.setItem('switchboard.sideWidth', String(SIDE_MIN + 16));
+    window.innerWidth = 1440;
+    history.replaceState(null, '', '#w=1');
+
+    const { page, source } = start();
+    const sash = root.querySelector<HTMLElement>('.side-sash')!;
+
+    hello(source);
+    sash.focus();
+    sash.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+    expect(localStorage.getItem('switchboard.sideWidth')).toBe(String(SIDE_MIN));
+    expect(root.classList.contains('drawers')).toBe(false);
+    sash.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+    expect(root.classList.contains('drawers')).toBe(true);
+    expect(localStorage.getItem('switchboard.listCollapsed')).toBe('1');
+    expect(localStorage.getItem('switchboard.sideWidth')).toBe(String(SIDE_MIN));
+    page.close();
+  });
+
+  it("pins the list back as a column when the open drawer's sash is dragged wider past the snap, only where it then fits", () => {
+    localStorage.setItem('switchboard.sideWidth', '300');
+    localStorage.setItem('switchboard.listCollapsed', '1');
+    window.innerWidth = 1440;
+    history.replaceState(null, '', '#w=1');
+
+    const { page, source } = start();
+    const side = root.querySelector<HTMLElement>('.side')!;
+    const sash = root.querySelector<HTMLElement>('.drawer-sash')!;
+
+    hello(source);
+    vi.spyOn(side, 'getBoundingClientRect').mockImplementation(() => ({ left: 0, width: parseFloat(root.style.getPropertyValue('--side-width')) || 300 }) as DOMRect);
+    expect(root.classList.contains('drawers')).toBe(true);
+    click('.header > .list-toggle');
+    expect(root.classList.contains('drawer-open')).toBe(true);
+    expect(sash.parentElement).toBe(side);
+    sash.dispatchEvent(new MouseEvent('pointerdown', { button: 0, clientX: 300, bubbles: true }));
+    sash.dispatchEvent(new MouseEvent('pointermove', { clientX: 300 + PIN_SNAP - 1, bubbles: true }));
+    expect(sash.classList.contains('snapping')).toBe(false);
+    // The drawer widens as it is dragged, and keeps open while the pointer is outside it.
+    expect(root.style.getPropertyValue('--side-width')).toBe(`${300 + PIN_SNAP - 1}px`);
+    // 1440 - 640 - 360 leaves the list at most 440 px as a column; past that the release would not show it, so no snap.
+    sash.dispatchEvent(new MouseEvent('pointermove', { clientX: 441, bubbles: true }));
+    expect(sash.classList.contains('snapping')).toBe(false);
+    sash.dispatchEvent(new MouseEvent('pointermove', { clientX: 300 + PIN_SNAP, bubbles: true }));
+    expect(sash.classList.contains('snapping')).toBe(true);
+    expect(sash.dataset['snap']).toBe('Release to keep the work items open');
+    sash.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+    expect(root.classList.contains('drawers')).toBe(false);
+    expect(root.classList.contains('drawer-open')).toBe(false);
+    expect(localStorage.getItem('switchboard.listCollapsed')).toBeNull();
+    expect(localStorage.getItem('switchboard.sideWidth')).toBe(String(300 + PIN_SNAP));
+    expect(document.activeElement).toBe(root.querySelector('.side-sash'));
+    page.close();
+  });
+
+  it("pins the drawer wherever the list then fits, without the slack a list that left by width needs", () => {
+    localStorage.setItem('switchboard.sideWidth', '300');
+    localStorage.setItem('switchboard.listCollapsed', '1');
+    window.innerWidth = 1360;
+    history.replaceState(null, '', '#w=1');
+
+    const { page, source } = start();
+    const side = root.querySelector<HTMLElement>('.side')!;
+    const sash = root.querySelector<HTMLElement>('.drawer-sash')!;
+
+    hello(source);
+    vi.spyOn(side, 'getBoundingClientRect').mockImplementation(() => ({ left: 0, width: parseFloat(root.style.getPropertyValue('--side-width')) || 300 }) as DOMRect);
+    click('.header > .list-toggle');
+    sash.dispatchEvent(new MouseEvent('pointerdown', { button: 0, clientX: 300, bubbles: true }));
+    // 361 + 640 + 360 px is more than 1360; 348 + 640 + 360 px fits, though not with LAYOUT_SLACK more.
+    sash.dispatchEvent(new MouseEvent('pointermove', { clientX: 361, bubbles: true }));
+    expect(sash.classList.contains('snapping')).toBe(false);
+    sash.dispatchEvent(new MouseEvent('pointermove', { clientX: 300 + PIN_SNAP, bubbles: true }));
+    expect(sash.classList.contains('snapping')).toBe(true);
+    sash.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+    expect(root.classList.contains('drawers')).toBe(false);
+    expect(localStorage.getItem('switchboard.listCollapsed')).toBeNull();
+    page.close();
+  });
+
+  it("keeps nothing from a drag the browser cancels, on either sash", () => {
+    localStorage.setItem('switchboard.sideWidth', '300');
+    window.innerWidth = 1440;
+    history.replaceState(null, '', '#w=1');
+
+    const { page, source } = start();
+    const side = root.querySelector<HTMLElement>('.side')!;
+    const sash = root.querySelector<HTMLElement>('.side-sash')!;
+    const drawerSash = root.querySelector<HTMLElement>('.drawer-sash')!;
+    const width = () => root.style.getPropertyValue('--side-width');
+
+    hello(source);
+    vi.spyOn(side, 'getBoundingClientRect').mockImplementation(() => ({ left: 0, width: parseFloat(width()) || 300 }) as DOMRect);
+    sash.dispatchEvent(new MouseEvent('pointerdown', { button: 0, clientX: 300, bubbles: true }));
+    sash.dispatchEvent(new MouseEvent('pointermove', { clientX: 10, bubbles: true }));
+    expect(sash.classList.contains('snapping')).toBe(true);
+    sash.dispatchEvent(new MouseEvent('pointercancel', { bubbles: true }));
+    expect(sash.classList.contains('snapping')).toBe(false);
+    expect(root.classList.contains('resizing')).toBe(false);
+    expect(root.classList.contains('drawers')).toBe(false);
+    expect(localStorage.getItem('switchboard.listCollapsed')).toBeNull();
+    expect(width()).toBe('300px');
+    sash.dispatchEvent(new MouseEvent('pointerdown', { button: 0, clientX: 300, bubbles: true }));
+    sash.dispatchEvent(new MouseEvent('pointermove', { clientX: 380, bubbles: true }));
+    sash.dispatchEvent(new MouseEvent('pointercancel', { bubbles: true }));
+    expect(width()).toBe('300px');
+    expect(localStorage.getItem('switchboard.sideWidth')).toBe('300');
+
+    // The drawer's sash: a cancelled drag past the pin neither pins nor keeps its width.
+    sash.focus();
+    sash.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+    sash.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+    expect(root.classList.contains('drawers')).toBe(true);
+    click('.header > .list-toggle');
+    const kept = localStorage.getItem('switchboard.sideWidth');
+    drawerSash.dispatchEvent(new MouseEvent('pointerdown', { button: 0, clientX: 200, bubbles: true }));
+    drawerSash.dispatchEvent(new MouseEvent('pointermove', { clientX: 300, bubbles: true }));
+    expect(drawerSash.classList.contains('snapping')).toBe(true);
+    drawerSash.dispatchEvent(new MouseEvent('pointercancel', { bubbles: true }));
+    expect(root.classList.contains('drawers')).toBe(true);
+    expect(localStorage.getItem('switchboard.listCollapsed')).toBe('1');
+    expect(localStorage.getItem('switchboard.sideWidth')).toBe(kept);
+    page.close();
+  });
+
+  it("only resizes the open drawer on a release short of the pin, and pins it from the keyboard past the snap", () => {
+    localStorage.setItem('switchboard.sideWidth', '300');
+    localStorage.setItem('switchboard.listCollapsed', '1');
+    window.innerWidth = 1440;
+    history.replaceState(null, '', '#w=1');
+
+    const { page, source } = start();
+    const side = root.querySelector<HTMLElement>('.side')!;
+    const sash = root.querySelector<HTMLElement>('.drawer-sash')!;
+
+    hello(source);
+    vi.spyOn(side, 'getBoundingClientRect').mockImplementation(() => ({ left: 0, width: parseFloat(root.style.getPropertyValue('--side-width')) || 300 }) as DOMRect);
+    click('.header > .list-toggle');
+    sash.dispatchEvent(new MouseEvent('pointerdown', { button: 0, clientX: 300, bubbles: true }));
+    sash.dispatchEvent(new MouseEvent('pointermove', { clientX: 320, bubbles: true }));
+    sash.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+    expect(localStorage.getItem('switchboard.sideWidth')).toBe('320');
+    expect(localStorage.getItem('switchboard.listCollapsed')).toBe('1');
+    expect(root.classList.contains('drawer-open')).toBe(true);
+    sash.focus();
+    // The drawer opened at 300 px: Right to 336 and 352 px stays a drawer; past 348 px it pins.
+    sash.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    expect(root.classList.contains('drawers')).toBe(true);
+    sash.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    expect(root.classList.contains('drawers')).toBe(false);
+    expect(localStorage.getItem('switchboard.listCollapsed')).toBeNull();
+    expect(document.activeElement).toBe(root.querySelector('.side-sash'));
     page.close();
   });
 

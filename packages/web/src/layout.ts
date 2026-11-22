@@ -36,17 +36,17 @@ export function chatNeed(kept: number | null): number {
 }
 
 /**
- * The columns that fit `width`: the list only while it, the conversation at `chat` (`chatNeed`) and the column at `DETAIL_MIN` all fit, and the
- * column only while the conversation and it fit beside whatever the list takes. A column shown at `before` stays until it no longer fits; one
- * hidden comes back only `LAYOUT_SLACK` past its need. A phone's width shows neither.
+ * The columns that fit `width`: the list only while it is not collapsed into the drawer and it, the conversation at `chat` (`chatNeed`) and the
+ * column at `DETAIL_MIN` all fit, and the column only while the conversation and it fit beside whatever the list takes. A column shown at
+ * `before` stays until it no longer fits; one hidden comes back only `LAYOUT_SLACK` past its need. A phone's width shows neither.
  */
-export function fitLayout(width: number, list: number, before: Layout | null, chat = CHAT_FIT): Layout {
+export function fitLayout(width: number, list: number, before: Layout | null, chat = CHAT_FIT, collapsed = false): Layout {
   if (width < TABLET_MIN) {
     return { list: false, wide: false };
   }
 
   const fits = (need: number, was: boolean | undefined): boolean => width >= need + (before === null || was === true ? 0 : LAYOUT_SLACK);
-  const showList = fits(list + chat + DETAIL_MIN, before?.list);
+  const showList = !collapsed && fits(list + chat + DETAIL_MIN, before?.list);
 
   return { list: showList, wide: fits((showList ? list : 0) + chat + DETAIL_MIN, before?.wide) };
 }

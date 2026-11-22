@@ -55,6 +55,12 @@ describe('the page layout', () => {
     expect(fitLayout(767, 260, null, chatNeed(CHAT_MIN))).toEqual({ list: false, wide: false });
   });
 
+  it('keeps the list in the drawer at any width once it is collapsed, giving its room to the column', () => {
+    expect(fitLayout(1920, 340, null, CHAT_FIT, true)).toEqual({ list: false, wide: true });
+    expect(fitLayout(1920, 340, { list: true, wide: true }, CHAT_FIT, true)).toEqual({ list: false, wide: true });
+    expect(fitLayout(767, 260, null, CHAT_FIT, true)).toEqual({ list: false, wide: false });
+  });
+
   it('keeps a shown column until it no longer fits, and brings a hidden one back only LAYOUT_SLACK past its need', () => {
     const shown = { list: true, wide: true };
     const hidden = { list: false, wide: false };

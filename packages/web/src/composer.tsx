@@ -4,7 +4,7 @@ import type { VNode } from 'preact';
 import type { PageState } from './model.js';
 import { trusted } from './trusted.js';
 
-/** The page's hosts: the list and its sheet, the sashes, the hidden list's sliver, the conversation's header, pane, note and composer, the side column, History and the sheet. */
+/** The page's hosts: the list and its sheet and the drawer's sash, the sashes, the hidden list's sliver, the conversation's header, pane, note and composer, the side column, History and the sheet. */
 export function renderFrame(side: { min: number; max: number }, chat: { min: number; max: number }): VNode {
   return (
     <>
@@ -12,8 +12,9 @@ export function renderFrame(side: { min: number; max: number }, chat: { min: num
         <div class="side-head"></div>
         <div id="list"></div>
         <div id="list-sheet"></div>
+        <div class="sash drawer-sash" role="separator" aria-orientation="vertical" aria-label="Work items width" aria-controls="list" tabindex={0} aria-valuemin={side.min} aria-valuemax={side.max} title="Drag to resize, or wider to keep the work items open; double-click to reset"></div>
       </aside>
-      <div class="sash side-sash" role="separator" aria-orientation="vertical" aria-label="Work items width" aria-controls="list" tabindex={0} aria-valuemin={side.min} aria-valuemax={side.max} title="Drag to resize; double-click to reset"></div>
+      <div class="sash side-sash" role="separator" aria-orientation="vertical" aria-label="Work items width" aria-controls="list" tabindex={0} aria-valuemin={side.min} aria-valuemax={side.max} title="Drag to resize, or past the edge to hide the work items; double-click to reset"></div>
       <div class="sliver" aria-hidden="true"></div>
       <main class="main">
         <div id="head"></div>

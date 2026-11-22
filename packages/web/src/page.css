@@ -236,8 +236,9 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
  * with a Back button at the start of its header; touch targets are at least 44 px tall. From 768 px the open work item takes the room first:
  * the list is the side column only while it, the conversation and the Status and Artifacts column all fit (`fitLayout` in layout.ts, which
  * sets #root.drawers otherwise), and a drawer over the conversation's left edge (below) otherwise, shown by the header's Work items button in
- * Back's place. With no work item open it is the side column from 768 px. Every switch is by the page's width and the list's kept width alone,
- * so a desktop window narrowed to a phone's width gets the phone's layout.
+ * Back's place, and in the drawer whatever the width once the operator hides it on its sash (main.ts). With no work item open it is the side
+ * column from 768 px. Every other switch is by the page's width and the kept widths alone, so a desktop window narrowed to a phone's width gets
+ * the phone's layout.
  */
 #root.listing > .main, #root:not(.listing) > .side { display: none; }
 /* Swipe right to go back (swipeBack.ts): while the conversation is dragged right, the list shows under it across the screen, shaded and moved
@@ -278,7 +279,15 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
   #root.drawers.drawer-open:not(.listing):not(.history) > .side { visibility: visible; transform: none; transition: transform 0.15s ease-out; box-shadow: 0 0 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36)); }
   #root.drawers:not(.listing):not(.history):not(.drawer-open) > .sliver { display: block; }
   #root.drawers:not(.listing):not(.history) .header > .list-toggle { display: inline-flex; }
+  /* The open drawer's own sash, on its right edge: dragged wider past PIN_SNAP it pins the list back as a column (main.ts). */
+  #root.drawers.drawer-open:not(.listing):not(.history) > .side > .drawer-sash { display: block; }
 }
+.side { position: relative; }
+.side > .drawer-sash { position: absolute; top: 0; bottom: 0; right: 0; margin: 0; }
+/* A drag that would snap, hiding the list in the drawer or pinning it back, says so beside the sash; the list dims while a release hides it. */
+.sash.snapping { background: var(--vscode-sash-hoverBorder, var(--vscode-focusBorder)); }
+.sash.snapping::after { content: attr(data-snap); position: absolute; top: 50%; left: 10px; transform: translateY(-50%); z-index: 40; padding: 3px 8px; border: 1px solid var(--vscode-editorHoverWidget-border, var(--vscode-widget-border, #454545)); border-radius: 4px; background: var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background)); color: var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground)); font-size: 12px; white-space: nowrap; pointer-events: none; box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36)); }
+#root.snap > .side:has(+ .side-sash.snapping) { opacity: 0.45; }
 @media (prefers-reduced-motion: reduce) { #root.drawers.drawer-open:not(.listing):not(.history) > .side { transition: none; } }
 /* With a mouse, the group headers can be as compact as the dock's. */
 @media (min-width: 768px) and (pointer: fine) {
