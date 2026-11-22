@@ -182,7 +182,7 @@ describe('the packaged voice process (architecture.md § Voice)', () => {
     expect(manifest.files).toContain('turn.js');
     // The GPU check sherpa-onnx's CUDA build runs before it loads; the CUDA build itself is machine data in <home>/voice/models.
     expect(manifest.files).toContain('gpucheck.js');
-    expect(manifest.files.some((file) => file.includes('onnxruntime_providers_cuda'))).toBe(false);
+    expect(manifest.files.some((file) => /onnxruntime_providers_(cuda|tensorrt)/.test(file))).toBe(false);
     expect(manifest.files).toContain('micuse.ps1');
     expect(manifest.files).toContain('commcapture.ps1');
     expect(manifest.files).toContain('lockwatch.ps1');

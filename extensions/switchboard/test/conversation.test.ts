@@ -1503,13 +1503,13 @@ describe('reply links and the secondary side bar', () => {
     expect(linkTarget('./src/a.ts#L42', 'D:/w')).toMatchObject({ line: 42 });
     expect((linkTarget('./src/a.ts#L42', 'D:/w') as { file: string }).file.replaceAll('\\', '/')).toBe('D:/w/src/a.ts');
     expect(linkTarget('src/b.ts#L4-L9', 'D:/w')).toMatchObject({ line: 4 });
-    expect(linkTarget('D:/x/c.ts', null)).toEqual({ file: 'D:/x/c.ts', line: null });
+    expect(linkTarget(process.platform === 'win32' ? 'D:/x/c.ts' : '/x/c.ts', null)).toEqual({ file: process.platform === 'win32' ? 'D:/x/c.ts' : '/x/c.ts', line: null });
     expect(linkTarget('src/d.ts', null)).toBeNull();
     expect(linkTarget('javascript:alert(1)', 'D:/w')).toBeNull();
     expect(linkTarget('mailto:x@y.z', 'D:/w')).toBeNull();
   });
 
-  it('opens a file: URL, a drive-letter path and a path with spaces at their line', () => {
+  it.runIf(process.platform === 'win32')('opens a file: URL, a drive-letter path and a path with spaces at their line', () => {
     expect(linkTarget('file:///D:/git/widgets/Views/Index.cshtml', 'D:/w')).toEqual({ file: 'D:/git/widgets/Views/Index.cshtml', line: null });
     expect(linkTarget('file:///D:/a%20b/c.ts#L3', null)).toEqual({ file: 'D:/a b/c.ts', line: 3 });
     expect(linkTarget('file://localhost/D:/c.ts#L7-L9', null)).toEqual({ file: 'D:/c.ts', line: 7 });
@@ -1519,6 +1519,13 @@ describe('reply links and the secondary side bar', () => {
     expect(linkTarget('D:/x/100%25%23.ts#L1', null)).toEqual({ file: 'D:/x/100%#.ts', line: 1 });
     expect(linkTarget('D:/x/50%.ts', null)).toEqual({ file: 'D:/x/50%.ts', line: null });
     expect(linkTarget('file:javascript:alert(1)', 'D:/w')).toBeNull();
+  });
+
+  it.runIf(process.platform !== 'win32')('opens POSIX files and file URLs at their line', () => {
+    expect(linkTarget('/repo/a.ts#L3', null)).toEqual({ file: '/repo/a.ts', line: 3 });
+    expect(linkTarget('file:///repo/a%20b.ts#L7', null)).toEqual({ file: '/repo/a b.ts', line: 7 });
+    expect(linkTarget('file://localhost/repo/a.ts#L7-L9', null)).toEqual({ file: '/repo/a.ts', line: 7 });
+    expect(linkTarget('./my%20dir/a.ts#L2', '/repo')).toEqual({ file: '/repo/my dir/a.ts', line: 2 });
   });
 
   it('puts the view in the secondary side bar from VS Code 1.106', () => {

@@ -193,6 +193,7 @@ export type FlowEvent =
   /** `launchId`: the launch of a Code Mode session's process (PRD R93). */
   | { type: 'session-started'; sessionId: string; nativeSessionId: string | null; shortId: string; startPrompt?: true; launchId?: string }
   | { type: 'session-start-failed'; sessionId: string; message: string }
+  | { type: 'session-start-pending'; sessionId: string; message: string }
   /** `checked` lists the sessions the read looked for, so a session whose start completed during the read is not ended; all when absent. */
   | { type: 'roster'; sessions: ObservedSession[]; checked?: string[]; forks?: ObservedFork[] }
   /** `limit`: what the runner read about the usage or rate limit a turn ended at (architecture.md § Rate limits). */
@@ -681,6 +682,15 @@ class Flow {
         return this.triageCancelled(event.triageId);
       case 'session-started':
         return this.sessionStarted(event.sessionId, event.nativeSessionId, event.shortId, event.startPrompt === true, event.launchId);
+      case 'session-start-pending': {
+        const session = this.session(event.sessionId);
+        if (session.state === 'starting') {
+          this.store.updateSession(session.id, { stateDetail: event.message });
+          const item = this.latest(session);
+          if (item !== null) this.store.updateWorkItem(item.id, { warning: event.message });
+        }
+        return;
+      }
       case 'session-start-failed':
         return this.sessionStartFailed(event.sessionId, event.message);
       case 'roster':
@@ -1579,11 +1589,12 @@ class Flow {
 
     if (session.state === 'starting') {
       // A session started with no prompt waits for the operator's first message (mechanics M87).
-      const state = startPrompt ? { state: 'waiting' as const, stateDetail: START_PROMPT } : { state: session.promptless === true ? ('idle' as const) : ('running' as const) };
+      const state = startPrompt ? { state: 'waiting' as const, stateDetail: START_PROMPT } : { state: session.promptless === true ? ('idle' as const) : ('running' as const), stateDetail: null };
 
       this.store.updateSession(sessionId, { nativeSessionId, shortId, ...state, stateAt: this.now, ...(launchId === undefined ? {} : { launchId }) });
       const item = this.store.workItem(session.workItemId)!;
-      if (session.execution === 'app-server' && item.error !== null) this.store.updateWorkItem(item.id, { error: null });
+      if (session.stateDetail !== null && item.warning === session.stateDetail) this.store.updateWorkItem(item.id, { warning: null });
+      if ((session.execution === 'app-server' && item.error !== null) || (session.stateDetail !== null && item.error === `Stop failed: ${session.stateDetail}`)) this.store.updateWorkItem(item.id, { error: null });
 
       // The started task session's prompt holds the guidance (PRD R77).
       if (session.kind === 'task' && item.guidance !== null) {
@@ -1599,7 +1610,7 @@ class Flow {
     // A Code Mode start that failed has no session to resume, so its preallocated IDs go (PRD R93); Retry starts a new session.
     const unused = session.codeMode === true ? { nativeSessionId: null, launchId: null } : {};
 
-    this.store.updateSession(sessionId, { state: 'ended', stateAt: this.now, endedAt: this.now, outcome: 'failed', outcomeDetail: message, released: true, ...unused });
+    this.store.updateSession(sessionId, { state: 'ended', stateDetail: null, stateAt: this.now, endedAt: this.now, outcome: 'failed', outcomeDetail: message, released: true, ...unused });
 
     const item = this.latest(session);
 
@@ -1612,6 +1623,7 @@ class Flow {
       return;
     }
 
+    if (session.stateDetail !== null && item.warning === session.stateDetail) this.store.updateWorkItem(item.id, { warning: null });
     this.fail(item, message);
   }
 
@@ -2161,6 +2173,10 @@ class Flow {
 
   private report(sessionId: string, report: Report): void {
     const session = this.session(sessionId);
+
+    if (session.state === 'ended' && session.outcome === 'failed' && session.nativeSessionId === null && session.shortId === null) {
+      throw new Refusal('The session failed to start; retry the work item before reporting.');
+    }
 
     if (!session.reports.includes(report.kind)) {
       throw new Refusal(`This session's report contract does not offer the ${report.kind} report.`);

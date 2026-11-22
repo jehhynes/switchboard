@@ -229,7 +229,7 @@ function copyRecognition() {
 
   const binaries = `bin/napi-v6/${process.platform}/${process.arch}/`;
 
-  if (!copyPackage('onnxruntime-node', (file) => file === 'package.json' || (file.startsWith('dist/') && file.endsWith('.js')) || file.startsWith(binaries))) {
+  if (!copyPackage('onnxruntime-node', (file) => file === 'package.json' || (file.startsWith('dist/') && file.endsWith('.js')) || (file.startsWith(binaries) && !/onnxruntime_providers_(cuda|tensorrt)/.test(file)))) {
     console.warn('onnxruntime-node is not installed, so turn detection waits out the pause alone.');
   } else {
     copyPackage('onnxruntime-common', (file) => file === 'package.json' || (file.startsWith('dist/cjs/') && (file.endsWith('.js') || file.endsWith('/package.json'))), path.dirname(path.dirname(require.resolve('onnxruntime-node'))));

@@ -1,4 +1,5 @@
-import { dirname } from 'node:path';
+import { realpathSync } from 'node:fs';
+import { dirname, posix, win32 } from 'node:path';
 import type { CopyRelation, MarkerReading, ObservedFork, ObservedSession, Reconciled, Session, SessionRunner, SessionTarget, StartAction, StartResult, StopReason } from '@switchboard/core';
 import type { Exec } from './exec.js';
 import { findForks, forkTargets, relationOf, Transcripts } from './fork.js';
@@ -6,12 +7,23 @@ import { markerState } from './hooks.js';
 import type { Marker } from './hooks.js';
 import type { ProcessTable, TabCandidate } from './runner.js';
 import { installHooks, readMarkers } from './install.js';
-import { copyFrom, entryFor, LAUNCH_TIMEOUT_MS, observe, observeForks, parentPids, readRoster, resumeArgs, startSession, stopSession, tabCandidates } from './runner.js';
+import { copyFrom, entryFor, LAUNCH_TIMEOUT_MS, START_TIMEOUT_MS, observe, observeForks, parentPids, readRoster, resumeArgs, startSession, stopSession, tabCandidates } from './runner.js';
 import { claudeEnvironment, failureOf } from './exec.js';
+
+/** A roster directory and a configured repository may use different links or platform spellings. */
+export function rosterDirectory(path: string, platform: NodeJS.Platform = process.platform): string {
+  let real = path;
+  try { real = realpathSync.native(path); } catch { /* Missing directories still have a comparable platform spelling. */ }
+  const paths = platform === 'win32' ? win32 : posix;
+  let normalized = paths.normalize(real);
+  if (normalized.length > paths.parse(normalized).root.length) normalized = normalized.replace(platform === 'win32' ? /[\\/]+$/ : /\/+$/, '');
+  return platform === 'win32' || platform === 'darwin' ? normalized.toLowerCase() : normalized;
+}
 
 export interface ClaudeRunnerDeps {
   /** Read at each use, so a change to `sessions.claudePath` applies to the next command. */
   claudePath(): string;
+  platform?: NodeJS.Platform;
   exec: Exec;
   sleep(ms: number): Promise<void>;
   now(): number;
@@ -30,6 +42,7 @@ export interface ClaudeRunnerDeps {
 /** Claude Code's background sessions (architecture.md § Claude Code runner). */
 export class ClaudeRunner implements SessionRunner {
   private readonly transcripts: Transcripts;
+  private readonly blockedStarts = new Map<string, { native: string; reads: number; at: number }>();
 
   constructor(private readonly deps: ClaudeRunnerDeps) {
     this.transcripts = new Transcripts(`${dirname(deps.claudeSettings).replaceAll('\\', '/')}/projects`, deps.now);
@@ -152,9 +165,35 @@ export class ClaudeRunner implements SessionRunner {
     return target.shortId === null ? Promise.resolve({ error: 'The session has not started yet.' }) : stopSession(this.deps.claudePath(), target.shortId, this.deps.exec);
   }
 
-  /** A background session started by a hub that stopped cannot be matched to its roster entry, so its start fails (PRD R43). */
-  reconcile(sessions: Session[]): Promise<Reconciled[]> {
-    return Promise.resolve(sessions.map((session) => ({ sessionId: session.id, failed: 'The hub stopped while the session was starting.' })));
+  /** Rejoin only a unique native identity or the start's stored Switchboard ID in its label. */
+  async reconcile(sessions: Session[]): Promise<Reconciled[]> {
+    for (const [id, reading] of this.blockedStarts) {
+      if (this.deps.now() - reading.at >= START_TIMEOUT_MS) this.blockedStarts.delete(id);
+    }
+    if (sessions.length === 0) return [];
+    const roster = await readRoster(this.deps.claudePath(), this.deps.exec);
+    if ('error' in roster) return sessions.map(session => ({ sessionId: session.id, pending: roster.error }));
+    const pathKey = (path: string): string => rosterDirectory(path, this.deps.platform);
+    return sessions.map(session => {
+      const matches = roster.entries.filter(entry => entry.kind === 'background' && pathKey(entry.cwd) === pathKey(session.cwd) && (
+        session.nativeSessionId !== null ? entry.sessionId === session.nativeSessionId :
+        session.shortId !== null ? entryFor([entry], session.shortId) !== undefined : entry.name?.endsWith(` · ${session.id}`) === true
+      ));
+      const entry = matches.length === 1 ? matches[0]! : null;
+      const previous = this.blockedStarts.get(session.id);
+      const blocked = entry?.state === 'blocked' && entry.pid === undefined ? (previous?.native === entry.sessionId ? previous.reads : 0) + 1 : 0;
+      if (entry !== null && blocked > 0) this.blockedStarts.set(session.id, { native: entry.sessionId, reads: blocked, at: this.deps.now() });
+      else this.blockedStarts.delete(session.id);
+      if (entry !== null && (entry.pid !== undefined || blocked >= 2)) {
+        this.blockedStarts.delete(session.id);
+        return { sessionId: session.id, started: { shortId: entry.id ?? entry.sessionId.slice(0, 8), nativeSessionId: entry.sessionId, ...(entry.pid === undefined ? { startPrompt: true as const } : {}) } };
+      }
+      if (matches.length > 1) return { sessionId: session.id, pending: 'More than one Claude background session matches this start; inspect claude agents and stop the extra session so the original can be recovered.', attention: true as const };
+      return this.deps.now() - session.startedAt < LAUNCH_TIMEOUT_MS + START_TIMEOUT_MS
+        ? { sessionId: session.id, pending: 'Waiting for the Claude background session to appear in the roster.' }
+        : { sessionId: session.id, pending: `The Claude start is still unconfirmed; inspect claude agents for the label ending · ${session.id}, then use Stop to clear this unconfirmed start if needed.`, attention: true as const, ...(matches.length === 0 ? { clearable: true as const } : {}) };
+
+    });
   }
 
   async installHooks(): Promise<string | null> {

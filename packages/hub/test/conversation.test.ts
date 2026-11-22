@@ -423,7 +423,7 @@ describe('folder-hosted conversations (architecture.md § Window scope)', () => 
       log: () => {},
     });
     // Support runs every work item in one folder with no worktree: two item windows on it, and a link to it.
-    const support = join(dir, 'support');
+    const support = join(dir, 'Support');
     const link = join(dir, 'support-link');
     const elsewhere = join(dir, 'elsewhere');
 
@@ -470,7 +470,7 @@ describe('folder-hosted conversations (architecture.md § Window scope)', () => 
     const item1 = scopes.open(files[0]!, view);
     const item2 = scopes.open(files[1]!, view);
 
-    expect(scopes.scope(folder)).toEqual({ kind: 'folder', key: folder, folder: support, title: 'support', scopeGen: 1, conversations: [{ workItemId: inFolder, primary: false }], workItemId: inFolder, cwd: support, sessionId: 'f1' });
+    expect(scopes.scope(folder)).toEqual({ kind: 'folder', key: folder, folder: support, title: 'Support', scopeGen: 1, conversations: [{ workItemId: inFolder, primary: false }], workItemId: inFolder, cwd: support, sessionId: 'f1' });
     expect(scopes.scoped(folder, view).workItems).toEqual([]);
     expect(scopes.scope(item1)?.conversations).toEqual([{ workItemId: 1, primary: true }, { workItemId: inItem, primary: false }]);
     expect(scopes.scope(item2)?.conversations).toEqual([{ workItemId: 2, primary: true }]);
@@ -499,7 +499,8 @@ describe('folder-hosted conversations (architecture.md § Window scope)', () => 
       expect(scopes.scope(key)?.conversations).toEqual([{ workItemId: inFolder, primary: false }]);
     }
 
-    expect(scopes.keysOf(support.toLowerCase())).toHaveLength(spellings.length);
+    expect(scopes.keysOf(support)).toHaveLength(spellings.length);
+    expect(scopes.keysOf(support.toLowerCase())).toHaveLength(process.platform === 'linux' ? 0 : spellings.length);
 
     writeFileSync(join(dir, 'a.txt'), '');
 
@@ -580,7 +581,7 @@ describe('folder-hosted conversations (architecture.md § Window scope)', () => 
 
     scopes.close(folder);
     expect(scopes.selectFor(newer, support)).toEqual({ keys: [], selected: true });
-    expect(store.windowBinding(windowFileKey(support))).toMatchObject({ workItemId: null, selectedWorkItemId: newer, selectedSessionId: 'f2', scopeGen: 3 });
+    expect(store.windowBinding(process.platform === 'linux' ? support : support.replaceAll('\\', '/').toLowerCase())).toMatchObject({ workItemId: null, selectedWorkItemId: newer, selectedSessionId: 'f2', scopeGen: 3 });
     expect(scopes.scope(scopes.open(null, view, link))).toMatchObject({ kind: 'folder', workItemId: newer, scopeGen: 3 });
   });
 
@@ -610,7 +611,7 @@ describe('folder-hosted conversations (architecture.md § Window scope)', () => 
     // Asked by a link to the folder: hosted by and run in its canonical folder, and stored as that folder's selection before any window opens.
     expect(service.dockConversation({ folder: link, opId: 'dock-1' })).toEqual({ status: 200, body: { workItemId: 3, folder: support } });
     expect(calls).toEqual([[support, support]]);
-    expect(store.windowBinding(windowFileKey(support))).toMatchObject({ workItemId: null, selectedWorkItemId: 3, selectedSessionId: 'd1', title: 'support' });
+    expect(store.windowBinding(process.platform === 'linux' ? support : support.replaceAll('\\', '/').toLowerCase())).toMatchObject({ workItemId: null, selectedWorkItemId: 3, selectedSessionId: 'd1', title: 'Support' });
 
     // The response was lost: the retry, by another spelling, answers the same work item and makes none.
     expect(service.dockConversation({ folder: `${support}${sep}`, opId: 'dock-1' })).toEqual({ status: 200, body: { workItemId: 3, folder: support } });
@@ -645,7 +646,7 @@ describe('folder-hosted conversations (architecture.md § Window scope)', () => 
     }
 
     expect(service.dockConversation({ folder: support, opId: 'x' })).toEqual({ status: 409, body: { error: 'New sessions need Code Mode (sessions.codeMode).' } });
-    expect(store.windowBinding(windowFileKey(support))).toBeNull();
+    expect(store.windowBinding(process.platform === 'linux' ? support : support.replaceAll('\\', '/').toLowerCase())).toBeNull();
   });
 });
 

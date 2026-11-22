@@ -343,7 +343,7 @@ export function markerState(marker: Marker): { state: LiveState; detail: string 
     case 'Stop':
       return marker.backgroundTasks > 0 ? { state: 'running', detail: BACKGROUND_DETAIL } : { state: 'idle', detail: null };
     case 'StopFailure':
-      return { state: 'failed', detail: marker.error ?? marker.errorMessage };
+      return { state: 'failed', detail: [marker.error, marker.errorMessage].filter(Boolean).join(': ') || null };
     default:
       return null;
   }

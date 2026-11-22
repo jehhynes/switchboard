@@ -118,6 +118,18 @@ describe('parseRows and commandQuery', () => {
   });
 });
 
+describe('query input failure', () => {
+  it('keeps a command failure when its SQL input also fails', async () => {
+    const result = await commandQuery("exec 0<&-; printf 'database unavailable' >&2; exit 2 #")('x'.repeat(4 * 1024 * 1024));
+    expect(result).toEqual({ error: 'The Forum query failed: database unavailable' });
+  });
+
+  it('refuses rows when a command closes stdin before receiving the SQL', async () => {
+    const result = await commandQuery("exec 0<&-; printf '{\"n\":1}\\n' #")('x'.repeat(4 * 1024 * 1024));
+    expect(result).toEqual({ error: expect.stringMatching(/^The Forum query input failed:/) });
+  });
+});
+
 describe('parseForumConfig', () => {
   it('applies defaults and validates', () => {
     expect(parseForumConfig({ userId: '7' })).toEqual({ config: { queryCommand: 'bash ~/.claude/scripts/run-forum-sql.sh', forumId: 1, userId: '7', maxRows: 500, auditDatabase: 'audit' } });

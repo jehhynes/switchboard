@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { isAbsolute, join } from 'node:path';
 import { ARTIFACTS_ENV, artifactsDir, START_PROMPT } from '@switchboard/core';
 import type { LiveState, StopReason, MarkerReading, ObservedFork, ObservedSession, PermissionMode, Reconciled, Session, SessionRunner, SessionTarget, StartAction, StartResult } from '@switchboard/core';
 import { killTree, processTable } from '@switchboard/holder';
@@ -9,6 +9,7 @@ import { executableDirOnPath } from '@switchboard/core';
 import { markerState } from './hooks.js';
 import type { Marker } from './hooks.js';
 import { readMarkers } from './install.js';
+import { claudeNotFound, failureOf } from './exec.js';
 import { conversationRules } from './conversationRules.js';
 
 /** The line Claude prints under its banner when Code Mode is on, the start's positive evidence (mechanics M63). */
@@ -144,12 +145,12 @@ export function claudeFile(claudePath: string, platform: NodeJS.Platform = proce
 }
 
 /**
- * Terminal output as text: a cursor move forward as the spaces it skips, other escape sequences removed, and runs of whitespace, including line
+ * Terminal output as text: cursor moves forward or to a column as spacing, other escape sequences removed, and runs of whitespace, including line
  * ends, as one space, so a line wrapped at the terminal's width reads whole.
  */
 export function plainText(output: string): string {
   return output
-    .replace(/\u001b\[(\d*)C/g, (_match, count: string) => ' '.repeat(Math.min(Number(count || '1'), 200)))
+    .replace(/\u001b\[(\d*)[CG]/g, (_match, count: string) => ' '.repeat(Math.min(Number(count || '1'), 200)))
     .replace(/\u001b\][^\u0007\u001b]*(\u0007|\u001b\\)/g, '')
     .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')
     .replace(/\u001b[()][A-Za-z0-9]/g, '')
@@ -392,11 +393,16 @@ export class CodeModeRunner implements SessionRunner {
     }
 
     const claudePath = this.deps.claudePath();
+    const file = claudeFile(claudePath, this.deps.platform);
+
+    if (isAbsolute(file) && !existsSync(file)) {
+      return { error: claudeNotFound(claudePath) };
+    }
 
     (this.deps.makeArtifactsDir ?? makeArtifactsDir)(artifacts);
 
     try {
-      await found.holder.spawn({ session, label, file: claudeFile(claudePath, this.deps.platform), args, cwd, env: codeModeEnvironment(this.deps.environment ?? process.env, launchId, claudePath, artifacts), cols: COLS, rows: ROWS });
+      await found.holder.spawn({ session, label, file, args, cwd, env: codeModeEnvironment(this.deps.environment ?? process.env, launchId, claudePath, artifacts), cols: COLS, rows: ROWS });
     } catch (error) {
       return { error: (error as Error).message };
     }
@@ -461,6 +467,10 @@ export class CodeModeRunner implements SessionRunner {
 
     if (entry === undefined || entry.exitedAt !== null) {
       const lines = lastLines(screen.text);
+
+      if (entry !== undefined && /execvp\(3\) failed[\s\S]*No such file or directory/.test(lines)) {
+        return { error: failureOf(this.deps.claudePath(), { code: entry.exitCode, stdout: '', stderr: lines, missing: true, timedOut: false }, this.readMs(), { cwd: entry.cwd }) };
+      }
 
       return { error: `Claude exited with code ${String(entry?.exitCode ?? null)} before the session started${lines === '' ? '.' : `: ${lines}`}` };
     }

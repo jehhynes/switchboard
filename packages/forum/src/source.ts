@@ -85,6 +85,7 @@ export function parseRows(stdout: string): QueryResult {
 export function commandQuery(command: string, bash = 'bash'): Query {
   return (sql) =>
     new Promise((resolve) => {
+      let inputError: Error | null = null;
       const child = execFile(bash, ['-c', `${command} --result-format=json/raw -`], { timeout: QUERY_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024, windowsHide: true }, (error, stdout, stderr) => {
         if (error !== null) {
           resolve({
@@ -93,9 +94,10 @@ export function commandQuery(command: string, bash = 'bash'): Query {
           return;
         }
 
-        resolve(parseRows(stdout));
+        resolve(inputError === null ? parseRows(stdout) : { error: `The Forum query input failed: ${inputError.message}` });
       });
 
+      child.stdin?.on('error', (error: Error) => { inputError = error; });
       child.stdin?.end(sql);
     });
 }
