@@ -152,6 +152,19 @@ describe('the artifact tabs', () => {
   });
 });
 
+describe("an artifact view's head", () => {
+  const css = PAGE_ASSETS['page.css']!.body;
+
+  it('is one bar for every type: the tab surface, a fixed height, and Open in new window as a 14 px icon, a link drawn as the button is', () => {
+    expect(css).toContain('.artifact-head { box-sizing: border-box; flex: none; display: flex; align-items: center; gap: 6px; min-height: 30px; padding: 4px 12px; border-bottom: 1px solid var(--vscode-panel-border); background: var(--sb-tab-surface, transparent); }');
+    expect(css).toContain('.artifact-head .icon { box-sizing: border-box; flex: none; justify-content: center; width: 22px; height: 22px; padding: 0; text-decoration: none; }');
+    expect(css).toContain('.artifact-head .icon > .codicon { font-size: 14px; line-height: 1; }');
+    expect(css).toMatch(/@media \(hover: none\), \(pointer: coarse\) \{\n  \.artifact-head \{ min-height: 52px; \}\n  \.artifact-head \.icon \{ width: 44px; height: 44px; \}\n\}/);
+    // No other rule sizes its button or glyph, as the bars' touch rule did.
+    expect(css.match(/\.artifact-head[^{]*\{[^}]*(min-width|min-height|font-size)/g)).toEqual(['.artifact-head { box-sizing: border-box; flex: none; display: flex; align-items: center; gap: 6px; min-height', '.artifact-head .icon > .codicon { font-size', '.artifact-head { min-height']);
+  });
+});
+
 describe('the tab strip on a narrow screen', () => {
   const css = PAGE_ASSETS['page.css']!.body;
   const narrow = /@container \(max-width: 600px\) \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';

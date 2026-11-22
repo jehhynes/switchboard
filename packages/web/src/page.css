@@ -538,7 +538,15 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 .artifact-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .artifact-kind { color: var(--vscode-descriptionForeground); font-size: 0.92em; }
 .artifact-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.artifact-head { display: flex; align-items: center; gap: 6px; padding: 4px 12px; border-bottom: 1px solid var(--vscode-panel-border); }
+/* The head of an artifact of every type, and of a file's tab, is one bar: the tab surface, 30 px tall (52 px on a touch screen, for its 44 px
+   button), and Open in new window as an icon button, a link or not, its glyph 14 px as the tab strip's. */
+.artifact-head { box-sizing: border-box; flex: none; display: flex; align-items: center; gap: 6px; min-height: 30px; padding: 4px 12px; border-bottom: 1px solid var(--vscode-panel-border); background: var(--sb-tab-surface, transparent); }
+.artifact-head .icon { box-sizing: border-box; flex: none; justify-content: center; width: 22px; height: 22px; padding: 0; text-decoration: none; }
+.artifact-head .icon > .codicon { font-size: 14px; line-height: 1; }
+@media (hover: none), (pointer: coarse) {
+  .artifact-head { min-height: 52px; }
+  .artifact-head .icon { width: 44px; height: 44px; }
+}
 .artifact-frame { flex: 1; width: 100%; border: 0; background: #fff; }
 .artifact-doc { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 8px 20px calc(60px + var(--sb-end)); max-width: 900px; width: 100%; box-sizing: border-box; margin: 0 auto; }
 /* The head shows the kind as a badge before the title, and a Markdown artifact is typeset as claude-collab's artifact viewer does, in the
@@ -668,17 +676,16 @@ body.artifact-window > .artifact-view { height: 100%; }
 @media (hover: none), (pointer: coarse) {
   .code-block > .copy { opacity: 1; }
   .meta .copy { display: none; }
-  button.picker, .tab, .composer-tool, .send, .voice-controls .ghost, .row, .group-head, .question-option, .show-more, .earlier-items, .question-submit, .question-link, .qc-primary, .qc-secondary, .qc-menu-button, .qc-menu button, .artifact-open, .artifact-head .icon, .composer-error .dismiss { min-height: 44px; }
+  button.picker, .tab, .composer-tool, .send, .voice-controls .ghost, .row, .group-head, .question-option, .show-more, .earlier-items, .question-submit, .question-link, .qc-primary, .qc-secondary, .qc-menu-button, .qc-menu button, .artifact-open, .composer-error .dismiss { min-height: 44px; }
   .qc-menu-button { min-width: 44px; }
   /* A card's options are 56 px rows on touch (design § 6, Phone). */
   .qc-option { min-height: 56px; }
-  .composer-tool, .send, .voice-controls .ghost.icon, .artifact-head .icon, .composer-error .dismiss { min-width: 44px; }
+  .composer-tool, .send, .voice-controls .ghost.icon, .composer-error .dismiss { min-width: 44px; }
   .voice-controls .ghost.talk-here { line-height: 44px; }
   .attachments { gap: 12px 8px; }
   .attachment { min-height: 28px; }
   .attachment-remove { position: relative; }
   .attachment-remove::after { content: ""; position: absolute; inset: -11px; }
-  .artifact-head .icon { display: inline-flex; align-items: center; justify-content: center; }
   .menu-row { height: 44px; }
 }
 /* iOS zooms the page into a text field under 16 px when it takes the focus, so on a touch screen every field types at 16 px; the composer's
@@ -693,8 +700,8 @@ body.artifact-window > .artifact-view { height: 100%; }
 }
 /* On a touch screen every icon button in the bars, inside a menu's anchor or not, is at least 44 px square, with its glyph at 20 px, centred. */
 @media (hover: none), (pointer: coarse) {
-  :is(.header, .list-header, .hist-bar, .settings-head, .persona-head, .artifact-head, .changes-bar) :is(button.icon, a.icon, button.actions) { min-width: 44px; min-height: 44px; align-items: center; justify-content: center; }
-  :is(.header, .list-header, .hist-bar, .settings-head, .persona-head, .artifact-head, .changes-bar) :is(button.icon, a.icon, button.actions) > .codicon { font-size: 20px; line-height: 1; }
+  :is(.header, .list-header, .hist-bar, .settings-head, .persona-head, .changes-bar) :is(button.icon, a.icon, button.actions) { min-width: 44px; min-height: 44px; align-items: center; justify-content: center; }
+  :is(.header, .list-header, .hist-bar, .settings-head, .persona-head, .changes-bar) :is(button.icon, a.icon, button.actions) > .codicon { font-size: 20px; line-height: 1; }
 }
 /* A narrow screen gives the conversation its width: less padding round the timeline and the composer. */
 @media (max-width: 600px) {
