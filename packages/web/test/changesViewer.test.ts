@@ -305,4 +305,17 @@ describe('mountChanges', () => {
     expect(css).toContain('[data-line-type="change-deletion"] { --diffs-diff-line-mix-target: #ff0000; }');
     expect(css).toContain('--diffs-dark-bg: var(--vscode-editor-background)');
   });
+
+  it('HeaderSuffix_ForACollapsedLargeFile_SaysWhyAndHowToRead', () => {
+    const { mount, view } = mounted([row('a.ts'), row('package-lock.json', 'M', 5, 5), row('c.png', 'M', null, null)]);
+    const suffix = (index: number) => (view.options['renderHeaderFilenameSuffix'] as (diff: unknown) => Element)(view.updates.at(index)!.fileDiff).textContent;
+
+    mount.setCollapsed('package-lock.json', true);
+    expect(suffix(-1)).toBe('+5 · −5 · generated');
+    expect((view.options['renderHeaderFilenameSuffix'] as (diff: unknown) => HTMLElement)(view.updates.at(-1)!.fileDiff).title).toBe('A generated file: expand it to read its diff.');
+    mount.setCollapsed('c.png', true);
+    expect(suffix(-1)).toBe('binary');
+    mount.setCollapsed('a.ts', true);
+    expect(suffix(-1)).toBe('+3 · −1');
+  });
 });

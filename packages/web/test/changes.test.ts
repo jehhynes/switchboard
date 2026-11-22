@@ -369,7 +369,10 @@ describe('the Changes list', () => {
     diffAnswers['src/new.ts'] = { status: 404, body: { error: 'src/new.ts is not one of the changes now.' } };
     diffAnswers['logo.png'] = { status: 200, body: { path: 'logo.png', status: 'U', patch: null, old: null, new: null, binary: true, tooLarge: null, partial: true } };
     // None viewed, so none starts collapsed and unread.
-    answers.push({ status: 200, body: { ...LIST, rows: LIST.rows.map((row) => ({ ...row, viewed: false })) } }, { status: 200, body: { ...LIST, rows: LIST.rows.map((row) => ({ ...row, viewed: false })) } });
+    // The list does not know logo.png is binary, so it is read; its answer says so.
+    const unread = () => ({ ...LIST, rows: LIST.rows.map((row) => ({ ...row, viewed: false, binary: false, additions: row.additions ?? 1, deletions: row.deletions ?? 0 })) });
+
+    answers.push({ status: 200, body: unread() }, { status: 200, body: unread() });
     start();
     visible = { first: 0, last: 1 };
     await openRow(0);
@@ -528,11 +531,12 @@ describe('the Changes list', () => {
     expect(chevron('docs/a.md').getAttribute('aria-expanded')).toBe('true');
     chevron('docs/a.md').click();
     // The viewed file started collapsed.
-    expect(changesMounts[0]!.collapsed).toEqual(['src/new.ts true', 'docs/a.md true']);
+    // The viewed file and the binary one started collapsed.
+    expect(changesMounts[0]!.collapsed).toEqual(['src/new.ts true', 'logo.png true', 'docs/a.md true']);
     expect(chevron('docs/a.md').getAttribute('aria-expanded')).toBe('false');
     expect(chevron('docs/a.md').querySelector('.codicon-chevron-right')).not.toBeNull();
     chevron('docs/a.md').click();
-    expect(changesMounts[0]!.collapsed).toEqual(['src/new.ts true', 'docs/a.md true', 'docs/a.md false']);
+    expect(changesMounts[0]!.collapsed).toEqual(['src/new.ts true', 'logo.png true', 'docs/a.md true', 'docs/a.md false']);
     expect(chevron('docs/a.md').getAttribute('aria-expanded')).toBe('true');
   });
 
@@ -594,8 +598,8 @@ describe('the Changes list', () => {
 
     const box = (index: number) => root.querySelectorAll<HTMLElement>('.diff-host .diff-viewed input')[index]!;
 
-    // A viewed file starts collapsed when the tab opens.
-    expect(changesMounts[0]!.collapsed).toEqual(['src/new.ts true']);
+    // A viewed file starts collapsed when the tab opens, as a binary one does.
+    expect(changesMounts[0]!.collapsed).toEqual(['src/new.ts true', 'logo.png true']);
     box(0).click();
     await flush();
     expect(changesMounts[0]!.collapsed.at(-1)).toBe('docs/a.md true');
@@ -697,6 +701,41 @@ describe('the Changes list', () => {
     expect(changesMounts[0]!.collapsed.lastIndexOf('src/new.ts false')).toBeGreaterThan(changesMounts[0]!.collapsed.lastIndexOf('src/new.ts true'));
   });
 
+  it('LargeFiles_BinaryGeneratedOrPast1500Lines_StartCollapsedAndAreReadOnlyWhenExpanded', async () => {
+    const rows = [
+      { ...LIST.rows[0]!, path: 'small.ts', hash: 'h-1', viewed: false },
+      { ...LIST.rows[0]!, path: 'package-lock.json', hash: 'h-2', viewed: false },
+      { ...LIST.rows[0]!, path: 'big.ts', additions: 1400, deletions: 200, hash: 'h-3', viewed: false },
+      { ...LIST.rows[2]!, path: 'logo.png', hash: 'h-4', viewed: false },
+    ];
+    const list = { ...LIST, rows, shown: 4, total: 4 };
+
+    answers.push(...[0, 1, 2].map(() => ({ status: 200, body: structuredClone(list) })));
+    start();
+    visible = { first: 0, last: 3 };
+    await openRow(0);
+    for (let index = 0; index < 6; index++) {
+      await flush();
+    }
+
+    expect(changesMounts[0]!.collapsed).toEqual(['package-lock.json true', 'big.ts true', 'logo.png true']);
+    expect(diffGets().map((one) => /path=([^&]*)/.exec(one)![1])).toEqual(['small.ts']);
+
+    // Expanding one reads it; it is not collapsed again when the list is read again.
+    changesMounts[0]!.header('big.ts');
+    for (let index = 0; index < 6; index++) {
+      await flush();
+    }
+
+    expect(diffGets().map((one) => /path=([^&]*)/.exec(one)![1])).toEqual(['small.ts', 'big.ts']);
+    root.querySelector<HTMLElement>('.changes-button')!.click();
+    await flush();
+    root.querySelector<HTMLElement>('[data-action="changes-refresh"]')!.click();
+    await flush();
+    await flush();
+    expect(changesMounts[0]!.collapsed.filter((one) => one === 'big.ts true')).toHaveLength(1);
+  });
+
   it('ChangesMenu_Buttons_HideViewedCollapseAndExpandEveryFile', async () => {
     start();
     await openRow(0);
@@ -707,9 +746,9 @@ describe('the Changes list', () => {
     expect(root.querySelector('[data-action="changes-hide-viewed"]')!.getAttribute('aria-pressed')).toBe('true');
     root.querySelector<HTMLElement>('[data-action="changes-collapse-all"]')!.click();
     // The viewed file started collapsed; it is hidden now, so only the others collapse.
-    expect(changesMounts[0]!.collapsed).toEqual(['src/new.ts true', 'docs/a.md true', 'logo.png true']);
+    expect(changesMounts[0]!.collapsed).toEqual(['src/new.ts true', 'logo.png true', 'docs/a.md true', 'logo.png true']);
     root.querySelector<HTMLElement>('[data-action="changes-expand-all"]')!.click();
-    expect(changesMounts[0]!.collapsed.slice(3)).toEqual(['docs/a.md false', 'logo.png false']);
+    expect(changesMounts[0]!.collapsed.slice(4)).toEqual(['docs/a.md false', 'logo.png false']);
 
     // Picking a hidden viewed file shows the viewed files again.
     root.querySelectorAll<HTMLElement>('.change-row')[1]!.click();
@@ -907,7 +946,7 @@ describe('the Changes list text', () => {
 
   it('says the file count, the lines changed, the viewed count and a cut list, and the base in its tooltip', () => {
     expect(listNote(LIST)).toBe('3 files · +3 −1 · 1 viewed');
-    expect(listNote({ ...LIST, shown: 400, total: 512 })).toBe('first 400 of 512 files · +3 −1 · 1 viewed');
+    expect(listNote({ ...LIST, shown: 400, total: 512 })).toBe('Showing 400 of 512 files · +3 −1 · 1 viewed');
     expect(listNote({ ...LIST, total: 1 })).toBe('1 file · +3 −1 · 1 viewed');
     expect(listBase(LIST)).toBe('Since 0123456');
     expect(listBase({ ...LIST, base: null })).toBe('Uncommitted changes only, no merge base');

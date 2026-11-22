@@ -5,6 +5,7 @@ import { CodeView, processFile, registerCustomTheme } from '@pierre/diffs';
 import type { CodeViewDiffItem, CodeViewItem, CodeViewOptions, FileDiffMetadata } from '@pierre/diffs';
 import { getOrCreateWorkerPoolSingleton } from '@pierre/diffs/worker';
 import type { WorkerPoolManager } from '@pierre/diffs/worker';
+import { largeReason } from '../changesWindow.js';
 import type { ChangesMount, ChangesMountOptions, ChangesRowInput, DiffData, DiffMount, DiffMountOptions, FileData, FileMountOptions, RowContent } from './types.js';
 
 registerCustomTheme('sb-dark-modern', () => import('./themes/sb-dark-modern.json').then((module) => module.default as never));
@@ -242,7 +243,13 @@ const CHANGES_CSS = `
 @media (prefers-reduced-motion: reduce) { :host([data-sb-item="placeholder"]) pre { animation: none; opacity: 0.4; } }
 `;
 
-/** A placeholder's header suffix: the row's own counts, which its blank lines do not have, and that it is loading unless it is collapsed, when it is not read. */
+/** What a collapsed unread file says it is, briefly, so its name keeps the header's room; its tooltip says expanding reads it. */
+const LARGE_SAYS = { binary: null, generated: 'generated', large: 'large' } as const;
+
+/**
+ * A placeholder's header suffix: the row's own counts, which its blank lines do not have, then that it is loading, or, collapsed and so not
+ * read, nothing more unless it is a binary, generated or large file, which says so.
+ */
 function headerSuffix(fileDiff: FileDiffMetadata, collapsed: ReadonlySet<string>): Element | null {
   const kind = kinds.get(fileDiff);
 
@@ -252,11 +259,18 @@ function headerSuffix(fileDiff: FileDiffMetadata, collapsed: ReadonlySet<string>
 
   const span = document.createElement('span');
   const { additions, deletions, binary } = kind.row;
+  const counts = [additions === null || (additions === 0 && (deletions ?? 0) > 0) ? null : `+${additions}`, deletions === null || deletions === 0 ? null : `−${deletions}`].filter((one) => one !== null);
+  const reason = largeReason(kind.row);
+  const said = reason === null ? null : LARGE_SAYS[reason];
+  const state = collapsed.has(kind.path) ? (said === null ? [] : [said]) : ['Loading…'];
 
   span.className = 'sb-loading';
-  const counts = [additions === null || (additions === 0 && (deletions ?? 0) > 0) ? null : `+${additions}`, deletions === null || deletions === 0 ? null : `−${deletions}`].filter((one) => one !== null);
 
-  span.textContent = [...(binary ? ['binary'] : counts), ...(collapsed.has(kind.path) ? [] : ['Loading…'])].join(' · ');
+  if (reason !== null && collapsed.has(kind.path)) {
+    span.title = `${reason === 'large' ? 'More than 1,500 changed lines' : reason === 'generated' ? 'A generated file' : 'A binary file'}: expand it to read its diff.`;
+  }
+
+  span.textContent = [...(binary ? ['binary'] : counts), ...state].join(' · ');
   return span;
 }
 

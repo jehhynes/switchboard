@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { evictions, rowKey, wantedIndexes } from '../src/changesWindow.js';
+import { evictions, largeReason, rowKey, wantedIndexes } from '../src/changesWindow.js';
 
 describe("the Changes tab's reads", () => {
   it('WantedIndexes_ForTheView_ListsOnScreenThenTheNextOne', () => {
@@ -34,5 +34,23 @@ describe("the Changes tab's budget", () => {
     expect(evictions(all, new Set(['wanted']), { first: 5, last: 5 }, 239)).toEqual(['sides']);
     expect(evictions(all, new Set(['wanted']), { first: 5, last: 5 }, 120)).toEqual(['sides', 'gone', 'far']);
     expect(evictions(all, new Set(['wanted']), { first: 5, last: 5 }, 0)).toEqual(['sides', 'gone', 'far', 'behind', 'near']);
+  });
+});
+describe('large files', () => {
+  const row = (path: string, additions: number | null = 10, deletions: number | null = 0, binary = false) => ({ path, additions, deletions, binary });
+
+  it('LargeReason_ForBinaryGeneratedAndLongDiffs_NamesWhy', () => {
+    expect(largeReason(row('a.png', null, null, true))).toBe('binary');
+    expect(largeReason(row('package-lock.json'))).toBe('generated');
+    expect(largeReason(row('web/yarn.lock'))).toBe('generated');
+    expect(largeReason(row('vendor/app.min.js'))).toBe('generated');
+    expect(largeReason(row('test/__snapshots__/a.test.ts.snap'))).toBe('generated');
+    expect(largeReason(row('packages/web/dist/index.js'))).toBe('generated');
+    expect(largeReason(row('big.ts', 1000, 501))).toBe('large');
+    // Not counted by the hub, as past its size caps.
+    expect(largeReason(row('huge.log', null, null))).toBe('large');
+    expect(largeReason(row('edge.ts', 1000, 500))).toBeNull();
+    expect(largeReason(row('src/distance.ts'))).toBeNull();
+    expect(largeReason(row('src/lockfile.ts'))).toBeNull();
   });
 });

@@ -78,3 +78,28 @@ export function evictions(held: HeldDiff[], wanted: ReadonlySet<string>, visible
 
   return out;
 }
+/** The most changed lines a file's diff shows on its own; past it the file starts collapsed and is read only when expanded. */
+export const LARGE_LINES = 1500;
+/** Lock files, minified files, snapshots and build output: generated, so they start collapsed. */
+const GENERATED = /(^|\/)(package-lock\.json|[^/]*\.lock|[^/]*\.min\.[^/]+|[^/]*\.snap)$|(^|\/)dist\//;
+
+/**
+ * Why a row starts collapsed and is read only when expanded: a binary file, a generated one, or one with more than {@link LARGE_LINES} changed
+ * lines or too large for the hub to count; null for any other.
+ */
+export function largeReason(row: { path: string; additions: number | null; deletions: number | null; binary: boolean }): 'binary' | 'generated' | 'large' | null {
+  if (row.binary) {
+    return 'binary';
+  }
+
+  if (GENERATED.test(row.path)) {
+    return 'generated';
+  }
+
+  // No counts for a file that is not binary: the hub left it uncounted, as it does past its size caps.
+  if (row.additions === null && row.deletions === null) {
+    return 'large';
+  }
+
+  return (row.additions ?? 0) + (row.deletions ?? 0) > LARGE_LINES ? 'large' : null;
+}

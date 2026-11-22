@@ -2,7 +2,7 @@
 // disk, as the VS Code window's Open changes shows them, in a menu from the Changes button at the end of the tab strips, and every changed file's
 // diff in one scrolling Changes tab, drawn by the diff viewer the page loads on first use, which reads only the files near the view.
 import type { ComponentChildren, VNode } from 'preact';
-import { DIFF_BUDGET, evictions, MAX_IN_FLIGHT, rowKey, wantedIndexes } from './changesWindow.js';
+import { DIFF_BUDGET, evictions, largeReason, MAX_IN_FLIGHT, rowKey, wantedIndexes } from './changesWindow.js';
 import { FileIcon } from './fileIcons.js';
 import { mount } from './island.js';
 import type { ChangeRow, ChangesList, ChangeStage, ChangeStatus, DiffData, FileData } from '@switchboard/protocol';
@@ -146,7 +146,7 @@ export function listNote(list: ChangesList): string {
   const ticked = viewed === 0 ? '' : ` · ${viewed} viewed`;
   const lines = ` · +${additions} −${deletions}`;
 
-  return list.shown < list.total ? `first ${list.shown} of ${files}${lines}${ticked}` : `${files}${lines}${ticked}`;
+  return list.shown < list.total ? `Showing ${list.shown} of ${files}${lines}${ticked}` : `${files}${lines}${ticked}`;
 }
 
 /** The menu note's tooltip: since which base. */
@@ -345,6 +345,8 @@ export class ChangesController {
   readonly #viewedCollapsed = new Set<string>();
   /** Whether the next mount collapses the viewed files: only when the tab opens, so a file the operator expanded stays so across remounts. */
   #collapseViewed = false;
+  /** The binary, generated and large files collapsed once, so one the operator expanded is not collapsed again. */
+  readonly #largeSeen = new Set<string>();
   #file: FileOpen | null = null;
   /** The pane the Changes tab drew into, watched so Auto follows a pane resized past 900 px without a redraw. */
   #resize: ResizeObserver | null = null;
@@ -369,6 +371,7 @@ export class ChangesController {
       this.#inFlight.clear();
       this.#failed.clear();
       this.#collapsed.clear();
+      this.#largeSeen.clear();
       this.#jump = null;
       this.#file = null;
       this.#unmount();
@@ -444,6 +447,8 @@ export class ChangesController {
       }
     }
 
+    this.#collapseLarge();
+
     const rows = this.#rows();
     const paths = new Set(this.view.list?.rows.map((row) => row.path) ?? []);
 
@@ -474,6 +479,17 @@ export class ChangesController {
     }
 
     this.#pump();
+  }
+
+  /** Collapses each binary, generated or large file the first time the list has it, so its diff is read only when it is expanded. */
+  #collapseLarge(): void {
+    for (const row of this.view.list?.rows ?? []) {
+      if (!this.#largeSeen.has(row.path) && largeReason(row) !== null) {
+        this.#largeSeen.add(row.path);
+        this.#collapsed.add(row.path);
+        this.#mount?.mount.setCollapsed(row.path, true);
+      }
+    }
   }
 
   /** Handles a click on the Changes button, its menu or the Changes tab; false for any other click. */
