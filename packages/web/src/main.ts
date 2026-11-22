@@ -1478,6 +1478,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     page.documentElement.lang = 'en';
     meta({ charset: 'utf-8' });
+    // At the device's width, so a phone draws it at the page's text size rather than zoomed out.
+    meta({ name: 'viewport', content: 'width=device-width, initial-scale=1' });
     meta({ name: 'referrer', content: 'no-referrer' });
 
     for (const name of ['theme.css', 'codicon.css', 'page.css']) {

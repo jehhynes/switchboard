@@ -2310,6 +2310,7 @@ describe('the page in use', () => {
     expect(html).toContain('<h1>Plan v2</h1>');
     expect(html).toContain('class="artifact-window"');
     expect(html).toContain('/page/page.css');
+    expect(html).toContain('<meta name="viewport" content="width=device-width, initial-scale=1">');
     expect(html).not.toContain('data-action="close-artifact"');
     // Its pictures and links name the hub in full, since a blob: document has no base for the page's paths.
     expect(html).toContain(`src="${location.origin}/v1/conversation/artifact/pk/chat/plan/pic.png"`);

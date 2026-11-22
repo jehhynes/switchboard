@@ -113,6 +113,13 @@ describe('the page on a phone', () => {
     expect(css.indexOf(`${rows}:is(:hover, :focus)`)).toBeGreaterThan(css.indexOf('.menu-row:hover, .menu-row:focus {'));
   });
 
+  it('keeps every text at its set size on a phone turned to landscape, where iOS would enlarge long blocks, with the viewport at the device width', () => {
+    expect(css).toMatch(/(^|\n)html \{ -webkit-text-size-adjust: 100%; text-size-adjust: 100%; \}/);
+    expect(css).not.toMatch(/text-size-adjust: (?!100%)/);
+    expect(PAGE_ASSETS['index.html']!.body).toContain('<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">');
+    expect(PAGE_ASSETS['offline.html']!.body).toContain('html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }');
+  });
+
   it("hides the header's main control in the phone's layout, and the Actions menu starts with it whatever it is", () => {
     expect(css).toContain(':where(html.phone) .header > button.row-main { display: none; }');
 

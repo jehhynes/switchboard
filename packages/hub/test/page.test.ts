@@ -11,7 +11,7 @@ import type { RemoteAccess } from '../src/page.js';
 import { createHash } from 'node:crypto';
 import { runInNewContext } from 'node:vm';
 import { Store } from '@switchboard/core';
-import { artifactFile, cookieValue, deviceLabel, PAIR_CODE_TRIES, PAIR_MS, PAIR_SCRIPT, pageOrigin, dockRowOf, findFiles, knownFolder, pageHeader, loopbackHost, PageAccess, pageCookie, PUBLIC_PAGE_FILES, PAGE_LINK_MS, PAGE_SESSION_MS, PAGE_SESSIONS_KEPT, pageActionEvent, pageActions, pageCommandOf, pageGroups, pageList, pageOpens, pasteText, poolRowOf, rowOpenUrl, tabUrl } from '../src/page.js';
+import { artifactFile, cookieValue, deviceLabel, pairHtml, SIGNED_OUT_HTML, PAIR_CODE_TRIES, PAIR_MS, PAIR_SCRIPT, pageOrigin, dockRowOf, findFiles, knownFolder, pageHeader, loopbackHost, PageAccess, pageCookie, PUBLIC_PAGE_FILES, PAGE_LINK_MS, PAGE_SESSION_MS, PAGE_SESSIONS_KEPT, pageActionEvent, pageActions, pageCommandOf, pageGroups, pageList, pageOpens, pasteText, poolRowOf, rowOpenUrl, tabUrl } from '../src/page.js';
 import { dockView } from '../src/dock.js';
 import type { DockView } from '../src/dock.js';
 import { pageAsset } from '../src/pageAssets.js';
@@ -27,6 +27,15 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
+});
+
+describe('the signed-out and pairing pages', () => {
+  it('draw at the device width with every text at its set size, which iOS would enlarge in landscape', () => {
+    for (const html of [SIGNED_OUT_HTML, pairHtml(false), pairHtml(true)]) {
+      expect(html).toContain('<meta name="viewport" content="width=device-width, initial-scale=1">');
+      expect(html).toContain('<style>html{-webkit-text-size-adjust:100%;text-size-adjust:100%}');
+    }
+  });
 });
 
 describe('PAIR_SCRIPT', () => {

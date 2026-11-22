@@ -5,6 +5,9 @@
    overflow starts it afresh), since
    iOS can still pan a page with overflow: hidden by a few pixels where its visual viewport is shorter than its layout viewport. */
 html, body { height: 100%; margin: 0; overflow: hidden; overscroll-behavior: none; }
+/* iOS enlarges the text of long blocks when the phone turns to landscape (text autosizing), so a long reply would draw bigger than a short
+   one; every text keeps its set size. */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 body { touch-action: pinch-zoom; }
 * { overscroll-behavior: contain; }
 textarea { overscroll-behavior: none; }
