@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { parseLine, readLines } from '../src/transcript.js';
+import { parseLine, readHead, readLines, readLinesBefore, transcriptEnd } from '../src/transcript.js';
 
 describe('parseLine', () => {
   it('reads nothing from what is not an entry object', () => {
@@ -79,6 +79,44 @@ describe('readLines', () => {
       writeFileSync(path, 'c\n');
       expect(readLines(path, 4)).toEqual({ lines: ['c'], offset: 2 });
       expect(readLines(path, 2)).toEqual({ lines: [], offset: 2 });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('reading part of a transcript', () => {
+  it('reads the lines before an offset within a window, leaving out a line the window cuts, and the lines of its start', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'transcript-'));
+    const path = join(dir, 't.jsonl');
+
+    try {
+      writeFileSync(path, 'first\nsecond\nthird\nhalf');
+      // Lines end at 6, 13 and 19; 'half' is still being written.
+      expect(readLinesBefore(path, 23, 1_000)).toEqual(['first', 'second', 'third']);
+      expect(readLinesBefore(path, 19, 16)).toEqual(['second', 'third']);
+      expect(readLinesBefore(path, 19, 13)).toEqual(['second', 'third']);
+      expect(readLinesBefore(path, 15, 9)).toEqual(['second']);
+      expect(readLinesBefore(join(dir, 'missing.jsonl'), 20, 100)).toEqual([]);
+      expect(readHead(path, 9)).toEqual(['first']);
+      expect(readHead(path, 1_000)).toEqual(['first', 'second', 'third']);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("finds the end of a transcript's last complete line, past a line longer than one read", () => {
+    const dir = mkdtempSync(join(tmpdir(), 'transcript-'));
+    const path = join(dir, 't.jsonl');
+
+    try {
+      writeFileSync(path, `a\n${'x'.repeat(200_000)}`);
+      expect(transcriptEnd(path)).toBe(2);
+      writeFileSync(path, `a\n${'x'.repeat(200_000)}\n`);
+      expect(transcriptEnd(path)).toBe(200_003);
+      writeFileSync(path, 'no line end');
+      expect(transcriptEnd(path)).toBe(0);
+      expect(transcriptEnd(join(dir, 'missing.jsonl'))).toBe(0);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

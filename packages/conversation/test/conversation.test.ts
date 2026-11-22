@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Store } from '@switchboard/core';
-import { SessionConversation } from '../src/conversation.js';
+import { COPIED_HEAD_BYTES, SessionConversation } from '../src/conversation.js';
+import { transcriptEnd } from '../src/transcript.js';
 import type { ConversationDeps } from '../src/conversation.js';
 import type { ConversationChange } from '../src/conversation.js';
 import type { ScreenRead } from '../src/screen.js';
@@ -704,6 +705,29 @@ describe('SessionConversation', () => {
     expect(first.items().map((item) => (item.type === 'reply' ? item.opening : ''))).toEqual(['One.', 'Two.']);
   });
 
+  it('reads only what follows a checkpoint set at the end of a transcript with history, and answers a message typed after it', () => {
+    const { store, conversation, path, append, items, changes } = setup();
+
+    append(user('u0', T0 - 60_000, 'Old question'), assistant('a0', T0 - 59_000, 'Old answer.'));
+    store.setCheckpoint({ sessionId: 's1', transcript: path, offset: transcriptEnd(path), lastUuid: null, lastAt: T0 });
+    append(chained(user('u1', T0 + 1000, 'New question'), 'a0'), chained(assistant('a1', T0 + 2000, 'New answer.'), 'u1'));
+    conversation.readTranscript(path);
+
+    expect(items().map((item) => (item.type === 'reply' ? `${item.opening}<${item.answers}` : item.text))).toEqual(['New question', `New answer.<${items()[0]!.id}`]);
+    expect(changes).toHaveLength(2);
+  });
+
+  it('takes a checkpoint whose path names the transcript with other separators as its own', () => {
+    const { store, conversation, path, append, items } = setup();
+
+    append(user('u0', T0 - 60_000, 'Old question'));
+    store.setCheckpoint({ sessionId: 's1', transcript: path.replaceAll('\\', '/'), offset: transcriptEnd(path), lastUuid: null, lastAt: T0 });
+    append(user('u1', T0 + 1000, 'New question'));
+    conversation.readTranscript(path.replaceAll('/', '\\'));
+
+    expect(items().map((item) => (item.type === 'message' ? item.text : ''))).toEqual(['New question']);
+  });
+
   it('answers the stored message after a restart, and imports no entry twice when the transcript is replaced by a shorter copy', () => {
     const first = setup();
 
@@ -790,6 +814,20 @@ describe('SessionConversation', () => {
     conversation.readTranscript(branched);
 
     expect(items().map((item) => (item.type === 'reply' ? `${item.kind}:${item.opening}` : ''))).toEqual(['reply:Before.', 'reply:After clear.', 'note:Conversation continued from another session.', 'reply:New in branch.']);
+  });
+
+  it('reads a new transcript whose first line is longer than the part checked for copied history from its end', () => {
+    const { conversation, path, append, items } = setup();
+
+    append(assistant('a1', T0 + 10_000, 'Before.'));
+    conversation.readTranscript(path);
+
+    const resumed = join(dir, 'native-2.jsonl');
+
+    writeFileSync(resumed, `${assistant('c0', T0, `Copied ${'x'.repeat(COPIED_HEAD_BYTES)}`)}\n${assistant('c1', T0 + 1, 'Copied too.')}\n`);
+    conversation.readTranscript(resumed);
+
+    expect(items().map((item) => (item.type === 'reply' ? `${item.kind}:${item.opening}` : ''))).toEqual(['reply:Before.', 'note:Conversation continued from another session.']);
   });
 
   it('confirms a typed /clear by its line in the new transcript it starts, and still lets go of other messages typed into the earlier one', () => {

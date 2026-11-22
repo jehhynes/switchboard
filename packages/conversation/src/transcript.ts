@@ -203,6 +203,92 @@ export function readLines(path: string, offset: number): { lines: string[]; offs
   return { lines: buffer.subarray(0, end).toString('utf8').split('\n').filter((line) => line.trim() !== ''), offset: from + end + 1 };
 }
 
+/**
+ * The complete lines of a transcript that end at or before `offset` and start no more than `bytes` before it; a line cut by that window is left
+ * out. Empty when the transcript cannot be read.
+ */
+export function readLinesBefore(path: string, offset: number, bytes: number): string[] {
+  const end = Math.min(offset, sizeOf(path) ?? 0);
+  const from = Math.max(0, end - bytes);
+
+  if (end <= from) {
+    return [];
+  }
+
+  const buffer = readBytes(path, from, end - from);
+  // A piece after the last line end is a line still being written, or one `offset` cuts.
+  const lines = buffer.subarray(0, buffer.lastIndexOf(10) + 1).toString('utf8').split('\n');
+
+  // The window's first piece starts inside a line, unless the window starts the file or a line.
+  if (from > 0 && readBytes(path, from - 1, 1)[0] !== 10) {
+    lines.shift();
+  }
+
+  return lines.filter((line) => line.trim() !== '');
+}
+
+/** The complete lines among a transcript's first `bytes`, or none when it cannot be read. */
+export function readHead(path: string, bytes: number): string[] {
+  const size = sizeOf(path) ?? 0;
+  const buffer = readBytes(path, 0, Math.min(size, bytes));
+  const end = buffer.lastIndexOf(10);
+
+  return end === -1 ? [] : buffer.subarray(0, end).toString('utf8').split('\n').filter((line) => line.trim() !== '');
+}
+
+/** The offset just past a transcript's last complete line: where a reader that skips everything written so far starts. 0 when it has none. */
+export function transcriptEnd(path: string): number {
+  const size = sizeOf(path) ?? 0;
+
+  for (let end = size; end > 0; ) {
+    const from = Math.max(0, end - TAIL_CHUNK_BYTES);
+    const at = readBytes(path, from, end - from).lastIndexOf(10);
+
+    if (at !== -1) {
+      return from + at + 1;
+    }
+
+    end = from;
+  }
+
+  return 0;
+}
+
+/** How much of a transcript's end `transcriptEnd` reads at a time, looking for its last line end. */
+const TAIL_CHUNK_BYTES = 64 * 1024;
+
+function sizeOf(path: string): number | null {
+  try {
+    return statSync(path).size;
+  } catch {
+    return null;
+  }
+}
+
+/** `length` bytes of a file from `from`, or none when it cannot be read. */
+function readBytes(path: string, from: number, length: number): Buffer {
+  if (length <= 0) {
+    return Buffer.alloc(0);
+  }
+
+  let fd: number;
+
+  try {
+    fd = openSync(path, 'r');
+  } catch {
+    return Buffer.alloc(0);
+  }
+
+  try {
+    const buffer = Buffer.alloc(length);
+    const read = readSync(fd, buffer, 0, length, from);
+
+    return buffer.subarray(0, read);
+  } finally {
+    closeSync(fd);
+  }
+}
+
 /** A slash command a session offers: a built-in or one of its skills, without its slash. */
 export interface SlashCommand {
   name: string;

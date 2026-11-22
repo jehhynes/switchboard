@@ -6,7 +6,7 @@ import { ScreenReader } from './screenReader.js';
 import { pasteText } from './input.js';
 import { keyOf, parseReply, stripAside } from './tags.js';
 import type { HeardTag } from './tags.js';
-import { parseLine, readLines } from './transcript.js';
+import { parseLine, readHead, readLines, readLinesBefore, transcriptEnd } from './transcript.js';
 import type { TranscriptEntry } from './transcript.js';
 import type { ScreenRead } from './screen.js';
 import { ConversationLog } from './log.js';
@@ -75,8 +75,20 @@ function confirms(at: number, message: ConversationMessage): boolean {
 /** A typed `/clear`, which moves the session to a new transcript file that records it. */
 const CLEAR = /^\/clear(?:\s|$)/;
 
+/**
+ * How much of a transcript before the point a reader starts at is indexed for `#answered`, and how much of a new transcript's start is checked
+ * for copied history. A transcript can grow to hundreds of megabytes, and reading it all would hold up the hub (architecture.md § Conversation).
+ */
+export const INDEX_TAIL_BYTES = 8 * 1024 * 1024;
+export const COPIED_HEAD_BYTES = 1024 * 1024;
+
 /** How many stored replies seed the screen reader, so the screen's old replies, redrawn, are never published again. */
 const SEED_REPLIES = 200;
+
+/** Whether two paths name the same transcript, whichever separators built them, as the hub's lookups and a stored checkpoint may differ. */
+function sameFile(a: string, b: string): boolean {
+  return a.replaceAll('\\', '/') === b.replaceAll('\\', '/');
+}
 
 /** Where the session's transcript is now: its file, or null while it has none. */
 export interface TranscriptState {
@@ -137,7 +149,7 @@ export class SessionConversation extends ConversationLog {
 
     let checkpoint = this.deps.store.checkpoint(this.sessionId);
 
-    if (checkpoint === null || checkpoint.transcript !== path) {
+    if (checkpoint === null || !sameFile(checkpoint.transcript, path)) {
       checkpoint = this.#switchTo(path, checkpoint);
     }
 
@@ -146,7 +158,7 @@ export class SessionConversation extends ConversationLog {
       this.#indexed = true;
 
       if (checkpoint.offset > 0) {
-        for (const line of readLines(path, 0)?.lines ?? []) {
+        for (const line of readLinesBefore(path, checkpoint.offset, INDEX_TAIL_BYTES)) {
           this.#index(parseLine(line));
         }
       }
@@ -200,8 +212,9 @@ export class SessionConversation extends ConversationLog {
     let offset = 0;
 
     if (previous !== null) {
-      const read = readLines(path, 0);
-      const copied = read !== null && read.lines.some((line) => {
+      // Copied history comes first in the new file; a first line longer than the part read is copied history too, as a new file starts small.
+      const head = readHead(path, COPIED_HEAD_BYTES);
+      const copied = (head.length === 0 && transcriptEnd(path) > 0) || head.some((line) => {
         const { at } = parseLine(line);
 
         return at !== null && previous.lastAt !== null && at < previous.lastAt;
@@ -216,7 +229,7 @@ export class SessionConversation extends ConversationLog {
       }
 
       if (copied) {
-        offset = read.offset;
+        offset = transcriptEnd(path);
         this.note('Conversation continued from another session.');
       }
 
@@ -229,7 +242,7 @@ export class SessionConversation extends ConversationLog {
     this.#indexed = true;
 
     if (offset > 0) {
-      for (const line of readLines(path, 0)?.lines ?? []) {
+      for (const line of readLinesBefore(path, offset, INDEX_TAIL_BYTES)) {
         this.#index(parseLine(line));
       }
     }
