@@ -145,7 +145,7 @@ body.vscode-high-contrast .message .box, body.vscode-high-contrast-light .messag
 /* The placeholder stays on one line, cut with an ellipsis in a narrow view, rather than wrapping under itself. */
 .composer textarea::placeholder { color: var(--vscode-input-placeholderForeground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .composer textarea:disabled { cursor: not-allowed; }
-.composer-controls { display: flex; flex: 1; align-items: center; gap: 2px; min-width: 0; min-height: 26px; }
+.composer-controls { display: flex; flex: 1 0 auto; align-items: center; gap: 2px; min-height: 26px; }
 .composer .send { margin-left: 2px; }
 .sending .composer { opacity: 0.7; }
 /* Dictation (architecture.md § Dictation): live words dimmed under the text, and the mic button beside Send. */
@@ -313,10 +313,11 @@ body.vscode-high-contrast .conversation-row[aria-checked="true"], body.vscode-hi
 .show-more { display: inline-block; margin: 2px 0 0; padding: 0; border: none; background: none; color: var(--vscode-textLink-foreground); font: inherit; font-size: 0.92em; cursor: pointer; }
 .show-more:hover { text-decoration: underline; }
 .show-more:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
-.voice-controls { display: flex; align-items: center; gap: 2px; min-width: 0; margin-left: 4px; }
+.voice-controls { display: flex; align-items: center; gap: 2px; min-width: 0; }
 .voice-controls .ghost { display: inline-flex; align-items: center; justify-content: center; gap: 4px; height: 26px; padding: 0 6px; border: none; border-radius: 5px; background: none; color: var(--vscode-descriptionForeground); font: inherit; font-size: 0.85em; white-space: nowrap; cursor: pointer; }
-.voice-controls .ghost.icon { width: 26px; padding: 0; }
+.voice-controls .ghost.icon { flex: none; width: 26px; padding: 0; }
 .voice-controls .ghost .codicon { font-size: 16px; }
+.voice-controls .ghost.talk-here { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; line-height: 26px; }
 .voice-controls .ghost:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
 .voice-controls .ghost[aria-pressed="true"] { color: var(--vscode-foreground); }
 

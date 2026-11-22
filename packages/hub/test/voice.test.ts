@@ -558,8 +558,26 @@ describe('VoiceControl', () => {
     connections[0]!.receive({ type: 'active', gen: 3, sessionId: 's1', reason: 'focus' });
     control.replyChanged(reply('r4'));
     control.setSpeakReplies(false);
-    expect(connections[0]!.sent.filter((one) => one.type === 'cancel').at(-1)).toEqual({ type: 'cancel', replyId: 'r4' });
+    expect(connections[0]!.sent.filter((one) => one.type === 'cancel').at(-1)).toEqual({ type: 'cancel', replyId: 'r4', off: true });
     expect(control.view('k1').speakReplies).toBe(false);
+  });
+
+  it('cancels every reply offered as Speak replies off, which the voice process stops at once, playing or not yet reported playing', async () => {
+    const { control, connections, windows, reply, settle } = setup();
+
+    windows.set('k1', scope('k1', 1, 's1'));
+    control.update();
+    await settle();
+    connections[0]!.receive({ type: 'active', gen: 1, sessionId: 's1', reason: 'focus' });
+    control.replyChanged(reply('r1'));
+    control.replyChanged(reply('r2'));
+    connections[0]!.receive({ type: 'speech', gen: 1, replyId: 'r1', sessionId: 's1', state: 'playing', atMs: 0, said: 0 });
+    expect(control.view('k1').speaking).toBe('r1');
+    const before = connections[0]!.sent.length;
+
+    control.setSpeakReplies(false);
+    // No `stop`, which would drop the alert lines waiting too.
+    expect(connections[0]!.sent.slice(before)).toEqual([{ type: 'cancel', replyId: 'r1', off: true }, { type: 'cancel', replyId: 'r2', off: true }]);
   });
 
   it('runs Talk here, Stop speaking and Replay only where they apply, and turns a dock row click into Talk here', async () => {

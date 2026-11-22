@@ -1585,13 +1585,17 @@ export class VoiceControl {
     return null;
   }
 
-  /** Speak replies on or off; turning it off cancels every reply offered and not yet played. */
+  /**
+   * Speak replies on or off. Turning it off cancels every reply offered with `off`, so the voice process stops the one playing at once,
+   * `interrupted` where it stopped, whether or not its `playing` has reached the hub, and leaves alert lines alone; the composer's speaker is how
+   * the operator stops a reply (architecture.md § Conversation view).
+   */
   setSpeakReplies(on: boolean): void {
     this.speakReplies = on;
 
     if (!on) {
       for (const replyId of this.#offered.keys()) {
-        this.#client?.send({ type: 'cancel', replyId });
+        this.#client?.send({ type: 'cancel', replyId, off: true });
       }
     }
 

@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { DEVICE_OFF_TIP, MIC_START_TIMEOUT, MIC_STARTING_TIP, MicStart } from '@switchboard/conversation/voiceControls';
+import { DEVICE_OFF_TIP, MIC_START_TIMEOUT, MIC_STARTING_TIP, MicStart, REPLAY_TIP, SPEAKING_TIP } from '@switchboard/conversation/voiceControls';
 import type { ArtifactView, ItemView, MessageView, ReplyView, SessionView, StatusView, ScopeView, VoiceView } from '@switchboard/hub';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -1030,12 +1030,14 @@ describe('speech in the view (architecture.md § Voice)', () => {
     expect(controls().innerHTML).toBe('');
 
     show(state([reply('r1', T0, { opening: 'Done. More.', speak: 'Done.' })], { voice: { ...VOICE, here: false } }));
-    // While the voice is elsewhere, one Talk here takes the whole cluster's place: no speaker, no Stop, no mic.
+    // While the voice is elsewhere, one Talk here takes the whole cluster's place: no speaker, no mic.
     expect(controls().textContent).toBe('Talk here');
     expect(controls().querySelector('[data-voice="speak-replies"]')).toBeNull();
     expect(host.querySelector('[data-voice="mic"]')).toBeNull();
-    // The cluster sits beside Send, after the message tools.
-    expect(controls().parentElement?.classList.contains('composer-footer')).toBe(true);
+    // The cluster sits beside the mic and Send, in one group after the message tools, which wraps whole on a narrow footer.
+    expect(controls().parentElement?.classList.contains('composer-end')).toBe(true);
+    expect(controls().parentElement?.parentElement?.classList.contains('composer-footer')).toBe(true);
+    expect(controls().parentElement?.lastElementChild?.classList.contains('send')).toBe(true);
     expect(controls().nextElementSibling?.classList.contains('mic-slot')).toBe(true);
     controls().querySelector<HTMLButtonElement>('[data-voice="talk-here"]')!.click();
 
@@ -1053,14 +1055,27 @@ describe('speech in the view (architecture.md § Voice)', () => {
     expect(controls().innerHTML).toBe('');
     expect(host.querySelector('[data-voice="mic"]')).toBeNull();
 
+    // While a reply plays there is no Stop button: the speaker stops it. On, its click turns Speak replies off, which stops the reply playing.
+    show(state([reply('r1', T0, { opening: 'Done. More.', speak: 'Done.' })], { voice: { ...VOICE, speaking: 'r1' } }));
+    expect(controls().querySelectorAll('button')).toHaveLength(1);
+    expect(controls().querySelector('.codicon-debug-stop')).toBeNull();
+    expect(controls().querySelector('[data-voice="speak-replies"]')!.getAttribute('title')).toBe(SPEAKING_TIP);
+    controls().querySelector<HTMLButtonElement>('[data-voice="speak-replies"]')!.click();
+
+    // Off, a reply plays only as a Replay, which the speaker's click stops, leaving Speak replies off; once it ends, the click turns it on.
     show(state([reply('r1', T0, { opening: 'Done. More.', speak: 'Done.' })], { voice: { ...VOICE, speaking: 'r1', speakReplies: false } }));
     expect(controls().textContent).toBe('');
     expect(controls().querySelector('[data-voice="talk-here"]')).toBeNull();
-    expect(controls().querySelector('[data-voice="stop"]')!.getAttribute('title')).toBe('Stop speaking (Escape)');
+    expect(controls().querySelectorAll('button')).toHaveLength(1);
+    expect(controls().querySelector('[data-voice="speak-replies"]')).toBeNull();
+    expect(controls().querySelector('[data-voice="stop"] .codicon-mute')).not.toBeNull();
+    expect(controls().querySelector('[data-voice="stop"]')!.getAttribute('title')).toBe(REPLAY_TIP);
+    controls().querySelector<HTMLButtonElement>('[data-voice="stop"]')!.click();
+    show(state([reply('r1', T0, { opening: 'Done. More.', speak: 'Done.' })], { voice: { ...VOICE, speakReplies: false } }));
     expect(controls().querySelector('[data-voice="speak-replies"] .codicon-mute')).not.toBeNull();
     expect(controls().querySelector('[data-voice="speak-replies"]')!.getAttribute('title')).toBe('Speak replies: off. Click to speak replies.');
-    controls().querySelector<HTMLButtonElement>('[data-voice="stop"]')!.click();
     controls().querySelector<HTMLButtonElement>('[data-voice="speak-replies"]')!.click();
+    show(state([reply('r1', T0, { opening: 'Done. More.', speak: 'Done.' })], { voice: { ...VOICE, speaking: 'r1', speakReplies: false } }));
 
     const item = root.querySelector<HTMLElement>('li[data-id="r1"]')!;
 
@@ -1070,6 +1085,7 @@ describe('speech in the view (architecture.md § Voice)', () => {
     host.querySelector('textarea')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
     expect(posted.filter((message) => message.type !== 'ready' && message.type !== 'seen' && message.type !== 'composer')).toEqual([
       { type: 'talk-here' },
+      { type: 'speak-replies', on: false },
       { type: 'speak-replies', on: false },
       { type: 'stop-speaking' },
       { type: 'speak-replies', on: true },
@@ -1445,7 +1461,7 @@ describe('the composer', () => {
 
   it('draws the footer with a send button, enabled only while there is text the session can take, which sends as Enter does', () => {
     const { input, posted, show, sent, host } = page();
-    const send = host.querySelector<HTMLButtonElement>('.composer > .composer-footer > button.send')!;
+    const send = host.querySelector<HTMLButtonElement>('.composer > .composer-footer > .composer-end > button.send')!;
     const type = (text: string) => {
       input.value = text;
       input.dispatchEvent(new Event('input'));

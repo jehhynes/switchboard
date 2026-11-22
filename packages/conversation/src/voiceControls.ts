@@ -1,6 +1,6 @@
 /**
  * The composer's voice controls, drawn alike by the VS Code Conversation view and the web page (architecture.md § Voice, § Dictation): the mic
- * button with its states, Speak replies, Stop and Talk here. Both control the computer's one voice process through the hub. Imports nothing, for
+ * button with its states, Speak replies and Talk here. Both control the computer's one voice process through the hub. Imports nothing, for
  * browser bundles.
  */
 
@@ -27,6 +27,10 @@ export type VoicePlace = 'window' | 'page';
 export const PAUSED_BY_VOICE_TIP = 'Paused: you said "stop listening". Say "start listening", or click to listen again.';
 /** Talk here's tooltip while the voice is here but no device has it. */
 export const DEVICE_OFF_TIP = 'Voice is off: the phone that had it left, so replies are not spoken. Click to speak them on this computer; the mic stays off.';
+/** Speak replies' tooltip while it is on and this window's session speaks: its click stops the reply too. */
+export const SPEAKING_TIP = 'Speak replies: on. Click to stop and stop speaking replies (Escape stops only this reply).';
+/** The speaker's tooltip while Speak replies is off and a Replay plays: its click stops the Replay and leaves Speak replies off. */
+export const REPLAY_TIP = 'Speak replies: off. Click to stop this replay (Escape).';
 /** The mic's tooltip while a room hold keeps dictation in the box. */
 export const ROOM_HOLD_TIP = 'Held: someone else is talking in the room, so dictation stays in the box until you press Enter.';
 
@@ -36,8 +40,8 @@ function escape(text: string): string {
 
 /**
  * The composer footer's voice controls (architecture.md § Voice), ghost icon buttons as in Claude Code's footer, in one cluster with the mic
- * beside Send: Stop while this window's session speaks and Speak replies as a speaker toggle while the voice is here; one Talk here in their
- * place while it is elsewhere, only for a session it can speak for (`live`). Nothing while voice is off. `place` names where it is drawn: a VS Code
+ * beside Send: Speak replies as a speaker toggle while the voice is here, which also stops the reply playing, so the composer has no separate Stop
+ * (Escape stops speaking from the keyboard); one Talk here in its place while it is elsewhere, only for a session it can speak for (`live`). Nothing while voice is off. `place` names where it is drawn: a VS Code
  * window or the web page, which control the same voice process on this computer. While the voice is here but no device has it, after the phone
  * left, "Voice is off — Talk here" stands before Speak replies, so a reply is not skipped unnoticed.
  */
@@ -48,13 +52,14 @@ export function renderVoiceControls(voice: VoiceControlsView | null, live = true
 
   const icon = (name: string, title: string, data: string, extra = ''): string =>
     `<button class="ghost icon" type="button" data-key="voice-${data}" data-voice="${data}" title="${escape(title)}" aria-label="${escape(title)}"${extra}><span class="codicon codicon-${name}" aria-hidden="true"></span></button>`;
-  const speakReplies = icon(
-    voice.speakReplies ? 'unmute' : 'mute',
-    voice.speakReplies ? 'Speak replies: on. Click to stop speaking replies.' : 'Speak replies: off. Click to speak replies.',
-    'speak-replies',
-    ` aria-pressed="${voice.speakReplies}"`,
-  );
-  const stop = voice.here && voice.speaking !== null ? icon('debug-stop', 'Stop speaking (Escape)', 'stop') : '';
+  // While this window's session speaks, a click stops the reply: turning Speak replies off stops it with everything offered (the hub sends `stop`
+  // first), and while it is off, a reply still plays only as a Replay, which the click stops, leaving Speak replies off.
+  const speaking = voice.here && voice.speaking !== null;
+  const speakReplies = voice.speakReplies
+    ? icon('unmute', speaking ? SPEAKING_TIP : 'Speak replies: on. Click to stop speaking replies.', 'speak-replies', ' aria-pressed="true"')
+    : speaking
+      ? icon('mute', REPLAY_TIP, 'stop')
+      : icon('mute', 'Speak replies: off. Click to speak replies.', 'speak-replies', ' aria-pressed="false"');
   const talkHere =
     !voice.here && live
       ? `<button class="ghost talk-here" type="button" data-key="voice-talk-here" data-voice="talk-here" title="The voice is not ${place === 'page' ? 'on this page' : 'in this window'}. Click to move it here.">Talk here</button>`
@@ -65,7 +70,7 @@ export function renderVoiceControls(voice: VoiceControlsView | null, live = true
       ? `<button class="ghost talk-here" type="button" data-key="voice-talk-here" data-voice="talk-here" title="${escape(DEVICE_OFF_TIP)}">Voice is off — Talk here</button>`
       : '';
 
-  return voice.here ? `${deviceOff}${stop}${speakReplies}` : talkHere;
+  return voice.here ? `${deviceOff}${speakReplies}` : talkHere;
 }
 
 /** A mic glyph: slashed while off, outlined, or filled; with a badge while paused, or while half-duplex capture holds it for a reply playing; ringed while it starts. */

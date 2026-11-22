@@ -85,8 +85,11 @@ export type HubMessage =
    * and `personality` are the session's persona's, or the settings' (architecture.md § Personas).
    */
   | { type: 'speak'; gen: number; replyId: string; sessionId: string; text: string; tone: string | null; turn: string | null; voice: TtsVoice; style: SpeechStyle; personality: string | null }
-  /** Stop or drop an offered reply: it was rewritten, or Speak replies was turned off; reported `skipped`. */
-  | { type: 'cancel'; replyId: string }
+  /**
+   * Stop or drop an offered reply: it was rewritten, reported `skipped`; or, with `off`, Speak replies was turned off, when the reply playing is
+   * `interrupted` where it stopped, as by Stop speaking, and a waiting one `skipped`, leaving alert lines alone.
+   */
+  | { type: 'cancel'; replyId: string; off?: true }
   /** Stop speaking: the playing reply is `interrupted` where it stopped, and the queued ones `skipped`. */
   | { type: 'stop' }
   | { type: 'earcon'; kind: 'needs-you' }
@@ -283,7 +286,7 @@ export function parseHubMessage(line: string): HubMessage | { error: string } {
         ? { type: 'speak', gen: m.gen, replyId: m.replyId, sessionId: m.sessionId, text: m.text, tone: m.tone, turn: m.turn, voice: m.voice as TtsVoice, style: m.style as SpeechStyle, personality: m.personality }
         : invalid;
     case 'cancel':
-      return isId(m.replyId) ? { type: 'cancel', replyId: m.replyId } : invalid;
+      return isId(m.replyId) && (m.off === undefined || m.off === true) ? { type: 'cancel', replyId: m.replyId, ...(m.off === true ? { off: true as const } : {}) } : invalid;
     case 'stop':
     case 'shutdown':
       return { type: m.type };

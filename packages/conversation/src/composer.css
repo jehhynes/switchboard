@@ -12,7 +12,11 @@ body.vscode-high-contrast, body.vscode-high-contrast-light { --sb-composer-backg
 .composer { position: relative; display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--sb-composer-border); border-radius: 8px; background: var(--sb-composer-background); color: var(--vscode-input-foreground); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1); }
 .composer:focus-within { border-color: var(--vscode-focusBorder); box-shadow: 0 0 0 3px color-mix(in srgb, var(--vscode-focusBorder) 12%, transparent), 0 1px 2px color-mix(in srgb, var(--vscode-focusBorder), transparent 80%); }
 .composer textarea { padding: 10px 14px; }
-.composer-footer { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 5px; border-top: 0.5px solid var(--sb-composer-border); color: var(--vscode-descriptionForeground); }
+.composer-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; padding: 5px; border-top: 0.5px solid var(--sb-composer-border); color: var(--vscode-descriptionForeground); }
+/* The footer's two clusters: the message tools and the context meter on the left, which never shrink under their buttons, and the voice controls,
+   mic and Send together on the right. Where both do not fit, the right cluster wraps whole onto its own line, still on the right, so no voice
+   control is ever drawn beside the context meter. */
+.composer-end { display: flex; flex: 0 1 auto; align-items: center; gap: 6px; min-width: 0; max-width: 100%; margin-left: auto; }
 .composer-tool, .composer .send { display: flex; flex: none; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border: none; border-radius: 5px; cursor: pointer; }
 .composer-tool { color: var(--vscode-descriptionForeground); background: transparent; font: inherit; }
 .composer-tool:hover:not(:disabled) { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground); }

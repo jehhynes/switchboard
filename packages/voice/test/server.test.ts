@@ -114,6 +114,8 @@ describe('voice protocol', () => {
     expect(parseHubMessage('{"type":"speak","gen":2,"replyId":"r","sessionId":"s","text":"Hi.","tone":null,"turn":"m","voice":"robot","style":"pair","personality":null}')).toEqual({ error: 'Invalid speak message.' });
     expect(parseHubMessage('{"type":"speak","gen":2,"replyId":"r","sessionId":"s","text":"Hi.","tone":null,"turn":"m","voice":"cedar","style":"loud","personality":null}')).toEqual({ error: 'Invalid speak message.' });
     expect(parseHubMessage('{"type":"cancel","replyId":"r"}')).toEqual({ type: 'cancel', replyId: 'r' });
+    expect(parseHubMessage('{"type":"cancel","replyId":"r","off":true}')).toEqual({ type: 'cancel', replyId: 'r', off: true });
+    expect(parseHubMessage('{"type":"cancel","replyId":"r","off":"yes"}')).toEqual({ error: 'Invalid cancel message.' });
     expect(parseHubMessage('{"type":"earcon","kind":"needs-you"}')).toEqual({ type: 'earcon', kind: 'needs-you' });
     expect(parseHubMessage('{"type":"settings","settings":{"enabled":true}}')).toMatchObject({ type: 'settings' });
     expect(parseHubMessage('{"type":"speak","gen":-1,"replyId":"r","sessionId":"s","text":"Hi.","tone":null,"turn":null}')).toEqual({ error: 'Invalid speak message.' });

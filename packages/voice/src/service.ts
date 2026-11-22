@@ -315,7 +315,7 @@ export class VoiceService {
         this.#speech.speak({ gen: message.gen, replyId: message.replyId, sessionId: message.sessionId, text: message.text, tone: message.tone, turn: message.turn, as: { voice: message.voice, style: message.style, personality: message.personality } });
         return;
       case 'cancel':
-        this.#speech.cancel(message.replyId);
+        this.#speech.cancel(message.replyId, message.off === true);
         return;
       case 'stop':
         this.#speech.stop();

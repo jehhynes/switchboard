@@ -10,7 +10,7 @@ import { renderTimeline, turnRow } from '../src/timeline.js';
 import { renderHeader } from '../src/header.js';
 import { renderList } from '../src/list.js';
 import { html } from './html.js';
-import { renderMicButton as viewMicButton } from '@switchboard/conversation/voiceControls';
+import { REPLAY_TIP, SPEAKING_TIP, renderMicButton as viewMicButton } from '@switchboard/conversation/voiceControls';
 import { renderMarkdown } from '../src/markdown.js';
 import { CHAT_MAX, CHAT_MIN, DRAWER_HIDE_MS, DRAWER_REVEAL_MS, loadMermaid, PANE_SHOW_DELAY_MS, PIN_SNAP, SENT_NOTE_MS, SHOW_MARKER_MS, SIDE_COLLAPSE, SIDE_MAX, SIDE_MIN, startPage, SWIPE_OPEN } from '../src/main.js';
 import { DETAIL_MIN } from '../src/layout.js';
@@ -974,18 +974,18 @@ describe('the page', () => {
     page.close();
   });
 
-  it('keeps each voice control its own button, so a focused Stop never turns into Talk here', () => {
+  it('keeps each voice control its own button, so a focused speaker never turns into Talk here', () => {
     const { page, source } = start();
     const voice = { enabled: true, here: true, mic: 'off', speaking: 'r1', speakReplies: true, error: null, recognizer: null };
 
     source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [], voice });
 
-    const stop = root.querySelector<HTMLElement>('[data-voice="stop"]')!;
+    const speaker = root.querySelector<HTMLElement>('[data-voice="speak-replies"]')!;
 
-    stop.focus();
+    speaker.focus();
     source.emit('voice', { voice: { ...voice, here: false, speaking: null } });
-    expect(stop.isConnected).toBe(false);
-    expect(root.querySelector('[data-voice="talk-here"]')).not.toBe(stop);
+    expect(speaker.isConnected).toBe(false);
+    expect(root.querySelector('[data-voice="talk-here"]')).not.toBe(speaker);
     page.close();
   });
 
@@ -4535,18 +4535,28 @@ describe('the page in use', () => {
     source.emit('message', { message: message('m8', 8, { delivery: 'not-sent', error: 'x', text: 'not mine' }) });
     expect(root.querySelector('textarea')!.value).toBe('lost words');
     expect(root.querySelector('.composer-error-text')!.textContent).toBe('The holder did not answer.');
-    // While the voice is elsewhere, one Talk here takes the cluster's place; here, Stop and Speak replies.
+    // While the voice is elsewhere, one Talk here takes the cluster's place; here, Speak replies, with no Stop beside it while a reply plays.
     expect(root.querySelector('[data-voice="speak-replies"]')).toBeNull();
     click('[data-voice="talk-here"]');
     source.emit('voice', { voice: { enabled: true, here: true, speaking: 'r1', speakReplies: true, error: null } });
-    expect(root.querySelector('.composer-footer > .voice-controls ~ .send')).not.toBeNull();
+    // The cluster sits with the mic and Send, never among the message tools beside the context meter.
+    expect(root.querySelector('.composer-footer > .composer-end > .voice-controls ~ .send')).not.toBeNull();
     expect(root.querySelector('.composer-controls .voice-controls')).toBeNull();
+    expect(root.querySelectorAll('.voice-controls button')).toHaveLength(1);
+    expect(root.querySelector('.voice-controls .codicon-debug-stop')).toBeNull();
+    expect(root.querySelector('[data-voice="speak-replies"]')!.getAttribute('title')).toBe(SPEAKING_TIP);
+    // The speaker turns Speak replies off, which stops the reply playing.
     click('[data-voice="speak-replies"]');
     await flush();
     expect(posts.filter((post) => /talk-here|speak-replies/.test(post.url)).map((post) => post.body['on'] ?? 'talk')).toEqual(['talk', false]);
+    expect(posts.some((post) => post.url.endsWith('/stop-speaking'))).toBe(false);
+    // Off, a reply plays only as a Replay, which the speaker stops.
+    source.emit('voice', { voice: { enabled: true, here: true, speaking: 'r1', speakReplies: false, error: null } });
+    expect(root.querySelector('[data-voice="stop"]')!.getAttribute('title')).toBe(REPLAY_TIP);
     click('[data-voice="stop"]');
     await flush();
     expect(posts.some((post) => post.url.endsWith('/stop-speaking'))).toBe(true);
+    source.emit('voice', { voice: { enabled: true, here: true, speaking: 'r1', speakReplies: true, error: null } });
 
     // The mic is the Conversation view's own button, and drives the computer's voice process as the view does.
     expect(root.querySelector('.composer-mic')!.innerHTML).toBe(renderMicButton({ enabled: true, here: true, speaking: 'r1', speakReplies: true, error: null }));

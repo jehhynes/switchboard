@@ -106,7 +106,7 @@ function startComposer(
     '<div class="composer-error" role="alert" hidden><span class="composer-error-text"></span>' +
     '<button class="dismiss" type="button" title="Dismiss" aria-label="Dismiss"><span class="codicon codicon-close" aria-hidden="true"></span></button></div>' +
     '<div class="composer"><div class="composer-input"><div class="live-mirror"><span class="mirror-text" aria-hidden="true"></span><span class="live-words" aria-live="polite" hidden></span></div><textarea rows="1" aria-label="Message"></textarea></div><div class="composer-footer"><div class="composer-controls"></div>' +
-    '<span class="mic-slot"></span><button class="send" type="button" title="Send (Enter)" aria-label="Send" disabled><span class="codicon codicon-arrow-up" aria-hidden="true"></span></button></div></div>';
+    '<div class="composer-end"><span class="mic-slot"></span><button class="send" type="button" title="Send (Enter)" aria-label="Send" disabled><span class="codicon codicon-arrow-up" aria-hidden="true"></span></button></div></div></div>';
 
   const input = host.querySelector('textarea')!;
   const send = host.querySelector<HTMLButtonElement>('button.send')!;
@@ -347,8 +347,8 @@ function startComposer(
       setContextMenu('closed');
     }
   });
-  // The voice's controls in one cluster with the mic beside Send (architecture.md § Voice): Stop while speaking and Speak replies, or Talk here
-  // in their place while the voice is elsewhere; the message tools stay on the footer's left.
+  // The voice's controls in one cluster with the mic beside Send (architecture.md § Voice): Speak replies, whose click also stops the reply
+  // playing, or Talk here in its place while the voice is elsewhere; the message tools stay on the footer's left.
   const voiceControls = document.createElement('div');
 
   voiceControls.className = 'voice-controls';

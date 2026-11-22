@@ -263,7 +263,7 @@ describe('VoiceService', () => {
     service.receive({ type: 'speak', gen: 1, replyId: 'r1', sessionId: 's1', text: 'One.', tone: 'calm', turn: 'm1', voice: 'cedar', style: 'pair', personality: 'Warm.' });
     service.receive({ type: 'speak', gen: 1, replyId: 'r2', sessionId: 's1', text: 'Two.', tone: null, turn: 'm1', ...VOICE });
     expect(tts.requests.map((one) => [one.text, one.tone, one.as])).toEqual([['One.', 'calm', { voice: 'cedar', style: 'pair', personality: 'Warm.' }]]);
-    service.receive({ type: 'cancel', replyId: 'r2' });
+    service.receive({ type: 'cancel', replyId: 'r2', off: true });
     service.receive({ type: 'stop' });
     expect(sent.filter((one) => one.type === 'speech').map((one) => `${(one as { replyId: string }).replyId} ${(one as { state: string }).state}`)).toEqual(['r2 skipped', 'r1 interrupted']);
     service.receive({ type: 'earcon', kind: 'needs-you' });

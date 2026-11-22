@@ -71,11 +71,13 @@ export function renderComposer(): VNode {
             </button>
             <span class="context-meter"></span>
           </div>
-          <div class="voice-controls"></div>
-          <span class="composer-mic"></span>
-          <button class="send" type="button" title="Send (Enter)" aria-label="Send" disabled>
-            <span class="codicon codicon-arrow-up"></span>
-          </button>
+          <div class="composer-end">
+            <div class="voice-controls"></div>
+            <span class="composer-mic"></span>
+            <button class="send" type="button" title="Send (Enter)" aria-label="Send" disabled>
+              <span class="codicon codicon-arrow-up"></span>
+            </button>
+          </div>
         </div>
       </div>
     </>
