@@ -5364,3 +5364,130 @@ describe("the list's CSS", () => {
     expect(declarationsOf((selector) => ['.detail .status-tab', '.detail .artifact-list', '.detail .artifact-doc'].includes(unprefixed(selector)))).toEqual(['max-width: none;']);
   });
 });
+
+describe('the highlight an answer link gives', () => {
+  // The page's sheet as build.mjs joins it: the shared bubbles and question card styles, then the page's own.
+  const sheet = ['@switchboard/conversation/bubbles.css', '@switchboard/conversation/questionCard.css']
+    .map((name) => readFileSync(createRequire(import.meta.url).resolve(name), 'utf8'))
+    .concat(readFileSync(join(__dirname, '../src/page.css'), 'utf8'))
+    .join('');
+
+  /** Each style rule of the sheet, with its declarations and whether it applies under reduced motion only, read with its enclosing blocks. */
+  const rules = (): Array<{ selectors: string[]; reduced: boolean; body: string; declarations: Array<[string, string]> }> => {
+    const text = sheet.replace(/\/\*[\s\S]*?\*\//g, '');
+    const found: Array<{ selectors: string[]; reduced: boolean; body: string; declarations: Array<[string, string]> }> = [];
+    const open: Array<{ prelude: string; from: number; nested: boolean }> = [];
+    let start = 0;
+
+    for (let at = 0; at < text.length; at++) {
+      if (text[at] === '{') {
+        if (open.length > 0) {
+          open.at(-1)!.nested = true;
+        }
+
+        open.push({ prelude: text.slice(start, at).trim(), from: at + 1, nested: false });
+        start = at + 1;
+      } else if (text[at] === '}' && open.length === 0) {
+        // A stray brace, as page.css has after its phone persona rules, closes nothing.
+        start = at + 1;
+      } else if (text[at] === '}') {
+        const block = open.pop()!;
+        const body = text.slice(block.from, at).trim();
+
+        if (!block.nested && !block.prelude.startsWith('@') && !open.some((outer) => outer.prelude.startsWith('@keyframes'))) {
+          found.push({
+            selectors: block.prelude.split(/,(?![^(]*\))/).map((one) => one.trim()),
+            reduced: open.some((outer) => /prefers-reduced-motion:\s*reduce/.test(outer.prelude)),
+            body,
+            declarations: body.split(';').filter((one) => one.includes(':')).map((one) => [one.slice(0, one.indexOf(':')).trim(), one.slice(one.indexOf(':') + 1).trim()]),
+          });
+        }
+
+        start = at + 1;
+      } else if (text[at] === ';' && open.length === 0) {
+        start = at + 1;
+      }
+    }
+
+    return found;
+  };
+  const all = rules();
+  const matches = (element: Element, selector: string): boolean => {
+    try {
+      return element.matches(selector);
+    } catch {
+      return false;
+    }
+  };
+  /** Whether a declaration draws a ring: a box shadow or an animation that is not none. */
+  const draws = ([property, value]: [string, string]): boolean => (property === 'box-shadow' && !/^none\b/.test(value)) || (/^animation(-name)?$/.test(property) && !/^none\b/.test(value));
+  /** The rules that draw a ring other than an outline on an element: with motion those outside the reduced-motion blocks, with reduced motion those inside. */
+  const rings = (element: Element, reduced: boolean): string[] =>
+    all.filter((rule) => rule.reduced === reduced && rule.declarations.some(draws) && rule.selectors.some((selector) => matches(element, selector))).map((rule) => rule.body);
+  /** A selector's specificity as one number: ids, then classes, attributes and pseudo-classes, then elements; :where counts nothing. */
+  const specificity = (selector: string): number => {
+    let rest = selector.replace(/:where\((?:[^()]|\([^()]*\))*\)/g, '').replace(/:(?:not|is)\(((?:[^()]|\([^()]*\))*)\)/g, ' $1');
+    const ids = (rest.match(/#[\w-]+/g) ?? []).length;
+
+    rest = rest.replace(/#[\w-]+/g, '');
+    const classes = (rest.match(/\.[\w-]+|\[[^\]]*\]|(?<!:):[\w-]+/g) ?? []).length;
+    const elements = (rest.replace(/\.[\w-]+|\[[^\]]*\]|::?[\w-]+/g, '').match(/[a-z][\w-]*/gi) ?? []).length;
+
+    return ids * 10_000 + classes * 100 + elements;
+  };
+  /** The value the sheet gives an element's property, by specificity and then order, with reduced motion or without; '' when no rule sets it. */
+  const cascaded = (property: string, element: Element, reduced: boolean): string => {
+    let best: { weight: number; value: string } | null = null;
+
+    for (const rule of all.filter((one) => reduced || !one.reduced)) {
+      const weight = Math.max(-1, ...rule.selectors.filter((selector) => matches(element, selector)).map(specificity));
+      const value = rule.declarations.filter(([name]) => name === property).at(-1)?.[1];
+
+      if (weight >= 0 && value !== undefined && (best === null || weight >= best.weight)) {
+        best = { weight, value };
+      }
+    }
+
+    return best?.value ?? '';
+  };
+  const outline = (element: Element, reduced: boolean): string => cascaded('outline', element, reduced);
+  const animation = (element: Element, reduced: boolean): string => cascaded('animation', element, reduced);
+
+  it('draws one ring on an answer message, on its bubble and never on its full-width row, and one on a card, focused or not, with motion and without', () => {
+    const host = document.createElement('div');
+
+    host.innerHTML = '<ul class="timeline"><li class="message linked" data-id="m1"><div class="bubble"><div class="box answers"><div class="answers-bubble"><span class="answers-title">Answers</span><button type="button" class="answers-link">Questions</button></div></div></div></li><li class="reply"><div class="question-card qc linked" tabindex="-1"></div></li></ul>';
+    document.body.append(host);
+
+    const row = host.querySelector('li.message')!;
+    const box = host.querySelector('.box')!;
+    const card = host.querySelector<HTMLElement>('.question-card')!;
+
+    // The page focuses the card it goes to.
+    card.focus();
+    expect(card.matches(':focus')).toBe(true);
+
+    // A ring on the row too was the doubled outline the operator saw on an iPhone with Reduce Motion on.
+    for (const reduced of [true, false]) {
+      expect([rings(row, reduced), outline(row, reduced)], `row, reduced motion ${reduced}`).toEqual([[], '']);
+    }
+
+    // With motion, the fading ring and no outline: the focused card's focus ring stays off, or it would ring twice.
+    expect(rings(box, false)).toEqual([expect.stringMatching(/^animation: sb-linked 1\.6s ease-out;/)]);
+    expect(rings(card, false)).toEqual([expect.stringMatching(/^animation: sb-linked 1\.6s ease-out;/)]);
+    expect([outline(box, false), outline(card, false)]).toEqual(['', 'none']);
+    expect([animation(box, false), animation(card, false)]).toEqual(['sb-linked 1.6s ease-out', 'sb-linked 1.6s ease-out']);
+    // With reduced motion, a still outline in place of the ring, which the card's focus rule does not take away.
+    expect([animation(box, true), animation(card, true)]).toEqual(['none', 'none']);
+    // No still shadow beside either ring: the moving ring is the animation's alone.
+    expect([false, true].flatMap((reduced) => [box, card].map((element) => cascaded('box-shadow', element, reduced)))).toEqual(['', '', '', '']);
+    expect([outline(box, true), outline(card, true)]).toEqual([expect.stringMatching(/^2px solid/), expect.stringMatching(/^2px solid/)]);
+
+    // Without the class, nothing rings, and the focused card draws no outline.
+    row.classList.remove('linked');
+    card.classList.remove('linked');
+    expect([false, true].flatMap((reduced) => [...rings(row, reduced), ...rings(box, reduced), ...rings(card, reduced)])).toEqual([]);
+    expect([false, true].map((reduced) => [outline(row, reduced), outline(box, reduced), outline(card, reduced)])).toEqual([['', '', 'none'], ['', '', 'none']]);
+    host.remove();
+  });
+});

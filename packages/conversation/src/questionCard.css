@@ -3,6 +3,8 @@
    vertical pan over it scrolls the conversation. */
 .question-card.qc { position: relative; --qc-border: var(--vscode-widget-border, rgba(127, 127, 127, 0.35)); --qc-accent: var(--vscode-focusBorder, #0078d4); display: flex; flex-direction: column; gap: 10px; box-sizing: border-box; max-width: 760px; margin: 8px 0 4px; padding: 12px 14px; border: 1px solid var(--qc-border); border-radius: 8px; background: color-mix(in srgb, var(--vscode-editorWidget-background, var(--vscode-input-background)) 85%, var(--vscode-foreground) 4%); color: var(--vscode-foreground); overflow: visible; touch-action: auto; }
 .question-card.qc:focus { outline: none; }
+/* A card the Questions link went to is focused as well as highlighted; under reduced motion its still outline (bubbles.css) outranks the rule above. */
+@media (prefers-reduced-motion: reduce) { .question-card.qc.linked:focus { outline: 2px solid var(--vscode-focusBorder, #0078d4); } }
 .question-card.qc:focus-visible, .question-card.qc:focus-within { border-color: color-mix(in srgb, var(--qc-accent) 55%, var(--qc-border)); }
 .qc-head { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 0.9em; }
 .qc-progress { font-weight: 600; white-space: nowrap; }

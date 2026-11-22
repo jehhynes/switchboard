@@ -46,9 +46,9 @@ body.vscode-high-contrast .speech-bubble, body.vscode-high-contrast-light .speec
 /* A card superseded by a later reply can no longer be answered, and is dimmed. */
 .question-card.superseded { opacity: 0.6; }
 
-/* A card or a message an answer link went to, highlighted for a moment. */
+/* A card or a message an answer link went to, highlighted for a moment: a message on its bubble only, never on its full-width row, so the
+   highlight is one ring in its bubble's shape; with reduced motion, a still outline instead of the fading ring. */
 @keyframes sb-linked { from { box-shadow: 0 0 0 2px var(--vscode-focusBorder, #0078d4); } to { box-shadow: 0 0 0 2px transparent; } }
-.linked { animation: sb-linked 1.6s ease-out; border-radius: 8px; }
-.message.linked { animation: none; }
+.linked:not(.message) { animation: sb-linked 1.6s ease-out; border-radius: 8px; }
 .message.linked .box { animation: sb-linked 1.6s ease-out; }
-@media (prefers-reduced-motion: reduce) { .linked, .message.linked .box { animation: none; outline: 2px solid var(--vscode-focusBorder, #0078d4); } }
+@media (prefers-reduced-motion: reduce) { .linked:not(.message), .message.linked .box { animation: none; outline: 2px solid var(--vscode-focusBorder, #0078d4); } }
