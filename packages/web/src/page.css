@@ -48,7 +48,9 @@ body { color: var(--vscode-foreground); background: var(--vscode-editor-backgrou
 .codicon { font: normal normal normal 14px/1 codicon; display: inline-block; text-decoration: none; text-rendering: auto; -webkit-font-smoothing: antialiased; user-select: none; }
 .codicon-modifier-spin { animation: codicon-spin 1.5s steps(30) infinite; }
 @keyframes codicon-spin { 100% { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .codicon-modifier-spin { animation: none; } }
+/* Reduced motion stops every spinner. !important, because codicon.css spins codicon-loading, codicon-sync and codicon-gear with two classes,
+   which outrank this one, and the state icons' own spin below has three. */
+@media (prefers-reduced-motion: reduce) { .codicon-modifier-spin { animation: none !important; } }
 /* Native scrollbars on every scroller, thin and in the theme's slider colours over a clear track, so dragging, track clicks and keys stay the
    browser's own. Chromium draws the ::-webkit-scrollbar parts, which have hover and active colours; a browser without them gets the standard
    properties, which Chromium would let override those parts. */
@@ -797,8 +799,6 @@ button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }
 .codicon.state-icon.tone-attention { color: var(--vscode-editorWarning-foreground); }
 .codicon.state-icon.tone-error { color: var(--vscode-errorForeground); }
 .codicon.state-icon.codicon-modifier-spin { animation: codicon-spin 1.1s linear infinite; }
-@media (prefers-reduced-motion: reduce) { .codicon.state-icon.codicon-modifier-spin { animation: none; } }
-
 /* Back to the work items, only on a phone, where the list and the conversation are separate views (architecture.md § Web page). */
 /* .header > raises it over button.icon's display. */
 .back-toggle { flex: none; }
