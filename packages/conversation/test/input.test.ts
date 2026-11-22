@@ -118,6 +118,8 @@ class FakeSession {
   runsCommands = false;
   /** Whether Ctrl+U deletes from the input box. */
   clears = true;
+  /** Lines Claude Code writes right after a message's line, such as the API request it makes for it. */
+  after: string[] = [];
   readonly writes: string[] = [];
   clock = T0;
   readonly transcript: string;
@@ -148,7 +150,7 @@ class FakeSession {
         const command = this.runsCommands ? /^\/(\S+)(?: (.*))?$/.exec(this.box) : null;
 
         if (this.saves) {
-          appendFileSync(this.transcript, `${user(command === null ? this.box : `<command-message>${command[1]}</command-message>\n<command-name>/${command[1]}</command-name>${command[2] === undefined ? '' : `\n<command-args>${command[2]}</command-args>`}`, this.clock)}\n`);
+          appendFileSync(this.transcript, `${user(command === null ? this.box : `<command-message>${command[1]}</command-message>\n<command-name>/${command[1]}</command-name>${command[2] === undefined ? '' : `\n<command-args>${command[2]}</command-args>`}`, this.clock)}\n${this.after.map((line) => `${line}\n`).join('')}`);
         }
 
         this.box = '';
@@ -217,6 +219,21 @@ describe('SessionInput', () => {
     expect(steps).toEqual({ queuedAt: T0, startedAt: T0, readyAt: T0, waited: null, reads: 3, readMs: 0, pastedAt: T0, echoAt: T0 + 60, missed: null, enterAt: T0 + 60, enters: 1, confirmedAt: T0 + 60 });
     expect(session.clock).toBe(T0 + 60);
     expect(stepsText(steps!, session.clock)).toBe('queue 0 ms, guards 0 ms, paste→echo 60 ms, paste→Enter 60 ms, Enter→transcript 0 ms, 3 screen reads in 0 ms, 60 ms in all');
+  });
+
+  it('counts a message sent from its line however much Claude Code writes after it, such as the API request it makes for it', async () => {
+    const session = new FakeSession();
+    const { deps, logs } = session.deps();
+    const outcomes: InputOutcome[] = [];
+    let steps: InputSteps | null = null;
+
+    // Claude Code 2.1.330 writes the request's blobs, over a megabyte, in the same flush as the message's line (hub.log 2026-11-22).
+    session.after = Array.from({ length: 8 }, () => JSON.stringify({ type: 'api-request-blob', timestamp: new Date(T0).toISOString(), body: { role: 'user', text: 'x'.repeat(150_000) } }));
+    await new SessionInput('s1', deps).send('Look into it', (outcome) => outcomes.push(outcome), { steps: (reported) => void (steps = reported) });
+
+    expect(outcomes).toEqual([{ delivery: 'sent' }]);
+    expect(steps).toMatchObject({ enterAt: T0 + 60, confirmedAt: T0 + 60 });
+    expect(logs).toEqual([]);
   });
 
   it('reports a paste never seen in the input box with what the screen showed, and the guard that held the message back', async () => {

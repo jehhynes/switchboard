@@ -5,7 +5,7 @@
  * separate write, retrying Enter alone while the paste sits unsent; and counts the message sent once the transcript has it. A message the transcript
  * does not confirm is settled from the screen: still in the input box, it is cleared from there and not sent; gone from it, it was sent.
  */
-import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
+import { closeSync, fstatSync, openSync, readSync, statSync } from 'node:fs';
 import headless from '@xterm/headless';
 import type { Line } from './screenReader.js';
 import { typedText, unwrapPasted } from './transcript.js';
@@ -211,6 +211,82 @@ export function transcriptTail(path: string): string[] {
     return buffer.toString('utf8').split('\n');
   } finally {
     closeSync(fd);
+  }
+}
+
+/**
+ * Reads a transcript forward from where it ended when a message was pasted, only what was added since the last read, for the message's line. Claude
+ * Code can write more than `TRANSCRIPT_TAIL_BYTES` just after a message's line, such as the API request it makes for it, so the tail alone can miss
+ * the line. A new transcript file, as after `/clear`, is read from its start.
+ */
+export class TranscriptWatch {
+  #path: string | null;
+  #offset: number;
+  #found = false;
+
+  constructor(path: string | null) {
+    this.#path = path;
+    this.#offset = path === null ? 0 : sizeOf(path);
+  }
+
+  /** Whether the transcript at `path` now has `text` as a message written at or after `since`, as `sentInTranscript` reads it. */
+  sent(path: string | null, text: string, since: number): boolean {
+    if (this.#found || path === null) {
+      return this.#found;
+    }
+
+    if (path !== this.#path) {
+      this.#path = path;
+      this.#offset = 0;
+    }
+
+    const size = sizeOf(path);
+
+    // Replaced by a shorter copy: read again from its start.
+    if (size < this.#offset) {
+      this.#offset = 0;
+    }
+
+    if (size === this.#offset) {
+      return false;
+    }
+
+    let fd: number;
+
+    try {
+      fd = openSync(path, 'r');
+    } catch {
+      return false;
+    }
+
+    let buffer: Buffer;
+
+    try {
+      buffer = Buffer.alloc(size - this.#offset);
+      buffer = buffer.subarray(0, readSync(fd, buffer, 0, buffer.length, this.#offset));
+    } finally {
+      closeSync(fd);
+    }
+
+    // A line still being written waits for its newline.
+    const end = buffer.lastIndexOf(10);
+
+    if (end === -1) {
+      return false;
+    }
+
+    this.#offset += end + 1;
+    this.#found = sentInTranscript(buffer.subarray(0, end).toString('utf8').split('\n'), text, since);
+
+    return this.#found;
+  }
+}
+
+function sizeOf(path: string): number {
+  try {
+    return statSync(path).size;
+  } catch {
+    return 0;
   }
 }
 
@@ -561,10 +637,11 @@ export class SessionInput {
     return run;
   }
 
-  #sent(pasted: string, since: number): boolean {
+  /** Whether the transcript has the message pasted at `since`: in what was added since its paste, with `watch`, or in its tail. */
+  #sent(pasted: string, since: number, watch?: TranscriptWatch): boolean {
     const path = this.deps.transcriptPath();
 
-    return path !== null && sentInTranscript(transcriptTail(path), pasted, since);
+    return path !== null && (watch?.sent(path, pasted, since) === true || sentInTranscript(transcriptTail(path), pasted, since));
   }
 
   /**
@@ -575,9 +652,9 @@ export class SessionInput {
    * with more, or one a terminal typed into, is left as it is, and the message is not sent. The transcript is read again before and after each
    * key and after any failure, so a message Claude takes late is sent. A screen that cannot be read leaves it not sent, with `unreadable`.
    */
-  async #settle(pasted: string, since: number, check: () => string | null, unreadable: string, steps?: InputSteps): Promise<InputOutcome> {
+  async #settle(pasted: string, since: number, check: () => string | null, unreadable: string, steps?: InputSteps, watch?: TranscriptWatch): Promise<InputOutcome> {
     const sent = (): boolean => {
-      const found = this.#sent(pasted, since);
+      const found = this.#sent(pasted, since, watch);
 
       if (found && steps !== undefined) {
         steps.confirmedAt ??= this.deps.now();
@@ -737,8 +814,9 @@ export class SessionInput {
 
     const pasted = pasteText(text, command);
     const since = this.deps.now();
+    const watch = new TranscriptWatch(this.deps.transcriptPath());
     const sent = (): boolean => {
-      const found = this.#sent(pasted, since);
+      const found = this.#sent(pasted, since, watch);
 
       if (found) {
         steps.confirmedAt ??= this.deps.now();
@@ -819,10 +897,10 @@ export class SessionInput {
 
       this.deps.log(`session ${this.sessionId}: a typed message is not in the transcript after ${result.enterAttempts} Enter${result.enterAttempts === 1 ? '' : 's'}${result.submitted ? '' : '; it is still in the input box'}`);
 
-      return await this.#settle(pasted, since, check, UNREADABLE, steps);
+      return await this.#settle(pasted, since, check, UNREADABLE, steps, watch);
     } catch (error) {
       // Something was written, so the screen says whether the message went.
-      return attempted ? await this.#settle(pasted, since, check, (error as Error).message, steps) : { delivery: 'not-sent', error: (error as Error).message };
+      return attempted ? await this.#settle(pasted, since, check, (error as Error).message, steps, watch) : { delivery: 'not-sent', error: (error as Error).message };
     } finally {
       ready.release();
     }
