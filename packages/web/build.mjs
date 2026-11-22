@@ -114,6 +114,9 @@ const assets = {
   'icon-192.png': binary('image/png', 'src/icon-192.png'),
   'icon-512.png': binary('image/png', 'src/icon-512.png'),
   'icon-maskable-512.png': binary('image/png', 'src/icon-maskable-512.png'),
+  // iOS takes the Home Screen icon from apple-touch-icon, not the manifest, and fills a transparent one with black, so it is the opaque
+  // maskable icon at 180 px, the iPhone's size.
+  'apple-touch-icon.png': binary('image/png', 'src/apple-touch-icon.png'),
 };
 
 mkdirSync('dist', { recursive: true });

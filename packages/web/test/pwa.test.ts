@@ -190,6 +190,35 @@ describe('the installable page', () => {
     expect(own).not.toMatch(/(^|\n)\.menu \{|align-right/);
   });
 
+  it('fits an iPhone: an opaque status bar, the safe areas in the bars\' colour, 16 px fields and an opaque 180 px Home Screen icon', () => {
+    const page = PAGE_ASSETS['index.html']!.body;
+    const css = PAGE_ASSETS['page.css']!.body;
+
+    expect(page).toContain('<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">');
+    // black-translucent gets iOS 26.1's blur over the page's top; with no key the status bar is opaque and the page starts below it.
+    expect(page).not.toContain('apple-mobile-web-app-status-bar-style');
+    expect(page).toContain('<div id="safe-top" aria-hidden="true"></div>\n<div id="root"></div>');
+    expect(css).toMatch(/#safe-top \{[^}]*position: fixed; inset: 0 0 auto 0; z-index: 1001; height: env\(safe-area-inset-top\); background: var\(--sb-bar-background\);/);
+    expect(css).toMatch(/#root \{[^}]*padding: env\(safe-area-inset-top\) env\(safe-area-inset-right\) 0 env\(safe-area-inset-left\);/);
+    expect(css).toMatch(/\.side, \.main, \.detail, #history \{ padding-bottom: env\(safe-area-inset-bottom\); \}/);
+    expect(css).toMatch(/\.sheet-backdrop \{[^}]*padding: max\(16px, env\(safe-area-inset-top\)\)/);
+    expect(css).toMatch(/\.settings-backdrop \{ padding: env\(safe-area-inset-top\) env\(safe-area-inset-right\) env\(safe-area-inset-bottom\) env\(safe-area-inset-left\);/);
+    // The bars are opaque in both schemes, so the band and the header they meet are one colour.
+    expect(css).toMatch(/^:root \{[^}]*--sb-bar-background: var\(--vscode-sideBar-background\);/m);
+
+    const touch = css.slice(css.indexOf('@media (hover: none), (pointer: coarse) {\n  .composer-input'));
+
+    expect(touch).toMatch(/^@media \(hover: none\), \(pointer: coarse\) \{\n  \.composer-input \{ font-size: 16px; \}\n  input:not\(\[type="checkbox"\], \[type="radio"\], \[type="file"\]\), textarea, select \{ font-size: 16px !important; \}/);
+
+    for (const name of ['index.html', 'offline.html']) {
+      expect(PAGE_ASSETS[name]!.body).toContain('<link rel="apple-touch-icon" href="apple-touch-icon.png">\n<meta name="apple-mobile-web-app-title" content="Switchboard">');
+    }
+
+    expect(size('apple-touch-icon.png')).toEqual([180, 180]);
+    // Colour type 2 is RGB with no alpha: iOS fills a transparent icon's corners with black.
+    expect(Buffer.from(PAGE_ASSETS['apple-touch-icon.png']!.body, 'base64')[25]).toBe(2);
+  });
+
   it('links the manifest from the page and the offline page, with the theme colour, light first while the system is light, and serves every file the worker keeps', () => {
     for (const name of ['index.html', 'offline.html']) {
       const html = PAGE_ASSETS[name]!.body;

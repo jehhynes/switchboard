@@ -3401,7 +3401,7 @@ describe("the list's CSS", () => {
     // Only the shown drawer has a transition, so it slides in and hides at once, as the dock does.
     expect(declarationsOf((selector) => selector === '#root.drawers:not(.listing):not(.history) > .side').join(' ')).not.toContain('transition');
     expect(declarationsOf((selector) => selector === '#root.drawers.drawer-open:not(.listing):not(.history) > .side').join(' ')).toContain('transition: transform 0.15s ease-out');
-    expect(declarationsOf((selector) => selector === '.sliver').join(' ')).toMatch(/position: fixed;.*left: 0;.*width: 3px;/);
+    expect(declarationsOf((selector) => selector === '.sliver').join(' ')).toMatch(/position: fixed;.*left: env\(safe-area-inset-left\);.*width: 3px;/);
   });
 
   it('shows the composer and the note above it only on the Conversation tab under 800 px of height, unless the composer has the focus or an error', () => {
