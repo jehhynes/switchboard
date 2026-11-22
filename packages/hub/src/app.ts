@@ -51,6 +51,8 @@ import type { PaneHelperDeps } from './paneHelper.js';
 import { currentHolderBuild, PANE_HELPER_INSTALL, paneHelperRecordPath, reserveHolderBuild } from './holderInstall.js';
 import { spawnEnvironment } from './spawn.js';
 import { PageTargets } from './pageTargets.js';
+import { VoiceSockets } from './voiceSocket.js';
+import { VOICE_OFF } from './server.js';
 
 const RELOAD_DEBOUNCE_MS = 300;
 /** The mic codicon in codicon.ttf, which marks the voice target's dock row (architecture.md § Voice). */
@@ -406,6 +408,10 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       voice.settingsChanged();
       readRemote(config.settings.web);
 
+      if (!config.settings.voice.enabled) {
+        voiceSockets.close(() => true, VOICE_OFF);
+      }
+
       if (!config.settings.web.chromePane) {
         paneLink.closeAll();
       }
@@ -513,6 +519,8 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       listener();
     }
   };
+  // The voice socket of a paired device (architecture.md § Remote access).
+  const voiceSockets = new VoiceSockets({ now: deps.now, log: (line) => deps.log(line) });
   const voice: VoiceControl = new VoiceControl({
     link: new VoiceLink({ home, nodePath: () => config.settings.sessions.nodePath, log: (line) => deps.log(line), now: deps.now, sleep: deps.sleep }),
     settings: () => config.settings.voice,
@@ -1552,6 +1560,11 @@ const dockWithRuns = () => {
             : route === 'file'
               ? pageChanges.file(key, query.get('path'), query.get('side'))
               : Promise.resolve({ status: 404, body: { error: 'not found' } }),
+      voice: {
+        enabled: () => config.settings.voice.enabled,
+        accept: (request, socket, head, device) => voiceSockets.accept(request, socket, head, device),
+        close: (match, reason) => voiceSockets.close(match, reason),
+      },
     },
     pagePort: () => config.settings.web.port,
     dock: () => dockWithRuns(),

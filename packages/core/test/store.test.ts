@@ -91,7 +91,7 @@ describe('Store', () => {
   });
 
   it('drops Support volume when upgrading: other engineers\' ticket-only triages, queue fields, volume facts and classifications (PRD R84)', () => {
-    const version = MIGRATIONS.length - 1;
+    const version = MIGRATIONS.findIndex((migration) => migration.includes('DROP TABLE ticketClassifications'));
     const path = join(dir, 'volume.db');
     const raw = new DatabaseSync(path);
     raw.exec(MIGRATIONS.slice(0, version).join(';'));
@@ -773,12 +773,12 @@ describe('Store', () => {
     store.savePageSession('b', 200);
     store.savePageSession('c', 300);
     store.savePageSession('a', 400);
-    expect(store.pageSession('a')).toEqual({ hash: 'a', createdAt: 100, usedAt: 400, label: '', host: null, login: null });
+    expect(store.pageSession('a')).toEqual({ hash: 'a', createdAt: 100, usedAt: 400, label: '', host: null, login: null, voice: false });
     expect(store.pageSession('missing')).toBeNull();
     expect(store.pageSessions().map((one) => one.hash)).toEqual(['a', 'c', 'b']);
     // Used before 250, or not among the 2 used last.
     store.trimPageSessions(250, 2);
-    expect([store.pageSession('a'), store.pageSession('b'), store.pageSession('c')]).toEqual([{ hash: 'a', createdAt: 100, usedAt: 400, label: '', host: null, login: null }, null, { hash: 'c', createdAt: 300, usedAt: 300, label: '', host: null, login: null }]);
+    expect([store.pageSession('a'), store.pageSession('b'), store.pageSession('c')]).toEqual([{ hash: 'a', createdAt: 100, usedAt: 400, label: '', host: null, login: null, voice: false }, null, { hash: 'c', createdAt: 300, usedAt: 300, label: '', host: null, login: null, voice: false }]);
     store.trimPageSessions(0, 1);
     expect(store.pageSession('c')).toBeNull();
     store.savePageSession('d', 500);
@@ -795,8 +795,28 @@ describe('Store', () => {
 
     store.savePageSession('p', 100, { label: 'Android · Chrome', host: 'pc.tailnet.ts.net', login: 'alex@example.com' });
     store.savePageSession('p', 900, { label: 'other', host: 'other.ts.net', login: 'mallory@example.com' });
-    expect(store.pageSession('p')).toEqual({ hash: 'p', createdAt: 100, usedAt: 900, label: 'Android · Chrome', host: 'pc.tailnet.ts.net', login: 'alex@example.com' });
+    expect(store.pageSession('p')).toEqual({ hash: 'p', createdAt: 100, usedAt: 900, label: 'Android · Chrome', host: 'pc.tailnet.ts.net', login: 'alex@example.com', voice: false });
     expect(store.pageSessions()).toEqual([store.pageSession('p')]);
+    store.close();
+  });
+
+  it('allows voice on one sign-in, keeps it across a later use, and forgets it with the sign-in', () => {
+    const store = Store.open(join(dir, 'voice.db'));
+
+    store.savePageSession('p', 100, { label: 'iPhone · Safari', host: 'pc.tailnet.ts.net', login: 'alex@example.com' });
+    store.savePageSession('q', 100);
+    expect(store.setPageSessionVoice('p', true)).toBe(true);
+    expect(store.setPageSessionVoice('missing', true)).toBe(false);
+    store.savePageSession('p', 900);
+    expect(store.pageSession('p')?.voice).toBe(true);
+    expect(store.pageSession('q')?.voice).toBe(false);
+    expect(store.pageSessions().map((one) => [one.hash, one.voice])).toEqual([['p', true], ['q', false]]);
+    expect(store.setPageSessionVoice('p', false)).toBe(true);
+    expect(store.pageSession('p')?.voice).toBe(false);
+    store.setPageSessionVoice('p', true);
+    store.deletePageSessions('p');
+    store.savePageSession('p', 1000);
+    expect(store.pageSession('p')?.voice).toBe(false);
     store.close();
   });
 });

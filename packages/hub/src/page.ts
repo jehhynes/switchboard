@@ -34,7 +34,7 @@ export const PAIR_CODE_TRIES = 10;
 const CODE_LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 /** Where the page's sign-ins are kept: the hub's store, by each cookie's SHA-256. */
-export type PageSessions = Pick<Store, 'pageSession' | 'pageSessions' | 'savePageSession' | 'deletePageSessions' | 'trimPageSessions'>;
+export type PageSessions = Pick<Store, 'pageSession' | 'pageSessions' | 'savePageSession' | 'deletePageSessions' | 'trimPageSessions' | 'setPageSessionVoice'>;
 
 /**
  * The Set-Cookie value that signs a browser in with a cookie value (architecture.md § Web page); `Secure` for a device that reaches the page
@@ -116,11 +116,12 @@ export function deviceLabel(agent: string | undefined): string {
   return `${system} · ${browser}`;
 }
 
-/** A remembered sign-in as the device list shows it: its ID, the start of its hash, its device, and when it was made and last used. */
+/** A remembered sign-in as the device list shows it: its ID, the start of its hash, its device, when it was made and last used, and whether voice is allowed on it. */
 export interface PageDeviceView extends PageDevice {
   id: string;
   createdAt: number;
   usedAt: number;
+  voice: boolean;
 }
 
 /** A pairing link's parts (architecture.md § Remote access): its URL on the remote host, its code, and when both stop working. */
@@ -286,19 +287,55 @@ export class PageAccess {
 
   /** The remembered sign-ins, the one used last first, each with its ID, the first 8 characters of its hash. */
   devices(): PageDeviceView[] {
-    return this.sessions.pageSessions().map(({ hash, label, host, login, createdAt, usedAt }) => ({ id: deviceId(hash), label, host, login, createdAt, usedAt }));
+    return this.sessions.pageSessions().map(({ hash, label, host, login, createdAt, usedAt, voice }) => ({ id: deviceId(hash), label, host, login, createdAt, usedAt, voice }));
+  }
+
+  /** The stored key of the one sign-in with this ID, or null when none or several have it. */
+  #find(id: string): string | null {
+    const found = this.sessions.pageSessions().filter((one) => deviceId(one.hash) === id.toLowerCase());
+
+    return found.length === 1 ? found[0]!.hash : null;
   }
 
   /** Forgets the sign-in with this ID; answers its stored key, or null when no one sign-in has it. */
   revoke(id: string): string | null {
-    const found = this.sessions.pageSessions().filter((one) => deviceId(one.hash) === id.toLowerCase());
+    const hash = this.#find(id);
 
-    if (found.length !== 1) {
+    if (hash !== null) {
+      this.sessions.deletePageSessions(hash);
+    }
+
+    return hash;
+  }
+
+  /**
+   * Allows or forbids voice on the paired device with this ID (architecture.md § Remote access); answers its stored key, or null when no one
+   * sign-in has it or it is this computer's, whose voice is the computer's own microphone and speaker.
+   */
+  allowVoice(id: string, on: boolean): string | null {
+    const hash = this.#find(id);
+
+    if (hash === null || this.sessions.pageSession(hash)?.host == null) {
       return null;
     }
 
-    this.sessions.deletePageSessions(found[0]!.hash);
-    return found[0]!.hash;
+    this.sessions.setPageSessionVoice(hash, on);
+    return hash;
+  }
+
+  /**
+   * Whether the sign-in with this stored key is still one this hub gave out, made where `origin` names and used within `PAGE_SESSION_MS`, as
+   * `allows` checks a request's, without counting a use.
+   */
+  signedIn(hash: string, origin: PageOrigin): boolean {
+    const session = this.sessions.pageSession(hash);
+
+    return session !== null && session.host === origin.host && session.login === origin.login && this.now() - session.usedAt <= PAGE_SESSION_MS;
+  }
+
+  /** Whether voice is allowed on the sign-in with this stored key. */
+  voiceAllowed(hash: string | null): boolean {
+    return hash !== null && this.sessions.pageSession(hash)?.voice === true;
   }
 
   /** Forgets every sign-in, so every browser needs a new link; answers how many there were. */

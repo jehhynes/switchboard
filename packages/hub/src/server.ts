@@ -1,13 +1,17 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { createServer } from 'node:http';
+import { createServer, STATUS_CODES } from 'node:http';
 import { gzipSync } from 'node:zlib';
 import { pipeline } from 'node:stream';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
+import type { Duplex } from 'node:stream';
 import type { HubIdentity } from '@switchboard/core';
 import { ARTIFACT_CSP, CONSOLE_QUEUE_BYTES, cookieValue, deviceId, deviceLabel, PAGE_COOKIE, PAGE_CSP, pageCookie, pageOrigin, PAIR_CSP, pairHtml, PUBLIC_PAGE_FILES, SIGNED_OUT_HTML } from './page.js';
 import type { PageAccess, PageOrigin, RemoteAccess } from './page.js';
 import { MAX_UPLOAD_BYTES } from './uploads.js';
+import { isWebSocketUpgrade } from './paneSocket.js';
+import { VOICE_SOCKET_PATH } from './voiceSocket.js';
+import type { VoiceDevice } from './voiceSocket.js';
 
 export interface Reply {
   status: number;
@@ -85,6 +89,17 @@ export interface PageRoutes {
    * `ETag` when it has one; without it the hub serves none.
    */
   changes?(route: string, key: string, query: URLSearchParams, ifNoneMatch: string | undefined): Promise<Reply & { etag?: string }>;
+  /** Voice on a paired device (architecture.md § Remote access); without it the hub refuses every voice socket. */
+  voice?: PageVoice;
+}
+
+/** The voice socket's side of the page routes: whether voice is on, and the sockets the server accepted and asks to close. */
+export interface PageVoice {
+  /** Whether `voice.enabled` is on. */
+  enabled(): boolean;
+  accept(request: IncomingMessage, socket: Duplex, head: Buffer, device: VoiceDevice): void;
+  /** Closes the voice sockets of the devices `match` picks, telling each page `reason`. */
+  close(match: (device: VoiceDevice) => boolean, reason: string): void;
 }
 
 /** The page's read-only change routes, under `/v1/conversation/` (architecture.md § Web page). */
@@ -98,20 +113,25 @@ const GZIP_MIN_BYTES = 1024;
  * `page-conversation`, hosted by the shown conversation's folder. `row-action`, `row-paste`, `resume`, `prompt`, `prompt-key` and `console-input` take only a page key.
  * The hub itself answers `page-pair`, `page-devices` and `page-device-revoke` (architecture.md § Remote access).
  */
-export const PAGE_COMMANDS = new Set(['open-file', 'viewed', 'send', 'history', 'seen', 'select', 'statuses', 'commands', 'answer', 'talk-here', 'stop-speaking', 'speak-replies', 'replay', 'personas', 'persona', 'page-focus', 'row-action', 'row-paste', 'row-open', 'row-command', 'pool-action', 'resume', 'prompt', 'prompt-key', 'mic', 'composer', 'providers', 'page-conversation', 'console-input', 'page-source', 'page-tabs', 'page-search', 'page-poll', 'page-history', 'page-holder-restart', 'page-adhoc', 'page-folder-conversation', 'pane-pair', 'pane-rect', 'page-pair', 'page-devices', 'page-device-revoke', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll']);
+export const PAGE_COMMANDS = new Set(['page-voice-state', 'page-device-voice', 'open-file', 'viewed', 'send', 'history', 'seen', 'select', 'statuses', 'commands', 'answer', 'talk-here', 'stop-speaking', 'speak-replies', 'replay', 'personas', 'persona', 'page-focus', 'row-action', 'row-paste', 'row-open', 'row-command', 'pool-action', 'resume', 'prompt', 'prompt-key', 'mic', 'composer', 'providers', 'page-conversation', 'console-input', 'page-source', 'page-tabs', 'page-search', 'page-poll', 'page-history', 'page-holder-restart', 'page-adhoc', 'page-folder-conversation', 'pane-pair', 'pane-rect', 'page-pair', 'page-devices', 'page-device-revoke', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll']);
 
 /**
  * The page commands a device that reaches the page through a remote host may not post (architecture.md § Remote access): pairing and the device
  * list, so a paired device cannot pair others or sign this computer out; the Chrome pane's, which works only beside this computer's page;
  * restarting the terminal holder; and Settings', which the operator keeps to this computer.
  */
-export const LOCAL_PAGE_COMMANDS = new Set(['page-pair', 'page-devices', 'page-device-revoke', 'pane-pair', 'pane-rect', 'page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll']);
+export const LOCAL_PAGE_COMMANDS = new Set(['page-pair', 'page-devices', 'page-device-revoke', 'page-device-voice', 'pane-pair', 'pane-rect', 'page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll']);
 
 /** The page routes only the hub token reaches, which the page's own routes never answer. */
 const HUB_PAGE_ROUTES = new Set(['/page/link', '/page/revoke', '/page/pair', '/page/devices']);
 
-/** The page commands the hub answers itself: pairing a device and the device list (architecture.md § Remote access). */
-const DEVICE_COMMANDS = new Set(['page-pair', 'page-devices', 'page-device-revoke']);
+/** The page commands the hub answers itself: pairing a device, the device list and voice on a device (architecture.md § Remote access). */
+const DEVICE_COMMANDS = new Set(['page-pair', 'page-devices', 'page-device-revoke', 'page-device-voice', 'page-voice-state']);
+
+/** Why a voice socket is refused while voice is off. */
+export const VOICE_OFF = 'Voice is off. Turn it on in Settings on the computer that runs Switchboard.';
+/** Why a voice socket is refused from a device voice is not allowed on. */
+export const VOICE_NOT_ALLOWED = 'Voice is not allowed on this device. Allow it in Pair a device on the computer that runs Switchboard.';
 
 /** Why a pairing link cannot be made with no remote host and login. */
 export const REMOTE_OFF = 'Pairing a device needs remote access: turn on Tailscale, or set the allowed hosts and logins, under Remote access on the General page of Settings, and run tailscale serve.';
@@ -484,13 +504,18 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
   const originOf = (origin: PageOrigin): string => (origin.host === null ? 'local' : `${origin.host} ${origin.login}`);
   const page = options.page;
 
-  /** Ends the open page streams of one sign-in, by its stored key, or of every sign-in. */
+  // The sign-in each open page key's stream opened with, so a voice socket names a key of its own sign-in (architecture.md § Remote access).
+  const pageKeySessions = new Map<string, string | null>();
+
+  /** Ends the open page streams and voice sockets of one sign-in, by its stored key, or of every sign-in. */
   const endPages = (session?: string): void => {
     for (const [stream, one] of pageStreams) {
       if (session === undefined || one === session) {
         stream.end();
       }
     }
+
+    page?.voice?.close((device) => session === undefined || device.hash === session, 'This device was signed out.');
   };
   /** A pairing link for the first remote host (architecture.md § Remote access), or why not while remote access is off. */
   const pairing = (): Reply => {
@@ -520,9 +545,45 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     endPages(hash);
     return { status: 200, body: { revoked: 1 } };
   };
+  /** Allows or forbids voice on one paired device by its ID; forbidding it closes the device's voice socket. */
+  const deviceVoice = (body: unknown): Reply => {
+    const { id, allow } = (body ?? {}) as { id?: unknown; allow?: unknown };
+
+    if (typeof id !== 'string' || !/^[0-9a-f]{8}$/i.test(id) || typeof allow !== 'boolean') {
+      return { status: 400, body: { error: 'Expected {id, allow}, a device ID of 8 hex characters and true or false.' } };
+    }
+
+    const hash = page?.access.allowVoice(id, allow) ?? null;
+
+    if (hash === null) {
+      return { status: 404, body: { error: `No paired device has the ID ${id}.` } };
+    }
+
+    if (!allow) {
+      page?.voice?.close((device) => device.hash === hash, 'Voice is no longer allowed on this device.');
+    }
+
+    return { status: 200, body: { voice: allow } };
+  };
+  /** Whether this page's device may take the voice, and why not. */
+  const voiceState = (cookie: string | undefined, origin: PageOrigin): Reply => {
+    const error = origin.host === null ? 'Voice on this computer uses its own microphone and speaker.' : page?.voice?.enabled() !== true ? VOICE_OFF : !page.access.voiceAllowed(page.access.sessionOf(cookie)) ? VOICE_NOT_ALLOWED : null;
+
+    return { status: 200, body: { allowed: error === null, error } };
+  };
   /** A device command the page posts, which the hub answers itself; null for any other command. */
-  const devicesRoute = (command: string, body: unknown, cookie: string | undefined): Reply | null =>
-    command === 'page-pair' ? pairing() : command === 'page-devices' ? devices(cookie) : command === 'page-device-revoke' ? revokeDevice((body as { id?: unknown } | null)?.id) : null;
+  const devicesRoute = (command: string, body: unknown, cookie: string | undefined, origin: PageOrigin): Reply | null =>
+    command === 'page-pair'
+      ? pairing()
+      : command === 'page-devices'
+        ? devices(cookie)
+        : command === 'page-device-revoke'
+          ? revokeDevice((body as { id?: unknown } | null)?.id)
+          : command === 'page-device-voice'
+            ? deviceVoice(body)
+            : command === 'page-voice-state'
+              ? voiceState(cookie, origin)
+              : null;
 
   /** The web page's routes (architecture.md § Web page); false for any other request. */
   const servePage = (request: IncomingMessage, response: ServerResponse, url: URL): boolean => {
@@ -691,6 +752,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       let key: string | null = page.opened(url.searchParams.get('installed') === '1');
 
       pageKeyOrigins.set(key, originOf(origin));
+      pageKeySessions.set(key, page.access.sessionOf(request.headers.cookie));
       openConversation(request, response, key);
       pageStreams.set(response, page.access.sessionOf(request.headers.cookie));
 
@@ -703,7 +765,11 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
         remoteStreams.delete(response);
 
         if (key !== null) {
+          const ended = key;
+
           pageKeyOrigins.delete(key);
+          pageKeySessions.delete(key);
+          page.voice?.close((device) => device.key === ended, 'The page that opened the voice closed.');
           options.windowClosed?.(key);
           key = null;
         }
@@ -867,7 +933,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
           return;
         }
 
-        const own = devicesRoute(command, body, request.headers.cookie);
+        const own = devicesRoute(command, body, request.headers.cookie, origin);
 
         if (own !== null) {
           json(response, own.status, own.body);
@@ -884,6 +950,91 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     return true;
   };
 
+  /**
+   * An upgrade on the page's origin: only the voice socket of a paired device (architecture.md § Remote access), checked as a page command is,
+   * by where it comes from, its sign-in and `Origin`, then by a page key its own sign-in's open stream holds, through the same remote host and
+   * login, and by voice being on and allowed on the device. Any refusal is an HTTP answer with its reason, never a socket.
+   */
+  const upgradeVoice = (request: IncomingMessage, socket: Duplex, head: Buffer): void => {
+    const refuse = (status: number, reason: string): void => {
+      const text = `${reason}\n`;
+
+      socket.on('error', () => undefined);
+      socket.end(`HTTP/1.1 ${status} ${STATUS_CODES[status] ?? ''}\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: ${Buffer.byteLength(text)}\r\n\r\n${text}`);
+    };
+    const url = new URL(request.url ?? '/', 'http://127.0.0.1');
+
+    if (page === undefined || url.pathname !== VOICE_SOCKET_PATH || !isWebSocketUpgrade(request)) {
+      refuse(404, 'Not found.');
+      return;
+    }
+
+    if (closing || held !== null) {
+      refuse(503, held ?? 'The hub is stopping.');
+      return;
+    }
+
+    const origin = pageOrigin(request.headers, request.socket.remoteAddress, request.socket.localPort ?? 0, page.remote?.() ?? { hosts: [], logins: [] });
+
+    if ('refused' in origin) {
+      refuse(403, origin.refused);
+      return;
+    }
+
+    if (!page.access.allows(request.headers.cookie, origin)) {
+      refuse(401, 'Not signed in.');
+      return;
+    }
+
+    if (request.headers.origin !== origin.origin) {
+      refuse(403, 'The page opens the voice only from its own origin.');
+      return;
+    }
+
+    const key = url.searchParams.get('window') ?? '';
+    const hash = page.access.sessionOf(request.headers.cookie);
+
+    if (!page.isPage(key) || pageKeySessions.get(key) !== hash || pageKeyOrigins.get(key) !== originOf(origin) || hash === null) {
+      refuse(403, 'Not in this window.');
+      return;
+    }
+
+    if (origin.host === null) {
+      refuse(403, 'Voice on this computer uses its own microphone and speaker.');
+      return;
+    }
+
+    if (page.voice === undefined || !page.voice.enabled()) {
+      refuse(403, VOICE_OFF);
+      return;
+    }
+
+    if (!page.access.voiceAllowed(hash)) {
+      refuse(403, VOICE_NOT_ALLOWED);
+      return;
+    }
+
+    const label = page.access.devices().find((one) => one.id === deviceId(hash))?.label ?? '';
+    const voice = page.voice;
+    const from = origin;
+    // Checked again at each message the page sends, so a socket does not outlive its sign-in, its permission or remote access.
+    const allowed = (): string | null => {
+      const now = page.remote?.() ?? { hosts: [], logins: [] };
+
+      return !now.hosts.includes(from.host) || !now.logins.includes(from.login)
+        ? 'Remote access no longer allows this device.'
+        : !page.access.signedIn(hash, from)
+          ? 'This device was signed out.'
+          : !voice.enabled()
+            ? VOICE_OFF
+            : !page.access.voiceAllowed(hash)
+              ? 'Voice is no longer allowed on this device.'
+              : null;
+    };
+
+    voice.accept(request, socket, head, { hash, key, host: origin.host, login: origin.login, label, allowed });
+  };
+
   /** A listener on the page's fixed port, which serves the page's routes and nothing else. */
   const listenPageOnce = (port: number): Promise<Server> =>
     new Promise((resolve, reject) => {
@@ -897,6 +1048,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
         }
       });
 
+      one.on('upgrade', upgradeVoice);
       one.once('error', reject);
       one.listen(port, '127.0.0.1', () => {
         one.off('error', reject);
@@ -1032,6 +1184,8 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       json(response, 404, { error: 'not found' });
     }
   });
+  server.on('upgrade', upgradeVoice);
+
 
   const notify = (to: View, event: string, data: unknown, only?: readonly string[]): number => {
     let sent = 0;
@@ -1099,6 +1253,8 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
               stream.end();
             }
           }
+
+          page?.voice?.close((device) => !remote.hosts.includes(device.host) || !remote.logins.includes(device.login), 'Remote access no longer allows this device.');
         },
         notifyWindows: (event, data, only) => notify('window', event, data, only),
         focusedWindow: () => (front === null ? null : (keys.get(front) ?? null)),
@@ -1165,6 +1321,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
               }
             };
 
+            page?.voice?.close(() => true, 'Switchboard stopped.');
             server.close(closed);
             server.closeAllConnections();
             pageServer?.close(closed);

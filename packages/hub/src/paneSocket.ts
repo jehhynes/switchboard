@@ -18,21 +18,51 @@ export interface PaneSocketHandlers {
   closed(): void;
 }
 
+/** One open WebSocket of the hub's own (architecture.md § Pane socket, § Remote access): JSON text messages and, where taken, binary ones. */
+export interface HubSocket extends PaneSocket {
+  /** Sends one binary message; dropped when the socket is closed or the message is over the frame limit. */
+  sendBinary(data: Buffer): void;
+  /** Closes with a code and a reason the peer reads, at most 123 bytes of it. */
+  close(code?: number, reason?: string): void;
+  /** Bytes written and not yet sent, for a sender that must not queue audio ahead of a slow peer. */
+  queued(): number;
+}
+
+export interface HubSocketHandlers extends PaneSocketHandlers {
+  /** A binary message; without it a binary frame closes the socket with 1003. */
+  binary?(data: Buffer): void;
+}
+
+/** Whether an upgrade request is a well-formed WebSocket version 13 handshake. */
+export function isWebSocketUpgrade(request: IncomingMessage): boolean {
+  const key = request.headers['sec-websocket-key'];
+
+  return request.method === 'GET' && String(request.headers.upgrade ?? '').toLowerCase() === 'websocket' && request.headers['sec-websocket-version'] === '13' && typeof key === 'string' && Buffer.from(key, 'base64').length === 16;
+}
+
 /**
  * Accepts a WebSocket upgrade on the browser endpoint (RFC 6455, version 13) when its `Origin` is exactly `origin`, or refuses it with 403 and
  * closes the connection. Only what the pane needs: unfragmented text frames of JSON up to {@link PANE_FRAME_LIMIT}, masked as the standard
  * requires of a client, ping, pong and close; anything else closes the socket.
  */
 export function acceptPaneSocket(request: IncomingMessage, socket: Duplex, head: Buffer, origin: string, handlers: PaneSocketHandlers): PaneSocket | null {
-  const key = request.headers['sec-websocket-key'];
-  const upgrade = String(request.headers.upgrade ?? '').toLowerCase();
-
-  if (request.method !== 'GET' || upgrade !== 'websocket' || request.headers['sec-websocket-version'] !== '13' || typeof key !== 'string' || Buffer.from(key, 'base64').length !== 16 || request.headers.origin !== origin) {
+  if (!isWebSocketUpgrade(request) || request.headers.origin !== origin) {
     socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
     return null;
   }
 
-  const accept = createHash('sha1').update(key + ACCEPT_GUID).digest('base64');
+  return acceptWebSocket(request, socket, head, handlers);
+}
+
+/**
+ * Accepts a WebSocket upgrade whose checks the caller made, with {@link isWebSocketUpgrade} among them: unfragmented text frames of JSON and,
+ * with `handlers.binary`, binary frames, each up to {@link PANE_FRAME_LIMIT} and masked as the standard requires of a client, ping, pong and
+ * close; anything else closes the socket.
+ */
+export function acceptWebSocket(request: IncomingMessage, socket: Duplex, head: Buffer, handlers: HubSocketHandlers): HubSocket {
+  const accept = createHash('sha1')
+    .update(String(request.headers['sec-websocket-key']) + ACCEPT_GUID)
+    .digest('base64');
 
   socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
 
@@ -46,16 +76,18 @@ export function acceptPaneSocket(request: IncomingMessage, socket: Duplex, head:
 
     return Buffer.concat([header, payload]);
   };
-  const end = (code: number): void => {
+  const end = (code: number, reason = ''): void => {
     if (!open) {
       return;
     }
 
     open = false;
 
-    const payload = Buffer.alloc(2);
+    const text = Buffer.from(reason, 'utf8').subarray(0, 123);
+    const payload = Buffer.alloc(2 + text.length);
 
     payload.writeUInt16BE(code);
+    text.copy(payload, 2);
     socket.end(frame(0x8, payload));
     handlers.closed();
   };
@@ -104,7 +136,7 @@ export function acceptPaneSocket(request: IncomingMessage, socket: Duplex, head:
         payload[index] = payload[index]! ^ mask[index % 4]!;
       }
 
-      if ((first & 0x80) === 0 || opcode === 0x0 || opcode === 0x2) {
+      if ((first & 0x80) === 0 || opcode === 0x0 || (opcode === 0x2 && handlers.binary === undefined)) {
         end(1003);
         return;
       }
@@ -116,6 +148,11 @@ export function acceptPaneSocket(request: IncomingMessage, socket: Duplex, head:
 
       if (opcode === 0x9) {
         socket.write(frame(0xa, payload.subarray(0, 125)));
+        continue;
+      }
+
+      if (opcode === 0x2) {
+        handlers.binary!(payload);
         continue;
       }
 
@@ -176,6 +213,12 @@ export function acceptPaneSocket(request: IncomingMessage, socket: Duplex, head:
         socket.write(frame(0x1, payload));
       }
     },
-    close: (code = 1000) => end(code),
+    sendBinary: (data) => {
+      if (open && data.length <= PANE_FRAME_LIMIT) {
+        socket.write(frame(0x2, data));
+      }
+    },
+    close: (code = 1000, reason = '') => end(code, reason),
+    queued: () => socket.writableLength,
   };
 }

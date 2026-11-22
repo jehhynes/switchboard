@@ -1070,7 +1070,7 @@ describe('the web page routes', () => {
       expect((await post(command, { Cookie: localCookie, Origin: here })).status).toBe(200);
     }
 
-    expect([...LOCAL_PAGE_COMMANDS]).toEqual(['page-pair', 'page-devices', 'page-device-revoke', 'pane-pair', 'pane-rect', 'page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll']);
+    expect([...LOCAL_PAGE_COMMANDS]).toEqual(['page-pair', 'page-devices', 'page-device-revoke', 'page-device-voice', 'pane-pair', 'pane-rect', 'page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll']);
 
     const devices = JSON.parse((await post('page-devices', { Cookie: localCookie, Origin: here })).body) as { devices: Array<{ id: string; label: string; host: string | null; login: string | null; current: boolean }> };
 

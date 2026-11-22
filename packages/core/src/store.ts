@@ -509,6 +509,8 @@ export const MIGRATIONS = [
    ALTER TABLE sourceStates DROP COLUMN volumeTimezone;
    INSERT INTO historyRevisions (ticketId, revision) SELECT id, 1 FROM tickets WHERE source IN ('zoho', 'forum') AND true
      ON CONFLICT (ticketId) DO UPDATE SET revision = revision + 1;`,
+  // Voice on a paired device (architecture.md § Remote access): allowed only from this computer, per sign-in, so revoking or pairing anew drops it.
+  `ALTER TABLE pageSessions ADD COLUMN voice INTEGER NOT NULL DEFAULT 0;`,
 ];
 
 /**
@@ -527,11 +529,12 @@ export interface PageDevice {
   login: string | null;
 }
 
-/** A remembered web page sign-in (architecture.md § Web page): its cookie's SHA-256, when it was made and last used, and its device. */
+/** A remembered web page sign-in (architecture.md § Web page): its cookie's SHA-256, when it was made and last used, its device, and whether voice is allowed on it. */
 export interface PageSession extends PageDevice {
   hash: string;
   createdAt: number;
   usedAt: number;
+  voice: boolean;
 }
 
 /**
@@ -1672,7 +1675,9 @@ export class Store {
 
   /** A remembered web page sign-in by its cookie's hash (architecture.md § Web page), or null. */
   pageSession(hash: string): PageSession | null {
-    return (this.#db.prepare('SELECT hash, createdAt, usedAt, label, host, login FROM pageSessions WHERE hash = ?').get(hash) as PageSession | undefined) ?? null;
+    const row = this.#db.prepare('SELECT hash, createdAt, usedAt, label, host, login, voice FROM pageSessions WHERE hash = ?').get(hash) as (Omit<PageSession, 'voice'> & { voice: number }) | undefined;
+
+    return row === undefined ? null : { ...row, voice: row.voice === 1 };
   }
 
   /** Every remembered sign-in, the one used last first. */
@@ -1729,7 +1734,14 @@ export class Store {
   }
 
   pageSessions(): PageSession[] {
-    return this.#db.prepare('SELECT hash, createdAt, usedAt, label, host, login FROM pageSessions ORDER BY usedAt DESC, createdAt DESC').all() as unknown as PageSession[];
+    const rows = this.#db.prepare('SELECT hash, createdAt, usedAt, label, host, login, voice FROM pageSessions ORDER BY usedAt DESC, createdAt DESC').all() as unknown as Array<Omit<PageSession, 'voice'> & { voice: number }>;
+
+    return rows.map((row) => ({ ...row, voice: row.voice === 1 }));
+  }
+
+  /** Allows or forbids voice on one sign-in's device (architecture.md § Remote access); false when no sign-in has the hash. */
+  setPageSessionVoice(hash: string, on: boolean): boolean {
+    return Number(this.#db.prepare('UPDATE pageSessions SET voice = ? WHERE hash = ?').run(on ? 1 : 0, hash).changes) === 1;
   }
 
   /** Stores a sign-in with its device, or for one already stored only the time it was last used. */
