@@ -3,7 +3,7 @@ import MarkdownIt from 'markdown-it';
 /** Raw HTML off, so a reply's text can never inject markup; tables, code spans and fences as GitHub draws them. */
 const markdown = new MarkdownIt({ html: false, linkify: true, breaks: false });
 
-/** Which link targets stay links: web pages; a path or any other scheme shows as text, since a browser page cannot open a local file. */
+/** Which link targets open in the browser: web pages; a path opens in the page's file tab, and any other scheme shows as text. */
 export function webLink(url: string): boolean {
   return /^https?:\/\//i.test(url.trim());
 }
@@ -39,8 +39,8 @@ export function copyButton(action: 'copy-code' | 'copy-reply', label: string): s
 }
 
 /**
- * Markdown as HTML: a web link opens in a new tab with no referrer; a link to a path, which a browser cannot open, keeps its text and shows its
- * target as a tooltip. `base`, when given, turns an image's relative source into the artifact file route, for an artifact's Markdown, and
+ * Markdown as HTML: a web link opens in a new tab with no referrer; a link to a path keeps its text, shows its target as a tooltip and opens
+ * in a file tab of the page (`data-action="local-file"`). `base`, when given, turns an image's relative source into the artifact file route, for an artifact's Markdown, and
  * `link` a relative link's target into the attributes of its `<a>`, or null to keep it as text.
  */
 export function renderMarkdown(text: string, base?: (path: string) => string | null, link?: (href: string) => string | null): string {
@@ -60,7 +60,8 @@ function linkify(html: string, base?: (path: string) => string | null, link?: (h
 
       const to = link?.(href) ?? null;
 
-      return to === null ? `<a class="path-link" title="${href}"` : `<a ${to}`;
+      // The page opens a path's file in a tab (`LocalFilesController`); a focusable link, though it has no href a browser could follow.
+      return to === null ? `<a class="path-link" title="${href}" tabindex="0" role="link" data-action="local-file" data-target="${href}"` : `<a ${to}`;
     })
     .replace(/<img src="([^"]*)"/g, (_match, src: string) => {
       if (/^(?:https?:|data:)/i.test(src)) {

@@ -129,6 +129,7 @@ The dock's list is in `apps/dock/src/Switchboard.Dock/Views/`, the page's in `pa
 | C16 | A control acts only on the hub's current view; with no hub the dock refuses it | Present | The hub checks the row still offers it |
 | C17 | A refusal or failure shows in the toast in the warning colours | Partly | The page shows it over the composer |
 | C18 | The open work item's ticket and links in a Chrome window over the installed page's Browser tab, behind `web.chromePane` on Windows (PRD R113) | Web only | The dock opens links as new browser tabs (R74); the operator approved the pane as a page feature in R113 ([architecture.md § Pane helper](architecture.md#pane-helper)) |
+| C19 | A link in a reply or status to a local file or folder opens it | Web only | The dock shows no conversation; VS Code's Conversation view opens the file in an editor at the line, and the page in a closable file tab on this computer only ([architecture.md § Web page](architecture.md#web-page)) |
 
 ## Search
 

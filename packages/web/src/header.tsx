@@ -421,7 +421,7 @@ export function renderSideSwitch(side: SideTab, state: PageState, browser = fals
 export function renderTabs(view: View, state: PageState, browser = false, strip: ArtifactStrip = { open: null, fit: 0, menu: false, now: 0 }, extra: ComponentChildren = null, console = true): VNode {
   const fresh = state.status?.unread === true;
   // As in the VS Code view: Status has its New badge; the page shows no unread counts.
-  const badges: Record<Tab, string> = { conversation: '', status: fresh ? 'New' : '', artifacts: '', console: '', browser: '', diff: '' };
+  const badges: Record<Tab, string> = { conversation: '', status: fresh ? 'New' : '', artifacts: '', console: '', browser: '', diff: '', file: '' };
 
   return (
     <nav class="tabs" role="tablist">

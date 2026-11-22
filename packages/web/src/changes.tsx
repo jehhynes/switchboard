@@ -82,12 +82,12 @@ export function diffTabs(changes: ChangesView, shown: boolean): ComponentChildre
   );
 }
 
-/** The Changes button, after the strip's tabs, with the count once a list was read. */
-export function changesButton(changes: ChangesView): VNode {
+/** The Changes button, after the strip's tabs, with the count once a list was read; `after` when other tabs, such as file tabs, come before it. */
+export function changesButton(changes: ChangesView, after = false): VNode {
   const count = changes.list?.total;
 
   return (
-    <button class={`tab changes-button${changes.tab ? '' : ' push'}${changes.menu ? ' open' : ''}`} type="button" data-action="changes-menu" aria-expanded={changes.menu} aria-label={count === undefined ? 'Changes list' : `Changes list, ${count} files`} title="The worktree's changes since its base">
+    <button class={`tab changes-button${changes.tab || after ? '' : ' push'}${changes.menu ? ' open' : ''}`} type="button" data-action="changes-menu" aria-expanded={changes.menu} aria-label={count === undefined ? 'Changes list' : `Changes list, ${count} files`} title="The worktree's changes since its base">
       <span class="codicon codicon-diff-multiple" aria-hidden="true"></span>
       <span class="tab-label">Changes</span>
       {count === undefined ? null : <span class="tab-badge muted">{count}</span>}

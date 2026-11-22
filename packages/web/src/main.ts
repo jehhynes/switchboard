@@ -32,6 +32,7 @@ import type { HistoryOpen, HistoryUi } from './history.js';
 import type { HistoryCategory, HistoryView } from '@switchboard/protocol';
 import { askForNotifications, notificationsAllowed, notifyNeeds, playChime } from './alerts.js';
 import { ChangesController, changesButton, diffTabs, renderChangesMenu } from './changes.js';
+import { LocalFilesController, localTabs } from './localFiles.js';
 import type { DiffModule } from './diff/types.js';
 import { useFileIcons } from './fileIcons.js';
 import type { NeedsItem } from './alerts.js';
@@ -234,7 +235,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /** Whether the Console tab shows: an active session, not ended, that the terminal holder may hold; otherwise its console would be blank, so there is no tab. */
   const showConsole = (): boolean => hasConsole(state.session);
   /** The tab the conversation's pane shows: always the conversation while Status and Artifacts have their own column, and never a Browser tab that is gone. */
-  const mainTab = (): Tab => (wide() || (view.tab === 'browser' && !showBrowser()) || (view.tab === 'artifacts' && openArtifact() === null) || (view.tab === 'diff' && !changes.view.tab) ? 'conversation' : view.tab === 'console' && !showConsole() ? 'status' : view.tab);
+  const mainTab = (): Tab => (wide() || (view.tab === 'browser' && !showBrowser()) || (view.tab === 'artifacts' && openArtifact() === null) || (view.tab === 'diff' && !changes.view.tab) || (view.tab === 'file' && localFiles.shown() === null) ? 'conversation' : view.tab === 'console' && !showConsole() ? 'status' : view.tab);
   /** The work item whose tabs were last chosen on its opening, and whether the operator has chosen a tab since. */
   let openedItem: number | null = null;
   let tabChosen = false;
@@ -286,8 +287,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const workItemId = state.scope?.workItemId ?? null;
     const shown = wide() ? sideTab() : mainTab();
 
-    // The Changes tab lasts as long as the page shows the work item, so it is not kept.
-    if (workItemId === null || shown === 'conversation' || shown === 'diff') {
+    // The Changes tab or a file tab lasts as long as the page shows the work item, so it is not kept.
+    if (workItemId === null || shown === 'conversation' || shown === 'diff' || shown === 'file') {
       return;
     }
 
@@ -320,7 +321,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     void post('page-tabs', closed ? { workItemId, close: { path, updatedAt: artifact.updatedAt } } : { workItemId, reopen: path });
   };
   /** What the column right of the conversation shows: Status in place of a Browser tab that is gone. */
-  const sideTab = (): SideTab => ((view.side === 'browser' && !showBrowser()) || (view.side === 'console' && !showConsole()) || (view.side === 'artifacts' && openArtifact() === null) || (view.side === 'diff' && !changes.view.tab) ? 'status' : view.side);
+  const sideTab = (): SideTab => ((view.side === 'browser' && !showBrowser()) || (view.side === 'console' && !showConsole()) || (view.side === 'artifacts' && openArtifact() === null) || (view.side === 'diff' && !changes.view.tab) || (view.side === 'file' && localFiles.shown() === null) ? 'status' : view.side);
   /** The artifact whose tab is chosen, while the work item still has it; artifacts have no list of their own, only a tab each and a menu. */
   function openArtifact(): string | null {
     return view.artifact !== null && state.artifacts.some((one) => one.path === view.artifact) ? view.artifact : null;
@@ -375,6 +376,26 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     diffSettings: () => ({ layout: state.diffLayout, wrap: state.diffWrap }),
   });
   let changesSession: string | null = null;
+  // Local file links' tabs (architecture.md § Web page), only on the page on this computer.
+  const localFiles = new LocalFilesController({
+    fetch: (...args) => deps.fetch(...args),
+    key: () => state.key,
+    allowed: () => paneLocal(),
+    draw: () => draw(),
+    show: () => {
+      leaving('file');
+      chooseTab('file');
+      draw();
+    },
+    closed: () => {
+      chooseTab(wide() ? 'status' : 'conversation');
+      draw();
+    },
+    loadDiff: () => deps.loadDiff?.() ?? Promise.resolve(null),
+    takePane: (pane) => takePane(pane),
+    drawPane: (pane, tree) => drawPane(pane, tree),
+    drawDiagrams: (pane) => drawDiagrams(pane),
+  });
   // File type icons, whose mapping loads the first time a list draws one (architecture.md § Web page).
   const dropFileIcons = useFileIcons({ fetch: (...args) => deps.fetch(...args), loaded: () => draw() });
 
@@ -1647,6 +1668,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const side = wide() && state.scope !== null;
 
     root.classList.toggle('wide', side);
+    root.classList.toggle('local-files', paneLocal());
     // Under 800 px of height the composer shows only on the Conversation tab (page.css).
     root.classList.toggle('off-conversation', state.scope !== null && mainTab() !== 'conversation');
 
@@ -1659,6 +1681,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     changesSession = state.session?.state ?? null;
     changes.follow(state.scope === null || state.key === null ? null : `${state.key} ${state.scope.scopeGen} ${state.scope.workItemId ?? ''}`, turnEnded);
+    localFiles.follow(state.scope === null || state.key === null ? null : `${state.key} ${state.scope.scopeGen} ${state.scope.workItemId ?? ''}`);
 
     if (state.scope === null) {
       mount(head, null);
@@ -1670,7 +1693,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     const strip = { open: openArtifact(), fit: view.artifactFit, menu: view.artifactMenu, now: deps.now(), closed: closedNow() };
 
-    const changeTabs = (shown: Tab): ComponentChild[] => [diffTabs(changes.view, shown === 'diff'), changesButton(changes.view)];
+    const changeTabs = (shown: Tab): ComponentChild[] => [diffTabs(changes.view, shown === 'diff'), localTabs(localFiles.view, shown === 'file', !changes.view.tab), changesButton(changes.view, localFiles.view.tabs.length > 0)];
 
     mount(head, [renderHeader(state, view), side ? null : renderTabs({ ...view, tab: mainTab() }, state, showBrowser(), strip, changeTabs(mainTab()), showConsole()), side ? null : renderChangesMenu(changes.view)]);
 
@@ -1680,7 +1703,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const drawTab = (pane: HTMLElement, tab: Tab): void => {
       pane.classList.toggle('console-pane', tab === 'console');
       pane.classList.toggle('browser-pane', tab === 'browser');
-      pane.classList.toggle('diff-pane', tab === 'diff');
+      pane.classList.toggle('diff-pane', tab === 'diff' || (tab === 'file' && localFiles.codeShown()));
 
       if (tab === 'browser') {
         // The Chrome pane's window lies over this area while it shows; until then the area says why it does not.
@@ -1692,6 +1715,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         drawConsole(pane);
       } else if (tab === 'diff') {
         changes.drawDiff(pane);
+      } else if (tab === 'file') {
+        localFiles.draw(pane);
       } else if (tab === 'artifacts' && artifact !== undefined && state.key !== null) {
         const kept = artifactDocs.get(docKey(artifact.path));
 
@@ -1722,7 +1747,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         drawDiagrams(pane);
       }
 
-      pane.classList.toggle('framed', tab === 'artifacts' && artifact !== undefined);
+      pane.classList.toggle('framed', (tab === 'artifacts' && artifact !== undefined) || (tab === 'file' && !localFiles.codeShown()));
     };
 
     drawTab(panel, mainTab());
@@ -1762,6 +1787,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     checkSeen();
     dropConsoles();
     changes.drop();
+    localFiles.drop();
   };
   /** Opens each open menu down and to the right of its button, or the other way where the page has no room (`placeMenus`, architecture.md § Conversation view, Menus). */
   const fitMenus = (): void => placeMenus(root, { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight });
@@ -2302,7 +2328,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   root.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
 
-    if (changes.click(target)) {
+    if (changes.click(target) || localFiles.click(target)) {
       return;
     }
     const sideTab = target.closest<HTMLElement>('[data-side]')?.dataset['side'];
@@ -2715,6 +2741,13 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
   });
   root.addEventListener('keydown', (event) => {
+    // Enter on a focused local file link opens it, as a click does.
+    if (event.key === 'Enter' && event.target instanceof HTMLElement && event.target.matches('a.path-link[data-action="local-file"]')) {
+      event.preventDefault();
+      localFiles.click(event.target);
+      return;
+    }
+
     // Left and Right, Home and End move between a tab strip's tabs, as in a tab list; Enter or Space then chooses one.
     const tab = event.target instanceof HTMLElement && event.target.getAttribute('role') === 'tab' ? event.target : null;
     // A narrow strip hides some diff tabs (page.css), which cannot take the focus.
