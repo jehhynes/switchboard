@@ -416,7 +416,8 @@ const Separator = ({ classes = 'menu-separator' }: { classes?: string }) => <li 
 
 /**
  * More Actions (PRD R71), in the dock's groups: New ad-hoc session… and New conversation in a folder…; Held sessions; Refresh sources,
- * Reload and Show hub log; then Pair a device and Open Settings, on this computer's page only, or Voice on this phone, on a paired device's.
+ * Reload and Show hub log; then Pair a device, Open Settings and, while the voice is not on this computer, Voice on the computer, on this computer's
+ * page only, or Voice on this phone, on a paired device's.
  * On a phone, where the header has no room for them, the source icons come first as a check row per source.
  */
 export function renderMoreMenu(header: PageHeader | null, local = false, phoneVoice: PhoneVoiceState | null = null): VNode {
@@ -448,6 +449,14 @@ export function renderMoreMenu(header: PageHeader | null, local = false, phoneVo
           <Separator />
           <MoreRow action="list-devices" icon="device-mobile" label="Pair a device…" />
           <MoreRow action="list-settings" icon="settings-gear" label="Open Settings" />
+          {header?.voiceDevice === undefined ? null : (
+            <li role="none">
+              <button type="button" class="menu-row" role="menuitemcheckbox" aria-checked="false" data-action="list-voice-computer" title={header.voiceDevice === 'phone' ? "The voice is on a phone. Use this computer's microphone and speaker instead" : "The phone that had the voice left. Use this computer's microphone and speaker"}>
+                <Gutter checked={false} />
+                <span class="title">Voice on the computer</span>
+              </button>
+            </li>
+          )}
         </>
       ) : null}
       {!local && phoneVoice !== null ? (
@@ -1296,6 +1305,17 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
         view.menu = null;
         redraw();
         deps.openSettings?.();
+        break;
+      case 'list-voice-computer':
+        view.menu = null;
+        view.notice = null;
+        redraw();
+        void deps.post('page-voice-computer', {}).then((answer) => {
+          if (answer.status !== 200) {
+            view.notice = String(answer.body['error'] ?? 'The voice did not move to this computer.');
+            redraw();
+          }
+        });
         break;
       case 'list-phone-voice':
         // Called in the tap itself, which iOS needs to let the page start audio.

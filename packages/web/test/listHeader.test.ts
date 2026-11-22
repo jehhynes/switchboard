@@ -449,6 +449,36 @@ describe('the list header (architecture.md § Web page)', () => {
     expect(root.querySelector('.list-note')).toBeNull();
   });
 
+  it('offers Voice on the computer on this computer\'s page only while the voice is not here, and says why it did not move (PRD R119)', async () => {
+    const { page, source } = start(true);
+
+    hello(source);
+    click('.more-actions');
+    expect(root.querySelector('[data-action="list-voice-computer"]')).toBeNull();
+    click('.more-actions');
+    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ voiceDevice: 'phone' }) });
+    click('.more-actions');
+    expect(menuRows().at(-1)).toBe('Voice on the computer');
+    expect(root.querySelector('[data-action="list-voice-computer"]')?.getAttribute('title')).toContain('on a phone');
+    answers['/page-voice-computer'] = { status: 409, body: { error: 'Voice is off (voice.enabled).' } };
+    click('.more-menu [data-action="list-voice-computer"]');
+    await flush();
+    await flush();
+    expect(posts.filter((one) => one.url === '/v1/conversation/page-voice-computer')).toHaveLength(1);
+    expect(root.querySelector('.more-menu')).toBeNull();
+    expect(root.textContent).toContain('Voice is off (voice.enabled).');
+    page.close();
+
+    // A paired device's page never offers it.
+    const remote = start(false);
+
+    hello(remote.source);
+    remote.source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ voiceDevice: 'none' }) });
+    click('.more-actions');
+    expect(root.querySelector('[data-action="list-voice-computer"]')).toBeNull();
+    remote.page.close();
+  });
+
   it('pairs a device from this computer with a QR code and a code, lists the signed-in devices and signs one out, and offers none of it on a paired device (architecture.md § Remote access)', async () => {
     const remote = start(false);
 
