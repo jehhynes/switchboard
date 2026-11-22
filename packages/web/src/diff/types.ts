@@ -69,6 +69,12 @@ export interface ChangesMount {
   onWant(listener: () => void): void;
   /** A row's drawn height in pixels, or undefined when it is not a row. */
   heightOf(path: string): number | undefined;
+  /** Where each hunk of a row's drawn diff starts: its first line on the new side, or on the old side for a hunk that only deletes; none while it has no diff. */
+  hunkStarts(path: string): Array<{ line: number; side: 'additions' | 'deletions' }>;
+  /** The first line of a row's diff showing under the sticky header, on the new side unless it is a deleted line; null when none shows. */
+  topLine(path: string): number | null;
+  /** Brings a row's line to the top of the view, under the sticky header. */
+  scrollToLine(path: string, line: number, side: 'additions' | 'deletions'): void;
   /** How many diff lines `pixels` of a row's height holds, for a placeholder that keeps that height. */
   linesFor(pixels: number): number;
   set(layout: 'split' | 'stacked', wrap: boolean): void;

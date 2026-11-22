@@ -372,6 +372,7 @@ export class ChangesController {
       this.#failed.clear();
       this.#collapsed.clear();
       this.#largeSeen.clear();
+      this.#hunk = null;
       this.#jump = null;
       this.#file = null;
       this.#unmount();
@@ -609,6 +610,7 @@ export class ChangesController {
 
     this.view.tab = false;
     this.#file = null;
+    this.#hunk = null;
     this.#unmount();
     this.deps.closedDiff();
   }
@@ -981,6 +983,8 @@ export class ChangesController {
       view = document.createElement('div');
       view.className = 'diff-view';
       view.dataset['diff'] = this.view.for ?? '';
+      // Focusable, so a click in the diffs gives it the focus its keys need.
+      view.tabIndex = 0;
 
       const host = document.createElement('div');
 
@@ -1214,6 +1218,108 @@ export class ChangesController {
     if (this.#fileMount !== null && !this.#fileMount.host.isConnected) {
       this.#fileMount.mount?.dispose();
       this.#fileMount = null;
+    }
+  }
+
+  /** The hunk n and p last went to, so the next press goes on from it while its file is the one at the top. */
+  #hunk: { path: string; index: number } | null = null;
+
+  /**
+   * The Changes tab's keys, while the focus is in it and not in a field: j and k the next and previous file, n and p the next and previous change,
+   * v ticks or clears the file at the top viewed, x collapses or expands it, ] and [ the next and previous file not viewed, Escape leaves a file
+   * view. True when the key was the tab's.
+   */
+  key(event: KeyboardEvent): boolean {
+    const target = event.target instanceof Element ? event.target : null;
+
+    if (event.ctrlKey || event.metaKey || event.altKey || target === null || target.closest('.diff-view') === null || target.closest('input, textarea, select, [contenteditable="true"]') !== null) {
+      return false;
+    }
+
+    if (this.#file !== null) {
+      if (event.key !== 'Escape') {
+        return false;
+      }
+
+      this.#file = null;
+      this.deps.draw();
+      return true;
+    }
+
+    const mounted = this.#mount;
+
+    if (mounted === null || !['j', 'k', 'n', 'p', 'v', 'x', '[', ']'].includes(event.key)) {
+      return false;
+    }
+
+    const rows = this.#rows();
+    const current = mounted.mount.current();
+    const at = rows.findIndex((row) => row.path === current);
+
+    if (at === -1) {
+      return true;
+    }
+
+    const go = (path: string | undefined): void => {
+      if (path !== undefined) {
+        this.#hunk = null;
+        mounted.mount.scrollToFile(path);
+      }
+    };
+
+    if (event.key === 'j' || event.key === 'k') {
+      go(rows[at + (event.key === 'j' ? 1 : -1)]?.path);
+    } else if (event.key === ']' || event.key === '[') {
+      const step = event.key === ']' ? 1 : -1;
+
+      for (let index = at + step; index >= 0 && index < rows.length; index += step) {
+        if (rows[index]!.viewed !== true) {
+          go(rows[index]!.path);
+          break;
+        }
+      }
+    } else if (event.key === 'v') {
+      void this.toggleViewed(current!);
+    } else if (event.key === 'x') {
+      this.#setCollapsed(current!, !this.#collapsed.has(current!));
+    } else {
+      this.#stepHunk(rows, at, event.key === 'n' ? 1 : -1);
+    }
+
+    return true;
+  }
+
+  /** Goes to the next or previous change from the last one gone to, or from the file at the top, across files; a file with no diff drawn yet is gone to whole. */
+  #stepHunk(rows: ChangeRow[], at: number, step: 1 | -1): void {
+    const mount = this.#mount!.mount;
+    // The first press in a file goes on from the line at the top of the view, so it never jumps back past what the operator scrolled to.
+    const here = rows[at]!.path;
+    const shown = this.#collapsed.has(here) ? [] : mount.hunkStarts(here);
+    const line = mount.topLine(here);
+    const before = line === null ? -1 : shown.filter((one) => one.line < line).length - 1;
+    const atLine = line !== null && shown[before + 1]?.line === line ? before + 1 : before;
+    const from = this.#hunk !== null && this.#hunk.path === here ? this.#hunk : { path: here, index: line === null ? (step === 1 ? -1 : 0) : step === 1 ? atLine : before + 1 };
+    let file = at;
+    let index = from.index + step;
+
+    while (file >= 0 && file < rows.length) {
+      const path = rows[file]!.path;
+      const starts = this.#collapsed.has(path) ? [] : mount.hunkStarts(path);
+
+      if (file !== at && starts.length === 0) {
+        this.#hunk = null;
+        mount.scrollToFile(path);
+        return;
+      }
+
+      if (index >= 0 && index < starts.length) {
+        this.#hunk = { path, index };
+        mount.scrollToLine(path, starts[index]!.line, starts[index]!.side);
+        return;
+      }
+
+      file += step;
+      index = step === 1 ? 0 : (file >= 0 && file < rows.length ? (this.#collapsed.has(rows[file]!.path) ? 0 : mount.hunkStarts(rows[file]!.path).length) - 1 : -1);
     }
   }
 

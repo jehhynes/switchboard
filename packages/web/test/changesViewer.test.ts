@@ -318,4 +318,18 @@ describe('mountChanges', () => {
     mount.setCollapsed('a.ts', true);
     expect(suffix(-1)).toBe('+3 · −1');
   });
+
+  it('HunkStarts_ForADrawnDiff_NameEachChangesFirstLine', () => {
+    const { mount, view } = mounted();
+
+    expect(mount.hunkStarts('b.ts')).toEqual([]);
+    mount.setRow('b.ts', { data: { path: 'b.ts', status: 'M', patch, old: null, new: null, binary: false, tooLarge: null, partial: true } });
+    expect(mount.hunkStarts('b.ts')).toEqual([{ line: 1, side: 'additions' }]);
+    expect(mount.hunkStarts('nope')).toEqual([]);
+    // Not drawn on screen: no line at the top.
+    expect(mount.topLine('b.ts')).toBeNull();
+    mount.scrollToLine('b.ts', 1, 'additions');
+    mount.scrollToLine('nope', 1, 'additions');
+    expect(view.scrolls).toEqual([{ type: 'line', id: 'b.ts', lineNumber: 1, side: 'additions', align: 'start', behavior: 'instant' }]);
+  });
 });

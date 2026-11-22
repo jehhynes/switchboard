@@ -462,6 +462,28 @@ export function mountChanges(host: HTMLElement, rows: ChangesRowInput[], mount: 
 
       return index === -1 ? undefined : (index + 1 < order.length ? top(index + 1) : view.getScrollHeight()) - top(index);
     },
+    hunkStarts(path) {
+      const item = items.get(path);
+
+      if (item === undefined || kinds.get(item.fileDiff)?.kind !== 'diff') {
+        return [];
+      }
+
+      return item.fileDiff.hunks.map((hunk) => (hunk.additionCount > 0 ? { line: hunk.additionStart, side: 'additions' as const } : { line: hunk.deletionStart, side: 'deletions' as const }));
+    },
+    topLine(path) {
+      const element = view.getRenderedItems().find((one) => one.id === path)?.element;
+      const below = host.getBoundingClientRect().top + 44;
+      const line = [...(element?.shadowRoot?.querySelectorAll<HTMLElement>('[data-line]') ?? [])].find((one) => one.getBoundingClientRect().bottom > below);
+
+      return line === undefined ? null : Number(line.dataset['line']) || null;
+    },
+    scrollToLine(path, line, side) {
+      if (items.has(path)) {
+        view.scrollTo({ type: 'line', id: path, lineNumber: line, side, align: 'start', behavior: 'instant' });
+        want();
+      }
+    },
     linesFor(pixels) {
       const lineHeight = parseFloat(getComputedStyle(host).getPropertyValue('--diffs-line-height')) || 19;
 

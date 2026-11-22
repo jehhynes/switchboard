@@ -77,6 +77,10 @@ describe('the Changes list', () => {
   let visible: { first: number; last: number } | null;
   /** The row the fake view says has its header at the top. */
   let current: string | null;
+  /** Each file's hunk starts as the fake view draws them. */
+  let hunks: Record<string, number[]>;
+  /** Each file's first line under the sticky header, as the fake view has it. */
+  let topLines: Record<string, number>;
   let etags: Record<string, () => string>;
   let notModified: Set<string>;
   let ifNoneMatch: string[];
@@ -86,6 +90,8 @@ describe('the Changes list', () => {
     changesMounts.length = 0;
     visible = { first: 0, last: 0 };
     current = null;
+    hunks = {};
+    topLines = {};
     etags = {};
     notModified = new Set();
     ifNoneMatch = [];
@@ -140,6 +146,9 @@ describe('the Changes list', () => {
           onWant: (listener) => listeners.push(listener),
           heightOf: () => 100,
           linesFor: () => 3,
+          hunkStarts: (path) => (hunks[path] ?? []).map((line) => ({ line, side: 'additions' as const })),
+          scrollToLine: (path, line) => fake.scrolls.push(`${path}:${line}`),
+          topLine: (path) => topLines[path] ?? null,
           set: (layout, wrap) => fake.layouts.push(`${layout} ${wrap}`),
           dispose: () => (fake.disposed = true),
         };
@@ -734,6 +743,93 @@ describe('the Changes list', () => {
     await flush();
     await flush();
     expect(changesMounts[0]!.collapsed.filter((one) => one === 'big.ts true')).toHaveLength(1);
+  });
+
+  it('Keys_InTheChangesTab_MoveBetweenFilesAndChangesTickAndCollapse', async () => {
+    start();
+    await openRow(0);
+
+    const view = root.querySelector<HTMLElement>('.diff-view')!;
+    const press = (key: string, target: Element = view, extra: KeyboardEventInit = {}) => target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...extra }));
+
+    expect(view.tabIndex).toBe(0);
+    current = 'docs/a.md';
+    changesMounts[0]!.scrolls.length = 0;
+    press('j');
+    press('k');
+    expect(changesMounts[0]!.scrolls).toEqual(['src/new.ts']);
+    current = 'src/new.ts';
+    press('k');
+    expect(changesMounts[0]!.scrolls.at(-1)).toBe('docs/a.md');
+
+    // ] skips the viewed file to the next one not viewed; [ goes back.
+    current = 'docs/a.md';
+    press(']');
+    expect(changesMounts[0]!.scrolls.at(-1)).toBe('logo.png');
+    current = 'logo.png';
+    press('[');
+    expect(changesMounts[0]!.scrolls.at(-1)).toBe('docs/a.md');
+
+    // n and p walk the changes of the file at the top, then on to the next file.
+    hunks = { 'docs/a.md': [3, 40] };
+    current = 'docs/a.md';
+    press('n');
+    press('n');
+    press('p');
+    expect(changesMounts[0]!.scrolls.slice(-3)).toEqual(['docs/a.md:3', 'docs/a.md:40', 'docs/a.md:3']);
+    press('n');
+    press('n');
+    // src/new.ts is collapsed (viewed), so the walk goes to it whole.
+    expect(changesMounts[0]!.scrolls.at(-1)).toBe('src/new.ts');
+
+    // x collapses and expands the file at the top; v ticks it.
+    press('x');
+    expect(changesMounts[0]!.collapsed.at(-1)).toBe('docs/a.md true');
+    press('x');
+    expect(changesMounts[0]!.collapsed.at(-1)).toBe('docs/a.md false');
+    press('v');
+    await flush();
+    expect(gets.at(-1)).toBe('VIEWED docs/a.md h-a true 3');
+
+    // Not with a modifier, and not outside the tab.
+    const before = changesMounts[0]!.scrolls.length;
+
+    press('j', view, { ctrlKey: true });
+    press('j', document.body);
+    expect(changesMounts[0]!.scrolls).toHaveLength(before);
+  });
+
+  it('HunkKeys_AfterAScroll_GoOnFromTheLineAtTheTop', async () => {
+    start();
+    await openRow(0);
+
+    const view = root.querySelector<HTMLElement>('.diff-view')!;
+    const press = (key: string) => view.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+
+    hunks = { 'docs/a.md': [3, 40, 90] };
+    current = 'docs/a.md';
+    // Scrolled by hand to line 50: n goes on to 90, never back to 3.
+    topLines = { 'docs/a.md': 50 };
+    press('n');
+    expect(changesMounts[0]!.scrolls.at(-1)).toBe('docs/a.md:90');
+
+    // Closing the tab forgets where n went; from line 20, p goes back to 3.
+    root.querySelector<HTMLElement>('.diff-tab .tab-close')!.click();
+    await openRow(0);
+    topLines = { 'docs/a.md': 20 };
+    root.querySelector<HTMLElement>('.diff-view')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', bubbles: true, cancelable: true }));
+    expect(changesMounts[1]!.scrolls.at(-1)).toBe('docs/a.md:3');
+  });
+
+  it('Escape_InAFileView_GoesBackToTheDiffs', async () => {
+    start();
+    await openRow(1);
+    changesMounts[0]!.onLine!('src/new.ts', 'new', 12);
+    await flush();
+    await flush();
+    root.querySelector('.diff-view')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(root.querySelector('.file-overlay')).toBeNull();
+    expect(changesMounts[0]!.disposed).toBe(false);
   });
 
   it('ChangesMenu_Buttons_HideViewedCollapseAndExpandEveryFile', async () => {

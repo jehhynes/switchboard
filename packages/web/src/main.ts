@@ -2780,6 +2780,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
   });
   root.addEventListener('keydown', (event) => {
+    // The Changes tab's own keys, while the focus is in it (changes.tsx `key`).
+    if (changes.key(event)) {
+      event.preventDefault();
+      return;
+    }
+
     // Enter on a focused local file link opens it, as a click does.
     if (event.key === 'Enter' && event.target instanceof HTMLElement && event.target.matches('a.path-link[data-action="local-file"]')) {
       event.preventDefault();
