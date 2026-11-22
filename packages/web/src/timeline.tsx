@@ -3,7 +3,7 @@
 import type { VNode } from 'preact';
 import { fullTime, metaLine, stamped, toneMark, voiceMark } from '@switchboard/conversation/messageMeta';
 import { hasUnspokenText, spokenBody } from '@switchboard/conversation/spokenBubble';
-import { answers, answersIn, cardOutcome, complete, parseQuestions } from '@switchboard/conversation/questions';
+import { answersCard, answersIn, cardOutcome, complete, parseQuestions } from '@switchboard/conversation/questions';
 import type { Question, QuestionChoice } from '@switchboard/conversation/questions';
 import { artifactIcon, awaitingReply, timeline } from './model.js';
 import type { PageState } from './model.js';
@@ -164,10 +164,10 @@ export function cardOf(key: string, markdown: string, answer: string | null, vie
   return questions.length === 0 ? null : questionCard(key, questions, view.cards.get(key), answer, canAnswer);
 }
 
-/** The text of the first message after a reply, which answers its card. */
+/** The text of the first message after a reply, which answers its card (`answersCard`). */
 function answerAfter(state: PageState, replyId: string): string | null {
   const from = state.items.findIndex((item) => item.id === replyId);
-  const later = from === -1 ? undefined : state.items.slice(from + 1).find((item) => item.type === 'message' && answers(item));
+  const later = from === -1 ? undefined : state.items.slice(from + 1).find((item) => item.type === 'message' && answersCard(item, state.items[from]!.at));
 
   return later?.type === 'message' ? later.text : null;
 }

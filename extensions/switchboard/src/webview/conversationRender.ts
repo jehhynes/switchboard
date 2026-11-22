@@ -8,7 +8,7 @@ import { fullTime, metaLine, stamped, toneMark, voiceMark } from '@switchboard/c
 import { hasUnspokenText, spokenBody } from '@switchboard/conversation/spokenBubble';
 import { artifactIcon, awaitingReply, selectedEntry, stateIcon, statusLine, timeline } from '../conversationModel.js';
 import type { ConversationState } from '../conversationModel.js';
-import { answers, answersIn, answerText, cardOutcome, complete, parseQuestions, questionSegments } from '@switchboard/conversation/questions';
+import { answersCard, answersIn, answerText, cardOutcome, complete, parseQuestions, questionSegments } from '@switchboard/conversation/questions';
 import type { Question, QuestionChoice } from '@switchboard/conversation/questions';
 
 /** What the page posts to the extension. */
@@ -53,7 +53,7 @@ export interface SendTarget {
 /** The text of the first message after the reply a status came from, or after the status's time when that reply is not loaded; null for none. */
 function statusAnswer(items: readonly ItemView[], status: StatusView): string | null {
   const from = items.findIndex((item) => item.type === 'reply' && `st-${item.id}` === status.id);
-  const later = (from === -1 ? items.filter((item) => item.at > status.at) : items.slice(from + 1)).find((item) => item.type === 'message' && answers(item));
+  const later = (from === -1 ? items.filter((item) => item.at > status.at) : items.slice(from + 1)).find((item) => item.type === 'message' && answersCard(item, status.at));
 
   return later?.type === 'message' ? later.text : null;
 }
@@ -684,7 +684,8 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
   // Found in conversation order, not the timeline's, where a rewrite takes the place of the reply it rewrote.
   const answerAfter = (replyId: string): string | null => {
     // A message still on its way, which may come back not sent, leaves the card as it is.
-    const later = state.items.slice(state.items.findIndex((item) => item.id === replyId) + 1).find((item) => item.type === 'message' && answers(item));
+    const from = state.items.findIndex((item) => item.id === replyId);
+    const later = state.items.slice(from + 1).find((item) => item.type === 'message' && answersCard(item, state.items[from]?.at ?? 0));
 
     return later?.type === 'message' ? later.text : null;
   };

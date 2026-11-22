@@ -125,6 +125,18 @@ describe('question cards in replies', () => {
     expect(host.querySelector('.question-card')?.className).toBe('question-card');
   });
 
+  it('leaves a card answerable under a provisional message queued before the reply, and answered by one queued after it', () => {
+    const host = document.createElement('div');
+    // A notice an earlier run left queued shows after the transcript's items, dated days before the reply.
+    const stale = message('m0', 1, { text: '2 background agents were stopped by the user: "A".', provisional: true, delivery: null });
+
+    host.innerHTML = html(renderTimeline(pageState([reply('r1', 5, { opening: ending }), stale]), newView()));
+    expect(host.querySelector('.question-card')?.className).toBe('question-card');
+    expect(host.querySelector<HTMLButtonElement>('.question-option')?.disabled).toBe(false);
+    host.innerHTML = html(renderTimeline(pageState([reply('r1', 5, { opening: ending }), message('m1', 6, { text: '1B', provisional: true, delivery: null })]), newView()));
+    expect(host.querySelector('.question-card')?.className).toBe('question-card answered');
+  });
+
   it('draws each option letter and its period in a column of their own and centres the mark on the first line', () => {
     const host = document.createElement('div');
 

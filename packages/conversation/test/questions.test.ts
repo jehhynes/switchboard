@@ -99,7 +99,7 @@ describe('a complete card', () => {
 });
 
 describe('an unanswered card (PRD R103)', () => {
-  const message = (withdrawn = false, delivery: string | null = 'sent'): CardItem => ({ type: 'message', withdrawn, delivery });
+  const message = (withdrawn = false, delivery: string | null = 'sent', patch: Partial<Extract<CardItem, { type: 'message' }>> = {}): CardItem => ({ type: 'message', withdrawn, delivery, ...patch });
   const reply = (id: string, opening: string, patch: Partial<Extract<CardItem, { type: 'reply' }>> = {}): CardItem => ({ type: 'reply', id, kind: 'reply', opening, rewrittenBy: null, withdrawn: false, ...patch });
 
   it('is a reply after the newest message that asks lettered questions', () => {
@@ -111,6 +111,14 @@ describe('an unanswered card (PRD R103)', () => {
     // Nor does one still waiting to be typed, which may come back not sent.
     expect(unansweredCard([reply('r1', ASKED), message(false, 'open')], null)).toBe(true);
     expect(unansweredCard([reply('r1', ASKED), message(false, null)], null)).toBe(false);
+  });
+
+  it('is still open under a provisional message queued before the card, and answered by one queued after it', () => {
+    // A notice an earlier run left queued shows after the transcript's items, dated before the card.
+    expect(unansweredCard([reply('r1', ASKED, { at: 500 }), message(false, null, { provisional: true, at: 100 })], null)).toBe(true);
+    expect(unansweredCard([reply('r1', ASKED, { at: 500 }), message(false, null, { provisional: true, at: 600 })], null)).toBe(false);
+    expect(unansweredCard([reply('r1', ASKED, { at: 500 }), message(false, null, { provisional: false, at: 100 })], null)).toBe(false);
+    expect(unansweredCard([reply('r1', '', { at: 500 }), message(false, null, { provisional: true, at: 100 })], { replyId: 'r1', markdown: ASKED })).toBe(true);
   });
 
   it('is none once any message follows, or when the reply is an aside, a note, rewritten, withdrawn or asks no lettered question', () => {

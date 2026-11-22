@@ -1,7 +1,7 @@
 // The Status and Artifacts tabs (architecture.md § Web page), in the tab strip or the column right of the conversation.
 import type { VNode } from 'preact';
 import { stampTime } from '@switchboard/conversation/messageMeta';
-import { answers } from '@switchboard/conversation/questions';
+import { answersCard } from '@switchboard/conversation/questions';
 import { artifactIcon } from './model.js';
 import type { PageState } from './model.js';
 import { renderMarkdown } from './markdown.js';
@@ -21,7 +21,7 @@ export function renderStatus(state: PageState, view: View, now: number): VNode {
 
   const answer = (): string | null => {
     const from = state.items.findIndex((item) => item.type === 'reply' && `st-${item.id}` === status.id);
-    const later = (from === -1 ? state.items.filter((item) => item.at > status.at) : state.items.slice(from + 1)).find((item) => item.type === 'message' && answers(item));
+    const later = (from === -1 ? state.items.filter((item) => item.at > status.at) : state.items.slice(from + 1)).find((item) => item.type === 'message' && answersCard(item, status.at));
 
     return later?.type === 'message' ? later.text : null;
   };

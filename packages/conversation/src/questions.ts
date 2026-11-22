@@ -327,8 +327,8 @@ export function answersIn(message: string, questions: readonly Question[]): Map<
 
 /** A conversation item as `unansweredCard` reads it: a message, or a reply with the text a card is drawn from. */
 export type CardItem =
-  | { type: 'message'; withdrawn: boolean; delivery?: string | null }
-  | { type: 'reply'; id: string; kind: 'reply' | 'aside' | 'note'; opening: string; rewrittenBy: string | null; withdrawn: boolean };
+  | { type: 'message'; withdrawn: boolean; delivery?: string | null; provisional?: boolean; at?: number }
+  | { type: 'reply'; id: string; kind: 'reply' | 'aside' | 'note'; opening: string; rewrittenBy: string | null; withdrawn: boolean; at?: number };
 
 /**
  * Whether a session's conversation holds a question card no message has answered yet (PRD R103): a reply, not an aside, a note or one a rewrite
@@ -337,22 +337,31 @@ export type CardItem =
  * newest answering message on; `status` is the newest status, with the reply it was written in.
  */
 export function unansweredCard(items: readonly CardItem[], status: { replyId: string; markdown: string } | null): boolean {
-  let start = items.length;
+  const asks = (markdown: string): boolean => parseQuestions(markdown).length > 0;
+  let asked: number | null = null;
 
-  while (start > 0 && !answers(items[start - 1]!)) {
-    start--;
+  for (const item of items) {
+    if (item.type === 'reply') {
+      if ((item.kind === 'reply' && !item.withdrawn && item.rewrittenBy === null && asks(item.opening)) || (status !== null && item.id === status.replyId && asks(status.markdown))) {
+        asked = item.at ?? 0;
+      }
+    } else if (asked !== null && answersCard(item, asked)) {
+      asked = null;
+    }
   }
 
-  const after = items.slice(start);
-  const asks = (markdown: string): boolean => parseQuestions(markdown).length > 0;
-
-  return (
-    after.some((item) => item.type === 'reply' && item.kind === 'reply' && !item.withdrawn && item.rewrittenBy === null && asks(item.opening)) ||
-    (status !== null && after.some((item) => item.type === 'reply' && item.id === status.replyId) && asks(status.markdown))
-  );
+  return asked !== null;
 }
 
 /** Whether a conversation item answers the cards before it, for `unansweredCard`: a message that is not withdrawn and has left the composer's queue. */
 export function answers(item: CardItem): boolean {
   return item.type === 'message' && !item.withdrawn && item.delivery !== 'open';
+}
+
+/**
+ * Whether a message after a card written at `askedAt` answers it (`answers`). A provisional message shows after everything in the transcript
+ * however long ago it was queued, so one queued before the card, such as a notice an earlier run left queued, was not written as its answer.
+ */
+export function answersCard(item: CardItem, askedAt: number): boolean {
+  return answers(item) && !(item.type === 'message' && item.provisional === true && item.at !== undefined && item.at < askedAt);
 }
