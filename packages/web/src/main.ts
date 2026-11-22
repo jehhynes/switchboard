@@ -122,6 +122,8 @@ export interface PageDeps {
    * answer, or null when the browser has no such extension. Read from `chrome.runtime` when left out.
    */
   toExtension?(extensionId: string, message: Record<string, unknown>): Promise<unknown>;
+  /** Runs a draw before the next repaint; `requestAnimationFrame` when left out. */
+  frame?(run: () => void): void;
 }
 
 type Answer = { status: number; body: Record<string, unknown> };
@@ -2044,7 +2046,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     draw();
     head.querySelector<HTMLElement>('button.view-options')?.focus();
   };
+  // A draw asked for before the next repaint (`drawSoon`), which a draw meanwhile makes unneeded.
+  let frame: { cancelled: boolean } | null = null;
   const draw = (): void => {
+    if (frame !== null) {
+      frame.cancelled = true;
+      frame = null;
+    }
+
     drawRegions();
 
     // Measured again after a draw that changed the tabs, since the Artifacts button may have come or gone; twice at most.
@@ -2056,6 +2065,23 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     reportBrowser();
   };
 
+
+  /** Draws before the next repaint, once however many events ask for it before then. */
+  const drawSoon = (): void => {
+    if (frame !== null) {
+      return;
+    }
+
+    const asked = { cancelled: false };
+
+    frame = asked;
+    (deps.frame ?? ((run: () => void) => void (typeof requestAnimationFrame === 'function' ? requestAnimationFrame(run) : setTimeout(run, 0))))(() => {
+      if (!asked.cancelled) {
+        frame = null;
+        draw();
+      }
+    });
+  };
 
   // ---- The console ----
   /** A pane's one line, for the console's host, which the console module draws into itself. */
@@ -3593,6 +3619,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
+    // The pane follows the page as drawn, so an event's draw still waiting for its frame is made first.
+    if (frame !== null) {
+      draw();
+    }
+
     const covered = paneCovered();
 
     if (covered !== noteCovered) {
@@ -3894,7 +3925,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         openTabs();
       }
 
-      draw();
+      // A burst of events, such as a long history read, draws once per frame, not once per event.
+      drawSoon();
 
       if (type === 'session' || type === 'hello') {
         void readPrompt();
@@ -3919,6 +3951,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   return {
     state: () => state,
     close: () => {
+      // A draw still asked for would draw the closed page.
+      if (frame !== null) {
+        frame.cancelled = true;
+        frame = null;
+      }
+
       clearInterval(seenTimer);
       clearInterval(historyTick ?? undefined);
       clearTimeout(historyChange ?? undefined);

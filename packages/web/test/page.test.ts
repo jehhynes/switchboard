@@ -15,6 +15,7 @@ import { renderMarkdown } from '../src/markdown.js';
 import { CHAT_MAX, CHAT_MIN, DRAWER_HIDE_MS, DRAWER_REVEAL_MS, loadMermaid, PANE_SHOW_DELAY_MS, PIN_SNAP, SENT_NOTE_MS, SHOW_MARKER_MS, SIDE_COLLAPSE, SIDE_MAX, SIDE_MIN, startPage, SWIPE_OPEN } from '../src/main.js';
 import { DETAIL_MIN } from '../src/layout.js';
 import type { ArtifactView, MessageView, PageGroup, PageRow, ReplyView, SessionView } from '@switchboard/protocol';
+import { drawAtOnce } from './frame.js';
 
 const message = (id: string, ord: number, patch: Partial<MessageView> = {}): MessageView => ({ type: 'message', id, sessionId: 's', workItemId: 1, at: 1_000 + ord, ord, provisional: false, withdrawn: false, origin: 'typed', text: `text ${id}`, delivery: 'sent', error: null, ...patch });
 const reply = (id: string, ord: number, patch: Partial<ReplyView> = {}): ReplyView => ({ type: 'reply', id, sessionId: 's', at: 1_000 + ord, ord, provisional: false, kind: 'reply', answers: null, opening: `reply ${id}`, rewrittenBy: null, withdrawn: false, unread: false, speak: null, tone: null, spoken: { state: 'none', atMs: null, saidChars: null }, ...patch });
@@ -570,7 +571,7 @@ describe('the page', () => {
 
       return { status: 200, ok: true, json: async () => ({}), text: async () => '' } as unknown as Response;
     });
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000 });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000 });
 
     return { page, source: FakeSource.last! };
   };
@@ -603,6 +604,40 @@ describe('the page', () => {
     source.emit('reply', { reply: reply('r3', 3) });
     expect(panel.scrollTop).toBe(50);
     page.close();
+  });
+
+  it('draws a burst of events once, at the next frame, and a frame a draw since makes unneeded draws nothing', () => {
+    const frames: Array<() => void> = [];
+    const fetch = vi.fn(async () => ({ status: 200, ok: true, json: async () => ({}), text: async () => '' }) as unknown as Response);
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: (run) => void frames.push(run), now: () => 10_000 });
+    const source = FakeSource.last!;
+    const replies = () => root.querySelectorAll('#panel .reply').length;
+
+    source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1, { title: 'Fix it' })])], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+
+    // A long history read arrives as one event per reply; none draws until the frame, which draws them all once.
+    for (let index = 1; index <= 200; index++) {
+      source.emit('reply', { reply: reply(`r${index}`, index) });
+    }
+
+    expect(frames).toHaveLength(1);
+    expect(replies()).toBe(0);
+    frames.shift()!();
+    expect(replies()).toBe(200);
+
+    // A draw before the frame, as a click's, leaves the frame nothing to draw.
+    source.emit('reply', { reply: reply('r201', 201) });
+    expect(frames).toHaveLength(1);
+    root.querySelector<HTMLElement>('.row')!.click();
+    expect(replies()).toBe(201);
+    root.querySelector('#panel')!.replaceChildren();
+    frames.shift()!();
+    expect(replies()).toBe(0);
+    // Nor does a frame asked for before the page closed.
+    source.emit('reply', { reply: reply('r202', 202) });
+    page.close();
+    frames.shift()!();
+    expect(replies()).toBe(0);
   });
 
   it('brings the conversation to its end on a send, wherever the operator had scrolled, and follows the turn row and the reply after it', async () => {
@@ -728,7 +763,7 @@ describe('the page', () => {
         text: async () => '',
       } as unknown as Response;
     });
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000 });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000 });
     const source = FakeSource.last!;
 
     source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: { id: 'nova', name: 'Nova', pinned: true, tonePending: false } })], items: [], more: false, status: null, artifacts: [] });
@@ -785,7 +820,7 @@ describe('the page', () => {
 
       return { status: 200, ok: true, json: async () => (url.endsWith('/personas') ? { personas: [{ id: 'nova', name: 'Nova', voice: 'cedar', style: 'pair', personality: '' }] } : {}), text: async () => '' } as unknown as Response;
     });
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000 });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000 });
     const source = FakeSource.last!;
     const open = async (): Promise<void> => {
       root.querySelector<HTMLElement>('button.view-options')!.click();
@@ -822,7 +857,7 @@ describe('the page', () => {
 
       return { status: 200, ok: true, json: async () => (url.endsWith('/personas') ? { personas: [{ id: 'nova', name: 'Nova', voice: 'cedar', style: 'pair', personality: '' }] } : {}), text: async () => '' } as unknown as Response;
     });
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000 });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000 });
     const source = FakeSource.last!;
 
     source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: null, canPin: false })], items: [], more: false, status: null, artifacts: [] });
@@ -862,7 +897,7 @@ describe('the page', () => {
       return url.endsWith('/personas') ? new Promise<Response>((resolve) => answers.push(resolve)) : ({ status: 200, ok: true, json: async () => ({}), text: async () => '' } as unknown as Response);
     });
     const roster = (name: string): Response => ({ status: 200, ok: true, json: async () => ({ personas: [{ id: name.toLowerCase(), name, voice: 'cedar', style: 'pair', personality: '' }] }), text: async () => '' }) as unknown as Response;
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000 });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000 });
     const source = FakeSource.last!;
     const open = (): void => {
       root.querySelector<HTMLElement>('button.view-options')!.click();
@@ -891,7 +926,7 @@ describe('the page', () => {
 
   it("shows why the persona dialog has no roster", async () => {
     const fetch = vi.fn(async (url: string) => ({ status: 200, ok: true, json: async () => (url.endsWith('/personas') ? { personas: [] } : {}), text: async () => '' }) as unknown as Response);
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000 });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000 });
     const source = FakeSource.last!;
 
     source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: null, canPin: true })], items: [], more: false, status: null, artifacts: [] });
@@ -1074,7 +1109,7 @@ describe('the page', () => {
 
       return { status: 200, ok: true, json: async () => ({}), text: async () => '' } as unknown as Response;
     });
-    const paired = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, local: false });
+    const paired = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, local: false });
     const phone = FakeSource.last!;
 
     history.replaceState(null, '', '#');
@@ -1392,7 +1427,7 @@ it('steps back through history once for Back, select and Back in quick successio
 
     const fetch = vi.fn(async (url: string) => ({ status: url.endsWith('/select') && refuse ? 404 : 200, ok: true, json: async () => (refuse ? { error: 'That work item is gone.' } : {}), text: async () => '' }) as unknown as Response);
     let refuse = false;
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000 });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000 });
     const source = FakeSource.last!;
     const groups = [listGroup('progress', [listRow(1), listRow(2)])];
 
@@ -1497,7 +1532,7 @@ it("turns the mic off through Back's path when a phone's conversation is left by
     history.replaceState(null, '', '#');
 
     const fetch = vi.fn(async (url: string) => ({ status: url.endsWith('/select') ? 404 : 200, ok: !url.endsWith('/select'), json: async () => (url.endsWith('/select') ? { error: 'That work item is gone.' } : {}), text: async () => '' }) as unknown as Response);
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000 });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000 });
 
     FakeSource.last!.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1), listRow(2)])], scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
     root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
@@ -1757,7 +1792,7 @@ describe('attaching files from the composer', () => {
 
       return Promise.resolve({ status: 200, ok: true, json: async () => ({ message: { id: 'm1' } }) } as unknown as Response);
     });
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000 });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000 });
     const source = FakeSource.last!;
 
     source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
@@ -1963,7 +1998,7 @@ describe('the page in use', () => {
     });
     const mermaid = vi.fn(loadDiagrams);
     const opened: string[] = [];
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, loadMermaid: mermaid, openUrl: (url) => opened.push(url), standalone: () => installed });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, loadMermaid: mermaid, openUrl: (url) => opened.push(url), standalone: () => installed });
 
     return { page, source: FakeSource.last!, mermaid, opened };
   };
@@ -2977,7 +3012,7 @@ describe('the page in use', () => {
   it("opens a link in the device's own browser from an installed page on another device, which the hub would open on the computer", async () => {
     const opened: string[] = [];
     const fetch = vi.fn(async (url: string, init?: { body?: string }) => (posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) }), { status: 200, ok: true, json: async () => ({}), text: async () => '' }) as unknown as Response);
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, openUrl: (url) => opened.push(url), standalone: () => true, local: false });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, openUrl: (url) => opened.push(url), standalone: () => true, local: false });
     const links = [{ label: 'PR #5', url: 'https://github.com/o/r/pull/5', kind: 'pr' as const, badge: '5', glyph: null, mentioned: false }];
 
     hello(FakeSource.last!, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', links })])] });
@@ -2994,7 +3029,7 @@ describe('the page in use', () => {
 
     // Left to the browser, the link opens in a new tab without an opener or referrer.
     const open = vi.spyOn(window, 'open').mockReturnValue(null);
-    const own = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, standalone: () => true, local: false });
+    const own = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, standalone: () => true, local: false });
 
     hello(FakeSource.last!, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', links })])] });
     click('button.actions');
@@ -3127,7 +3162,7 @@ describe('the page in use', () => {
       vi.useRealTimers();
     });
 
-    const page = startPage(root, { fetch: (async (url: string, init?: { body?: string }) => (posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) }), { status: 200, ok: true, json: async () => ({}), text: async () => '' })) as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, standalone: () => true, toExtension: async () => ({ ok: true }) });
+    const page = startPage(root, { fetch: (async (url: string, init?: { body?: string }) => (posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) }), { status: 200, ok: true, json: async () => ({}), text: async () => '' })) as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, standalone: () => true, toExtension: async () => ({ ok: true }) });
     const source = FakeSource.last!;
     const rects = () => posts.filter((post) => post.url.endsWith('/pane-rect')).map((post) => post.body['rect']);
     const turn = async () => {
@@ -3180,7 +3215,7 @@ describe('the page in use', () => {
       vi.useRealTimers();
     });
 
-    const page = startPage(root, { fetch: (async (url: string, init?: { body?: string }) => (posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) }), { status: 200, ok: true, json: async () => ({}), text: async () => '' })) as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, standalone: () => true, toExtension: async () => ({ ok: true }) });
+    const page = startPage(root, { fetch: (async (url: string, init?: { body?: string }) => (posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) }), { status: 200, ok: true, json: async () => ({}), text: async () => '' })) as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, standalone: () => true, toExtension: async () => ({ ok: true }) });
     const source = FakeSource.last!;
     const note = () => root.querySelector('#detail .detail-body')!.textContent!.trim();
     const turn = async () => {
@@ -3232,7 +3267,7 @@ describe('the page in use', () => {
       vi.unstubAllGlobals();
     });
 
-    const page = startPage(root, { fetch: (async (url: string, init?: { body?: string }) => (posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) }), { status: 200, ok: true, json: async () => ({}), text: async () => '' })) as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, standalone: () => true, toExtension: async () => ({ ok: true }) });
+    const page = startPage(root, { fetch: (async (url: string, init?: { body?: string }) => (posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) }), { status: 200, ok: true, json: async () => ({}), text: async () => '' })) as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, standalone: () => true, toExtension: async () => ({ ok: true }) });
     const source = FakeSource.last!;
     const tabs = () => [...root.querySelectorAll<HTMLElement>('#detail .side-switch [data-side]')].map((tab) => tab.dataset['side']);
     const chosen = () => root.querySelector<HTMLElement>('#detail .side-switch .tab.selected')?.dataset['side'];
@@ -3271,7 +3306,7 @@ describe('the page in use', () => {
       vi.unstubAllGlobals();
     });
 
-    const page = startPage(root, { fetch: (async (url: string, init?: { body?: string }) => (posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) }), { status: 200, ok: true, json: async () => ({}), text: async () => '' })) as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, standalone: () => true, toExtension: async () => ({ ok: true }) });
+    const page = startPage(root, { fetch: (async (url: string, init?: { body?: string }) => (posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) }), { status: 200, ok: true, json: async () => ({}), text: async () => '' })) as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, standalone: () => true, toExtension: async () => ({ ok: true }) });
     const source = FakeSource.last!;
     const chosen = () => root.querySelector<HTMLElement>('#detail .side-switch .tab.selected')?.dataset['side'];
     const paired = { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: null };
@@ -3368,7 +3403,7 @@ describe('the page in use', () => {
 
     let refuse = false;
     const answer = (url: string) => (refuse && url.endsWith('/select') ? 409 : 200);
-    const open = () => startPage(root, { fetch: (async (url: string, init?: { body?: string }) => (posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) }), { status: answer(url), ok: answer(url) === 200, json: async () => ({}), text: async () => '' })) as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, standalone: () => true, toExtension: async () => ({ ok: true }) });
+    const open = () => startPage(root, { fetch: (async (url: string, init?: { body?: string }) => (posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) }), { status: answer(url), ok: answer(url) === 200, json: async () => ({}), text: async () => '' })) as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, standalone: () => true, toExtension: async () => ({ ok: true }) });
     let page = open();
     let source = FakeSource.last!;
     const shown = () => root.querySelector<HTMLElement>('#head .tab.selected')?.dataset['tab'];
@@ -3437,7 +3472,7 @@ describe('the page in use', () => {
       inits.push({ url, keepalive: init?.keepalive });
       return { status: 200, ok: true, json: async () => ({}), text: async () => '' };
     }) as unknown as typeof globalThis.fetch;
-    const open = () => startPage(root, { fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, standalone: () => true, toExtension: async () => ({ ok: true }) });
+    const open = () => startPage(root, { fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, standalone: () => true, toExtension: async () => ({ ok: true }) });
     const paired = { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: true, error: null };
     const rects = () => posts.filter((post) => post.url.endsWith('/pane-rect')).map((post) => post.body['rect']);
     let page = open();
@@ -3484,7 +3519,7 @@ describe('the page in use', () => {
     page.close();
 
     // A page on another device cannot drive the pane, so it has no Browser tab.
-    page = startPage(root, { fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, standalone: () => true, local: false, toExtension: async () => ({ ok: true }) });
+    page = startPage(root, { fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, standalone: () => true, local: false, toExtension: async () => ({ ok: true }) });
     source = FakeSource.last!;
     hello(source, { openOn: 'browser', groups: [listGroup('progress', [listRow(1, { title: 'Fix it', url: 'https://github.com/o/r/issues/1' })])] });
     source.emit('pane', { pane: paired });
@@ -3552,6 +3587,7 @@ describe('the page in use', () => {
     const page = startPage(root, {
       fetch: fetch as unknown as typeof globalThis.fetch,
       EventSource: FakeSource as unknown as typeof EventSource,
+      frame: drawAtOnce,
       now: () => 10_000,
       standalone: () => true,
       toExtension: async (id, message) => (sent.push([id, message]), { ok: true }),
@@ -4206,7 +4242,7 @@ describe('the page in use', () => {
 
     // A paired device may not change settings.json (architecture.md § Remote access), so its menu has Show message details only.
     const fetch = vi.fn(async () => ({ status: 200, ok: true, json: async () => ({}), text: async () => '' }) as unknown as Response);
-    const paired = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, local: false });
+    const paired = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, local: false });
 
     hello(FakeSource.last!, { settings: { expandReplies: true } });
     click('.header button.view-options');
@@ -4320,7 +4356,7 @@ describe('the page in use', () => {
 
   it('shows a paired device\'s mic off while the voice is elsewhere, so its tap can take the voice to the phone (PRD R119)', () => {
     const fetch = vi.fn(async () => ({ status: 200, ok: true, json: async () => ({}), text: async () => '' }) as unknown as Response);
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, local: false });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, local: false });
     const source = FakeSource.last!;
 
     hello(source);
@@ -4329,7 +4365,7 @@ describe('the page in use', () => {
     page.close();
 
     // This computer's page shows Talk here instead, as the Conversation view does.
-    const local = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, local: true });
+    const local = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, local: true });
 
     hello(FakeSource.last!);
     FakeSource.last!.emit('voice', { voice: { enabled: true, here: false, mic: 'off', speaking: null, speakReplies: true, error: null } });
@@ -4345,7 +4381,7 @@ describe('the page in use', () => {
       posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) });
       return { status: 200, ok: true, json: async () => ({}), text: async () => '' } as unknown as Response;
     });
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => now });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => now });
 
     hello(FakeSource.last!);
     now += 1_100;
@@ -4388,7 +4424,7 @@ describe('the page against late answers', () => {
 
       return held.test(url) ? new Promise<Response>((resolve) => pending.push({ url, resolve: (answer) => resolve(reply(answer)) })) : Promise.resolve(reply({ status: 200, body: {} }));
     });
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000 });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000 });
 
     return { page, source: FakeSource.last! };
   };

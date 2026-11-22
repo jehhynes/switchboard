@@ -4,6 +4,7 @@ import { EMPTY_HISTORY_UI, entryShown, gapText, historyUrl, renderHistory, RUN_L
 import type { HistoryOpen } from '../src/history.js';
 import { html } from './html.js';
 import type { HistoryCategory, HistoryEntry, HistoryView, PageGroup, PageRow } from '@switchboard/protocol';
+import { drawAtOnce } from './frame.js';
 
 class FakeSource {
   static last: FakeSource | null = null;
@@ -136,7 +137,7 @@ describe("the page's History in use", () => {
 
     document.body.replaceChildren(root);
     history.replaceState(null, '', '#');
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => T0 });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => T0 });
     const source = FakeSource.last!;
     const row: PageRow = { workItemId: null, ticketId: 77, title: 'Inbox badge', priority: null, time: null, ticket: 'gh 77', sourceKind: 'github', url: '', playbook: '', links: [], returned: 0, comment: null, mark: null, details: [], stripe: null, dim: false, host: null, actions: [], main: null, pastes: [], search: '', opens: [], terminal: false, band: null, voice: null, history: { ticketId: 77, key: 'gh 77' } };
 
@@ -183,7 +184,7 @@ describe("the page's History in use", () => {
 
       return { status: answer.status, ok: answer.status === 200, json: async () => answer.body, text: async () => '' } as unknown as Response;
     });
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => T0, openUrl: (url) => opened.push(url) });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => T0, openUrl: (url) => opened.push(url) });
 
     return { page, source: FakeSource.last! };
   };

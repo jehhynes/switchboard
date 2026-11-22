@@ -4,6 +4,7 @@ import type { LocalFileData } from '../src/localLinks.js';
 import { renderMarkdown } from '../src/markdown.js';
 import type { DiffModule } from '../src/diff/types.js';
 import { startPage } from '../src/main.js';
+import { drawAtOnce } from './frame.js';
 
 class FakeSource {
   static last: FakeSource | null = null;
@@ -103,7 +104,7 @@ describe('web links with the Chrome pane', () => {
 
       return { status, ok: status === 200, json: async () => (status === 200 ? {} : { error: 'The Chrome pane is not connected.' }) } as unknown as Response;
     });
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, standalone: () => options.installed, local: options.local ?? true, openUrl: (url) => opened.push(url), toExtension: async () => ({ ok: true }) });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, standalone: () => options.installed, local: options.local ?? true, openUrl: (url) => opened.push(url), toExtension: async () => ({ ok: true }) });
     const source = FakeSource.last!;
     const scope = { kind: 'page', key: 'pk', folder: 'D:/w', title: 'Fix it', scopeGen: 3, conversations: [{ workItemId: 1, title: 'Fix it', primary: true, sessionId: 's', state: 'idle', conversation: 'full', unread: 0 }], workItemId: 1, cwd: 'D:/w', sessionId: 's' };
     const session = { id: 's', title: 'Task', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, persona: null };
@@ -243,7 +244,7 @@ describe('local file tabs', () => {
 
       return { status: answer.status, ok: answer.status === 200, json: async () => answer.body } as unknown as Response;
     });
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, loadDiff: async () => module, local });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, loadDiff: async () => module, local });
     const source = FakeSource.last!;
     const scope = (scopeGen = 3) => ({ kind: 'page', key: 'pk', folder: 'D:/w', title: 'Fix it', scopeGen, conversations: [{ workItemId: 1, title: 'Fix it', primary: true, sessionId: 's', state: 'idle', conversation: 'full', unread: 0 }], workItemId: 1, cwd: 'D:/w', sessionId: 's' });
     const session = { id: 's', title: 'Task', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, persona: null };

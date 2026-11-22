@@ -9,6 +9,7 @@ import { html } from './html.js';
 import { EMPTY } from '../src/model.js';
 import type { SessionView } from '@switchboard/protocol';
 import { PAGE_ASSETS } from '../dist/index.js';
+import { drawAtOnce } from './frame.js';
 
 class FakeSource {
   static all: FakeSource[] = [];
@@ -682,7 +683,7 @@ describe('the Console tab', () => {
 
     document.body.replaceChildren(root);
 
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, loadConsole });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, loadConsole });
     const source = FakeSource.all[0]!;
 
     source.emit('hello', { type: 'hello', key: 'pk', groups: [], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
@@ -718,7 +719,7 @@ describe('the Console tab', () => {
 
     document.body.replaceChildren(root);
 
-    const page = startPage(root, { fetch: vi.fn() as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, loadConsole });
+    const page = startPage(root, { fetch: vi.fn() as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, loadConsole });
 
     FakeSource.all[0]!.emit('hello', { type: 'hello', key: 'pk', groups: [], scope, sessions: [session({ provider: 'codex' })], items: [], more: false, status: null, artifacts: [] });
     root.querySelector<HTMLElement>('[data-tab="console"]')!.click();

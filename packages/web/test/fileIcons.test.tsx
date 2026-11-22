@@ -6,6 +6,7 @@ import { FileIcon, fileIconClass, iconOf, iconStyles, languageOf, resetFileIcons
 import type { FileIconMap } from '../src/fileIcons.js';
 import { startPage } from '../src/main.js';
 import { html } from './html.js';
+import { drawAtOnce } from './frame.js';
 
 const MAP = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../src/seti/file-icons.json'), 'utf8')) as FileIconMap;
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -186,7 +187,7 @@ describe('the page', () => {
     document.body.replaceChildren(root);
     localStorage.clear();
 
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000 });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000 });
 
     FakeSource.last!.emit('hello', { key: 'pk', groups: [], scope, sessions: [session], items: [], more: false, status: null, artifacts, unread: 0 });
     await flush();

@@ -4,6 +4,7 @@ import { bareKey, filterGroups, isKey, rangeSince, renderListHeader, SEARCH_DELA
 import { html } from './html.js';
 import type { SearchView } from '../src/listHeader.js';
 import type { PageGroup, PageHeader, PageRow, SourceGroup } from '@switchboard/protocol';
+import { drawAtOnce } from './frame.js';
 
 class FakeSource {
   static last: FakeSource | null = null;
@@ -64,7 +65,7 @@ describe('the list header (architecture.md § Web page)', () => {
 
       return { status: answer.status, ok: answer.status === 200, json: async () => answer.body, text: async () => '' } as unknown as Response;
     });
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, reload: () => void reloads++, ...(local === undefined ? {} : { local }) });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, reload: () => void reloads++, ...(local === undefined ? {} : { local }) });
 
     return { page, source: FakeSource.last! };
   };
@@ -230,7 +231,7 @@ describe('the list header (architecture.md § Web page)', () => {
     page.close();
     root.replaceChildren();
 
-    const second = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => new Date(2026, 10, 21, 12).getTime() });
+    const second = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => new Date(2026, 10, 21, 12).getTime() });
     const stream = FakeSource.last!;
 
     searchHello(stream);

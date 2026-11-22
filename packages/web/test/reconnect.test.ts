@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { startPage } from '../src/main.js';
 import { RECONNECT_MS, reconnector } from '../src/reconnect.js';
+import { drawAtOnce } from './frame.js';
 
 type Answer = { status: number; body?: unknown } | 'down';
 
@@ -95,7 +96,7 @@ describe('the page after its stream fails', () => {
 
     document.body.replaceChildren(root);
 
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: function () { return source; } as unknown as typeof EventSource, now: () => 10_000, build: 'b1', reload });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: function () { return source; } as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, build: 'b1', reload });
 
     listeners.get('error')!();
     await vi.advanceTimersByTimeAsync(RECONNECT_MS);

@@ -5,6 +5,7 @@ import { diffLayout, diffNote } from '../src/changes.js';
 import type { DiffModule } from '../src/diff/types.js';
 import { startPage } from '../src/main.js';
 import type { PageRow } from '@switchboard/protocol';
+import { drawAtOnce } from './frame.js';
 
 class FakeSource {
   static last: FakeSource | null = null;
@@ -217,7 +218,7 @@ describe('the Changes list', () => {
 
       return { status: answer.status, ok: answer.status === 200, headers: new Headers(etag === undefined ? {} : { ETag: etag }), json: async () => answer.body } as unknown as Response;
     });
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, loadDiff: async () => module });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, loadDiff: async () => module });
     const source = FakeSource.last!;
 
     pages.push(page);
