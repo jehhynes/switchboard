@@ -219,13 +219,6 @@ describe('the installable page', () => {
     expect(Buffer.from(PAGE_ASSETS['apple-touch-icon.png']!.body, 'base64')[25]).toBe(2);
   });
 
-  it("keeps the list's pinned group headers off a touch screen's overlay scrollbar, which iOS draws under them", () => {
-    const css = PAGE_ASSETS['page.css']!.body;
-
-    expect(css).toMatch(/@media \(hover: none\), \(pointer: coarse\) \{ \.group-head \{ width: calc\(100% - var\(--sb-overlay-scrollbar\)\); \} \}/);
-    expect(css).toMatch(/^:root \{ --sb-overlay-scrollbar: 10px;/m);
-  });
-
   it("leaves a reply's copy button out on a touch screen, where the text is copied as the system does, and keeps a code block's", () => {
     const css = PAGE_ASSETS['page.css']!.body;
     const touch = /@media \(hover: none\), \(pointer: coarse\) \{\n  \.code-block > \.copy \{ opacity: 1; \}\n  \.meta \.copy \{ display: none; \}\n/.exec(css);

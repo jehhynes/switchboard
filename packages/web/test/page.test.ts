@@ -3381,6 +3381,13 @@ describe("the list's CSS", () => {
     expect(wide).toContain('.work-list { --group-head-height: 32px; }');
   });
 
+  it("keeps the pinned group headers the list's full width, the list a stacking context so iOS draws its scroll indicator over them", () => {
+    expect(declarationsOf((selector) => selector === '#list').join(' ')).toMatch(/overflow-y: auto; isolation: isolate;/);
+    expect(declarationsOf((selector) => selector === '.group-head').join(' ')).toContain('width: 100%;');
+    expect(css).not.toMatch(/\.group-head \{[^}]*width: calc/);
+    expect(css).not.toContain('--sb-overlay-scrollbar');
+  });
+
   it("draws replies, our messages and the composer at the theme's text size, with no size of their own, and spoken bubbles at 110% from the shared bubbles.css", () => {
     expect(css).not.toContain('--chat-scale');
     // The bubble's 110% is of the reply's size, so the reply and the message around it keep the theme's.

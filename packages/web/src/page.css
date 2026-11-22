@@ -8,7 +8,7 @@ html, body { height: 100%; margin: 0; overflow: hidden; overscroll-behavior: non
    editor tabs do, and the selected row takes the dock's light selection colour (#E4E6F1, Light Modern's selected activity bar item), since
    Light Modern's list selection (#E8E8E8) barely shows on the side bar. The list's muted texts take the dock's grey (DockMuted), which in
    Light Modern is #717171, not the theme's description colour. */
-:root { --sb-overlay-scrollbar: 10px; --sb-github: #f0f6fc; --sb-pull-request: #a371f7; --sb-source-off: #7a7a7a; --sb-chat-background: var(--vscode-sideBar-background); --sb-bar-background: var(--vscode-sideBar-background); --sb-row-selected: var(--vscode-list-activeSelectionBackground); --sb-row-muted: var(--vscode-descriptionForeground); --sb-tab-shade: 25%; }
+:root { --sb-github: #f0f6fc; --sb-pull-request: #a371f7; --sb-source-off: #7a7a7a; --sb-chat-background: var(--vscode-sideBar-background); --sb-bar-background: var(--vscode-sideBar-background); --sb-row-selected: var(--vscode-list-activeSelectionBackground); --sb-row-muted: var(--vscode-descriptionForeground); --sb-tab-shade: 25%; }
 @media (prefers-color-scheme: light) {
   :root { --sb-github: #1f2328; --sb-pull-request: #8250df; --sb-source-off: #8a8a8a; --sb-composer-background: color-mix(in srgb, var(--vscode-input-background) 50%, var(--vscode-sideBar-background)); --sb-chat-background: var(--vscode-editor-background); --sb-bar-background: var(--vscode-sideBar-background); --sb-row-selected: #E4E6F1; --sb-row-muted: #717171; --sb-tab-shade: 3.5%; }
 }
@@ -112,7 +112,9 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 .holder-result-text { flex: 1; min-width: 0; }
 @media (hover: none), (pointer: coarse) { .holder-restart { min-height: 44px; } }
 @media (hover: none), (pointer: coarse) { .list-header button.icon { min-width: 44px; min-height: 44px; } .list-header { min-height: 44px; } }
-#list { flex: 1; overflow-y: auto; padding-bottom: 12px; touch-action: pan-y pinch-zoom; }
+/* The list is a stacking context, so iOS WebKit composites the pinned group headers (z-index 2) inside the list's scroll view, below its
+   scroll indicator; otherwise they belong to an outer stacking context, sit above the scroll view and cover the indicator. */
+#list { flex: 1; overflow-y: auto; isolation: isolate; padding-bottom: 12px; touch-action: pan-y pinch-zoom; }
 #list > .empty { padding: 0 20px; }
 .work-list { --group-head-height: 44px; }
 .work-list ul { list-style: none; margin: 0; padding: 0; }
@@ -123,9 +125,6 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
    top of the list while the group's rows scroll under it, until the next group's header pushes it up; mixed with the list's background, so the
    bar is opaque and rows do not show through it. Rows and their menus scroll to below it. */
 .group-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 6px; width: 100%; min-height: var(--group-head-height); padding: 4px 8px 4px 6px; border: none; background: color-mix(in srgb, var(--vscode-focusBorder) 25%, var(--vscode-sideBar-background)); color: var(--vscode-foreground); text-align: left; cursor: pointer; }
-/* A touch screen's scrollbar is an overlay drawn inside the list's right edge, which iOS draws under the pinned group headers, so there the
-   headers stop short of it. A desktop scrollbar has its own gutter beside them. */
-@media (hover: none), (pointer: coarse) { .group-head { width: calc(100% - var(--sb-overlay-scrollbar)); } }
 .group-head:hover { background: color-mix(in srgb, var(--vscode-focusBorder) 35%, var(--vscode-sideBar-background)); }
 .work-list .row, .work-list .row-menu { scroll-margin-top: var(--group-head-height); }
 .group-head .group-icon { font-size: 16px; }
