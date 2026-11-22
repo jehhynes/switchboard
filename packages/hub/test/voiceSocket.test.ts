@@ -505,6 +505,16 @@ describe('the voice socket on the page origin', () => {
     expired.send({ type: 'ping', t: 1 });
     await expired.closed;
     expect([expired.closeCode, expired.closeReason]).toEqual([VOICE_CLOSE.refused, 'This device was signed out.']);
+
+    // A socket that sends only audio is checked too.
+    now -= PAGE_SESSION_MS + 1;
+
+    const audioOnly = await connected();
+
+    now += PAGE_SESSION_MS + 1;
+    audioOnly.frame(Buffer.from([2, 0, 0]), 0x2);
+    await audioOnly.closed;
+    expect([audioOnly.closeCode, audioOnly.closeReason]).toEqual([VOICE_CLOSE.refused, 'This device was signed out.']);
   });
 
   it('closes a socket whose sign-in the store trimmed', async () => {

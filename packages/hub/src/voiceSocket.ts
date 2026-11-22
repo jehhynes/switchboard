@@ -170,6 +170,11 @@ export class VoiceSockets {
           return;
         }
 
+        // Audio alone keeps a socket busy, so it too checks the sign-in and its voice permission again.
+        if (!stillAllowed()) {
+          return;
+        }
+
         const now = this.deps.now();
         const limit = UPLINK_BYTES_PER_SECOND * UPLINK_RATE_LIMIT;
 
