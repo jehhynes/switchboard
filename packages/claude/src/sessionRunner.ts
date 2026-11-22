@@ -13,7 +13,10 @@ import { claudeEnvironment, failureOf } from './exec.js';
 /** A roster directory and a configured repository may use different links or platform spellings. */
 export function rosterDirectory(path: string, platform: NodeJS.Platform = process.platform): string {
   let real = path;
-  try { real = realpathSync.native(path); } catch { /* Missing directories still have a comparable platform spelling. */ }
+  // Only the host's own paths resolve; a recorded path of another platform keeps its spelling.
+  if (platform === process.platform) {
+    try { real = realpathSync.native(path); } catch { /* Missing directories still have a comparable platform spelling. */ }
+  }
   const paths = platform === 'win32' ? win32 : posix;
   let normalized = paths.normalize(real);
   if (normalized.length > paths.parse(normalized).root.length) normalized = normalized.replace(platform === 'win32' ? /[\\/]+$/ : /\/+$/, '');
