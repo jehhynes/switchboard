@@ -2,8 +2,8 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from '@switchboard/core/settings';
 import type { VoiceSettings } from '@switchboard/core/settings';
-import { PHRASE_SILENCE_MS } from '../src/asr.js';
-import { Dictation } from '../src/dictation.js';
+import { ASR_RATE, PHRASE_SILENCE_MS } from '../src/asr.js';
+import { Dictation, WARM_RETRY_MS, WARM_SETTLE_MS, WARM_SOON_MS } from '../src/dictation.js';
 import type { AudioDevices } from '../src/micUse.js';
 import type { VoiceMessage } from '../src/protocol.js';
 import type { ChatTurn } from '../src/turn.js';
@@ -38,7 +38,7 @@ function fakeVoiceprint(options: { verdict?: (text: string) => PieceCheck | null
   return voiceprint;
 }
 
-function setup(options: { turn?: (chat: ChatTurn[]) => number; watcher?: 'none' | 'manual'; recognizer?: { error: string }; settings?: Partial<VoiceSettings>; voiceprint?: ReturnType<typeof fakeVoiceprint> } = {}) {
+function setup(options: { turn?: (chat: ChatTurn[]) => number; watcher?: 'none' | 'manual'; recognizer?: { error: string }; settings?: Partial<VoiceSettings>; voiceprint?: ReturnType<typeof fakeVoiceprint>; listenable?: () => boolean } = {}) {
   const clock = new Clock();
   const capture = new FakeCapture();
   const engine = new FakeEngine();
@@ -94,6 +94,7 @@ function setup(options: { turn?: (chat: ChatTurn[]) => number; watcher?: 'none' 
     ...(options.voiceprint === undefined ? {} : { voiceprint: options.voiceprint as unknown as Voiceprint }),
     playing: () => speech.playing,
     playedUntil: () => speech.until,
+    ...(options.listenable === undefined ? {} : { listenable: options.listenable }),
     interrupt: () => {
       const playing = speech.playing;
 
@@ -292,17 +293,97 @@ describe('Dictation', () => {
     await settle();
     expect(capture.opens).toBe(0);
     expect(dictation.state).toBe('starting');
+    // The recogniser loads at Mic on, while the watcher starts, not after its first answer.
+    expect(loads).toHaveLength(1);
     watch.changed!(false, []);
     await settle();
     expect(capture.opens).toBe(1);
     expect(capture.devices).toEqual([null]);
-    expect(termsAsked).toEqual(['acme/app']);
+    expect(new Set(termsAsked)).toEqual(new Set(['acme/app']));
     // The spoken commands are boosted with the terms.
     expect(loads).toEqual([['Switchboard', 'acme/app', 'stop listening', 'pause listening', 'start listening', 'resume listening']]);
     expect(dictation.state).toBe('listening');
     // Where the loaded recogniser runs, for the audio report.
     expect(dictation.recognizer).toBe('gpu');
     expect(changed()).toBeGreaterThan(0);
+  });
+
+  it('logs how long Mic on waited for each step before capture opened', async () => {
+    const { dictation, watch, logs, clock } = setup();
+
+    dictation.target(1, 's1', 'acme/app');
+    dictation.mic(true);
+    clock.advance(400);
+    watch.changed!(false, []);
+    await settle();
+    expect(logs.filter((line) => line.startsWith('mic on'))).toEqual(['mic on → listening in 400 ms: recogniser loaded 0 ms, other-app check 400 ms, capture open 0 ms']);
+    // Off and on again: the recogniser is kept.
+    dictation.mic(false);
+    dictation.mic(true);
+    watch.changed!(false, []);
+    await settle();
+    expect(logs.filter((line) => line.startsWith('mic on')).at(-1)).toBe('mic on → listening in 0 ms: recogniser ready 0 ms, other-app check 0 ms, capture open 0 ms');
+  });
+
+  it('loads the recogniser ahead of Mic on once the target settles, waiting while a reply plays, and once per set of terms', () => {
+    const { dictation, loads, logs, clock, speech, engine } = setup();
+
+    dictation.target(1, 's1', 'acme/app');
+    clock.advance(WARM_SETTLE_MS - 1);
+    expect(loads).toHaveLength(0);
+    // A target that moves again waits again.
+    dictation.target(2, 's2', 'acme/web');
+    clock.advance(WARM_SETTLE_MS - 1);
+    expect(loads).toHaveLength(0);
+    speech.playing = { replyId: 'r1', text: 'Done.', voice: 'marin' };
+    clock.advance(1);
+    expect(loads).toHaveLength(0);
+    speech.playing = null;
+    clock.advance(WARM_RETRY_MS);
+    expect(loads.map((terms) => terms[1])).toEqual(['acme/web']);
+    // Its first decode runs then, on a second of silence.
+    expect(engine.accepted).toBe(ASR_RATE);
+    expect(logs.filter((line) => line.startsWith('recogniser loaded ahead'))).toHaveLength(1);
+    // The same terms load nothing again; Mic on finds it ready.
+    dictation.target(3, 's3', 'acme/web');
+    clock.advance(WARM_SETTLE_MS);
+    dictation.warm();
+    expect(loads).toHaveLength(1);
+
+    // A phone took the voice: the target the hub sets right after loads at once, not after it settles.
+    dictation.warmSoon();
+    dictation.target(4, 's4', 'acme/phone');
+    clock.advance(WARM_SOON_MS);
+    expect(loads.map((terms) => terms[1])).toEqual(['acme/web', 'acme/phone']);
+    // The next target settles again, also after a move whose target was ready.
+    dictation.target(5, 's5', 'acme/later');
+    clock.advance(WARM_SOON_MS);
+    expect(loads).toHaveLength(2);
+    clock.advance(WARM_SETTLE_MS);
+    dictation.warmSoon();
+    clock.advance(WARM_SOON_MS);
+    dictation.target(6, 's6', 'acme/other');
+    clock.advance(WARM_SOON_MS);
+    expect(loads).toHaveLength(3);
+  });
+
+  it('loads nothing ahead of Mic on while no device has the voice, and keeps no error from a load ahead that failed', () => {
+    let listenable = false;
+    const options: { recognizer?: { error: string } } = {};
+    const none = setup({ ...options, listenable: () => listenable });
+
+    none.dictation.target(1, 's1', 'acme/app');
+    none.clock.advance(WARM_SETTLE_MS);
+    expect(none.loads).toHaveLength(0);
+    listenable = true;
+
+    const missing = setup({ recognizer: { error: 'No speech recognition model in m.' } });
+
+    missing.dictation.target(1, 's1', 'acme/app');
+    missing.clock.advance(WARM_SETTLE_MS);
+    expect(missing.loads).toHaveLength(1);
+    expect(missing.dictation.error).toBeNull();
+    expect(missing.logs.filter((line) => line.startsWith('No speech recognition model'))).toEqual([]);
   });
 
   it('turns live words into pieces after their pause and ends the utterance after the end-of-message pause, as final', async () => {
@@ -509,7 +590,9 @@ describe('Dictation', () => {
     missing.dictation.typing(false);
     await settle();
     expect(missing.dictation.state).toBe('unavailable');
+    // Mic on tried it while the watcher started, whose answer reports that failure without loading again; the composer's focus round trip tries again.
     expect(missing.loads.length).toBe(2);
+    expect(missing.logs.filter((line) => line.startsWith('mic on'))).toEqual(['mic on → unavailable in 0 ms: recogniser loaded 0 ms, other-app check 0 ms']);
     expect(missing.logs.filter((line) => line.startsWith('No speech recognition model'))).toHaveLength(1);
     delete options.recognizer;
     missing.dictation.typing(true);

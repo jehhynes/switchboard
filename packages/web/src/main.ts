@@ -617,6 +617,22 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   // The mic button shows starting from a Mic on tap until the voice view confirms it, and the tap's error if it failed.
   const micStart = new MicStart(() => draw());
   let micScope: number | null | undefined;
+  // A Mic on tap's steps, as milliseconds from the tap, sent to the hub log once its start ends (architecture.md § Dictation).
+  let micTiming: { at: number; steps: Array<{ step: string; ms: number }> } | null = null;
+  const micStep = (step: string, at = deps.now()): void => {
+    if (micTiming !== null && micTiming.steps.length < 11) {
+      micTiming.steps.push({ step, ms: Math.max(0, Math.round(at - micTiming.at)) });
+    }
+  };
+  const micTimed = (outcome: string): void => {
+    const timing = micTiming;
+
+    micTiming = null;
+
+    if (timing !== null) {
+      void post('mic-timing', { steps: timing.steps, outcome });
+    }
+  };
   // Voice on this phone, on a paired device's page (architecture.md § Remote access).
   const phoneVoice = local ? null : new PhoneVoice({ key: () => state.key, post: (name, body) => post(name, body), changed: () => draw(), now: () => deps.now() });
   const header = listHeader(root.querySelector<HTMLElement>('.side-head')!, list, root.querySelector<HTMLElement>('#list-sheet')!, {
@@ -1161,16 +1177,24 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const on = button.dataset['on'] === 'true';
     let attempt = 0;
 
+    const timing = on ? { at: deps.now(), steps: [] } : null;
+
     if (on) {
       attempt = micStart.start();
+      micTiming = timing;
     } else {
       micStart.clear();
+      micTiming = null;
     }
 
     const failed = (error: string): void => {
       // A refusal answered after a later tap or Mic off is not shown.
       if (on && !micStart.fail(error, attempt)) {
         return;
+      }
+
+      if (on) {
+        micTimed(`failed: ${error}`);
       }
 
       draw();
@@ -1193,7 +1217,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       const leaves = micLeaves;
 
       micOpening = true;
-      void phoneVoice.micOn().then(async (error) => {
+      void phoneVoice.micOn((step, at) => tap === micTaps && micStep(step, at)).then(async (error) => {
         // A newer tap owns the mic now.
         if (tap !== micTaps) {
           return;
@@ -1211,12 +1235,15 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
           return;
         }
 
+        micStep('mic on sent');
+
         const answer = await command('mic', { on: true });
 
         if (tap !== micTaps) {
           return;
         }
 
+        micStep('hub answered');
         micOpening = false;
 
         if (leaves !== micLeaves) {
@@ -1240,7 +1267,13 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
-    void command('mic', { on }).then(refused);
+    void command('mic', { on }).then((answer) => {
+      if (answer.status === 200 && timing !== null && micTiming === timing) {
+        micStep('hub answered');
+      }
+
+      refused(answer);
+    });
     draw();
   });
   // The context meter's menu (architecture.md § Context meter): closed, open, or asking to confirm Compact, which sends /compact as a chosen
@@ -1376,10 +1409,17 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     if (state.scope?.workItemId !== micScope) {
       micScope = state.scope?.workItemId;
       micStart.clear();
+      micTiming = null;
     }
 
     if (micView?.here === true) {
       micStart.view(micView.mic);
+    }
+
+    // The start ended: confirmed by the voice view, or failed with why.
+    if (micTiming !== null && micStart.pending !== 'starting') {
+      micStep('voice confirmed');
+      micTimed(micStart.pending === null ? (micView?.mic ?? 'off') : `failed: ${micStart.pending.error}`);
     }
 
     mount(micSlot, full ? renderShared(renderMicButton(micView, micStart.pending)) : null);
@@ -1867,6 +1907,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       micLeaves++;
       micOpening = false;
       micStart.clear();
+      micTiming = null;
       queueMicrotask(() => {
         phoneVoice?.micOff();
         void command('mic', { on: false });
@@ -4004,6 +4045,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       settingsShown?.disconnect();
       clearInterval(promptTimer);
       clearTimeout(showTimer);
+      // A start still pending neither redraws nor reports its timing from a closed page.
+      micStart.clear();
+      micTiming = null;
       listening.abort();
       dropDrawer();
       listWidth?.disconnect();

@@ -286,6 +286,8 @@ export class VoiceControl {
   #closed = false;
   /** The mic as the operator set it, one per machine; the process gets it after each start. */
   #micOn = false;
+  /** When Mic on was asked and from where, until the voice process says the mic listens or cannot, for the hub log's timing line. */
+  #micAsked: { at: number; from: string } | null = null;
   /** What capture is doing, as the process last said. */
   #mic: MicState = 'off';
   /** Why the open capture cancels no echo, as the process last said; null while it does or nothing captures. */
@@ -757,6 +759,7 @@ export class VoiceControl {
    */
   mic(key: string, on: boolean): string | null {
     // A paired device's mic is its own, used only while it has the voice: it never turns on this computer's microphone (PRD R119).
+
     if (on && this.deps.remotePage?.(key) === true && !(this.#device === 'phone' && key === this.#phoneKey)) {
       return PHONE_MIC_HERE;
     }
@@ -772,9 +775,21 @@ export class VoiceControl {
     }
 
     this.#micOn = on;
+    // Timed only from a mic that is not listening already, whose next state is the voice process's answer to this one.
+    this.#micAsked = on && this.#mic !== 'listening' && this.#mic !== 'hearing' ? { at: this.deps.now(), from: this.deps.remotePage?.(key) === true ? 'a paired device' : 'this computer' } : null;
     this.#client?.send({ type: 'mic', on });
     this.viewsChanged();
     return null;
+  }
+
+  /**
+   * A page's Mic on tap timed (architecture.md § Dictation): each step as milliseconds from the tap, logged in one hub log line, since the page's
+   * steps (the microphone's permission, the voice socket, the audio worklet, the hub's answer) are the start's part this computer cannot see.
+   */
+  micTiming(key: string, steps: Array<{ step: string; ms: number }>, outcome: string): void {
+    const from = this.deps.remotePage?.(key) === true ? "a paired device's page" : "this computer's page";
+
+    this.deps.log(`voice: mic on tap on ${from} → ${outcome}: ${steps.map((one) => `${one.step} at ${Math.round(one.ms)} ms`).join(', ')}`);
   }
 
   /**
@@ -1723,6 +1738,12 @@ export class VoiceControl {
           this.#recognizer = message.recognizer;
           this.#roomHoldUntil = message.roomHold ?? null;
           this.viewsChanged();
+        }
+
+        // Mic on as the hub saw it: from the command to the voice process's first state past starting.
+        if (this.#micAsked !== null && message.mic !== 'off' && message.mic !== 'starting') {
+          this.deps.log(`voice: mic on from ${this.#micAsked.from} → ${message.mic} in ${Math.round(this.deps.now() - this.#micAsked.at)} ms`);
+          this.#micAsked = null;
         }
 
         if (message.error !== this.#audioError) {

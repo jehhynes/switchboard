@@ -258,6 +258,8 @@ export class FakeEngine implements AsrEngine {
   text = '';
   held = '';
   streams = 0;
+  /** Samples fed to every stream. */
+  accepted = 0;
 
   stream(): AsrStream {
     this.streams++;
@@ -266,7 +268,8 @@ export class FakeEngine implements AsrEngine {
     let text = '';
 
     return {
-      accept: () => {
+      accept: (samples) => {
+        this.accepted += samples.length;
         text = this.text;
       },
       text: () => text,

@@ -471,7 +471,8 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
       withSession();
 
       const { voice, sockets, tracks, captures, asked } = setup();
-      const opened = voice.micOn();
+      const steps: string[] = [];
+      const opened = voice.micOn((name) => steps.push(name));
 
       // The socket, the audio and the microphone are all asked for in the tap itself, the session set to record first.
       expect(sockets).toHaveLength(1);
@@ -484,6 +485,10 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
       expect(await opened).toBeNull();
       expect(voice.micOpen).toBe(true);
       expect(captures).toHaveLength(1);
+      // Each part the tap started is timed for the hub log, the microphone's permission first here and the capture last.
+      expect(steps[0]).toBe('microphone allowed');
+      expect(steps.slice(1, -1).sort()).toEqual(['audio resumed', 'audio worklet loaded', 'voice socket welcomed']);
+      expect(steps.at(-1)).toBe('capture connected');
       expect(sockets[0]!.sent.filter((one) => (one as { type: string }).type === 'state')).toEqual([{ type: 'state', busy: false }]);
 
       // Frames wait for the voice process's capture.
@@ -516,7 +521,12 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
       voice.start();
       sockets[0]!.open();
       sockets[0]!.message({ type: 'welcome', at: 0 });
-      expect(await voice.micOn()).toBeNull();
+
+      const steps: string[] = [];
+
+      expect(await voice.micOn((name) => steps.push(name))).toBeNull();
+      // The voice was on this phone before the tap: only the microphone's parts are timed.
+      expect(steps).toEqual(['microphone allowed', 'capture connected']);
       hide(true);
       expect(sockets[0]!.sent.at(-1)).toEqual({ type: 'state', busy: true });
       hide(false);

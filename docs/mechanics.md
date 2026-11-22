@@ -1509,3 +1509,15 @@ Current use: the console's resync after each fit ([architecture.md](architecture
   - With `NO_COLOR=1` the placeholder is not dim, so it reads as a draft.
 - **Not verified:** the environment of the running hub and holder, which were left alone; Linux.
 - **Current use:** the Code Mode environment sets `TERM`, and the input box and menus read a `>` prompt line under a rule and a `>` menu cursor (architecture.md § Code Mode sessions, § Typing a message).
+
+## M122. Where Mic on's start spends its time, 2026-11-22
+
+- **Versions:** sherpa-onnx-node 2.0.1, its CUDA 12 build, the fp32 and int8 Nemotron 0.6B 160 ms streaming models, on an NVIDIA RTX 2000 Ada (16 GB), Windows 11 Pro 10.0.26300, Windows PowerShell 5.1; copies of the models outside the Switchboard home; the operator's voice and hub logs, read only.
+- **Evidence:** the voice log of a phone tap that took the voice and turned the mic on: `voice device: the phone` at 12:35:14.864, the first `listening:` line at 12:35:23.130, 8.3 s later; the hub log's voice socket `hello` came within 1 ms of the move. The voice process had started at 12:27:17 and had not had the mic on since, so its recogniser was not loaded. A later tap, at 12:36:00.264, listened within 2 s.
+- **Method:** a recogniser created and decoded in a fresh Node.js process on each device; then the voice process's `Dictation` driven from Mic on to listening with the real recogniser and stand-ins for capture and the other-app watcher: the phone's, which answer at once, and this computer's, the real `micuse.ps1` watcher and PowerShell compiling `commcapture.ps1`'s types without opening a device. No microphone was opened and nothing was played.
+- **Result:**
+  - Creating the GPU recogniser took 5.1 s in the first run after the models were copied and 2.6 s with them in the file cache; another for other terms 3.3 s. Its first decode of a second of audio took 0.45 to 0.9 s, later ones 0.18 s. The CPU int8 recogniser took 1.7 to 2.6 s, with no slow first decode.
+  - The other-app watcher's first answer came 0.3 to 0.5 s after it started; PowerShell starting and compiling the capture helper's types took 0.7 to 0.8 s, 0.15 s of it the compile.
+  - Mic on to listening in the voice process, recogniser not loaded: 2.7 to 4.5 s for the phone; for this computer 3.0 to 3.4 s, with the watcher started while the recogniser loaded, where the two ran one after the other before. Recogniser loaded ahead: 13 ms for the phone, 0.9 s for this computer (other-app check 0.4 s, capture helper 0.5 s).
+- **Not verified:** the page's own steps on an iPhone (the microphone permission prompt, the audio worklet's load over the remote host), which the page now reports in the hub log; whether iOS asks for the microphone again within a page's life after the page released it.
+- **Current use:** the recogniser loads ahead of Mic on, and each start is timed in the voice and hub logs (architecture.md § Dictation).

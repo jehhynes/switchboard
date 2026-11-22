@@ -66,6 +66,7 @@ async function setup(patch: Partial<VoiceSettings> = {}) {
   let refuse: string | null = null;
   let focused: string | null = 'k1';
   let lastReply: string | null = 'Which port?';
+  const logs: string[] = [];
   const control = new VoiceControl({
     link: { find: async () => connection, connected: () => connection, stop: () => undefined },
     settings: () => settings,
@@ -86,7 +87,7 @@ async function setup(patch: Partial<VoiceSettings> = {}) {
     notify: (key, type, payload) => void notified.push({ key, type, payload }),
     dockChanged: () => undefined,
     now: () => t,
-    log: () => undefined,
+    log: (line) => void logs.push(line),
     setTimer: (run, ms) => {
       const timer = { run, at: t + ms, cleared: false, every: null };
 
@@ -140,7 +141,7 @@ async function setup(patch: Partial<VoiceSettings> = {}) {
       .filter(Boolean)
       .map((line) => JSON.parse(line) as Record<string, unknown>);
 
-  return { control, connection, windows, notified, dictated, busy, advance, settle, piece, end, fragments, refuse: (why: string | null) => (refuse = why), focus: (key: string | null) => (focused = key), setLastReply: (text: string) => (lastReply = text) };
+  return { control, connection, windows, notified, dictated, busy, advance, settle, piece, end, fragments, logs, refuse: (why: string | null) => (refuse = why), focus: (key: string | null) => (focused = key), setLastReply: (text: string) => (lastReply = text) };
 }
 
 const events = (notified: Array<{ key: string; type: string; payload: Record<string, unknown> }>, type: string) => notified.filter((one) => one.type === type).map((one) => [one.key, one.payload]);
@@ -157,6 +158,27 @@ describe('VoiceControl dictation', () => {
     expect(control.mic('k2', false)).toBe('Voice is not in this window.');
     expect(control.mic('k1', false)).toBeNull();
     expect(connection.sent.at(-1)).toEqual({ type: 'mic', on: false });
+  });
+
+  it('logs how long Mic on took from the command to the voice process listening, and a page\'s own steps', async () => {
+    const { control, connection, advance, logs } = await setup();
+    const audio = (mic: string): void => connection.receive({ type: 'audio', mic, recognizer: 'gpu', error: null } as unknown as VoiceMessage);
+
+    expect(control.mic('k1', true)).toBeNull();
+    advance(300);
+    audio('starting');
+    advance(5_200);
+    audio('listening');
+    // Once: later states are not the start's.
+    audio('hearing');
+    expect(logs.filter((line) => line.startsWith('voice: mic on'))).toEqual(['voice: mic on from this computer → listening in 5500 ms']);
+    // On again while it listens times nothing.
+    expect(control.mic('k1', true)).toBeNull();
+    audio('typing');
+    expect(logs.filter((line) => line.startsWith('voice: mic on'))).toHaveLength(1);
+
+    control.micTiming('k1', [{ step: 'hub answered', ms: 40 }, { step: 'voice confirmed', ms: 5_540 }], 'listening');
+    expect(logs.at(-1)).toBe("voice: mic on tap on this computer's page → listening: hub answered at 40 ms, voice confirmed at 5540 ms");
   });
 
   it('keeps the mic off once the voice process turned it off for a locked computer, also for a process started again', async () => {

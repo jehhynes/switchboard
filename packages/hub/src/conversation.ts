@@ -314,12 +314,16 @@ export interface ConversationVoice {
   timing?(messageId: string): string | null;
   /** The mic command: why it was refused, or null. */
   mic?(key: string, on: boolean): string | null;
+  micTiming?(key: string, steps: Array<{ step: string; ms: number }>, outcome: string): void;
   /** The composer command: the window's composer gained or lost the focus, or its draft changed. */
   composer?(key: string, focused: boolean, draft: string): void;
 }
 
 /** The most IDs one `seen` command marks. */
 export const SEEN_MAX_IDS = 200;
+/** The most steps a page's Mic on timing names, and the longest a step may take, since a start that long has failed. */
+export const MIC_TIMING_STEPS = 12;
+export const MIC_TIMING_MAX_MS = 120_000;
 
 type Send = (type: string, payload: Record<string, unknown>) => void;
 
@@ -2008,8 +2012,27 @@ export class ConversationService {
    * and `replay {replyId}` work only while the voice is here, `speak-replies {on}` turns Speak replies on or off. Refused with 403 outside the
    * window's scope, 409 for a stale `scopeGen` and with the voice's refusal, and 404 while voice is not part of this hub.
    */
-  voiceCommand(name: 'talk-here' | 'stop-speaking' | 'speak-replies' | 'replay' | 'mic' | 'composer', body: Record<string, unknown>): { status: number; body: unknown } {
-    const { window, scopeGen, opId, on, replyId, focused, draft } = body;
+  voiceCommand(name: 'talk-here' | 'stop-speaking' | 'speak-replies' | 'replay' | 'mic' | 'mic-timing' | 'composer', body: Record<string, unknown>): { status: number; body: unknown } {
+    const { window, scopeGen, opId, on, replyId, focused, draft, steps, outcome } = body;
+
+    // A page's Mic on tap timed, for the hub log (architecture.md § Dictation): any window or page key the hub knows, at any scope.
+    if (name === 'mic-timing') {
+      const valid =
+        typeof window === 'string' &&
+        this.deps.windows.scope(window) !== null &&
+        Array.isArray(steps) &&
+        steps.length <= MIC_TIMING_STEPS &&
+        steps.every((one: unknown) => typeof one === 'object' && one !== null && typeof (one as { step?: unknown }).step === 'string' && /^[a-z][a-z -]{0,39}$/.test((one as { step: string }).step) && typeof (one as { ms?: unknown }).ms === 'number' && Number.isFinite((one as { ms: number }).ms) && (one as { ms: number }).ms >= 0 && (one as { ms: number }).ms <= MIC_TIMING_MAX_MS) &&
+        typeof outcome === 'string' &&
+        outcome.length <= 200;
+
+      if (!valid) {
+        return { status: 400, body: { error: `Expected {window, steps, outcome}: at most ${MIC_TIMING_STEPS} steps of {step, ms}, a lowercase name and 0 to ${MIC_TIMING_MAX_MS} ms each, and an outcome of at most 200 characters.` } };
+      }
+
+      this.deps.voice?.micTiming?.(window as string, steps as Array<{ step: string; ms: number }>, (outcome as string).replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' '));
+      return { status: 200, body: { done: true } };
+    }
 
     if (
       typeof window !== 'string' ||

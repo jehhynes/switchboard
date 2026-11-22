@@ -1230,6 +1230,9 @@ describe('the page', () => {
     expect(root.querySelector('.composer-mic .mic.starting')).not.toBeNull();
     phone.emit('voice', voice('listening'));
     expect(root.querySelector('.composer-mic .mic.listening')).not.toBeNull();
+    await flush();
+    // The phone's steps, from the tap: its microphone, the hub's answer and the voice's confirmation.
+    expect((posts.filter((post) => post.url.endsWith('/mic-timing')).at(-1)?.body['steps'] as Array<{ step: string }>).map((one) => one.step)).toEqual(['microphone allowed', 'capture connected', 'mic on sent', 'hub answered', 'voice confirmed']);
     root.querySelector<HTMLElement>('.composer-mic [data-voice="mic"]')!.click();
     phone.emit('voice', voice('off'));
     // A refused microphone shows on the button, and the next tap tries again.
@@ -4364,6 +4367,9 @@ describe('the page in use', () => {
     expect(root.querySelector('.composer-mic .mic')!.getAttribute('title')).toContain('another app is using the microphone');
     source.emit('voice', { voice: { enabled: true, here: true, mic: 'listening', speaking: null, speakReplies: true, error: null } });
     expect(root.querySelector('.composer-mic .mic.listening')).not.toBeNull();
+    await flush();
+    // The tap's start, timed from the click, goes to the hub log once the voice confirmed it.
+    expect(posts.filter((post) => post.url.endsWith('/mic-timing')).map((post) => [post.body['outcome'], (post.body['steps'] as Array<{ step: string }>).map((one) => one.step)])).toEqual([['paused-other-app', ['hub answered', 'voice confirmed']]]);
 
     // Focusing the box and leaving it tell the hub, for the focus rule of dictation.
     const box = root.querySelector('textarea')!;

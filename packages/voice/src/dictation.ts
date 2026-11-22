@@ -23,6 +23,12 @@ const BARGE_PREROLL = 0.3 * ASR_RATE;
 /** After a reply ends, audio still this loud in its last 0.6 s keeps the words held and checked for up to `TAIL_HOLD_MS`. */
 const TAIL_KEEP = 0.6 * ASR_RATE;
 const TAIL_HOLD_MS = 1_500;
+/** The recogniser loads ahead of Mic on once the target has stayed this long, since focus moves it several times a second. */
+export const WARM_SETTLE_MS = 2_000;
+/** A load ahead of Mic on waiting for a reply or an utterance to end tries again after this long. */
+export const WARM_RETRY_MS = 5_000;
+/** After a phone takes the voice, the recogniser loads this soon, once the hub's target for the phone's conversation has come. */
+export const WARM_SOON_MS = 50;
 /** The spoken commands (architecture.md § Dictation), recognised only as a whole utterance in the operator's voice and never sent. */
 export const SPOKEN_COMMANDS: Readonly<Record<string, SpokenCommand>> = {
   'stop listening': 'stop-listening',
@@ -57,7 +63,7 @@ export const ROOM_ECHO_GUARD_MS = 2_000;
 
 export interface DictationDeps {
   capture: Capture;
-  /** Loads the recogniser biased toward the terms, or says why it cannot run; it blocks while the model loads, about 2 seconds. */
+  /** Loads the recogniser biased toward the terms, or says why it cannot run; it blocks while the model loads, 2 to 5 seconds. */
   recognizer(terms: string[]): AsrEngine | { error: string };
   vocabulary: { terms(repo: string | null): string[]; used(text: string): void };
   turn: TurnModel | null;
@@ -69,6 +75,8 @@ export interface DictationDeps {
   settings(): VoiceSettings;
   /** The voice check and enrolment; without it every piece passes unscored and enrolment fails. */
   voiceprint?: Voiceprint | null;
+  /** Whether a device has the voice, so loading the recogniser ahead of Mic on is worth blocking the process; true when left out. */
+  listenable?(): boolean;
   /** The reply being played, its spoken passage and voice, for barge-in; null while none plays. */
   playing?(): { replyId: string; text: string; voice: string } | null;
   /** Until when the voice plays: `Infinity` while it plays, else when it last stopped (`Speech.playedUntil`), for half-duplex capture. */
@@ -190,6 +198,12 @@ export class Dictation {
   #paused: { texts: string[]; checks: Array<{ score: number | null; f0: number | null }>; lastAt: number } | null = null;
   /** A spoken alert waits for its answer: capture runs even with no target or after the idle timeout, and the next utterance is the answer. */
   #answer: ((text: string | null, cut: boolean) => void) | null = null;
+  /** Mic on until capture opens: when it came and each step it waited for, for the voice log's timing line; null otherwise. */
+  #starting: { at: number; last: number; steps: string[]; engine: boolean; failed?: { key: string; error: string } } | null = null;
+  /** The recogniser's load ahead of Mic on, waiting for the target to settle or for nothing to play. */
+  #warmTimer: unknown = null;
+  /** A phone took the voice: the next target loads its recogniser at once rather than after it settles. */
+  #warmUrgent = false;
 
   constructor(private readonly deps: DictationDeps) {
     this.#auto = new AutoDuplex(deps.log);
@@ -312,6 +326,11 @@ export class Dictation {
 
         this.#idleOff = false;
         this.#error = null;
+
+        if (this.#stream === null) {
+          this.#starting = { at: this.deps.now(), last: this.deps.now(), steps: [], engine: false };
+        }
+
         this.#sync();
       }
 
@@ -328,6 +347,7 @@ export class Dictation {
       this.#idleOff = false;
       this.#error = null;
       this.#otherApp = null;
+      this.#starting = { at: this.deps.now(), last: this.deps.now(), steps: [], engine: false };
       // The headphones may have come off since: the echo check starts over.
       this.#resetEcho('the mic was turned on');
       this.#startWatch();
@@ -335,7 +355,13 @@ export class Dictation {
       if (this.#watch === null) {
         this.#otherApp = false;
       }
+
+      // The recogniser loads while the other-app watcher starts, not after its first answer; a failure is reported by the attempt to listen.
+      if (this.#target !== null && this.#enrollment === null && !this.#recognizerFailed) {
+        this.#loadEngine(true);
+      }
     } else {
+      this.#starting = null;
       this.#cut(true);
       this.#watchGen++;
       this.#watch?.close();
@@ -374,7 +400,95 @@ export class Dictation {
       this.#stopCapture();
     }
 
+    // Focus moves the target several times a second: the recogniser loads once it settles.
+    if (this.#target !== null) {
+      if (this.#warmTimer !== null) {
+      this.#clearTimer(this.#warmTimer);
+    }
+
+      this.#warmTimer = this.#timer(() => this.warm(), this.#warmUrgent ? WARM_SOON_MS : WARM_SETTLE_MS);
+    }
+
     this.#sync();
+  }
+
+  /**
+   * A phone took the voice in the tap that turns its mic on next: the recogniser loads at once, for the target the hub sets right after the
+   * move, while the page opens the phone's microphone.
+   */
+  warmSoon(): void {
+    this.#warmUrgent = true;
+
+    if (this.#warmTimer !== null) {
+      this.#clearTimer(this.#warmTimer);
+    }
+
+    this.#warmTimer = this.#timer(() => this.warm(), WARM_SOON_MS);
+  }
+
+  /**
+   * Loads the recogniser for the target's terms ahead of Mic on (architecture.md § Dictation), so turning the mic on does not wait seconds for
+   * the model. Loading blocks the process, so it waits while a reply plays or an utterance is open, and it runs a second of silence through the
+   * new recogniser, whose first decode on the GPU is several times slower than later ones.
+   */
+  warm(): void {
+    if (this.#warmTimer !== null) {
+      this.#clearTimer(this.#warmTimer);
+    }
+
+    this.#warmTimer = null;
+    this.#warmUrgent = false;
+
+    if (this.#target === null || this.#enrollment !== null || this.#recognizerFailed || !this.deps.settings().enabled || this.deps.listenable?.() === false || this.#engine?.key === this.#termsKey()) {
+      return;
+    }
+
+    if ((this.deps.playing?.() ?? null) !== null || this.#utterance !== null) {
+      this.#warmTimer = this.#timer(() => this.warm(), WARM_RETRY_MS);
+      return;
+    }
+
+    const at = this.deps.now();
+
+    if (!this.#loadEngine(true)) {
+      return;
+    }
+
+    const loaded = this.deps.now();
+
+    this.#engine!.engine.stream().accept(new Float32Array(ASR_RATE));
+    this.deps.log(`recogniser loaded ahead of the mic in ${Math.round(loaded - at)} ms, its first decode ${Math.round(this.deps.now() - loaded)} ms`);
+  }
+
+  /** The words the recogniser is biased toward for the target: its repository's terms and the spoken commands, which are heard as said. */
+  #terms(): string[] {
+    return hotwordList(this.deps.vocabulary.terms(this.#target?.repo ?? null), Object.keys(SPOKEN_COMMANDS));
+  }
+
+  #termsKey(): string {
+    return this.#terms().join('\n');
+  }
+
+  /** A step of Mic on's start done, for its timing line. */
+  #step(name: string): void {
+    const starting = this.#starting;
+
+    if (starting !== null) {
+      const now = this.deps.now();
+
+      starting.steps.push(`${name} ${Math.round(now - starting.last)} ms`);
+      starting.last = now;
+    }
+  }
+
+  /** Mic on's start ended, opened or failed: one voice log line with how long each step took. */
+  #started(outcome: string): void {
+    const starting = this.#starting;
+
+    if (starting !== null) {
+      this.#starting = null;
+      this.deps.log(`mic on → ${outcome} in ${Math.round(this.deps.now() - starting.at)} ms${starting.steps.length === 0 ? '' : `: ${starting.steps.join(', ')}`}`);
+    }
   }
 
   /** A session's latest reply, which the turn model reads. */
@@ -486,6 +600,12 @@ export class Dictation {
   }
 
   close(): void {
+    if (this.#warmTimer !== null) {
+      this.#clearTimer(this.#warmTimer);
+    }
+
+    this.#warmTimer = null;
+
     if (this.#enrollment !== null) {
       this.#clearTimer(this.#enrollment.timer);
       this.#enrollment = null;
@@ -508,6 +628,10 @@ export class Dictation {
     }
 
     this.#otherApp = busy;
+
+    if (was === null) {
+      this.#step(busy ? `other-app check (${apps.join(', ') || 'another app'} records)` : 'other-app check');
+    }
 
 
     if (busy) {
@@ -557,19 +681,42 @@ export class Dictation {
     }
   }
 
-  /** Loads the recogniser for the target's terms when they changed; false, with the error kept, when it cannot run. */
-  #loadEngine(): boolean {
-    // The spoken commands are boosted, so they are heard as said.
-    const terms = hotwordList(this.deps.vocabulary.terms(this.#target?.repo ?? null), Object.keys(SPOKEN_COMMANDS));
+  /**
+   * Loads the recogniser for the target's terms when they changed; false, with the error kept, when it cannot run. A load ahead of listening
+   * (`ahead`) keeps no error: the attempt to listen loads it again and reports why.
+   */
+  #loadEngine(ahead = false): boolean {
+    const terms = this.#terms();
     const key = terms.join('\n');
+    const starting = this.#starting;
 
     if (this.#engine?.key === key) {
+      if (starting !== null && !starting.engine) {
+        starting.engine = true;
+        this.#step('recogniser ready');
+      }
+
       return true;
     }
 
-    const engine = this.deps.recognizer(terms);
+    // Mic on's load ahead failed for these terms: its attempt to listen reports that, rather than paying for the load again.
+    const failed = !ahead && starting?.failed?.key === key ? starting.failed : null;
+    const engine = failed === null ? this.deps.recognizer(terms) : { error: failed.error };
+
+    if (starting !== null && !starting.engine) {
+      starting.engine = true;
+      this.#step('recogniser loaded');
+    }
 
     if ('error' in engine) {
+      if (ahead) {
+        if (starting !== null) {
+          starting.failed = { key, error: engine.error };
+        }
+
+        return false;
+      }
+
       if (this.#loggedRecognizerError !== engine.error) {
         this.#loggedRecognizerError = engine.error;
         this.deps.log(engine.error);
@@ -599,6 +746,7 @@ export class Dictation {
     const forEnrollment = this.#enrollment !== null;
 
     if (!forEnrollment && !this.#loadEngine()) {
+      this.#started('unavailable');
       this.#report();
       return;
     }
@@ -616,6 +764,8 @@ export class Dictation {
       );
     } catch (error) {
       this.#opening = false;
+      this.#step('capture open');
+      this.#started('failed');
       this.#failed(error as Error);
       return;
     }
@@ -632,6 +782,12 @@ export class Dictation {
     this.#stream = stream;
     this.#deaf = false;
     this.#echo.restart();
+
+    if (!forEnrollment) {
+      this.#step('capture open');
+      this.#started('listening');
+    }
+
     this.#applyDuplex();
 
     this.#ticker = (this.deps.every ?? every)(() => this.#tick(), TURN_TICK_MS);

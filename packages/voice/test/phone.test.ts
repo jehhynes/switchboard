@@ -193,6 +193,7 @@ describe('VoiceService with the voice on the phone', () => {
           recognizer: null,
           mic: (on: boolean) => calls.push(`mic ${on}`),
           enroll: (action: string) => calls.push(`enroll ${action}`),
+          warmSoon: () => calls.push('warm'),
           target: () => undefined,
           settingsChanged: () => undefined,
           reference: () => undefined,
@@ -305,10 +306,14 @@ describe('VoiceService with the voice on the phone', () => {
     tts.requests[0]!.audio(Math.round(100 * BYTES_PER_MS));
     tts.requests[0]!.finish();
     await settle();
+    // The phone took the voice in the tap that turns its mic on next: the recogniser loads meanwhile.
+    expect(calls.slice(-2)).toEqual(['mic false', 'warm']);
     service.receive({ type: 'device', device: 'none' });
     await settle();
     expect(speechOf('r1').at(-1)?.[0]).toBe('interrupted');
     expect(calls).toContain('mic false');
+    // Only a move to the phone loads it.
+    expect(calls.filter((call) => call === 'warm')).toHaveLength(1);
 
     // Nothing plays with no device: not on this computer's speakers either, and the outcome says why.
     speak('r2');

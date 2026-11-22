@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PERMISSION_PROMPT, Store, toneSection, toneVersion, windowFileKey } from '@switchboard/core';
 import type { Interruption, Session as StoredSession } from '@switchboard/core';
 import { projectSlug } from '@switchboard/claude';
-import { ConversationService, sessionView, typedText } from '../src/conversation.js';
+import { ConversationService, MIC_TIMING_MAX_MS, MIC_TIMING_STEPS, sessionView, typedText } from '../src/conversation.js';
 import type { ConversationServiceDeps, ConversationVoice, PersonaView } from '../src/conversation.js';
 import { dockView, windowOf } from '../src/dock.js';
 import { canonicalFolder, WindowScopes } from '../src/windows.js';
@@ -1272,6 +1272,33 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     ]);
     expect(store.conversation('s3', null, 10).items).toEqual([]);
     expect(service.voiceCommand('composer', { window: mine.key, scopeGen: 1, opId: 'o', focused: 'yes', draft: '' })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, focused, draft}.' } });
+  });
+
+  it("passes a page's Mic on timing to the voice for the hub log, and refuses a malformed or unknown one (architecture.md § Dictation)", () => {
+    const { voice } = fakeVoice();
+    const timed: unknown[] = [];
+
+    voice.micTiming = (key, steps, outcome) => void timed.push({ key, steps, outcome });
+
+    const { service, open, view } = setupSend(new FakeHeld(), undefined, voice);
+    const mine = open(view.file);
+    const steps = [{ step: 'microphone allowed', ms: 2_400 }, { step: 'hub answered', ms: 2_600 }];
+
+    expect(service.voiceCommand('mic-timing', { window: mine.key, steps, outcome: 'listening\nnext\u001b[31m line' })).toEqual({ status: 200, body: { done: true } });
+    // No control character reaches the log.
+    expect(timed).toEqual([{ key: mine.key, steps, outcome: 'listening next [31m line' }]);
+
+    for (const bad of [
+      { window: 'nobody', steps, outcome: 'listening' },
+      { window: mine.key, steps: [{ step: 'Bad<b>', ms: 1 }], outcome: 'listening' },
+      { window: mine.key, steps: [{ step: 'late', ms: MIC_TIMING_MAX_MS + 1 }], outcome: 'listening' },
+      { window: mine.key, steps: Array.from({ length: MIC_TIMING_STEPS + 1 }, () => ({ step: 'step', ms: 1 })), outcome: 'listening' },
+      { window: mine.key, steps, outcome: 'x'.repeat(201) },
+    ]) {
+      expect(service.voiceCommand('mic-timing', bad).status).toBe(400);
+    }
+
+    expect(timed).toHaveLength(1);
   });
 
   it('types a dictated message that spoke over a reply with its interruption note after the tags, stores the reply, and retypes it the same (architecture.md § Voice check and barge-in)', async () => {

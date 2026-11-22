@@ -121,6 +121,10 @@ export class PhoneVoice {
   #micSeenOn = false;
   /** The socket's welcome, which a microphone opened in the same tap waits for. */
   #welcome: { promise: Promise<boolean>; resolve(on: boolean): void } | null = null;
+  /** When the audio context resumed, the worklet loaded and the socket was welcomed, for Mic on's timing; null before. */
+  #resumedAt: number | null = null;
+  #workletAt: number | null = null;
+  #welcomedAt: number | null = null;
 
   constructor(private readonly deps: PhoneVoiceDeps) {
     const onVisibility = deps.onVisibility ?? ((changed: () => void) => document.addEventListener('visibilitychange', changed));
@@ -169,7 +173,9 @@ export class PhoneVoice {
     }
 
     this.#context = context;
-    void context.resume().catch(() => {
+    this.#resumedAt = null;
+    this.#workletAt = null;
+    void context.resume().then(() => void (this.#context === context && (this.#resumedAt = this.deps.now()))).catch(() => {
       if (this.#context === context) {
         this.#lose('The phone did not start its audio.');
       }
@@ -185,6 +191,8 @@ export class PhoneVoice {
         if (this.#context !== context) {
           return null;
         }
+
+        this.#workletAt = this.deps.now();
 
         const node = this.deps.node?.(context) ?? (new AudioWorkletNode(context as unknown as AudioContext, 'sb-play', { outputChannelCount: [1] }) as unknown as PhoneAudioNode);
 
@@ -298,6 +306,7 @@ export class PhoneVoice {
 
       if (message['type'] === 'welcome') {
         welcomed = true;
+        this.#welcomedAt = this.deps.now();
         this.state = 'on';
         this.#pings(socket);
         this.#welcome?.resolve(true);
@@ -372,14 +381,17 @@ export class PhoneVoice {
   /**
    * Mic on on this phone, called from its tap (PRD R119): takes the voice to this phone first when it is not here, sets the audio session to
    * play and record before asking for the microphone, as iOS needs to keep replies on the loudspeaker, opens it with iOS's echo cancellation,
-   * and connects it to the capture worklet. Resolves null once the microphone is open and the voice socket welcomed, else why not.
+   * and connects it to the capture worklet. Resolves null once the microphone is open and the voice socket welcomed, else why not. `step`
+   * hears when each part was done, for the hub log's timing of the start: those this tap started, and the microphone's permission.
    */
-  async micOn(): Promise<string | null> {
+  async micOn(step: (name: string, at: number) => void = () => undefined): Promise<string | null> {
     if (this.#mic !== null) {
       return null;
     }
 
-    if (this.state === 'off') {
+    const opened = this.state === 'off';
+
+    if (opened) {
       this.start();
     }
 
@@ -407,6 +419,8 @@ export class PhoneVoice {
 
       return (error as Error).name === 'NotAllowedError' ? 'The phone did not allow the microphone.' : 'The phone\'s microphone did not open.';
     }
+
+    step('microphone allowed', this.deps.now());
 
     const track = stream.getAudioTracks()[0];
 
@@ -453,6 +467,15 @@ export class PhoneVoice {
       return this.error ?? 'The mic was turned off.';
     }
 
+    // The parts the tap that took the voice to this phone started, in the order they were done.
+    if (opened) {
+      const parts: Array<[string, number | null]> = [['audio resumed', this.#resumedAt], ['voice socket welcomed', this.#welcomedAt], ['audio worklet loaded', this.#workletAt]];
+
+      for (const [name, at] of parts.filter((part): part is [string, number] => part[1] !== null).sort((a, b) => a[1] - b[1])) {
+        step(name, at);
+      }
+    }
+
     if (context === null || loaded === null) {
       this.micOff();
       return this.error ?? 'The phone could not load the voice\'s audio.';
@@ -469,6 +492,7 @@ export class PhoneVoice {
 
     node.port.onmessage = (event) => this.#frame(mic, event.data);
     mic.node = node;
+    step('capture connected', this.deps.now());
     this.#sendBusy();
     this.deps.changed();
     return null;

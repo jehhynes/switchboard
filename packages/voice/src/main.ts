@@ -133,6 +133,7 @@ async function main(): Promise<void> {
         voiceprint,
         send: hooks.send,
         playing: hooks.playing,
+        listenable: hooks.listenable,
         playedUntil: hooks.playedUntil,
         interrupt: hooks.interrupt,
         changed: hooks.changed,
