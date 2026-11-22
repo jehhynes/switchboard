@@ -273,6 +273,9 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 .sliver > .stripe-warning { background: var(--vscode-editorWarning-foreground); }
 .sliver > .stripe-error { background: var(--vscode-testing-iconFailed); }
 .sliver > .stripe-turn { background: var(--vscode-focusBorder); }
+/* On a touch screen the sliver takes touches 16 px in from the edge, so a swipe right from the edge shows the drawer (main.ts). */
+.sliver { touch-action: pan-y; }
+@media (pointer: coarse) { .sliver::after { content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 16px; } }
 @media (min-width: 768px) {
   #root.drawers:not(.listing):not(.history) > .side { box-sizing: border-box; position: fixed; top: 0; bottom: 0; left: 0; z-index: 30; padding-top: var(--sb-top); padding-left: env(safe-area-inset-left); visibility: hidden; transform: translateX(-100%); }
   #root.drawers:not(.listing):not(.history) > .side-sash { display: none; }

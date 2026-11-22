@@ -66,6 +66,8 @@ const SASH_STEP = 16;
  */
 export const SIDE_COLLAPSE = SIDE_MIN / 2;
 export const PIN_SNAP = 48;
+/** How far right a touch from the page's left edge must move, more across than down, to show the drawer. */
+export const SWIPE_OPEN = 40;
 /** A pill shrunk to its icon, as the dock's: its 1 px borders and 6 px padding each side round a 14 px codicon, or the key's 12 px logo; and the space between line 2's items. */
 const COMPACT_PILL = 28;
 const COMPACT_KEY = 26;
@@ -1649,6 +1651,35 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }, DRAWER_REVEAL_MS);
   });
   sliver.addEventListener('pointerleave', cancelReveal);
+  // A touch swiping right from the page's left edge, on the sliver's wider touch area (page.css), shows the drawer as its button does.
+  let swipe: { id: number; x: number; y: number } | null = null;
+
+  sliver.addEventListener('pointerdown', (event) => {
+    swipe = event.pointerType === 'touch' && drawerMode() && view.drawer === null ? { id: event.pointerId, x: event.clientX, y: event.clientY } : null;
+    if (swipe !== null) {
+      sliver.setPointerCapture?.(event.pointerId);
+    }
+  });
+  sliver.addEventListener('pointermove', (event) => {
+    if (swipe === null || swipe.id !== event.pointerId) {
+      return;
+    }
+
+    const across = event.clientX - swipe.x;
+    const down = Math.abs(event.clientY - swipe.y);
+
+    if (across >= SWIPE_OPEN && across > down) {
+      swipe = null;
+      openDrawer('open');
+    } else if (down >= SWIPE_OPEN) {
+      swipe = null;
+    }
+  });
+  for (const type of ['pointerup', 'pointercancel']) {
+    sliver.addEventListener(type, () => {
+      swipe = null;
+    });
+  }
   drawer.addEventListener('pointerenter', () => {
     overDrawer = true;
   });

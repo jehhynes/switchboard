@@ -12,7 +12,7 @@ import { renderList } from '../src/list.js';
 import { html } from './html.js';
 import { renderMicButton as viewMicButton } from '@switchboard/conversation/voiceControls';
 import { renderMarkdown } from '../src/markdown.js';
-import { CHAT_MAX, CHAT_MIN, DRAWER_HIDE_MS, DRAWER_REVEAL_MS, loadMermaid, PANE_SHOW_DELAY_MS, PIN_SNAP, SENT_NOTE_MS, SHOW_MARKER_MS, SIDE_COLLAPSE, SIDE_MAX, SIDE_MIN, startPage } from '../src/main.js';
+import { CHAT_MAX, CHAT_MIN, DRAWER_HIDE_MS, DRAWER_REVEAL_MS, loadMermaid, PANE_SHOW_DELAY_MS, PIN_SNAP, SENT_NOTE_MS, SHOW_MARKER_MS, SIDE_COLLAPSE, SIDE_MAX, SIDE_MIN, startPage, SWIPE_OPEN } from '../src/main.js';
 import { DETAIL_MIN } from '../src/layout.js';
 import type { ArtifactView, MessageView, PageGroup, PageRow, ReplyView, SessionView } from '@switchboard/protocol';
 
@@ -3649,6 +3649,36 @@ describe('the page in use', () => {
     expect(root.classList.contains('drawers')).toBe(false);
     expect(localStorage.getItem('switchboard.listCollapsed')).toBeNull();
     expect(document.activeElement).toBe(root.querySelector('.side-sash'));
+    page.close();
+  });
+
+  it('shows the drawer on a touch swiping right from the left edge, not on a mouse, a short or a mostly vertical swipe', () => {
+    window.innerWidth = 1024;
+    history.replaceState(null, '', '#w=1');
+
+    const { page, source } = start();
+    const sliver = root.querySelector<HTMLElement>('.sliver')!;
+    const isOpen = () => root.classList.contains('drawer-open');
+    const pointer = (type: string, x: number, y: number, pointerType = 'touch') => sliver.dispatchEvent(Object.assign(new Event(type, { bubbles: true }), { pointerType, pointerId: 1, clientX: x, clientY: y, button: 0 }));
+
+    hello(source);
+    expect(root.classList.contains('drawers')).toBe(true);
+    pointer('pointerdown', 2, 300, 'mouse');
+    pointer('pointermove', 2 + SWIPE_OPEN + 10, 300, 'mouse');
+    expect(isOpen()).toBe(false);
+    pointer('pointerdown', 2, 300);
+    pointer('pointermove', 2 + SWIPE_OPEN - 1, 300);
+    pointer('pointerup', 2 + SWIPE_OPEN - 1, 300);
+    expect(isOpen()).toBe(false);
+    pointer('pointerdown', 2, 300);
+    pointer('pointermove', 2 + SWIPE_OPEN, 300 + SWIPE_OPEN + 5);
+    pointer('pointermove', 2 + SWIPE_OPEN + 20, 300 + SWIPE_OPEN + 5);
+    expect(isOpen()).toBe(false);
+    pointer('pointerup', 0, 0);
+    pointer('pointerdown', 2, 300);
+    pointer('pointermove', 2 + SWIPE_OPEN, 310);
+    expect(isOpen()).toBe(true);
+    expect(document.activeElement).toBe(root.querySelector('[data-work-item="1"]'));
     page.close();
   });
 
