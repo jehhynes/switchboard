@@ -786,6 +786,20 @@ describe('createHubApp', () => {
     expect(await app.post['/config/voice-enroll']!({ action: 'finish' })).toEqual({ status: 400, body: { error: "Expected {action: 'start' | 'cancel' | 'status'}." } });
   });
 
+  it("logs a page's Mic on timing in the hub log, with each step from the tap (architecture.md § Dictation)", async () => {
+    writeSettings({ sessions: { installHooks: false }, sources: { adhoc: { repoRoot: 'D:/scratch' } } });
+    const logs: string[] = [];
+    const app = await start((line) => logs.push(line));
+    const page = app.page!.opened();
+
+    app.runtime.send({ type: 'adhoc', prompt: 'Fix the badge', repoRoot: 'D:/scratch', start: false });
+    await app.runtime.settled();
+    expect(await app.post['/v1/conversation/select']!({ window: page, opId: 'o1', workItemId: 1 })).toMatchObject({ status: 200 });
+
+    expect(await app.post['/v1/conversation/mic-timing']!({ window: page, steps: [{ step: 'hub answered', ms: 40 }, { step: 'voice confirmed', ms: 90 }], outcome: 'listening' })).toEqual({ status: 200, body: { done: true } });
+    expect(logs.filter((line) => line.startsWith('voice: mic on tap'))).toEqual(["voice: mic on tap on this computer's page → listening: hub answered at 40 ms, voice confirmed at 90 ms"]);
+  });
+
   it('reads, checks and saves settings.json with its playbooks for the Settings window, refusing a stale version', async () => {
     writeSettings({ sessions: { installHooks: false } });
     const app = await start();
