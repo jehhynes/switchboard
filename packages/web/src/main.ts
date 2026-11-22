@@ -12,7 +12,7 @@ import { mount, unmount } from './island.js';
 import type { ComponentChild, VNode } from 'preact';
 import { renderList, renderListPane } from './list.js';
 import { menuRows, renderHeader, renderSideSwitch, renderTabs } from './header.js';
-import { CHAT_FIT, DETAIL_MIN, fitLayout, sideWidth, TABLET_MIN, type Layout } from './layout.js';
+import { CHAT_MIN, chatNeed, DETAIL_MIN, fitLayout, sideWidth, TABLET_MIN, type Layout } from './layout.js';
 import { renderTimeline } from './timeline.js';
 import { renderArtifacts, renderArtifactView, renderEmpty, renderStatus } from './side.js';
 import { renderSheet } from './sheet.js';
@@ -56,8 +56,8 @@ export const COMPOSER_DRAFT_MS = 300;
 /** The widths the sashes allow for the work items and the conversation, in pixels, their arrow-key step, and where the page keeps them. */
 export const SIDE_MIN = 200;
 export const SIDE_MAX = 600;
-/** The conversation's sash keeps it at least as wide as the layout lets it be beside the column, so a width kept on a cramped page cannot narrow it. */
-export const CHAT_MIN = CHAT_FIT;
+/** The conversation's sash sets it from `CHAT_MIN` (layout.ts) up; a narrower width lets the list and the column fit a narrower page. */
+export { CHAT_MIN };
 export const CHAT_MAX = 1600;
 const SASH_STEP = 16;
 /** A pill shrunk to its icon, as the dock's: its 1 px borders and 6 px padding each side round a 14 px codicon, or the key's 12 px logo; and the space between line 2's items. */
@@ -157,7 +157,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     key: SIDE_WIDTH,
     min: SIDE_MIN,
     max: SIDE_MAX,
-    limit: () => (layout?.list === true ? window.innerWidth - CHAT_FIT - DETAIL_MIN : SIDE_MAX),
+    limit: () => (layout?.list === true ? window.innerWidth - chatNeed(chatSash.width()) - DETAIL_MIN : SIDE_MAX),
     changed: () => {
       if (!relayout()) {
         return;
@@ -173,10 +173,21 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       }
     },
   });
-  resizer(root, root.querySelector<HTMLElement>('.chat-sash')!, root.querySelector<HTMLElement>('.main')!, { property: '--chat-width', key: CHAT_WIDTH, min: CHAT_MIN, max: CHAT_MAX });
-  /** Works out the columns again from the page's width and the list's kept width, and sets the root's classes; true when they changed. */
+  // The conversation's width counts in the layout too (chatNeed): narrowed, it can bring the list or the column back.
+  const chatSash = resizer(root, root.querySelector<HTMLElement>('.chat-sash')!, root.querySelector<HTMLElement>('.main')!, {
+    property: '--chat-width',
+    key: CHAT_WIDTH,
+    min: CHAT_MIN,
+    max: CHAT_MAX,
+    changed: () => {
+      if (relayout()) {
+        draw();
+      }
+    },
+  });
+  /** Works out the columns again from the page's width and the list's and the conversation's kept widths, and sets the root's classes; true when they changed. */
   const relayout = (): boolean => {
-    const next = fitLayout(window.innerWidth, sideWidth(sideSash.width(), window.innerWidth), layout);
+    const next = fitLayout(window.innerWidth, sideWidth(sideSash.width(), window.innerWidth), layout, chatNeed(chatSash.width()));
     const changed = layout === null || next.list !== layout.list || next.wide !== layout.wide;
 
     layout = next;

@@ -3430,6 +3430,26 @@ describe('the page in use', () => {
     again.page.close();
   });
 
+  it("brings the list back as a column when the conversation is narrowed on its sash, and sends it to the drawer when widened again", () => {
+    window.innerWidth = 1300;
+
+    const { page, source } = start();
+    const sash = root.querySelector<HTMLElement>('.chat-sash')!;
+
+    hello(source);
+    // The default 340 px list, the conversation at 640 px and the column at 360 px do not fit 1300 px.
+    expect(root.classList.contains('drawers')).toBe(true);
+    expect(root.classList.contains('wide')).toBe(true);
+    sash.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+    expect(localStorage.getItem('switchboard.chatWidth')).toBe(String(CHAT_MIN));
+    // 340 + 400 + 360 px fit.
+    expect(root.classList.contains('drawers')).toBe(false);
+    expect(root.classList.contains('wide')).toBe(true);
+    sash.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    expect(root.classList.contains('drawers')).toBe(true);
+    page.close();
+  });
+
   it('takes a list width kept elsewhere as it is', () => {
     localStorage.setItem('switchboard.sideWidth', '440');
     window.innerWidth = 1440;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CHAT_FIT, DETAIL_MIN, fitLayout, LAYOUT_SLACK, sideWidth } from '../src/layout.js';
+import { CHAT_FIT, CHAT_MIN, chatNeed, DETAIL_MIN, fitLayout, LAYOUT_SLACK, sideWidth } from '../src/layout.js';
 
 describe('the page layout', () => {
   it("draws the list as page.css does: the kept width, or 30% of the page between 260 and 340 px, at least 200 px and at most half the page", () => {
@@ -38,6 +38,21 @@ describe('the page layout', () => {
     expect(fitLayout(1366, 340, null).list).toBe(true);
     expect(fitLayout(1366, 380, null).list).toBe(false);
     expect(fitLayout(1380, 380, null).list).toBe(true);
+  });
+
+  it("fits the columns to the conversation's width set on its sash, between CHAT_MIN and CHAT_FIT", () => {
+    expect(chatNeed(null)).toBe(CHAT_FIT);
+    expect(chatNeed(940)).toBe(CHAT_FIT);
+    expect(chatNeed(500)).toBe(500);
+    expect(chatNeed(CHAT_MIN - 50)).toBe(CHAT_MIN);
+    // The Surface sizes, in CSS pixels, with the default 340 px list: 1368 px fits it only beside the default conversation; a conversation
+    // narrowed to 400 px leaves the column 1368 - 340 - 400 px with the list shown, or brings both back on a 1180 px tablet.
+    expect(fitLayout(1368, 340, null)).toEqual({ list: true, wide: true });
+    expect(fitLayout(1280, 340, null)).toEqual({ list: false, wide: true });
+    expect(fitLayout(1280, 340, null, chatNeed(500))).toEqual({ list: true, wide: true });
+    expect(fitLayout(1100, 340, null, chatNeed(CHAT_MIN))).toEqual({ list: true, wide: true });
+    expect(fitLayout(1099, 340, null, chatNeed(CHAT_MIN))).toEqual({ list: false, wide: true });
+    expect(fitLayout(767, 260, null, chatNeed(CHAT_MIN))).toEqual({ list: false, wide: false });
   });
 
   it('keeps a shown column until it no longer fits, and brings a hidden one back only LAYOUT_SLACK past its need', () => {
