@@ -6,7 +6,7 @@ type NativeRequest = NonNullable<SessionView['requests']>[number];
 import { providerMark } from '@switchboard/conversation/providerIcons';
 import { fullTime, metaLine, spokenMark, stamped, toneMark, voiceMark } from '@switchboard/conversation/messageMeta';
 import { hasUnspokenText, spokenBody } from '@switchboard/conversation/spokenBubble';
-import { artifactIcon, awaitingReply, selectedEntry, stateIcon, statusLine, timeline } from '../conversationModel.js';
+import { artifactIcon, awaitingReply, inTurn, selectedEntry, stateIcon, statusLine, timeline } from '../conversationModel.js';
 import type { ConversationState } from '../conversationModel.js';
 import { answersIn, answerText, cardLinks, complete, questionSegments, withoutEndingQuestions } from '@switchboard/conversation/questions';
 import type { AnswerLine, CardLinks, CardSettled, QuestionChoice } from '@switchboard/conversation/questions';
@@ -699,7 +699,7 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
     return settled === undefined ? '' : questionCard(key, settled, page.cards?.get(key), canAnswer);
   };
   // The turn's row after the newest item, so replies written mid-turn show above it; it has no data-id, so the keys skip it.
-  const spinner = turnRow(state.session, awaitingReply(state.items, state.session));
+  const spinner = turnRow(state.session, inTurn(state.session) || awaitingReply(state.items, state.session));
   // A turn starts at each message; the first item shown, and each turn that starts on another day than the turn before it, has a divider.
   // In conversation order, not by time, so an item dated before the ones above it, such as one still queued from days ago, starts no divider.
   let turnDay: number | null = null;

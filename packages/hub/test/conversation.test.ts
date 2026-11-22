@@ -4,7 +4,7 @@ import { join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PERMISSION_PROMPT, Store, toneSection, toneVersion, windowFileKey } from '@switchboard/core';
 import type { Interruption, Session as StoredSession } from '@switchboard/core';
-import { projectSlug } from '@switchboard/claude';
+import { BACKGROUND_DETAIL, projectSlug } from '@switchboard/claude';
 import { ConversationService, MIC_TIMING_MAX_MS, MIC_TIMING_STEPS, sessionView, typedText } from '../src/conversation.js';
 import type { ConversationServiceDeps, ConversationVoice, PersonaView } from '../src/conversation.js';
 import { dockView, windowOf } from '../src/dock.js';
@@ -1657,6 +1657,12 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
 });
 
 describe('sessionView', () => {
+  it('marks a running session whose turn ended with background tasks as in no turn, and no other', () => {
+    expect(sessionView(session({ codeMode: true, state: 'running', stateDetail: BACKGROUND_DETAIL }), true, true)).toMatchObject({ state: 'running', background: true });
+    expect(sessionView(session({ codeMode: true, state: 'running', stateDetail: null }), true, true)).toMatchObject({ state: 'running', background: false });
+    expect(sessionView(session({ codeMode: true, state: 'idle', stateDetail: BACKGROUND_DETAIL }), true, true)).toMatchObject({ state: 'idle', background: false });
+  });
+
   it('names what the view can do with each kind of session', () => {
     expect(sessionView(session({ codeMode: true, state: 'ended' }), true, true)).toMatchObject({ state: 'ended', conversation: 'read-only', reason: 'The session has ended. Open it in the terminal to resume it.' });
     expect(sessionView(session({ codeMode: true, state: 'idle' }), true, false)).toMatchObject({ conversation: 'read-only', reason: 'Switchboard cannot follow this session while sessions.installHooks is off.' });

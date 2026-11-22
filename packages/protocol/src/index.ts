@@ -28,6 +28,8 @@ export interface SessionView {
   limit?: { until: number; retry: boolean } | null;
   /** The session's context size, null while the hub cannot read it (architecture.md § Context meter). */
   context?: ContextView | null;
+  /** `running` with its turn ended while background tasks it started still run, so it is in no turn. Absent from an older hub. */
+  background?: boolean;
 }
 
 /** A Codex app-server session's pending question or approval, answered with the `answer` command. */

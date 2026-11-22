@@ -16,7 +16,7 @@ const on = (tab: Tab, unopened: string[] = []) => ({ tab, unopened: new Set(unop
 
 const T0 = Date.UTC(2026, 10, 19, 12);
 const SCOPE: ScopeView = { kind: 'item', workItemId: 2, key: 'k1', folder: 'D:/w', title: 'Fix the <inbox> badge', cwd: 'D:/w', scopeGen: 1, sessionId: 's2', conversations: [{ workItemId: 2, title: 'Fix the <inbox> badge', primary: true, sessionId: 's2', state: 'running', conversation: 'full', unread: 0 }] };
-const SESSION: SessionView = { id: 's2', kind: 'task', title: 'Task session aaaa', state: 'running', waitingFor: null, launch: 'l', current: true, conversation: 'full', reason: null, persona: null };
+const SESSION: SessionView = { id: 's2', kind: 'task', title: 'Task session aaaa', state: 'running', waitingFor: null, launch: 'l', current: true, conversation: 'full', reason: null, persona: null, background: false };
 
 // Each item's ord is its time unless a test gives it another.
 const reply = (id: string, at: number, patch: Partial<ReplyView> = {}): ReplyView => ({ type: 'reply', id, sessionId: 's2', at, ord: at, provisional: false, kind: 'reply', answers: null, opening: `Reply ${id}`, source: 'transcript', replaces: null, rewrittenBy: null, withdrawn: false, unread: false, speak: null, tone: null, spoken: { state: 'none', atMs: null, saidChars: null }, ...patch });
@@ -321,7 +321,8 @@ describe('the Conversation view page', () => {
     root.innerHTML = renderConversation(state([message('m1', T0, 'Sent', { provisional: true })]));
     expect(root.querySelector('.message')?.className).toBe('message provisional');
     root.innerHTML = html;
-    expect([...root.querySelectorAll('.timeline > li')].map((li) => li.className)).toEqual(['day', 'message', 'reply reply', 'reply aside', 'note']);
+    // The session is still in its turn, so the turn row follows its reply.
+    expect([...root.querySelectorAll('.timeline > li')].map((li) => li.className)).toEqual(['day', 'message', 'reply reply', 'reply aside', 'note', 'working']);
     expect(root.querySelector('.reply.reply .body > p')?.innerHTML).toBe('Both fixed.');
     expect(root.querySelector<HTMLDetailsElement>('.fold.earlier')?.open).toBe(true);
     expect(root.querySelector('.fold.earlier .was table')).not.toBeNull();
@@ -525,7 +526,7 @@ describe('the Conversation view page', () => {
     expect([...root.querySelector('li[data-id="r1"]')!.children].map((child) => child.className)).toEqual(['dot', 'body', 'meta']);
     expect(root.querySelector('li[data-id="m2"] .box')?.className).toBe('box');
     // A divider before the first turn and before the turn on the next day, which the keys skip: Yesterday and Today.
-    expect([...root.querySelectorAll('.timeline > li')].map((li) => li.getAttribute('data-id') ?? li.className)).toEqual(['day', 'm1', 'r1', 'n1', 'a1', 'day', 'm2', 'r2']);
+    expect([...root.querySelectorAll('.timeline > li')].map((li) => li.getAttribute('data-id') ?? li.className)).toEqual(['day', 'm1', 'r1', 'n1', 'a1', 'day', 'm2', 'r2', 'working']);
     expect([...root.querySelectorAll('.day')].map((day) => day.textContent)).toEqual(['Yesterday', 'Today']);
     expect(root.querySelector('.day')?.getAttribute('role')).toBe('separator');
 
@@ -543,7 +544,7 @@ describe('the Conversation view page', () => {
     expect([...root.querySelectorAll('.timeline > li')].map((li) => li.getAttribute('data-id') ?? li.className)).toEqual(['day', 'm1', 'day', 'm2', 'm0']);
   });
 
-  it('shows a spinner after the newest item while the session works on a reply, gone when the reply arrives or the turn ends', () => {
+  it('shows a spinner after the newest item while the session is in a turn, also after its reply, gone when the turn or the session ends', () => {
     const root = document.createElement('div');
     const asked = [reply('r1', T0, { opening: 'Hi' }), message('m1', T0 + 1, 'Why?'), reply('a1', T0 + 2, { kind: 'aside', opening: 'Reading' })];
 
@@ -560,8 +561,18 @@ describe('the Conversation view page', () => {
     expect(root.querySelector('.working [role="status"]')?.textContent).toBe('Thinking');
     expect(root.querySelector('.working .codicon')?.getAttribute('aria-hidden')).toBe('true');
 
+    // A reply mid-turn, or a turn a task notification started, leaves the turn row after it (session 311b1ad4).
     root.innerHTML = renderConversation(state([...asked, reply('r2', T0 + 3)]));
+    expect([...root.querySelectorAll('.timeline > li')].map((li) => li.getAttribute('data-id') ?? li.className)).toEqual(['day', 'r1', 'm1', 'a1', 'r2', 'working']);
+    // Only background tasks left: `running`, but in no turn.
+    root.innerHTML = renderConversation(state([...asked, reply('r2', T0 + 3)], { session: { ...SESSION, background: true } }));
     expect(root.querySelector('.working')).toBeNull();
+    // An older hub sends no `background`: the row goes with the reply, as before.
+    root.innerHTML = renderConversation(state([...asked, reply('r2', T0 + 3)], { session: (({ background: _, ...older }) => older)(SESSION) }));
+    expect(root.querySelector('.working')).toBeNull();
+    // A message sent then still waits for its reply.
+    root.innerHTML = renderConversation(state(asked, { session: { ...SESSION, background: true } }));
+    expect(root.querySelector('.working .working-label')?.textContent).toBe('Thinking…');
     root.innerHTML = renderConversation(state(asked, { session: { ...SESSION, state: 'idle' } }));
     expect(root.querySelector('.working')).toBeNull();
     root.innerHTML = renderConversation(state(asked, { session: { ...SESSION, state: 'ended' } }));

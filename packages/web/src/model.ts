@@ -223,7 +223,16 @@ export function timeline(items: ItemView[], artifacts: readonly ArtifactView[]):
   return entries;
 }
 
-/** Whether the session is in a turn and no reply answers the operator's latest message or a later one, while the spinner shows at the timeline's end. */
+/**
+ * Whether the session is in a turn: starting, or running other than with only background tasks left. The turn row shows all through it, also
+ * after a reply mid-turn and in a turn a task notification started, which answers no message.
+ */
+export function inTurn(session: SessionView | null): boolean {
+  // `background` absent: an older hub, so only awaitingReply shows the row.
+  return session?.state === 'starting' || (session?.state === 'running' && session.background !== undefined && !session.background);
+}
+
+/** Whether the session is in a turn and no reply answers the operator's latest message or a later one, so the turn row shows even before a hook says the turn started. */
 export function awaitingReply(items: readonly ItemView[], session: SessionView | null): boolean {
   if (session === null || (session.state !== 'starting' && session.state !== 'running' && session.state !== 'waiting')) {
     return false;

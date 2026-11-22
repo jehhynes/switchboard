@@ -13,6 +13,7 @@ import { CATEGORIES, historyView } from './history.js';
 import type { PageActionExtra, PageFile, PageHeader, PageListGroup, PageRow } from './page.js';
 import type { ConversationRef, WindowScope, WindowScopes } from './windows.js';
 import type { VoiceView } from './voice.js';
+import { BACKGROUND_DETAIL } from '@switchboard/claude';
 import { ClaudeConversationAdapter } from './claudeConversation.js';
 import type { ConversationAdapter, ConversationChanged, DeliveryOutcome, NativeRequest } from './conversationAdapter.js';
 export { ansiTheme, claudePaths } from './claudeConversation.js';
@@ -58,6 +59,8 @@ export interface SessionView {
   limit?: { until: number; retry: boolean } | null;
   /** The session's context size (architecture.md § Context meter), null while not known. Absent from an older hub. */
   context?: ContextView | null;
+  /** `running` with its turn ended while background tasks it started still run, so it is in no turn (`BACKGROUND_DETAIL`). Absent from an older hub. */
+  background?: boolean;
 }
 
 /** The voice settings a session's persona is read from. */
@@ -134,6 +137,7 @@ export function sessionView(session: Session, current: boolean, hooks: boolean, 
     persona: personaOf(session, personas),
     canPin: personas !== null && personas.enabled && personas.personas.length > 0 && (session.codeMode === true || session.execution === 'app-server'),
     limit: limitOf(session),
+    background: session.state === 'running' && session.stateDetail === BACKGROUND_DETAIL,
   };
 }
 

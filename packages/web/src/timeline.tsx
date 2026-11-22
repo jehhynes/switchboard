@@ -5,7 +5,7 @@ import { fullTime, metaLine, spokenMark, stamped, toneMark, voiceMark } from '@s
 import { hasUnspokenText, spokenBody } from '@switchboard/conversation/spokenBubble';
 import { answerText, answersIn, cardLinks, complete, withoutEndingQuestions } from '@switchboard/conversation/questions';
 import type { AnswerLine, CardLinks, CardSettled, QuestionChoice } from '@switchboard/conversation/questions';
-import { artifactIcon, awaitingReply, timeline } from './model.js';
+import { artifactIcon, awaitingReply, inTurn, timeline } from './model.js';
 import type { PageState } from './model.js';
 import { copyButton, renderInline, renderMarkdown } from './markdown.js';
 import { dayLabel, deliveryMark, spokenRender, withoutQuestions } from './render.js';
@@ -221,7 +221,7 @@ export function renderTimeline(state: PageState, view: View, now: number = Date.
   const links = pageCards(state);
   // After the newest item, so replies written mid-turn show above it.
   const shownPrompt = view.prompt !== null && view.prompt.sessionId === state.session.id ? view.prompt : null;
-  const spinner = turnRow(state.session, awaitingReply(state.items, state.session), shownPrompt?.prompt != null);
+  const spinner = turnRow(state.session, inTurn(state.session) || awaitingReply(state.items, state.session), shownPrompt?.prompt != null);
   let lastDay: number | null = null;
   const rows = entries.flatMap((entry) => {
     if (entry.type === 'artifact') {
@@ -302,7 +302,8 @@ export function turnRow(session: PageState['session'], awaiting: boolean, prompt
     );
   }
 
-  if (!awaiting || session === null) {
+  // A Codex request draws its own card, which may come before the session's waiting state.
+  if (!awaiting || session === null || (session.requests ?? []).length > 0) {
     return null;
   }
 

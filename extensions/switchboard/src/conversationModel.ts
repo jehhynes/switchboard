@@ -291,9 +291,19 @@ export function isWorking(session: SessionView | null): boolean {
 }
 
 /**
- * Whether the session is in a turn and no reply answers the operator's latest message or a later one, while the view shows its spinner at the
- * end of the timeline. A reply's `answers` follows the transcript's links, so a rewrite, which the timeline shows in the
- * place of the earlier reply it rewrote, can end the wait; asides and notes do not. A reply that names no message ends it when it comes later.
+ * Whether the session is in a turn: starting, or running other than with only background tasks left. The turn row shows all through it, also
+ * after a reply mid-turn and in a turn a task notification started, which answers no message.
+ */
+export function inTurn(session: SessionView | null): boolean {
+  // `background` absent: an older hub, so only awaitingReply shows the row.
+  return session?.state === 'starting' || (session?.state === 'running' && session.background !== undefined && !session.background);
+}
+
+/**
+ * Whether the session is in a turn and no reply answers the operator's latest message or a later one, so the view shows its turn row at the
+ * end of the timeline even before a hook says the turn started. A reply's `answers` follows the transcript's links, so a rewrite, which the
+ * timeline shows in the place of the earlier reply it rewrote, can end the wait; asides and notes do not. A reply that names no message ends it
+ * when it comes later.
  */
 export function awaitingReply(items: readonly ItemView[], session: SessionView | null): boolean {
   // It stands still while the session waits on a question or a permission, and goes when the turn or the session ends.
