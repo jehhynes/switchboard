@@ -843,7 +843,11 @@ a.sheet-button { display: inline-flex; align-items: center; text-decoration: non
 /* Maximized (main.ts), the column covers the whole page, the list and the conversation too, which keep their places under it; its strip's last
    button restores it. */
 .tab.panel-max { flex: none; justify-content: center; padding: 0 10px; border-right: none; border-left: 1px solid var(--vscode-panel-border); cursor: pointer; }
-@media (hover: none), (pointer: coarse) { .tab.panel-max { min-width: 44px; } }:where(html:not(.phone)) #root.wide.maximized > .detail { position: fixed; inset: var(--sb-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); z-index: var(--sb-z-maximized); min-width: 0; border-left: none; }
+@media (hover: none), (pointer: coarse) { .tab.panel-max { min-width: 44px; } }
+/* The maximize button is no tab: it keeps the strip's background when focused or pressed, so it never looks chosen, shows the focus outline
+   alone for the keyboard, and takes an icon button's hover where the pointer can hover. */
+.tab.panel-max, .tab.panel-max:hover, .tab.panel-max:focus, .tab.panel-max:active { background: var(--sb-tab-strip); }
+@media (hover: hover) { .tab.panel-max:hover { background: var(--vscode-toolbar-hoverBackground); } }:where(html:not(.phone)) #root.wide.maximized > .detail { position: fixed; inset: var(--sb-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); z-index: var(--sb-z-maximized); min-width: 0; border-left: none; }
 /* The column's tab strip starts at the column's top, with no band above, and its tabs keep their own height. One pixel of the strip above
    them keeps the chosen tab's top edge off the window's top edge, which the window's frame can cover. */
 :where(html:not(.phone)) .detail-head { flex: none; display: flex; align-items: flex-start; padding-top: 1px; border-bottom: 1px solid var(--vscode-panel-border); }

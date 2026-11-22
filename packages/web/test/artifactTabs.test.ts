@@ -135,6 +135,13 @@ describe('the tab strip on a narrow screen', () => {
     expect(changes).toContain('@media (hover: none), (pointer: coarse) { @container (max-width: 479px) { .changes-files { margin-right: auto; } .changes-note { order: 1; flex-basis: 100%;');
   });
 
+  it('MaximizeButton_FocusedOrPressed_KeepsTheStripBackgroundNotTheChosenTabs', () => {
+    expect(css).toContain('.tab.panel-max, .tab.panel-max:hover, .tab.panel-max:focus, .tab.panel-max:active { background: var(--sb-tab-strip); }');
+    expect(css).toContain('@media (hover: hover) { .tab.panel-max:hover { background: var(--vscode-toolbar-hoverBackground); } }');
+    // The keyboard's focus shows as the outline every tab has.
+    expect(css).toContain('.tab:focus-visible { outline: 1px solid var(--vscode-focusBorder);');
+  });
+
   it('lines up the Artifacts menu kinds in a column, cutting the title first, and leaves the kind out on a viewport under 520 px', () => {
     expect(css).toContain('.artifact-menu { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto;');
     expect(css).toContain('.artifact-menu .menu-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid;');
