@@ -240,6 +240,8 @@ export interface VoiceControlDeps {
   pageFocused?(key: string): boolean;
   /** Whether a page key is a paired device's page, which never takes the voice to this computer. */
   remotePage?(key: string): boolean;
+  /** The session's latest replies that came at or after `since`, for a hub that took over to offer those neither hub offered. */
+  repliesSince?(sessionId: string, since: number): ConversationReply[];
 }
 
 /** The first byte of a binary frame the hub sends the phone: a playback's 24 kHz PCM, after its playback number (Voice on a phone). */
@@ -248,6 +250,77 @@ export const PHONE_PCM_FRAME = 1;
 export const PHONE_MIC_FRAME = 2;
 /** Why a paired device's page cannot turn on this computer's microphone. */
 export const PHONE_MIC_HERE = 'Tap Voice on this phone to use the mic here.';
+/** How long a hub that took over waits for the phone that had the voice to take it back, before the voice is off (architecture.md § Hub lifecycle). */
+export const PHONE_RESUME_MS = 30_000;
+/** Why a phone's page that asks to take the voice back after a hub restart is refused. */
+export const NOT_RESUMED = 'The voice moved on while Switchboard restarted. Tap Voice on this phone to use it here.';
+
+/**
+ * The voice's state a restarting hub hands to the hub that takes over, in `hub-handover.json` (architecture.md § Hub lifecycle): the device and
+ * the paired device's sign-in (`phoneHash`) that holds it, the target, Speak replies and the mic, so the restart changes none of them.
+ */
+export interface VoiceHandover {
+  device: VoiceDevice;
+  phoneHash: string | null;
+  target: { gen: number; sessionId: string | null };
+  speakReplies: boolean;
+  micOn: boolean;
+  mic: MicState;
+  phoneCapture: boolean;
+  phoneBusy: boolean;
+  /** When it was handed over: a reply that came after it was offered by neither hub, so the hub that takes over offers it. */
+  at: number;
+  /** The replies that asked to be heard and waited for the voice, which the hub that takes over offers. */
+  held: string[];
+}
+
+/** How long before the handover a reply may have come and still not been offered by the hub that handed over, which saw it too late. */
+const HANDOVER_REPLY_MARGIN_MS = 60_000;
+
+/** A handed-over voice state read from the handover file, or null for anything malformed. */
+export function parseVoiceHandover(raw: unknown): VoiceHandover | null {
+  if (typeof raw !== 'object' || raw === null) {
+    return null;
+  }
+
+  const one = raw as Record<string, unknown>;
+  const target = one['target'] as Record<string, unknown> | null | undefined;
+  const device = one['device'];
+  const hash = one['phoneHash'];
+
+  if (
+    (device !== 'computer' && device !== 'phone' && device !== 'none') ||
+    (hash !== null && typeof hash !== 'string') ||
+    typeof target !== 'object' ||
+    target === null ||
+    typeof target['gen'] !== 'number' ||
+    !Number.isSafeInteger(target['gen']) ||
+    (target['sessionId'] !== null && typeof target['sessionId'] !== 'string') ||
+    typeof one['speakReplies'] !== 'boolean' ||
+    typeof one['micOn'] !== 'boolean' ||
+    typeof one['mic'] !== 'string' ||
+    typeof one['phoneCapture'] !== 'boolean' ||
+    typeof one['phoneBusy'] !== 'boolean' ||
+    typeof one['at'] !== 'number' ||
+    !Array.isArray(one['held']) ||
+    !(one['held'] as unknown[]).every((id) => typeof id === 'string')
+  ) {
+    return null;
+  }
+
+  return {
+    device,
+    phoneHash: hash,
+    target: { gen: target['gen'], sessionId: target['sessionId'] as string | null },
+    speakReplies: one['speakReplies'],
+    micOn: one['micOn'],
+    mic: one['mic'] as MicState,
+    phoneCapture: one['phoneCapture'],
+    phoneBusy: one['phoneBusy'],
+    at: one['at'],
+    held: one['held'] as string[],
+  };
+}
 
 interface Offered {
   gen: number;
@@ -334,6 +407,18 @@ export class VoiceControl {
   #phoneCapture = false;
   /** Whether the phone's microphone cannot be heard, as its page last said, for a voice process started again. */
   #phoneBusy = true;
+  /** The sign-in (`VoiceDevice.hash`) of the paired device whose page holds the voice, which alone may take it back after a hub restart. */
+  #phoneHash: string | null = null;
+  /** After a hub restart that took over the voice on a phone: the phone that may take it back without a tap, until the timer turns the voice off. */
+  #resume: { hash: string; timer: unknown } | null = null;
+  /** Replies that asked to be heard while the phone had not taken the voice back yet, offered once it did, or the wait ended. */
+  readonly #heldReplies = new Set<string>();
+  /** After a hub restart: the target the hub before handed over, a target while no page or window shows it, until the phone's page shows a conversation or the voice moves. */
+  #carried: string | null = null;
+  /** After a hub restart: when the hub before handed over, so the replies that came since are offered once the voice can take them. */
+  #handedAt: number | null = null;
+  /** The voice process's connection after the hub handed over, which only `close` uses: nothing more is sent to it. */
+  #handedOver: VoiceConnection | null = null;
 
   constructor(private readonly deps: VoiceControlDeps) {}
 
@@ -346,13 +431,40 @@ export class VoiceControl {
    * A paired phone's page took the voice with its tap (PRD R119): the voice moves to its speaker, and to the conversation it shows, as Talk
    * here there would move it.
    */
-  phoneOpened(key: string): void {
+  phoneOpened(key: string, hash: string | null = null): void {
+    // After a hub restart the phone that had the voice takes it back as it was, its mic and capture too, with nothing played or heard
+    // elsewhere meanwhile (architecture.md § Hub lifecycle).
+    if (this.#resume !== null && hash !== null && hash === this.#resume.hash && this.#device === 'phone') {
+      this.#endResume();
+      this.#phoneKey = key;
+      this.deps.log('voice: device phone: the phone took the voice back after the hub restart');
+
+      if (this.#phoneCapture) {
+        this.deps.phone?.send({ type: 'capture', on: true });
+      }
+
+      if (this.#target.sessionId === null && this.deps.windows.scope(key)?.sessionId != null) {
+        this.talkHere(key);
+      }
+
+      this.#targetsSent = '';
+      this.viewsChanged();
+      this.deps.dockChanged();
+      this.update();
+      this.#offerHeld();
+      return;
+    }
+
+    this.#endResume();
+    this.#carried = null;
+
     // Another phone's page taking over is a move: what played on the first stops before anything plays on this one.
     if (this.#device === 'phone' && this.#phoneKey !== key) {
       this.#setDevice('none', 'another phone takes the voice');
     }
 
     this.#phoneKey = key;
+    this.#phoneHash = hash;
     this.#setDevice('phone', 'a paired phone took the voice');
 
     if (this.deps.windows.scope(key)?.sessionId != null) {
@@ -360,15 +472,156 @@ export class VoiceControl {
     }
 
     this.update();
+    this.#offerHeld();
+  }
+
+  /**
+   * Whether a phone's page may take the voice back without a tap after a hub restart: only the paired device that had it, while this hub waits
+   * for it (`PHONE_RESUME_MS`). Why not, or null.
+   */
+  resumable(hash: string): string | null {
+    return !this.#closed && this.#resume !== null && this.#resume.hash === hash ? null : NOT_RESUMED;
+  }
+
+  /**
+   * The hub hands over to the hub that takes over (architecture.md § Hub lifecycle): what the voice is doing goes to that hub, and from now on this
+   * hub sends the voice process nothing, so neither the phone's socket closing nor the windows leaving move the voice, its target or its mic.
+   */
+  handOver(): VoiceHandover {
+    const state = this.handoverState();
+
+    this.#handedOver = this.#client;
+    this.#client = null;
+    this.#closed = true;
+    this.#endResume();
+    this.#stopFlush();
+    this.#clear('linger');
+    this.#clear('restart');
+    this.deps.log(`voice: handed over: device ${state.device}, target ${state.target.sessionId ?? 'none'}, generation ${state.target.gen}, mic ${state.micOn ? 'on' : 'off'}`);
+    return state;
+  }
+
+  /** What `handOver` hands over, changing nothing, so the handover file is written before this hub lets go of the voice. */
+  handoverState(): VoiceHandover {
+    return {
+      device: this.#device,
+      phoneHash: this.#device === 'phone' ? (this.#resume?.hash ?? this.#phoneHash) : null,
+      target: { ...this.#target },
+      speakReplies: this.speakReplies,
+      micOn: this.#micOn,
+      mic: this.#mic,
+      phoneCapture: this.#phoneCapture,
+      phoneBusy: this.#phoneBusy,
+      at: this.deps.now(),
+      held: [...this.#heldReplies],
+    };
+  }
+
+  /**
+   * In a hub that took over (architecture.md § Hub lifecycle): the voice as the hub before it handed it over. A phone that had the voice keeps it
+   * while this hub waits `PHONE_RESUME_MS` for its page to take it back; the voice is off after that, never on this computer's speakers.
+   */
+  restore(raw: unknown): void {
+    const state = parseVoiceHandover(raw);
+
+    if (state === null) {
+      return;
+    }
+
+    this.speakReplies = state.speakReplies;
+    this.#target = { ...state.target };
+    this.#carried = state.target.sessionId;
+    this.#handedAt = state.at;
+
+    for (const id of state.held) {
+      this.#heldReplies.add(id);
+    }
+    this.#micOn = state.micOn;
+    this.#mic = state.mic;
+
+    if (state.device === 'phone' && state.phoneHash !== null) {
+      this.#device = 'phone';
+      this.#deviceChosen = true;
+      this.#phoneHash = state.phoneHash;
+      this.#phoneCapture = state.phoneCapture;
+      this.#phoneBusy = state.phoneBusy;
+      this.#resume = { hash: state.phoneHash, timer: this.#timer(() => this.#resumeEnded(), PHONE_RESUME_MS) };
+      this.deps.log(`voice: device phone: waiting up to ${PHONE_RESUME_MS / 1000} seconds for the phone to take the voice back after the hub restart`);
+    } else if (state.device !== 'computer') {
+      // A phone whose sign-in is not known cannot take the voice back: it is off, as when the phone left.
+      this.#device = 'none';
+      this.#deviceChosen = true;
+      this.#micOn = false;
+    }
+
+    this.update();
+  }
+
+  /** The phone did not take the voice back in time: the voice is off (PRD R119, decision 1). */
+  #resumeEnded(): void {
+    if (this.#resume === null) {
+      return;
+    }
+
+    this.#resume = null;
+    this.#phoneHash = null;
+    this.#carried = null;
+    this.#setDevice('none', `the phone did not take the voice back within ${PHONE_RESUME_MS / 1000} seconds of the hub restart`);
+    this.update();
+    this.#offerHeld();
+  }
+
+  #endResume(): void {
+    if (this.#resume === null) {
+      return;
+    }
+
+    if (this.deps.clearTimer === undefined) {
+      clearTimeout(this.#resume.timer as NodeJS.Timeout);
+    } else {
+      this.deps.clearTimer(this.#resume.timer);
+    }
+
+    this.#resume = null;
+  }
+
+  /** Offers the replies held while the phone had not taken the voice back, now that the wait ended, wherever the voice is now. */
+  #offerHeld(): void {
+    if (this.#resume !== null || this.#client === null) {
+      return;
+    }
+
+    // Replies that came while the hubs changed over, which neither offered, as the one before had let go and this one had no voice process yet.
+    if (this.#handedAt !== null && this.#target.sessionId !== null) {
+      for (const reply of this.deps.repliesSince?.(this.#target.sessionId, this.#handedAt - HANDOVER_REPLY_MARGIN_MS) ?? []) {
+        this.#heldReplies.add(reply.id);
+      }
+    }
+
+    this.#handedAt = null;
+
+    const held = [...this.#heldReplies];
+
+    this.#heldReplies.clear();
+
+    for (const id of held) {
+      const reply = this.deps.store.reply(id);
+
+      if (reply !== null) {
+        this.replyChanged(reply);
+      }
+    }
   }
 
   /** The phone's voice socket closed: the voice stays off, never moving back to this computer's speakers on its own (PRD R119, decision 1). */
   phoneClosed(reason: string): void {
-    if (this.#device !== 'phone') {
+    // A hub that handed over leaves the device to the hub that takes over.
+    if (this.#closed || this.#device !== 'phone') {
       return;
     }
 
     this.#phoneKey = null;
+    this.#phoneHash = null;
     this.#micOn = false;
     this.#setDevice('none', `the phone left: ${reason}`);
     this.update();
@@ -436,12 +689,17 @@ export class VoiceControl {
 
     const fromPhone = this.#device === 'phone';
 
+    this.#endResume();
+    this.#carried = null;
     this.#phoneKey = null;
+    this.#phoneHash = null;
     this.#setDevice('computer', 'taken back on this computer');
 
     if (fromPhone) {
       this.deps.phone?.close('Voice moved to the computer.');
     }
+
+    this.#offerHeld();
   }
 
   #setDevice(device: VoiceDevice, why: string): void {
@@ -608,7 +866,7 @@ export class VoiceControl {
       return scope === null ? [] : [{ key, scope }];
     });
     const terminals = this.#terminalTargets();
-    const wanted = settings.enabled && (scopes.length > 0 || this.#enrolling() || this.#terminalFocus !== null || (this.#target.sessionId !== null && terminals.has(this.#target.sessionId)));
+    const wanted = settings.enabled && (scopes.length > 0 || this.#enrolling() || this.#terminalFocus !== null || this.#resume !== null || (this.#target.sessionId !== null && terminals.has(this.#target.sessionId)));
 
     this.#demand(wanted);
     this.viewsChanged();
@@ -627,12 +885,26 @@ export class VoiceControl {
       }
     }
 
-    // While the phone has the voice only its page's focus moves it: nobody may be at this computer (PRD R119, decision 2).
-    const phone = this.#device === 'phone' ? this.#phoneKey : null;
-    const focused = phone !== null ? (this.deps.pageFocused?.(phone) === true ? phone : null) : this.deps.focusedWindow();
+    // After a hub restart the target stays one, though no window or page shows it yet, until the phone's page shows a conversation again.
+    if (this.#carried !== null && this.#phoneKey !== null && this.deps.windows.scope(this.#phoneKey)?.sessionId != null) {
+      this.#carried = null;
+    }
+
+    const carried = this.#device === 'phone' ? this.#carried : null;
+    const carriedSession = carried === null || targets.has(carried) || !this.deps.full(carried) ? null : (this.deps.session?.(carried) ?? null);
+
+    if (carried !== null && carriedSession !== null) {
+      targets.set(carried, { sessionId: carried, workItemId: carriedSession.workItemId, repo: this.#repoOf(carriedSession.cwd) });
+    }
+
+    // While the phone has the voice only its page's focus moves it: nobody may be at this computer (PRD R119, decision 2). That holds too while
+    // its page has not taken the voice back after a hub restart, when nothing is focused.
+    const onPhone = this.#device === 'phone';
+    const phone = onPhone ? this.#phoneKey : null;
+    const focused = onPhone ? (phone !== null && this.deps.pageFocused?.(phone) === true ? phone : null) : this.deps.focusedWindow();
     const session = focused === null ? null : (this.deps.windows.scope(focused)?.sessionId ?? null);
     // The dock reports a terminal only while it is in front, so its focus wins over a window that has not reported its blur yet.
-    const focus = this.#terminalFocus !== null && phone === null ? { sessionId: this.#terminalFocus, via: 'terminal' as const } : session === null ? null : { sessionId: session, via: 'window' as const };
+    const focus = this.#terminalFocus !== null && !onPhone ? { sessionId: this.#terminalFocus, via: 'terminal' as const } : session === null ? null : { sessionId: session, via: 'window' as const };
     const message: HubMessage = { type: 'targets', targets: [...targets.values()], focus };
     const text = JSON.stringify(message);
 
@@ -736,7 +1008,18 @@ export class VoiceControl {
 
     this.#sendContext(reply.sessionId);
 
-    if (!settings.enabled || !this.speakReplies || !asked || this.#client === null || this.#target.sessionId !== reply.sessionId) {
+    if (!settings.enabled || !this.speakReplies || !asked || this.#target.sessionId !== reply.sessionId) {
+      return;
+    }
+
+    // It waits for the phone to take the voice back after a hub restart, or for the voice process, rather than play to a phone that cannot
+    // hear it yet; after a restart, a reply before the voice process connects waits for it too.
+    if (this.#resume !== null || (this.#client === null && this.#handedAt !== null)) {
+      this.#heldReplies.add(reply.id);
+      return;
+    }
+
+    if (this.#client === null) {
       return;
     }
 
@@ -1257,6 +1540,7 @@ export class VoiceControl {
 
     if (refused === null) {
       this.#talkedFrom = key;
+      this.#carried = null;
     }
 
     return refused;
@@ -1487,18 +1771,42 @@ export class VoiceControl {
     return false;
   }
 
-  /** Whether a reply is offered to the voice process or being spoken, or a voice enrolment runs, so a hub restart waits for it (architecture.md § Hub lifecycle). */
+  /** Whether a reply is offered to the voice process or being spoken, or a voice enrolment runs. */
   speaking(): boolean {
     return this.#offered.size > 0 || this.#playing.size > 0 || this.#enrolling();
   }
 
+  /**
+   * Why a hub restart waits (architecture.md § Hub lifecycle): a reply offered or playing, an enrolment, the operator being heard, or a phone that
+   * has not taken the voice back since the last restart; null when the voice lets it go ahead.
+   */
+  restartBlocker(): string | null {
+    // Replies held for the phone count, as its wait is short; ones held for a voice process that does not connect are handed over instead.
+    if (this.#offered.size > 0 || this.#playing.size > 0 || (this.#resume !== null && this.#heldReplies.size > 0)) {
+      return 'the voice is speaking a reply';
+    }
+
+    if (this.#enrolling()) {
+      return 'a voice enrolment is recording';
+    }
+
+    if (this.#mic === 'hearing') {
+      return 'the voice is hearing the operator';
+    }
+
+    return this.#resume === null ? null : 'the phone has not taken the voice back since the last restart';
+  }
+
   close(): void {
     this.#closed = true;
+    this.#endResume();
     this.#stopFlush();
     this.#clear('linger');
     this.#clear('restart');
     this.#client?.close();
     this.#client = null;
+    this.#handedOver?.close();
+    this.#handedOver = null;
   }
 
   #talkTo(sessionId: string): string | null {
@@ -1870,6 +2178,7 @@ export class VoiceControl {
 
     this.deps.dockChanged();
     this.update();
+    this.#offerHeld();
   }
 
   /** The process is gone, so nothing it was speaking will play. */

@@ -8,7 +8,7 @@ import type { BrowserServer } from './browser.js';
 import type { SnoozeByUrl, UnsnoozeByUrl } from './browserSnooze.js';
 import { findHub, readHubRecord } from './discover.js';
 import { holdLock, releaseLock } from './lock.js';
-import { clearHandover, HubRestart, installedBuild, pendingHandover, RESTART_CHECK_MS, TAKEOVER_WAIT_MS, writeHandover } from './restart.js';
+import { clearHandover, handedOver, HubRestart, installedBuild, pendingHandover, RESTART_CHECK_MS, TAKEOVER_WAIT_MS, writeHandover } from './restart.js';
 import type { Successor } from './restart.js';
 import { listenHub } from './server.js';
 import type { PageRoutes, PostContext, Reply } from './server.js';
@@ -58,6 +58,13 @@ export interface HubApp {
   busy(): boolean;
   /** Why the hub cannot restart onto a new build now, or null when it is quiet (architecture.md § Hub lifecycle). */
   quiet?(): string | null;
+  /**
+   * What the app carries to its successor's app as the hub hands over, such as the voice's device and target, written to `hub-handover.json`;
+   * it changes nothing (architecture.md § Hub lifecycle).
+   */
+  handover?(): Record<string, unknown>;
+  /** The handover file is written: the app stops acting on what it handed over. */
+  handedOver?(): void;
   close(): void;
 }
 
@@ -77,8 +84,8 @@ export interface ServeOptions {
   waitMs?: number;
   exit?: (code: number) => void;
   log?: (line: string) => void;
-  /** Built once this process holds the hub lock, so a losing start never opens the store. */
-  app?: () => Promise<HubApp>;
+  /** Built once this process holds the hub lock, so a losing start never opens the store; a successor's gets what the hub before it carried. */
+  app?: (carried: Record<string, unknown> | null) => Promise<HubApp>;
   /** The pid of the hub this one takes over from, whose lock it waits for (`--takeover`). */
   takeover?: number;
   /** Restarts onto the installed bundle when that is another build (architecture.md § Hub lifecycle). */
@@ -207,7 +214,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
 
   let stopping: Promise<void> | undefined;
 
-  const app = options.app === undefined ? undefined : await options.app();
+  const app = options.app === undefined ? undefined : await options.app(options.takeover === undefined ? null : handedOver(home, process.pid));
   const server = await listenHub({
     identity: { hub: HUB_NAME, protocol: PROTOCOL, version, pid: process.pid },
     build,
@@ -319,7 +326,14 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
           quiet: () => (stopping !== undefined ? 'the hub is stopping' : server.inFlight() > 0 ? 'a request is being answered' : (app?.quiet?.() ?? null)),
           successor: () => restartOptions.successor(),
           handOver: async (started) => {
-            writeHandover(home, started.pid);
+            try {
+              writeHandover(home, started.pid, Date.now(), app?.handover?.());
+            } catch (error) {
+              started.cancel();
+              return { error: `the handover could not be written: ${(error as Error).message}` };
+            }
+
+            app?.handedOver?.();
             server.hold('The hub is restarting onto a new build; try again in a few seconds.');
             await stop('restarting onto the installed build');
 

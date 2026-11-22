@@ -66,6 +66,12 @@ export const PING_MS = 5_000;
 
 /** The close codes the hub gives a reason with, as `VOICE_CLOSE` in the hub's voice socket. */
 const MOVED = 4001;
+const RESTARTING = 4002;
+/**
+ * How long the page tries to take the voice back after the hub closed its socket to restart, keeping its audio and microphone meanwhile; the
+ * hub that takes over waits 30 s for it (architecture.md § Hub lifecycle).
+ */
+export const RESUME_MS = 45_000;
 
 export interface PhoneVoiceDeps {
   /** The page key the hub gave this page's stream, or null before its `hello`. */
@@ -125,6 +131,8 @@ export class PhoneVoice {
   #resumedAt: number | null = null;
   #workletAt: number | null = null;
   #welcomedAt: number | null = null;
+  /** After the hub closed the socket to restart: the page key the closed socket named, and the timer that gives up taking the voice back. */
+  #resuming: { from: string; timer: unknown } | null = null;
 
   constructor(private readonly deps: PhoneVoiceDeps) {
     const onVisibility = deps.onVisibility ?? ((changed: () => void) => document.addEventListener('visibilitychange', changed));
@@ -261,21 +269,68 @@ export class PhoneVoice {
     }
 
     const origin = this.deps.origin?.() ?? location.origin;
-    const url = `${origin.replace(/^http/, 'ws')}/v1/voice/socket?window=${encodeURIComponent(key)}`;
 
     this.#openAudio(origin);
+    this.#welcome = deferred();
+    this.#connect(origin, key, false);
+  }
+
+  /**
+   * The page's stream has a new key, as after a hub restart: while the voice waits to come back to this phone, the socket opens again with it and
+   * asks to take the voice back, with the audio and microphone the tap opened (architecture.md § Hub lifecycle).
+   */
+  keyChanged(): void {
+    const key = this.deps.key();
+
+    if (this.#resuming === null || this.#socket !== null || key === null || key === this.#resuming.from) {
+      return;
+    }
+
+    this.#connect(this.deps.origin?.() ?? location.origin, key, true);
+  }
+
+  /** The hub closed the socket to restart: the audio, the microphone and the welcome a Mic on waits for stay, until the voice comes back or {@link RESUME_MS} passes. */
+  #suspend(key: string): void {
+    this.#capturing = false;
+
+    if (this.#ping !== null) {
+      clearInterval(this.#ping);
+      this.#ping = null;
+    }
+
+    this.#socket = null;
+    this.#welcome = deferred();
+    this.state = 'connecting';
+    this.error = null;
+    this.#resuming = {
+      from: key,
+      timer: (this.deps.setTimer ?? ((run, ms) => setTimeout(run, ms)))(() => this.#lose('Switchboard restarted, and the voice did not come back to this phone.'), RESUME_MS),
+    };
+    this.deps.changed();
+    this.keyChanged();
+  }
+
+  #clearResuming(): void {
+    if (this.#resuming !== null) {
+      (this.deps.clearTimer ?? ((timer) => clearTimeout(timer as ReturnType<typeof setTimeout>)))(this.#resuming.timer);
+      this.#resuming = null;
+    }
+  }
+
+  /** Opens the voice socket with the page key; `resume` asks the hub to take the voice back after its restart rather than as a new tap. */
+  #connect(origin: string, key: string, resume: boolean): void {
+    const url = `${origin.replace(/^http/, 'ws')}/v1/voice/socket?window=${encodeURIComponent(key)}`;
     const socket = this.deps.socket?.(url) ?? new WebSocket(url);
     let welcomed = false;
 
     this.#run++;
     this.#socket = socket;
-    this.#welcome = deferred();
     this.state = 'connecting';
     this.error = null;
     this.#best = Infinity;
     this.offset = null;
     socket.binaryType = 'arraybuffer';
-    socket.onopen = () => socket.send(JSON.stringify({ type: 'hello' }));
+    socket.onopen = () => socket.send(JSON.stringify(resume ? { type: 'hello', resume: true } : { type: 'hello' }));
     socket.onmessage = (event: MessageEvent) => {
       if (this.#socket !== socket) {
         return;
@@ -307,6 +362,7 @@ export class PhoneVoice {
       if (message['type'] === 'welcome') {
         welcomed = true;
         this.#welcomedAt = this.deps.now();
+        this.#clearResuming();
         this.state = 'on';
         this.#pings(socket);
         this.#welcome?.resolve(true);
@@ -326,6 +382,12 @@ export class PhoneVoice {
     };
     socket.onclose = (event: CloseEvent) => {
       if (this.#socket !== socket) {
+        return;
+      }
+
+      // The hub restarts: the voice comes back to this phone from the hub that takes over, with nothing to tap.
+      if (event.code === RESTARTING && welcomed) {
+        this.#suspend(key);
         return;
       }
 
@@ -362,14 +424,14 @@ export class PhoneVoice {
   stop(): void {
     const socket = this.#socket;
 
-    if (socket === null) {
+    if (socket === null && this.#resuming === null) {
       return;
     }
 
     this.#run++;
     this.#stopped();
     this.error = null;
-    socket.close(1000);
+    socket?.close(1000);
     this.deps.changed();
   }
 
@@ -608,6 +670,7 @@ export class PhoneVoice {
     this.#micRun++;
     this.#releaseMic();
     this.#capturing = false;
+    this.#clearResuming();
     this.#welcome?.resolve(false);
     this.#welcome = null;
 

@@ -2,7 +2,7 @@ import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildOf } from '../src/bundle.js';
-import { clearHandover, handoverPath, HubRestart, installedBuild, pendingHandover, READY_MESSAGE, startSuccessor, TAKEOVER_WAIT_MS, writeHandover } from '../src/restart.js';
+import { clearHandover, handedOver, handoverPath, HubRestart, installedBuild, pendingHandover, READY_MESSAGE, startSuccessor, TAKEOVER_WAIT_MS, writeHandover } from '../src/restart.js';
 import type { RestartDeps, Successor } from '../src/restart.js';
 import { tempHome, until } from './helpers.js';
 
@@ -239,5 +239,19 @@ describe('handover', () => {
     expect(readFileSync(handoverPath(home), 'utf8')).toContain('4242');
     clearHandover(home, 4242);
     expect(() => readFileSync(handoverPath(home), 'utf8')).toThrow();
+  });
+
+  it('gives the successor it names what the old hub carried, only while the handover is fresh', () => {
+    const at = 1_000_000;
+
+    expect(handedOver(home, 4242, at)).toBeNull();
+    mkdirSync(join(home, '.switchboard'));
+    writeHandover(home, 4242, at, { voice: { device: 'phone' } });
+    expect(pendingHandover(home, () => true, at + 1000)).toEqual({ pid: 4242 });
+    expect(handedOver(home, 4242, at + 1000)).toEqual({ voice: { device: 'phone' } });
+    expect(handedOver(home, 99, at + 1000)).toBeNull();
+    expect(handedOver(home, 4242, at + TAKEOVER_WAIT_MS)).toBeNull();
+    writeHandover(home, 4242, at);
+    expect(handedOver(home, 4242, at + 1000)).toBeNull();
   });
 });

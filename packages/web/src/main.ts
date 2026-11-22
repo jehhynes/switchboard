@@ -3879,6 +3879,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         if (state.key !== keyBefore) {
           acked = null;
           selectInFlight = false;
+          // After a hub restart the voice comes back to this phone over the new stream's key (architecture.md § Hub lifecycle).
+          phoneVoice?.keyChanged();
         }
 
         reconcile();
@@ -4013,7 +4015,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     });
   }
 
-  const lost = reconnector({ fetch: (url, init) => deps.fetch(url, init), setTimeout: (run, ms) => setTimeout(run, ms), reload: deps.reload ?? (() => location.reload()), build: deps.build ?? null });
+  const lost = reconnector({
+    fetch: (url, init) => deps.fetch(url, init),
+    setTimeout: (run, ms) => setTimeout(run, ms),
+    reload: deps.reload ?? (() => location.reload()),
+    build: deps.build ?? null,
+    // A reload would end the phone's audio until its next tap, so it waits while the voice is on this phone or coming back to it.
+    hold: () => phoneVoice !== null && phoneVoice.state !== 'off',
+  });
 
   source.addEventListener('error', () => {
     state = { ...state, connected: false };

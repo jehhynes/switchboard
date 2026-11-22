@@ -516,4 +516,76 @@ describe('serveHub restart onto a new build', () => {
       `hub restart: pid ${process.pid} took over with build b2`,
     ]);
   });
+
+  it('keeps running, its app untouched, when the handover cannot be written', async () => {
+    const bundle = join(switchboardHome(home), 'hub.js');
+    const exit = vi.fn();
+    const lines: string[] = [];
+    const handedOver = vi.fn();
+    const cancel = vi.fn();
+
+    mkdirSync(switchboardHome(home), { recursive: true });
+    served(
+      await serve({
+        exit,
+        log: (line) => lines.push(line),
+        browserPort: null,
+        // A value JSON cannot write.
+        app: async () => ({ ...app(() => null), handover: () => ({ voice: 1n }), handedOver }),
+        restart: { bundle, checkMs: 20, successor: async () => ({ pid: process.pid, cancel }) },
+      }),
+    );
+    writeFileSync(bundle, 'the new build');
+    await until(() => (lines.some((line) => line.startsWith('hub restart failed')) ? true : null));
+    expect(lines.find((line) => line.startsWith('hub restart failed'))).toMatch(/^hub restart failed: the handover could not be written: .+; this hub keeps running$/);
+    expect([exit.mock.calls.length, handedOver.mock.calls.length, cancel.mock.calls.length]).toEqual([0, 0, 1]);
+    expect(lines.some((line) => line.startsWith('stopping'))).toBe(false);
+  });
+
+  it('carries what the app hands over to the successor\'s app, which a hub started anew never gets', async () => {
+    const bundle = join(switchboardHome(home), 'hub.js');
+    const exit = vi.fn();
+    const handed: string[] = [];
+    let carried: unknown = 'not built';
+    let successor: Promise<ServeResult> | null = null;
+
+    mkdirSync(switchboardHome(home), { recursive: true });
+
+    const fresh: unknown[] = [];
+
+    served(
+      await serve({
+        exit,
+        browserPort: null,
+        app: async (given) => {
+          fresh.push(given);
+          return { ...app(() => null), handover: () => (handed.push('handed'), { voice: { device: 'phone', phoneHash: 'h' } }), handedOver: () => void handed.push('let go') };
+        },
+        restart: {
+          bundle,
+          checkMs: 20,
+          successor: async () => {
+            successor = serve({
+              build: 'b2',
+              takeover: process.pid,
+              browserPort: null,
+              app: async (given) => {
+                carried = given;
+                return app(() => null);
+              },
+            });
+            return { pid: process.pid, cancel: () => {} };
+          },
+        },
+      }),
+    );
+
+    expect(fresh).toEqual([null]);
+    writeFileSync(bundle, 'the new build');
+    await until(() => (exit.mock.calls.length > 0 ? true : null));
+    served(await successor!);
+    expect(handed).toEqual(['handed', 'let go']);
+    expect(carried).toEqual({ voice: { device: 'phone', phoneHash: 'h' } });
+    expect(existsSync(handoverPath(home))).toBe(false);
+  });
 });

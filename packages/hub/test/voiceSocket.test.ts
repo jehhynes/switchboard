@@ -154,6 +154,8 @@ describe('the voice socket on the page origin', () => {
   let remoteAccess: RemoteAccess;
   let enabled: boolean;
   let now: number;
+  /** Why a page's `hello {resume: true}` is refused, or null while the hub waits for that device. */
+  let resumeRefused: string | null;
   const clients: Client[] = [];
   const streams: Array<ReturnType<typeof request>> = [];
 
@@ -162,6 +164,7 @@ describe('the voice socket on the page origin', () => {
     remoteAccess = { hosts: [HOST], logins: ['alex@example.com'] };
     enabled = true;
     now = 1_000;
+    resumeRefused = 'Nothing to take back.';
   });
 
   afterEach(async () => {
@@ -179,6 +182,7 @@ describe('the voice socket on the page origin', () => {
       idleMs: 1_000,
       log: () => undefined,
       opened: (device) => events.push(`opened ${device.key}`),
+      resumable: (device) => (events.push(`resumable ${device.key}`), resumeRefused),
       closed: (device, reason) => events.push(`closed ${device.key}: ${reason}`),
       audio: (_device, data) => audio.push(data),
       message: (device, data) => events.push(`message ${device.key} ${String(data['type'])}`),
@@ -386,6 +390,48 @@ describe('the voice socket on the page origin', () => {
     await client.closed;
     expect([client.closeCode, client.closeReason]).toEqual([1008, 'Audio faster than real time.']);
     expect(events.at(-1)).toBe(`closed ${phonePage.key}: Audio faster than real time.`);
+  });
+
+  it('lets a page take the voice back with hello {resume: true} only while the hub waits for its device, and closes the voice for a restart with its own code', async () => {
+    const { pair, openPage, open, allow, events, sockets } = await serve();
+    const phone = await pair();
+    const phonePage = await openPage({ ...REMOTE, Cookie: phone });
+    const good = { ...REMOTE, Cookie: phone, Origin: PHONE_ORIGIN };
+
+    await allow(phone, true);
+
+    // Refused: the socket closes with the reason, and nothing took the voice.
+    const refused = open(phonePage.key, good);
+
+    expect(await refused.status).toBe(101);
+    refused.send({ type: 'hello', resume: true });
+    await refused.closed;
+    expect([refused.closeCode, refused.closeReason]).toEqual([VOICE_CLOSE.refused, 'Nothing to take back.']);
+    expect(events).toEqual([`resumable ${phonePage.key}`]);
+
+    resumeRefused = null;
+
+    const resumed = open(phonePage.key, good);
+
+    expect(await resumed.status).toBe(101);
+    resumed.send({ type: 'hello', resume: true });
+    expect(await resumed.next()).toEqual({ type: 'welcome', at: now });
+    expect(events).toEqual([`resumable ${phonePage.key}`, `resumable ${phonePage.key}`, `opened ${phonePage.key}`]);
+
+    // A plain hello is a tap, which never asks.
+    events.length = 0;
+
+    const tapped = open(phonePage.key, good);
+
+    expect(await tapped.status).toBe(101);
+    tapped.send({ type: 'hello' });
+    expect(await tapped.next()).toEqual({ type: 'welcome', at: now });
+    await resumed.closed;
+    expect(events).toEqual([`opened ${phonePage.key}`]);
+
+    sockets.close(() => true, 'Switchboard is restarting.', VOICE_CLOSE.restarting);
+    await tapped.closed;
+    expect([tapped.closeCode, tapped.closeReason]).toEqual([VOICE_CLOSE.restarting, 'Switchboard is restarting.']);
   });
 
   it('closes a socket that never says hello, and one sending a frame over the limit', async () => {

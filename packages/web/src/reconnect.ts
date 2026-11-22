@@ -12,6 +12,11 @@ export interface ReconnectDeps {
   reload(): void;
   /** The build of the hub that served this page, or null when unknown. */
   build: string | null;
+  /**
+   * Whether a reload for another build waits, asked every `RECONNECT_MS`: while the voice is on this phone, whose audio a reload ends until
+   * the next tap, the page goes on with its build meanwhile (architecture.md § Hub lifecycle).
+   */
+  hold?(): boolean;
 }
 
 /**
@@ -20,6 +25,14 @@ export interface ReconnectDeps {
  */
 export function reconnector(deps: ReconnectDeps): (source: { readyState?: number }) => void {
   let watching = false;
+  let reloading = false;
+  const reloadWhenFree = (): void => {
+    if (deps.hold?.() === true) {
+      deps.setTimeout(reloadWhenFree, RECONNECT_MS);
+    } else {
+      deps.reload();
+    }
+  };
 
   const ask = (source: { readyState?: number }): void => {
     void deps.fetch('/page/ping', { cache: 'no-store' }).then(
@@ -34,7 +47,10 @@ export function reconnector(deps: ReconnectDeps): (source: { readyState?: number
         watching = false;
 
         if (deps.build !== null && build !== deps.build) {
-          deps.reload();
+          if (!reloading) {
+            reloading = true;
+            reloadWhenFree();
+          }
         } else if (source.readyState === CLOSED) {
           // A signed-out page reloads too, so the hub's signed-out page replaces the conversation it still shows.
           deps.reload();

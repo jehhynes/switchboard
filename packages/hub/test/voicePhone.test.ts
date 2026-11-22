@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from '@switchboard/core';
 import type { HubMessage, VoiceMessage } from '@switchboard/voice';
-import { PHONE_HAS_VOICE, PHONE_MIC_FRAME, PHONE_MIC_HERE, PHONE_PCM_FRAME, VOICE_RESTART_MS, VoiceControl } from '../src/voice.js';
+import type { ConversationReply } from '@switchboard/core';
+import { NOT_RESUMED, PHONE_HAS_VOICE, PHONE_MIC_FRAME, PHONE_MIC_HERE, PHONE_PCM_FRAME, PHONE_RESUME_MS, VOICE_RESTART_MS, VoiceControl, parseVoiceHandover } from '../src/voice.js';
 import type { VoiceConnection } from '../src/voiceLink.js';
 import type { WindowScope } from '../src/windows.js';
 
@@ -435,5 +436,262 @@ describe('VoiceControl with the voice on a phone (PRD R119)', () => {
     control.phoneClosed('closed by the page');
     expect(control.toComputer('pc')).toBeNull();
     expect(control.device).toBe('computer');
+  });
+});
+
+/** One hub of a restart: its own connection to the voice process, windows and pages, and replies; the voice process outlives it. */
+function hubOf(windowList: WindowScope[], remote: string[]) {
+  const connections: FakeConnection[] = [];
+  const windows = new Map(windowList.map((one) => [one.key, one]));
+  const focusedPages = new Set<string>();
+  const replies = new Map<string, ConversationReply>();
+  const toPhone: Array<Record<string, unknown> | Buffer> = [];
+  const logs: string[] = [];
+  let t = 1_000;
+  const timers: Array<{ run: () => void; at: number; cleared: boolean }> = [];
+  const control = new VoiceControl({
+    link: {
+      find: async () => {
+        const next = new FakeConnection();
+
+        connections.push(next);
+        return next;
+      },
+      connected: () => connections.at(-1) ?? null,
+      stop: () => undefined,
+    },
+    settings: () => ({ ...DEFAULT_SETTINGS.voice, enabled: true }),
+    store: { reply: (id) => replies.get(id) ?? null, updateReply: () => undefined, message: () => ({ spokenRequested: true }), markSeen: () => undefined },
+    windows: { keys: () => [...windows.keys()], scope: (key) => windows.get(key) ?? null },
+    focusedWindow: () => 'pc',
+    pageFocused: (key) => focusedPages.has(key),
+    remotePage: (key) => remote.includes(key),
+    repliesSince: (sessionId, since) => [...replies.values()].filter((one) => one.sessionId === sessionId && one.at >= since),
+    full: (sessionId) => ['s1', 's2'].includes(sessionId),
+    session: (sessionId) => ({ workItemId: sessionId === 's1' ? 1 : 2, cwd: null }),
+    replyChanged: () => undefined,
+    notify: () => undefined,
+    dockChanged: () => undefined,
+    now: () => t,
+    log: (line) => void logs.push(line),
+    setTimer: (run, ms) => {
+      const timer = { run, at: t + ms, cleared: false };
+
+      timers.push(timer);
+      return timer;
+    },
+    clearTimer: (timer) => void ((timer as { cleared: boolean }).cleared = true),
+    phone: {
+      send: (message) => toPhone.push(message) > 0,
+      sendBinary: (data) => toPhone.push(data) > 0,
+      close: () => undefined,
+    },
+  });
+  const sentOf = <T extends HubMessage['type']>(type: T) => connections.at(-1)!.sent.filter((one) => one.type === type) as Array<Extract<HubMessage, { type: T }>>;
+  const reply = (id: string, sessionId: string): ConversationReply => {
+    const one = { id, sessionId, kind: 'reply', source: 'transcript', speak: 'Done.', opening: 'Done.', answers: `m-${id}`, rewrittenBy: null, withdrawn: false, spokenState: 'none', tone: null, at: t } as unknown as ConversationReply;
+
+    replies.set(id, one);
+    return one;
+  };
+  const advance = (ms: number): void => {
+    t += ms;
+
+    for (const timer of timers.filter((one) => !one.cleared && one.at <= t)) {
+      timer.cleared = true;
+      timer.run();
+    }
+  };
+
+  return { control, connections, windows, focusedPages, toPhone, logs, sentOf, reply, advance };
+}
+
+/** What the voice process tells a hub that connects: its target, its capture and its device, which it kept while no hub was connected. */
+function greet(connection: FakeConnection, gen: number, sessionId: string | null, device: 'computer' | 'phone' | 'none'): void {
+  connection.receive({ type: 'active', gen, sessionId, reason: sessionId === null ? 'gone' : 'focus' });
+  connection.receive({ type: 'audio', mic: 'listening', engine: 'phone', device: 'phone', recognizer: 'gpu', error: null });
+  connection.receive({ type: 'device', device });
+}
+
+describe('VoiceControl across a hub restart with the voice on a phone (architecture.md § Hub lifecycle)', () => {
+  /** A hub whose phone has the voice, the mic on and the phone's capture open, for session s2 at generation 5; and what it hands over. */
+  async function handedOver() {
+    const old = hubOf([scope('pc', 1, 's1'), scope('phone', 2, 's2')], ['phone']);
+
+    old.control.update();
+    await settle();
+    old.control.phoneOpened('phone', 'hash-1');
+    old.connections[0]!.receive({ type: 'active', gen: 5, sessionId: 's2', reason: 'talk-here' });
+    expect(old.control.mic('phone', true)).toBeNull();
+    old.connections[0]!.receive({ type: 'phone-capture', on: true });
+    old.connections[0]!.receive({ type: 'audio', mic: 'listening', engine: 'phone', device: 'phone', recognizer: 'gpu', error: null });
+    old.control.phoneMessage({ type: 'state', busy: false });
+
+    return { old, handed: JSON.parse(JSON.stringify(old.control.handOver())) as unknown };
+  }
+
+  it('hands over the device, sign-in, target, mic and Speak replies, then sends the voice process nothing as its phone socket and windows close', async () => {
+    const { old, handed } = await handedOver();
+    const sent = old.connections[0]!.sent.length;
+
+    expect(handed).toEqual({ device: 'phone', phoneHash: 'hash-1', target: { gen: 5, sessionId: 's2' }, speakReplies: true, micOn: true, mic: 'listening', phoneCapture: true, phoneBusy: false, at: 1_000, held: [] });
+    expect(parseVoiceHandover(handed)).toEqual(handed);
+
+    // The old hub stops: its phone socket closes and its windows leave, which before the fix told the voice process the phone left.
+    old.control.phoneClosed('Switchboard is restarting.');
+    old.windows.clear();
+    old.control.windowClosed('pc');
+    old.control.windowClosed('phone');
+    old.control.close();
+    expect(old.connections[0]!.sent).toHaveLength(sent);
+    expect(old.connections).toHaveLength(1);
+    expect(old.control.device).toBe('phone');
+    expect(old.logs.filter((line) => line.includes('the phone left'))).toEqual([]);
+    expect(old.control.resumable('hash-1')).toBe(NOT_RESUMED);
+  });
+
+  it('keeps the voice on the phone through the restart, moves nothing to this computer meanwhile, and lets the phone take it back without a tap', async () => {
+    const { handed } = await handedOver();
+    // The hub that takes over: this computer's window comes back focused at once; the phone's page comes back later with a new key.
+    const next = hubOf([scope('pc', 1, 's1')], ['phone-2']);
+
+    next.control.restore(handed);
+    expect(next.logs).toContain(`voice: device phone: waiting up to ${PHONE_RESUME_MS / 1000} seconds for the phone to take the voice back after the hub restart`);
+    await settle();
+    greet(next.connections[0]!, 5, 's2', 'phone');
+    next.control.update();
+
+    // Nothing moves the voice: the device the process kept stands, the target stays one though nothing shows it, and the focused window is no focus.
+    expect(next.control.device).toBe('phone');
+    expect(next.sentOf('device')).toEqual([{ type: 'device', device: 'phone' }]);
+    expect(next.sentOf('targets').at(-1)).toEqual({ type: 'targets', targets: [{ sessionId: 's1', workItemId: 1, repo: null }, { sessionId: 's2', workItemId: 2, repo: null }], focus: null });
+    next.control.selected('pc');
+    expect(next.sentOf('talk-here')).toEqual([]);
+    expect(next.sentOf('mic')).toEqual([{ type: 'mic', on: true, restore: true }]);
+    expect(next.control.target).toBe('s2');
+    expect(next.control.view('pc').deviceOff).toBeUndefined();
+    expect(next.control.restartBlocker()).toBe('the phone has not taken the voice back since the last restart');
+    expect(next.control.resumable('hash-2')).toBe(NOT_RESUMED);
+    expect(next.control.resumable('hash-1')).toBeNull();
+
+    // A reply that asked to be heard meanwhile waits for the phone rather than play to nobody.
+    next.control.replyChanged(next.reply('r1', 's2'));
+    expect(next.sentOf('speak')).toEqual([]);
+
+    // The phone's page is back with a new key and opens the voice socket again from the same sign-in.
+    next.windows.set('phone-2', scope('phone-2', 2, 's2'));
+    next.focusedPages.add('phone-2');
+    next.control.phoneOpened('phone-2', 'hash-1');
+    expect(next.logs).toContain('voice: device phone: the phone took the voice back after the hub restart');
+    expect(next.toPhone).toEqual([{ type: 'capture', on: true }]);
+    expect(next.sentOf('device')).toHaveLength(1);
+    expect(next.sentOf('mic')).toHaveLength(1);
+    expect(next.sentOf('talk-here')).toEqual([]);
+    expect(next.sentOf('speak').map((one) => [one.replyId, one.gen])).toEqual([['r1', 5]]);
+    expect(next.sentOf('targets').at(-1)!.focus).toEqual({ sessionId: 's2', via: 'window' });
+    expect(next.control.micLive).toBe(true);
+    expect(next.control.view('phone-2')).toMatchObject({ here: true, mic: 'listening' });
+
+    // The phone's audio is relayed again, as the voice process still has its capture open.
+    next.control.phoneAudio('phone-2', Buffer.from([PHONE_MIC_FRAME, 1, 0]));
+    expect(next.sentOf('phone-mic')).toHaveLength(1);
+
+    // The wait is over: its end changes nothing.
+    next.advance(PHONE_RESUME_MS);
+    expect(next.control.device).toBe('phone');
+    expect(next.control.resumable('hash-1')).toBe(NOT_RESUMED);
+  });
+
+  it('keeps the target while the phone is back before its page shows a conversation, and offers the replies that came while the hubs changed over', async () => {
+    const { handed } = await handedOver();
+    const next = hubOf([scope('pc', 1, 's1')], ['phone-2']);
+
+    // A reply the hub before saw too late to offer, and one that comes before this hub has its voice process.
+    next.reply('r0', 's2');
+    next.control.restore(handed);
+    next.control.replyChanged(next.reply('r1', 's2'));
+    await settle();
+    greet(next.connections[0]!, 5, 's2', 'phone');
+    expect(next.sentOf('speak')).toEqual([]);
+
+    // The phone's page is back, its stream not yet showing a conversation: the target stays one.
+    next.windows.set('phone-2', scope('phone-2', 2, null));
+    next.control.phoneOpened('phone-2', 'hash-1');
+    next.control.update();
+    expect(next.sentOf('targets').at(-1)!.targets.map((one) => one.sessionId)).toEqual(['s1', 's2']);
+    expect(next.sentOf('talk-here')).toEqual([]);
+    expect(next.sentOf('speak').map((one) => one.replyId).sort()).toEqual(['r0', 'r1']);
+
+    // Once it shows its conversation, that is what keeps the target.
+    next.windows.set('phone-2', scope('phone-2', 2, 's2'));
+    next.control.update();
+    expect(next.sentOf('targets').at(-1)!.targets.map((one) => one.sessionId)).toEqual(['s1', 's2']);
+    next.windows.set('phone-2', scope('phone-2', 1, 's1'));
+    next.control.update();
+    expect(next.sentOf('targets').at(-1)!.targets.map((one) => one.sessionId)).toEqual(['s1']);
+  });
+
+  it('turns the voice off, never onto this computer, when the phone does not come back in time', async () => {
+    const { handed } = await handedOver();
+    // This computer has a window on the voice target's session too, which shows the voice off at the end.
+    const next = hubOf([scope('pc', 1, 's1'), scope('pc-2', 2, 's2')], ['phone-2']);
+
+    next.control.restore(handed);
+    await settle();
+    greet(next.connections[0]!, 5, 's2', 'phone');
+    next.control.replyChanged(next.reply('r1', 's2'));
+    next.advance(PHONE_RESUME_MS - 1);
+    expect(next.control.device).toBe('phone');
+    next.advance(1);
+    expect(next.control.device).toBe('none');
+    expect(next.logs).toContain(`voice: device none: the phone did not take the voice back within ${PHONE_RESUME_MS / 1000} seconds of the hub restart`);
+    expect(next.sentOf('device').map((one) => one.device)).toEqual(['phone', 'none']);
+    expect(next.control.view('pc-2')).toMatchObject({ here: true, deviceOff: true });
+    expect(next.control.micLive).toBe(false);
+    // The held reply goes to the voice process, which skips it with no device; the restart no longer waits.
+    expect(next.sentOf('speak').map((one) => one.replyId)).toEqual(['r1']);
+    expect(next.control.resumable('hash-1')).toBe(NOT_RESUMED);
+
+    // A tap on the phone takes it as before.
+    next.windows.set('phone-2', scope('phone-2', 2, 's2'));
+    next.control.phoneOpened('phone-2', 'hash-1');
+    expect(next.control.device).toBe('phone');
+  });
+
+  it('lets Talk here on this computer take the voice back during the wait, ending it, and keeps an unknown phone off', async () => {
+    const { handed } = await handedOver();
+    const next = hubOf([scope('pc', 1, 's1')], []);
+
+    next.control.restore(handed);
+    await settle();
+    greet(next.connections[0]!, 5, 's2', 'phone');
+    expect(next.control.talkHere('pc')).toBeNull();
+    expect(next.control.device).toBe('computer');
+    expect(next.control.resumable('hash-1')).toBe(NOT_RESUMED);
+    next.advance(PHONE_RESUME_MS);
+    expect(next.control.device).toBe('computer');
+
+    // A phone whose sign-in the handover does not name, and a voice process replaced meanwhile that starts on this computer: the voice is off.
+    const unknown = hubOf([scope('pc', 1, 's1')], []);
+
+    unknown.control.restore({ ...(handed as Record<string, unknown>), phoneHash: null });
+    await settle();
+    greet(unknown.connections[0]!, 0, null, 'computer');
+    expect(unknown.control.device).toBe('none');
+    expect(unknown.sentOf('device').map((one) => one.device)).toEqual(['none', 'none']);
+    expect(parseVoiceHandover({ device: 'phone' })).toBeNull();
+
+    // On this computer, a reply that comes before the voice process connects waits for it without holding a restart back, and goes to the next hub.
+    const computer = hubOf([scope('pc', 1, 's2')], []);
+
+    computer.reply('r9', 's2');
+    computer.control.restore({ ...(handed as Record<string, unknown>), device: 'computer', phoneHash: null, held: ['r9'] });
+    computer.control.replyChanged(computer.reply('r1', 's2'));
+    expect(computer.control.restartBlocker()).toBeNull();
+    expect(computer.control.handoverState().held).toEqual(['r9', 'r1']);
+    await settle();
+    expect(computer.sentOf('speak').map((one) => one.replyId).sort()).toEqual(['r1', 'r9']);
+    expect(computer.control.device).toBe('computer');
+    expect(parseVoiceHandover(null)).toBeNull();
   });
 });

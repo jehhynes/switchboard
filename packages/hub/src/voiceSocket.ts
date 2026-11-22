@@ -24,6 +24,8 @@ export const VOICE_QUEUE_MAX = 1024 * 1024;
 export const VOICE_CLOSE = {
   /** Another device or page took the voice. */
   moved: 4001,
+  /** The hub restarts onto a new build: the page may take the voice back from the hub that takes over without a tap (architecture.md § Hub lifecycle). */
+  restarting: 4002,
   /** The device lost its permission: voice forbidden on it, its sign-in revoked, remote access or voice turned off, or its page key ended. */
   refused: 4003,
 } as const;
@@ -46,6 +48,8 @@ export interface VoiceSocketDeps {
   log(line: string): void;
   /** The device's page said `hello`: it has the voice socket. */
   opened?(device: VoiceDevice): void;
+  /** Why the device's page may not take the voice back after a hub restart, as its `hello {resume: true}` asks; null when it may. */
+  resumable?(device: VoiceDevice): string | null;
   /** A JSON message from the page after `hello` other than `ping`. */
   message?(device: VoiceDevice, data: Record<string, unknown>): void;
   /** A binary message from the page after `hello`, within the rate limit. */
@@ -148,7 +152,7 @@ export class VoiceSockets {
 
         if (type === 'hello') {
           if (!one.hello) {
-            this.#hello(one);
+            this.#hello(one, message['resume'] === true);
             heard();
           }
 
@@ -213,7 +217,16 @@ export class VoiceSockets {
     };
   }
 
-  #hello(one: Open): void {
+  #hello(one: Open, resume: boolean): void {
+    // A page taking the voice back after a hub restart takes it only from the hub that waits for it, never as a new tap would.
+    const refused = !resume ? null : this.deps.resumable === undefined ? 'Nothing to take back.' : this.deps.resumable(one.device);
+
+    if (refused !== null) {
+      this.deps.log(`voice socket: ${one.device.label || 'a device'} (${one.device.hash.slice(0, 8)}) did not take the voice back: ${refused}`);
+      one.socket.close(VOICE_CLOSE.refused, refused);
+      return;
+    }
+
     clearTimeout(one.timer);
     one.hello = true;
 
@@ -263,11 +276,11 @@ export class VoiceSockets {
     return this.#current?.socket.queued() ?? 0;
   }
 
-  /** Closes every voice socket, open or still waiting for `hello`, whose device `match` picks, with {@link VOICE_CLOSE.refused} and `reason`. */
-  close(match: (device: VoiceDevice) => boolean, reason: string): void {
+  /** Closes every voice socket, open or still waiting for `hello`, whose device `match` picks, with `code` ({@link VOICE_CLOSE.refused}) and `reason`. */
+  close(match: (device: VoiceDevice) => boolean, reason: string, code: number = VOICE_CLOSE.refused): void {
     for (const one of [...this.#open]) {
       if (match(one.device)) {
-        one.socket.close(VOICE_CLOSE.refused, reason);
+        one.socket.close(code, reason);
       }
     }
   }

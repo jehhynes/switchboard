@@ -30,8 +30,11 @@ export interface RestartDeps {
   quiet(): string | null;
   /** Starts the hub that takes over; resolves once it is ready, or with why it did not start. */
   successor(): Promise<Successor | { error: string }>;
-  /** Refuses new requests, stops this hub so the successor takes its lock, port and record, and exits. */
-  handOver(successor: Successor): Promise<void>;
+  /**
+   * Refuses new requests, stops this hub so the successor takes its lock, port and record, and exits; or, when it could not hand over before
+   * stopping anything, ends the successor and answers why, and this hub runs on.
+   */
+  handOver(successor: Successor): Promise<void | { error: string }>;
   log(line: string): void;
 }
 
@@ -134,7 +137,16 @@ export class HubRestart {
       this.#running = false;
     }
 
-    await this.deps.handOver(handedTo);
+    const refused = await this.deps.handOver(handedTo);
+
+    // Nothing was handed over: this hub keeps running its own build.
+    if (refused !== undefined) {
+      this.deps.log(`hub restart failed: ${refused.error}; this hub keeps running`);
+      this.#handedOver = false;
+      this.#failed = installed;
+      this.#asked = false;
+      this.#waiting = null;
+    }
   }
 }
 
@@ -240,12 +252,29 @@ export function handoverPath(home: string): string {
   return join(switchboardHome(home), 'hub-handover.json');
 }
 
-/** Names the successor before the old hub lets go of the lock. */
-export function writeHandover(home: string, pid: number, now: number = Date.now()): void {
+/**
+ * Names the successor before the old hub lets go of the lock, with what the app hands it (`carried`), such as the voice's device and target
+ * (architecture.md § Hub lifecycle).
+ */
+export function writeHandover(home: string, pid: number, now: number = Date.now(), carried?: Record<string, unknown>): void {
   const path = handoverPath(home);
 
-  writeFileSync(`${path}.${process.pid}.tmp`, JSON.stringify({ pid, at: now }));
+  writeFileSync(`${path}.${process.pid}.tmp`, JSON.stringify({ pid, at: now, ...(carried === undefined ? {} : { carried }) }));
   renameSync(`${path}.${process.pid}.tmp`, path);
+}
+
+/** What the hub that handed over to `pid` carried to it, from a handover under `TAKEOVER_WAIT_MS` old that names it; null otherwise. */
+export function handedOver(home: string, pid: number, now: number = Date.now()): Record<string, unknown> | null {
+  try {
+    const raw = JSON.parse(readFileSync(handoverPath(home), 'utf8')) as { pid?: unknown; at?: unknown; carried?: unknown };
+    const carried = raw.carried;
+
+    return raw.pid === pid && typeof raw.at === 'number' && now - raw.at < TAKEOVER_WAIT_MS && now >= raw.at && typeof carried === 'object' && carried !== null && !Array.isArray(carried)
+      ? (carried as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Removes the handover once the successor it names holds the lock. */

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { HIDDEN_MS, MIC_CONSTRAINTS, MIC_FRAME, PING_MS, PhoneVoice } from '../src/phoneVoice.js';
+import { HIDDEN_MS, MIC_CONSTRAINTS, MIC_FRAME, PING_MS, PhoneVoice, RESUME_MS } from '../src/phoneVoice.js';
 import type { PhoneAudioContext, PhoneAudioNode, PhoneCaptureNode, PhoneMicStream, PhoneMicTrack } from '../src/phoneVoice.js';
 import type { PlayCommand, PlayReport } from '../src/voiceWorklet.js';
 
@@ -213,6 +213,8 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
         hidden = on;
         visibility();
       },
+      /** The page's stream got a new key, as after a hub restart. */
+      setKey: (next: string) => (key = next),
     };
   }
 
@@ -458,6 +460,76 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
   });
 
   describe('the phone\'s microphone (PRD R119)', () => {
+    it('keeps its audio and microphone when the hub closes the voice to restart, and takes the voice back over the new stream\'s key without a tap', async () => {
+      const { voice, sockets, tracks, captures, contexts, timers, setKey } = setup();
+      const opened = voice.micOn();
+
+      sockets[0]!.open();
+      sockets[0]!.message({ type: 'welcome', at: 0 });
+      expect(await opened).toBeNull();
+      sockets[0]!.message({ type: 'capture', on: true });
+      sockets[0]!.closeFromHub(4002, 'Switchboard is restarting.');
+      expect([voice.state, voice.error, voice.micOpen]).toEqual(['connecting', null, true]);
+      expect([contexts[0]!.closed, tracks[0]!.stopped, captures[0]!.disconnected]).toEqual([false, false, false]);
+
+      // The old key belongs to the hub that stopped: nothing opens until the page's stream has a new one.
+      voice.keyChanged();
+      expect(sockets).toHaveLength(1);
+      captures[0]!.frame([1]);
+      expect(sockets[0]!.binary).toEqual([]);
+      setKey('page-8');
+      voice.keyChanged();
+      expect(sockets.map((one) => one.url)).toEqual(['wss://pc.tail.ts.net/v1/voice/socket?window=page-7', 'wss://pc.tail.ts.net/v1/voice/socket?window=page-8']);
+      sockets[1]!.open();
+      expect(sockets[1]!.sent).toEqual([{ type: 'hello', resume: true }]);
+      sockets[1]!.message({ type: 'welcome', at: 0 });
+      expect([voice.state, voice.error, voice.micOpen]).toEqual(['on', null, true]);
+      expect(sockets[1]!.sent.filter((one) => (one as { type: string }).type === 'state')).toEqual([{ type: 'state', busy: false }]);
+
+      // Frames wait for the voice process's capture, which the hub that took over sends again.
+      captures[0]!.frame([1]);
+      expect(sockets[1]!.binary).toEqual([]);
+      sockets[1]!.message({ type: 'capture', on: true });
+      captures[0]!.frame([1, -2]);
+      expect(sockets[1]!.binary).toEqual([[MIC_FRAME, 1, 0, 254, 255]]);
+      // The same audio and microphone throughout, and the wait's timer is gone.
+      expect([contexts.length, tracks.length, captures.length]).toEqual([1, 1, 1]);
+      expect(timers.filter((one) => one.ms === RESUME_MS).map((one) => one.cleared)).toEqual([true]);
+    });
+
+    it('lets go of the audio and microphone when the voice does not come back in time, the hub refuses it, or the voice is turned off meanwhile', async () => {
+      const { voice, sockets, tracks, contexts, timers, setKey } = setup();
+      const turnOn = async (socket: number): Promise<void> => {
+        const opened = voice.micOn();
+
+        sockets[socket]!.open();
+        sockets[socket]!.message({ type: 'welcome', at: 0 });
+        expect(await opened).toBeNull();
+        sockets[socket]!.closeFromHub(4002, 'Switchboard is restarting.');
+      };
+
+      await turnOn(0);
+      timers.find((one) => one.ms === RESUME_MS)!.run();
+      expect([voice.state, voice.error, voice.micOpen]).toEqual(['off', 'Switchboard restarted, and the voice did not come back to this phone.', false]);
+      expect([contexts[0]!.closed, tracks[0]!.stopped]).toEqual([true, true]);
+
+      await turnOn(1);
+      setKey('page-8');
+      voice.keyChanged();
+      sockets[2]!.open();
+      sockets[2]!.closeFromHub(4003, 'The voice moved on while Switchboard restarted. Tap Voice on this phone to use it here.');
+      expect([voice.state, voice.error]).toEqual(['off', 'The voice moved on while Switchboard restarted. Tap Voice on this phone to use it here.']);
+      expect([contexts[1]!.closed, tracks[1]!.stopped]).toEqual([true, true]);
+
+      setKey('page-7');
+      await turnOn(3);
+      voice.stop();
+      expect([voice.state, voice.error, contexts[2]!.closed, tracks[2]!.stopped]).toEqual(['off', null, true, true]);
+      setKey('page-9');
+      voice.keyChanged();
+      expect(sockets).toHaveLength(4);
+    });
+
     const session = { type: 'auto' };
 
     function withSession(): void {

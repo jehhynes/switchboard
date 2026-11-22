@@ -6,7 +6,7 @@ import { drawAtOnce } from './frame.js';
 type Answer = { status: number; body?: unknown } | 'down';
 
 /** A reconnector over scripted answers per URL, with its timers run by hand. */
-function harness(build: string | null, answers: Record<string, Answer[]>) {
+function harness(build: string | null, answers: Record<string, Answer[]>, hold?: () => boolean) {
   const asked: string[] = [];
   const timers: Array<{ run: () => void; ms: number }> = [];
   let reloads = 0;
@@ -25,6 +25,7 @@ function harness(build: string | null, answers: Record<string, Answer[]>) {
     setTimeout: (run, ms) => timers.push({ run, ms }),
     reload: () => void reloads++,
     build,
+    ...(hold === undefined ? {} : { hold }),
   });
   const tick = async (): Promise<void> => {
     const timer = timers.shift()!;
@@ -67,6 +68,24 @@ describe('reconnecting after the hub restarts', () => {
     await closed.tick();
     expect(closed.reloads()).toBe(1);
     expect(closed.asked).toEqual(['/page/ping']);
+  });
+
+  it('puts off the reload for another build while the voice is on this phone, and reloads once it is not', async () => {
+    let held = true;
+    const { lost, tick, timers, reloads } = harness('b1', { '/page/ping': [{ status: 200, body: { build: 'b2' } }, { status: 200, body: { build: 'b2' } }] }, () => held);
+
+    lost({ readyState: 0 });
+    await tick();
+    expect(reloads()).toBe(0);
+    await tick();
+    expect(reloads()).toBe(0);
+    // Another error meanwhile asks again but starts no second reload.
+    lost({ readyState: 0 });
+    held = false;
+    await tick();
+    await tick();
+    expect(reloads()).toBe(1);
+    expect(timers).toHaveLength(0);
   });
 
   it('does not reload for a build it never knew, and watches again after the next error', async () => {

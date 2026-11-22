@@ -14,6 +14,7 @@ import { renderMicButton as viewMicButton } from '@switchboard/conversation/voic
 import { renderMarkdown } from '../src/markdown.js';
 import { CHAT_MAX, CHAT_MIN, DRAWER_HIDE_MS, DRAWER_REVEAL_MS, loadMermaid, PANE_SHOW_DELAY_MS, PIN_SNAP, SENT_NOTE_MS, SHOW_MARKER_MS, SIDE_COLLAPSE, SIDE_MAX, SIDE_MIN, startPage, SWIPE_OPEN } from '../src/main.js';
 import { DETAIL_MIN } from '../src/layout.js';
+import { RECONNECT_MS } from '../src/reconnect.js';
 import type { ArtifactView, MessageView, PageGroup, PageRow, ReplyView, SessionView } from '@switchboard/protocol';
 import { drawAtOnce } from './frame.js';
 
@@ -1246,6 +1247,100 @@ describe('the page', () => {
     phone.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1), listRow(2)])], scope: { ...scope, workItemId: 2 }, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
     phone.emit('voice', voice('off'));
     expect(root.querySelector('.composer-mic .mic.unavailable')).toBeNull();
+    window.innerWidth = width;
+    paired.close();
+  });
+
+  it('takes the voice back over the new stream after a hub restart with no tap, and puts off the reload for the new build while the voice is on the phone', async () => {
+    vi.useFakeTimers();
+    onTestFinished(() => void vi.useRealTimers());
+    history.replaceState(null, '', '#');
+
+    const width = window.innerWidth;
+    const tick = () => vi.advanceTimersByTimeAsync(0);
+    const sockets: Array<{ url: string; sent: unknown[]; onopen: (() => void) | null; onmessage: ((event: { data: string }) => void) | null; onclose: ((event: { code: number; reason: string }) => void) | null }> = [];
+    const contexts: Array<{ closed: boolean }> = [];
+    const reload = vi.fn();
+
+    vi.stubGlobal('AudioContext', class {
+      state = 'running';
+      destination = {};
+      onstatechange = null;
+      closed = false;
+      audioWorklet = { addModule: async () => undefined };
+      resume = async () => undefined;
+      close = async () => void (this.closed = true);
+      createMediaStreamSource = () => ({ connect: () => undefined, disconnect: () => undefined });
+      constructor() {
+        contexts.push(this);
+      }
+    });
+    vi.stubGlobal('AudioWorkletNode', class {
+      port = { postMessage: () => undefined, onmessage: null };
+      connect(): void {}
+      disconnect(): void {}
+    });
+    vi.stubGlobal('WebSocket', class {
+      binaryType = 'blob';
+      readonly sent: unknown[] = [];
+      onopen: (() => void) | null = null;
+      onmessage: ((event: { data: string }) => void) | null = null;
+      onclose: ((event: { code: number; reason: string }) => void) | null = null;
+      constructor(readonly url: string) {
+        sockets.push(this);
+      }
+      send(data: unknown): void {
+        this.sent.push(typeof data === 'string' ? JSON.parse(data) : data);
+      }
+      close(): void {}
+    });
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: async () => ({ getAudioTracks: () => [{ muted: false, readyState: 'live', stop: () => undefined }] }) } });
+    onTestFinished(() => void Reflect.deleteProperty(navigator, 'mediaDevices'));
+    onTestFinished(() => void vi.unstubAllGlobals());
+
+    const fetch = vi.fn(async (url: string, init?: { body?: string }) => {
+      posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) });
+
+      return { status: 200, ok: true, json: async () => (url === '/page/ping' ? { build: 'b2' } : {}), text: async () => '' } as unknown as Response;
+    });
+
+    window.innerWidth = 375;
+
+    const paired = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, local: false, build: 'b1', reload });
+    const phone = FakeSource.last!;
+    const hello = (key: string) => phone.emit('hello', { key, groups: [listGroup('progress', [listRow(1)])], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+
+    hello('pk');
+    phone.emit('voice', { voice: { enabled: true, here: false, mic: 'off', speaking: null, speakReplies: true, error: null } });
+    root.querySelector<HTMLElement>('.composer-mic [data-voice="mic"]')!.click();
+    await tick();
+    expect(sockets.map((one) => one.url)).toEqual([expect.stringMatching(/\/v1\/voice\/socket\?window=pk$/)]);
+    sockets[0]!.onopen?.();
+    sockets[0]!.onmessage?.({ data: JSON.stringify({ type: 'welcome', at: 0 }) });
+    await tick();
+    await tick();
+
+    // The hub restarts onto build b2: it closes the voice for the restart, and the page's stream fails until the new hub answers.
+    sockets[0]!.onclose?.({ code: 4002, reason: 'Switchboard is restarting.' });
+    phone.emit('error', {});
+    await vi.advanceTimersByTimeAsync(RECONNECT_MS);
+    expect(contexts.map((one) => one.closed)).toEqual([false]);
+
+    // The browser's own reconnect gives the stream a new key: the voice socket opens with it and takes the voice back.
+    hello('pk2');
+    expect(sockets.map((one) => one.url)).toEqual([expect.stringMatching(/window=pk$/), expect.stringMatching(/window=pk2$/)]);
+    sockets[1]!.onopen?.();
+    expect(sockets[1]!.sent).toEqual([{ type: 'hello', resume: true }]);
+    sockets[1]!.onmessage?.({ data: JSON.stringify({ type: 'welcome', at: 0 }) });
+    await vi.advanceTimersByTimeAsync(RECONNECT_MS * 3);
+    // No reload for the new build while the voice is on this phone: a reload would end its audio until the next tap.
+    expect(reload).not.toHaveBeenCalled();
+    expect(contexts).toHaveLength(1);
+
+    // Once the voice is off on this phone, the page reloads into the new build.
+    sockets[1]!.onclose?.({ code: 4003, reason: 'Voice is no longer allowed on this device.' });
+    await vi.advanceTimersByTimeAsync(RECONNECT_MS);
+    expect(reload).toHaveBeenCalledTimes(1);
     window.innerWidth = width;
     paired.close();
   });

@@ -52,7 +52,7 @@ import type { PaneHelperDeps } from './paneHelper.js';
 import { currentHolderBuild, PANE_HELPER_INSTALL, paneHelperRecordPath, reserveHolderBuild } from './holderInstall.js';
 import { spawnEnvironment } from './spawn.js';
 import { PageTargets } from './pageTargets.js';
-import { VoiceSockets } from './voiceSocket.js';
+import { VOICE_CLOSE, VoiceSockets } from './voiceSocket.js';
 import { VOICE_OFF } from './server.js';
 
 const RELOAD_DEBOUNCE_MS = 300;
@@ -215,6 +215,8 @@ export interface AppOptions {
   launch?: Launcher;
   /** Starts the Chrome pane helper (architecture.md § Pane helper); tests replace it. */
   startPaneHelper?: PaneHelperDeps['start'];
+  /** What the hub this one took over from carried to it (`HubApp.handover`), such as the voice's state; null or left out for a hub that started anew. */
+  handover?: Record<string, unknown> | null;
 }
 
 /** Opens the store, loads configuration, and runs the core for the hub process. */
@@ -530,7 +532,8 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   const voiceSockets = new VoiceSockets({
     now: deps.now,
     log: (line) => deps.log(line),
-    opened: (device) => voice.phoneOpened(device.key),
+    opened: (device) => voice.phoneOpened(device.key, device.hash),
+    resumable: (device) => voice.resumable(device.hash),
     closed: (_device, reason) => voice.phoneClosed(reason),
     message: (_device, data) => voice.phoneMessage(data),
     audio: (device, data) => voice.phoneAudio(device.key, data),
@@ -550,6 +553,11 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     },
     pageFocused: (key) => focusedPages.has(key),
     remotePage: (key) => remotePages.has(key),
+    repliesSince: (sessionId, since) =>
+      store
+        .conversation(sessionId, null, 100, false)
+        .items.flatMap((item) => (item.type === 'reply' && item.at >= since ? [store.reply(item.id)] : []))
+        .filter((reply): reply is NonNullable<typeof reply> => reply !== null),
     full: (sessionId) => {
       const session = store.session(sessionId);
 
@@ -1064,6 +1072,9 @@ const dockWithRuns = () => {
   };
 
   const debriefTimer = setInterval(() => void debriefs.scan(), DEBRIEF_SCAN_MS);
+
+  // A hub that took over goes on with the voice as the hub before it left it (architecture.md § Hub lifecycle).
+  voice.restore(options.handover?.['voice']);
 
   return {
     runtime,
@@ -1701,7 +1712,13 @@ const dockWithRuns = () => {
     },
     onChange: (listener) => void builtListeners.push(listener),
     busy: () => runtime.hasActiveSessions() || debriefs.running(),
-    quiet: () => runtime.restartBlocker() ?? (conversation.sending() ? 'a message is being sent' : voice.speaking() ? 'the voice is speaking a reply or enrolling' : debriefs.running() ? 'a friction debrief is running' : null),
+    quiet: () => runtime.restartBlocker() ?? (conversation.sending() ? 'a message is being sent' : (voice.restartBlocker() ?? (debriefs.running() ? 'a friction debrief is running' : null))),
+    // The voice goes on as it was under the hub that takes over: the phone's page takes it back without a tap (architecture.md § Hub lifecycle).
+    handover: () => ({ voice: voice.handoverState() }),
+    handedOver: () => {
+      voice.handOver();
+      voiceSockets.close(() => true, 'Switchboard is restarting.', VOICE_CLOSE.restarting);
+    },
     close: () => {
       clearTimeout(pending);
       clearInterval(debriefTimer);
