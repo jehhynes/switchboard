@@ -173,7 +173,14 @@ describe('VoiceControl with the voice on a phone (PRD R119)', () => {
     control.phoneMessage({ type: 'played', id: 7, ms: Number.NaN, done: false });
     control.phoneMessage({ type: 'played', id: 7, ms: 1 });
     control.phoneMessage({ type: 'other', id: 7, ms: 1, done: true });
-    expect(sentOf('phone-played')).toEqual([{ type: 'phone-played', id: 7, ms: 120, done: false }]);
+    // What the phone's output took goes along for the voice's lead; a bad one is left out.
+    control.phoneMessage({ type: 'played', id: 7, ms: 130, done: false, out: 430 });
+    control.phoneMessage({ type: 'played', id: 7, ms: 140, done: false, out: -5 });
+    expect(sentOf('phone-played')).toEqual([
+      { type: 'phone-played', id: 7, ms: 120, done: false },
+      { type: 'phone-played', id: 7, ms: 130, done: false, out: 430 },
+      { type: 'phone-played', id: 7, ms: 140, done: false },
+    ]);
   });
 
   it('leaves the voice off when the phone leaves, and takes it back to this computer only by Talk here or the mic there', async () => {

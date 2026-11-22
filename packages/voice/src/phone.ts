@@ -6,8 +6,11 @@ import { BYTES_PER_MS } from './tts.js';
 export const PHONE_LEAD_MS = 300;
 /** Audio goes to the phone in pieces of at most this long, so the lead is checked before each. */
 export const PHONE_CHUNK_MS = 40;
-/** A playback waiting on the phone that reports no progress for this long has stalled, as when iOS suspended its audio. */
-export const PHONE_STALL_MS = 3_000;
+/**
+ * A playback waiting on the phone that reports no progress for this long has stalled, as when iOS suspended its audio for good. It is longer
+ * than the page's own wait for an interrupted audio context to run again (`RECOVER_MS` in the page), so a phone that recovers keeps the voice.
+ */
+export const PHONE_STALL_MS = 8_000;
 /** Why a stalled phone loses the voice. */
 export const PHONE_STALLED = 'The phone stopped playing the voice.';
 
@@ -84,6 +87,11 @@ interface Open {
   sentMs: number;
   /** Milliseconds the phone reported heard. */
   playedMs: number;
+  /**
+   * Milliseconds the phone reported its output took, before the output's latency; the lead is counted from it, since a Bluetooth output's
+   * latency can exceed the lead, and a lead counted from what is heard would then never let more audio go.
+   */
+  outMs: number;
   done: boolean;
   /** Its end was sent, so the phone may report it done. */
   ended: boolean;
@@ -142,7 +150,7 @@ export class PhoneOutput implements Output {
   }
 
   async open(): Promise<PhonePlayback> {
-    const one: Open = { id: ++this.#next, sentMs: 0, playedMs: 0, done: false, ended: false, waitingSince: null, stopped: false, lost: null, waiting: [], drained: null };
+    const one: Open = { id: ++this.#next, sentMs: 0, playedMs: 0, outMs: 0, done: false, ended: false, waitingSince: null, stopped: false, lost: null, waiting: [], drained: null };
 
     this.#open.set(one.id, one);
     this.send({ type: 'phone-play', id: one.id });
@@ -165,7 +173,7 @@ export class PhoneOutput implements Output {
           const piece = pcm.subarray(at, at + chunk);
 
           // Hold the write while the phone holds a full lead, so a stop finds little queued there.
-          while (!one.stopped && one.sentMs - one.playedMs + piece.length / BYTES_PER_MS > PHONE_LEAD_MS) {
+          while (!one.stopped && one.sentMs - Math.max(one.playedMs, one.outMs) + piece.length / BYTES_PER_MS > PHONE_LEAD_MS) {
             this.#waiting(one);
             await new Promise<void>((resolve) => one.waiting.push(resolve));
           }
@@ -210,8 +218,11 @@ export class PhoneOutput implements Output {
     };
   }
 
-  /** The phone's report for a playback: how much of it was heard, and whether all it was sent was played after its end. */
-  played(id: number, ms: number, done: boolean): void {
+  /**
+   * The phone's report for a playback: how much of it was heard, how much its output took (`out`, before the output's latency; a page that
+   * does not say counts as having taken what was heard), and whether all it was sent was played after its end.
+   */
+  played(id: number, ms: number, done: boolean, out?: number): void {
     const one = this.#open.get(id);
 
     if (one === undefined || one.stopped) {
@@ -220,12 +231,14 @@ export class PhoneOutput implements Output {
 
     // A report never counts more than was sent, nor an end before it was sent, so a page cannot lift the lead or end a playback early.
     const heard = Math.min(ms, one.sentMs);
+    const taken = Math.min(Math.max(out ?? 0, heard), one.sentMs);
 
-    if (heard > one.playedMs && one.waitingSince !== null) {
+    if ((heard > one.playedMs || taken > one.outMs) && one.waitingSince !== null) {
       one.waitingSince = this.deps.now();
     }
 
     one.playedMs = Math.max(one.playedMs, heard);
+    one.outMs = Math.max(one.outMs, taken);
 
     if (done && one.ended) {
       one.done = true;

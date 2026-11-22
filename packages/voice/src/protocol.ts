@@ -115,8 +115,11 @@ export type HubMessage =
    * none, after the phone that had the voice left, when nothing plays or listens until the operator moves it.
    */
   | { type: 'device'; device: VoiceDevice }
-  /** The phone's report for one of its playbacks: the milliseconds heard, and `done` once everything sent before its end played. */
-  | { type: 'phone-played'; id: number; ms: number; done: boolean }
+  /**
+   * The phone's report for one of its playbacks: the milliseconds heard, the milliseconds its output took before the output's latency (`out`,
+   * absent from an older page), and `done` once everything sent before its end played.
+   */
+  | { type: 'phone-played'; id: number; ms: number; done: boolean; out?: number }
   /** The phone's microphone audio, 16 kHz mono 16-bit PCM in base64, while the process has phone capture open (Voice on a phone). */
   | { type: 'phone-mic'; pcm: string }
   /** Whether the phone's microphone cannot be heard now: no track open, the track muted (a call, Siri), or the page hidden. */
@@ -311,7 +314,13 @@ export function parseHubMessage(line: string): HubMessage | { error: string } {
     case 'device':
       return m.device === 'computer' || m.device === 'phone' || m.device === 'none' ? { type: 'device', device: m.device } : invalid;
     case 'phone-played':
-      return isGen(m.id) && typeof m.ms === 'number' && Number.isFinite(m.ms) && m.ms >= 0 && typeof m.done === 'boolean' ? { type: 'phone-played', id: m.id, ms: m.ms, done: m.done } : invalid;
+      if (m.out !== undefined && !(typeof m.out === 'number' && Number.isFinite(m.out) && m.out >= 0)) {
+        return invalid;
+      }
+
+      return isGen(m.id) && typeof m.ms === 'number' && Number.isFinite(m.ms) && m.ms >= 0 && typeof m.done === 'boolean'
+        ? { type: 'phone-played', id: m.id, ms: m.ms, done: m.done, ...(m.out === undefined ? {} : { out: m.out }) }
+        : invalid;
     case 'phone-mic':
       return isText(m.pcm) && m.pcm.length <= PHONE_MIC_MAX_BASE64 ? { type: 'phone-mic', pcm: m.pcm } : invalid;
     case 'phone-state':

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { HIDDEN_MS, MIC_CONSTRAINTS, MIC_FRAME, PING_MS, PhoneVoice, RESUME_MS } from '../src/phoneVoice.js';
+import { HIDDEN_MS, MIC_CONSTRAINTS, MIC_FRAME, PING_MS, PhoneVoice, RECOVER_MS, RESUME_MS, RESUME_RETRY_MS } from '../src/phoneVoice.js';
 import type { PhoneAudioContext, PhoneAudioNode, PhoneCaptureNode, PhoneMicStream, PhoneMicTrack } from '../src/phoneVoice.js';
 import type { PlayCommand, PlayReport } from '../src/voiceWorklet.js';
 
@@ -377,13 +377,14 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
 
     // 4800 frames at 24 kHz is 200 ms; the output's 20 ms latency is not heard yet.
     nodes[0]!.report({ type: 'played', id: 3, frames: 4_800, done: false, underruns: 0 });
-    expect(socket.sent.at(-1)).toEqual({ type: 'played', id: 3, ms: 180, done: false });
+    // What the output took goes too, as `out`, for the voice's lead.
+    expect(socket.sent.at(-1)).toEqual({ type: 'played', id: 3, ms: 180, done: false, out: 200 });
     // The end is reported once the latency passed.
     nodes[0]!.report({ type: 'played', id: 3, frames: 7_200, done: true, underruns: 1 });
-    expect(socket.sent.at(-1)).toEqual({ type: 'played', id: 3, ms: 180, done: false });
+    expect(socket.sent.at(-1)).toEqual({ type: 'played', id: 3, ms: 180, done: false, out: 200 });
     expect(timers.at(-1)!.ms).toBeCloseTo(20);
     timers.at(-1)!.run();
-    expect(socket.sent.at(-1)).toEqual({ type: 'played', id: 3, ms: 300, done: true });
+    expect(socket.sent.at(-1)).toEqual({ type: 'played', id: 3, ms: 300, done: true, out: 300 });
 
     voice.stop();
     await flush();
@@ -391,8 +392,8 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
     expect(nodes[0]!.disconnected).toBe(true);
   });
 
-  it('loses the voice when the page stays hidden or the phone takes its audio, and keeps it when the page comes back in time', async () => {
-    const { voice, sockets, contexts, timers, hide } = setup();
+  it('loses the voice when the page stays hidden or the phone takes its audio for good, and keeps it when the page comes back in time', async () => {
+    const { voice, sockets, contexts, timers, hide, advance } = setup();
 
     voice.start();
     sockets[0]!.open();
@@ -415,10 +416,52 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
     voice.start();
     sockets[1]!.open();
     sockets[1]!.message({ type: 'welcome', at: 0 });
-    contexts[1]!.change('suspended');
-    expect(voice.state).toBe('on');
+    // A call holds the audio: the page asks it back until `RECOVER_MS` passed, then the voice leaves.
     contexts[1]!.change('interrupted');
+    expect(voice.state).toBe('on');
+
+    for (let waited = 0; waited < RECOVER_MS; waited += RESUME_RETRY_MS) {
+      advance(RESUME_RETRY_MS);
+      timers.at(-1)!.run();
+    }
+
     expect([voice.state, voice.error]).toEqual(['off', 'The phone took its audio, as for a call, so the voice left this phone.']);
+    expect(sockets[1]!.closedWith).toBe(1000);
+  });
+
+  it('resumes an audio context that iOS interrupts or suspends for a route change, as Bluetooth earbuds cause, and plays on with the voice and the mic kept', async () => {
+    const { voice, sockets, contexts, nodes, timers, tracks, advance } = setup();
+    const opened = voice.micOn();
+
+    sockets[0]!.open();
+    sockets[0]!.message({ type: 'welcome', at: 0 });
+    expect(await opened).toBeNull();
+    sockets[0]!.message({ type: 'play', id: 1 });
+    await flush();
+
+    const context = contexts[0]!;
+    const resumed = context.resumed;
+
+    for (const state of ['interrupted', 'suspended']) {
+      context.change(state);
+      // Asked to resume at once, and again while it stays stopped.
+      expect(context.resumed).toBe(resumed + 1);
+      advance(RESUME_RETRY_MS);
+      timers.at(-1)!.run();
+      expect(context.resumed).toBe(resumed + 2);
+      context.resumed = resumed;
+      context.change('running');
+      // Running again ends the wait: its timer is cleared, and nothing is lost even past `RECOVER_MS`.
+      expect(timers.at(-1)!.cleared).toBe(true);
+      advance(RECOVER_MS);
+      timers.at(-1)!.run();
+      expect([voice.state, voice.error, voice.micOpen, tracks[0]!.stopped, context.closed]).toEqual(['on', null, true, false, false]);
+    }
+
+    // The same worklet plays on, reporting from where it stopped.
+    nodes[0]!.report({ type: 'played', id: 1, frames: 24_000, done: false, underruns: 1 });
+    expect(sockets[0]!.sent.at(-1)).toEqual({ type: 'played', id: 1, ms: 980, done: false, out: 1_000 });
+    expect(nodes).toHaveLength(1);
   });
 
   it('drops a report from a context it closed since, and loses the voice when the phone does not start its audio', async () => {
@@ -441,11 +484,52 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
     contexts.length = 0;
     const refusing = new FakeContext();
 
+    // A refused resume leaves the context suspended.
+    refusing.state = 'suspended';
     refusing.resume = () => Promise.reject(new Error('not allowed'));
+    const refusals: Array<() => void> = [];
+    let clock = 0;
     const failing = new PhoneVoice({
       context: () => refusing,
       node: () => new FakeNode(),
       onVisibility: () => undefined,
+      setTimer: (run) => refusals.push(run),
+      clearTimer: () => undefined,
+      key: () => 'page-9',
+      post: async () => ({ status: 200, body: {} }),
+      changed: () => undefined,
+      now: () => clock,
+      origin: () => 'https://pc.tail.ts.net',
+      socket: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+
+    failing.start();
+    await flush();
+    // It may be an interruption's refusal, so it is asked again until `RECOVER_MS` passed.
+    expect(failing.state).toBe('connecting');
+
+    while (failing.state !== 'off' && clock <= RECOVER_MS) {
+      clock += RESUME_RETRY_MS;
+      refusals.shift()!();
+    }
+
+    expect([failing.state, failing.error, clock]).toEqual(['off', 'The phone did not start its audio.', RECOVER_MS]);
+
+    // A tap's resume that an interruption, as a Bluetooth route change, makes fail is waited out, and the voice stays once the audio runs.
+    const interrupted = new FakeContext();
+    let refuse!: () => void;
+    const retries: Array<() => void> = [];
+
+    interrupted.resume = () => {
+      interrupted.resumed++;
+      return interrupted.resumed === 1 ? new Promise((_, reject) => (refuse = () => reject(new Error('interrupted')))) : Promise.resolve();
+    };
+    const kept = new PhoneVoice({
+      context: () => interrupted,
+      node: () => new FakeNode(),
+      onVisibility: () => undefined,
+      setTimer: (run) => retries.push(run),
+      clearTimer: () => undefined,
       key: () => 'page-9',
       post: async () => ({ status: 200, body: {} }),
       changed: () => undefined,
@@ -454,9 +538,55 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
       socket: (url) => new FakeSocket(url) as unknown as WebSocket,
     });
 
-    failing.start();
+    kept.start();
+    interrupted.change('interrupted');
+    refuse();
     await flush();
-    expect([failing.state, failing.error]).toEqual(['off', 'The phone did not start its audio.']);
+    expect(kept.state).toBe('connecting');
+    expect(interrupted.resumed).toBeGreaterThanOrEqual(2);
+    interrupted.change('running');
+    retries.at(-1)!();
+    expect([kept.state, kept.error]).toEqual(['connecting', null]);
+
+    // A refusal that lands after the interruption already ended keeps the context that runs; one that lands while it is still suspended, after
+    // a state change, is waited out too.
+    for (const after of ['running', 'suspended', 'suspended, unseen']) {
+      const context = new FakeContext();
+      let reject!: () => void;
+      const timers: Array<() => void> = [];
+
+      context.resume = () => {
+        context.resumed++;
+        return context.resumed === 1 ? new Promise((_, no) => (reject = () => no(new Error('interrupted')))) : Promise.resolve();
+      };
+      const voice = new PhoneVoice({
+        context: () => context,
+        node: () => new FakeNode(),
+        onVisibility: () => undefined,
+        setTimer: (run) => timers.push(run),
+        clearTimer: () => undefined,
+        key: () => 'page-9',
+        post: async () => ({ status: 200, body: {} }),
+        changed: () => undefined,
+        now: () => 0,
+        origin: () => 'https://pc.tail.ts.net',
+        socket: (url) => new FakeSocket(url) as unknown as WebSocket,
+      });
+
+      voice.start();
+
+      if (after === 'suspended, unseen') {
+        // Suspended, its state change not delivered yet when the refusal lands.
+        context.state = 'suspended';
+      } else {
+        context.change('interrupted');
+        context.change(after);
+      }
+
+      reject();
+      await flush();
+      expect([after, voice.state, voice.error]).toEqual([after, 'connecting', null]);
+    }
   });
 
   describe('the phone\'s microphone (PRD R119)', () => {
@@ -530,10 +660,22 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
       expect(sockets).toHaveLength(4);
     });
 
-    const session = { type: 'auto' };
+    /** The audio session, with each type the page set. */
+    const types: string[] = [];
+    let current = 'auto';
+    const session = {
+      get type(): string {
+        return current;
+      },
+      set type(type: string) {
+        current = type;
+        types.push(type);
+      },
+    };
 
     function withSession(): void {
-      session.type = 'auto';
+      current = 'auto';
+      types.length = 0;
       Object.defineProperty(navigator, 'audioSession', { value: session, configurable: true });
     }
 
@@ -550,6 +692,8 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
       expect(sockets).toHaveLength(1);
       expect(asked).toEqual([MIC_CONSTRAINTS]);
       expect(session.type).toBe('play-and-record');
+      // Set to record from the start, never to playback first, so iOS does not move a Bluetooth route under the voice.
+      expect(types.every((type) => type === 'play-and-record')).toBe(true);
       await flush();
       expect(captures).toEqual([]);
       sockets[0]!.open();

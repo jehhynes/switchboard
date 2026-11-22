@@ -640,11 +640,11 @@ export class VoiceControl {
   }
 
   /**
-   * A JSON message from the phone's page: `played {id, ms, done}`, the position of one of its playbacks, or `state {busy}`, whether its
+   * A JSON message from the phone's page: `played {id, ms, done, out?}`, the position of one of its playbacks, or `state {busy}`, whether its
    * microphone cannot be heard now (no track open, the track muted, the page hidden).
    */
   phoneMessage(data: Record<string, unknown>): void {
-    const { type, id, ms, done, busy } = data;
+    const { type, id, ms, done, busy, out } = data;
 
     if (this.#device === 'phone' && type === 'state' && typeof busy === 'boolean') {
       this.#phoneBusy = busy;
@@ -653,7 +653,10 @@ export class VoiceControl {
     }
 
     if (this.#device === 'phone' && type === 'played' && typeof id === 'number' && Number.isSafeInteger(id) && id >= 0 && typeof ms === 'number' && Number.isFinite(ms) && ms >= 0 && typeof done === 'boolean') {
-      this.#client?.send({ type: 'phone-played', id, ms, done });
+      // `out`, what the phone's output took before its latency, sets how far ahead the voice may send; a bad one is left out.
+      const taken = typeof out === 'number' && Number.isFinite(out) && out >= 0 ? { out } : {};
+
+      this.#client?.send({ type: 'phone-played', id, ms, done, ...taken });
     }
   }
 

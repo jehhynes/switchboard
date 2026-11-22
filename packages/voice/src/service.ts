@@ -338,7 +338,7 @@ export class VoiceService {
         this.#deviceChanged(message.device);
         return;
       case 'phone-played':
-        this.#phone.played(message.id, message.ms, message.done);
+        this.#phone.played(message.id, message.ms, message.done, message.out);
         return;
       case 'phone-mic':
         if (this.#device === 'phone') {

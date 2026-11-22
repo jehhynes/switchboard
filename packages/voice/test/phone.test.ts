@@ -128,6 +128,45 @@ describe('PhoneOutput (architecture.md § Remote access, Voice on a phone)', () 
     await drain;
   });
 
+  it('counts the lead from what the phone\'s output took, so an output latency longer than the lead, as Bluetooth earbuds have, never holds the write', async () => {
+    const clock = new Clock();
+    const stalls: string[] = [];
+    const sent: VoiceMessage[] = [];
+    const phone = new PhoneOutput({ send: (message) => sent.push(message), now: clock.now, every: clock.every, stalled: (why) => stalls.push(why) });
+    const playback = await phone.open();
+    const pcmMs = () => sent.filter((one) => one.type === 'phone-pcm').reduce((sum, one) => sum + Buffer.from((one as { pcm: string }).pcm, 'base64').length / BYTES_PER_MS, 0);
+    const latency = 400;
+    let written = false;
+    const write = playback.write(MS(3_000)).then(() => (written = true));
+
+    // The phone's output takes all it was sent; what is heard trails it by the latency.
+    for (let round = 0; round < 200 && !written; round++) {
+      await settle();
+      clock.advance(40);
+
+      const out = pcmMs();
+
+      phone.played(1, Math.max(0, out - latency), false, out);
+    }
+
+    await write;
+    expect([written, stalls]).toEqual([true, []]);
+    expect(pcmMs()).toBe(3_000);
+    // The position is still what was heard.
+    expect(playback.position()).toBe(3_000 - latency);
+
+    // A page that does not say what its output took counts as having taken what was heard.
+    const older = await phone.open();
+    const held = older.write(MS(1_000));
+
+    await settle();
+    phone.played(2, 100, false);
+    await settle();
+    expect(older.position()).toBe(100);
+    older.stop();
+    await held;
+  });
+
   it('fails every playback and says so when the phone stops reporting while a write or the end waits on it', async () => {
     const clock = new Clock();
     const stalls: string[] = [];
@@ -163,6 +202,8 @@ describe('PhoneOutput (architecture.md § Remote access, Voice on a phone)', () 
     expect(parseHubMessage('{"type":"device","device":"phone"}')).toEqual({ type: 'device', device: 'phone' });
     expect(parseHubMessage('{"type":"device","device":"tablet"}')).toEqual({ error: 'Invalid device message.' });
     expect(parseHubMessage('{"type":"phone-played","id":3,"ms":120.5,"done":false}')).toEqual({ type: 'phone-played', id: 3, ms: 120.5, done: false });
+    expect(parseHubMessage('{"type":"phone-played","id":3,"ms":120.5,"done":false,"out":420.5}')).toEqual({ type: 'phone-played', id: 3, ms: 120.5, done: false, out: 420.5 });
+    expect(parseHubMessage('{"type":"phone-played","id":3,"ms":120.5,"done":false,"out":-1}')).toHaveProperty('error');
     expect(parseHubMessage('{"type":"phone-played","id":3,"ms":-1,"done":false}')).toHaveProperty('error');
     expect(parseHubMessage('{"type":"phone-played","id":"3","ms":1,"done":false}')).toHaveProperty('error');
   });

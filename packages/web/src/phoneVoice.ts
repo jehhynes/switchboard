@@ -11,6 +11,14 @@ type Answer = { status: number; body: Record<string, unknown> };
 
 /** A hidden page loses the voice after this long, since iOS soon suspends it and stops its audio (PRD R119). */
 export const HIDDEN_MS = 3_000;
+/**
+ * How long an interrupted or suspended audio context may take to run again before the voice leaves this phone. iOS interrupts or suspends
+ * the page's audio briefly when the route changes, as Bluetooth earbuds move between playback and play-and-record; a call or Siri keeps it
+ * longer. It is shorter than the voice's own stall limit (`PHONE_STALL_MS`), so a phone that recovers keeps the voice and the mic.
+ */
+export const RECOVER_MS = 5_000;
+/** How often the page asks an interrupted or suspended audio context to resume while it waits. */
+export const RESUME_RETRY_MS = 500;
 /** The first byte of the hub's binary frame of a playback's PCM, as `PHONE_PCM_FRAME` in the hub. */
 const PCM_FRAME = 1;
 /** The first byte of the page's binary frame of its microphone's PCM, as `PHONE_MIC_FRAME` in the hub. */
@@ -115,6 +123,8 @@ export class PhoneVoice {
   /** The playback node once its worklet loaded; commands wait for it in order. */
   #node: Promise<PhoneAudioNode | null> = Promise.resolve(null);
   #hiddenTimer: unknown = null;
+  /** While the audio context is interrupted or suspended: since when, and the next resume's timer. */
+  #recovering: { since: number; timer: unknown; why: string } | null = null;
   /** The microphone while Mic on holds it, and its capture node once connected. */
   #mic: { stream: PhoneMicStream; track: PhoneMicTrack; node: PhoneCaptureNode | null } | null = null;
   /** Rises at each microphone open and release, so a late open after a release keeps nothing. */
@@ -170,28 +180,44 @@ export class PhoneVoice {
 
   /**
    * The phone's speaker, opened in the tap, as iOS requires: the audio context resumed in the tap's own call, the audio session set to
-   * playback, and the playback worklet loaded.
+   * playback, or to play and record when the tap is Mic on's, so the session's mode never changes under a playback, and the playback worklet
+   * loaded.
    */
-  #openAudio(origin: string): void {
+  #openAudio(origin: string, record: boolean): void {
     const context = this.deps.context?.() ?? (new AudioContext({ latencyHint: 'interactive' }) as unknown as PhoneAudioContext);
     const session = (navigator as Navigator & { audioSession?: { type: string } }).audioSession;
 
     if (session !== undefined) {
-      session.type = 'playback';
+      session.type = record ? 'play-and-record' : 'playback';
     }
 
     this.#context = context;
     this.#resumedAt = null;
     this.#workletAt = null;
     void context.resume().then(() => void (this.#context === context && (this.#resumedAt = this.deps.now()))).catch(() => {
-      if (this.#context === context) {
-        this.#lose('The phone did not start its audio.');
+      if (this.#context !== context) {
+        return;
+      }
+
+      // A route change or a call that interrupts the tap's resume is waited out as any interruption is, and a context that runs since is
+      // kept; one that never runs loses the voice once the wait is over, saying the phone did not start its audio.
+      if (context.state === 'running') {
+        this.#resumedAt ??= this.deps.now();
+      } else {
+        this.#recover(context, 'The phone did not start its audio.');
       }
     });
     context.onstatechange = () => {
-      // iOS interrupts the page's audio for a call or Siri: the voice leaves the phone, as when it is lost.
-      if (this.#context === context && context.state === 'interrupted') {
-        this.#lose('The phone took its audio, as for a call, so the voice left this phone.');
+      if (this.#context !== context) {
+        return;
+      }
+
+      // iOS interrupts or suspends the page's audio when the route changes, as Bluetooth earbuds do, and for a call or Siri: the page resumes
+      // it and the worklet plays on from where it stopped; only one that stays stopped loses the voice.
+      if (context.state === 'running') {
+        this.#clearRecovering();
+      } else if (context.state === 'interrupted' || context.state === 'suspended') {
+        this.#recover(context);
       }
     };
     this.#node = context.audioWorklet.addModule(`${origin}/page/voice-worklet.js`).then(
@@ -218,7 +244,51 @@ export class PhoneVoice {
     );
   }
 
-  /** The worklet's report, sent to the hub as heard time: what it played less the output's latency, and the end once that latency passed. */
+  /**
+   * Asks a stopped audio context to resume, again every {@link RESUME_RETRY_MS}, and loses the voice once it stayed stopped for
+   * {@link RECOVER_MS}, as when a call holds the phone's audio.
+   */
+  #recover(context: PhoneAudioContext, why = 'The phone took its audio, as for a call, so the voice left this phone.'): void {
+    const recovering = (this.#recovering ??= { since: this.deps.now(), timer: null, why });
+
+    void context.resume().catch(() => undefined);
+
+    if (recovering.timer !== null) {
+      return;
+    }
+
+    recovering.timer = (this.deps.setTimer ?? ((run, ms) => setTimeout(run, ms)))(() => {
+      recovering.timer = null;
+
+      if (this.#context !== context || this.#recovering !== recovering) {
+        return;
+      }
+
+      if (context.state === 'running') {
+        this.#clearRecovering();
+      } else if (this.deps.now() - recovering.since >= RECOVER_MS) {
+        this.#lose(recovering.why);
+      } else {
+        this.#recover(context);
+      }
+    }, RESUME_RETRY_MS);
+  }
+
+  #clearRecovering(): void {
+    const recovering = this.#recovering;
+
+    this.#recovering = null;
+
+    if (recovering?.timer != null) {
+      (this.deps.clearTimer ?? ((timer) => clearTimeout(timer as ReturnType<typeof setTimeout>)))(recovering.timer);
+    }
+  }
+
+  /**
+   * The worklet's report, sent to the hub as heard time: what it played less the output's latency, and the end once that latency passed. It
+   * also says what the output took (`out`), from which the voice counts how far ahead it may send, since a Bluetooth output's latency can be
+   * longer than that lead.
+   */
   #played(context: PhoneAudioContext, report: PlayReport): void {
     // A report of a context the page closed since belongs to no playback of the socket open now.
     if (this.#context !== context) {
@@ -230,7 +300,7 @@ export class PhoneVoice {
     const socket = this.#socket;
     const send = (): void => {
       if (this.#socket === socket && this.#context === context && socket !== null) {
-        socket.send(JSON.stringify({ type: 'played', id: report.id, ms: report.done ? ms : Math.max(0, ms - latencyMs), done: report.done }));
+        socket.send(JSON.stringify({ type: 'played', id: report.id, ms: report.done ? ms : Math.max(0, ms - latencyMs), done: report.done, out: ms }));
       }
     };
 
@@ -262,6 +332,11 @@ export class PhoneVoice {
 
   /** Opens the voice socket. Called from the tap that asks for the voice, where iOS lets audio start. */
   start(): void {
+    this.#start(false);
+  }
+
+  /** Opens the voice socket, with the audio session ready to record when `record`, for Mic on's tap. */
+  #start(record: boolean): void {
     const key = this.deps.key();
 
     if (this.state !== 'off' || key === null) {
@@ -270,7 +345,7 @@ export class PhoneVoice {
 
     const origin = this.deps.origin?.() ?? location.origin;
 
-    this.#openAudio(origin);
+    this.#openAudio(origin, record);
     this.#welcome = deferred();
     this.#connect(origin, key, false);
   }
@@ -454,7 +529,7 @@ export class PhoneVoice {
     const opened = this.state === 'off';
 
     if (opened) {
-      this.start();
+      this.#start(true);
     }
 
     const welcome = this.#welcome;
@@ -680,6 +755,7 @@ export class PhoneVoice {
     }
 
     this.#clearHidden();
+    this.#clearRecovering();
 
     const context = this.#context;
 
