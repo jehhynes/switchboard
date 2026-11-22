@@ -772,10 +772,15 @@ describe('unread replies and statuses', () => {
     root.innerHTML = renderConversation(shown, new Set(), T0, false, on('status'));
     expect([...root.querySelectorAll<HTMLElement>('[data-unread]')].map((one) => one.dataset['unread'])).toEqual(['st1']);
     expect(root.querySelector('.status-tab')?.getAttribute('aria-label')).toBe('Status, unread');
+    // The Status tab has the unread dot, not a New badge, from any tab.
+    expect(root.querySelector('[data-tab="status"] .unread-dot')?.getAttribute('title')).toBe('Unread');
+    expect(root.querySelector('[data-tab="status"]')?.getAttribute('aria-label')).toBe('Status, unread');
+    expect(root.querySelector('[data-tab="status"] .tab-badge')).toBeNull();
 
     root.innerHTML = renderConversation(state([], { status: status('stage-2', { fallback: true, unread: true }) }), new Set(), T0, false, on('status'));
     expect(root.querySelector('[data-unread]')).toBeNull();
     expect(root.querySelector('.tab-badge')).toBeNull();
+    expect(root.querySelector('.unread-dot')).toBeNull();
   });
 
   it('reports each unread item seen once it was visible in a focused window for a second, leaving those outside the timeline unread', () => {
@@ -1781,17 +1786,24 @@ describe('the Status tab', () => {
     expect(root.querySelector('.status-body table')).not.toBeNull();
     expect(root.querySelector('[data-action="status-open"]')).not.toBeNull();
     expect(root.querySelector('[data-action="statuses"]')).not.toBeNull();
-    expect(root.querySelector('.status-new')).toBeNull();
+    expect(root.querySelector('.status-head .unread-dot')).toBeNull();
     expect(root.querySelector('.timeline')).toBeNull();
 
     root.innerHTML = renderConversation(state({ status: status('st-1', 'x') }), new Set(), T0, true, on('status'));
-    expect(root.querySelector('.status-new')?.textContent).toBe('New');
-    expect(root.querySelector('[data-tab="status"] .tab-badge')?.textContent).toBe('New');
+    expect(root.querySelector('.status-head .unread-dot')?.getAttribute('aria-label')).toBe('Updated');
+    expect(root.querySelector('.status-head')?.textContent).not.toContain('New');
+    expect(root.querySelector('[data-tab="status"] .unread-dot')?.getAttribute('aria-label')).toBe('Updated');
+    expect(root.querySelector('[data-tab="status"]')?.getAttribute('aria-label')).toBe('Status, updated');
+    expect(root.querySelector('[data-tab="status"] .tab-badge')).toBeNull();
+    // A New status that is also unread is named Unread, on the tab and in its head.
+    root.innerHTML = renderConversation(state({ status: status('st-1', 'x', { unread: true }) }), new Set(), T0, true, on('status'));
+    expect(root.querySelector('.status-head .unread-dot')?.getAttribute('aria-label')).toBe('Unread');
+    expect(root.querySelector('[data-tab="status"]')?.getAttribute('aria-label')).toBe('Status, unread');
 
     // Not on the Conversation tab any more.
     root.innerHTML = renderConversation(state({ status: status('st-1', 'x') }), new Set(), T0, true);
     expect(root.querySelector('.status-tab')).toBeNull();
-    expect(root.querySelector('[data-tab="status"] .tab-badge')?.textContent).toBe('New');
+    expect(root.querySelector('[data-tab="status"] .unread-dot')?.getAttribute('aria-label')).toBe('Updated');
 
     // The stage stands in, dimmed, with nothing to open; with neither, a line says so.
     root.innerHTML = renderConversation(state({ status: status('stage-2', 'Reading the inbox code', { fallback: true }) }), new Set(), T0, false, on('status'));
@@ -1812,7 +1824,7 @@ describe('the Status tab', () => {
     let kept: unknown = null;
     const vscode = { postMessage: (message: { type: string }) => posted.push(message), getState: () => kept, setState: (next: unknown) => void (kept = next) };
     const show = (patch: Partial<ConversationState>) => window.dispatchEvent(new MessageEvent('message', { data: { type: 'state', state: state(patch) } }));
-    const badge = () => root.querySelector('[data-tab="status"] .tab-badge')?.textContent ?? null;
+    const badge = () => root.querySelector('[data-tab="status"] .unread-dot')?.getAttribute('aria-label') ?? null;
 
     document.body.replaceChildren(root, live);
     startConversation(root, live, vscode);
@@ -1821,41 +1833,41 @@ describe('the Status tab', () => {
 
     // The first status after the stage, and each that replaces it, is New; on another tab it stays New, however long.
     show({ status: status('st-1', 'First.') });
-    expect(badge()).toBe('New');
+    expect(badge()).toBe('Updated');
     expect(live.textContent).toBe('New status: First.');
     vi.advanceTimersByTime(5 * STATUS_NEW_MS);
-    expect(badge()).toBe('New');
+    expect(badge()).toBe('Updated');
 
     // Shown on the Status tab, it is New for a minute.
     root.querySelector<HTMLElement>('[role="tab"][data-tab="status"]')!.click();
-    expect(root.querySelector('.status-new')).not.toBeNull();
+    expect(root.querySelector('.status-head .unread-dot')).not.toBeNull();
     expect(root.querySelector('.status-age')?.textContent).toBe('5 min ago');
     vi.advanceTimersByTime(STATUS_NEW_MS - 1);
-    expect(root.querySelector('.status-new')).not.toBeNull();
+    expect(root.querySelector('.status-head .unread-dot')).not.toBeNull();
     vi.advanceTimersByTime(1);
-    expect(root.querySelector('.status-new')).toBeNull();
+    expect(root.querySelector('.status-head .unread-dot')).toBeNull();
     expect(badge()).toBeNull();
     vi.advanceTimersByTime(3 * 60_000);
     expect(root.querySelector('.status-age')?.textContent).toBe('9 min ago');
 
-    // An unread status keeps the badge after its New mark.
+    // An unread status keeps the tab's dot after its New mark.
     show({ status: status('st-1', 'First.', { unread: true }) });
-    expect(root.querySelector('.status-new')).toBeNull();
-    expect(badge()).toBe('New');
+    expect(root.querySelector('.status-head .unread-dot')).toBeNull();
+    expect(badge()).toBe('Unread');
 
     show({ status: status('st-2', '## Second') });
-    expect(root.querySelector('.status-new')).not.toBeNull();
+    expect(root.querySelector('.status-head .unread-dot')).not.toBeNull();
     // A redraw with the same status keeps the mark; opening it in the preview clears it.
     show({ status: status('st-2', '## Second') });
-    expect(root.querySelector('.status-new')).not.toBeNull();
+    expect(root.querySelector('.status-head .unread-dot')).not.toBeNull();
     root.querySelector<HTMLElement>('[data-action="status-open"]')!.click();
-    expect(root.querySelector('.status-new')).toBeNull();
+    expect(root.querySelector('.status-head .unread-dot')).toBeNull();
     root.querySelector<HTMLElement>('[data-action="statuses"]')!.click();
     expect(posted.filter((message) => message.type.startsWith('status'))).toEqual([{ type: 'status-open', statusId: null }, { type: 'statuses', id: expect.any(Number), before: 'st-2' }]);
 
     // Another session's first status is not New.
     show({ scope: { ...SCOPE, sessionId: 's5' }, session: { ...SESSION, id: 's5' }, status: status('st-5', 'Other.', { sessionId: 's5' }) });
-    expect(root.querySelector('.status-new')).toBeNull();
+    expect(root.querySelector('.status-head .unread-dot')).toBeNull();
     vi.useRealTimers();
   });
 
@@ -1878,9 +1890,9 @@ describe('the Status tab', () => {
     vi.advanceTimersByTime(5 * STATUS_NEW_MS);
     hidden = false;
     document.dispatchEvent(new Event('visibilitychange'));
-    expect(root.querySelector('.status-new')).not.toBeNull();
+    expect(root.querySelector('.status-head .unread-dot')).not.toBeNull();
     vi.advanceTimersByTime(STATUS_NEW_MS);
-    expect(root.querySelector('.status-new')).toBeNull();
+    expect(root.querySelector('.status-head .unread-dot')).toBeNull();
     expect(root.querySelector('.status-tab')?.getAttribute('role')).toBe('region');
     vi.restoreAllMocks();
     vi.useRealTimers();

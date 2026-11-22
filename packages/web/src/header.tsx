@@ -125,7 +125,7 @@ function ConversationLabel({ entry, state, unread = false }: { entry: Entry; sta
     <>
       <Codicon {...icon} />
       <span class="title">{entry.title}</span>
-      {unread ? <span class="unread-dot" role="img" title="Unread replies or status" aria-label="Unread replies or status"></span> : null}
+      {unread ? <UnreadDot label="Unread replies or status" /> : null}
       {trusted(providerMark(selected ? (state.session?.provider ?? entry.provider) : entry.provider))}
     </>
   );
@@ -302,14 +302,19 @@ export function renderHeader(state: PageState, view: View): VNode {
   );
 }
 
-/** A tab, drawn alike in the strip and in the side column's switch. */
-function TabButton({ selected, label, badge, attrs }: { selected: boolean; label: string; badge: string; attrs: Record<string, string> }) {
+/** A tab, drawn alike in the strip and in the side column's switch, with the unread dot ([Unread](architecture.md § Unread)) while `unread`. */
+function TabButton({ selected, label, unread = false, attrs }: { selected: boolean; label: string; unread?: boolean; attrs: Record<string, string> }) {
   return (
     <button class={`tab${selected ? ' selected' : ''}`} type="button" role="tab" {...attrs} aria-selected={selected} tabindex={selected ? 0 : -1}>
       {label}
-      {badge === '' ? null : <span class="tab-badge">{badge}</span>}
+      {unread ? <UnreadDot /> : null}
     </button>
   );
+}
+
+/** The unread mark's dot (architecture.md § Unread), named for a screen reader and on hover. */
+export function UnreadDot({ label = 'Unread' }: { label?: string }) {
+  return <span class="unread-dot" role="img" title={label} aria-label={label}></span>;
 }
 
 /** What a strip's artifact tabs show: the open artifact while one shows, how many tabs fit, whether the Artifacts menu is open, and the time for its ages. */
@@ -381,16 +386,16 @@ function artifactTabs(state: PageState, strip: ArtifactStrip): ComponentChildren
  */
 export function renderSideSwitch(side: SideTab, state: PageState, browser = false, strip: ArtifactStrip = { open: null, fit: 0, menu: false, now: 0 }, extra: ComponentChildren = null, console = true): VNode {
   const fresh = state.status?.unread === true;
-  const tabs: Array<[SideTab, string, string]> = [
-    ['status', 'Status', fresh ? 'New' : ''],
-    ...(console ? [['console', 'Console', ''] as [SideTab, string, string]] : []),
-    ...(browser ? [['browser', 'Browser', ''] as [SideTab, string, string]] : []),
+  const tabs: Array<[SideTab, string, boolean]> = [
+    ['status', 'Status', fresh],
+    ...(console ? [['console', 'Console', false] as [SideTab, string, boolean]] : []),
+    ...(browser ? [['browser', 'Browser', false] as [SideTab, string, boolean]] : []),
   ];
 
   return (
     <nav class="tabs side-switch" role="tablist" aria-label={['Status', ...(console ? ['console'] : []), ...(browser ? ['browser'] : [])].join(', ') + ' and artifacts'}>
-      {tabs.map(([tab, label, badge]) => (
-        <TabButton selected={tab === side} label={label} badge={badge} attrs={{ 'data-side': tab }} />
+      {tabs.map(([tab, label, unread]) => (
+        <TabButton selected={tab === side} label={label} unread={unread} attrs={{ 'data-side': tab }} />
       ))}
       {artifactTabs(state, { ...strip, open: side === 'artifacts' ? strip.open : null, fit: strip.fit })}
       {extra}
@@ -412,13 +417,12 @@ export function renderMaximize(maximized: boolean): VNode {
 /** The conversation's tab strip on a narrower screen: Conversation, Status, Console and Browser, each while it has something to show, then a tab per artifact as in the column, and `extra`, as the Changes button. */
 export function renderTabs(view: View, state: PageState, browser = false, strip: ArtifactStrip = { open: null, fit: 0, menu: false, now: 0 }, extra: ComponentChildren = null, console = true): VNode {
   const fresh = state.status?.unread === true;
-  // As in the VS Code view: Status has its New badge; the page shows no unread counts.
-  const badges: Record<Tab, string> = { conversation: '', status: fresh ? 'New' : '', artifacts: '', console: '', browser: '', diff: '', file: '' };
+  // As in the VS Code view, Status has the unread dot while its status is unread; the page shows no unread counts.
 
   return (
     <nav class="tabs" role="tablist">
       {TABS.filter(({ tab }) => tab !== 'artifacts' && (browser || tab !== 'browser') && (console || tab !== 'console')).map(({ tab, label }) => (
-        <TabButton selected={tab === view.tab} label={label} badge={badges[tab]} attrs={{ 'data-tab': tab }} />
+        <TabButton selected={tab === view.tab} label={label} unread={tab === 'status' && fresh} attrs={{ 'data-tab': tab }} />
       ))}
       {artifactTabs(state, { ...strip, open: view.tab === 'artifacts' ? strip.open : null })}
       {extra}

@@ -7,7 +7,7 @@ import { parseQuestions, resolveAnswers } from '@switchboard/conversation/questi
 import { artifactUrl, BROWSER_MIN_WIDTH, browserNote, paneLink, paneStatus, collapsedGroups, newView, renderMicButton, renderVoice, markdownBody } from '../src/render.js';
 import { renderArtifactView, renderStatus } from '../src/side.js';
 import { backgroundRow, renderTimeline, turnRow } from '../src/timeline.js';
-import { renderHeader } from '../src/header.js';
+import { renderHeader, renderSideSwitch, renderTabs } from '../src/header.js';
 import { renderList } from '../src/list.js';
 import { html } from './html.js';
 import { REPLAY_TIP, SPEAKING_TIP, renderMicButton as viewMicButton } from '@switchboard/conversation/voiceControls';
@@ -132,6 +132,42 @@ describe('question cards in replies', () => {
     expect(host.querySelectorAll('.status-body ol > li')).toHaveLength(1);
     expect(host.querySelector('.question-card')).toBeNull();
     expect(host.querySelector('.questions-fold')).toBeNull();
+  });
+
+  it('marks an unread status with the unread dot, not a New label, on the Status tab in the strip and the column and in its head', () => {
+    const host = document.createElement('div');
+    const unread = { ...pageState([]), status: { id: 'st-1', sessionId: 's', at: 1, markdown: 'Built.', fallback: false, unread: true } };
+    const seen = { ...unread, status: { ...unread.status, unread: false } };
+    const dot = (markup: string, selector: string) => {
+      host.innerHTML = markup;
+      return host.querySelector(selector);
+    };
+
+    for (const [markup, tab] of [[html(renderTabs(newView(), unread)), '[data-tab="status"]'], [html(renderSideSwitch('console', unread)), '[data-side="status"]']] as const) {
+      const shown = dot(markup, `${tab} .unread-dot`);
+
+      expect(shown?.getAttribute('role')).toBe('img');
+      expect(shown?.getAttribute('aria-label')).toBe('Unread');
+      expect(shown?.getAttribute('title')).toBe('Unread');
+      expect(host.querySelector(tab)?.textContent).toBe('Status');
+      expect(host.querySelector('.tab-badge')).toBeNull();
+    }
+    expect(dot(html(renderStatus(unread, 2)), '.status-head .unread-dot')?.getAttribute('aria-label')).toBe('Unread');
+    expect(host.querySelector('.status-head')?.textContent).not.toContain('New');
+
+    // A seen status has none.
+    expect(dot(html(renderTabs(newView(), seen)), '.unread-dot')).toBeNull();
+    expect(dot(html(renderSideSwitch('console', seen)), '.unread-dot')).toBeNull();
+    expect(dot(html(renderStatus(seen, 2)), '.unread-dot')).toBeNull();
+  });
+
+  it("draws a tab's unread dot over its end padding and the dropdown's dot alike, so the dot leaves the tab's width as it was", () => {
+    const page = readFileSync(join(__dirname, '../src/page.css'), 'utf8');
+    const picker = readFileSync(createRequire(import.meta.url).resolve('@switchboard/conversation/picker.css'), 'utf8');
+
+    expect(page).toContain('.tab > .unread-dot { position: absolute;');
+    expect(page).not.toContain('.status-new');
+    expect(picker).toMatch(/^\.unread-dot \{[^}]*width: 7px; height: 7px; border-radius: 50%; background: var\(--vscode-activityBarBadge-background\);/m);
   });
 
   it('leaves a card answerable under a provisional message queued before the reply, and answered by one queued after it', () => {

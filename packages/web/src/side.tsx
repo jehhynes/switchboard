@@ -5,12 +5,13 @@ import { artifactIcon } from './model.js';
 import type { PageState } from './model.js';
 import { renderMarkdown } from './markdown.js';
 import { stripQuestionMarkup } from '@switchboard/conversation/questions';
+import { UnreadDot } from './header.js';
 import { ago, artifactShow, artifactUrl } from './render.js';
 import { trusted } from './trusted.js';
 import type { ArtifactView, StatusView } from '@switchboard/protocol';
 
 /**
- * The Status tab: the latest status as Markdown with its time and age and a New mark while unread, or the stage dimmed. Questions in a status are
+ * The Status tab: the latest status as Markdown with its time and age and the unread dot while unread, or the stage dimmed. Questions in a status are
  * plain Markdown; question cards show only in the conversation.
  */
 export function renderStatus(state: PageState, now: number): VNode {
@@ -28,7 +29,7 @@ export function renderStatus(state: PageState, now: number): VNode {
         <span class="status-age">
           {trusted(stampTime(status.at))} · {ago(status.at, now)}
         </span>
-        {status.unread ? <span class="status-new">New</span> : null}
+        {status.unread ? <UnreadDot /> : null}
       </div>
       <div class="status-body body">{trusted(renderMarkdown(stripQuestionMarkup(status.markdown)))}</div>
     </div>

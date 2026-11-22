@@ -388,6 +388,8 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 .tab .tab-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tab-open .tab-label { flex: 1 1 auto; }
 .tab .codicon { flex: none; font-size: 14px; }
+/* A tab's unread dot sits in its end padding, level with the label's top, so it changes neither the tab's width nor where its label sits. */
+.tab > .unread-dot { position: absolute; top: 10px; right: 4px; }
 /* A file's type icon (fileIcons.tsx): its Seti character at 150% of the text, centred in a 16-pixel box, as VS Code's Explorer and tabs draw it. */
 .file-icon { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; }
 .file-icon::before { font-family: seti; font-size: 150%; font-style: normal; font-weight: normal; line-height: 1; -webkit-font-smoothing: antialiased; }
@@ -415,6 +417,7 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 @media (hover: none), (pointer: coarse) { .tab.artifact-menu-button, .tab.changes-button { min-width: 44px; justify-content: center; } }
 @container (max-width: 360px) {
   .tab { padding: 0 9px; }
+  .tab > .unread-dot { top: 8px; right: 0; }
   .tab.artifact-menu-button, .tab.changes-button { padding: 0 8px; }
 }
 .artifact-menu .menu-row.in-bar .title { color: var(--vscode-descriptionForeground); }
@@ -515,7 +518,6 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 .status-head { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
 .status-label { font-weight: 500; }
 .status-age { color: var(--vscode-descriptionForeground); font-size: 0.92em; }
-.status-new { box-sizing: border-box; height: 16px; padding: 0 6px; border-radius: 8px; font-size: 11px; line-height: 16px; color: var(--vscode-activityBarBadge-foreground); background: var(--vscode-activityBarBadge-background); }
 .status-tab.unread .codicon-pulse { color: var(--vscode-activityBarBadge-background); }
 .status-tab.fallback .status-body { color: var(--vscode-descriptionForeground); }
 .artifact-list { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 4px; }

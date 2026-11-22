@@ -356,14 +356,19 @@ function age(at: number, now: number, className: string): string {
   return `<time class="${className} age" data-at="${at}" datetime="${new Date(at).toISOString()}">${ago(at, now)}</time>`;
 }
 
-/** Whether the Status tab's badge shows: the latest status is New, or unread (architecture.md § Unread); never the stage. */
-export function statusBadge(status: StatusView | null, fresh: boolean): boolean {
-  return status !== null && !status.fallback && (fresh || status.unread);
+/** The Status tab's dot, named for a screen reader: Unread while the latest status is unread (architecture.md § Unread), else Updated while it is `fresh`; never for the stage. */
+export function statusDot(status: StatusView | null, fresh: boolean): 'Unread' | 'Updated' | null {
+  return status === null || status.fallback ? null : status.unread ? 'Unread' : fresh ? 'Updated' : null;
+}
+
+/** The unread mark's dot (architecture.md § Unread), named for a screen reader and on hover. */
+function unreadDot(label: string): string {
+  return `<span class="unread-dot" role="img" title="${escape(label)}" aria-label="${escape(label)}"></span>`;
 }
 
 /**
- * The Status tab (architecture.md § Statuses): the session's latest status as Markdown under a line with its time, how long ago, a New mark while
- * `fresh`, and the buttons that open it and the earlier statuses in the Markdown preview. Before the first status, the work item's stage, dimmed;
+ * The Status tab (architecture.md § Statuses): the session's latest status as Markdown under a line with its time, how long ago, the unread dot
+ * while `fresh`, and the buttons that open it and the earlier statuses in the Markdown preview. Before the first status, the work item's stage, dimmed;
  * with neither, a line that says so.
  */
 export function renderStatus(status: StatusView | null, fresh: boolean, now: number, earlier: EarlierStatuses | null = null): string {
@@ -379,7 +384,7 @@ export function renderStatus(status: StatusView | null, fresh: boolean, now: num
     );
   }
 
-  const mark = fresh ? '<span class="status-new">New</span>' : '';
+  const mark = fresh ? unreadDot(status.unread ? 'Unread' : 'Updated') : '';
   const actions =
     '<span class="status-actions"><button class="icon" type="button" data-action="status-open" title="Open in the Markdown preview" aria-label="Open the status in the Markdown preview"><span class="codicon codicon-open-preview" aria-hidden="true"></span></button>' +
     `<span class="menu-anchor"><button class="icon${earlier === null ? '' : ' pressed'}" type="button" data-action="statuses" title="Earlier statuses" aria-label="Earlier statuses" aria-haspopup="menu" aria-expanded="${earlier !== null}"><span class="codicon codicon-history" aria-hidden="true"></span></button>${earlierStatuses(earlier)}</span></span>`;
@@ -446,11 +451,11 @@ export function renderArtifacts(artifacts: readonly ArtifactView[], unopened: Re
   return `<ul class="artifact-list" aria-label="Artifacts">${rows.join('')}</ul>`;
 }
 
-/** The tab strip, as VS Code's panel tabs: the selected tab underlined; Status with a New badge, Artifacts with the count of new or changed ones. */
-function renderTabs(selected: Tab, badges: Record<Tab, string>): string {
+/** The tab strip, as VS Code's panel tabs: the selected tab underlined; Status with the unread dot named `dot`, Artifacts with the count of new or changed ones. */
+function renderTabs(selected: Tab, dot: string | null, unopened: number): string {
   const tabs = TABS.map(({ tab, label }) => {
-    const badge = badges[tab] === '' ? '' : `<span class="tab-badge">${escape(badges[tab])}</span>`;
-    const name = badges[tab] === '' ? label : `${label}, ${tab === 'status' ? 'new status' : `${badges[tab]} new or changed`}`;
+    const badge = tab === 'status' && dot !== null ? unreadDot(dot) : tab === 'artifacts' && unopened > 0 ? `<span class="tab-badge">${unopened}</span>` : '';
+    const name = tab === 'status' && dot !== null ? `${label}, ${dot.toLowerCase()}` : tab === 'artifacts' && unopened > 0 ? `${label}, ${unopened} new or changed` : label;
 
     return `<button class="tab${tab === selected ? ' selected' : ''}" type="button" role="tab" id="tab-${tab}" data-tab="${tab}" aria-selected="${tab === selected}" aria-controls="panel" aria-label="${escape(name)}" tabindex="${tab === selected ? 0 : -1}"><span class="tab-label">${label}</span>${badge}</button>`;
   });
@@ -731,7 +736,7 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
   const body = state.session === null ? '<p class="empty">No session yet. Messages appear here once the work item\'s session starts.</p>' : entries.length === 0 && spinner === '' && requests === '' ? '<p class="empty">No messages yet. They appear here when you or the session write one.</p>' : `<ol class="timeline" tabindex="0" aria-label="Conversation">${entries.join('')}${requests}${spinner}</ol>`;
 
   const unopened = state.artifacts.filter((artifact) => page.unopened.has(artifact.path)).length;
-  const tabs = renderTabs(page.tab, { conversation: '', status: statusBadge(state.status, fresh) ? 'New' : '', artifacts: unopened === 0 ? '' : String(unopened) });
+  const tabs = renderTabs(page.tab, statusDot(state.status, fresh), unopened);
   const status = state.status;
   // Each tab's panel, and each conversation's, is its own node, so a redraw keeps its scroll position and another tab or conversation starts afresh.
   const shownKey = `${state.scope.scopeGen}-${state.session?.id ?? ''}`;
