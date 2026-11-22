@@ -570,11 +570,20 @@ body.artifact-window > .artifact-view { height: 100%; }
   .composer-input { font-size: 16px; }
   input:not([type="checkbox"], [type="radio"], [type="file"]), textarea, select { font-size: 16px !important; }
 }
+/* Where a short screen hides a phone's composer off the Conversation tab (below), the conversation keeps the home indicator's inset. */
+@media (max-width: 600px) and (height < 800px) {
+  #root.off-conversation:not(:has(#composer:focus-within, #composer .composer-error:not([hidden]))) > .main { padding-bottom: env(safe-area-inset-bottom); }
+}
 /* A narrow screen gives the conversation its width: less padding round the timeline and the composer, and wider bubbles. */
 @media (max-width: 600px) {
   .scroll { padding: 12px 12px 12px; }
-  #composer { padding: 0 12px 12px; }
-  #note { padding: 0 12px; }
+  /* On a phone the composer is as wide as the screen and sits on its bottom edge, the home indicator's inset inside it, and the notes above
+     it share its edges. */
+  #composer, #note { padding: 0; }
+  #composer .composer { border-width: 1px 0 0; border-radius: 0; box-shadow: none; padding-bottom: env(safe-area-inset-bottom); }
+  .main:has(#composer:not([hidden])) { padding-bottom: 0; }
+  .session-note, .composer-error { border-left: none; border-right: none; border-radius: 0; }
+  .composer-sent { padding: 0 12px; }
   .message .bubble { max-width: 92%; }
 }
 

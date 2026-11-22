@@ -3418,8 +3418,10 @@ describe("the list's CSS", () => {
 
     // Every height under 800 px, a zoomed 799.5 px included, and no width condition.
     expect(css).toContain(`@media (height < 800px) {\n  ${rule} #note, ${rule} #composer { display: none; }\n}`);
-    // Nothing else hides them by that class, so taller screens keep the composer on every tab.
-    expect(css.match(/off-conversation/g)).toHaveLength(2);
+    // Nothing else hides them by that class, so taller screens keep the composer on every tab; the class's one other use gives a phone's
+    // conversation back the home indicator's inset the hidden composer held.
+    expect(css.match(/off-conversation/g)).toHaveLength(3);
+    expect(css).toContain(`${rule} > .main { padding-bottom: env(safe-area-inset-bottom); }`);
   });
 
   it('puts Status and Artifacts beside the conversation only where #root.wide says they fit, never on a phone', () => {
