@@ -231,7 +231,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /** Whether the Console tab shows: an active session, not ended, that the terminal holder may hold; otherwise its console would be blank, so there is no tab. */
   const showConsole = (): boolean => hasConsole(state.session);
   /** The tab the conversation's pane shows: always the conversation while Status and Artifacts have their own column, and never a Browser tab that is gone. */
-  const mainTab = (): Tab => (wide() || (view.tab === 'browser' && !showBrowser()) || (view.tab === 'artifacts' && openArtifact() === null) || (view.tab === 'diff' && changes.view.open === null) ? 'conversation' : view.tab === 'console' && !showConsole() ? 'status' : view.tab);
+  const mainTab = (): Tab => (wide() || (view.tab === 'browser' && !showBrowser()) || (view.tab === 'artifacts' && openArtifact() === null) || (view.tab === 'diff' && !changes.view.tab) ? 'conversation' : view.tab === 'console' && !showConsole() ? 'status' : view.tab);
   /** The work item whose tabs were last chosen on its opening, and whether the operator has chosen a tab since. */
   let openedItem: number | null = null;
   let tabChosen = false;
@@ -283,7 +283,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const workItemId = state.scope?.workItemId ?? null;
     const shown = wide() ? sideTab() : mainTab();
 
-    // A diff tab lasts as long as the page shows the work item, so it is not kept.
+    // The Changes tab lasts as long as the page shows the work item, so it is not kept.
     if (workItemId === null || shown === 'conversation' || shown === 'diff') {
       return;
     }
@@ -317,7 +317,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     void post('page-tabs', closed ? { workItemId, close: { path, updatedAt: artifact.updatedAt } } : { workItemId, reopen: path });
   };
   /** What the column right of the conversation shows: Status in place of a Browser tab that is gone. */
-  const sideTab = (): SideTab => ((view.side === 'browser' && !showBrowser()) || (view.side === 'console' && !showConsole()) || (view.side === 'artifacts' && openArtifact() === null) || (view.side === 'diff' && changes.view.open === null) ? 'status' : view.side);
+  const sideTab = (): SideTab => ((view.side === 'browser' && !showBrowser()) || (view.side === 'console' && !showConsole()) || (view.side === 'artifacts' && openArtifact() === null) || (view.side === 'diff' && !changes.view.tab) ? 'status' : view.side);
   /** The artifact whose tab is chosen, while the work item still has it; artifacts have no list of their own, only a tab each and a menu. */
   function openArtifact(): string | null {
     return view.artifact !== null && state.artifacts.some((one) => one.path === view.artifact) ? view.artifact : null;

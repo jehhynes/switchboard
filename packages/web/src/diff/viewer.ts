@@ -152,7 +152,7 @@ export function placeholderPatch(row: Pick<ChangesRowInput, 'path' | 'from' | 's
 }
 
 /** What a row's drawn item is: its diff, a placeholder or a note; the view marks its element so the page's CSS can draw it so. */
-export type ItemKind = { kind: 'diff' } | { kind: 'placeholder'; row: ChangesRowInput } | { kind: 'note'; row: ChangesRowInput };
+export type ItemKind = { kind: 'diff'; path: string } | { kind: 'placeholder'; path: string; row: ChangesRowInput } | { kind: 'note'; path: string; row: ChangesRowInput };
 
 /** The items the view draws, by their metadata, so the header callbacks and the post-render hook know which row and kind each is. */
 export const kinds = new WeakMap<FileDiffMetadata, ItemKind>();
@@ -180,7 +180,7 @@ export function syntheticItem(row: ChangesRowInput, kind: 'placeholder' | 'note'
     fileDiff.prevName = row.from;
   }
 
-  kinds.set(fileDiff, { kind, row });
+  kinds.set(fileDiff, { kind, path: row.path, row });
   return { id: row.path, type: 'diff', version, fileDiff };
 }
 
@@ -285,7 +285,7 @@ export function mountChanges(host: HTMLElement, rows: ChangesRowInput[], mount: 
   const optionsFor = (layout: 'split' | 'stacked', wrap: boolean): CodeViewOptions<undefined, undefined> =>
     ({
       ...options(layout, wrap),
-      unsafeCSS: CHANGES_CSS,
+      unsafeCSS: BACKGROUND_CSS + CHANGES_CSS,
       loadDiffFiles: async (fileDiff: FileDiffMetadata) => {
         const path = [...items.values()].find((item) => item.fileDiff === fileDiff)?.id ?? (items.has(fileDiff.name) ? fileDiff.name : undefined);
         const data = path === undefined ? null : await mount.loadSides(path);
@@ -300,6 +300,11 @@ export function mountChanges(host: HTMLElement, rows: ChangesRowInput[], mount: 
         return fileDiff.type === 'rename-pure' ? { oldFile: null, newFile } : { oldFile: { name: data.from ?? data.path, contents: lf(data.old ?? '', data.patch) }, newFile };
       },
       renderHeaderFilenameSuffix: headerSuffix,
+      renderHeaderMetadata: (fileDiff: FileDiffMetadata) => {
+        const path = kinds.get(fileDiff)?.path;
+
+        return path === undefined ? null : (mount.headerMeta?.(path) ?? null);
+      },
       onPostRender: (node: HTMLElement, instance: { fileDiff?: FileDiffMetadata }) => {
         const kind = instance.fileDiff === undefined ? undefined : kinds.get(instance.fileDiff);
 
@@ -361,7 +366,7 @@ export function mountChanges(host: HTMLElement, rows: ChangesRowInput[], mount: 
         const read = diffItem(content.data, `${path} ${version}`) as CodeViewDiffItem<undefined> | null;
 
         if (read !== null) {
-          kinds.set(read.fileDiff, { kind: 'diff' });
+          kinds.set(read.fileDiff, { kind: 'diff', path });
         }
 
         item = read === null ? syntheticItem(row, 'note', "git's patch for this file could not be read.", 1, version) : { ...read, id: path, version };

@@ -16,6 +16,7 @@
 .changes-head button.icon { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: none; border-radius: 4px; background: transparent; color: var(--vscode-foreground); cursor: pointer; }
 .changes-head button.icon:hover { background: var(--vscode-toolbar-hoverBackground); }
 .changes-head button.icon:disabled { cursor: default; opacity: 0.6; }
+.changes-head button.icon[aria-pressed="true"] { background: var(--vscode-toolbar-activeBackground, var(--vscode-toolbar-hoverBackground)); }
 /* The work item's Open in VS Code, the header's own, beside Refresh. */
 .changes-open { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 4px; background: var(--vscode-button-secondaryBackground, transparent); color: var(--vscode-button-secondaryForeground, var(--vscode-foreground)); font: inherit; font-size: 12px; cursor: pointer; }
 .changes-open:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground)); }
@@ -38,20 +39,16 @@
 .changes-empty { margin: 0; padding: 8px; color: var(--vscode-descriptionForeground); white-space: normal; }
 .changes-empty.error { color: var(--vscode-errorForeground); }
 @media (hover: none), (pointer: coarse) { .change-row { height: 44px; } .changes-head button.icon { width: 44px; height: 44px; } .changes-open { height: 44px; } }
-/* A file's diff tab, drawn as an artifact's: its name in its status colour, cut with an ellipsis, and a close mark. */
+/* The Changes tab, drawn as an artifact's tab: its name, how many files are viewed of all, and a close mark. */
 .tab.diff-tab { box-sizing: border-box; max-width: 200px; padding: 0 6px 0 0; }
 .tab.diff-tab .tab-label { overflow: hidden; text-overflow: ellipsis; }
-.tab.diff-tab.status-A .tab-label, .tab.diff-tab.status-U .tab-label { color: var(--sb-git-added); }
-.tab.diff-tab.status-M .tab-label { color: var(--sb-git-modified); }
-.tab.diff-tab.status-D .tab-label { color: var(--sb-git-deleted); text-decoration: line-through; }
-.tab.diff-tab.status-R .tab-label { color: var(--sb-git-renamed); }
-.tab.diff-tab.status-C .tab-label { color: var(--sb-git-conflict); }
 .changes-rows button.change-row { width: 100%; border: none; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .changes-rows button.change-row:hover, .changes-rows button.change-row:focus-visible { background: var(--vscode-list-hoverBackground); outline: none; }
-/* The diff tab's pane: the diff viewer alone, which scrolls itself, in VS Code's editor font and diff editor colours; each file's own header
-   names it and holds the page's controls for it (.diff-slot). */
+/* The Changes tab's pane: the diff viewer alone, which scrolls itself, in VS Code's editor font and diff editor colours; each file's own header
+   names it and holds the page's controls for it (.diff-slot). A file view lies over the diffs, so they keep their place for Back. */
 .diff-pane { padding: 0 !important; overflow: hidden !important; }
-.diff-view { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.diff-view { position: relative; display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.file-overlay { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; background: var(--vscode-editor-background); }
 .diff-slot { display: inline-flex; align-items: center; gap: 6px; font-family: var(--vscode-font-family); }
 .diff-from { color: var(--vscode-descriptionForeground); }
 .diff-at { font-family: var(--diffs-font-family); }
@@ -79,5 +76,6 @@
 .change-viewed { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 28px; cursor: pointer; }
 .change-viewed input, .diff-viewed input { margin: 0; accent-color: var(--vscode-focusBorder); cursor: pointer; }
 .change-item.viewed .change-name, .change-item.viewed .change-dir { opacity: 0.6; }
-.diff-viewed { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+/* Pierre stops pointer events on its headers while the view scrolls; the tick takes them still, so a tap just after a fling lands. */
+.diff-viewed { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; pointer-events: auto; }
 @media (hover: none), (pointer: coarse) { .change-viewed { width: 44px; height: 44px; } .change-viewed input, .diff-viewed input { width: 20px; height: 20px; } }

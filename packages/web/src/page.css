@@ -340,12 +340,13 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 .tab.artifact-menu-button.open { color: var(--vscode-panelTitle-activeForeground); background: var(--sb-tab-surface); }
 .tab-badge.muted { color: var(--vscode-badge-foreground); background: var(--vscode-badge-background); }
 /* The strip never wraps. Narrower than 600 px it keeps its own tabs whole and shows Artifacts and Changes as their icons with their counts, each
-   still opening its list; a diff tab other than the one shown is reached from the Changes list there. Under 360 px its tabs' padding shrinks. */
+   still opening its list, and the Changes tab as its icon and close mark, only while chosen, the Changes list opening it. Under 360 px its tabs'
+   padding shrinks. */
 @container (max-width: 600px) {
-  .tab.artifact-menu-button .tab-label, .tab.artifact-menu-button .codicon-chevron-down, .tab.changes-button .tab-label, .tab.changes-button .codicon-chevron-down { display: none; }
+  .tab.artifact-menu-button .tab-label, .tab.artifact-menu-button .codicon-chevron-down, .tab.changes-button .tab-label, .tab.changes-button .codicon-chevron-down, .tab.diff-tab .tab-label, .tab.diff-tab .tab-badge { display: none; }
   .tab.artifact-menu-button, .tab.changes-button { padding: 0 10px; }
   .tab.diff-tab:not(.selected) { display: none; }
-  .tab.diff-tab.selected { flex: 0 1 auto; min-width: 0; border-left: 1px solid var(--vscode-panel-border); }
+  .tab.diff-tab.selected { flex: none; border-left: 1px solid var(--vscode-panel-border); }
   .tab.diff-tab.selected, .tab.changes-button { margin-left: auto; }
   .tab.diff-tab.selected ~ .tab.changes-button, .artifact-more ~ .tab.diff-tab.selected, .artifact-more ~ .tab.changes-button { margin-left: 0; }
 }

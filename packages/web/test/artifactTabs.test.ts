@@ -99,10 +99,12 @@ describe('the tab strip on a narrow screen', () => {
   const css = PAGE_ASSETS['page.css']!.body;
   const narrow = /@container \(max-width: 600px\) \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
 
-  it('never wraps, and under 600 px shows Artifacts and Changes as their icons and counts, with the shown diff tab only', () => {
+  it('never wraps, and under 600 px shows Artifacts, Changes and the Changes tab as their icons and counts, the tab only while chosen', () => {
     // A size container is a stacking context: the strip stands above the pane after it, so the Artifacts menu inside it does too.
     expect(css).toMatch(/\.tabs \{ position: relative; z-index: 3; display: flex; flex-wrap: nowrap; container-type: inline-size;/);
-    expect(narrow).toContain('.tab.artifact-menu-button .tab-label, .tab.artifact-menu-button .codicon-chevron-down, .tab.changes-button .tab-label, .tab.changes-button .codicon-chevron-down { display: none; }');
+    expect(narrow).toContain('.tab.artifact-menu-button .tab-label, .tab.artifact-menu-button .codicon-chevron-down, .tab.changes-button .tab-label, .tab.changes-button .codicon-chevron-down, .tab.diff-tab .tab-label, .tab.diff-tab .tab-badge { display: none; }');
+    // The Changes tab keeps its icon and close mark whole.
+    expect(narrow).toContain('.tab.diff-tab.selected { flex: none;');
     expect(narrow).toContain('.tab.diff-tab:not(.selected) { display: none; }');
     // Conversation, Status, Console and Browser are never hidden.
     expect(narrow).not.toMatch(/\.tab(\[data-tab|\.selected|:not\(\.diff-tab)[^{]*\{[^}]*display: none/);
@@ -114,7 +116,7 @@ describe('the tab strip on a narrow screen', () => {
     const state = { ...EMPTY, artifacts: eight };
 
     expect(html(renderTabs(newView(), state, false, { open: null, fit: 1, menu: false, now: 0 }))).toContain('aria-label="Artifacts, 7 more"');
-    expect(html(changesButton(newChanges()))).toContain('aria-label="Changes"');
-    expect(html(changesButton({ ...newChanges(), list: { total: 3, rows: [] } as never }))).toContain('aria-label="Changes, 3 files"');
+    expect(html(changesButton(newChanges()))).toContain('aria-label="Changes list"');
+    expect(html(changesButton({ ...newChanges(), list: { total: 3, rows: [] } as never }))).toContain('aria-label="Changes list, 3 files"');
   });
 });

@@ -1,15 +1,16 @@
-// The Changes list and the diff tabs (PRD R118, architecture.md § Web page): the open conversation's worktree changes from its merge base to
-// disk, as the VS Code window's Open changes shows them, in a menu from the Changes button at the end of the tab strips; each file opens in a
-// closable tab of its own, drawn by the diff viewer the page loads on first use.
+// The Changes list and the Changes tab (PRD R118, architecture.md § Web page): the open conversation's worktree changes from its merge base to
+// disk, as the VS Code window's Open changes shows them, in a menu from the Changes button at the end of the tab strips, and every changed file's
+// diff in one scrolling Changes tab, drawn by the diff viewer the page loads on first use, which reads only the files near the view.
 import type { ComponentChildren, VNode } from 'preact';
+import { DIFF_BUDGET, evictions, MAX_IN_FLIGHT, rowKey, wantedIndexes } from './changesWindow.js';
 import { FileIcon } from './fileIcons.js';
-import { mount, unmount } from './island.js';
+import { mount } from './island.js';
 import type { ChangeRow, ChangesList, ChangeStage, ChangeStatus, DiffData, FileData } from '@switchboard/protocol';
-import type { DiffModule, DiffMount } from './diff/types.js';
+import type { ChangesMount, DiffModule, DiffMount, RowContent } from './diff/types.js';
 
 export type { ChangeRow, ChangesList, ChangeStage, ChangeStatus } from '@switchboard/protocol';
 
-/** What the page keeps of the Changes list: the list as last read, a read on its way or why one failed, and whether its menu is open. */
+/** What the page keeps of the Changes list: the list as last read, a read on its way or why one failed, whether its menu is open, and the Changes tab. */
 export interface ChangesView {
   list: ChangesList | null;
   loading: boolean;
@@ -17,12 +18,13 @@ export interface ChangesView {
   menu: boolean;
   /** The conversation the list was read for: the page key, scope generation and work item. */
   for: string | null;
-  /** The files with a tab, in the order they opened, and the one the diff tab shows. */
-  tabs: string[];
-  open: string | null;
+  /** Whether the Changes tab is open. */
+  tab: boolean;
+  /** Whether the Changes tab leaves out the files ticked viewed. */
+  hideViewed: boolean;
 }
 
-export const newChanges = (): ChangesView => ({ list: null, loading: false, error: null, menu: false, for: null, tabs: [], open: null });
+export const newChanges = (): ChangesView => ({ list: null, loading: false, error: null, menu: false, for: null, tab: false, hideViewed: false });
 
 /** Where the diff's sides go: side by side, one above the other, or by the pane's width (`auto`, stacked and wrapped under {@link SPLIT_MIN_WIDTH}). */
 export type DiffLayout = 'auto' | 'split' | 'stacked';
@@ -52,27 +54,32 @@ export function rowTitle(row: ChangeRow): string {
 /** A file's name, the last part of its path. */
 const baseName = (path: string): string => path.slice(path.lastIndexOf('/') + 1);
 
-/**
- * The diff tabs, one per file opened from the list, each with its status colour and a close button, as an artifact's tab is drawn; `shown` is
- * whether the strip shows the diff tab now, so the open file's tab is selected.
- */
-export function diffTabs(changes: ChangesView, shown: boolean): ComponentChildren {
-  return changes.tabs.map((path) => {
-    const selected = shown && path === changes.open;
-    const row = changes.list?.rows.find((one) => one.path === path);
+/** How many files are ticked viewed, and the lines added and deleted over every row. */
+function totals(list: ChangesList): { viewed: number; additions: number; deletions: number } {
+  return list.rows.reduce((sum, row) => ({ viewed: sum.viewed + (row.viewed === true ? 1 : 0), additions: sum.additions + (row.additions ?? 0), deletions: sum.deletions + (row.deletions ?? 0) }), { viewed: 0, additions: 0, deletions: 0 });
+}
 
-    return (
-      <span class={`tab diff-tab${path === changes.tabs[0] ? ' push' : ''}${selected ? ' selected' : ''}${row === undefined ? '' : ` status-${row.status}`}`} role="presentation">
-        <button class="tab-open" type="button" role="tab" data-action="diff-tab" data-path={path} aria-selected={selected} tabindex={selected ? 0 : -1} title={row === undefined ? path : rowTitle(row)}>
-          <FileIcon path={path} />
-          <span class="tab-label">{baseName(path)}</span>
-        </button>
-        <button class="tab-close" type="button" data-action="diff-close" data-path={path} aria-label={`Close ${baseName(path)}`} title="Close" tabindex={selected ? 0 : -1}>
-          <span class="codicon codicon-close" aria-hidden="true"></span>
-        </button>
-      </span>
-    );
-  });
+/** The Changes tab, after the strip's other tabs and before the Changes button, with how many files are viewed of all and a close mark; `shown` is whether the strip shows it now. */
+export function diffTabs(changes: ChangesView, shown: boolean): ComponentChildren {
+  if (!changes.tab) {
+    return null;
+  }
+
+  const list = changes.list;
+  const progress = list === null ? null : `${totals(list).viewed}/${list.total}`;
+
+  return (
+    <span class={`tab diff-tab push${shown ? ' selected' : ''}`} role="presentation">
+      <button class="tab-open" type="button" role="tab" data-action="diff-tab" aria-selected={shown} tabindex={shown ? 0 : -1} title="Every changed file's diff" aria-label={progress === null ? 'Changes' : `Changes, ${progress} viewed`}>
+        <span class="codicon codicon-diff-multiple" aria-hidden="true"></span>
+        <span class="tab-label">Changes</span>
+        {progress === null ? null : <span class="tab-badge muted">{progress}</span>}
+      </button>
+      <button class="tab-close" type="button" data-action="diff-close" aria-label="Close Changes" title="Close" tabindex={shown ? 0 : -1}>
+        <span class="codicon codicon-close" aria-hidden="true"></span>
+      </button>
+    </span>
+  );
 }
 
 /** The Changes button, after the strip's tabs, with the count once a list was read. */
@@ -80,7 +87,7 @@ export function changesButton(changes: ChangesView): VNode {
   const count = changes.list?.total;
 
   return (
-    <button class={`tab changes-button${changes.tabs.length === 0 ? ' push' : ''}${changes.menu ? ' open' : ''}`} type="button" data-action="changes-menu" aria-expanded={changes.menu} aria-label={count === undefined ? 'Changes' : `Changes, ${count} files`} title="The worktree's changes since its base">
+    <button class={`tab changes-button${changes.tab ? '' : ' push'}${changes.menu ? ' open' : ''}`} type="button" data-action="changes-menu" aria-expanded={changes.menu} aria-label={count === undefined ? 'Changes list' : `Changes list, ${count} files`} title="The worktree's changes since its base">
       <span class="codicon codicon-diff-multiple" aria-hidden="true"></span>
       <span class="tab-label">Changes</span>
       {count === undefined ? null : <span class="tab-badge muted">{count}</span>}
@@ -102,7 +109,6 @@ function Counts({ row }: { row: ChangeRow }) {
   );
 }
 
-/** One row: the file's name, its folder, the lines added and deleted, and its status letter, as VS Code's Source Control draws a change. */
 /** A file's Viewed tick, as on a pull request: ticked at the content it had, cleared when that changes. */
 function ViewedBox({ row }: { row: ChangeRow }): VNode {
   return (
@@ -133,20 +139,33 @@ function Row({ row }: { row: ChangeRow }): VNode {
   );
 }
 
-/** What the menu says above its rows: since which base, how many files, and a first cut when the worktree has more than the hub lists. */
+/** What the menu says above its rows: how many files, the lines added and deleted, how many are viewed, and a first cut when the worktree has more than the hub lists. */
 export function listNote(list: ChangesList): string {
-  const since = list.base === null ? 'Uncommitted changes only, no merge base' : `Since ${list.base.slice(0, 7)}`;
   const files = list.total === 1 ? '1 file' : `${list.total} files`;
-
-  const viewed = list.rows.filter((row) => row.viewed === true).length;
+  const { viewed, additions, deletions } = totals(list);
   const ticked = viewed === 0 ? '' : ` · ${viewed} viewed`;
+  const lines = ` · +${additions} −${deletions}`;
 
-  return list.shown < list.total ? `${since} · first ${list.shown} of ${files}${ticked}` : `${since} · ${files}${ticked}`;
+  return list.shown < list.total ? `first ${list.shown} of ${files}${lines}${ticked}` : `${files}${lines}${ticked}`;
+}
+
+/** The menu note's tooltip: since which base. */
+export function listBase(list: ChangesList): string {
+  return list.base === null ? 'Uncommitted changes only, no merge base' : `Since ${list.base.slice(0, 7)}`;
+}
+
+/** A header button of the Changes menu: a codicon with its name as tooltip. */
+function HeadButton({ action, icon, label, pressed, disabled }: { action: string; icon: string; label: string; pressed?: boolean; disabled?: boolean }): VNode {
+  return (
+    <button class="icon" type="button" data-action={action} title={label} aria-label={label} aria-pressed={pressed} disabled={disabled}>
+      <span class={`codicon codicon-${icon}`} aria-hidden="true"></span>
+    </button>
+  );
 }
 
 /**
- * The Changes menu while open, under the strip: its note, Open in VS Code for the work item's window while its row offers it, and Refresh, then
- * the rows, or why there are none.
+ * The Changes menu while open, under the strip: its note, Hide viewed, Collapse all, Expand all, Open in VS Code for the work item's window
+ * while its row offers it, and Refresh, then the rows, or why there are none.
  */
 export function renderChangesMenu(changes: ChangesView, openInVsCode = false): VNode | null {
   if (!changes.menu) {
@@ -172,10 +191,17 @@ export function renderChangesMenu(changes: ChangesView, openInVsCode = false): V
     );
   }
 
+  const empty = list === null || list.rows.length === 0;
+
   return (
     <div class="glass changes-menu">
       <div class="changes-head">
-        <span class="changes-note">{list === null ? 'Changes' : listNote(list)}</span>
+        <span class="changes-note" title={list === null ? undefined : listBase(list)}>
+          {list === null ? 'Changes' : listNote(list)}
+        </span>
+        <HeadButton action="changes-hide-viewed" icon={changes.hideViewed ? 'eye-closed' : 'eye'} label={changes.hideViewed ? 'Show viewed files' : 'Hide viewed files'} pressed={changes.hideViewed} disabled={empty} />
+        <HeadButton action="changes-collapse-all" icon="collapse-all" label="Collapse all" disabled={empty} />
+        <HeadButton action="changes-expand-all" icon="expand-all" label="Expand all" disabled={empty} />
         {openInVsCode ? (
           <button class="changes-open" type="button" data-action="row-command" data-label="Open in VS Code" title="Open the worktree in its VS Code window">
             <span class="codicon codicon-vscode" aria-hidden="true"></span>
@@ -196,13 +222,13 @@ export interface ChangesDeps {
   /** The page key, null before the stream's hello. */
   key(): string | null;
   draw(): void;
-  /** Shows the diff tab, in the side column on a wide screen and in the conversation's strip on a narrower one. */
+  /** Shows the Changes tab, in the side column on a wide screen and in the conversation's strip on a narrower one. */
   showDiff(): void;
-  /** The last diff tab closed while it showed: the strip shows another tab. */
+  /** The Changes tab closed while it showed: the strip shows another tab. */
   closedDiff(): void;
   /** Loads the diff viewer's module on first use; null when it cannot load. */
   loadDiff(): Promise<DiffModule | null>;
-  /** Empties a pane Preact drew into, before the diff tab draws into it itself. */
+  /** Empties a pane Preact drew into, before the Changes tab draws into it itself. */
   takePane(pane: HTMLElement): void;
   /** The work item the page shows, which a `viewed` event must name. */
   workItemId(): number | null;
@@ -212,7 +238,7 @@ export interface ChangesDeps {
   diffSettings(): { layout: DiffLayout; wrap: DiffWrap };
 }
 
-/** A diff tab's file view: the file at a line, on disk or at the base, opened from a line number of its diff. */
+/** The Changes tab's file view: a file at a line, on disk or at the base, opened from a line number of its diff. */
 interface FileOpen {
   path: string;
   side: 'disk' | 'base';
@@ -236,26 +262,7 @@ export function fileNote(entry: FileOpen['entry']): string | null {
 /** A file's diff as read: on its way, read, or why not. */
 type DiffEntry = { state: 'loading' } | { state: 'ok'; data: DiffData; version: string } | { state: 'error'; error: string };
 
-/** What a diff's own file header carries after its counts: the file's Viewed tick, while it is one of the change rows. */
-function DiffTools({ row }: { row: ChangeRow | undefined }): VNode | null {
-  return row === undefined ? null : (
-    <label class="diff-viewed" title={row.viewed === true ? 'Viewed; untick to read it again' : 'Mark viewed'}>
-      <input type="checkbox" data-action="diff-viewed" data-path={row.path} checked={row.viewed === true} />
-      Viewed
-    </label>
-  );
-}
-
-/** The file view's way back to the diff, before the file's name in its header and after what the view says in place of the file. */
-function BackButton(): VNode {
-  return (
-    <button class="diff-back" type="button" data-action="diff-back" title="Back to the diff" aria-label="Back to the diff">
-      <span class="codicon codicon-arrow-left" aria-hidden="true"></span>
-    </button>
-  );
-}
-
-/** What the diff tab says in place of a diff: a binary file, one too large, a read on its way or why it failed. */
+/** What the Changes tab says in place of a file's diff: a binary file, one too large, a read on its way or why it failed. */
 export function diffNote(entry: DiffEntry | undefined): string | null {
   if (entry === undefined || entry.state === 'loading') {
     return 'Reading the diff…';
@@ -272,43 +279,96 @@ export function diffNote(entry: DiffEntry | undefined): string | null {
   return entry.data.tooLarge === 'patch' || entry.data.patch === null ? 'This change is too large to show here. Open it in VS Code.' : null;
 }
 
-/** The page's side of the Changes list: reads it from the hub, and answers the clicks and presses that open, refresh and close its menu. */
+/** A file's diff the Changes tab holds: what it was read for, its ETag, how many characters it holds and whether its sides were read too. */
+interface Held {
+  key: string;
+  etag: string | null;
+  content: RowContent;
+  chars: number;
+  hydrated: boolean;
+}
+
+/** What the viewer draws a row's header and placeholder from, so a change to any of it draws the row again. */
+function rowShape(row: ChangeRow): string {
+  return JSON.stringify([row.path, row.from ?? null, row.status, row.additions, row.deletions, row.binary]);
+}
+
+/** The file view's way back to the diffs, before the file's name in its header and before what the view says in place of the file. */
+function BackButton(): VNode {
+  return (
+    <button class="diff-back" type="button" data-action="diff-back" title="Back to the diffs" aria-label="Back to the diffs">
+      <span class="codicon codicon-arrow-left" aria-hidden="true"></span>
+    </button>
+  );
+}
+
+/** What a file's own header carries after its counts: its Viewed tick. */
+function DiffTools({ row }: { row: ChangeRow | undefined }): VNode | null {
+  return row === undefined ? null : (
+    <label class="diff-viewed" title={row.viewed === true ? 'Viewed; untick to read it again' : 'Mark viewed'}>
+      <input type="checkbox" data-action="diff-viewed" data-path={row.path} checked={row.viewed === true} />
+      Viewed
+    </label>
+  );
+}
+
+/** An element the viewer puts in a file's own header. */
+function slot(): HTMLElement {
+  const element = document.createElement('span');
+
+  element.className = 'diff-slot';
+  return element;
+}
+
+/** The page's side of the Changes list and tab: reads them from the hub, and answers the clicks and presses on the list, its menu and the tab. */
 export class ChangesController {
   readonly view: ChangesView = newChanges();
   #reading = 0;
-  /** Each opened file's diff as read, by path, dropped with the list. */
-  readonly #diffs = new Map<string, DiffEntry>();
-  #diffReads = 0;
-  /** The diff viewer on each host it draws into, dropped once its host leaves the page. */
-  readonly #mounted = new Map<HTMLElement, { mount: DiffMount | null; layout: string }>();
+  /** Bumped when the page leaves the conversation, so an answer read for the one it left is dropped. */
+  #generation = 0;
   #module: Promise<DiffModule | null> | null = null;
-  /** Each diff tab's file view while it shows one, by the tab's path. */
-  readonly #files = new Map<string, FileOpen>();
-  /** The elements the viewer puts in a file's own header, by the diff view they belong to: after the counts, before the name and after it. */
-  readonly #slots = new WeakMap<HTMLElement, { meta: HTMLElement; prefix: HTMLElement; suffix: HTMLElement }>();
+  /** The Changes tab's viewer and the host it draws into, null before the module loads or once its host left the page. */
+  #mount: { host: HTMLElement; mount: ChangesMount; layout: string; paths: string[] } | null = null;
+  /** Each held file's diff, by path. */
+  readonly #held = new Map<string, Held>();
+  /** The reads on their way, by path, with the key each was asked for. */
+  readonly #inFlight = new Map<string, string>();
+  /** The keys a read failed for, retried once the list is read again. */
+  readonly #failed = new Set<string>();
+  /** The file to bring to the top once the viewer has mounted. */
+  #jump: string | null = null;
+  #collapsed = new Set<string>();
+  #file: FileOpen | null = null;
+  /** The pane the Changes tab drew into, watched so Auto follows a pane resized past 900 px without a redraw. */
+  #resize: ResizeObserver | null = null;
+  readonly #watched = new WeakSet<HTMLElement>();
+  #fileMount: { host: HTMLElement; mount: DiffMount | null } | null = null;
+  /** Each file's header element the viewer shows after its counts, by path, drawn again on every draw. */
+  readonly #metas = new Map<string, HTMLElement>();
 
   constructor(private readonly deps: ChangesDeps) {}
 
   /**
-   * Follows the page's conversation: `id` names it (page key, scope generation, work item), so another one drops the list and closes the menu;
-   * `turnEnded` reads an open menu's list again when the session's turn ends.
+   * Follows the page's conversation: `id` names it (page key, scope generation, work item), so another one drops the list, its diffs and the
+   * Changes tab; `turnEnded` reads the list again when the session's turn ends while the menu or the tab is open.
    */
   follow(id: string | null, turnEnded: boolean): void {
     if (id !== this.view.for) {
       this.#reading++;
-      this.#diffReads++;
-      this.#diffs.clear();
-      this.#files.clear();
+      this.#generation++;
+      this.#held.clear();
+      this.#inFlight.clear();
+      this.#failed.clear();
+      this.#collapsed.clear();
+      this.#jump = null;
+      this.#file = null;
+      this.#unmount();
       Object.assign(this.view, newChanges(), { for: id });
       return;
     }
 
-    if (turnEnded && this.view.menu) {
+    if (turnEnded && (this.view.menu || this.view.tab)) {
       void this.refresh();
-    }
-
-    if (turnEnded && this.view.open !== null) {
-      void this.readDiff(this.view.open);
     }
   }
 
@@ -347,11 +407,58 @@ export class ChangesController {
 
     this.view.loading = false;
     this.view.error = error;
-    this.view.list = list ?? this.view.list;
+
+    if (list !== null) {
+      this.view.list = list;
+      this.#failed.clear();
+      this.#syncRows();
+    }
+
     this.deps.draw();
   }
 
-  /** Handles a click on the Changes button or in its menu; false for any other click. */
+  /** The rows the Changes tab shows, in the list's order: all, or those not ticked viewed. */
+  #rows(): ChangeRow[] {
+    const rows = this.view.list?.rows ?? [];
+
+    return this.view.hideViewed ? rows.filter((row) => row.viewed !== true) : rows;
+  }
+
+  /** Gives the viewer the rows shown now, drops held diffs of rows that went, and reads what the view wants. */
+  #syncRows(): void {
+    const rows = this.#rows();
+    const paths = new Set(this.view.list?.rows.map((row) => row.path) ?? []);
+
+    for (const path of [...this.#held.keys()].filter((one) => !paths.has(one))) {
+      this.#held.delete(path);
+    }
+
+    const mounted = this.#mount;
+
+    if (mounted !== null) {
+      const next = rows.map(rowShape);
+      const before = new Map(mounted.paths.map((shape) => [JSON.parse(shape)[0] as string, shape]));
+
+      if (next.join('\u0000') !== mounted.paths.join('\u0000')) {
+        mounted.paths = next;
+        mounted.mount.setRows(rows);
+
+        for (const [index, row] of rows.entries()) {
+          const held = this.#held.get(row.path);
+
+          // A row shown again draws what is held for it, and its collapse; a row whose header data changed gets a placeholder drawn from it.
+          if (before.get(row.path) !== next[index]) {
+            mounted.mount.setRow(row.path, held?.content ?? null);
+            mounted.mount.setCollapsed(row.path, this.#collapsed.has(row.path));
+          }
+        }
+      }
+    }
+
+    this.#pump();
+  }
+
+  /** Handles a click on the Changes button, its menu or the Changes tab; false for any other click. */
   click(target: HTMLElement): boolean {
     const action = target.closest<HTMLElement>('[data-action]')?.dataset['action'];
 
@@ -368,11 +475,21 @@ export class ChangesController {
 
     if (action === 'changes-refresh') {
       void this.refresh();
+      return true;
+    }
 
-      if (this.view.open !== null) {
-        void this.readDiff(this.view.open);
-      }
+    if (action === 'changes-hide-viewed') {
+      this.view.hideViewed = !this.view.hideViewed;
+      this.#syncRows();
+      this.deps.draw();
+      return true;
+    }
 
+    if (action === 'changes-collapse-all' || action === 'changes-expand-all') {
+      const collapse = action === 'changes-collapse-all';
+
+      this.#collapsed = collapse ? new Set(this.view.list?.rows.map((row) => row.path)) : new Set();
+      this.#rows().forEach((row) => this.#mount?.mount.setCollapsed(row.path, collapse));
       return true;
     }
 
@@ -384,13 +501,18 @@ export class ChangesController {
 
     const path = target.closest<HTMLElement>('[data-path]')?.dataset['path'];
 
-    if ((action === 'diff-open' || action === 'diff-tab') && path !== undefined) {
-      this.openDiff(path);
+    if (action === 'diff-open' && path !== undefined) {
+      this.openChanges(path);
       return true;
     }
 
-    if (action === 'diff-close' && path !== undefined) {
-      this.closeDiff(path);
+    if (action === 'diff-tab') {
+      this.openChanges(null);
+      return true;
+    }
+
+    if (action === 'diff-close') {
+      this.closeChanges();
       return true;
     }
 
@@ -399,8 +521,8 @@ export class ChangesController {
       return true;
     }
 
-    if (action === 'diff-back' && this.view.open !== null) {
-      this.#files.delete(this.view.open);
+    if (action === 'diff-back') {
+      this.#file = null;
       this.deps.draw();
       return true;
     }
@@ -408,131 +530,225 @@ export class ChangesController {
     return target.closest('.changes-menu') !== null;
   }
 
-  /** Opens a file's diff in its own tab, or shows its tab, and reads it when it has not been read. */
-  openDiff(path: string): void {
-    if (!this.view.tabs.includes(path)) {
-      this.view.tabs.push(path);
+  /** Opens the Changes tab, or shows it, at a file's diff when `path` names one; opening it reads the list again. */
+  openChanges(path: string | null): void {
+    const opening = !this.view.tab;
+
+    this.view.tab = true;
+    this.view.menu = false;
+    this.#file = null;
+
+    if (path !== null) {
+      // A file hidden as viewed shows again when picked.
+      if (this.view.hideViewed && this.view.list?.rows.find((row) => row.path === path)?.viewed === true) {
+        this.view.hideViewed = false;
+        this.#syncRows();
+      }
+
+      this.#jump = path;
+      this.#scrollToJump();
     }
 
-    this.view.open = path;
-    this.view.menu = false;
-
-    if (!this.#diffs.has(path)) {
-      void this.readDiff(path);
+    if (opening) {
+      void this.refresh();
     }
 
     this.deps.showDiff();
   }
 
-  /** Closes a file's tab; closing the one shown shows its neighbour, or another tab of the strip when it was the last. */
-  closeDiff(path: string): void {
-    const at = this.view.tabs.indexOf(path);
-
-    if (at === -1) {
+  /** Closes the Changes tab; the strip shows another tab. */
+  closeChanges(): void {
+    if (!this.view.tab) {
       return;
     }
 
-    this.view.tabs.splice(at, 1);
-    this.#diffs.delete(path);
-    this.#files.delete(path);
-    this.#diffSeq.delete(path);
-    this.#loadingDiff.delete(path);
+    this.view.tab = false;
+    this.#file = null;
+    this.#unmount();
+    this.deps.closedDiff();
+  }
 
-    if (this.view.open === path) {
-      this.view.open = this.view.tabs[Math.min(at, this.view.tabs.length - 1)] ?? null;
+  #scrollToJump(): void {
+    if (this.#jump !== null && this.#mount !== null) {
+      this.#mount.mount.scrollToFile(this.#jump);
+      this.#jump = null;
+    }
+  }
 
-      if (this.view.open === null) {
-        this.deps.closedDiff();
-        return;
+  /** Reads one file's diff, the patch alone, sending the ETag of what is held for it so an unchanged one answers 304. */
+  async #read(row: ChangeRow, key: string): Promise<void> {
+    const pageKey = this.deps.key();
+    const generation = this.#generation;
+
+    if (pageKey === null) {
+      return;
+    }
+
+    const held = this.#held.get(row.path);
+
+    this.#inFlight.set(row.path, key);
+
+    let next: Held | null = null;
+    let failed = false;
+
+    try {
+      const response = await this.deps.fetch(`/v1/conversation/diff?window=${encodeURIComponent(pageKey)}&path=${encodeURIComponent(row.path)}&sides=0`, {
+        credentials: 'same-origin',
+        ...(held?.etag == null ? {} : { headers: { 'If-None-Match': held.etag } }),
+      });
+
+      if (response.status === 304 && held !== undefined) {
+        next = { ...held, key };
+      } else {
+        const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+
+        if (response.ok) {
+          const data = body as unknown as DiffData;
+          const note = diffNote({ state: 'ok', data, version: '' });
+
+          next = { key, etag: response.headers?.get?.('ETag') ?? null, content: note === null ? { data } : { note }, chars: data.patch?.length ?? 0, hydrated: false };
+        } else {
+          next = { key, etag: null, content: { note: String(body['error'] ?? `Switchboard answered ${response.status}.`) }, chars: 0, hydrated: false };
+          failed = true;
+        }
+      }
+    } catch (failure) {
+      next = { key, etag: null, content: { note: `Switchboard did not answer: ${String(failure)}` }, chars: 0, hydrated: false };
+      failed = true;
+    }
+
+    if (generation !== this.#generation || this.#inFlight.get(row.path) !== key) {
+      return;
+    }
+
+    this.#inFlight.delete(row.path);
+
+    const now = this.view.list?.rows.find((one) => one.path === row.path);
+
+    // The list was read again meanwhile and the row changed: this answer is for content no longer shown.
+    if (now === undefined || rowKey(this.view.list?.base ?? null, now) !== key) {
+      this.#pump();
+      return;
+    }
+
+    if (failed) {
+      // A failed read shows why but holds nothing, so it is read again once the list is.
+      this.#failed.add(key);
+      this.#mount?.mount.setRow(row.path, next.content);
+    } else {
+      const current = this.#held.get(row.path);
+
+      this.#held.set(row.path, next);
+
+      if (current === undefined || next.content !== current.content) {
+        this.#mount?.mount.setRow(row.path, next.content);
       }
     }
 
-    this.deps.draw();
+    this.#pump();
   }
 
-  /** Reads a file's diff from the hub; an answer for a conversation or a read the page has moved on from is dropped. */
-  async readDiff(path: string): Promise<void> {
-    const key = this.deps.key();
+  /** Starts the reads the view wants, at most {@link MAX_IN_FLIGHT} at a time, then gives up held diffs past the budget, the furthest first. */
+  #pump(): void {
+    const mounted = this.#mount;
+    const base = this.view.list?.base ?? null;
 
-    if (key === null) {
+    if (mounted === null || !this.view.tab) {
       return;
     }
 
-    const reading = this.#diffReads;
-    const seq = ++this.#seq;
-    const before = this.#diffs.get(path);
+    const rows = this.#rows();
+    const visible = mounted.mount.visible();
+    const wanted = wantedIndexes(visible, rows.length).map((index) => rows[index]!);
 
-    this.#diffSeq.set(path, seq);
+    for (const row of wanted) {
+      if (this.#inFlight.size >= MAX_IN_FLIGHT) {
+        break;
+      }
 
-    this.#diffs.set(path, before?.state === 'ok' ? before : { state: 'loading' });
-    this.#loadingDiff.add(path);
-    this.deps.draw();
+      const key = rowKey(base, row);
 
-    let entry: DiffEntry;
+      if (this.#held.get(row.path)?.key !== key && !this.#inFlight.has(row.path) && !this.#failed.has(key)) {
+        void this.#read(row, key);
+      }
+    }
+
+    const index = new Map(rows.map((row, at) => [row.path, at]));
+    const out = evictions(
+      [...this.#held].map(([path, held]) => ({ path, index: index.get(path) ?? -1, chars: held.chars, hydrated: held.hydrated })),
+      // A row being read is never given up, so its answer always lands on what it holds.
+      new Set([...wanted.map((row) => row.path), ...this.#inFlight.keys()]),
+      visible,
+      DIFF_BUDGET,
+    );
+
+    for (const path of out) {
+      const height = mounted.mount.heightOf(path);
+
+      this.#held.delete(path);
+
+      // A placeholder as tall as the diff was, so the view does not move.
+      if (height !== undefined) {
+        mounted.mount.setRow(path, null, mounted.mount.linesFor(height));
+      }
+    }
+  }
+
+  /** Reads a file's diff with both sides, for a region of its patch-only diff expanded; null when it cannot be read. */
+  async #loadSides(path: string): Promise<DiffData | null> {
+    const key = this.deps.key();
+    const generation = this.#generation;
+
+    if (key === null) {
+      return null;
+    }
 
     try {
       const response = await this.deps.fetch(`/v1/conversation/diff?window=${encodeURIComponent(key)}&path=${encodeURIComponent(path)}`, { credentials: 'same-origin' });
-      const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
 
-      entry = response.ok ? { state: 'ok', data: body as unknown as DiffData, version: response.headers?.get?.('ETag') ?? String(body['version'] ?? Date.now()) } : { state: 'error', error: String(body['error'] ?? `Switchboard answered ${response.status}.`) };
-    } catch (failure) {
-      entry = { state: 'error', error: `Switchboard did not answer: ${String(failure)}` };
-    }
+      if (!response.ok) {
+        return null;
+      }
 
-    if (reading !== this.#diffReads || !this.view.tabs.includes(path) || this.#diffSeq.get(path) !== seq) {
-      return;
-    }
+      const data = (await response.json()) as DiffData;
+      const held = this.#held.get(path);
+      const shown = held !== undefined && 'data' in (held.content ?? {}) ? (held.content as { data: DiffData }).data.patch : null;
 
-    this.#loadingDiff.delete(path);
-    this.#diffs.set(path, entry);
-    this.deps.draw();
-  }
+      // The file changed since its patch was read: its sides would not match, so its diff is read again instead.
+      if (generation === this.#generation && held !== undefined && data.patch !== shown) {
+        held.key = '';
+        this.#pump();
+        return null;
+      }
 
-  readonly #loadingDiff = new Set<string>();
-  /** Each file's latest read, so an older answer that arrives after a newer one, or after its tab closed, is dropped. */
-  readonly #diffSeq = new Map<string, number>();
-  #seq = 0;
-  /** The panes the diff tab drew into, watched so Auto follows a pane resized past 900 px without a redraw. */
-  #resize: ResizeObserver | null = null;
-  readonly #watched = new WeakSet<HTMLElement>();
+      if (generation === this.#generation && held !== undefined) {
+        held.chars += (data.old?.length ?? 0) + (data.new?.length ?? 0);
+        held.hydrated = true;
+      }
 
-  /** Gives the diff shown in `pane` the layout its width calls for now. */
-  #relayout(pane: HTMLElement): void {
-    const host = pane.querySelector<HTMLElement>(':scope > .diff-view > .diff-host');
-    const mounted = host === null ? undefined : this.#mounted.get(host);
-    const shown = this.#shownLayout(pane);
-    // A file view is always stacked; only its wrapping follows the width.
-    const layout = host?.classList.contains('file-view') === true ? `stacked ${shown.wrap}` : `${shown.layout} ${shown.wrap}`;
-
-    if (mounted !== undefined && mounted.layout !== layout) {
-      mounted.layout = layout;
-      mounted.mount?.set(shown.layout, shown.wrap);
+      return data;
+    } catch {
+      return null;
     }
   }
 
   /**
-   * Shows the open tab's file at a line, from a line number clicked in its diff: the file on disk for the new side, the file at the base for the
-   * old side (a deleted file's only side).
+   * Shows a file at a line, from a line number clicked in its diff: the file on disk for the new side, the file at the base for the old side (a
+   * deleted file's only side), over the diffs, which keep their place for Back.
    */
-  openFileView(side: 'old' | 'new', line: number): void {
-    const tab = this.view.open;
-    const row = tab === null ? undefined : this.view.list?.rows.find((one) => one.path === tab);
-
-    if (tab === null) {
-      return;
-    }
-
+  openFileView(path: string, side: 'old' | 'new', line: number): void {
+    const row = this.view.list?.rows.find((one) => one.path === path);
     const base = side === 'old' || row?.status === 'D';
-    const open: FileOpen = { path: base ? (row?.from ?? tab) : tab, side: base ? 'base' : 'disk', line, entry: { state: 'loading' } };
+    const open: FileOpen = { path: base ? (row?.from ?? path) : path, side: base ? 'base' : 'disk', line, entry: { state: 'loading' } };
 
-    this.#files.set(tab, open);
+    this.#file = open;
     this.deps.draw();
-    void this.#readFile(tab, open);
+    void this.#readFile(open);
   }
 
-  async #readFile(tab: string, open: FileOpen): Promise<void> {
+  async #readFile(open: FileOpen): Promise<void> {
     const key = this.deps.key();
-    const reading = this.#diffReads;
+    const generation = this.#generation;
 
     if (key === null) {
       return;
@@ -547,7 +763,7 @@ export class ChangesController {
       open.entry = { state: 'error', error: `Switchboard did not answer: ${String(failure)}` };
     }
 
-    if (reading === this.#diffReads && this.#files.get(tab) === open) {
+    if (generation === this.#generation && this.#file === open) {
       this.deps.draw();
     }
   }
@@ -564,7 +780,7 @@ export class ChangesController {
     }
 
     row.viewed = row.viewed !== true;
-    this.deps.draw();
+    this.#viewedChanged();
 
     // One post at a time per file, the last click's choice sent once the one on its way answers, so the hub ends where the page shows.
     if (this.#ticking.has(row)) {
@@ -582,7 +798,7 @@ export class ChangesController {
         if (answer.status !== 200) {
           row.viewed = !sent;
           this.view.error = String(answer.body['error'] ?? `Switchboard answered ${answer.status}.`);
-          this.deps.draw();
+          this.#viewedChanged();
           void this.refresh();
           return;
         }
@@ -601,25 +817,64 @@ export class ChangesController {
 
     if (row !== undefined && typeof data['viewed'] === 'boolean') {
       row.viewed = data['viewed'];
-      this.deps.draw();
+      this.#viewedChanged();
     }
   }
 
-  /** The layout and wrapping the diff shows with in `pane` now. */
+  /** A tick changed: the tab's count follows, and with viewed files hidden, so do its rows. */
+  #viewedChanged(): void {
+    if (this.view.hideViewed) {
+      this.#syncRows();
+    }
+
+    this.deps.draw();
+  }
+
+  /** The layout and wrapping the diffs show with in `pane` now. */
   #shownLayout(pane: HTMLElement | null): { layout: 'split' | 'stacked'; wrap: boolean } {
     const settings = this.deps.diffSettings();
 
     return diffLayout(settings.layout, settings.wrap, pane?.clientWidth || (typeof innerWidth === 'number' ? innerWidth : 0));
   }
 
+  /** Gives the diffs and the file view shown in `pane` the layout its width calls for now. */
+  #relayout(pane: HTMLElement): void {
+    const shown = this.#shownLayout(pane);
+    const mounted = this.#mount;
+
+    if (mounted !== null && pane.contains(mounted.host) && mounted.layout !== `${shown.layout} ${shown.wrap}`) {
+      mounted.layout = `${shown.layout} ${shown.wrap}`;
+      mounted.mount.set(shown.layout, shown.wrap);
+    }
+
+    if (this.#fileMount !== null && pane.contains(this.#fileMount.host)) {
+      this.#fileMount.mount?.set('stacked', shown.wrap);
+    }
+  }
+
+  /** Says `text` in a host in place of the diffs. */
+  #say(host: HTMLElement, text: string): void {
+    const note = document.createElement('p');
+
+    note.className = 'empty';
+    note.textContent = text;
+    host.replaceChildren(note);
+  }
+
+  #unmount(): void {
+    this.#metas.clear();
+    this.#mount?.mount.dispose();
+    this.#mount = null;
+    this.#fileMount?.mount?.dispose();
+    this.#fileMount = null;
+  }
+
   /**
-   * Draws the open file's diff into a pane: its header, then the diff viewer, which keeps its own DOM, mounted once per file and version and
-   * given the layout again when the pane's width or a choice changes it.
+   * Draws the Changes tab into a pane: every row's diff in one view, mounted once per conversation and given the layout again when the pane's
+   * width changes, and over it the file view while one is open. Nothing sits above the diffs.
    */
   drawDiff(pane: HTMLElement): void {
-    const path = this.view.open;
-
-    if (path === null) {
+    if (!this.view.tab) {
       return;
     }
 
@@ -629,101 +884,142 @@ export class ChangesController {
       this.#watched.add(pane);
     }
 
-    const entry = this.#diffs.get(path);
-    const file = this.#files.get(path) ?? null;
-    const shown = this.#shownLayout(pane);
-    const version = file !== null ? `file ${file.side} ${file.path} ${file.line} ${file.entry.state === 'ok' ? file.entry.version : file.entry.state}` : entry?.state === 'ok' ? entry.version : (entry?.state ?? '');
-    const id = `${path}\u0000${version}`;
     let view = pane.querySelector<HTMLElement>(':scope > .diff-view');
-    let slots = view === null ? undefined : this.#slots.get(view);
 
-    if (view?.dataset['diff'] !== id || slots === undefined) {
+    if (view?.dataset['diff'] !== this.view.for) {
       this.deps.takePane(pane);
       view = document.createElement('div');
       view.className = 'diff-view';
-      view.dataset['diff'] = id;
+      view.dataset['diff'] = this.view.for ?? '';
 
       const host = document.createElement('div');
-      const slot = (): HTMLElement => {
-        const element = document.createElement('span');
 
-        element.className = 'diff-slot';
-        return element;
-      };
-
-      slots = { meta: slot(), prefix: slot(), suffix: slot() };
-      this.#slots.set(view, slots);
       host.className = 'diff-host';
       view.append(host);
       pane.replaceChildren(view);
       this.drop();
+    }
 
-      if (file === null) {
-        this.#mountInto(host, entry, shown, slots.meta);
-      } else {
-        host.classList.add('file-view');
-        this.#mountFileInto(host, file, shown.wrap, slots);
+    const host = view.querySelector<HTMLElement>(':scope > .diff-host')!;
+    const list = this.view.list;
+
+    if (this.#mount === null || this.#mount.host !== host) {
+      if (this.view.error !== null && list === null) {
+        this.#say(host, this.view.error);
+      } else if (list === null) {
+        this.#say(host, 'Reading the changes…');
+      } else if (list.rows.length === 0) {
+        this.#say(host, list.base === null ? 'No uncommitted changes, and no merge base was found.' : 'No changes since the merge base.');
+      } else if (host.dataset['mounting'] !== 'yes') {
+        host.dataset['mounting'] = 'yes';
+        this.#mountInto(host);
       }
     }
 
     this.#relayout(pane);
-    // The file's own header in the viewer carries the path, its change and counts; the page adds the Viewed tick, or the file view's way back
-    // and line.
-    mount(slots.meta, file === null ? <DiffTools row={this.view.list?.rows.find((one) => one.path === path)} /> : null);
-    mount(slots.prefix, file === null ? null : <BackButton />);
-    mount(slots.suffix, file === null ? null : <span class="diff-at">:{file.line}{file.side === 'base' ? <span class="diff-from"> at the base</span> : null}</span>);
+    this.#drawFile(view);
+
+    for (const [path, element] of this.#metas) {
+      mount(element, <DiffTools row={this.view.list?.rows.find((one) => one.path === path)} />);
+    }
   }
 
-  /** Mounts the diff viewer on a host once its module loads, or says why there is no diff to show. */
-  #mountInto(host: HTMLElement, entry: DiffEntry | undefined, shown: { layout: 'split' | 'stacked'; wrap: boolean }, meta: HTMLElement): void {
-    const say = (text: string): void => {
-      const note = document.createElement('p');
+  /** A file's header element after its counts, holding its Viewed tick. */
+  #meta(path: string): HTMLElement {
+    let element = this.#metas.get(path);
 
-      note.className = 'empty';
-      note.textContent = text;
-      host.replaceChildren(note);
-    };
-    const note = diffNote(entry);
-
-    this.#mounted.set(host, { mount: null, layout: `${shown.layout} ${shown.wrap}` });
-
-    if (note !== null || entry?.state !== 'ok') {
-      say(note ?? 'Reading the diff…');
-      return;
+    if (element === undefined) {
+      element = slot();
+      this.#metas.set(path, element);
+      mount(element, <DiffTools row={this.view.list?.rows.find((one) => one.path === path)} />);
     }
 
-    say('Loading the diff viewer…');
+    return element;
+  }
+
+  /** Mounts the viewer on the host once its module loads, or says why it cannot. */
+  #mountInto(host: HTMLElement): void {
+    this.#say(host, 'Loading the diff viewer…');
     this.#module ??= this.deps.loadDiff();
     void this.#module.then((module) => {
-      const kept = this.#mounted.get(host);
+      delete host.dataset['mounting'];
 
-      if (kept === undefined || !host.isConnected) {
+      if (!host.isConnected || !this.view.tab) {
         return;
       }
 
       if (module === null) {
         this.#module = null;
-        say('The diff viewer could not be loaded. Reload the page to try again.');
+        this.#say(host, 'The diff viewer could not be loaded. Reload the page to try again.');
         return;
       }
 
+      const rows = this.#rows();
+      const shown = this.#shownLayout(host.closest<HTMLElement>('.diff-pane') ?? host);
+
       host.replaceChildren();
+      this.#mount?.mount.dispose();
 
-      const [layout, wrap] = kept.layout.split(' ') as ['split' | 'stacked', string];
+      const mount = module.mountChanges(host, rows, { layout: shown.layout, wrap: shown.wrap, loadSides: (path) => this.#loadSides(path), onLine: (path, side, line) => this.openFileView(path, side, line), headerMeta: (path) => this.#meta(path) });
 
-      kept.mount = module.mountDiff(host, entry.data, entry.version, { layout, wrap: wrap === 'true', onLine: (side, line) => this.openFileView(side, line), meta });
+      this.#mount = { host, mount, layout: `${shown.layout} ${shown.wrap}`, paths: rows.map(rowShape) };
 
-      if (kept.mount === null) {
-        say("git's patch for this file could not be read.");
-      } else if (entry.data.tooLarge === 'sides') {
-        host.classList.add('patch-only');
+      for (const row of rows) {
+        const held = this.#held.get(row.path);
+
+        if (held !== undefined) {
+          mount.setRow(row.path, held.content);
+        }
+
+        if (this.#collapsed.has(row.path)) {
+          mount.setCollapsed(row.path, true);
+        }
       }
+
+      mount.onWant(() => this.#pump());
+      this.#scrollToJump();
+      this.#pump();
     });
   }
 
-  /** Mounts the file view on a host once the viewer loads, or says why there is no file to show. */
-  #mountFileInto(host: HTMLElement, file: FileOpen, wrap: boolean, slots: { prefix: HTMLElement; suffix: HTMLElement }): void {
-    // Until the viewer draws the file's header, which holds the way back, the text in its place offers it.
+  /**
+   * Draws the file view over the diffs while one is open, or takes it away: the file's own header holds Back before its name and the line after
+   * it, so nothing sits above it either.
+   */
+  #drawFile(view: HTMLElement): void {
+    let overlay = view.querySelector<HTMLElement>(':scope > .file-overlay');
+    const file = this.#file;
+
+    if (file === null) {
+      if (overlay !== null) {
+        overlay.remove();
+        this.#fileMount?.mount?.dispose();
+        this.#fileMount = null;
+      }
+
+      return;
+    }
+
+    const id = `${file.side} ${file.path} ${file.line} ${file.entry.state === 'ok' ? file.entry.version : file.entry.state}`;
+
+    if (overlay?.dataset['file'] !== id) {
+      overlay?.remove();
+      this.#fileMount?.mount?.dispose();
+      overlay = document.createElement('div');
+      overlay.className = 'file-overlay';
+      overlay.dataset['file'] = id;
+
+      const host = document.createElement('div');
+
+      host.className = 'diff-host file-view';
+      overlay.append(host);
+      view.append(overlay);
+      this.#mountFileInto(host, file);
+    }
+  }
+
+  /** Mounts the file view on a host once the viewer loads, or says why there is no file to show, with the way back. */
+  #mountFileInto(host: HTMLElement, file: FileOpen): void {
     const say = (text: string): void => {
       const line = document.createElement('p');
 
@@ -733,8 +1029,9 @@ export class ChangesController {
     };
     const note = fileNote(file.entry);
     const entry = file.entry;
+    const kept = { host, mount: null as DiffMount | null };
 
-    this.#mounted.set(host, { mount: null, layout: `stacked ${wrap}` });
+    this.#fileMount = kept;
 
     if (note !== null || entry.state !== 'ok') {
       say(note ?? 'Reading the file…');
@@ -744,9 +1041,7 @@ export class ChangesController {
     say('Loading the diff viewer…');
     this.#module ??= this.deps.loadDiff();
     void this.#module.then((module) => {
-      const kept = this.#mounted.get(host);
-
-      if (kept === undefined || !host.isConnected) {
+      if (this.#fileMount !== kept || !host.isConnected) {
         return;
       }
 
@@ -756,18 +1051,26 @@ export class ChangesController {
         return;
       }
 
+      const prefix = slot();
+      const suffix = slot();
+
+      mount(prefix, <BackButton />);
+      mount(suffix, <span class="diff-at">:{file.line}{file.side === 'base' ? <span class="diff-from"> at the base</span> : null}</span>);
       host.replaceChildren();
-      kept.mount = module.mountFile(host, entry.data, entry.version, { wrap, line: file.line, prefix: slots.prefix, suffix: slots.suffix });
+      kept.mount = module.mountFile(host, entry.data, entry.version, { wrap: this.#shownLayout(host.closest<HTMLElement>('.diff-pane') ?? host).wrap, line: file.line, prefix, suffix });
     });
   }
 
-  /** Ends the diff viewers whose host has left the page. */
+  /** Ends the viewers whose host has left the page. */
   drop(): void {
-    for (const [host, mounted] of this.#mounted) {
-      if (!host.isConnected) {
-        this.#mounted.delete(host);
-        mounted.mount?.dispose();
-      }
+    if (this.#mount !== null && !this.#mount.host.isConnected) {
+      this.#mount.mount.dispose();
+      this.#mount = null;
+    }
+
+    if (this.#fileMount !== null && !this.#fileMount.host.isConnected) {
+      this.#fileMount.mount?.dispose();
+      this.#fileMount = null;
     }
   }
 

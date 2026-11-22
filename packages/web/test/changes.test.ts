@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { listNote, rowTitle } from '../src/changes.js';
+import { listBase, listNote, rowTitle } from '../src/changes.js';
 import type { ChangesList } from '../src/changes.js';
 import { diffLayout, diffNote } from '../src/changes.js';
 import type { DiffModule } from '../src/diff/types.js';
@@ -71,22 +71,30 @@ describe('the Changes list', () => {
   const fileSets: string[] = [];
   let module: DiffModule | null;
   let diffAnswers: Record<string, { status: number; body: unknown }>;
+  /** What each mountChanges was given and asked, and the rows the fake view says are on screen. */
+  type FakeChanges = { meta: (path: string) => HTMLElement | null; rows: string[]; layout: string; wrap: boolean; layouts: string[]; scrolls: string[]; sets: Array<[string, string]>; collapsed: string[]; disposed: boolean; onLine?: (path: string, side: 'old' | 'new', line: number) => void; loadSides: (path: string) => Promise<unknown>; want: () => void };
+  const changesMounts: FakeChanges[] = [];
+  let visible: { first: number; last: number } | null;
+  let etags: Record<string, () => string>;
+  let notModified: Set<string>;
+  let ifNoneMatch: string[];
 
   beforeEach(() => {
     mounts.length = 0;
+    changesMounts.length = 0;
+    visible = { first: 0, last: 0 };
+    etags = {};
+    notModified = new Set();
+    ifNoneMatch = [];
     files.length = 0;
     fileSets.length = 0;
     diffAnswers = {};
     module = {
       mountDiff: (host, data, _version, options) => {
         const mount = { path: data.path, layout: options.layout, wrap: options.wrap, sets: [] as string[], disposed: false, ...(options.onLine === undefined ? {} : { onLine: options.onLine }) };
-        const shown = document.createElement('span');
 
         mounts.push(mount);
-        shown.className = 'fake';
-        shown.textContent = `diff of ${data.path}`;
-        // As the viewer puts the page's element in the file's own header.
-        host.replaceChildren(shown, ...(options.meta === undefined ? [] : [options.meta]));
+        host.textContent = `diff of ${data.path}`;
         return data.patch === 'unreadable' ? null : { set: (layout, wrap) => mount.sets.push(`${layout} ${wrap}`), dispose: () => (mount.disposed = true) };
       },
       mountFile: (host, data, _version, options) => {
@@ -98,8 +106,39 @@ describe('the Changes list', () => {
         host.replaceChildren(...(options.prefix === undefined ? [] : [options.prefix]), shown, ...(options.suffix === undefined ? [] : [options.suffix]));
         return { set: (layout, wrap) => fileSets.push(`${layout} ${wrap}`), dispose: () => {} };
       },
-      mountChanges: () => {
-        throw new Error('The diff tabs do not draw the Changes tab.');
+      mountChanges: (host, rows, options) => {
+        const listeners: Array<() => void> = [];
+        const fake: FakeChanges = {
+          meta: (path) => options.headerMeta?.(path) ?? null,
+          rows: rows.map((row) => row.path),
+          layout: options.layout,
+          wrap: options.wrap,
+          layouts: [],
+          scrolls: [],
+          sets: [],
+          collapsed: [],
+          disposed: false,
+          ...(options.onLine === undefined ? {} : { onLine: options.onLine }),
+          loadSides: options.loadSides,
+          want: () => listeners.forEach((listener) => listener()),
+        };
+
+        changesMounts.push(fake);
+        // As the viewer puts each file's header element in its own header.
+        host.replaceChildren(...rows.map((row) => options.headerMeta?.(row.path)).filter((one): one is HTMLElement => one != null));
+        return {
+          setRows: (next) => (fake.rows = next.map((row) => row.path)),
+          setRow: (path, content) => fake.sets.push([path, content === null ? 'placeholder' : 'note' in content ? content.note : 'diff']),
+          setCollapsed: (path, collapsed) => fake.collapsed.push(`${path} ${collapsed}`),
+          scrollToFile: (path) => fake.scrolls.push(path),
+          current: () => null,
+          visible: () => visible,
+          onWant: (listener) => listeners.push(listener),
+          heightOf: () => 100,
+          linesFor: () => 3,
+          set: (layout, wrap) => fake.layouts.push(`${layout} ${wrap}`),
+          dispose: () => (fake.disposed = true),
+        };
       },
     };
   });
@@ -147,11 +186,23 @@ describe('the Changes list', () => {
 
       if (diffPath !== null) {
         gets.push(url);
+
+        const sent = (init as { headers?: Record<string, string> } | undefined)?.headers?.['If-None-Match'];
+
+        if (sent !== undefined) {
+          ifNoneMatch.push(sent);
+        }
+
+        if (sent !== undefined && notModified.has(diffPath)) {
+          return { status: 304, ok: false, headers: new Headers(), json: async () => ({}) } as unknown as Response;
+        }
       }
 
       await (answer as { wait?: Promise<void> }).wait;
 
-      return { status: answer.status, ok: answer.status === 200, json: async () => answer.body } as unknown as Response;
+      const etag = diffPath === null ? undefined : etags[diffPath]?.();
+
+      return { status: answer.status, ok: answer.status === 200, headers: new Headers(etag === undefined ? {} : { ETag: etag }), json: async () => answer.body } as unknown as Response;
     });
     const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, loadDiff: async () => module });
     const source = FakeSource.last!;
@@ -162,7 +213,6 @@ describe('the Changes list', () => {
     return { page, source };
   };
   const button = () => root.querySelector<HTMLElement>('.changes-button')!;
-  const viewedBox = () => root.querySelector<HTMLInputElement>('.diff-host .diff-viewed input')!;
 
   it('reads the list when its menu opens and draws each row with its name, folder, counts and status', async () => {
     start();
@@ -183,7 +233,8 @@ describe('the Changes list', () => {
       ['logo.png', '', 'binary', 'U'],
     ]);
     expect(rows[1]!.title).toBe('src/old.ts → src/new.ts\nRenamed · staged');
-    expect(root.querySelector('.changes-note')!.textContent).toBe('Since 0123456 · 3 files · 1 viewed');
+    expect(root.querySelector('.changes-note')!.textContent).toBe('3 files · +3 −1 · 1 viewed');
+    expect(root.querySelector<HTMLElement>('.changes-note')!.title).toBe('Since 0123456');
     expect([...root.querySelectorAll<HTMLInputElement>('.change-viewed input')].map((box) => box.checked)).toEqual([false, true, false]);
     expect(button().querySelector('.tab-badge')!.textContent).toBe('3');
   });
@@ -264,95 +315,233 @@ describe('the Changes list', () => {
     root.querySelectorAll<HTMLElement>('.change-row')[index]!.click();
     await flush();
     await flush();
+    await flush();
   };
+  const diffGets = () => gets.filter((one) => one.startsWith('/v1/conversation/diff'));
 
-  it('opens a file from the list in a closable tab of its own, read and drawn by the diff viewer loaded on first use', async () => {
+  it('ChangesTab_PickingARow_OpensOneTabScrolledToThatFileWithNothingAboveTheDiffs', async () => {
     start();
-    await openRow(0);
+    await openRow(1);
 
     expect(root.querySelector('.changes-menu')).toBeNull();
-    expect(gets).toContain('/v1/conversation/diff?window=pk&path=docs%2Fa.md');
-    expect([...root.querySelectorAll('.diff-tab .tab-label')].map((one) => one.textContent)).toEqual(['a.md']);
-    // The file's type icon, the file codicon until the icon theme loads.
-    expect(root.querySelector('.diff-tab .tab-open > .codicon')).not.toBeNull();
-    expect(root.querySelector('.diff-tab .codicon-diff')).toBeNull();
+    expect([...root.querySelectorAll('.diff-tab .tab-label')].map((one) => one.textContent)).toEqual(['Changes']);
+    expect(root.querySelector('.diff-tab .tab-badge')!.textContent).toBe('1/3');
     expect(root.querySelector('.diff-tab')!.classList.contains('selected')).toBe(true);
-    // The viewer's own file header names the file; the page adds only the Viewed tick to it, with no bar of its own above the diff.
-    expect(root.querySelector('.diff-head')).toBeNull();
-    expect(root.querySelector('.diff-view')!.children).toHaveLength(1);
-    expect(root.querySelector('.diff-host .fake')!.textContent).toBe('diff of docs/a.md');
-    expect(viewedBox().dataset['path']).toBe('docs/a.md');
-    expect(viewedBox().checked).toBe(false);
+    expect(changesMounts).toHaveLength(1);
+    expect(changesMounts[0]!.rows).toEqual(['docs/a.md', 'src/new.ts', 'logo.png']);
+    expect(changesMounts[0]!.scrolls).toEqual(['src/new.ts']);
     // A phone's width (test/setup.ts): stacked and wrapped.
-    expect(mounts).toMatchObject([{ path: 'docs/a.md', layout: 'stacked', wrap: true }]);
+    expect(changesMounts[0]).toMatchObject({ layout: 'stacked', wrap: true });
+    // Nothing above the diffs: the view holds the viewer's host alone, and each file's own header carries only its Viewed tick from the page.
+    expect([...root.querySelector('.diff-view')!.children].map((one) => one.className)).toEqual(['diff-host']);
+    expect(root.querySelector('.diff-head')).toBeNull();
+    expect([...root.querySelectorAll<HTMLInputElement>('.diff-host .diff-viewed input')].map((box) => [box.dataset['path'], box.checked])).toEqual([
+      ['docs/a.md', false],
+      ['src/new.ts', true],
+      ['logo.png', false],
+    ]);
 
-    // A second file opens its own tab; the first keeps its tab.
-    await openRow(1);
-    expect([...root.querySelectorAll('.diff-tab .tab-label')].map((one) => one.textContent)).toEqual(['a.md', 'new.ts']);
-    expect(viewedBox().dataset['path']).toBe('src/new.ts');
-    expect(viewedBox().checked).toBe(true);
-
-    // Closing the one shown shows its neighbour; closing the last goes back to the conversation.
-    root.querySelector<HTMLElement>('.diff-tab.selected .tab-close')!.click();
+    // Ticking in a header ticks the list's row too.
+    root.querySelectorAll<HTMLElement>('.diff-host .diff-viewed input')[0]!.click();
     await flush();
-    expect(viewedBox().dataset['path']).toBe('docs/a.md');
+    expect(gets.at(-1)).toBe('VIEWED docs/a.md h-a true 3');
+    expect(root.querySelector('.diff-tab .tab-badge')!.textContent).toBe('2/3');
+    expect(root.querySelectorAll<HTMLInputElement>('.diff-host .diff-viewed input')[0]!.checked).toBe(true);
+
+    // Picking another row scrolls the same tab.
+    await openRow(0);
+    expect(changesMounts).toHaveLength(1);
+    expect(changesMounts[0]!.scrolls).toEqual(['src/new.ts', 'docs/a.md']);
+
+    // Closing the tab ends the viewer and goes back to the conversation.
     root.querySelector<HTMLElement>('.diff-tab .tab-close')!.click();
     await flush();
     expect(root.querySelector('.diff-tab')).toBeNull();
     expect(root.querySelector('.diff-view')).toBeNull();
-    expect(mounts.every((mount) => mount.disposed)).toBe(true);
+    expect(changesMounts[0]!.disposed).toBe(true);
   });
 
-  it("shows the file at a clicked line number, the base's for the old side, and asks for it in VS Code", async () => {
+  it('ChangesTab_ForTheFilesInView_ReadsEachPatchAloneAndDrawsItOrWhyNot', async () => {
+    diffAnswers['src/new.ts'] = { status: 404, body: { error: 'src/new.ts is not one of the changes now.' } };
+    diffAnswers['logo.png'] = { status: 200, body: { path: 'logo.png', status: 'U', patch: null, old: null, new: null, binary: true, tooLarge: null, partial: true } };
+    start();
+    await openRow(0);
+    await flush();
+
+    // The first row on screen and two ahead.
+    expect(diffGets()).toEqual(['/v1/conversation/diff?window=pk&path=docs%2Fa.md&sides=0', '/v1/conversation/diff?window=pk&path=src%2Fnew.ts&sides=0', '/v1/conversation/diff?window=pk&path=logo.png&sides=0']);
+    expect(changesMounts[0]!.sets).toEqual([
+      ['docs/a.md', 'diff'],
+      ['src/new.ts', 'src/new.ts is not one of the changes now.'],
+      ['logo.png', 'Binary file not shown.'],
+    ]);
+
+    // Expanding a folded region reads both sides of that file.
+    await expect(changesMounts[0]!.loadSides('docs/a.md')).resolves.toMatchObject({ path: 'docs/a.md', old: 'a' });
+    expect(diffGets().at(-1)).toBe('/v1/conversation/diff?window=pk&path=docs%2Fa.md');
+  });
+
+  it('ChangesTab_WhileScrolling_ReadsAtMostThreeAtOnceAndOnlyWhatTheViewWants', async () => {
+    const many: ChangesList = { ...LIST, rows: Array.from({ length: 12 }, (_, index) => ({ ...LIST.rows[0]!, path: `f${index}.ts`, hash: `h${index}` })), shown: 12, total: 12 };
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+
+    answers.push({ status: 200, body: many }, { status: 200, body: many });
+    for (let index = 0; index < 12; index++) {
+      diffAnswers[`f${index}.ts`] = { status: 200, body: { path: `f${index}.ts`, status: 'M', patch: 'diff --git a/x b/x', old: null, new: null, binary: false, tooLarge: null, partial: true }, wait: held } as never;
+    }
+
+    start();
+    visible = { first: 0, last: 2 };
+    await openRow(0);
+    await flush();
+    // On screen 0 to 2, two ahead: five wanted, three read at once.
+    expect(diffGets()).toHaveLength(3);
+
+    // Scrolled far down before they answer: the rows wanted then are read next, never the ones left behind.
+    visible = { first: 9, last: 9 };
+    changesMounts[0]!.want();
+    release();
+    for (let index = 0; index < 8; index++) {
+      await flush();
+    }
+
+    expect(diffGets().map((one) => /path=([^&]*)/.exec(one)![1])).toEqual(['f0.ts', 'f1.ts', 'f2.ts', 'f9.ts', 'f10.ts', 'f11.ts', 'f8.ts']);
+  });
+
+  it('ChangesTab_WhenAFileChanges_ReadsItAgainWithItsETagAndKeepsItOn304', async () => {
+    let etag = '"e1"';
+    const { source } = start();
+
+    etags['docs/a.md'] = () => etag;
+    await openRow(0);
+    await flush();
+    expect(changesMounts[0]!.sets.filter(([path]) => path === 'docs/a.md')).toHaveLength(1);
+
+    // The turn's end reads the list again: an unchanged row is not read again.
+    source.emit('session', { session: { ...session, state: 'running' } });
+    source.emit('session', { session: { ...session, state: 'idle' } });
+    await flush();
+    await flush();
+    expect(diffGets().filter((one) => one.includes('docs%2Fa.md'))).toHaveLength(1);
+
+    // Its hash changed: read again with its ETag; a 304 keeps what is drawn.
+    answers.push({ status: 200, body: { ...LIST, rows: LIST.rows.map((row) => (row.path === 'docs/a.md' ? { ...row, hash: 'h-a2' } : row)) } });
+    notModified.add('docs/a.md');
+    source.emit('session', { session: { ...session, state: 'running' } });
+    source.emit('session', { session: { ...session, state: 'idle' } });
+    for (let index = 0; index < 6; index++) {
+      await flush();
+    }
+
+    expect(diffGets().filter((one) => one.includes('docs%2Fa.md'))).toHaveLength(2);
+    expect(ifNoneMatch.at(-1)).toBe('"e1"');
+    expect(changesMounts[0]!.sets.filter(([path]) => path === 'docs/a.md')).toHaveLength(1);
+    etag = '"e2"';
+  });
+
+  it('ChangesTab_AnswerForARowThatChangedMeanwhile_IsDroppedAndReadAgain', async () => {
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const { source } = start();
+
+    diffAnswers['docs/a.md'] = { status: 200, body: { path: 'docs/a.md', status: 'M', patch: 'diff --git a/x b/x', old: null, new: null, binary: false, tooLarge: null, partial: true }, wait: held } as never;
+    await openRow(0);
+    // The list is read again while the first read is on its way, and the file's content changed.
+    answers.push({ status: 200, body: { ...LIST, rows: LIST.rows.map((row) => (row.path === 'docs/a.md' ? { ...row, hash: 'h-a2', status: 'R' as const, from: 'docs/old.md' } : row)) } });
+    source.emit('session', { session: { ...session, state: 'running' } });
+    source.emit('session', { session: { ...session, state: 'idle' } });
+    await flush();
+    await flush();
+    // Its header data changed, so its placeholder is drawn again from the new row.
+    expect(changesMounts[0]!.sets).toContainEqual(['docs/a.md', 'placeholder']);
+    delete diffAnswers['docs/a.md'];
+    release();
+    for (let index = 0; index < 8; index++) {
+      await flush();
+    }
+
+    // The old answer drew nothing; the row was read again and that answer drawn.
+    expect(diffGets().filter((one) => one.includes('docs%2Fa.md'))).toHaveLength(2);
+    expect(changesMounts[0]!.sets.filter(([path, what]) => path === 'docs/a.md' && what === 'diff')).toHaveLength(1);
+  });
+
+  it('LoadSides_ForAFileChangedSinceItsPatch_GivesNothingAndReadsItAgain', async () => {
+    start();
+    await openRow(0);
+    await flush();
+    diffAnswers['docs/a.md'] = { status: 200, body: { path: 'docs/a.md', status: 'M', patch: 'diff --git a/y b/y', old: 'a', new: 'b', binary: false, tooLarge: null } };
+    await expect(changesMounts[0]!.loadSides('docs/a.md')).resolves.toBeNull();
+    await flush();
+    await flush();
+    expect(diffGets().filter((one) => one.includes('docs%2Fa.md') && one.endsWith('sides=0'))).toHaveLength(2);
+  });
+
+  it('ChangesMenu_Buttons_HideViewedCollapseAndExpandEveryFile', async () => {
+    start();
+    await openRow(0);
+    button().click();
+    await flush();
+    root.querySelector<HTMLElement>('[data-action="changes-hide-viewed"]')!.click();
+    expect(changesMounts[0]!.rows).toEqual(['docs/a.md', 'logo.png']);
+    expect(root.querySelector('[data-action="changes-hide-viewed"]')!.getAttribute('aria-pressed')).toBe('true');
+    root.querySelector<HTMLElement>('[data-action="changes-collapse-all"]')!.click();
+    expect(changesMounts[0]!.collapsed).toEqual(['docs/a.md true', 'logo.png true']);
+    root.querySelector<HTMLElement>('[data-action="changes-expand-all"]')!.click();
+    expect(changesMounts[0]!.collapsed.slice(2)).toEqual(['docs/a.md false', 'logo.png false']);
+
+    // Picking a hidden viewed file shows the viewed files again.
+    root.querySelectorAll<HTMLElement>('.change-row')[1]!.click();
+    await flush();
+    expect(changesMounts[0]!.rows).toEqual(['docs/a.md', 'src/new.ts', 'logo.png']);
+  });
+
+  it("ChangesTab_LineNumberClicked_ShowsTheFileOverTheDiffsAndBackKeepsThem", async () => {
     start();
     await openRow(1);
-    mounts[0]!.onLine!('new', 12);
+    changesMounts[0]!.onLine!('src/new.ts', 'new', 12);
     await flush();
     await flush();
     expect(gets.at(-1)).toBe('/v1/conversation/file?window=pk&path=src%2Fnew.ts&side=disk');
     expect(files.at(-1)).toEqual({ path: 'src/new.ts', side: 'disk', line: 12 });
-    // The file's own header has the way back before its name and the line after it, and no tick or Open in VS Code.
-    expect(root.querySelector('.diff-host .fake')!.textContent).toBe('file src/new.ts at 12');
-    expect(root.querySelector('.diff-host .diff-at')!.textContent).toBe(':12');
-    expect(root.querySelector('.diff-host .diff-viewed')).toBeNull();
+    // The file's own header has the way back before its name and the line after it; nothing sits above it.
+    expect(root.querySelector('.file-overlay .fake')!.textContent).toBe('file src/new.ts at 12');
+    expect(root.querySelector('.file-overlay .diff-at')!.textContent).toBe(':12');
+    expect(root.querySelector('.file-overlay .diff-head')).toBeNull();
     expect(root.querySelector('[data-action="diff-open-vscode"]')).toBeNull();
 
-    root.querySelector<HTMLElement>('.diff-host [data-action="diff-back"]')!.click();
+    root.querySelector<HTMLElement>('.file-overlay [data-action="diff-back"]')!.click();
     await flush();
-    await flush();
-    expect(root.querySelector('.diff-host .fake')!.textContent).toBe('diff of src/new.ts');
-    expect(viewedBox().dataset['path']).toBe('src/new.ts');
+    expect(root.querySelector('.file-overlay')).toBeNull();
+    expect(changesMounts).toHaveLength(1);
+    expect(changesMounts[0]!.disposed).toBe(false);
 
-    // The old side's line opens the file at the base, by its old name, with nothing to open in VS Code.
-    mounts.at(-1)!.onLine!('old', 3);
+    // The old side's line opens the file at the base, by its old name.
+    changesMounts[0]!.onLine!('src/new.ts', 'old', 3);
     await flush();
     await flush();
     expect(files.at(-1)).toEqual({ path: 'src/old.ts', side: 'base', line: 3 });
-    expect(root.querySelector('.diff-host .diff-at')!.textContent).toBe(':3 at the base');
+    expect(root.querySelector('.file-overlay .diff-at')!.textContent).toBe(':3 at the base');
   });
 
   it('offers the way back from a file view before the viewer draws its header', async () => {
     start();
     await openRow(1);
-    mounts[0]!.onLine!('new', 12);
-    expect(root.querySelector('.diff-host .empty')!.textContent).toBe('Reading the file…');
-    expect(root.querySelector('.diff-host .empty [data-action="diff-back"]')).not.toBeNull();
+    changesMounts[0]!.onLine!('src/new.ts', 'new', 12);
+    expect(root.querySelector('.file-overlay .empty')!.textContent).toBe('Reading the file…');
+    expect(root.querySelector('.file-overlay .empty [data-action="diff-back"]')).not.toBeNull();
   });
 
-  it('lays the open diff out as the settings say, and again when they change', async () => {
+  it('lays the diffs out as the settings say, and again when they change', async () => {
     const { source } = start();
 
     source.emit('settings', { settings: { expandReplies: false, diffLayout: 'split', diffWrap: 'on' } });
     await openRow(0);
-    // No controls of its own: the settings choose.
     expect(root.querySelector('[data-action="diff-layout"], [data-action="diff-wrap"]')).toBeNull();
-    expect(mounts[0]).toMatchObject({ layout: 'split', wrap: true });
+    expect(changesMounts[0]).toMatchObject({ layout: 'split', wrap: true });
 
     source.emit('settings', { settings: { expandReplies: false, diffLayout: 'stacked', diffWrap: 'off' } });
-    expect(mounts[0]!.sets.at(-1)).toBe('stacked false');
-    // A value the page does not know keeps the one before.
-    source.emit('settings', { settings: { expandReplies: false, diffLayout: 'sideways', diffWrap: 'on' } });
-    expect(mounts[0]!.sets.at(-1)).toBe('stacked true');
+    expect(changesMounts[0]!.layouts.at(-1)).toBe('stacked false');
   });
 
   it("offers the work item's Open in VS Code in the menu's head while its row does, which the header's control runs", async () => {
@@ -373,19 +562,6 @@ describe('the Changes list', () => {
     expect(root.querySelector('.changes-menu')).toBeNull();
   });
 
-  it("says why a diff does not show: binary, refused, a patch the viewer cannot read, or no viewer", async () => {
-    diffAnswers['docs/a.md'] = { status: 200, body: { path: 'docs/a.md', status: 'M', patch: null, old: null, new: null, binary: true, tooLarge: null } };
-    diffAnswers['src/new.ts'] = { status: 404, body: { error: 'src/new.ts is not one of the changes now.' } };
-    diffAnswers['logo.png'] = { status: 200, body: { path: 'logo.png', status: 'U', patch: 'unreadable', old: null, new: 'x', binary: false, tooLarge: null } };
-    start();
-    await openRow(0);
-    expect(root.querySelector('.diff-host')!.textContent).toBe('Binary file not shown.');
-    await openRow(1);
-    expect(root.querySelector('.diff-host')!.textContent).toBe('src/new.ts is not one of the changes now.');
-    await openRow(2);
-    expect(root.querySelector('.diff-host')!.textContent).toBe("git's patch for this file could not be read.");
-  });
-
   it('says so when the diff viewer cannot load', async () => {
     module = null;
     start();
@@ -393,34 +569,7 @@ describe('the Changes list', () => {
     expect(root.querySelector('.diff-host')!.textContent).toBe('The diff viewer could not be loaded. Reload the page to try again.');
   });
 
-  it("keeps the newest of two reads of a file's diff when the older answers last", async () => {
-    let release: () => void = () => {};
-    const held = new Promise<void>((resolve) => (release = resolve));
-
-    const { source } = start();
-
-    await openRow(0);
-
-    // The first refresh is held and answers an old version after the second refresh has answered.
-    diffAnswers['docs/a.md'] = { status: 200, body: { path: 'docs/a.md', status: 'M', patch: 'old', old: 'a', new: 'b', binary: false, tooLarge: 'patch' }, wait: held } as never;
-    // The menu's Refresh reads the open diff again with the list.
-    button().click();
-    await flush();
-    root.querySelector<HTMLElement>('[data-action="changes-refresh"]')!.click();
-    await flush();
-    diffAnswers['docs/a.md'] = { status: 200, body: { path: 'docs/a.md', status: 'M', patch: 'diff --git a/x b/x', old: 'a', new: 'c', binary: false, tooLarge: null } };
-    // The turn's end reads it again while the refresh is on its way (Refresh itself waits while one is).
-    source.emit('session', { session: { ...session, state: 'running' } });
-    source.emit('session', { session: { ...session, state: 'idle' } });
-    await flush();
-    await flush();
-    release();
-    await flush();
-    await flush();
-    expect(root.querySelector('.diff-host .fake')!.textContent).toBe('diff of docs/a.md');
-  });
-
-  it('gives the open diff the layout its pane calls for when the pane is resized', async () => {
+  it('gives the diffs the layout their pane calls for when the pane is resized', async () => {
     const observers: Array<(entries: Array<{ target: Element }>) => void> = [];
 
     vi.stubGlobal('ResizeObserver', class {
@@ -438,14 +587,14 @@ describe('the Changes list', () => {
 
     Object.defineProperty(pane, 'clientWidth', { configurable: true, value: 1200 });
     observers.forEach((callback) => callback([{ target: pane }]));
-    expect(mounts[0]!.sets.at(-1)).toBe('split false');
+    expect(changesMounts[0]!.layouts.at(-1)).toBe('split false');
     Object.defineProperty(pane, 'clientWidth', { configurable: true, value: 500 });
     observers.forEach((callback) => callback([{ target: pane }]));
-    expect(mounts[0]!.sets.at(-1)).toBe('stacked true');
+    expect(changesMounts[0]!.layouts.at(-1)).toBe('stacked true');
 
     // A file view wraps as its pane narrows, and stays stacked.
     Object.defineProperty(pane, 'clientWidth', { configurable: true, value: 1200 });
-    mounts[0]!.onLine!('new', 2);
+    changesMounts[0]!.onLine!('docs/a.md', 'new', 2);
     await flush();
     await flush();
     Object.defineProperty(pane, 'clientWidth', { configurable: true, value: 500 });
@@ -454,7 +603,7 @@ describe('the Changes list', () => {
     vi.unstubAllGlobals();
   });
 
-  it('ticks a file viewed at the hash it was shown with, from the list and the diff, follows another device, and takes back a refused tick', async () => {
+  it('ticks a file viewed at the hash it was shown with, follows another device, and takes back a refused tick', async () => {
     const { source } = start();
 
     button().click();
@@ -463,7 +612,7 @@ describe('the Changes list', () => {
     await flush();
     expect(gets.at(-1)).toBe('VIEWED docs/a.md h-a true 3');
     expect(root.querySelectorAll<HTMLInputElement>('.change-viewed input')[0]!.checked).toBe(true);
-    // Ticking does not open the file.
+    // Ticking does not open the Changes tab.
     expect(root.querySelector('.diff-tab')).toBeNull();
 
     // Another device clears it at that hash; one at another hash, or for another work item, changes nothing.
@@ -480,15 +629,6 @@ describe('the Changes list', () => {
     await flush();
     await flush();
     expect(gets.slice(before)).toEqual(['VIEWED logo.png h-logo true 3', '/v1/conversation/changes?window=pk']);
-
-    // The diff's header has the same tick.
-    root.querySelectorAll<HTMLElement>('.change-row')[1]!.click();
-    await flush();
-    await flush();
-    expect(root.querySelector<HTMLInputElement>('.diff-viewed input')!.checked).toBe(true);
-    root.querySelector<HTMLElement>('.diff-viewed input')!.click();
-    await flush();
-    expect(gets.at(-1)).toBe('VIEWED src/new.ts h-new false 3');
   });
 
   it('sends a file\'s ticks one at a time, ending on the last click', async () => {
@@ -520,13 +660,14 @@ describe('the Changes list', () => {
     expect((box() as HTMLInputElement).checked).toBe(true);
   });
 
-  it('drops the diff tabs when the page moves to another conversation', async () => {
+  it('drops the Changes tab when the page moves to another conversation', async () => {
     const { source } = start();
 
     await openRow(0);
     source.emit('hello', { key: 'pk', groups: [], scope: scope(4, 2), sessions: [session], items: [], more: false, status: null, artifacts: [], unread: 0 });
     expect(root.querySelector('.diff-tab')).toBeNull();
     expect(root.querySelector('.diff-view')).toBeNull();
+    expect(changesMounts[0]!.disposed).toBe(true);
   });
 });
 
@@ -550,14 +691,16 @@ describe('the Changes list text', () => {
     expect(diffNote({ state: 'ok', version: '1', data: { ...data, tooLarge: 'sides' } })).toBeNull();
   });
 
-  it('says the base, the file count and a cut list', () => {
-    expect(listNote({ ...LIST, base: null })).toBe('Uncommitted changes only, no merge base · 3 files · 1 viewed');
-    expect(listNote({ ...LIST, shown: 400, total: 512 })).toBe('Since 0123456 · first 400 of 512 files · 1 viewed');
-    expect(listNote({ ...LIST, total: 1 })).toBe('Since 0123456 · 1 file · 1 viewed');
+  it('says the file count, the lines changed, the viewed count and a cut list, and the base in its tooltip', () => {
+    expect(listNote(LIST)).toBe('3 files · +3 −1 · 1 viewed');
+    expect(listNote({ ...LIST, shown: 400, total: 512 })).toBe('first 400 of 512 files · +3 −1 · 1 viewed');
+    expect(listNote({ ...LIST, total: 1 })).toBe('1 file · +3 −1 · 1 viewed');
+    expect(listBase(LIST)).toBe('Since 0123456');
+    expect(listBase({ ...LIST, base: null })).toBe('Uncommitted changes only, no merge base');
   });
 
   it("names a row's stages in its tooltip", () => {
-    expect(listNote({ ...LIST, rows: LIST.rows.map((row) => ({ ...row, viewed: false })) })).toBe('Since 0123456 · 3 files');
+    expect(listNote({ ...LIST, rows: LIST.rows.map((row) => ({ ...row, viewed: false })) })).toBe('3 files · +3 −1');
     expect(rowTitle(LIST.rows[0]!)).toBe('docs/a.md\nModified · committed, unstaged');
     expect(rowTitle({ ...LIST.rows[0]!, stages: [] })).toBe('docs/a.md\nModified');
   });
