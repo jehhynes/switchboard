@@ -6,6 +6,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { LOCAL_PAGE_COMMANDS, listenHub } from '../src/server.js';
+import { zip } from '../src/browserExtension.js';
+import { unzip } from './zip.js';
 import type { HubServer, PageRoutes } from '../src/server.js';
 import type { RemoteAccess } from '../src/page.js';
 import { createHash } from 'node:crypto';
@@ -718,9 +720,23 @@ describe('the web page routes', () => {
     mkdirSync(join(folder, 'chat'), { recursive: true });
     writeFileSync(join(folder, 'chat', 'page.html'), '<script>1</script>');
 
+    const browserPosts: unknown[] = [];
     const page: PageRoutes = {
       access: new PageAccess(store),
       remote: () => remoteAccess,
+      browser: {
+        snoozed: () => ['https://github.com/o/r/issues/1'],
+        cards: () => [{ url: 'https://github.com/o/r/issues/2', playbook: 'dev:new-dev', group: 'progress', snoozed: false, workItemId: 7 }],
+        snooze: (url, until) => {
+          browserPosts.push({ snooze: url, until });
+          return url.endsWith('/2') ? { refused: null } : null;
+        },
+        unsnooze: (url) => {
+          browserPosts.push({ unsnooze: url });
+          return url.endsWith('/2') ? { refused: null } : null;
+        },
+        download: (origin) => zip([{ name: 'switchboard-extension/remote.json', body: Buffer.from(JSON.stringify({ origin })) }]),
+      },
       asset: (name) => (name === 'diff/b1/diff.js' ? { mime: 'text/javascript; charset=utf-8', body: 'plain', immutable: true, gzip: gzipSync('plain') } : name === 'index.html' ? { mime: 'text/html; charset=utf-8', body: '<html>page {{build}}</html>' } : ['manifest.webmanifest', 'sw.js', 'page.js'].includes(name) ? { mime: 'text/plain', body: name } : null),
       opened: (app) => {
         const key = `page-${++keys}`;
@@ -810,7 +826,7 @@ describe('the web page routes', () => {
     const link = await send(server.port, 'POST', '/page/link', { Authorization: `Bearer ${server.token}` });
     const url = new URL(JSON.parse(link.body).url as string);
 
-    return { posted, uploaded, closed, consoles, url, folder, installed, open: () => page.opened() };
+    return { posted, uploaded, closed, consoles, url, folder, installed, browserPosts, access: page.access, open: () => page.opened() };
   }
 
   it("serves the page on its fixed port, which the link names, by that port's Host only, and nothing but the page there", async () => {
@@ -1115,6 +1131,71 @@ describe('the web page routes', () => {
     expect(JSON.parse((await send(server.port, 'POST', '/page/pair', { Authorization: `Bearer ${server.token}` })).body)).toMatchObject({ host: 'pc.tail.ts.net', url: expect.stringMatching(/^https:\/\/pc\.tail\.ts\.net\/page\?t=[0-9a-f]{64}$/) });
     expect((await send(server.port, 'POST', '/page/pair', {})).status).toBe(401);
     stream.destroy();
+  });
+
+  it("serves the browser extension's download and routes through the page's origin to a signed-in browser, taking posts only from an extension (PRD R121)", async () => {
+    const { url, browserPosts, access } = await serve();
+    const localCookie = String((await send(server.port, 'GET', `${url.pathname}${url.search}`, {})).headers['set-cookie']).split(';')[0]!;
+    const ts = { Host: 'pc.tail.ts.net', 'X-Forwarded-Proto': 'https', 'X-Forwarded-For': '100.64.0.2', 'Tailscale-User-Login': 'alex@example.com' };
+    const download = async (headers: Record<string, string>) => {
+      const answer = await new Promise<{ status: number; headers: Record<string, unknown>; body: Buffer }>((resolve, reject) => {
+        const outbound = request({ host: '127.0.0.1', port: server.port, path: '/page/switchboard-extension.zip', headers: { Host: `127.0.0.1:${server.port}`, ...headers } }, (response) => {
+          const chunks: Buffer[] = [];
+
+          response.on('data', (chunk: Buffer) => chunks.push(chunk));
+          response.on('end', () => resolve({ status: response.statusCode ?? 0, headers: response.headers, body: Buffer.concat(chunks) }));
+        });
+
+        outbound.on('error', reject);
+        outbound.end();
+      });
+
+      return answer;
+    };
+
+    // This computer's copy names no origin, and needs the sign-in.
+    expect((await download({})).status).toBe(401);
+
+    const local = await download({ Cookie: localCookie });
+
+    expect(local.status).toBe(200);
+    expect(local.headers['content-type']).toBe('application/zip');
+    expect(local.headers['content-disposition']).toBe('attachment; filename="switchboard-extension.zip"');
+    expect(JSON.parse(unzip(local.body).get('switchboard-extension/remote.json')!.toString('utf8'))).toEqual({ origin: null });
+
+    // A paired device's copy names its page's origin.
+    remoteAccess = { hosts: ['pc.tail.ts.net'], logins: ['alex@example.com'] };
+
+    const link = new URL(access.pair('pc.tail.ts.net').url);
+    const phone = String((await send(server.port, 'GET', `${link.pathname}${link.search}`, ts)).headers['set-cookie']).split(';')[0]!;
+
+    expect((await download(ts)).status).toBe(401);
+    expect(JSON.parse(unzip((await download({ ...ts, Cookie: phone })).body).get('switchboard-extension/remote.json')!.toString('utf8'))).toEqual({ origin: 'https://pc.tail.ts.net' });
+
+    // The extension's reads carry the browser's sign-in, from the device's host and login only.
+    expect((await send(server.port, 'GET', '/v1/browser/cards', ts)).status).toBe(401);
+    expect((await send(server.port, 'GET', '/v1/browser/cards', { Cookie: phone })).status).toBe(401);
+    expect((await send(server.port, 'GET', '/v1/browser/cards', { ...ts, Cookie: phone, 'Tailscale-User-Login': 'mallory@example.com' })).status).toBe(403);
+    expect(JSON.parse((await send(server.port, 'GET', '/v1/browser/cards', { ...ts, Cookie: phone })).body)).toEqual({ cards: [{ url: 'https://github.com/o/r/issues/2', playbook: 'dev:new-dev', group: 'progress', snoozed: false, workItemId: 7 }] });
+    expect(JSON.parse((await send(server.port, 'GET', '/v1/browser/snoozed', { ...ts, Cookie: phone })).body)).toEqual({ urls: ['https://github.com/o/r/issues/1'] });
+    expect((await send(server.port, 'GET', '/v1/browser/other', { ...ts, Cookie: phone })).status).toBe(404);
+
+    // A post comes from an extension with JSON, never from a web page, the page's own origin included.
+    const extension = { ...ts, Cookie: phone, Origin: 'chrome-extension://abcdefghijklmnopabcdefghijklmnop', 'Content-Type': 'application/json' };
+
+    expect((await send(server.port, 'POST', '/v1/browser/snooze', { ...extension, Origin: 'https://pc.tail.ts.net' }, { url: 'https://github.com/o/r/issues/2', until: null })).status).toBe(403);
+    expect((await send(server.port, 'POST', '/v1/browser/snooze', { ...extension, 'Content-Type': 'text/plain' }, { url: 'https://github.com/o/r/issues/2', until: null })).status).toBe(415);
+    expect((await send(server.port, 'POST', '/v1/browser/snooze', { ...extension, Cookie: localCookie }, { url: 'https://github.com/o/r/issues/2', until: null })).status).toBe(401);
+    expect(browserPosts).toEqual([]);
+    expect(JSON.parse((await send(server.port, 'POST', '/v1/browser/snooze', extension, { url: 'https://github.com/o/r/issues/2', until: 5 })).body)).toEqual({ done: true });
+    expect((await send(server.port, 'POST', '/v1/browser/unsnooze', { ...extension, Origin: 'moz-extension://5f1e' }, { url: 'https://github.com/o/r/issues/9' })).status).toBe(404);
+    expect(browserPosts).toEqual([{ snooze: 'https://github.com/o/r/issues/2', until: 5 }, { unsnooze: 'https://github.com/o/r/issues/9' }]);
+
+    // Once remote access no longer allows the device, nothing is served to it.
+    remoteAccess = { hosts: [], logins: [] };
+    expect((await send(server.port, 'GET', '/v1/browser/cards', { ...ts, Cookie: phone })).status).toBe(403);
+    expect((await send(server.port, 'POST', '/v1/browser/snooze', extension, { url: 'https://github.com/o/r/issues/2', until: null })).status).toBe(403);
+    expect(browserPosts).toHaveLength(2);
   });
 
   it('ends a paired device\'s open page when remote access no longer allows its host or login, and keeps the others', async () => {

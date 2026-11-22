@@ -743,6 +743,9 @@ button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }
 .sheet-button.primary:hover { background: var(--vscode-button-hoverBackground); }
 .sheet-button.secondary { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
 .sheet-button:disabled { opacity: 0.5; cursor: default; }
+a.sheet-button { display: inline-flex; align-items: center; text-decoration: none; }
+.extension-steps { padding-left: 20px; }
+.extension-steps li { margin-bottom: 4px; }
 /* The persona dialog, as Settings: centred over the dimmed page in the glass of the page's floating layers, the whole screen on a phone. */
 .persona-backdrop { position: fixed; inset: 0; z-index: var(--sb-z-persona); display: flex; align-items: center; justify-content: center; padding: max(24px, var(--sb-top)) max(24px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left)); background: rgba(0, 0, 0, 0.45); }
 .persona-dialog { box-sizing: border-box; display: flex; flex-direction: column; width: min(560px, 100%); max-height: min(80vh, 100%); overflow: hidden; border-radius: 8px; box-shadow: 0 8px 32px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.5)); }

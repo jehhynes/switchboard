@@ -195,6 +195,7 @@ export type HeaderSheet =
   | { kind: 'adhoc'; opId: string; schedule: string; repo: string; provider: string; providerChosen: boolean; prompt: string; start: boolean; providerNote: string | null; busy: boolean; error: string | null }
   | { kind: 'folder'; opId: string; folder: string; provider: string; providerChosen: boolean; installed: string[] | null; busy: boolean; error: string | null }
   | { kind: 'later'; title: string }
+  | { kind: 'extension'; remote: boolean }
   | { kind: 'holder'; busy: boolean; error: string | null }
   | { kind: 'devices'; pairing: Pairing | null; devices: Device[] | null; busy: boolean; error: string | null };
 
@@ -429,7 +430,7 @@ const Separator = ({ classes = 'menu-separator' }: { classes?: string }) => <li 
 
 /**
  * More Actions (PRD R71), in the dock's groups: New ad-hoc session… and New conversation in a folder…; Held sessions; Refresh sources,
- * Reload and Show hub log; then Pair a device, Open Settings and, while the voice is not on this computer, Voice on the computer, on this computer's
+ * Reload, Show hub log and Get the browser extension…; then Pair a device, Open Settings and, while the voice is not on this computer, Voice on the computer, on this computer's
  * page only, or Voice on this phone, on a paired device's.
  * On a phone, where the header has no room for them, the source icons come first as a check row per source.
  */
@@ -457,6 +458,7 @@ export function renderMoreMenu(header: PageHeader | null, local = false, phoneVo
       <MoreRow action="list-poll" icon="refresh" label="Refresh sources" />
       <MoreRow action="list-reload" icon="debug-restart" label="Reload" />
       <MoreRow action="list-later-log" icon="output" label="Show hub log" />
+      <MoreRow action="list-extension" icon="extensions" label="Get the browser extension…" />
       {local ? (
         <>
           <Separator />
@@ -633,6 +635,46 @@ function Frame({ title, children, buttons }: { title: string; children: Componen
   );
 }
 
+/** Where the page downloads the browser extension (PRD R121); the hub's `EXTENSION_DOWNLOAD`. */
+export const EXTENSION_DOWNLOAD = '/page/switchboard-extension.zip';
+
+/**
+ * Get the browser extension (PRD R121): the download and how to load it unpacked in Chrome or Edge. A paired device's copy reaches the hub through
+ * this page's address with this browser's sign-in, so it is loaded in the browser the page is open in.
+ */
+function ExtensionSheet({ remote }: { remote: boolean }) {
+  return (
+    <Frame
+      title="Get the browser extension"
+      buttons={
+        <>
+          <button type="button" class="sheet-button secondary" data-action="list-sheet-cancel">
+            Close
+          </button>
+          <a class="sheet-button primary" href={EXTENSION_DOWNLOAD} download="switchboard-extension.zip">
+            Download
+          </a>
+        </>
+      }
+    >
+      <p class="sheet-detail">
+        {remote
+          ? 'The extension shows Switchboard on GitHub project boards. This copy reaches Switchboard through this page, signed in as this browser is, so load it in this browser.'
+          : 'The extension shows Switchboard on GitHub project boards. This copy reaches Switchboard on this computer.'}
+      </p>
+      <ol class="sheet-detail extension-steps">
+        <li>Download the extension and extract the zip.</li>
+        <li>
+          Open <code>chrome://extensions</code> in Chrome or <code>edge://extensions</code> in Edge, and turn on Developer mode.
+        </li>
+        <li>
+          Select Load unpacked and choose the extracted <code>switchboard-extension</code> folder.
+        </li>
+      </ol>
+    </Frame>
+  );
+}
+
 /**
  * A sheet of the header (architecture.md § Web page), drawn as the page's other sheets: New ad-hoc session as the dock's window (Run, with the
  * schedules; Repository; Provider; Prompt; Start automatically), New conversation in a folder with the folder and, when both are installed, the
@@ -645,6 +687,10 @@ export function renderHeaderSheet(sheet: HeaderSheet | null, header: PageHeader 
 
   if (sheet.kind === 'devices') {
     return <DevicesSheet sheet={sheet} now={now} />;
+  }
+
+  if (sheet.kind === 'extension') {
+    return <ExtensionSheet remote={sheet.remote} />;
   }
 
   if (sheet.kind === 'later') {
@@ -1109,7 +1155,7 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
   };
   const revokeDevice = (id: string): Promise<void> => changeDevice('page-device-revoke', { id }, 'The device was not signed out.');
   const closeSheet = (): void => {
-    if (view.sheet !== null && view.sheet.kind !== 'later' && view.sheet.kind !== 'devices' && view.sheet.busy) {
+    if (view.sheet !== null && view.sheet.kind !== 'later' && view.sheet.kind !== 'extension' && view.sheet.kind !== 'devices' && view.sheet.busy) {
       return;
     }
 
@@ -1121,7 +1167,7 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
   const sheetGo = async (): Promise<void> => {
     const sheet = view.sheet;
 
-    if (sheet === null || sheet.kind === 'later' || sheet.busy) {
+    if (sheet === null || sheet.kind === 'later' || sheet.kind === 'extension' || sheet.busy) {
       return;
     }
 
@@ -1169,7 +1215,7 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
     const name = field.dataset?.['field'];
     const sheet = view.sheet;
 
-    if (name === undefined || sheet === null || sheet.kind === 'later' || sheet.kind === 'holder' || sheet.kind === 'devices') {
+    if (name === undefined || sheet === null || sheet.kind === 'later' || sheet.kind === 'extension' || sheet.kind === 'holder' || sheet.kind === 'devices') {
       return;
     }
 
@@ -1313,6 +1359,12 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
       case 'list-devices':
         view.menu = null;
         void openDevices();
+        break;
+      case 'list-extension':
+        view.menu = null;
+        view.sheet = { kind: 'extension', remote: view.local !== true };
+        redraw();
+        sheetHost.querySelector<HTMLElement>('.sheet-button.primary')?.focus();
         break;
       case 'list-settings':
         view.menu = null;

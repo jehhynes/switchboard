@@ -1,6 +1,5 @@
 import type { Card } from '@switchboard/core/group';
 import { itemHref } from './board.js';
-import { openUri } from './open.js';
 import type { SnoozeMenus } from './snooze.js';
 
 const ITEM = 'switchboard-menu-item';
@@ -102,7 +101,7 @@ function menuItem(template: Element, slot: string, label: string, iconPath: stri
  * Items that already match the card are left alone, so a pass that changes nothing makes no mutation. A menu without a plain
  * GitHub item to copy gets none.
  */
-export function addMenuItems(doc: Document, list: Element, card: (url: string) => Card | undefined, snooze: SnoozeMenus, open: (uri: string) => void): void {
+export function addMenuItems(doc: Document, list: Element, card: (url: string) => Card | undefined, snooze: SnoozeMenus, open: (ticketUrl: string) => void): void {
   const owner = menuCard(doc, list);
   const template = list.querySelector(`:scope > li[role="menuitem"]:not([aria-haspopup]):not([data-variant]):not(.${ITEM})`);
   const url = owner === null ? undefined : itemHref(owner.card);
@@ -131,7 +130,7 @@ export function addMenuItems(doc: Document, list: Element, card: (url: string) =
   const slot = (name: string): Element | null => list.querySelector(`:scope > .${ITEM}[data-switchboard-slot="${name}"]`);
   const openRun = (): void => {
     closeGitHubMenu();
-    open(openUri(target.url));
+    open(target.url);
   };
   // A change of state, such as a snooze from the dock while the menu is open, updates the items in place, so focus stays.
   let openItem = slot('open');
@@ -170,7 +169,7 @@ export function addMenuItems(doc: Document, list: Element, card: (url: string) =
 }
 
 /** Watches for GitHub opening a card's or table row's actions menu in its portal and adds Switchboard's items before it paints. */
-export function watchCardMenus(doc: Document, card: (url: string) => Card | undefined, snooze: SnoozeMenus, open: (uri: string) => void): { stop(): void } {
+export function watchCardMenus(doc: Document, card: (url: string) => Card | undefined, snooze: SnoozeMenus, open: (ticketUrl: string) => void): { stop(): void } {
   const observer = new MutationObserver(() => {
     for (const list of doc.querySelectorAll('ul[role="menu"][aria-labelledby]')) {
       addMenuItems(doc, list, card, snooze, open);

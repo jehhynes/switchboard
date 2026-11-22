@@ -1,9 +1,8 @@
 import { MARK_GLYPHS, MARK_TITLES } from '@switchboard/core/group';
 import type { Card, Group } from '@switchboard/core/group';
 import { PROJECT, REFRESH_MS, issueKey, itemHref, tableRows } from './board.js';
-import { BROWSER_PORT } from './hub.js';
-
-export const CARDS_URL = `http://127.0.0.1:${BROWSER_PORT}/cards`;
+import { LOCAL_ROUTES } from './hub.js';
+import type { HubRoutes } from './hub.js';
 
 export const PILL = 'switchboard-pill';
 const GROUPS: Record<Group, string> = { blocked: 'Blocked on you', review: 'Ready for review', progress: 'In progress', unstarted: 'Unstarted', done: 'Done' };
@@ -16,7 +15,7 @@ function isCard(value: unknown): value is Card {
 
   const card = value as Record<string, unknown>;
 
-  return typeof card['url'] === 'string' && (card['playbook'] === null || typeof card['playbook'] === 'string') && typeof card['group'] === 'string' && Object.hasOwn(GROUPS, card['group']) && typeof card['snoozed'] === 'boolean' && isMark(card['mark']) && (card['stripe'] == null || STRIPES.has(card['stripe']));
+  return typeof card['url'] === 'string' && (card['playbook'] === null || typeof card['playbook'] === 'string') && typeof card['group'] === 'string' && Object.hasOwn(GROUPS, card['group']) && typeof card['snoozed'] === 'boolean' && isMark(card['mark']) && (card['stripe'] == null || STRIPES.has(card['stripe'])) && (card['workItemId'] == null || Number.isSafeInteger(card['workItemId']));
 }
 
 // A hub older than the mark sends none.
@@ -25,9 +24,9 @@ function isMark(mark: unknown): boolean {
 }
 
 /** The hub's cards, or null when the hub does not answer or answers with something else, such as a hub older than PRD R67. */
-export async function readCards(fetchUrl: (url: string) => Promise<Response>): Promise<Card[] | null> {
+export async function readCards(fetchUrl: (url: string) => Promise<Response>, routes: HubRoutes = LOCAL_ROUTES): Promise<Card[] | null> {
   try {
-    const response = await fetchUrl(CARDS_URL);
+    const response = await fetchUrl(routes.cards);
 
     if (!response.ok) {
       return null;

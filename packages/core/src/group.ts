@@ -445,6 +445,8 @@ export interface Card {
   stripe?: 'error' | 'warning' | 'turn' | null;
   /** The URLs of the ticket's links (PRD R52), so a pull request page finds its ticket (PRD R69). A hub older than R69 sends none. */
   links?: string[];
+  /** The work item the card shows, which the web page opens on another device (PRD R121); null for a pool ticket. A hub older than R121 sends none. */
+  workItemId?: number | null;
 }
 
 /**

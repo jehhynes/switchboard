@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { postSnooze, postUnsnooze, snoozeMenus, snoozeMessage, unsnoozeMessage } from '../src/snooze.js';
+import { remoteRoutes } from '../src/hub.js';
 import type { SnoozeAnswer, SnoozeMenus } from '../src/snooze.js';
 
 const ISSUE = 'https://github.com/github/roadmap/issues/1090';
@@ -28,6 +29,16 @@ describe('postSnooze (PRD R66)', () => {
     expect(await postSnooze(reply(403, 'forbidden'), ISSUE, null)).toEqual({ error: 'Switchboard answered 403.' });
     expect(await postSnooze(reply(500, '{"error":""}'), ISSUE, null)).toEqual({ error: 'Switchboard answered 500.' });
     expect(await postSnooze(async () => Promise.reject(new TypeError('Failed to fetch')), ISSUE, null)).toEqual({ error: 'Switchboard is not running.' });
+  });
+});
+
+describe('postSnooze and postUnsnooze on another device (PRD R121)', () => {
+  it("post to the routes on the page's origin", async () => {
+    const fetchUrl = vi.fn(async (_url: string, _init: RequestInit) => new Response('{"done":true}', { status: 200 }));
+
+    await postSnooze(fetchUrl, ISSUE, null, remoteRoutes('https://pc.tail.ts.net'));
+    await postUnsnooze(fetchUrl, ISSUE, remoteRoutes('https://pc.tail.ts.net'));
+    expect(fetchUrl.mock.calls.map(([url]) => url)).toEqual(['https://pc.tail.ts.net/v1/browser/snooze', 'https://pc.tail.ts.net/v1/browser/unsnooze']);
   });
 });
 

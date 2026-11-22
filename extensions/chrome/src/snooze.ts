@@ -1,8 +1,6 @@
 import { snoozeChoices } from '@switchboard/core/snooze';
-import { BROWSER_PORT } from './hub.js';
-
-export const SNOOZE_URL = `http://127.0.0.1:${BROWSER_PORT}/snooze`;
-export const UNSNOOZE_URL = `http://127.0.0.1:${BROWSER_PORT}/unsnooze`;
+import { LOCAL_ROUTES } from './hub.js';
+import type { HubRoutes } from './hub.js';
 
 /** The hub's answer to a snooze or unsnooze: done, or the reason it was not. */
 export type SnoozeAnswer = { done: true } | { error: string };
@@ -10,13 +8,13 @@ export type SnoozeAnswer = { done: true } | { error: string };
 type FetchUrl = (url: string, init: RequestInit) => Promise<Response>;
 
 /** Posts a snooze to the hub (PRD R66). */
-export function postSnooze(fetchUrl: FetchUrl, url: string, until: number | null): Promise<SnoozeAnswer> {
-  return postHub(fetchUrl, SNOOZE_URL, { url, until });
+export function postSnooze(fetchUrl: FetchUrl, url: string, until: number | null, routes: HubRoutes = LOCAL_ROUTES): Promise<SnoozeAnswer> {
+  return postHub(fetchUrl, routes.snooze, { url, until });
 }
 
 /** Posts an unsnooze to the hub, which ends the ticket's snooze (PRD R66). */
-export function postUnsnooze(fetchUrl: FetchUrl, url: string): Promise<SnoozeAnswer> {
-  return postHub(fetchUrl, UNSNOOZE_URL, { url });
+export function postUnsnooze(fetchUrl: FetchUrl, url: string, routes: HubRoutes = LOCAL_ROUTES): Promise<SnoozeAnswer> {
+  return postHub(fetchUrl, routes.unsnooze, { url });
 }
 
 /**

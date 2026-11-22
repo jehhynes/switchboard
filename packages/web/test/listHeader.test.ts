@@ -311,7 +311,7 @@ describe('the list header (architecture.md § Web page)', () => {
     hello(source);
     click('.more-actions');
     expect(root.querySelector('.more-actions')?.getAttribute('aria-expanded')).toBe('true');
-    expect(menuRows()).toEqual(['gh', 'desk', 'help', '-', 'New ad-hoc session…', 'New conversation in a folder…', '-', 'Held sessions', '-', 'Refresh sources', 'Reload', 'Show hub log', '-', 'Pair a device…', 'Open Settings']);
+    expect(menuRows()).toEqual(['gh', 'desk', 'help', '-', 'New ad-hoc session…', 'New conversation in a folder…', '-', 'Held sessions', '-', 'Refresh sources', 'Reload', 'Show hub log', 'Get the browser extension…', '-', 'Pair a device…', 'Open Settings']);
     // The source rows are the phone's: page.css hides them outside the phone's layout, where the icons are in the header.
     expect([...root.querySelectorAll('.more-menu .more-source')]).toHaveLength(4);
     expect(root.querySelector('.more-menu [data-source="help"]')?.getAttribute('aria-checked')).toBe('false');
@@ -349,6 +349,23 @@ describe('the list header (architecture.md § Web page)', () => {
       click('#list-sheet .sheet-button');
       expect(root.querySelector('#list-sheet .sheet')).toBeNull();
     }
+
+    // Get the browser extension downloads this computer's copy and says how to load it unpacked (PRD R121).
+    click('.more-actions');
+    click('.more-menu [data-action="list-extension"]');
+    expect(root.querySelector('.more-menu')).toBeNull();
+    expect(root.querySelector('#list-sheet .sheet-title')?.textContent).toBe('Get the browser extension');
+    expect(root.querySelector('#list-sheet a.sheet-button.primary')?.getAttribute('href')).toBe('/page/switchboard-extension.zip');
+    expect(root.querySelector('#list-sheet a.sheet-button.primary')?.getAttribute('download')).toBe('switchboard-extension.zip');
+    expect(root.querySelector('#list-sheet .sheet-detail')?.textContent).toContain('reaches Switchboard on this computer');
+    expect([...root.querySelectorAll('#list-sheet .extension-steps li')].map((li) => li.textContent)).toEqual([
+      'Download the extension and extract the zip.',
+      'Open chrome://extensions in Chrome or edge://extensions in Edge, and turn on Developer mode.',
+      'Select Load unpacked and choose the extracted switchboard-extension folder.',
+    ]);
+    expect(posts.map((one) => one.url)).not.toContain('/v1/conversation/page-extension');
+    click('#list-sheet .sheet-button.secondary');
+    expect(root.querySelector('#list-sheet .sheet')).toBeNull();
 
     // Open Settings opens the page's Settings, which reads settings.json from the hub.
     click('.more-actions');
@@ -486,9 +503,13 @@ describe('the list header (architecture.md § Web page)', () => {
     hello(remote.source);
     click('.more-actions');
     // Settings stays on this computer too; the menu ends with Voice on this device, off until tapped.
-    expect(menuRows().slice(-6)).toEqual(['-', 'Refresh sources', 'Reload', 'Show hub log', '-', 'Voice on this device']);
+    expect(menuRows().slice(-7)).toEqual(['-', 'Refresh sources', 'Reload', 'Show hub log', 'Get the browser extension…', '-', 'Voice on this device']);
     expect(root.querySelector('[data-action="list-phone-voice"]')?.getAttribute('aria-checked')).toBe('false');
     expect(root.querySelector('[data-action="list-settings"]')).toBeNull();
+    // A paired device's copy reaches the hub through this page, so it is loaded in this browser (PRD R121).
+    click('.more-menu [data-action="list-extension"]');
+    expect(root.querySelector('#list-sheet .sheet-detail')?.textContent).toContain('signed in as this browser is, so load it in this browser');
+    click('#list-sheet .sheet-button.secondary');
     remote.page.close();
 
     const { page, source } = start(true);

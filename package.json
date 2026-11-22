@@ -22,9 +22,9 @@
     "apps/hub",
     "apps/dock",
     "apps/pane-helper",
-    "extensions/switchboard",
     "extensions/chrome",
     "extensions/firefox",
+    "extensions/switchboard",
     "extensions/gnome-shell"
   ],
   "scripts": {

@@ -47,16 +47,16 @@ describe('cardsOf', () => {
     );
 
     expect(cards).toEqual([
-      { url: issue(1), playbook: 'dev:review-pr', group: 'review', mark: 'review', snoozed: false, stripe: 'turn', links: [] },
-      { url: issue(2), playbook: 'dev:qa-failure', group: 'blocked', mark: 'question', snoozed: false, stripe: 'warning', links: [] },
-      { url: issue(3), playbook: 'dev:new-dev', group: 'progress', mark: 'running', snoozed: true, stripe: null, links: [] },
-      { url: issue(4), playbook: 'dev:triage', group: 'unstarted', mark: 'triaging', snoozed: false, stripe: null, links: [] },
-      { url: issue(5), playbook: 'dev:other', group: 'done', mark: 'done-session', snoozed: false, stripe: null, links: [] },
-      { url: issue(6), playbook: null, group: 'blocked', mark: 'failed', snoozed: false, stripe: 'error', links: [] },
+      { url: issue(1), playbook: 'dev:review-pr', group: 'review', mark: 'review', snoozed: false, stripe: 'turn', links: [], workItemId: 1 },
+      { url: issue(2), playbook: 'dev:qa-failure', group: 'blocked', mark: 'question', snoozed: false, stripe: 'warning', links: [], workItemId: 2 },
+      { url: issue(3), playbook: 'dev:new-dev', group: 'progress', mark: 'running', snoozed: true, stripe: null, links: [], workItemId: 3 },
+      { url: issue(4), playbook: 'dev:triage', group: 'unstarted', mark: 'triaging', snoozed: false, stripe: null, links: [], workItemId: 4 },
+      { url: issue(5), playbook: 'dev:other', group: 'done', mark: 'done-session', snoozed: false, stripe: null, links: [], workItemId: 5 },
+      { url: issue(6), playbook: null, group: 'blocked', mark: 'failed', snoozed: false, stripe: 'error', links: [], workItemId: 6 },
     ]);
   });
 
-  it('shows a ticket as its open work item, otherwise its latest one', () => {
+  it('shows a ticket as its open work item, otherwise its latest one, with that work item\'s ID (PRD R121)', () => {
     const returning = ticket(1, 'github', issue(1));
     const finished = ticket(2, 'github', issue(2));
     const cards = cardsOf(
@@ -74,8 +74,8 @@ describe('cardsOf', () => {
     );
 
     expect(cards).toEqual([
-      { url: issue(1), playbook: 'dev:review-pr-followup', group: 'unstarted', mark: null, snoozed: false, stripe: null, links: [] },
-      { url: issue(2), playbook: 'dev:new-dev', group: 'done', mark: 'done-session', snoozed: false, stripe: null, links: [] },
+      { url: issue(1), playbook: 'dev:review-pr-followup', group: 'unstarted', mark: null, snoozed: false, stripe: null, links: [], workItemId: 4 },
+      { url: issue(2), playbook: 'dev:new-dev', group: 'done', mark: 'done-session', snoozed: false, stripe: null, links: [], workItemId: 5 },
     ]);
   });
 
@@ -92,7 +92,7 @@ describe('cardsOf', () => {
       ),
     );
 
-    expect(cards).toEqual([{ url: issue(1), playbook: 'dev:new-dev', group: 'progress', mark: 'running', snoozed: false, stripe: null, links: [] }]);
+    expect(cards).toEqual([{ url: issue(1), playbook: 'dev:new-dev', group: 'progress', mark: 'running', snoozed: false, stripe: null, links: [], workItemId: 1 }]);
   });
 
   it('shows a pool ticket as Unstarted with its triage\'s playbook, over its done work items', () => {
@@ -112,10 +112,10 @@ describe('cardsOf', () => {
     );
 
     expect(cards).toEqual([
-      { url: 'https://desk.example.test/1', playbook: 'support:case', group: 'unstarted', mark: null, snoozed: true, stripe: null, links: [] },
-      { url: 'https://desk.example.test/2', playbook: 'support:triage', group: 'unstarted', mark: 'triaging', snoozed: false, stripe: null, links: [] },
-      { url: 'https://desk.example.test/3', playbook: null, group: 'unstarted', mark: null, snoozed: false, stripe: null, links: [] },
-      { url: 'https://desk.example.test/4', playbook: null, group: 'unstarted', mark: null, snoozed: true, stripe: null, links: [] },
+      { url: 'https://desk.example.test/1', playbook: 'support:case', group: 'unstarted', mark: null, snoozed: true, stripe: null, links: [], workItemId: null },
+      { url: 'https://desk.example.test/2', playbook: 'support:triage', group: 'unstarted', mark: 'triaging', snoozed: false, stripe: null, links: [], workItemId: null },
+      { url: 'https://desk.example.test/3', playbook: null, group: 'unstarted', mark: null, snoozed: false, stripe: null, links: [], workItemId: null },
+      { url: 'https://desk.example.test/4', playbook: null, group: 'unstarted', mark: null, snoozed: true, stripe: null, links: [], workItemId: null },
     ]);
   });
 
@@ -133,8 +133,8 @@ describe('cardsOf', () => {
     );
 
     expect(cards).toEqual([
-      { url: issue(1), playbook: 'dev:develop', group: 'progress', mark: 'running', snoozed: false, stripe: null, links: ['https://github.com/o/r/pull/7', 'https://example.test/doc'] },
-      { url: 'https://desk.example.test/2', playbook: 'support:case', group: 'unstarted', mark: null, snoozed: false, stripe: null, links: ['https://github.com/o/r/issues/9'] },
+      { url: issue(1), playbook: 'dev:develop', group: 'progress', mark: 'running', snoozed: false, stripe: null, links: ['https://github.com/o/r/pull/7', 'https://example.test/doc'], workItemId: 1 },
+      { url: 'https://desk.example.test/2', playbook: 'support:case', group: 'unstarted', mark: null, snoozed: false, stripe: null, links: ['https://github.com/o/r/issues/9'], workItemId: null },
     ]);
   });
 });

@@ -1,7 +1,7 @@
 import type { Card } from '@switchboard/core/group';
 import { issueKey, watchBoard } from './board.js';
 import { watchCardMenus } from './menu.js';
-import { watchPillClicks } from './open.js';
+import { openUri, pageOpenUrl, watchPillClicks } from './open.js';
 import { cardsByIssue, watchPills } from './pills.js';
 import { snoozeMenus } from './snooze.js';
 import type { SnoozeAnswer } from './snooze.js';
@@ -32,8 +32,27 @@ const ask = async (message: object): Promise<SnoozeAnswer> => {
   return typeof answer === 'object' && answer !== null ? (answer as SnoozeAnswer) : { error: 'The Switchboard extension did not answer.' };
 };
 
-// A vscode:// navigation leaves the page as it is; Chrome asks before opening VS Code (mechanics M22).
-const open = (uri: string): void => location.assign(uri);
+// The web page's origin when this copy came from another computer's hub (PRD R121), which has no VS Code here to open.
+let origin: string | null = null;
+
+void chrome.runtime.sendMessage({ type: 'hub' }).then(
+  (hub) => {
+    const named = (hub as { origin?: unknown } | null)?.origin;
+
+    origin = typeof named === 'string' ? named : null;
+  },
+  () => undefined,
+);
+
+// A vscode:// navigation leaves the page as it is; Chrome asks before opening VS Code (mechanics M22). On another device the web page opens in a
+// new tab instead, in the click that asked for it.
+const open = (ticketUrl: string): void => {
+  if (origin === null) {
+    location.assign(openUri(ticketUrl));
+  } else {
+    window.open(pageOpenUrl(origin, cards.get(issueKey(ticketUrl) ?? '')), '_blank', 'noopener');
+  }
+};
 
 watchCardMenus(
   document,

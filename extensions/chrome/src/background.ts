@@ -1,16 +1,29 @@
-import { readPaneEnabled, readSnoozed } from './hub.js';
+import { REMOTE_FILE, readPaneEnabled, readRoutes, readSnoozed } from './hub.js';
 import { PaneConnection, PaneWindow, paneMarkerUrl } from './pane.js';
 import type { KeyValue, PaneSocketLike } from './pane.js';
 import { readCards } from './pills.js';
 import { postSnooze, postUnsnooze, snoozeMessage, unsnoozeMessage } from './snooze.js';
 
+// The hub on this computer, or the one whose web page gave this copy (architecture.md § Browser extension).
+const routes = readRoutes((url) => fetch(url), chrome.runtime.getURL(REMOTE_FILE));
+
 // Content scripts on github.com cannot read a loopback address, so the service worker reads the hub for them.
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if ((message as { type?: unknown } | null)?.type !== 'hub') {
+    return false;
+  }
+
+  void routes.then((hub) => sendResponse({ origin: hub.origin }));
+
+  return true;
+});
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if ((message as { type?: unknown } | null)?.type !== 'snoozed') {
     return false;
   }
 
-  void readSnoozed((url) => fetch(url, { cache: 'no-store' })).then(sendResponse);
+  void routes.then((hub) => readSnoozed((url) => fetch(url, { cache: 'no-store' }), hub)).then(sendResponse);
 
   return true;
 });
@@ -20,7 +33,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return false;
   }
 
-  void readCards((url) => fetch(url, { cache: 'no-store' })).then(sendResponse);
+  void routes.then((hub) => readCards((url) => fetch(url, { cache: 'no-store' }), hub)).then(sendResponse);
 
   return true;
 });
@@ -33,7 +46,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return false;
   }
 
-  void postSnooze((url, init) => fetch(url, init), snooze.url, snooze.until).then(sendResponse);
+  void routes.then((hub) => postSnooze((url, init) => fetch(url, init), snooze.url, snooze.until, hub)).then(sendResponse);
 
   return true;
 });
@@ -45,12 +58,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return false;
   }
 
-  void postUnsnooze((url, init) => fetch(url, init), unsnooze.url).then(sendResponse);
+  void routes.then((hub) => postUnsnooze((url, init) => fetch(url, init), unsnooze.url, hub)).then(sendResponse);
 
   return true;
 });
 
-// The Chrome pane (architecture.md § Browser extension): Chrome only, as Firefox has neither the fixed extension ID nor externally_connectable.
+// The Chrome pane (architecture.md § Browser extension): Chrome only, as Firefox has neither the fixed extension ID nor externally_connectable, and
+// only with the hub on this computer, since the pane keeps a window there. Its listeners are added at once, as a service worker that an event
+// wakes gets only the listeners its first run adds.
 if (!FIREFOX) {
   const store = (area: chrome.storage.StorageArea): KeyValue => ({ get: (key) => area.get(key), set: (items) => area.set(items), remove: (key) => area.remove(key) });
   const markerPage = chrome.runtime.getURL('pane.html');
@@ -84,9 +99,13 @@ if (!FIREFOX) {
 
   // The page wakes the service worker, which Chrome stops while no socket keeps it busy, and hands it the pairing token.
   chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
-    sendResponse(pane.external(message, sender.origin));
-    return false;
+    void routes.then((hub) => sendResponse(hub.origin === null ? pane.external(message, sender.origin) : null));
+    return true;
   });
   chrome.windows.onRemoved.addListener((windowId) => void pane.windowRemoved(windowId).catch((error: unknown) => console.error('Switchboard could not forget its pane', error)));
-  pane.connect();
+  void routes.then((hub) => {
+    if (hub.origin === null) {
+      pane.connect();
+    }
+  });
 }

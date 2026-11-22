@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { hubBundlePath, switchboardHome } from '@switchboard/core';
 import { installBundle } from './bundle.js';
 import { installHolder, installPaneHelper, installVoice, MANIFEST_FILE } from './holderInstall.js';
+import { installBrowserExtension } from './browserExtension.js';
 import { installDiffViewer } from './pageAssets.js';
 
 /** What an install did: whether the hub bundle changed, and once the per-build programs are installed, each one's error. */
@@ -13,7 +14,7 @@ export interface CarriedInstall {
 
 /**
  * Installs what the extension carries in its `dist` folder into the home, as activation does and `hub.js install` does without VS Code
- * (architecture.md § Hub lifecycle): the hub bundle, which a running hub then restarts onto, and the web page's Mermaid and diff viewer at once, then the
+ * (architecture.md § Hub lifecycle): the hub bundle, which a running hub then restarts onto, and the web page's Mermaid, diff viewer and browser extension at once, then the
  * terminal holder's, the voice process's and, on Windows, the Chrome pane helper's builds. A hub bundle that cannot be copied throws; a program
  * that cannot be installed fails only what it runs, so its error is returned.
  */
@@ -32,6 +33,13 @@ export function installCarried(dist: string, home: string, platform: NodeJS.Plat
     installDiffViewer(join(dist, 'diff'), join(switchboardHome(home), 'web'));
   } catch {
     // The page then says the diff viewer could not be loaded.
+  }
+
+  // The browser extension, which the web page offers for download to another device (architecture.md § Browser extension).
+  try {
+    installBrowserExtension(join(dist, 'chrome'), join(switchboardHome(home), 'web'));
+  } catch {
+    // The page's download then answers that there is none.
   }
 
   const target = switchboardHome(home);

@@ -106,6 +106,13 @@ function copyAssets() {
   } else {
     console.warn('packages/web has not built its diff viewer, so the web page shows no diffs. Build packages/web first.');
   }
+
+  // The browser extension's unpacked build, which activation installs in the home, so the web page offers it for download.
+  if (fs.existsSync('../chrome/dist/manifest.json')) {
+    fs.cpSync('../chrome/dist', 'dist/chrome', { recursive: true });
+  } else {
+    console.warn('extensions/chrome has not been built, so the web page offers no browser extension. Build extensions/chrome first.');
+  }
 }
 
 /** Every file under a folder, relative with forward slashes, sorted. */

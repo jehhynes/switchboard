@@ -55,6 +55,8 @@ import { spawnEnvironment } from './spawn.js';
 import { PageTargets } from './pageTargets.js';
 import { VOICE_CLOSE, VoiceSockets } from './voiceSocket.js';
 import { VOICE_OFF } from './server.js';
+import type { PageBrowser } from './server.js';
+import { browserExtensionZip } from './browserExtension.js';
 
 const RELOAD_DEBOUNCE_MS = 300;
 /** The dock's note while no device has the voice, after the phone that had it left. */
@@ -1087,6 +1089,23 @@ const dockWithRuns = () => {
   // A hub that took over goes on with the voice as the hub before it left it (architecture.md § Hub lifecycle).
   voice.restore(options.handover?.['voice']);
 
+  // What the browser extension reads and posts, on the browser endpoint and through the web page's origin (architecture.md § Browser extension).
+  const browser: PageBrowser = {
+    snoozed: () => store.snoozedTickets(deps.now()).flatMap((ticket) => (ticket.url === '' ? [] : [ticket.url])),
+    cards: () => cardsOf(views().snapshot),
+    snooze: (url, until) => {
+      const ticket = store.ticketInScopeByUrl(url);
+
+      return ticket === null ? null : { refused: runtime.send({ type: 'snooze', ticketId: ticket.id, until }).refused };
+    },
+    unsnooze: (url) => {
+      const ticket = store.ticketInScopeByUrl(url);
+
+      return ticket === null ? null : { refused: runtime.send({ type: 'restore', ticketId: ticket.id }).refused };
+    },
+    download: (origin) => browserExtensionZip(join(home, 'web'), origin),
+  };
+
   return {
     runtime,
     post: {
@@ -1695,6 +1714,7 @@ const dockWithRuns = () => {
         accept: (request, socket, head, device) => voiceSockets.accept(request, socket, head, device),
         close: (match, reason) => voiceSockets.close(match, reason),
       },
+      browser,
     },
     pagePort: () => config.settings.web.port,
     dock: () => dockWithRuns(),
@@ -1710,20 +1730,12 @@ const dockWithRuns = () => {
     attachWindows: (send) => {
       sendWindows = send;
     },
-    snoozedUrls: () => store.snoozedTickets(deps.now()).flatMap((ticket) => (ticket.url === '' ? [] : [ticket.url])),
-    cards: () => cardsOf(views().snapshot),
-    snoozeUrl: (url, until) => {
-      const ticket = store.ticketInScopeByUrl(url);
-
-      return ticket === null ? null : { refused: runtime.send({ type: 'snooze', ticketId: ticket.id, until }).refused };
-    },
+    snoozedUrls: () => browser.snoozed(),
+    cards: () => browser.cards(),
+    snoozeUrl: (url, until) => browser.snooze(url, until),
     paneUpgrade: (request, socket, head) => paneLink.upgrade(request, socket, head),
     paneEnabled: () => config.settings.web.chromePane,
-    unsnoozeUrl: (url) => {
-      const ticket = store.ticketInScopeByUrl(url);
-
-      return ticket === null ? null : { refused: runtime.send({ type: 'restore', ticketId: ticket.id }).refused };
-    },
+    unsnoozeUrl: (url) => browser.unsnooze(url),
     onChange: (listener) => void builtListeners.push(listener),
     busy: () => runtime.hasActiveSessions() || debriefs.running(),
     quiet: () => runtime.restartBlocker() ?? (conversation.sending() ? 'a message is being sent' : (voice.restartBlocker() ?? (debriefs.running() ? 'a friction debrief is running' : null))),

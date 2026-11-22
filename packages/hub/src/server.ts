@@ -5,7 +5,9 @@ import { gzipSync } from 'node:zlib';
 import { pipeline } from 'node:stream';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
-import type { HubIdentity } from '@switchboard/core';
+import type { Card, HubIdentity } from '@switchboard/core';
+import { handleSnooze, handleUnsnooze } from './browserSnooze.js';
+import type { SnoozeByUrl, UnsnoozeByUrl } from './browserSnooze.js';
 import { ARTIFACT_CSP, CONSOLE_QUEUE_BYTES, cookieValue, deviceId, deviceLabel, PAGE_COOKIE, PAGE_CSP, pageCookie, pageOrigin, PAIR_CSP, pairHtml, PUBLIC_PAGE_FILES, SIGNED_OUT_HTML } from './page.js';
 import type { PageAccess, PageOrigin, RemoteAccess } from './page.js';
 import { MAX_UPLOAD_BYTES } from './uploads.js';
@@ -99,7 +101,25 @@ export interface PageRoutes {
    * null for any other.
    */
   localFile?(key: string, target: string, paired: boolean): Promise<LocalOpened | null>;
+  /** The browser extension's side of the page routes (architecture.md § Browser extension); without it the hub serves none of them. */
+  browser?: PageBrowser;
 }
+
+/**
+ * What the browser extension reads and posts through the web page's origin on another device (PRD R121), as it does on the browser endpoint on
+ * this computer, and the extension's download.
+ */
+export interface PageBrowser {
+  snoozed(): string[];
+  cards(): Card[];
+  snooze: SnoozeByUrl;
+  unsnooze: UnsnoozeByUrl;
+  /** The extension as a zip for a page on `origin`, an HTTPS origin for another device or null for this computer; null when none is installed. */
+  download(origin: string | null): Buffer | null;
+}
+
+/** The browser extension's download under `/page/` (PRD R121). */
+export const EXTENSION_DOWNLOAD = '/page/switchboard-extension.zip';
 
 /** The voice socket's side of the page routes: whether voice is on, and the sockets the server accepted and asks to close. */
 export interface PageVoice {
@@ -599,7 +619,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
   /** The web page's routes (architecture.md § Web page); false for any other request. */
   const servePage = (request: IncomingMessage, response: ServerResponse, url: URL): boolean => {
     const path = url.pathname;
-    const isPageRoute = path === '/' || path === '/page' || path.startsWith('/page/') || path === '/v1/page/list' || path.startsWith('/v1/conversation/artifact/') || (path === '/v1/conversation/events' && url.searchParams.has('page')) || path === '/v1/conversation/files' || path === '/v1/conversation/console' || (path.startsWith('/v1/conversation/') && (CHANGE_ROUTES.has(path.slice('/v1/conversation/'.length)) || LOCAL_FILE_ROUTES.has(path.slice('/v1/conversation/'.length))));
+    const isPageRoute = path === '/' || path === '/page' || path.startsWith('/page/') || path === '/v1/page/list' || path.startsWith('/v1/browser/') || path.startsWith('/v1/conversation/artifact/') || (path === '/v1/conversation/events' && url.searchParams.has('page')) || path === '/v1/conversation/files' || path === '/v1/conversation/console' || (path.startsWith('/v1/conversation/') && (CHANGE_ROUTES.has(path.slice('/v1/conversation/'.length)) || LOCAL_FILE_ROUTES.has(path.slice('/v1/conversation/'.length))));
     const bearer = request.headers.authorization !== undefined;
     const cookiePost = request.method === 'POST' && !bearer && path.startsWith('/v1/conversation/') && request.headers.cookie !== undefined;
 
@@ -753,6 +773,44 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
 
     // Each signed-in request renews the cookie's Max-Age, as it renews the sign-in, so a computer in use stays signed in.
     response.setHeader('Set-Cookie', pageCookie(cookieValue(request.headers.cookie, PAGE_COOKIE)!, remote));
+
+    // The browser extension for this device: for a remote one, a copy that reaches the hub through this origin (architecture.md § Browser extension).
+    if (request.method === 'GET' && path === EXTENSION_DOWNLOAD) {
+      const archive = page.browser?.download(remote ? origin.origin : null) ?? null;
+
+      if (archive === null) {
+        json(response, 404, { error: 'This hub has no browser extension to give. Build extensions/chrome, then the VS Code extension, and install it.' });
+      } else {
+        response.writeHead(200, { 'Content-Type': 'application/zip', 'Content-Disposition': 'attachment; filename="switchboard-extension.zip"', 'Content-Length': archive.length, 'Cache-Control': 'no-store' });
+        response.end(archive);
+      }
+
+      return true;
+    }
+
+    // The browser extension's routes through the page's origin, with the page's sign-in, which the extension's requests carry as the browser's
+    // own (architecture.md § Browser extension). A post must come from an extension, as on the browser endpoint.
+    if (path.startsWith('/v1/browser/')) {
+      const browser = page.browser;
+      const route = path.slice('/v1/browser/'.length);
+      const allowed = <T>(run: () => T): T | { refused: string } => (stillAllowed() ? run() : { refused: 'Remote access no longer allows this device.' });
+
+      if (browser === undefined) {
+        json(response, 404, { error: 'not found' });
+      } else if (request.method === 'GET' && route === 'snoozed') {
+        json(response, 200, { urls: browser.snoozed() });
+      } else if (request.method === 'GET' && route === 'cards') {
+        json(response, 200, { cards: browser.cards() });
+      } else if (request.method === 'POST' && route === 'snooze') {
+        void handleSnooze(request, (url, until) => allowed(() => browser.snooze(url, until))).then(({ status, body }) => json(response, status, body));
+      } else if (request.method === 'POST' && route === 'unsnooze') {
+        void handleUnsnooze(request, (url) => allowed(() => browser.unsnooze(url))).then(({ status, body }) => json(response, status, body));
+      } else {
+        json(response, 404, { error: 'not found' });
+      }
+
+      return true;
+    }
 
     if (request.method === 'GET' && path.startsWith('/page/')) {
       sendAsset(path === '/page/' ? 'index.html' : path.slice('/page/'.length));

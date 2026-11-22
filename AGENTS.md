@@ -46,6 +46,7 @@ Read the document that covers the decision:
 | [parity.md](docs/parity.md) | Each dock list and row behaviour and whether the web page matches it |
 | [testing.md](docs/testing.md) | Required checks, test layers, fixture rules, isolation and live acceptance |
 | [install-linux.md](docs/install-linux.md) | Installing Switchboard on Linux |
+| [install-browser-extension.md](docs/install-browser-extension.md) | Installing the browser extension on another computer from the web page |
 
 - Invoke the `update-docs` skill ([.claude/skills/update-docs/SKILL.md](.claude/skills/update-docs/SKILL.md)) to create, revise or retire a document under `docs/`, or to decide whether a change needs a documentation update; it owns what each document holds and leaves out.
 - Re-verify the version-fragile mechanisms in mechanics.md after upgrading Claude Code, its VS Code extension, or VS Code.

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { REFRESH_MS } from '../src/board.js';
 import { MARK_GLYPHS } from '@switchboard/core/group';
 import { applyPills, cardsByIssue, readCards, watchPills } from '../src/pills.js';
+import { remoteRoutes } from '../src/hub.js';
 
 const COLUMN = readFileSync(join(import.meta.dirname, 'fixtures', 'column.html'), 'utf8');
 const reply = (status: number, body: string) => async () => new Response(body, { status });
@@ -48,6 +49,16 @@ describe('readCards', () => {
     expect(await readCards(reply(200, JSON.stringify({ cards: [{ ...needs, mark: 'toString' }] })))).toBeNull();
     expect(await readCards(reply(200, JSON.stringify({ cards: [{ ...needs, mark: 'waiting' }] })))).toBeNull();
     expect(await readCards(reply(200, JSON.stringify({ cards: [{ ...needs, stripe: 'agent' }] })))).toBeNull();
+    expect(await readCards(reply(200, JSON.stringify({ cards: [{ ...needs, workItemId: '7' }] })))).toBeNull();
+    expect(await readCards(reply(200, JSON.stringify({ cards: [{ ...needs, workItemId: 1.5 }] })))).toBeNull();
+  });
+
+  it("reads a work item's ID, null for a pool ticket (PRD R121), through the page's origin on another device", async () => {
+    const cards = [{ ...needs, workItemId: 7 }, { ...working, workItemId: null }];
+    const fetchUrl = vi.fn(reply(200, JSON.stringify({ cards })));
+
+    expect(await readCards(fetchUrl, remoteRoutes('https://pc.tail.ts.net'))).toEqual(cards);
+    expect(fetchUrl).toHaveBeenCalledExactlyOnceWith('https://pc.tail.ts.net/v1/browser/cards');
   });
 
   it('accepts a mark and a stripe, null ones and a card without them', async () => {

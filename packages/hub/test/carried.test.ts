@@ -28,6 +28,8 @@ beforeEach(() => {
   mkdirSync(join(dist, 'mermaid'), { recursive: true });
   writeFileSync(join(dist, 'hub.js'), 'hub one');
   writeFileSync(join(dist, 'mermaid', 'mermaid.min.js'), 'mermaid');
+  mkdirSync(join(dist, 'chrome'));
+  writeFileSync(join(dist, 'chrome', 'manifest.json'), '{"manifest_version":3}');
   program('holder', HOLDER, 'holder.js');
   program('voice', VOICE, 'voice.js');
 });
@@ -37,12 +39,13 @@ afterEach(() => {
 });
 
 describe('installCarried', () => {
-  it('installs the hub bundle and Mermaid at once, then the holder and voice builds, and reports a hub bundle it did not change', async () => {
+  it('installs the hub bundle, Mermaid and the browser extension at once, then the holder and voice builds, and reports a hub bundle it did not change', async () => {
     const first = installCarried(dist, home, 'linux');
 
     expect(first.hub).toBe(true);
     expect(readFileSync(hubBundlePath(home), 'utf8')).toBe('hub one');
     expect(readFileSync(join(switchboardHome(home), 'web', 'mermaid.min.js'), 'utf8')).toBe('mermaid');
+    expect(readFileSync(join(switchboardHome(home), 'web', 'chrome', 'manifest.json'), 'utf8')).toBe('{"manifest_version":3}');
     expect(await first.programs).toEqual([]);
     expect(JSON.parse(readFileSync(join(switchboardHome(home), 'holder', 'current.json'), 'utf8'))).toEqual({ build: HOLDER });
     expect(JSON.parse(readFileSync(join(switchboardHome(home), 'voice', 'current.json'), 'utf8'))).toEqual({ build: VOICE });

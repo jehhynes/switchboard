@@ -35,6 +35,7 @@ Each document under `docs/` has one recorded purpose from the table in [Establis
 | [parity.md](../../../docs/parity.md) | Work plans and progress records | A developer changing the dock's or the web page's work item list or rows: each behavior, whether the web page matches it, and the open gaps. |
 | [testing.md](../../../docs/testing.md) | Current reference, procedures and troubleshooting | A developer adding or running tests: required checks, what earns a test, test layers, fixture and isolation rules and live acceptance. |
 | [install-linux.md](../../../docs/install-linux.md) | Current reference, procedures and troubleshooting | The operator installing, checking and troubleshooting Switchboard on Linux. |
+| [install-browser-extension.md](../../../docs/install-browser-extension.md) | Current reference, procedures and troubleshooting | The operator installing the browser extension on another computer from the web page, and troubleshooting it. |
 
 ### Switchboard conventions
 

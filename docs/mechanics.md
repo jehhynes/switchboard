@@ -1566,3 +1566,14 @@ Current use: the console's resync after each fit ([architecture.md](architecture
   - Separately, one spoken thought became two messages when the turn model ended it at a short pause: "We're still having audio duplexing issues" was sent at 18:55:58 after 1.2 s of quiet (turn model p 0.16), and "Started speaking a second sentence" 5 s later as a message of its own. The same pattern (p 0.1 to 0.4, 0.7 to 1.6 s of earned quiet, the next utterance within 5 s) appears through the day.
 - **Not verified:** how much echo iOS's voice processing leaves with the phone's loudspeaker rather than earbuds; whether a web page can tell the output route on iOS (Safari lists no audio outputs).
 - **Current use:** phone capture counts as capture that cancels the echo and listens while the voice plays from the first moment (architecture.md § Remote access, Voice on a phone; § Dictation), and a reply waits to start while the operator speaks and for a moment after (architecture.md § Voice check and barge-in).
+
+## M128. Sign-in cookies on an unpacked extension's requests, 2026-11-22
+
+- **Versions:** Playwright's Chromium 155.0.8059.12 (`chromium-1247`), headless (`--headless=new`), a scratch profile, the extension loaded with `--load-extension` and `--disable-features=DisableLoadExtensionCommandLineSwitch`; Windows 11.
+- **Method:** a test HTTPS server on `127.0.0.1:8443` for a name mapped to it with `--host-resolver-rules`, certificate errors ignored. A tab opened its `/set`, which answered `Set-Cookie: sb_page=abc; HttpOnly; Secure; SameSite=Strict; Path=/`; a Manifest V3 service worker with host permission `https://<name>/*` (no port) then fetched the server, and the server logged each request's `Cookie`, `Origin` and `Sec-Fetch-Site`. The same day, the built extension, downloaded from a scratch hub through a stand-in for `tailscale serve` and loaded unpacked, read and posted to that hub (architecture.md § Browser extension).
+- **Result:**
+  - The service worker's `GET`s, with and without `credentials: 'include'`, and its JSON `POST` all carried the `SameSite=Strict`, `HttpOnly`, `Secure` cookie the tab had been given, with `Sec-Fetch-Site: none`. A host permission without a port matched the server on port 8443.
+  - The `GET`s carried no `Origin`; the `POST` carried `Origin: chrome-extension://<ID>`.
+  - Before the tab signed in, the extension's read through the scratch hub was refused with 401; after it, reads answered 200 and a snooze reached the hub, which answered 404 for a ticket it did not have.
+- **Not verified:** branded Chrome and Edge, which ignore `--load-extension` from Chrome 137; Firefox, whose extension requests treat `SameSite` cookies differently; a real `tailscale serve`.
+- **Current use:** a browser extension downloaded on a paired device reaches the hub through the web page's origin with the page's sign-in (architecture.md § Browser extension, PRD R121).

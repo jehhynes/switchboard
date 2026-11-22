@@ -4,7 +4,6 @@ import type { Card } from '@switchboard/core/group';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { issueKey } from '../src/board.js';
 import { menuCard, watchCardMenus } from '../src/menu.js';
-import { openUri } from '../src/open.js';
 import type { SnoozeMenus } from '../src/snooze.js';
 
 const FIXTURE = readFileSync(join(import.meta.dirname, 'fixtures', 'card-menu.html'), 'utf8');
@@ -173,7 +172,7 @@ describe('watchCardMenus', () => {
     document.body.addEventListener('click', reachedGitHub);
 
     item('Open in Switchboard').click();
-    expect(opened).toEqual([openUri(ISSUE)]);
+    expect(opened).toEqual([ISSUE]);
     expect(keys).toEqual(['Escape']);
     expect(reachedGitHub).not.toHaveBeenCalled();
 
@@ -227,7 +226,7 @@ describe('watchCardMenus in a project table', () => {
     const items = [...list.querySelectorAll<HTMLElement>('.switchboard-menu-item')];
 
     items[0]!.click();
-    expect(opened).toEqual([openUri(ISSUE)]);
+    expect(opened).toEqual([ISSUE]);
     items[1]!.click();
     expect(snooze.choose).toHaveBeenCalledExactlyOnceWith(ISSUE, button);
     watch.stop();

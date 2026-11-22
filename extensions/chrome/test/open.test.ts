@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { openUri, watchPillClicks } from '../src/open.js';
+import { openUri, pageOpenUrl, watchPillClicks } from '../src/open.js';
 import { applyPills, cardsByIssue } from '../src/pills.js';
 
 const COLUMN = readFileSync(join(import.meta.dirname, 'fixtures', 'column.html'), 'utf8');
@@ -9,6 +9,15 @@ const COLUMN = readFileSync(join(import.meta.dirname, 'fixtures', 'column.html')
 describe('openUri', () => {
   it("encodes the ticket URL into the Switchboard extension's vscode:// URI", () => {
     expect(openUri('https://desk.example.test/t?a=1&b=2')).toBe('vscode://switchboard.switchboard/open?url=https%3A%2F%2Fdesk.example.test%2Ft%3Fa%3D1%26b%3D2');
+  });
+});
+
+describe('pageOpenUrl (PRD R121)', () => {
+  it("opens the card's work item on the web page, or the page for a pool ticket, an unknown card or an older hub", () => {
+    expect(pageOpenUrl('https://pc.tail.ts.net', { workItemId: 42 })).toBe('https://pc.tail.ts.net/page/#w=42');
+    expect(pageOpenUrl('https://pc.tail.ts.net', { workItemId: null })).toBe('https://pc.tail.ts.net/page/');
+    expect(pageOpenUrl('https://pc.tail.ts.net', {})).toBe('https://pc.tail.ts.net/page/');
+    expect(pageOpenUrl('https://pc.tail.ts.net', undefined)).toBe('https://pc.tail.ts.net/page/');
   });
 });
 
@@ -34,7 +43,7 @@ describe('watchPillClicks', () => {
     const click = new MouseEvent('click', { bubbles: true, cancelable: true });
 
     pill.dispatchEvent(click);
-    expect(opened).toEqual([openUri('https://github.com/github/roadmap/issues/1035')]);
+    expect(opened).toEqual(['https://github.com/github/roadmap/issues/1035']);
     expect(click.defaultPrevented).toBe(true);
     expect(reachedGitHub).not.toHaveBeenCalled();
 
@@ -51,7 +60,7 @@ describe('watchPillClicks', () => {
     watch = watchPillClicks(document, (uri) => opened.push(uri));
     document.querySelector('[role="rowheader"] .switchboard-pill')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
 
-    expect(opened).toEqual([openUri('https://github.com/github/roadmap/issues/1040')]);
+    expect(opened).toEqual(['https://github.com/github/roadmap/issues/1040']);
   });
 
   it('opens the ticket when Enter is pressed on the focusable pill, and ignores other keys', () => {
@@ -71,7 +80,7 @@ describe('watchPillClicks', () => {
     expect(reachedGitHub).toHaveBeenCalledTimes(1);
 
     pill.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
-    expect(opened).toEqual([openUri('https://github.com/github/roadmap/issues/1035')]);
+    expect(opened).toEqual(['https://github.com/github/roadmap/issues/1035']);
     expect(reachedGitHub).toHaveBeenCalledTimes(1);
   });
 });
