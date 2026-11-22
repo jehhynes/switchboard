@@ -15,7 +15,7 @@ import { artifactFile, cookieValue, deviceLabel, pairHtml, SIGNED_OUT_HTML, PAIR
 import { dockView } from '../src/dock.js';
 import type { DockView } from '../src/dock.js';
 import { pageAsset } from '../src/pageAssets.js';
-import { LOCAL_FILES_COMPUTER_ONLY, openLocalFile } from '../src/localFiles.js';
+import { LOCAL_FILES_PAIRED_ONLY, localRoots, openLocalFile } from '../src/localFiles.js';
 import { item, NOW, session, snapshot, triage } from './views.js';
 import { until } from './helpers.js';
 
@@ -734,7 +734,7 @@ describe('the web page routes', () => {
       files: async (key) => (key === 'page-1' ? [{ path: 'a.ts', dir: false }] : null),
       changes: async (route, key, query) => (route === 'changes' && key === 'page-1' ? { status: 200, body: { rows: 'x'.repeat(2000), q: query.get('q') }, etag: 'e1' } : { status: 403, body: { error: 'Not in this window.' } }),
       artifact: (key, name) => (key === 'page-1' ? artifactFile(folder, name) : null),
-      localFile: async (key, target) => (key === 'page-1' ? openLocalFile({ cwd: folder, folders: [folder], sessionIds: [] }, target) : null),
+      localFile: async (key, target, paired) => (pages.has(key) ? openLocalFile(localRoots({ folder, cwd: folder }, [], null, paired), target) : null),
       upload: (key, scopeGen, name, bytes) => {
         uploaded.push({ key, scopeGen, name, bytes: Buffer.from(bytes).toString('utf8') });
         return { status: 200, body: { path: 'C:\\Temp\\a.txt', image: false } };
@@ -1340,7 +1340,7 @@ describe('the web page routes', () => {
     expect((await send(server.port, 'GET', '/v1/conversation/artifact/page-1/chat/page.html', {})).status).toBe(404);
   });
 
-  it("serves a local file a link names only to this computer's page, for its own page key, with the cookie, and nothing outside its folders", async () => {
+  it("serves a local file a link names to the page of its own page key, with the cookie, nothing outside its folders, and a paired device only files", async () => {
     const { url } = await serve();
     const cookie = String((await send(server.port, 'GET', `${url.pathname}${url.search}`, {})).headers['set-cookie']).split(';')[0]!;
     const folder = join(dir, 'w1');
@@ -1360,6 +1360,7 @@ describe('the web page routes', () => {
     const shown = await get('/v1/conversation/local-file?window=page-1&path=notes.md');
 
     expect(shown.status).toBe(200);
+    expect(JSON.parse((await get('/v1/conversation/local-file?window=page-1&path=.')).body)).toMatchObject({ kind: 'dir' });
     expect(JSON.parse(shown.body)).toMatchObject({ kind: 'markdown', name: 'notes.md', contents: '# Notes' });
     expect(shown.headers['cache-control']).toBe('no-cache');
 
@@ -1387,18 +1388,45 @@ describe('the web page routes', () => {
     expect(other).toMatch(/^sb_page=/);
     expect((await get('/v1/conversation/local-file?window=page-1&path=notes.md', { Cookie: other })).status).toBe(403);
 
-    // A paired device gets no local file (architecture.md § Remote access).
+    // A paired device reads files in the session's working folder through its own page key only, never a folder or a file outside it
+    // (architecture.md § Remote access).
     const ts = { Host: 'pc.tail.ts.net', 'X-Forwarded-Proto': 'https', 'X-Forwarded-For': '100.64.0.2', 'Tailscale-User-Login': 'alex@example.com' };
 
     remoteAccess = { hosts: ['pc.tail.ts.net'], logins: ['alex@example.com'] };
 
     const pairing = new URL((JSON.parse((await send(server.port, 'POST', '/page/pair', { Authorization: `Bearer ${server.token}` })).body) as { url: string }).url);
     const phone = String((await send(server.port, 'GET', `${pairing.pathname}${pairing.search}`, ts)).headers['set-cookie']).split(';')[0]!;
-    const remote = await get('/v1/conversation/local-file?window=page-1&path=notes.md', { ...ts, Cookie: phone });
+    const asPhone = { ...ts, Cookie: phone };
 
-    expect(remote.status).toBe(403);
-    expect(JSON.parse(remote.body)).toEqual({ error: LOCAL_FILES_COMPUTER_ONLY });
-    expect((await get('/v1/conversation/local-file-raw?window=page-1&path=shot.png', { ...ts, Cookie: phone })).status).toBe(403);
+    expect((await get('/v1/conversation/local-file?window=page-1&path=notes.md', asPhone)).status).toBe(403);
+
+    const phoneStream = request({ host: '127.0.0.1', port: server.port, path: '/v1/conversation/events?page=1', headers: asPhone }, (response) => response.resume());
+
+    phoneStream.on('error', () => {});
+    phoneStream.end();
+    await until(() => (server.clients() === 2 ? true : null));
+
+    const onPhone = await get('/v1/conversation/local-file?window=page-2&path=notes.md', asPhone);
+
+    expect(onPhone.status).toBe(200);
+    expect(JSON.parse(onPhone.body)).toMatchObject({ kind: 'markdown', contents: '# Notes' });
+
+    const phonePicture = await get('/v1/conversation/local-file-raw?window=page-2&path=shot.png', asPhone);
+
+    expect(phonePicture.status).toBe(200);
+    expect(phonePicture.headers['content-type']).toBe('image/png');
+
+    for (const target of ['.', '../secret.txt', join(dir, 'secret.txt')]) {
+      const refused = await get(`/v1/conversation/local-file?window=page-2&path=${encodeURIComponent(target)}`, asPhone);
+
+      expect(refused.status).toBe(404);
+      expect(JSON.parse(refused.body)).toEqual({ error: LOCAL_FILES_PAIRED_ONLY });
+    }
+
+    // This computer's page cannot read through the phone's key, nor the phone through this computer's.
+    expect((await get('/v1/conversation/local-file?window=page-2&path=notes.md')).status).toBe(403);
+    expect((await get('/v1/conversation/local-file-raw?window=page-1&path=shot.png', asPhone)).status).toBe(403);
+    phoneStream.destroy();
     stream.destroy();
     await until(() => (server.clients() === 0 ? true : null));
     expect((await get('/v1/conversation/local-file?window=page-1&path=notes.md')).status).toBe(403);

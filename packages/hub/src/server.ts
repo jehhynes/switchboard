@@ -9,7 +9,7 @@ import type { HubIdentity } from '@switchboard/core';
 import { ARTIFACT_CSP, CONSOLE_QUEUE_BYTES, cookieValue, deviceId, deviceLabel, PAGE_COOKIE, PAGE_CSP, pageCookie, pageOrigin, PAIR_CSP, pairHtml, PUBLIC_PAGE_FILES, SIGNED_OUT_HTML } from './page.js';
 import type { PageAccess, PageOrigin, RemoteAccess } from './page.js';
 import { MAX_UPLOAD_BYTES } from './uploads.js';
-import { LOCAL_FILES_COMPUTER_ONLY, rawMime } from './localFiles.js';
+import { LOCAL_FILES_PAIRED_ONLY, rawMime } from './localFiles.js';
 import type { LocalOpened } from './localFiles.js';
 import { isWebSocketUpgrade } from './paneSocket.js';
 import { VOICE_SOCKET_PATH } from './voiceSocket.js';
@@ -95,9 +95,10 @@ export interface PageRoutes {
   voice?: PageVoice;
   /**
    * A local file or folder a link in the page's selected conversation names (architecture.md § Web page), by its real path, read only inside
-   * that conversation's folders and scratchpads; null for any other.
+   * that conversation's folders and scratchpads, or for a paired device (`paired`) only a file inside its current session's working folder;
+   * null for any other.
    */
-  localFile?(key: string, target: string): Promise<LocalOpened | null>;
+  localFile?(key: string, target: string, paired: boolean): Promise<LocalOpened | null>;
 }
 
 /** The voice socket's side of the page routes: whether voice is on, and the sockets the server accepted and asks to close. */
@@ -873,26 +874,22 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       return true;
     }
 
-    // A local file a link names (architecture.md § Web page): only on this computer, for a page key of this sign-in's own stream.
+    // A local file a link names (architecture.md § Web page), for a page key of this sign-in's own stream; on a paired device only a file in the
+    // session's working folder (architecture.md § Remote access).
     if (request.method === 'GET' && LOCAL_FILE_ROUTES.has(path.slice('/v1/conversation/'.length))) {
       const raw = path.endsWith('-raw');
-
-      if (remote) {
-        json(response, 403, { error: LOCAL_FILES_COMPUTER_ONLY });
-        return true;
-      }
 
       if (page.localFile === undefined || !page.isPage(window) || pageKeyOrigins.get(window) !== originOf(origin) || pageKeySessions.get(window) !== page.access.sessionOf(request.headers.cookie)) {
         json(response, 403, { error: 'Not in this window.' });
         return true;
       }
 
-      void page.localFile(window, url.searchParams.get('path') ?? '').then(
+      void page.localFile(window, url.searchParams.get('path') ?? '', remote).then(
         (found) => {
           const mime = found === null ? null : rawMime(found.real);
 
           if (found === null) {
-            json(response, 404, { error: 'No such file in this conversation’s folders.' });
+            json(response, 404, { error: remote ? LOCAL_FILES_PAIRED_ONLY : 'No such file in this conversation’s folders.' });
           } else if (!raw || mime === null || found.handle === null || found.view.tooLarge || found.view.size === null) {
             void found.handle?.close();
 

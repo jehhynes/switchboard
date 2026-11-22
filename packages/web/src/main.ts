@@ -534,11 +534,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     diffSettings: () => ({ layout: state.diffLayout, wrap: state.diffWrap }),
   });
   let changesSession: string | null = null;
-  // Local file links' tabs (architecture.md § Web page), only on the page on this computer.
+  // Local file links' tabs (architecture.md § Web page); the hub decides what a paired device may read (architecture.md § Remote access).
   const localFiles = new LocalFilesController({
     fetch: (...args) => deps.fetch(...args),
     key: () => state.key,
-    allowed: () => paneLocal(),
     draw: () => draw(),
     show: () => {
       leaving('file');
@@ -2016,7 +2015,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const side = wide() && state.scope !== null;
 
     root.classList.toggle('wide', side);
-    root.classList.toggle('local-files', paneLocal());
     // Under 800 px of height the composer shows only on the Conversation tab (page.css).
     root.classList.toggle('off-conversation', state.scope !== null && mainTab() !== 'conversation');
 

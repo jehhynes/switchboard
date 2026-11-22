@@ -1656,15 +1656,16 @@ const dockWithRuns = () => {
       list: () => conversation.pageList(),
       files: (key, query) => conversation.files(key, query),
       artifact: (key, name) => conversation.artifactFile(key, name),
-      localFile: async (key, target) => {
+      localFile: async (key, target, paired) => {
         const scope = scopes.isPage(key) ? scopes.scope(key) : null;
 
         if (scope === null || scope.workItemId === null) {
           return null;
         }
 
-        // The conversation's folders: its own, and each of its work item's sessions' working folder and scratchpad (architecture.md § Web page).
-        return openLocalFile(localRoots(scope, store.sessionsFor(scope.workItemId), scope.sessionId), target);
+        // The conversation's folders: its own, and each of its work item's sessions' working folder and scratchpad (architecture.md § Web page);
+        // for a paired device, only the current session's working folder (architecture.md § Remote access).
+        return openLocalFile(localRoots(scope, store.sessionsFor(scope.workItemId), scope.sessionId, paired), target);
       },
       upload: (key, scopeGen, name, bytes) => conversation.pageUpload(key, scopeGen, name, bytes),
       console: (key, sessionId, send, end) => pageConsole.open(key, sessionId, send, end),

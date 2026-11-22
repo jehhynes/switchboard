@@ -84,8 +84,6 @@ export interface LocalFilesDeps {
   fetch: typeof fetch;
   /** The page key, null before the stream's hello. */
   key(): string | null;
-  /** Whether this page may open local files: only the page on this computer (architecture.md § Remote access). */
-  allowed(): boolean;
   draw(): void;
   /** Shows the file tab, in the side column on a wide screen and in the conversation's strip on a narrower one. */
   show(): void;
@@ -209,8 +207,8 @@ export class LocalFilesController {
   }
 
   /**
-   * Handles a click on a local file link, a file tab or a folder's entry; false for any other click. A link on a page that may not open local
-   * files does nothing, as before.
+   * Handles a click on a local file link, a file tab or a folder's entry; false for any other click. A paired device's page opens links too: the
+   * hub sends it only files in the session's working folder and says why it refuses any other (architecture.md § Remote access).
    */
   click(target: HTMLElement): boolean {
     const button = target.closest<HTMLElement>('[data-action]');
@@ -219,7 +217,7 @@ export class LocalFilesController {
     if (action === 'local-file') {
       const link = linkTarget(button!.dataset['target'] ?? '');
 
-      if (link !== null && this.deps.allowed()) {
+      if (link !== null) {
         this.open(link.path, link.line);
       }
 
@@ -362,8 +360,11 @@ function LocalView({ tab, note, pageKey }: { tab: LocalTab; note: string | null;
       <div class="artifact-head">
         <span class="artifact-badge">{data?.kind === 'dir' ? 'folder' : (data?.kind ?? 'file')}</span>
         <span class="artifact-title" title={path}>
-          {path}
-          {tab.line === null ? null : `:${tab.line}`}
+          {/* The title cuts its start, right to left; the path itself reads left to right, so `../a` stays `../a`. */}
+          <bdi dir="ltr">
+            {path}
+            {tab.line === null ? null : `:${tab.line}`}
+          </bdi>
         </span>
       </div>
       {body}

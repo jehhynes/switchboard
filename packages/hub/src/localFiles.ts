@@ -12,8 +12,8 @@ export const LOCAL_TEXT_MAX_BYTES = 4 * 1024 * 1024;
 export const LOCAL_RAW_MAX_BYTES = 32 * 1024 * 1024;
 /** The most entries a folder's listing holds. */
 export const LOCAL_DIR_MAX = 500;
-/** Why a paired device gets no local file (architecture.md § Remote access). */
-export const LOCAL_FILES_COMPUTER_ONLY = 'Local files open only on the computer that runs Switchboard.';
+/** Why a paired device gets no folder and no file outside the session's working folder (architecture.md § Remote access). */
+export const LOCAL_FILES_PAIRED_ONLY = 'On a paired device, only files in the session’s working folder open, not folders or files elsewhere.';
 
 const IMAGES: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif', svg: 'image/svg+xml' };
 const MARKDOWN = new Set(['md', 'markdown']);
@@ -29,20 +29,30 @@ export interface LocalRoots {
   folders: string[];
   /** The Claude session IDs whose scratchpads may be read. */
   sessionIds: string[];
+  /** Whether a folder's entries may be listed; false for a paired device. */
+  listFolders?: boolean;
   /** The temporary folder Claude Code keeps its `claude` folder in; the system's by default. */
   temp?: string;
 }
 
 /**
  * The roots of a page's selected conversation: relative links against its current session's working folder; its own folders and each of its
- * work item's sessions' working folders; and those sessions' Claude session IDs, earlier ones a fork or a clear replaced included.
+ * work item's sessions' working folders; and those sessions' Claude session IDs, earlier ones a fork or a clear replaced included. For a paired
+ * device (`paired`), only the working folder the current session runs in, or the checkout before its first session, with no scratchpad and no
+ * folder listing (architecture.md § Remote access).
  */
-export function localRoots(scope: { folder: string | null; cwd: string | null }, sessions: ReadonlyArray<{ id: string; cwd: string; nativeSessionId: string | null; retiredIds: readonly string[] }>, currentId: string | null): LocalRoots {
+export function localRoots(scope: { folder: string | null; cwd: string | null }, sessions: ReadonlyArray<{ id: string; cwd: string; nativeSessionId: string | null; retiredIds: readonly string[] }>, currentId: string | null, paired = false): LocalRoots {
   const current = sessions.find((one) => one.id === currentId);
   const named = (one: string | null | undefined): one is string => typeof one === 'string' && one !== '';
+  const cwd = current?.cwd || scope.cwd || scope.folder;
+
+  if (paired) {
+    // One folder only, even should the scope's folder ever differ from the session's.
+    return { cwd, folders: [current?.cwd || scope.cwd].filter(named), sessionIds: [], listFolders: false };
+  }
 
   return {
-    cwd: current?.cwd || scope.cwd || scope.folder,
+    cwd,
     folders: [scope.folder, scope.cwd, ...sessions.map((one) => one.cwd)].filter(named),
     sessionIds: sessions.flatMap((one) => [one.nativeSessionId, ...one.retiredIds]).filter(named),
   };
@@ -194,7 +204,7 @@ async function readHandle(handle: FileHandle, cap: number): Promise<Buffer | 'la
 }
 
 /**
- * Reads a link's target when {@link allowedPath} allows it: a folder's entries, a text file's text, or what a picture or PDF is, with its open
+ * Reads a link's target when {@link allowedPath} allows it: a folder's entries, unless `listFolders` is false, a text file's text, or what a picture or PDF is, with its open
  * handle. A file is read through the handle opened after the check, and only when the checked path still leads to that same file, so a file
  * swapped for a link out of the roots between the check and the read is refused. `checked` runs between the two, for tests.
  */
@@ -212,6 +222,10 @@ export async function openLocalFile(roots: LocalRoots, target: string, checked?:
   const base = { path: slashed(real), name, contents: null, tooLarge: false, size: null, entries: null, more: false };
 
   if (first.isDirectory()) {
+    if (roots.listFolders === false) {
+      return null;
+    }
+
     const read = await readdir(real, { withFileTypes: true }).catch(() => null);
 
     if (read === null || !(await unchanged(roots, real, first))) {

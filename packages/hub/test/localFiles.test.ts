@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { renameSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { allowedPath, LOCAL_DIR_MAX, LOCAL_TEXT_MAX_BYTES, localRoots, localTarget, openLocalFile, rawMime } from '../src/localFiles.js';
 import type { LocalRoots } from '../src/localFiles.js';
 
@@ -70,6 +71,19 @@ describe('localRoots', () => {
     expect(localRoots({ folder: 'D:/worktree', cwd: 'D:/worktree' }, sessions, 's1')).toEqual({ cwd: 'D:/repo', folders: ['D:/worktree', 'D:/worktree', 'D:/repo', 'D:/worktree'], sessionIds: ['n1', 'old1'] });
     expect(localRoots({ folder: 'D:/f', cwd: null }, [], null)).toEqual({ cwd: 'D:/f', folders: ['D:/f'], sessionIds: [] });
     expect(localRoots({ folder: null, cwd: null }, [], null)).toEqual({ cwd: null, folders: [], sessionIds: [] });
+  });
+
+  it("names for a paired device only the current session's working folder, with no scratchpad and no folder listing", () => {
+    const sessions = [
+      { id: 's1', cwd: 'D:/repo', nativeSessionId: 'n1', retiredIds: ['old1'] },
+      { id: 's2', cwd: 'D:/worktree', nativeSessionId: 'n2', retiredIds: [] },
+    ];
+
+    expect(localRoots({ folder: 'D:/host', cwd: 'D:/worktree' }, sessions, 's2', true)).toEqual({ cwd: 'D:/worktree', folders: ['D:/worktree'], sessionIds: [], listFolders: false });
+    // A scope whose folder differs from the current session's gives only the session's.
+    expect(localRoots({ folder: 'D:/host', cwd: 'D:/other' }, sessions, 's1', true)).toEqual({ cwd: 'D:/repo', folders: ['D:/repo'], sessionIds: [], listFolders: false });
+    // Before its first session, the checkout it will run in.
+    expect(localRoots({ folder: 'D:/host', cwd: 'D:/repo' }, [], null, true)).toEqual({ cwd: 'D:/repo', folders: ['D:/repo'], sessionIds: [], listFolders: false });
   });
 });
 
@@ -218,5 +232,70 @@ describe('openLocalFile', () => {
     };
 
     expect(await openLocalFile(roots, 'src', swap)).toBeNull();
+  });
+});
+
+describe('openLocalFile for a paired device', () => {
+  let paired: LocalRoots;
+
+  beforeEach(() => {
+    paired = localRoots({ folder: dir, cwd: work }, [{ id: 's', cwd: work, nativeSessionId: SESSION, retiredIds: [] }], 's', true);
+    paired.temp = temp;
+  });
+
+  const read = async (target: string) => {
+    const opened = await openLocalFile(paired, target);
+
+    await opened?.handle?.close();
+    return opened?.view ?? null;
+  };
+
+  it("reads a file in the session's working folder, its .wip included", async () => {
+    writeFileSync(join(work, 'shot.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+
+    expect(await read('src/a.ts')).toMatchObject({ kind: 'text', contents: 'export const a = 1;\n' });
+    expect(await read(join(work, '.wip', 'notes.md'))).toMatchObject({ kind: 'markdown', contents: '# Notes\n' });
+    expect(await read(pathToFileURL(join(work, 'shot.png')).href)).toMatchObject({ kind: 'image', size: 4 });
+  });
+
+  it('lists no folder, the working folder itself included', async () => {
+    expect(await read('.')).toBeNull();
+    expect(await read('src')).toBeNull();
+    expect(await read('.wip/artifacts')).toBeNull();
+  });
+
+  it('refuses a file outside the working folder, by .. or an absolute path, even in a folder the computer may read', async () => {
+    writeFileSync(join(dir, 'host.txt'), 'host folder');
+
+    expect(await read('../outside/secret.txt')).toBeNull();
+    expect(await read('src/../../outside/secret.txt')).toBeNull();
+    expect(await read(join(dir, 'outside', 'secret.txt'))).toBeNull();
+    // The conversation's host folder holds the working folder, but is not it.
+    expect(await read(join(dir, 'host.txt'))).toBeNull();
+    expect(await read('.git/config')).toBeNull();
+  });
+
+  it("refuses the session's scratchpad, which only this computer's page reads", async () => {
+    expect(await read(join(temp, 'claude', 'proj', SESSION, 'scratchpad', 'out.txt'))).toBeNull();
+  });
+
+  it('refuses a junction or link out of the working folder', async () => {
+    symlinkSync(join(dir, 'outside'), join(work, 'linked'), 'junction');
+
+    expect(await read('linked/secret.txt')).toBeNull();
+    expect(await read(join(work, 'linked', 'secret.txt'))).toBeNull();
+  });
+
+  it('refuses a file symlink out of the working folder', async (context) => {
+    try {
+      symlinkSync(join(dir, 'outside', 'secret.txt'), join(work, 'secret-link.txt'), 'file');
+    } catch {
+      // Windows makes a file symlink only with Developer Mode or as an administrator.
+      context.skip();
+    }
+
+    expect((await readFile(join(work, 'secret-link.txt'), 'utf8'))).toBe('secret');
+
+    expect(await read('secret-link.txt')).toBeNull();
   });
 });

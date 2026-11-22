@@ -347,11 +347,26 @@ describe('local file tabs', () => {
     expect(root.querySelector('.timeline')).not.toBeNull();
   });
 
-  it('opens nothing on a page from another device, as local files stay on this computer', async () => {
+  it("opens a link on a paired device's page too, and shows why the hub refuses a folder or a file outside the working folder", async () => {
+    const refusal = { status: 404, body: { error: 'On a paired device, only files in the session’s working folder open, not folders or files elsewhere.' } };
+
+    answers['D:/w/.wip/shots/'] = refusal;
+    answers['../secret.txt'] = refusal;
     start(false);
     link('Review').click();
     await flush();
-    expect(localGets()).toEqual([]);
-    expect(tabs()).toEqual([]);
+    expect(localGets()).toEqual([localFileUrl('pk', '.wip/review.md')]);
+    expect(root.querySelector('.local-view .artifact-doc h1')!.textContent).toBe('Review');
+    expect(root.querySelector('.local-view a.path-link')).not.toBeNull();
+
+    link('9 screenshots').click();
+    await flush();
+    expect(root.querySelector('.local-entries')).toBeNull();
+    expect(root.querySelector('.local-view .empty')!.textContent).toBe(refusal.body.error);
+
+    link('out').click();
+    await flush();
+    expect(root.querySelector('.local-view .empty')!.textContent).toBe(refusal.body.error);
+    expect(tabs()).toEqual([['review.md', false], ['shots', false], ['secret.txt', true]]);
   });
 });
