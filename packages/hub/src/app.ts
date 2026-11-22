@@ -246,24 +246,59 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     deps.log(`Code Mode idle limit: ${deps.codeModeIdleMs} ms`);
   }
 
-  // The names and logins the web page is served to through tailscale serve, read at start (architecture.md § Remote access); with
-  // web.tailscale, this machine's Tailscale name and owner join them once `tailscale status` answers.
-  const web = config.settings.web;
-  let remote: RemoteAccess = { hosts: [...web.remoteHosts], logins: [...web.remoteLogins] };
+  // The names and logins the web page is served to through tailscale serve (architecture.md § Remote access), read at start and again when
+  // web.remoteHosts, web.remoteLogins or web.tailscale changes; with web.tailscale, this machine's Tailscale name and owner join them once
+  // `tailscale status` answers. A change that no longer allows a remote device ends its open streams.
+  let remote: RemoteAccess = { hosts: [], logins: [] };
+  let remoteRead: string | null = null;
+  let remoteReads = 0;
+  // Tailscale's name and owner as last read, kept while web.tailscale stays on, so a change of the lists does not drop them until it answers again.
+  let tailscaleFound: { host: string; login: string } | null = null;
+  let remoteChanged: () => void = () => {};
+  const readRemote = (web: { remoteHosts: string[]; remoteLogins: string[]; tailscale: boolean }): void => {
+    const read = JSON.stringify([web.remoteHosts, web.remoteLogins, web.tailscale]);
 
-  if (web.tailscale) {
-    void tailscaleIdentity(deps.exec).then((found) => {
-      if ('error' in found) {
-        deps.log(`web page: Tailscale not used: ${found.error}`);
-        return;
-      }
+    if (read === remoteRead) {
+      return;
+    }
 
-      remote = { hosts: [...new Set([found.host, ...remote.hosts])], logins: [...new Set([...remote.logins, found.login])] };
-      deps.log(`web page: served as https://${found.host} to the Tailscale login ${found.login} through tailscale serve`);
-    });
-  } else if (remote.hosts.length > 0) {
-    deps.log(remote.logins.length > 0 ? `web page: served as ${remote.hosts.map((host) => `https://${host}`).join(', ')} through tailscale serve` : 'web page: web.remoteHosts is set but web.remoteLogins is empty, so no remote device is let in');
-  }
+    const first = remoteRead === null;
+    const mine = ++remoteReads;
+    const allowed = (): RemoteAccess =>
+      tailscaleFound === null
+        ? { hosts: [...web.remoteHosts], logins: [...web.remoteLogins] }
+        : { hosts: [...new Set([tailscaleFound.host, ...web.remoteHosts])], logins: [...new Set([...web.remoteLogins, tailscaleFound.login])] };
+
+    remoteRead = read;
+    tailscaleFound = web.tailscale ? tailscaleFound : null;
+    remote = allowed();
+    remoteChanged();
+
+    if (web.tailscale) {
+      void tailscaleIdentity(deps.exec).then((found) => {
+        if (mine !== remoteReads) {
+          return;
+        }
+
+        if ('error' in found) {
+          deps.log(`web page: Tailscale not used: ${found.error}`);
+          tailscaleFound = null;
+        } else {
+          deps.log(`web page: served as https://${found.host} to the Tailscale login ${found.login} through tailscale serve`);
+          tailscaleFound = found;
+        }
+
+        remote = allowed();
+        remoteChanged();
+      });
+    } else if (remote.hosts.length > 0) {
+      deps.log(remote.logins.length > 0 ? `web page: served as ${remote.hosts.map((host) => `https://${host}`).join(', ')} through tailscale serve` : 'web page: web.remoteHosts is set but web.remoteLogins is empty, so no remote device is let in');
+    } else if (!first) {
+      deps.log('web page: not served to other devices');
+    }
+  };
+
+  readRemote(config.settings.web);
 
   const runtime = new Runtime(deps, config);
   const launch = options.launch ?? launcher();
@@ -369,6 +404,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       config = loadConfig(configDir, config, store.homeRepos());
       runtime.reload(config);
       voice.settingsChanged();
+      readRemote(config.settings.web);
 
       if (!config.settings.web.chromePane) {
         paneLink.closeAll();
@@ -1524,6 +1560,9 @@ const dockWithRuns = () => {
     },
     attachDockClick: (click) => {
       clickDock = click;
+    },
+    attachRemote: (changed) => {
+      remoteChanged = changed;
     },
     attachWindows: (send) => {
       sendWindows = send;

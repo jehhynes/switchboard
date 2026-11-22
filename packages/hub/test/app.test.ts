@@ -319,6 +319,51 @@ describe('createHubApp', () => {
     expect(unset).toContain('web page: web.remoteHosts is set but web.remoteLogins is empty, so no remote device is let in');
   });
 
+  it('reads the remote hosts, logins and web.tailscale again when settings.json changes, and has the server end the remote pages they no longer allow (PRD R115)', async () => {
+    writeSettings({ sessions: { installHooks: false } });
+
+    const status = JSON.stringify({ BackendState: 'Running', Self: { DNSName: 'pc.tail1.ts.net.', UserID: 7 }, User: { '7': { LoginName: 'alex@example.com' } } });
+    const lines: string[] = [];
+    let asked = 0;
+    const exec = async (file: string, args: string[]) => (file === 'tailscale' ? (asked++, { code: 0, stdout: status, stderr: '', missing: false, timedOut: false }) : noCli(file, args, { timeoutMs: 0 }));
+    const app = await createHubApp({ home: temp.home, log: (line) => lines.push(line), deps: { exec } });
+    let changed = 0;
+
+    closers.push(() => app.close());
+    app.attachRemote!(() => changed++);
+    expect(app.page!.remote!()).toEqual({ hosts: [], logins: [] });
+
+    writeSettings({ sessions: { installHooks: false }, web: { remoteHosts: ['extra.example.net'], remoteLogins: ['a@example.com'] } });
+    await until(() => (app.page!.remote!().hosts.length === 1 ? true : null));
+    expect(app.page!.remote!()).toEqual({ hosts: ['extra.example.net'], logins: ['a@example.com'] });
+    expect(changed).toBe(1);
+    expect(asked).toBe(0);
+
+    writeSettings({ sessions: { installHooks: false }, web: { remoteHosts: ['extra.example.net'], remoteLogins: ['a@example.com'], tailscale: true } });
+    await until(() => (app.page!.remote!().hosts.length === 2 ? true : null));
+    expect(app.page!.remote!()).toEqual({ hosts: ['pc.tail1.ts.net', 'extra.example.net'], logins: ['a@example.com', 'alex@example.com'] });
+    expect(lines).toContain('web page: served as https://pc.tail1.ts.net to the Tailscale login alex@example.com through tailscale serve');
+
+    // A change of the lists with web.tailscale still on keeps Tailscale's name and owner while it asks again.
+    writeSettings({ sessions: { installHooks: false }, web: { remoteLogins: ['a@example.com'], tailscale: true } });
+    await until(() => (asked === 2 ? true : null));
+    expect(app.page!.remote!()).toEqual({ hosts: ['pc.tail1.ts.net'], logins: ['a@example.com', 'alex@example.com'] });
+
+    // A change elsewhere in the file reads nothing again.
+    const before = changed;
+
+    writeSettings({ sessions: { installHooks: false, concurrency: 3 }, web: { remoteLogins: ['a@example.com'], tailscale: true } });
+    await new Promise((done) => setTimeout(done, 500));
+    expect(changed).toBe(before);
+    expect(asked).toBe(2);
+
+    writeSettings({ sessions: { installHooks: false } });
+    await until(() => (app.page!.remote!().hosts.length === 0 ? true : null));
+    expect(app.page!.remote!()).toEqual({ hosts: [], logins: [] });
+    expect(lines).toContain('web page: not served to other devices');
+    expect(changed).toBeGreaterThan(before);
+  });
+
   it('gives a page, and only a page, a pairing token for the Chrome extension while the Chrome pane is on (PRD R113)', async () => {
     writeSettings({ sessions: { installHooks: false } });
     const off = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli } });

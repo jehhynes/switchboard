@@ -1039,6 +1039,61 @@ describe('the web page routes', () => {
     stream.destroy();
   });
 
+  it('ends a paired device\'s open page when remote access no longer allows its host or login, and keeps the others', async () => {
+    const { url } = await serve();
+    const localCookie = String((await send(server.port, 'GET', `${url.pathname}${url.search}`, {})).headers['set-cookie']).split(';')[0]!;
+    const ts = { Host: 'pc.tail.ts.net', 'X-Forwarded-Proto': 'https', 'X-Forwarded-For': '100.64.0.2', 'Tailscale-User-Login': 'alex@example.com' };
+
+    remoteAccess = { hosts: ['pc.tail.ts.net'], logins: ['alex@example.com'] };
+
+    const pairing = new URL((JSON.parse((await send(server.port, 'POST', '/page/pair', { Authorization: `Bearer ${server.token}` })).body) as { url: string }).url);
+    const phone = String((await send(server.port, 'GET', `${pairing.pathname}${pairing.search}`, ts)).headers['set-cookie']).split(';')[0]!;
+    const ended = { local: false, phone: false };
+    const open = (name: 'local' | 'phone', headers: Record<string, string>) => {
+      const stream = request({ host: '127.0.0.1', port: server.port, path: '/v1/conversation/events?page=1', headers }, (response) => {
+        response.resume();
+        response.on('end', () => (ended[name] = true));
+      });
+
+      stream.on('error', () => {});
+      stream.end();
+      return stream;
+    };
+    const local = open('local', { Host: `127.0.0.1:${server.port}`, Cookie: localCookie });
+
+    open('phone', { ...ts, Cookie: phone });
+    await until(() => (server.clients() === 2 ? true : null));
+
+    // A change that still allows the phone's host and login keeps it.
+    remoteAccess = { hosts: ['other.tail.ts.net', 'pc.tail.ts.net'], logins: ['alex@example.com'] };
+    server.remoteChanged();
+    await new Promise((done) => setTimeout(done, 50));
+    expect(ended).toEqual({ local: false, phone: false });
+
+    // A command whose body was still arriving when its login was removed is refused once read.
+    let answered: { status: number; body: string } | null = null;
+    const slow = request({ host: '127.0.0.1', port: server.port, method: 'POST', path: '/v1/conversation/page-source', headers: { ...ts, Cookie: phone, Origin: 'https://pc.tail.ts.net', 'Content-Type': 'application/json' } }, (response) => {
+      let body = '';
+
+      response.on('data', (chunk: Buffer) => (body += chunk.toString()));
+      response.on('end', () => (answered = { status: response.statusCode ?? 0, body }));
+    });
+
+    slow.on('error', () => {});
+    slow.write('{"window":');
+    await new Promise((done) => setTimeout(done, 50));
+
+    remoteAccess = { hosts: ['pc.tail.ts.net'], logins: [] };
+    server.remoteChanged();
+    slow.end('"page-2"}');
+    await until(() => answered);
+    expect(answered).toEqual({ status: 403, body: JSON.stringify({ error: 'Remote access no longer allows this device.' }) });
+    await until(() => (ended.phone ? true : null));
+    expect(ended.local).toBe(false);
+    expect((await send(server.port, 'GET', '/v1/page/list', { ...ts, Cookie: phone })).status).toBe(403);
+    local.destroy();
+  });
+
   it('revokes every sign-in only with the hub token and ends the open pages\' streams', async () => {
     const { url, closed } = await serve();
     const exchange = await send(server.port, 'GET', `${url.pathname}${url.search}`, {});

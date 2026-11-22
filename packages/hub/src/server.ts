@@ -114,7 +114,7 @@ const HUB_PAGE_ROUTES = new Set(['/page/link', '/page/revoke', '/page/pair', '/p
 const DEVICE_COMMANDS = new Set(['page-pair', 'page-devices', 'page-device-revoke']);
 
 /** Why a pairing link cannot be made with no remote host and login. */
-export const REMOTE_OFF = 'Pairing a device needs remote access: set web.tailscale to true, or web.remoteHosts and web.remoteLogins, in settings.json, run tailscale serve, and restart the hub.';
+export const REMOTE_OFF = 'Pairing a device needs remote access: turn on Tailscale, or set the allowed hosts and logins, under Remote access on the General page of Settings, and run tailscale serve.';
 
 export interface HubServer {
   port: number;
@@ -127,6 +127,8 @@ export interface HubServer {
   update(): void;
   /** Sends an event to every `/dock/events` stream, such as `show` or `config`; returns how many streams it reached. */
   notifyDock(event: string, data: unknown): number;
+  /** Ends the open page and console streams of remote devices whose host or login `PageRoutes.remote` no longer allows (architecture.md § Remote access). */
+  remoteChanged(): void;
   /** Sends an event to every `/events` stream, or with `keys` only to the streams of those window keys, such as `claim`; returns how many streams it reached. */
   notifyWindows(event: string, data: unknown, keys?: readonly string[]): number;
   /** The key of the window that last gained focus and still has it, item or folder window, or null (architecture.md § Window scope). */
@@ -474,6 +476,9 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
   let pageReady: Promise<unknown> = Promise.resolve();
   // Open page streams and the sign-in each opened with, so a revoke ends them all and a sign-in replaced ends its own.
   const pageStreams = new Map<ServerResponse, string | null>();
+  // The open page and console streams of remote devices with the host and login each came through, so a change of remote access that no
+  // longer allows them ends them (architecture.md § Remote access).
+  const remoteStreams = new Map<ServerResponse, { host: string; login: string }>();
   // Where each open page key's stream came from, this computer or a remote host and login, so its artifact links work only from there.
   const pageKeyOrigins = new Map<string, string>();
   const originOf = (origin: PageOrigin): string => (origin.host === null ? 'local' : `${origin.host} ${origin.login}`);
@@ -543,6 +548,12 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     }
 
     const remote = origin.host !== null;
+    // Whether remote access still allows this request's host and login once its body is read, since a change may have removed them meanwhile.
+    const stillAllowed = (): boolean => {
+      const now = page.remote?.() ?? { hosts: [], logins: [] };
+
+      return origin.host === null || (now.hosts.includes(origin.host) && now.logins.includes(origin.login));
+    };
 
     if (remote) {
       response.setHeader('Strict-Transport-Security', 'max-age=31536000');
@@ -682,8 +693,14 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       pageKeyOrigins.set(key, originOf(origin));
       openConversation(request, response, key);
       pageStreams.set(response, page.access.sessionOf(request.headers.cookie));
+
+      if (origin.host !== null) {
+        remoteStreams.set(response, { host: origin.host, login: origin.login });
+      }
+
       request.on('close', () => {
         pageStreams.delete(response);
+        remoteStreams.delete(response);
 
         if (key !== null) {
           pageKeyOrigins.delete(key);
@@ -714,6 +731,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       };
       const end = (): void => {
         pageStreams.delete(response);
+        remoteStreams.delete(response);
         response.end();
       };
 
@@ -725,6 +743,10 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       response.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
       pageStreams.set(response, page.access.sessionOf(request.headers.cookie));
 
+      if (origin.host !== null) {
+        remoteStreams.set(response, { host: origin.host, login: origin.login });
+      }
+
       const opened = page.console(window, sessionId, send, end);
 
       if ('status' in opened) {
@@ -735,6 +757,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
 
       request.on('close', () => {
         pageStreams.delete(response);
+        remoteStreams.delete(response);
         opened.close();
       });
       return true;
@@ -796,6 +819,11 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
 
         request.on('data', (chunk: Buffer) => chunks.push(chunk));
         request.on('end', () => {
+          if (!stillAllowed()) {
+            json(response, 403, { error: 'Remote access no longer allows this device.' });
+            return;
+          }
+
           const reply = page.upload(window, Number(url.searchParams.get('scopeGen') ?? NaN), url.searchParams.get('name') ?? '', Buffer.concat(chunks));
 
           json(response, reply.status, reply.body);
@@ -828,6 +856,11 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     readJson(request).then(
       (body) => {
         const key = (body as { window?: unknown } | null)?.window;
+
+        if (!stillAllowed()) {
+          json(response, 403, { error: 'Remote access no longer allows this device.' });
+          return;
+        }
 
         if (typeof key !== 'string' || !page.isPage(key)) {
           json(response, 403, { error: 'Not in this window.' });
@@ -1057,6 +1090,16 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
           }
         },
         notifyDock: (event, data) => notify('dock', event, data),
+        remoteChanged: () => {
+          const remote = page?.remote?.() ?? { hosts: [], logins: [] };
+
+          for (const [stream, from] of remoteStreams) {
+            if (!remote.hosts.includes(from.host) || !remote.logins.includes(from.login)) {
+              remoteStreams.delete(stream);
+              stream.end();
+            }
+          }
+        },
         notifyWindows: (event, data, only) => notify('window', event, data, only),
         focusedWindow: () => (front === null ? null : (keys.get(front) ?? null)),
         clickDock: (data) => {

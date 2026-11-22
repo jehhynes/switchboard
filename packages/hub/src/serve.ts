@@ -52,6 +52,8 @@ export interface HubApp {
   attachDockClick?(click: (data: unknown) => boolean): void;
   /** Gives the app the way to send an event to the VS Code windows' streams. */
   attachWindows?(send: (event: string, data: unknown, keys?: readonly string[]) => number): void;
+  /** Gives the app the way to end the remote page streams that a change of remote access no longer allows. */
+  attachRemote?(changed: () => void): void;
   /** While true, the hub does not exit for lack of clients (PRD R43). */
   busy(): boolean;
   /** Why the hub cannot restart onto a new build now, or null when it is quiet (architecture.md § Hub lifecycle). */
@@ -242,6 +244,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
   app?.attachDock?.((event, data) => server.notifyDock(event, data));
   app?.attachDockClick?.((data) => server.clickDock(data));
   app?.attachWindows?.((event, data, keys) => server.notifyWindows(event, data, keys));
+  app?.attachRemote?.(() => server.remoteChanged());
 
   const pagePort = options.pagePort ?? app?.pagePort?.() ?? 0;
 
