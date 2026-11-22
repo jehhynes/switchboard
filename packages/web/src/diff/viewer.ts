@@ -83,26 +83,25 @@ export function mountDiff(host: HTMLElement, data: DiffData, version: string, mo
     return null;
   }
 
-  const view = new CodeView<undefined, undefined>(
-    {
-      ...options(mount.layout, mount.wrap),
-      onLineNumberClick: (props: { lineNumber: number; annotationSide?: 'deletions' | 'additions' }) => mount.onLine?.(props.annotationSide === 'deletions' ? 'old' : 'new', props.lineNumber),
-    } as CodeViewOptions<undefined, undefined>,
-    workers(),
-  );
+  const callbacks = {
+    onLineNumberClick: (props: { lineNumber: number; annotationSide?: 'deletions' | 'additions' }) => mount.onLine?.(props.annotationSide === 'deletions' ? 'old' : 'new', props.lineNumber),
+    renderHeaderMetadata: () => mount.meta ?? null,
+  };
+  const view = new CodeView<undefined, undefined>({ ...options(mount.layout, mount.wrap), ...callbacks } as CodeViewOptions<undefined, undefined>, workers());
 
   view.setup(host);
   view.setItems([item]);
 
   return {
-    set: (layout, wrap) => view.setOptions({ ...options(layout, wrap), onLineNumberClick: (props: { lineNumber: number; annotationSide?: 'deletions' | 'additions' }) => mount.onLine?.(props.annotationSide === 'deletions' ? 'old' : 'new', props.lineNumber) } as CodeViewOptions<undefined, undefined>),
+    set: (layout, wrap) => view.setOptions({ ...options(layout, wrap), ...callbacks } as CodeViewOptions<undefined, undefined>),
     dispose: () => view.cleanUp(),
   };
 }
 
 /** Draws a whole file read-only into `host`, scrolled to `line` and with it selected (PRD R118's file view). */
 export function mountFile(host: HTMLElement, data: FileData, version: string, mount: FileMountOptions): DiffMount {
-  const view = new CodeView<undefined, undefined>(options('stacked', mount.wrap), workers());
+  const callbacks = { renderHeaderPrefix: () => mount.prefix ?? null, renderHeaderFilenameSuffix: () => mount.suffix ?? null };
+  const view = new CodeView<undefined, undefined>({ ...options('stacked', mount.wrap), ...callbacks }, workers());
   const item: CodeViewItem<undefined> = { id: data.path, type: 'file', file: { name: data.path, contents: data.contents ?? '', cacheKey: version } };
 
   view.setup(host);
@@ -113,5 +112,5 @@ export function mountFile(host: HTMLElement, data: FileData, version: string, mo
     view.setSelectedLines({ id: data.path, range: { start: mount.line, end: mount.line } });
   }
 
-  return { set: (_layout, wrap) => view.setOptions(options('stacked', wrap)), dispose: () => view.cleanUp() };
+  return { set: (_layout, wrap) => view.setOptions({ ...options('stacked', wrap), ...callbacks }), dispose: () => view.cleanUp() };
 }

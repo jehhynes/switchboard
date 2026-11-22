@@ -8,6 +8,9 @@ export interface FileMountOptions {
   wrap: boolean;
   /** The line to scroll to and select, null for the top. */
   line: number | null;
+  /** What the file's header shows before its name and after it. */
+  prefix?: HTMLElement;
+  suffix?: HTMLElement;
 }
 
 export interface DiffMountOptions {
@@ -15,6 +18,8 @@ export interface DiffMountOptions {
   wrap: boolean;
   /** A line number was clicked: the old side's or the new side's line. */
   onLine?(side: 'old' | 'new', line: number): void;
+  /** What the file's header shows after its counts. */
+  meta?: HTMLElement;
 }
 
 export interface DiffMount {

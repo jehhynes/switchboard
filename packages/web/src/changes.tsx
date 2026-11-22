@@ -26,16 +26,16 @@ export const newChanges = (): ChangesView => ({ list: null, loading: false, erro
 
 /** Where the diff's sides go: side by side, one above the other, or by the pane's width (`auto`, stacked and wrapped under {@link SPLIT_MIN_WIDTH}). */
 export type DiffLayout = 'auto' | 'split' | 'stacked';
+/** Whether long lines wrap: always, never, or only while `auto` stacks the sides (`web.diffWrap`). */
+export type DiffWrap = 'auto' | 'on' | 'off';
 /** The narrowest pane a diff shows side by side in, as VS Code's diff editor switches to inline at 900 px. */
 export const SPLIT_MIN_WIDTH = 900;
-const LAYOUT_KEY = 'switchboard.diffLayout';
-const WRAP_KEY = 'switchboard.diffWrap';
 
 /** The layout and wrapping a diff shows with in a pane `width` pixels wide. */
-export function diffLayout(choice: DiffLayout, wrap: boolean | null, width: number): { layout: 'split' | 'stacked'; wrap: boolean } {
+export function diffLayout(choice: DiffLayout, wrap: DiffWrap, width: number): { layout: 'split' | 'stacked'; wrap: boolean } {
   const layout = choice === 'auto' ? (width > 0 && width < SPLIT_MIN_WIDTH ? 'stacked' : 'split') : choice;
 
-  return { layout, wrap: wrap ?? (choice === 'auto' && layout === 'stacked') };
+  return { layout, wrap: wrap === 'auto' ? choice === 'auto' && layout === 'stacked' : wrap === 'on' };
 }
 
 const STATUS_TITLES: Record<ChangeStatus, string> = { A: 'Added', M: 'Modified', D: 'Deleted', R: 'Renamed', U: 'Untracked', C: 'Conflict' };
@@ -144,8 +144,11 @@ export function listNote(list: ChangesList): string {
   return list.shown < list.total ? `${since} · first ${list.shown} of ${files}${ticked}` : `${since} · ${files}${ticked}`;
 }
 
-/** The Changes menu while open, under the strip: its note and Refresh, then the rows, or why there are none. */
-export function renderChangesMenu(changes: ChangesView): VNode | null {
+/**
+ * The Changes menu while open, under the strip: its note, Open in VS Code for the work item's window while its row offers it, and Refresh, then
+ * the rows, or why there are none.
+ */
+export function renderChangesMenu(changes: ChangesView, openInVsCode = false): VNode | null {
   if (!changes.menu) {
     return null;
   }
@@ -173,6 +176,12 @@ export function renderChangesMenu(changes: ChangesView): VNode | null {
     <div class="glass changes-menu">
       <div class="changes-head">
         <span class="changes-note">{list === null ? 'Changes' : listNote(list)}</span>
+        {openInVsCode ? (
+          <button class="changes-open" type="button" data-action="row-command" data-label="Open in VS Code" title="Open the worktree in its VS Code window">
+            <span class="codicon codicon-vscode" aria-hidden="true"></span>
+            Open in VS Code
+          </button>
+        ) : null}
         <button class="icon" type="button" data-action="changes-refresh" title="Refresh" aria-label="Refresh" disabled={changes.loading}>
           <span class={`codicon codicon-refresh${changes.loading ? ' codicon-modifier-spin' : ''}`} aria-hidden="true"></span>
         </button>
@@ -199,6 +208,8 @@ export interface ChangesDeps {
   workItemId(): number | null;
   /** Posts a command for the conversation the page shows, with its `scopeGen`. */
   command(name: string, body: Record<string, unknown>): Promise<{ status: number; body: Record<string, unknown> }>;
+  /** The diff viewer's layout and wrapping, from the settings (`web.diffLayout`, `web.diffWrap`). */
+  diffSettings(): { layout: DiffLayout; wrap: DiffWrap };
 }
 
 /** A diff tab's file view: the file at a line, on disk or at the base, opened from a line number of its diff. */
@@ -225,66 +236,22 @@ export function fileNote(entry: FileOpen['entry']): string | null {
 /** A file's diff as read: on its way, read, or why not. */
 type DiffEntry = { state: 'loading' } | { state: 'ok'; data: DiffData; version: string } | { state: 'error'; error: string };
 
-/** The diff tab's header: the path, a rename's old path, the counts, the layout and wrap controls and Refresh. */
-function DiffHead({ path, row, choice, wrap, loading, file, note }: { path: string; row: ChangeRow | undefined; choice: DiffLayout; wrap: boolean; loading: boolean; file: FileOpen | null; note: string | null }): VNode {
-  // Open in VS Code opens the file on disk, at the file view's line; a deleted file has none.
-  const openable = file === null ? row?.status !== 'D' : file.side === 'disk';
-  const open = openable ? (
-    <button class="diff-open" type="button" data-action="diff-open-vscode" title="Open the file in its VS Code window">
-      <span class="codicon codicon-go-to-file" aria-hidden="true"></span>
-      Open in VS Code
-    </button>
-  ) : null;
+/** What a diff's own file header carries after its counts: the file's Viewed tick, while it is one of the change rows. */
+function DiffTools({ row }: { row: ChangeRow | undefined }): VNode | null {
+  return row === undefined ? null : (
+    <label class="diff-viewed" title={row.viewed === true ? 'Viewed; untick to read it again' : 'Mark viewed'}>
+      <input type="checkbox" data-action="diff-viewed" data-path={row.path} checked={row.viewed === true} />
+      Viewed
+    </label>
+  );
+}
 
-  if (file !== null) {
-    return (
-      <div class="diff-head">
-        <button class="icon" type="button" data-action="diff-back" title="Back to the diff" aria-label="Back to the diff">
-          <span class="codicon codicon-arrow-left" aria-hidden="true"></span>
-        </button>
-        <span class="diff-title" title={file.path}>
-          {file.path}:{file.line}
-          {file.side === 'base' ? <span class="diff-from"> at the base</span> : null}
-        </span>
-        <span class="diff-tools">
-          {note === null ? null : <span class="diff-note">{note}</span>}
-          {open}
-        </span>
-      </div>
-    );
-  }
-
+/** The file view's way back to the diff, before the file's name in its header and after what the view says in place of the file. */
+function BackButton(): VNode {
   return (
-    <div class="diff-head">
-      <span class={`diff-title${row === undefined ? '' : ` status-${row.status}`}`} title={row === undefined ? path : rowTitle(row)}>
-        {row?.from === undefined ? null : <span class="diff-from">{row.from} → </span>}
-        {path}
-      </span>
-      {row === undefined ? null : <Counts row={row} />}
-      <span class="diff-tools">
-        <span class="diff-layout" role="group" aria-label="Layout">
-          {(['auto', 'split', 'stacked'] as const).map((one) => (
-            <button type="button" data-action="diff-layout" data-layout={one} aria-pressed={choice === one} title={one === 'auto' ? `Side by side from ${SPLIT_MIN_WIDTH} px, else stacked and wrapped` : one === 'split' ? 'Side by side' : 'Stacked'}>
-              {one === 'auto' ? 'Auto' : one === 'split' ? 'Split' : 'Stacked'}
-            </button>
-          ))}
-        </span>
-        <button class="diff-wrap" type="button" data-action="diff-wrap" aria-pressed={wrap} title="Wrap long lines">
-          Wrap
-        </button>
-        {row === undefined ? null : (
-          <label class="diff-viewed">
-            <input type="checkbox" data-action="diff-viewed" data-path={path} checked={row.viewed === true} />
-            Viewed
-          </label>
-        )}
-        <button class="icon" type="button" data-action="diff-refresh" title="Refresh" aria-label="Refresh" disabled={loading}>
-          <span class={`codicon codicon-refresh${loading ? ' codicon-modifier-spin' : ''}`} aria-hidden="true"></span>
-        </button>
-        {note === null ? null : <span class="diff-note">{note}</span>}
-        {open}
-      </span>
-    </div>
+    <button class="diff-back" type="button" data-action="diff-back" title="Back to the diff" aria-label="Back to the diff">
+      <span class="codicon codicon-arrow-left" aria-hidden="true"></span>
+    </button>
   );
 }
 
@@ -315,23 +282,12 @@ export class ChangesController {
   /** The diff viewer on each host it draws into, dropped once its host leaves the page. */
   readonly #mounted = new Map<HTMLElement, { mount: DiffMount | null; layout: string }>();
   #module: Promise<DiffModule | null> | null = null;
-  /** Each diff tab's file view while it shows one, by the tab's path, and what Open in VS Code last said. */
+  /** Each diff tab's file view while it shows one, by the tab's path. */
   readonly #files = new Map<string, FileOpen>();
-  #note: { path: string; text: string } | null = null;
-  #layout: DiffLayout = 'auto';
-  #wrap: boolean | null = null;
+  /** The elements the viewer puts in a file's own header, by the diff view they belong to: after the counts, before the name and after it. */
+  readonly #slots = new WeakMap<HTMLElement, { meta: HTMLElement; prefix: HTMLElement; suffix: HTMLElement }>();
 
-  constructor(private readonly deps: ChangesDeps) {
-    try {
-      const layout = localStorage.getItem(LAYOUT_KEY);
-      const wrap = localStorage.getItem(WRAP_KEY);
-
-      this.#layout = layout === 'split' || layout === 'stacked' ? layout : 'auto';
-      this.#wrap = wrap === null ? null : wrap === '1';
-    } catch {
-      // Without local storage the choices last until the page reloads.
-    }
-  }
+  constructor(private readonly deps: ChangesDeps) {}
 
   /**
    * Follows the page's conversation: `id` names it (page key, scope generation, work item), so another one drops the list and closes the menu;
@@ -343,7 +299,6 @@ export class ChangesController {
       this.#diffReads++;
       this.#diffs.clear();
       this.#files.clear();
-      this.#note = null;
       Object.assign(this.view, newChanges(), { for: id });
       return;
     }
@@ -413,7 +368,18 @@ export class ChangesController {
 
     if (action === 'changes-refresh') {
       void this.refresh();
+
+      if (this.view.open !== null) {
+        void this.readDiff(this.view.open);
+      }
+
       return true;
+    }
+
+    // Open in VS Code in the menu's head is the header's own control, which the page runs; the menu closes.
+    if (action === 'row-command') {
+      this.view.menu = false;
+      return false;
     }
 
     const path = target.closest<HTMLElement>('[data-path]')?.dataset['path'];
@@ -428,25 +394,6 @@ export class ChangesController {
       return true;
     }
 
-    if (action === 'diff-layout') {
-      this.#layout = (target.closest<HTMLElement>('[data-layout]')?.dataset['layout'] as DiffLayout | undefined) ?? 'auto';
-      this.#keep(LAYOUT_KEY, this.#layout === 'auto' ? null : this.#layout);
-      this.deps.draw();
-      return true;
-    }
-
-    if (action === 'diff-wrap') {
-      this.#wrap = !this.#shownLayout(target.closest<HTMLElement>('.diff-view')?.parentElement ?? null).wrap;
-      this.#keep(WRAP_KEY, this.#wrap ? '1' : '0');
-      this.deps.draw();
-      return true;
-    }
-
-    if (action === 'diff-refresh' && this.view.open !== null) {
-      void this.readDiff(this.view.open);
-      return true;
-    }
-
     if (action === 'diff-viewed' && path !== undefined) {
       void this.toggleViewed(path);
       return true;
@@ -455,11 +402,6 @@ export class ChangesController {
     if (action === 'diff-back' && this.view.open !== null) {
       this.#files.delete(this.view.open);
       this.deps.draw();
-      return true;
-    }
-
-    if (action === 'diff-open-vscode' && this.view.open !== null) {
-      void this.openInVsCode(this.view.open);
       return true;
     }
 
@@ -584,7 +526,6 @@ export class ChangesController {
     const open: FileOpen = { path: base ? (row?.from ?? tab) : tab, side: base ? 'base' : 'disk', line, entry: { state: 'loading' } };
 
     this.#files.set(tab, open);
-    this.#note = null;
     this.deps.draw();
     void this.#readFile(tab, open);
   }
@@ -664,30 +605,11 @@ export class ChangesController {
     }
   }
 
-  /** Opens the tab's file, at the file view's line or its first, in the work item's VS Code window, and says how that went. */
-  async openInVsCode(tab: string): Promise<void> {
-    const open = this.#files.get(tab);
-    const answer = await this.deps.command('open-file', { path: open?.path ?? tab, line: open?.line ?? 1 });
-
-    this.#note = { path: tab, text: answer.status === 200 ? 'Opened in VS Code.' : String(answer.body['error'] ?? `Switchboard answered ${answer.status}.`) };
-    this.deps.draw();
-  }
-
-  #keep(key: string, value: string | null): void {
-    try {
-      if (value === null) {
-        localStorage.removeItem(key);
-      } else {
-        localStorage.setItem(key, value);
-      }
-    } catch {
-      // Kept until the page reloads.
-    }
-  }
-
   /** The layout and wrapping the diff shows with in `pane` now. */
   #shownLayout(pane: HTMLElement | null): { layout: 'split' | 'stacked'; wrap: boolean } {
-    return diffLayout(this.#layout, this.#wrap, pane?.clientWidth || (typeof innerWidth === 'number' ? innerWidth : 0));
+    const settings = this.deps.diffSettings();
+
+    return diffLayout(settings.layout, settings.wrap, pane?.clientWidth || (typeof innerWidth === 'number' ? innerWidth : 0));
   }
 
   /**
@@ -713,31 +635,47 @@ export class ChangesController {
     const version = file !== null ? `file ${file.side} ${file.path} ${file.line} ${file.entry.state === 'ok' ? file.entry.version : file.entry.state}` : entry?.state === 'ok' ? entry.version : (entry?.state ?? '');
     const id = `${path}\u0000${version}`;
     let view = pane.querySelector<HTMLElement>(':scope > .diff-view');
+    let slots = view === null ? undefined : this.#slots.get(view);
 
-    if (view?.dataset['diff'] !== id) {
+    if (view?.dataset['diff'] !== id || slots === undefined) {
       this.deps.takePane(pane);
       view = document.createElement('div');
       view.className = 'diff-view';
       view.dataset['diff'] = id;
-      view.append(document.createElement('div'), document.createElement('div'));
-      view.lastElementChild!.className = 'diff-host';
+
+      const host = document.createElement('div');
+      const slot = (): HTMLElement => {
+        const element = document.createElement('span');
+
+        element.className = 'diff-slot';
+        return element;
+      };
+
+      slots = { meta: slot(), prefix: slot(), suffix: slot() };
+      this.#slots.set(view, slots);
+      host.className = 'diff-host';
+      view.append(host);
       pane.replaceChildren(view);
       this.drop();
 
       if (file === null) {
-        this.#mountInto(view.lastElementChild as HTMLElement, entry, shown);
+        this.#mountInto(host, entry, shown, slots.meta);
       } else {
-        view.lastElementChild!.classList.add('file-view');
-        this.#mountFileInto(view.lastElementChild as HTMLElement, file, shown.wrap);
+        host.classList.add('file-view');
+        this.#mountFileInto(host, file, shown.wrap, slots);
       }
     }
 
     this.#relayout(pane);
-    mount(view.firstElementChild!, <DiffHead path={path} row={this.view.list?.rows.find((one) => one.path === path)} choice={this.#layout} wrap={shown.wrap} loading={this.#loadingDiff.has(path)} file={file} note={this.#note?.path === path ? this.#note.text : null} />);
+    // The file's own header in the viewer carries the path, its change and counts; the page adds the Viewed tick, or the file view's way back
+    // and line.
+    mount(slots.meta, file === null ? <DiffTools row={this.view.list?.rows.find((one) => one.path === path)} /> : null);
+    mount(slots.prefix, file === null ? null : <BackButton />);
+    mount(slots.suffix, file === null ? null : <span class="diff-at">:{file.line}{file.side === 'base' ? <span class="diff-from"> at the base</span> : null}</span>);
   }
 
   /** Mounts the diff viewer on a host once its module loads, or says why there is no diff to show. */
-  #mountInto(host: HTMLElement, entry: DiffEntry | undefined, shown: { layout: 'split' | 'stacked'; wrap: boolean }): void {
+  #mountInto(host: HTMLElement, entry: DiffEntry | undefined, shown: { layout: 'split' | 'stacked'; wrap: boolean }, meta: HTMLElement): void {
     const say = (text: string): void => {
       const note = document.createElement('p');
 
@@ -773,7 +711,7 @@ export class ChangesController {
 
       const [layout, wrap] = kept.layout.split(' ') as ['split' | 'stacked', string];
 
-      kept.mount = module.mountDiff(host, entry.data, entry.version, { layout, wrap: wrap === 'true', onLine: (side, line) => this.openFileView(side, line) });
+      kept.mount = module.mountDiff(host, entry.data, entry.version, { layout, wrap: wrap === 'true', onLine: (side, line) => this.openFileView(side, line), meta });
 
       if (kept.mount === null) {
         say("git's patch for this file could not be read.");
@@ -784,13 +722,14 @@ export class ChangesController {
   }
 
   /** Mounts the file view on a host once the viewer loads, or says why there is no file to show. */
-  #mountFileInto(host: HTMLElement, file: FileOpen, wrap: boolean): void {
+  #mountFileInto(host: HTMLElement, file: FileOpen, wrap: boolean, slots: { prefix: HTMLElement; suffix: HTMLElement }): void {
+    // Until the viewer draws the file's header, which holds the way back, the text in its place offers it.
     const say = (text: string): void => {
       const line = document.createElement('p');
 
       line.className = 'empty';
-      line.textContent = text;
       host.replaceChildren(line);
+      mount(line, [<BackButton />, text]);
     };
     const note = fileNote(file.entry);
     const entry = file.entry;
@@ -818,7 +757,7 @@ export class ChangesController {
       }
 
       host.replaceChildren();
-      kept.mount = module.mountFile(host, entry.data, entry.version, { wrap, line: file.line });
+      kept.mount = module.mountFile(host, entry.data, entry.version, { wrap, line: file.line, prefix: slots.prefix, suffix: slots.suffix });
     });
   }
 

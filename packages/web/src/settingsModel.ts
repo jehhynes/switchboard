@@ -1258,6 +1258,35 @@ export function generalFields(state: EditorState): Section[] {
         },
       ],
     },
+    {
+      heading: 'Diff viewer',
+      fields: [
+        {
+          path: 'web.diffLayout',
+          label: 'Layout',
+          kind: 'select',
+          help: "How a changed file's diff shows its sides on every page: Auto shows them side by side in a pane at least 900 px wide and one above the other in a narrower one, as VS Code's diff editor does.",
+          placeholder: 'auto',
+          options: [
+            { value: 'auto', label: 'Auto' },
+            { value: 'split', label: 'Side by side' },
+            { value: 'stacked', label: 'Stacked' },
+          ],
+        },
+        {
+          path: 'web.diffWrap',
+          label: 'Wrap long lines',
+          kind: 'select',
+          help: 'Whether a diff wraps lines longer than its pane. Auto wraps them only while Auto layout stacks the sides.',
+          placeholder: 'auto',
+          options: [
+            { value: 'auto', label: 'Auto' },
+            { value: 'on', label: 'On' },
+            { value: 'off', label: 'Off' },
+          ],
+        },
+      ],
+    },
     // Settings draws the paired devices and Pair a device after this section (architecture.md § Remote access).
     {
       heading: 'Remote access',

@@ -4,6 +4,7 @@ import type { ChangesList } from '../src/changes.js';
 import { diffLayout, diffNote } from '../src/changes.js';
 import type { DiffModule } from '../src/diff/types.js';
 import { startPage } from '../src/main.js';
+import type { PageRow } from '@switchboard/protocol';
 
 class FakeSource {
   static last: FakeSource | null = null;
@@ -40,6 +41,7 @@ const LIST: ChangesList = {
   total: 3,
 };
 
+const listRow = (patch: Partial<PageRow> = {}): PageRow => ({ workItemId: 1, ticketId: null, title: 'Fix it', priority: null, time: null, ticket: 'gh 1', sourceKind: 'github', url: '', playbook: 'dev:build', links: [], returned: 0, comment: null, mark: null, details: [], stripe: null, dim: false, host: null, actions: [], main: null, pastes: [], search: '', opens: [], terminal: false, band: null, voice: null, history: null, ...patch });
 const session = { id: 's', title: 'Task', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, persona: null };
 const scope = (scopeGen = 3, workItemId = 1) => ({ kind: 'page', key: 'pk', folder: 'D:/w', title: 'Fix it', scopeGen, conversations: [{ workItemId, title: 'Fix it', primary: true, sessionId: 's', state: 'idle', conversation: 'full', unread: 0 }], workItemId, cwd: 'D:/w', sessionId: 's' });
 
@@ -78,14 +80,22 @@ describe('the Changes list', () => {
     module = {
       mountDiff: (host, data, _version, options) => {
         const mount = { path: data.path, layout: options.layout, wrap: options.wrap, sets: [] as string[], disposed: false, ...(options.onLine === undefined ? {} : { onLine: options.onLine }) };
+        const shown = document.createElement('span');
 
         mounts.push(mount);
-        host.textContent = `diff of ${data.path}`;
+        shown.className = 'fake';
+        shown.textContent = `diff of ${data.path}`;
+        // As the viewer puts the page's element in the file's own header.
+        host.replaceChildren(shown, ...(options.meta === undefined ? [] : [options.meta]));
         return data.patch === 'unreadable' ? null : { set: (layout, wrap) => mount.sets.push(`${layout} ${wrap}`), dispose: () => (mount.disposed = true) };
       },
       mountFile: (host, data, _version, options) => {
+        const shown = document.createElement('span');
+
         files.push({ path: data.path, side: data.side, line: options.line });
-        host.textContent = `file ${data.path} at ${String(options.line)}`;
+        shown.className = 'fake';
+        shown.textContent = `file ${data.path} at ${String(options.line)}`;
+        host.replaceChildren(...(options.prefix === undefined ? [] : [options.prefix]), shown, ...(options.suffix === undefined ? [] : [options.suffix]));
         return { set: (layout, wrap) => fileSets.push(`${layout} ${wrap}`), dispose: () => {} };
       },
     };
@@ -112,6 +122,11 @@ describe('the Changes list', () => {
         return (sent['path'] === 'logo.png'
           ? { status: 409, ok: false, json: async () => ({ error: 'logo.png changed since it was shown; read it again.' }) }
           : { status: 200, ok: true, json: async () => ({ path: sent['path'], hash: sent['hash'], viewed: sent['viewed'] }) }) as unknown as Response;
+      }
+
+      if (url === '/v1/conversation/row-command') {
+        gets.push(`POST ${String((init as { body?: string } | undefined)?.body)}`);
+        return { status: 200, ok: true, json: async () => ({}) } as unknown as Response;
       }
 
       if (url === '/v1/conversation/open-file') {
@@ -144,6 +159,7 @@ describe('the Changes list', () => {
     return { page, source };
   };
   const button = () => root.querySelector<HTMLElement>('.changes-button')!;
+  const viewedBox = () => root.querySelector<HTMLInputElement>('.diff-host .diff-viewed input')!;
 
   it('reads the list when its menu opens and draws each row with its name, folder, counts and status', async () => {
     start();
@@ -258,20 +274,25 @@ describe('the Changes list', () => {
     expect(root.querySelector('.diff-tab .tab-open > .codicon')).not.toBeNull();
     expect(root.querySelector('.diff-tab .codicon-diff')).toBeNull();
     expect(root.querySelector('.diff-tab')!.classList.contains('selected')).toBe(true);
-    expect(root.querySelector('.diff-title')!.textContent).toBe('docs/a.md');
-    expect(root.querySelector('.diff-host')!.textContent).toBe('diff of docs/a.md');
+    // The viewer's own file header names the file; the page adds only the Viewed tick to it, with no bar of its own above the diff.
+    expect(root.querySelector('.diff-head')).toBeNull();
+    expect(root.querySelector('.diff-view')!.children).toHaveLength(1);
+    expect(root.querySelector('.diff-host .fake')!.textContent).toBe('diff of docs/a.md');
+    expect(viewedBox().dataset['path']).toBe('docs/a.md');
+    expect(viewedBox().checked).toBe(false);
     // A phone's width (test/setup.ts): stacked and wrapped.
     expect(mounts).toMatchObject([{ path: 'docs/a.md', layout: 'stacked', wrap: true }]);
 
     // A second file opens its own tab; the first keeps its tab.
     await openRow(1);
     expect([...root.querySelectorAll('.diff-tab .tab-label')].map((one) => one.textContent)).toEqual(['a.md', 'new.ts']);
-    expect(root.querySelector('.diff-title')!.textContent).toBe('src/old.ts → src/new.ts');
+    expect(viewedBox().dataset['path']).toBe('src/new.ts');
+    expect(viewedBox().checked).toBe(true);
 
     // Closing the one shown shows its neighbour; closing the last goes back to the conversation.
     root.querySelector<HTMLElement>('.diff-tab.selected .tab-close')!.click();
     await flush();
-    expect(root.querySelector('.diff-title')!.textContent).toBe('docs/a.md');
+    expect(viewedBox().dataset['path']).toBe('docs/a.md');
     root.querySelector<HTMLElement>('.diff-tab .tab-close')!.click();
     await flush();
     expect(root.querySelector('.diff-tab')).toBeNull();
@@ -287,36 +308,66 @@ describe('the Changes list', () => {
     await flush();
     expect(gets.at(-1)).toBe('/v1/conversation/file?window=pk&path=src%2Fnew.ts&side=disk');
     expect(files.at(-1)).toEqual({ path: 'src/new.ts', side: 'disk', line: 12 });
-    expect(root.querySelector('.diff-title')!.textContent).toBe('src/new.ts:12');
+    // The file's own header has the way back before its name and the line after it, and no tick or Open in VS Code.
+    expect(root.querySelector('.diff-host .fake')!.textContent).toBe('file src/new.ts at 12');
+    expect(root.querySelector('.diff-host .diff-at')!.textContent).toBe(':12');
+    expect(root.querySelector('.diff-host .diff-viewed')).toBeNull();
+    expect(root.querySelector('[data-action="diff-open-vscode"]')).toBeNull();
 
-    root.querySelector<HTMLElement>('[data-action="diff-open-vscode"]')!.click();
-    await flush();
-    expect(JSON.parse(gets.at(-1)!.slice('POST '.length))).toMatchObject({ window: 'pk', scopeGen: 3, path: 'src/new.ts', line: 12 });
-    expect(root.querySelector('.diff-note')!.textContent).toBe('The work item no longer offers this.');
-
-    root.querySelector<HTMLElement>('[data-action="diff-back"]')!.click();
+    root.querySelector<HTMLElement>('.diff-host [data-action="diff-back"]')!.click();
     await flush();
     await flush();
-    expect(root.querySelector('.diff-title')!.textContent).toBe('src/old.ts → src/new.ts');
+    expect(root.querySelector('.diff-host .fake')!.textContent).toBe('diff of src/new.ts');
+    expect(viewedBox().dataset['path']).toBe('src/new.ts');
 
     // The old side's line opens the file at the base, by its old name, with nothing to open in VS Code.
     mounts.at(-1)!.onLine!('old', 3);
     await flush();
     await flush();
     expect(files.at(-1)).toEqual({ path: 'src/old.ts', side: 'base', line: 3 });
-    expect(root.querySelector('.diff-title')!.textContent).toBe('src/old.ts:3 at the base');
-    expect(root.querySelector('[data-action="diff-open-vscode"]')).toBeNull();
+    expect(root.querySelector('.diff-host .diff-at')!.textContent).toBe(':3 at the base');
   });
 
-  it('changes the layout and wrapping on the open diff and keeps the choice', async () => {
+  it('offers the way back from a file view before the viewer draws its header', async () => {
     start();
+    await openRow(1);
+    mounts[0]!.onLine!('new', 12);
+    expect(root.querySelector('.diff-host .empty')!.textContent).toBe('Reading the file…');
+    expect(root.querySelector('.diff-host .empty [data-action="diff-back"]')).not.toBeNull();
+  });
+
+  it('lays the open diff out as the settings say, and again when they change', async () => {
+    const { source } = start();
+
+    source.emit('settings', { settings: { expandReplies: false, diffLayout: 'split', diffWrap: 'on' } });
     await openRow(0);
-    root.querySelector<HTMLElement>('[data-action="diff-layout"][data-layout="stacked"]')!.click();
+    // No controls of its own: the settings choose.
+    expect(root.querySelector('[data-action="diff-layout"], [data-action="diff-wrap"]')).toBeNull();
+    expect(mounts[0]).toMatchObject({ layout: 'split', wrap: true });
+
+    source.emit('settings', { settings: { expandReplies: false, diffLayout: 'stacked', diffWrap: 'off' } });
     expect(mounts[0]!.sets.at(-1)).toBe('stacked false');
-    root.querySelector<HTMLElement>('[data-action="diff-wrap"]')!.click();
+    // A value the page does not know keeps the one before.
+    source.emit('settings', { settings: { expandReplies: false, diffLayout: 'sideways', diffWrap: 'on' } });
     expect(mounts[0]!.sets.at(-1)).toBe('stacked true');
-    expect(localStorage.getItem('switchboard.diffLayout')).toBe('stacked');
-    expect(localStorage.getItem('switchboard.diffWrap')).toBe('1');
+  });
+
+  it("offers the work item's Open in VS Code in the menu's head while its row does, which the header's control runs", async () => {
+    const { source } = start();
+
+    button().click();
+    await flush();
+    expect(root.querySelector('.changes-open')).toBeNull();
+
+    source.emit('list', { groups: [{ key: 'progress', title: 'progress', glyph: '', empty: null, rows: [listRow({ opens: [{ label: 'Open in VS Code', icon: 'vscode' }] })] }] });
+    const open = root.querySelector<HTMLElement>('.changes-menu .changes-open')!;
+
+    expect(open.dataset['action']).toBe('row-command');
+    expect(open.dataset['label']).toBe('Open in VS Code');
+    open.click();
+    await flush();
+    expect(JSON.parse(gets.at(-1)!.slice('POST '.length))).toMatchObject({ window: 'pk', scopeGen: 3, workItemId: 1, label: 'Open in VS Code' });
+    expect(root.querySelector('.changes-menu')).toBeNull();
   });
 
   it("says why a diff does not show: binary, refused, a patch the viewer cannot read, or no viewer", async () => {
@@ -349,7 +400,10 @@ describe('the Changes list', () => {
 
     // The first refresh is held and answers an old version after the second refresh has answered.
     diffAnswers['docs/a.md'] = { status: 200, body: { path: 'docs/a.md', status: 'M', patch: 'old', old: 'a', new: 'b', binary: false, tooLarge: 'patch' }, wait: held } as never;
-    root.querySelector<HTMLElement>('[data-action="diff-refresh"]')!.click();
+    // The menu's Refresh reads the open diff again with the list.
+    button().click();
+    await flush();
+    root.querySelector<HTMLElement>('[data-action="changes-refresh"]')!.click();
     await flush();
     diffAnswers['docs/a.md'] = { status: 200, body: { path: 'docs/a.md', status: 'M', patch: 'diff --git a/x b/x', old: 'a', new: 'c', binary: false, tooLarge: null } };
     // The turn's end reads it again while the refresh is on its way (Refresh itself waits while one is).
@@ -360,7 +414,7 @@ describe('the Changes list', () => {
     release();
     await flush();
     await flush();
-    expect(root.querySelector('.diff-host')!.textContent).toBe('diff of docs/a.md');
+    expect(root.querySelector('.diff-host .fake')!.textContent).toBe('diff of docs/a.md');
   });
 
   it('gives the open diff the layout its pane calls for when the pane is resized', async () => {
@@ -475,11 +529,12 @@ describe('the Changes list', () => {
 
 describe('the Changes list text', () => {
   it('lays a diff out side by side from 900 px and stacked and wrapped under it, unless chosen', () => {
-    expect(diffLayout('auto', null, 1200)).toEqual({ layout: 'split', wrap: false });
-    expect(diffLayout('auto', null, 899)).toEqual({ layout: 'stacked', wrap: true });
-    expect(diffLayout('auto', false, 375)).toEqual({ layout: 'stacked', wrap: false });
-    expect(diffLayout('split', null, 375)).toEqual({ layout: 'split', wrap: false });
-    expect(diffLayout('stacked', true, 1200)).toEqual({ layout: 'stacked', wrap: true });
+    expect(diffLayout('auto', 'auto', 1200)).toEqual({ layout: 'split', wrap: false });
+    expect(diffLayout('auto', 'auto', 899)).toEqual({ layout: 'stacked', wrap: true });
+    expect(diffLayout('auto', 'off', 375)).toEqual({ layout: 'stacked', wrap: false });
+    expect(diffLayout('split', 'auto', 375)).toEqual({ layout: 'split', wrap: false });
+    expect(diffLayout('stacked', 'auto', 375)).toEqual({ layout: 'stacked', wrap: false });
+    expect(diffLayout('stacked', 'on', 1200)).toEqual({ layout: 'stacked', wrap: true });
   });
 
   it('says why a diff does not show', () => {

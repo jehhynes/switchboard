@@ -1,6 +1,6 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ConversationMessage, ConversationReply, Interruption, Persona, Piece, Session, SpokenState, VoiceSettings } from '@switchboard/core';
+import type { ConversationMessage, ConversationReply, Interruption, Persona, Piece, Session, SpokenState, ViewSettings, VoiceSettings } from '@switchboard/core';
 import { PERMISSION_PROMPT, QUESTION_CARD, START_PROMPT } from '@switchboard/core/group';
 import { spokenText } from '@switchboard/conversation';
 import type { HeardTag } from '@switchboard/conversation';
@@ -172,6 +172,8 @@ export function alertDetail(cause: AlertCause, inTerminal: boolean, reply: { spe
 export interface VoiceControlDeps {
   link: { find(): Promise<VoiceConnection | { error: string }>; connected(): VoiceConnection | null; stop(): void };
   settings(): VoiceSettings;
+  /** The settings windows and pages read, sent to each when the settings are reloaded; `expandReplies` alone when left out. */
+  viewSettings?(): ViewSettings;
   store: {
     reply(id: string): ConversationReply | null;
     updateReply(id: string, patch: Partial<Pick<ConversationReply, 'spokenState' | 'spokenAtMs' | 'saidChars'>>): void;
@@ -595,7 +597,7 @@ export class VoiceControl {
     }
 
     for (const key of this.deps.windows.keys()) {
-      this.deps.notify(key, 'settings', { settings: { expandReplies: this.deps.settings().expandReplies } });
+      this.deps.notify(key, 'settings', { settings: this.deps.viewSettings?.() ?? { expandReplies: this.deps.settings().expandReplies } });
     }
 
     this.update();

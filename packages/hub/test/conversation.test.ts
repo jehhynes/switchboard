@@ -1072,7 +1072,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     const calls: string[] = [];
     const voice: ConversationVoice = {
       shown: (key) => ({ enabled: true, here: key === 'k1', mic: 'off', speaking: null, speakReplies: true, error: null, recognizer: null }),
-      settings: () => ({ expandReplies: true }),
+      settings: () => ({ expandReplies: true, diffLayout: 'auto', diffWrap: 'auto' }),
       spokenFor: (sessionId, command) => {
         calls.push(`spokenFor ${sessionId} ${command}`);
         return command ? { spoken: false, expressive: false } : spoken;

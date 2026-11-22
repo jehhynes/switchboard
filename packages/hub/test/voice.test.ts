@@ -74,6 +74,7 @@ function setup(patch: Partial<VoiceSettings> = { enabled: true }) {
       stop: () => void stops++,
     },
     settings: () => settings,
+    viewSettings: () => ({ expandReplies: settings.expandReplies, diffLayout: 'stacked', diffWrap: 'on' }),
     store: {
       reply: (id) => replies.get(id) ?? null,
       updateReply: (id, patch) => void replies.set(id, { ...replies.get(id)!, ...patch }),
@@ -536,6 +537,8 @@ describe('VoiceControl', () => {
     control.settingsChanged();
     expect(connections[0]!.sent.filter((one) => one.type === 'settings').at(-1)).toMatchObject({ settings: { voice: 'cedar' } });
     expect(notified.filter((one) => one.type === 'settings').map((one) => one.key)).toEqual(['k1', 'k2']);
+    // Each window and page gets every setting it reads, the diff viewer's too.
+    expect(notified.filter((one) => one.type === 'settings').at(-1)).toMatchObject({ payload: { settings: { expandReplies: true, diffLayout: 'stacked', diffWrap: 'on' } } });
     expect(connections[0]!.sent.filter((one) => one.type === 'stop')).toEqual([]);
 
     // Turning voice off stops what plays.

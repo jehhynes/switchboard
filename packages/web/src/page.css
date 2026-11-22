@@ -588,8 +588,8 @@ body.artifact-window > .artifact-view { height: 100%; }
 }
 /* On a touch screen every icon button in the bars, inside a menu's anchor or not, is at least 44 px square, with its glyph at 20 px, centred. */
 @media (hover: none), (pointer: coarse) {
-  :is(.header, .list-header, .hist-bar, .settings-head, .artifact-head, .changes-head, .diff-head) :is(button.icon, a.icon, button.actions, button.persona) { min-width: 44px; min-height: 44px; align-items: center; justify-content: center; }
-  :is(.header, .list-header, .hist-bar, .settings-head, .artifact-head, .changes-head, .diff-head) :is(button.icon, a.icon, button.actions, button.persona) > .codicon { font-size: 20px; line-height: 1; }
+  :is(.header, .list-header, .hist-bar, .settings-head, .artifact-head, .changes-head) :is(button.icon, a.icon, button.actions, button.persona) { min-width: 44px; min-height: 44px; align-items: center; justify-content: center; }
+  :is(.header, .list-header, .hist-bar, .settings-head, .artifact-head, .changes-head) :is(button.icon, a.icon, button.actions, button.persona) > .codicon { font-size: 20px; line-height: 1; }
 }
 /* A narrow screen gives the conversation its width: less padding round the timeline and the composer, and wider bubbles. */
 @media (max-width: 600px) {

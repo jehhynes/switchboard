@@ -126,6 +126,23 @@ export interface AlertSettings {
   surface: AlertSurface;
 }
 
+/** How the web page's diff viewer lays out a file's sides: side by side, stacked, or side by side from 900 px and stacked under it. */
+export const DIFF_LAYOUTS = ['auto', 'split', 'stacked'] as const;
+
+export type DiffLayoutSetting = (typeof DIFF_LAYOUTS)[number];
+
+/** Whether the diff viewer wraps long lines: always, never, or only while `auto` layout stacks the sides. */
+export const DIFF_WRAPS = ['auto', 'on', 'off'] as const;
+
+export type DiffWrapSetting = (typeof DIFF_WRAPS)[number];
+
+/** The settings a VS Code window's view and the web page read, in a stream's `hello` and its `settings` event. */
+export interface ViewSettings {
+  expandReplies: boolean;
+  diffLayout: DiffLayoutSetting;
+  diffWrap: DiffWrapSetting;
+}
+
 /** The web page (architecture.md § Web page). */
 export interface WebSettings {
   /** The port the hub serves the page on, read at hub start, so an installed page keeps its address; 0 serves it only on the hub's own port. */
@@ -144,6 +161,10 @@ export interface WebSettings {
   remoteLogins: string[];
   /** At hub start, adds this machine's Tailscale name to `remoteHosts` and its owner's login to `remoteLogins`, from `tailscale status --json`. */
   tailscale: boolean;
+  /** The diff viewer's layout on every page (PRD R118); `auto` by default. */
+  diffLayout: DiffLayoutSetting;
+  /** The diff viewer's line wrapping on every page; `auto` by default. */
+  diffWrap: DiffWrapSetting;
 }
 
 /** A DNS name with at least two labels, lowercase, that is not an IP address: the form a remote host takes. */
@@ -261,7 +282,7 @@ export const DEFAULT_SETTINGS: Settings = {
   dock: { openVSCode: 'always', openTerminal: 'vscode', openIn: 'vscode' },
   alerts: { surface: 'auto' },
   voice: { enabled: false, voice: 'marin', style: 'none', speed: 1, expressive: false, expandReplies: false, awayMinutes: 2, needsYouSound: true, outputDevice: null, micIdleMinutes: 10, endPauseMs: 3000, inputDevice: null, halfDuplexTailMs: 800, duplex: { local: 'auto', remote: 'auto' }, matchThreshold: 0.6, pitchLowFactor: 1.22, pitchMinLowShare: 0.2, roomHold: true, roomHoldSeconds: 60, personas: [], playbookPersonas: {}, spokenAlerts: true, alertOn: { finished: true, question: true, permission: true }, alertAnswerSeconds: 10, operatorName: '' },
-  web: { port: 47616, chromePane: false, remoteHosts: [], remoteLogins: [], tailscale: false },
+  web: { port: 47616, chromePane: false, remoteHosts: [], remoteLogins: [], tailscale: false, diffLayout: 'auto', diffWrap: 'auto' },
 };
 
 /** A source's or schedule's name: it keys tickets in the store and History. */
@@ -609,13 +630,15 @@ export function parseSettings(text: string): SettingsResult {
   voice.playbookPersonas = parsePlaybookPersonas(read, voiceIn['playbookPersonas'], voice.personas);
 
   const webIn = read.section(root, 'web', 'web');
-  read.unknown(webIn, ['port', 'chromePane', 'remoteHosts', 'remoteLogins', 'tailscale'], 'web');
+  read.unknown(webIn, ['port', 'chromePane', 'remoteHosts', 'remoteLogins', 'tailscale', 'diffLayout', 'diffWrap'], 'web');
   const web: WebSettings = {
     port: read.integer(webIn, 'port', 'web', defaults.web.port, 0, 65535),
     chromePane: read.boolean(webIn, 'chromePane', 'web', defaults.web.chromePane),
     remoteHosts: read.names(webIn, 'remoteHosts', 'web', REMOTE_HOST, 'host names such as pc.tailnet.ts.net, without a port'),
     remoteLogins: read.names(webIn, 'remoteLogins', 'web', /^[^\s,;]+$/, 'logins without spaces'),
     tailscale: read.boolean(webIn, 'tailscale', 'web', defaults.web.tailscale),
+    diffLayout: read.choice(webIn, 'diffLayout', 'web', DIFF_LAYOUTS, defaults.web.diffLayout),
+    diffWrap: read.choice(webIn, 'diffWrap', 'web', DIFF_WRAPS, defaults.web.diffWrap),
   };
 
   return read.errors.length > 0 ? { errors: read.errors } : { settings: { sessions, triage, sources, schedules, dock, alerts, voice, web } };

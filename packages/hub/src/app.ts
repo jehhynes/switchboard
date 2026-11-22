@@ -6,7 +6,7 @@ import { homedir } from 'node:os';
 import { claudeSettingsPath, readRoster, spawnExec } from '@switchboard/claude';
 import { hostKey, hubBundlePath, NEW_CONVERSATION_TITLE, PANE_EXTENSION_ID, personaById, Store, switchboardHome } from '@switchboard/core';
 import { CODEX_PERMISSION_MODES, PERMISSION_MODES, PROVIDERS, TEMPLATE_VARIABLES } from '@switchboard/core';
-import type { FlowEvent, SourceSettings } from '@switchboard/core';
+import type { FlowEvent, SourceSettings, ViewSettings } from '@switchboard/core';
 import { githubSource } from '@switchboard/github';
 import { zohoSource } from '@switchboard/zoho';
 import { forumSource } from '@switchboard/forum';
@@ -514,6 +514,8 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   });
   // The window in front, which the voice follows (architecture.md § Voice).
   let focusedWindow: string | null = null;
+  // What a window's view and the web page read of the settings, in each `hello` and again when settings.json is reloaded.
+  const viewSettings = (): ViewSettings => ({ expandReplies: config.settings.voice.expandReplies, diffLayout: config.settings.web.diffLayout, diffWrap: config.settings.web.diffWrap });
   // The page's list and header, sent again when the voice changes the dock's view; set once the conversation service exists.
   let pageListChanged = (): void => {};
   const builtNow = (): void => {
@@ -536,6 +538,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   const voice: VoiceControl = new VoiceControl({
     link: new VoiceLink({ home, nodePath: () => config.settings.sessions.nodePath, log: (line) => deps.log(line), now: deps.now, sleep: deps.sleep }),
     settings: () => config.settings.voice,
+    viewSettings: () => viewSettings(),
     store,
     windows: { keys: () => scopes.keys(), scope: (key) => scopes.scope(key) },
     focusedWindow: () => focusedWindow,
@@ -660,7 +663,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     windows: scopes,
     voice: {
       shown: (key) => voice.shown(key),
-      settings: () => ({ expandReplies: config.settings.voice.expandReplies }),
+      settings: () => viewSettings(),
       spokenFor: (sessionId, command) => voice.spokenFor(sessionId, command),
       replyChanged: (reply) => voice.replyChanged(reply),
       talkHere: (key) => voice.talkHere(key),

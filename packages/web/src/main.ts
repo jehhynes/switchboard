@@ -369,6 +369,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     takePane: (pane) => takePane(pane),
     command: (name, body) => command(name, body),
     workItemId: () => state.scope?.workItemId ?? null,
+    diffSettings: () => ({ layout: state.diffLayout, wrap: state.diffWrap }),
   });
   let changesSession: string | null = null;
   // File type icons, whose mapping loads the first time a list draws one (architecture.md § Web page).
@@ -1567,9 +1568,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     const strip = { open: openArtifact(), fit: view.artifactFit, menu: view.artifactMenu, now: deps.now(), closed: closedNow() };
 
+    // The Changes menu's Open in VS Code, the header's own, while the open work item's row offers it.
+    const offersVsCode = (): boolean => selectedRow(state)?.opens.some((one) => one.label === 'Open in VS Code') === true;
     const changeTabs = (shown: Tab): ComponentChild[] => [diffTabs(changes.view, shown === 'diff'), changesButton(changes.view)];
 
-    mount(head, [renderHeader(state, view), side ? null : renderTabs({ ...view, tab: mainTab() }, state, showBrowser(), strip, changeTabs(mainTab()), showConsole()), side ? null : renderChangesMenu(changes.view)]);
+    mount(head, [renderHeader(state, view), side ? null : renderTabs({ ...view, tab: mainTab() }, state, showBrowser(), strip, changeTabs(mainTab()), showConsole()), side ? null : renderChangesMenu(changes.view, offersVsCode())]);
 
     const artifact = view.artifact === null ? undefined : state.artifacts.find((one) => one.path === view.artifact);
     const now = deps.now();
@@ -1625,7 +1628,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     drawTab(panel, mainTab());
 
     if (side) {
-      mount(detailHead, [renderSideSwitch(sideTab(), state, showBrowser(), strip, changeTabs(sideTab()), showConsole()), renderChangesMenu(changes.view)]);
+      mount(detailHead, [renderSideSwitch(sideTab(), state, showBrowser(), strip, changeTabs(sideTab()), showConsole()), renderChangesMenu(changes.view, offersVsCode())]);
       drawTab(detailBody, sideTab());
     }
     // The composer first, so the conversation is scrolled against its final height.

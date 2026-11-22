@@ -20,9 +20,23 @@ export interface PageState {
   unread: number;
   voice: VoiceView | null;
   expandReplies: boolean;
+  /** The diff viewer's settings (`web.diffLayout`, `web.diffWrap`), from the `hello` and each `settings` event. */
+  diffLayout: 'auto' | 'split' | 'stacked';
+  diffWrap: 'auto' | 'on' | 'off';
 }
 
-export const EMPTY: PageState = { key: null, connected: false, groups: [], header: null, scope: null, session: null, items: [], more: false, status: null, artifacts: [], unread: 0, voice: null, expandReplies: false };
+export const EMPTY: PageState = { key: null, connected: false, groups: [], header: null, scope: null, session: null, items: [], more: false, status: null, artifacts: [], unread: 0, voice: null, expandReplies: false, diffLayout: 'auto', diffWrap: 'auto' };
+
+/** The diff viewer's settings an event carries, each kept as it was when the event lacks it or names a value the page does not know. */
+function diffSettings(settings: Record<string, unknown> | undefined, state: PageState): Pick<PageState, 'diffLayout' | 'diffWrap'> {
+  const layout = settings?.['diffLayout'];
+  const wrap = settings?.['diffWrap'];
+
+  return {
+    diffLayout: layout === 'auto' || layout === 'split' || layout === 'stacked' ? layout : state.diffLayout,
+    diffWrap: wrap === 'auto' || wrap === 'on' || wrap === 'off' ? wrap : state.diffWrap,
+  };
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Event = { type: string } & Record<string, any>;
@@ -67,6 +81,7 @@ export function applyEvent(state: PageState, event: Event): PageState {
         unread: event['unread'] ?? 0,
         voice: event['voice'] ?? null,
         expandReplies: event['settings']?.expandReplies ?? state.expandReplies,
+        ...diffSettings(event['settings'], state),
       };
     case 'list':
       return { ...state, groups: event['groups'], header: event['header'] ?? state.header };
@@ -98,7 +113,7 @@ export function applyEvent(state: PageState, event: Event): PageState {
     case 'voice':
       return { ...state, voice: event['voice'] };
     case 'settings':
-      return { ...state, expandReplies: event['settings']?.expandReplies === true };
+      return { ...state, expandReplies: event['settings']?.expandReplies === true, ...diffSettings(event['settings'], state) };
     case 'progress':
       return { ...state, items: state.items.map((item) => (item.id === event['replyId'] && item.type === 'reply' ? { ...item, spoken: { state: 'playing', atMs: event['atMs'], saidChars: event['chars'] } } : item)) };
     default:

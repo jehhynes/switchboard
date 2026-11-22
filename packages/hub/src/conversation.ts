@@ -1,7 +1,7 @@
 import { countsUnread, inTranscript } from '@switchboard/core';
 import type { ConversationMessage, ConversationReply, ConversationStatus, Interruption, Piece, Provider, Session, SpokenState, Store } from '@switchboard/core';
 import { artifactsDir, hostKey, PERMISSION_PROMPT, personaById, sessionTone, START_PROMPT, toneVersion, waitsOnLimit } from '@switchboard/core';
-import type { PersonaSettings } from '@switchboard/core';
+import type { PersonaSettings, ViewSettings } from '@switchboard/core';
 import { ArtifactFolder, MAX_MESSAGE_CHARS, NotWritten, interruptNote, messageTags, pasteText } from '@switchboard/conversation';
 import { promptKeyData, readPrompt, screenRows, stepsText, TYPING_PAUSE_MS } from '@switchboard/conversation';
 import type { Artifact, ContextView, ConversationChange, HeardTag, InputOutcome, InputSteps, PromptKey, ScreenPrompt, SlashCommand } from '@switchboard/conversation';
@@ -285,8 +285,8 @@ export interface ConversationServiceDeps {
 export interface ConversationVoice {
   /** A window's voice state for its `hello`; later changes come as `voice` events. */
   shown(key: string): VoiceView;
-  /** The one setting the view reads. */
-  settings(): { expandReplies: boolean };
+  /** The settings the view and the web page read. */
+  settings(): ViewSettings;
   spokenFor(sessionId: string, command: boolean): { spoken: boolean; expressive: boolean };
   replyChanged(reply: ConversationReply): void;
   talkHere(key: string): string | null;
@@ -1451,7 +1451,7 @@ export class ConversationService {
     return { key, ...event };
   }
 
-  /** The voice state and the setting the view reads, which a `hello` carries with voice (architecture.md § Voice). */
+  /** The voice state and the settings the view reads, which a `hello` carries with voice (architecture.md § Voice). */
   #voiceHello(key: string): Record<string, unknown> {
     const voice = this.deps.voice;
 
