@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { CPU_MODEL } from './sherpa.js';
+import { collectGarbage, CPU_MODEL } from './sherpa.js';
 import type { AsrDevice, SherpaRuntime } from './sherpa.js';
 
 /** Capture and recognition run at 16 kHz mono. */
@@ -12,6 +12,13 @@ const PREROLL = ASR_RATE / 2;
 export const PHRASE_SILENCE_MS = 1_200;
 /** A brief quiet after new words: the moment to ask whether the message is finished. */
 export const QUIET_MS = 400;
+/**
+ * Audio below -55 dBFS is silence the recogniser does not decode (mechanics.md M131): each 160 ms chunk costs the fp32 model about 40 ms of
+ * GPU time whether or not anyone speaks. The operator's captures sit at -60 to -75 dBFS between words and -40 to -20 dBFS in speech.
+ */
+export const SILENCE_RMS = 10 ** (-55 / 20);
+/** Decoding goes on this long after the last loud audio or new words, so the model gives up the words it held back and a piece settles. */
+export const DECODE_HANGOVER_MS = 2_000;
 
 /** One recogniser stream: audio in, its text so far out. */
 export interface AsrStream {
@@ -23,7 +30,11 @@ export interface AsrStream {
 
 export interface AsrEngine {
   readonly device: AsrDevice;
+  /** Audio quieter than this RMS (samples from -1 to 1) is not decoded once {@link DECODE_HANGOVER_MS} passed; undefined decodes all of it. */
+  readonly silenceRms?: number | undefined;
   stream(): AsrStream;
+  /** Releases the recogniser's native memory, gigabytes of GPU memory with the fp32 model; its streams take no more audio. */
+  free(): void;
 }
 
 export interface TranscriberEvents {
@@ -53,6 +64,9 @@ export class Transcriber {
   #pieceStart = 0;
   /** No audio before this sample goes into a piece's voice check: after a barge-in, the reply's echo before the operator's first word. */
   #audioFrom = 0;
+  /** The samples the stream has been given, and when the audio was last louder than the engine's silence. */
+  #fed = 0;
+  #loudAt = -Infinity;
 
   constructor(
     private readonly engine: AsrEngine,
@@ -76,7 +90,7 @@ export class Transcriber {
       this.#ring[this.#total++ % KEEP] = sample;
     }
 
-    this.#stream.accept(samples);
+    this.#decode(samples);
 
     const text = this.#stream.text().trim();
 
@@ -101,6 +115,27 @@ export class Transcriber {
       this.events.onPiece(piece, audio);
       this.events.onWords('');
     }
+  }
+
+  /**
+   * Gives the stream the chunk unless it is silence past the hangover; after silence that was skipped, the half second before the chunk goes
+   * first, so a word's soft onset is not lost.
+   */
+  #decode(samples: Float32Array): void {
+    const silence = this.engine.silenceRms;
+
+    if (silence !== undefined) {
+      if (rms(samples) >= silence) {
+        this.#loudAt = this.#total;
+      } else if (this.#total - Math.max(this.#loudAt, this.#grewAt) > (DECODE_HANGOVER_MS * ASR_RATE) / 1000) {
+        return;
+      }
+    }
+
+    const skipped = this.#total - samples.length - this.#fed;
+
+    this.#stream.accept(skipped > 0 ? this.samples(Math.max(this.#fed, this.#total - samples.length - PREROLL)) : samples);
+    this.#fed = this.#total;
   }
 
   /** The samples from `from` (an absolute sample count) to now, within the last 8 seconds. */
@@ -151,6 +186,7 @@ export class Transcriber {
 
     this.#stream = this.engine.stream();
     this.#stream.accept(pre);
+    this.#fed = this.#total;
     this.#text = this.#stream.text().trim();
     this.#settled = 0;
     this.#grewAt = this.#total;
@@ -183,11 +219,22 @@ export class Transcriber {
       this.#stream.accept(pre);
     }
 
+    this.#fed = this.#total;
     this.#text = '';
     this.#settled = 0;
     this.#quietDone = true;
     this.#audioFrom = 0;
   }
+}
+
+function rms(samples: Float32Array): number {
+  let sum = 0;
+
+  for (const sample of samples) {
+    sum += sample * sample;
+  }
+
+  return samples.length === 0 ? 0 : Math.sqrt(sum / samples.length);
 }
 
 function words(text: string): string[] {
@@ -234,7 +281,7 @@ export function sherpaEngine(module: unknown, device: AsrDevice, modelDir: strin
   }
 
   const words = hotwords();
-  let recognizer: InstanceType<SherpaModule['OnlineRecognizer']>;
+  let recognizer: InstanceType<SherpaModule['OnlineRecognizer']> | null;
 
   try {
     recognizer = new (module as SherpaModule).OnlineRecognizer({
@@ -256,27 +303,71 @@ export function sherpaEngine(module: unknown, device: AsrDevice, modelDir: strin
     return { error: `The speech recognition model could not load: ${(error as Error).message}` };
   }
 
+  /** The streams still in use, whose native handles `free` drops before the recogniser's; a stream no longer used is collected as usual. */
+  const streams = new Set<WeakRef<{ drop(): void }>>();
+
   return {
     device,
+    silenceRms: SILENCE_RMS,
     stream: () => {
-      const stream = recognizer.createStream();
+      if (recognizer === null) {
+        return { accept: () => undefined, text: () => '', finish: () => undefined };
+      }
+
+      let stream: ReturnType<NonNullable<typeof recognizer>['createStream']> | null = recognizer.createStream();
       const decode = (): void => {
+        if (recognizer === null || stream === null) {
+          stream = null;
+          return;
+        }
+
         while (recognizer.isReady(stream)) {
           recognizer.decode(stream);
         }
       };
 
-      return {
-        accept: (samples) => {
-          stream.acceptWaveform({ sampleRate: ASR_RATE, samples });
+      const one = {
+        accept: (samples: Float32Array) => {
+          stream?.acceptWaveform({ sampleRate: ASR_RATE, samples });
           decode();
         },
-        text: () => recognizer.getResult(stream).text,
+        text: () => (recognizer === null || stream === null ? '' : recognizer.getResult(stream).text),
         finish: () => {
-          stream.inputFinished();
+          stream?.inputFinished();
           decode();
+        },
+        drop: () => {
+          stream = null;
         },
       };
+
+      for (const ref of streams) {
+        if (ref.deref() === undefined) {
+          streams.delete(ref);
+        }
+      }
+
+      streams.add(new WeakRef(one));
+      return one;
+    },
+    // sherpa-onnx-node has no destroy call: the recogniser's native memory goes when V8 collects its handle, which the small JS object never
+    // prompts, so each replaced recogniser kept its 3.3 GB of GPU memory (mechanics.md M131). Dropping every reference and collecting frees it
+    // on the next turn of the event loop. Its streams go first, a turn before it, since a stream's state may live in the recogniser's memory.
+    free: () => {
+      if (recognizer === null) {
+        return;
+      }
+
+      for (const ref of streams) {
+        ref.deref()?.drop();
+      }
+
+      streams.clear();
+      collectGarbage();
+      setImmediate(() => {
+        recognizer = null;
+        collectGarbage();
+      });
     },
   };
 }

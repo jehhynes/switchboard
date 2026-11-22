@@ -214,7 +214,7 @@ export function renderTimeline(state: PageState, view: View, now: number = Date.
       entry.type === 'message' ? (
         <Message key={entry.item.id} item={entry.item} stamped={shown} details={view.details} answered={links.answers.get(entry.item.id) ?? []} />
       ) : (
-        <Reply key={entry.item.id} item={entry.item} earlier={entry.earlier} view={view} stamped={shown} card={entry.item.kind === 'reply' ? cardOf(`reply:${entry.item.id}`, links, view, state, canAnswer) : null} expandReplies={state.expandReplies} />
+        <Reply key={entry.item.id} item={entry.item} earlier={entry.earlier} view={view} stamped={shown} card={entry.item.kind === 'reply' ? cardOf(`reply:${entry.item.id}`, links, view, state, canAnswer) : null} expandReplies={view.expandReplies ?? state.expandReplies} />
       );
 
     return divider === null ? [row] : [divider, row];

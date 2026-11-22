@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { renderSideSwitch, renderTabs } from '../src/header.js';
-import { ARTIFACT_MENU_WIDTH, ARTIFACT_TAB_WIDTH, ARTIFACT_TABS_MAX, artifactBar, artifactTabsFit, closedArtifacts, newView } from '../src/render.js';
+import { ARTIFACT_MENU_WIDTH, ARTIFACT_TAB_WIDTH, ARTIFACT_TABS_MAX, artifactBar, artifactTabsFit, closedArtifacts, newView, openArtifactsSeen, parseArtifactsSeen, unreadArtifacts } from '../src/render.js';
 import { EMPTY } from '../src/model.js';
 import type { ArtifactView } from '@switchboard/protocol';
 import { html } from './html.js';
@@ -42,6 +42,32 @@ describe('artifactBar', () => {
     expect(artifactBar(eight, 'chat/a6.md', 3).tabs.map((one) => one.path)).toEqual(['chat/a7.md', 'chat/a6.md', 'chat/a5.md']);
     expect(artifactBar(eight, 'chat/gone.md', 3).tabs).toHaveLength(3);
     expect(artifactBar(eight, null, 3).ordered.map((one) => one.path)).toEqual(eight.map((one) => one.path).reverse());
+  });
+});
+
+describe('the artifacts this device opened', () => {
+  it('reads the readable entries of what was kept, and none from nothing or something unreadable', () => {
+    expect(parseArtifactsSeen(JSON.stringify({ '1': ['chat/a1.md'], '2': 'bad', '3': [4] }))).toEqual({ '1': ['chat/a1.md'] });
+    expect(parseArtifactsSeen(null)).toEqual({});
+    expect(parseArtifactsSeen('{')).toEqual({});
+    expect(parseArtifactsSeen('[["chat/a1.md"]]')).toEqual({});
+  });
+
+  it('counts as unread the artifacts of a seen work item not opened, and none of a work item not seen yet', () => {
+    const seen = { '1': ['chat/a5.md', 'chat/a0.md'], '2': ['chat/a6.md'] };
+
+    expect([...unreadArtifacts(eight.slice(4), 1, seen)]).toEqual(['chat/a4.md', 'chat/a6.md', 'chat/a7.md']);
+    expect([...unreadArtifacts(eight, 3, seen)]).toEqual([]);
+    expect([...unreadArtifacts(eight, null, seen)]).toEqual([]);
+  });
+
+  it('adds opened paths once, records a work item seen with none, and leaves the record it was given alone', () => {
+    const seen = { '1': ['chat/a1.md'] };
+
+    expect(openArtifactsSeen(seen, 1, ['chat/a2.md', 'chat/a1.md'])).toEqual({ '1': ['chat/a1.md', 'chat/a2.md'] });
+    expect(openArtifactsSeen(seen, 3, [])).toEqual({ '1': ['chat/a1.md'], '3': [] });
+    expect(openArtifactsSeen(seen, 1, ['chat/a1.md'])).toBeNull();
+    expect(seen).toEqual({ '1': ['chat/a1.md'] });
   });
 });
 
@@ -87,13 +113,29 @@ describe('the artifact tabs', () => {
     expect(markup).toContain('title="Note 7 · note"');
   });
 
-  it('leave out the closed artifacts but the open one, which the menu marks closed', () => {
+  it('leave out the closed artifacts but the open one, and list them in the menu as any other', () => {
     const closed = new Set(['chat/a7.md', 'chat/a5.md']);
     const markup = html(renderSideSwitch('artifacts', state, false, { open: 'chat/a5.md', fit: 3, menu: true, now: 2_000, closed }));
+    const menu = new DOMParser().parseFromString(markup, 'text/html').querySelector('.artifact-menu')!;
 
     expect(tabPaths(markup)).toEqual(['chat/a6.md', 'chat/a4.md', 'chat/a5.md']);
-    expect(markup.match(/menu-row[^"]*closed/g)).toHaveLength(2);
-    expect(markup).toContain('Closed · ');
+    expect(menu.querySelector('[data-path="chat/a7.md"]')!.className).toBe('menu-row');
+    expect(menu.querySelector('[data-path="chat/a7.md"] .menu-note')!.textContent).toBe('just now');
+    expect(menu.textContent).not.toContain('Closed');
+  });
+
+  it('mark the artifacts not opened with the unread dot after the title, named in the row', () => {
+    const unread = new Set(['chat/a7.md', 'chat/a0.md']);
+    const markup = html(renderSideSwitch('status', state, false, { open: null, fit: 2, menu: true, now: 1_001 + 3 * 60_000, unread }));
+    const menu = new DOMParser().parseFromString(markup, 'text/html').querySelector('.artifact-menu')!;
+    const row = menu.querySelector('[data-path="chat/a0.md"]')!;
+
+    expect([...menu.querySelectorAll('.unread-dot')].map((dot) => dot.closest<HTMLElement>('.menu-row')!.dataset['path'])).toEqual(['chat/a7.md', 'chat/a0.md']);
+    expect([...row.querySelector('.title')!.children].map((cell) => cell.className)).toEqual(['title-text', 'unread-dot']);
+    expect(row.getAttribute('aria-label')).toBe('Note 0, unread, note, 3 min ago');
+    expect(menu.querySelector('[data-path="chat/a1.md"]')!.getAttribute('aria-label')).toBe('Note 1, note, 3 min ago');
+    // The tabs carry no dot.
+    expect(markup.slice(0, markup.indexOf('artifact-menu" role="menu"'))).not.toContain('unread-dot');
   });
 
   it('show no menu when every artifact has a tab, and none at all without artifacts', () => {
@@ -107,6 +149,19 @@ describe('the artifact tabs', () => {
     expect(paths(markup, 'data-tab')).toEqual(['conversation', 'status', 'console']);
     expect(tabPaths(markup)).toEqual(['chat/a7.md']);
     expect(markup).toContain('+7');
+  });
+});
+
+describe("an artifact view's head", () => {
+  const css = PAGE_ASSETS['page.css']!.body;
+
+  it('is one bar for every type: the tab surface, a fixed height, and Open in new window as a 14 px icon, a link drawn as the button is', () => {
+    expect(css).toContain('.artifact-head { box-sizing: border-box; flex: none; display: flex; align-items: center; gap: 6px; min-height: 30px; padding: 4px 12px; border-bottom: 1px solid var(--vscode-panel-border); background: var(--sb-tab-surface, transparent); }');
+    expect(css).toContain('.artifact-head .icon { box-sizing: border-box; flex: none; justify-content: center; width: 22px; height: 22px; padding: 0; text-decoration: none; }');
+    expect(css).toContain('.artifact-head .icon > .codicon { font-size: 14px; line-height: 1; }');
+    expect(css).toMatch(/@media \(hover: none\), \(pointer: coarse\) \{\n  \.artifact-head \{ min-height: 52px; \}\n  \.artifact-head \.icon \{ width: 44px; height: 44px; \}\n\}/);
+    // No other rule sizes its button or glyph, as the bars' touch rule did.
+    expect(css.match(/\.artifact-head[^{]*\{[^}]*(min-width|min-height|font-size)/g)).toEqual(['.artifact-head { box-sizing: border-box; flex: none; display: flex; align-items: center; gap: 6px; min-height', '.artifact-head .icon > .codicon { font-size', '.artifact-head { min-height']);
   });
 });
 

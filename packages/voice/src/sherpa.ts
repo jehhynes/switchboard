@@ -2,6 +2,8 @@ import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { delimiter, join } from 'node:path';
+import { setFlagsFromString } from 'node:v8';
+import { runInNewContext } from 'node:vm';
 
 /** Where speech recognition runs: the GPU through sherpa-onnx's CUDA build, or the CPU. */
 export type AsrDevice = 'gpu' | 'cpu';
@@ -129,6 +131,25 @@ export function gpuCheck(script: string): (paths: CudaPaths) => string | null {
 
     return gpuCheckVerdict({ status: result.status, stdout: result.stdout ?? '', stderr: result.stderr ?? '', error: result.error });
   };
+}
+
+let gc: (() => void) | null | undefined;
+
+/**
+ * Runs a full garbage collection, so native objects dropped since, such as a replaced recogniser, are released by their finalizers on the next
+ * turn of the event loop; `--expose-gc` set at run time makes `gc` available to a new context. Does nothing where V8 refuses the flag.
+ */
+export function collectGarbage(): void {
+  if (gc === undefined) {
+    try {
+      setFlagsFromString('--expose-gc');
+      gc = runInNewContext('gc') as () => void;
+    } catch {
+      gc = null;
+    }
+  }
+
+  gc?.();
 }
 
 /** sherpa-onnx as loaded, the device it runs recognition on, and why not the GPU when not. */

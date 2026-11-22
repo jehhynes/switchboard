@@ -56,6 +56,45 @@ export function closedArtifacts(artifacts: readonly ArtifactView[], closed: Read
 }
 
 /**
+ * Which artifacts this device has opened, kept in local storage under {@link ARTIFACTS_SEEN} (architecture.md § Web page): the paths opened, by
+ * work item. A work item's artifacts the device first saw count as opened, so the dot marks only artifacts written since, by the hub's own file
+ * times, whatever the device's clock says.
+ */
+export type ArtifactsSeen = Record<string, string[]>;
+
+export const ARTIFACTS_SEEN = 'switchboard.artifactsSeen';
+
+/** The kept {@link ArtifactsSeen}, its readable entries, or none when nothing readable was kept. */
+export function parseArtifactsSeen(text: string | null): ArtifactsSeen {
+  try {
+    const read: unknown = JSON.parse(text ?? 'null');
+
+    if (typeof read === 'object' && read !== null && !Array.isArray(read)) {
+      return Object.fromEntries(Object.entries(read).filter((entry): entry is [string, string[]] => Array.isArray(entry[1]) && entry[1].every((path) => typeof path === 'string')));
+    }
+  } catch {
+    // None below.
+  }
+
+  return {};
+}
+
+/** The work item's artifacts this device has not opened; none for a work item it has not seen yet. */
+export function unreadArtifacts(artifacts: readonly ArtifactView[], workItemId: number | null, seen: ArtifactsSeen): Set<string> {
+  const opened = workItemId === null ? undefined : seen[String(workItemId)];
+
+  return opened === undefined ? new Set() : new Set(artifacts.filter((artifact) => !opened.includes(artifact.path)).map((artifact) => artifact.path));
+}
+
+/** `seen` with the paths opened for the work item, an empty list recording it as seen, or null when nothing changes. */
+export function openArtifactsSeen(seen: ArtifactsSeen, workItemId: number, paths: readonly string[]): ArtifactsSeen | null {
+  const opened = seen[String(workItemId)];
+  const added = paths.filter((path) => !(opened ?? []).includes(path));
+
+  return opened !== undefined && added.length === 0 ? null : { ...seen, [String(workItemId)]: [...(opened ?? []), ...added] };
+}
+
+/**
  * The artifacts newest first, and those with a tab: those not closed, the first `fit`, with the open one in place of the last of them when it is not among them, so
  * the open artifact always has its tab.
  */
@@ -183,8 +222,11 @@ export interface View {
   viewMenu: boolean;
   /** Whether each message's line shows its time and its optional marks (dictated, tone), kept in local storage. */
   details: boolean;
-  /** Whether the page may change settings.json, so the view options menu offers Expand replies: this computer's page, not a paired device's. */
-  settingsHere: boolean;
+  /**
+   * A paired device's own Expand replies, kept in its local storage, since only this computer's page may change settings.json; null follows
+   * `voice.expandReplies`, as this computer's page always does.
+   */
+  expandReplies: boolean | null;
   /** New conversation…'s provider menu under the dropdown: the providers, null while they load, or why not. */
   providers: { items: Array<{ provider: string; name: string; default: boolean }> | null; error: string | null } | null;
   /** The prompt the session waits on in its terminal, as last read, for the session it was read for; a key being sent waits. */
@@ -227,7 +269,7 @@ export type Sheet =
   | { kind: 'snooze'; row: string; label: string; title: string; choices: SnoozeChoice[]; picked: string; date: string; comment: string }
   | { kind: 'text'; title: string; text: string };
 
-export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), bands: new Map(), list: false, drawer: null, actions: false, linkMenu: false, rowMenu: null, sheet: null, acting: false, prompt: null, providers: null, side: 'status', viewMenu: false, details: false, settingsHere: false, pane: null, paneNote: null, artifactFit: ARTIFACT_TABS_MAX, artifactMenu: false });
+export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), bands: new Map(), list: false, drawer: null, actions: false, linkMenu: false, rowMenu: null, sheet: null, acting: false, prompt: null, providers: null, side: 'status', viewMenu: false, details: false, expandReplies: null, pane: null, paneNote: null, artifactFit: ARTIFACT_TABS_MAX, artifactMenu: false });
 
 /** The longest menu label for a link, as the dock's `LinkLabelMax`; a longer one is cut with an ellipsis and shown whole in its tooltip. */
 export const LINK_LABEL_MAX = 48;

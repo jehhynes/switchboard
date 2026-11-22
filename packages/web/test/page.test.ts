@@ -2325,6 +2325,104 @@ describe('the page in use', () => {
     vi.unstubAllGlobals();
   });
 
+  it('marks the artifacts this device has not opened with the unread dot in the Artifacts menu, until opened here or on another of its pages', () => {
+    window.innerWidth = 1920;
+    // Kept before the page loaded: work item 1 seen with chat/a5.md opened; another work item's opened path does not count.
+    localStorage.setItem('switchboard.artifactsSeen', JSON.stringify({ '1': ['chat/plan.md', 'chat/p.html', 'chat/a5.md'], '2': ['chat/a6.md'] }));
+    onTestFinished(() => {
+      vi.unstubAllGlobals();
+    });
+
+    const { page, source } = start();
+
+    hello(source);
+
+    for (let index = 4; index < 8; index++) {
+      source.emit('artifact', { artifact: { path: `chat/a${index}.md`, owner: 'chat', kind: 'note', title: `Note ${index}`, ext: 'md', type: 'markdown', updatedAt: 10_000 + index } });
+    }
+
+    vi.spyOn(root.querySelector('#detail .tabs')!, 'getBoundingClientRect').mockReturnValue({ width: 300 } as DOMRect);
+    click('#detail [data-side="console"]');
+
+    const dotted = () => [...root.querySelectorAll<HTMLElement>('#detail .artifact-menu .menu-row')].filter((row) => row.querySelector('.title > .unread-dot') !== null).map((row) => row.dataset['path']);
+
+    click('#detail [data-action="artifact-menu"]');
+    expect(dotted()).toEqual(['chat/a7.md', 'chat/a6.md', 'chat/a4.md']);
+    expect(root.querySelector('#detail .artifact-menu [data-path="chat/a4.md"]')!.getAttribute('aria-label')).toBe('Note 4, unread, note, just now');
+    expect(root.querySelector('#detail .artifact-menu [data-path="chat/a5.md"]')!.getAttribute('aria-label')).toBe('Note 5, note, just now');
+    expect(root.querySelector('#detail .artifact-menu [data-path="chat/a4.md"] .unread-dot')!.getAttribute('aria-label')).toBe('Unread');
+    // No row says whether its tab is closed.
+    expect(root.querySelector('#detail .artifact-menu')!.textContent).not.toContain('Closed');
+
+    // Opening one clears its dot and keeps it for this device, added to what another page kept meanwhile.
+    localStorage.setItem('switchboard.artifactsSeen', JSON.stringify({ '1': ['chat/plan.md', 'chat/p.html', 'chat/a5.md', 'chat/a6.md'], '2': ['chat/a6.md'] }));
+    click('#detail .artifact-menu [data-path="chat/a4.md"]');
+    click('#detail [data-action="artifact-menu"]');
+    expect(dotted()).toEqual(['chat/a7.md']);
+    expect(JSON.parse(localStorage.getItem('switchboard.artifactsSeen')!)).toEqual({ '1': ['chat/plan.md', 'chat/p.html', 'chat/a5.md', 'chat/a6.md', 'chat/a4.md'], '2': ['chat/a6.md'] });
+
+    // Another of this device's pages opening one clears it here too.
+    const kept = JSON.stringify({ '1': ['chat/plan.md', 'chat/p.html', 'chat/a5.md', 'chat/a6.md', 'chat/a4.md', 'chat/a7.md'] });
+
+    localStorage.setItem('switchboard.artifactsSeen', kept);
+    window.dispatchEvent(new StorageEvent('storage', { key: 'switchboard.artifactsSeen', newValue: kept }));
+    expect(dotted()).toEqual([]);
+    page.close();
+  });
+
+  it('counts the artifacts a work item has when this device first sees it as opened, and marks only later ones', () => {
+    window.innerWidth = 1920;
+    onTestFinished(() => {
+      vi.unstubAllGlobals();
+    });
+
+    const { page, source } = start();
+
+    hello(source);
+    expect(JSON.parse(localStorage.getItem('switchboard.artifactsSeen')!)).toEqual({ '1': ['chat/p.html', 'chat/plan.md'] });
+    source.emit('artifact', { artifact: { path: 'chat/new.md', owner: 'chat', kind: 'note', title: 'New', ext: 'md', type: 'markdown', updatedAt: 1 } });
+    vi.spyOn(root.querySelector('#detail .tabs')!, 'getBoundingClientRect').mockReturnValue({ width: 300 } as DOMRect);
+    click('#detail [data-side="console"]');
+    click('#detail [data-action="artifact-menu"]');
+    // By the hub's file times alone: an artifact with an older time than the page's clock is still new.
+    expect(root.querySelector('#detail .artifact-menu [data-path="chat/new.md"] .unread-dot')).not.toBeNull();
+    expect(root.querySelector('#detail .artifact-menu [data-path="chat/plan.md"] .unread-dot')).toBeNull();
+    page.close();
+
+    // A later page whose copy is stale, as when another page kept the work item first without this one hearing of it, adds nothing at its hello.
+    localStorage.setItem('switchboard.artifactsSeen', JSON.stringify({ '2': [] }));
+
+    const again = start();
+
+    localStorage.setItem('switchboard.artifactsSeen', JSON.stringify({ '1': ['chat/p.html', 'chat/plan.md'], '2': [] }));
+    hello(again.source, { artifacts: [artifact('chat/plan.md', 'markdown', 'md'), artifact('chat/p.html', 'html', 'html'), { path: 'chat/new.md', owner: 'chat', kind: 'note', title: 'New', ext: 'md', type: 'markdown', updatedAt: 1 }] });
+    expect(JSON.parse(localStorage.getItem('switchboard.artifactsSeen')!)).toEqual({ '1': ['chat/p.html', 'chat/plan.md'], '2': [] });
+    again.page.close();
+  });
+
+  it('keeps an artifact unread while History covers its tab, and counts it opened once History closes', () => {
+    window.innerWidth = 1920;
+    history.replaceState(null, '', '#w=1');
+    onTestFinished(() => {
+      vi.unstubAllGlobals();
+    });
+
+    const { page, source } = start();
+
+    hello(source, { artifacts: [], groups: [listGroup('progress', [listRow(1, { title: 'Fix it', history: { ticketId: 1, key: 'gh 1' } })])] });
+    source.emit('artifact', { artifact: { path: 'chat/new.md', owner: 'chat', kind: 'note', title: 'New', ext: 'md', type: 'markdown', updatedAt: 1 } });
+    click('[data-action="actions"]');
+    click('.actions-menu [data-action="row-history"]');
+    expect(root.classList.contains('history')).toBe(true);
+    click('#detail .artifact-tab[data-path="chat/new.md"] .tab-open');
+    expect(root.querySelector('#detail .tab.selected')!.getAttribute('data-path')).toBe('chat/new.md');
+    expect(JSON.parse(localStorage.getItem('switchboard.artifactsSeen')!)).toEqual({ '1': [] });
+    root.querySelector<HTMLElement>('.hist-close')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(root.classList.contains('history')).toBe(false);
+    expect(JSON.parse(localStorage.getItem('switchboard.artifactsSeen')!)).toEqual({ '1': ['chat/new.md'] });
+    page.close();
+  });
+
   it('fits the artifact tabs to the strip, newest first, and lists every artifact in the Artifacts menu with those in tabs dimmed', async () => {
     window.innerWidth = 1920;
     onTestFinished(() => {
@@ -2400,7 +2498,7 @@ describe('the page in use', () => {
     // The open artifact's close button is its own, and shows Status.
     root.querySelector<HTMLElement>('#detail .artifact-tab.selected .tab-close')!.click();
     expect(root.querySelector('#detail .tab.selected')!.getAttribute('data-side')).toBe('status');
-    // Closed, its tab is gone for the work item, kept in the hub for every device, and the menu marks it.
+    // Closed, its tab is gone for the work item, kept in the hub for every device; the menu still lists it, unmarked.
     expect(paths()).not.toContain('chat/a1.md');
     expect(posts.filter((post) => post.url.endsWith('/page-tabs')).at(-2)?.body).toMatchObject({ workItemId: 1, close: { path: 'chat/a1.md', updatedAt: 10_001 } });
     const cleared = posts.filter((post) => post.url.endsWith('/page-tabs')).at(-1)!.body;
@@ -2408,7 +2506,7 @@ describe('the page in use', () => {
     expect(cleared).toMatchObject({ workItemId: 1, tab: null });
     expect(cleared).not.toHaveProperty('openOn');
     click('#detail [data-action="artifact-menu"]');
-    expect(root.querySelector('#detail .artifact-menu [data-path="chat/a1.md"]')!.classList.contains('closed')).toBe(true);
+    expect(root.querySelector('#detail .artifact-menu [data-path="chat/a1.md"]')!.className).toBe('menu-row');
     // Choosing it opens its tab again.
     click('#detail .artifact-menu [data-path="chat/a1.md"]');
     expect(root.querySelector('#detail .tab.selected')!.getAttribute('data-path')).toBe('chat/a1.md');
@@ -4595,7 +4693,7 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it("sets voice.expandReplies from View options' Expand replies on this computer's page, follows the hub's settings, and leaves it out on a paired device", async () => {
+  it("sets voice.expandReplies from View options' Expand replies on this computer's page, follows the hub's settings, and keeps a paired device's choice on that device", async () => {
     const { page, source } = start();
     const expandRow = () => root.querySelector('[data-action="toggle-expand-replies"]');
 
@@ -4641,13 +4739,41 @@ describe('the page in use', () => {
     expect(expandRow()!.getAttribute('aria-checked')).toBe('true');
     page.close();
 
-    // A paired device may not change settings.json (architecture.md § Remote access), so its menu has Show message details only.
-    const fetch = vi.fn(async () => ({ status: 200, ok: true, json: async () => ({}), text: async () => '' }) as unknown as Response);
-    const paired = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, local: false });
+    // This computer's page never reads a paired device's choice.
+    expect(localStorage.getItem('switchboard.expandReplies')).toBeNull();
 
-    hello(FakeSource.last!, { settings: { expandReplies: true } });
+    // A paired device may not change settings.json (architecture.md § Remote access), so its Expand replies starts from voice.expandReplies
+    // and, once toggled, is kept on the device and posts nothing.
+    const fetch = vi.fn(async () => ({ status: 200, ok: true, json: async () => ({}), text: async () => '' }) as unknown as Response);
+    const pairedPage = () => startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, local: false });
+    const expandPosts = () => fetch.mock.calls.filter((call) => String((call as unknown[])[0]).endsWith('/expand-replies'));
+    let paired = pairedPage();
+
+    hello(FakeSource.last!, { items: [reply('r1', 2, { opening: 'Whole reply.', speak: 'Short.' })], settings: { expandReplies: true } });
     click('.header button.view-options');
-    expect([...root.querySelectorAll('.view-options-menu .menu-row')].map((row) => row.textContent!.trim())).toEqual(['Show message details']);
+    expect([...root.querySelectorAll('.view-options-menu .menu-row')].map((row) => row.textContent!.trim()).slice(0, 2)).toEqual(['Show message details', 'Expand replies']);
+    expect(expandRow()!.getAttribute('aria-checked')).toBe('true');
+    expect(root.querySelector('#panel')!.textContent).toContain('Whole reply.');
+    click('[data-action="toggle-expand-replies"]');
+    await flush();
+    expect(expandPosts()).toEqual([]);
+    expect(localStorage.getItem('switchboard.expandReplies')).toBe('0');
+    expect(expandRow()!.getAttribute('aria-checked')).toBe('false');
+    expect(root.querySelector('#panel')!.textContent).not.toContain('Whole reply.');
+
+    // The device's choice outlasts the hub's settings and a reload.
+    FakeSource.last!.emit('settings', { settings: { expandReplies: true, diffLayout: 'auto', diffWrap: 'auto' } });
+    expect(expandRow()!.getAttribute('aria-checked')).toBe('false');
+    paired.close();
+    paired = pairedPage();
+    hello(FakeSource.last!, { items: [reply('r1', 2, { opening: 'Whole reply.', speak: 'Short.' })], settings: { expandReplies: true } });
+    expect(root.querySelector('#panel')!.textContent).not.toContain('Whole reply.');
+    click('.header button.view-options');
+    click('[data-action="toggle-expand-replies"]');
+    expect(localStorage.getItem('switchboard.expandReplies')).toBe('1');
+    expect(expandRow()!.getAttribute('aria-checked')).toBe('true');
+    expect(root.querySelector('#panel')!.textContent).toContain('Whole reply.');
+    expect(expandPosts()).toEqual([]);
     paired.close();
   });
 

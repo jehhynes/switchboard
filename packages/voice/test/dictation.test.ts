@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from '@switchboard/core/settings';
 import type { VoiceSettings } from '@switchboard/core/settings';
 import { ASR_RATE, PHRASE_SILENCE_MS } from '../src/asr.js';
-import { Dictation, WARM_RETRY_MS, WARM_SETTLE_MS, WARM_SOON_MS } from '../src/dictation.js';
+import { Dictation, WARM_RELEASE_MS, WARM_RETRY_MS, WARM_SETTLE_MS, WARM_SOON_MS } from '../src/dictation.js';
 import type { AudioDevices } from '../src/micUse.js';
 import { ENROLL_SECONDS } from '../src/protocol.js';
 import type { VoiceMessage } from '../src/protocol.js';
@@ -48,6 +48,8 @@ function setup(options: { turn?: (chat: ChatTurn[]) => number; watcher?: 'none' 
   const chats: ChatTurn[][] = [];
   const termsAsked: Array<string | null> = [];
   const loads: string[][] = [];
+  /** Each load and each free, in order, with the clock's time. */
+  const recognizers: Array<{ load: boolean; at: number }> = [];
   const used: string[] = [];
   let spoke = 0;
   let changed = 0;
@@ -61,6 +63,7 @@ function setup(options: { turn?: (chat: ChatTurn[]) => number; watcher?: 'none' 
     capture,
     recognizer: (terms) => {
       loads.push(terms);
+      recognizers.push({ load: true, at: clock.t });
       return options.recognizer ?? engine;
     },
     vocabulary: {
@@ -139,7 +142,12 @@ function setup(options: { turn?: (chat: ChatTurn[]) => number; watcher?: 'none' 
     await settle();
   };
 
-  return { clock, capture, engine, sent, logs, chats, termsAsked, loads, used, watch, settings, dictation, say, quiet, loud, listening, speech, spoke: () => spoke, changed: () => changed };
+  engine.free = () => {
+    engine.freed++;
+    recognizers.push({ load: false, at: clock.t });
+  };
+
+  return { clock, capture, engine, sent, logs, chats, termsAsked, loads, recognizers, used, watch, settings, dictation, say, quiet, loud, listening, speech, spoke: () => spoke, changed: () => changed };
 }
 
 /** A WAV's PCM from `fixtures/echo`: real captures of a reply played aloud (README.md there). */
@@ -353,7 +361,7 @@ describe('Dictation', () => {
     // A phone took the voice: the target the hub sets right after loads at once, not after it settles.
     dictation.warmSoon();
     dictation.target(4, 's4', 'acme/phone');
-    clock.advance(WARM_SOON_MS);
+    clock.advance(WARM_SOON_MS + WARM_RELEASE_MS);
     expect(loads.map((terms) => terms[1])).toEqual(['acme/web', 'acme/phone']);
     // The next target settles again, also after a move whose target was ready.
     dictation.target(5, 's5', 'acme/later');
@@ -363,8 +371,96 @@ describe('Dictation', () => {
     dictation.warmSoon();
     clock.advance(WARM_SOON_MS);
     dictation.target(6, 's6', 'acme/other');
-    clock.advance(WARM_SOON_MS);
+    clock.advance(WARM_SOON_MS + WARM_RELEASE_MS);
     expect(loads).toHaveLength(3);
+  });
+
+  it('frees the recogniser before one for other terms loads, and loads that one only once the memory has gone, ahead of the mic and while listening', async () => {
+    const { dictation, loads, recognizers, clock, engine, listening, say } = setup();
+    /** No load comes while a recogniser freed before it may still hold its memory. */
+    const neverTwo = (): void => {
+      recognizers.forEach((one, index) => {
+        if (one.load) {
+          expect(recognizers.slice(0, index).filter((freed) => !freed.load && one.at - freed.at < WARM_RELEASE_MS)).toEqual([]);
+        }
+      });
+      expect(recognizers.filter((one) => !one.load)).toHaveLength(3);
+    };
+
+    dictation.target(1, 's1', 'acme/app');
+    clock.advance(WARM_SETTLE_MS);
+    dictation.target(2, 's2', 'acme/web');
+    clock.advance(WARM_SETTLE_MS);
+    expect([loads.length, engine.freed, dictation.recognizer]).toEqual([1, 1, null]);
+    clock.advance(WARM_RELEASE_MS);
+    expect(loads.map((terms) => terms[1])).toEqual(['acme/app', 'acme/web']);
+    // Mic on for a target with other terms frees the loaded one and waits before loading.
+    dictation.target(3, 's3', 'acme/app');
+    dictation.mic(true);
+    await settle();
+    expect([loads.length, engine.freed, dictation.state]).toEqual([2, 2, 'starting']);
+    clock.advance(WARM_RELEASE_MS);
+    await settle();
+    await listening();
+    expect([loads.map((terms) => terms[1]).at(-1), dictation.state]).toEqual(['acme/app', 'listening']);
+    // While listening, the target's new terms free the recogniser at once; audio until the next loads is heard by none.
+    dictation.target(4, 's4', 'acme/phone');
+    expect([engine.freed, dictation.recognizer]).toEqual([3, null]);
+    say('lost words', 50);
+    clock.advance(WARM_RELEASE_MS - 50);
+    await settle();
+    expect([loads.map((terms) => terms[1]).at(-1), dictation.recognizer, dictation.state]).toEqual(['acme/phone', 'cpu', 'listening']);
+    neverTwo();
+  });
+
+  it('loads one recogniser for target changes while listening, with the last terms, and none once an enrolment took the capture', async () => {
+    const options: { recognizer?: { error: string } } = {};
+    const { dictation, loads, clock, listening } = setup(options);
+
+    await listening();
+    options.recognizer = { error: 'No speech recognition model in m.' };
+    dictation.target(2, 's2', 'acme/web');
+    dictation.target(3, 's3', 'acme/phone');
+    dictation.target(4, 's4', 'acme/other');
+    clock.advance(WARM_RELEASE_MS);
+    await settle();
+    // One load for the capture, then the attempt to listen again; not one per target change.
+    expect(loads.map((terms) => terms[1])).toEqual(['acme/app', 'acme/other', 'acme/other']);
+    expect(dictation.state).toBe('unavailable');
+
+    const enrolling = setup({ voiceprint: fakeVoiceprint() });
+
+    await enrolling.listening();
+    enrolling.dictation.target(2, 's2', 'acme/web');
+    enrolling.dictation.enroll('start');
+    await settle();
+    enrolling.clock.advance(WARM_RELEASE_MS);
+    await settle();
+    expect([enrolling.loads.length, enrolling.dictation.enrolling]).toEqual([1, true]);
+  });
+
+  it('loads the recogniser for a target that moved while the device opened, and stops capture when it cannot load', async () => {
+    const options: { recognizer?: { error: string } } = {};
+    const { dictation, capture, watch, loads, clock } = setup(options);
+    let open = (): void => undefined;
+
+    capture.hold = new Promise((resolve) => (open = resolve));
+    dictation.target(1, 's1', 'acme/app');
+    dictation.mic(true);
+    watch.changed!(false, []);
+    await settle();
+    dictation.target(2, 's2', 'acme/web');
+    clock.advance(WARM_SETTLE_MS);
+    // The load ahead waits for the open.
+    expect(loads.map((terms) => terms[1])).toEqual(['acme/app']);
+    options.recognizer = { error: 'No speech recognition model in m.' };
+    open();
+    await settle();
+    clock.advance(WARM_RELEASE_MS);
+    await settle();
+    // Loaded once the old one's memory had gone, then again by the attempt to listen, which reports why.
+    expect(loads.map((terms) => terms[1])).toEqual(['acme/app', 'acme/web', 'acme/web']);
+    expect([dictation.state, dictation.error, capture.open_]).toEqual(['unavailable', 'No speech recognition model in m.', false]);
   });
 
   it('loads the recogniser once the settings come, with no target or device, then for a target with other terms, and keeps no error from a load ahead that failed', () => {
@@ -384,7 +480,7 @@ describe('Dictation', () => {
     expect(loads).toHaveLength(1);
     // A target with its own terms loads them once it settles.
     dictation.target(2, 's2', 'acme/app');
-    clock.advance(WARM_SETTLE_MS);
+    clock.advance(WARM_SETTLE_MS + WARM_RELEASE_MS);
     expect(loads.map((terms) => terms[1])).toEqual(['stop listening', 'acme/app']);
 
     // An enrolment that starts before the load puts it off until the enrolment ends, cancelled or finished.
@@ -548,7 +644,7 @@ describe('Dictation', () => {
   });
 
   it('closes an utterance open at a voice move as cut under its own generation, and stops listening with no target', async () => {
-    const { dictation, say, sent, listening, capture, loads } = setup();
+    const { dictation, say, sent, listening, capture, loads, clock } = setup();
 
     await listening();
     say('about the', 200);
@@ -558,6 +654,8 @@ describe('Dictation', () => {
     // The same terms keep the recogniser.
     expect(loads).toHaveLength(1);
     dictation.target(3, 's3', 'acme/other');
+    clock.advance(WARM_RELEASE_MS);
+    await settle();
     expect(loads).toHaveLength(2);
     dictation.target(4, null, null);
     expect(dictation.state).toBe('idle-off');

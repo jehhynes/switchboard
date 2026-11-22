@@ -184,7 +184,7 @@ function PersonaRow({ session }: { session: PageState['session'] }) {
 }
 
 /**
- * The header's view options button and its menu: Show message details, Expand replies on this computer's page, the persona, and the Chrome
+ * The header's view options button and its menu: Show message details, Expand replies, the persona, and the Chrome
  * pane's state and pairing while it is on.
  */
 function ViewOptions({ view, expandReplies, session }: { view: View; expandReplies: boolean; session: PageState['session'] }) {
@@ -199,12 +199,10 @@ function ViewOptions({ view, expandReplies, session }: { view: View; expandRepli
             <Gutter checked={view.details} />
             <span class="title">Show message details</span>
           </button>
-          {view.settingsHere ? (
-            <button type="button" class="menu-row" role="menuitemcheckbox" aria-checked={expandReplies} data-action="toggle-expand-replies">
-              <Gutter checked={expandReplies} />
-              <span class="title">Expand replies</span>
-            </button>
-          ) : null}
+          <button type="button" class="menu-row" role="menuitemcheckbox" aria-checked={expandReplies} data-action="toggle-expand-replies">
+            <Gutter checked={expandReplies} />
+            <span class="title">Expand replies</span>
+          </button>
           <PersonaRow session={session} />
           <PaneRows view={view} />
         </div>
@@ -295,7 +293,7 @@ export function renderHeader(state: PageState, view: View): VNode {
         {pickerMenu}
       </div>
       <Actions row={selectedRow(state)} view={view} />
-      <ViewOptions view={view} expandReplies={state.expandReplies} session={state.session} />
+      <ViewOptions view={view} expandReplies={view.expandReplies ?? state.expandReplies} session={state.session} />
     </header>
   );
 }
@@ -323,15 +321,18 @@ export interface ArtifactStrip {
   now: number;
   /** The artifacts whose tabs the operator closed (`closedArtifacts`). */
   closed?: ReadonlySet<string>;
+  /** The artifacts this device has not opened (`unreadArtifacts`), which the menu marks with the unread dot. */
+  unread?: ReadonlySet<string>;
 }
 
 /**
  * One tab per artifact after the fixed tabs, newest first, but those the operator closed, as many as fit (`artifactBar`), each with a close button;
  * then, when some have no tab, Artifacts with their count, which opens a menu of every artifact, newest first with its title, kind and age in
- * columns, those with a tab dimmed and those closed marked so.
+ * columns, those with a tab dimmed and those this device has not opened marked with the unread dot.
  */
 function artifactTabs(state: PageState, strip: ArtifactStrip): ComponentChildren {
   const closed = strip.closed ?? new Set<string>();
+  const unread = strip.unread ?? new Set<string>();
   const { ordered, tabs } = artifactBar(state.artifacts, strip.open, strip.fit, closed);
   const rest = ordered.length - tabs.length;
 
@@ -363,14 +364,18 @@ function artifactTabs(state: PageState, strip: ArtifactStrip): ComponentChildren
         {strip.menu ? (
           <div class="menu glass artifact-menu" role="menu" aria-label="Artifacts">
             {ordered.map((artifact) => {
-              const note = closed.has(artifact.path) ? `Closed · ${ago(artifact.updatedAt, strip.now)}` : ago(artifact.updatedAt, strip.now);
+              const note = ago(artifact.updatedAt, strip.now);
+              const fresh = unread.has(artifact.path);
 
               return (
-                <button class={`menu-row${tabs.includes(artifact) ? ' in-bar' : ''}${closed.has(artifact.path) ? ' closed' : ''}`} type="button" role="menuitem" data-action="artifact" data-path={artifact.path} title={artifact.path} aria-label={`${artifact.title}, ${artifact.kind}, ${note}`}>
+                <button class={`menu-row${tabs.includes(artifact) ? ' in-bar' : ''}`} type="button" role="menuitem" data-action="artifact" data-path={artifact.path} title={artifact.path} aria-label={`${artifact.title}, ${fresh ? 'unread, ' : ''}${artifact.kind}, ${note}`}>
                   <span class="menu-gutter">
                     <FileIcon path={artifact.path} />
                   </span>
-                  <span class="title">{artifact.title}</span>
+                  <span class="title">
+                    <span class="title-text">{artifact.title}</span>
+                    {fresh ? <UnreadDot /> : null}
+                  </span>
                   <span class="menu-kind">{artifact.kind}</span>
                   <span class="menu-note">{note}</span>
                 </button>
