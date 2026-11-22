@@ -5,7 +5,7 @@
 // applied to every width here, and safe-area insets come from the DevTools protocol.
 // Run `npm run build` first; the browser is SWITCHBOARD_CHROME, else Chrome or Edge where they install. --report prints the measurements.
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -18,6 +18,8 @@ const SIZES = [
 ];
 const VIEWS = ['list', 'conversation', 'empty', 'history', 'settings', 'drawer', 'sheet'];
 const report = process.argv.includes('--report');
+/** --shots <dir> saves a screenshot of each view there. */
+const shots = process.argv.includes('--shots') ? process.argv[process.argv.indexOf('--shots') + 1] : null;
 
 const browsers = [
   process.env.SWITCHBOARD_CHROME,
@@ -79,6 +81,32 @@ const measure = `(() => {
     document: { height: root.scrollHeight, client: root.clientHeight, width: root.scrollWidth, clientWidth: root.clientWidth, body: document.body.scrollHeight, bodyClient: document.body.clientHeight },
     touchAction: getComputedStyle(document.body).touchAction,
     past, scrollers,
+    edge: (() => {
+      // WebKit's top-edge test (LocalFrameView::fixedContainerEdges): the point 4 px down at the top's middle, pointer-events ignored, then up to the
+      // first fixed or sticky box at least 90% of the viewport wide (narrower ones are skipped, unless full height) and under 105% tall.
+      const all = document.createElement('style');
+
+      all.textContent = '* { pointer-events: auto !important; }';
+      document.head.append(all);
+      const hit = document.elementFromPoint(innerWidth / 2, 4);
+
+      all.remove();
+      for (let one = hit; one && one !== root; one = one.parentElement) {
+        const style = getComputedStyle(one);
+
+        if (style.position !== 'fixed' && style.position !== 'sticky') continue;
+        const box = one.getBoundingClientRect();
+        const wide = box.width / innerWidth;
+        const tall = box.height / innerHeight;
+
+        if (style.visibility === 'hidden' || Number(style.opacity) < 0.1 || (style.backgroundColor === 'rgba(0, 0, 0, 0)' && one.children.length === 0)) continue;
+        if (wide < 0.9 ? tall < 0.9 : tall >= 1.05) continue;
+        return { name: name(one), kind: wide < 0.9 ? 'sidebar' : tall >= 0.9 ? 'viewport' : 'bar', top: box.top, height: box.height, wide: Math.round(wide * 1000) / 1000, background: style.backgroundColor };
+      }
+      return { name: null, hit: hit && name(hit) };
+    })(),
+    bar: (() => { const probe = document.createElement('div'); probe.style.background = 'var(--sb-bar-background)'; document.body.append(probe); const colour = getComputedStyle(probe).backgroundColor; probe.remove(); return colour; })(),
+    band: document.getElementById('safe-top').getBoundingClientRect().height,
     tops: { header: top('.header'), listHeader: top('.list-header'), historyBar: top('.hist-bar'), settingsHead: top('.settings-head'), tabs: top('.tabs'), panel: top('#panel'), list: top('#list') },
   };
 })()`;
@@ -102,6 +130,22 @@ function failures(view, size, m) {
     if (!/^(contain|none) (contain|none)$/.test(one.overscroll)) out.push(one.name + ' hands a drag on to the page (overscroll-behavior ' + one.overscroll + ')');
   }
   if (m.touchAction !== 'pinch-zoom') out.push('the page outside the scrollers takes a pan or no pinch (body touch-action ' + m.touchAction + ')');
+  // No band above the bars: under the opaque status bar the top inset is 0, and each view's top bar starts at the page's top edge.
+  if (m.band !== 0) out.push('a ' + m.band + ' px band above the bars');
+  for (const [bar, top] of Object.entries(m.tops)) {
+    // The dialog Settings, from 768 px wide, sits inside the dimmed page's margin.
+    if ((['header', 'listHeader', 'historyBar'].includes(bar) || (bar === 'settingsHead' && size.width < 768)) && top !== null && top !== 0) out.push('the ' + bar + ' starts ' + top + ' px down');
+  }
+  // In portrait, under the status bar, WebKit finds the view's own solid top bar at the top edge, in the bars' colour, and paints the status bar in
+  // it instead of blurring the page's top. An open sheet's dimmed backdrop is viewport-sized, which keeps the colour WebKit had. Landscape has no
+  // status bar, so no colour is painted there, and its bars, inside the notch's insets, are under 90% of the width.
+  if (size.orientation === 'portrait') {
+    const edge = m.edge;
+    const own = view === 'sheet' ? edge.kind === 'viewport' : edge.kind === 'bar' && /^[a-z]+\.(header|list-header|hist-bar|settings-head)(\.|$)/.test(edge.name ?? '');
+
+    if (!own) out.push('WebKit finds ' + (edge.name ?? 'no fixed or sticky box (hit ' + edge.hit + ')') + (edge.kind ? ' (' + edge.kind + ')' : '') + ' at the top edge, not the view\'s top bar');
+    else if (edge.kind === 'bar' && (edge.top !== 0 || edge.height <= 10 || edge.background !== m.bar)) out.push('the top bar ' + edge.name + ' is at ' + edge.top + ', ' + edge.height + ' px tall, ' + edge.background + ' for the bars\' ' + m.bar);
+  }
   return out;
 }
 
@@ -224,6 +268,10 @@ try {
         }
 
         results.push({ name, ...m });
+        if (shots !== null) {
+          mkdirSync(shots, { recursive: true });
+          writeFileSync(join(shots, name.replaceAll(' ', '-') + '.png'), Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
+        }
         console.log((found.length === 0 ? 'ok   ' : 'FAIL ') + name);
         found.forEach((one) => console.log('     ' + one));
         failed += found.length === 0 ? 0 : 1;

@@ -159,7 +159,7 @@ describe('the installable page', () => {
     expect(rule?.[1]).toContain('height: 1px');
     expect(rule?.[1]).toContain('background: var(--vscode-titleBar-border, var(--vscode-widget-border))');
     expect(rule?.[1]).toContain('position: fixed');
-    // Along the band's bottom edge, under the 12 px band the installed app keeps at the top.
+    // Along the band's bottom edge: the top inset's band, 0 under an iPhone's opaque status bar.
     expect(rule?.[1]).toContain('inset: var(--sb-top) 0 auto 0');
     // Only the installed app draws it; a browser tab has its own tab strip above the page.
     expect(css.replace(rule![0], '')).not.toMatch(/body::before/);
@@ -200,14 +200,21 @@ describe('the installable page', () => {
     // black-translucent gets iOS 26.1's blur over the page's top; with no key the status bar is opaque and the page starts below it.
     expect(page).not.toContain('apple-mobile-web-app-status-bar-style');
     expect(page).toContain('<div id="safe-top" aria-hidden="true"></div>\n<div id="root"></div>');
-    // The band is the status bar's inset, and at least 12 px in the installed app, so iOS's top-edge hit test (4 px down) finds a fixed box over
-    // 10 px tall, paints the status bar in its colour and drops its blur; everything at the top starts below the band.
-    expect(css).toContain(':root { --sb-top: env(safe-area-inset-top); }\n@media (display-mode: standalone) { :root { --sb-top: max(env(safe-area-inset-top), 12px); } }');
+    // The band is the status bar's inset alone, 0 under the opaque status bar: no band takes room above the bars. Each view's top bar is sticky at
+    // the top, opaque and z-index 10, so iOS's top-edge hit test (4 px down) finds it, paints the status bar in its colour and drops its blur.
+    expect(css).toContain(':root { --sb-top: env(safe-area-inset-top); }\n');
+    expect(css).not.toMatch(/--sb-top: max\(/);
+    expect(css).toContain('.header, .list-header, .hist-bar, .settings-head { position: sticky; top: 0; z-index: 10; }');
+    expect(css).toMatch(/(^|\n)\.header \{[^}]*background: var\(--sb-bar-background\);/);
+    expect(css).not.toMatch(/(^|\n)\.header \{[^}]*position: relative/);
+    expect(css).toMatch(/(^|\n)\.list-header \{[^}]*background: var\(--sb-bar-background\);/);
+    expect(css).toMatch(/(^|\n)\.hist-bar \{[^}]*background: var\(--vscode-sideBar-background\);/);
+    expect(css).toMatch(/(^|\n)\.settings-head \{[^}]*background: var\(--vscode-sideBar-background\);/);
     expect(css).toMatch(/#safe-top \{[^}]*position: fixed; inset: 0 0 auto 0; z-index: 1001; height: var\(--sb-top\); background: var\(--sb-bar-background\);/);
     expect(css).toMatch(/#root \{[^}]*padding: var\(--sb-top\) env\(safe-area-inset-right\) 0 env\(safe-area-inset-left\);/);
     expect(css).toMatch(/#root\.drawers:not\(\.listing\):not\(\.history\) > \.side \{[^}]*padding-top: var\(--sb-top\);/);
-    // Only the band's own definitions read the inset; every top edge reads the band.
-    expect(css.match(/env\(safe-area-inset-top\)/g)).toHaveLength(2);
+    // Only the band's own definition reads the inset; every top edge reads the band.
+    expect(css.match(/env\(safe-area-inset-top\)/g)).toHaveLength(1);
     expect(css).toMatch(/\.sheet-backdrop \{[^}]*padding: max\(16px, var\(--sb-top\)\)/);
     expect(css).toMatch(/\.settings-backdrop \{[^}]*padding: max\(24px, var\(--sb-top\)\)/);
     expect(css).toMatch(/\.settings-backdrop \{ padding: var\(--sb-top\) env\(safe-area-inset-right\) 0 env\(safe-area-inset-left\);/);

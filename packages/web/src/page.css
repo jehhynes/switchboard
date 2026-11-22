@@ -20,17 +20,21 @@ textarea { overscroll-behavior: none; }
   :root { --sb-github: #1f2328; --sb-pull-request: #8250df; --sb-source-off: #8a8a8a; --sb-composer-background: color-mix(in srgb, var(--vscode-input-background) 50%, var(--vscode-sideBar-background)); --sb-chat-background: var(--vscode-editor-background); --sb-bar-background: var(--vscode-sideBar-background); --sb-row-selected: #E4E6F1; --sb-row-muted: #717171; --sb-tab-shade: 3.5%; }
 }
 body { color: var(--vscode-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); line-height: 1.5; }
-/* The band at the page's top (#safe-top, below): the status bar's inset, and in the installed app at least 12 px, so WebKit on an iPhone finds a
-   fixed element at the top edge (it hit-tests 4 px down at the middle and reads the colour of a box over 10 px tall), paints the status bar in
-   its colour and drops the blur it draws over the page's top otherwise. Everything at the top starts below it. */
+/* The band at the page's top (#safe-top, below): the status bar's inset, 0 under an iPhone's opaque status bar. Everything at the top starts
+   below it. */
 :root { --sb-top: env(safe-area-inset-top); }
-@media (display-mode: standalone) { :root { --sb-top: max(env(safe-area-inset-top), 12px); } }
+/* Each view's top bar is the page's top edge on an iPhone, with no band above it: sticky at the top of a page that never scrolls, opaque in the
+   bars' colour and the screen's width in portrait, so WebKit finds it (it hit-tests 4 px down at the top's middle, takes a fixed or sticky box
+   at least 90% of the width and reads the colour of one over 10 px tall), paints the status bar in its colour and drops the blur it draws over
+   the page's top otherwise. Sticky makes each a stacking context: z-index 10 keeps their menus over the tabs, the sash and the list, and the
+   composer's menu (10, later) over the header. */
+.header, .list-header, .hist-bar, .settings-head { position: sticky; top: 0; z-index: 10; }
 /* The installed app's title bar takes the page's colour, so a line along the band's bottom edge marks where the title bar ends. */
 @media (display-mode: standalone) { body::before { content: ''; position: fixed; inset: var(--sb-top) 0 auto 0; z-index: 1000; height: 1px; background: var(--vscode-titleBar-border, var(--vscode-widget-border)); pointer-events: none; } }
 /* Safe areas (viewport-fit=cover): on a phone the page keeps out of the notch, the rounded corners and the home indicator. The bars' colour
-   fills the band under the status bar: #safe-top is a real, full-width fixed element, which iOS samples to paint the status bar solid rather
-   than blur the page under it, and the side bands are #root's own. Each column pads its bottom, so its own colour runs under the home
-   indicator. Every inset is 0 on a desktop and under an opaque status bar, where the band is the installed app's 12 px alone. */
+   fills any band under the status bar: #safe-top is a full-width fixed element as tall as the top inset, 0 under an opaque status bar, where
+   the top bars themselves are the page's top edge (above), and the side bands are #root's own. Each column pads its bottom, so its own colour runs under the home
+   indicator. Every inset is 0 on a desktop and under an opaque status bar. */
 #safe-top { position: fixed; inset: 0 0 auto 0; z-index: 1001; height: var(--sb-top); background: var(--sb-bar-background); pointer-events: none; }
 #root { box-sizing: border-box; display: flex; height: 100%; padding: var(--sb-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); background: var(--sb-bar-background); }
 /* The bottom: every scroller runs to the screen's bottom edge, under the home indicator, as a native list does, and pads the end of its content
@@ -62,7 +66,7 @@ button:focus-visible, a:focus-visible, .tab:focus-visible { outline: 1px solid v
 .side { flex: none; width: 100%; display: flex; flex-direction: column; background: var(--vscode-sideBar-background); border-right: 1px solid var(--vscode-sideBar-border, var(--vscode-panel-border)); }
 /* The list's header, as the dock's title row: the icons keep their width at the right. */
 .side-head { flex: none; }
-.list-header { display: flex; align-items: center; justify-content: flex-end; gap: 2px; min-height: 35px; padding: 0 4px 0 20px; }
+.list-header { display: flex; align-items: center; justify-content: flex-end; gap: 2px; min-height: 35px; padding: 0 4px 0 20px; background: var(--sb-bar-background); }
 /* On a phone the list is its own view and no window title names the app, so the header starts with the icon and "Switchboard", which take
    what is left and end in an ellipsis; from 768 px the window or tab title shows it. */
 .list-title { display: none; }
@@ -283,7 +287,7 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 
 /* The conversation, as the Conversation view: header, tabs, the tab's panel and the composer. */
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--sb-chat-background); }
-.header { position: relative; display: flex; align-items: center; gap: 4px; padding: 6px 6px 6px 12px; border-bottom: 1px solid var(--vscode-panel-border); background: var(--sb-bar-background); user-select: none; }
+.header { display: flex; align-items: center; gap: 4px; padding: 6px 6px 6px 12px; border-bottom: 1px solid var(--vscode-panel-border); background: var(--sb-bar-background); user-select: none; }
 .picker-anchor { flex: 1 1 0; min-width: 6em; }
 button.picker { flex: 1 1 auto; min-width: 0; overflow: hidden; display: flex; align-items: center; gap: 6px; border: none; color: inherit; padding: 6px 6px; cursor: pointer; text-align: left; font-weight: 500; }
 button.persona:hover, button.icon:hover, a.icon:hover { background: var(--vscode-toolbar-hoverBackground); }
