@@ -988,6 +988,57 @@ describe('the page', () => {
     paired.close();
   });
 
+  it('goes back to the list on a phone with a swipe right over the conversation, as Back does, but not over a menu or from a wider page', async () => {
+    history.replaceState(null, '', '#');
+    vi.useFakeTimers();
+
+    const { page, source } = start();
+    const groups = [listGroup('progress', [listRow(1), listRow(2)])];
+    const main = root.querySelector<HTMLElement>('.main')!;
+    let t = 0;
+    const swipe = (target: Element): void => {
+      for (const [type, x] of [['touchstart', 150], ['touchmove', 165], ['touchmove', 330]] as const) {
+        const event = new Event(type, { bubbles: true, cancelable: true });
+
+        Object.defineProperty(event, 'touches', { value: [{ clientX: x, clientY: 400 }] });
+        t += 16;
+        target.dispatchEvent(event);
+      }
+
+      target.dispatchEvent(Object.defineProperty(new Event('touchend', { bubbles: true }), 'touches', { value: [] }));
+      vi.advanceTimersByTime(400);
+    };
+
+    vi.spyOn(performance, 'now').mockImplementation(() => t);
+    source.emit('hello', { key: 'pk', groups, scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
+    source.emit('hello', { key: 'pk', groups, scope, sessions: [session()], items: [reply('r1', 1)], more: false, status: null, artifacts: [] });
+    expect(root.classList.contains('listing')).toBe(false);
+
+    // With the header's dropdown open the swipe is the menu's, and the conversation stays.
+    root.querySelector<HTMLElement>('.header .picker')!.click();
+    expect(root.querySelector('.menu, [role="menu"]')).not.toBeNull();
+    swipe(root.querySelector('#panel .timeline')!);
+    expect(root.classList.contains('listing')).toBe(false);
+    root.querySelector<HTMLElement>('.header .picker')!.click();
+    expect(root.querySelector('.menu, [role="menu"]')).toBeNull();
+
+    swipe(root.querySelector('#panel .timeline')!);
+    expect(root.classList.contains('listing')).toBe(true);
+    expect(root.classList.contains('swiping')).toBe(false);
+    expect(main.style.transform).toBe('');
+    expect(document.activeElement).toBe(root.querySelector('[data-work-item="1"]'));
+
+    // From tablet width the list is beside the conversation, and a swipe does nothing.
+    root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
+    resizeTo(1024);
+    swipe(root.querySelector('#panel .timeline')!);
+    expect(root.classList.contains('listing')).toBe(false);
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    page.close();
+  });
+
   it('shows a refused first select over the list, which a phone shows again, and clears it on the next select', async () => {
     history.replaceState(null, '', '#');
 

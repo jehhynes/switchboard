@@ -229,6 +229,14 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
  * so a desktop window narrowed to a phone's width gets the phone's layout.
  */
 #root.listing > .main, #root:not(.listing) > .side { display: none; }
+/* Swipe right to go back (swipeBack.ts): while the conversation is dragged right, the list shows under it across the screen, shaded and moved
+   left until the conversation leaves, as iOS's navigation shows the view below. swipeBack.ts sets the transforms and the shade's opacity. */
+@media (max-width: 767px) {
+  #root.swiping:not(.listing) > .side { box-sizing: border-box; display: flex; position: fixed; inset: 0; z-index: 1; padding: var(--sb-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); will-change: transform; }
+  #root.swiping > .main { position: relative; z-index: 3; will-change: transform; box-shadow: 0 0 12px rgba(0, 0, 0, 0.35); }
+  #root.swiping { user-select: none; -webkit-user-select: none; }
+}
+.swipe-shade { position: fixed; inset: 0; z-index: 2; background: #000; opacity: 0; pointer-events: none; }
 /* A sash resizes the pane before it (resizer in main.ts, which keeps the width in --side-width or --chat-width), drawn as VS Code's:
    invisible until hovered, dragged or focused, then a 4 px line in the sash colour over the edge, taking no width of its own. The work
    items' sash shows where the list is a column, the conversation's only beside the Status and Artifacts column. */

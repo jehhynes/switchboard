@@ -19,6 +19,7 @@ import { renderSheet } from './sheet.js';
 import { renderComposer, renderComposerMenu, renderEndedNote, renderFrame, renderShared } from './composer.js';
 import { listHeader } from './listHeader.js';
 import { PhoneVoice } from './phoneVoice.js';
+import { swipeBack } from './swipeBack.js';
 import { settings } from './settings.js';
 import { attachments, drawChips } from './attachments.js';
 import type { Attached } from './attachments.js';
@@ -2156,6 +2157,24 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     });
   };
 
+  /** Back to the list on a phone, from the Back button or a swipe right (swipeBack.ts), with the focus on the selected row. */
+  const back = (): void => {
+    view.list = true;
+    draw();
+    list.querySelector<HTMLElement>('.row.selected')?.focus();
+  };
+  // A swipe right over a phone's conversation goes back, while no menu, sheet, Settings or History lies over it.
+  const stopSwipe = swipeBack({
+    root,
+    host: root.querySelector<HTMLElement>('.main')!,
+    under: drawer,
+    enabled: () => window.innerWidth < TABLET_MIN && !root.classList.contains('listing') && shownHistory === null && document.querySelector('.menu, [role="menu"], [role="listbox"]:not([hidden]), .sheet-backdrop, .settings-backdrop') === null,
+    back,
+    reducedMotion: () => typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+  });
+
+  listening.signal.addEventListener('abort', stopSwipe);
+
   // ---- Cards ----
   const cardQuestions = (key: string): ReturnType<typeof parseQuestions> => {
     const [kind, ...rest] = key.split(':');
@@ -2248,9 +2267,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
         break;
       case 'back':
-        view.list = true;
-        draw();
-        list.querySelector<HTMLElement>('.row.selected')?.focus();
+        back();
         break;
       case 'group': {
         const group = button!.dataset['group']!;
