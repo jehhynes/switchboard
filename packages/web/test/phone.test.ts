@@ -43,6 +43,26 @@ describe('the page on a phone', () => {
     expect(css).toContain('.settings-bar { flex-wrap: wrap; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); }');
   });
 
+  it('gives a conversation under 600 px wide, by its own width, its side padding, dot gutter, list indent and bubble room, and leaves a wider one as it was', () => {
+    const narrow = /@container conversation \(max-width: 600px\) \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
+
+    // The conversation's pane is the container, so a narrow column on a wide screen narrows too, and a phone's width alone does not.
+    expect(css).toMatch(/(^|\n)\.main \{[^}]*container: conversation \/ inline-size;/);
+    expect(narrow).toContain('.scroll:has(> .timeline) { padding-left: 8px; padding-right: 8px; }');
+    // A conversation narrowed on its sash keeps its timeline as wide as the pane less that padding.
+    expect(narrow).toContain('.timeline { max-width: calc(var(--chat-width, 940px) - 16px); }');
+    expect(narrow).toContain('.reply, .timeline > li.artifact { padding-left: 20px; }');
+    expect(narrow).toContain('.reply .dot { left: 4px; }');
+    expect(narrow).toContain('.body ul, .body ol { padding-inline-start: 1.5em; }');
+    expect(narrow).toContain('.message .bubble, .speech-bubble { max-width: calc(100% - 24px); }');
+    expect(phone).not.toContain('.bubble');
+    // Wider, the bubbles keep their room and the replies their gutter.
+    expect(css).toMatch(/(^|\n)\.message \.bubble \{[^}]*max-width: 85%;/);
+    expect(css).toMatch(/(^|\n)\.speech-bubble \{[^}]*max-width: 80%;/);
+    expect(css).toMatch(/(^|\n)\.reply \{ padding-left: 30px; \}/);
+    expect(css).toMatch(/(^|\n)\.body ul, \.body ol \{ margin: 1em 0; padding-inline-start: 2em; \}/);
+  });
+
   it('wraps a very long link, path or word anywhere, and keeps code blocks, tables and media inside the conversation', () => {
     const url = `https://example.com/${'segment'.repeat(60)}?q=${'x'.repeat(200)}`;
     const markup = renderMarkdown(`See ${url} and D:/${'folder/'.repeat(40)}file.ts`);

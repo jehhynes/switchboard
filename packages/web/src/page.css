@@ -298,7 +298,8 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 }
 
 /* The conversation, as the Conversation view: header, tabs, the tab's panel and the composer. */
-.main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--sb-chat-background); }
+/* The conversation's pane is a size container (conversation), so its timeline fits its own width, whatever the page's (below). */
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; container: conversation / inline-size; background: var(--sb-chat-background); }
 .header { display: flex; align-items: center; gap: 4px; padding: 6px 6px 6px 12px; border-bottom: 1px solid var(--vscode-panel-border); background: var(--sb-bar-background); user-select: none; }
 .picker-anchor { flex: 1 1 0; min-width: 6em; }
 button.picker { flex: 1 1 auto; min-width: 0; overflow: hidden; display: flex; align-items: center; gap: 6px; border: none; color: inherit; padding: 6px 6px; cursor: pointer; text-align: left; font-weight: 500; }
@@ -644,7 +645,7 @@ body.artifact-window > .artifact-view { height: 100%; }
   :is(.header, .list-header, .hist-bar, .settings-head, .artifact-head, .changes-head) :is(button.icon, a.icon, button.actions, button.persona) { min-width: 44px; min-height: 44px; align-items: center; justify-content: center; }
   :is(.header, .list-header, .hist-bar, .settings-head, .artifact-head, .changes-head) :is(button.icon, a.icon, button.actions, button.persona) > .codicon { font-size: 20px; line-height: 1; }
 }
-/* A narrow screen gives the conversation its width: less padding round the timeline and the composer, and wider bubbles. */
+/* A narrow screen gives the conversation its width: less padding round the timeline and the composer. */
 @media (max-width: 600px) {
   .scroll { padding: 12px 12px calc(12px + var(--sb-end)); }
   /* On a phone the composer is as wide as the screen and sits on its bottom edge, and the notes above it share its edges. Rather than keep a
@@ -656,7 +657,17 @@ body.artifact-window > .artifact-view { height: 100%; }
   #composer .composer-footer { padding-left: max(5px, calc(env(safe-area-inset-bottom) - env(safe-area-inset-left))); padding-right: max(5px, calc(env(safe-area-inset-bottom) - env(safe-area-inset-right))); padding-bottom: max(5px, min(14px, env(safe-area-inset-bottom))); }
   .session-note, .composer-error { border-left: none; border-right: none; border-radius: 0; }
   .composer-sent { padding: 0 12px; }
-  .message .bubble { max-width: 92%; }
+}
+/* A conversation under 600 px wide, on a phone or in a narrow column, gives its text the width: 8 px at its sides, a 20 px gutter for the
+   replies' dots, a shallower list indent, and bubbles that stop 24 px short of the far side, our messages' at the left and a reply's spoken
+   passage at the right. A wider one keeps the room messaging apps leave. */
+@container conversation (max-width: 600px) {
+  .scroll:has(> .timeline) { padding-left: 8px; padding-right: 8px; }
+  .timeline { max-width: calc(var(--chat-width, 940px) - 16px); }
+  .reply, .timeline > li.artifact { padding-left: 20px; }
+  .reply .dot { left: 4px; }
+  .body ul, .body ol { padding-inline-start: 1.5em; }
+  .message .bubble, .speech-bubble { max-width: calc(100% - 24px); }
 }
 
 /* The selected work item's row actions (architecture.md § Web page): the dock's main control as a small button and the rest under an ellipsis. */
