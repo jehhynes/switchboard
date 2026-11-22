@@ -413,6 +413,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   window.addEventListener('focus', () => void settingsPane.reload());
   document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && void settingsPane.reload());
   const local = deps.local ?? ['127.0.0.1', 'localhost'].includes(location.hostname);
+  // Each Mic on tap on a paired device and each leaving of the conversation is counted, so a mic still opening when the page left is not turned
+  // on, and a late answer to an older tap leaves a newer tap's mic alone.
+  let micTaps = 0;
+  let micLeaves = 0;
+  let micOpening = false;
   // Voice on this phone, on a paired device's page (architecture.md § Remote access).
   const phoneVoice = local ? null : new PhoneVoice({ key: () => state.key, post: (name, body) => post(name, body), changed: () => draw(), now: () => deps.now() });
   const header = listHeader(root.querySelector<HTMLElement>('.side-head')!, list, root.querySelector<HTMLElement>('#list-sheet')!, {
@@ -962,13 +967,45 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         return;
       }
 
+      const tap = ++micTaps;
+      const leaves = micLeaves;
+
+      micOpening = true;
       void phoneVoice.micOn().then(async (error) => {
+        // A newer tap owns the mic now.
+        if (tap !== micTaps) {
+          return;
+        }
+
+        // The page left the conversation while the mic opened: it stays off.
+        if (leaves !== micLeaves) {
+          phoneVoice.micOff();
+          return;
+        }
+
         if (error !== null) {
+          micOpening = false;
           showError(error);
           return;
         }
 
         const answer = await command('mic', { on: true });
+
+        if (tap !== micTaps) {
+          return;
+        }
+
+        micOpening = false;
+
+        if (leaves !== micLeaves) {
+          // Left while Mic on was answered: off again, after it, so the hub ends with the mic off.
+          if (answer.status === 200) {
+            phoneVoice.micOff();
+            void command('mic', { on: false });
+          }
+
+          return;
+        }
 
         if (answer.status !== 200) {
           phoneVoice.micOff();
@@ -1540,10 +1577,30 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   // The columns follow the width as it changes; a draw moves each pane to its place only when they change.
   window.addEventListener('resize', () => relayout() && draw(), { signal: listening.signal });
 
+  /** Whether the last draw showed the list in the conversation's place on a narrow screen; true at first, so a load is no leaving. */
+  let wasListing = true;
   /** Draws the state; Preact changes only what differs, so the focus, a selection, the scroll position and open menus stay. */
   const drawRegions = (): void => {
     // On a narrow screen the list and the conversation are each a full-width view (page.css); the list shows until a work item is opened.
-    root.classList.toggle('listing', shownHistory === null && (view.list || wanted === null));
+    const listing = shownHistory === null && (view.list || wanted === null);
+
+    // Leaving the conversation for the list on a phone's width (Back, or a refused open) leaves the work item, so a mic on for it turns off and
+    // a phone's microphone is released; what plays goes on (PRD R119).
+    const leftConversation = listing && !wasListing && window.innerWidth < TABLET_MIN && ((state.voice?.here === true && state.voice.mic !== 'off') || micOpening);
+
+    wasListing = listing;
+
+    // After this draw, since releasing the phone's microphone draws again.
+    if (leftConversation) {
+      micLeaves++;
+      micOpening = false;
+      queueMicrotask(() => {
+        phoneVoice?.micOff();
+        void command('mic', { on: false });
+      });
+    }
+
+    root.classList.toggle('listing', listing);
     // A ticket's History shows in the conversation's place, over its column and the side column (architecture.md § Web page).
     root.classList.toggle('history', shownHistory !== null);
     mount(historyHost, shownHistory === null ? null : renderHistory(shownHistory));

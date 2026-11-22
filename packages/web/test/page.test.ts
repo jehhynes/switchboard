@@ -814,6 +814,180 @@ describe('the page', () => {
     page.close();
   });
 
+  it('turns the mic off when a phone\'s width leaves the conversation for the list, and not on a wide page or with the mic off (PRD R119)', async () => {
+    history.replaceState(null, '', '#');
+
+    const width = window.innerWidth;
+    const voice = (mic: string) => ({ voice: { enabled: true, here: true, mic, speaking: 'r1', speakReplies: true, error: null } });
+    const mics = () => posts.filter((post) => post.url.endsWith('/mic')).map((post) => post.body['on']);
+    const { page, source } = start();
+    const open = async (): Promise<void> => {
+      root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
+      await flush();
+      source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)])], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    };
+
+    window.innerWidth = 375;
+    source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)])], scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    await open();
+    source.emit('voice', voice('listening'));
+    root.querySelector<HTMLElement>('.header > button.back-toggle')!.click();
+    await flush();
+    expect(mics()).toEqual([false]);
+    // Speech goes on: no Stop is sent.
+    expect(posts.some((post) => post.url.endsWith('/stop-speaking'))).toBe(false);
+
+    // With the mic already off, Back sends nothing.
+    await open();
+    source.emit('voice', voice('off'));
+    root.querySelector<HTMLElement>('.header > button.back-toggle')!.click();
+    await flush();
+    expect(mics()).toEqual([false]);
+
+    // A wide page keeps the conversation beside the list: nothing is left.
+    window.innerWidth = 1440;
+    await open();
+    source.emit('voice', voice('listening'));
+    root.querySelector<HTMLElement>('.header > button.back-toggle')!.click();
+    await flush();
+    expect(mics()).toEqual([false]);
+    page.close();
+
+    // A paired device's page, which holds a phone's microphone, does the same, once.
+    window.innerWidth = 375;
+    posts.length = 0;
+    root = document.createElement('div');
+    document.body.replaceChildren(root);
+
+    let holdMic: Promise<void> | null = null;
+    const fetch = vi.fn(async (url: string, init?: { body?: string }) => {
+      posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) });
+
+      if (url.endsWith('/mic') && holdMic !== null) {
+        await holdMic;
+      }
+
+      return { status: 200, ok: true, json: async () => ({}), text: async () => '' } as unknown as Response;
+    });
+    const paired = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, local: false });
+    const phone = FakeSource.last!;
+
+    history.replaceState(null, '', '#');
+    phone.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)])], scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
+    await flush();
+    phone.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)])], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    phone.emit('voice', voice('listening'));
+    root.querySelector<HTMLElement>('.header > button.back-toggle')!.click();
+    await flush();
+    expect(mics()).toEqual([false]);
+
+    // A Mic on still opening when Back is tapped is not turned on afterwards: the phone's audio and socket never answer here.
+    const sockets: Array<{ onopen: (() => void) | null; onmessage: ((event: { data: string }) => void) | null }> = [];
+
+    vi.stubGlobal('AudioContext', class {
+      state = 'running';
+      destination = {};
+      onstatechange = null;
+      audioWorklet = { addModule: async () => undefined };
+      resume = async () => undefined;
+      close = async () => undefined;
+      createMediaStreamSource = () => ({ connect: () => undefined, disconnect: () => undefined });
+    });
+    vi.stubGlobal('AudioWorkletNode', class {
+      port = { postMessage: () => undefined, onmessage: null };
+      connect(): void {}
+      disconnect(): void {}
+    });
+    vi.stubGlobal('WebSocket', class {
+      binaryType = 'blob';
+      onopen: (() => void) | null = null;
+      onmessage: ((event: { data: string }) => void) | null = null;
+      constructor() {
+        sockets.push(this);
+      }
+      send(): void {}
+      close(): void {}
+    });
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: async () => ({ getAudioTracks: () => [{ muted: false, readyState: 'live', stop: () => undefined }] }) } });
+    onTestFinished(() => void Reflect.deleteProperty(navigator, 'mediaDevices'));
+    onTestFinished(() => void vi.unstubAllGlobals());
+    posts.length = 0;
+    root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
+    await flush();
+    phone.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)])], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    phone.emit('voice', voice('off'));
+    root.querySelector<HTMLElement>('.composer-mic [data-voice="mic"]')!.click();
+    root.querySelector<HTMLElement>('.header > button.back-toggle')!.click();
+    await flush();
+    // The socket is welcomed only after Back.
+    sockets[0]!.onopen?.();
+    sockets[0]!.onmessage?.({ data: JSON.stringify({ type: 'welcome', at: 0 }) });
+    await flush();
+    await flush();
+    expect(sockets).toHaveLength(1);
+    expect(mics().filter((on) => on === true)).toEqual([]);
+
+    // Back while the hub has not answered Mic on yet: the page sends Mic off after that answer.
+    let answerMic!: () => void;
+
+    holdMic = new Promise((resolve) => (answerMic = resolve));
+    posts.length = 0;
+    root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
+    await flush();
+    phone.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)])], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    phone.emit('voice', voice('off'));
+    // The voice is already on this phone, its socket welcomed.
+    root.querySelector<HTMLElement>('.composer-mic [data-voice="mic"]')!.click();
+    await flush();
+    await flush();
+    expect(sockets).toHaveLength(1);
+    expect(mics()).toEqual([true]);
+    root.querySelector<HTMLElement>('.header > button.back-toggle')!.click();
+    await flush();
+    holdMic = null;
+
+    const before = mics().length;
+
+    answerMic();
+    await flush();
+    await flush();
+    // Sent after the hub answered Mic on, so it cannot arrive first and leave the mic on.
+    expect(mics().slice(before)).toEqual([false]);
+
+    // Back, then the conversation again and Mic on, while the first Mic on is still unanswered: its late answer leaves the new mic alone.
+    let answerFirst!: () => void;
+
+    holdMic = new Promise((resolve) => (answerFirst = resolve));
+    root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
+    await flush();
+    phone.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)])], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    phone.emit('voice', voice('off'));
+    root.querySelector<HTMLElement>('.composer-mic [data-voice="mic"]')!.click();
+    await flush();
+    await flush();
+    root.querySelector<HTMLElement>('.header > button.back-toggle')!.click();
+    await flush();
+    root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
+    await flush();
+    phone.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)])], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    phone.emit('voice', voice('off'));
+    holdMic = null;
+    root.querySelector<HTMLElement>('.composer-mic [data-voice="mic"]')!.click();
+    await flush();
+    await flush();
+
+    const second = mics().length;
+
+    answerFirst();
+    await flush();
+    await flush();
+    expect(mics().slice(second)).toEqual([]);
+    expect(mics().at(-1)).toBe(true);
+    window.innerWidth = width;
+    paired.close();
+  });
+
   it('shows a refused first select over the list, which a phone shows again, and clears it on the next select', async () => {
     history.replaceState(null, '', '#');
 
