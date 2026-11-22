@@ -22,8 +22,11 @@ export interface ListHeaderDeps {
   local?: boolean;
   /** Voice on this phone (architecture.md § Remote access), on a paired device's page only: where it is, its last error, and the tap that moves it. */
   phoneVoice?: { state(): PhoneVoiceState; error(): string | null; toggle(): void };
-  /** Whether the list is pinned as a column rather than a drawer (architecture.md § Web page), for its pin button, whose click the page takes. */
-  pinned?(): boolean;
+  /**
+   * Whether the list is pinned as a column rather than a drawer (architecture.md § Web page), for its pin button, whose click the page takes;
+   * undefined where the pin would change nothing, which leaves the pin out.
+   */
+  pinned?(): boolean | undefined;
 }
 
 /** A pairing link the hub gave out (architecture.md § Remote access): its URL, its code and when both stop working. */
@@ -357,7 +360,7 @@ export function renderListHeader(header: PageHeader | null, view: HeaderView): V
           </button>
           {view.menu === 'more' ? renderMoreMenu(header, view.local === true, view.phoneVoice ?? null) : null}
         </div>
-        {/* Outside the phone's layout (page.css), as VS Code's and the dock's pin: pinned, the list is a column; unpinned, a drawer. */}
+        {/* Outside the phone's layout (page.css), as VS Code's and the dock's pin: pinned, the list is a column; unpinned, a drawer. Left out where it changes nothing (main.ts). */}
         {view.pinned === undefined ? null : (
           <button type="button" class="icon list-pin" data-action="list-pin" title={view.pinned ? 'Unpin sidebar' : 'Pin sidebar'} aria-label={view.pinned ? 'Unpin sidebar' : 'Pin sidebar'} aria-controls="list">
             <span class={`codicon codicon-${view.pinned ? 'pinned' : 'pin'}`} aria-hidden="true"></span>
@@ -1418,8 +1421,12 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
 
       view.phoneVoice = view.local === true ? null : (deps.phoneVoice?.state() ?? null);
 
-      if (deps.pinned !== undefined) {
-        view.pinned = deps.pinned();
+      const pinned = deps.pinned?.();
+
+      if (pinned === undefined) {
+        delete view.pinned;
+      } else {
+        view.pinned = pinned;
       }
 
       const voiceError = view.local === true ? null : (deps.phoneVoice?.error() ?? null);

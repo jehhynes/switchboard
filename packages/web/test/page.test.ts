@@ -4214,16 +4214,38 @@ describe('the page in use', () => {
     expect(root.classList.contains('drawer-open')).toBe(false);
     expect(localStorage.getItem('switchboard.listCollapsed')).toBeNull();
     expect(document.activeElement).toBe(pin());
-    // With no work item open the unpinned list stays the side column, so the pin stays where it was pressed.
-    pin().click();
-    history.replaceState(null, '', '#');
     again.page.close();
+  });
+
+  it('leaves the pin out where the list is a column either way: with no work item open, and while History shows', () => {
+    window.innerWidth = 1180;
+    localStorage.setItem('switchboard.listCollapsed', '1');
+    history.replaceState(null, '', '#');
+
     const listing = start();
 
+    // No work item open: the unpinned list is the side column, so a pin there would change nothing.
     hello(listing.source, { scope: null, sessions: [], items: [] });
     expect(root.classList.contains('listing')).toBe(true);
-    expect(root.querySelector('.list-pin')!.getAttribute('aria-label')).toBe('Pin sidebar');
+    expect(root.querySelector('.list-pin')).toBeNull();
+    // Opening one makes it the drawer, whose header has the pin.
     listing.page.close();
+    history.replaceState(null, '', '#w=1');
+
+    const { page, source } = start();
+
+    hello(source, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', history: { ticketId: 1, key: 'gh 1' } })])] });
+    expect(root.classList.contains('drawers')).toBe(true);
+    expect(root.querySelector('.side-head .list-pin')?.getAttribute('aria-label')).toBe('Pin sidebar');
+    // History, opened from the work item's Actions menu, keeps the list a column, and leaves out the pin until it closes.
+    click('[data-action="actions"]');
+    click('.actions-menu [data-action="row-history"]');
+    expect(root.classList.contains('history')).toBe(true);
+    expect(root.querySelector('.list-pin')).toBeNull();
+    root.querySelector<HTMLElement>('.hist-close')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(root.classList.contains('history')).toBe(false);
+    expect(root.querySelector('.side-head .list-pin')?.getAttribute('aria-label')).toBe('Pin sidebar');
+    page.close();
   });
 
   it('has no pin in the phone\'s layout, where the list is its own view', () => {

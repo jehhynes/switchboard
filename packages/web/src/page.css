@@ -254,11 +254,9 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 /*
  * Phone first: in the phone's layout (html.phone, set by main.ts from `isPhone` in layout.ts: under 768 px wide, or a phone's screen in
  * either orientation) the list and the conversation are each a full-width view, the list until a work item is opened, the conversation with a
- * Back button at the start of its header; touch targets are at least 44 px tall. Outside it the open work item takes the room first: the list
- * is the side column only while it, the conversation and the Status and Artifacts column all fit (`fitLayout` in layout.ts, which sets
- * #root.drawers otherwise), and a drawer over the conversation's left edge (below) otherwise, shown by the header's Work items button in
- * Back's place, and in the drawer whatever the width once the operator hides it on its sash (main.ts). With no work item open it is the side
- * column. Every other switch is by the page's width and the kept widths alone, so a desktop window narrowed to a phone's width gets the
+ * Back button at the start of its header; touch targets are at least 44 px tall. Outside it the list is the side column while pinned at its
+ * header's pin, and unpinned (main.ts, which sets #root.drawers) a drawer over the conversation's left edge (below), shown by the header's
+ * Work items button in Back's place. With no work item open, or while History shows, it is the side column either way, and the pin is left out. Every other switch is by the page's width and the kept widths alone, so a desktop window narrowed to a phone's width gets the
  * phone's layout.
  */
 #root.listing > .main, #root:not(.listing) > .side { display: none; }

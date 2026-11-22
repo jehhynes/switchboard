@@ -596,7 +596,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     local,
     openSettings: () => settingsPane.open(),
     reload: () => (deps.reload ?? (() => location.reload()))(),
-    pinned: () => listPinned,
+    // The pin shows only where it changes the list: with no work item open, or while History shows, the list is a column either way.
+    pinned: () => (pinWorks() ? listPinned : undefined),
     ...(phoneVoice === null ? {} : { phoneVoice: { state: () => phoneVoice.state, error: () => phoneVoice.error, toggle: () => (phoneVoice.state === 'off' ? phoneVoice.start() : phoneVoice.stop()) } }),
   });
   /** A command for the conversation the page shows, refused by the hub when the page has moved on since. */
@@ -1696,8 +1697,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const sliver = root.querySelector<HTMLElement>('.sliver')!;
   // Under a drawer opened by its button or a key, a backdrop takes the press outside it, so the press closes the drawer and does nothing else.
   const backdrop = root.querySelector<HTMLElement>('.drawer-backdrop')!;
-  /** Whether the list is a drawer: outside the phone's layout while it does not fit and a work item's conversation is open; History, opened from the list, keeps it a column. */
-  const drawerMode = (): boolean => root.classList.contains('drawers') && !(view.list || wanted === null) && shownHistory === null;
+  /** Whether the list's pin changes it: only while a work item's conversation shows; with none open, or while History, opened from the list, shows, it is a column either way. */
+  const pinWorks = (): boolean => !(view.list || wanted === null) && shownHistory === null;
+  /** Whether the list is a drawer: outside the phone's layout, unpinned, while a work item's conversation is open. */
+  const drawerMode = (): boolean => root.classList.contains('drawers') && pinWorks();
   let revealTimer: ReturnType<typeof setTimeout> | null = null;
   let drawerTick: ReturnType<typeof setInterval> | null = null;
   let overDrawer = false;
