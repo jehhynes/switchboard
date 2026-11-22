@@ -1,149 +1,392 @@
 import { describe, expect, it } from 'vitest';
-import { answersIn, answerText, complete, parseQuestions, unansweredCard , cardOutcome, questionLines, questionSegments, withoutEndingQuestions, cardLinks } from '../src/questions.js';
-import type { CardItem, CardLinks, LinkItem, QuestionChoice } from '../src/questions.js';
+import { answerMessage, answersIn, BATCH, cardLinks, cardSteps, cardUtterance, currentStep, deriveSlug, draftAnswers, moveStep, parseQuestions, pickLetter, questionLedger, questionLines, questionSegments, questionSpeech, resolveAnswers, sendLabel, setOther, stripQuestionMarkup, withdrawals, withoutEndingQuestions } from '../src/questions.js';
+import type { CardLinks, LedgerItem, LinkItem, QuestionLedger, StoredAnswer } from '../src/questions.js';
 
 /** The shape the conversation rules show, with a second question. */
 const ASKED = 'Two things before I start:\n\n1. Which port?\n   - A) 8765 (recommended)\n   - B) 8799\n2. **Keep the old route?**\n   - A) Yes\n   - B) No, remove it\n   - C) Keep it behind a flag\n\nSay if neither fits.';
-const choices = (entries: Array<[number, Partial<QuestionChoice>]>): Map<number, QuestionChoice> => new Map(entries.map(([index, choice]) => [index, { letters: [], other: '', ...choice }]));
 
-describe('parsing lettered questions', () => {
-  it('reads numbered questions with options lettered from A, each on its own line, as the conversation rules show them', () => {
-    expect(parseQuestions(ASKED)).toEqual([
-      { number: 1, text: 'Which port?', multi: false, options: [{ letter: 'A', text: '8765 (recommended)' }, { letter: 'B', text: '8799' }] },
-      { number: 2, text: 'Keep the old route?', multi: false, options: [{ letter: 'A', text: 'Yes' }, { letter: 'B', text: 'No, remove it' }, { letter: 'C', text: 'Keep it behind a flag' }] },
+/** The shape the new rules ask for: ids, topics, context and options with descriptions. */
+const NEW = [
+  'Three decisions before I do the phone layout:',
+  '',
+  '1. **Persona registration.** Register a persona as soon as you save it, or only after its voice check passes? {#persona-registered}',
+  '   Today Save registers it at once. I keep building the phone layout whichever you pick.',
+  "   - A) Register on save (recommended) — keeps today's behaviour; a broken voice shows an error the first time it speaks.",
+  '   - B) Register after the voice check — Save takes about 2 s longer.',
+  '     A new persona cannot be picked until its check plays.',
+  '2. **Phone layout:** How should the persona list look on a phone? {#phone-layout}',
+  '   - A) One card per persona -- about a day of work.',
+  '   - B) Two-column table',
+  '3. **Design first?** Mock up the phone layout before I build it? {#design-first}',
+  '   - A) Design with mockups first',
+  '   - B) Build it directly',
+].join('\n');
+
+describe('parsing questions (PRD R103)', () => {
+  it('reads the slug, topic, context, labels, descriptions and the recommendation the rules ask for', () => {
+    const [first, second, third] = parseQuestions(NEW);
+
+    expect(first).toEqual({
+      number: 1,
+      slug: 'persona-registered',
+      written: true,
+      topic: 'Persona registration',
+      text: 'Register a persona as soon as you save it, or only after its voice check passes?',
+      context: 'Today Save registers it at once. I keep building the phone layout whichever you pick.',
+      multi: false,
+      options: [
+        { letter: 'A', label: 'Register on save', description: "keeps today's behaviour; a broken voice shows an error the first time it speaks.", recommended: true, text: 'Register on save' },
+        { letter: 'B', label: 'Register after the voice check', description: 'Save takes about 2 s longer. A new persona cannot be picked until its check plays.', recommended: false, text: 'Register after the voice check' },
+      ],
+    });
+    // A topic ending in ":" or "?", and an option split on " -- ".
+    expect(second).toMatchObject({ slug: 'phone-layout', topic: 'Phone layout', text: 'How should the persona list look on a phone?', context: '' });
+    expect(second!.options[0]).toMatchObject({ label: 'One card per persona', description: 'about a day of work.' });
+    expect(second!.options[1]).toMatchObject({ label: 'Two-column table', description: '', recommended: false });
+    expect(third).toMatchObject({ slug: 'design-first', topic: 'Design first?', text: 'Mock up the phone layout before I build it?' });
+  });
+
+  it('keeps reading the old shape, with derived slugs, no context and label-only options', () => {
+    const questions = parseQuestions(ASKED);
+
+    expect(questions.map((question) => [question.number, question.slug, question.written, question.topic, question.text, question.context])).toEqual([
+      [1, 'port', false, null, 'Which port?', ''],
+      [2, 'keep-old-route', false, null, 'Keep the old route?', ''],
+    ]);
+    // "(recommended)" is lifted off an old option's label too.
+    expect(questions[0]!.options).toEqual([
+      { letter: 'A', label: '8765', description: '', recommended: true, text: '8765' },
+      { letter: 'B', label: '8799', description: '', recommended: false, text: '8799' },
     ]);
   });
 
-  it('takes the option shapes Claude writes, a bold or parenthesised letter, a lower-case one, and a line that continues an option or a question', () => {
+  it('derives a meaningful slug from the topic or the first significant words, and suffixes a slug used twice in one reply', () => {
+    expect(deriveSlug('Persona registration', 'Anything?')).toBe('persona-registration');
+    expect(deriveSlug(null, 'Should we register a persona on save?')).toBe('register-persona-save');
+    expect(deriveSlug(null, '42 is the port?')).toBe('q-42-port');
+    expect(deriveSlug(null, 'Ok?')).toBe('question');
+
+    const twice = parseQuestions('1. Port? {#port-choice}\n   - A) 1\n   - B) 2\n2. Port again? {#port-choice}\n   - A) 3\n   - B) 4\n3. Port? \n   - A) x\n   - B) y\n4. Port? \n   - A) x\n   - B) y');
+
+    expect(twice.map((question) => question.slug)).toEqual(['port-choice', 'port-choice-2', 'port', 'port-2']);
+    // A malformed id is text, not a slug.
+    expect(parseQuestions('1. Which? {#Q1}\n   - A) x\n   - B) y')[0]).toMatchObject({ slug: 'question', written: false, text: 'Which? {#Q1}' });
+  });
+
+  it('takes the option shapes Claude writes, a bold or parenthesised letter, a lower-case one, and lines that continue the context or an option', () => {
     const questions = parseQuestions('1) Scope\n   for this run\n**A)** Only the inbox\n(b) Everything\n  including the dock\nc) Nothing\n\n2. Name?\n   A. Short\n   B: Long');
 
-    expect(questions.map((question) => [question.number, question.text, question.options.map((option) => `${option.letter} ${option.text}`)])).toEqual([
-      [1, 'Scope for this run', ['A Only the inbox', 'B Everything including the dock', 'C Nothing']],
-      [2, 'Name?', ['A Short', 'B Long']],
+    expect(questions.map((question) => [question.number, question.text, question.context, question.options.map((option) => `${option.letter} ${option.label}|${option.description}`)])).toEqual([
+      [1, 'Scope', 'for this run', ['A Only the inbox|', 'B Everything|including the dock', 'C Nothing|']],
+      [2, 'Name?', '', ['A Short|', 'B Long|']],
     ]);
   });
 
-  it('reads a lone question with lettered options and no number, answered by its letter alone', () => {
+  it('reads a lone question with lettered options and no number', () => {
     const questions = parseQuestions('Which one should I keep?\n\n- A) The first\n- B) The second');
 
-    expect(questions).toEqual([{ number: null, text: 'Which one should I keep?', multi: false, options: [{ letter: 'A', text: 'The first' }, { letter: 'B', text: 'The second' }] }]);
-    expect(answerText(questions, choices([[0, { letters: ['B'] }]]))).toBe('B');
-    expect(answerText(questions, choices([[0, { other: 'neither' }]]))).toBe('Other: neither');
-    expect(answersIn('b', questions).get(0)?.letters).toEqual(['B']);
-    // Several picks of a lone question read back as they were sent.
-    const several = parseQuestions('Which should run? Pick any that apply.\n\n- A) Lint\n- B) Tests');
-
-    expect(answerText(several, choices([[0, { letters: ['A', 'B'] }]]))).toBe('A, B');
-    expect(answersIn('A, B', several).get(0)?.letters).toEqual(['A', 'B']);
+    expect(questions).toMatchObject([{ number: null, slug: 'one-keep', text: 'Which one should I keep?' }]);
   });
 
-  it('marks a question that says it takes several options', () => {
+  it('marks a question that says it takes several options, in its text or its context', () => {
     expect(parseQuestions('1. Which checks should run? Pick any that apply.\n   - A) Lint\n   - B) Tests')[0]?.multi).toBe(true);
-    expect(parseQuestions('1. Which one? Choose one or more.\n   - A) Lint\n   - B) Tests')[0]?.multi).toBe(true);
+    expect(parseQuestions('1. Which checks should run?\n   Choose one or more.\n   - A) Lint\n   - B) Tests')[0]?.multi).toBe(true);
     expect(parseQuestions(ASKED)[0]?.multi).toBe(false);
   });
 
   it('finds no question in lists, prose, code or shapes whose answers could not be told apart', () => {
-    // A numbered list with no options, one option alone, letters out of order or not from A, and initials.
     expect(parseQuestions('1. Build\n2. Test\n3. Ship')).toEqual([]);
     expect(parseQuestions('1. Which?\n   - A) Only one')).toEqual([]);
     expect(parseQuestions('1. Which?\n   - B) One\n   - C) Two')).toEqual([]);
     expect(parseQuestions('1. Which?\n   - A) One\n   - C) Two')).toEqual([]);
     expect(parseQuestions('1. Which?\n   - A) One\n   - B) Two\n   - D) Four')).toEqual([]);
     expect(parseQuestions('Asked J. Smith and\nK. Jones about it.')).toEqual([]);
-    // Options inside a fenced block are code.
-    expect(parseQuestions('```\n1. Which?\n   - A) One\n   - B) Two\n```')).toEqual([]);
-    // A paragraph after the question's line ends it.
+    expect(parseQuestions('```\n1. Which? {#which-one}\n   - A) One\n   - B) Two\n```')).toEqual([]);
     expect(parseQuestions('1. Which?\nI think so.\n- A) One\n- B) Two').map((question) => question.number)).toEqual([null]);
-    // A number used twice, or a lone run beside numbered questions.
     expect(parseQuestions('1. One?\n   - A) x\n   - B) y\n1. Again?\n   - A) x\n   - B) y')).toEqual([]);
     expect(parseQuestions('1. One?\n   - A) x\n   - B) y\n\nAlso:\n\n- A) p\n- B) q')).toEqual([]);
     expect(parseQuestions('- A) p\n- B) q')).toEqual([]);
   });
-});
 
-describe('the answer a card sends', () => {
-  const questions = parseQuestions(ASKED);
+  it('parses more than four questions and options past D, which the rules ask against, without dropping any', () => {
+    const many = parseQuestions(Array.from({ length: 6 }, (_, index) => `${index + 1}. Question ${index + 1}? {#question-${index + 1}}\n   - A) x\n   - B) y\n   - C) z\n   - D) w\n   - E) v`).join('\n'));
 
-  it('names each answered question by number and letter, an Other answer by its text, and leaves out unanswered ones', () => {
-    expect(answerText(questions, choices([[0, { letters: ['A'] }], [1, { letters: ['B'] }]]))).toBe('1A, 2B');
-    expect(answerText(questions, choices([[0, { letters: ['A'] }], [1, { other: '  use   port 8800 ' }]]))).toBe('1A, 2 Other: use port 8800');
-    expect(answerText(questions, choices([[1, { letters: ['C', 'A'] }]]))).toBe('2A, 2C');
-    expect(answerText(questions, choices([[0, { other: '   ' }]]))).toBe('');
-    // A comma in an Other text puts each answer on its own line.
-    expect(answerText(questions, choices([[0, { other: 'both, in turn' }], [1, { letters: ['A'] }]]))).toBe('1 Other: both, in turn\n2A');
-  });
-
-  it('reads the choices back from the message, sent by a card or typed', () => {
-    expect(answersIn('1A, 2 Other: use port 8800', questions)).toEqual(choices([[0, { letters: ['A'] }], [1, { other: 'use port 8800' }]]));
-    expect(answersIn('1 Other: both, in turn\n2A', questions)).toEqual(choices([[0, { other: 'both, in turn' }], [1, { letters: ['A'] }]]));
-    expect(answersIn('1B and 2 C please', questions)).toEqual(choices([[0, { letters: ['B'] }], [1, { letters: ['C'] }]]));
-    // A lone Other answer keeps its commas, and Other text is never read for picks.
-    expect(answerText(questions.slice(0, 1), choices([[0, { other: 'both, in turn' }]]))).toBe('1 Other: both, in turn');
-    expect(answersIn('1 Other: both, in turn', questions)).toEqual(choices([[0, { other: 'both, in turn' }]]));
-    expect(answersIn('1 Other: neither; use 2B later\n2A', questions)).toEqual(choices([[0, { other: 'neither; use 2B later' }], [1, { letters: ['A'] }]]));
-    expect(answersIn('1A, 2 Other: none', questions)).toEqual(choices([[0, { letters: ['A'] }], [1, { other: 'none' }]]));
-    // A letter a question does not have, or a number no question has, is no answer.
-    expect(answersIn('1C, 3A, port 8765A', questions)).toEqual(new Map());
+    expect(many).toHaveLength(6);
+    expect(many[0]!.options.map((option) => option.letter)).toEqual(['A', 'B', 'C', 'D', 'E']);
   });
 });
 
-describe('a complete card', () => {
-  it('needs a pick or Other text for every question before Submit', () => {
-    const questions = parseQuestions(ASKED);
+describe('withdraw lines and the markup the views hide', () => {
+  it('reads the slugs, all, and a reason inside or after the brackets, outside code', () => {
+    expect(withdrawals('Done.\n[withdraw: persona-registered, design-first]\n[withdraw: phone-layout — your message settled it]\n[withdraw: all] -- starting over\n```\n[withdraw: in-code]\n```\nSay [withdraw: inline] mid-line.')).toEqual([
+      { slugs: ['persona-registered', 'design-first'], reason: null },
+      { slugs: ['phone-layout'], reason: 'your message settled it' },
+      { slugs: 'all', reason: 'starting over' },
+    ]);
+  });
 
-    expect(complete(questions, choices([[0, { letters: ['A'] }], [1, { other: 'later' }]]))).toBe(true);
-    expect(complete(questions, choices([[0, { letters: ['A'] }]]))).toBe(false);
-    expect(complete(questions, choices([[0, { letters: ['A'] }], [1, { other: '   ' }]]))).toBe(false);
+  it('strips withdraw lines and question ids, and leaves code and other text alone', () => {
+    expect(stripQuestionMarkup('Hello.\n[withdraw: a-b-c]\n1. **Port?** Which? {#port-choice}\n   - A) x\n```\n1. Which? {#kept-in-code}\n```')).toBe('Hello.\n1. **Port?** Which?\n   - A) x\n```\n1. Which? {#kept-in-code}\n```');
   });
 });
 
-describe('an unanswered card (PRD R103)', () => {
-  const message = (withdrawn = false, delivery: string | null = 'sent', patch: Partial<Extract<CardItem, { type: 'message' }>> = {}): CardItem => ({ type: 'message', withdrawn, delivery, ...patch });
-  const reply = (id: string, opening: string, patch: Partial<Extract<CardItem, { type: 'reply' }>> = {}): CardItem => ({ type: 'reply', id, kind: 'reply', opening, rewrittenBy: null, withdrawn: false, ...patch });
+describe('the answer message the hub writes (design § 4)', () => {
+  const [first, second, third] = parseQuestions(NEW);
 
-  it('is a reply after the newest message that asks lettered questions', () => {
-    expect(unansweredCard([message(), reply('r1', ASKED)], null)).toBe(true);
-    expect(unansweredCard([reply('r1', ASKED)], null)).toBe(true);
-    // An aside or a reply that is only a status after it leaves it open; a reply with text supersedes it (`supersedes`).
-    expect(unansweredCard([message(), reply('r1', ASKED), reply('r2', 'Working on it.', { kind: 'aside' }), reply('r3', '')], null)).toBe(true);
-    expect(unansweredCard([message(), reply('r1', ASKED), reply('r2', 'Ignore the question I asked.')], null)).toBe(false);
-    expect(unansweredCard([message(), reply('r1', ASKED), reply('r2', 'Ignore that.'), reply('r3', ASKED)], null)).toBe(true);
-    // A withdrawn message never reached Claude, so it answers nothing.
-    expect(unansweredCard([reply('r1', ASKED), message(true)], null)).toBe(true);
-    // Nor does one still waiting to be typed, which may come back not sent.
-    expect(unansweredCard([reply('r1', ASKED), message(false, 'open')], null)).toBe(true);
-    expect(unansweredCard([reply('r1', ASKED), message(false, null)], null)).toBe(false);
+  it('writes one line per answered question with its slug, its text, and the label alone', () => {
+    expect(answerMessage([{ question: first!, letters: ['A'], other: '' }, { question: second!, letters: [], other: '' }, { question: third!, letters: [], other: ' only for the list,\n  not the  sheet ' }])).toBe(
+      '[answers]\n- persona-registered: Register a persona as soon as you save it, or only after its voice check passes? → A) Register on save\n- design-first: Mock up the phone layout before I build it? → Other: only for the list, not the sheet',
+    );
   });
 
-  it('is still open under a provisional message queued before the card, and answered by one queued after it', () => {
-    // A notice an earlier run left queued shows after the transcript's items, dated before the card.
-    expect(unansweredCard([reply('r1', ASKED, { at: 500 }), message(false, null, { provisional: true, at: 100 })], null)).toBe(true);
-    expect(unansweredCard([reply('r1', ASKED, { at: 500 }), message(false, null, { provisional: true, at: 600 })], null)).toBe(false);
-    expect(unansweredCard([reply('r1', ASKED, { at: 500 }), message(false, null, { provisional: false, at: 100 })], null)).toBe(false);
-    expect(unansweredCard([reply('r1', '', { at: 500 }), message(false, null, { provisional: true, at: 100 })], { replyId: 'r1', markdown: ASKED })).toBe(true);
-  });
+  it('joins several picks with "; ", puts Other last, writes a dismissal, and is empty with nothing answered', () => {
+    const multi = parseQuestions('1. Where? Pick any that apply. {#where-shown}\n   - A) Web page\n   - B) Dock\n   - C) VS Code view')[0]!;
 
-  it('is none once any message follows, or when the reply is an aside, a note, rewritten, withdrawn or asks no lettered question', () => {
-    expect(unansweredCard([reply('r1', ASKED), message()], null)).toBe(false);
-    expect(unansweredCard([message(), reply('r1', ASKED, { kind: 'aside' })], null)).toBe(false);
-    expect(unansweredCard([message(), reply('r1', ASKED, { kind: 'note' })], null)).toBe(false);
-    expect(unansweredCard([message(), reply('r1', ASKED, { rewrittenBy: 'r2' }), reply('r2', 'Never mind.')], null)).toBe(false);
-    expect(unansweredCard([message(), reply('r1', ASKED, { withdrawn: true })], null)).toBe(false);
-    expect(unansweredCard([message(), reply('r1', '1. Build\n2. Test')], null)).toBe(false);
-    expect(unansweredCard([], null)).toBe(false);
-  });
-
-  it('is the newest status asking lettered questions, written in a reply after the newest message', () => {
-    expect(unansweredCard([message(), reply('r1', '')], { replyId: 'r1', markdown: ASKED })).toBe(true);
-    expect(unansweredCard([reply('r1', ''), message()], { replyId: 'r1', markdown: ASKED })).toBe(false);
-    expect(unansweredCard([message(), reply('r1', '')], { replyId: 'r1', markdown: 'Done.' })).toBe(false);
-    // A status whose reply is older than the items read is answered by the message read after it.
-    expect(unansweredCard([message(), reply('r2', 'Ok.')], { replyId: 'r1', markdown: ASKED })).toBe(false);
+    expect(answerMessage([{ question: multi, letters: ['C', 'A'], other: 'and the phone' }])).toBe('[answers]\n- where-shown: Where? Pick any that apply. → A) Web page; C) VS Code view; Other: and the phone');
+    expect(answerMessage([{ question: first!, letters: [], other: '', dismissed: true }])).toBe('[answers]\n- persona-registered: Register a persona as soon as you save it, or only after its voice check passes? → No answer (dismissed)');
+    expect(answerMessage([{ question: first!, letters: [], other: '   ' }])).toBe('');
   });
 });
 
-describe('how each card was left, and the links between cards and answers (PRD R103)', () => {
+describe('resolving a message against the open questions (design § 4)', () => {
+  const questions = parseQuestions(NEW);
+  const open = questions.map((question) => ({ replyId: 'r1', question }));
+
+  it('reads [answers] lines by slug, an arrow in the Other text included, and a dismissal', () => {
+    const text = '[spoken] [voice] [answers]\n- persona-registered: Register a persona as soon as you save it, or only after its voice check passes? → B) Register after the voice check\n- design-first: Mock up the phone layout before I build it? → Other: only → the list; not the sheet\n- phone-layout: How should the persona list look on a phone? → No answer (dismissed)\n- unknown-slug: Gone? → A) x';
+
+    expect(resolveAnswers(text, open)).toEqual([
+      { replyId: 'r1', slug: 'persona-registered', letters: ['B'], other: '' },
+      { replyId: 'r1', slug: 'design-first', letters: [], other: 'only → the list; not the sheet' },
+      { replyId: 'r1', slug: 'phone-layout', letters: [], other: '', dismissed: true },
+    ]);
+  });
+
+  it('reads "slug B", "slug: B", several on one line, and "slug other: …"', () => {
+    expect(resolveAnswers('persona-registered B, phone-layout: a', open)).toEqual([
+      { replyId: 'r1', slug: 'persona-registered', letters: ['B'], other: '' },
+      { replyId: 'r1', slug: 'phone-layout', letters: ['A'], other: '' },
+    ]);
+    expect(resolveAnswers('design-first other: only the list', open)).toEqual([{ replyId: 'r1', slug: 'design-first', letters: [], other: 'only the list' }]);
+    // A lower-case letter in running text is not a pick.
+    expect(resolveAnswers('phone-layout a lot better now', open)).toEqual([]);
+  });
+
+  it('answers the current question with a lone letter or "other: …", and the only open question without one', () => {
+    expect(resolveAnswers('b.', open, { replyId: 'r1', slug: 'phone-layout' })).toEqual([{ replyId: 'r1', slug: 'phone-layout', letters: ['B'], other: '' }]);
+    expect(resolveAnswers('[voice] Bee', open, { replyId: 'r1', slug: 'design-first' })).toEqual([{ replyId: 'r1', slug: 'design-first', letters: ['B'], other: '' }]);
+    expect(resolveAnswers('Other: mock the list only', open, { replyId: 'r1', slug: 'design-first' })).toEqual([{ replyId: 'r1', slug: 'design-first', letters: [], other: 'mock the list only' }]);
+    expect(resolveAnswers('B', open.slice(1, 2))).toEqual([{ replyId: 'r1', slug: 'phone-layout', letters: ['B'], other: '' }]);
+    // With several open and no current question, a lone letter answers nothing.
+    expect(resolveAnswers('B', open)).toEqual([]);
+    // A letter the question does not offer.
+    expect(resolveAnswers('C', open, { replyId: 'r1', slug: 'phone-layout' })).toEqual([]);
+  });
+
+  it('reads legacy "1A" against the newest card only, and an unrelated message as nothing', () => {
+    const older = parseQuestions(ASKED).map((question) => ({ replyId: 'r0', question }));
+
+    expect(resolveAnswers('1A, 3 Other: maybe', [...older, ...open])).toEqual([
+      { replyId: 'r1', slug: 'design-first', letters: [], other: 'maybe' },
+      { replyId: 'r1', slug: 'persona-registered', letters: ['A'], other: '' },
+    ]);
+    expect(resolveAnswers('Hold off on the voice check idea, it is flaky.', open)).toEqual([]);
+    expect(resolveAnswers('anything', [])).toEqual([]);
+  });
+});
+
+const reply = (id: string, opening: string, patch: Partial<Extract<LedgerItem, { type: 'reply' }>> = {}): LedgerItem => ({ type: 'reply', id, kind: 'reply', opening, rewrittenBy: null, withdrawn: false, at: 10, ...patch });
+const message = (id: string, text: string, patch: Partial<Extract<LedgerItem, { type: 'message' }>> = {}): LedgerItem => ({ type: 'message', id, text, withdrawn: false, delivery: 'sent', at: 20, ...patch });
+const stored = (replyId: string, slug: string, letters: string[], other = '', extra: Partial<StoredAnswer> = {}): StoredAnswer => ({ replyId, slug, letters, other, via: 'card', ...extra });
+const states = (ledger: QuestionLedger): Record<string, string> => Object.fromEntries([...ledger.questions.values()].map((one) => [one.key, one.state]));
+
+describe('the question ledger (design § 5.2)', () => {
+  it('keeps questions open across a message that answers nothing', () => {
+    const ledger = questionLedger([reply('r1', NEW), message('m1', 'Hold off on the voice check idea.', { answers: [] })]);
+
+    expect(ledger.open).toEqual(['reply:r1#persona-registered', 'reply:r1#phone-layout', 'reply:r1#design-first']);
+    expect(ledger.answers.size).toBe(0);
+  });
+
+  it('answers by the links stored on the message, which win over its text, and shows Sending while it is open', () => {
+    const ledger = questionLedger([reply('r1', NEW), message('m1', 'persona-registered A', { delivery: 'open', answers: [stored('r1', 'phone-layout', ['B'])] })]);
+
+    expect(states(ledger)).toEqual({ 'reply:r1#persona-registered': 'open', 'reply:r1#phone-layout': 'answered', 'reply:r1#design-first': 'open' });
+    expect(ledger.questions.get('reply:r1#phone-layout')!.answer).toEqual({ messageId: 'm1', letters: ['B'], other: '', via: 'card', sending: true });
+    expect(ledger.answers.get('m1')!.map((one) => one.key)).toEqual(['reply:r1#phone-layout']);
+  });
+
+  it('resolves a message stored without links by its text, and ignores one not sent', () => {
+    const ledger = questionLedger([reply('r1', NEW), message('m0', 'design-first B', { delivery: 'not-sent' }), message('m1', 'persona-registered B, design-first A')]);
+
+    expect(states(ledger)).toEqual({ 'reply:r1#persona-registered': 'answered', 'reply:r1#phone-layout': 'open', 'reply:r1#design-first': 'answered' });
+    expect(ledger.questions.get('reply:r1#design-first')!.answer).toMatchObject({ messageId: 'm1', letters: ['A'], via: 'typed' });
+  });
+
+  it('withdraws by a withdraw line with its reason, by all, and asks nothing in an aside, a note or a withdrawn reply', () => {
+    const one = questionLedger([reply('r1', NEW), reply('r2', 'Settled.\n[withdraw: persona-registered — your message settled it]')]);
+
+    expect(states(one)['reply:r1#persona-registered']).toBe('withdrawn');
+    expect(one.questions.get('reply:r1#persona-registered')!.reason).toBe('your message settled it');
+    expect(one.open).toHaveLength(2);
+    expect(questionLedger([reply('r1', NEW), reply('r2', '[withdraw: all]')]).open).toEqual([]);
+    expect(questionLedger([reply('r1', NEW, { kind: 'aside' }), reply('r2', NEW, { kind: 'note' }), reply('r3', NEW, { withdrawn: true })]).cards.size).toBe(0);
+  });
+
+  it('replaces an open question asked again by slug, and opens a new one for a slug reused after an answer', () => {
+    const again = '1. **Design first?** Mock up only the list, or the list and the edit sheet? {#design-first}\n   - A) Only the list\n   - B) List and edit sheet';
+    const ledger = questionLedger([reply('r1', NEW), reply('r2', again)]);
+
+    expect(states(ledger)['reply:r1#design-first']).toBe('replaced');
+    expect(ledger.questions.get('reply:r1#design-first')!.replacedBy).toBe('reply:r2#design-first');
+    expect(ledger.open).toContain('reply:r2#design-first');
+
+    const reused = questionLedger([reply('r1', NEW), message('m1', 'x', { answers: [stored('r1', 'design-first', ['A'])] }), reply('r2', again)]);
+
+    expect(states(reused)['reply:r1#design-first']).toBe('answered');
+    expect(states(reused)['reply:r2#design-first']).toBe('open');
+  });
+
+  it('carries a rewritten reply\'s questions over by slug, as they stood, and withdraws the ones the rewrite no longer asks', () => {
+    const rewrite = '1. **Phone layout:** How should it look? {#phone-layout}\n   - A) Cards\n   - B) Table\n2. **Persona registration.** Register on save? {#persona-registered}\n   - A) Yes, on save\n   - B) After the check';
+    const ledger = questionLedger([reply('r1', NEW, { rewrittenBy: 'r2' }), message('m1', 'x', { answers: [stored('r1', 'persona-registered', ['B'])] }), reply('r2', rewrite)]);
+
+    expect(states(ledger)).toEqual({
+      'reply:r1#persona-registered': 'answered',
+      'reply:r1#phone-layout': 'replaced',
+      'reply:r1#design-first': 'withdrawn',
+      'reply:r2#phone-layout': 'open',
+      'reply:r2#persona-registered': 'answered',
+    });
+    expect(ledger.open).toEqual(['reply:r2#phone-layout']);
+  });
+
+  it('dismisses the questions the operator dismissed, and records a dismissal an answer message reports', () => {
+    expect(states(questionLedger([reply('r1', NEW)], { dismissed: ['reply:r1#phone-layout'] }))['reply:r1#phone-layout']).toBe('dismissed');
+
+    const told = questionLedger([reply('r1', NEW), message('m1', '[answers]', { answers: [stored('r1', 'persona-registered', ['A']), stored('r1', 'phone-layout', [], '', { dismissed: true })] })]);
+
+    expect(states(told)['reply:r1#phone-layout']).toBe('dismissed');
+    expect(told.questions.get('reply:r1#phone-layout')!.answer?.messageId).toBe('m1');
+  });
+
+  it('keeps the old rules for a card asked before the cutover: answered, skipped or superseded, and only the newest open', () => {
+    const before = questionLedger([reply('r0', ASKED, { at: 1 }), message('m1', '1A, 2B', { at: 2 }), reply('r1', ASKED, { at: 3 }), message('m2', 'thanks', { at: 4 }), reply('r2', ASKED, { at: 5 }), reply('r3', 'Ok.', { at: 6 })], { since: 100 });
+
+    expect(states(before)).toEqual({ 'reply:r0#port': 'answered', 'reply:r0#keep-old-route': 'answered', 'reply:r1#port': 'skipped', 'reply:r1#keep-old-route': 'skipped', 'reply:r2#port': 'superseded', 'reply:r2#keep-old-route': 'superseded' });
+    expect(before.questions.get('reply:r0#keep-old-route')!.answer).toMatchObject({ letters: ['B'], via: 'legacy' });
+    expect(before.open).toEqual([]);
+
+    const waiting = questionLedger([reply('r0', ASKED, { at: 1 })], { since: 100 });
+
+    expect(waiting.open).toEqual(['reply:r0#port', 'reply:r0#keep-old-route']);
+    expect(waiting.cards.get('reply:r0')!.legacy).toBe(true);
+    // A card after the cutover follows the new rules beside an old one.
+    expect(questionLedger([reply('r0', ASKED, { at: 1 }), message('m1', 'unrelated', { at: 2 }), reply('r1', NEW, { at: 200 }), message('m2', 'unrelated', { at: 201 })], { since: 100 }).open).toHaveLength(3);
+  });
+
+  it('lets a reply after the cutover supersede an old card, and keeps a dismissal made before a later reply asks the slug again', () => {
+    const old = questionLedger([reply('r0', ASKED, { at: 1 }), reply('r1', 'Working on it.', { at: 200 })], { since: 100 });
+
+    expect(states(old)['reply:r0#port']).toBe('superseded');
+    expect(old.open).toEqual([]);
+
+    const again = '1. **Design first?** Only the list? {#design-first}\n   - A) Yes\n   - B) No';
+    const ledger = questionLedger([reply('r1', NEW, { at: 10 }), reply('r2', again, { at: 30 })], { dismissed: [{ key: 'reply:r1#design-first', at: 20 }] });
+
+    expect(states(ledger)['reply:r1#design-first']).toBe('dismissed');
+    expect(states(ledger)['reply:r2#design-first']).toBe('open');
+
+    // Placed after the item that was newest when it was made, whatever the times say.
+    const same = questionLedger([reply('r1', NEW, { at: 10 }), reply('r2', again, { at: 10 })], { dismissed: [{ key: 'reply:r1#design-first', at: 10, after: 'r1' }] });
+
+    expect(states(same)['reply:r1#design-first']).toBe('dismissed');
+    expect(states(same)['reply:r2#design-first']).toBe('open');
+  });
+
+  it('lists the cards in conversation order', () => {
+    const ledger = questionLedger([reply('r1', NEW), reply('r2', ASKED)]);
+
+    expect([...ledger.cards.keys()]).toEqual(['reply:r1', 'reply:r2']);
+  });
+});
+
+describe('a card\'s draft and stepper (design § 6)', () => {
+  const ledger = questionLedger([reply('r1', NEW)]);
+  const card = ledger.cards.get('reply:r1')!;
+
+  it('starts at the first question, picks a single option and moves on, except on the last step', () => {
+    expect(currentStep(card, undefined)!.question.slug).toBe('persona-registered');
+
+    const first = pickLetter(card, undefined, 'persona-registered', 'A');
+
+    expect(first).toEqual({ draft: { step: 'persona-registered', picks: { 'persona-registered': { letters: ['A'], other: null } } }, advance: true });
+    expect(pickLetter(card, first.draft, 'design-first', 'B').advance).toBe(false);
+    // A letter the question does not offer changes nothing.
+    expect(pickLetter(card, first.draft, 'phone-layout', 'D')).toEqual({ draft: first.draft, advance: false });
+  });
+
+  it('opens Other, clearing a single choice once it has text, and moves Back, Next and to a step', () => {
+    const picked = pickLetter(card, undefined, 'phone-layout', 'A').draft;
+
+    expect(setOther(card, picked, 'phone-layout', '').picks['phone-layout']).toEqual({ letters: ['A'], other: '' });
+    expect(setOther(card, picked, 'phone-layout', 'neither').picks['phone-layout']).toEqual({ letters: [], other: 'neither' });
+    expect(moveStep(card, picked, 'next').step).toBe('design-first');
+    expect(moveStep(card, picked, 'back').step).toBe('persona-registered');
+    expect(moveStep(card, { step: 'persona-registered', picks: {} }, 'back').step).toBe('persona-registered');
+    expect(moveStep(card, undefined, 'design-first').step).toBe('design-first');
+  });
+
+  it('sends only the answered questions, and labels Send for one, all and some', () => {
+    const draft = { step: 'design-first', picks: { 'persona-registered': { letters: ['A'], other: null }, 'design-first': { letters: [], other: 'list only' }, 'phone-layout': { letters: [], other: '  ' } } };
+
+    expect(draftAnswers(card, draft).map(({ one }) => one.question.slug)).toEqual(['persona-registered', 'design-first']);
+    expect(sendLabel(1, 1)).toBe('Send answer');
+    expect(sendLabel(3, 3)).toBe('Send 3 answers');
+    expect(sendLabel(2, 3)).toBe('Send 2 of 3');
+  });
+
+  it('steps through at most four questions at a time', () => {
+    const six = Array.from({ length: 6 }, (_, index) => `${index + 1}. Question ${index + 1}? {#question-${index + 1}}\n   - A) x\n   - B) y`).join('\n');
+    const big = questionLedger([reply('r9', six)]).cards.get('reply:r9')!;
+
+    expect(cardSteps(big).map((one) => one.question.slug)).toEqual(['question-1', 'question-2', 'question-3', 'question-4']);
+    expect(BATCH).toBe(4);
+  });
+});
+
+describe('voice (design § 7)', () => {
+  it('reads the current question with its place, topic, context and options, and no slug or Markdown', () => {
+    const question = parseQuestions(NEW)[0]!;
+
+    expect(questionSpeech(question, 1, 3)).toBe(
+      "Question 1 of 3. Persona registration. Register a persona as soon as you save it, or only after its voice check passes? Today Save registers it at once. I keep building the phone layout whichever you pick. A: Register on save, recommended: keeps today's behaviour; a broken voice shows an error the first time it speaks. B: Register after the voice check: Save takes about 2 s longer. A new persona cannot be picked until its check plays. Or say Other.",
+    );
+    expect(questionSpeech(parseQuestions('1. **Port** in use? {#port-choice}\n   - A) `8765`\n   - B) 8799')[0]!, 1, 1)).toBe('Port in use? A: 8765. B: 8799. Or say Other.');
+  });
+
+  it('reads the card grammar from a whole utterance, homophones included, and nothing else', () => {
+    expect(['B', 'bee', 'Be.', 'option C', 'see', 'sea', 'dee', 'ay', 'eh', 'B please'].map(cardUtterance)).toEqual([
+      { type: 'pick', letter: 'B' },
+      { type: 'pick', letter: 'B' },
+      { type: 'pick', letter: 'B' },
+      { type: 'pick', letter: 'C' },
+      { type: 'pick', letter: 'C' },
+      { type: 'pick', letter: 'C' },
+      { type: 'pick', letter: 'D' },
+      { type: 'pick', letter: 'A' },
+      { type: 'pick', letter: 'A' },
+      { type: 'pick', letter: 'B' },
+    ]);
+    expect(cardUtterance('The second one.')).toEqual({ type: 'pick-index', index: 1 });
+    expect(cardUtterance('the recommended one')).toEqual({ type: 'recommended' });
+    expect(cardUtterance('Other, only the list.')).toEqual({ type: 'other', text: 'only the list' });
+    expect(['back', 'Next.', 'skip', 'repeat', 'send', 'send them'].map((one) => cardUtterance(one)?.type)).toEqual(['back', 'next', 'next', 'repeat', 'send', 'send']);
+    expect(['fix the login flow', 'B and C', 'be careful', 'otherwise fine', ''].map(cardUtterance)).toEqual([null, null, null, null, null]);
+  });
+});
+
+describe('the legacy rules before the cutover: how each card was left, and the links between cards and answers (PRD R103)', () => {
   const message = (id: string, text: string, patch: Partial<Extract<LinkItem, { type: 'message' }>> = {}): LinkItem => ({ type: 'message', id, text, withdrawn: false, delivery: 'sent', at: 0, ...patch });
   const reply = (id: string, opening: string, patch: Partial<Extract<LinkItem, { type: 'reply' }>> = {}): LinkItem => ({ type: 'reply', id, kind: 'reply', opening, rewrittenBy: null, withdrawn: false, at: 0, ...patch });
   const outcomes = (links: CardLinks): Array<[string, string | null, string | null]> => [...links.cards].map(([key, card]) => [key, card.outcome, card.message?.id ?? null]);
@@ -201,7 +444,8 @@ describe('how each card was left, and the links between cards and answers (PRD R
   });
 });
 
-describe('where the questions are, and how a later message left them', () => {
+
+describe('where the questions are', () => {
   const asked = 'Two things before I go on.\n\n1. Which port?\n   - A) 8765\n   - B) 8799\n2. Which checks?\n   - A) Unit\n   - B) Live\n     and the smoke run';
 
   it('finds the lines from the first question to the last option or its continuation, and the line a lone run asks', () => {
@@ -223,14 +467,14 @@ describe('where the questions are, and how a later message left them', () => {
     expect(withoutEndingQuestions('Nothing asked.')).toBe('Nothing asked.');
   });
 
-  it('counts a message as an answer only when it answers one of the questions, else as skipping them', () => {
-    const questions = parseQuestions(asked);
+});
 
-    expect(cardOutcome(null, questions)).toBeNull();
-    expect(cardOutcome('1A, 2B', questions)).toBe('answered');
-    expect(cardOutcome('2 Other: none', questions)).toBe('answered');
-    expect(cardOutcome('Never mind, do the docs first.', questions)).toBe('skipped');
-    // A number with a letter for a question the card does not ask answers nothing.
-    expect(cardOutcome('3A', questions)).toBe('skipped');
+describe('the legacy answer reading', () => {
+  it('reads "1A", "1 A", "2A, 2C", "1A and 2B" and an Other answer from a message', () => {
+    const questions = parseQuestions(ASKED);
+
+    expect(answersIn('1A, 2 Other: use port 8800', questions)).toEqual(new Map([[0, { letters: ['A'], other: '' }], [1, { letters: [], other: 'use port 8800' }]]));
+    expect([...answersIn('1B and 2 C please', questions)]).toEqual([[0, { letters: ['B'], other: '' }], [1, { letters: ['C'], other: '' }]]);
+    expect(answersIn('1C, 3A, port 8765A', questions)).toEqual(new Map());
   });
 });
