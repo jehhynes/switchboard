@@ -1417,7 +1417,8 @@ describe('the web page routes', () => {
     expect(JSON.parse(largeChunked.body)).toEqual({ error: 'notes one.txt is larger than 10 MB.' });
     expect(uploadLogs).toContain('web upload: 200, local, declared none, transfer chunked, received 5');
     expect(uploadLogs).toContain('web upload: 413, local, declared none, transfer chunked, received >10 MB');
-    expect(uploadLogs).toContain('web upload: 401, local, declared 5, transfer none, received 0');
+    expect(uploadLogs.filter((line) => line === 'web upload: 401, local, declared 5, transfer none, received 0')).toHaveLength(2);
+    expect(uploadLogs.filter((line) => line === 'web upload: 403, unknown, declared 5, transfer none, received 0')).toHaveLength(1);
     expect(uploadLogs.join('\n')).not.toContain('notes one.txt');
     expect(uploadLogs.join('\n')).not.toContain(cookie);
     // A window's GET, or the hub token, reaches no upload: the route is the page's alone.

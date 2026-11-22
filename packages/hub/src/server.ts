@@ -620,9 +620,11 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
   /** The web page's routes (architecture.md § Web page); false for any other request. */
   const servePage = (request: IncomingMessage, response: ServerResponse, url: URL): boolean => {
     const path = url.pathname;
+    const isUpload = request.method === 'POST' && path === '/v1/conversation/upload';
+    const logUpload = (outcome: string, location: string, bytes: number): void => options.log?.(`web upload: ${outcome}, ${location}, declared ${request.headers['content-length'] ?? 'none'}, transfer ${request.headers['transfer-encoding'] ?? 'none'}, received ${bytes > MAX_UPLOAD_BYTES ? '>10 MB' : bytes}`);
     const isPageRoute = path === '/' || path === '/page' || path.startsWith('/page/') || path === '/v1/page/list' || path.startsWith('/v1/browser/') || path.startsWith('/v1/conversation/artifact/') || (path === '/v1/conversation/events' && url.searchParams.has('page')) || path === '/v1/conversation/files' || path === '/v1/conversation/console' || (path.startsWith('/v1/conversation/') && (CHANGE_ROUTES.has(path.slice('/v1/conversation/'.length)) || LOCAL_FILE_ROUTES.has(path.slice('/v1/conversation/'.length))));
     const bearer = request.headers.authorization !== undefined;
-    const cookiePost = request.method === 'POST' && !bearer && path.startsWith('/v1/conversation/') && request.headers.cookie !== undefined;
+    const cookiePost = request.method === 'POST' && !bearer && path.startsWith('/v1/conversation/') && (request.headers.cookie !== undefined || isUpload);
 
     if (page === undefined || (!isPageRoute && !cookiePost) || (request.method === 'POST' && HUB_PAGE_ROUTES.has(path))) {
       return false;
@@ -636,6 +638,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     const origin = pageOrigin(request.headers, request.socket.remoteAddress, request.socket.localPort ?? 0, page.remote?.() ?? { hosts: [], logins: [] });
 
     if ('refused' in origin) {
+      if (isUpload) logUpload('403', 'unknown', 0);
       json(response, 403, { error: origin.refused });
       return true;
     }
@@ -762,9 +765,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     }
 
     if (!page.access.allows(request.headers.cookie, origin)) {
-      if (request.method === 'POST' && path === '/v1/conversation/upload') {
-        options.log?.(`web upload: 401, ${remote ? 'remote' : 'local'}, declared ${request.headers['content-length'] ?? 'none'}, transfer ${request.headers['transfer-encoding'] ?? 'none'}, received 0`);
-      }
+      if (isUpload) logUpload('401', remote ? 'remote' : 'local', 0);
 
       if (request.method === 'GET' && path === '/page/') {
         response.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Frame-Options': 'DENY', 'Content-Security-Policy': remote ? PAIR_CSP : PAGE_CSP });
@@ -979,11 +980,10 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     if (request.method === 'POST' && path === '/v1/conversation/upload') {
       const declared = request.headers['content-length'];
       const length = declared === undefined ? null : Number(declared);
-      const transfer = request.headers['transfer-encoding'] ?? 'none';
-      const logUpload = (outcome: string, bytes: number): void => options.log?.(`web upload: ${outcome}, ${remote ? 'remote' : 'local'}, declared ${declared ?? 'none'}, transfer ${transfer}, received ${bytes > MAX_UPLOAD_BYTES ? '>10 MB' : bytes}`);
+      const logResult = (outcome: string, bytes: number): void => logUpload(outcome, remote ? 'remote' : 'local', bytes);
       const refuse = (status: number, error: string): void => {
         // The body is not read, so the connection closes rather than wait for it.
-        logUpload(String(status), 0);
+        logResult(String(status), 0);
         response.setHeader('Connection', 'close');
         json(response, status, { error });
       };
@@ -1011,24 +1011,24 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
         });
         request.on('end', () => {
           if (!stillAllowed()) {
-            logUpload('403', size);
+            logResult('403', size);
             json(response, 403, { error: 'Remote access no longer allows this device.' });
             return;
           }
 
           if (size > MAX_UPLOAD_BYTES) {
-            logUpload('413', size);
+            logResult('413', size);
             json(response, 413, { error: `${url.searchParams.get('name') || 'The file'} is larger than 10 MB.` });
             return;
           }
 
           const reply = page.upload(window, Number(url.searchParams.get('scopeGen') ?? NaN), url.searchParams.get('name') ?? '', Buffer.concat(chunks));
 
-          logUpload(String(reply.status), size);
+          logResult(String(reply.status), size);
           json(response, reply.status, reply.body);
         });
         request.on('error', () => {
-          logUpload('request error', size);
+          logResult('request error', size);
           response.destroy();
         });
       }
