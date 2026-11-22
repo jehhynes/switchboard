@@ -31,8 +31,13 @@
           <SolidColorBrush x:Key="DockBadge" Color="#CCCCCC" />
           <SolidColorBrush x:Key="DockLink" Color="#005FB8" />
           <SolidColorBrush x:Key="DockFocus" Color="#005FB8" />
-          <!-- The row stripe on the operator's turn in Ready for review is the focus blue (PRD R27). -->
           <SolidColorBrush x:Key="DockTurn" Color="#005FB8" />
+          <!-- A row stripe's status colours, the web page's status colours (theme.css): 3:1 or more on every row background, warning lighter than
+               error so the two stay apart with protanopia or deuteranopia, and the operator's turn blue (PRD R27). -->
+          <SolidColorBrush x:Key="DockStripeWarning" Color="#A37A00" />
+          <SolidColorBrush x:Key="DockStripeError" Color="#8F0A14" />
+          <SolidColorBrush x:Key="DockStripeTurn" Color="#005FB8" />
+          <SolidColorBrush x:Key="DockStripeWarningFill" Color="#2EA37A00" />
           <SolidColorBrush x:Key="DockActionButton" Color="#1F3B3B3B" />
           <SolidColorBrush x:Key="DockActionButtonHover" Color="#333B3B3B" />
           <SolidColorBrush x:Key="DockGroupBar" Color="#40005FB8" />
@@ -95,6 +100,10 @@
           <SolidColorBrush x:Key="DockLink" Color="#4DAAFC" />
           <SolidColorBrush x:Key="DockFocus" Color="#0078D4" />
           <SolidColorBrush x:Key="DockTurn" Color="#0078D4" />
+          <SolidColorBrush x:Key="DockStripeWarning" Color="#F2CC0C" />
+          <SolidColorBrush x:Key="DockStripeError" Color="#F14C4C" />
+          <SolidColorBrush x:Key="DockStripeTurn" Color="#3794FF" />
+          <SolidColorBrush x:Key="DockStripeWarningFill" Color="#2EF2CC0C" />
           <SolidColorBrush x:Key="DockActionButton" Color="#1FCCCCCC" />
           <SolidColorBrush x:Key="DockActionButtonHover" Color="#33CCCCCC" />
           <SolidColorBrush x:Key="DockGroupBar" Color="#400078D4" />

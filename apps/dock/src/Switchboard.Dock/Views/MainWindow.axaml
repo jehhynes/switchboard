@@ -189,13 +189,13 @@
       <Setter Property="Margin" Value="0" />
     </Style>
     <Style Selector="Border.stripe.warning">
-      <Setter Property="Background" Value="{DynamicResource DockWarning}" />
+      <Setter Property="Background" Value="{DynamicResource DockStripeWarning}" />
     </Style>
     <Style Selector="Border.stripe.error">
-      <Setter Property="Background" Value="{DynamicResource DockError}" />
+      <Setter Property="Background" Value="{DynamicResource DockStripeError}" />
     </Style>
     <Style Selector="Border.stripe.turn">
-      <Setter Property="Background" Value="{DynamicResource DockTurn}" />
+      <Setter Property="Background" Value="{DynamicResource DockStripeTurn}" />
     </Style>
     <!-- A Ready for review row on the agent's turn dims its texts; the selection keeps full strength. -->
     <Style Selector="Border.row.dim Grid.content">
@@ -334,10 +334,10 @@
     <Style Selector="Border.pill.mentioned:pointerover">
       <Setter Property="Background" Value="{DynamicResource DockPillFillHover}" />
     </Style>
-    <!-- Returned asks for attention, so it takes the warning colour, and opens nothing. -->
+    <!-- Returned asks for attention, so it takes the warning stripe's colour, its text the warning text colour, and opens nothing. -->
     <Style Selector="Border.pill.returned">
-      <Setter Property="BorderBrush" Value="{DynamicResource DockWarning}" />
-      <Setter Property="Background" Value="{DynamicResource DockWarningFill}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource DockStripeWarning}" />
+      <Setter Property="Background" Value="{DynamicResource DockStripeWarningFill}" />
       <Setter Property="TextElement.Foreground" Value="{DynamicResource DockWarning}" />
       <Setter Property="Cursor" Value="Arrow" />
     </Style>

@@ -123,7 +123,7 @@ public sealed class ReviewOrderTests
 
         Assert.Equal(expected is null ? [] : [expected], kinds.Where(stripe.Classes.Contains));
         Assert.Equal(
-            expected is null ? null : window.FindResource(window.ActualThemeVariant, $"Dock{char.ToUpperInvariant(expected[0])}{expected[1..]}"),
+            expected is null ? null : window.FindResource(window.ActualThemeVariant, $"DockStripe{char.ToUpperInvariant(expected[0])}{expected[1..]}"),
             expected is null ? null : stripe.Background);
     }
 

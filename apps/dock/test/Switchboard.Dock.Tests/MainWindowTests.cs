@@ -1605,7 +1605,7 @@ public sealed class MainWindowTests
             .Where((border) => border.Classes.Contains("row") && border.IsEffectivelyVisible && border.DataContext is RowViewModel row && (row.StripeWarning || row.StripeError || row.StripeTurn))
             .ToList();
         var bars = window.SliverBars();
-        string Tone(RowViewModel row) => row.StripeError ? "DockError" : row.StripeWarning ? "DockWarning" : "DockTurn";
+        string Tone(RowViewModel row) => row.StripeError ? "DockStripeError" : row.StripeWarning ? "DockStripeWarning" : "DockStripeTurn";
 
         Assert.NotEmpty(striped);
         Assert.Equal(striped.Count, bars.Count);

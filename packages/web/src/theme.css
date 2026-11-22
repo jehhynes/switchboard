@@ -5,6 +5,11 @@
  * setting (prefers-color-scheme), live; Dark Modern is the default. Where Light Modern's own colour for text or a mark is under 4.5:1 on the
  * side bar (errorForeground, editorWarning.foreground, testing.iconPassed), the light copy takes VS Code's Light High Contrast value. The terminal
  * colours are VS Code's terminal defaults on the panel's background, with Light Modern's terminal foreground and cursor, for the console.
+ *
+ * --sb-status-* are the page's own colours for the marks that tell a row's status apart: a row's stripe and the hidden list's sliver, a warning
+ * (a block or a question) amber, an error red and the operator's turn blue. Each is 3:1 or more on the side bar, a hovered row and the selected
+ * row, and warning and error differ in lightness as well as hue, so they stay apart with protanopia or deuteranopia. Text in the warning or error
+ * colour keeps editorWarning.foreground and testing.iconFailed, which are chosen for a text's 4.5:1.
  */
 :root {
   --vscode-foreground: #CCCCCC;
@@ -95,6 +100,9 @@
   --vscode-font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", system-ui, "Ubuntu", "Droid Sans", sans-serif;
   --vscode-font-size: 13px;
   --vscode-editor-font-family: Consolas, "Courier New", monospace;
+  --sb-status-warning: #F2CC0C;
+  --sb-status-error: #F14C4C;
+  --sb-status-turn: #3794FF;
   color-scheme: dark;
 }
 
@@ -185,6 +193,9 @@
     --vscode-terminal-ansiBrightMagenta: #D670D6;
     --vscode-terminal-ansiBrightCyan: #29B8DB;
     --vscode-terminal-ansiBrightWhite: #A5A5A5;
+    --sb-status-warning: #A37A00;
+    --sb-status-error: #8F0A14;
+    --sb-status-turn: #005FB8;
     color-scheme: light;
   }
 }

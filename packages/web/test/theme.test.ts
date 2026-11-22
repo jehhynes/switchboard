@@ -29,6 +29,31 @@ function luminance(colour: string, under = '#ffffff'): number {
   return 0.2126 * linear(r!, 0) + 0.7152 * linear(g!, 1) + 0.0722 * linear(b!, 2);
 }
 
+/** A #rrggbb colour as Viénot, Brettel and Mollon (1999) simulate it for protanopia or deuteranopia, or as it is, in CIELAB (D65). */
+function lab(colour: string, vision: 'normal' | 'protanopia' | 'deuteranopia' = 'normal'): [number, number, number] {
+  const simulate = {
+    normal: [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+    protanopia: [[0.11238, 0.88762, 0], [0.11238, 0.88762, 0], [0.00401, -0.00401, 1]],
+    deuteranopia: [[0.29275, 0.70725, 0], [0.29275, 0.70725, 0], [-0.02234, 0.02234, 1]],
+  }[vision];
+  const linear = [1, 3, 5].map((at) => parseInt(colour.slice(at, at + 2), 16) / 255).map((value) => (value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4));
+  const [r, g, b] = simulate.map((row) => Math.min(1, Math.max(0, row[0]! * linear[0]! + row[1]! * linear[1]! + row[2]! * linear[2]!)));
+  const f = (t: number) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116);
+  const [x, y, z] = [(0.4124 * r! + 0.3576 * g! + 0.1805 * b!) / 0.95047, 0.2126 * r! + 0.7152 * g! + 0.0722 * b!, (0.0193 * r! + 0.1192 * g! + 0.9505 * b!) / 1.08883];
+
+  return [116 * f(y) - 16, 500 * (f(x) - f(y)), 200 * (f(y) - f(z))];
+}
+
+/** A #rrggbb colour's hue in degrees. */
+function hue(colour: string): number {
+  const [r, g, b] = [1, 3, 5].map((at) => parseInt(colour.slice(at, at + 2), 16));
+  const high = Math.max(r!, g!, b!);
+  const range = high - Math.min(r!, g!, b!);
+  const sector = high === r ? ((g! - b!) / range + 6) % 6 : high === g ? (b! - r!) / range + 2 : (r! - g!) / range + 4;
+
+  return sector * 60;
+}
+
 function contrast(text: string, background: string): number {
   const [high, low] = [luminance(text), luminance(background)].sort((x, y) => y - x);
 
@@ -81,6 +106,59 @@ describe('the theme copy', () => {
 
     // VS Code's light terminal palette: its white is a mid grey, so white text stays visible on a light background.
     expect(blocks().light.get('--vscode-terminal-ansiWhite')).toBe('#555555');
+  });
+
+  it('gives row stripes status colours that show on every row background and stay apart in hue, lightness and with protanopia or deuteranopia', () => {
+    const theme = PAGE_ASSETS['theme.css']!.body;
+    const page = PAGE_ASSETS['page.css']!.body;
+    const start = theme.indexOf('@media (prefers-color-scheme: light)');
+    const status = (text: string) => new Map([...text.matchAll(/--sb-status-(\w+): (#[0-9A-Fa-f]{6});/g)].map((match) => [match[1]!, match[2]!]));
+    const pageLight = /@media \(prefers-color-scheme: light\) \{\s*:root \{([^}]*)\}/.exec(page)?.[1] ?? '';
+    const { dark, light } = blocks();
+    const schemes = {
+      dark: { status: status(theme.slice(0, start)), backgrounds: [dark.get('--vscode-sideBar-background')!, dark.get('--vscode-list-hoverBackground')!, dark.get('--vscode-list-activeSelectionBackground')!] },
+      light: { status: status(theme.slice(start)), backgrounds: [light.get('--vscode-sideBar-background')!, light.get('--vscode-list-hoverBackground')!, /--sb-row-selected: (#[0-9A-Fa-f]{6});/.exec(pageLight)?.[1] ?? ''] },
+    };
+
+    // The dark selected row is the list's selection colour; the light one is the page's own.
+    expect(page).toMatch(/^:root \{[^}]*--sb-row-selected: var\(--vscode-list-activeSelectionBackground\);/m);
+
+    for (const [scheme, { status: colours, backgrounds }] of Object.entries(schemes)) {
+      expect([...colours.keys()].sort(), scheme).toEqual(['error', 'turn', 'warning']);
+      const [warning, error, turn] = [colours.get('warning')!, colours.get('error')!, colours.get('turn')!];
+
+      for (const [name, colour] of colours) {
+        for (const background of backgrounds) {
+          expect(contrast(colour, background), `${name} on ${background} in ${scheme}`).toBeGreaterThanOrEqual(3);
+        }
+      }
+
+      // Amber, red and blue.
+      expect(hue(warning), `warning in ${scheme}`).toBeGreaterThanOrEqual(40);
+      expect(hue(warning), `warning in ${scheme}`).toBeLessThanOrEqual(55);
+      expect(Math.min(hue(error), 360 - hue(error)), `error in ${scheme}`).toBeLessThanOrEqual(10);
+      expect(hue(turn), `turn in ${scheme}`).toBeGreaterThanOrEqual(200);
+      expect(hue(turn), `turn in ${scheme}`).toBeLessThanOrEqual(220);
+      // Warning is clearly lighter than error, so the two differ where their hues do not.
+      expect(lab(warning)[0] - lab(error)[0], `lightness in ${scheme}`).toBeGreaterThanOrEqual(20);
+
+      for (const vision of ['protanopia', 'deuteranopia'] as const) {
+        for (const [a, b] of [[warning, error], [warning, turn], [error, turn]] as const) {
+          const [p, q] = [lab(a, vision), lab(b, vision)];
+
+          expect(Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]), `${a} and ${b} with ${vision} in ${scheme}`).toBeGreaterThanOrEqual(25);
+        }
+      }
+    }
+
+    for (const tone of ['warning', 'error', 'turn']) {
+      expect(page).toContain(`.row.stripe-${tone}::before { background: var(--sb-status-${tone}); }`);
+      expect(page).toContain(`.sliver > .stripe-${tone} { background: var(--sb-status-${tone}); }`);
+    }
+
+    // Returned's outline and fill take the warning status colour; warning text keeps the readable editorWarning colour.
+    expect(page).toContain('.row-line .pill.returned { border-color: var(--sb-status-warning); background: color-mix(in srgb, var(--sb-status-warning) 18%, transparent); color: var(--vscode-editorWarning-foreground); }');
+    expect(page).toContain('.row-details .row-detail.warning { color: var(--vscode-editorWarning-foreground); }');
   });
 
   it("draws the page's own colours, its surfaces and the composer's light fill from variables that follow the scheme", () => {
