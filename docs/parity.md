@@ -85,7 +85,7 @@ The dock's list is in `apps/dock/src/Switchboard.Dock/Views/`, the page's in `pa
 | # | Behaviour | Web | Note |
 |---|---|---|---|
 | M1 | Mark codicon per kind from `MARK_GLYPHS`/`MARK_ICONS`, its meaning as tooltip | Present | |
-| M2 | Running and Triaging marks spin | Present | |
+| M2 | Running and Triaging marks spin, under reduced motion too | Present | Every spinner on the page and in the Conversation view also spins under reduced motion (the operator's decision) |
 | M3 | Mark colour: every mark in the foreground colour and only Failed in the error colour | Present | The conversation header's and dropdown's state icons keep their tones ([architecture.md § Conversation view](architecture.md#conversation-view)) |
 | M4 | Left stripe 3 px, inset 8 px top and bottom: error (failed), warning (blocked or asking), turn in the focus blue (operator's turn in review); none on the agent's turn or snoozed | Present | |
 | M5 | The selected row's stripe is full height | Present | |

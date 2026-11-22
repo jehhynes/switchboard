@@ -29,11 +29,13 @@ describe('the shared mark icons', () => {
 describe('the spinning codicons', () => {
   const page = PAGE_ASSETS['page.css']!.body;
 
-  it('all stop under reduced motion, though codicon.css spins the loading glyph with a selector that outranks one class', () => {
-    // The running mark, Thinking… and the attachment chips spin through this rule, which a bare `.codicon-modifier-spin { animation: none }` loses to.
-    expect(css).toMatch(/\.codicon-loading\.codicon-modifier-spin,[^{}]*\{[^}]*animation: codicon-spin/);
-    expect(page).toContain('@media (prefers-reduced-motion: reduce) { .codicon-modifier-spin { animation: none !important; } }');
-    // No narrower reduced-motion rule for one surface, which is how the header's state icon came to stop alone.
-    expect(page.match(/prefers-reduced-motion: reduce\) \{[^{}]*modifier-spin/g)).toHaveLength(1);
+  it('keep spinning under reduced motion, as the dock and the Conversation view do, while the other reduced-motion rules stay', () => {
+    // Each reduced-motion block whole, over as many lines as it takes.
+    const reduced = page.split(/@media\s*\(prefers-reduced-motion:\s*reduce\)/).slice(1).map((rest) => rest.slice(0, rest.indexOf('}\n') + 1).replace(/\s+/g, ' '));
+
+    expect(page).toMatch(/\.codicon-modifier-spin \{ animation: codicon-spin /);
+    expect(reduced.filter((rule) => /spin/.test(rule))).toEqual([]);
+    expect(reduced.some((rule) => rule.includes('.composer .mic .codicon { animation: none; }'))).toBe(true);
+    expect(reduced.length).toBeGreaterThan(1);
   });
 });

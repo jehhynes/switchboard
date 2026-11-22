@@ -386,6 +386,15 @@ describe('the Conversation view page', () => {
     expect(renderConversation(state([reply('r1', T0)], { more: true }))).toContain('data-action="earlier"');
   });
 
+  it('keeps its spinners spinning under vscode-reduce-motion, as the web page and the dock do, and stops only the mic pulse', () => {
+    const css = readFileSync(join(__dirname, '../src/webview/conversation.css'), 'utf8');
+    // Each rule whose selector names vscode-reduce-motion, wherever it starts and however many lines it takes.
+    const reduced = (css.match(/[^{}]*vscode-reduce-motion[^{}]*\{[^}]*\}/g) ?? []).map((rule) => rule.trim().replace(/\s+/g, ' '));
+
+    expect(css).toContain('.codicon.state-icon.codicon-modifier-spin { animation: codicon-spin 1.1s linear infinite; }');
+    expect(reduced).toEqual(['body.vscode-reduce-motion .composer .mic .codicon { animation: none; }']);
+  });
+
   it("draws the composer from the composer.css it shares with the web page: a fill between the side bar and the input colour, and no rule of its own for the box", () => {
     const css = readFileSync(join(__dirname, '../src/webview/conversation.css'), 'utf8');
     const shared = readFileSync(require.resolve('@switchboard/conversation/composer.css'), 'utf8');
