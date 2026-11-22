@@ -204,7 +204,7 @@ describe('the installable page', () => {
     // the top, opaque and z-index 10, so iOS's top-edge hit test (4 px down) finds it, paints the status bar in its colour and drops its blur.
     expect(css).toContain(':root { --sb-top: env(safe-area-inset-top); }\n');
     expect(css).not.toMatch(/--sb-top: max\(/);
-    expect(css).toContain('.header, .list-header, .hist-bar, .settings-head { position: sticky; top: 0; z-index: 10; }');
+    expect(css).toContain('.header, .list-header, .hist-bar, .settings-head, .persona-head { position: sticky; top: 0; z-index: 10; }');
     expect(css).toMatch(/(^|\n)\.header \{[^}]*background: var\(--sb-bar-background\);/);
     expect(css).not.toMatch(/(^|\n)\.header \{[^}]*position: relative/);
     expect(css).toMatch(/(^|\n)\.list-header \{[^}]*background: var\(--sb-bar-background\);/);

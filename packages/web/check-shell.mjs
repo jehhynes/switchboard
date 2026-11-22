@@ -1,5 +1,6 @@
 // Checks the page's shell at iPhone sizes and an iPad's in a real headless Chrome or Edge (testing.md § Web page shell check): in the installed
-// app's standalone mode, portrait and landscape, light and dark, the list, a conversation, an empty one, History, Settings, the drawer and a sheet.
+// app's standalone mode, portrait and landscape, light and dark, the list, a conversation, an empty one, History, Settings, the drawer, a sheet
+// and the persona dialog.
 // Nothing outside the scrollers can move: the document is exactly the viewport, nothing reaches past it outside a scroller, every scroller keeps
 // a drag to itself, and the page outside the scrollers takes no pan. Chrome has no display-mode emulation, so the page's standalone rules are
 // applied to every width here, and safe-area insets come from the DevTools protocol.
@@ -20,7 +21,7 @@ const SIZES = [
   { device: 'iphone', orientation: 'landscape', width: 852, height: 393, screen: [852, 393], insets: { top: 0, bottom: 21, left: 59, right: 59 }, phone: true },
   { device: 'ipad', orientation: 'landscape', width: 1180, height: 796, screen: [1180, 820], insets: { top: 0, bottom: 20, left: 0, right: 0 }, phone: false },
 ];
-const VIEWS = ['list', 'conversation', 'empty', 'history', 'settings', 'drawer', 'sheet'];
+const VIEWS = ['list', 'conversation', 'empty', 'history', 'settings', 'drawer', 'sheet', 'persona'];
 const report = process.argv.includes('--report');
 /** --shots <dir> saves a screenshot of each view there. */
 const shots = process.argv.includes('--shots') ? process.argv[process.argv.indexOf('--shots') + 1] : null;
@@ -49,7 +50,8 @@ const remove = { label: 'Delete', action: 'delete', icon: 'trash', group: 'state
 const groups = [{ key: 'progress', title: 'In progress', glyph: '\u{ea70}', empty: null, rows: [row(1, 'Fix it', { history: { ticketId: 1, key: 'gh 1' }, actions: [remove] }), row(2, 'Another thing')] }];
 const open = view !== 'list' && view !== 'settings';
 const scope = open ? { kind: 'page', key: 'k', folder: 'D:/w', title: 'Fix it', scopeGen: 3, conversations: [{ workItemId: 1, title: 'Fix it', primary: true, sessionId: 's', state: 'idle', conversation: 'full', unread: 0 }], workItemId: 1, cwd: 'D:/w', sessionId: 's' } : null;
-const session = { id: 's', title: 'Task session s', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, persona: null };
+const session = { id: 's', title: 'Task session s', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, persona: view === 'persona' ? { id: 'nova', name: 'Nova', pinned: true, tonePending: false } : null, canPin: true };
+const personas = [{ id: 'nova', name: 'Nova', voice: 'cedar', style: 'pair', personality: 'Warm and brief, with a dry joke now and then.' }, { id: 'iris', name: 'Iris', voice: 'marin', style: 'none', personality: '' }];
 const items = [];
 for (let i = 0; view !== 'empty' && open && i < 30; i++) {
   items.push({ type: 'message', id: 'm' + i, sessionId: 's', workItemId: 1, at: now - 100000 + i * 2000, ord: i * 2, provisional: false, withdrawn: false, origin: 'typed', text: 'Message ' + i, delivery: 'sent', error: null });
@@ -64,7 +66,7 @@ class FakeSource {
   emit(type, data) { for (const listener of this.listeners[type] ?? []) listener({ data: JSON.stringify({ type, ...data }) }); }
 }
 window.EventSource = FakeSource;
-window.fetch = async () => ({ status: 200, ok: true, headers: new Headers(), json: async () => ({}), text: async () => '' });
+window.fetch = async (url) => ({ status: 200, ok: true, headers: new Headers(), json: async () => (String(url).endsWith('/personas') ? { personas } : {}), text: async () => '' });
 const matchMedia = window.matchMedia.bind(window);
 window.matchMedia = (query) => (query.includes('display-mode: standalone') ? { matches: true, media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} } : matchMedia(query));
 </script>`;
@@ -112,7 +114,7 @@ const measure = `(() => {
     })(),
     bar: (() => { const probe = document.createElement('div'); probe.style.background = 'var(--sb-bar-background)'; document.body.append(probe); const colour = getComputedStyle(probe).backgroundColor; probe.remove(); return colour; })(),
     band: document.getElementById('safe-top').getBoundingClientRect().height,
-    tops: { header: top('.header'), listHeader: top('.list-header'), historyBar: top('.hist-bar'), settingsHead: top('.settings-head'), tabs: top('.tabs'), panel: top('#panel'), list: top('#list') },
+    tops: { header: top('.header'), listHeader: top('.list-header'), historyBar: top('.hist-bar'), settingsHead: top('.settings-head'), personaHead: top('.persona-head'), tabs: top('.tabs'), panel: top('#panel'), list: top('#list') },
   };
 })()`;
 
@@ -122,6 +124,7 @@ const OPEN = {
   settings: ['[data-action=list-more]', '[data-action=list-settings]'],
   drawer: ['[data-action=drawer]'],
   sheet: ['[data-action=actions]', '[data-action=row-action][data-label=Delete]'],
+  persona: ['[data-action=view-menu]', '[data-action=persona]'],
 };
 
 /** Checks one view's measurements; answers its failures. */
@@ -138,15 +141,15 @@ function failures(view, size, m) {
   // No band above the bars: under the opaque status bar the top inset is 0, and each view's top bar starts at the page's top edge.
   if (m.band !== 0) out.push('a ' + m.band + ' px band above the bars');
   for (const [bar, top] of Object.entries(m.tops)) {
-    // The dialog Settings, outside the phone's layout, sits inside the dimmed page's margin.
-    if ((['header', 'listHeader', 'historyBar'].includes(bar) || (bar === 'settingsHead' && size.phone)) && top !== null && top !== 0) out.push('the ' + bar + ' starts ' + top + ' px down');
+    // The dialogs, Settings and the persona dialog, outside the phone's layout sit inside the dimmed page's margin.
+    if ((['header', 'listHeader', 'historyBar'].includes(bar) || (['settingsHead', 'personaHead'].includes(bar) && size.phone)) && top !== null && top !== 0) out.push('the ' + bar + ' starts ' + top + ' px down');
   }
   // In portrait, under the status bar, WebKit finds the view's own solid top bar at the top edge, in the bars' colour, and paints the status bar in
   // it instead of blurring the page's top. An open sheet's dimmed backdrop is viewport-sized, which keeps the colour WebKit had. Landscape has no
   // status bar, so no colour is painted there, and its bars, inside the notch's insets, are under 90% of the width. The iPad is not checked for it.
   if (size.device === 'iphone' && size.orientation === 'portrait') {
     const edge = m.edge;
-    const own = view === 'sheet' ? edge.kind === 'viewport' : edge.kind === 'bar' && /^[a-z]+\.(header|list-header|hist-bar|settings-head)(\.|$)/.test(edge.name ?? '');
+    const own = view === 'sheet' ? edge.kind === 'viewport' : edge.kind === 'bar' && /^[a-z]+\.(header|list-header|hist-bar|settings-head|persona-head)(\.|$)/.test(edge.name ?? '');
 
     if (!own) out.push('WebKit finds ' + (edge.name ?? 'no fixed or sticky box (hit ' + edge.hit + ')') + (edge.kind ? ' (' + edge.kind + ')' : '') + ' at the top edge, not the view\'s top bar');
     else if (edge.kind === 'bar' && (edge.top !== 0 || edge.height <= 10 || edge.background !== m.bar)) out.push('the top bar ' + edge.name + ' is at ' + edge.top + ', ' + edge.height + ' px tall, ' + edge.background + ' for the bars\' ' + m.bar);

@@ -152,8 +152,8 @@ export interface View {
   artifact: string | null;
   /** What the operator picked or typed for a Codex request's questions, by `<request ID>:<question ID>`. */
   requestValues: Map<string, string>;
-  /** The header's persona menu while open: the roster, null while it loads, or why it could not. */
-  personas: { items: Array<{ id: string; name: string }> | null; error: string | null } | null;
+  /** The persona dialog while open: the roster, null while it loads, or why it could not. */
+  personas: { items: Array<{ id: string; name: string; voice?: string; style?: string; personality?: string }> | null; error: string | null } | null;
   /** The list's collapsed groups, by key. */
   collapsed: Set<string>;
   /** The Done bands the operator opened or closed, by `<group>:<band>`; the rest follow `OPEN_BANDS`. Kept until the page reloads, as the dock keeps them until it exits. */

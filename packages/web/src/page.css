@@ -31,7 +31,7 @@ body { color: var(--vscode-foreground); background: var(--vscode-editor-backgrou
    at least 90% of the width and reads the colour of one over 10 px tall), paints the status bar in its colour and drops the blur it draws over
    the page's top otherwise. Sticky makes each a stacking context: z-index 10 keeps their menus over the tabs, the sash and the list, and the
    composer's menu (10, later) over the header. */
-.header, .list-header, .hist-bar, .settings-head { position: sticky; top: 0; z-index: 10; }
+.header, .list-header, .hist-bar, .settings-head, .persona-head { position: sticky; top: 0; z-index: 10; }
 /* The installed app's title bar takes the page's colour, so a line along the band's bottom edge marks where the title bar ends. */
 @media (display-mode: standalone) { body::before { content: ''; position: fixed; inset: var(--sb-top) 0 auto 0; z-index: 1000; height: 1px; background: var(--vscode-titleBar-border, var(--vscode-widget-border)); pointer-events: none; } }
 /* Safe areas (viewport-fit=cover): on a phone the page keeps out of the notch, the rounded corners and the home indicator. The bars' colour
@@ -301,15 +301,14 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 .header { display: flex; align-items: center; gap: 4px; padding: 6px 6px 6px 12px; border-bottom: 1px solid var(--vscode-panel-border); background: var(--sb-bar-background); user-select: none; }
 .picker-anchor { flex: 1 1 0; min-width: 6em; }
 button.picker { flex: 1 1 auto; min-width: 0; overflow: hidden; display: flex; align-items: center; gap: 6px; border: none; color: inherit; padding: 6px 6px; cursor: pointer; text-align: left; font-weight: 500; }
-button.persona:hover, button.icon:hover, a.icon:hover { background: var(--vscode-toolbar-hoverBackground); }
+button.icon:hover, a.icon:hover { background: var(--vscode-toolbar-hoverBackground); }
 button.picker .title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-button.picker > .codicon, button.picker > .provider, button.picker > .count, .persona-anchor, .header > button.icon { flex: none; }
+button.picker > .codicon, button.picker > .provider, button.picker > .count, .header > button.icon { flex: none; }
 .provider { flex: none; display: inline-flex; align-items: center; color: var(--vscode-foreground); font-size: 16px; }
-/* The persona is an icon, its name in its tooltip and accessible name; dimmed while its tone waits for a resume. */
-button.persona { display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: none; background: transparent; color: var(--vscode-descriptionForeground); padding: 0; border-radius: 4px; cursor: pointer; }
-button.persona.pending .codicon { opacity: 0.6; }
+/* The view options menu's Persona… row dims its icon while the persona's tone waits for a resume. */
+.persona-row.pending .menu-gutter .codicon { opacity: 0.6; }
 button.icon, a.icon { display: inline-flex; align-items: center; border: none; background: transparent; color: var(--vscode-icon-foreground); padding: 3px; border-radius: 4px; cursor: pointer; }
-/* Every icon button in the header, inside a menu's anchor or not, is 26 px square, as Actions and the persona are. */
+/* Every icon button in the header, inside a menu's anchor or not, is 26 px square, as Actions is. */
 .header button.icon { justify-content: center; min-width: 26px; height: 26px; }
 /* Floating layers that overlap content (menus, the @ and / lists, the New messages pill) share one glass, as VS Code's own context menu: the
    menu colour mostly opaque over a blur of what is behind, a hairline border and a soft shadow; fully opaque where backdrop-filter is missing. */
@@ -619,8 +618,8 @@ body.artifact-window > .artifact-view { height: 100%; }
 @media (hover: none), (pointer: coarse) {
   .code-block > .copy { opacity: 1; }
   .meta .copy { display: none; }
-  button.picker, button.persona, .tab, .composer-tool, .send, .voice-controls .ghost, .row, .group-head, .question-option, .show-more, .earlier-items, .question-submit, .artifact-open, .artifact-head .icon, .composer-error .dismiss { min-height: 44px; }
-  button.persona, .composer-tool, .send, .voice-controls .ghost.icon, .artifact-head .icon, .composer-error .dismiss { min-width: 44px; }
+  button.picker, .tab, .composer-tool, .send, .voice-controls .ghost, .row, .group-head, .question-option, .show-more, .earlier-items, .question-submit, .artifact-open, .artifact-head .icon, .composer-error .dismiss { min-height: 44px; }
+  .composer-tool, .send, .voice-controls .ghost.icon, .artifact-head .icon, .composer-error .dismiss { min-width: 44px; }
   .attachments { gap: 12px 8px; }
   .attachment { min-height: 28px; }
   .attachment-remove { position: relative; }
@@ -640,8 +639,8 @@ body.artifact-window > .artifact-view { height: 100%; }
 }
 /* On a touch screen every icon button in the bars, inside a menu's anchor or not, is at least 44 px square, with its glyph at 20 px, centred. */
 @media (hover: none), (pointer: coarse) {
-  :is(.header, .list-header, .hist-bar, .settings-head, .artifact-head, .changes-head) :is(button.icon, a.icon, button.actions, button.persona) { min-width: 44px; min-height: 44px; align-items: center; justify-content: center; }
-  :is(.header, .list-header, .hist-bar, .settings-head, .artifact-head, .changes-head) :is(button.icon, a.icon, button.actions, button.persona) > .codicon { font-size: 20px; line-height: 1; }
+  :is(.header, .list-header, .hist-bar, .settings-head, .persona-head, .artifact-head, .changes-head) :is(button.icon, a.icon, button.actions) { min-width: 44px; min-height: 44px; align-items: center; justify-content: center; }
+  :is(.header, .list-header, .hist-bar, .settings-head, .persona-head, .artifact-head, .changes-head) :is(button.icon, a.icon, button.actions) > .codicon { font-size: 20px; line-height: 1; }
 }
 /* A narrow screen gives the conversation its width: less padding round the timeline and the composer. */
 @media (max-width: 600px) {
@@ -694,6 +693,42 @@ button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }
 .sheet-button.primary:hover { background: var(--vscode-button-hoverBackground); }
 .sheet-button.secondary { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
 .sheet-button:disabled { opacity: 0.5; cursor: default; }
+/* The persona dialog, as Settings: centred over the dimmed page in the glass of the page's floating layers, the whole screen on a phone. */
+.persona-backdrop { position: fixed; inset: 0; z-index: 55; display: flex; align-items: center; justify-content: center; padding: max(24px, var(--sb-top)) max(24px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left)); background: rgba(0, 0, 0, 0.45); }
+.persona-dialog { box-sizing: border-box; display: flex; flex-direction: column; width: min(560px, 100%); max-height: min(80vh, 100%); overflow: hidden; border-radius: 8px; box-shadow: 0 8px 32px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.5)); }
+.persona-head { flex: none; display: flex; align-items: center; gap: 4px; min-height: 35px; padding: 0 4px 0 12px; border-bottom: 1px solid var(--vscode-menu-separatorBackground, var(--vscode-panel-border)); }
+.persona-title { flex: 1; margin: 0; font-size: 13px; font-weight: 600; }
+.persona-head button.icon { justify-content: center; min-width: 26px; height: 26px; }
+.persona-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 8px; }
+.persona-list { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.persona-option { display: flex; align-items: flex-start; gap: 6px; box-sizing: border-box; width: 100%; padding: 8px 10px 8px 4px; border: none; border-radius: 4px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.persona-option .menu-gutter { padding-top: 2px; }
+.persona-option.current { background: var(--vscode-list-inactiveSelectionBackground, color-mix(in srgb, var(--vscode-focusBorder) 18%, transparent)); color: var(--vscode-list-inactiveSelectionForeground, inherit); }
+.persona-option:hover, .persona-option:focus-visible { background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground)); color: var(--vscode-menu-selectionForeground, inherit); }
+.persona-option:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+.persona-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.persona-name { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; font-weight: 600; overflow-wrap: anywhere; }
+.persona-tag { font-size: 12px; font-weight: normal; color: var(--vscode-descriptionForeground); }
+.persona-option:hover .persona-tag, .persona-option:focus-visible .persona-tag { color: inherit; }
+.persona-meta { font-size: 12px; color: var(--vscode-descriptionForeground); }
+.persona-option:hover .persona-meta, .persona-option:focus-visible .persona-meta { color: inherit; opacity: 0.85; }
+.persona-personality { white-space: pre-wrap; overflow-wrap: anywhere; }
+.persona-message { margin: 8px 4px; }
+.persona-note { margin: 4px 4px 8px; font-size: 12px; color: var(--vscode-descriptionForeground); }
+.persona-bar { flex: none; display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-top: 1px solid var(--vscode-menu-separatorBackground, var(--vscode-panel-border)); }
+.persona-bar .persona-note { flex: 1; margin: 0; }
+/* On a phone it is full screen, opaque in the bars' colour, keeping out of the top and side safe areas, its bar running to the bottom edge with the
+   home indicator's inset inside it, as full-screen Settings does. */
+:where(html.phone) .persona-backdrop { padding: var(--sb-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); background: var(--sb-bar-background); }
+:where(html.phone) .persona-dialog.glass { width: 100%; height: 100%; max-height: none; border: none; border-radius: 0; box-shadow: none; background: var(--sb-bar-background); -webkit-backdrop-filter: none; backdrop-filter: none; }
+:where(html.phone) .persona-head { background: var(--sb-bar-background); }
+:where(html.phone) .persona-body { padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
+:where(html.phone) .persona-bar { flex-wrap: wrap; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); }
+:where(html.phone) .persona-body:has(+ .persona-bar) { padding-bottom: 8px; }
+}
+@media (hover: none), (pointer: coarse) {
+  .persona-option { min-height: 44px; }
+}
 @media (hover: none), (pointer: coarse) {
   .header > button.row-main, button.actions, .sheet-button { min-height: 44px; min-width: 44px; }
   .actions-menu .menu-row, .sheet-choice { min-height: 44px; height: auto; }

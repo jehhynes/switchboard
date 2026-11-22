@@ -15,6 +15,7 @@ import { menuRows, renderHeader, renderSideSwitch, renderTabs } from './header.j
 import { CHAT_MIN, chatNeed, DETAIL_MIN, fitLayout, isPhone, sideWidth, type Layout } from './layout.js';
 import { renderTimeline } from './timeline.js';
 import { renderArtifacts, renderArtifactView, renderEmpty, renderStatus } from './side.js';
+import { renderPersonaDialog } from './personas.js';
 import { renderSheet } from './sheet.js';
 import { renderComposer, renderComposerMenu, renderEndedNote, renderFrame, renderShared } from './composer.js';
 import { listHeader } from './listHeader.js';
@@ -146,6 +147,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const composerHost = root.querySelector<HTMLElement>('#composer')!;
   const note = root.querySelector<HTMLElement>('#note')!;
   const sheetHost = root.querySelector<HTMLElement>('#sheet')!;
+  // The persona dialog over the whole page, as Settings is.
+  const personaHost = root.appendChild(document.createElement('div'));
+  let personaCovers = false;
+  // The scope generation the persona dialog opened for, and each opening's number, so a late roster answer fills only the dialog that asked.
+  let personaScope: number | null = null;
+  let personaAsks = 0;
   const detailHead = root.querySelector<HTMLElement>('#detail .detail-head')!;
   const detailBody = root.querySelector<HTMLElement>('#detail .detail-body')!;
   const historyHost = root.querySelector<HTMLElement>('#history')!;
@@ -1843,6 +1850,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // A search shows only the rows that match, in every group, open (PRD R63).
     const listed = header.list(state.groups);
     mount(sheetHost, renderSheet(view.sheet, view.acting));
+
+    // The persona dialog belongs to the conversation it opened for, so it closes when another replaces it, before a pick could pin that one's session.
+    if (view.personas !== null && (state.scope === null || state.scope.scopeGen !== personaScope)) {
+      view.personas = null;
+    }
+
+    mount(personaHost, renderPersonaDialog(state.session?.persona, view.personas));
+    coverForPersonas(view.personas !== null);
     mount(list, renderListPane(expired, listError, renderList(listed.groups, state.scope?.workItemId ?? null, view.collapsed, listed.filtering, poolMenu(), view.bands, !paneWorks()), header.end(listed.groups)));
     // Each draw shows line 2's pills whole until `fitLines` fits them again after the redraw, as a list drawn afresh would.
     list.querySelectorAll('.pill.compact, .pill.omitted').forEach((pill) => pill.classList.remove('compact', 'omitted'));
@@ -1999,6 +2014,26 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     view.artifactFit = fit;
     return changed;
+  };
+  // Makes the rest of the page inert while the persona dialog shows, so Tab and clicks reach only the dialog, as Settings does.
+  function coverForPersonas(on: boolean): void {
+    if (on === personaCovers) {
+      return;
+    }
+
+    personaCovers = on;
+
+    for (const child of root.children) {
+      if (child !== personaHost) {
+        child.toggleAttribute('inert', on);
+      }
+    }
+  }
+  /** Closes the persona dialog and gives the focus back to the view options button, under which Persona… opened it. */
+  const closePersonas = (): void => {
+    view.personas = null;
+    draw();
+    head.querySelector<HTMLElement>('button.view-options')?.focus();
   };
   const draw = (): void => {
     drawRegions();
@@ -2457,7 +2492,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     root,
     host: root.querySelector<HTMLElement>('.main')!,
     under: drawer,
-    enabled: () => isPhone() && !root.classList.contains('listing') && shownHistory === null && document.querySelector('.menu, [role="menu"], [role="listbox"]:not([hidden]), .sheet-backdrop, .settings-backdrop') === null,
+    enabled: () => isPhone() && !root.classList.contains('listing') && shownHistory === null && document.querySelector('.menu, [role="menu"], [role="listbox"]:not([hidden]), .sheet-backdrop, .settings-backdrop, .persona-backdrop') === null,
     back,
     reducedMotion: () => typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
   });
@@ -2598,22 +2633,25 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         view.providers = null;
         view.picker = !view.picker;
         // One header menu at a time.
-        view.personas = null;
         view.actions = false;
         view.viewMenu = false;
         draw();
         break;
       case 'persona':
-        view.actions = false;
-        view.viewMenu = false;
         void choosePersona();
+        break;
+      case 'persona-close':
+        // A press on the dialog itself is not one on its backdrop.
+        if (!button!.classList.contains('persona-backdrop') || target === button) {
+          closePersonas();
+        }
+
         break;
       case 'actions':
         view.actions = !view.actions;
         view.linkMenu = false;
         view.rowMenu = null;
         view.picker = false;
-        view.personas = null;
         view.viewMenu = false;
         draw();
         break;
@@ -2679,7 +2717,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
         closeMenus();
         view.picker = false;
-        view.personas = null;
         view.rowMenu = open ? null : key;
         draw();
         // A row near the list's end keeps its menu in view.
@@ -2708,8 +2745,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         void pressPromptKey(button!.dataset['promptKey'] ?? '');
         break;
       case 'persona-pick':
-        view.personas = null;
-        draw();
+        // A pick applies at once and closes the dialog.
+        closePersonas();
 
         if (state.session !== null) {
           void command('persona', { sessionId: state.session.id, personaId: button!.dataset['persona'] || null }).then((answer) => answer.status === 200 || showError(String(answer.body['error'] ?? 'The persona was not pinned.')));
@@ -2809,7 +2846,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         // One header menu at a time.
         view.providers = null;
         view.picker = false;
-        view.personas = null;
         view.actions = false;
         draw();
         break;
@@ -2939,10 +2975,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       draw();
     }
 
-    if ((view.picker || view.personas !== null || view.actions || view.providers !== null || view.viewMenu) && !(event.target instanceof Node && head.querySelector('.header')?.contains(event.target) === true)) {
+    if ((view.picker || view.actions || view.providers !== null || view.viewMenu) && !(event.target instanceof Node && head.querySelector('.header')?.contains(event.target) === true)) {
       view.providers = null;
       view.picker = false;
-      view.personas = null;
       view.actions = false;
       view.viewMenu = false;
       draw();
@@ -2983,7 +3018,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
-    if (event.key === 'Escape' && view.sheet !== null) {
+    if (event.key === 'Escape' && view.personas !== null) {
+      closePersonas();
+      event.stopImmediatePropagation();
+    } else if (event.key === 'Escape' && view.sheet !== null) {
       view.sheet = null;
       draw();
       event.stopImmediatePropagation();
@@ -3000,13 +3038,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       draw();
       list.querySelector<HTMLElement>(`[data-action="pool-menu"][data-row="${opener}"]`)?.focus();
       event.stopImmediatePropagation();
-    } else if (event.key === 'Escape' && (view.picker || view.personas !== null || view.actions || view.providers !== null || view.viewMenu)) {
-      const opener = view.picker || view.providers !== null ? 'button.picker' : view.actions ? 'button.actions' : view.viewMenu ? 'button.view-options' : 'button.persona';
+    } else if (event.key === 'Escape' && (view.picker || view.actions || view.providers !== null || view.viewMenu)) {
+      const opener = view.picker || view.providers !== null ? 'button.picker' : view.actions ? 'button.actions' : 'button.view-options';
 
       view.providers = null;
-
       view.picker = false;
-      view.personas = null;
       view.actions = false;
       view.viewMenu = false;
       draw();
@@ -3019,7 +3055,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     } else if (event.key === 'Escape' && view.drawer !== null) {
       closeDrawer();
       event.stopImmediatePropagation();
-    } else if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && (view.picker || view.personas !== null || view.actions || view.providers !== null || view.viewMenu || view.rowMenu !== null)) {
+    } else if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && (view.picker || view.actions || view.providers !== null || view.viewMenu || view.rowMenu !== null)) {
       // Up and Down move between a header menu's rows, or a pool row's menu's, as in a VS Code menu.
       const rows = [...(view.rowMenu !== null ? list.querySelectorAll<HTMLElement>('.row-menu .menu-row') : head.querySelectorAll<HTMLElement>('.header .menu .menu-row'))];
       const at = rows.indexOf(document.activeElement as HTMLElement);
@@ -3438,32 +3474,37 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
   };
 
-  /** The header's persona button: the roster in a menu under the header, as the dropdown is, and pinning one to the session. */
+  /** Persona… in the view options menu: the roster in the persona dialog, from which a pick pins a persona to the session. */
   const choosePersona = async (): Promise<void> => {
-    if (view.personas !== null) {
-      view.personas = null;
-      draw();
-      return;
-    }
-
+    view.viewMenu = false;
     view.picker = false;
+    view.providers = null;
+    view.actions = false;
+    personaScope = state.scope?.scopeGen ?? null;
     view.personas = { items: null, error: null };
     draw();
+    personaHost.querySelector<HTMLElement>('.persona-close')?.focus();
 
-    const shown = state.scope?.scopeGen;
+    const ask = ++personaAsks;
     const answer = await command('personas');
 
-    if (view.personas === null || shown !== state.scope?.scopeGen) {
+    // The dialog closed, or closed and opened again, or its conversation changed (drawRegions closes it then).
+    if (view.personas === null || ask !== personaAsks || personaScope !== state.scope?.scopeGen) {
       return;
     }
 
-    view.personas = answer.status === 200 ? { items: (answer.body['personas'] as Array<{ id: string; name: string }> | undefined) ?? [], error: null } : { items: null, error: String(answer.body['error'] ?? 'Switchboard did not answer.') };
+    view.personas = answer.status === 200 ? { items: (answer.body['personas'] as NonNullable<View['personas']>['items']) ?? [], error: null } : { items: null, error: String(answer.body['error'] ?? 'Switchboard did not answer.') };
 
     if (view.personas.items?.length === 0) {
       view.personas = { items: null, error: 'No personas. Add them to voice.personas in settings.json, with voice.enabled on.' };
     }
 
     draw();
+
+    // The current persona, else the first, takes the focus from Close once the roster shows, unless the operator moved it.
+    if (document.activeElement === personaHost.querySelector('.persona-close')) {
+      personaHost.querySelector<HTMLElement>('.persona-option.current, .persona-option')?.focus();
+    }
   };
 
   // ---- The Chrome pane (architecture.md § Pane state): the installed page reports its right column, wakes and pairs the extension ----
@@ -3484,7 +3525,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // The pane window stays above the page, so it hides while Settings, a sheet (the page's or the list header's) or History covers the page.
     const listSheet = root.querySelector('#list-sheet .sheet-backdrop') !== null;
 
-    if (!showBrowser() || state.key === null || state.scope === null || view.sheet !== null || listSheet || settingsPane.isOpen() || shownHistory !== null) {
+    if (!showBrowser() || state.key === null || state.scope === null || view.sheet !== null || view.personas !== null || listSheet || settingsPane.isOpen() || shownHistory !== null) {
       return null;
     }
 

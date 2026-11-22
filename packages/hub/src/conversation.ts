@@ -2058,7 +2058,7 @@ export class ConversationService {
   }
 
   /**
-   * `personas` (architecture.md § Personas): the roster the header offers, `[{id, name}]`, empty while `voice.enabled` is off. `persona
+   * `personas` (architecture.md § Personas): the roster the header offers, `[{id, name, voice, style, personality}]`, empty while `voice.enabled` is off. `persona
    * {sessionId, personaId | null}` pins a persona to the window's selected conversation's current session, or clears its pin; refused with 403
    * outside the scope, 409 for a stale `scopeGen`, while voice is off and with the flow's refusal.
    */
@@ -2081,7 +2081,7 @@ export class ConversationService {
     const settings = this.deps.personas?.() ?? null;
 
     if (name === 'personas') {
-      return { status: 200, body: { personas: settings === null || !settings.enabled ? [] : settings.personas.map((persona) => ({ id: persona.id, name: persona.name })) } };
+      return { status: 200, body: { personas: settings === null || !settings.enabled ? [] : settings.personas.map((persona) => ({ id: persona.id, name: persona.name, voice: persona.voice, style: persona.style, personality: persona.personality })) } };
     }
 
     if (settings === null || !settings.enabled || this.deps.pinPersona === undefined) {

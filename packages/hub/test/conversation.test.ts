@@ -1137,7 +1137,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     const command = (name: 'persona' | 'personas', patch: Record<string, unknown> = {}, window = mine.key) => service.personaCommand(name, { window, scopeGen: 1, opId: `o${++op}`, ...patch });
 
     expect(mine.frames[0]).toMatchObject({ type: 'hello', sessions: [{ id: 's2', persona: null }] });
-    expect(command('personas')).toEqual({ status: 200, body: { personas: [{ id: 'nova', name: 'Nova' }] } });
+    expect(command('personas')).toEqual({ status: 200, body: { personas: [{ id: 'nova', name: 'Nova', voice: 'cedar', style: 'pair', personality: 'Warm.' }] } });
     expect(command('persona', { sessionId: 's2', personaId: 'nova' })).toEqual({ status: 200, body: { persona: { id: 'nova', name: 'Nova', pinned: true, tonePending: true } } });
     expect(mine.frames.at(-1)).toMatchObject({ type: 'session', session: { id: 's2', persona: { name: 'Nova', pinned: true } } });
     expect(theirs.frames.filter((frame) => frame.type === 'session')).toMatchObject([{ session: { id: 's3', persona: null } }]);

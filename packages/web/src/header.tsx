@@ -1,5 +1,5 @@
 // The conversation's header (architecture.md § Web page): the dropdown of the selected work item's conversations, the row's actions, the
-// persona and the view options, and the tabs under it or the switch atop the side column.
+// view options with Persona…, and the tabs under it or the switch atop the side column.
 import type { ComponentChildren, VNode } from 'preact';
 import { providerMark } from '@switchboard/conversation/providerIcons';
 import { FileIcon } from './fileIcons.js';
@@ -161,10 +161,35 @@ function PaneRows({ view }: { view: View }) {
 }
 
 /**
- * The header's view options button and its menu: Show message details, Expand spoken replies on this computer's page, and the Chrome pane's
- * state and pairing while it is on.
+ * The view options menu's Persona… row, which opens the persona dialog, while the session has a persona or can take a pin: the persona's name,
+ * the pin icon and Pinned while one is pinned, dimmed while its tone waits for a resume.
  */
-function ViewOptions({ view, expandReplies }: { view: View; expandReplies: boolean }) {
+function PersonaRow({ session }: { session: PageState['session'] }) {
+  const persona = session?.persona;
+
+  if (persona == null && session?.canPin !== true) {
+    return null;
+  }
+
+  return (
+    <>
+      <div class="menu-separator" role="separator"></div>
+      <button type="button" class={`menu-row persona-row${persona?.tonePending === true ? ' pending' : ''}`} role="menuitem" aria-haspopup="dialog" data-action="persona" title={persona == null ? 'No persona. Choose one for this session.' : persona.tonePending ? 'Its tone reaches the session when it next resumes.' : undefined}>
+        <span class="menu-gutter" aria-hidden="true">
+          <span class={`codicon codicon-${persona?.pinned === true ? 'pinned' : 'person'}`}></span>
+        </span>
+        <span class="title">{persona == null ? 'Persona…' : `Persona: ${persona.name}…`}</span>
+        {persona?.pinned === true ? <span class="menu-note">Pinned</span> : null}
+      </button>
+    </>
+  );
+}
+
+/**
+ * The header's view options button and its menu: Show message details, Expand spoken replies on this computer's page, Persona…, and the Chrome
+ * pane's state and pairing while it is on.
+ */
+function ViewOptions({ view, expandReplies, session }: { view: View; expandReplies: boolean; session: PageState['session'] }) {
   return (
     <div class="menu-anchor view-options-anchor">
       <button type="button" class="icon view-options" data-action="view-menu" aria-haspopup="menu" aria-expanded={view.viewMenu} title="View options" aria-label="View options">
@@ -182,6 +207,7 @@ function ViewOptions({ view, expandReplies }: { view: View; expandReplies: boole
               <span class="title">Expand spoken replies</span>
             </button>
           ) : null}
+          <PersonaRow session={session} />
           <PaneRows view={view} />
         </div>
       ) : null}
@@ -198,27 +224,13 @@ function Message({ text }: { text: string }) {
   );
 }
 
-/** The header: the dropdown of the selected work item's conversations, its button drawn as its rows are, and the persona as an icon. */
+/** The header: the dropdown of the selected work item's conversations, its button drawn as its rows are, the row's actions and the view options. */
 export function renderHeader(state: PageState, view: View): VNode {
   const scope = state.scope!;
   const selected = selectedEntry(state);
   const title = selected?.title ?? scope.title;
   // The button carries the dot while a conversation the operator is not looking at has unseen items.
   const othersUnread = scope.conversations.some((entry) => entry.workItemId !== scope.workItemId && entry.unread > 0);
-  const persona = state.session?.persona;
-  const personaLabel = persona == null ? '' : `Persona: ${persona.name}${persona.pinned ? ', pinned' : ''}`;
-  const personaButton =
-    persona == null ? (
-      state.session?.canPin === true ? (
-        <button type="button" class="persona" data-action="persona" aria-haspopup="menu" aria-expanded={view.personas !== null} title="No persona. Click to choose one." aria-label="No persona. Click to choose one.">
-          <span class="codicon codicon-person" aria-hidden="true"></span>
-        </button>
-      ) : null
-    ) : (
-      <button type="button" class={`persona${persona.tonePending ? ' pending' : ''}`} data-action="persona" aria-haspopup="menu" aria-expanded={view.personas !== null} title={`${personaLabel}. Click to choose another.`} aria-label={personaLabel}>
-        <span class={`codicon codicon-${persona.pinned ? 'pinned' : 'person'}`} aria-hidden="true"></span>
-      </button>
-    );
   // After a separator, New conversation… as in the Conversation view; it opens the providers under the same button when there is a choice.
   const providers = view.providers;
   const providerRows =
@@ -262,36 +274,6 @@ export function renderHeader(state: PageState, view: View): VNode {
         </li>
       </ul>
     ) : null;
-  const menu = view.personas;
-  const personaRows =
-    menu === null
-      ? null
-      : menu.error !== null
-        ? <Message text={menu.error} />
-        : menu.items === null
-          ? <Message text="Loading…" />
-          : [
-              ...menu.items.map((one) => (
-                <li role="none">
-                  <button type="button" class="menu-row" role="menuitemradio" aria-checked={persona?.id === one.id} data-action="persona-pick" data-persona={one.id}>
-                    <Gutter checked={persona?.id === one.id} />
-                    <span class="title">{one.name}</span>
-                  </button>
-                </li>
-              )),
-              ...(persona?.pinned === true
-                ? [
-                    <Separator />,
-                    <li role="none">
-                      <button type="button" class="menu-row" role="menuitem" data-action="persona-pick" data-persona="">
-                        <Gutter checked={false} />
-                        <span class="title">Clear pin</span>
-                      </button>
-                    </li>,
-                  ]
-                : []),
-            ];
-
   return (
     <header class="header">
       <button type="button" class="icon back-toggle" data-action="back" title="Back to work items" aria-label="Back to work items">
@@ -315,17 +297,7 @@ export function renderHeader(state: PageState, view: View): VNode {
         {pickerMenu}
       </div>
       <Actions row={selectedRow(state)} view={view} console={hasConsole(state.session)} />
-      {personaButton === null ? null : (
-        <div class="menu-anchor persona-anchor">
-          {personaButton}
-          {menu === null ? null : (
-            <ul class="glass menu persona-menu" role="menu" aria-label="Persona">
-              {personaRows}
-            </ul>
-          )}
-        </div>
-      )}
-      <ViewOptions view={view} expandReplies={state.expandReplies} />
+      <ViewOptions view={view} expandReplies={state.expandReplies} session={state.session} />
     </header>
   );
 }

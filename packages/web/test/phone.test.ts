@@ -89,7 +89,7 @@ describe('the page on a phone', () => {
   });
 
   it("makes every icon button in the bars 44 px with its glyph at 20 px, centred, on a touch screen, without showing a button the layout hides", () => {
-    const touch = /@media \(hover: none\), \(pointer: coarse\) \{\n  :is\(\.header, [^)]*\) :is\(button\.icon, a\.icon, button\.actions, button\.persona\) \{([^}]*)\}\n  :is\([^)]*\) :is\([^)]*\) > \.codicon \{([^}]*)\}/.exec(css);
+    const touch = /@media \(hover: none\), \(pointer: coarse\) \{\n  :is\(\.header, [^)]*\) :is\(button\.icon, a\.icon, button\.actions\) \{([^}]*)\}\n  :is\([^)]*\) :is\([^)]*\) > \.codicon \{([^}]*)\}/.exec(css);
 
     expect(touch?.[1]).toContain('align-items: center; justify-content: center;');
     // By descent, not as a child, so the header's View options button inside its menu's anchor is as large as the buttons beside it.
