@@ -209,12 +209,15 @@ describe('drawing', () => {
     expect(host.querySelector('li[data-id="r1"] .meta > :last-child')?.className).toBe('stamp');
   });
 
-  it('dims the part of an interrupted passage not heard, and says Not spoken only when speech failed', () => {
-    const spoken = (state: ReplyView['spoken']['state']) => html(renderTimeline(pageState([reply('r1', 1, { opening: 'Fixed it. More.', speak: 'Fixed it.', spoken: { state, atMs: 7_400, saidChars: 3 } })]), newView()));
+  it('dims the part of an interrupted passage not heard, and says Not spoken only when speech failed, with message details on', () => {
+    const spoken = (state: ReplyView['spoken']['state'], details = true) => html(renderTimeline(pageState([reply('r1', 1, { opening: 'Fixed it. More.', speak: 'Fixed it.', spoken: { state, atMs: 7_400, saidChars: 3 } })]), { ...newView(), details }));
 
     expect(spoken('interrupted')).toContain('<div class="speech-bubble"><p class="passage">Fix<span class="unheard">ed it.</span></p></div>');
     expect(spoken('interrupted')).not.toContain('0:07');
     expect(spoken('failed')).toContain('<span>Not spoken</span>');
+    // Not spoken is a message detail, as in the Conversation view; the dimmed part of an interrupted passage is not.
+    expect(spoken('failed', false)).not.toContain('class="spoken');
+    expect(spoken('interrupted', false)).toContain('<span class="unheard">ed it.</span>');
     expect(spoken('playing')).not.toContain('class="unheard"');
 
     for (const routine of ['playing', 'interrupted', 'stopped-moved', 'played', 'queued'] as const) {

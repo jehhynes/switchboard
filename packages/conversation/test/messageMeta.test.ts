@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { metaLine, stamped, toneMark, voiceMark } from '../src/messageMeta.js';
+import { metaLine, spokenMark, stamped, toneMark, voiceMark } from '../src/messageMeta.js';
 
 const at = new Date(2026, 10, 20, 9, 5, 7).getTime();
 
@@ -24,5 +24,14 @@ describe('the message meta line shared by the Conversation view and the web page
     expect(toneMark('calm', false)).toBe('');
     expect(toneMark(null, true)).toBe('');
     expect(toneMark('<calm>', true)).toBe('<span class="tone" title="How the reply sounds when spoken: &#60;calm&#62;">&#60;calm&#62;</span>');
+  });
+
+  it('marks a reply whose speech failed as Not spoken only with message details on, and no other speech state', () => {
+    expect(spokenMark('failed', true)).toBe('<span class="spoken failed" title="Speaking this reply failed; see the voice log."><span class="codicon codicon-mute" aria-hidden="true"></span><span>Not spoken</span></span>');
+    expect(spokenMark('failed', false)).toBe('');
+
+    for (const state of ['playing', 'played', 'interrupted', 'skipped', 'stopped-moved', 'queued', 'none']) {
+      expect(spokenMark(state, true)).toBe('');
+    }
   });
 });

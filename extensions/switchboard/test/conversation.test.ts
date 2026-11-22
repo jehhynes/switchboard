@@ -981,13 +981,16 @@ describe('speech in the view (architecture.md § Voice)', () => {
     expect(item.querySelector('.tone')?.getAttribute('title')).toBe('How the reply sounds when spoken: calm and brief');
   });
 
-  it('dims the part of an interrupted passage not heard, and says Not spoken only when speech failed', () => {
-    const spoken = (state_: ReplyView['spoken']['state'], atMs: number | null = null, saidChars: number | null = null) =>
-      renderConversation(state([reply('r1', T0, { opening: 'Fixed it. More.', speak: 'Fixed it.', spoken: { state: state_, atMs, saidChars } })]));
+  it('dims the part of an interrupted passage not heard, and says Not spoken only when speech failed, with message details on', () => {
+    const spoken = (state_: ReplyView['spoken']['state'], atMs: number | null = null, saidChars: number | null = null, details = true) =>
+      renderConversation(state([reply('r1', T0, { opening: 'Fixed it. More.', speak: 'Fixed it.', spoken: { state: state_, atMs, saidChars } })]), new Set(), Date.now(), false, { tab: 'conversation', unopened: new Set(), details });
 
     expect(spoken('interrupted', 7_400, 3)).toContain('<div class="speech-bubble"><p class="passage">Fix<span class="unheard">ed it.</span></p></div>');
     expect(spoken('interrupted', 7_400, 3)).not.toContain('0:07');
     expect(spoken('failed')).toContain('<span>Not spoken</span>');
+    // Not spoken is a message detail; the dimmed part of an interrupted passage is not.
+    expect(spoken('failed', null, null, false)).not.toContain('class="spoken');
+    expect(spoken('interrupted', 7_400, 3, false)).toContain('<span class="unheard">ed it.</span>');
     // Routine states show nothing: no line under the reply, and a playing passage is not dimmed.
     expect(spoken('playing', 100, 3)).not.toContain('class="unheard"');
 

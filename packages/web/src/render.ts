@@ -358,13 +358,6 @@ export function deliveryMark(item: MessageView): string {
   return item.delivery === 'uncertain' ? `<span class="delivery uncertain" title="${escape(item.error ?? '')}">uncertain</span>` : '';
 }
 
-/** The mark of a reply whose speech failed, for its meta line; empty otherwise, since routine speech states show nothing. */
-export function spokenMark(item: ReplyView): string {
-  return item.spoken.state === 'failed'
-    ? '<span class="spoken failed" title="Speaking this reply failed; see the voice log."><span class="codicon codicon-mute" aria-hidden="true"></span><span>Not spoken</span></span>'
-    : '';
-}
-
 /** How the shared `spokenBody` draws a reply's text around its bubbles: `markdown` for the text, the page's own escaping for a passage heard in part. */
 export function spokenRender(markdown: (text: string, last: boolean) => string): { markdown: (text: string, last: boolean) => string; escape: (text: string) => string } {
   return { markdown, escape };

@@ -4,7 +4,7 @@ import type { ArtifactView, ConversationEntry, ItemView, MessageView, ReplyView,
 /** A Codex session's pending question or approval, as the hub sends it. */
 type NativeRequest = NonNullable<SessionView['requests']>[number];
 import { providerMark } from '@switchboard/conversation/providerIcons';
-import { fullTime, metaLine, stamped, toneMark, voiceMark } from '@switchboard/conversation/messageMeta';
+import { fullTime, metaLine, spokenMark, stamped, toneMark, voiceMark } from '@switchboard/conversation/messageMeta';
 import { hasUnspokenText, spokenBody } from '@switchboard/conversation/spokenBubble';
 import { artifactIcon, awaitingReply, selectedEntry, stateIcon, statusLine, timeline } from '../conversationModel.js';
 import type { ConversationState } from '../conversationModel.js';
@@ -150,13 +150,6 @@ function message(item: MessageView, stamped: boolean, details: boolean): string 
   return `<li class="message${item.provisional ? ' provisional' : ''}" data-id="${escape(item.id)}" tabindex="-1"${queued ? ' title="Sent; Claude has not read it yet"' : ''}><div class="bubble"${meta === '' && !queued ? ` title="${escape(fullTime(item.at))}"` : ''}><div class="box${COMMAND.test(item.text) ? ' command' : ''}">${escape(item.text)}</div>${meta}</div></li>`;
 }
 
-/** The mark of a reply whose speech failed (architecture.md § Voice); empty otherwise, since routine speech states show nothing. */
-export function spokenMark(item: ReplyView): string {
-  return item.spoken.state === 'failed'
-    ? '<span class="spoken failed" title="Speaking this reply failed; see the voice log."><span class="codicon codicon-mute" aria-hidden="true"></span><span>Not spoken</span></span>'
-    : '';
-}
-
 // The voice controls are drawn by one renderer with the web page's (architecture.md § Voice).
 export { renderMicButton, renderVoiceControls } from '@switchboard/conversation/voiceControls';
 
@@ -189,7 +182,7 @@ function reply(item: ReplyView, earlier: ReplyView | null, open: ReadonlySet<str
 
   // A reply read off the screen has no copy button until its transcript copy replaces it, as Claude Code's has none while it streams. The copy
   // button comes first on the line under the reply, then the tone and a speech failure, and the time at the right.
-  const meta = metaLine([item.provisional ? '' : copyButton('copy-reply', 'Copy response'), tone, spokenMark(item)], item.at, stamped);
+  const meta = metaLine([item.provisional ? '' : copyButton('copy-reply', 'Copy response'), tone, spokenMark(item.spoken.state, details)], item.at, stamped);
 
   // An unread reply's dot takes the badge colour until the view has shown it in a focused window for a second (architecture.md § Unread).
   const unread = item.unread ? ` unread" data-unread="${escape(item.id)}` : '';

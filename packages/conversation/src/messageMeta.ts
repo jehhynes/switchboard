@@ -1,7 +1,7 @@
 /**
  * The line under a message or a reply, drawn alike by the VS Code Conversation view and the web page so they cannot drift (architecture.md
  * § Conversation view, § Web page): its marks on the left and its time at the right. The copy button and error marks always show; the
- * optional marks (a dictated message's, a reply's tone) and every item's time show only with Show message details on; without it only the
+ * optional marks (a dictated message's, a reply's tone, Not spoken) and every item's time show only with Show message details on; without it only the
  * first item after a day's divider shows its time, and the others have it as their tooltip. Imports nothing, for browser bundles.
  */
 
@@ -60,6 +60,16 @@ export function voiceMark(item: DictatedMessage, details: boolean): string {
   const label = `${item.partial === true ? 'partial' : 'dictated'}${item.interrupted === undefined ? '' : ' · interrupted the reply'}`;
 
   return `<span class="voice-mark" title="${escape(title)}"><span class="codicon codicon-mic" aria-hidden="true"></span><span>${label}</span></span>`;
+}
+
+/**
+ * A reply's speech outcome, with message details on: "Not spoken" when its speech failed, with why in the tooltip; empty otherwise, since routine
+ * speech states show nothing (architecture.md § Voice).
+ */
+export function spokenMark(state: string, details: boolean): string {
+  return state === 'failed' && details
+    ? '<span class="spoken failed" title="Speaking this reply failed; see the voice log."><span class="codicon codicon-mute" aria-hidden="true"></span><span>Not spoken</span></span>'
+    : '';
 }
 
 /** A reply's tone, with message details on: how it sounds when spoken. */

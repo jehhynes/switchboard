@@ -1,14 +1,14 @@
 // The Conversation tab (architecture.md § Web page): our messages, the replies with their spoken bubbles and question cards, artifact rows, the
 // turn row, and the prompt or Codex request the session waits on.
 import type { VNode } from 'preact';
-import { fullTime, metaLine, stamped, toneMark, voiceMark } from '@switchboard/conversation/messageMeta';
+import { fullTime, metaLine, spokenMark, stamped, toneMark, voiceMark } from '@switchboard/conversation/messageMeta';
 import { hasUnspokenText, spokenBody } from '@switchboard/conversation/spokenBubble';
 import { answersCard, answersIn, cardOutcome, complete, parseQuestions } from '@switchboard/conversation/questions';
 import type { Question, QuestionChoice } from '@switchboard/conversation/questions';
 import { artifactIcon, awaitingReply, timeline } from './model.js';
 import type { PageState } from './model.js';
 import { copyButton, renderInline, renderMarkdown } from './markdown.js';
-import { dayLabel, deliveryMark, spokenMark, spokenRender, withoutQuestions } from './render.js';
+import { dayLabel, deliveryMark, spokenRender, withoutQuestions } from './render.js';
 import type { CardDraft, View } from './render.js';
 import { trusted } from './trusted.js';
 import type { ArtifactView, MessageView, NativeRequest, ReplyView, ScreenPrompt } from '@switchboard/protocol';
@@ -49,8 +49,8 @@ function Reply({ item, earlier, view, stamped: shown, card, expandReplies }: { i
   const said = item.spoken.state === 'interrupted' ? item.spoken.saidChars : null;
   const body = passage === null ? markdownPart(item.opening, true) : spokenBody(item.opening, passage, said, !expanded, spokenRender(markdownPart));
   const tone = toneMark(item.tone, view.details);
-  // The copy button comes first on the line under the reply, then the tone with message details on and a speech failure, and the time at the right.
-  const meta = metaLine([item.provisional ? '' : copyButton('copy-reply', 'Copy response'), tone, spokenMark(item)], item.at, shown);
+  // The copy button comes first on the line under the reply, then the tone and a speech failure with message details on, and the time at the right.
+  const meta = metaLine([item.provisional ? '' : copyButton('copy-reply', 'Copy response'), tone, spokenMark(item.spoken.state, view.details)], item.at, shown);
 
   return (
     <li class={`reply ${item.kind}${item.unread ? ' unread' : ''}`} data-unread={item.unread ? item.id : undefined} data-id={item.id} data-speak={item.speak === null ? undefined : '1'}>
