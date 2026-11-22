@@ -56,11 +56,9 @@
   --diffs-font-family: var(--vscode-editor-font-family);
   --diffs-header-font-family: var(--vscode-font-family);
   --diffs-font-size: 14px; --diffs-line-height: 19px;
-  --diffs-bg-addition-override: #9bb95533;
-  --diffs-bg-addition-number-override: #9bb95533;
+  /* The changed lines' tints are set in the viewer (BACKGROUND_CSS); a changed word's is VS Code's diffEditor.insertedTextBackground or
+     removedTextBackground, drawn over its line's. */
   --diffs-bg-addition-emphasis-override: light-dark(#9ccc2c40, #9ccc2c33);
-  --diffs-bg-deletion-override: #ff000033;
-  --diffs-bg-deletion-number-override: #ff000033;
   --diffs-bg-deletion-emphasis-override: #ff000033;
   --diffs-bg-separator-override: var(--vscode-sideBar-background);
 }

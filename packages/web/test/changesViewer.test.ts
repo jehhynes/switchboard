@@ -294,4 +294,15 @@ describe('mountChanges', () => {
     expect(mount.visible()).toEqual({ first: 0, last: 0 });
     vi.unstubAllGlobals();
   });
+
+  it('Tints_OfChangedLines_AreVsCodesLineBackgroundsAtFullStrength', () => {
+    const { view } = mounted();
+    const css = String(view.options['unsafeCSS']);
+
+    // Pierre mixes 12 to 20 percent of a solid colour into a line; 20 percent of VS Code's colours is its 0x33 alpha over the editor.
+    expect(css).toContain('--mix-light: 80%; --mix-dark: 80%;');
+    expect(css).toContain('[data-line-type="change-addition"] { --diffs-diff-line-mix-target: #9bb955; }');
+    expect(css).toContain('[data-line-type="change-deletion"] { --diffs-diff-line-mix-target: #ff0000; }');
+    expect(css).toContain('--diffs-dark-bg: var(--vscode-editor-background)');
+  });
 });

@@ -15,7 +15,14 @@ const THEME = { dark: 'sb-dark-modern', light: 'sb-light-modern' } as const;
  * The page's editor background under the code, its gutters and the file's header in both schemes, in place of the theme's own, so the viewer
  * matches the page around it; Pierre's `unsafe` layer comes after the theme's.
  */
-const BACKGROUND_CSS = ':host { --diffs-light-bg: var(--vscode-editor-background); --diffs-dark-bg: var(--vscode-editor-background); }';
+const BACKGROUND_CSS =
+  ':host { --diffs-light-bg: var(--vscode-editor-background); --diffs-dark-bg: var(--vscode-editor-background); }' +
+  // VS Code's diff editor tints a changed line and its line number with diffEditor.insertedLineBackground (#9bb95533) or
+  // removedLineBackground (#ff000033) over the editor, in Dark Modern and Light Modern alike. Pierre mixes a solid colour into the line's
+  // background, 12 to 20 percent of it, so the same tint is the solid colour at 20 percent in both schemes.
+  ' :is([data-line], [data-no-newline], [data-column-number], [data-gutter-buffer]):is([data-line-type="change-addition"], [data-line-type="change-deletion"]) { --mix-light: 80%; --mix-dark: 80%; }' +
+  ' :is([data-line], [data-no-newline], [data-column-number], [data-gutter-buffer])[data-line-type="change-addition"] { --diffs-diff-line-mix-target: #9bb955; }' +
+  ' :is([data-line], [data-no-newline], [data-column-number], [data-gutter-buffer])[data-line-type="change-deletion"] { --diffs-diff-line-mix-target: #ff0000; }';
 /** Files longer than this many lines show uncoloured (`tokenizeMaxLength` counts lines), so a lock file never ties up the workers. */
 export const TOKENIZE_MAX_LINES = 10_000;
 
