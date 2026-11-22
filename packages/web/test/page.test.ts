@@ -1039,6 +1039,169 @@ describe('the page', () => {
     page.close();
   });
 
+it("makes a phone's conversation a history entry, which the browser's back leaves as Back does and its forward opens again", async () => {
+    history.replaceState(null, '', '#');
+
+    const { page, source } = start();
+    const groups = [listGroup('progress', [listRow(1), listRow(2)])];
+    const popped = () => new Promise((resolve) => window.addEventListener('popstate', resolve, { once: true }));
+    const entries = history.length;
+
+    source.emit('hello', { key: 'pk', groups, scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
+    source.emit('hello', { key: 'pk', groups, scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    expect(history.length).toBe(entries + 1);
+    expect(location.hash).toBe('#w=1');
+
+    // Back, as Android's back button gives it: the list, on the selected row, and the list's entry keeps the work item's address.
+    let pop = popped();
+
+    history.back();
+    await pop;
+    expect(root.classList.contains('listing')).toBe(true);
+    expect(document.activeElement).toBe(root.querySelector('[data-work-item="1"]'));
+    expect(location.hash).toBe('#w=1');
+    // Forward opens the conversation again.
+    pop = popped();
+    history.forward();
+    await pop;
+    expect(root.classList.contains('listing')).toBe(false);
+
+    // The Back button takes the entry with it, so the browser's back from the list leaves the page as before.
+    pop = popped();
+    root.querySelector<HTMLElement>('.header > button.back-toggle')!.click();
+    expect(root.classList.contains('listing')).toBe(true);
+    await pop;
+    expect(root.classList.contains('listing')).toBe(true);
+    expect(history.state).toBeNull();
+    expect(location.hash).toBe('#w=1');
+
+    // Another conversation chosen from the header's dropdown replaces the entry rather than adding one.
+    root.querySelector<HTMLElement>('[data-work-item="2"]')!.click();
+    const after = history.length;
+
+    root.querySelector<HTMLElement>('.header .picker')!.click();
+    root.querySelector<HTMLElement>('.header [role="menu"] [data-action="select"][data-work-item="1"]')!.click();
+    expect(history.length).toBe(after);
+    expect(location.hash).toBe('#w=1');
+
+    // A row opened before Back's own step back lands keeps an entry of its own.
+    pop = popped();
+    root.querySelector<HTMLElement>('.header > button.back-toggle')!.click();
+    root.querySelector<HTMLElement>('[data-work-item="2"]')!.click();
+    await pop;
+    expect(root.classList.contains('listing')).toBe(false);
+    expect(history.state).toEqual({ switchboardConversation: true });
+    expect(location.hash).toBe('#w=2');
+    page.close();
+  });
+
+it('steps back through history once for Back, select and Back in quick succession, and drops a refused row\'s entry or a reloaded mark', async () => {
+    history.replaceState({ switchboardConversation: true }, '', '#w=1');
+
+    const fetch = vi.fn(async (url: string) => ({ status: url.endsWith('/select') && refuse ? 404 : 200, ok: true, json: async () => (refuse ? { error: 'That work item is gone.' } : {}), text: async () => '' }) as unknown as Response);
+    let refuse = false;
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000 });
+    const source = FakeSource.last!;
+    const groups = [listGroup('progress', [listRow(1), listRow(2)])];
+
+    // A reload drops the mark, whose list entry belonged to the page before.
+    expect(history.state).toBeNull();
+    source.emit('hello', { key: 'pk', groups, scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+
+    const back = vi.spyOn(history, 'back');
+    const popped = () => new Promise((resolve) => window.addEventListener('popstate', resolve, { once: true }));
+
+    root.querySelector<HTMLElement>('.header > button.back-toggle')!.click();
+    expect(back).not.toHaveBeenCalled();
+    root.querySelector<HTMLElement>('[data-work-item="2"]')!.click();
+    expect(history.state).toEqual({ switchboardConversation: true });
+
+    let pop = popped();
+
+    root.querySelector<HTMLElement>('.header > button.back-toggle')!.click();
+    root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
+    root.querySelector<HTMLElement>('.header > button.back-toggle')!.click();
+    expect(back).toHaveBeenCalledOnce();
+    await pop;
+    expect(root.classList.contains('listing')).toBe(true);
+    expect(history.state).toBeNull();
+
+    // A refused first open from the list takes its entry back with it.
+    source.emit('hello', { key: 'pk2', groups, scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    refuse = true;
+    pop = popped();
+    root.querySelector<HTMLElement>('[data-work-item="2"]')!.click();
+    expect(history.state).toEqual({ switchboardConversation: true });
+    await pop;
+    expect(back).toHaveBeenCalledTimes(2);
+    expect(root.classList.contains('listing')).toBe(true);
+    expect(history.state).toBeNull();
+    back.mockRestore();
+    page.close();
+  });
+
+it("turns the mic off through Back's path when a phone's conversation is left by a swipe or the browser's back (PRD R119)", async () => {
+    history.replaceState(null, '', '#');
+    window.innerWidth = 375;
+
+    const voice = (mic: string) => ({ voice: { enabled: true, here: true, mic, speaking: null, speakReplies: true, error: null } });
+    const mics = () => posts.filter((post) => post.url.endsWith('/mic')).map((post) => post.body['on']);
+    const groups = [listGroup('progress', [listRow(1)])];
+    const { page, source } = start();
+    const open = async (): Promise<void> => {
+      root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
+      await flush();
+      source.emit('hello', { key: 'pk', groups, scope, sessions: [session()], items: [reply('r1', 1)], more: false, status: null, artifacts: [] });
+      source.emit('voice', voice('listening'));
+    };
+    const swipe = async (): Promise<void> => {
+      const target = root.querySelector('#panel .timeline')!;
+
+      for (const [type, x] of [['touchstart', 150], ['touchmove', 165], ['touchmove', 330]] as const) {
+        target.dispatchEvent(Object.defineProperty(new Event(type, { bubbles: true, cancelable: true }), 'touches', { value: [{ clientX: x, clientY: 400 }] }));
+      }
+
+      target.dispatchEvent(Object.defineProperty(new Event('touchend', { bubbles: true }), 'touches', { value: [] }));
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      await flush();
+    };
+
+    source.emit('hello', { key: 'pk', groups, scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    await open();
+    await swipe();
+    expect(root.classList.contains('listing')).toBe(true);
+    expect(mics()).toEqual([false]);
+
+    // The browser's back, as Android's back button gives it.
+    await open();
+
+    const popped = new Promise((resolve) => window.addEventListener('popstate', resolve, { once: true }));
+
+    history.back();
+    await popped;
+    await flush();
+    expect(root.classList.contains('listing')).toBe(true);
+    expect(mics()).toEqual([false, false]);
+    // Speech goes on: no Stop is sent.
+    expect(posts.some((post) => post.url.endsWith('/stop-speaking'))).toBe(false);
+    page.close();
+  });
+
+  it('adds no history entry from tablet width, where the list stays beside the conversation', () => {
+    history.replaceState(null, '', '#');
+    window.innerWidth = 1024;
+
+    const { page, source } = start();
+    const entries = history.length;
+
+    source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)])], scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
+    expect(history.length).toBe(entries);
+    expect(location.hash).toBe('#w=1');
+    page.close();
+  });
+
   it('shows a refused first select over the list, which a phone shows again, and clears it on the next select', async () => {
     history.replaceState(null, '', '#');
 

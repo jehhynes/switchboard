@@ -81,6 +81,8 @@ export const HISTORY_REFRESH_MS = 30_000;
 /** How long the Chrome pane stays hidden after the page's last floating layer closes, so a quick close and open does not flicker it. */
 export const PANE_SHOW_DELAY_MS = 100;
 const HISTORY_CHANGE_MS = 1_000;
+/** The mark on the history entry a phone's conversation adds over the list, so the browser's back returns to the list (architecture.md § Web page). */
+const CONVERSATION_ENTRY = 'switchboardConversation';
 /** Where the page keeps each work item's draft, over a reload. */
 const DRAFTS = 'switchboard.drafts';
 
@@ -389,6 +391,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /** A select refused while no conversation was shown, which the list shows until the next select. */
   let listError: string | null = null;
   let wanted: number | null = Number(/^#w=(\d+)$/.exec(location.hash)?.[1] ?? NaN) || null;
+
+  // A reload keeps the entry's mark, but the list's entry before it belonged to the page before the reload; Back then stays in this page.
+  if (conversationEntry(history.state)) {
+    history.replaceState(null, '');
+  }
   /** The marker of the dock's latest `show`, in the title until the dock has found this window. */
   let showMarker: string | null = null;
   let showTimer: ReturnType<typeof setTimeout> | undefined;
@@ -1585,8 +1592,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // On a narrow screen the list and the conversation are each a full-width view (page.css); the list shows until a work item is opened.
     const listing = shownHistory === null && (view.list || wanted === null);
 
-    // Leaving the conversation for the list on a phone's width (Back, or a refused open) leaves the work item, so a mic on for it turns off and
-    // a phone's microphone is released; what plays goes on (PRD R119).
+    // Leaving the conversation for the list on a phone's width (Back, a swipe right or the browser's back, all through back(), or a refused
+    // open) leaves the work item, so a mic on for it turns off and a phone's microphone is released; what plays goes on (PRD R119).
     const leftConversation = listing && !wasListing && window.innerWidth < TABLET_MIN && ((state.voice?.here === true && state.voice.mic !== 'off') || micOpening);
 
     wasListing = listing;
@@ -2089,6 +2096,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
   // ---- Selecting ----
   const select = async (workItemId: number): Promise<void> => {
+    const listing = view.list || wanted === null;
+
     // A work item opened from the list shows its conversation in History's place.
     closeHistory();
     // Choosing a work item hides the drawer, as a row's click hides the auto-hidden dock.
@@ -2102,7 +2111,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     view.providers = null;
     newFrom = null;
     view.artifact = null;
-    history.replaceState(null, '', `#w=${workItemId}`);
+    // On a phone, a conversation opened from the list is a history entry of its own, which the browser's back, as Android's back button, leaves.
+    if (listing && window.innerWidth < TABLET_MIN && !conversationEntry(history.state)) {
+      history.pushState({ [CONVERSATION_ENTRY]: true }, '', `#w=${workItemId}`);
+    } else {
+      history.replaceState(history.state, '', `#w=${workItemId}`);
+    }
 
     if (state.scope?.workItemId === workItemId && !selectInFlight) {
       acked = workItemId;
@@ -2140,7 +2154,17 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
         wanted = state.scope?.workItemId ?? null;
         acked = wanted;
-        history.replaceState(null, '', wanted === null ? '#' : `#w=${wanted}`);
+
+        // A conversation still shown keeps its history entry; with none, the entry the refused row added goes, as Back's does.
+        if (wanted !== null) {
+          history.replaceState(history.state, '', `#w=${wanted}`);
+        } else if (conversationEntry(history.state) && !backPending) {
+          history.replaceState(history.state, '', '#');
+          backPending = true;
+          history.back();
+        } else {
+          history.replaceState(conversationEntry(history.state) ? history.state : null, '', '#');
+        }
 
         // With no conversation shown, the composer that holds errors is hidden, so the refusal shows over the list, which a phone shows again.
         if (wanted === null) {
@@ -2162,7 +2186,58 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     view.list = true;
     draw();
     list.querySelector<HTMLElement>('.row.selected')?.focus();
+
+    // The conversation's history entry goes with it, so the browser's back from the list leaves the page as before.
+    if (conversationEntry(history.state) && !backPending) {
+      backPending = true;
+      history.back();
+    }
   };
+  /** Whether Back's `history.back()` has not landed yet. */
+  let backPending = false;
+  // The browser's back, as Android's back button, leaves a phone's conversation as Back does, and its forward opens it again; the list's entry
+  // keeps the open work item's address, as Back leaves it.
+  window.addEventListener(
+    'popstate',
+    (event) => {
+      const left = backPending;
+
+      backPending = false;
+
+      if (wanted === null || window.innerWidth >= TABLET_MIN) {
+        return;
+      }
+
+      const listing = view.list;
+
+      // A row opened before Back's own step back landed gets its entry again.
+      if (left) {
+        if (listing) {
+          history.replaceState(history.state, '', `#w=${wanted}`);
+        } else {
+          history.pushState({ [CONVERSATION_ENTRY]: true }, '', `#w=${wanted}`);
+        }
+
+        return;
+      }
+
+      if (conversationEntry(event.state)) {
+        if (listing) {
+          view.list = false;
+          draw();
+        }
+
+        return;
+      }
+
+      history.replaceState(history.state, '', `#w=${wanted}`);
+
+      if (!listing) {
+        back();
+      }
+    },
+    { signal: listening.signal },
+  );
   // A swipe right over a phone's conversation goes back, while no menu, sheet, Settings or History lies over it.
   const stopSwipe = swipeBack({
     root,
@@ -3555,6 +3630,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       consoles.clear();
     },
   };
+}
+
+/** Whether a history entry's state marks a phone's conversation (`CONVERSATION_ENTRY`). */
+function conversationEntry(state: unknown): boolean {
+  return typeof state === 'object' && state !== null && (state as Record<string, unknown>)[CONVERSATION_ENTRY] === true;
 }
 
 /** Loads the console's script and xterm.js's styles from the hub, the first time a console shows; null when the script cannot load. */
