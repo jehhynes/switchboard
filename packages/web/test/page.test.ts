@@ -257,9 +257,12 @@ describe('drawing', () => {
     expect(svg).toContain('<iframe');
     expect(html(renderArtifactView('key', artifact('chat/p.png', 'image', 'png')))).toContain('<img class="media"');
     expect(html(renderArtifactView('key', artifact('chat/v.mp4', 'video', 'mp4')))).toContain('<video');
-    expect(html(renderArtifactView('key', artifact('chat/d.pdf', 'file', 'pdf')))).toContain('download');
+    // Only a file of another kind is a download, in place of a preview.
+    expect(html(renderArtifactView('key', artifact('chat/d.pdf', 'file', 'pdf')))).not.toContain('download');
+    expect(html(renderArtifactView('key', artifact('chat/d.bin', 'file', 'bin')))).toContain('The page cannot show this kind of file.');
+    expect(html(renderArtifactView('key', artifact('chat/d.bin', 'file', 'bin')))).not.toContain('download');
 
-    // The head: the kind as a badge, the title, Open in new window and Download; each version's file loads afresh.
+    // The head: the kind as a badge, the title and Open in new window, and no Download; each version's file loads afresh.
     const head = document.createElement('div');
 
     head.innerHTML = html(renderArtifactView('key', { ...artifact('chat/v.mp4', 'video', 'mp4'), kind: 'demo', title: 'Demo' }));
@@ -269,7 +272,7 @@ describe('drawing', () => {
     expect(head.querySelector('video')!.getAttribute('src')).toBe('/v1/conversation/artifact/key/chat/v.mp4?v=1500');
     expect(head.querySelector('a[title="Open in new window"]')!.getAttribute('target')).toBe('_blank');
     expect(head.querySelector('a[title="Open in new window"]')!.getAttribute('href')).toBe('/v1/conversation/artifact/key/chat/v.mp4?v=1500');
-    expect(head.querySelector('a[download]')!.getAttribute('href')).toBe('/v1/conversation/artifact/key/chat/v.mp4');
+    expect(head.querySelector('.artifact-head a[download], .artifact-head [title="Download"]')).toBeNull();
     // Markdown, which the page draws itself, opens as drawn rather than as its source text.
     head.innerHTML = html(renderArtifactView('key', artifact('chat/a.md', 'markdown', 'md')));
     expect(head.querySelector('a[title="Open in new window"]')).toBeNull();
@@ -1529,7 +1532,7 @@ describe('the page in use', () => {
 
     expect(json.textContent).toBe('{\n  "a": 1,\n  "b": "<x>"\n}');
     expect(json.innerHTML).toContain('&lt;x&gt;');
-    expect(root.querySelector('.artifact-view a[download]')).not.toBeNull();
+    expect(root.querySelector('.artifact-view a[download]')).toBeNull();
     expect(root.querySelector('.artifact-view [title="Open in new window"]')).not.toBeNull();
 
     answers['/artifact/'] = { status: 200, body: {}, text: 'plain <b>text</b>' };
@@ -1546,7 +1549,8 @@ describe('the page in use', () => {
     expect(pdf.hasAttribute('sandbox')).toBe(false);
 
     click('#head .artifact-tab[data-path="chat/blob.bin"]');
-    expect(root.querySelector('.artifact-view .empty a[download]')!.textContent).toContain('Download blob.bin');
+    expect(root.querySelector('.artifact-view .empty')!.textContent).toBe('The page cannot show this kind of file. Open it in a new window from the button above.');
+    expect(root.querySelector('.artifact-view a[download]')).toBeNull();
     page.close();
   });
 

@@ -74,8 +74,8 @@ export function renderEmpty(text: string): VNode {
 /**
  * An open artifact (architecture.md § Web page), in place in its pane: a page or an SVG in a sandboxed frame with an opaque origin, pictures,
  * audio and video in the page, Markdown as the page drew it from its text (`doc`: its HTML, null when it could not be read, undefined while it
- * loads), and anything else as a download. Its head has the kind as a badge and the title, as claude-collab's viewer, then Open in new window and
- * Download. Each version is drawn afresh, so its files load again (`?v=`), and an unchanged one is left as it is, so a frame or a video is not
+ * loads), and for anything else a note that it cannot be shown. Its head has the kind as a badge and the title, as claude-collab's viewer, then Open in new window.
+ * Each version is drawn afresh, so its files load again (`?v=`), and an unchanged one is left as it is, so a frame or a video is not
  * reloaded.
  */
 export function renderArtifactView(key: string, artifact: ArtifactView, doc?: string | null): VNode {
@@ -95,11 +95,7 @@ export function renderArtifactView(key: string, artifact: ArtifactView, doc?: st
   ) : show === 'markdown' || show === 'text' ? (
     <div class="artifact-doc body">{doc === undefined ? <p class="empty">Loading…</p> : doc === null ? <p class="empty">This artifact could not be read.</p> : trusted(doc)}</div>
   ) : (
-    <p class="empty">
-      <a href={file} download="">
-        Download {artifact.path.split('/').pop() ?? artifact.path}
-      </a>
-    </p>
+    <p class="empty">The page cannot show this kind of file. Open it in a new window from the button above.</p>
   );
 
   return (
@@ -116,9 +112,6 @@ export function renderArtifactView(key: string, artifact: ArtifactView, doc?: st
             <span class="codicon codicon-link-external"></span>
           </a>
         )}
-        <a class="icon" href={file} download="" title="Download" aria-label="Download">
-          <span class="codicon codicon-desktop-download"></span>
-        </a>
       </div>
       {body}
     </div>
