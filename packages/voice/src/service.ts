@@ -2,11 +2,11 @@ import type { VoiceSettings } from '@switchboard/core/settings';
 import { DEFAULT_SETTINGS } from '@switchboard/core/settings';
 import { Alerts } from './alerts.js';
 import { pcm24to16, splitSaid } from './barge.js';
-import type { Dictation } from './dictation.js';
-import type { Output } from './output.js';
+import type { Dictation, DictationDeps } from './dictation.js';
+import type { Capture, Output } from './output.js';
 import type { LockEvent, LockWatch } from './lockWatch.js';
 import type { AwayReason, HubMessage, Interrupted, VoiceDevice, VoiceFocus, VoiceMessage, VoiceTarget } from './protocol.js';
-import { PhoneOutput } from './phone.js';
+import { PhoneCapture, PhoneOutput } from './phone.js';
 import { PlayedReference } from './reference.js';
 import { Router } from './routing.js';
 import { Speech } from './speech.js';
@@ -33,6 +33,10 @@ export interface VoiceServiceDeps {
     playing(): { replyId: string; text: string; voice: string } | null;
     playedUntil(): number;
     interrupt(): Interrupted | null;
+    /** The capture to use: this computer's, or the phone's while the phone has the voice (architecture.md § Remote access, Voice on a phone). */
+    capture(computer: Capture): Capture;
+    /** The other-app watcher to use: this computer's, or the phone's own busy state while the phone has the voice. */
+    watchMicUse(computer: DictationDeps['watchMicUse']): DictationDeps['watchMicUse'];
   }) => Dictation;
   /** Learns the reply voices' prints from the audio played, for barge-in; none when left out. */
   voiceprint?: Voiceprint;
@@ -72,6 +76,12 @@ export class VoiceService {
   #device: VoiceDevice = 'computer';
   /** The phone's speaker, used while the phone has the voice. */
   readonly #phone: PhoneOutput;
+  /** The phone's microphone, used while the phone has the voice. */
+  readonly #phoneCapture: PhoneCapture;
+  /** Whether the phone's microphone cannot be heard, as its page last said: true until it says otherwise, and after each move. */
+  #phoneBusy = true;
+  /** The phone's busy state's listener while dictation watches it, in place of this computer's other-app watcher. */
+  #phoneWatch: ((busy: boolean, apps: string[]) => void) | null = null;
 
   constructor(private readonly deps: VoiceServiceDeps) {
     this.#phone = new PhoneOutput({
@@ -80,6 +90,7 @@ export class VoiceService {
       ...(deps.every === undefined ? {} : { every: deps.every }),
       stalled: (reason) => deps.send({ type: 'phone-stalled', reason }),
     });
+    this.#phoneCapture = new PhoneCapture({ send: (message) => deps.send(message) });
     this.#dictation =
       deps.dictation?.({
         changed: () => deps.send(this.#audio()),
@@ -102,6 +113,16 @@ export class VoiceService {
 
           return stopped === null ? null : { replyId: stopped.item.replyId, ...splitSaid(stopped.item.text, stopped.said) };
         },
+        capture: (computer) => ({
+          open: (device, onPcm, onError) => {
+            if (this.#device === 'none') {
+              return Promise.reject(new Error('The phone that had the voice left.'));
+            }
+
+            return this.#device === 'phone' ? this.#phoneCapture.open(device, onPcm, onError) : computer.open(device, onPcm, onError);
+          },
+        }),
+        watchMicUse: (computer) => (changed, failed, devices) => (this.#device === 'phone' ? this.#watchPhone(changed) : computer(changed, failed, devices)),
       }) ?? null;
     // What plays is also the echo canceller's reference, handed over as it plays, so a reply played aloud is not heard as the operator.
     const output: Output = {
@@ -112,9 +133,11 @@ export class VoiceService {
         }
 
         const playback = this.#device === 'phone' ? await this.#phone.open() : await deps.output.open(device);
+        // A phone's playback is timed by what the phone reports heard, not by when it was written (Voice on a phone).
         const reference = new PlayedReference({
           push: (pcm) => this.#dictation?.reference(pcm),
           now: deps.now,
+          ...(playback.position === undefined ? {} : { played: () => playback.position!() }),
           ...(deps.every === undefined ? {} : { every: deps.every }),
         });
 
@@ -227,8 +250,8 @@ export class VoiceService {
 
         return;
       case 'mic':
-        if (message.on && this.#device !== 'computer') {
-          this.deps.log('mic stays off: the voice is not on this computer');
+        if (message.on && this.#device === 'none') {
+          this.deps.log('mic stays off: the phone that had the voice left');
           return;
         }
 
@@ -256,6 +279,12 @@ export class VoiceService {
         this.deps.heard?.(message.heard, message.meant);
         return;
       case 'enroll':
+        // Enrolment records this computer's microphone only (PRD R119).
+        if (message.action === 'start' && this.#device !== 'computer') {
+          this.deps.send({ type: 'enrollment', state: 'failed', error: 'The voice is on the phone. Take it back to this computer to record your voice.' });
+          return;
+        }
+
         if (message.action === 'start' && this.#away.size > 0) {
           this.deps.send({ type: 'enrollment', state: 'failed', error: AWAY_ERROR[[...this.#away][0]!] });
           return;
@@ -303,6 +332,19 @@ export class VoiceService {
         return;
       case 'phone-played':
         this.#phone.played(message.id, message.ms, message.done);
+        return;
+      case 'phone-mic':
+        if (this.#device === 'phone') {
+          this.#phoneCapture.pcm(Buffer.from(message.pcm, 'base64'));
+        }
+
+        return;
+      case 'phone-state':
+        if (this.#device === 'phone' && message.busy !== this.#phoneBusy) {
+          this.#phoneBusy = message.busy;
+          this.#phoneWatch?.(message.busy, message.busy ? ['the phone'] : []);
+        }
+
         return;
       default:
         return;
@@ -413,13 +455,17 @@ export class VoiceService {
     // Muting stops what plays, the needs-you sound too, and drops what waits; the new device's mute follows below.
     this.#speech.mute(true);
 
-    if (from === 'phone') {
-      this.#phone.lost(device === 'none' ? 'The phone that had the voice left.' : 'The voice moved to this computer.');
-    }
+    // The mic goes off with any move, and with it the device it captured from: the operator turns it on where the voice is now.
+    this.#dictation?.enroll('cancel');
+    this.#dictation?.mic(false);
+    this.#phoneBusy = true;
+    this.#phoneWatch = null;
 
-    // Until the phone's microphone is built in, capture stays on this computer's microphone only, so it is off away from it.
-    if (device !== 'computer') {
-      this.#dictation?.mic(false);
+    if (from === 'phone') {
+      const why = device === 'none' ? 'The phone that had the voice left.' : 'The voice moved to this computer.';
+
+      this.#phone.lost(why);
+      this.#phoneCapture.lost(why);
     }
 
     if (device === 'none') {
@@ -434,6 +480,27 @@ export class VoiceService {
     }
 
     this.#syncMute();
+  }
+
+  /**
+   * The phone's busy state as dictation's other-app watcher: a muted track (a call, Siri), a hidden page or no track open pauses listening and
+   * discards what was being heard, as another app recording on this computer does. It answers at once with the state the page last sent.
+   */
+  #watchPhone(changed: (busy: boolean, apps: string[]) => void): { close(): void } {
+    this.#phoneWatch = changed;
+    queueMicrotask(() => {
+      if (this.#phoneWatch === changed) {
+        changed(this.#phoneBusy, this.#phoneBusy ? ['the phone'] : []);
+      }
+    });
+
+    return {
+      close: () => {
+        if (this.#phoneWatch === changed) {
+          this.#phoneWatch = null;
+        }
+      },
+    };
   }
 
   /** Nothing plays while the operator is away from the device that has the voice, or no device has it. */
@@ -456,8 +523,8 @@ export class VoiceService {
     return {
       type: 'audio',
       mic: this.#dictation?.state ?? 'off',
-      engine: this.deps.output.engine,
-      device: this.#dictation === null ? this.#settings.outputDevice : this.#settings.inputDevice,
+      engine: this.#device === 'phone' ? 'phone' : this.deps.output.engine,
+      device: this.#device === 'phone' ? 'phone' : this.#dictation === null ? this.#settings.outputDevice : this.#settings.inputDevice,
       recognizer: this.#dictation?.recognizer ?? null,
       error: this.#dictation?.error ?? this.#error,
       ...(halfDuplex === null ? {} : { halfDuplex }),

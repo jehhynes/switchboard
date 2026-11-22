@@ -1,4 +1,4 @@
-import type { Output, Playback } from './output.js';
+import type { Capture, CaptureStream, Output, Playback } from './output.js';
 import type { VoiceMessage } from './protocol.js';
 import { BYTES_PER_MS } from './tts.js';
 
@@ -12,6 +12,63 @@ export const PHONE_STALL_MS = 3_000;
 export const PHONE_STALLED = 'The phone stopped playing the voice.';
 
 type PhoneSend = (message: Extract<VoiceMessage, { type: 'phone-play' | 'phone-pcm' | 'phone-end' | 'phone-flush' }>) => void;
+
+/**
+ * Why phone capture starts half-duplex: iOS cancels the echo of the page's own playback, but how much is left is measured first by the echo
+ * check under `voice.duplex` `auto`, against the phone's played reports.
+ */
+export const PHONE_HALF_DUPLEX = "the phone's echo cancellation is not measured";
+
+export interface PhoneCaptureDeps {
+  send(message: Extract<VoiceMessage, { type: 'phone-capture' }>): void;
+}
+
+/**
+ * The phone's microphone as the voice's `Capture` (architecture.md § Remote access, Voice on a phone): opening it asks the page to send its
+ * 16 kHz PCM (`phone-capture {on: true}`), which the hub relays as `phone-mic`; stopping it asks the page to stop. One stream at a time.
+ */
+export class PhoneCapture implements Capture {
+  #stream: { onPcm: (pcm: Buffer) => void; onError: (error: Error) => void } | null = null;
+
+  constructor(private readonly deps: PhoneCaptureDeps) {}
+
+  async open(_device: string | null, onPcm: (pcm: Buffer) => void, onError: (error: Error) => void): Promise<CaptureStream> {
+    const stream = { onPcm, onError };
+
+    this.#stream = stream;
+    this.deps.send({ type: 'phone-capture', on: true });
+
+    return {
+      stop: () => {
+        if (this.#stream === stream) {
+          this.#stream = null;
+          this.deps.send({ type: 'phone-capture', on: false });
+        }
+      },
+      halfDuplex: PHONE_HALF_DUPLEX,
+      remote: false,
+      // The phone cancels its own playback's echo; the echo check takes the reference from the service.
+      reference: () => undefined,
+    };
+  }
+
+  /** The phone's audio, as the hub relays it; dropped while no stream is open. A trailing odd byte, half a sample, is left out. */
+  pcm(pcm: Buffer): void {
+    const whole = pcm.subarray(0, pcm.length - (pcm.length % 2));
+
+    if (whole.length > 0) {
+      this.#stream?.onPcm(whole);
+    }
+  }
+
+  /** The phone is gone: the open stream fails with why, as a removed device does. */
+  lost(why: string): void {
+    const stream = this.#stream;
+
+    this.#stream = null;
+    stream?.onError(new Error(why));
+  }
+}
 
 export interface PhoneOutputDeps {
   send: PhoneSend;

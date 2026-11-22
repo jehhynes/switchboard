@@ -5,6 +5,8 @@ import type { SpeechStyle, TtsVoice, VoiceSettings } from '@switchboard/core/set
 export const PROTOCOL = 1;
 /** A longer line closes the connection. */
 export const MAX_LINE_BYTES = 1024 * 1024;
+/** The longest `phone-mic` the process takes: one 64 KB WebSocket frame of PCM, in base64. */
+export const PHONE_MIC_MAX_BASE64 = Math.ceil(65_536 / 3) * 4;
 export const HELLO_DEADLINE_MS = 5_000;
 
 /** A session the voice can speak for: a `full` session with a connected scoped window, or whose terminal window the dock has seen in front. */
@@ -115,6 +117,10 @@ export type HubMessage =
   | { type: 'device'; device: VoiceDevice }
   /** The phone's report for one of its playbacks: the milliseconds heard, and `done` once everything sent before its end played. */
   | { type: 'phone-played'; id: number; ms: number; done: boolean }
+  /** The phone's microphone audio, 16 kHz mono 16-bit PCM in base64, while the process has phone capture open (Voice on a phone). */
+  | { type: 'phone-mic'; pcm: string }
+  /** Whether the phone's microphone cannot be heard now: no track open, the track muted (a call, Siri), or the page hidden. */
+  | { type: 'phone-state'; busy: boolean }
   | { type: 'shutdown' };
 
 /** Where the voice's microphone and speaker are. */
@@ -164,7 +170,9 @@ export type VoiceMessage =
   | { type: 'phone-end'; id: number }
   | { type: 'phone-flush'; id: number }
   /** The phone stopped reporting what it played for longer than `PHONE_STALL_MS`, so the hub closes its socket. */
-  | { type: 'phone-stalled'; reason: string };
+  | { type: 'phone-stalled'; reason: string }
+  /** Phone capture opened or stopped: the page sends its microphone's audio only while it is on (Voice on a phone). */
+  | { type: 'phone-capture'; on: boolean };
 
 /** Splits a byte stream into lines; a line over the limit is an error, since the peer is not following the protocol. */
 export class LineReader {
@@ -301,6 +309,10 @@ export function parseHubMessage(line: string): HubMessage | { error: string } {
       return m.device === 'computer' || m.device === 'phone' || m.device === 'none' ? { type: 'device', device: m.device } : invalid;
     case 'phone-played':
       return isGen(m.id) && typeof m.ms === 'number' && Number.isFinite(m.ms) && m.ms >= 0 && typeof m.done === 'boolean' ? { type: 'phone-played', id: m.id, ms: m.ms, done: m.done } : invalid;
+    case 'phone-mic':
+      return isText(m.pcm) && m.pcm.length <= PHONE_MIC_MAX_BASE64 ? { type: 'phone-mic', pcm: m.pcm } : invalid;
+    case 'phone-state':
+      return typeof m.busy === 'boolean' ? { type: 'phone-state', busy: m.busy } : invalid;
     case 'heard':
       return isText(m.heard) && isText(m.meant) && m.heard.trim() !== '' && m.meant.trim() !== '' && m.heard.length <= 200 && m.meant.length <= 200 ? { type: 'heard', heard: m.heard, meant: m.meant } : invalid;
     default:

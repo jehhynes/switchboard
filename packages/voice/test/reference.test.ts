@@ -91,4 +91,28 @@ describe('PlayedReference', () => {
     expect(idle.pushed).toEqual([]);
     expect(idle.clock.timers).toEqual([]);
   });
+
+  it('pushes a phone\'s audio as the phone reports it heard, whatever the clock says, and never skips what a report passed over', () => {
+    const clock = new Clock();
+    const pushed: Buffer[] = [];
+    let heard = 0;
+    const reference = new PlayedReference({ push: (pcm) => pushed.push(pcm), now: clock.now, played: () => heard, every: clock.every });
+    const total = () => pushed.reduce((sum, pcm) => sum + pcm.length, 0);
+    const pcm = audio(1000);
+
+    reference.written(pcm.subarray(0, 600 * BYTES_PER_MS));
+    reference.written(pcm.subarray(600 * BYTES_PER_MS));
+    expect(total()).toBe(REFERENCE_TICK_MS * BYTES_PER_MS);
+    // Two seconds pass and the phone has played nothing: nothing more goes.
+    clock.advance(2000);
+    expect(total()).toBe(REFERENCE_TICK_MS * BYTES_PER_MS);
+    // A report jumps 300 ms: all of it goes, in order.
+    heard = 300;
+    clock.advance(REFERENCE_TICK_MS);
+    expect(total()).toBe((300 + REFERENCE_TICK_MS) * BYTES_PER_MS);
+    heard = 1000;
+    clock.advance(REFERENCE_TICK_MS);
+    expect(Buffer.concat(pushed).equals(pcm)).toBe(true);
+    expect(clock.timers.filter((timer) => !timer.cleared)).toEqual([]);
+  });
 });
