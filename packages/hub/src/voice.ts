@@ -106,6 +106,17 @@ export const VOICE_LINGER_MS = 10 * 60_000;
 export const VOICE_RESTART_MS = 60_000;
 /** What a dock row click answers when its session has no window to talk to. */
 export const OPEN_ITS_WINDOW = 'Open its window to talk to it.';
+/** The mic codicon in codicon.ttf, which marks the voice target's dock row while the mic is on (architecture.md § Voice). */
+export const VOICE_GLYPH = '\u{ec12}';
+/** The speaker codicon (`unmute`), which marks the voice target's row while the mic is off: the voice speaks there, but nothing listens. */
+export const SPEAKER_GLYPH = '\u{eb75}';
+
+/** The voice target's row mark: the mic while the mic is on, else the speaker, with where the voice is in its tooltip. */
+export function voiceMark(micLive: boolean, onPhone: boolean): { glyph: string; title: string } {
+  const where = onPhone ? 'The voice speaks for this session on the phone' : 'The voice speaks for this session';
+
+  return micLive ? { glyph: VOICE_GLYPH, title: `${where}, and the mic is on.` } : { glyph: SPEAKER_GLYPH, title: `${where}; the mic is off.` };
+}
 /** Why a dock click leaves the voice where it is while the phone has it. */
 export const PHONE_HAS_VOICE = 'The voice is on the phone. Use Talk here in a window to take it back.';
 /** How long after a session's change an alert for it is sent, so the transcript has given the turn's last reply and a passing state is not called out. */
@@ -305,6 +316,8 @@ export class VoiceControl {
   /** Where the voice's microphone and speaker are, and the page key of the phone that has it (PRD R119). */
   #device: VoiceDevice = 'computer';
   #phoneKey: string | null = null;
+  /** The mic state the rows' mark last showed (`micLive`). */
+  #micLiveShown = false;
   /** Whether the voice process has the phone's capture open, so the phone's audio is relayed. */
   #phoneCapture = false;
   /** Whether the phone's microphone cannot be heard, as its page last said, for a voice process started again. */
@@ -478,8 +491,21 @@ export class VoiceControl {
     return this.#roomHoldUntil !== null && this.#roomHoldUntil > this.deps.now();
   }
 
-  /** Sends each window its voice state when it changed. */
+  /**
+   * Whether the mic is on where the voice is: turned on, and capture neither off, stopped by the idle timeout nor unavailable. The voice
+   * target's row shows the mic mark only then, else the speaker mark (architecture.md § Dock, PRD R109).
+   */
+  get micLive(): boolean {
+    return this.#micOn && this.#mic !== 'off' && this.#mic !== 'idle-off' && this.#mic !== 'unavailable';
+  }
+
+  /** Sends each window its voice state when it changed, and the dock and the page's list their row mark when the mic came on or went off. */
   viewsChanged(): void {
+    if (this.micLive !== this.#micLiveShown) {
+      this.#micLiveShown = this.micLive;
+      this.deps.dockChanged();
+    }
+
     for (const key of this.deps.windows.keys()) {
       const view = this.view(key);
       const text = JSON.stringify(view);
@@ -723,6 +749,7 @@ export class VoiceControl {
 
     this.#micOn = on;
     this.#client?.send({ type: 'mic', on });
+    this.viewsChanged();
     return null;
   }
 

@@ -58,7 +58,7 @@ Evidence names the file and line as of `main` at `a1323bc`; the symbol named bes
 |---|---|---|---|---|
 | R1 | Line 1: priority dot (with immediacy and severity tooltip) only on a priority ticket | MainWindow.axaml:502, `priorityTitle` rows.ts:533 | Present | render.ts:239, page.css:47 |
 | R2 | Line 1: title in semibold, cut with an ellipsis, whole title in its tooltip | MainWindow.axaml:504 | Present | render.ts:253-254 (tooltip on the row button) |
-| R3 | Line 1: the voice target's mic mark before the time | MainWindow.axaml:506, app.ts:589 | Present | `PageRow.voice` on the voice target's row (`pageList` page.ts, `voiceRow` app.ts), drawn before the time in `Row` list.tsx; the hub sends the list again when the voice target moves (`pageListChanged`) |
+| R3 | Line 1: the voice target's mark before the time, the mic while the mic is on, else the speaker | MainWindow.axaml:506, app.ts:589 | Present | `PageRow.voice` on the voice target's row (`pageList` page.ts, `voiceRow` app.ts), drawn before the time in `Row` list.tsx; both take the glyph and tooltip from the hub (`voiceMark` voice.ts, from `VoiceControl.micLive`), and the hub sends the dock and the list again when the voice target moves or the mic comes on or goes off (`pageListChanged`) |
 | R4 | Line 1: time at the end, muted, with what it counts and since when in its tooltip; Done rows show the done time | MainWindow.axaml:508, `rowTime` rows.ts:511 | Present | render.ts:240 |
 | R5 | Times refresh at least every minute | hub `tick` (architecture.md § Rows) | Present | the hub sends `list` on each rebuild (conversation.ts:536) |
 | R6 | Line 2: comment icon first, muted, with every comment and its time in the tooltip | MainWindow.axaml:513, `commentOf` dock.ts:503 | Present | render.ts:241 |

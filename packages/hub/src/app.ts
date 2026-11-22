@@ -27,7 +27,7 @@ import { ConversationService, claudePaths, sessionView } from './conversation.js
 import { PageConsole } from './console.js';
 import { CodexConversationAdapter } from './codexConversation.js';
 import { runAppServerDebrief } from '@switchboard/codex';
-import { alertDetail, alertKind, VoiceControl } from './voice.js';
+import { alertDetail, alertKind, VoiceControl, voiceMark } from './voice.js';
 import { VoiceLink } from './voiceLink.js';
 import { enrolledAt, parseRemote } from '@switchboard/voice';
 import { buildSnapshot } from './snapshot.js';
@@ -55,12 +55,6 @@ import { VoiceSockets } from './voiceSocket.js';
 import { VOICE_OFF } from './server.js';
 
 const RELOAD_DEBOUNCE_MS = 300;
-/** The mic codicon in codicon.ttf, which marks the voice target's dock row (architecture.md § Voice). */
-export const VOICE_GLYPH = '\u{ec12}';
-/** The mic mark's tooltip. */
-const VOICE_TITLE = 'The voice speaks for this session.';
-/** The mic mark's tooltip while a paired phone has the voice (architecture.md § Remote access, Voice on a phone). */
-const PHONE_VOICE_TITLE = 'The voice speaks for this session on the phone.';
 /** The dock's note while no device has the voice, after the phone that had it left. */
 const NO_VOICE_DEVICE = 'Voice: the phone that had it left. Use Talk here to bring it to this computer, or tap Voice on this phone again.';
 
@@ -704,7 +698,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       const built = views();
       const row = voiceRow();
 
-      return pageList(built.dock, built.snapshot, row === null ? null : { row, glyph: VOICE_GLYPH, title: voice.device === 'phone' ? PHONE_VOICE_TITLE : VOICE_TITLE });
+      return pageList(built.dock, built.snapshot, row === null ? null : { row, ...voiceMark(voice.micLive, voice.device === 'phone') });
     },
     pageHeader: () => {
       const built = views();
@@ -931,7 +925,7 @@ const dockWithRuns = () => {
           ...row,
           open: row.open?.type === 'terminal' ? { ...executable(row.open), type: 'terminal' as const } : row.open,
           terminal: row.terminal === null ? null : executable(row.terminal),
-          voice: row.key === activeRow ? { glyph: VOICE_GLYPH, title: voice.device === 'phone' ? PHONE_VOICE_TITLE : VOICE_TITLE } : null,
+          voice: row.key === activeRow ? voiceMark(voice.micLive, voice.device === 'phone') : null,
           controls: [...row.controls, ...personaControls(row.key)],
         })),
       })),

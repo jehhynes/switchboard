@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from '@switchboard/core';
 import type { ConversationReply, Persona, VoiceSettings } from '@switchboard/core';
 import type { HubMessage, VoiceMessage } from '@switchboard/voice';
-import { ALERT_DELAY_MS, OPEN_ITS_WINDOW, VOICE_LINGER_MS, VOICE_RESTART_MS, VoiceControl, alertDetail, alertKind } from '../src/voice.js';
+import { ALERT_DELAY_MS, OPEN_ITS_WINDOW, SPEAKER_GLYPH, VOICE_GLYPH, VOICE_LINGER_MS, VOICE_RESTART_MS, VoiceControl, alertDetail, alertKind, voiceMark } from '../src/voice.js';
 import type { VoiceConnection } from '../src/voiceLink.js';
 import type { WindowScope } from '../src/windows.js';
 
@@ -705,5 +705,49 @@ describe('spoken alerts in the hub', () => {
     advance(ALERT_DELAY_MS);
     expect(alerts()).toEqual([]);
     focus(null);
+  });
+
+  it('says the mic is on where the voice is only while it is turned on and capture runs, and tells the dock when that changes (PRD R109)', async () => {
+    const { control, connections, windows, settle, dockChanges } = setup({ enabled: true });
+
+    windows.set('k1', scope('k1', 1, 's1'));
+    control.update();
+    await settle();
+    control.talkHere('k1');
+    connections[0]!.receive({ type: 'active', gen: 1, sessionId: 's1', reason: 'talk-here' });
+    expect(control.micLive).toBe(false);
+
+    const before = dockChanges();
+
+    expect(control.mic('k1', true)).toBeNull();
+    // Turned on, but capture has not started: not on yet.
+    expect(control.micLive).toBe(false);
+    connections[0]!.receive({ type: 'audio', mic: 'listening', engine: 'decibri', device: null, recognizer: 'cpu', error: null });
+    expect(control.micLive).toBe(true);
+    expect(dockChanges()).toBe(before + 1);
+    // Hearing is still on, with no new mark.
+    connections[0]!.receive({ type: 'audio', mic: 'hearing', engine: 'decibri', device: null, recognizer: 'cpu', error: null });
+    expect(dockChanges()).toBe(before + 1);
+
+    // The idle timeout stops capture: no longer on.
+    connections[0]!.receive({ type: 'audio', mic: 'idle-off', engine: 'decibri', device: null, recognizer: 'cpu', error: null });
+    expect(control.micLive).toBe(false);
+    expect(dockChanges()).toBe(before + 2);
+    connections[0]!.receive({ type: 'audio', mic: 'listening', engine: 'decibri', device: null, recognizer: 'cpu', error: null });
+
+    // Mic off is off at once, before the process answers.
+    expect(control.mic('k1', false)).toBeNull();
+    expect(control.micLive).toBe(false);
+    expect(dockChanges()).toBe(before + 4);
+  });
+});
+
+describe('voiceMark', () => {
+  it('marks the voice target\'s row with the mic while the mic is on, else the speaker, saying where the voice is', () => {
+    expect(voiceMark(true, false)).toEqual({ glyph: VOICE_GLYPH, title: 'The voice speaks for this session, and the mic is on.' });
+    expect(voiceMark(false, false)).toEqual({ glyph: SPEAKER_GLYPH, title: 'The voice speaks for this session; the mic is off.' });
+    expect(voiceMark(true, true)).toEqual({ glyph: VOICE_GLYPH, title: 'The voice speaks for this session on the phone, and the mic is on.' });
+    expect(voiceMark(false, true).glyph).toBe(SPEAKER_GLYPH);
+    expect(SPEAKER_GLYPH).not.toBe(VOICE_GLYPH);
   });
 });
