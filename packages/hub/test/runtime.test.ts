@@ -3340,7 +3340,7 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
       return `${ticket.source} ${ticket.sourceKey}`;
     })();
 
-    expect(await runtime.register('cleared-uuid', 'Mine')).toEqual({ refused: `This session runs in the terminal holder for ${key}, which Switchboard follows there.` });
+    expect(await runtime.register('cleared-uuid', 'Mine')).toEqual({ refused: `This session already belongs to work item ${key}.` });
     runtime.stop();
   });
 
@@ -4097,7 +4097,7 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
 
       const cannotType = context.runtime.heldCannotType();
 
-      expect(cannotType).toMatch(/^The terminal holder is from an older build and cannot type\. To switch to this build, run \S+ "[^"]+\/\.switchboard\/hub\.js" holder stop --all in a terminal: .* again with --yes\. Until then, open the session in the terminal\.$/);
+      expect(cannotType).toMatch(/^The terminal holder is from an older build and cannot accept messages from Switchboard\. Open the session in a terminal to type there\. To update it, run \S+ "[^"]+\/\.switchboard\/hub\.js" holder stop --all, review the sessions listed, then run it again with --yes; those sessions will stop\.$/);
       expect(context.runtime.heldHolder()).toMatchObject({ protocol: 1 });
       await expect(context.runtime.writeHeld('s1', 'x')).rejects.toThrow(new NotWritten(cannotType!));
       context.runtime.stop();
@@ -4110,7 +4110,7 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
 
       const handlers = { onSize: () => undefined, onData: () => undefined, onReplayed: () => undefined, onExit: () => undefined, onClose: () => undefined };
 
-      await expect(context.runtime.viewHeld('s1', handlers)).rejects.toThrow(/^The terminal holder is from an older build and cannot show its sessions here\. To switch to this build, run .* holder stop --all/);
+      await expect(context.runtime.viewHeld('s1', handlers)).rejects.toThrow(/^The terminal holder is from an older build and cannot show the session's console here\. Open the session in a terminal\. To update it, run .* holder stop --all/);
       await expect(context.runtime.sizeHeld('s1', 100, 30)).rejects.toBeInstanceOf(NotWritten);
       context.runtime.stop();
     });

@@ -1181,7 +1181,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
           return;
         }
 
-        // The voice left without a word, as a hidden page loses it: the mic is off with nothing to say.
+        // The voice ended with nothing to say, as when a hidden page loses it or the operator turns voice or the mic off: the mic is off.
         if (error === '') {
           micOpening = false;
           micStart.clear();

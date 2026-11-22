@@ -460,7 +460,7 @@ describe('the list header (architecture.md § Web page)', () => {
     source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ voiceDevice: 'phone' }) });
     click('.more-actions');
     expect(menuRows().at(-1)).toBe('Voice on the computer');
-    expect(root.querySelector('[data-action="list-voice-computer"]')?.getAttribute('title')).toContain('on a phone');
+    expect(root.querySelector('[data-action="list-voice-computer"]')?.getAttribute('title')).toContain('on a paired device');
     answers['/page-voice-computer'] = { status: 409, body: { error: 'Voice is off (voice.enabled).' } };
     click('.more-menu [data-action="list-voice-computer"]');
     await flush();
@@ -485,8 +485,8 @@ describe('the list header (architecture.md § Web page)', () => {
 
     hello(remote.source);
     click('.more-actions');
-    // Settings stays on this computer too; the menu ends with Voice on this phone, off until tapped.
-    expect(menuRows().slice(-6)).toEqual(['-', 'Refresh sources', 'Reload', 'Show hub log', '-', 'Voice on this phone']);
+    // Settings stays on this computer too; the menu ends with Voice on this device, off until tapped.
+    expect(menuRows().slice(-6)).toEqual(['-', 'Refresh sources', 'Reload', 'Show hub log', '-', 'Voice on this device']);
     expect(root.querySelector('[data-action="list-phone-voice"]')?.getAttribute('aria-checked')).toBe('false');
     expect(root.querySelector('[data-action="list-settings"]')).toBeNull();
     remote.page.close();

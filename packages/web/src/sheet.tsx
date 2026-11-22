@@ -92,7 +92,7 @@ export function renderSheet(sheet: Sheet | null, acting: boolean): VNode | null 
   return (
     <Frame title={`Snooze ${sheet.title}`} buttons={go('Snooze', acting)}>
       <fieldset class="sheet-field">
-        <legend>Wake it</legend>
+        <legend>Snooze ends</legend>
         {sheet.choices.map((choice, index) => (
           <label class="sheet-choice">
             <input type="radio" name="snooze" value={String(index)} checked={sheet.picked === String(index)} />
@@ -102,7 +102,7 @@ export function renderSheet(sheet: Sheet | null, acting: boolean): VNode | null 
         <label class="sheet-choice">
           <input type="radio" name="snooze" value="date" disabled={first === null} checked={sheet.picked === 'date'} />
           <span>On</span>
-          <input type="date" class="snooze-date" disabled={first === null} min={first ?? undefined} value={sheet.date} aria-label="Wake date" />
+          <input type="date" class="snooze-date" disabled={first === null} min={first ?? undefined} value={sheet.date} aria-label="Snooze end date" />
         </label>
       </fieldset>
       <label class="sheet-field">

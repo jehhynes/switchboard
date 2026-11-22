@@ -26,13 +26,13 @@ export type VoicePlace = 'window' | 'page';
 /** The mic's tooltip while the operator paused it by voice. */
 export const PAUSED_BY_VOICE_TIP = 'Paused: you said "stop listening". Say "start listening", or click to listen again.';
 /** Talk here's tooltip while the voice is here but no device has it. */
-export const DEVICE_OFF_TIP = 'Voice is off: the phone that had it left, so replies are not spoken. Click to speak them on this computer; the mic stays off.';
+export const DEVICE_OFF_TIP = 'Voice is off. Click to use it on this computer.';
 /** Speak replies' tooltip while it is on and this window's session speaks: its click stops the reply too. */
 export const SPEAKING_TIP = 'Speak replies: on. Click to stop and stop speaking replies (Escape stops only this reply).';
 /** The speaker's tooltip while Speak replies is off and a Replay plays: its click stops the Replay and leaves Speak replies off. */
 export const REPLAY_TIP = 'Speak replies: off. Click to stop this replay (Escape).';
 /** The mic's tooltip while a room hold keeps dictation in the box. */
-export const ROOM_HOLD_TIP = 'Held: someone else is talking in the room, so dictation stays in the box until you press Enter.';
+export const ROOM_HOLD_TIP = 'Dictation is waiting after another voice was detected. Press Enter to send it.';
 
 function escape(text: string): string {
   return text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
@@ -62,12 +62,12 @@ export function renderVoiceControls(voice: VoiceControlsView | null, live = true
       : icon('mute', 'Speak replies: off. Click to speak replies.', 'speak-replies', ' aria-pressed="false"');
   const talkHere =
     !voice.here && live
-      ? `<button class="ghost talk-here" type="button" data-key="voice-talk-here" data-voice="talk-here" title="The voice is not ${place === 'page' ? 'on this page' : 'in this window'}. Click to move it here.">Talk here</button>`
+      ? `<button class="ghost talk-here" type="button" data-key="voice-talk-here" data-voice="talk-here" title="Click to use voice for this session.">Talk here</button>`
       : '';
 
   const deviceOff =
     voice.here && voice.deviceOff === true
-      ? `<button class="ghost talk-here" type="button" data-key="voice-talk-here" data-voice="talk-here" title="${escape(DEVICE_OFF_TIP)}">Voice is off — Talk here</button>`
+      ? `<button class="ghost talk-here" type="button" data-key="voice-talk-here" data-voice="talk-here" title="${escape(DEVICE_OFF_TIP)}">Talk here</button>`
       : '';
 
   return voice.here ? `${deviceOff}${speakReplies}` : talkHere;
@@ -239,7 +239,7 @@ export function renderMicButton(voice: VoiceControlsView | null, pending: MicPen
       // The mic is on but cannot run: a click turns it off, and turning it on again tries again.
       return button(micGlyph('off'), `Mic on but unavailable: ${voice.error ?? 'unknown error'} Click to turn the mic off.`, false, 'unavailable');
     case 'idle-off':
-      return button(micGlyph('outline'), 'Mic off after a quiet spell. Click to turn it on (Ctrl+Alt+M).', true, 'idle');
+      return button(micGlyph('outline'), 'Mic turned off after inactivity. Click to turn it on (Ctrl+Alt+M).', true, 'idle');
     default:
       return button(micGlyph('off'), 'Mic off. Click to turn it on (Ctrl+Alt+M).', true, 'off');
   }

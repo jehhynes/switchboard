@@ -345,7 +345,7 @@ export function voiceStatus(voice: VoiceView | null): { text: string; tooltip: s
   }
 
   if (!voice.here) {
-    return { text: '$(circle-slash) Voice not here', tooltip: 'Voice is not in this window. Click to talk here.', command: 'switchboard.talkHere', warning: false };
+    return { text: '$(circle-slash) Voice not here', tooltip: 'Click to use voice for this session.', command: 'switchboard.talkHere', warning: false };
   }
 
   // After the phone left, no device has the voice: nothing plays or listens until it is taken back (PRD R119).
@@ -370,7 +370,7 @@ export function voiceStatus(voice: VoiceView | null): { text: string; tooltip: s
   switch (voice.mic) {
     case 'listening':
     case 'hearing':
-      return { text: voice.roomHold === true ? '$(mic-filled) Listening (held)' : '$(mic-filled) Listening', tooltip: `${sends}${halfDuplex} Click to turn the mic off.`, command: 'switchboard.toggleMicrophone', warning: false };
+      return { text: voice.roomHold === true ? '$(mic-filled) Dictation waiting' : '$(mic-filled) Listening', tooltip: `${sends}${halfDuplex} Click to turn the mic off.`, command: 'switchboard.toggleMicrophone', warning: false };
     case 'typing':
       return { text: '$(mic-filled) Typing', tooltip: 'Dictation pauses while the composer has the focus. Click to turn the mic off.', command: 'switchboard.toggleMicrophone', warning: false };
     case 'starting':
@@ -380,7 +380,7 @@ export function voiceStatus(voice: VoiceView | null): { text: string; tooltip: s
     case 'paused-by-voice':
       return { text: '$(mic) Mic paused', tooltip: PAUSED_BY_VOICE_TIP, command: 'switchboard.toggleMicrophone', warning: false };
     default:
-      return { text: '$(mic) Mic off', tooltip: voice.mic === 'idle-off' ? 'The mic stopped after a quiet spell. Click to turn it on.' : 'Click to turn the mic on.', command: 'switchboard.toggleMicrophone', warning: false };
+      return { text: '$(mic) Mic off', tooltip: voice.mic === 'idle-off' ? 'Mic turned off after inactivity. Click to turn it on.' : 'Click to turn the mic on.', command: 'switchboard.toggleMicrophone', warning: false };
   }
 }
 

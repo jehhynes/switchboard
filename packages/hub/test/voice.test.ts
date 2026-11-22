@@ -592,7 +592,7 @@ describe('VoiceControl', () => {
     await settle();
     expect(control.talkHere('k0')).toBe('This window has no session to talk to.');
     full.delete('s2');
-    expect(control.talkHere('k2')).toBe('The voice speaks only for a live session.');
+    expect(control.talkHere('k2')).toBe('Voice is not available for this session.');
     expect(control.talkHere('k1')).toBeNull();
     expect(connections[0]!.sent.at(-1)).toEqual({ type: 'talk-here', sessionId: 's1' });
 
@@ -897,9 +897,9 @@ describe('spoken alerts in the hub', () => {
 
 describe('voiceMark', () => {
   it('marks the voice target\'s row with the mic while the mic is on, else the speaker, saying where the voice is', () => {
-    expect(voiceMark(true, false)).toEqual({ glyph: VOICE_GLYPH, title: 'The voice speaks for this session, and the mic is on.' });
-    expect(voiceMark(false, false)).toEqual({ glyph: SPEAKER_GLYPH, title: 'The voice speaks for this session; the mic is off.' });
-    expect(voiceMark(true, true)).toEqual({ glyph: VOICE_GLYPH, title: 'The voice speaks for this session on the phone, and the mic is on.' });
+    expect(voiceMark(true, false)).toEqual({ glyph: VOICE_GLYPH, title: 'Voice is set to this session. Mic on.' });
+    expect(voiceMark(false, false)).toEqual({ glyph: SPEAKER_GLYPH, title: 'Voice is set to this session. Mic off.' });
+    expect(voiceMark(true, true)).toEqual({ glyph: VOICE_GLYPH, title: 'Voice is on a paired device for this session. Mic on.' });
     expect(voiceMark(false, true).glyph).toBe(SPEAKER_GLYPH);
     expect(SPEAKER_GLYPH).not.toBe(VOICE_GLYPH);
   });

@@ -164,7 +164,7 @@ describe('the voice socket on the page origin', () => {
     remoteAccess = { hosts: [HOST], logins: ['alex@example.com'] };
     enabled = true;
     now = 1_000;
-    resumeRefused = 'Nothing to take back.';
+    resumeRefused = 'Voice did not resume after Switchboard restarted.';
   });
 
   afterEach(async () => {
@@ -301,7 +301,7 @@ describe('the voice socket on the page origin', () => {
     expect(await refused(otherPage.key, good)).toEqual([403, 'Not in this window.']);
     expect(await refused(localPage.key, good)).toEqual([403, 'Not in this window.']);
     // This computer's own page, with its own key and cookie, and a phone's cookie on this computer.
-    expect(await refused(localPage.key, { Host: `127.0.0.1:${server.port}`, Cookie: localCookie, Origin: `http://127.0.0.1:${server.port}` })).toEqual([403, 'Voice on this computer uses its own microphone and speaker.']);
+    expect(await refused(localPage.key, { Host: `127.0.0.1:${server.port}`, Cookie: localCookie, Origin: `http://127.0.0.1:${server.port}` })).toEqual([403, 'Use Voice on the computer to use this computer\'s microphone and speaker.']);
     expect(await refused(phonePage.key, { Host: `127.0.0.1:${server.port}`, Cookie: phone, Origin: `http://127.0.0.1:${server.port}` })).toEqual([401, 'Not signed in.']);
     // Another path, and a plain GET with no upgrade.
     const wrongPath = new Client(connect(server.port, '127.0.0.1'), `/v1/voice/other?window=${phonePage.key}`, { Upgrade: 'websocket', Connection: 'Upgrade', 'Sec-WebSocket-Version': '13', 'Sec-WebSocket-Key': randomBytes(16).toString('base64'), ...good });
@@ -347,7 +347,7 @@ describe('the voice socket on the page origin', () => {
     expect((await post('page-device-voice', local, { window: here.key, id: idOf(localCookie), allow: true })).status).toBe(404);
     expect((await post('page-device-voice', local, { window: here.key, id: '00000000', allow: true })).status).toBe(404);
     expect((await post('page-device-voice', local, { window: here.key, id: idOf(phone), allow: 'yes' })).status).toBe(400);
-    expect(JSON.parse((await post('page-voice-state', local, { window: here.key })).body)).toEqual({ allowed: false, error: 'Voice on this computer uses its own microphone and speaker.' });
+    expect(JSON.parse((await post('page-voice-state', local, { window: here.key })).body)).toEqual({ allowed: false, error: 'Use Voice on the computer to use this computer\'s microphone and speaker.' });
 
     enabled = false;
     expect(JSON.parse((await post('page-voice-state', { ...REMOTE, Cookie: phone, Origin: PHONE_ORIGIN }, { window: phonePage.key })).body)).toEqual({ allowed: false, error: VOICE_OFF });
@@ -406,7 +406,7 @@ describe('the voice socket on the page origin', () => {
     expect(await refused.status).toBe(101);
     refused.send({ type: 'hello', resume: true });
     await refused.closed;
-    expect([refused.closeCode, refused.closeReason]).toEqual([VOICE_CLOSE.refused, 'Nothing to take back.']);
+    expect([refused.closeCode, refused.closeReason]).toEqual([VOICE_CLOSE.refused, 'Voice did not resume after Switchboard restarted.']);
     expect(events).toEqual([`resumable ${phonePage.key}`]);
 
     resumeRefused = null;
@@ -508,7 +508,7 @@ describe('the voice socket on the page origin', () => {
     const fifth = await connected((await openPage({ ...REMOTE, Cookie: tablet })).key, { ...good, Cookie: tablet });
 
     await fourth.closed;
-    expect([fourth.closeCode, fourth.closeReason]).toEqual([VOICE_CLOSE.moved, 'Voice moved to another device.']);
+    expect([fourth.closeCode, fourth.closeReason]).toEqual([VOICE_CLOSE.moved, 'Voice is now on another device.']);
 
     // Signing the device out, then pairing it anew, which needs voice allowed again.
     const id = page.access.sessionOf(tablet)!.slice(0, 8);

@@ -578,7 +578,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
   };
   /** Whether this page's device may take the voice, and why not. */
   const voiceState = (cookie: string | undefined, origin: PageOrigin): Reply => {
-    const error = origin.host === null ? 'Voice on this computer uses its own microphone and speaker.' : page?.voice?.enabled() !== true ? VOICE_OFF : !page.access.voiceAllowed(page.access.sessionOf(cookie)) ? VOICE_NOT_ALLOWED : null;
+    const error = origin.host === null ? 'Use Voice on the computer to use this computer\'s microphone and speaker.' : page?.voice?.enabled() !== true ? VOICE_OFF : !page.access.voiceAllowed(page.access.sessionOf(cookie)) ? VOICE_NOT_ALLOWED : null;
 
     return { status: 200, body: { allowed: error === null, error } };
   };
@@ -1047,7 +1047,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     }
 
     if (origin.host === null) {
-      refuse(403, 'Voice on this computer uses its own microphone and speaker.');
+      refuse(403, 'Use Voice on the computer to use this computer\'s microphone and speaker.');
       return;
     }
 

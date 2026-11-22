@@ -12,7 +12,7 @@ export const PHONE_CHUNK_MS = 40;
  */
 export const PHONE_STALL_MS = 8_000;
 /** Why a stalled phone loses the voice. */
-export const PHONE_STALLED = 'The phone stopped playing the voice.';
+export const PHONE_STALLED = 'Voice stopped because playback on this device stopped progressing.';
 
 type PhoneSend = (message: Extract<VoiceMessage, { type: 'phone-play' | 'phone-pcm' | 'phone-end' | 'phone-flush' }>) => void;
 

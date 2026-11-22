@@ -208,7 +208,7 @@ describe('dockView', () => {
     expect(row(item(1, { runStartedAt: NOW - 40 * 60_000, sessions: [session({ stateAt: NOW - 40 * 60_000 })] })).details).toEqual([
       { text: 'No stage report · 40m', title: 'No stage report for 40m', tone: 'warning' },
     ]);
-    expect(row(item(1, { status: 'queued', waits: [{ kind: 'snoozed' }] })).details).toEqual([{ text: 'Starts when the ticket wakes', title: 'The ticket is snoozed.', tone: null }]);
+    expect(row(item(1, { status: 'queued', waits: [{ kind: 'snoozed' }] })).details).toEqual([{ text: 'Starts after the snooze ends', title: 'The ticket is snoozed.', tone: null }]);
   });
 
   it('names the mark in words on line 3 when nothing else is there', () => {
@@ -247,9 +247,9 @@ describe('dockView', () => {
     const snoozed = (until: number | null, snoozeComment: string | null) => row(item(7, { status: 'unstarted', ticket: { ...item(7).ticket, snoozed: true, snoozedUntil: until, snoozeComment } }));
     const until = NOW + 86_400_000;
 
-    expect(snoozed(until, null).details).toEqual([{ text: `Wakes ${wakeText(until)}`, title: null, tone: null }]);
+    expect(snoozed(until, null).details).toEqual([{ text: `Snoozed until ${wakeText(until)}`, title: null, tone: null }]);
     expect(snoozed(until, 'Waiting for the release.\nThen retry.').details).toEqual([
-      { text: `Wakes ${new Date(until).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`, title: `Wakes ${wakeText(until)}`, tone: null },
+      { text: `Snoozed until ${new Date(until).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`, title: `Snoozed until ${wakeText(until)}`, tone: null },
       { text: 'Waiting for the release. Then retry.', title: 'Waiting for the release.\nThen retry.', tone: null },
     ]);
     expect(snoozed(null, 'Later').details).toEqual([{ text: 'Later', title: 'Later', tone: null }]);

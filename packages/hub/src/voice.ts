@@ -43,8 +43,8 @@ export interface VoiceView {
 const MIC_OFF_TEXT: Record<AwayReason, string> = { locked: 'computer locked', asleep: 'computer going to sleep', disconnected: 'session disconnected' };
 
 /** What the composer shows when a dictated turn is held, while the room hold runs and after it. */
-export const HELD_NOTE = 'Held: someone else is talking in the room — press Enter to send';
-export const HELD_AFTER_NOTE = 'Held: someone else was talking in the room — press Enter to send';
+export const HELD_NOTE = 'Dictation is waiting while another voice is detected. Press Enter to send it.';
+export const HELD_AFTER_NOTE = 'Dictation is still waiting after another voice was detected. Press Enter to send it.';
 
 /** The key dictation uses for the target's session terminal window, which no window key can equal (architecture.md § Voice). */
 const TERMINAL = '\0terminal';
@@ -110,7 +110,7 @@ export const VOICE_LINGER_MS = 10 * 60_000;
 /** A crashed voice process is started again at most this often. */
 export const VOICE_RESTART_MS = 60_000;
 /** What a dock row click answers when its session has no window to talk to. */
-export const OPEN_ITS_WINDOW = 'Open its window to talk to it.';
+export const OPEN_ITS_WINDOW = 'Open a window for this session to use voice.';
 /** The mic codicon in codicon.ttf, which marks the voice target's dock row while the mic is on (architecture.md § Voice). */
 export const VOICE_GLYPH = '\u{ec12}';
 /** The speaker codicon (`unmute`), which marks the voice target's row while the mic is off: the voice speaks there, but nothing listens. */
@@ -118,12 +118,12 @@ export const SPEAKER_GLYPH = '\u{eb75}';
 
 /** The voice target's row mark: the mic while the mic is on, else the speaker, with where the voice is in its tooltip. */
 export function voiceMark(micLive: boolean, onPhone: boolean): { glyph: string; title: string } {
-  const where = onPhone ? 'The voice speaks for this session on the phone' : 'The voice speaks for this session';
+  const where = onPhone ? 'Voice is on a paired device for this session' : 'Voice is set to this session';
 
-  return micLive ? { glyph: VOICE_GLYPH, title: `${where}, and the mic is on.` } : { glyph: SPEAKER_GLYPH, title: `${where}; the mic is off.` };
+  return micLive ? { glyph: VOICE_GLYPH, title: `${where}. Mic on.` } : { glyph: SPEAKER_GLYPH, title: `${where}. Mic off.` };
 }
 /** Why a dock click leaves the voice where it is while the phone has it. */
-export const PHONE_HAS_VOICE = 'The voice is on the phone. Use Talk here in a window to take it back.';
+export const PHONE_HAS_VOICE = 'Voice is on a paired device. Select Talk here in the session\'s window to use it on this computer.';
 /** How long after a session's change an alert for it is sent, so the transcript has given the turn's last reply and a passing state is not called out. */
 export const ALERT_DELAY_MS = 1_500;
 /** The longest detail an alert reads, cut at a sentence. */
@@ -266,11 +266,11 @@ export const PHONE_PCM_FRAME = 1;
 /** The first byte of a binary frame the phone sends: its microphone's 16 kHz PCM (Voice on a phone). */
 export const PHONE_MIC_FRAME = 2;
 /** Why a paired device's page cannot turn on this computer's microphone. */
-export const PHONE_MIC_HERE = 'Tap Voice on this phone to use the mic here.';
+export const PHONE_MIC_HERE = 'Select Voice on this device before turning on the mic.';
 /** How long a hub that took over waits for the phone that had the voice to take it back, before the voice is off (architecture.md § Hub lifecycle). */
 export const PHONE_RESUME_MS = 30_000;
 /** Why a phone's page that asks to take the voice back after a hub restart is refused. */
-export const NOT_RESUMED = 'The voice moved on while Switchboard restarted. Tap Voice on this phone to use it here.';
+export const NOT_RESUMED = 'Voice did not resume after Switchboard restarted. Select Voice on this device to start it here.';
 
 /**
  * The voice's state a restarting hub hands to the hub that takes over, in `hub-handover.json` (architecture.md § Hub lifecycle): the device and
@@ -683,7 +683,7 @@ export class VoiceControl {
    */
   toComputer(key: string): string | null {
     if (this.deps.remotePage?.(key) === true) {
-      return 'Choose Voice on the computer on the computer that runs Switchboard.';
+      return 'Select Voice on the computer on the computer running Switchboard.';
     }
 
     if (!this.deps.settings().enabled) {
@@ -716,7 +716,7 @@ export class VoiceControl {
     this.#setDevice('computer', 'taken back on this computer');
 
     if (fromPhone) {
-      this.deps.phone?.close('Voice moved to the computer.');
+      this.deps.phone?.close('Voice is now on the computer running Switchboard.');
     }
 
     this.#offerHeld();
@@ -1600,7 +1600,7 @@ export class VoiceControl {
 
     // Another paired device's page cannot take the voice from the phone, nor to this computer after the phone left (PRD R119).
     if (this.#device !== 'computer' && key !== this.#phoneKey && this.deps.remotePage?.(key) === true) {
-      return this.#device === 'phone' ? 'The voice is on another device.' : 'Tap Voice on this phone to use the voice here.';
+      return this.#device === 'phone' ? 'Voice is on another device.' : 'Select Voice on this device to start voice here.';
     }
 
     // Talk here on this computer takes the voice back from the phone, or after the phone left (PRD R119).
@@ -1892,7 +1892,7 @@ export class VoiceControl {
     }
 
     if (!this.deps.full(sessionId)) {
-      return 'The voice speaks only for a live session.';
+      return 'Voice is not available for this session.';
     }
 
     if (this.#client === null) {

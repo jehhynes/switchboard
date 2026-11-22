@@ -69,11 +69,11 @@ export const SESSION_ENDED = 'The session has ended. Open it in the terminal to 
 export const SESSION_RELAUNCHED = 'The session was resumed since the view showed it; send the message again.';
 /** Why a held session cannot be typed into: its holder is from an older build; `stopAll` is the command that replaces it (`hub.js holder stop --all`). */
 export function holderCannotType(stopAll: string): string {
-  return `The terminal holder is from an older build and cannot type. To switch to this build, run ${stopAll} in a terminal: it lists the sessions that end with the holder, each of which can be resumed, and ends them when run again with --yes. Until then, open the session in the terminal.`;
+  return `The terminal holder is from an older build and cannot accept messages from Switchboard. Open the session in a terminal to type there. To update it, run ${stopAll}, review the sessions listed, then run it again with --yes; those sessions will stop.`;
 }
 /** Why the web page's console cannot show a held session: its holder is from an older build; `stopAll` replaces it, as for `holderCannotType`. */
 export function holderCannotView(stopAll: string): string {
-  return `The terminal holder is from an older build and cannot show its sessions here. To switch to this build, run ${stopAll} in a terminal: it lists the sessions that end with the holder, each of which can be resumed, and ends them when run again with --yes. Until then, open the session in the terminal.`;
+  return `The terminal holder is from an older build and cannot show the session's console here. Open the session in a terminal. To update it, run ${stopAll}, review the sessions listed, then run it again with --yes; those sessions will stop.`;
 }
 
 /** What the web page's console hears from a held session it watches (architecture.md § Web page). */
@@ -1549,7 +1549,7 @@ export class Runtime {
     const held = this.runners.codeMode.heldBy?.(nativeSessionId, this.deps.store.activeSessions()) ?? null;
 
     if (held !== null) {
-      return { refused: `This session runs in the terminal holder for ${keyOf(held)}, which Switchboard follows there.` };
+      return { refused: `This session already belongs to work item ${keyOf(held)}.` };
     }
 
     if (live === null) {

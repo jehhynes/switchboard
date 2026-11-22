@@ -213,9 +213,9 @@ describe('VoiceControl with the voice on a phone (PRD R119)', () => {
     control.phoneOpened('phone');
     expect(control.mic('pc', true)).toBeNull();
     expect(control.device).toBe('computer');
-    expect(closed).toEqual(['Voice moved to the computer.']);
+    expect(closed).toEqual(['Voice is now on the computer running Switchboard.']);
     // The socket's close that follows changes nothing.
-    control.phoneClosed('Voice moved to the computer.');
+    control.phoneClosed('Voice is now on the computer running Switchboard.');
     expect(control.device).toBe('computer');
     // Talk here on the phone's own page keeps it there.
     control.phoneOpened('phone');
@@ -229,7 +229,7 @@ describe('VoiceControl with the voice on a phone (PRD R119)', () => {
     control.update();
     await settle();
     control.phoneOpened('phone');
-    expect(control.talkHere('tablet')).toBe('The voice is on another device.');
+    expect(control.talkHere('tablet')).toBe('Voice is on another device.');
     expect(control.device).toBe('phone');
 
     // A selection on the phone page moves the voice by the page's own focus, though a window on this computer was focused last.
@@ -248,15 +248,15 @@ describe('VoiceControl with the voice on a phone (PRD R119)', () => {
     ]);
 
     // The phone's reports go to the voice process only while a phone has the voice; a stall closes its socket.
-    connections[0]!.receive({ type: 'phone-stalled', reason: 'The phone stopped playing the voice.' });
-    expect(closed).toEqual(['The phone stopped playing the voice.']);
-    expect(logs).toContain('voice: the phone stopped playing: The phone stopped playing the voice.');
-    control.phoneClosed('The phone stopped playing the voice.');
+    connections[0]!.receive({ type: 'phone-stalled', reason: 'Voice stopped because playback on this device stopped progressing.' });
+    expect(closed).toEqual(['Voice stopped because playback on this device stopped progressing.']);
+    expect(logs).toContain('voice: the phone stopped playing: Voice stopped because playback on this device stopped progressing.');
+    control.phoneClosed('Voice stopped because playback on this device stopped progressing.');
     expect(control.device).toBe('none');
     control.phoneMessage({ type: 'played', id: 1, ms: 1, done: false });
     expect(sentOf('phone-played')).toEqual([]);
     // With none, a paired page still cannot bring the voice to this computer.
-    expect(control.talkHere('phone')).toBe('Tap Voice on this phone to use the voice here.');
+    expect(control.talkHere('phone')).toBe('Select Voice on this device to start voice here.');
     expect(control.device).toBe('none');
   });
 
@@ -431,12 +431,12 @@ describe('VoiceControl with the voice on a phone (PRD R119)', () => {
     // On this computer any page may sound, focused or not.
     expect(control.pageMaySound('pc')).toBe(true);
     control.phoneOpened('phone');
-    expect(control.toComputer('phone')).toBe('Choose Voice on the computer on the computer that runs Switchboard.');
+    expect(control.toComputer('phone')).toBe('Select Voice on the computer on the computer running Switchboard.');
     expect(control.device).toBe('phone');
     expect(control.toComputer('pc')).toBeNull();
     expect(control.device).toBe('computer');
     expect(sentOf('device').at(-1)).toEqual({ type: 'device', device: 'computer' });
-    expect(closed).toEqual(['Voice moved to the computer.']);
+    expect(closed).toEqual(['Voice is now on the computer running Switchboard.']);
 
     // After the phone left, too.
     control.phoneOpened('phone');

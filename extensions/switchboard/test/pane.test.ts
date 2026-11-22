@@ -153,7 +153,7 @@ describe('paneModel (PRD R92)', () => {
 
   it('shows nothing before the first snapshot but this window\'s voice', () => {
     expect(paneModel(null, FILE, WINDOWS, NOW)).toEqual({ items: [], voice: null });
-    expect(paneModel(null, FILE, WINDOWS, NOW, { status: null, voice: { enabled: true, here: false, mic: 'off', speaking: null, speakReplies: true, error: null, recognizer: null } }).voice).toEqual({ icon: 'circle-slash', text: 'Voice not here', tooltip: 'Voice is not in this window. Click to talk here.', talkHere: true });
+    expect(paneModel(null, FILE, WINDOWS, NOW, { status: null, voice: { enabled: true, here: false, mic: 'off', speaking: null, speakReplies: true, error: null, recognizer: null } }).voice).toEqual({ icon: 'circle-slash', text: 'Voice not here', tooltip: 'Click to use voice for this session.', talkHere: true });
     // After the phone left, the voice is off here too, with Talk here to take it back.
     expect(paneModel(null, FILE, WINDOWS, NOW, { status: null, voice: { enabled: true, here: true, mic: 'off', speaking: null, speakReplies: true, error: null, recognizer: null, deviceOff: true } }).voice).toMatchObject({ icon: 'circle-slash', text: 'Voice off', talkHere: true });
   });

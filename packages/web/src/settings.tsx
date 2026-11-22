@@ -1255,7 +1255,7 @@ function DevicesBlock({ remote, on }: { remote: RemoteView; on: Handlers }) {
                 </span>
               </span>
               {one.host === null ? null : (
-                <button type="button" class="sheet-button secondary" title={one.voice === true ? 'Stop this device using the voice; its voice connection closes' : 'Let this device use the voice with its own microphone and speaker'} disabled={remote.busy} onClick={() => on.deviceVoice(one.id, one.voice !== true)}>
+                <button type="button" class="sheet-button secondary" title={one.voice === true ? 'Stop this device from using voice; its current voice connection will close.' : 'Allow this device to use its microphone and speaker for voice.'} disabled={remote.busy} onClick={() => on.deviceVoice(one.id, one.voice !== true)}>
                   {one.voice === true ? 'Forbid voice' : 'Allow voice'}
                 </button>
               )}
@@ -1266,7 +1266,7 @@ function DevicesBlock({ remote, on }: { remote: RemoteView; on: Handlers }) {
           ))}
         </ul>
       )}
-      <button type="button" class="sheet-button secondary" title="Show a one-time link and code that sign a phone or another device of yours in" disabled={remote.busy} onClick={on.pair}>
+      <button type="button" class="sheet-button secondary" title="Show a one-time link and code to sign in a device to the web page." disabled={remote.busy} onClick={on.pair}>
         {pairing === null ? 'Pair a device…' : 'New code'}
       </button>
       {remote.error === null ? null : (

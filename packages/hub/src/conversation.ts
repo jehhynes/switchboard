@@ -128,7 +128,7 @@ export function sessionView(session: Session, current: boolean, hooks: boolean, 
       : session.state === 'ended' && !resumable
         ? 'The session has ended. Open it in the terminal to resume it.'
         : conversation === 'read-only'
-          ? 'Switchboard cannot follow this session while sessions.installHooks is off.'
+          ? 'Switchboard cannot track this session while Install hooks is off.'
           : null;
 
   return {

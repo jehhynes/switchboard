@@ -512,9 +512,9 @@ describe('drawing', () => {
   it("puts the mic mark before the time on the voice target's row only, with its tooltip", () => {
     const root = document.createElement('div');
 
-    root.innerHTML = html(renderList([listGroup('progress', [listRow(1, { time: { text: '2h', title: 'In queue' }, voice: { glyph: '\u{ec12}', title: 'The voice speaks for this session.' } }), listRow(2, { voice: null })])], null, new Set()));
+    root.innerHTML = html(renderList([listGroup('progress', [listRow(1, { time: { text: '2h', title: 'In queue' }, voice: { glyph: '\u{ec12}', title: 'Voice is set to this session. Mic on.' } }), listRow(2, { voice: null })])], null, new Set()));
     expect([...root.querySelector('[data-work-item="1"] .row-head')!.children].map((child) => child.className)).toEqual(['row-title', 'codicon voice-mark', 'row-time']);
-    expect(root.querySelector('[data-work-item="1"] .voice-mark')!.getAttribute('aria-label')).toBe('The voice speaks for this session.');
+    expect(root.querySelector('[data-work-item="1"] .voice-mark')!.getAttribute('aria-label')).toBe('Voice is set to this session. Mic on.');
     expect(root.querySelector('[data-work-item="1"] .voice-mark')!.textContent).toBe('\u{ec12}');
     expect(root.querySelector('[data-work-item="2"] .voice-mark')).toBeNull();
   });
@@ -566,7 +566,7 @@ describe('drawing', () => {
     expect(renderVoice(null)).toBe('');
     expect(renderVoice({ enabled: true, here: false, mic: 'off', speaking: null, speakReplies: true, error: null, recognizer: null })).toContain('data-voice="talk-here"');
     expect(renderVoice({ enabled: true, here: true, mic: 'idle-off', speaking: 'r1', speakReplies: false, error: null, recognizer: null })).toContain('data-voice="stop"');
-    expect(renderVoice({ enabled: true, here: false, mic: 'off', speaking: null, speakReplies: true, error: null, recognizer: null })).toContain('The voice is not on this page.');
+    expect(renderVoice({ enabled: true, here: false, mic: 'off', speaking: null, speakReplies: true, error: null, recognizer: null })).toContain('Click to use voice for this session.');
     // One renderer with the Conversation view: every mic state is drawn by the view's own button.
     expect(renderMicButton).toBe(viewMicButton);
     expect(renderMicButton({ enabled: true, here: true, mic: 'paused-by-voice', speaking: null, speakReplies: true, error: null })).toContain('data-on="true"');
@@ -1312,7 +1312,7 @@ describe('the page', () => {
     root.querySelector<HTMLElement>('.composer-mic [data-voice="mic"]')!.click();
     await flush();
     await flush();
-    expect(root.querySelector('.composer-mic .mic.unavailable')?.getAttribute('title')).toBe('The mic did not start: The phone did not allow the microphone. Click to try again.');
+    expect(root.querySelector('.composer-mic .mic.unavailable')?.getAttribute('title')).toBe('The mic did not start: Microphone access was not allowed on this device. Click to try again.');
     expect(root.querySelector('.composer-mic [data-voice="mic"]')?.getAttribute('data-on')).toBe('true');
     // The failure belongs to its conversation: another one's mic shows the hub's state.
     phone.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1), listRow(2)])], scope: { ...scope, workItemId: 2 }, sessions: [session()], items: [], more: false, status: null, artifacts: [] });

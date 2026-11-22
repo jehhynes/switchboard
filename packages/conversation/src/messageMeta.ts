@@ -55,7 +55,7 @@ export function voiceMark(item: DictatedMessage, details: boolean): string {
   const pieces = (item.pieces ?? []).map((piece) => `${piece.dropped ? '(dropped) ' : ''}${piece.text}${piece.score === null ? '' : ` · match ${piece.score.toFixed(2)}`}${piece.f0 === null ? '' : ` · ${Math.round(piece.f0)} Hz`}`);
   const dictated = pieces.length === 0 ? 'Dictated' : `Dictated in ${pieces.length} piece${pieces.length === 1 ? '' : 's'}:\n${pieces.join('\n')}`;
   // Spoken over a reply being read aloud, which stopped it (architecture.md § Voice check and barge-in).
-  const over = item.interrupted === undefined ? '' : item.interrupted.said === '' ? 'Spoke over the reply before its first words.' : `Spoke over the reply after "${item.interrupted.said}".`;
+  const over = item.interrupted === undefined ? '' : item.interrupted.said === '' ? 'You interrupted the reply before it played.' : `You interrupted the reply after "${item.interrupted.said}".`;
   const title = over === '' ? dictated : `${dictated}\n${over}`;
   const label = `${item.partial === true ? 'partial' : 'dictated'}${item.interrupted === undefined ? '' : ' · interrupted the reply'}`;
 

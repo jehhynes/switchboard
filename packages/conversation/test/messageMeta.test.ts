@@ -19,8 +19,8 @@ describe('the message meta line shared by the Conversation view and the web page
 
     expect(voiceMark(dictated, false)).toBe('');
     expect(voiceMark({ origin: 'typed' }, true)).toBe('');
-    expect(voiceMark(dictated, true)).toBe('<span class="voice-mark" title="Dictated in 1 piece:&#10;(dropped) a &#60;b&#62;&#10;Spoke over the reply after &#34;so&#34;.">'.replace(/&#10;/g, '\n') + '<span class="codicon codicon-mic" aria-hidden="true"></span><span>partial · interrupted the reply</span></span>');
-    expect(voiceMark({ origin: 'voice', interrupted: { said: '' } }, true)).toContain('title="Dictated\nSpoke over the reply before its first words."');
+    expect(voiceMark(dictated, true)).toBe('<span class="voice-mark" title="Dictated in 1 piece:&#10;(dropped) a &#60;b&#62;&#10;You interrupted the reply after &#34;so&#34;.">'.replace(/&#10;/g, '\n') + '<span class="codicon codicon-mic" aria-hidden="true"></span><span>partial · interrupted the reply</span></span>');
+    expect(voiceMark({ origin: 'voice', interrupted: { said: '' } }, true)).toContain('title="Dictated\nYou interrupted the reply before it played."');
     expect(toneMark('calm', false)).toBe('');
     expect(toneMark(null, true)).toBe('');
     expect(toneMark('<calm>', true)).toBe('<span class="tone" title="How the reply sounds when spoken: &#60;calm&#62;">&#60;calm&#62;</span>');

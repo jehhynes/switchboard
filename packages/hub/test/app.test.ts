@@ -1130,9 +1130,9 @@ describe('createHubApp', () => {
     // No voice build is installed in this home, so the process cannot start: the dock says so, no window does.
     await until(() => ((app.dock() as { notes: string[] }).notes.some((note) => note.startsWith('Voice: The voice process is not installed')) ? true : null));
     // Its session is not a live, observed one, since hooks are off; with its window closed there is none to talk to.
-    expect(await app.post['/dock/select']!({ rowKey: row.key })).toEqual({ status: 200, body: { selected: true, voice: 'The voice speaks only for a live session.' } });
+    expect(await app.post['/dock/select']!({ rowKey: row.key })).toEqual({ status: 200, body: { selected: true, voice: 'Voice is not available for this session.' } });
     app.windowClosed!(key);
-    expect(await app.post['/dock/select']!({ rowKey: row.key })).toEqual({ status: 200, body: { selected: false, voice: 'Open its window to talk to it.' } });
+    expect(await app.post['/dock/select']!({ rowKey: row.key })).toEqual({ status: 200, body: { selected: false, voice: 'Open a window for this session to use voice.' } });
 
     // The dock reports a session's terminal window in front, or none.
     const sessionId = app.runtime.snapshot().workItems[0]!.sessions[0]!.id;

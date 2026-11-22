@@ -52,7 +52,7 @@ public static partial class SettingsFields
         ("done", "Done", "The session closes the work item. Off, its turn ends in Ready for review."),
         ("approval", "Approval", "The session can leave a prompt for you to approve, such as one that posts its draft."),
         ("worktree", "Worktree", "The session can link a worktree it creates. Branch names link worktrees without it."),
-        ("playbook", "Playbook", "The session can hand its work item to another playbook in the namespace, whose skill it runs."),
+        ("playbook", "Playbook", "The session can change its work item's playbook to another in the same namespace, and then runs that playbook's skill."),
         ("paste", "Paste", "The session can name drafted texts, such as a customer reply, that Copy puts on the clipboard on its approval row."),
     ];
 
@@ -353,7 +353,7 @@ public static partial class SettingsFields
             [
                 new Field("sessions.provider", "Default agent", FieldKind.Select, "The agent playbook and ad-hoc sessions run in. A playbook can name its own.", "claude", providers),
                 new Field("sessions.concurrency", "Concurrency", FieldKind.Integer, "Sessions that run at once, 1 to 10. A start with no free slot waits as queued.", "2"),
-                new Field("sessions.codeMode", "Code Mode (experimental)", FieldKind.Boolean, "New Claude sessions run with Claude Code’s Code Mode, held by Switchboard’s terminal holder, and open in a terminal instead of the Claude view. They keep running between turns until you stop them or they sit idle for an hour. They skip the gateway in your Claude settings and use your Claude subscription sign-in. Sessions already started keep their mode. Needs Install hooks.", Fallback: false),
+                new Field("sessions.codeMode", "Code Mode (experimental)", FieldKind.Boolean, "New Claude sessions use Claude Code’s Code Mode and open in a terminal instead of the Claude view. They keep running between turns until you stop them or they sit idle for an hour. They use your Claude subscription sign-in; the gateway in your Claude settings does not apply. Sessions already started keep their mode. Needs Install hooks.", Fallback: false),
                 new Field("sessions.debriefs", "Friction debriefs", FieldKind.Boolean, "Ask each session what slowed it down, once its work item is done or 45 minutes after its last turn. The answers go to ~/.claude/.wip/debrief for the friction-review skill.", Fallback: false),
             ]),
             new Section("Claude sessions",
@@ -390,7 +390,7 @@ public static partial class SettingsFields
             // The Settings window draws the paired devices and Pair a device after this section (architecture.md § Remote access).
             new Section("Remote access",
             [
-                new Field("web.tailscale", "Tailscale", FieldKind.Boolean, "Serve this web page to your phone and other devices of yours on your tailnet: Switchboard adds this computer's Tailscale name to Allowed hosts and its owner's login to Allowed logins, read from tailscale status again whenever this changes. Needs Tailscale running here and tailscale serve pointed at the page's port, as in tailscale serve --bg 47616. Each device then pairs once with Pair a device. Never use tailscale funnel.", Fallback: false),
+                new Field("web.tailscale", "Tailscale", FieldKind.Boolean, "Let your devices open the web page through your tailnet. Switchboard adds this computer's Tailscale name and login to Allowed hosts and Allowed logins. Tailscale must be running here, and tailscale serve must point to the page's port, as in tailscale serve --bg 47616. Pair each device with Pair a device. Do not use Tailscale Funnel.", Fallback: false),
                 new Field("web.remoteHosts", "Allowed hosts", FieldKind.List, "One per line, such as pc.tailnet.ts.net, without https:// or a port: other names the page answers as through tailscale serve. With Tailscale on, this computer's own Tailscale name needs no line."),
                 new Field("web.remoteLogins", "Allowed logins", FieldKind.List, "One per line, such as you@example.com: the Tailscale logins whose devices may pair and use the page; other people on your tailnet are refused. With Tailscale on, this computer's owner needs no line."),
             ]),
@@ -470,8 +470,8 @@ public static partial class SettingsFields
                 new Field("voice.matchThreshold", "Voice match", FieldKind.Number, "0 to 1. A dictated piece that matches your enrolled voice less than this is dropped as someone else’s; one or two words get 0.15 less.", "0.6"),
                 new Field("voice.pitchLowFactor", "Low pitch factor", FieldKind.Number, "1 to 3. A voiced moment at or under this many times your enrolled voice’s 90th-percentile pitch counts as low.", "1.22"),
                 new Field("voice.pitchMinLowShare", "Least low share", FieldKind.Number, "0 to 1. A piece with a smaller share of low moments is dropped as someone else’s; 0 turns the pitch check off.", "0.2"),
-                new Field("voice.roomHold", "Room hold", FieldKind.Boolean, "After the voice check hears someone else in the room, keep dictated messages in the composer until you press Enter. Turn it off where other voices are always around.", Fallback: true),
-                new Field("voice.roomHoldSeconds", "Room hold (seconds)", FieldKind.Integer, "1 to 3600. How long the room hold lasts after someone else was last heard.", "60"),
+                new Field("voice.roomHold", "Hold dictation when another person speaks", FieldKind.Boolean, "When Switchboard detects another voice, it keeps dictated messages in the composer until you press Enter. Turn this off if other people often speak nearby.", Fallback: true),
+                new Field("voice.roomHoldSeconds", "Dictation hold time (seconds)", FieldKind.Integer, "Keep dictated messages in the composer for 1 to 3600 seconds after another voice was last detected.", "60"),
             ], Advanced: true),
             new Section("Playbook personas",
                 assigned.Select((playbook) => new Field($"voice.playbookPersonas.{playbook}", playbooks.Contains(playbook) ? playbook : $"{playbook} (missing)", FieldKind.Select, "",

@@ -602,8 +602,8 @@ export function voiceFields(state: EditorState): Section[] {
         { path: 'voice.matchThreshold', label: 'Voice match', kind: 'number', help: '0 to 1. A dictated piece that matches your enrolled voice less than this is dropped as someone else’s; one or two words get 0.15 less.', placeholder: '0.6' },
         { path: 'voice.pitchLowFactor', label: 'Low pitch factor', kind: 'number', help: '1 to 3. A voiced moment at or under this many times your enrolled voice’s 90th-percentile pitch counts as low.', placeholder: '1.22' },
         { path: 'voice.pitchMinLowShare', label: 'Least low share', kind: 'number', help: '0 to 1. A piece with a smaller share of low moments is dropped as someone else’s; 0 turns the pitch check off.', placeholder: '0.2' },
-        { path: 'voice.roomHold', label: 'Room hold', kind: 'boolean', help: 'After the voice check hears someone else in the room, keep dictated messages in the composer until you press Enter. Turn it off where other voices are always around.', fallback: true },
-        { path: 'voice.roomHoldSeconds', label: 'Room hold (seconds)', kind: 'integer', help: '1 to 3600. How long the room hold lasts after someone else was last heard.', placeholder: '60' },
+        { path: 'voice.roomHold', label: 'Hold dictation when another person speaks', kind: 'boolean', help: 'When Switchboard detects another voice, it keeps dictated messages in the composer until you press Enter. Turn this off if other people often speak nearby.', fallback: true },
+        { path: 'voice.roomHoldSeconds', label: 'Dictation hold time (seconds)', kind: 'integer', help: 'Keep dictated messages in the composer for 1 to 3600 seconds after another voice was last detected.', placeholder: '60' },
       ],
     },
     {
@@ -759,7 +759,7 @@ export const REPORT_FIELDS: ReadonlyArray<{ kind: string; label: string; help: s
   { kind: 'done', label: 'Done', help: 'The session closes the work item. Off, its turn ends in Ready for review.' },
   { kind: 'approval', label: 'Approval', help: 'The session can leave a prompt for you to approve, such as one that posts its draft.' },
   { kind: 'worktree', label: 'Worktree', help: 'The session can link a worktree it creates. Branch names link worktrees without it.' },
-  { kind: 'playbook', label: 'Playbook', help: 'The session can hand its work item to another playbook in the namespace, whose skill it runs.' },
+  { kind: 'playbook', label: 'Playbook', help: 'The session can change its work item\'s playbook to another in the same namespace, and then runs that playbook\'s skill.' },
   { kind: 'paste', label: 'Paste', help: 'The session can name drafted texts, such as a customer reply, that Copy puts on the clipboard on its approval row.' },
 ];
 
@@ -1162,7 +1162,7 @@ export function generalFields(state: EditorState): Section[] {
           path: 'sessions.codeMode',
           label: 'Code Mode (experimental)',
           kind: 'boolean',
-          help: 'New Claude sessions run with Claude Code’s Code Mode, held by Switchboard’s terminal holder, and open in a terminal instead of the Claude view. They keep running between turns until you stop them or they sit idle for an hour. They skip the gateway in your Claude settings and use your Claude subscription sign-in. Sessions already started keep their mode. Needs Install hooks.',
+          help: 'New Claude sessions use Claude Code’s Code Mode and open in a terminal instead of the Claude view. They keep running between turns until you stop them or they sit idle for an hour. They use your Claude subscription sign-in; the gateway in your Claude settings does not apply. Sessions already started keep their mode. Needs Install hooks.',
           fallback: false,
         },
         { path: 'sessions.debriefs', label: 'Friction debriefs', kind: 'boolean', help: 'Ask each session what slowed it down, once its work item is done or 45 minutes after its last turn. The answers go to ~/.claude/.wip/debrief for the friction-review skill.', fallback: false },
@@ -1291,7 +1291,7 @@ export function generalFields(state: EditorState): Section[] {
     {
       heading: 'Remote access',
       fields: [
-        { path: 'web.tailscale', label: 'Tailscale', kind: 'boolean', help: "Serve this web page to your phone and other devices of yours on your tailnet: Switchboard adds this computer's Tailscale name to Allowed hosts and its owner's login to Allowed logins, read from tailscale status again whenever this changes. Needs Tailscale running here and tailscale serve pointed at the page's port, as in tailscale serve --bg 47616. Each device then pairs once with Pair a device. Never use tailscale funnel.", fallback: false },
+        { path: 'web.tailscale', label: 'Tailscale', kind: 'boolean', help: "Let your devices open the web page through your tailnet. Switchboard adds this computer's Tailscale name and login to Allowed hosts and Allowed logins. Tailscale must be running here, and tailscale serve must point to the page's port, as in tailscale serve --bg 47616. Pair each device with Pair a device. Do not use Tailscale Funnel.", fallback: false },
         { path: 'web.remoteHosts', label: 'Allowed hosts', kind: 'list', help: "One per line, such as pc.tailnet.ts.net, without https:// or a port: other names the page answers as through tailscale serve. With Tailscale on, this computer's own Tailscale name needs no line." },
         { path: 'web.remoteLogins', label: 'Allowed logins', kind: 'list', help: "One per line, such as you@example.com: the Tailscale logins whose devices may pair and use the page; other people on your tailnet are refused. With Tailscale on, this computer's owner needs no line." },
       ],

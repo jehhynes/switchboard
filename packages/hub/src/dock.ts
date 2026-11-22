@@ -569,7 +569,7 @@ function wake(ticket: { snoozed: boolean; snoozedUntil: number | null; snoozeCom
   const day = (time: number) => new Date(time).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
   return [
-    ...(until === null ? [] : [comment === null ? { text: `Wakes ${wakeText(until)}`, title: null, tone: null } : { text: `Wakes ${day(until)}`, title: `Wakes ${wakeText(until)}`, tone: null }]),
+    ...(until === null ? [] : [comment === null ? { text: `Snoozed until ${wakeText(until)}`, title: null, tone: null } : { text: `Snoozed until ${day(until)}`, title: `Snoozed until ${wakeText(until)}`, tone: null }]),
     ...(comment === null ? [] : [{ ...clipped(oneLine(comment), CAPS.note), title: comment }]),
   ];
 }

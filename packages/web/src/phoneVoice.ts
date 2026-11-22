@@ -123,7 +123,7 @@ export class PhoneVoice {
   /** The playback node once its worklet loaded; commands wait for it in order. */
   #node: Promise<PhoneAudioNode | null> = Promise.resolve(null);
   #hiddenTimer: unknown = null;
-  /** The voice left this phone without a word, as a hidden page loses it, so a Mic on it cuts short says nothing either. */
+  /** The voice ended with nothing to say, as when a hidden page loses it or the operator turns it off, so a Mic on it cuts short says nothing either. */
   #quiet = false;
   /** While the audio context is interrupted or suspended: since when, and the next resume's timer. */
   #recovering: { since: number; timer: unknown; why: string } | null = null;
@@ -206,7 +206,7 @@ export class PhoneVoice {
       if (context.state === 'running') {
         this.#resumedAt ??= this.deps.now();
       } else {
-        this.#recover(context, 'The phone did not start its audio.');
+        this.#recover(context, 'Audio did not start on this device.');
       }
     });
     context.onstatechange = () => {
@@ -238,7 +238,7 @@ export class PhoneVoice {
       },
       () => {
         if (this.#context === context) {
-          this.#lose('The phone could not load the voice\'s audio.');
+          this.#lose('Voice audio did not load on this device.');
         }
 
         return null;
@@ -250,7 +250,7 @@ export class PhoneVoice {
    * Asks a stopped audio context to resume, again every {@link RESUME_RETRY_MS}, and loses the voice once it stayed stopped for
    * {@link RECOVER_MS}, as when a call holds the phone's audio.
    */
-  #recover(context: PhoneAudioContext, why = 'The phone took its audio, as for a call, so the voice left this phone.'): void {
+  #recover(context: PhoneAudioContext, why = 'Voice stopped because this device\'s audio did not resume.'): void {
     const recovering = (this.#recovering ??= { since: this.deps.now(), timer: null, why });
 
     void context.resume().catch(() => undefined);
@@ -321,7 +321,7 @@ export class PhoneVoice {
     });
   }
 
-  /** Why Mic on did not open: the voice's error, an empty string when the voice left without a word, else `fallback`. */
+  /** Why Mic on did not open: the voice's error, an empty string when the voice ended with nothing to say, else `fallback`. */
   #why(fallback: string): string {
     return this.error ?? (this.#quiet && this.state === 'off' ? '' : fallback);
   }
@@ -388,7 +388,7 @@ export class PhoneVoice {
     this.#quiet = false;
     this.#resuming = {
       from: key,
-      timer: (this.deps.setTimer ?? ((run, ms) => setTimeout(run, ms)))(() => this.#lose('Switchboard restarted, and the voice did not come back to this phone.'), RESUME_MS),
+      timer: (this.deps.setTimer ?? ((run, ms) => setTimeout(run, ms)))(() => this.#lose('Voice did not resume after Switchboard restarted. Select Voice on this device to start it here.'), RESUME_MS),
     };
     this.deps.changed();
     this.keyChanged();
@@ -479,7 +479,7 @@ export class PhoneVoice {
       this.#stopped();
 
       if (event.reason !== '') {
-        this.error = event.code === MOVED ? 'Voice moved to another device.' : event.reason;
+        this.error = event.code === MOVED ? 'Voice is now on another device.' : event.reason;
         this.deps.changed();
         return;
       }
@@ -497,7 +497,7 @@ export class PhoneVoice {
         (answer) => {
           const said = answer.status === 200 ? answer.body['error'] : null;
 
-          why(typeof said === 'string' ? said : welcomed ? 'The voice connection closed.' : 'Switchboard did not open the voice.');
+          why(typeof said === 'string' ? said : welcomed ? 'The voice connection closed.' : 'Voice did not start.');
         },
         () => why('Switchboard did not answer.'),
       );
@@ -516,7 +516,8 @@ export class PhoneVoice {
     this.#run++;
     this.#stopped();
     this.error = null;
-    this.#quiet = false;
+    // Voice off is the operator's own action: a Mic on it cuts short says nothing.
+    this.#quiet = true;
     socket?.close(1000);
     this.deps.changed();
   }
@@ -547,7 +548,7 @@ export class PhoneVoice {
     const welcome = this.#welcome;
 
     if (this.state === 'off' || welcome === null) {
-      return this.#why('The voice did not open on this phone.');
+      return this.#why('Voice did not start on this device.');
     }
 
     const run = ++this.#micRun;
@@ -569,7 +570,7 @@ export class PhoneVoice {
         return '';
       }
 
-      return (error as Error).name === 'NotAllowedError' ? 'The phone did not allow the microphone.' : 'The phone\'s microphone did not open.';
+      return (error as Error).name === 'NotAllowedError' ? 'Microphone access was not allowed on this device.' : 'The microphone did not open on this device.';
     }
 
     step('microphone allowed', this.deps.now());
@@ -586,10 +587,10 @@ export class PhoneVoice {
       }
 
       if (run !== this.#micRun) {
-        return (this.state as PhoneVoiceState) === 'off' ? this.#why('The voice left this phone.') : 'The mic was turned off.';
+        return this.#why('');
       }
 
-      return 'The phone\'s microphone did not open.';
+      return 'No microphone audio was available on this device.';
     }
 
     const mic: { stream: PhoneMicStream; track: PhoneMicTrack; node: PhoneCaptureNode | null } = { stream, track, node: null };
@@ -604,19 +605,19 @@ export class PhoneVoice {
 
     // Released meanwhile, perhaps with a newer attempt holding the microphone now: that one is left alone.
     if (this.#mic !== mic) {
-      return this.#why('The mic was turned off.');
+      return this.#why('');
     }
 
     if (!welcomed) {
       this.micOff();
-      return this.#why('The voice did not open on this phone.');
+      return this.#why('Voice did not start on this device.');
     }
 
     const context = this.#context;
     const loaded = await this.#node;
 
     if (this.#mic !== mic) {
-      return this.#why('The mic was turned off.');
+      return this.#why('');
     }
 
     // The parts the tap that took the voice to this phone started, in the order they were done.
@@ -630,7 +631,7 @@ export class PhoneVoice {
 
     if (context === null || loaded === null) {
       this.micOff();
-      return this.#why('The phone could not load the voice\'s audio.');
+      return this.#why('Voice audio did not start on this device.');
     }
 
     let node: PhoneCaptureNode;
@@ -639,7 +640,7 @@ export class PhoneVoice {
       node = this.deps.capture?.(context, stream) ?? browserCapture(context, stream);
     } catch {
       this.micOff();
-      return 'The phone could not connect its microphone to the voice.';
+      return 'Switchboard could not start microphone capture on this device.';
     }
 
     node.port.onmessage = (event) => this.#frame(mic, event.data);

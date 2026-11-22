@@ -72,7 +72,7 @@ static class SnoozeDialog
         }
 
         list.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { onDate, date } });
-        shell.Body.Children.Add(DialogShell.Field("Wake it", list));
+        shell.Body.Children.Add(DialogShell.Field("Snooze ends", list));
         shell.Body.Children.Add(DialogShell.Field("Comment", comment));
 
         return dialog.ShowDialog<SnoozeAnswer?>(owner);

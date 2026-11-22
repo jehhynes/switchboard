@@ -1347,13 +1347,13 @@ public sealed class MainWindowTests
     {
         var (window, model) = Open();
 
-        model.Show(Fixtures.View with { Groups = [new DockGroup("progress", "In progress", null, [Fixtures.Row("item:15") with { Voice = new RowVoice("\uec12", "The voice speaks for this session.") }, Fixtures.Row("item:8")])] });
+        model.Show(Fixtures.View with { Groups = [new DockGroup("progress", "In progress", null, [Fixtures.Row("item:15") with { Voice = new RowVoice("\uec12", "Voice is set to this session. Mic on.") }, Fixtures.Row("item:8")])] });
         Dispatcher.UIThread.RunJobs();
         TextBlock MarkOf(string key) => window.GetVisualDescendants().OfType<TextBlock>().Single((text) => text.Name == "VoiceMark" && text.DataContext is RowViewModel row && row.Key == key);
 
         Assert.True(MarkOf("item:15").IsVisible);
         Assert.Equal("\uec12", MarkOf("item:15").Text);
-        Assert.Equal("The voice speaks for this session.", ToolTip.GetTip(MarkOf("item:15")));
+        Assert.Equal("Voice is set to this session. Mic on.", ToolTip.GetTip(MarkOf("item:15")));
         Assert.False(MarkOf("item:8").IsVisible);
     }
 

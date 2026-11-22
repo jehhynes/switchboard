@@ -162,14 +162,14 @@ describe('the conversation state', () => {
 
     expect(voiceStatus(null)).toBeNull();
     expect(voiceStatus({ ...voice, enabled: false })).toBeNull();
-    expect(voiceStatus({ ...voice, here: false })).toEqual({ text: '$(circle-slash) Voice not here', tooltip: 'Voice is not in this window. Click to talk here.', command: 'switchboard.talkHere', warning: false });
+    expect(voiceStatus({ ...voice, here: false })).toEqual({ text: '$(circle-slash) Voice not here', tooltip: 'Click to use voice for this session.', command: 'switchboard.talkHere', warning: false });
     expect(voiceStatus({ ...voice, error: 'no device' })).toMatchObject({ text: '$(warning) Voice', command: 'switchboard.showVoiceLog', warning: true });
     // After the phone left: the voice is off until Talk here takes it back.
     expect(voiceStatus({ ...voice, deviceOff: true as const })).toEqual({ text: '$(circle-slash) Voice off', tooltip: DEVICE_OFF_TIP, command: 'switchboard.talkHere', warning: true });
     expect(voiceStatus({ ...voice, speaking: 'r1' })).toMatchObject({ text: '$(unmute) Speaking', command: 'switchboard.stopSpeaking' });
     // The mic (architecture.md § Dictation).
     expect(voiceStatus(voice)).toEqual({ text: '$(mic) Mic off', tooltip: 'Click to turn the mic on.', command: 'switchboard.toggleMicrophone', warning: false });
-    expect(voiceStatus({ ...voice, mic: 'idle-off' })).toMatchObject({ text: '$(mic) Mic off', tooltip: 'The mic stopped after a quiet spell. Click to turn it on.' });
+    expect(voiceStatus({ ...voice, mic: 'idle-off' })).toMatchObject({ text: '$(mic) Mic off', tooltip: 'Mic turned off after inactivity. Click to turn it on.' });
     expect(voiceStatus({ ...voice, mic: 'listening' })).toMatchObject({ text: '$(mic-filled) Listening', command: 'switchboard.toggleMicrophone' });
     expect(voiceStatus({ ...voice, mic: 'hearing' })).toMatchObject({ text: '$(mic-filled) Listening' });
     expect(voiceStatus({ ...voice, mic: 'typing' })).toMatchObject({ text: '$(mic-filled) Typing' });
@@ -186,7 +186,7 @@ describe('the conversation state', () => {
     expect(voiceStatus(fullDuplex)).toMatchObject({ tooltip: 'Dictation sends when you stop talking. Full duplex (echo check: none heard): talking over a reply stops it. Click to turn the mic off.' });
     expect(voiceStatus({ ...fullDuplex, speaking: 'r1' })).toMatchObject({ tooltip: 'Full duplex (echo check: none heard): talking over a reply stops it. Click to stop speaking.' });
     // A room hold: spoken turns stay in the box.
-    expect(voiceStatus({ ...voice, mic: 'listening', roomHold: true })).toEqual({ text: '$(mic-filled) Listening (held)', tooltip: 'Held: someone else is talking in the room, so dictation stays in the box until you press Enter. Click to turn the mic off.', command: 'switchboard.toggleMicrophone', warning: false });
+    expect(voiceStatus({ ...voice, mic: 'listening', roomHold: true })).toEqual({ text: '$(mic-filled) Dictation waiting', tooltip: 'Dictation is waiting after another voice was detected. Press Enter to send it. Click to turn the mic off.', command: 'switchboard.toggleMicrophone', warning: false });
     // Paused by "stop listening": the toggle listens again.
     expect(voiceStatus({ ...voice, mic: 'paused-by-voice' })).toEqual({ text: '$(mic) Mic paused', tooltip: 'Paused: you said "stop listening". Say "start listening", or click to listen again.', command: 'switchboard.toggleMicrophone', warning: false });
     expect(micOn({ ...voice, mic: 'paused-by-voice' })).toBe(false);
@@ -1140,7 +1140,7 @@ describe('speech in the view (architecture.md § Voice)', () => {
     show(state([reply('r1', T0, { opening: 'Done. More.', speak: 'Done.' })], { voice: { ...VOICE, deviceOff: true as const } }));
     const off = controls().querySelector<HTMLButtonElement>('[data-voice="talk-here"]')!;
 
-    expect(off.textContent).toBe('Voice is off — Talk here');
+    expect(off.textContent).toBe('Talk here');
     expect(off.getAttribute('title')).toBe(DEVICE_OFF_TIP);
     expect(controls().querySelector('[data-voice="speak-replies"]')).not.toBeNull();
     off.click();
@@ -1182,8 +1182,8 @@ describe('speech in the view (architecture.md § Voice)', () => {
       { tab: 'conversation', unopened: new Set(), details: true },
     );
 
-    expect(over).toContain('<span class="voice-mark" title="Dictated\nSpoke over the reply after &#34;The session token&#34;."><span class="codicon codicon-mic" aria-hidden="true"></span><span>dictated · interrupted the reply</span></span>');
-    expect(over).toContain('title="Dictated\nSpoke over the reply before its first words."');
+    expect(over).toContain('<span class="voice-mark" title="Dictated\nYou interrupted the reply after &#34;The session token&#34;."><span class="codicon codicon-mic" aria-hidden="true"></span><span>dictated · interrupted the reply</span></span>');
+    expect(over).toContain('title="Dictated\nYou interrupted the reply before it played."');
   });
 
   it('draws one mic button whose glyph and tooltip carry the mic state, and nothing with voice off (architecture.md § Dictation)', () => {
@@ -1198,7 +1198,7 @@ describe('speech in the view (architecture.md § Voice)', () => {
     // After the idle timeout: an outlined mic, apart from off.
     expect(glyph({ ...VOICE, mic: 'idle-off' })).toMatch(/^outline .*codicon-mic"/);
     expect(renderMicButton({ ...VOICE, mic: 'idle-off' })).toContain('class="mic idle"');
-    expect(renderMicButton({ ...VOICE, mic: 'idle-off' })).toContain('Mic off after a quiet spell.');
+    expect(renderMicButton({ ...VOICE, mic: 'idle-off' })).toContain('Mic turned off after inactivity.');
     expect(glyph({ ...VOICE, mic: 'unavailable', error: 'No <model>.' })).toMatch(/^off /);
     // The mic is on but cannot run: the click turns it off, never only tries again.
     expect(renderMicButton({ ...VOICE, mic: 'unavailable', error: 'No <model>.' })).toContain('Mic on but unavailable: No &#60;model&#62;. Click to turn the mic off.');
@@ -1233,8 +1233,8 @@ describe('speech in the view (architecture.md § Voice)', () => {
     expect(renderMicButton({ ...VOICE, mic: 'paused-by-voice' })).toContain('title="Mic paused: you said &#34;stop listening&#34;. Say &#34;start listening&#34;, or click to listen again."');
     expect(renderMicButton({ ...VOICE, mic: 'paused-by-voice' })).toMatch(/class="mic paused".*data-on="true"/);
     // A room hold says spoken turns stay in the box.
-    expect(renderMicButton({ ...VOICE, mic: 'listening', roomHold: true })).toContain('title="Mic on: listening. Held: someone else is talking in the room, so dictation stays in the box until you press Enter. Click to turn the mic off."');
-    expect(renderMicButton({ ...VOICE, mic: 'hearing', roomHold: true })).toContain('title="Mic on: hearing you. Held: someone else is talking in the room, so dictation stays in the box until you press Enter. Click to turn the mic off."');
+    expect(renderMicButton({ ...VOICE, mic: 'listening', roomHold: true })).toContain('title="Mic on: listening. Dictation is waiting after another voice was detected. Press Enter to send it. Click to turn the mic off."');
+    expect(renderMicButton({ ...VOICE, mic: 'hearing', roomHold: true })).toContain('title="Mic on: hearing you. Dictation is waiting after another voice was detected. Press Enter to send it. Click to turn the mic off."');
   });
 });
 
@@ -1254,10 +1254,10 @@ describe('the mic start', () => {
     expect(renderMicButton({ ...VOICE, mic: 'listening' }, 'starting')).toContain('class="mic listening"');
     expect(renderMicButton({ ...VOICE, mic: 'unavailable', error: 'No model.' }, 'starting')).toContain('Mic on but unavailable: No model.');
     // Failed: a slashed mic in the warning colour with why, whose click tries again.
-    const failed = renderMicButton(VOICE, { error: 'The phone did not allow the microphone.' });
+    const failed = renderMicButton(VOICE, { error: 'Microphone access was not allowed on this device.' });
 
     expect(failed).toMatch(/class="mic unavailable".*data-on="true"/);
-    expect(failed).toContain('title="The mic did not start: The phone did not allow the microphone. Click to try again."');
+    expect(failed).toContain('title="The mic did not start: Microphone access was not allowed on this device. Click to try again."');
     expect(renderMicButton({ ...VOICE, here: false }, 'starting')).toBe('');
     // A start that timed out shows its failure though the voice process still says starting.
     expect(renderMicButton({ ...VOICE, mic: 'starting' }, { error: MIC_START_TIMEOUT })).toContain('class="mic unavailable"');

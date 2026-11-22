@@ -85,9 +85,9 @@ describe('PhoneOutput (architecture.md § Remote access, Voice on a phone)', () 
 
     const ended = second.drain();
 
-    phone.lost('The phone that had the voice left.');
-    await expect(ended).rejects.toThrow('The phone that had the voice left.');
-    await expect(second.drain()).rejects.toThrow('The phone that had the voice left.');
+    phone.lost('Voice is off.');
+    await expect(ended).rejects.toThrow('Voice is off.');
+    await expect(second.drain()).rejects.toThrow('Voice is off.');
     // Writing to a lost playback sends nothing.
     const count = sent.length;
 
@@ -436,8 +436,8 @@ describe('PhoneCapture (architecture.md § Remote access, Voice on a phone)', ()
     await capture.open(null, () => undefined, (error) => errors.push(`second: ${error.message}`));
     first.stop();
     expect(sent.at(-1)).toEqual({ type: 'phone-capture', on: true });
-    capture.lost('The phone that had the voice left.');
-    expect(errors).toEqual(['second: The phone that had the voice left.']);
+    capture.lost('Voice is off.');
+    expect(errors).toEqual(['second: Voice is off.']);
   });
 
   it('reads the phone\'s audio and busy state in the protocol, and refuses bad ones', () => {
@@ -696,7 +696,7 @@ describe('VoiceService dictating from the phone', () => {
 
     service.receive({ type: 'device', device: 'phone' });
     service.receive({ type: 'enroll', action: 'start' });
-    expect(sent.at(-1)).toEqual({ type: 'enrollment', state: 'failed', error: 'The voice is on the phone. Take it back to this computer to record your voice.' });
+    expect(sent.at(-1)).toEqual({ type: 'enrollment', state: 'failed', error: 'Select Voice on the computer before recording your voice.' });
 
     service.receive({ type: 'device', device: 'none' });
     service.receive({ type: 'mic', on: true });

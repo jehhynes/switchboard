@@ -343,9 +343,9 @@ describe('pageList', () => {
     expect(list.map((group) => [group.key, group.title, group.glyph])).toEqual(dock.groups.map((group) => [group.key, group.title, group.glyph]));
     expect(list.flatMap((group) => group.rows).find((row) => row.workItemId === 1)).toEqual({ workItemId: 1, ticketId: null, title: 'Fix the badge', priority: ownRow.priority, time: ownRow.time, ticket: ownRow.ticket, sourceKind: ownRow.sourceKind, url: ownRow.url, playbook: ownRow.playbook, links: [], returned: ownRow.returned, comment: ownRow.comment, mark: ownRow.mark, details: ownRow.details, stripe: ownRow.stripe, dim: ownRow.dim, host: null, actions: pageActions(ownRow), main: null, pastes: [], opens: pageOpens(ownRow), terminal: expect.any(Boolean), search: ownRow.search, band: null, voice: null, history: { ticketId: own.ticket.id, key: ownRow.ticket } });
     // The voice target's row alone has the mic mark, as the dock's.
-    const marked = pageList(dock, view, { row: 'item:1', glyph: '\u{ec12}', title: 'The voice speaks for this session.' }).flatMap((group) => group.rows);
+    const marked = pageList(dock, view, { row: 'item:1', glyph: '\u{ec12}', title: 'Voice is set to this session. Mic on.' }).flatMap((group) => group.rows);
 
-    expect(marked.filter((row) => row.voice !== null).map((row) => [row.workItemId, row.voice])).toEqual([[1, { glyph: '\u{ec12}', title: 'The voice speaks for this session.' }]]);
+    expect(marked.filter((row) => row.voice !== null).map((row) => [row.workItemId, row.voice])).toEqual([[1, { glyph: '\u{ec12}', title: 'Voice is set to this session. Mic on.' }]]);
     expect(pageOpens(ownRow).map((one) => one.label)).toEqual(['Open in VS Code']);
     // The dock's menu has Open in terminal for a session it can attach to or resume, and the page's opens its Console tab for it.
     expect(list.flatMap((group) => group.rows).find((row) => row.workItemId === 1)?.terminal).toBe(ownRow.terminal !== null || ownRow.commands.some((one) => one.command['type'] === 'terminal'));

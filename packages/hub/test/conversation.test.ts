@@ -1423,7 +1423,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     expect(refused({})).toEqual({ status: 409, body: { error: held.cannotType_ } });
     held.cannotType_ = null;
     setHooks(false);
-    expect(refused({})).toEqual({ status: 409, body: { error: 'Switchboard cannot follow this session while sessions.installHooks is off.' } });
+    expect(refused({})).toEqual({ status: 409, body: { error: 'Switchboard cannot track this session while Install hooks is off.' } });
     setHooks(true);
     store.updateSession('s2', { state: 'ended' });
     expect(refused({})).toEqual({ status: 409, body: { error: 'The session has ended. Open it in the terminal to resume it.' } });
@@ -1847,7 +1847,7 @@ describe('sessionView', () => {
 
   it('names what the view can do with each kind of session', () => {
     expect(sessionView(session({ codeMode: true, state: 'ended' }), true, true)).toMatchObject({ state: 'ended', conversation: 'read-only', reason: 'The session has ended. Open it in the terminal to resume it.' });
-    expect(sessionView(session({ codeMode: true, state: 'idle' }), true, false)).toMatchObject({ conversation: 'read-only', reason: 'Switchboard cannot follow this session while sessions.installHooks is off.' });
+    expect(sessionView(session({ codeMode: true, state: 'idle' }), true, false)).toMatchObject({ conversation: 'read-only', reason: 'Switchboard cannot track this session while Install hooks is off.' });
     expect(sessionView(session({ state: 'waiting', stateDetail: null }), false, true)).toMatchObject({ waitingFor: 'question', conversation: 'none', current: false });
     expect(sessionView(session({ codeMode: true, state: 'failed' }), true, true)).toMatchObject({ state: 'idle', conversation: 'full' });
     // An ended registered session resumes in the holder, so the page offers Resume; while it runs in the operator's window it has no conversation (PRD R81).

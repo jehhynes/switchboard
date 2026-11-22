@@ -461,7 +461,7 @@ export function renderMoreMenu(header: PageHeader | null, local = false, phoneVo
           <MoreRow action="list-settings" icon="settings-gear" label="Open Settings" />
           {header?.voiceDevice === undefined ? null : (
             <li role="none">
-              <button type="button" class="menu-row" role="menuitemcheckbox" aria-checked="false" data-action="list-voice-computer" title={header.voiceDevice === 'phone' ? "The voice is on a phone. Use this computer's microphone and speaker instead" : "The phone that had the voice left. Use this computer's microphone and speaker"}>
+              <button type="button" class="menu-row" role="menuitemcheckbox" aria-checked="false" data-action="list-voice-computer" title={header.voiceDevice === 'phone' ? "Voice is on a paired device. Select Voice on the computer to use this computer's microphone and speaker." : "Voice is off. Select Voice on the computer to use this computer's microphone and speaker."}>
                 <Gutter checked={false} />
                 <span class="title">Voice on the computer</span>
               </button>
@@ -473,9 +473,9 @@ export function renderMoreMenu(header: PageHeader | null, local = false, phoneVo
         <>
           <Separator />
           <li role="none">
-            <button type="button" class="menu-row" role="menuitemcheckbox" aria-checked={phoneVoice !== 'off'} data-action="list-phone-voice" title="Use this phone's microphone and speaker for the voice instead of the computer's">
+            <button type="button" class="menu-row" role="menuitemcheckbox" aria-checked={phoneVoice !== 'off'} data-action="list-phone-voice" title="Use this device's microphone and speaker for voice.">
               <Gutter checked={phoneVoice !== 'off'} />
-              <span class="title">{phoneVoice === 'connecting' ? 'Voice on this phone…' : 'Voice on this phone'}</span>
+              <span class="title">{phoneVoice === 'connecting' ? 'Voice on this device…' : 'Voice on this device'}</span>
             </button>
           </li>
         </>
@@ -574,7 +574,7 @@ function DevicesSheet({ sheet, now }: { sheet: Extract<HeaderSheet, { kind: 'dev
                 </span>
               </span>
               {one.host === null ? null : (
-                <button type="button" class="sheet-button secondary" data-action="list-device-voice" data-id={one.id} data-allow={one.voice === true ? '0' : '1'} disabled={sheet.busy} title={one.voice === true ? "Stop this device using the voice; its voice connection closes" : "Let this device use the voice with its own microphone and speaker"}>
+                <button type="button" class="sheet-button secondary" data-action="list-device-voice" data-id={one.id} data-allow={one.voice === true ? '0' : '1'} disabled={sheet.busy} title={one.voice === true ? "Stop this device from using voice; its current voice connection will close." : "Allow this device to use its microphone and speaker for voice."}>
                   {one.voice === true ? 'Forbid voice' : 'Allow voice'}
                 </button>
               )}
@@ -723,7 +723,7 @@ export function renderHeaderSheet(sheet: HeaderSheet | null, header: PageHeader 
     return (
       <Frame title="New conversation in a folder" buttons={go(ready, 'Create')}>
         {folders.length === 0 ? (
-          <p class="sheet-detail">The hub knows no folders yet. Add a repo root in Settings from the dock.</p>
+          <p class="sheet-detail">No folders are available. Add a repo root in the dock's Settings.</p>
         ) : (
           <>
             <Select label="Folder" field="folder" items={[{ value: '', label: 'Choose a folder' }, ...folders.map((one) => ({ value: one, label: one }))]} chosen={sheet.folder} />

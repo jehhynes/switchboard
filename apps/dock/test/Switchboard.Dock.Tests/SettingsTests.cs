@@ -34,7 +34,7 @@ public sealed class SettingsFieldsTests
         Assert.True(fields["sessions.installHooks"].Fallback);
         Assert.False(fields["sessions.debriefs"].Fallback);
         Assert.Equal((FieldKind.Boolean, false), (fields["sessions.codeMode"].Kind, fields["sessions.codeMode"].Fallback));
-        Assert.Contains("skip the gateway in your Claude settings and use your Claude subscription sign-in", fields["sessions.codeMode"].Help);
+        Assert.Contains("use your Claude subscription sign-in; the gateway in your Claude settings does not apply", fields["sessions.codeMode"].Help);
         Assert.Equal(["acceptEdits", "auto", "plan"], fields["sessions.permissionMode"].Options!.Select((option) => option.Value));
         Assert.Equal(["auto", "bypassPermissions"], fields["sessions.codex.permissionMode"].Options!.Select((option) => option.Value));
         Assert.Equal("bypassPermissions", fields["sessions.codex.permissionMode"].Placeholder);

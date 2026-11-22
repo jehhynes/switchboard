@@ -502,7 +502,7 @@ public sealed class SettingsWindow : Window
         pairButton = new Button { Name = "PairDevice", HorizontalAlignment = HorizontalAlignment.Left };
         devicesError = Tinted(new TextBlock { Name = "DevicesError", TextWrapping = TextWrapping.Wrap, IsVisible = false }, "DockError");
         pairingPanel = new StackPanel { Name = "Pairing", Spacing = 4 };
-        ToolTip.SetTip(pairButton, "Show a one-time link and code that sign a phone or another device of yours in to the web page");
+        ToolTip.SetTip(pairButton, "Show a one-time link and code to sign in a device to the web page.");
         pairButton.Click += async (_, _) => await editor.ListDevices(pair: true);
         UpdateDevices();
 
@@ -560,7 +560,7 @@ public sealed class SettingsWindow : Window
                 var allow = !device.Voice;
                 var voice = new Button { Name = $"Voice:{device.Id}", Content = allow ? "Allow voice" : "Forbid voice", IsEnabled = !editor.DevicesBusy, VerticalAlignment = VerticalAlignment.Center };
 
-                ToolTip.SetTip(voice, allow ? "Let this device use the voice with its own microphone and speaker" : "Stop this device using the voice; its voice connection closes");
+                ToolTip.SetTip(voice, allow ? "Allow this device to use its microphone and speaker for voice." : "Stop this device from using voice; its current voice connection will close.");
                 voice.Click += async (_, _) => await editor.ListDevices(voice: (id, allow));
                 buttons.Children.Add(voice);
             }

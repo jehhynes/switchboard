@@ -219,7 +219,7 @@ export class VoiceSockets {
 
   #hello(one: Open, resume: boolean): void {
     // A page taking the voice back after a hub restart takes it only from the hub that waits for it, never as a new tap would.
-    const refused = !resume ? null : this.deps.resumable === undefined ? 'Nothing to take back.' : this.deps.resumable(one.device);
+    const refused = !resume ? null : this.deps.resumable === undefined ? 'Voice did not resume after Switchboard restarted.' : this.deps.resumable(one.device);
 
     if (refused !== null) {
       this.deps.log(`voice socket: ${one.device.label || 'a device'} (${one.device.hash.slice(0, 8)}) did not take the voice back: ${refused}`);
@@ -237,7 +237,7 @@ export class VoiceSockets {
     this.deps.log(`voice socket: ${one.device.label || 'a device'} (${one.device.hash.slice(0, 8)}) opened from ${one.device.host}`);
 
     if (previous !== null) {
-      previous.socket.close(VOICE_CLOSE.moved, 'Voice moved to another device.');
+      previous.socket.close(VOICE_CLOSE.moved, 'Voice is now on another device.');
     }
 
     this.deps.opened?.(one.device);
@@ -265,7 +265,7 @@ export class VoiceSockets {
     const current = this.#current;
 
     if (current !== null && current.socket.queued() > VOICE_QUEUE_MAX) {
-      current.socket.close(1008, 'The page does not read the voice.');
+      current.socket.close(1008, 'Voice stopped because audio could not be sent to this device in time.');
     }
 
     return this.#current !== null;

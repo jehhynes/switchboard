@@ -58,7 +58,7 @@ import { VOICE_OFF } from './server.js';
 
 const RELOAD_DEBOUNCE_MS = 300;
 /** The dock's note while no device has the voice, after the phone that had it left. */
-const NO_VOICE_DEVICE = 'Voice: the phone that had it left. Use Talk here to bring it to this computer, or tap Voice on this phone again.';
+const NO_VOICE_DEVICE = 'Voice is off. Select Talk here on this computer, or Voice on this device on a paired device.';
 
 /** Operator events the dock may send (PRD R27). */
 const OPERATOR_EVENTS = new Set(['adhoc', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retry', 'stop', 'delete', 'open-question', 'pick', 'retriage-pool', 'snooze', 'restore', 'comment', 'move', 'reset-position', 'persona']);

@@ -20,6 +20,8 @@ const LEARN_BYTES = 3_000 * BYTES_PER_MS;
 /** What `voice.log` says when the operator leaves the computer, and when each reason ends. */
 const AWAY_TEXT: Record<AwayReason, string> = { locked: 'computer locked', asleep: 'computer going to sleep', disconnected: 'session disconnected' };
 const AWAY_ERROR: Record<AwayReason, string> = { locked: 'The computer is locked.', asleep: 'The computer is going to sleep.', disconnected: 'The session is disconnected.' };
+/** Why nothing plays or listens after the phone that had the voice disconnected. */
+const PHONE_GONE = 'Voice is off.';
 const BACK_TEXT: Record<'unlocked' | 'awake' | 'connected', string> = { unlocked: 'computer unlocked', awake: 'computer awake', connected: 'session connected' };
 
 export interface VoiceServiceDeps {
@@ -118,7 +120,7 @@ export class VoiceService {
         capture: (computer) => ({
           open: (device, onPcm, onError) => {
             if (this.#device === 'none') {
-              return Promise.reject(new Error('The phone that had the voice left.'));
+              return Promise.reject(new Error(PHONE_GONE));
             }
 
             return this.#device === 'phone' ? this.#phoneCapture.open(device, onPcm, onError) : computer.open(device, onPcm, onError);
@@ -132,7 +134,7 @@ export class VoiceService {
       engine: deps.output.engine,
       open: async (device) => {
         if (this.#device === 'none') {
-          throw new Error('The phone that had the voice left.');
+          throw new Error(PHONE_GONE);
         }
 
         const playback = this.#device === 'phone' ? await this.#phone.open() : await deps.output.open(device);
@@ -291,7 +293,7 @@ export class VoiceService {
       case 'enroll':
         // Enrolment records this computer's microphone only (PRD R119).
         if (message.action === 'start' && this.#device !== 'computer') {
-          this.deps.send({ type: 'enrollment', state: 'failed', error: 'The voice is on the phone. Take it back to this computer to record your voice.' });
+          this.deps.send({ type: 'enrollment', state: 'failed', error: 'Select Voice on the computer before recording your voice.' });
           return;
         }
 
@@ -472,7 +474,7 @@ export class VoiceService {
     this.#phoneWatch = null;
 
     if (from === 'phone') {
-      const why = device === 'none' ? 'The phone that had the voice left.' : 'The voice moved to this computer.';
+      const why = device === 'none' ? PHONE_GONE : 'Voice is now on this computer.';
 
       this.#phone.lost(why);
       this.#phoneCapture.lost(why);

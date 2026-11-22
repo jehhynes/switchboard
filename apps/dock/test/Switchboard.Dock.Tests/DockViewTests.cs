@@ -24,12 +24,12 @@ public sealed class DockViewTests
     {
         var json = JsonNode.Parse(Fixtures.DockJson)!;
 
-        json["groups"]![0]!["rows"]![0]!["voice"] = new JsonObject { ["glyph"] = "\uec12", ["title"] = "The voice speaks for this session." };
+        json["groups"]![0]!["rows"]![0]!["voice"] = new JsonObject { ["glyph"] = "\uec12", ["title"] = "Voice is set to this session. Mic on." };
         json["groups"]![0]!["rows"]![1]!["voice"] = null;
 
         var rows = DockView.Parse(json.ToJsonString()).Groups[0].Rows;
 
-        Assert.Equal(new RowVoice("\uec12", "The voice speaks for this session."), rows[0].Voice);
+        Assert.Equal(new RowVoice("\uec12", "Voice is set to this session. Mic on."), rows[0].Voice);
         Assert.Null(rows[1].Voice);
         Assert.Null(Fixtures.View.Groups[0].Rows[0].Voice);
     }

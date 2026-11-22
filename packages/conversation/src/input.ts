@@ -37,7 +37,7 @@ export const NOT_CLEARED = 'Claude Code did not take the message, and it is stil
 /** How long a new hub waits for the holder to show a session's screen before it settles a message a stopped hub left being typed. */
 export const RESOLVE_WAIT_MS = 30_000;
 /** A typed message the transcript has not confirmed while the input box cannot be read. */
-export const UNREADABLE = 'Claude Code has not shown taking the message, and Switchboard could not read its input box: check the terminal before sending it again.';
+export const UNREADABLE = 'Switchboard could not confirm that Claude Code received the message. Check the terminal before sending it again.';
 /** The longest message the view may send. */
 export const MAX_MESSAGE_CHARS = 10_000;
 /** How much of the transcript's end the confirmation reads: the message was written moments ago. */

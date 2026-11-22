@@ -642,7 +642,7 @@ export function waitTexts(item: WorkItemView): { text: string; title: string }[]
         return { text: `Waits for ${owner}'s turn to end`, title: `Session ${wait.shortId ?? wait.sessionId} on this ticket is running or waiting on a question. This starts when its turn ends.` };
       }
       case 'snoozed':
-        return { text: 'Starts when the ticket wakes', title: 'The ticket is snoozed.' };
+        return { text: 'Starts after the snooze ends', title: 'The ticket is snoozed.' };
       case 'blockers':
         return { text: `Starts when ${refList(wait.blockers)} ${wait.blockers.length === 1 ? 'closes' : 'close'}`, title: blockersTitle(wait.blockers) };
       case 'limit':

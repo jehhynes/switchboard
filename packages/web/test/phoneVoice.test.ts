@@ -277,8 +277,8 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
 
     voice.start();
     expect(voice.error).toBeNull();
-    sockets[1]!.closeFromHub(4001, 'Voice moved to another device.');
-    expect(voice.error).toBe('Voice moved to another device.');
+    sockets[1]!.closeFromHub(4001, 'Voice is now on another device.');
+    expect(voice.error).toBe('Voice is now on another device.');
 
     // A refused upgrade closes with no reason, so the page asks the hub.
     voice.start();
@@ -299,7 +299,7 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
     voice.start();
     sockets[4]!.closeFromHub(1006);
     await flush();
-    expect(voice.error).toBe('Switchboard did not open the voice.');
+    expect(voice.error).toBe('Voice did not start.');
 
     // An answer about a refused socket that comes after the voice was asked for again is dropped.
     let late!: (answer: { status: number; body: Record<string, unknown> }) => void;
@@ -426,7 +426,7 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
       timers.at(-1)!.run();
     }
 
-    expect([voice.state, voice.error]).toEqual(['off', 'The phone took its audio, as for a call, so the voice left this phone.']);
+    expect([voice.state, voice.error]).toEqual(['off', 'Voice stopped because this device\'s audio did not resume.']);
     expect(sockets[1]!.closedWith).toBe(1000);
   });
 
@@ -514,7 +514,7 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
       refusals.shift()!();
     }
 
-    expect([failing.state, failing.error, clock]).toEqual(['off', 'The phone did not start its audio.', RECOVER_MS]);
+    expect([failing.state, failing.error, clock]).toEqual(['off', 'Audio did not start on this device.', RECOVER_MS]);
 
     // A tap's resume that an interruption, as a Bluetooth route change, makes fail is waited out, and the voice stays once the audio runs.
     const interrupted = new FakeContext();
@@ -641,15 +641,15 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
 
       await turnOn(0);
       timers.find((one) => one.ms === RESUME_MS)!.run();
-      expect([voice.state, voice.error, voice.micOpen]).toEqual(['off', 'Switchboard restarted, and the voice did not come back to this phone.', false]);
+      expect([voice.state, voice.error, voice.micOpen]).toEqual(['off', 'Voice did not resume after Switchboard restarted. Select Voice on this device to start it here.', false]);
       expect([contexts[0]!.closed, tracks[0]!.stopped]).toEqual([true, true]);
 
       await turnOn(1);
       setKey('page-8');
       voice.keyChanged();
       sockets[2]!.open();
-      sockets[2]!.closeFromHub(4003, 'The voice moved on while Switchboard restarted. Tap Voice on this phone to use it here.');
-      expect([voice.state, voice.error]).toEqual(['off', 'The voice moved on while Switchboard restarted. Tap Voice on this phone to use it here.']);
+      sockets[2]!.closeFromHub(4003, 'Voice did not resume after Switchboard restarted. Select Voice on this device to start it here.');
+      expect([voice.state, voice.error]).toEqual(['off', 'Voice did not resume after Switchboard restarted. Select Voice on this device to start it here.']);
       expect([contexts[1]!.closed, tracks[1]!.stopped]).toEqual([true, true]);
 
       setKey('page-7');
@@ -749,7 +749,7 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
       hide(false);
       expect(sockets[0]!.sent.at(-1)).toEqual({ type: 'state', busy: false });
 
-      sockets[0]!.closeFromHub(4001, 'Voice moved to another device.');
+      sockets[0]!.closeFromHub(4001, 'Voice is now on another device.');
       expect(tracks[0]!.stopped).toBe(true);
       expect(voice.micOpen).toBe(false);
     });
@@ -794,7 +794,7 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
       refuse(Object.assign(new Error('denied'), { name: 'NotAllowedError' }));
       expect(await refused).toBe('');
 
-      // A later Stop's own cut-short Mic on still says why.
+      // Voice off, the operator's own action, cuts a Mic on short with nothing to say.
       hide(false);
       voice.start();
       sockets[2]!.open();
@@ -805,9 +805,9 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
 
       voice.stop();
       open({ getAudioTracks: () => [new FakeTrack()] });
-      expect(await stopped).toBe('The voice left this phone.');
+      expect(await stopped).toBe('');
 
-      // As does one whose microphone request then fails.
+      // So too one whose microphone request then fails.
       voice.start();
       sockets[3]!.open();
       sockets[3]!.message({ type: 'welcome', at: 0 });
@@ -817,7 +817,7 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
 
       voice.stop();
       refuse(Object.assign(new Error('denied'), { name: 'NotAllowedError' }));
-      expect(await stoppedRefused).toBe('The phone did not allow the microphone.');
+      expect(await stoppedRefused).toBe('');
     });
 
     it('releases the microphone when the hub\'s mic turns off after it was on, and says why it could not open', async () => {
@@ -835,9 +835,9 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
       expect([voice.micOpen, tracks[0]!.stopped]).toEqual([false, true]);
 
       media(() => Promise.reject(Object.assign(new Error('denied'), { name: 'NotAllowedError' })));
-      expect(await voice.micOn()).toBe('The phone did not allow the microphone.');
+      expect(await voice.micOn()).toBe('Microphone access was not allowed on this device.');
       media(() => Promise.reject(new Error('no device')));
-      expect(await voice.micOn()).toBe("The phone's microphone did not open.");
+      expect(await voice.micOn()).toBe("The microphone did not open on this device.");
       expect(voice.micOpen).toBe(false);
 
       // Mic off while the microphone is still opening keeps nothing of it.
@@ -852,7 +852,7 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
       const track = new FakeTrack();
 
       open({ getAudioTracks: () => [track] });
-      expect(await late).toBe('The mic was turned off.');
+      expect(await late).toBe('');
       expect([track.stopped, voice.micOpen]).toEqual([true, false]);
     });
 
@@ -885,13 +885,13 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
       });
       const track = new FakeTrack();
 
-      expect(await failing.micOn()).toBe('The phone could not connect its microphone to the voice.');
+      expect(await failing.micOn()).toBe('Switchboard could not start microphone capture on this device.');
       expect([track.stopped, failing.micOpen, session.type]).toEqual([true, false, 'playback']);
 
       const { voice, media } = setup();
 
       media(async () => ({ getAudioTracks: () => [] }));
-      expect(await voice.micOn()).toBe("The phone's microphone did not open.");
+      expect(await voice.micOn()).toBe('No microphone audio was available on this device.');
       expect(session.type).toBe('playback');
     });
 
@@ -909,7 +909,7 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
       sockets[0]!.open();
       sockets[0]!.message({ type: 'welcome', at: 0 });
       expect(await second).toBeNull();
-      expect(await first).toBe('The mic was turned off.');
+      expect(await first).toBe('');
       expect(tracks.map((one) => one.stopped)).toEqual([true, false]);
       expect(voice.micOpen).toBe(true);
       expect(captures).toHaveLength(1);
