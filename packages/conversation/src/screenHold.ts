@@ -82,6 +82,15 @@ export class ScreenHold {
     return handle;
   }
 
+  /** A screen copy published before, by an earlier hub process; returns its new handle. */
+  adopt(replyId: string): number {
+    const handle = ++this.#seq;
+
+    this.#replies.set(handle, replyId);
+
+    return handle;
+  }
+
   /** No transcript copy in time: the screen copy is published. */
   #release(handle: number): void {
     const held = this.#held.get(handle);

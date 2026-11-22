@@ -3,7 +3,7 @@
  * the whole model message is saved, while the screen shows it as soon as the text block is drawn. Claude Code's classic renderer draws a reply as
  * "● text" with two-space continuation lines; a block counts as finished once something is drawn after it.
  */
-import { endsInOpenTag, isRewriteLine, isStatusLine, keyOf, splitRewrite, stripAside } from './tags.js';
+import { endsInOpenTag, isRewriteLine, isStatusLine, keyOf, parseReply, splitRewrite, stripAside } from './tags.js';
 
 /** The part of an xterm buffer cell the reader uses. */
 export interface Cell {
@@ -189,6 +189,11 @@ export function lineText(line: Line, isCode: (cell: Cell) => boolean): string {
 
 /** A tool call's header, "Bash(echo hi)" or "github - search (MCP)(...)": with reduced motion on, a running one's bullet is drawn like a reply's. */
 const TOOL_CALL = /^[A-Z][\w-]*\(|^[\w-]+ - .+ \(MCP\)\(/;
+/**
+ * Focus view's row of running tool calls (mechanics M120): drawn with a running tool call's blinking bullet, so with the bullet blank it reads as
+ * a reply's next paragraph. Only the row as seen counts, so a reply that names the shortcut is never cut.
+ */
+const COLLAPSED_ROW = /^(● | {2})Working… \(ctrl\+o to expand\)$/;
 /** A row of a menu's numbered options, "1: Bad    2: Fine": a prompt of Claude Code's, never a reply. */
 const OPTION_ROW = /^\s*\d+: \S.*?\s{2,}\d+: \S/;
 
@@ -200,7 +205,7 @@ export function screenBlocks(lines: string[], isReplyBullet: (index: number) => 
   const blocks: Array<string | null> = [];
 
   for (let index = 0; index < lines.length; index++) {
-    if (!lines[index]!.startsWith('● ') || !isReplyBullet(index) || TOOL_CALL.test(lines[index]!.slice(2))) {
+    if (!lines[index]!.startsWith('● ') || !isReplyBullet(index) || TOOL_CALL.test(lines[index]!.slice(2)) || COLLAPSED_ROW.test(lines[index]!.trimEnd())) {
       continue;
     }
 
@@ -210,7 +215,8 @@ export function screenBlocks(lines: string[], isReplyBullet: (index: number) => 
     // A running tool call's bullet blinks: drawn blank, its header after a blank line would read as the reply's last paragraph.
     while (
       next < lines.length &&
-      (lines[next] === '' || (lines[next]!.startsWith('  ') && !lines[next]!.startsWith('  ⎿') && !(lines[next - 1] === '' && TOOL_CALL.test(lines[next]!.slice(2)))))
+      (lines[next] === '' ||
+        (lines[next]!.startsWith('  ') && !lines[next]!.startsWith('  ⎿') && !(lines[next - 1] === '' && COLLAPSED_ROW.test(lines[next]!.trimEnd())) && !(lines[next - 1] === '' && TOOL_CALL.test(lines[next]!.slice(2)))))
     ) {
       body.push(lines[next++]!.slice(2));
     }
@@ -248,6 +254,8 @@ export class ScreenReader {
   readonly ids = new Map<string, number[]>();
   /** Handle of a reply's screen copy to when it was read or last grew and when it was first read, until its transcript copy comes. */
   readonly pending = new Map<number, { at: number; first: number }>();
+  /** Keys of adopted copies, which are keys of the reply's `opening` rather than of its raw text. */
+  readonly adopted = new Set<string>();
   /** The newest block read. */
   #tail: { key: string; id: number | null; at: number; frozen?: boolean } | null = null;
   /** When `unconfirmed` last saw Claude working. */
@@ -257,6 +265,24 @@ export class ScreenReader {
     private readonly push: ScreenPush,
     private readonly now: () => number = Date.now,
   ) {}
+
+  /**
+   * A screen copy an earlier hub process published and left waiting, as a restart does: it waits again from now, so its transcript copy replaces
+   * it in place or it is withdrawn as any other copy would be.
+   */
+  adopt(key: string, handle: number, newest: boolean): void {
+    const now = this.now();
+
+    this.sent.add(key);
+    this.adopted.add(key);
+    this.#wait(key, handle);
+    this.pending.set(handle, { at: now, first: now });
+
+    // The newest may still be streaming: a longer copy on the screen grows it in place. An empty key would take any block as its growth.
+    if (newest && key !== '') {
+      this.#tail = { key, id: handle, at: now };
+    }
+  }
 
   /** The oldest screen copy waiting under the key, taken off the list. */
   take(key: string): number | undefined {
@@ -409,8 +435,8 @@ export class ScreenReader {
         this.#tail!.at = now;
       }
 
-      // Sent already, or a copy of a sent one cut off or caught mid-redraw.
-      if (this.sent.has(key) || (!same && key.length > 40 && [...this.sent].some((sent) => sent.length > key.length && sent.startsWith(key)))) {
+      // Sent already, adopted, or a copy of a sent one cut off or caught mid-redraw.
+      if (this.sent.has(key) || (this.adopted.size > 0 && this.adopted.has(keyOf(parseReply(text).opening))) || (!same && key.length > 40 && [...this.sent].some((sent) => sent.length > key.length && sent.startsWith(key)))) {
         return;
       }
 

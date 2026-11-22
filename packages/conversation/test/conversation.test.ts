@@ -718,6 +718,49 @@ describe('SessionConversation', () => {
     expect(first.items().map((item) => (item.type === 'reply' ? `${item.opening}<${item.answers}` : item.text.slice(0, 9)))).toEqual(['Question?', 'One.<m-1', 'Two.<m-1']);
   });
 
+  it('withdraws a screen copy a stopped hub left waiting when no transcript copy comes, and replaces one whose transcript copy comes', () => {
+    const { store, conversation, clock, path, append, items, advance, logs } = setup();
+
+    conversation.readScreen(screen('● Never confirmed'));
+    conversation.readScreen(screen('● Never confirmed', '', '● Confirmed later'));
+    advance(300);
+    expect(items()).toMatchObject([{ source: 'screen', withdrawn: false }, { source: 'screen', withdrawn: false }]);
+
+    const [never, later] = items().map((item) => (item as { id: string }).id);
+    // The hub restarts: a new process reads the same store.
+    const restarted = new SessionConversation('s1', 7, { store, now: () => clock.t, newId: () => 'n', onChange: () => {}, log: (line) => logs.push(line) });
+
+    append(assistant('a1', clock.t + 100, 'Confirmed later, in full.'));
+    restarted.readTranscript(path);
+    // The transcript copy takes its line's place, before the copy still waiting.
+    expect(items()).toMatchObject([{ id: later, source: 'transcript', opening: 'Confirmed later, in full.' }, { id: never, source: 'screen', withdrawn: false }]);
+
+    clock.t += 5_001;
+    restarted.tick(false);
+    expect(items().find((item) => (item as { id: string }).id === never)).toMatchObject({ withdrawn: true });
+    expect(items().find((item) => (item as { id: string }).id === later)).toMatchObject({ withdrawn: false });
+    expect(logs).toContain(`session s1 reply ${never} withdrawn: no transcript copy came`);
+  });
+
+  it('grows the newest screen copy a stopped hub left in place, and lets a tagged transcript copy replace one by its opening', () => {
+    const { store, conversation, clock, path, append, items, advance } = setup();
+
+    conversation.readScreen(screen('● Done.', '  [status]', '  All good'));
+    conversation.readScreen(screen('● Done.', '  [status]', '  All good', '', '● Still drawing'));
+    advance(300);
+
+    const [done, drawing] = items().map((item) => (item as { id: string }).id);
+    const restarted = new SessionConversation('s1', 7, { store, now: () => clock.t, newId: () => 'n', onChange: () => {}, log: () => {} });
+
+    restarted.readScreen(screen('● Done.', '  [status]', '  All good', '', '● Still drawing, and done'));
+    expect(items()).toMatchObject([{ id: done }, { id: drawing, source: 'screen', opening: 'Still drawing, and done' }]);
+
+    append(assistant('a1', clock.t, 'Done.\n[status]\nAll good'));
+    restarted.readTranscript(path);
+    expect(items()).toHaveLength(2);
+    expect(items().find((item) => (item as { id: string }).id === done)).toMatchObject({ source: 'transcript', withdrawn: false });
+  });
+
   it('withdraws a screen copy still waiting when the session ends', () => {
     const { conversation, items, advance } = setup();
 

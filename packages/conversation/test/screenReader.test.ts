@@ -1,8 +1,16 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { CONFIRM_MS, ScreenReader, isReplyCell, screenBlocks, unwrap } from '../src/screenReader.js';
 import type { Cell } from '../src/screenReader.js';
 
 const all = (): boolean => true;
+/** A screen recorded from Claude Code's Focus view; each "●" at a line's start counts as a reply's. */
+const recorded = (name: string): { lines: string[]; bullet: (index: number) => boolean } => {
+  const lines = readFileSync(join(import.meta.dirname, 'fixtures', 'screens', `${name}.txt`), 'utf8').split('\n');
+
+  return { lines, bullet: (index) => lines[index]!.startsWith('● ') };
+};
 
 function reader(now: { t: number }) {
   const pushed: Array<{ text: string; aside: boolean; replaces: number | undefined; id: number }> = [];
@@ -38,6 +46,35 @@ describe('screen blocks', () => {
     expect(screenBlocks(['● How is Claude doing this session? (optional)', '  1: Bad    2: Fine   3: Good   0: Dismiss', '', '> '], all)).toEqual([]);
     expect(screenBlocks(['● Done. [asi', '', '> '], all)).toEqual([null]);
     expect(screenBlocks(['● Answer', '', '> '], () => false)).toEqual([]);
+  });
+
+  it('ends a reply at the Focus view row of a running tool call, whose bullet blinks blank (Claude Code 2.1.330)', () => {
+    const { lines, bullet } = recorded('focus-working');
+
+    expect(screenBlocks(lines, bullet)).toEqual(["I'll run the PowerShell command that sleeps 10 seconds and prints the date."]);
+
+    // The row with its bullet drawn is no reply either, whatever its colour.
+    const drawn = lines.map((line) => (line === '  Working… (ctrl+o to expand)' ? '● Working… (ctrl+o to expand)' : line));
+
+    expect(screenBlocks(drawn, all)).toEqual(["I'll run the PowerShell command that sleeps 10 seconds and prints the date."]);
+  });
+
+  it('keeps a reply that names the shortcut in a sentence of its own', () => {
+    for (const line of ['Use (ctrl+o to expand)', 'Press it (ctrl+o to expand).', 'To see a long result in full, press the key Claude Code names (ctrl+o to expand)', 'Note: it folds (ctrl+o to expand)']) {
+      expect(screenBlocks(['● Here is how.', '', `  ${line}`, '', '> '], all)).toEqual([`Here is how.\n\n${line}`]);
+      expect(screenBlocks([`● ${line}`, '', '> '], all)).toEqual([line]);
+    }
+
+    // Within a paragraph, not after a blank line, a short line ending in the shortcut is the reply's.
+    expect(screenBlocks(['● Folded rows end in', '  Ran 2 tools (ctrl+o to expand)', '', '> '], all)).toEqual(['Folded rows end in Ran 2 tools (ctrl+o to expand)']);
+  });
+
+  it('reads a reply shown as a thinking summary without its "· summary" or the running tool call row after it', () => {
+    const { lines, bullet } = recorded('focus-summary');
+
+    expect(screenBlocks(lines, bullet)).toEqual([
+      'The Status tab fix will stop showing question cards, since only numbered items with lettered options become cards and items three and four lacked options. The landscape fix is merged, so rotated phones keep the phone layout.',
+    ]);
   });
 
   it("keeps a code fence's lines as they are and joins none into it", () => {
@@ -99,6 +136,25 @@ describe('ScreenReader', () => {
 
     screen.read(['● Not a reply', '', '> '], all);
     expect(screen.unconfirmed(2_000, true)).toEqual([1]);
+  });
+
+  it('adopts a copy an earlier process left waiting, so it is withdrawn when no transcript copy comes', () => {
+    const now = { t: 0 };
+    const { screen, pushed } = reader(now);
+
+    screen.adopt('Leftover', 41, false);
+    screen.read(['● Leftover', '', '> '], all);
+    expect(pushed).toEqual([]);
+    now.t = CONFIRM_MS + 1;
+    expect(screen.unconfirmed(0, false)).toEqual([41]);
+  });
+
+  it('takes no reply as the growth of an adopted copy with an empty key', () => {
+    const { screen, pushed } = reader({ t: 0 });
+
+    screen.adopt('', 41, true);
+    screen.read(['● Another reply', '', '> '], all);
+    expect(pushed).toEqual([{ text: 'Another reply', aside: false, replaces: undefined, id: 1 }]);
   });
 
   it('after a resize takes the screen as read, and publishes no growth of the block it was drawing', () => {

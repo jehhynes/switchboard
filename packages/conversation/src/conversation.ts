@@ -4,7 +4,7 @@ import { ScreenHold } from './screenHold.js';
 import type { HoldOptions, Via } from './screenHold.js';
 import { ScreenReader } from './screenReader.js';
 import { pasteText } from './input.js';
-import { keyOf, stripAside } from './tags.js';
+import { keyOf, parseReply, stripAside } from './tags.js';
 import type { HeardTag } from './tags.js';
 import { parseLine, readLines } from './transcript.js';
 import type { TranscriptEntry } from './transcript.js';
@@ -107,8 +107,20 @@ export class SessionConversation extends ConversationLog {
     // A reply read after a hub restart answers the last message stored before it.
     this.lastMessage = deps.store.latestMessageId(sessionId);
 
+    let newest = true;
+
+    // Newest first.
     for (const reply of deps.store.latestReplies(sessionId, SEED_REPLIES)) {
-      this.#reader.sent.add(keyOf(reply.opening));
+      const key = keyOf(reply.opening);
+
+      this.#reader.sent.add(key);
+
+      // A screen copy still waiting when the hub stopped waits again, so it is replaced or withdrawn rather than left as a reply.
+      if (reply.source === 'screen' && !reply.withdrawn) {
+        this.#reader.adopt(key, this.#hold.adopt(reply.id), newest);
+      }
+
+      newest = false;
     }
 
     // The screen draws each line of a joined reply as a block of its own.
@@ -285,6 +297,13 @@ export class SessionConversation extends ConversationLog {
     }
   }
 
+  /** The waiting copy a transcript copy with this key replaces: the same key or one it starts with, of those in `among` when given. */
+  #waiting(key: string, among?: Set<string>): string | undefined {
+    const waiting = [...this.#reader.ids.keys()].filter((one) => among === undefined || among.has(one));
+
+    return waiting.includes(key) ? key : waiting.find((one) => one !== '' && key.startsWith(one));
+  }
+
   /**
    * The message a reply answers: the first operator's message line on the reply's `parentUuid` chain, which matched the API requests for every
    * reply checked (claude-collab findings 2026-11-19); null when the chain leaves the lines this hub has read, such as after a restart.
@@ -444,7 +463,7 @@ export class SessionConversation extends ConversationLog {
 
     // Its screen copy, whole or cut off while still being drawn, if one waits: the raw Markdown replaces the screen's rendered copy. Only copies
     // still waiting count, because each transcript reply is a reply of its own, and a second "Yes." is a second answer.
-    const shown = this.#reader.ids.has(key) ? key : [...this.#reader.ids.keys()].find((waiting) => waiting !== '' && key.startsWith(waiting));
+    const shown = this.#waiting(key) ?? this.#waiting(keyOf(parseReply(entry.text).opening), this.#reader.adopted);
     const handle = shown === undefined ? undefined : this.#reader.take(shown);
     // The store keeps which reply each API message became, so a hub restart between two of its lines still joins them.
     const joined = entry.messageId === null ? null : this.deps.store.replyOfApiMessage(this.sessionId, entry.messageId);

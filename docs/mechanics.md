@@ -1488,3 +1488,12 @@ Current use: the console's resync after each fit ([architecture.md](architecture
   - With M68, which records the refusal to resume a Code Mode session without Code Mode, Claude keeps a session in the mode it started in, either way; only a new session starts in Code Mode.
 - **Not verified:** Linux; a session started in the VS Code panel.
 - **Current use:** a registered session resumes in the mode its transcript records (`transcriptLaunch`, architecture.md § Code Mode sessions, Registered sessions).
+
+## M120. Focus view's row of running tool calls on the screen, 2026-11-22
+
+- **Versions:** Claude Code CLI 2.1.330 (native build), Opus 5.5, on Windows 11 Pro 10.0.26300; node-pty 1.1.0 and @xterm/headless at 120 × 40.
+- **Experiment:** a Code Mode session started with `codeModeSettings()` (Focus view, classic renderer) was asked to write a sentence before each of two shell commands; its screen was read every 300 ms. Then the screen copy of the operator's session 311b1ad4 that the web page showed with `· summary` and `Working… (ctrl+o to expand)` was compared with its transcript and the hub's log.
+- **Result:**
+  - While a tool call runs, Focus view draws a row `● Working… (ctrl+o to expand)` under the text written before it, after a blank line, with its `●` in grey (`#999999`) blinking: drawn blank, the row reads `  Working… (ctrl+o to expand)`, a reply's continuation line, so the screen reader added it to the reply's copy as a last paragraph (recorded in `packages/conversation/test/fixtures/screens/focus-working.txt`).
+  - In 311b1ad4 the text before a tool call was saved only as a thinking block (`thinkingDisplay: "updates"`), drawn as `● <text> · summary`; with the row added, the `· summary` was not at the copy's end and stayed, so the copy's key never matched the transcript copy's. The transcript copy was published as a reply of its own, and the hub restarted 20 s later while the screen copy still waited, which left it published as a reply; no withdrawal was logged. The message holding that text, shown as the operator's, was one the operator sent from the page (its transcript line came 4 s after "Screen reading bug:"), not a screen copy taken as a message.
+- **Current use:** the screen reader ends a reply's copy at such a row and skips the row itself, and a restarted hub takes up the screen copies left waiting (architecture.md § Reading a session).
