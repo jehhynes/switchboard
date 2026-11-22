@@ -406,7 +406,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
   window.addEventListener('focus', () => void settingsPane.reload());
   document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && void settingsPane.reload());
-  const header = listHeader(root.querySelector<HTMLElement>('.side-head')!, list, root.querySelector<HTMLElement>('#list-sheet')!, { post: (name, body) => post(name, body), redraw: () => draw(), select: (workItemId) => void select(workItemId), now: () => deps.now(), local: deps.local ?? ['127.0.0.1', 'localhost'].includes(location.hostname), openSettings: () => settingsPane.open() });
+  const header = listHeader(root.querySelector<HTMLElement>('.side-head')!, list, root.querySelector<HTMLElement>('#list-sheet')!, { post: (name, body) => post(name, body), redraw: () => draw(), select: (workItemId) => void select(workItemId), now: () => deps.now(), local: deps.local ?? ['127.0.0.1', 'localhost'].includes(location.hostname), openSettings: () => settingsPane.open(), reload: () => (deps.reload ?? (() => location.reload()))() });
   /** A command for the conversation the page shows, refused by the hub when the page has moved on since. */
   const command = (name: string, body: Record<string, unknown> = {}): Promise<Answer> => post(name, { scopeGen: state.scope?.scopeGen ?? -1, ...body });
 

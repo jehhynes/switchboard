@@ -52,6 +52,7 @@ describe('the list header (architecture.md § Web page)', () => {
     vi.useRealTimers();
   });
 
+  let reloads = 0;
   const start = (local?: boolean) => {
     const fetch = vi.fn(async (url: string, init?: { body?: string }) => {
       posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) });
@@ -63,7 +64,7 @@ describe('the list header (architecture.md § Web page)', () => {
 
       return { status: answer.status, ok: answer.status === 200, json: async () => answer.body, text: async () => '' } as unknown as Response;
     });
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, ...(local === undefined ? {} : { local }) });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, reload: () => void reloads++, ...(local === undefined ? {} : { local }) });
 
     return { page, source: FakeSource.last! };
   };
@@ -309,7 +310,7 @@ describe('the list header (architecture.md § Web page)', () => {
     hello(source);
     click('.more-actions');
     expect(root.querySelector('.more-actions')?.getAttribute('aria-expanded')).toBe('true');
-    expect(menuRows()).toEqual(['gh', 'desk', 'help', '-', 'New ad-hoc session…', 'New conversation in a folder…', '-', 'Held sessions', '-', 'Refresh sources', 'Show hub log', '-', 'Pair a device…', 'Open Settings']);
+    expect(menuRows()).toEqual(['gh', 'desk', 'help', '-', 'New ad-hoc session…', 'New conversation in a folder…', '-', 'Held sessions', '-', 'Refresh sources', 'Reload', 'Show hub log', '-', 'Pair a device…', 'Open Settings']);
     // The source rows are the phone's: page.css hides them from 768 px, where the icons are in the header.
     expect([...root.querySelectorAll('.more-menu .more-source')]).toHaveLength(4);
     expect(root.querySelector('.more-menu [data-source="help"]')?.getAttribute('aria-checked')).toBe('false');
@@ -329,6 +330,14 @@ describe('the list header (architecture.md § Web page)', () => {
     expect(posts.at(-1)?.url).toBe('/v1/conversation/page-poll');
     expect(root.querySelector('.more-menu')).toBeNull();
     expect(root.querySelector('.list-notice')?.textContent).toBe('Every source is off.');
+
+    // Reload reloads the page, for an installed app with no browser reload, and closes the menu.
+    const before = reloads;
+
+    click('.more-actions');
+    click('.more-menu [data-action="list-reload"]');
+    expect(reloads).toBe(before + 1);
+    expect(root.querySelector('.more-menu')).toBeNull();
 
     // A dock window the page does not have yet says to use the dock.
     for (const [action, title] of [['list-later-held', 'Held sessions'], ['list-later-log', 'Show hub log']]) {
@@ -446,7 +455,7 @@ describe('the list header (architecture.md § Web page)', () => {
     hello(remote.source);
     click('.more-actions');
     // Settings stays on this computer too, and the menu ends with Show hub log rather than a separator.
-    expect(menuRows().slice(-3)).toEqual(['-', 'Refresh sources', 'Show hub log']);
+    expect(menuRows().slice(-4)).toEqual(['-', 'Refresh sources', 'Reload', 'Show hub log']);
     expect(root.querySelector('[data-action="list-settings"]')).toBeNull();
     remote.page.close();
 

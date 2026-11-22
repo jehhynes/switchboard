@@ -14,6 +14,8 @@ export interface ListHeaderDeps {
   select(workItemId: number): void;
   /** Opens Settings (architecture.md § Web page), as the dock's Open Settings opens its window. */
   openSettings?(): void;
+  /** Reloads the page, for an installed app with no browser reload. */
+  reload?(): void;
   now(): number;
   /** Whether the page is the one on this computer, which may pair devices, open Settings and restart the holder (architecture.md § Remote access); false on a paired device. */
   local?: boolean;
@@ -407,8 +409,8 @@ function MoreRow({ action, icon, label }: { action: string; icon: string; label:
 const Separator = ({ classes = 'menu-separator' }: { classes?: string }) => <li class={classes} role="separator"></li>;
 
 /**
- * More Actions (PRD R71), in the dock's groups: New ad-hoc session… and New conversation in a folder…; Held sessions; Refresh sources and
- * Show hub log; then Pair a device and Open Settings, on this computer's page only. On a phone, where the header has no room for them,
+ * More Actions (PRD R71), in the dock's groups: New ad-hoc session… and New conversation in a folder…; Held sessions; Refresh sources,
+ * Reload and Show hub log; then Pair a device and Open Settings, on this computer's page only. On a phone, where the header has no room for them,
  * the source icons come first as a check row per source.
  */
 export function renderMoreMenu(header: PageHeader | null, local = false): VNode {
@@ -433,6 +435,7 @@ export function renderMoreMenu(header: PageHeader | null, local = false): VNode 
       <MoreRow action="list-later-held" icon="terminal" label="Held sessions" />
       <Separator />
       <MoreRow action="list-poll" icon="refresh" label="Refresh sources" />
+      <MoreRow action="list-reload" icon="debug-restart" label="Reload" />
       <MoreRow action="list-later-log" icon="output" label="Show hub log" />
       {local ? (
         <>
@@ -1252,6 +1255,11 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
       case 'list-poll':
         view.menu = null;
         void refresh();
+        break;
+      case 'list-reload':
+        view.menu = null;
+        redraw();
+        (deps.reload ?? (() => location.reload()))();
         break;
       case 'list-devices':
         view.menu = null;
