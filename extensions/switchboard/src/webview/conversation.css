@@ -161,7 +161,7 @@ body.vscode-high-contrast .message .box, body.vscode-high-contrast-light .messag
 .composer .mic.off, .composer .mic.elsewhere, .composer .mic.idle { color: var(--vscode-descriptionForeground); }
 .composer .mic.off:hover, .composer .mic.elsewhere:hover, .composer .mic.idle:hover { color: var(--vscode-foreground); }
 .composer .mic.listening, .composer .mic.hearing, .composer .mic.starting, .composer .mic.held { color: var(--vscode-focusBorder); }
-.composer .mic.starting, .composer .mic.held .codicon-mic-filled { opacity: 0.6; }
+.composer .mic.starting .codicon-mic-filled, .composer .mic.held .codicon-mic-filled { opacity: 0.6; }
 .composer .mic.unavailable { color: var(--vscode-editorWarning-foreground); }
 .mic-glyph { position: relative; display: inline-flex; }
 .mic-glyph.off::after { content: ''; position: absolute; left: 50%; top: -1px; width: 1.5px; height: 18px; margin-left: -0.75px; background: currentColor; box-shadow: 0 0 0 1px var(--sb-composer-background); transform: rotate(-45deg); }
@@ -170,6 +170,8 @@ body.vscode-high-contrast .message .box, body.vscode-high-contrast-light .messag
 .composer .mic.listening .codicon-mic-filled { animation: mic-pulse 2s ease-in-out infinite; }
 .composer .mic.hearing .codicon-mic-filled { animation: mic-pulse 0.8s ease-in-out infinite; }
 @keyframes mic-pulse { 50% { opacity: 0.45; } }
+.mic-ring { position: absolute; inset: -4px; border: 1.5px solid transparent; border-top-color: currentColor; border-right-color: currentColor; border-radius: 50%; animation: mic-ring 0.9s linear infinite; }
+@keyframes mic-ring { 100% { transform: rotate(360deg); } }
 body.vscode-reduce-motion .composer .mic .codicon { animation: none; }
 /* The composer's extras, measured from Claude Code's panel: its file and command lists 8 px above the box at its width, rows 4 by 8 px with a
    4 px radius, a folder path dimmed and cut from its start; footer tools as 26 px ghost buttons; a dashed ring while files are dragged over. */

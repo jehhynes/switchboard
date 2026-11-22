@@ -10,6 +10,7 @@ import type { ConversationMessage, SendTarget, Tab } from './conversationRender.
 import { startComposerExtras } from './composerExtras.js';
 import { morph } from './morph.js';
 import { renderContextMeter } from '@switchboard/conversation/contextMeter';
+import { MicStart } from '@switchboard/conversation/voiceControls';
 import type { ContextMenuState } from '@switchboard/conversation/contextMeter';
 import type { ExtrasReply } from './composerExtras.js';
 
@@ -85,6 +86,8 @@ function startComposer(
   draft(text: string, workItemId: number | null): void;
   words(text: string): void;
   refused(error: string, workItemId: number | null): void;
+  micStart(): void;
+  micFailed(error: string): void;
 } {
   // As Claude Code's input: the text area over a footer, whose left side is kept for the controls later slices add. Why a message did not go
   // shows above it until dismissed.
@@ -352,12 +355,26 @@ function startComposer(
     }
   });
   let speaking = false;
+  // The mic button shows starting from a Mic on click until the voice view confirms it, and the extension's refusal if it failed.
+  let shownVoice: ConversationState['voice'] = null;
+  const drawMic = (): void => redraw(micSlot, enabled ? renderMicButton(shownVoice, micStart.pending) : '');
+  const micStart = new MicStart(drawMic);
 
   micSlot.addEventListener('click', (event) => {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-voice="mic"]');
 
     if (button !== null) {
-      vscode.postMessage({ type: 'mic', on: button.dataset['on'] === 'true' });
+      const on = button.dataset['on'] === 'true';
+
+      vscode.postMessage({ type: 'mic', on });
+
+      if (on) {
+        micStart.start();
+      } else {
+        micStart.clear();
+      }
+
+      drawMic();
     }
   });
   input.addEventListener('scroll', () => void (mirror.scrollTop = input.scrollTop));
@@ -404,6 +421,11 @@ function startComposer(
 
   return {
     update: (state) => {
+      // A start or its failure belongs to the conversation it was clicked in.
+      if ((state.scope?.workItemId ?? null) !== current) {
+        micStart.clear();
+      }
+
       switchTo(state.scope?.workItemId ?? null);
       enabled = state.connected && state.session?.conversation === 'full';
       extras.update(state);
@@ -414,7 +436,13 @@ function startComposer(
       input.placeholder = enabled ? 'Message…' : (state.session?.reason ?? (state.connected ? 'No session has started yet.' : 'Connecting to Switchboard…'));
       // Redrawn only when they change, so a state event between a press and its release does not swallow the click.
       redraw(voiceControls, renderVoiceControls(state.voice, enabled));
-      redraw(micSlot, enabled ? renderMicButton(state.voice) : '');
+      shownVoice = state.voice;
+
+      if (state.voice?.here === true) {
+        micStart.view(state.voice.mic);
+      }
+
+      drawMic();
 
       if (contextShown?.id !== state.session?.id) {
         contextMenu = 'closed';
@@ -471,6 +499,14 @@ function startComposer(
       liveWords.textContent = text;
       liveWords.hidden = text === '';
       showLive();
+    },
+    micStart: () => {
+      micStart.start();
+      drawMic();
+    },
+    micFailed: (why) => {
+      micStart.fail(why);
+      drawMic();
     },
     refused: (why, workItemId) => {
       if (workItemId !== null && workItemId !== current) {
@@ -1331,7 +1367,7 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     checkSeen();
   });
 
-  window.addEventListener('message', (event: MessageEvent<{ type: 'state'; state: ConversationState; unopened?: string[]; details?: boolean } | { type: 'focus'; focused: boolean } | { type: 'seen-failed'; ids: string[] } | { type: 'sent'; id: number; error: string | null } | { type: 'copied'; id: number; ok: boolean } | { type: 'unsent'; returned: Array<{ text: string; error: string; workItemId: number | null }> } | { type: 'draft'; text: string; workItemId: number | null } | { type: 'words'; text: string } | { type: 'refused'; error: string; workItemId: number | null } | MenuReply | ExtrasReply>) => {
+  window.addEventListener('message', (event: MessageEvent<{ type: 'state'; state: ConversationState; unopened?: string[]; details?: boolean } | { type: 'focus'; focused: boolean } | { type: 'seen-failed'; ids: string[] } | { type: 'sent'; id: number; error: string | null } | { type: 'copied'; id: number; ok: boolean } | { type: 'unsent'; returned: Array<{ text: string; error: string; workItemId: number | null }> } | { type: 'draft'; text: string; workItemId: number | null } | { type: 'words'; text: string } | { type: 'refused'; error: string; workItemId: number | null } | { type: 'mic-start' } | { type: 'mic-failed'; error: string } | MenuReply | ExtrasReply>) => {
     if (event.data.type === 'files' || event.data.type === 'commands' || event.data.type === 'mentions' || event.data.type === 'image') {
       composer?.receive(event.data);
     } else if (event.data.type === 'draft') {
@@ -1340,6 +1376,10 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
       composer?.words(event.data.text);
     } else if (event.data.type === 'refused') {
       composer?.refused(event.data.error, event.data.workItemId);
+    } else if (event.data.type === 'mic-start') {
+      composer?.micStart();
+    } else if (event.data.type === 'mic-failed') {
+      composer?.micFailed(event.data.error);
     } else if (event.data.type === 'menu') {
       // The header menu's choices, only for the menu still open that asked.
       if (menu?.id === event.data.id) {

@@ -86,6 +86,8 @@ const FILES_FOUND = 500;
  */
 export class ConversationView implements vscode.WebviewViewProvider, vscode.TextDocumentContentProvider {
   #state: ConversationState = EMPTY_CONVERSATION;
+  /** Rises at each mic command, so a refusal answered after a later one is not shown. */
+  #micAttempt = 0;
   /** Statuses this window was sent, by ID, with the session's folder for their links, which a status document reads; cleared when the scope moves. */
   readonly #statuses = new Map<string, { markdown: string; cwd: string | null }>();
   readonly #statusChanged = new vscode.EventEmitter<vscode.Uri>();
@@ -526,20 +528,26 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
   }
 
   /** A voice command for this window (architecture.md § Voice); a refusal shows as a warning, except Stop speaking's, which has nothing to stop. */
-  async #voiceCommand(name: 'talk-here' | 'stop-speaking' | 'speak-replies' | 'replay' | 'mic', extra: Record<string, unknown> = {}): Promise<void> {
+  async #voiceCommand(name: 'talk-here' | 'stop-speaking' | 'speak-replies' | 'replay' | 'mic', extra: Record<string, unknown> = {}, stale = (): boolean => false): Promise<string | null> {
     const target = this.#target;
     const scope = this.#state.scope;
 
     if (target === null || scope === null) {
       void vscode.window.showWarningMessage('Switchboard: this window has no session for the voice.');
-      return;
+      return 'This window has no session for the voice.';
     }
 
     const reply = await postToHub(target.record, `/v1/conversation/${name}`, { window: target.key, scopeGen: scope.scopeGen, opId: randomUUID(), ...extra }, HISTORY_TIMEOUT_MS);
 
-    if (reply?.status !== 200 && name !== 'stop-speaking') {
+    if (reply?.status === 200) {
+      return null;
+    }
+
+    if (name !== 'stop-speaking' && !stale()) {
       warnHub(reply);
     }
+
+    return reply?.error ?? (reply === null ? 'The hub did not answer.' : `The hub answered ${reply.status}.`);
   }
 
   /** The header's persona menu (architecture.md § Personas): the roster from the hub's `personas`, the session's own marked, and Clear pin while one is pinned. */
@@ -584,13 +592,27 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
   }
 
   /** Talk here: the voice moves to this window's selected conversation's session. */
-  talkHere(): Promise<void> {
-    return this.#voiceCommand('talk-here');
+  async talkHere(): Promise<void> {
+    await this.#voiceCommand('talk-here');
   }
 
-  /** The mic on or off (architecture.md § Dictation); turning it on also talks here. */
-  mic(on: boolean): Promise<void> {
-    return this.#voiceCommand('mic', { on });
+  /**
+   * The mic on or off (architecture.md § Dictation); turning it on also talks here, and the mic button shows starting until it listens: the view
+   * starts it itself on its own click (`fromView`), else it is told.
+   */
+  async mic(on: boolean, fromView = false): Promise<void> {
+    // A refusal answered after a later Mic on or off changes nothing.
+    const attempt = ++this.#micAttempt;
+
+    if (on && !fromView) {
+      this.#post({ type: 'mic-start' });
+    }
+
+    const error = await this.#voiceCommand('mic', { on }, () => attempt !== this.#micAttempt);
+
+    if (on && error !== null && attempt === this.#micAttempt) {
+      this.#post({ type: 'mic-failed', error });
+    }
   }
 
   /** Toggle Microphone: off while the voice is here with the mic on, else on, which also moves the voice here. */
@@ -608,13 +630,13 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
     }
   }
 
-  stopSpeaking(): Promise<void> {
-    return this.#voiceCommand('stop-speaking');
+  async stopSpeaking(): Promise<void> {
+    await this.#voiceCommand('stop-speaking');
   }
 
   /** Speak replies on or off; with no value, the opposite of what it is. */
-  speakReplies(on = !(this.#state.voice?.speakReplies ?? true)): Promise<void> {
-    return this.#voiceCommand('speak-replies', { on });
+  async speakReplies(on = !(this.#state.voice?.speakReplies ?? true)): Promise<void> {
+    await this.#voiceCommand('speak-replies', { on });
   }
 
   /** Speaks a reply's passage again, or the newest reply's that has one. */
@@ -624,7 +646,7 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
       return Promise.resolve();
     }
 
-    return this.#voiceCommand('replay', { replyId });
+    return this.#voiceCommand('replay', { replyId }).then(() => undefined);
   }
 
   /** Loads the items before the oldest the view shows. */
@@ -888,7 +910,7 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
           case 'speak-replies':
             return this.speakReplies(message.on === true);
           case 'mic':
-            return this.mic(message.on === true);
+            return this.mic(message.on === true, true);
           case 'composer':
             return this.composer(message.focused === true, String(message.draft));
           case 'replay':

@@ -1158,6 +1158,8 @@ describe('the page', () => {
     phone.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)])], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
     phone.emit('voice', voice('off'));
     root.querySelector<HTMLElement>('.composer-mic [data-voice="mic"]')!.click();
+    // Starting from the tap, while the voice socket and the microphone open.
+    expect(root.querySelector('.composer-mic .mic.starting')?.getAttribute('aria-busy')).toBe('true');
     root.querySelector<HTMLElement>('.header > button.back-toggle')!.click();
     await flush();
     // The socket is welcomed only after Back.
@@ -1224,6 +1226,23 @@ describe('the page', () => {
     await flush();
     expect(mics().slice(second)).toEqual([]);
     expect(mics().at(-1)).toBe(true);
+    // Starting until the voice view says the mic listens.
+    expect(root.querySelector('.composer-mic .mic.starting')).not.toBeNull();
+    phone.emit('voice', voice('listening'));
+    expect(root.querySelector('.composer-mic .mic.listening')).not.toBeNull();
+    root.querySelector<HTMLElement>('.composer-mic [data-voice="mic"]')!.click();
+    phone.emit('voice', voice('off'));
+    // A refused microphone shows on the button, and the next tap tries again.
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: async () => Promise.reject(Object.assign(new Error('no'), { name: 'NotAllowedError' })) } });
+    root.querySelector<HTMLElement>('.composer-mic [data-voice="mic"]')!.click();
+    await flush();
+    await flush();
+    expect(root.querySelector('.composer-mic .mic.unavailable')?.getAttribute('title')).toBe('The mic did not start: The phone did not allow the microphone. Click to try again.');
+    expect(root.querySelector('.composer-mic [data-voice="mic"]')?.getAttribute('data-on')).toBe('true');
+    // The failure belongs to its conversation: another one's mic shows the hub's state.
+    phone.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1), listRow(2)])], scope: { ...scope, workItemId: 2 }, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    phone.emit('voice', voice('off'));
+    expect(root.querySelector('.composer-mic .mic.unavailable')).toBeNull();
     window.innerWidth = width;
     paired.close();
   });
@@ -4337,6 +4356,8 @@ describe('the page in use', () => {
     // The mic is the Conversation view's own button, and drives the computer's voice process as the view does.
     expect(root.querySelector('.composer-mic')!.innerHTML).toBe(renderMicButton({ enabled: true, here: true, speaking: 'r1', speakReplies: true, error: null }));
     click('.composer-mic [data-voice="mic"]');
+    // Starting from the click, before the hub answers.
+    expect(root.querySelector('.composer-mic .mic.starting')).not.toBeNull();
     await flush();
     expect(posts.find((post) => post.url.endsWith('/mic'))?.body).toMatchObject({ on: true, scopeGen: 3 });
     source.emit('voice', { voice: { enabled: true, here: true, mic: 'paused-other-app', speaking: null, speakReplies: true, error: null } });

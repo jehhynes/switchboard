@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { DEVICE_OFF_TIP } from '@switchboard/conversation/voiceControls';
+import { DEVICE_OFF_TIP, MIC_START_TIMEOUT, MIC_STARTING_TIP, MicStart } from '@switchboard/conversation/voiceControls';
 import type { ArtifactView, ItemView, MessageView, ReplyView, SessionView, StatusView, ScopeView, VoiceView } from '@switchboard/hub';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -1147,6 +1147,7 @@ describe('speech in the view (architecture.md § Voice)', () => {
     expect(renderMicButton({ ...VOICE, mic: 'hearing' })).toContain('class="mic hearing"');
     expect(glyph({ ...VOICE, mic: 'hearing' })).toMatch(/^filled .*codicon-mic-filled"/);
     expect(renderMicButton({ ...VOICE, mic: 'starting' })).toContain('class="mic starting"');
+    expect(glyph({ ...VOICE, mic: 'starting' })).toMatch(/^filled .*codicon-mic-filled".*<span class="mic-ring" aria-hidden="true">/);
     // Typing and another app recording: a mic with a pause badge.
     expect(renderMicButton({ ...VOICE, mic: 'typing' })).toContain('Mic paused while you type');
     expect(renderMicButton({ ...VOICE, mic: 'typing' })).toContain('<span class="mic-glyph outline"><span class="codicon codicon-mic" aria-hidden="true"></span><span class="mic-badge pause" aria-hidden="true"><span class="codicon codicon-debug-pause">');
@@ -1172,6 +1173,83 @@ describe('speech in the view (architecture.md § Voice)', () => {
     // A room hold says spoken turns stay in the box.
     expect(renderMicButton({ ...VOICE, mic: 'listening', roomHold: true })).toContain('title="Mic on: listening. Held: someone else is talking in the room, so dictation stays in the box until you press Enter. Click to turn the mic off."');
     expect(renderMicButton({ ...VOICE, mic: 'hearing', roomHold: true })).toContain('title="Mic on: hearing you. Held: someone else is talking in the room, so dictation stays in the box until you press Enter. Click to turn the mic off."');
+  });
+});
+
+describe('the mic start', () => {
+  const VOICE = { enabled: true, here: true, mic: 'off' as const, speaking: null, speakReplies: true, error: null, recognizer: null };
+
+  it('shows starting with a ring from the tap until the voice listens, and the tap\'s error until the next tap', () => {
+    const starting = renderMicButton(VOICE, 'starting');
+
+    expect(starting).toMatch(/class="mic starting".*data-on="false".*aria-busy="true"/);
+    expect(starting).toContain(`aria-label="${MIC_STARTING_TIP}"`);
+    expect(starting).toContain('class="mic-ring"');
+    // Still starting while the hub has the mic off or idle, or the voice process opens capture; the voice view's state once it listens.
+    expect(renderMicButton({ ...VOICE, mic: 'idle-off' }, 'starting')).toContain('class="mic starting"');
+    // A pause by voice is not hidden: a click listens again at once.
+    expect(renderMicButton({ ...VOICE, mic: 'paused-by-voice' }, 'starting')).toContain('class="mic paused"');
+    expect(renderMicButton({ ...VOICE, mic: 'listening' }, 'starting')).toContain('class="mic listening"');
+    expect(renderMicButton({ ...VOICE, mic: 'unavailable', error: 'No model.' }, 'starting')).toContain('Mic on but unavailable: No model.');
+    // Failed: a slashed mic in the warning colour with why, whose click tries again.
+    const failed = renderMicButton(VOICE, { error: 'The phone did not allow the microphone.' });
+
+    expect(failed).toMatch(/class="mic unavailable".*data-on="true"/);
+    expect(failed).toContain('title="The mic did not start: The phone did not allow the microphone. Click to try again."');
+    expect(renderMicButton({ ...VOICE, here: false }, 'starting')).toBe('');
+    // A start that timed out shows its failure though the voice process still says starting.
+    expect(renderMicButton({ ...VOICE, mic: 'starting' }, { error: MIC_START_TIMEOUT })).toContain('class="mic unavailable"');
+  });
+
+  it('ends a pending start once the voice view confirms or ends it, or after its limit', () => {
+    vi.useFakeTimers();
+
+    try {
+      const changed = vi.fn();
+      const start = new MicStart(changed, 1_000);
+
+      start.start();
+      start.view('off');
+      start.view('idle-off');
+      expect(start.pending).toBe('starting');
+      start.view('listening');
+      expect(start.pending).toBeNull();
+      // The voice process said starting, then off: it failed, and the voice view shows.
+      start.start();
+      start.view('starting');
+      expect(start.pending).toBe('starting');
+      start.view('off');
+      expect(start.pending).toBeNull();
+      // Off before the voice process said starting is the hub not having heard of the tap yet; a start never confirmed fails at its limit.
+      start.start();
+      start.view('off');
+      vi.advanceTimersByTime(999);
+      expect(start.pending).toBe('starting');
+      expect(changed).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+      expect(start.pending).toEqual({ error: MIC_START_TIMEOUT });
+      expect(changed).toHaveBeenCalledOnce();
+      // A failure stays until the mic is on or the next tap, and its limit does not end it.
+      start.start();
+      start.fail('No.');
+      vi.advanceTimersByTime(5_000);
+      expect(start.pending).toEqual({ error: 'No.' });
+      start.view('off');
+      expect(start.pending).toEqual({ error: 'No.' });
+      start.view('hearing');
+      expect(start.pending).toBeNull();
+      // A failure answered for an earlier attempt, or after Mic off, changes nothing.
+      const first = start.start();
+
+      start.start();
+      expect(start.fail('Late.', first)).toBe(false);
+      expect(start.pending).toBe('starting');
+      start.clear();
+      start.fail('Late.');
+      expect(start.pending).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -1225,6 +1303,21 @@ describe('the composer', () => {
       expect(host.querySelector('.mic-slot button')).toBe(micButton);
       micButton.click();
       expect(posted.at(-1)).toEqual({ type: 'mic', on: false });
+      // Mic on shows starting at the click, before the hub answers, until the voice listens; the extension's refusal shows on the button.
+      show({ ...state(), voice: { ...voice, mic: 'off' } });
+      host.querySelector<HTMLButtonElement>('.mic-slot button')!.click();
+      expect(posted.at(-1)).toEqual({ type: 'mic', on: true });
+      expect(host.querySelector('.mic-slot button.mic.starting')?.getAttribute('aria-label')).toBe(MIC_STARTING_TIP);
+      show({ ...state(), voice: { ...voice, mic: 'off' } });
+      expect(host.querySelector('.mic-slot button.mic.starting')).not.toBeNull();
+      post({ type: 'mic-failed', error: 'The hub did not answer.' });
+      expect(host.querySelector('.mic-slot button.mic.unavailable')?.getAttribute('title')).toBe('The mic did not start: The hub did not answer. Click to try again.');
+      // Toggle Microphone from the keyboard starts it through the extension.
+      post({ type: 'mic-start' });
+      expect(host.querySelector('.mic-slot button.mic.starting')).not.toBeNull();
+      show({ ...state(), voice: { ...voice, mic: 'starting' } });
+      show({ ...state(), voice });
+      expect(host.querySelector('.mic-slot button.mic.listening')).not.toBeNull();
       // With capture unavailable, as with no recognition model, the click still turns the mic off.
       show({ ...state(), voice: { ...voice, mic: 'unavailable', error: 'No speech recognition model in m.' } });
       host.querySelector<HTMLButtonElement>('.mic-slot button')!.click();

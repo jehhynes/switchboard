@@ -68,32 +68,142 @@ export function renderVoiceControls(voice: VoiceControlsView | null, live = true
   return voice.here ? `${deviceOff}${stop}${speakReplies}` : talkHere;
 }
 
-/** A mic glyph: slashed while off, outlined, or filled; with a badge while paused, or while half-duplex capture holds it for a reply playing. */
-function micGlyph(kind: 'off' | 'outline' | 'filled', badge: 'pause' | 'held' | null = null): string {
+/** A mic glyph: slashed while off, outlined, or filled; with a badge while paused, or while half-duplex capture holds it for a reply playing; ringed while it starts. */
+function micGlyph(kind: 'off' | 'outline' | 'filled', badge: 'pause' | 'held' | 'ring' | null = null): string {
   const mic = `<span class="codicon codicon-${kind === 'filled' ? 'mic-filled' : 'mic'}" aria-hidden="true"></span>`;
-  const mark = badge === null ? '' : `<span class="mic-badge ${badge}" aria-hidden="true"><span class="codicon codicon-${badge === 'pause' ? 'debug-pause' : 'unmute'}"></span></span>`;
+  const mark =
+    badge === null
+      ? ''
+      : badge === 'ring'
+        ? '<span class="mic-ring" aria-hidden="true"></span>'
+        : `<span class="mic-badge ${badge}" aria-hidden="true"><span class="codicon codicon-${badge === 'pause' ? 'debug-pause' : 'unmute'}"></span></span>`;
 
   return `<span class="mic-glyph ${kind}">${mic}${mark}</span>`;
+}
+
+/** The mic button's tooltip from the tap that turns the mic on until the voice process says it listens. */
+export const MIC_STARTING_TIP = 'Starting microphone… Click to turn it off.';
+
+/** The mic states in which a tap's Mic on is not yet confirmed: the voice process has not opened capture, or the hub has not heard of the tap. */
+const UNCONFIRMED = new Set<string | undefined>([undefined, 'off', 'idle-off', 'starting']);
+
+/** Why a start the voice view never confirmed failed. */
+export const MIC_START_TIMEOUT = 'The mic did not start within 30 seconds.';
+
+/** What the page or the view knows of its own Mic on tap before the voice view confirms it: starting, or why it failed. */
+export type MicPending = 'starting' | { error: string } | null;
+
+/**
+ * A tap's Mic on until the voice view confirms it (architecture.md § Dictation): the button shows starting from the tap, before the hub or the
+ * voice process answers, and the error if the tap failed. Ends when the voice view's mic leaves the unconfirmed states, when it falls back to off
+ * after the voice process said starting, or fails after `limitMs`. A failure answered for an earlier attempt changes nothing.
+ */
+export class MicStart {
+  pending: MicPending = null;
+  #sawStarting = false;
+  #timer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor(
+    private readonly changed: () => void,
+    private readonly limitMs = 30_000,
+  ) {}
+
+  #attempt = 0;
+
+  /** Starts an attempt, and returns it for its failure. */
+  start(): number {
+    this.#clearTimer();
+    this.pending = 'starting';
+    this.#sawStarting = false;
+
+    const attempt = ++this.#attempt;
+
+    this.#timer = setTimeout(() => {
+      this.#timer = null;
+
+      if (this.pending === 'starting') {
+        this.pending = { error: MIC_START_TIMEOUT };
+        this.changed();
+      }
+    }, this.limitMs);
+
+    return attempt;
+  }
+
+  /** The attempt failed; one still starting shows why. False for an attempt a later start or clear ended, whose failure is not shown. */
+  fail(error: string, attempt = this.#attempt): boolean {
+    if (attempt !== this.#attempt) {
+      return false;
+    }
+
+    if (this.pending === 'starting') {
+      this.#clearTimer();
+      this.pending = { error };
+    }
+
+    return true;
+  }
+
+  /** Mic off, or the page left: ends the attempt. */
+  clear(): void {
+    this.#clearTimer();
+    this.#attempt++;
+    this.pending = null;
+  }
+
+  /** The voice view's mic while the voice is here; ends a pending start it confirms or ends. */
+  view(mic: string | undefined): void {
+    if (this.pending === null) {
+      return;
+    }
+
+    if (this.pending === 'starting' && mic === 'starting') {
+      this.#sawStarting = true;
+      return;
+    }
+
+    if (!UNCONFIRMED.has(mic) || (this.pending === 'starting' && this.#sawStarting && (mic === 'off' || mic === 'idle-off'))) {
+      this.#clearTimer();
+      this.pending = null;
+    }
+  }
+
+  #clearTimer(): void {
+    if (this.#timer !== null) {
+      clearTimeout(this.#timer);
+      this.#timer = null;
+    }
+  }
 }
 
 /**
  * The composer's one mic button (architecture.md § Dictation), whose glyph and tooltip carry the mic's state, each drawn apart: a slashed mic while
  * off, unavailable or in a window the voice is not in, whose click talks here and turns the mic on; an outlined mic after the idle timeout; a
- * filled mic in the accent colour that pulses while it listens, faster while it hears, and still while it starts; a pause badge while the composer
+ * filled mic in the accent colour that pulses while it listens, faster while it hears, and ringed by a turning arc while it starts, from the
+ * tap until the voice process listens (`pending`, from MicStart), or a slashed mic in the warning colour when the tap failed; a pause badge while the composer
  * has the focus or another app records; and a speaker badge while half-duplex capture holds it for a reply playing. While the mic is on, in any
  * state, a click turns it off. Empty with voice off.
  */
-export function renderMicButton(voice: VoiceControlsView | null): string {
+export function renderMicButton(voice: VoiceControlsView | null, pending: MicPending = null): string {
   if (voice === null || !voice.enabled) {
     return '';
   }
 
-  const button = (glyph: string, title: string, on: boolean, kind: string): string =>
-    `<button class="mic ${kind}" type="button" data-voice="mic" data-on="${on}" title="${escape(title)}" aria-label="${escape(title)}" aria-pressed="${!on}">${glyph}</button>`;
+  const button = (glyph: string, title: string, on: boolean, kind: string, extra = ''): string =>
+    `<button class="mic ${kind}" type="button" data-voice="mic" data-on="${on}" title="${escape(title)}" aria-label="${escape(title)}" aria-pressed="${!on}"${extra}>${glyph}</button>`;
 
   // While the voice is elsewhere, Talk here takes the cluster's place (renderVoiceControls).
   if (!voice.here) {
     return '';
+  }
+
+  // The tap's own failure until the next tap, and from the tap until the voice process listens (MicStart).
+  if (pending !== null && pending !== 'starting' && UNCONFIRMED.has(voice.mic)) {
+    return button(micGlyph('off'), `The mic did not start: ${pending.error} Click to try again.`, true, 'unavailable');
+  }
+
+  if (voice.mic === 'starting' || (pending === 'starting' && UNCONFIRMED.has(voice.mic))) {
+    return button(micGlyph('filled', 'ring'), MIC_STARTING_TIP, false, 'starting', ' aria-busy="true"');
   }
 
   // Where recognition runs, once the recogniser loaded; half-duplex capture does not listen while the voice speaks, and full duplex with no echo
@@ -115,8 +225,6 @@ export function renderMicButton(voice: VoiceControlsView | null): string {
       return button(micGlyph('filled'), `Mic on: hearing you.${held}${where}${halfDuplex} Click to turn the mic off.`, false, 'hearing');
     case 'typing':
       return button(micGlyph('outline', 'pause'), `Mic paused while you type: dictation goes on when you send or leave the box.${where} Click to turn the mic off.`, false, 'paused');
-    case 'starting':
-      return button(micGlyph('filled'), 'Mic starting. Click to turn it off.', false, 'starting');
     case 'paused-other-app':
       return button(micGlyph('outline', 'pause'), `Mic paused: another app is using the microphone.${where} Click to turn the mic off.`, false, 'paused');
     case 'paused-by-voice':

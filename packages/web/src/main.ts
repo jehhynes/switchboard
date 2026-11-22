@@ -20,6 +20,7 @@ import { renderSheet } from './sheet.js';
 import { renderComposer, renderComposerMenu, renderEndedNote, renderFrame, renderShared } from './composer.js';
 import { listHeader } from './listHeader.js';
 import { PhoneVoice } from './phoneVoice.js';
+import { MicStart } from '@switchboard/conversation/voiceControls';
 import { swipeBack } from './swipeBack.js';
 import { settings } from './settings.js';
 import { attachments, drawChips } from './attachments.js';
@@ -613,6 +614,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   let micTaps = 0;
   let micLeaves = 0;
   let micOpening = false;
+  // The mic button shows starting from a Mic on tap until the voice view confirms it, and the tap's error if it failed.
+  const micStart = new MicStart(() => draw());
+  let micScope: number | null | undefined;
   // Voice on this phone, on a paired device's page (architecture.md § Remote access).
   const phoneVoice = local ? null : new PhoneVoice({ key: () => state.key, post: (name, body) => post(name, body), changed: () => draw(), now: () => deps.now() });
   const header = listHeader(root.querySelector<HTMLElement>('.side-head')!, list, root.querySelector<HTMLElement>('#list-sheet')!, {
@@ -1155,11 +1159,31 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
 
     const on = button.dataset['on'] === 'true';
-    const refused = (answer: Answer): void => void (answer.status === 200 || showError(String(answer.body['error'] ?? 'The mic did not change.')));
+    let attempt = 0;
+
+    if (on) {
+      attempt = micStart.start();
+    } else {
+      micStart.clear();
+    }
+
+    const failed = (error: string): void => {
+      // A refusal answered after a later tap or Mic off is not shown.
+      if (on && !micStart.fail(error, attempt)) {
+        return;
+      }
+
+      draw();
+      showError(error);
+    };
+    const refused = (answer: Answer): void => void (answer.status === 200 || failed(String(answer.body['error'] ?? 'The mic did not change.')));
 
     // On a paired device the mic is this phone's (PRD R119): its tap opens the phone's microphone, taking the voice here first.
     if (phoneVoice !== null) {
       if (!on) {
+        // A Mic on still opening is dropped.
+        micTaps++;
+        micOpening = false;
         phoneVoice.micOff();
         void command('mic', { on: false }).then(refused);
         return;
@@ -1183,7 +1207,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
         if (error !== null) {
           micOpening = false;
-          showError(error);
+          failed(error);
           return;
         }
 
@@ -1211,10 +1235,13 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
         refused(answer);
       });
+      // After micOn, so the microphone and the audio start in the tap, as iOS needs.
+      draw();
       return;
     }
 
     void command('mic', { on }).then(refused);
+    draw();
   });
   // The context meter's menu (architecture.md § Context meter): closed, open, or asking to confirm Compact, which sends /compact as a chosen
   // slash command to the session the page shows, leaving the box's draft alone.
@@ -1345,7 +1372,17 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // On a paired device the mic shows while the voice is elsewhere too, off: its tap takes the voice to this phone (PRD R119).
     const micView = phoneVoice !== null && state.voice?.enabled === true && !state.voice.here ? { ...state.voice, here: true, mic: 'off' as const, error: null } : state.voice;
 
-    mount(micSlot, full ? renderShared(renderMicButton(micView)) : null);
+    // A start or its failure belongs to the conversation it was tapped in.
+    if (state.scope?.workItemId !== micScope) {
+      micScope = state.scope?.workItemId;
+      micStart.clear();
+    }
+
+    if (micView?.here === true) {
+      micStart.view(micView.mic);
+    }
+
+    mount(micSlot, full ? renderShared(renderMicButton(micView, micStart.pending)) : null);
     // The hub's mic turned off while the voice is here, as by Mic off in another of this phone's views: the phone's microphone is released too.
     if (state.voice?.here === true) {
       phoneVoice?.viewMic(state.voice.mic);
@@ -1829,6 +1866,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     if (leftConversation) {
       micLeaves++;
       micOpening = false;
+      micStart.clear();
       queueMicrotask(() => {
         phoneVoice?.micOff();
         void command('mic', { on: false });
