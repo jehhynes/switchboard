@@ -779,6 +779,8 @@ export interface PageHeader {
   /** The dock's holder notice and restart result (architecture.md § Restarting the holder); absent when the dock shows none. */
   holderNotice?: DockHolderNotice;
   holderResult?: DockHolderResult;
+  /** Where the voice is while it is not on this computer, with voice on: a paired phone, or none after the phone left (PRD R119); absent otherwise. */
+  voiceDevice?: 'phone' | 'none';
 }
 
 /**

@@ -780,7 +780,7 @@ describe('the web page routes', () => {
           return { status: 200, body: { started: true } };
         },
         ...Object.fromEntries(
-          ['page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll'].map((command) => [
+          ['page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer'].map((command) => [
             `/v1/conversation/${command}`,
             async (body: unknown) => {
               posted.push(body);
@@ -1058,7 +1058,7 @@ describe('the web page routes', () => {
     // A paired device posts from its own origin and may not pair, list devices, drive the Chrome pane, restart the holder or use Settings.
     expect((await post('page-source', { ...ts, Cookie: phone, Origin: here })).status).toBe(403);
     expect((await post('page-source', { ...ts, Cookie: phone, Origin: 'https://pc.tail.ts.net' })).status).toBe(200);
-    for (const command of ['page-pair', 'page-devices', 'page-device-revoke', 'page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll']) {
+    for (const command of ['page-pair', 'page-devices', 'page-device-revoke', 'page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer']) {
       const refused = await post(command, { ...ts, Cookie: phone, Origin: 'https://pc.tail.ts.net' });
 
       expect(refused.status).toBe(403);
@@ -1066,11 +1066,11 @@ describe('the web page routes', () => {
     }
 
     // This computer's page still restarts the holder and uses Settings.
-    for (const command of ['page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll']) {
+    for (const command of ['page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer']) {
       expect((await post(command, { Cookie: localCookie, Origin: here })).status).toBe(200);
     }
 
-    expect([...LOCAL_PAGE_COMMANDS]).toEqual(['page-pair', 'page-devices', 'page-device-revoke', 'page-device-voice', 'pane-pair', 'pane-rect', 'page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll']);
+    expect([...LOCAL_PAGE_COMMANDS]).toEqual(['page-pair', 'page-devices', 'page-device-revoke', 'page-device-voice', 'pane-pair', 'pane-rect', 'page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer']);
 
     const devices = JSON.parse((await post('page-devices', { Cookie: localCookie, Origin: here })).body) as { devices: Array<{ id: string; label: string; host: string | null; login: string | null; current: boolean }> };
 

@@ -82,6 +82,7 @@ function setup() {
       return timer;
     },
     clearTimer: (timer) => void ((timer as { cleared: boolean }).cleared = true),
+    alertText: (sessionId) => ({ title: `Item of ${sessionId}`, detail: 'Done.' }),
     phone: {
       send: (message) => toPhone.push(message) > 0,
       sendBinary: (data) => toPhone.push(data) > 0,
@@ -103,7 +104,17 @@ function setup() {
     await settle();
   };
 
-  return { control, connections, windows, focusedPages, focus: (key: string | null) => (focused = key), toPhone, closed, logs, sentOf, restart };
+  /** Runs the timers due after `ms`. */
+  const advance = (ms: number): void => {
+    t += ms;
+
+    for (const timer of timers.filter((one) => !one.cleared && one.at <= t)) {
+      timer.cleared = true;
+      timer.run();
+    }
+  };
+
+  return { control, connections, windows, focusedPages, focus: (key: string | null) => (focused = key), toPhone, closed, logs, sentOf, restart, advance };
 }
 
 describe('VoiceControl with the voice on a phone (PRD R119)', () => {
@@ -312,5 +323,78 @@ describe('VoiceControl with the voice on a phone (PRD R119)', () => {
     expect(control.device).toBe('computer');
     control.phoneAudio('phone', Buffer.from([PHONE_MIC_FRAME, 1, 2]));
     expect(sentOf('phone-mic')).toEqual([]);
+  });
+
+  it('alerts and plays the needs-you sound on the phone only while its page is in front, by the phone page\'s focus, not this computer\'s', async () => {
+    const { control, focusedPages, focus, sentOf, advance } = setup();
+    const run = (kinds: Record<string, 'running' | 'idle'>) => control.sessionsChanged(Object.entries(kinds).map(([sessionId, kind]) => ({ sessionId, workItemId: Number(sessionId.slice(1)), kind })));
+
+    control.update();
+    await settle();
+    control.phoneOpened('phone');
+    // This computer's window shows s1; the phone page shows s2 and is hidden.
+    focus('pc');
+    run({ s1: 'running', s2: 'running', s3: 'running' });
+    expect(run({ s1: 'idle', s2: 'running', s3: 'running' })).toEqual([]);
+    expect(control.needsYou([1], null)).toBe(false);
+    advance(60_000);
+    expect(sentOf('alert')).toEqual([]);
+    expect(sentOf('earcon')).toEqual([]);
+
+    // In front, the phone hears them; this computer's focused window does not keep s1's alert back.
+    focusedPages.add('phone');
+    run({ s1: 'running', s2: 'running', s3: 'running' });
+    expect(run({ s1: 'idle', s2: 'idle', s3: 'running' })).toEqual([1]);
+    advance(60_000);
+    expect(sentOf('alert').map((one) => one.sessionId)).toEqual(['s1']);
+    expect(control.needsYou([1], null)).toBe(true);
+
+    // An alert waiting when the phone page goes behind is not sent.
+    run({ s1: 'running', s2: 'idle', s3: 'running' });
+    run({ s1: 'running', s2: 'idle', s3: 'idle' });
+    focusedPages.delete('phone');
+    advance(60_000);
+    expect(sentOf('alert').map((one) => one.sessionId)).toEqual(['s1']);
+
+    // A hidden phone page does not sound the needs-you message in the voice's place, nor does another page in front.
+    expect(control.pageMaySound('phone')).toBe(false);
+    focusedPages.add('tablet');
+    focusedPages.add('pc');
+    expect(control.pageMaySound('tablet')).toBe(false);
+    expect(control.pageMaySound('pc')).toBe(false);
+    focusedPages.add('phone');
+    expect(control.pageMaySound('phone')).toBe(true);
+    focusedPages.delete('phone');
+
+    // With no device after the phone left, nothing is alerted.
+    control.phoneClosed('closed by the page');
+    focusedPages.add('phone');
+    expect(control.needsYou([1], null)).toBe(false);
+    expect(control.pageMaySound('pc')).toBe(false);
+    focusedPages.delete('phone');
+    expect(control.pageMaySound('phone')).toBe(false);
+  });
+
+  it('takes the voice back to this computer with Voice on the computer, only from this computer\'s page', async () => {
+    const { control, closed, sentOf } = setup();
+
+    control.update();
+    await settle();
+    expect(control.toComputer('pc')).toBe('The voice is already on this computer.');
+    // On this computer any page may sound, focused or not.
+    expect(control.pageMaySound('pc')).toBe(true);
+    control.phoneOpened('phone');
+    expect(control.toComputer('phone')).toBe('Choose Voice on the computer on the computer that runs Switchboard.');
+    expect(control.device).toBe('phone');
+    expect(control.toComputer('pc')).toBeNull();
+    expect(control.device).toBe('computer');
+    expect(sentOf('device').at(-1)).toEqual({ type: 'device', device: 'computer' });
+    expect(closed).toEqual(['Voice moved to the computer.']);
+
+    // After the phone left, too.
+    control.phoneOpened('phone');
+    control.phoneClosed('closed by the page');
+    expect(control.toComputer('pc')).toBeNull();
+    expect(control.device).toBe('computer');
   });
 });

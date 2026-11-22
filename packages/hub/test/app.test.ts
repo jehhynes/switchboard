@@ -812,6 +812,9 @@ describe('createHubApp', () => {
     expect(app.post['/v1/conversation/page-settings-save']).toBe(app.post['/config/save']);
     expect(app.post['/v1/conversation/page-voice-enroll']).toBe(app.post['/config/voice-enroll']);
     expect(await app.post['/v1/conversation/page-settings-save']!({ window: 'page-1', opId: 'o', value: {}, version: 'stale' })).toMatchObject({ status: 409 });
+    // Voice on the computer takes only a page's key.
+    expect(await app.post['/v1/conversation/page-voice-computer']!({})).toEqual({ status: 400, body: { error: 'Expected {window}.' } });
+    expect(await app.post['/v1/conversation/page-voice-computer']!({ window: 'page-unknown' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
   });
 
   it('writes each item window\'s workspace file when it builds the dock view', async () => {

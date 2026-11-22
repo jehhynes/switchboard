@@ -379,6 +379,28 @@ export class VoiceControl {
     }
   }
 
+  /**
+   * Voice on the computer, from this computer's page (PRD R119): the voice comes back from the phone, or after it left, to this computer's
+   * microphone and speaker, with the mic off. Why not, or null.
+   */
+  toComputer(key: string): string | null {
+    if (this.deps.remotePage?.(key) === true) {
+      return 'Choose Voice on the computer on the computer that runs Switchboard.';
+    }
+
+    if (!this.deps.settings().enabled) {
+      return 'Voice is off (voice.enabled).';
+    }
+
+    if (this.#device === 'computer') {
+      return 'The voice is already on this computer.';
+    }
+
+    this.#takeBack(null);
+    this.update();
+    return null;
+  }
+
   /** The voice comes back to this computer from the phone, or from none, by an action taken on this computer. */
   #takeBack(key: string | null): void {
     if (this.#device === 'computer' || (key !== null && key === this.#phoneKey)) {
@@ -1299,7 +1321,8 @@ export class VoiceControl {
       settings.alertOn[cause === 'turn-finished' ? 'finished' : cause] &&
       this.#client !== null &&
       this.#target.sessionId !== sessionId &&
-      this.#focusedSession() !== sessionId
+      this.#focusedSession() !== sessionId &&
+      this.#canBeHeard()
     );
   }
 
@@ -1360,16 +1383,37 @@ export class VoiceControl {
 
   /** The session of the focused conversation: a session terminal window in front, else the focused window's selected conversation's. */
   #focusedSession(): string | null {
+    // While the phone has the voice its page is where the operator is, whatever this computer shows (PRD R119).
+    if (this.#device === 'phone') {
+      return this.#phoneKey !== null && this.deps.pageFocused?.(this.#phoneKey) === true ? (this.deps.windows.scope(this.#phoneKey)?.sessionId ?? null) : null;
+    }
+
     const focused = this.deps.focusedWindow();
 
     return this.#terminalFocus ?? (focused === null ? null : (this.deps.windows.scope(focused)?.sessionId ?? null));
+  }
+
+  /**
+   * Whether a web page may play its own needs-you sound: any while the voice is on this computer; while it is on the phone, only that phone's
+   * page in front, where the voice would play it; none after the phone left (PRD R119).
+   */
+  pageMaySound(key: string): boolean {
+    return this.#device === 'computer' || (this.#device === 'phone' && key === this.#phoneKey && this.deps.pageFocused?.(key) === true);
+  }
+
+  /**
+   * Whether a spoken alert or the needs-you sound can be heard where the voice is: on this computer, or on the phone while its page is in front
+   * (PRD R119); never with no device. A hidden phone page plays and hears nothing.
+   */
+  #canBeHeard(): boolean {
+    return this.#device === 'computer' || (this.#device === 'phone' && this.#phoneKey !== null && this.deps.pageFocused?.(this.#phoneKey) === true);
   }
 
   /** A work item other than the voice target's started needing the operator: the process plays the needs-you sound. Returns whether it was sent. */
   needsYou(workItemIds: number[], targetWorkItem: number | null): boolean {
     const settings = this.deps.settings();
 
-    if (settings.enabled && settings.needsYouSound && this.#client !== null && workItemIds.some((id) => id !== targetWorkItem)) {
+    if (settings.enabled && settings.needsYouSound && this.#client !== null && this.#canBeHeard() && workItemIds.some((id) => id !== targetWorkItem)) {
       this.#client.send({ type: 'earcon', kind: 'needs-you' });
       return true;
     }

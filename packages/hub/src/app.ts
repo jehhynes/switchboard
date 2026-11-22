@@ -709,7 +709,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     pageHeader: () => {
       const built = views();
 
-      return pageHeader({ ...built.dock, notes: withVoiceNote(built.dock.notes) }, built.snapshot);
+      return { ...pageHeader({ ...built.dock, notes: withVoiceNote(built.dock.notes) }, built.snapshot), ...(config.settings.voice.enabled && voice.device !== 'computer' ? { voiceDevice: voice.device } : {}) };
     },
     pollSources: () => runtime.pollNow(),
     restartHolder: (detail) => restartHolder(detail),
@@ -877,7 +877,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         sendDock('needs', { items: needing.map(({ rowKey, message }) => ({ rowKey, message })) });
       } else {
         // The page sounds only where neither the voice's chime nor a spoken alert does, so one event makes one sound.
-        const sound = config.settings.voice.needsYouSound && !chimed && unalerted.some((id) => id !== targetSession?.workItemId);
+        const sound = config.settings.voice.needsYouSound && !chimed && voice.pageMaySound(page) && unalerted.some((id) => id !== targetSession?.workItemId);
 
         conversation.pageNeeds(page, needing.map(({ workItemId, message }) => ({ workItemId, message })), sound);
       }
@@ -1246,6 +1246,20 @@ const dockWithRuns = () => {
       '/v1/conversation/row-paste': async (body) => (isRecord(body) ? conversation.rowPaste(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId, label}.' } }),
       '/v1/conversation/page-history': async (body) => (isRecord(body) ? conversation.pageHistory(body) : { status: 400, body: { error: 'Expected {window, ticketId}.' } }),
       '/v1/conversation/page-poll': async (body) => (isRecord(body) ? conversation.pagePoll(body) : { status: 400, body: { error: 'Expected {window}.' } }),
+      // Voice on the computer from this computer's page, taking the voice back from the phone (architecture.md § Remote access).
+      '/v1/conversation/page-voice-computer': async (body) => {
+        if (!isRecord(body) || typeof body['window'] !== 'string') {
+          return { status: 400, body: { error: 'Expected {window}.' } };
+        }
+
+        if (!scopes.isPage(body['window'])) {
+          return { status: 403, body: { error: 'Not in this window.' } };
+        }
+
+        const refused = voice.toComputer(body['window']);
+
+        return refused === null ? { status: 200, body: { device: 'computer' } } : { status: 409, body: { error: refused } };
+      },
       '/v1/conversation/page-holder-restart': async (body) => (isRecord(body) ? conversation.pageHolderRestart(body) : { status: 400, body: { error: 'Expected {window}.' } }),
       '/v1/conversation/page-adhoc': async (body) => (isRecord(body) ? conversation.pageAdhoc(body) : { status: 400, body: { error: 'Expected {window, opId, prompt, repoRoot, start, provider}.' } }),
       '/v1/conversation/page-folder-conversation': async (body) => (isRecord(body) ? conversation.pageFolderConversation(body) : { status: 400, body: { error: 'Expected {window, opId, folder, provider?}.' } }),

@@ -262,6 +262,8 @@ export interface PageHeader {
   holderNotice?: { text: string; confirm: { question: string; detail: string; action: string } | null };
   /** The last holder restart's result, which the page hides once dismissed, by `at`. */
   holderResult?: { at: number; text: string; failed: boolean };
+  /** Where the voice is while it is not on this computer: a paired phone, or none after the phone left; absent otherwise. */
+  voiceDevice?: 'phone' | 'none';
 }
 
 /** A prompt the session waits on in its terminal, as the hub read it from the screen (`ScreenPrompt` in the conversation package). */
