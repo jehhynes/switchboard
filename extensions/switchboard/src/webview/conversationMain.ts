@@ -1,9 +1,16 @@
 import type { ConversationState } from '../conversationModel.js';
 import { EMPTY_CONVERSATION } from '../conversationModel.js';
-import { ago, moreKey, PICKER, questionsWaiting, renderConversation, renderMicButton, renderVoiceControls, replyText, TABS, viewCards } from './conversationRender.js';
+import { ago, moreKey, PICKER, questionsWaiting, renderConversation, renderMicButton, renderVoiceControls, replyText, TABS, viewLedger } from './conversationRender.js';
 import type { CardDraft, EarlierStatuses, HeaderMenu } from './conversationRender.js';
 import type { StatusView } from '@switchboard/hub';
-import { answerText, complete, parseQuestions } from '@switchboard/conversation/questions';
+import { cardSteps, currentStep, draftAnswers, moveStep, picked, pickLetter, setOther } from '@switchboard/conversation/questions';
+import type { CardDraft as SharedDraft, LedgerCard } from '@switchboard/conversation/questions';
+import { cardKeyAction, isAnswerMessage } from '@switchboard/conversation/questionCard';
+
+/** How long after a single-choice pick the card moves to the next question (design open choice 4). */
+export const ADVANCE_MS = 200;
+/** How long typing in a card's Other field pauses before the hub hears it. */
+export const OTHER_SETTLE_MS = 400;
 import { placeMenus } from '@switchboard/conversation/menuPlace';
 import { statusLine } from '../conversationModel.js';
 import type { ConversationMessage, SendTarget, Tab } from './conversationRender.js';
@@ -629,50 +636,107 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
   // Copy buttons waiting for the extension to say it wrote the clipboard.
   const copies = new Map<number, HTMLElement>();
   let nextCopy = 1;
-  // The question cards' choices by card key, and the cards whose answer is being sent by send ID, numbered apart from the composer's.
+  // The question cards as this view keeps them beside the hub's drafts (PRD R103), and the cards whose answer is being sent by send ID, numbered
+  // apart from the composer's; `card-draft` posts numbered apart again.
   const cards = new Map<string, CardDraft>();
   /** The card or message an answer link went to, highlighted until `until`. */
   let linked: { selector: string; until: number } | null = null;
   const cardSends = new Map<number, string>();
   let nextCardSend = 1_000_000;
-  /** The questions a card asks, read again from the reply or status it belongs to. */
-  const cardQuestions = (key: string): ReturnType<typeof parseQuestions> => {
-    const [kind, ...rest] = key.split(':');
-    const id = rest.join(':');
-    const markdown = kind === 'status' ? (state.status?.id === id ? state.status.markdown : '') : (state.items.flatMap((item) => (item.id === id && item.type === 'reply' ? [item.opening] : []))[0] ?? '');
+  const cardPosts = new Map<number, string>();
+  let nextCardPost = 2_000_000;
+  let advanceTimer: ReturnType<typeof setTimeout> | null = null;
+  let otherTimer: ReturnType<typeof setTimeout> | null = null;
+  const cardUi = (key: string): CardDraft => {
+    let ui = cards.get(key);
 
-    return markdown === '' ? [] : parseQuestions(markdown);
-  };
-  const cardDraft = (key: string): CardDraft => {
-    let draft = cards.get(key);
-
-    if (draft === undefined) {
-      draft = { choices: new Map(), sent: null, workItemId: null, sending: false, error: null };
-      cards.set(key, draft);
+    if (ui === undefined) {
+      ui = { local: null, pending: 0, sending: false, error: null, menuOpen: false };
+      cards.set(key, ui);
     }
 
-    return draft;
+    return ui;
   };
-  /** Sends a card's answer as an ordinary message, to the session the page shows, as the composer's Enter does. */
-  const submitCard = (key: string): void => {
-    const draft = cards.get(key);
-    const questions = cardQuestions(key);
-    const text = draft === undefined || !complete(questions, draft.choices) ? '' : answerText(questions, draft.choices);
+  const cardNow = (key: string): LedgerCard | null => viewLedger(state).cards.get(key) ?? null;
+  const cardDraftOf = (key: string): SharedDraft | undefined => cards.get(key)?.local ?? state.questions?.drafts[key];
+  const cardTarget = (): { scopeGen: number; sessionId: string; launch: string | null } | null =>
+    state.scope === null || state.session === null ? null : { scopeGen: state.scope.scopeGen, sessionId: state.session.id, launch: state.session.launch };
+  /** Shows a card's new draft and tells the hub, which keeps it for every window; `quiet` leaves the view undrawn. */
+  const setDraft = (key: string, draft: SharedDraft, quiet = false): void => {
+    const ui = cardUi(key);
+    const target = cardTarget();
 
-    // A card answered, skipped or superseded takes no answer, though an Enter in its field could still reach here.
-    if (draft === undefined || text === '' || draft.sending || draft.sent !== null || state.scope === null || state.session === null || !state.connected || state.session.conversation !== 'full' || viewCards(state).cards.get(key)?.outcome != null) {
+    ui.local = draft;
+    ui.error = null;
+
+    if (!quiet) {
+      draw();
+    }
+
+    if (target !== null) {
+      const id = nextCardPost++;
+
+      ui.pending++;
+      cardPosts.set(id, key);
+      vscode.postMessage({ type: 'card-draft', id, card: key, draft, target });
+    }
+  };
+  const stepCard = (key: string, to: 'back' | 'next' | string): void => {
+    const card = cardNow(key);
+
+    if (card !== null) {
+      setDraft(key, moveStep(card, cardDraftOf(key), to));
+    }
+  };
+  /** Picks a letter; a single-choice pick moves on after `ADVANCE_MS`, unless the operator moved first. */
+  const pickCard = (key: string, slug: string, letter: string): void => {
+    const card = cardNow(key);
+
+    if (card === null) {
+      return;
+    }
+
+    const { draft, advance } = pickLetter(card, cardDraftOf(key), slug, letter);
+
+    setDraft(key, draft);
+
+    if (advance) {
+      clearTimeout(advanceTimer ?? undefined);
+      advanceTimer = setTimeout(() => {
+        const now = cardNow(key);
+
+        if (now !== null && currentStep(now, cardDraftOf(key))?.question.slug === slug) {
+          stepCard(key, 'next');
+        }
+      }, ADVANCE_MS);
+    }
+  };
+  const openOther = (key: string, slug: string): void => {
+    const card = cardNow(key);
+
+    if (card !== null) {
+      setDraft(key, setOther(card, cardDraftOf(key), slug, cardDraftOf(key)?.picks[slug]?.other ?? ''));
+      root.querySelector<HTMLTextAreaElement>(`.qc-other[data-card="${CSS.escape(key)}"]`)?.focus();
+    }
+  };
+  /** Sends a card's answers; the hub writes the `[answers]` message. */
+  const submitCard = (key: string): void => {
+    const card = cardNow(key);
+    const ui = cardUi(key);
+    const target = cardTarget();
+    const given = card === null ? [] : draftAnswers(card, cardDraftOf(key));
+
+    if (card === null || given.length === 0 || ui.sending || target === null || !state.connected || state.session?.conversation !== 'full') {
       return;
     }
 
     const id = nextCardSend++;
 
     cardSends.set(id, key);
-    draft.sending = true;
-    draft.sent = text;
-    draft.workItemId = state.scope.workItemId;
-    draft.error = null;
+    ui.sending = true;
+    ui.error = null;
     draw();
-    vscode.postMessage({ type: 'send', id, text, target: { scopeGen: state.scope.scopeGen, sessionId: state.session.id, launch: state.session.launch } });
+    vscode.postMessage({ type: 'send', id, target, answers: given.map(({ one, pick }) => ({ card: key, slug: one.question.slug, letters: pick.letters, other: pick.other ?? '' })) });
   };
   // The header menu open, the Status tab's earlier statuses while listed, and the Codex requests' answers, numbered apart from the sends.
   let menu: (HeaderMenu & { id: number }) | null = null;
@@ -982,7 +1046,6 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
 
   // The chip over the composer, on every tab, and the cards it was last worked out from.
   const waitingChip = composerHost === undefined ? null : document.createElement('button');
-  let links: { items: ConversationState['items']; links: ReturnType<typeof viewCards> } | null = null;
 
   if (waitingChip !== null) {
     waitingChip.type = 'button';
@@ -1007,19 +1070,18 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
       return;
     }
 
-    if (links?.items !== state.items) {
-      links = { items: state.items, links: viewCards(state) };
-    }
+    // Every open question of the conversation counts, from the hub, which reads back past the items the view holds; the chip goes to the oldest.
+    const ledger = viewLedger(state);
+    const count = state.questions?.open ?? ledger.open.length;
+    const key = state.questions?.oldest ?? (ledger.open.length === 0 ? null : (ledger.questions.get(ledger.open[0]!)?.card ?? null));
 
-    const key = links.links.open;
-
-    // A card the view cannot answer, while the composer could not send, has no chip.
-    if (key === null || !state.connected || state.session?.conversation !== 'full') {
+    // Questions the view cannot answer, while the composer could not send, have no chip.
+    if (key === null || count === 0 || !state.connected || state.session?.conversation !== 'full') {
       waitingChip.hidden = true;
       return;
     }
 
-    const shown = questionsWaiting(links.links.cards.get(key)!.questions.length);
+    const shown = questionsWaiting(count);
 
     if (waitingChip.dataset['targetCard'] !== key || waitingChip.innerHTML !== shown) {
       waitingChip.dataset['targetCard'] = key;
@@ -1163,25 +1225,34 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
       open.delete(PICKER);
       draw();
       vscode.postMessage({ type: 'select', workItemId: Number(button!.dataset['workItem']) });
-    } else if (action === 'pick') {
-      // One option per question, picked again to clear it, or several where the question takes several; a pick replaces a single question's Other text.
-      const key = button!.dataset['card']!;
-      const index = Number(button!.dataset['question']);
-      const letter = button!.dataset['letter']!;
-      const question = cardQuestions(key)[index];
-      const draft = cardDraft(key);
-      const choice = draft.choices.get(index) ?? { letters: [], other: '' };
-      const picked = choice.letters.includes(letter);
-
-      if (question === undefined) {
-        return;
-      }
-
-      draft.choices.set(index, question.multi ? { ...choice, letters: picked ? choice.letters.filter((one) => one !== letter) : [...choice.letters, letter] } : { letters: picked ? [] : [letter], other: picked ? choice.other : '' });
-      draft.error = null;
-      draw();
-    } else if (action === 'answer') {
+    } else if (action === 'card-pick') {
+      pickCard(button!.dataset['card']!, button!.dataset['slug']!, button!.dataset['letter']!);
+    } else if (action === 'card-other') {
+      openOther(button!.dataset['card']!, button!.dataset['slug']!);
+    } else if (action === 'card-step') {
+      stepCard(button!.dataset['card']!, button!.dataset['slug']!);
+    } else if (action === 'card-back' || action === 'card-next') {
+      stepCard(button!.dataset['card']!, action === 'card-back' ? 'back' : 'next');
+    } else if (action === 'card-send') {
       submitCard(button!.dataset['card']!);
+    } else if (action === 'card-menu') {
+      const ui = cardUi(button!.dataset['card']!);
+
+      ui.menuOpen = !ui.menuOpen;
+      draw();
+    } else if (action === 'card-dismiss') {
+      const key = button!.dataset['card']!;
+      const target = cardTarget();
+
+      cardUi(key).menuOpen = false;
+      draw();
+
+      if (target !== null) {
+        const id = nextCardPost++;
+
+        cardPosts.set(id, key);
+        vscode.postMessage({ type: 'card-dismiss', id, card: key, slug: button!.dataset['slug']!, target });
+      }
     } else if (action === 'goto-card') {
       const key = button!.dataset['targetCard'] ?? '';
 
@@ -1258,37 +1329,59 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
       return;
     }
 
-    if (!(field instanceof HTMLInputElement) || !field.classList.contains('question-other')) {
+    if (!(field instanceof HTMLTextAreaElement) || !field.classList.contains('qc-other')) {
       return;
     }
 
+    // Typing in Other keeps the view undrawn; the hub hears it once the typing pauses.
     const key = field.dataset['card']!;
-    const index = Number(field.dataset['question']);
-    const draft = cardDraft(key);
-    const choice = draft.choices.get(index) ?? { letters: [], other: '' };
-    const single = cardQuestions(key)[index]?.multi !== true;
+    const card = cardNow(key);
 
-    draft.choices.set(index, { letters: single && field.value.trim() !== '' ? [] : choice.letters, other: field.value });
-    draft.error = null;
-
-    if (single && choice.letters.length > 0 && field.value.trim() !== '') {
-      draw();
-    } else {
-      const submit = root.querySelector<HTMLButtonElement>(`.question-submit[data-card="${CSS.escape(key)}"]`);
-
-      if (submit !== null) {
-        submit.disabled = !complete(cardQuestions(key), draft.choices);
-      }
+    if (card === null) {
+      return;
     }
+
+    const draft = setOther(card, cardDraftOf(key), field.dataset['slug']!, field.value);
+
+    cardUi(key).local = draft;
+    clearTimeout(otherTimer ?? undefined);
+    otherTimer = setTimeout(() => setDraft(key, cardDraftOf(key) ?? draft, true), OTHER_SETTLE_MS);
   });
 
-  // Enter in an Other field submits its card.
+  // A question card's keys while it has the focus (design § 6): A–H pick, O opens Other, Enter goes on or sends, Backspace goes back.
   root.addEventListener('keydown', (event) => {
-    const field = event.target as HTMLElement;
+    const cardEl = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>('.question-card.qc') : null;
 
-    if (field instanceof HTMLInputElement && field.classList.contains('question-other') && event.key === 'Enter' && !event.isComposing) {
-      event.preventDefault();
-      submitCard(field.dataset['card']!);
+    if (cardEl === null || event.ctrlKey || event.metaKey || event.altKey || event.isComposing) {
+      return;
+    }
+
+    const key = cardEl.dataset['card']!;
+    const card = cardNow(key);
+    const inField = event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLInputElement;
+    const action = card === null || !(state.connected && state.session?.conversation === 'full') ? null : cardKeyAction(event.key, inField && event.key !== 'Enter');
+    const step = card === null ? null : currentStep(card, cardDraftOf(key));
+
+    if (action === null || step === null || (inField && event.key === 'Enter' && event.shiftKey) || (action.type === 'forward' && event.target instanceof HTMLButtonElement)) {
+      return;
+    }
+
+    event.preventDefault();
+
+    if (action.type === 'pick') {
+      pickCard(key, step.question.slug, action.letter);
+    } else if (action.type === 'other') {
+      openOther(key, step.question.slug);
+    } else if (action.type === 'back') {
+      stepCard(key, 'back');
+    } else {
+      const steps = cardSteps(card!);
+
+      if (steps.indexOf(step) === steps.length - 1) {
+        submitCard(key);
+      } else if (picked(cardDraftOf(key)?.picks[step.question.slug])) {
+        stepCard(key, 'next');
+      }
     }
   });
 
@@ -1469,7 +1562,7 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     checkSeen();
   });
 
-  window.addEventListener('message', (event: MessageEvent<{ type: 'state'; state: ConversationState; unopened?: string[]; details?: boolean } | { type: 'focus'; focused: boolean } | { type: 'seen-failed'; ids: string[] } | { type: 'sent'; id: number; error: string | null } | { type: 'copied'; id: number; ok: boolean } | { type: 'unsent'; returned: Array<{ text: string; error: string; workItemId: number | null }> } | { type: 'draft'; text: string; workItemId: number | null } | { type: 'words'; text: string } | { type: 'refused'; error: string; workItemId: number | null } | { type: 'mic-start' } | { type: 'mic-failed'; error: string } | MenuReply | ExtrasReply>) => {
+  window.addEventListener('message', (event: MessageEvent<{ type: 'state'; state: ConversationState; unopened?: string[]; details?: boolean } | { type: 'focus'; focused: boolean } | { type: 'seen-failed'; ids: string[] } | { type: 'sent'; id: number; error: string | null } | { type: 'card-answered'; id: number; error: string | null } | { type: 'copied'; id: number; ok: boolean } | { type: 'unsent'; returned: Array<{ text: string; error: string; workItemId: number | null }> } | { type: 'draft'; text: string; workItemId: number | null } | { type: 'words'; text: string } | { type: 'refused'; error: string; workItemId: number | null } | { type: 'mic-start' } | { type: 'mic-failed'; error: string } | MenuReply | ExtrasReply>) => {
     if (event.data.type === 'files' || event.data.type === 'commands' || event.data.type === 'mentions' || event.data.type === 'image') {
       composer?.receive(event.data);
     } else if (event.data.type === 'draft') {
@@ -1545,13 +1638,10 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
 
       wasConnected = state.connected;
 
-      // A card's answer that shows in the conversation with its delivery settled is done with: only one still on its way can come back not sent.
-      for (const [key, draft] of cards) {
-        const replyId = key.startsWith('status:st-') ? key.slice('status:st-'.length) : key.startsWith('reply:') ? key.slice('reply:'.length) : null;
-        const from = state.items.findIndex((item) => item.id === replyId);
-
-        if (draft.sent !== null && !draft.sending && draft.workItemId === state.scope?.workItemId && from !== -1 && state.items.slice(from + 1).some((item) => item.type === 'message' && !item.withdrawn && item.delivery !== 'open' && item.text === draft.sent)) {
-          draft.sent = null;
+      // The hub's drafts now hold what this view changed, unless a change is still on its way.
+      for (const ui of cards.values()) {
+        if (ui.pending === 0) {
+          ui.local = null;
         }
       }
 
@@ -1586,26 +1676,45 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
         return;
       }
 
-      // A refused answer keeps the card's choices and shows why; a taken one waits, greyed, until its message shows in the conversation.
-      const draft = cardDraft(key);
+      // A refused answer keeps the card's picks and shows why; a taken one shows its questions Sending… until the message is sent.
+      const ui = cardUi(key);
 
       cardSends.delete(event.data.id);
-      draft.sending = false;
+      ui.sending = false;
+      ui.error = event.data.error;
+      draw();
+    } else if (event.data.type === 'card-answered') {
+      const key = cardPosts.get(event.data.id);
 
-      if (event.data.error !== null) {
-        draft.error = event.data.error;
-        draft.sent = null;
+      if (key === undefined) {
+        return;
       }
 
-      draw();
+      const ui = cardUi(key);
+
+      cardPosts.delete(event.data.id);
+      ui.pending = Math.max(0, ui.pending - 1);
+
+      if (event.data.error !== null) {
+        ui.error = event.data.error;
+
+        if (ui.pending === 0) {
+          ui.local = null;
+        }
+
+        draw();
+      }
     } else if (event.data.type === 'unsent') {
       for (const one of event.data.returned) {
-        // A card's answer that was not sent goes back to its card, with why, rather than into the composer.
-        const card = [...cards.values()].find((draft) => draft.sent !== null && draft.sent === one.text && draft.workItemId === one.workItemId);
+        // A card's answer that was not sent reopens its questions, with why on the card, rather than going into the composer.
+        if (isAnswerMessage(one.text)) {
+          const slugs = [...one.text.matchAll(/^-\s*([a-z][a-z0-9-]{2,39}):/gm)].map((match) => match[1]!);
+          const card = [...viewLedger(state).cards.values()].find((one) => one.questions.some((question) => slugs.includes(question.question.slug)));
 
-        if (card !== undefined) {
-          card.sent = null;
-          card.error = one.error;
+          if (card !== undefined) {
+            cardUi(card.key).error = one.error;
+          }
+
           draw();
         } else {
           composer?.unsent(one.text, one.error, one.workItemId);

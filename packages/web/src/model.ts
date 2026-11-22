@@ -1,6 +1,6 @@
 import { SESSION_ICONS, SESSION_TONES, sessionIcon } from '@switchboard/core/group';
 import type { IconTone, SessionIcon } from '@switchboard/core/group';
-import type { ArtifactView, ConversationEntry, ItemView, PageGroup, PageHeader, PageRow, ReplyView, ScopeView, SessionView, StatusView, VoiceView } from '@switchboard/protocol';
+import type { ArtifactView, ConversationEntry, ItemView, PageGroup, PageHeader, PageRow, QuestionsView, ReplyView, ScopeView, SessionView, StatusView, VoiceView } from '@switchboard/protocol';
 
 /** What the page shows, kept from its conversation stream (architecture.md § Web page). */
 export interface PageState {
@@ -19,13 +19,15 @@ export interface PageState {
   artifacts: ArtifactView[];
   unread: number;
   voice: VoiceView | null;
+  /** The session's questions as the hub keeps them (PRD R103): the open count, the oldest open card and the card drafts; null before the hub sent them. */
+  questions: QuestionsView | null;
   expandReplies: boolean;
   /** The diff viewer's settings (`web.diffLayout`, `web.diffWrap`), from the `hello` and each `settings` event. */
   diffLayout: 'auto' | 'split' | 'stacked';
   diffWrap: 'auto' | 'on' | 'off';
 }
 
-export const EMPTY: PageState = { key: null, connected: false, groups: [], header: null, scope: null, session: null, items: [], more: false, status: null, artifacts: [], unread: 0, voice: null, expandReplies: false, diffLayout: 'auto', diffWrap: 'auto' };
+export const EMPTY: PageState = { key: null, connected: false, groups: [], header: null, scope: null, session: null, items: [], more: false, status: null, artifacts: [], unread: 0, voice: null, questions: null, expandReplies: false, diffLayout: 'auto', diffWrap: 'auto' };
 
 /** The diff viewer's settings an event carries, each kept as it was when the event lacks it or names a value the page does not know. */
 function diffSettings(settings: Record<string, unknown> | undefined, state: PageState): Pick<PageState, 'diffLayout' | 'diffWrap'> {
@@ -80,6 +82,7 @@ export function applyEvent(state: PageState, event: Event): PageState {
         artifacts: newestFirst(event['artifacts'] ?? []),
         unread: event['unread'] ?? 0,
         voice: event['voice'] ?? null,
+        questions: event['questions'] ?? null,
         expandReplies: event['settings']?.expandReplies ?? state.expandReplies,
         ...diffSettings(event['settings'], state),
       };
@@ -112,6 +115,8 @@ export function applyEvent(state: PageState, event: Event): PageState {
     }
     case 'voice':
       return { ...state, voice: event['voice'] };
+    case 'questions':
+      return event['questions']?.sessionId === state.scope?.sessionId ? { ...state, questions: event['questions'] } : state;
     case 'settings':
       return { ...state, expandReplies: event['settings']?.expandReplies === true, ...diffSettings(event['settings'], state) };
     case 'progress':

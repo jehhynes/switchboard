@@ -1,0 +1,195 @@
+// @vitest-environment jsdom
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { cardKeyAction, isAnswerMessage, questionsWaiting, renderAnswersBubble, renderQuestionCard, stepAnnouncement } from '../src/questionCard.js';
+import { questionLedger } from '../src/questions.js';
+import type { LedgerItem } from '../src/questions.js';
+
+const NEW = [
+  '1. **Persona registration.** Register on save, or after its voice check? {#persona-registered}',
+  '   Today Save registers it at once.',
+  "   - A) Register on save (recommended) — keeps today's behaviour.",
+  '   - B) Register after the voice check — Save takes about 2 s longer.',
+  '2. **Phone layout:** How should the list look? {#phone-layout}',
+  '   - A) One card per persona',
+  '   - B) Two-column table',
+  '3. **Design first?** Mock it up first? {#design-first}',
+  '   - A) Mock up first',
+  '   - B) Build directly',
+].join('\n');
+const reply = (id: string, opening: string): LedgerItem => ({ type: 'reply', id, kind: 'reply', opening, rewrittenBy: null, withdrawn: false, at: 10 });
+const inline = (text: string): string => text.replace(/[&<>]/g, '');
+const host = (html: string): HTMLElement => {
+  const div = document.createElement('div');
+
+  div.innerHTML = html;
+  return div;
+};
+
+describe('the question card (design § 6)', () => {
+  const ledger = questionLedger([reply('r1', NEW)]);
+  const card = ledger.cards.get('reply:r1')!;
+
+  it('shows one question at a time with its progress, slug, topic, context, options and Other, and Next disabled until a pick', () => {
+    const view = host(renderQuestionCard(card, undefined, { canAnswer: true, inline }));
+
+    expect(view.querySelector('.qc-progress')?.textContent).toBe('Question 1 of 3');
+    expect(view.querySelectorAll('.qc-dot')).toHaveLength(3);
+    expect(view.querySelector('.qc-head .qc-slug')?.textContent).toBe('persona-registered');
+    expect(view.querySelector('.qc-topic')?.textContent).toBe('Persona registration');
+    expect(view.querySelector('.qc-question')?.textContent).toBe('Register on save, or after its voice check?');
+    expect(view.querySelector('.qc-context')?.textContent).toBe('Today Save registers it at once.');
+    expect([...view.querySelectorAll('.qc-option')].map((one) => one.textContent)).toEqual(["ARegister on saveRecommendedKeeps today's behaviour.", 'BRegister after the voice checkSave takes about 2 s longer.', '…OtherWrite your own answer.']);
+    expect(view.querySelector('.qc-options')?.getAttribute('role')).toBe('radiogroup');
+    expect(view.querySelector('[data-action="card-back"]')?.hasAttribute('disabled')).toBe(true);
+    expect(view.querySelector('[data-action="card-next"]')?.hasAttribute('disabled')).toBe(true);
+    expect(view.querySelector('.qc-sr')?.textContent).toBe('Question 1 of 3: Register on save, or after its voice check?');
+    expect([...view.querySelectorAll('.qc-chip')].map((one) => one.textContent)).toEqual(['Persona registration: –', 'Phone layout: –', 'Design first?: –']);
+  });
+
+  it('marks the pick, fills its dot, enables Next and shows the picks in the summary', () => {
+    const view = host(renderQuestionCard(card, { step: 'persona-registered', picks: { 'persona-registered': { letters: ['A'], other: null } } }, { canAnswer: true, inline }));
+
+    expect(view.querySelector('.qc-option.qc-selected')?.getAttribute('data-letter')).toBe('A');
+    expect(view.querySelector('.qc-option[data-letter="A"]')?.getAttribute('aria-checked')).toBe('true');
+    expect(view.querySelector('.qc-dot.qc-filled')).not.toBeNull();
+    expect(view.querySelector('[data-action="card-next"]')?.hasAttribute('disabled')).toBe(false);
+    expect(view.querySelector('.qc-chip')?.textContent).toBe('Persona registration: A');
+  });
+
+  it('opens a text area under Other, and offers Send 2 of 3 on the last step when one question is left', () => {
+    const view = host(renderQuestionCard(card, { step: 'design-first', picks: { 'persona-registered': { letters: ['A'], other: null }, 'design-first': { letters: [], other: 'only the list' } } }, { canAnswer: true, inline }));
+
+    expect(view.querySelector('textarea.qc-other')?.textContent).toBe('only the list');
+    expect(view.querySelector('.qc-other-option')?.getAttribute('aria-checked')).toBe('true');
+    expect(view.querySelector('[data-action="card-send"]')?.textContent).toBe('Send 2 of 3');
+    expect(view.querySelector('[data-action="card-send"]')?.hasAttribute('disabled')).toBe(false);
+    expect(view.querySelector('[data-action="card-next"]')).toBeNull();
+  });
+
+  it('disables Send on the last step with nothing picked, and everything while a Send is under way', () => {
+    expect(host(renderQuestionCard(card, { step: 'design-first', picks: {} }, { canAnswer: true, inline })).querySelector('[data-action="card-send"]')?.hasAttribute('disabled')).toBe(true);
+
+    const sending = host(renderQuestionCard(card, { step: 'design-first', picks: { 'design-first': { letters: ['A'], other: null } } }, { canAnswer: true, sending: true, inline }));
+
+    expect(sending.querySelector('[data-action="card-send"]')?.textContent).toBe('Sending…');
+    expect([...sending.querySelectorAll('.qc-option')].every((one) => one.hasAttribute('disabled'))).toBe(true);
+  });
+
+  it('is read-only with a note and no footer or menu when it cannot be answered, and shows a refusal', () => {
+    const ended = host(renderQuestionCard(card, undefined, { canAnswer: false, note: 'Session ended — open in terminal to continue.', inline }));
+
+    expect(ended.querySelector('.qc-footer')).toBeNull();
+    expect(ended.querySelector('.qc-menu-button')).toBeNull();
+    expect(ended.querySelector('.qc-note')?.textContent).toBe('Session ended — open in terminal to continue.');
+    expect(host(renderQuestionCard(card, undefined, { canAnswer: true, error: 'That question was withdrawn.', inline })).querySelector('.qc-error')?.textContent).toBe('That question was withdrawn.');
+  });
+
+  it('offers Dismiss in the header menu, for the current question', () => {
+    const view = host(renderQuestionCard(card, { step: 'phone-layout', picks: {} }, { canAnswer: true, menuOpen: true, inline }));
+
+    expect(view.querySelector('.qc-menu-button')?.getAttribute('aria-expanded')).toBe('true');
+    expect(view.querySelector('[data-action="card-dismiss"]')?.getAttribute('data-slug')).toBe('phone-layout');
+    expect(host(renderQuestionCard(card, undefined, { canAnswer: true, inline })).querySelector('[data-action="card-dismiss"]')).toBeNull();
+  });
+
+  it('shows withdrawn and replaced questions as struck rows under the stepper, with the reason and a link to the new question', () => {
+    const again = '1. **Design first?** Only the list? {#design-first}\n   - A) Only the list\n   - B) Both';
+    const changed = questionLedger([reply('r1', NEW), reply('r2', 'Ok.\n[withdraw: persona-registered — your message settled it]'), reply('r3', again)]);
+    const view = host(renderQuestionCard(changed.cards.get('reply:r1')!, undefined, { canAnswer: true, inline }));
+
+    expect(view.querySelector('.qc-progress')?.textContent).toBe('Question 1 of 1');
+    expect([...view.querySelectorAll('.qc-row')].map((row) => [row.querySelector('.qc-pill')?.textContent, row.querySelector('.qc-struck') !== null, row.querySelector('.qc-row-detail')?.textContent])).toEqual([
+      ['Withdrawn', true, 'Withdrawn by the session: "your message settled it"'],
+      ['Replaced', true, 'Replaced by a newer version of this question. Go to it'],
+    ]);
+    expect(view.querySelector('[data-action="goto-card"]')?.getAttribute('data-target-card')).toBe('reply:r3');
+    expect(view.querySelector('[data-action="card-send"]')?.textContent).toBe('Send answer');
+  });
+
+  it('folds to a summary once every question is settled, linking the answer', () => {
+    const answered = questionLedger([
+      reply('r1', NEW),
+      { type: 'message', id: 'm1', text: '[answers]', withdrawn: false, delivery: 'sent', at: 20, answers: ['persona-registered', 'phone-layout', 'design-first'].map((slug) => ({ replyId: 'r1', slug, letters: ['A'], other: '', via: 'card' as const })) },
+    ]);
+    const view = host(renderQuestionCard(answered.cards.get('reply:r1')!, undefined, { canAnswer: true, inline }));
+
+    expect(view.querySelector('.qc-done')?.textContent).toBe('All 3 questions answered · Your answer');
+    expect(view.querySelector('[data-action="goto-message"]')?.getAttribute('data-target')).toBe('m1');
+    expect([...view.querySelectorAll('.qc-row-detail')].map((one) => one.textContent)).toEqual(['→ A) Register on save', '→ A) One card per persona', '→ A) Mock up first']);
+    expect(view.querySelector('.qc-option')).toBeNull();
+  });
+
+  it('shows a dismissed question as a row that says the session is told', () => {
+    const dismissed = questionLedger([reply('r1', NEW)], { dismissed: ['reply:r1#persona-registered', 'reply:r1#phone-layout', 'reply:r1#design-first'] });
+    const view = host(renderQuestionCard(dismissed.cards.get('reply:r1')!, undefined, { canAnswer: true, inline }));
+
+    expect(view.querySelector('.qc-done')?.textContent).toBe('All 3 questions settled');
+    expect(view.querySelector('.qc-row-detail')?.textContent).toBe('You dismissed it; the session is told with your next answers.');
+  });
+
+  it('says how many more questions wait after the first four', () => {
+    const six = Array.from({ length: 6 }, (_, index) => `${index + 1}. Question ${index + 1}? {#question-${index + 1}}\n   - A) x\n   - B) y`).join('\n');
+    const view = host(renderQuestionCard(questionLedger([reply('r9', six)]).cards.get('reply:r9')!, undefined, { canAnswer: true, inline }));
+
+    expect(view.querySelectorAll('.qc-dot')).toHaveLength(4);
+    expect(view.querySelector('.qc-later')?.textContent).toBe('2 more questions after these');
+  });
+
+  it('escapes what the session wrote in the slug-free parts it does not render as Markdown', () => {
+    const tricky = questionLedger([reply('r1', '1. **<b>Topic</b>.** Which? {#tricky-one}\n   - A) x\n   - B) y')]);
+
+    expect(renderQuestionCard(tricky.cards.get('reply:r1')!, undefined, { canAnswer: true, inline })).toContain('&#60;b&#62;Topic&#60;/b&#62;');
+  });
+
+  it('announces the step for assistive readers', () => {
+    expect(stepAnnouncement(card, { step: 'phone-layout', picks: {} })).toBe('Question 2 of 3: How should the list look?');
+  });
+});
+
+describe('the card keys (design § 6)', () => {
+  it('picks A–H, opens Other with O, goes on with Enter and back with Backspace, and leaves a field\'s typing alone', () => {
+    expect(cardKeyAction('b', false)).toEqual({ type: 'pick', letter: 'B' });
+    expect(cardKeyAction('O', false)).toEqual({ type: 'other' });
+    expect(cardKeyAction('Enter', false)).toEqual({ type: 'forward' });
+    expect(cardKeyAction('Backspace', false)).toEqual({ type: 'back' });
+    expect(cardKeyAction('z', false)).toBeNull();
+    expect(cardKeyAction('b', true)).toBeNull();
+  });
+});
+
+describe('the Answers bubble (design § 4)', () => {
+  it('hides the tag, shows each slug as a chip, the question dimmed and the answer bold, with a link to the questions', () => {
+    const ledger = questionLedger([reply('r1', NEW), { type: 'message', id: 'm1', text: 'x', withdrawn: false, delivery: 'sent', at: 20, answers: [{ replyId: 'r1', slug: 'persona-registered', letters: ['A'], other: '', via: 'card' }] }]);
+    const text = '[spoken] [answers]\n- persona-registered: Register on save, or after its voice check? → A) Register on save\n- design-first: Mock it up first? → Other: a → b';
+    const view = host(renderAnswersBubble(text, ledger.answers.get('m1')!));
+
+    expect(isAnswerMessage(text)).toBe(true);
+    expect(isAnswerMessage('persona-registered A')).toBe(false);
+    expect(view.querySelector('.answers-title')?.textContent).toBe('Answers');
+    expect([...view.querySelectorAll('.answers-line')].map((line) => [line.querySelector('.qc-slug')?.textContent, line.querySelector('.answers-question')?.textContent, line.querySelector('.answers-answer')?.textContent])).toEqual([
+      ['persona-registered', 'Register on save, or after its voice check?', 'A) Register on save'],
+      ['design-first', 'Mock it up first?', 'Other: a → b'],
+    ]);
+    expect(view.querySelector('[data-action="goto-card"]')?.getAttribute('data-target-card')).toBe('reply:r1');
+    expect(view.textContent).not.toContain('[answers]');
+  });
+});
+
+describe('the waiting chip', () => {
+  it('counts every open question', () => {
+    expect(questionsWaiting(1)).toContain('1 question waiting');
+    expect(questionsWaiting(5)).toContain('5 questions waiting');
+  });
+});
+
+describe('the card\'s styles', () => {
+  it('never scroll or take touch gestures, so a vertical pan over a card scrolls the conversation', () => {
+    const css = readFileSync(join(__dirname, '../src/questionCard.css'), 'utf8');
+
+    expect(css).not.toMatch(/overflow(?:-[xy])?\s*:\s*(?:auto|scroll)/);
+    expect(css).not.toMatch(/touch-action\s*:\s*(?:none|pan-x|pinch-zoom)/);
+    expect(css).not.toMatch(/overscroll-behavior/);
+  });
+});

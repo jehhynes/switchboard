@@ -4,8 +4,8 @@ import { hasUnspokenText, spokenBody } from '@switchboard/conversation/spokenBub
 import { artifactIcon, awaitingReply, selectedEntry, selectedRow, stateIcon, timeline } from './model.js';
 import type { PageState } from './model.js';
 import { copyButton, escape, renderInline, renderMarkdown } from './markdown.js';
-import { answers, answersIn, answerText, cardOutcome, complete, parseQuestions, questionSegments } from '@switchboard/conversation/questions';
-import type { Question, QuestionChoice } from '@switchboard/conversation/questions';
+import { questionSegments, stripQuestionMarkup } from '@switchboard/conversation/questions';
+import type { CardDraft as SharedDraft } from '@switchboard/conversation/questions';
 import type { ArtifactView, MessageView, NativeRequest, PageAction, PageGroup, PageRow, ReplyView, ScreenPrompt, StatusView, VoiceView } from '@switchboard/protocol';
 import type { SnoozeChoice } from '@switchboard/core/snooze';
 
@@ -133,14 +133,20 @@ export function consoleNote(session: PageState['session']): string | null {
   return session.conversation === 'none' ? "This session does not run in Switchboard's terminal holder, so it has no console here." : null;
 }
 
-/** A question card's choices and the answer on its way, kept by the page until the answer shows in the conversation. */
+/**
+ * What the page keeps of a question card beside the hub's draft (PRD R103): a draft it changed whose `card-draft` the hub has not echoed yet, a
+ * Send under way, why the last was refused, and whether its header menu is open.
+ */
 export interface CardDraft {
-  choices: Map<number, QuestionChoice>;
-  sent: string | null;
+  /** The draft as this page changed it, shown until the hub's `questions` event follows; null once it has. */
+  local: SharedDraft | null;
+  /** `card-draft` posts not yet answered. */
+  pending: number;
+  sending: boolean;
   /** The message the answer became, once the hub took it. */
   sentId?: string | null;
-  sending: boolean;
   error: string | null;
+  menuOpen: boolean;
 }
 
 /** What the page keeps beside the hub's state: the tab shown, open folds, the open dropdown, the cards and the open artifact. */
@@ -325,7 +331,8 @@ export function bandOpen(key: string, bands: ReadonlyMap<string, boolean>): bool
  * in place, folded into one line, "2 questions — answer below", that opens them. `ends` is false for text a spoken passage follows, whose questions
  * all fold.
  */
-export function withoutQuestions(markdown: string, key: string, open: ReadonlySet<string>, ends = true): string {
+export function withoutQuestions(source: string, key: string, open: ReadonlySet<string>, ends = true): string {
+  const markdown = stripQuestionMarkup(source);
   const segments = questionSegments(markdown);
 
   if (segments === null) {
@@ -426,4 +433,3 @@ export function renderVoice(voice: VoiceView | null, live = true): string {
 
 export { renderMicButton };
 
-export { answerText, complete, parseQuestions };

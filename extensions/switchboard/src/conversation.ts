@@ -620,6 +620,22 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
     return this.mic(!micOn(this.#state.voice));
   }
 
+  /**
+   * A question card's draft changed, or the operator dismissed one of its questions (PRD R103): `card-draft` or `card-dismiss` to the hub,
+   * which keeps the drafts for every window. Why not, or null.
+   */
+  async card(name: 'card-draft' | 'card-dismiss', fields: Record<string, unknown>, shown: SendTarget): Promise<string | null> {
+    const target = this.#target;
+
+    if (target === null) {
+      return 'This window has no session.';
+    }
+
+    const reply = await postToHub(target.record, `/v1/conversation/${name}`, { window: target.key, scopeGen: shown.scopeGen, opId: randomUUID(), sessionId: shown.sessionId, ...fields }, HISTORY_TIMEOUT_MS);
+
+    return reply === null ? 'The hub did not answer.' : reply.status === 200 ? null : (reply.error ?? `The hub refused it (${reply.status}).`);
+  }
+
   /** The composer gained or lost the focus, or its draft changed, for the focus rule; nothing to say when the hub does not take it. */
   async composer(focused: boolean, draft: string): Promise<void> {
     const target = this.#target;
@@ -678,15 +694,16 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
    * Sends the composer's text to this window's current session (architecture.md § Typing a message). A command that got no answer is posted once
    * more with the same `opId`, which the hub answers with the message it already added. Resolves the refusal, or null once the hub took it.
    */
-  async send(text: string, shown: SendTarget, command = false): Promise<string | null> {
+  async send(text: string, shown: SendTarget, command = false, answers: unknown = undefined): Promise<string | null> {
     const target = this.#target;
 
     if (target === null) {
       return 'This window has no session to send to.';
     }
 
-    // The session, launch and scope generation the page showed, so the hub refuses the message rather than send it elsewhere.
-    const body = { window: target.key, scopeGen: shown.scopeGen, opId: randomUUID(), sessionId: shown.sessionId, launch: shown.launch, text, ...(command ? { command: true } : {}) };
+    // The session, launch and scope generation the page showed, so the hub refuses the message rather than send it elsewhere. A card's Send
+    // posts its answers, whose text the hub writes.
+    const body = { window: target.key, scopeGen: shown.scopeGen, opId: randomUUID(), sessionId: shown.sessionId, launch: shown.launch, ...(answers === undefined ? { text } : { answers }), ...(command ? { command: true } : {}) };
     const reply = (await postToHub(target.record, '/v1/conversation/send', body, SEND_TIMEOUT_MS)) ?? (await postToHub(target.record, '/v1/conversation/send', body, SEND_TIMEOUT_MS));
 
     if (reply === null) {
@@ -935,7 +952,10 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
               () => view.webview.postMessage({ type: 'copied', id: message.id, ok: false }),
             );
           case 'send':
-            return this.send(String(message.text), message.target, message.command === true).then((error) => view.webview.postMessage({ type: 'sent', id: message.id, error }));
+            return this.send(String(message.text ?? ''), message.target, message.command === true, message.answers).then((error) => view.webview.postMessage({ type: 'sent', id: message.id, error }));
+          case 'card-draft':
+          case 'card-dismiss':
+            return this.card(message.type, message.type === 'card-draft' ? { card: message.card, draft: message.draft } : { card: message.card, slug: message.slug }, message.target).then((error) => view.webview.postMessage({ type: 'card-answered', id: message.id, error }));
           case 'files':
             return this.files(String(message.query)).then(
               (items) => view.webview.postMessage({ type: 'files', id: message.id, items }),

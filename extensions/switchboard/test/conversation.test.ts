@@ -130,7 +130,14 @@ describe('the conversation state', () => {
 
     const moved = applyEvent(applyEvent(state, { type: 'scope', scope: { ...SCOPE, workItemId: 3, sessionId: null } }), hello([], { scope: { ...SCOPE, workItemId: 3, sessionId: null }, sessions: [] }));
 
-    expect(moved).toEqual({ scope: { ...SCOPE, workItemId: 3, sessionId: null }, session: null, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, voice: null, settings: { expandReplies: false } });
+    expect(moved).toEqual({ scope: { ...SCOPE, workItemId: 3, sessionId: null }, session: null, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, voice: null, settings: { expandReplies: false }, questions: null });
+
+    // A session's questions, from hello and its own questions events only (PRD R103).
+    const questions = { sessionId: 's2', since: 1, open: 2, oldest: 'reply:r1', drafts: {}, dismissed: [] };
+    const asked = applyEvent(state, { type: 'questions', questions });
+
+    expect(asked.questions).toEqual(questions);
+    expect(applyEvent(asked, { type: 'questions', questions: { ...questions, sessionId: 'other', open: 9 } }).questions).toEqual(questions);
   });
 
   it('keeps the voice state and the setting from hello and their events, and shows a playing reply\'s progress (architecture.md § Voice)', () => {

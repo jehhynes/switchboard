@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { afterEach, onTestFinished, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyEvent, awaitingReply, EMPTY, inTurn, mentionOf, mentionQuery, commandQuery, timeline, withEarlier } from '../src/model.js';
-import { answerText, answersIn, complete, parseQuestions } from '@switchboard/conversation/questions';
+import { parseQuestions, resolveAnswers } from '@switchboard/conversation/questions';
 import { artifactUrl, BROWSER_MIN_WIDTH, browserNote, paneLink, paneStatus, collapsedGroups, newView, renderMicButton, renderVoice, markdownBody } from '../src/render.js';
 import { renderArtifactView, renderStatus } from '../src/side.js';
 import { backgroundRow, renderTimeline, turnRow } from '../src/timeline.js';
@@ -12,7 +12,7 @@ import { renderList } from '../src/list.js';
 import { html } from './html.js';
 import { REPLAY_TIP, SPEAKING_TIP, renderMicButton as viewMicButton } from '@switchboard/conversation/voiceControls';
 import { renderMarkdown } from '../src/markdown.js';
-import { CHAT_MAX, CHAT_MIN, DRAWER_HIDE_MS, DRAWER_REVEAL_MS, loadMermaid, PANE_SHOW_DELAY_MS, SENT_NOTE_MS, SHOW_MARKER_MS, SIDE_MAX, SIDE_MIN, startPage, SWIPE_OPEN } from '../src/main.js';
+import { ADVANCE_MS, CHAT_MAX, CHAT_MIN, DRAWER_HIDE_MS, OTHER_SETTLE_MS, DRAWER_REVEAL_MS, loadMermaid, PANE_SHOW_DELAY_MS, SENT_NOTE_MS, SHOW_MARKER_MS, SIDE_MAX, SIDE_MIN, startPage, SWIPE_OPEN } from '../src/main.js';
 import { DETAIL_MIN } from '../src/layout.js';
 import { RECONNECT_MS } from '../src/reconnect.js';
 import type { ArtifactView, MessageView, PageGroup, PageRow, ReplyView, SessionView } from '@switchboard/protocol';
@@ -75,26 +75,15 @@ describe('the page model', () => {
 });
 
 describe('question cards', () => {
-  const text = '1. Which port?\n   - A) 8765\n   - B) 8799\n2. Which checks? Choose all that apply.\n   - A) Unit\n   - B) Live\n\n```\n3. Not a question\n   - A) x\n   - B) y\n```';
-
-  it('reads numbered questions outside code, answers as "1A, 2B", and reads a typed answer back', () => {
+  it('reads numbered questions outside code, with ids, and resolves a typed answer against them', () => {
+    const text = '1. Which port? {#port-choice}\n   - A) 8765\n   - B) 8799\n2. Which checks? Choose all that apply.\n   - A) Unit\n   - B) Live\n\n```\n3. Not a question\n   - A) x\n   - B) y\n```';
     const questions = parseQuestions(text);
 
-    expect(questions.map((question) => [question.number, question.multi, question.options.length])).toEqual([[1, false, 2], [2, true, 2]]);
-
-    const choices = new Map([[0, { letters: ['B'], other: '' }], [1, { letters: ['A', 'B'], other: '' }]]);
-
-    expect(complete(questions, choices)).toBe(true);
-    expect(answerText(questions, choices)).toBe('1B, 2A, 2B');
-    expect(answerText(questions, new Map([[0, { letters: [], other: 'use 9000, please' }]]))).toBe('1 Other: use 9000, please');
-    expect(complete(questions, new Map([[0, { letters: ['A'], other: '' }]]))).toBe(false);
-    expect([...answersIn('1A and 2B', questions).entries()]).toEqual([[0, { letters: ['A'], other: '' }], [1, { letters: ['B'], other: '' }]]);
-    // An Other answer and the picks after it read back as they were sent.
-    const mixed = new Map([[0, { letters: [], other: 'Use 9000' }], [1, { letters: ['B'], other: '' }]]);
-
-    expect(answerText(questions, mixed)).toBe('1 Other: Use 9000, 2B');
-    expect([...answersIn(answerText(questions, mixed), questions).entries()]).toEqual([[0, { letters: [], other: 'Use 9000' }], [1, { letters: ['B'], other: '' }]]);
-    expect(parseQuestions('1. One\n - A) x\n - B) y\n1. Again\n - A) x\n - B) y')).toEqual([]);
+    expect(questions.map((question) => [question.number, question.slug, question.multi, question.options.length])).toEqual([[1, 'port-choice', false, 2], [2, 'checks-choose-all', true, 2]]);
+    expect(resolveAnswers('port-choice B, checks-choose-all A and B', questions.map((question) => ({ replyId: 'r1', question })))).toEqual([
+      { replyId: 'r1', slug: 'port-choice', letters: ['B'], other: '' },
+      { replyId: 'r1', slug: 'checks-choose-all', letters: ['A', 'B'], other: '' },
+    ]);
     expect(parseQuestions('Pick one:\n- A) x\n- B) y')).toMatchObject([{ number: null, text: 'Pick one:' }]);
   });
 });
@@ -103,8 +92,9 @@ describe('question cards in replies', () => {
   const ending = 'Before I go on:\n\n1. Port?\n   - A) 1\n   - B) 2';
   const pageState = (items: Array<MessageView | ReplyView>) => applyEvent(EMPTY, { type: 'hello', key: 'k', groups: [], scope, sessions: [session()], items, more: false, status: null, artifacts: [] });
 
-  it('leaves questions that end a reply out of its text, folds ones written mid-message, and tells an answer from a message that skipped them', () => {
+  it('leaves questions that end a reply out of its text, folds ones written mid-message, and keeps a card open under a message that answers nothing', () => {
     const host = document.createElement('div');
+    const fresh = (items: Array<MessageView | ReplyView>) => ({ ...pageState(items), questions: { sessionId: 's', since: 0, open: 1, oldest: 'reply:r1', drafts: {}, dismissed: [] } });
 
     host.innerHTML = html(renderTimeline(pageState([reply('r1', 1, { opening: ending })]), newView()));
     expect(host.querySelector('li[data-id="r1"] > .body')?.textContent?.trim()).toBe('Before I go on:');
@@ -118,13 +108,19 @@ describe('question cards in replies', () => {
     host.innerHTML = html(renderTimeline(pageState([reply('r1', 1, { opening: `${ending}\n\nThen I start.`, speak: 'Then I start.' })]), view));
     expect(host.querySelector('details.questions-fold summary')?.textContent).toBe('1 question — answer below');
     expect(host.querySelector('li[data-id="r1"] .speech-bubble')?.textContent?.trim()).toBe('Then I start.');
+    // A question id and a withdraw line never show.
+    host.innerHTML = html(renderTimeline(fresh([reply('r1', 1, { opening: 'Before I go on:\n[withdraw: old-one]\n\n1. Port? {#port-choice}\n   - A) 1\n   - B) 2\n\nThen I start.' })]), newView()));
+    expect(host.querySelector('li[data-id="r1"] > .body')?.textContent).not.toMatch(/withdraw|\{#/);
+    // After the cutover, a message that answers nothing leaves the card open; one that answers settles it.
+    host.innerHTML = html(renderTimeline(fresh([reply('r1', 1, { opening: ending }), message('m1', 2, { text: 'Later.' })]), newView()));
+    expect(host.querySelector('.question-card .qc-option')).not.toBeNull();
+    host.innerHTML = html(renderTimeline(fresh([reply('r1', 1, { opening: ending }), message('m1', 2, { text: 'port B' })]), newView()));
+    expect(host.querySelector('.question-card .qc-pill')?.textContent).toBe('Answered');
+    // Before the cutover, the old rules: the next message skips it.
     host.innerHTML = html(renderTimeline(pageState([reply('r1', 1, { opening: ending }), message('m1', 2, { text: 'Later.' })]), newView()));
-    expect(host.querySelector('.question-card')?.className).toBe('question-card skipped');
-    expect(host.querySelector('.question-card [aria-checked="true"]')).toBeNull();
-    host.innerHTML = html(renderTimeline(pageState([reply('r1', 1, { opening: ending }), message('m1', 2, { text: '1B' })]), newView()));
-    expect(host.querySelector('.question-card')?.className).toBe('question-card answered');
+    expect(host.querySelector('.question-card .qc-pill')?.textContent).toBe('Skipped');
     host.innerHTML = html(renderTimeline(pageState([reply('r1', 1, { opening: ending }), message('m1', 2, { text: '1B', delivery: 'open' })]), newView()));
-    expect(host.querySelector('.question-card')?.className).toBe('question-card');
+    expect(host.querySelector('.question-card .qc-option')).not.toBeNull();
   });
 
   it("shows a status's questions on the Status tab as plain Markdown, with no card or fold", () => {
@@ -144,26 +140,21 @@ describe('question cards in replies', () => {
     const stale = message('m0', 1, { text: '2 background agents were stopped by the user: "A".', provisional: true, delivery: null });
 
     host.innerHTML = html(renderTimeline(pageState([reply('r1', 5, { opening: ending }), stale]), newView()));
-    expect(host.querySelector('.question-card')?.className).toBe('question-card');
-    expect(host.querySelector<HTMLButtonElement>('.question-option')?.disabled).toBe(false);
+    expect(host.querySelector<HTMLButtonElement>('.qc-option')?.disabled).toBe(false);
     host.innerHTML = html(renderTimeline(pageState([reply('r1', 5, { opening: ending }), message('m1', 6, { text: '1B', provisional: true, delivery: null })]), newView()));
-    expect(host.querySelector('.question-card')?.className).toBe('question-card answered');
+    expect(host.querySelector('.question-card .qc-pill')?.textContent).toBe('Answered');
   });
 
-  it('draws each option letter and its period in a column of their own and centres the mark on the first line', () => {
+  it('draws each option as a full-width button with a letter badge, its label and description, and Other last', () => {
     const host = document.createElement('div');
 
-    host.innerHTML = html(renderTimeline(pageState([reply('r1', 1, { opening: ending })]), newView()));
-    const options = [...host.querySelectorAll('.question-option')];
+    host.innerHTML = html(renderTimeline(pageState([reply('r1', 1, { opening: 'Before I go on:\n\n1. Port? {#port-choice}\n   - A) 8765 (recommended) — the default.\n   - B) 8799' })]), newView()));
+    const options = [...host.querySelectorAll('.qc-option')];
 
-    expect(options.map((one) => one.textContent)).toEqual(['A. 1', 'B. 2']);
-    // A wrapped line starts under the text, not under the letter.
-    expect(options.map((one) => [...one.children].map((child) => child.className))).toEqual(Array(2).fill(['question-mark radio', 'question-letter', 'question-option-text']));
-    const css = readFileSync(join(__dirname, '../src/page.css'), 'utf8');
-
-    expect(css).toMatch(/\.question-option \.question-letter \{ flex: none; min-width: 1\.4em; \}/);
-    expect(css).toMatch(/\.question-option-text \{ flex: 1;/);
-    expect(css).toMatch(/\.question-mark \{[^}]*height: 16px; margin-top: 2px; margin-top: calc\(\(1lh - 16px\) \/ 2\);/);
+    expect(options.map((one) => one.textContent)).toEqual(['A8765RecommendedThe default.', 'B8799', '…OtherWrite your own answer.']);
+    expect(options.map((one) => [...one.children].map((child) => child.className))).toEqual(Array(3).fill(['qc-letter', 'qc-option-body']));
+    // The shared styles reach the page's bundle.
+    expect(readFileSync(join(__dirname, '../build.mjs'), 'utf8')).toContain("'@switchboard/conversation/questionCard.css'");
   });
 });
 
@@ -604,7 +595,7 @@ describe('drawing', () => {
   it('draws a card under a reply that asks, answered by the next message', () => {
     const state = { ...EMPTY, connected: true, scope, session: session(), items: [reply('r1', 1, { opening: 'Pick:\n- A) x\n- B) y' }), message('m1', 2, { text: 'B' })] };
 
-    expect(html(renderTimeline(state, newView()))).toMatch(/question-card[\s\S]*aria-checked="true" data-action="pick" data-card="reply:r1" data-question="0" data-letter="B"[\s\S]*Answered/);
+    expect(html(renderTimeline(state, newView()))).toMatch(/question-card[\s\S]*qc-pill">Answered[\s\S]*→ B\) y/);
   });
 });
 
@@ -4356,7 +4347,7 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it('links an answer and its card both ways, each going to the other and highlighting it, and supersedes a card with a later reply', () => {
+  it('links an answer and its card both ways, each going to the other and highlighting it, and supersedes an old card with a later reply', () => {
     const { page, source } = start();
     const scrolled: string[] = [];
     const asked = '1. Move this work to a Code Mode session?\n   - A) Not now, keep it here\n   - B) Yes';
@@ -4368,21 +4359,29 @@ describe('the page in use', () => {
 
     const ref = root.querySelector<HTMLButtonElement>('li[data-id="m1"] .bubble > .answer-ref')!;
 
-    expect(ref.textContent).toBe('↳1. Move this work to a Code Mode session?→ A) Not now, keep it here');
+    expect(ref.textContent).toBe('↳Move this work to a Code Mode session?→ A) Not now, keep it here');
     click('li[data-id="m1"] .answer-ref');
     expect(scrolled).toEqual(['reply:r1']);
     expect(root.querySelector('.question-card')!.classList.contains('linked')).toBe(true);
-    expect(root.querySelector('.question-card .question-link')!.textContent).toBe('1A');
-    click('.question-card .question-link');
+    expect(root.querySelector('.question-card .qc-done')!.textContent).toBe('Question answered · Your answer');
+    click('.question-card [data-action="goto-message"]');
     expect(scrolled).toEqual(['reply:r1', 'm1']);
     expect(root.querySelector('li[data-id="m1"]')!.classList.contains('linked')).toBe(true);
 
-    // A later reply withdraws the question: the card is superseded and takes no answer.
+    // Before the cutover, a later reply supersedes the card, which takes no answer.
     hello(source, { items: [reply('r1', 2, { opening: asked }), reply('r2', 3, { opening: 'Ignore the question I asked.' })] });
-    expect(root.querySelector('.question-card')!.className).toBe('question-card superseded');
-    expect(root.querySelector('.question-card .question-state')!.textContent).toBe('Superseded: a later reply came after these questions');
-    expect(root.querySelector<HTMLButtonElement>('[data-action="pick"]')!.disabled).toBe(true);
-    expect(root.querySelector('.question-submit, .question-other')).toBeNull();
+    expect(root.querySelector('.question-card .qc-pill')!.textContent).toBe('Superseded');
+    expect(root.querySelector('.question-card .qc-row-detail')!.textContent).toBe('Superseded: a later reply came after it.');
+    expect(root.querySelector('.qc-option, [data-action="card-send"]')).toBeNull();
+
+    // After it, a reply with text leaves the question open, and an Answers message shows as its bubble.
+    const questions = { sessionId: 's', since: 0, open: 0, oldest: null, drafts: {}, dismissed: [] };
+
+    hello(source, { questions, items: [reply('r1', 2, { opening: asked }), reply('r2', 3, { opening: 'Working on it.' }), message('m1', 4, { text: '[answers]\n- code-mode-session: Move this work to a Code Mode session? → B) Yes', answers: [{ replyId: 'r1', slug: 'move-work-code', letters: ['B'], other: '', via: 'card' }] })] });
+    expect(root.querySelector('li[data-id="m1"] .answers-title')!.textContent).toBe('Answers');
+    expect(root.querySelector('li[data-id="m1"] .answers-answer')!.textContent).toBe('B) Yes');
+    expect(root.querySelector('li[data-id="m1"] .box')!.textContent).not.toContain('[answers]');
+    expect(root.querySelector('.question-card .qc-pill')!.textContent).toBe('Answered');
     delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
     page.close();
   });
@@ -4426,6 +4425,15 @@ describe('the page in use', () => {
       expect(root.classList.contains('off-conversation')).toBe(false);
       expect(scrolled).toEqual(['reply:r1', 'reply:r1']);
       expect(chip()!.hidden).toBe(true);
+      // The hub's count is every open question of the conversation, across cards, and the chip goes to the oldest.
+      cardTop = -500;
+      hello(source, { items: [reply('r1', 2, { opening: asked }), reply('r2', 3, { opening: 'Checking.', kind: 'aside' })], questions: { sessionId: 's', since: 0, open: 3, oldest: 'reply:r1', drafts: {}, dismissed: [] } });
+      expect(chip()!.textContent).toBe('3 questions waiting');
+      source.emit('questions', { questions: { sessionId: 's', since: 0, open: 2, oldest: 'reply:r1', drafts: {}, dismissed: [] } });
+      expect(chip()!.textContent).toBe('2 questions waiting');
+      // Another session's questions change nothing.
+      source.emit('questions', { questions: { sessionId: 'other', since: 0, open: 9, oldest: 'reply:x', drafts: {}, dismissed: [] } });
+      expect(chip()!.textContent).toBe('2 questions waiting');
       // Answered or superseded, or while the page cannot answer, there is none.
       hello(source, { items: [reply('r1', 2, { opening: asked }), message('m1', 3, { text: '1B' })] });
       expect(chip()!.hidden).toBe(true);
@@ -4442,24 +4450,86 @@ describe('the page in use', () => {
     }
   });
 
-  it('answers a card with Submit as an ordinary message, and shows a refusal on the card', async () => {
+  it('steps through a card one question at a time, keeps its draft on the hub, and sends the picks for the hub to write, showing a refusal on the card', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+
+    try {
+      const { page, source } = start();
+      const asked = '1. **Port.** Which port? {#port-choice}\n   - A) 1\n   - B) 2\n2. Keep the route? {#keep-route}\n   - A) Keep\n   - B) Remove';
+      const questions = { sessionId: 's', since: 0, open: 2, oldest: 'reply:r1', drafts: {}, dismissed: [] };
+      const drafts = () => posts.filter((post) => post.url.endsWith('/card-draft')).map((post) => post.body['draft']);
+      const step = () => root.querySelector('.question-card')!.getAttribute('data-step');
+
+      hello(source, { items: [reply('r1', 2, { opening: asked })], questions });
+      expect(root.querySelector('.qc-progress')!.textContent).toBe('Question 1 of 2');
+      click('[data-action="card-pick"][data-letter="B"]');
+      expect(root.querySelector('[data-letter="B"]')!.getAttribute('aria-checked')).toBe('true');
+      expect(drafts().at(-1)).toEqual({ step: 'port-choice', picks: { 'port-choice': { letters: ['B'], other: null } } });
+      // A single-choice pick moves on after 200 ms.
+      expect(step()).toBe('port-choice');
+      await vi.advanceTimersByTimeAsync(ADVANCE_MS);
+      expect(step()).toBe('keep-route');
+      expect(root.querySelector('[data-action="card-send"]')!.textContent).toBe('Send 1 of 2');
+      click('[data-action="card-back"]');
+      expect(step()).toBe('port-choice');
+      click('[data-action="card-next"]');
+      // Other opens a field; its text reaches the hub once the typing pauses.
+      click('[data-action="card-other"]');
+      const other = root.querySelector<HTMLTextAreaElement>('textarea.qc-other')!;
+
+      other.value = 'keep it, for now';
+      other.dispatchEvent(new Event('input', { bubbles: true }));
+      await vi.advanceTimersByTimeAsync(OTHER_SETTLE_MS);
+      expect(drafts().at(-1)).toEqual({ step: 'keep-route', picks: { 'port-choice': { letters: ['B'], other: null }, 'keep-route': { letters: [], other: 'keep it, for now' } } });
+
+      // The hub's draft, as another device changed it, shows once this page has nothing on its way.
+      source.emit('questions', { questions: { ...questions, drafts: { 'reply:r1': { step: 'keep-route', picks: { 'port-choice': { letters: ['A'], other: null }, 'keep-route': { letters: ['A'], other: null } } } } } });
+      expect(root.querySelector('[data-letter="A"]')!.getAttribute('aria-checked')).toBe('true');
+      expect(root.querySelector('[data-action="card-send"]')!.textContent).toBe('Send 2 answers');
+
+      answers['/send'] = { status: 409, body: { error: 'That question was withdrawn.' } };
+      click('[data-action="card-send"]');
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(posts.find((post) => post.url.endsWith('/send'))?.body).toMatchObject({ sessionId: 's', launch: 'L', scopeGen: 3, answers: [{ card: 'reply:r1', slug: 'port-choice', letters: ['A'], other: '' }, { card: 'reply:r1', slug: 'keep-route', letters: ['A'], other: '' }] });
+      expect(posts.find((post) => post.url.endsWith('/send'))?.body).not.toHaveProperty('text');
+      expect(root.querySelector('.qc-error')!.textContent).toBe('That question was withdrawn.');
+      expect(root.querySelector<HTMLButtonElement>('[data-action="card-send"]')!.disabled).toBe(false);
+
+      // Dismiss is in the card's menu.
+      click('[data-action="card-menu"]');
+      click('[data-action="card-dismiss"]');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(posts.find((post) => post.url.endsWith('/card-dismiss'))?.body).toMatchObject({ sessionId: 's', card: 'reply:r1', slug: 'keep-route' });
+      page.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('answers a card from the keyboard: letters pick, O opens Other, Enter goes on and sends, Backspace goes back', async () => {
     const { page, source } = start();
+    const asked = '1. Which port? {#port-choice}\n   - A) 1\n   - B) 2\n2. Keep the route? {#keep-route}\n   - A) Keep\n   - B) Remove';
+    const key = (name: string, target: Element = root.querySelector('.question-card')!) => target.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true }));
+    const step = () => root.querySelector('.question-card')!.getAttribute('data-step');
 
-    hello(source, { items: [reply('r1', 2, { opening: '1. Port?\n   - A) 1\n   - B) 2' })] });
-    click('[data-action="pick"][data-letter="B"]');
+    hello(source, { items: [reply('r1', 2, { opening: asked })], questions: { sessionId: 's', since: 0, open: 2, oldest: 'reply:r1', drafts: {}, dismissed: [] } });
+    key('b');
     expect(root.querySelector('[data-letter="B"]')!.getAttribute('aria-checked')).toBe('true');
-    answers['/send'] = { status: 409, body: { error: 'The session has ended.' } };
-    click('[data-action="answer"]');
+    key('Enter');
+    expect(step()).toBe('keep-route');
+    key('Backspace');
+    expect(step()).toBe('port-choice');
+    key('Enter');
+    key('o');
+    expect(root.querySelector('textarea.qc-other')).not.toBeNull();
+    // Letters typed in Other are its text, not picks.
+    expect(key('a', root.querySelector('textarea.qc-other')!)).toBe(true);
+    root.querySelector<HTMLTextAreaElement>('textarea.qc-other')!.value = 'later';
+    root.querySelector('textarea.qc-other')!.dispatchEvent(new Event('input', { bubbles: true }));
+    key('Enter', root.querySelector('textarea.qc-other')!);
     await flush();
-    await flush();
-    expect(posts.find((post) => post.url.endsWith('/send'))?.body).toMatchObject({ text: '1B', sessionId: 's', launch: 'L', scopeGen: 3 });
-    expect(root.querySelector('.question-error')!.textContent).toBe('The session has ended.');
-
-    const other = root.querySelector<HTMLInputElement>('.question-other')!;
-
-    other.value = 'port 3';
-    other.dispatchEvent(new Event('input', { bubbles: true }));
-    expect(root.querySelector<HTMLButtonElement>('.question-submit')!.disabled).toBe(false);
+    expect(posts.find((post) => post.url.endsWith('/send'))?.body).toMatchObject({ answers: [{ slug: 'port-choice', letters: ['B'] }, { slug: 'keep-route', letters: [], other: 'later' }] });
     page.close();
   });
 
@@ -4786,14 +4856,14 @@ describe('the page against late answers', () => {
     const { page, source } = start(/send/);
 
     helloFor(source, 1, 3, [reply('r1', 1, { opening: 'Pick:\n- A) x\n- B) y' })]);
-    root.querySelector<HTMLElement>('[data-action="pick"][data-letter="A"]')!.click();
-    root.querySelector<HTMLElement>('[data-action="answer"]')!.click();
+    root.querySelector<HTMLElement>('[data-action="card-pick"][data-letter="A"]')!.click();
+    root.querySelector<HTMLElement>('[data-action="card-send"]')!.click();
     pending.shift()!.resolve({ status: 200, body: { message: { id: 'm5' } } });
     await flush();
-    source.emit('message', { message: message('m5', 9, { workItemId: 1, delivery: 'not-sent', error: 'The session ended.', text: 'A' }) });
-    expect(root.querySelector('.question-error')!.textContent).toBe('The session ended.');
-    expect(root.querySelector<HTMLButtonElement>('.question-submit')!.disabled).toBe(false);
-    expect(root.querySelector('textarea')!.value).toBe('');
+    source.emit('message', { message: message('m5', 9, { workItemId: 1, delivery: 'not-sent', error: 'The session ended.', text: '[answers]\n- pick: Pick: → A) x' }) });
+    expect(root.querySelector('.qc-error')!.textContent).toBe('The session ended.');
+    expect(root.querySelector<HTMLButtonElement>('[data-action="card-send"]')!.disabled).toBe(false);
+    expect(root.querySelector<HTMLTextAreaElement>('textarea:not(.qc-other)')!.value).toBe('');
     page.close();
   });
 

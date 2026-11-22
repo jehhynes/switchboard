@@ -4,6 +4,7 @@ import { stampTime } from '@switchboard/conversation/messageMeta';
 import { artifactIcon } from './model.js';
 import type { PageState } from './model.js';
 import { renderMarkdown } from './markdown.js';
+import { stripQuestionMarkup } from '@switchboard/conversation/questions';
 import { ago, artifactShow, artifactUrl } from './render.js';
 import { trusted } from './trusted.js';
 import type { ArtifactView, StatusView } from '@switchboard/protocol';
@@ -29,7 +30,7 @@ export function renderStatus(state: PageState, now: number): VNode {
         </span>
         {status.unread ? <span class="status-new">New</span> : null}
       </div>
-      <div class="status-body body">{trusted(renderMarkdown(status.markdown))}</div>
+      <div class="status-body body">{trusted(renderMarkdown(stripQuestionMarkup(status.markdown)))}</div>
     </div>
   );
 }

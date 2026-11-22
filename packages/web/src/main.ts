@@ -3,7 +3,7 @@ import { snoozeChoices } from '@switchboard/core/snooze';
 import type { PageState } from './model.js';
 import { placeMenus } from '@switchboard/conversation/menuPlace';
 import { escape, renderMarkdown, webLink } from './markdown.js';
-import { answerText, artifactShow, artifactTabsFit, artifactUrl, textArtifactHtml, bandOpen, browserNote, BROWSER_MIN_WIDTH, closedArtifacts, paneLink, collapsedGroups, complete, firstSnoozeDay, GROUPS_KEY, inputReady, renderMicButton, markdownBody, newView, parseQuestions, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, hasConsole, SIDE_TABS } from './render.js';
+import { artifactShow, artifactTabsFit, artifactUrl, textArtifactHtml, bandOpen, browserNote, BROWSER_MIN_WIDTH, closedArtifacts, paneLink, collapsedGroups, firstSnoozeDay, GROUPS_KEY, inputReady, renderMicButton, markdownBody, newView, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, hasConsole, SIDE_TABS } from './render.js';
 import type { CardDraft, PaneView, SideTab, Tab, View } from './render.js';
 import type { ConsoleOptions, MountedConsole } from './console.js';
 import { LIGHT_SCHEME } from './console.js';
@@ -13,7 +13,10 @@ import type { ComponentChild, VNode } from 'preact';
 import { renderList, renderListPane } from './list.js';
 import { menuRows, renderHeader, renderMaximize, renderSideSwitch, renderTabs } from './header.js';
 import { CHAT_MIN, chatNeed, fitLayout, isPhone, sideLimit, sideWidth, type Layout } from './layout.js';
-import { pageCards, renderTimeline } from './timeline.js';
+import { pageLedger, renderTimeline } from './timeline.js';
+import { cardSteps, currentStep, draftAnswers, moveStep, pickLetter, setOther } from '@switchboard/conversation/questions';
+import type { CardDraft as SharedDraft, LedgerCard } from '@switchboard/conversation/questions';
+import { cardKeyAction, isAnswerMessage, questionsWaiting } from '@switchboard/conversation/questionCard';
 import { renderArtifacts, renderArtifactView, renderEmpty, renderStatus } from './side.js';
 import { renderPersonaDialog } from './personas.js';
 import { renderSheet } from './sheet.js';
@@ -40,7 +43,12 @@ import { useFileIcons } from './fileIcons.js';
 import type { NeedsItem } from './alerts.js';
 
 /** The stream's event types the page reads. */
-export const EVENTS = ['tabs', 'hello', 'list', 'scope', 'conversations', 'session', 'message', 'reply', 'status', 'artifact', 'unread', 'voice', 'settings', 'progress', 'words', 'draft', 'pane', 'needs', 'show', 'config', 'viewed'];
+/** How long after a single-choice pick the card moves to the next question (design open choice 4). */
+export const ADVANCE_MS = 200;
+/** How long typing in a card's Other field pauses before the hub hears it. */
+export const OTHER_SETTLE_MS = 400;
+
+export const EVENTS = ['tabs', 'hello', 'list', 'scope', 'conversations', 'session', 'message', 'reply', 'status', 'artifact', 'unread', 'voice', 'settings', 'progress', 'words', 'draft', 'questions', 'pane', 'needs', 'show', 'config', 'viewed'];
 /** How long the page's title holds the marker the dock finds its window by after a `show` (architecture.md § Dock). */
 export const SHOW_MARKER_MS = 5_000;
 /** How often the page wakes the Chrome extension while the Chrome pane is on and no extension is connected. */
@@ -1652,24 +1660,20 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
    * Shows the questions-waiting chip over the composer while the newest card that can be answered is not in view, as when the asides after it
    * pushed it up or another tab is shown (PRD R103).
    */
-  let waitingFrom: { items: PageState['items']; links: ReturnType<typeof pageCards> } | null = null;
   const showWaiting = (): void => {
     const chip = composerHost.querySelector<HTMLElement>('.question-waiting')!;
+    // Every open question of the conversation counts, from the hub, which reads back past the items the page holds; the chip goes to the oldest.
+    const ledger = pageLedger(state);
+    const count = state.questions?.open ?? ledger.open.length;
+    const key = state.questions?.oldest ?? (ledger.open.length === 0 ? null : (ledger.questions.get(ledger.open[0]!)?.card ?? null));
 
-    if (waitingFrom?.items !== state.items) {
-      waitingFrom = { items: state.items, links: pageCards(state) };
-    }
-
-    const key = waitingFrom.links.open;
-
-    // A card the page cannot answer, while the composer could not send, has no chip.
-    if (key === null || !state.connected || state.session?.conversation !== 'full') {
+    // Questions the page cannot answer, while the composer could not send, have no chip.
+    if (key === null || count === 0 || !state.connected || state.session?.conversation !== 'full') {
       chip.hidden = true;
       return;
     }
 
-    const count = waitingFrom.links.cards.get(key)!.questions.length;
-    const shown = `<span class="codicon codicon-question" aria-hidden="true"></span>${count} question${count === 1 ? '' : 's'} waiting`;
+    const shown = questionsWaiting(count);
 
     if (chip.dataset['targetCard'] !== key || chip.innerHTML !== shown) {
       chip.dataset['targetCard'] = key;
@@ -2165,7 +2169,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       frame = null;
     }
 
+    // A card is drawn anew from HTML, so the control that had the focus in it gets it back, with an Other field's caret.
+    const focus = cardFocus();
+
     drawRegions();
+    restoreCardFocus(focus);
 
     // Measured again after a draw that changed the tabs, since the Artifacts button may have come or gone; twice at most.
     for (let again = 0; again < 2 && fitArtifactTabs(); again++) {
@@ -2653,54 +2661,145 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   listening.signal.addEventListener('abort', stopSwipe);
   listening.signal.addEventListener('abort', () => document.documentElement.classList.remove('phone'));
 
-  // ---- Cards ----
-  const cardQuestions = (key: string): ReturnType<typeof parseQuestions> => {
-    const [kind, ...rest] = key.split(':');
-    const id = rest.join(':');
-    const markdown = kind === 'status' ? (state.status?.id === id ? state.status.markdown : '') : (state.items.find((item): item is Extract<ItemView, { type: 'reply' }> => item.id === id && item.type === 'reply')?.opening ?? '');
+  // ---- Cards (PRD R103) ----
+  // The hub keeps each card's draft for every page, window and the voice; a page shows its own change at once, until the hub's `questions` follows.
+  const cardUi = (key: string): CardDraft => {
+    let ui = view.cards.get(key);
 
-    return markdown === '' ? [] : parseQuestions(markdown);
-  };
-  const cardDraft = (key: string): CardDraft => {
-    let draft = view.cards.get(key);
-
-    if (draft === undefined) {
-      draft = { choices: new Map(), sent: null, sending: false, error: null };
-      view.cards.set(key, draft);
+    if (ui === undefined) {
+      ui = { local: null, pending: 0, sending: false, error: null, menuOpen: false };
+      view.cards.set(key, ui);
     }
 
-    return draft;
+    return ui;
   };
-  const submitCard = async (key: string): Promise<void> => {
-    const draft = cardDraft(key);
-    const questions = cardQuestions(key);
+  const cardNow = (key: string): LedgerCard | null => pageLedger(state).cards.get(key) ?? null;
+  const cardDraftOf = (key: string): SharedDraft | undefined => view.cards.get(key)?.local ?? state.questions?.drafts[key];
+  let otherTimer: ReturnType<typeof setTimeout> | null = null;
+  let advanceTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Shows a card's new draft and tells the hub; `quiet` leaves the page undrawn, as while an Other field is typed in. */
+  const setDraft = (key: string, draft: SharedDraft, quiet = false): void => {
+    const ui = cardUi(key);
+    const session = state.session;
 
-    // A card answered, skipped or superseded takes no answer, though an Enter in its field could still reach here.
-    if (!complete(questions, draft.choices) || draft.sending || state.session === null || state.session.conversation !== 'full' || pageCards(state).cards.get(key)?.outcome != null) {
+    ui.local = draft;
+    ui.error = null;
+
+    if (!quiet) {
+      draw();
+    }
+
+    if (session === null) {
       return;
     }
 
-    draft.sending = true;
-    draft.sent = answerText(questions, draft.choices);
-    draft.error = null;
+    ui.pending++;
+    void command('card-draft', { sessionId: session.id, card: key, draft }).then((answer) => {
+      ui.pending--;
+
+      if (answer.status !== 200 && ui.pending === 0) {
+        ui.local = null;
+        draw();
+      }
+    });
+  };
+  const sendCard = async (key: string): Promise<void> => {
+    const card = cardNow(key);
+    const ui = cardUi(key);
+    const session = state.session;
+    const given = card === null ? [] : draftAnswers(card, cardDraftOf(key));
+
+    if (card === null || given.length === 0 || ui.sending || session === null || session.conversation !== 'full' || !state.connected) {
+      return;
+    }
+
+    ui.sending = true;
+    ui.error = null;
     draw();
     toEnd();
 
-    const answer = await command('send', { sessionId: state.session.id, launch: state.session.launch, text: draft.sent });
+    const answer = await command('send', { sessionId: session.id, launch: session.launch, answers: given.map(({ one, pick }) => ({ card: key, slug: one.question.slug, letters: pick.letters, other: pick.other ?? '' })) });
     const id = (answer.body['message'] as { id?: string } | undefined)?.id ?? null;
     const late = id === null ? undefined : unsent.get(id);
 
-    draft.sending = false;
+    ui.sending = false;
 
     if (answer.status !== 200 || late !== undefined) {
-      draft.sent = null;
-      draft.error = late?.error ?? String(answer.body['error'] ?? 'Not sent.');
+      ui.error = late?.error ?? String(answer.body['error'] ?? 'Not sent.');
       unsent.delete(id ?? '');
     } else {
-      draft.sentId = id;
+      ui.sentId = id;
     }
 
     draw();
+  };
+  /** Moves a card to the step before or after, or by slug. */
+  const stepCard = (key: string, to: 'back' | 'next' | string): void => {
+    const card = cardNow(key);
+
+    if (card !== null) {
+      setDraft(key, moveStep(card, cardDraftOf(key), to));
+    }
+  };
+  /** Picks a letter; a single-choice pick moves on after `ADVANCE_MS` (design open choice 4), unless the operator moved first. */
+  const pickCard = (key: string, slug: string, letter: string): void => {
+    const card = cardNow(key);
+
+    if (card === null) {
+      return;
+    }
+
+    const { draft, advance } = pickLetter(card, cardDraftOf(key), slug, letter);
+
+    setDraft(key, draft);
+
+    if (advance) {
+      clearTimeout(advanceTimer ?? undefined);
+      advanceTimer = setTimeout(() => {
+        const now = cardNow(key);
+
+        if (now !== null && currentStep(now, cardDraftOf(key))?.question.slug === slug) {
+          stepCard(key, 'next');
+        }
+      }, ADVANCE_MS);
+    }
+  };
+  const openOther = (key: string, slug: string): void => {
+    const card = cardNow(key);
+
+    if (card !== null) {
+      setDraft(key, setOther(card, cardDraftOf(key), slug, cardDraftOf(key)?.picks[slug]?.other ?? ''));
+      [...root.querySelectorAll<HTMLTextAreaElement>('textarea.qc-other')].find((field) => field.dataset['card'] === key)?.focus();
+    }
+  };
+  /** The control in a card that has the focus, to give it back after a draw. */
+  const cardFocus = (): { card: string; selector: string; start: number | null; end: number | null } | null => {
+    const active = document.activeElement as HTMLElement | null;
+    const card = active?.closest<HTMLElement>('.question-card.qc');
+
+    if (active === null || card == null) {
+      return null;
+    }
+
+    const key = card.dataset['card'] ?? '';
+    const data = ['action', 'slug', 'letter'].map((name) => (active.dataset[name] === undefined ? '' : `[data-${name}="${active.dataset[name]!.replace(/["\\]/g, (char) => `\\${char}`)}"]`)).join('');
+    const field = active instanceof HTMLTextAreaElement;
+
+    return { card: key, selector: field ? '.qc-other' : data === '' ? '' : data, start: field ? active.selectionStart : null, end: field ? active.selectionEnd : null };
+  };
+  const restoreCardFocus = (focus: ReturnType<typeof cardFocus>): void => {
+    if (focus === null || document.activeElement?.closest('.question-card.qc') != null) {
+      return;
+    }
+
+    const card = [...root.querySelectorAll<HTMLElement>('.question-card.qc')].find((one) => one.dataset['card'] === focus.card);
+    const target = (focus.selector === '' ? null : card?.querySelector<HTMLElement>(focus.selector)) ?? card;
+
+    target?.focus({ preventScroll: true });
+
+    if (target instanceof HTMLTextAreaElement && focus.start !== null) {
+      target.setSelectionRange(focus.start, focus.end ?? focus.start);
+    }
   };
 
   // ---- Clicks ----
@@ -3037,26 +3136,54 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         }
 
         break;
-      case 'pick': {
-        const key = button!.dataset['card']!;
-        const index = Number(button!.dataset['question']);
-        const letter = button!.dataset['letter']!;
-        const draft = cardDraft(key);
-        const choice = draft.choices.get(index) ?? { letters: [], other: '' };
-        const multi = cardQuestions(key)[index]?.multi === true;
-        const picked = choice.letters.includes(letter);
+      case 'card-pick':
+        pickCard(button!.dataset['card']!, button!.dataset['slug']!, button!.dataset['letter']!);
+        break;
+      case 'card-other':
+        openOther(button!.dataset['card']!, button!.dataset['slug']!);
+        break;
+      case 'card-step':
+        stepCard(button!.dataset['card']!, button!.dataset['slug']!);
+        break;
+      case 'card-back':
+        stepCard(button!.dataset['card']!, 'back');
+        break;
+      case 'card-next':
+        stepCard(button!.dataset['card']!, 'next');
+        break;
+      case 'card-send':
+        void sendCard(button!.dataset['card']!);
+        break;
+      case 'card-menu': {
+        const ui = cardUi(button!.dataset['card']!);
 
-        draft.choices.set(index, multi ? { ...choice, letters: picked ? choice.letters.filter((one) => one !== letter) : [...choice.letters, letter] } : { letters: picked ? [] : [letter], other: picked ? choice.other : '' });
+        ui.menuOpen = !ui.menuOpen;
         draw();
         break;
       }
-      case 'answer':
-        void submitCard(button!.dataset['card']!);
+      case 'card-dismiss': {
+        const key = button!.dataset['card']!;
+        const ui = cardUi(key);
+
+        ui.menuOpen = false;
+        draw();
+
+        if (state.session !== null) {
+          void command('card-dismiss', { sessionId: state.session.id, card: key, slug: button!.dataset['slug']! }).then((answer) => {
+            if (answer.status !== 200) {
+              ui.error = String(answer.body['error'] ?? 'Not dismissed.');
+              draw();
+            }
+          });
+        }
+
         break;
+      }
       case 'goto-card': {
         const key = button!.dataset['targetCard']!;
 
         showLinked('conversation', () => [...document.querySelectorAll<HTMLElement>('.question-card')].find((card) => card.dataset['cardKey'] === key) ?? null);
+        [...document.querySelectorAll<HTMLElement>('.question-card.qc')].find((card) => card.dataset['cardKey'] === key)?.focus({ preventScroll: true });
         break;
       }
       case 'goto-message':
@@ -3109,23 +3236,24 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
-    if (!field.classList?.contains('question-other')) {
+    if (!field.classList?.contains('qc-other')) {
       return;
     }
 
+    // Typing in Other keeps the page undrawn, so the field keeps its caret; the hub hears it once the typing pauses, and the buttons follow then.
     const key = field.dataset['card']!;
-    const index = Number(field.dataset['question']);
-    const draft = cardDraft(key);
-    const choice = draft.choices.get(index) ?? { letters: [], other: '' };
-    const single = cardQuestions(key)[index]?.multi !== true;
+    const slug = field.dataset['slug']!;
+    const card = cardNow(key);
 
-    draft.choices.set(index, { letters: single && field.value.trim() !== '' ? [] : choice.letters, other: field.value });
-
-    const submit = [...root.querySelectorAll<HTMLButtonElement>('.question-submit')].find((one) => one.dataset['card'] === key) ?? null;
-
-    if (submit !== null) {
-      submit.disabled = !complete(cardQuestions(key), draft.choices);
+    if (card === null) {
+      return;
     }
+
+    const draft = setOther(card, cardDraftOf(key), slug, field.value);
+
+    cardUi(key).local = draft;
+    clearTimeout(otherTimer ?? undefined);
+    otherTimer = setTimeout(() => setDraft(key, cardDraftOf(key) ?? draft, true), OTHER_SETTLE_MS);
   });
   // The dropdown closes on a press outside the header and on Escape, which gives the focus back to its button.
   document.addEventListener('pointerdown', (event) => {
@@ -3154,6 +3282,45 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
   });
   root.addEventListener('keydown', (event) => {
+    // A question card's keys while it has the focus (design § 6): A–H pick, O opens Other, Enter goes on or sends, Backspace goes back.
+    const cardEl = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>('.question-card.qc') : null;
+
+    if (cardEl !== null && !event.ctrlKey && !event.metaKey && !event.altKey && !event.isComposing) {
+      const key = cardEl.dataset['card']!;
+      const card = cardNow(key);
+      const inField = event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLInputElement;
+      const action = card === null || !(state.connected && state.session?.conversation === 'full') ? null : cardKeyAction(event.key, inField && event.key !== 'Enter');
+      const step = card === null ? null : currentStep(card, cardDraftOf(key));
+
+      if (action !== null && step !== null && !(inField && event.key === 'Enter' && event.shiftKey)) {
+        // A button's own Enter clicks it.
+        if (action.type === 'forward' && event.target instanceof HTMLButtonElement && !event.target.matches('.qc-other')) {
+          return;
+        }
+
+        event.preventDefault();
+
+        if (action.type === 'pick') {
+          pickCard(key, step.question.slug, action.letter);
+        } else if (action.type === 'other') {
+          openOther(key, step.question.slug);
+        } else if (action.type === 'back') {
+          stepCard(key, 'back');
+        } else {
+          const steps = cardSteps(card!);
+
+          if (steps.indexOf(step) === steps.length - 1) {
+            setDraft(key, cardDraftOf(key) ?? { step: step.question.slug, picks: {} }, true);
+            void sendCard(key);
+          } else if ((cardDraftOf(key)?.picks[step.question.slug]?.letters.length ?? 0) > 0 || (cardDraftOf(key)?.picks[step.question.slug]?.other ?? '').trim() !== '') {
+            stepCard(key, 'next');
+          }
+        }
+
+        return;
+      }
+    }
+
     // The Changes tab's own keys, while the focus is in it (changes.tsx `key`).
     if (changes.key(event)) {
       event.preventDefault();
@@ -3994,6 +4161,15 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         }
       }
 
+      // The hub's drafts now hold what this page changed, unless a change is still on its way.
+      if (type === 'questions') {
+        for (const ui of view.cards.values()) {
+          if (ui.pending === 0) {
+            ui.local = null;
+          }
+        }
+      }
+
       if (type === 'words') {
         liveWords.textContent = String(data['text'] ?? '');
         liveWords.hidden = liveWords.textContent === '';
@@ -4009,9 +4185,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         const card = [...view.cards.values()].find((one) => one.sentId === message.id);
 
         if (card !== undefined) {
-          card.sent = null;
           card.sentId = null;
           card.error = error;
+        } else if (isAnswerMessage(message.text)) {
+          // An answer message's questions reopen with their picks; its text never goes into the composer.
+          mine.delete(message.id);
         } else if (mine.delete(message.id) || data['giveBack'] === true) {
           giveBack(message.workItemId, message.text, error);
         } else {

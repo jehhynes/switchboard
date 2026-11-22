@@ -1,0 +1,82 @@
+/* The question card (packages/conversation/src/questionCard.ts), shared by the web page and the VS Code Conversation view, whose builds put this
+   file before their own styles. Only theme variables both front ends have. The card never scrolls or takes touch gestures of its own, so a
+   vertical pan over it scrolls the conversation. */
+.question-card.qc { position: relative; --qc-border: var(--vscode-widget-border, rgba(127, 127, 127, 0.35)); --qc-accent: var(--vscode-focusBorder, #0078d4); display: flex; flex-direction: column; gap: 10px; box-sizing: border-box; max-width: 760px; margin: 8px 0 4px; padding: 12px 14px; border: 1px solid var(--qc-border); border-radius: 8px; background: color-mix(in srgb, var(--vscode-editorWidget-background, var(--vscode-input-background)) 85%, var(--vscode-foreground) 4%); color: var(--vscode-foreground); overflow: visible; touch-action: auto; }
+.question-card.qc:focus { outline: none; }
+.question-card.qc:focus-visible, .question-card.qc:focus-within { border-color: color-mix(in srgb, var(--qc-accent) 55%, var(--qc-border)); }
+.qc-head { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 0.9em; }
+.qc-progress { font-weight: 600; white-space: nowrap; }
+.qc-dots { display: inline-flex; gap: 4px; }
+.qc-dot { width: 22px; height: 4px; padding: 0; border: none; border-radius: 2px; background: color-mix(in srgb, var(--vscode-foreground) 25%, transparent); cursor: pointer; }
+.qc-dot.qc-filled { background: color-mix(in srgb, var(--qc-accent) 55%, transparent); }
+.qc-dot.qc-current { background: var(--qc-accent); }
+.qc-dot:focus-visible { outline: 1px solid var(--qc-accent); outline-offset: 3px; }
+.qc-slug { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 1px 5px; border-radius: 3px; background: var(--vscode-textCodeBlock-background, rgba(127, 127, 127, 0.15)); color: var(--vscode-descriptionForeground); font-family: var(--vscode-editor-font-family, monospace); font-size: 0.85em; overflow-wrap: anywhere; }
+.qc-row .qc-slug, .answers-line .qc-slug { margin-left: 0; white-space: normal; overflow-wrap: anywhere; }
+.qc-menu-anchor { position: relative; flex: none; }
+.qc-menu-button { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: none; border-radius: 4px; background: transparent; color: var(--vscode-descriptionForeground); cursor: pointer; }
+.qc-menu-button:hover, .qc-menu-button:focus-visible { outline: none; background: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, 0.15)); color: var(--vscode-foreground); }
+.qc-menu { position: absolute; z-index: 3; top: 100%; right: 0; margin-top: 4px; padding: 4px; border: 1px solid var(--vscode-menu-border, var(--qc-border)); border-radius: 6px; background: var(--vscode-menu-background, var(--vscode-editorWidget-background)); box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36)); white-space: nowrap; }
+.qc-menu button { display: block; width: 100%; padding: 4px 10px; border: none; border-radius: 4px; background: transparent; color: var(--vscode-menu-foreground, var(--vscode-foreground)); font: inherit; text-align: left; cursor: pointer; }
+.qc-menu button:hover, .qc-menu button:focus-visible { outline: none; background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground)); color: var(--vscode-menu-selectionForeground, var(--vscode-foreground)); }
+.qc-topic { margin-top: 2px; color: var(--vscode-textLink-foreground, var(--qc-accent)); font-size: 0.8em; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; }
+.qc-question { font-size: 1.08em; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+.qc-context { color: var(--vscode-descriptionForeground); line-height: 1.5; overflow-wrap: anywhere; }
+.qc-question p, .qc-context p { margin: 0; }
+.qc-options { display: flex; flex-direction: column; gap: 6px; }
+.qc-option { display: flex; align-items: flex-start; gap: 12px; box-sizing: border-box; width: 100%; margin: 0; padding: 10px 12px; border: 1px solid var(--qc-border); border-radius: 6px; background: color-mix(in srgb, var(--vscode-editor-background, transparent) 60%, transparent); color: var(--vscode-foreground); font: inherit; text-align: left; cursor: pointer; touch-action: manipulation; }
+.qc-option:hover:not(:disabled) { border-color: color-mix(in srgb, var(--qc-accent) 50%, var(--qc-border)); }
+.qc-option:focus-visible { outline: 1px solid var(--qc-accent); outline-offset: 1px; }
+.qc-option.qc-selected { border: 2px solid var(--qc-accent); padding: 9px 11px; background: color-mix(in srgb, var(--qc-accent) 14%, transparent); }
+.qc-option:disabled { cursor: default; opacity: 0.75; }
+.qc-letter { display: inline-flex; flex: none; align-items: center; justify-content: center; box-sizing: border-box; min-width: 20px; height: 20px; margin-top: 1px; padding: 0 4px; border: 1px solid var(--qc-border); border-radius: 4px; font-size: 0.8em; font-weight: 600; }
+.qc-selected .qc-letter { border-color: var(--qc-accent); background: var(--qc-accent); color: var(--vscode-button-foreground, #fff); }
+.qc-option-body { display: flex; flex: 1; flex-wrap: wrap; align-items: baseline; column-gap: 8px; row-gap: 2px; min-width: 0; }
+.qc-label { font-weight: 600; overflow-wrap: anywhere; }
+.qc-label p, .qc-desc p { margin: 0; display: inline; }
+.qc-recommended { padding: 0 6px; border-radius: 8px; background: color-mix(in srgb, var(--vscode-testing-iconPassed, #388a34) 22%, transparent); color: color-mix(in srgb, var(--vscode-testing-iconPassed, #388a34) 70%, var(--vscode-foreground)); font-size: 0.78em; font-weight: 500; }
+.qc-desc { flex-basis: 100%; color: var(--vscode-descriptionForeground); font-size: 0.9em; line-height: 1.45; overflow-wrap: anywhere; }
+.qc-other { box-sizing: border-box; width: 100%; min-height: 56px; padding: 8px 10px; border: 1px solid var(--qc-border); border-radius: 6px; outline: none; background: var(--vscode-input-background); color: var(--vscode-input-foreground, var(--vscode-foreground)); font: inherit; resize: vertical; }
+.qc-other:focus { border-color: var(--qc-accent); }
+.qc-other::placeholder { color: var(--vscode-input-placeholderForeground); }
+.qc-summary { display: flex; flex-wrap: wrap; gap: 6px; }
+.qc-chip { padding: 1px 8px; border: 1px solid var(--qc-border); border-radius: 10px; background: transparent; color: var(--vscode-descriptionForeground); font: inherit; font-size: 0.82em; cursor: pointer; }
+.qc-chip b { color: var(--vscode-foreground); }
+.qc-chip:hover, .qc-chip:focus-visible { outline: none; border-color: var(--qc-accent); }
+.qc-later, .qc-note { margin: 0; color: var(--vscode-descriptionForeground); font-size: 0.85em; }
+.qc-footer { display: flex; align-items: center; gap: 8px; }
+.qc-error { flex: 1; min-width: 0; color: var(--vscode-errorForeground); font-size: 0.9em; overflow-wrap: anywhere; }
+.qc-primary { margin-left: auto; padding: 5px 14px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 4px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); font: inherit; font-weight: 600; cursor: pointer; touch-action: manipulation; }
+.qc-primary:hover:not(:disabled) { background: var(--vscode-button-hoverBackground, var(--vscode-button-background)); }
+.qc-secondary { padding: 5px 14px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 4px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); font: inherit; cursor: pointer; touch-action: manipulation; }
+.qc-secondary:hover:not(:disabled) { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-button-secondaryBackground)); }
+.qc-primary:disabled, .qc-secondary:disabled { opacity: 0.5; cursor: default; }
+.qc-error + .qc-primary { margin-left: 0; }
+.qc-link { padding: 0; border: none; background: transparent; color: var(--vscode-textLink-foreground, var(--qc-accent)); font: inherit; cursor: pointer; }
+.qc-link:hover, .qc-link:focus-visible { outline: none; text-decoration: underline; }
+.qc-settled { display: flex; flex-direction: column; gap: 8px; margin: 2px 0 0; padding: 0; list-style: none; }
+.qc-open-card .qc-settled, .question-card.qc:not(.qc-settled-card) .qc-settled { padding-top: 10px; border-top: 1px solid var(--qc-border); }
+.qc-row { display: flex; align-items: flex-start; gap: 8px; font-size: 0.92em; }
+.qc-pill { flex: none; padding: 0 7px; border-radius: 8px; background: color-mix(in srgb, var(--vscode-foreground) 12%, transparent); color: var(--vscode-descriptionForeground); font-size: 0.82em; line-height: 1.6; }
+.qc-answered .qc-pill { background: color-mix(in srgb, var(--vscode-testing-iconPassed, #388a34) 22%, transparent); color: color-mix(in srgb, var(--vscode-testing-iconPassed, #388a34) 70%, var(--vscode-foreground)); }
+.qc-row-main { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.qc-row-question { font-weight: 600; }
+.qc-row-question p { display: inline; margin: 0; }
+.qc-struck { text-decoration: line-through; color: var(--vscode-descriptionForeground); }
+.qc-row-detail { display: block; color: var(--vscode-descriptionForeground); }
+.qc-answered .qc-row-detail { color: var(--vscode-foreground); font-weight: 600; }
+.qc-done { font-size: 0.9em; color: var(--vscode-descriptionForeground); }
+.qc-done .qc-progress { font-weight: 400; }
+
+/* The Answers bubble: an answer message, its tag hidden, each slug a chip, the question dimmed and the answer bold. */
+.answers-bubble { display: flex; flex-direction: column; gap: 6px; }
+.answers-title { color: var(--vscode-descriptionForeground); font-size: 0.78em; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+.answers-line { overflow-wrap: anywhere; }
+.answers-line .qc-slug { margin: 0 4px 0 0; }
+.answers-question { color: var(--vscode-descriptionForeground); }
+.answers-answer { font-weight: 600; }
+.answers-link { align-self: flex-start; padding: 0; border: none; background: transparent; color: var(--vscode-textLink-foreground, var(--vscode-focusBorder)); font: inherit; font-size: 0.85em; cursor: pointer; }
+.answers-link:hover, .answers-link:focus-visible { outline: none; text-decoration: underline; }
+
+/* The step's announcement, for assistive readers only. */
+.qc-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }

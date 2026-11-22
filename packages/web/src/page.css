@@ -651,7 +651,10 @@ body.artifact-window > .artifact-view { height: 100%; }
 @media (hover: none), (pointer: coarse) {
   .code-block > .copy { opacity: 1; }
   .meta .copy { display: none; }
-  button.picker, .tab, .composer-tool, .send, .voice-controls .ghost, .row, .group-head, .question-option, .show-more, .earlier-items, .question-submit, .question-link, .artifact-open, .artifact-head .icon, .composer-error .dismiss { min-height: 44px; }
+  button.picker, .tab, .composer-tool, .send, .voice-controls .ghost, .row, .group-head, .question-option, .show-more, .earlier-items, .question-submit, .question-link, .qc-primary, .qc-secondary, .qc-menu-button, .qc-menu button, .artifact-open, .artifact-head .icon, .composer-error .dismiss { min-height: 44px; }
+  .qc-menu-button { min-width: 44px; }
+  /* A card's options are 56 px rows on touch (design § 6, Phone). */
+  .qc-option { min-height: 56px; }
   .composer-tool, .send, .voice-controls .ghost.icon, .artifact-head .icon, .composer-error .dismiss { min-width: 44px; }
   .voice-controls .ghost.talk-here { line-height: 44px; }
   .attachments { gap: 12px 8px; }
@@ -960,3 +963,6 @@ ol.hist-timeline { list-style: none; margin: 0; padding: 4px 12px 10px; }
   .hist-gap { display: none; }
 }
 @media (hover: none), (pointer: coarse) { .hist-bar button.icon, .hist-toolbar button.icon, .history-view button.hist-chip, .history-view button.hist-link { min-height: 44px; } .hist-bar button.icon { min-width: 44px; } }
+
+/* A question card on a phone (design § 6): the full width of the timeline at 14 px. */
+:where(html.phone) .question-card.qc { max-width: none; font-size: 14px; }

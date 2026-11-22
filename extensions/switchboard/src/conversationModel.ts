@@ -2,7 +2,7 @@ import { DEVICE_OFF_TIP, PAUSED_BY_VOICE_TIP, ROOM_HOLD_TIP } from '@switchboard
 import { SESSION_ICONS, SESSION_TONES, sessionIcon } from '@switchboard/core/group';
 import type { IconTone } from '@switchboard/core/group';
 import type { SessionIcon } from '@switchboard/core/group';
-import type { ArtifactView, ConversationEntry, ItemView, ReplyView, ScopeView, SessionView, StatusView, VoiceView } from '@switchboard/hub';
+import type { ArtifactView, ConversationEntry, ItemView, QuestionsView, ReplyView, ScopeView, SessionView, StatusView, VoiceView } from '@switchboard/hub';
 
 /** What a window's Conversation view shows, kept from its conversation stream (architecture.md § Conversation view). */
 export interface ConversationState {
@@ -27,14 +27,17 @@ export interface ConversationState {
   voice: VoiceView | null;
   /** The one setting the view reads: whether a reply with a `[speak]` passage starts expanded. */
   settings: { expandReplies: boolean };
+  /** The session's questions as the hub keeps them (PRD R103): the open count, the oldest open card and the card drafts; null from an older hub. */
+  questions?: QuestionsView | null;
 }
 
-export const EMPTY_CONVERSATION: ConversationState = { scope: null, session: null, items: [], more: false, connected: false, status: null, artifactsDir: null, artifacts: [], unread: 0, voice: null, settings: { expandReplies: false } };
+export const EMPTY_CONVERSATION: ConversationState = { scope: null, session: null, items: [], more: false, connected: false, status: null, artifactsDir: null, artifacts: [], unread: 0, voice: null, settings: { expandReplies: false }, questions: null };
 
 /** An event of the conversation stream, as parsed from its data line. */
 export type ConversationEvent =
-  | { type: 'hello'; scope: ScopeView | null; sessions: SessionView[]; items: ItemView[]; more: boolean; status: StatusView | null; artifactsDir: string | null; artifacts: ArtifactView[]; unread?: number; voice?: VoiceView; settings?: { expandReplies: boolean } }
+  | { type: 'hello'; scope: ScopeView | null; sessions: SessionView[]; items: ItemView[]; more: boolean; status: StatusView | null; artifactsDir: string | null; artifacts: ArtifactView[]; unread?: number; voice?: VoiceView; settings?: { expandReplies: boolean }; questions?: QuestionsView | null }
   | { type: 'voice'; voice: VoiceView }
+  | { type: 'questions'; questions: QuestionsView }
   | { type: 'settings'; settings: { expandReplies: boolean } }
   | { type: 'progress'; replyId: string; chars: number; atMs: number }
   | { type: 'scope'; scope: ScopeView | null }
@@ -92,7 +95,13 @@ export function applyEvent(state: ConversationState, event: ConversationEvent): 
         unread: hello.unread ?? 0,
         voice: hello.voice ?? null,
         settings: hello.settings ?? state.settings,
+        questions: hello.questions ?? null,
       };
+    }
+    case 'questions': {
+      const questions = (event as Extract<ConversationEvent, { type: 'questions' }>).questions;
+
+      return questions?.sessionId === state.scope?.sessionId ? { ...state, questions } : state;
     }
     case 'voice':
       return { ...state, voice: (event as Extract<ConversationEvent, { type: 'voice' }>).voice };
