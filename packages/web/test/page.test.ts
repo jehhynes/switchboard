@@ -4595,7 +4595,7 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it("sets voice.expandReplies from View options' Expand replies on this computer's page, follows the hub's settings, and leaves it out on a paired device", async () => {
+  it("sets voice.expandReplies from View options' Expand replies on this computer's page, follows the hub's settings, and keeps a paired device's choice on that device", async () => {
     const { page, source } = start();
     const expandRow = () => root.querySelector('[data-action="toggle-expand-replies"]');
 
@@ -4641,13 +4641,41 @@ describe('the page in use', () => {
     expect(expandRow()!.getAttribute('aria-checked')).toBe('true');
     page.close();
 
-    // A paired device may not change settings.json (architecture.md § Remote access), so its menu has Show message details only.
-    const fetch = vi.fn(async () => ({ status: 200, ok: true, json: async () => ({}), text: async () => '' }) as unknown as Response);
-    const paired = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, local: false });
+    // This computer's page never reads a paired device's choice.
+    expect(localStorage.getItem('switchboard.expandReplies')).toBeNull();
 
-    hello(FakeSource.last!, { settings: { expandReplies: true } });
+    // A paired device may not change settings.json (architecture.md § Remote access), so its Expand replies starts from voice.expandReplies
+    // and, once toggled, is kept on the device and posts nothing.
+    const fetch = vi.fn(async () => ({ status: 200, ok: true, json: async () => ({}), text: async () => '' }) as unknown as Response);
+    const pairedPage = () => startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, local: false });
+    const expandPosts = () => fetch.mock.calls.filter((call) => String((call as unknown[])[0]).endsWith('/expand-replies'));
+    let paired = pairedPage();
+
+    hello(FakeSource.last!, { items: [reply('r1', 2, { opening: 'Whole reply.', speak: 'Short.' })], settings: { expandReplies: true } });
     click('.header button.view-options');
-    expect([...root.querySelectorAll('.view-options-menu .menu-row')].map((row) => row.textContent!.trim())).toEqual(['Show message details']);
+    expect([...root.querySelectorAll('.view-options-menu .menu-row')].map((row) => row.textContent!.trim()).slice(0, 2)).toEqual(['Show message details', 'Expand replies']);
+    expect(expandRow()!.getAttribute('aria-checked')).toBe('true');
+    expect(root.querySelector('#panel')!.textContent).toContain('Whole reply.');
+    click('[data-action="toggle-expand-replies"]');
+    await flush();
+    expect(expandPosts()).toEqual([]);
+    expect(localStorage.getItem('switchboard.expandReplies')).toBe('0');
+    expect(expandRow()!.getAttribute('aria-checked')).toBe('false');
+    expect(root.querySelector('#panel')!.textContent).not.toContain('Whole reply.');
+
+    // The device's choice outlasts the hub's settings and a reload.
+    FakeSource.last!.emit('settings', { settings: { expandReplies: true, diffLayout: 'auto', diffWrap: 'auto' } });
+    expect(expandRow()!.getAttribute('aria-checked')).toBe('false');
+    paired.close();
+    paired = pairedPage();
+    hello(FakeSource.last!, { items: [reply('r1', 2, { opening: 'Whole reply.', speak: 'Short.' })], settings: { expandReplies: true } });
+    expect(root.querySelector('#panel')!.textContent).not.toContain('Whole reply.');
+    click('.header button.view-options');
+    click('[data-action="toggle-expand-replies"]');
+    expect(localStorage.getItem('switchboard.expandReplies')).toBe('1');
+    expect(expandRow()!.getAttribute('aria-checked')).toBe('true');
+    expect(root.querySelector('#panel')!.textContent).toContain('Whole reply.');
+    expect(expandPosts()).toEqual([]);
     paired.close();
   });
 

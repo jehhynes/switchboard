@@ -184,7 +184,7 @@ function PersonaRow({ session }: { session: PageState['session'] }) {
 }
 
 /**
- * The header's view options button and its menu: Show message details, Expand replies on this computer's page, the persona, and the Chrome
+ * The header's view options button and its menu: Show message details, Expand replies, the persona, and the Chrome
  * pane's state and pairing while it is on.
  */
 function ViewOptions({ view, expandReplies, session }: { view: View; expandReplies: boolean; session: PageState['session'] }) {
@@ -199,12 +199,10 @@ function ViewOptions({ view, expandReplies, session }: { view: View; expandRepli
             <Gutter checked={view.details} />
             <span class="title">Show message details</span>
           </button>
-          {view.settingsHere ? (
-            <button type="button" class="menu-row" role="menuitemcheckbox" aria-checked={expandReplies} data-action="toggle-expand-replies">
-              <Gutter checked={expandReplies} />
-              <span class="title">Expand replies</span>
-            </button>
-          ) : null}
+          <button type="button" class="menu-row" role="menuitemcheckbox" aria-checked={expandReplies} data-action="toggle-expand-replies">
+            <Gutter checked={expandReplies} />
+            <span class="title">Expand replies</span>
+          </button>
           <PersonaRow session={session} />
           <PaneRows view={view} />
         </div>
@@ -295,7 +293,7 @@ export function renderHeader(state: PageState, view: View): VNode {
         {pickerMenu}
       </div>
       <Actions row={selectedRow(state)} view={view} />
-      <ViewOptions view={view} expandReplies={state.expandReplies} session={state.session} />
+      <ViewOptions view={view} expandReplies={view.expandReplies ?? state.expandReplies} session={state.session} />
     </header>
   );
 }

@@ -76,6 +76,8 @@ const SIDE_WIDTH = 'switchboard.sideWidth';
 const LIST_UNPINNED = 'switchboard.listCollapsed';
 /** Where the page keeps Show message details. */
 const DETAILS = 'switchboard.messageDetails';
+/** A paired device's own Expand replies, '1' or '0'; this computer's page keeps it in settings.json instead. */
+const EXPAND = 'switchboard.expandReplies';
 /** Where an earlier page kept the conversation's text size, which is now fixed; removed on load. */
 const OLD_TEXT_SCALE = 'switchboard.textScale';
 const CHAT_WIDTH = 'switchboard.chatWidth';
@@ -530,7 +532,18 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && void settingsPane.reload());
   const local = deps.local ?? ['127.0.0.1', 'localhost'].includes(location.hostname);
 
-  view.settingsHere = local;
+
+  // A paired device may not change settings.json (architecture.md § Remote access), so its Expand replies is its own, following
+  // voice.expandReplies until it is first toggled there.
+  if (!local) {
+    try {
+      const kept = localStorage.getItem(EXPAND);
+
+      view.expandReplies = kept === '1' ? true : kept === '0' ? false : null;
+    } catch {
+      // Follows voice.expandReplies without local storage.
+    }
+  }
   /**
    * The value Expand replies was last clicked to, until the hub's `settings` event or a refusal, so a quick second click reverses the
    * first, and the value of the save in flight; saves go one at a time, so a later click's value is the one the file keeps.
@@ -3083,7 +3096,20 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         draw();
         break;
       case 'toggle-expand-replies':
-        // voice.expandReplies in settings.json; the checkbox and the replies follow the hub's `settings` event once the file is reloaded.
+        if (!local) {
+          view.expandReplies = !(view.expandReplies ?? state.expandReplies);
+
+          try {
+            localStorage.setItem(EXPAND, view.expandReplies ? '1' : '0');
+          } catch {
+            // A page without local storage keeps the choice until it reloads.
+          }
+
+          draw();
+          break;
+        }
+
+        // On this computer's page, voice.expandReplies in settings.json; the checkbox and the replies follow the hub's `settings` event once the file is reloaded.
         expandAsked = !(expandAsked ?? state.expandReplies);
 
         if (expandSending === null) {
