@@ -298,14 +298,22 @@ export class Speech {
             return;
           }
 
+          const start = (): void => {
+            if (current.startedAt === null) {
+              current.startedAt = this.deps.now();
+              this.#report(item, 'playing', 0, 0);
+              current.ticker = (this.deps.every ?? every)(() => this.#progress(current), PROGRESS_MS);
+            }
+          };
+
+          // A playback that reports its own position, as a phone's, plays while a long write still waits on it, so it counts from the start.
+          if (current.playback.position !== undefined) {
+            start();
+          }
+
           await current.playback.write(pcm);
           current.writtenMs += pcm.length / BYTES_PER_MS;
-
-          if (current.startedAt === null) {
-            current.startedAt = this.deps.now();
-            this.#report(item, 'playing', 0, 0);
-            current.ticker = (this.deps.every ?? every)(() => this.#progress(current), PROGRESS_MS);
-          }
+          start();
         });
       }, item.as);
     } catch (error) {
@@ -347,7 +355,9 @@ export class Speech {
 
   /** Where playback stands: how long it has played and how much of the passage that covers. */
   #position(current: Current): { atMs: number; said: number } {
-    const playedMs = current.startedAt === null ? 0 : Math.min(this.deps.now() - current.startedAt, current.writtenMs);
+    // A phone reports what it played; elsewhere playback is timed from its first write.
+    const reported = current.playback?.position?.();
+    const playedMs = current.startedAt === null ? 0 : (reported ?? Math.min(this.deps.now() - current.startedAt, current.writtenMs));
     const totalMs = current.complete ? current.writtenMs : Math.max(current.writtenMs, current.item.text.length * MS_PER_CHAR);
     const said = totalMs <= 0 ? 0 : Math.min(current.item.text.length, Math.round((current.item.text.length * playedMs) / totalMs));
 

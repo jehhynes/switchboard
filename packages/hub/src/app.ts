@@ -59,6 +59,10 @@ const RELOAD_DEBOUNCE_MS = 300;
 export const VOICE_GLYPH = '\u{ec12}';
 /** The mic mark's tooltip. */
 const VOICE_TITLE = 'The voice speaks for this session.';
+/** The mic mark's tooltip while a paired phone has the voice (architecture.md § Remote access, Voice on a phone). */
+const PHONE_VOICE_TITLE = 'The voice speaks for this session on the phone.';
+/** The dock's note while no device has the voice, after the phone that had it left. */
+const NO_VOICE_DEVICE = 'Voice: the phone that had it left. Use Talk here to bring it to this computer, or tap Voice on this phone again.';
 
 /** Operator events the dock may send (PRD R27). */
 const OPERATOR_EVENTS = new Set(['adhoc', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retry', 'stop', 'delete', 'open-question', 'pick', 'retriage-pool', 'snooze', 'restore', 'comment', 'move', 'reset-position', 'persona']);
@@ -519,14 +523,30 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       listener();
     }
   };
+  // The page keys of paired devices' pages, which cannot take the voice back to this computer (architecture.md § Remote access).
+  const remotePages = new Set<string>();
   // The voice socket of a paired device (architecture.md § Remote access).
-  const voiceSockets = new VoiceSockets({ now: deps.now, log: (line) => deps.log(line) });
+  const voiceSockets = new VoiceSockets({
+    now: deps.now,
+    log: (line) => deps.log(line),
+    opened: (device) => voice.phoneOpened(device.key),
+    closed: (_device, reason) => voice.phoneClosed(reason),
+    message: (_device, data) => voice.phoneMessage(data),
+  });
   const voice: VoiceControl = new VoiceControl({
     link: new VoiceLink({ home, nodePath: () => config.settings.sessions.nodePath, log: (line) => deps.log(line), now: deps.now, sleep: deps.sleep }),
     settings: () => config.settings.voice,
     store,
     windows: { keys: () => scopes.keys(), scope: (key) => scopes.scope(key) },
     focusedWindow: () => focusedWindow,
+    // Voice on a phone (architecture.md § Remote access): its voice socket, and whether its page has the focus.
+    phone: {
+      send: (message) => voiceSockets.send(message),
+      sendBinary: (data) => voiceSockets.sendBinary(data),
+      close: (reason) => voiceSockets.close(() => true, reason),
+    },
+    pageFocused: (key) => focusedPages.has(key),
+    remotePage: (key) => remotePages.has(key),
     full: (sessionId) => {
       const session = store.session(sessionId);
 
@@ -677,7 +697,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       const built = views();
       const row = voiceRow();
 
-      return pageList(built.dock, built.snapshot, row === null ? null : { row, glyph: VOICE_GLYPH, title: VOICE_TITLE });
+      return pageList(built.dock, built.snapshot, row === null ? null : { row, glyph: VOICE_GLYPH, title: voice.device === 'phone' ? PHONE_VOICE_TITLE : VOICE_TITLE });
     },
     pageHeader: () => {
       const built = views();
@@ -903,7 +923,7 @@ const dockWithRuns = () => {
           ...row,
           open: row.open?.type === 'terminal' ? { ...executable(row.open), type: 'terminal' as const } : row.open,
           terminal: row.terminal === null ? null : executable(row.terminal),
-          voice: row.key === activeRow ? { glyph: VOICE_GLYPH, title: VOICE_TITLE } : null,
+          voice: row.key === activeRow ? { glyph: VOICE_GLYPH, title: voice.device === 'phone' ? PHONE_VOICE_TITLE : VOICE_TITLE } : null,
           controls: [...row.controls, ...personaControls(row.key)],
         })),
       })),
@@ -921,8 +941,9 @@ const dockWithRuns = () => {
   /** The dock's notes with the voice's problem last, as the dock and the page show them (architecture.md § Voice). */
   function withVoiceNote(notes: string[]): string[] {
     const voiceError = voice.dockError();
+    const withError = voiceError === null ? notes : [...notes, `Voice: ${voiceError}`];
 
-    return voiceError === null ? notes : [...notes, `Voice: ${voiceError}`];
+    return voice.device === 'none' && config.settings.voice.enabled ? [...withError, NO_VOICE_DEVICE] : withError;
   }
 
   /**
@@ -1522,6 +1543,7 @@ const dockWithRuns = () => {
       }
 
       focusedPages.delete(key);
+      remotePages.delete(key);
       pageTargets.closed(key);
       paneFocusedFor = paneFocusedFor === key ? null : paneFocusedFor;
       pane.pageClosed(key);
@@ -1535,8 +1557,12 @@ const dockWithRuns = () => {
       access: new PageAccess(store, deps.now),
       remote: () => remote,
       asset: (name) => pageAsset(name, home),
-      opened: (installed) => {
+      opened: (installed, remote) => {
         const key = scopes.openPage();
+
+        if (remote === true) {
+          remotePages.add(key);
+        }
 
         pageTargets.opened(key, installed === true);
 

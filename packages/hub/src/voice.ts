@@ -5,7 +5,7 @@ import { PERMISSION_PROMPT, QUESTION_CARD, START_PROMPT } from '@switchboard/cor
 import { spokenText } from '@switchboard/conversation';
 import type { HeardTag } from '@switchboard/conversation';
 import { ENROLL_SECONDS } from '@switchboard/voice';
-import type { AlertCause, AwayReason, EnrollmentState, HubMessage, MicState, UtteranceTiming, VoiceMessage, VoiceTarget } from '@switchboard/voice';
+import type { AlertCause, AwayReason, EnrollmentState, HubMessage, MicState, UtteranceTiming, VoiceDevice, VoiceMessage, VoiceTarget } from '@switchboard/voice';
 import type { VoiceConnection } from './voiceLink.js';
 import type { WindowScope } from './windows.js';
 
@@ -106,6 +106,8 @@ export const VOICE_LINGER_MS = 10 * 60_000;
 export const VOICE_RESTART_MS = 60_000;
 /** What a dock row click answers when its session has no window to talk to. */
 export const OPEN_ITS_WINDOW = 'Open its window to talk to it.';
+/** Why a dock click leaves the voice where it is while the phone has it. */
+export const PHONE_HAS_VOICE = 'The voice is on the phone. Use Talk here in a window to take it back.';
 /** How long after a session's change an alert for it is sent, so the transcript has given the turn's last reply and a passing state is not called out. */
 export const ALERT_DELAY_MS = 1_500;
 /** The longest detail an alert reads, cut at a sentence. */
@@ -214,7 +216,16 @@ export interface VoiceControlDeps {
   setTimer?(run: () => void, ms: number): unknown;
   clearTimer?(timer: unknown): void;
   every?(run: () => void, ms: number): { stop(): void };
+  /** The voice socket of the paired phone that holds it (architecture.md § Remote access, Voice on a phone); without it the voice stays on this computer. */
+  phone?: { send(message: Record<string, unknown>): boolean; sendBinary(data: Buffer): boolean; close(reason: string): void };
+  /** Whether a page reported that it has the focus and is visible. */
+  pageFocused?(key: string): boolean;
+  /** Whether a page key is a paired device's page, which never takes the voice to this computer. */
+  remotePage?(key: string): boolean;
 }
+
+/** The first byte of a binary frame the hub sends the phone: a playback's 24 kHz PCM, after its playback number (Voice on a phone). */
+export const PHONE_PCM_FRAME = 1;
 
 interface Offered {
   gen: number;
@@ -285,8 +296,86 @@ export class VoiceControl {
   /** The alert of each session waiting to be sent or sent and not ended, with the kind it was for. */
   readonly #alerts = new Map<string, { alertId: string; kind: AlertKind; timer: unknown }>();
   #alertCount = 0;
+  /** Where the voice's microphone and speaker are, and the page key of the phone that has it (PRD R119). */
+  #device: VoiceDevice = 'computer';
+  #phoneKey: string | null = null;
 
   constructor(private readonly deps: VoiceControlDeps) {}
+
+  /** Where the voice's microphone and speaker are: this computer, a paired phone, or none after the phone left. */
+  get device(): VoiceDevice {
+    return this.#device;
+  }
+
+  /**
+   * A paired phone's page took the voice with its tap (PRD R119): the voice moves to its speaker, and to the conversation it shows, as Talk
+   * here there would move it.
+   */
+  phoneOpened(key: string): void {
+    // Another phone's page taking over is a move: what played on the first stops before anything plays on this one.
+    if (this.#device === 'phone' && this.#phoneKey !== key) {
+      this.#setDevice('none', 'another phone takes the voice');
+    }
+
+    this.#phoneKey = key;
+    this.#setDevice('phone', 'a paired phone took the voice');
+
+    if (this.deps.windows.scope(key)?.sessionId != null) {
+      this.talkHere(key);
+    }
+
+    this.update();
+  }
+
+  /** The phone's voice socket closed: the voice stays off, never moving back to this computer's speakers on its own (PRD R119, decision 1). */
+  phoneClosed(reason: string): void {
+    if (this.#device !== 'phone') {
+      return;
+    }
+
+    this.#phoneKey = null;
+    this.#micOn = false;
+    this.#setDevice('none', `the phone left: ${reason}`);
+    this.update();
+  }
+
+  /** A JSON message from the phone's page: `played {id, ms, done}`, the position of one of its playbacks. */
+  phoneMessage(data: Record<string, unknown>): void {
+    const { type, id, ms, done } = data;
+
+    if (this.#device === 'phone' && type === 'played' && typeof id === 'number' && Number.isSafeInteger(id) && id >= 0 && typeof ms === 'number' && Number.isFinite(ms) && ms >= 0 && typeof done === 'boolean') {
+      this.#client?.send({ type: 'phone-played', id, ms, done });
+    }
+  }
+
+  /** The voice comes back to this computer from the phone, or from none, by an action taken on this computer. */
+  #takeBack(key: string | null): void {
+    if (this.#device === 'computer' || (key !== null && key === this.#phoneKey)) {
+      return;
+    }
+
+    const fromPhone = this.#device === 'phone';
+
+    this.#phoneKey = null;
+    this.#setDevice('computer', 'taken back on this computer');
+
+    if (fromPhone) {
+      this.deps.phone?.close('Voice moved to the computer.');
+    }
+  }
+
+  #setDevice(device: VoiceDevice, why: string): void {
+    if (device === this.#device) {
+      return;
+    }
+
+    this.#device = device;
+    this.deps.log(`voice: device ${device}: ${why}`);
+    this.#client?.send({ type: 'device', device });
+    this.#targetsSent = '';
+    this.viewsChanged();
+    this.deps.dockChanged();
+  }
 
   /** The voice target's session, or null. */
   get target(): string | null {
@@ -429,10 +518,12 @@ export class VoiceControl {
       }
     }
 
-    const focused = this.deps.focusedWindow();
+    // While the phone has the voice only its page's focus moves it: nobody may be at this computer (PRD R119, decision 2).
+    const phone = this.#device === 'phone' ? this.#phoneKey : null;
+    const focused = phone !== null ? (this.deps.pageFocused?.(phone) === true ? phone : null) : this.deps.focusedWindow();
     const session = focused === null ? null : (this.deps.windows.scope(focused)?.sessionId ?? null);
     // The dock reports a terminal only while it is in front, so its focus wins over a window that has not reported its blur yet.
-    const focus = this.#terminalFocus !== null ? { sessionId: this.#terminalFocus, via: 'terminal' as const } : session === null ? null : { sessionId: session, via: 'window' as const };
+    const focus = this.#terminalFocus !== null && phone === null ? { sessionId: this.#terminalFocus, via: 'terminal' as const } : session === null ? null : { sessionId: session, via: 'window' as const };
     const message: HubMessage = { type: 'targets', targets: [...targets.values()], focus };
     const text = JSON.stringify(message);
 
@@ -558,6 +649,10 @@ export class VoiceControl {
    * operator turned it on; turning it off stops capture wherever the voice is. Why not, or null.
    */
   mic(key: string, on: boolean): string | null {
+    if (on && this.#device === 'phone' && key === this.#phoneKey) {
+      return 'The phone does not dictate yet: type, or use the mic on the computer.';
+    }
+
     if (on) {
       const refused = this.talkHere(key);
 
@@ -1023,6 +1118,17 @@ export class VoiceControl {
   /** Talk here from a window: the voice moves to its selected conversation's session; why not, or null. */
   talkHere(key: string): string | null {
     const session = this.deps.windows.scope(key)?.sessionId ?? null;
+
+    // Another paired device's page cannot take the voice from the phone, nor to this computer after the phone left (PRD R119).
+    if (this.#device !== 'computer' && key !== this.#phoneKey && this.deps.remotePage?.(key) === true) {
+      return this.#device === 'phone' ? 'The voice is on another device.' : 'Tap Voice on this phone to use the voice here.';
+    }
+
+    // Talk here on this computer takes the voice back from the phone, or after the phone left (PRD R119).
+    if (session !== null && this.deps.settings().enabled && this.#client !== null && this.deps.full(session)) {
+      this.#takeBack(key);
+    }
+
     const refused = session === null ? 'This window has no session to talk to.' : this.#talkTo(session);
 
     if (refused === null) {
@@ -1034,6 +1140,11 @@ export class VoiceControl {
 
   /** A dock row's click (architecture.md § Dock): Talk here for that work item's session when one of its windows is connected; why not, or null. */
   dockSelect(workItemId: number): string | null {
+    // A dock click is no Talk here: it does not take the voice from the phone (PRD R119, decision 2).
+    if (this.#device === 'phone') {
+      return PHONE_HAS_VOICE;
+    }
+
     const key = this.deps.windows.keys().find((one) => this.deps.windows.scope(one)?.workItemId === workItemId && this.deps.windows.scope(one)?.sessionId != null);
 
     return key === undefined ? OPEN_ITS_WINDOW : this.talkHere(key);
@@ -1041,7 +1152,14 @@ export class VoiceControl {
 
   /** The window selected another conversation: while it has the focus, Talk here for it, without the focus debounce (voice-design § 2.3). */
   selected(key: string): void {
-    if (this.deps.settings().enabled && this.#client !== null && this.deps.focusedWindow() === key) {
+    if (this.#device === 'phone' && key !== this.#phoneKey) {
+      return;
+    }
+
+    // While the phone has the voice its page's own focus counts, whatever window on this computer was focused last.
+    const focused = this.#device === 'phone' ? this.deps.pageFocused?.(key) === true : this.deps.focusedWindow() === key;
+
+    if (this.deps.settings().enabled && this.#client !== null && focused) {
       this.talkHere(key);
     }
   }
@@ -1413,6 +1531,34 @@ export class VoiceControl {
         this.deps.log(`voice: spoken command ${message.command} ("${message.text}")`);
         this.#fragment({ event: 'command', sessionId: message.sessionId ?? '', utteranceId: message.utteranceId, pieceId: null, messageId: null, text: message.text, score: message.score, f0: message.f0 });
         return;
+      case 'phone-play':
+      case 'phone-end':
+      case 'phone-flush':
+        if (this.#device === 'phone') {
+          this.deps.phone?.send({ type: message.type.slice('phone-'.length), id: message.id });
+        }
+
+        return;
+      case 'phone-stalled':
+        // The phone stopped playing while its socket stayed open: the voice leaves it, as when it is lost.
+        if (this.#device === 'phone') {
+          this.deps.log(`voice: the phone stopped playing: ${message.reason}`);
+          this.deps.phone?.close(message.reason);
+        }
+
+        return;
+      case 'phone-pcm':
+        if (this.#device === 'phone') {
+          const pcm = Buffer.from(message.pcm, 'base64');
+          const frame = Buffer.alloc(5 + pcm.length);
+
+          frame.writeUInt8(PHONE_PCM_FRAME, 0);
+          frame.writeUInt32LE(message.id, 1);
+          pcm.copy(frame, 5);
+          this.deps.phone?.sendBinary(frame);
+        }
+
+        return;
       case 'audio':
         if (message.mic !== this.#mic || (message.halfDuplex ?? null) !== this.#halfDuplex || (message.fullDuplex ?? null) !== this.#fullDuplex || message.recognizer !== this.#recognizer || (message.roomHold ?? null) !== this.#roomHoldUntil) {
           this.#mic = message.mic;
@@ -1524,6 +1670,11 @@ export class VoiceControl {
     });
     found.onMessage((message) => this.#receive(message));
     found.send({ type: 'settings', settings: this.deps.settings() });
+
+    if (this.#device !== 'computer') {
+      found.send({ type: 'device', device: this.#device });
+    }
+
     this.#typingSent = null;
     this.#contextSent.clear();
 

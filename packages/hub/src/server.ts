@@ -69,8 +69,8 @@ export interface PageRoutes {
   remote?(): RemoteAccess;
   /** A file of the page itself, by its name under `/page/`, `index.html` for the page; null for none. */
   asset(name: string): { mime: string; body: Buffer | string; immutable?: boolean; gzip?: Buffer } | null;
-  /** Registers a page's conversation stream, `installed` when it runs as the installed app, and returns its page key. */
-  opened(installed?: boolean): string;
+  /** Registers a page's conversation stream, `installed` when it runs as the installed app, `remote` from a paired device, and returns its page key. */
+  opened(installed?: boolean, remote?: boolean): string;
   isPage(key: string): boolean;
   list(): unknown;
   /** The `@` picker's files for a page key, or null with no selection. */
@@ -749,7 +749,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     }
 
     if (request.method === 'GET' && path === '/v1/conversation/events') {
-      let key: string | null = page.opened(url.searchParams.get('installed') === '1');
+      let key: string | null = page.opened(url.searchParams.get('installed') === '1', origin.host !== null);
 
       pageKeyOrigins.set(key, originOf(origin));
       pageKeySessions.set(key, page.access.sessionOf(request.headers.cookie));

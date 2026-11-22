@@ -4,6 +4,8 @@ export interface Playback {
   /** Resolves once everything written has played. */
   drain(): Promise<void>;
   stop(): void;
+  /** How much of it has been heard, in milliseconds, where the device reports it, as a phone does; left out where it is timed by the clock. */
+  position?(): number;
 }
 
 /** The playback device; decibri's `Speaker` in the process, a fake in tests. */

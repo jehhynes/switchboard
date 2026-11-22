@@ -5,7 +5,8 @@ import { pcm24to16, splitSaid } from './barge.js';
 import type { Dictation } from './dictation.js';
 import type { Output } from './output.js';
 import type { LockEvent, LockWatch } from './lockWatch.js';
-import type { AwayReason, HubMessage, Interrupted, VoiceFocus, VoiceMessage, VoiceTarget } from './protocol.js';
+import type { AwayReason, HubMessage, Interrupted, VoiceDevice, VoiceFocus, VoiceMessage, VoiceTarget } from './protocol.js';
+import { PhoneOutput } from './phone.js';
 import { PlayedReference } from './reference.js';
 import { Router } from './routing.js';
 import { Speech } from './speech.js';
@@ -67,8 +68,18 @@ export class VoiceService {
   /** Why the process last turned the mic off on its own, until the operator sets the mic again; a restored mic stays off meanwhile. */
   #turnedOff: AwayReason | null = null;
   readonly #lockWatch: LockWatch | null;
+  /** Where the voice's microphone and speaker are (architecture.md § Remote access, Voice on a phone). */
+  #device: VoiceDevice = 'computer';
+  /** The phone's speaker, used while the phone has the voice. */
+  readonly #phone: PhoneOutput;
 
   constructor(private readonly deps: VoiceServiceDeps) {
+    this.#phone = new PhoneOutput({
+      send: (message) => deps.send(message),
+      now: deps.now,
+      ...(deps.every === undefined ? {} : { every: deps.every }),
+      stalled: (reason) => deps.send({ type: 'phone-stalled', reason }),
+    });
     this.#dictation =
       deps.dictation?.({
         changed: () => deps.send(this.#audio()),
@@ -96,7 +107,11 @@ export class VoiceService {
     const output: Output = {
       engine: deps.output.engine,
       open: async (device) => {
-        const playback = await deps.output.open(device);
+        if (this.#device === 'none') {
+          throw new Error('The phone that had the voice left.');
+        }
+
+        const playback = this.#device === 'phone' ? await this.#phone.open() : await deps.output.open(device);
         const reference = new PlayedReference({
           push: (pcm) => this.#dictation?.reference(pcm),
           now: deps.now,
@@ -114,6 +129,7 @@ export class VoiceService {
             reference.stop();
             playback.stop();
           },
+          ...(playback.position === undefined ? {} : { position: () => playback.position!() }),
         };
       },
     };
@@ -211,6 +227,11 @@ export class VoiceService {
 
         return;
       case 'mic':
+        if (message.on && this.#device !== 'computer') {
+          this.deps.log('mic stays off: the voice is not on this computer');
+          return;
+        }
+
         if (message.on && (this.#away.size > 0 || (message.restore === true && this.#turnedOff !== null))) {
           const reason = [...this.#away][0] ?? this.#turnedOff!;
 
@@ -277,6 +298,12 @@ export class VoiceService {
       case 'alert-cancel':
         this.#alerts.cancel(message.alertId);
         return;
+      case 'device':
+        this.#deviceChanged(message.device);
+        return;
+      case 'phone-played':
+        this.#phone.played(message.id, message.ms, message.done);
+        return;
       default:
         return;
     }
@@ -329,6 +356,12 @@ export class VoiceService {
    */
   #lockChanged(event: LockEvent): void {
     if (event === 'locked' || event === 'asleep' || event === 'disconnected') {
+      // Leaving the computer is the point of the voice on the phone: only sleep, which stops the hub too, stops it there (PRD R119).
+      if (this.#device === 'phone' && event !== 'asleep') {
+        this.deps.log(`${AWAY_TEXT[event]}: the voice stays on the phone`);
+        return;
+      }
+
       if (this.#away.has(event)) {
         return;
       }
@@ -338,7 +371,7 @@ export class VoiceService {
       this.deps.log(`mic off: ${AWAY_TEXT[event]}`);
       this.#dictation?.enroll('cancel');
       this.#dictation?.mic(false);
-      this.#speech.mute(true);
+      this.#syncMute();
       this.#alerts.cancelAll(AWAY_TEXT[event]);
       this.deps.send({ type: 'mic-off', reason: event });
       return;
@@ -357,11 +390,55 @@ export class VoiceService {
     }
 
     if (this.#away.size === 0) {
-      this.#speech.mute(false);
+      this.#syncMute();
       this.deps.log(`${BACK_TEXT[event]}: speech resumes; the mic stays off until it is turned on`);
     } else {
       this.deps.log(`${BACK_TEXT[event]}: still ${[...this.#away].map((reason) => AWAY_TEXT[reason]).join(', ')}`);
     }
+  }
+
+  /**
+   * The voice moved to another device: what plays stops where it is, as Stop speaking stops it, and nothing plays on the new device until the
+   * next reply. With none, after the phone left, nothing plays or listens until the operator moves the voice (PRD R119).
+   */
+  #deviceChanged(device: VoiceDevice): void {
+    if (device === this.#device) {
+      return;
+    }
+
+    const from = this.#device;
+
+    this.#device = device;
+    this.deps.log(`voice device: ${device === 'none' ? 'none, the phone left' : device === 'phone' ? 'the phone' : 'this computer'} (was ${from})`);
+    // Muting stops what plays, the needs-you sound too, and drops what waits; the new device's mute follows below.
+    this.#speech.mute(true);
+
+    if (from === 'phone') {
+      this.#phone.lost(device === 'none' ? 'The phone that had the voice left.' : 'The voice moved to this computer.');
+    }
+
+    // Until the phone's microphone is built in, capture stays on this computer's microphone only, so it is off away from it.
+    if (device !== 'computer') {
+      this.#dictation?.mic(false);
+    }
+
+    if (device === 'none') {
+      this.#alerts.cancelAll('the phone left');
+    }
+
+    // A lock of this computer before the voice moved to the phone does not keep the phone silent.
+    if (device === 'phone') {
+      this.#away.delete('locked');
+      this.#away.delete('disconnected');
+      this.#turnedOff = this.#turnedOff === 'asleep' ? 'asleep' : null;
+    }
+
+    this.#syncMute();
+  }
+
+  /** Nothing plays while the operator is away from the device that has the voice, or no device has it. */
+  #syncMute(): void {
+    this.#speech.mute(this.#device === 'none' || this.#away.size > 0);
   }
 
   #failed(error: string | null): void {

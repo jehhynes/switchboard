@@ -108,7 +108,17 @@ export type HubMessage =
   | { type: 'heard'; heard: string; meant: string }
   /** Voiceprint enrolment: record `ENROLL_SECONDS` of the operator's speech and save the print, or stop recording and save nothing. */
   | { type: 'enroll'; action: 'start' | 'cancel' }
+  /**
+   * Where the voice's microphone and speaker are (architecture.md § Remote access, Voice on a phone): this computer's, a paired phone's, or
+   * none, after the phone that had the voice left, when nothing plays or listens until the operator moves it.
+   */
+  | { type: 'device'; device: VoiceDevice }
+  /** The phone's report for one of its playbacks: the milliseconds heard, and `done` once everything sent before its end played. */
+  | { type: 'phone-played'; id: number; ms: number; done: boolean }
   | { type: 'shutdown' };
+
+/** Where the voice's microphone and speaker are. */
+export type VoiceDevice = 'computer' | 'phone' | 'none';
 
 export type VoiceMessage =
   | { type: 'welcome'; protocol: number; build: string; pid: number; features: string[] }
@@ -147,7 +157,14 @@ export type VoiceMessage =
    */
   | { type: 'mic-off'; reason: AwayReason }
   /** A spoken alert ended. */
-  | { type: 'alert-done'; alertId: string; sessionId: string; outcome: AlertOutcome };
+  | { type: 'alert-done'; alertId: string; sessionId: string; outcome: AlertOutcome }
+  /** A playback on the phone opens, its 24 kHz PCM follows in base64 pieces, its end is sent, or it is flushed at once (Voice on a phone). */
+  | { type: 'phone-play'; id: number }
+  | { type: 'phone-pcm'; id: number; pcm: string }
+  | { type: 'phone-end'; id: number }
+  | { type: 'phone-flush'; id: number }
+  /** The phone stopped reporting what it played for longer than `PHONE_STALL_MS`, so the hub closes its socket. */
+  | { type: 'phone-stalled'; reason: string };
 
 /** Splits a byte stream into lines; a line over the limit is an error, since the peer is not following the protocol. */
 export class LineReader {
@@ -280,6 +297,10 @@ export function parseHubMessage(line: string): HubMessage | { error: string } {
       return isId(m.sessionId) && isText(m.lastReply) ? { type: 'context', sessionId: m.sessionId, lastReply: m.lastReply } : invalid;
     case 'enroll':
       return m.action === 'start' || m.action === 'cancel' ? { type: 'enroll', action: m.action } : invalid;
+    case 'device':
+      return m.device === 'computer' || m.device === 'phone' || m.device === 'none' ? { type: 'device', device: m.device } : invalid;
+    case 'phone-played':
+      return isGen(m.id) && typeof m.ms === 'number' && Number.isFinite(m.ms) && m.ms >= 0 && typeof m.done === 'boolean' ? { type: 'phone-played', id: m.id, ms: m.ms, done: m.done } : invalid;
     case 'heard':
       return isText(m.heard) && isText(m.meant) && m.heard.trim() !== '' && m.meant.trim() !== '' && m.heard.length <= 200 && m.meant.length <= 200 ? { type: 'heard', heard: m.heard, meant: m.meant } : invalid;
     default:
