@@ -1,6 +1,6 @@
 # Switchboard PRD
 
-Switchboard is a local software factory for one developer. It ingests work assigned to the operator, triages each assignment to a playbook, runs the playbook's prompt in a background agent session, and shows what each session is doing in the dock, a list docked beside VS Code that switches the screen to a work item's own VS Code window.
+Switchboard is a local software factory for one developer. It ingests work assigned to the operator, triages each assignment to a playbook, runs the playbook's prompt in a background agent session, and shows the work on the web page the hub serves, its primary interface (R109). The dock, a list docked beside VS Code that switches the screen to a work item's own VS Code window, and VS Code's Conversation view (R96) still run until the web page replaces them.
 
 ## Scope
 
@@ -26,8 +26,8 @@ Switchboard is a local software factory for one developer. It ingests work assig
 - Remote, cloud or multi-machine operation. One hub runs per machine; reaching its web page from the operator's own paired devices over their tailnet (R115) is not remote operation.
 - Changing git state: no commits, branches, or creating, cleaning up or removing worktrees. Read-only git queries that validate and link worktrees are allowed.
 - Answering a session's permission prompts or questions for the operator.
-- Inferring state it did not observe: no stuck-session detection, and no check of a session's work beyond whether its ticket is still assigned when it reports done (R10). The dock may colour an observed age, such as the time since a running session's last stage report (R58), but draws no conclusion from it and takes no action.
-- Reproducing the source's ticket view or conversation. The dock links to the source.
+- Inferring state it did not observe: no stuck-session detection, and no check of a session's work beyond whether its ticket is still assigned when it reports done (R10). Switchboard may colour an observed age, such as the time since a running session's last stage report (R58), but draws no conclusion from it and takes no action.
+- Reproducing the source's ticket view or conversation. Switchboard links to the source.
 - Reproducing Ground Control's board, lanes or review views, or the Support board.
 - Built-in playbooks or namespaces.
 - Unattended overnight operation as a committed goal.
@@ -70,7 +70,8 @@ Switchboard is a local software factory for one developer. It ingests work assig
 | Session | One agent conversation for a work item. Kinds: `setup`, `task`. |
 | Active session | A session whose process is running, in the background, in the terminal holder or in a VS Code tab. |
 | Stage | A free-text label a session reports about its progress. Switchboard displays it and does not act on it. |
-| Dock | Switchboard's native app, which lists the work items at the edge of the screen (R27, R71). |
+| Web page | The page the hub serves, Switchboard's primary interface, which lists the work items and shows their conversations (R109). |
+| Dock | Switchboard's native app, which lists the work items at the edge of the screen (R27, R71). It runs until the web page replaces it. |
 | Item window | The VS Code window the dock opens for one work item's folder (R71). |
 | Terminal holder | Switchboard's process that holds Code Mode sessions in hidden terminals, so they run while no terminal shows them and outlive the hub (R94). |
 
