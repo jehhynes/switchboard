@@ -3,7 +3,7 @@
  * the whole model message is saved, while the screen shows it as soon as the text block is drawn. Claude Code's classic renderer draws a reply as
  * "● text" with two-space continuation lines; a block counts as finished once something is drawn after it.
  */
-import { endsInOpenTag, isDetailsLine, isRewriteLine, isStatusLine, keyOf, parseReply, splitRewrite, stripAside } from './tags.js';
+import { drawnKeyOf, endsInOpenTag, isDetailsLine, isRewriteLine, isStatusLine, keyOf, parseReply, splitRewrite, stripAside } from './tags.js';
 
 /** The part of an xterm buffer cell the reader uses. */
 export interface Cell {
@@ -250,6 +250,11 @@ export type ScreenPush = (text: string, aside: boolean, replaces: number | undef
 export class ScreenReader {
   /** Keys already published, from the screen or the transcript. */
   readonly sent = new Set<string>();
+  /**
+   * Keys of transcript copies with their links drawn with their targets, as the screen shows them. They count only as the same reply or one cut
+   * off, never in the check for a redraw, whose shared opening letters a long link target could make two replies have.
+   */
+  readonly drawn = new Set<string>();
   /** Key to the handles of screen copies still waiting for their transcript copies, oldest first. */
   readonly ids = new Map<string, number[]>();
   /** Handle of a reply's screen copy to when it was read or last grew and when it was first read, until its transcript copy comes. */
@@ -281,6 +286,17 @@ export class ScreenReader {
     // The newest may still be streaming: a longer copy on the screen grows it in place. An empty key would take any block as its growth.
     if (newest && key !== '') {
       this.#tail = { key, id: handle, at: now };
+    }
+  }
+
+  /** A transcript copy's text, so its screen copies drawn either way are not published again. */
+  saw(text: string): void {
+    const drawn = drawnKeyOf(text);
+
+    this.sent.add(keyOf(text));
+
+    if (drawn !== null) {
+      this.drawn.add(drawn);
     }
   }
 
@@ -436,7 +452,12 @@ export class ScreenReader {
       }
 
       // Sent already, adopted, or a copy of a sent one cut off or caught mid-redraw.
-      if (this.sent.has(key) || (this.adopted.size > 0 && this.adopted.has(keyOf(parseReply(text).opening))) || (!same && key.length > 40 && [...this.sent].some((sent) => sent.length > key.length && sent.startsWith(key)))) {
+      if (
+        this.sent.has(key) ||
+        this.drawn.has(key) ||
+        (this.adopted.size > 0 && this.adopted.has(keyOf(parseReply(text).opening))) ||
+        (!same && key.length > 40 && [...this.sent, ...this.drawn].some((sent) => sent.length > key.length && sent.startsWith(key)))
+      ) {
         return;
       }
 
