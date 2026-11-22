@@ -11,6 +11,7 @@ import { copyButton, renderInline, renderMarkdown } from './markdown.js';
 import { dayLabel, deliveryMark, spokenRender, withoutQuestions } from './render.js';
 import type { CardDraft, View } from './render.js';
 import { trusted } from './trusted.js';
+import { backgroundLabel } from '@switchboard/core/group';
 import type { ArtifactView, MessageView, NativeRequest, ReplyView, ScreenPrompt } from '@switchboard/protocol';
 
 /**
@@ -221,7 +222,7 @@ export function renderTimeline(state: PageState, view: View, now: number = Date.
   const links = pageCards(state);
   // After the newest item, so replies written mid-turn show above it.
   const shownPrompt = view.prompt !== null && view.prompt.sessionId === state.session.id ? view.prompt : null;
-  const spinner = turnRow(state.session, inTurn(state.session) || awaitingReply(state.items, state.session), shownPrompt?.prompt != null);
+  const spinner = turnRow(state.session, inTurn(state.session) || awaitingReply(state.items, state.session), shownPrompt?.prompt != null) ?? backgroundRow(state.session);
   let lastDay: number | null = null;
   const rows = entries.flatMap((entry) => {
     if (entry.type === 'artifact') {
@@ -311,6 +312,25 @@ export function turnRow(session: PageState['session'], awaiting: boolean, prompt
     <li class="working" key="turn">
       <span class={`codicon codicon-loading${session.state === 'waiting' ? '' : ' codicon-modifier-spin'}`} aria-hidden="true"></span>
       <span>{session.state === 'starting' ? 'Starting' : 'Thinking'}…</span>
+    </li>
+  );
+}
+
+/**
+ * The row at the end of the timeline while the session's turn has ended and its background agents or shell commands run, such as "3 agents
+ * running", with the spinner, until they finish. A turn row, as for a message sent meanwhile, comes first.
+ */
+export function backgroundRow(session: PageState['session']): VNode | null {
+  const background = session?.background ?? null;
+
+  if (background === null) {
+    return null;
+  }
+
+  return (
+    <li class="working background" role="status" key="turn">
+      <span class="codicon codicon-loading codicon-modifier-spin" aria-hidden="true"></span>
+      <span class="working-label">{backgroundLabel(background)}</span>
     </li>
   );
 }

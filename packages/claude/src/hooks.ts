@@ -1,5 +1,7 @@
 import type { LiveState } from '@switchboard/core';
-import { NODE_NAME, PERMISSION_PROMPT, scriptHome } from '@switchboard/core';
+import { BACKGROUND_DETAIL, backgroundDetail, NODE_NAME, PERMISSION_PROMPT, scriptHome } from '@switchboard/core';
+
+export { BACKGROUND_DETAIL };
 
 /** Longest error text a marker keeps. */
 export const ERROR_MESSAGE_LIMIT = 500;
@@ -66,6 +68,8 @@ try {
         toolName: text(payload.tool_name),
         promptTool,
         backgroundTasks: Array.isArray(payload.background_tasks) ? payload.background_tasks.length : 0,
+        // Each task's type, such as subagent or shell, so the conversation can say what still runs (mechanics M124).
+        backgroundTypes: Array.isArray(payload.background_tasks) ? payload.background_tasks.map((task) => text(task?.type) ?? 'unknown') : [],
         error: failed ? text(payload.error) : null,
         errorMessage: failed && typeof payload.last_assistant_message === 'string' ? payload.last_assistant_message.slice(0, ${ERROR_MESSAGE_LIMIT}) : null,
         ...(launch === null ? {} : { launch, startSource }),
@@ -286,6 +290,8 @@ export interface Marker {
   /** The tool of the permission request a `PermissionRequest` or a `Notification` after it waits on; markers from before Switchboard recorded it have none. */
   promptTool?: string | null;
   backgroundTasks: number;
+  /** The type of each background task `Stop` listed, such as `subagent` or `shell`; markers from before Switchboard recorded it have none. */
+  backgroundTypes?: string[];
   error: string | null;
   errorMessage: string | null;
   /** The `SWITCHBOARD_LAUNCH` of a Code Mode session's process; absent for other sessions (PRD R93). */
@@ -293,9 +299,6 @@ export interface Marker {
   /** For a Code Mode process: `clear`, `fork` or `resume` when a SessionStart of that source began this session ID, else null (mechanics M73). */
   startSource?: string | null;
 }
-
-/** The detail of a turn that ended while background tasks remain: the session is `running`, but not on a prompt or tool call. */
-export const BACKGROUND_DETAIL = 'turn ended with background tasks';
 
 const WAITING_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode']);
 const WAITING_NOTIFICATIONS = new Set(['permission_prompt', 'worker_permission_prompt', 'agent_needs_input']);
@@ -341,7 +344,8 @@ export function markerState(marker: Marker): { state: LiveState; detail: string 
 
       return marker.notificationType !== null && WAITING_NOTIFICATIONS.has(marker.notificationType) ? { state: 'waiting', detail: null } : null;
     case 'Stop':
-      return marker.backgroundTasks > 0 ? { state: 'running', detail: BACKGROUND_DETAIL } : { state: 'idle', detail: null };
+      // A turn that ended while background tasks remain is `running`, but not on a prompt or tool call; the detail counts each kind.
+      return marker.backgroundTasks > 0 ? { state: 'running', detail: backgroundDetail(marker.backgroundTypes) } : { state: 'idle', detail: null };
     case 'StopFailure':
       return { state: 'failed', detail: [marker.error, marker.errorMessage].filter(Boolean).join(': ') || null };
     default:

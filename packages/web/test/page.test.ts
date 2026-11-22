@@ -6,7 +6,7 @@ import { applyEvent, awaitingReply, EMPTY, inTurn, mentionOf, mentionQuery, comm
 import { answerText, answersIn, complete, parseQuestions } from '@switchboard/conversation/questions';
 import { artifactUrl, BROWSER_MIN_WIDTH, browserNote, paneLink, paneStatus, collapsedGroups, newView, renderMicButton, renderVoice, markdownBody } from '../src/render.js';
 import { renderArtifactView, renderStatus } from '../src/side.js';
-import { renderTimeline, turnRow } from '../src/timeline.js';
+import { backgroundRow, renderTimeline, turnRow } from '../src/timeline.js';
 import { renderHeader } from '../src/header.js';
 import { renderList } from '../src/list.js';
 import { html } from './html.js';
@@ -290,14 +290,15 @@ describe('drawing', () => {
     };
 
     // Session 311b1ad4: a reply had answered the latest message, and the turn went on with tool calls, or a task notification started one.
-    expect([...draw({ state: 'running', background: false }).querySelectorAll('.timeline > li')].map((li) => li.getAttribute('data-id') ?? li.className)).toEqual(['day', 'm1', 'r1', 'working']);
-    expect(draw({ state: 'running', background: false }).querySelector('.working')?.textContent).toBe('Thinking…');
-    expect(draw({ state: 'running', background: false }).querySelector('.working .codicon-modifier-spin')).not.toBeNull();
+    expect([...draw({ state: 'running', background: null }).querySelectorAll('.timeline > li')].map((li) => li.getAttribute('data-id') ?? li.className)).toEqual(['day', 'm1', 'r1', 'working']);
+    expect(draw({ state: 'running', background: null }).querySelector('.working')?.textContent).toBe('Thinking…');
+    expect(draw({ state: 'running', background: null }).querySelector('.working .codicon-modifier-spin')).not.toBeNull();
     expect(draw({ state: 'starting' }).querySelector('.working')?.textContent).toBe('Starting…');
     // The turn ended with background tasks running: the session is `running` but in no turn.
-    expect(draw({ state: 'running', background: true }).querySelector('.working')).toBeNull();
+    expect(draw({ state: 'running', background: { agents: 1, shells: 0, other: 0 } }).querySelector('.working:not(.background)')).toBeNull();
+    expect(draw({ state: 'running', background: { agents: 1, shells: 0, other: 0 } }).querySelector('.working.background')?.textContent).toBe('1 agent running');
     expect(draw({ state: 'idle' }).querySelector('.working')).toBeNull();
-    expect(inTurn(session({ state: 'running', background: true }))).toBe(false);
+    expect(inTurn(session({ state: 'running', background: { agents: 1, shells: 0, other: 0 } }))).toBe(false);
     // An older hub sends no `background`, so only an unanswered message shows the row.
     expect(inTurn(session({ state: 'running' }))).toBe(false);
     expect(draw({ state: 'running' }).querySelector('.working')).toBeNull();
@@ -308,14 +309,15 @@ describe('drawing', () => {
   it('shows Thinking for a message sent while only background tasks run, until a reply answers it', () => {
     const draw = (items: Array<MessageView | ReplyView>): HTMLElement => {
       const host = document.createElement('div');
-      const state = applyEvent(EMPTY, { type: 'hello', key: 'k', groups: [], scope, sessions: [session({ state: 'running', background: true })], items, more: false, status: null, artifacts: [] });
+      const state = applyEvent(EMPTY, { type: 'hello', key: 'k', groups: [], scope, sessions: [session({ state: 'running', background: { agents: 1, shells: 0, other: 0 } })], items, more: false, status: null, artifacts: [] });
 
       host.innerHTML = html(renderTimeline(state, newView()));
       return host;
     };
 
     expect(draw([message('m1', 1), reply('r1', 2, { answers: 'm1' }), message('m2', 3)]).querySelector('.working')?.textContent).toBe('Thinking…');
-    expect(draw([message('m1', 1), reply('r1', 2, { answers: 'm1' }), message('m2', 3), reply('r2', 4, { answers: 'm2' })]).querySelector('.working')).toBeNull();
+    expect(draw([message('m1', 1), reply('r1', 2, { answers: 'm1' }), message('m2', 3), reply('r2', 4, { answers: 'm2' })]).querySelector('.working:not(.background)')).toBeNull();
+    expect(draw([message('m1', 1), reply('r1', 2, { answers: 'm1' }), message('m2', 3), reply('r2', 4, { answers: 'm2' })]).querySelector('.working.background')?.textContent).toBe('1 agent running');
   });
 
   it('says what the turn waits for: Starting or Thinking with the spinner, and the answer or permission the terminal asks for instead of Thinking', () => {
@@ -327,6 +329,34 @@ describe('drawing', () => {
     expect(html(turnRow(session({ state: 'waiting', waitingFor: 'question' }), true))).toMatch(/codicon-question[\s\S]*Waiting for your answer/);
     expect(html(turnRow(session({ state: 'waiting', waitingFor: 'permission' }), false))).toMatch(/codicon-shield[\s\S]*Waiting for permission/);
     expect(html(turnRow(session({ state: 'waiting', waitingFor: 'permission' }), true))).not.toContain('Thinking');
+  });
+
+  it('says how many background agents and shells run after the turn ended, with the spinner, when no turn row is due', () => {
+    const background = session({ state: 'running', background: { agents: 3, shells: 1, other: 0 } });
+    const row = html(backgroundRow(background));
+
+    expect(row).toContain('3 agents · 1 shell running');
+    expect(row).toContain('codicon-modifier-spin');
+    expect(row).toContain('role="status"');
+    expect(html(backgroundRow(session({ state: 'running' })))).toBe('');
+    expect(html(backgroundRow(session({ state: 'running', background: null })))).toBe('');
+    expect(html(backgroundRow(null))).toBe('');
+
+    // A reply answered the message, so no turn row is due; the background line shows until the hub's next state drops it.
+    const items = [message('m1', 1, { text: 'Go.' }), reply('r1', 2, { opening: 'Started.' })];
+    const shown = html(renderTimeline({ ...EMPTY, connected: true, scope, session: background, items }, newView()));
+    const host = document.createElement('div');
+
+    host.innerHTML = shown;
+    expect(host.querySelector('.timeline > li:last-child')?.textContent).toBe('3 agents · 1 shell running');
+    expect(shown).not.toContain('Thinking');
+    // A message sent while they run shows Thinking until its reply, in place of the background line.
+    const sent = html(renderTimeline({ ...EMPTY, connected: true, scope, session: background, items: [...items, message('m2', 3, { text: 'And?' })] }, newView()));
+
+    expect(sent).toContain('Thinking');
+    expect(sent).not.toContain('agents');
+    // Once they finish, the session is idle and the line goes.
+    expect(html(renderTimeline({ ...EMPTY, connected: true, scope, session: session({ state: 'idle' }), items }, newView()))).not.toContain('running');
   });
 
   it('opens a page or an SVG artifact in a sandboxed frame with an opaque origin, and media in the page', () => {
@@ -560,7 +590,7 @@ describe('drawing', () => {
     const markup = html(renderTimeline({ ...EMPTY, connected: true, scope, session: session({ state: 'running' }), items }, newView()));
 
     expect(order(markup)).toEqual(['day', 'm1', 'a1', 'a2', 'working']);
-    expect(order(html(renderTimeline({ ...EMPTY, connected: true, scope, session: session({ state: 'running', background: false }), items: [...items, reply('r1', 4)] }, newView())))).toEqual(['day', 'm1', 'a1', 'a2', 'r1', 'working']);
+    expect(order(html(renderTimeline({ ...EMPTY, connected: true, scope, session: session({ state: 'running', background: null }), items: [...items, reply('r1', 4)] }, newView())))).toEqual(['day', 'm1', 'a1', 'a2', 'r1', 'working']);
     expect(html(renderTimeline({ ...EMPTY, connected: true, scope, session: session({ state: 'idle' }), items }, newView()))).not.toContain('class="working"');
   });
 

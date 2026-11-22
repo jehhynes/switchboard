@@ -1,7 +1,7 @@
 import { countsUnread, inTranscript } from '@switchboard/core';
 import type { ConversationMessage, ConversationReply, ConversationStatus, Interruption, Piece, Provider, Session, SpokenState, Store } from '@switchboard/core';
-import { artifactsDir, hostKey, PERMISSION_PROMPT, personaById, resumesHeld, sessionTone, START_PROMPT, toneVersion, waitsOnLimit } from '@switchboard/core';
-import type { PersonaSettings, ViewSettings } from '@switchboard/core';
+import { artifactsDir, backgroundCounts, hostKey, PERMISSION_PROMPT, personaById, resumesHeld, sessionTone, START_PROMPT, toneVersion, waitsOnLimit } from '@switchboard/core';
+import type { BackgroundCounts, PersonaSettings, ViewSettings } from '@switchboard/core';
 import { ArtifactFolder, MAX_MESSAGE_CHARS, NotWritten, interruptNote, messageTags, pasteText } from '@switchboard/conversation';
 import { promptKeyData, readPrompt, screenRows, stepsText, TYPING_PAUSE_MS } from '@switchboard/conversation';
 import type { Artifact, ContextView, ConversationChange, HeardTag, InputOutcome, InputSteps, PromptKey, ScreenPrompt, SlashCommand } from '@switchboard/conversation';
@@ -13,7 +13,6 @@ import { CATEGORIES, historyView } from './history.js';
 import type { PageActionExtra, PageFile, PageHeader, PageListGroup, PageRow } from './page.js';
 import type { ConversationRef, WindowScope, WindowScopes } from './windows.js';
 import type { VoiceView } from './voice.js';
-import { BACKGROUND_DETAIL } from '@switchboard/claude';
 import { ClaudeConversationAdapter } from './claudeConversation.js';
 import type { ConversationAdapter, ConversationChanged, DeliveryOutcome, NativeRequest } from './conversationAdapter.js';
 export { ansiTheme, claudePaths } from './claudeConversation.js';
@@ -59,8 +58,11 @@ export interface SessionView {
   limit?: { until: number; retry: boolean } | null;
   /** The session's context size (architecture.md § Context meter), null while not known. Absent from an older hub. */
   context?: ContextView | null;
-  /** `running` with its turn ended while background tasks it started still run, so it is in no turn (`BACKGROUND_DETAIL`). Absent from an older hub. */
-  background?: boolean;
+  /**
+   * While the session is `running` with its turn ended and background tasks it started still run, so it is in no turn: how many of each kind
+   * (all zero when the hook writer did not record their types); null otherwise. Absent from an older hub.
+   */
+  background?: BackgroundCounts | null;
 }
 
 /** The voice settings a session's persona is read from. */
@@ -137,7 +139,7 @@ export function sessionView(session: Session, current: boolean, hooks: boolean, 
     persona: personaOf(session, personas),
     canPin: personas !== null && personas.enabled && personas.personas.length > 0 && (session.codeMode === true || session.execution === 'app-server'),
     limit: limitOf(session),
-    background: session.state === 'running' && session.stateDetail === BACKGROUND_DETAIL,
+    background: backgroundCounts(session),
   };
 }
 

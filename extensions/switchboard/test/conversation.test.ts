@@ -16,7 +16,7 @@ const on = (tab: Tab, unopened: string[] = []) => ({ tab, unopened: new Set(unop
 
 const T0 = Date.UTC(2026, 10, 19, 12);
 const SCOPE: ScopeView = { kind: 'item', workItemId: 2, key: 'k1', folder: 'D:/w', title: 'Fix the <inbox> badge', cwd: 'D:/w', scopeGen: 1, sessionId: 's2', conversations: [{ workItemId: 2, title: 'Fix the <inbox> badge', primary: true, sessionId: 's2', state: 'running', conversation: 'full', unread: 0 }] };
-const SESSION: SessionView = { id: 's2', kind: 'task', title: 'Task session aaaa', state: 'running', waitingFor: null, launch: 'l', current: true, conversation: 'full', reason: null, persona: null, background: false };
+const SESSION: SessionView = { id: 's2', kind: 'task', title: 'Task session aaaa', state: 'running', waitingFor: null, launch: 'l', current: true, conversation: 'full', reason: null, persona: null, background: null };
 
 // Each item's ord is its time unless a test gives it another.
 const reply = (id: string, at: number, patch: Partial<ReplyView> = {}): ReplyView => ({ type: 'reply', id, sessionId: 's2', at, ord: at, provisional: false, kind: 'reply', answers: null, opening: `Reply ${id}`, source: 'transcript', replaces: null, rewrittenBy: null, withdrawn: false, unread: false, speak: null, tone: null, spoken: { state: 'none', atMs: null, saidChars: null }, ...patch });
@@ -45,6 +45,27 @@ describe('the conversation state', () => {
     root.innerHTML = renderConversation(applyEvent(next, hello([], { sessions: [] })));
     expect(root.querySelector('.provider')).toBeNull();
   });
+  it('says how many background agents run after the turn ended, with the spinner, when no turn row is due', () => {
+    const background = { ...SESSION, state: 'running' as const, background: { agents: 3, shells: 0, other: 0 } };
+    const root = document.createElement('div');
+
+    root.innerHTML = renderConversation(applyEvent(EMPTY_CONVERSATION, hello([message('m1', T0, 'Go'), reply('r1', T0 + 1)], { sessions: [background] })));
+    const row = root.querySelector('.timeline > li.working.background');
+
+    expect(row?.querySelector('.working-label')?.textContent).toBe('3 agents running');
+    expect(row?.querySelector('[role="status"]')?.textContent).toBe('3 agents running');
+    expect(row?.querySelector('.codicon-modifier-spin')).not.toBeNull();
+    expect(root.querySelector('.timeline > li:last-child')).toBe(row);
+    // A message sent while they run shows Thinking until its reply, in place of the background line.
+    const sent = renderConversation(applyEvent(EMPTY_CONVERSATION, hello([message('m1', T0, 'Go'), reply('r1', T0 + 1), message('m2', T0 + 2, 'And?')], { sessions: [background] })));
+
+    expect(sent).toContain('Thinking');
+    expect(sent).not.toContain('agents running');
+    // A working session shows Thinking and no background line; an idle one neither.
+    expect(renderConversation(applyEvent(EMPTY_CONVERSATION, hello([message('m1', T0, 'Go')], { sessions: [SESSION] })))).not.toContain('li class="working background"');
+    expect(renderConversation(applyEvent(EMPTY_CONVERSATION, hello([message('m1', T0, 'Go'), reply('r1', T0 + 1)], { sessions: [{ ...SESSION, state: 'idle', background: null }] })))).not.toContain('class="working');
+  });
+
   it('renders native Codex requests and unknown delivery without exposing a request as a chat answer', () => {
     const uncertain = message('m-unknown', T0, 'Check delivery', { origin: 'typed', delivery: 'uncertain', error: 'Check the terminal before resending.' });
     const native = { ...SESSION, provider: 'codex' as const, state: 'waiting' as const, waitingFor: 'question' as const, requests: [{id:'1:0',kind:'question' as const,title:'Choose <red> or blue',questions:[{id:'color',question:'Which color?',options:['Red','Blue']}],decisions:[]}] };
@@ -565,13 +586,14 @@ describe('the Conversation view page', () => {
     root.innerHTML = renderConversation(state([...asked, reply('r2', T0 + 3)]));
     expect([...root.querySelectorAll('.timeline > li')].map((li) => li.getAttribute('data-id') ?? li.className)).toEqual(['day', 'r1', 'm1', 'a1', 'r2', 'working']);
     // Only background tasks left: `running`, but in no turn.
-    root.innerHTML = renderConversation(state([...asked, reply('r2', T0 + 3)], { session: { ...SESSION, background: true } }));
-    expect(root.querySelector('.working')).toBeNull();
+    root.innerHTML = renderConversation(state([...asked, reply('r2', T0 + 3)], { session: { ...SESSION, background: { agents: 1, shells: 0, other: 0 } } }));
+    expect(root.querySelector('.working:not(.background)')).toBeNull();
+    expect(root.querySelector('.working.background .working-label')?.textContent).toBe('1 agent running');
     // An older hub sends no `background`: the row goes with the reply, as before.
     root.innerHTML = renderConversation(state([...asked, reply('r2', T0 + 3)], { session: (({ background: _, ...older }) => older)(SESSION) }));
     expect(root.querySelector('.working')).toBeNull();
     // A message sent then still waits for its reply.
-    root.innerHTML = renderConversation(state(asked, { session: { ...SESSION, background: true } }));
+    root.innerHTML = renderConversation(state(asked, { session: { ...SESSION, background: { agents: 1, shells: 0, other: 0 } } }));
     expect(root.querySelector('.working .working-label')?.textContent).toBe('Thinking…');
     root.innerHTML = renderConversation(state(asked, { session: { ...SESSION, state: 'idle' } }));
     expect(root.querySelector('.working')).toBeNull();

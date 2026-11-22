@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { activeSession, adhocLabel, failedAtTriage, groupOf, holdsSlot, MARK_ICONS, MARK_TONES, markOf, needsYou, QUESTION_CARD, reviewOrder, SESSION_ICONS, SESSION_TONES, sessionIcon, triageLabel, turnOf, urlKey, waitsOnCard } from '../src/group.js';
+import { activeSession, adhocLabel, BACKGROUND_DETAIL, backgroundCounts, backgroundDetail, backgroundLabel, failedAtTriage, groupOf, holdsSlot, MARK_ICONS, MARK_TONES, markOf, needsYou, QUESTION_CARD, reviewOrder, SESSION_ICONS, SESSION_TONES, sessionIcon, triageLabel, turnOf, urlKey, waitsOnCard } from '../src/group.js';
 import type { DoneReason, SessionOutcome, SessionState, WorkItemStatus } from '../src/model.js';
 
 const item = (status: WorkItemStatus, ...states: SessionState[]) => ({
@@ -13,6 +13,43 @@ const triageFailed = (status: WorkItemStatus, readyAt: number | null = null) => 
 /** A work item whose latest session Open in Claude stopped (PRD R70). */
 const opened = (status: WorkItemStatus) => ({ ...item(status), sessions: [{ state: 'ended' as SessionState, outcome: 'opened' as SessionOutcome | null }] });
 const ready = (status: WorkItemStatus, ...states: SessionState[]) => ({ ...item(status, ...states), readyAt: 1000 });
+
+// Stop lists each background task with a type, such as subagent, shell or code (mechanics M124).
+describe('background work after a turn', () => {
+  it('counts each kind in the detail and reads it back', () => {
+    const detail = backgroundDetail(['subagent', 'shell', 'subagent', 'subagent', 'code', 'monitor']);
+
+    expect(detail).toBe(`${BACKGROUND_DETAIL}: 3 agents, 1 shell, 2 other tasks`);
+    expect(backgroundCounts({ state: 'running', stateDetail: detail })).toEqual({ agents: 3, shells: 1, other: 2 });
+    expect(backgroundCounts({ state: 'running', stateDetail: backgroundDetail(['subagent']) })).toEqual({ agents: 1, shells: 0, other: 0 });
+    expect(backgroundCounts({ state: 'running', stateDetail: backgroundDetail(['shell', 'shell']) })).toEqual({ agents: 0, shells: 2, other: 0 });
+  });
+
+  it('gives an older marker without types the plain detail, with no counts', () => {
+    expect(backgroundDetail(undefined)).toBe(BACKGROUND_DETAIL);
+    expect(backgroundDetail([])).toBe(BACKGROUND_DETAIL);
+    expect(backgroundCounts({ state: 'running', stateDetail: BACKGROUND_DETAIL })).toEqual({ agents: 0, shells: 0, other: 0 });
+  });
+
+  it('finds no background work in a working, waiting or idle session', () => {
+    const detail = backgroundDetail(['subagent']);
+
+    expect(backgroundCounts({ state: 'running', stateDetail: null })).toBeNull();
+    expect(backgroundCounts({ state: 'idle', stateDetail: detail })).toBeNull();
+    expect(backgroundCounts({ state: 'waiting', stateDetail: 'permission-prompt' })).toBeNull();
+    expect(backgroundCounts({ state: 'running', stateDetail: `${BACKGROUND_DETAIL}s` })).toBeNull();
+    expect(backgroundCounts(null)).toBeNull();
+  });
+
+  it('labels the line', () => {
+    expect(backgroundLabel({ agents: 3, shells: 0, other: 0 })).toBe('3 agents running');
+    expect(backgroundLabel({ agents: 1, shells: 0, other: 0 })).toBe('1 agent running');
+    expect(backgroundLabel({ agents: 1, shells: 2, other: 0 })).toBe('1 agent · 2 shells running');
+    expect(backgroundLabel({ agents: 0, shells: 0, other: 1 })).toBe('1 background task running');
+    expect(backgroundLabel({ agents: 2, shells: 0, other: 1 })).toBe('2 agents · 1 other task running');
+    expect(backgroundLabel({ agents: 0, shells: 0, other: 0 })).toBe('Background tasks running');
+  });
+});
 
 describe('groupOf', () => {
   it('checks Done, then Unstarted, then Ready for review, then Blocked on you, then In progress (PRD R27)', () => {

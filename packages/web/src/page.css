@@ -450,6 +450,8 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 .working.waiting .codicon { color: var(--vscode-editorWarning-foreground); }
 .working.waiting .working-label { font-weight: 500; }
 .working-detail { color: var(--vscode-descriptionForeground); font-size: 0.92em; }
+/* Background work after the turn ended: a quieter line than Thinking. */
+.working.background { color: var(--vscode-descriptionForeground); font-weight: normal; }
 
 /* Markdown, as in the Conversation view. */
 /* Long words, links and paths wrap anywhere; code blocks and tables scroll inside their own box, and media keeps to the width, so nothing widens

@@ -4,7 +4,7 @@
  * (`packages/hub/src/protocol.ts`), so a change on either side that breaks the other fails the build.
  */
 
-import type { Mark } from '@switchboard/core/group';
+import type { BackgroundCounts, Mark } from '@switchboard/core/group';
 import type { ContextView } from '@switchboard/conversation/contextMeter';
 
 export type SessionState = 'starting' | 'running' | 'waiting' | 'idle' | 'ended';
@@ -28,8 +28,11 @@ export interface SessionView {
   limit?: { until: number; retry: boolean } | null;
   /** The session's context size, null while the hub cannot read it (architecture.md § Context meter). */
   context?: ContextView | null;
-  /** `running` with its turn ended while background tasks it started still run, so it is in no turn. Absent from an older hub. */
-  background?: boolean;
+  /**
+   * While the session is `running` with its turn ended and background tasks it started still run, so it is in no turn: how many of each kind
+   * (architecture.md § Conversation view); null otherwise. Absent from an older hub.
+   */
+  background?: BackgroundCounts | null;
 }
 
 /** A Codex app-server session's pending question or approval, answered with the `answer` command. */

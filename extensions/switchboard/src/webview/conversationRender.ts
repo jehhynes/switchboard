@@ -4,6 +4,7 @@ import type { ArtifactView, ConversationEntry, ItemView, MessageView, ReplyView,
 /** A Codex session's pending question or approval, as the hub sends it. */
 type NativeRequest = NonNullable<SessionView['requests']>[number];
 import { providerMark } from '@switchboard/conversation/providerIcons';
+import { backgroundLabel } from '@switchboard/core/group';
 import { fullTime, metaLine, spokenMark, stamped, toneMark, voiceMark } from '@switchboard/conversation/messageMeta';
 import { hasUnspokenText, spokenBody } from '@switchboard/conversation/spokenBubble';
 import { artifactIcon, awaitingReply, inTurn, selectedEntry, stateIcon, statusLine, timeline } from '../conversationModel.js';
@@ -662,6 +663,22 @@ export function turnRow(session: SessionView | null, awaiting: boolean): string 
 }
 
 /**
+ * The row at the end of the timeline while the session's turn has ended and its background agents or shell commands run, such as "3 agents
+ * running", with the spinner, until they finish. A turn row, as for a message sent meanwhile, comes first. Empty otherwise.
+ */
+export function backgroundRow(session: SessionView | null): string {
+  const background = session?.background ?? null;
+
+  if (background === null) {
+    return '';
+  }
+
+  const label = escape(backgroundLabel(background));
+
+  return `<li class="working background"><span class="working-icon codicon codicon-loading codicon-modifier-spin" aria-hidden="true"></span><span class="working-label" aria-hidden="true">${label}</span><span role="status">${label}</span></li>`;
+}
+
+/**
  * The view's HTML: the header with the session's state, the tab strip, and the selected tab: the conversation, with a note when the view cannot
  * talk to the session, and the timeline; the status; or the artifacts.
  */
@@ -699,7 +716,7 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
     return settled === undefined ? '' : questionCard(key, settled, page.cards?.get(key), canAnswer);
   };
   // The turn's row after the newest item, so replies written mid-turn show above it; it has no data-id, so the keys skip it.
-  const spinner = turnRow(state.session, inTurn(state.session) || awaitingReply(state.items, state.session));
+  const spinner = turnRow(state.session, inTurn(state.session) || awaitingReply(state.items, state.session)) || backgroundRow(state.session);
   // A turn starts at each message; the first item shown, and each turn that starts on another day than the turn before it, has a divider.
   // In conversation order, not by time, so an item dated before the ones above it, such as one still queued from days ago, starts no divider.
   let turnDay: number | null = null;

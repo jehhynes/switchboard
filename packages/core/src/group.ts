@@ -22,6 +22,73 @@ export function waitsOnPermission(session: { state: Session['state']; stateDetai
   return session !== null && session.state === 'waiting' && session.stateDetail === PERMISSION_PROMPT;
 }
 
+/** The state detail of a `running` Claude session whose turn ended while background tasks run; a count of each kind follows it. */
+export const BACKGROUND_DETAIL = 'turn ended with background tasks';
+
+/** Background work a session's turn left running: subagents, shell commands and every other kind of task (mechanics M124). */
+export interface BackgroundCounts {
+  agents: number;
+  shells: number;
+  other: number;
+}
+
+const BACKGROUND_KINDS: readonly [key: keyof BackgroundCounts, word: string][] = [
+  ['agents', 'agent'],
+  ['shells', 'shell'],
+  ['other', 'other task'],
+];
+
+/**
+ * The detail of a turn that ended while background tasks run, from the task types `Stop` lists (`subagent`, `shell`, `code`, `monitor` and
+ * others, mechanics M124), such as `turn ended with background tasks: 2 agents, 1 shell`; without types, as from an older hook writer, only
+ * {@link BACKGROUND_DETAIL}.
+ */
+export function backgroundDetail(types: readonly string[] | undefined): string {
+  if (types === undefined || types.length === 0) {
+    return BACKGROUND_DETAIL;
+  }
+
+  const counts: BackgroundCounts = { agents: 0, shells: 0, other: 0 };
+
+  for (const type of types) {
+    counts[type === 'subagent' ? 'agents' : type === 'shell' ? 'shells' : 'other']++;
+  }
+
+  const parts = BACKGROUND_KINDS.filter(([key]) => counts[key] > 0).map(([key, word]) => `${counts[key]} ${word}${counts[key] === 1 ? '' : 's'}`);
+
+  return `${BACKGROUND_DETAIL}: ${parts.join(', ')}`;
+}
+
+/** The background work of a `running` session whose turn ended with background tasks, all zero when its detail has no counts, else null. */
+export function backgroundCounts(session: { state: Session['state']; stateDetail?: string | null } | null | undefined): BackgroundCounts | null {
+  const detail = session?.state === 'running' ? (session.stateDetail ?? null) : null;
+
+  if (detail === null || (detail !== BACKGROUND_DETAIL && !detail.startsWith(`${BACKGROUND_DETAIL}: `))) {
+    return null;
+  }
+
+  const counts: BackgroundCounts = { agents: 0, shells: 0, other: 0 };
+
+  for (const [key, word] of BACKGROUND_KINDS) {
+    const found = new RegExp(`(\\d+) ${word}s?(,|$)`).exec(detail);
+
+    counts[key] = found === null ? 0 : Number(found[1]);
+  }
+
+  return counts;
+}
+
+/** The line the conversation shows while a session's turn has ended and its background work runs, such as `3 agents running`. */
+export function backgroundLabel(counts: BackgroundCounts): string {
+  const parts = BACKGROUND_KINDS.filter(([key]) => counts[key] > 0).map(([key, word]) => {
+    const name = key === 'other' && counts.agents + counts.shells === 0 ? 'background task' : word;
+
+    return `${counts[key]} ${name}${counts[key] === 1 ? '' : 's'}`;
+  });
+
+  return parts.length === 0 ? 'Background tasks running' : `${parts.join(' · ')} running`;
+}
+
 /**
  * The state detail of an `idle` Code Mode or Codex app-server task session whose turn ended with a question card no message has answered yet,
  * so its work item waits on the operator's answer (PRD R103).

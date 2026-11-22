@@ -148,6 +148,8 @@ describe('markerState', () => {
     [{ event: 'Notification', notificationType: 'idle_prompt' }, null],
     [{ event: 'Stop' }, { state: 'idle', detail: null }],
     [{ event: 'Stop', backgroundTasks: 2 }, { state: 'running', detail: BACKGROUND_DETAIL }],
+    [{ event: 'Stop', backgroundTasks: 4, backgroundTypes: ['subagent', 'shell', 'subagent', 'code'] }, { state: 'running', detail: `${BACKGROUND_DETAIL}: 2 agents, 1 shell, 1 other task` }],
+    [{ event: 'Stop', backgroundTasks: 0, backgroundTypes: [] }, { state: 'idle', detail: null }],
     [{ event: 'StopFailure', error: 'rate_limit', errorMessage: 'API Error' }, { state: 'failed', detail: 'rate_limit: API Error' }],
     [{ event: 'StopFailure', errorMessage: 'API Error' }, { state: 'failed', detail: 'API Error' }],
     [{ event: 'SessionEnd' }, null],
@@ -272,6 +274,7 @@ describe('hook writer', () => {
       toolName: null,
       promptTool: null,
       backgroundTasks: 0,
+      backgroundTypes: [],
       error: 'rate_limit',
       errorMessage: 'x'.repeat(500),
     });
@@ -280,7 +283,11 @@ describe('hook writer', () => {
     expect(JSON.parse(readFileSync(markerPath(), 'utf8')).event).toBe('StopFailure');
 
     run({ session_id: 'abc-123', hook_event_name: 'Stop', background_tasks: [{}, {}] });
-    expect(JSON.parse(readFileSync(markerPath(), 'utf8'))).toMatchObject({ event: 'Stop', backgroundTasks: 2, error: null, errorMessage: null });
+    expect(JSON.parse(readFileSync(markerPath(), 'utf8'))).toMatchObject({ event: 'Stop', backgroundTasks: 2, backgroundTypes: ['unknown', 'unknown'], error: null, errorMessage: null });
+
+    // As Claude Code 2.1.330 lists them (mechanics M124).
+    run({ session_id: 'abc-123', hook_event_name: 'Stop', background_tasks: [{ id: 'a1', type: 'subagent', status: 'running', description: 'sleeper', agent_type: 'general-purpose' }, { id: 'b1', type: 'shell', status: 'running', description: 'Sleep', command: 'sleep 25' }] });
+    expect(JSON.parse(readFileSync(markerPath(), 'utf8'))).toMatchObject({ event: 'Stop', backgroundTasks: 2, backgroundTypes: ['subagent', 'shell'] });
 
     expect(run({ session_id: 'abc-123', hook_event_name: 'SessionEnd' })).toEqual({ status: 0, stdout: '' });
     expect(existsSync(markerPath())).toBe(false);
