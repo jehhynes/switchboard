@@ -138,6 +138,8 @@ svg.source-logo.forum { color: #57ae57; }
 /* The dock's notes above the groups, in the warning colour; the held-session note is a button that looks like one. */
 .list-note { display: block; box-sizing: border-box; width: 100%; margin: 0; padding: 4px 4px 4px 20px; border: none; background: transparent; color: var(--vscode-editorWarning-foreground); text-align: left; overflow-wrap: anywhere; }
 button.held-note { cursor: pointer; }
+/* Why no device has the voice after the phone was lost: information, not a warning. */
+.voice-note { color: var(--vscode-descriptionForeground); }
 button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 .holder-notice { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 0; padding: 4px 4px 4px 20px; color: var(--vscode-editorWarning-foreground); }
 .holder-notice-text { flex: 1 1 12em; min-width: 0; }

@@ -406,6 +406,9 @@ describe('pageHeader', () => {
 
     expect(header).toMatchObject({ notes, heldNote: '2 held sessions without a work item' });
     expect(pageHeader({ notes: [], sources: [], repoRoots: [], schedules: [] }, snapshot([]))).not.toHaveProperty('heldNote');
+    // The lost phone's note goes apart from the warning notes, untoned (PRD R119).
+    expect(pageHeader({ notes: [], voiceNote: 'Voice stopped unexpectedly.', sources: [], repoRoots: [], schedules: [] }, snapshot([]))).toMatchObject({ notes: [], voiceNote: 'Voice stopped unexpectedly.' });
+    expect(pageHeader({ notes: [], sources: [], repoRoots: [], schedules: [] }, snapshot([]))).not.toHaveProperty('voiceNote');
     // From the dock view itself: a settings error is the dock's note, and the page's.
     const view = snapshot([]);
     const broken = { ...view, errors: { ...view.errors, settings: 'settings.json is not valid JSON.' } };

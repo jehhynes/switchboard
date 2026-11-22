@@ -223,6 +223,84 @@ describe('VoiceControl with the voice on a phone (PRD R119)', () => {
     expect(control.device).toBe('phone');
   });
 
+  it('counts the phone lost only when the operator did not choose its leaving, and carries that over a hub restart', async () => {
+    const { control, connections, logs } = setup();
+
+    control.update();
+    await settle();
+    expect(control.phoneLost).toBe(false);
+
+    // The socket closing with no word from the page, as a dropped connection: lost.
+    control.phoneOpened('phone');
+    control.phoneClosed('closed by the page');
+    expect([control.device, control.phoneLost]).toEqual(['none', true]);
+    expect(logs).toContain('voice: device none: the phone left unexpectedly: closed by the page');
+    expect(parseVoiceHandover(control.handoverState())?.phoneLost).toBe(true);
+    // Talk here on this computer ends it.
+    expect(control.talkHere('pc')).toBeNull();
+    expect(control.phoneLost).toBe(false);
+
+    // Voice off on the phone: its page says it leaves before the socket closes.
+    control.phoneOpened('phone');
+    control.phoneMessage({ type: 'leave' });
+    control.phoneClosed('closed by the page');
+    expect([control.device, control.phoneLost]).toEqual(['none', false]);
+    expect(logs).toContain('voice: device none: the phone left: closed by the page');
+    expect(control.handoverState()).not.toHaveProperty('phoneLost');
+
+    // A page hidden when its socket closes, as when the app is closed; a page shown again counts as before.
+    control.phoneOpened('phone');
+    control.phoneMessage({ type: 'visibility', hidden: true });
+    control.phoneClosed('closed by the page');
+    expect(control.phoneLost).toBe(false);
+    control.phoneOpened('phone');
+    control.phoneMessage({ type: 'visibility', hidden: true });
+    control.phoneMessage({ type: 'visibility', hidden: false });
+    control.phoneClosed('The page stopped answering.');
+    expect(control.phoneLost).toBe(true);
+
+    // The hub's own refusal (a sign-out, a forbidden device, voice turned off, the page closed) is the operator's choice.
+    control.phoneOpened('phone');
+    control.phoneClosed('This device was signed out.', true);
+    expect(control.phoneLost).toBe(false);
+
+    // A stalled phone is closed by the hub with its refusal code, yet lost.
+    control.phoneOpened('phone');
+    connections[0]!.receive({ type: 'phone-stalled', reason: 'Voice stopped because playback on this device stopped progressing.' });
+    control.phoneClosed('Voice stopped because playback on this device stopped progressing.', true);
+    expect(control.phoneLost).toBe(true);
+
+    // A leave from a page that does not hold the voice changes nothing.
+    control.phoneMessage({ type: 'leave' });
+    expect(control.phoneLost).toBe(true);
+
+    // Another phone taking the voice over is no loss.
+    control.phoneOpened('phone');
+    control.phoneOpened('tablet', 'tablet-hash');
+    expect([control.device, control.phoneLost]).toEqual(['phone', false]);
+
+    // A hub that took over: a phone that does not come back in time is lost; a handed-over loss stays one, a chosen leave does not.
+    const handed = control.handoverState();
+    const next = setup();
+
+    next.control.restore(handed);
+    next.control.update();
+    await settle();
+    expect([next.control.device, next.control.phoneLost]).toEqual(['phone', false]);
+    next.advance(PHONE_RESUME_MS);
+    expect([next.control.device, next.control.phoneLost]).toEqual(['none', true]);
+
+    const lost = setup();
+
+    lost.control.restore({ ...handed, device: 'none', phoneHash: null, phoneLost: true });
+    expect([lost.control.device, lost.control.phoneLost]).toEqual(['none', true]);
+
+    const left = setup();
+
+    left.control.restore({ ...handed, device: 'none', phoneHash: null });
+    expect([left.control.device, left.control.phoneLost]).toEqual(['none', false]);
+  });
+
   it('lets no other paired page take the voice, hands it over between phones, follows the phone page\'s own focus for a selection, and drops a stalled phone', async () => {
     const { control, connections, focusedPages, focus, sentOf, closed, logs } = setup();
 
@@ -415,6 +493,15 @@ describe('VoiceControl with the voice on a phone (PRD R119)', () => {
     expect(sentOf('device')).toEqual([{ type: 'device', device: 'none' }]);
     expect(logs).toContain('voice: device none: the voice process had the phone when the hub connected');
     expect(closed).toEqual([]);
+    // The phone's socket closed with the hub that stopped: lost. A process that had none was off already, maybe by the operator's choice.
+    expect(control.phoneLost).toBe(true);
+
+    const fresh = setup();
+
+    fresh.control.update();
+    await settle();
+    fresh.connections[0]!.receive({ type: 'device', device: 'none' });
+    expect([fresh.control.device, fresh.control.phoneLost]).toEqual(['none', false]);
 
     // A phone that took the voice in this hub is not moved by the greeting of a process that reconnects.
     control.phoneOpened('phone');

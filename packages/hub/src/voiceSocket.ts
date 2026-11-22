@@ -54,8 +54,8 @@ export interface VoiceSocketDeps {
   message?(device: VoiceDevice, data: Record<string, unknown>): void;
   /** A binary message from the page after `hello`, within the rate limit. */
   audio?(device: VoiceDevice, data: Buffer): void;
-  /** The device's socket closed, after `hello`, with why. */
-  closed?(device: VoiceDevice, reason: string): void;
+  /** The device's socket closed, after `hello`, with why; `refused` when the hub closed it with {@link VOICE_CLOSE.refused}. */
+  closed?(device: VoiceDevice, reason: string, refused: boolean): void;
 }
 
 interface Open {
@@ -96,6 +96,7 @@ export class VoiceSockets {
       timer: setTimeout(() => one.socket.close(1008, 'No hello.'), VOICE_HELLO_MS),
     };
     let reason = 'closed by the page';
+    let refused = false;
     // Any message from the page puts off the idle close.
     const heard = (): void => {
       if (one.hello) {
@@ -203,7 +204,7 @@ export class VoiceSockets {
         if (this.#current === one) {
           this.#current = null;
           this.deps.log(`voice socket: ${device.label || 'a device'} (${device.hash.slice(0, 8)}) closed: ${reason}`);
-          this.deps.closed?.(device, reason);
+          this.deps.closed?.(device, reason, refused);
         }
       },
     });
@@ -213,6 +214,7 @@ export class VoiceSockets {
 
     one.socket.close = (code, why) => {
       reason = why === undefined || why === '' ? reason : why;
+      refused ||= code === VOICE_CLOSE.refused;
       close(code, why);
     };
   }

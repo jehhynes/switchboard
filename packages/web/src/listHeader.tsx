@@ -244,7 +244,8 @@ function NeedsYou({ view }: { view: HeaderView }) {
 
 /**
  * The dock's notes above its groups, in the warning colour: settings, playbook, hook, source and voice errors and setup notes, then the held
- * sessions without a work item, whose click opens what Held sessions in More Actions opens.
+ * sessions without a work item, whose click opens what Held sessions in More Actions opens; then, untoned, why no device has the voice when
+ * the phone was lost.
  */
 function HeaderNotes({ header }: { header: PageHeader | null }) {
   return (
@@ -258,6 +259,11 @@ function HeaderNotes({ header }: { header: PageHeader | null }) {
         <button type="button" class="list-note held-note" data-action="list-later-held" title="Open held sessions">
           {header.heldNote}
         </button>
+      )}
+      {header?.voiceNote === undefined ? null : (
+        <p class="list-note voice-note" role="status">
+          {header.voiceNote}
+        </p>
       )}
     </>
   );

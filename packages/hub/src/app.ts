@@ -59,8 +59,8 @@ import type { PageBrowser } from './server.js';
 import { browserExtensionZip } from './browserExtension.js';
 
 const RELOAD_DEBOUNCE_MS = 300;
-/** The dock's note while no device has the voice, after the phone that had it left. */
-const NO_VOICE_DEVICE = 'Voice is off. Select Talk here on this computer, or Voice on this device on a paired device.';
+/** The dock's and the page's neutral note while no device has the voice because the phone was lost (`VoiceControl.phoneLost`). */
+export const PHONE_LOST_NOTE = 'Voice stopped unexpectedly on the paired device. Select Voice on this device there, or Talk here on this computer.';
 
 /** Operator events the dock may send (PRD R27). */
 const OPERATOR_EVENTS = new Set(['adhoc', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retry', 'stop', 'delete', 'open-question', 'pick', 'retriage-pool', 'snooze', 'restore', 'comment', 'move', 'reset-position', 'persona']);
@@ -537,7 +537,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     log: (line) => deps.log(line),
     opened: (device) => voice.phoneOpened(device.key, device.hash),
     resumable: (device) => voice.resumable(device.hash),
-    closed: (_device, reason) => voice.phoneClosed(reason),
+    closed: (_device, reason, refused) => voice.phoneClosed(reason, refused),
     message: (_device, data) => voice.phoneMessage(data),
     audio: (device, data) => voice.phoneAudio(device.key, data),
   });
@@ -725,7 +725,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     pageHeader: () => {
       const built = views();
 
-      return { ...pageHeader({ ...built.dock, notes: withVoiceNote(built.dock.notes) }, built.snapshot), ...(config.settings.voice.enabled && voice.device !== 'computer' ? { voiceDevice: voice.device } : {}) };
+      return { ...pageHeader({ ...built.dock, ...withVoiceNotes(built.dock.notes) }, built.snapshot), ...(config.settings.voice.enabled && voice.device !== 'computer' ? { voiceDevice: voice.device } : {}) };
     },
     pollSources: () => runtime.pollNow(),
     restartHolder: (detail) => restartHolder(detail),
@@ -941,7 +941,7 @@ const dockWithRuns = () => {
     return {
       ...view,
       openIn: config.settings.dock.openIn,
-      notes: withVoiceNote(view.notes),
+      ...withVoiceNotes(view.notes),
       ...(view.held === undefined ? {} : { held: view.held.map((one) => (one.terminal === null ? one : { ...one, terminal: executable(one.terminal) })) }),
       groups: view.groups.map((group) => ({
         ...group,
@@ -964,12 +964,17 @@ const dockWithRuns = () => {
     return targetSession === null ? null : `item:${targetSession.workItemId}`;
   }
 
-  /** The dock's notes with the voice's problem last, as the dock and the page show them (architecture.md § Voice). */
-  function withVoiceNote(notes: string[]): string[] {
+  /**
+   * The dock's notes with the voice's problem last, and the neutral voice note while the phone was lost, as the dock and the page show them
+   * (architecture.md § Voice). Voice the operator turned off, or a phone left by choice, has no note.
+   */
+  function withVoiceNotes(notes: string[]): { notes: string[]; voiceNote?: string } {
     const voiceError = voice.dockError();
-    const withError = voiceError === null ? notes : [...notes, `Voice: ${voiceError}`];
 
-    return voice.device === 'none' && config.settings.voice.enabled ? [...withError, NO_VOICE_DEVICE] : withError;
+    return {
+      notes: voiceError === null ? notes : [...notes, `Voice: ${voiceError}`],
+      ...(config.settings.voice.enabled && voice.phoneLost ? { voiceNote: PHONE_LOST_NOTE } : {}),
+    };
   }
 
   /**
@@ -1713,7 +1718,7 @@ const dockWithRuns = () => {
       voice: {
         enabled: () => config.settings.voice.enabled,
         accept: (request, socket, head, device) => voiceSockets.accept(request, socket, head, device),
-        close: (match, reason) => voiceSockets.close(match, reason),
+        close: (match, reason, code) => voiceSockets.close(match, reason, code),
       },
       browser,
     },

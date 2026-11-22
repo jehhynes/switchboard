@@ -108,6 +108,8 @@ export interface PhoneVoiceDeps {
   /** Whether the page is hidden, and a way to hear it change; the document's when left out. */
   hidden?(): boolean;
   onVisibility?(changed: () => void): void;
+  /** Hears the page being unloaded, as by a reload or closing the app; the window's `pagehide` when left out. */
+  onPageHide?(hidden: () => void): void;
   setTimer?(run: () => void, ms: number): unknown;
   clearTimer?(timer: unknown): void;
 }
@@ -157,6 +159,8 @@ export class PhoneVoice {
     const onVisibility = deps.onVisibility ?? ((changed: () => void) => document.addEventListener('visibilitychange', changed));
 
     onVisibility(() => this.#visibility());
+    // A page that unloads leaves by the operator's choice, so the hub notes no lost phone when its stream and socket end.
+    (deps.onPageHide ?? ((hidden: () => void) => window.addEventListener('pagehide', hidden)))(() => this.#send({ type: 'leave' }));
   }
 
   /**
@@ -168,6 +172,8 @@ export class PhoneVoice {
 
     // A hidden page cannot be heard: nothing of what it hears goes on, at once, before the voice leaves it.
     this.#sendBusy();
+    // The hub notes no lost phone for a socket that closes while the page is hidden, as when the app is closed: leaving it plainly ends talking.
+    this.#send({ type: 'visibility', hidden });
 
     if (!hidden || this.state === 'off') {
       this.#clearHidden();
@@ -333,9 +339,21 @@ export class PhoneVoice {
     return this.error ?? (this.#quiet && this.state === 'off' ? '' : fallback);
   }
 
+  /** Sends a JSON message on the voice socket while it is welcomed. */
+  #send(message: Record<string, unknown>): void {
+    if (this.state === 'on' && this.#socket !== null) {
+      this.#socket.send(JSON.stringify(message));
+    }
+  }
+
   /** The voice left this phone on its own: closed, with why, or null when that needs no word. */
   #lose(why: string | null): void {
     const socket = this.#socket;
+
+    // A loss that needs no word, as a hidden page's, is no failure: the hub notes nothing for it either.
+    if (why === null) {
+      this.#send({ type: 'leave' });
+    }
 
     this.#run++;
     this.#stopped();
@@ -536,10 +554,11 @@ export class PhoneVoice {
       return;
     }
 
+    // Voice off is the operator's own action: the hub notes nothing for it, and a Mic on it cuts short says nothing.
+    this.#send({ type: 'leave' });
     this.#run++;
     this.#stopped();
     this.error = null;
-    // Voice off is the operator's own action: a Mic on it cuts short says nothing.
     this.#quiet = true;
     socket?.close(1000);
     this.deps.changed();
