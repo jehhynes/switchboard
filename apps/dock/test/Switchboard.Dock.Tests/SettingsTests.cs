@@ -11,8 +11,8 @@ public sealed class SettingsFieldsTests
         var sections = SettingsFields.GeneralFields(SettingsConfigs.State());
         var fields = sections.SelectMany((section) => section.Fields).ToDictionary((field) => field.Path);
 
-        Assert.Equal(["Sessions", "Claude sessions", "Codex sessions", "Triage", "Dock", "Alerts", "Web page", "Advanced"], sections.Select((section) => section.Heading));
-        Assert.Equal([false, false, false, false, false, false, false, true], sections.Select((section) => section.Advanced));
+        Assert.Equal(["Sessions", "Claude sessions", "Codex sessions", "Triage", "Dock", "Alerts", "Web page", "Remote access", "Advanced"], sections.Select((section) => section.Heading));
+        Assert.Equal([false, false, false, false, false, false, false, false, true], sections.Select((section) => section.Advanced));
         Assert.Equal(
             [
                 "sessions.provider", "sessions.concurrency", "sessions.codeMode", "sessions.debriefs",
@@ -22,11 +22,12 @@ public sealed class SettingsFieldsTests
                 "dock.openVSCode", "dock.openIn", "dock.openTerminal",
                 "alerts.surface",
                 "web.chromePane",
+                "web.tailscale", "web.remoteHosts", "web.remoteLogins",
                 "sessions.installHooks", "sessions.claudePath", "sessions.codexPath", "sessions.nodePath",
             ],
             sections.SelectMany((section) => section.Fields).Select((field) => field.Path));
         Assert.Equal(
-            ["Default agent", "Concurrency", "Code Mode (experimental)", "Friction debriefs", "Model", "Permission mode", "Model", "Permission mode", "Concurrency", "Model", "Timeout (seconds)", "Rows open in", "Row click opens", "Terminal for \"Open in terminal\"", "Needs-you alerts from", "Chrome pane (experimental)", "Install hooks", "Claude Code path", "Codex path", "Node.js path"],
+            ["Default agent", "Concurrency", "Code Mode (experimental)", "Friction debriefs", "Model", "Permission mode", "Model", "Permission mode", "Concurrency", "Model", "Timeout (seconds)", "Rows open in", "Row click opens", "Terminal for \"Open in terminal\"", "Needs-you alerts from", "Chrome pane (experimental)", "Tailscale", "Allowed hosts", "Allowed logins", "Install hooks", "Claude Code path", "Codex path", "Node.js path"],
             sections.SelectMany((section) => section.Fields).Select((field) => field.Label));
         Assert.Equal(["claude", "codex"], fields["sessions.provider"].Options!.Select((option) => option.Value));
         Assert.Equal(["Claude", "Codex"], fields["sessions.provider"].Options!.Select((option) => option.Label));
@@ -49,6 +50,10 @@ public sealed class SettingsFieldsTests
         Assert.Contains("when Rows open in is Always", fields["dock.openTerminal"].Help);
         Assert.Equal((FieldKind.Boolean, false), (fields["web.chromePane"].Kind, fields["web.chromePane"].Fallback));
         Assert.StartsWith("Experimental, Windows only, and may break with Chrome updates.", fields["web.chromePane"].Help);
+        Assert.Equal((FieldKind.Boolean, false), (fields["web.tailscale"].Kind, fields["web.tailscale"].Fallback));
+        Assert.Contains("tailscale serve --bg 47616", fields["web.tailscale"].Help);
+        Assert.Equal((FieldKind.List, null), (fields["web.remoteHosts"].Kind, fields["web.remoteHosts"].ListDefault));
+        Assert.Equal((FieldKind.List, null), (fields["web.remoteLogins"].Kind, fields["web.remoteLogins"].ListDefault));
     }
 
     [Fact]
@@ -429,6 +434,7 @@ public sealed class SettingsPagesTests
     [InlineData("dock.openVSCode", "general")]
     [InlineData("alerts.surface", "general")]
     [InlineData("web.chromePane", "general")]
+    [InlineData("web.remoteLogins", "general")]
     [InlineData("sources.github.repo", "source:github")]
     [InlineData("sources.zoho.orgId", "source:zoho")]
     public void Nav_SettingEdited_MarksOnlyItsPage(string path, string page)

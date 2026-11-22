@@ -387,6 +387,13 @@ public static partial class SettingsFields
             [
                 new Field("web.chromePane", "Chrome pane (experimental)", FieldKind.Boolean, "Experimental, Windows only, and may break with Chrome updates. Shows the selected work item's ticket and pull request in a Chrome window that Switchboard keeps over the installed web page's right column, without the dock. Needs the Switchboard Chrome extension, paired from the page's view options.", Fallback: false),
             ]),
+            // The Settings window draws the paired devices and Pair a device after this section (architecture.md § Remote access).
+            new Section("Remote access",
+            [
+                new Field("web.tailscale", "Tailscale", FieldKind.Boolean, "Serve this web page to your phone and other devices of yours on your tailnet: Switchboard adds this computer's Tailscale name to Allowed hosts and its owner's login to Allowed logins, read from tailscale status again whenever this changes. Needs Tailscale running here and tailscale serve pointed at the page's port, as in tailscale serve --bg 47616. Each device then pairs once with Pair a device. Never use tailscale funnel.", Fallback: false),
+                new Field("web.remoteHosts", "Allowed hosts", FieldKind.List, "One per line, such as pc.tailnet.ts.net, without https:// or a port: other names the page answers as through tailscale serve. With Tailscale on, this computer's own Tailscale name needs no line."),
+                new Field("web.remoteLogins", "Allowed logins", FieldKind.List, "One per line, such as you@example.com: the Tailscale logins whose devices may pair and use the page; other people on your tailnet are refused. With Tailscale on, this computer's owner needs no line."),
+            ]),
             new Section("Advanced",
             [
                 new Field("sessions.installHooks", "Install hooks", FieldKind.Boolean, "Add Switchboard’s hooks to your Claude and Codex settings, so the dock shows when a session waits for you or runs in VS Code. Off, the session list and Codex’s run output alone decide state.", Fallback: true),

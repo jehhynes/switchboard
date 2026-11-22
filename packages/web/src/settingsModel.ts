@@ -1258,6 +1258,15 @@ export function generalFields(state: EditorState): Section[] {
         },
       ],
     },
+    // Settings draws the paired devices and Pair a device after this section (architecture.md § Remote access).
+    {
+      heading: 'Remote access',
+      fields: [
+        { path: 'web.tailscale', label: 'Tailscale', kind: 'boolean', help: "Serve this web page to your phone and other devices of yours on your tailnet: Switchboard adds this computer's Tailscale name to Allowed hosts and its owner's login to Allowed logins, read from tailscale status again whenever this changes. Needs Tailscale running here and tailscale serve pointed at the page's port, as in tailscale serve --bg 47616. Each device then pairs once with Pair a device. Never use tailscale funnel.", fallback: false },
+        { path: 'web.remoteHosts', label: 'Allowed hosts', kind: 'list', help: "One per line, such as pc.tailnet.ts.net, without https:// or a port: other names the page answers as through tailscale serve. With Tailscale on, this computer's own Tailscale name needs no line." },
+        { path: 'web.remoteLogins', label: 'Allowed logins', kind: 'list', help: "One per line, such as you@example.com: the Tailscale logins whose devices may pair and use the page; other people on your tailnet are refused. With Tailscale on, this computer's owner needs no line." },
+      ],
+    },
     {
       heading: 'Advanced',
       advanced: true,

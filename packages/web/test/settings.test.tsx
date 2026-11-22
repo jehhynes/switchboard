@@ -129,8 +129,8 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     expect(host.querySelector('.settings-nav-entry.current')?.textContent).toContain('General');
     expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('General');
     expect(host.querySelector('.settings-file')?.textContent).toBe('C:/home/.switchboard/settings.json');
-    expect(texts('.settings-section-heading')).toEqual(['Sessions', 'Claude sessions', 'Codex sessions', 'Triage', 'Dock', 'Alerts', 'Web page', 'Advanced']);
-    expect(texts('.settings-section:not(.advanced) .settings-caption label')).toEqual(['Default agent', 'Concurrency', 'Code Mode (experimental)', 'Friction debriefs', 'Model', 'Permission mode', 'Model', 'Permission mode', 'Concurrency', 'Model', 'Timeout (seconds)', 'Rows open in', 'Row click opens', 'Terminal for "Open in terminal"', 'Needs-you alerts from', 'Chrome pane (experimental)']);
+    expect(texts('.settings-section-heading')).toEqual(['Sessions', 'Claude sessions', 'Codex sessions', 'Triage', 'Dock', 'Alerts', 'Web page', 'Remote access', 'Advanced']);
+    expect(texts('.settings-section:not(.advanced) .settings-caption label')).toEqual(['Default agent', 'Concurrency', 'Code Mode (experimental)', 'Friction debriefs', 'Model', 'Permission mode', 'Model', 'Permission mode', 'Concurrency', 'Model', 'Timeout (seconds)', 'Rows open in', 'Row click opens', 'Terminal for "Open in terminal"', 'Needs-you alerts from', 'Chrome pane (experimental)', 'Tailscale', 'Allowed hosts', 'Allowed logins']);
     expect(host.querySelector('[data-path="sessions.installHooks"]')).toBeNull();
     expect(host.querySelector('.settings-toggle')?.getAttribute('aria-expanded')).toBe('false');
     expect(host.querySelector('.settings-status')?.textContent).toBe('Saved');
@@ -177,6 +177,25 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     // The next edit drops the bar's errors.
     type('sessions.concurrency', '3');
     expect(host.querySelectorAll('.settings-bar .settings-error')).toHaveLength(0);
+  });
+
+  it('edits remote access under General: the Tailscale switch and the allowed hosts and logins, one per line, each error on its list', async () => {
+    answers['page-settings-check'] = (body) => ({ status: 200, body: { errors: (getAt(body['settings'] as never, 'web.remoteHosts') as string[] | undefined)?.includes('https://pc') === true ? ['web.remoteHosts must be a list of host names such as pc.tailnet.ts.net, without a port.'] : [] } });
+    await opened();
+
+    expect(field<HTMLInputElement>('web.tailscale').checked).toBe(false);
+    expect(field<HTMLTextAreaElement>('web.remoteHosts').value).toBe('');
+    field<HTMLInputElement>('web.tailscale').click();
+    type('web.remoteHosts', 'pc.tail.ts.net\nhttps://pc');
+    type('web.remoteLogins', ' alex@example.com \n\n');
+    await settle(CHECK_DELAY_MS);
+    expect(named('page-settings-check').at(-1)!.body['settings']).toEqual({ sessions: { installHooks: false }, web: { tailscale: true, remoteHosts: ['pc.tail.ts.net', 'https://pc'], remoteLogins: ['alex@example.com'] } });
+    expect(host.querySelector('[data-path="web.remoteHosts"] .settings-field-error')?.textContent).toBe('web.remoteHosts must be a list of host names such as pc.tailnet.ts.net, without a port.');
+
+    // Emptying a list removes its key.
+    type('web.remoteHosts', '');
+    await settle(CHECK_DELAY_MS);
+    expect(named('page-settings-check').at(-1)!.body['settings']).toEqual({ sessions: { installHooks: false }, web: { tailscale: true, remoteLogins: ['alex@example.com'] } });
   });
 
   it('keeps what was typed in a field while the draft holds its reading, and keeps a key the page has no field for', async () => {
