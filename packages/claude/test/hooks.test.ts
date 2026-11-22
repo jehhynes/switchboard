@@ -10,6 +10,9 @@ import { BACKGROUND_DETAIL, CONTRACT_HOOK_SOURCE, CONTRACT_HOOK_WAIT_MS, HOOK_EV
 import type { Marker } from '../src/hooks.js';
 import { PERMISSION_PROMPT } from '@switchboard/core';
 
+/** The test's environment without the variables the hook reads, so a run inside a Switchboard session's terminal, which sets SWITCHBOARD_LAUNCH, gives the same result. */
+const HOOK_ENV: NodeJS.ProcessEnv = Object.fromEntries(Object.entries(process.env).filter(([name]) => !['SWITCHBOARD_LAUNCH', 'FRICTION_DEBRIEF'].includes(name.toUpperCase())));
+
 const HOOK = 'C:/Users/me/.switchboard/hook.mjs';
 const ENTRY = { type: 'command', command: 'node', args: [HOOK], async: true, timeout: 5 };
 const CONTRACT_HOOK = 'C:/Users/me/.switchboard/contract.mjs';
@@ -176,7 +179,7 @@ describe('hook writer', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  function run(payload: unknown, env: NodeJS.ProcessEnv = process.env): { status: number | null; stdout: string } {
+  function run(payload: unknown, env: NodeJS.ProcessEnv = HOOK_ENV): { status: number | null; stdout: string } {
     const result = spawnSync(process.execPath, [join(dir, 'hook.mjs')], { input: typeof payload === 'string' ? payload : JSON.stringify(payload), encoding: 'utf8', env });
 
     return { status: result.status, stdout: result.stdout };
@@ -211,7 +214,7 @@ describe('hook writer', () => {
 
   it("records a Code Mode process's launch, and keeps a clear, fork or resume start source across later events of the session ID (mechanics M73, M77)", () => {
     const written = () => JSON.parse(readFileSync(markerPath(), 'utf8'));
-    const held = { ...process.env, SWITCHBOARD_LAUNCH: 'launch-1' };
+    const held = { ...HOOK_ENV, SWITCHBOARD_LAUNCH: 'launch-1' };
 
     run({ session_id: 'abc-123', hook_event_name: 'SessionStart', source: 'startup' }, held);
     expect(written()).toMatchObject({ event: 'SessionStart', launch: 'launch-1', startSource: null });
@@ -234,7 +237,7 @@ describe('hook writer', () => {
   });
 
   it('records no launch or start source for a session without SWITCHBOARD_LAUNCH', () => {
-    const env = { ...process.env };
+    const env = { ...HOOK_ENV };
 
     delete env['SWITCHBOARD_LAUNCH'];
     run({ session_id: 'abc-123', hook_event_name: 'SessionStart', source: 'clear' }, env);
@@ -247,10 +250,10 @@ describe('hook writer', () => {
   });
 
   it('writes no marker for a debrief fork', () => {
-    expect(run({ session_id: 'abc-123', hook_event_name: 'Stop' }, { ...process.env, FRICTION_DEBRIEF: '1' })).toEqual({ status: 0, stdout: '' });
+    expect(run({ session_id: 'abc-123', hook_event_name: 'Stop' }, { ...HOOK_ENV, FRICTION_DEBRIEF: '1' })).toEqual({ status: 0, stdout: '' });
     expect(existsSync(markerPath())).toBe(false);
 
-    run({ session_id: 'abc-123', hook_event_name: 'Stop' }, { ...process.env, FRICTION_DEBRIEF: '' });
+    run({ session_id: 'abc-123', hook_event_name: 'Stop' }, { ...HOOK_ENV, FRICTION_DEBRIEF: '' });
     expect(existsSync(markerPath())).toBe(true);
   });
 
