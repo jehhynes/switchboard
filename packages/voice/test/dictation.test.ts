@@ -5,6 +5,7 @@ import type { VoiceSettings } from '@switchboard/core/settings';
 import { ASR_RATE, PHRASE_SILENCE_MS } from '../src/asr.js';
 import { Dictation, WARM_RETRY_MS, WARM_SETTLE_MS, WARM_SOON_MS } from '../src/dictation.js';
 import type { AudioDevices } from '../src/micUse.js';
+import { ENROLL_SECONDS } from '../src/protocol.js';
 import type { VoiceMessage } from '../src/protocol.js';
 import type { ChatTurn } from '../src/turn.js';
 import type { PieceCheck, Voiceprint } from '../src/voiceprint.js';
@@ -38,7 +39,7 @@ function fakeVoiceprint(options: { verdict?: (text: string) => PieceCheck | null
   return voiceprint;
 }
 
-function setup(options: { turn?: (chat: ChatTurn[]) => number; watcher?: 'none' | 'manual'; recognizer?: { error: string }; settings?: Partial<VoiceSettings>; voiceprint?: ReturnType<typeof fakeVoiceprint>; listenable?: () => boolean } = {}) {
+function setup(options: { turn?: (chat: ChatTurn[]) => number; watcher?: 'none' | 'manual'; recognizer?: { error: string }; settings?: Partial<VoiceSettings>; voiceprint?: ReturnType<typeof fakeVoiceprint> } = {}) {
   const clock = new Clock();
   const capture = new FakeCapture();
   const engine = new FakeEngine();
@@ -94,7 +95,6 @@ function setup(options: { turn?: (chat: ChatTurn[]) => number; watcher?: 'none' 
     ...(options.voiceprint === undefined ? {} : { voiceprint: options.voiceprint as unknown as Voiceprint }),
     playing: () => speech.playing,
     playedUntil: () => speech.until,
-    ...(options.listenable === undefined ? {} : { listenable: options.listenable }),
     interrupt: () => {
       const playing = speech.playing;
 
@@ -367,15 +367,51 @@ describe('Dictation', () => {
     expect(loads).toHaveLength(3);
   });
 
-  it('loads nothing ahead of Mic on while no device has the voice, and keeps no error from a load ahead that failed', () => {
-    let listenable = false;
-    const options: { recognizer?: { error: string } } = {};
-    const none = setup({ ...options, listenable: () => listenable });
+  it('loads the recogniser once the settings come, with no target or device, then for a target with other terms, and keeps no error from a load ahead that failed', () => {
+    const { dictation, loads, logs, clock } = setup();
 
-    none.dictation.target(1, 's1', 'acme/app');
-    none.clock.advance(WARM_SETTLE_MS);
-    expect(none.loads).toHaveLength(0);
-    listenable = true;
+    // The voice process started: the hub's settings come before any target or device has the voice.
+    dictation.settingsChanged();
+    clock.advance(WARM_SETTLE_MS - 1);
+    expect(loads).toHaveLength(0);
+    clock.advance(1);
+    expect(loads.map((terms) => terms.slice(0, 2))).toEqual([['Switchboard', 'stop listening']]);
+    expect(logs.filter((line) => line.startsWith('recogniser loaded ahead'))).toHaveLength(1);
+    // Settings again, as after a hub restart, and the target leaving load nothing again.
+    dictation.settingsChanged();
+    dictation.target(1, null, null);
+    clock.advance(WARM_SETTLE_MS);
+    expect(loads).toHaveLength(1);
+    // A target with its own terms loads them once it settles.
+    dictation.target(2, 's2', 'acme/app');
+    clock.advance(WARM_SETTLE_MS);
+    expect(loads.map((terms) => terms[1])).toEqual(['stop listening', 'acme/app']);
+
+    // An enrolment that starts before the load puts it off until the enrolment ends, cancelled or finished.
+    for (const end of ['cancel', 'finish'] as const) {
+      const enrolling = setup({ voiceprint: fakeVoiceprint() });
+
+      enrolling.dictation.settingsChanged();
+      enrolling.dictation.enroll('start');
+      enrolling.clock.advance(WARM_SETTLE_MS);
+      expect(enrolling.loads).toHaveLength(0);
+
+      if (end === 'cancel') {
+        enrolling.dictation.enroll('cancel');
+      } else {
+        enrolling.clock.advance(ENROLL_SECONDS * 1000);
+      }
+
+      enrolling.clock.advance(WARM_SETTLE_MS);
+      expect(enrolling.loads).toHaveLength(1);
+    }
+
+    // Voice off loads nothing.
+    const off = setup({ settings: { enabled: false } });
+
+    off.dictation.settingsChanged();
+    off.clock.advance(WARM_SETTLE_MS);
+    expect(off.loads).toHaveLength(0);
 
     const missing = setup({ recognizer: { error: 'No speech recognition model in m.' } });
 

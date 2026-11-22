@@ -80,8 +80,6 @@ export interface DictationDeps {
   settings(): VoiceSettings;
   /** The voice check and enrolment; without it every piece passes unscored and enrolment fails. */
   voiceprint?: Voiceprint | null;
-  /** Whether a device has the voice, so loading the recogniser ahead of Mic on is worth blocking the process; true when left out. */
-  listenable?(): boolean;
   /** The reply being played, its spoken passage and voice, for barge-in; null while none plays. */
   playing?(): { replyId: string; text: string; voice: string } | null;
   /** Until when the voice plays: `Infinity` while it plays, else when it last stopped (`Speech.playedUntil`), for half-duplex capture. */
@@ -456,8 +454,10 @@ export class Dictation {
 
   /**
    * Loads the recogniser for the target's terms ahead of Mic on (architecture.md § Dictation), so turning the mic on does not wait seconds for
-   * the model. Loading blocks the process, so it waits while a reply plays or an utterance is open, and it runs a second of silence through the
-   * new recogniser, whose first decode on the GPU is several times slower than later ones.
+   * the model: once the process has its settings, and again for each target, whether or not a device has the voice, since a phone's first tap
+   * takes the voice and turns its mic on at once (mechanics.md M129). Loading blocks the process, so it waits while a reply plays or an
+   * utterance is open, and it runs a second of silence through the new recogniser, whose first decode on the GPU is several times slower than
+   * later ones.
    */
   warm(): void {
     if (this.#warmTimer !== null) {
@@ -467,7 +467,9 @@ export class Dictation {
     this.#warmTimer = null;
     this.#warmUrgent = false;
 
-    if (this.#target === null || this.#enrollment !== null || this.#recognizerFailed || !this.deps.settings().enabled || this.deps.listenable?.() === false || this.#engine?.key === this.#termsKey()) {
+    // With no target yet, as when the process has just started, the recogniser loads for no repository's terms, so the first Mic on after a
+    // restart finds one; a target's terms load it again only when they differ.
+    if ((this.#target === null && this.#engine !== null) || this.#enrollment !== null || this.#recognizerFailed || !this.deps.settings().enabled || this.#engine?.key === this.#termsKey()) {
       return;
     }
 
@@ -555,6 +557,16 @@ export class Dictation {
       this.deps.log('room hold ended: voice.roomHold is off');
       this.deps.changed();
     }
+
+    // The process started, as onto a new build, or voice was turned on: the recogniser loads before the first Mic on asks for it.
+    this.#warmUnloaded();
+  }
+
+  /** Schedules the load ahead when no recogniser is loaded or due, as after the settings come or an enrolment that put it off. */
+  #warmUnloaded(): void {
+    if (this.#engine === null && this.#warmTimer === null && this.deps.settings().enabled) {
+      this.#warmTimer = this.#timer(() => this.warm(), WARM_SETTLE_MS);
+    }
   }
 
   /**
@@ -625,6 +637,8 @@ export class Dictation {
 
     this.#stopCapture();
     this.#sync();
+    // A load ahead that waited for the enrolment runs now.
+    this.#warmUnloaded();
   }
 
   close(): void {

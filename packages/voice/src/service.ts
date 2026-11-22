@@ -39,8 +39,6 @@ export interface VoiceServiceDeps {
     capture(computer: Capture): Capture;
     /** The other-app watcher to use: this computer's, or the phone's own busy state while the phone has the voice. */
     watchMicUse(computer: DictationDeps['watchMicUse']): DictationDeps['watchMicUse'];
-    /** Whether a device has the voice: none after the phone left. */
-    listenable(): boolean;
   }) => Dictation;
   /** Learns the reply voices' prints from the audio played, for barge-in; none when left out. */
   voiceprint?: Voiceprint;
@@ -127,7 +125,6 @@ export class VoiceService {
           },
         }),
         watchMicUse: (computer) => (changed, failed, devices) => (this.#device === 'phone' ? this.#watchPhone(changed) : computer(changed, failed, devices)),
-        listenable: () => this.#device !== 'none',
       }) ?? null;
     // What plays is also the echo canceller's reference, handed over as it plays, so a reply played aloud is not heard as the operator.
     const output: Output = {
