@@ -1,8 +1,8 @@
 // Swipe right to go back on a phone (architecture.md § Web page): a touch that pans right over the conversation drags it off to the right with
 // the work items' list showing under it, as iOS's own navigation does, and on release either goes back, as the Back button does, or snaps back.
-// The installed app on an iPhone has no back gesture of its own, so the page draws one.
+// iOS can draw its own history gesture from the edge, so the page leaves that touch to the browser when it has earlier history.
 
-/** A touch that starts this close to the screen's left edge, in CSS pixels, may pan over anything but a text field, as iOS's edge swipe does. */
+/** A touch that starts this close to the screen's left edge, in CSS pixels, may belong to iOS's history gesture. */
 export const EDGE_PX = 24;
 /** How far a touch moves before its direction is read, so a tap or a still finger never starts a swipe. */
 export const SLOP_PX = 10;
@@ -26,13 +26,24 @@ const SIDEWAYS = '.diff-host, .console';
 /** How a touch can start a swipe: from the edge, as a pan anywhere else, or not at all. */
 export type SwipeStart = 'edge' | 'pan' | null;
 
+/** Whether iOS may show its own history preview for a left-edge swipe. */
+export function browserBackPreview(userAgent: string, platform: string, touchPoints: number, historyLength: number): boolean {
+  // The page cannot inspect the back-stack position; more than one entry means WebKit may have a preview to show.
+  return historyLength > 1 && (/iPad|iPhone|iPod/.test(userAgent) || (platform === 'MacIntel' && touchPoints > 1));
+}
+
 /**
- * How a touch at `x` on the elements of `path` (innermost first, as `composedPath` gives them) can start a swipe: never in a control; from the
- * edge in any other place; elsewhere only outside a pane that scrolls sideways and while no text is selected, so a pan there scrolls it and a
- * drag selects. Elements outside `host` are not looked at.
+ * How a touch at `x` on the elements of `path` (innermost first, as `composedPath` gives them) can start a swipe: never in a control or from an
+ * edge handled by the browser; otherwise from the edge, or away from it only outside a pane that scrolls sideways and while no text is
+ * selected, so a pan there scrolls it and a drag selects. Elements outside `host` are not looked at.
  */
-export function swipeStart(x: number, path: readonly EventTarget[], host: Element, selecting = false): SwipeStart {
+export function swipeStart(x: number, path: readonly EventTarget[], host: Element, selecting = false, nativeEdgeBack = false): SwipeStart {
   const edge = x <= EDGE_PX;
+
+  if (edge && nativeEdgeBack) {
+    return null;
+  }
+
   let sideways = false;
 
   for (const target of path) {
@@ -159,6 +170,8 @@ export interface SwipeBackOptions {
   back(): void;
   /** Whether the operator asked for less motion: the list does not slide and a release lands at once. */
   reducedMotion(): boolean;
+  /** Whether the browser handles a back swipe from the left edge itself. */
+  nativeEdgeBack?(): boolean;
   now?(): number;
   frame?(callback: () => void): void;
 }
@@ -346,7 +359,7 @@ export function swipeBack(options: SwipeBackOptions): () => void {
 
       const touch = event.touches[0]!;
       const selection = document.getSelection();
-      const start = swipeStart(touch.clientX, event.composedPath(), host, selection !== null && !selection.isCollapsed);
+      const start = swipeStart(touch.clientX, event.composedPath(), host, selection !== null && !selection.isCollapsed, options.nativeEdgeBack?.());
 
       tracker = start === null ? null : new SwipeTracker(start, touch.clientX, touch.clientY, now());
       touching?.abort();

@@ -1592,6 +1592,58 @@ describe('the page', () => {
     page.close();
   });
 
+  it('leaves an iOS edge swipe to browser history before and after the conversation marker is cleared', async () => {
+    history.replaceState(null, '', '#');
+    const userAgent = Object.getOwnPropertyDescriptor(navigator, 'userAgent');
+
+    Object.defineProperty(navigator, 'userAgent', { configurable: true, value: 'Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1' });
+    onTestFinished(() => {
+      if (userAgent === undefined) {
+        Reflect.deleteProperty(navigator, 'userAgent');
+      } else {
+        Object.defineProperty(navigator, 'userAgent', userAgent);
+      }
+    });
+
+    const { page, source } = start();
+    const groups = [listGroup('progress', [listRow(1)])];
+
+    source.emit('hello', { key: 'pk', groups, scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
+    source.emit('hello', { key: 'pk', groups, scope, sessions: [session()], items: [reply('r1', 1)], more: false, status: null, artifacts: [] });
+    expect(history.state).toEqual({ switchboardConversation: true });
+
+    const target = root.querySelector<HTMLElement>('#panel .timeline')!;
+
+    const drag = (): void => {
+      for (const [type, x] of [['touchstart', 5], ['touchmove', 25], ['touchmove', 190]] as const) {
+        const event = new Event(type, { bubbles: true, cancelable: true });
+
+        Object.defineProperty(event, 'touches', { value: [{ clientX: x, clientY: 400 }] });
+        target.dispatchEvent(event);
+        expect(event.defaultPrevented).toBe(false);
+        expect(root.classList.contains('swiping')).toBe(false);
+      }
+    };
+
+    drag();
+    history.replaceState(null, '', '#w=1');
+    drag();
+    history.replaceState({ switchboardConversation: true }, '', '#w=1');
+
+    expect(root.querySelector<HTMLElement>('.main')!.style.transform).toBe('');
+    const popped = new Promise((resolve) => window.addEventListener('popstate', resolve, { once: true }));
+
+    history.back();
+    await popped;
+    expect(root.classList.contains('listing')).toBe(true);
+    const returned = new Promise((resolve) => window.addEventListener('popstate', resolve, { once: true }));
+
+    history.forward();
+    await returned;
+    page.close();
+  });
+
 it("makes a phone's conversation a history entry, which the browser's back leaves as Back does and its forward opens again", async () => {
     history.replaceState(null, '', '#');
 

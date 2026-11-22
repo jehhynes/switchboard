@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { COMPLETE_SHARE, EDGE_PX, FLING_SPEED, LIST_SHADE, LIST_SHIFT, PAN_RATIO, SLOP_PX, SPEED_WINDOW_MS, swipeBack, swipeStart, SwipeTracker } from '../src/swipeBack.js';
+import { browserBackPreview, COMPLETE_SHARE, EDGE_PX, FLING_SPEED, LIST_SHADE, LIST_SHIFT, PAN_RATIO, SLOP_PX, SPEED_WINDOW_MS, swipeBack, swipeStart, SwipeTracker } from '../src/swipeBack.js';
 
 /** A touch event as a phone sends it, with one finger at each point given. */
 const touch = (type: string, points: [number, number][]): Event => {
@@ -38,6 +38,8 @@ describe('where a swipe can start', () => {
 
     expect(swipeStart(EDGE_PX, path(text), host)).toBe('edge');
     expect(swipeStart(EDGE_PX + 1, path(text), host)).toBe('pan');
+    expect(swipeStart(EDGE_PX, path(text), host, false, true)).toBeNull();
+    expect(swipeStart(EDGE_PX + 1, path(text), host, false, true)).toBe('pan');
   });
 
   it('never starts in a text field, a menu, a sheet, a sash or a frame, even from the edge', () => {
@@ -83,6 +85,16 @@ describe('where a swipe can start', () => {
     expect(swipeStart(200, [...path(text).slice(0, 2), outer], host)).toBe('pan');
     expect(swipeStart(200, path(text), host, true)).toBeNull();
     expect(swipeStart(10, path(text), host, true)).toBe('edge');
+  });
+});
+
+describe('when iOS owns the edge', () => {
+  it('leaves an edge with browser history to iPhone and touch iPad, but keeps the page gesture without earlier history or on Android', () => {
+    expect(browserBackPreview('Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X)', 'iPhone', 5, 2)).toBe(true);
+    expect(browserBackPreview('Mozilla/5.0 (Macintosh; Intel Mac OS X)', 'MacIntel', 5, 2)).toBe(true);
+    expect(browserBackPreview('Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X)', 'iPhone', 5, 1)).toBe(false);
+    expect(browserBackPreview('Mozilla/5.0 (Linux; Android 15)', 'Linux armv8l', 5, 2)).toBe(false);
+    expect(browserBackPreview('Mozilla/5.0 (Macintosh; Intel Mac OS X)', 'MacIntel', 0, 2)).toBe(false);
   });
 });
 
@@ -171,7 +183,7 @@ describe('the swipe on the page', () => {
     document.body.replaceChildren();
   });
 
-  const setup = (patch: { enabled?: () => boolean; reduced?: boolean } = {}) => {
+  const setup = (patch: { enabled?: () => boolean; reduced?: boolean; nativeEdgeBack?: boolean } = {}) => {
     const root = document.createElement('div');
 
     root.innerHTML = '<aside class="side"><div id="list"><button class="row selected">Item</button></div></aside><main class="main"><div class="scroll"><p>Reply</p><pre class="code">wide code</pre></div><textarea></textarea></main>';
@@ -184,7 +196,7 @@ describe('the swipe on the page', () => {
     const frames: (() => void)[] = [];
 
     Object.defineProperty(host, 'getBoundingClientRect', { value: () => ({ width: 390, height: 800, top: 0, left: 0, right: 390, bottom: 800 }) });
-    stop = swipeBack({ root, host, under, enabled: patch.enabled ?? (() => true), back, reducedMotion: () => patch.reduced === true, now: () => t, frame: (callback) => frames.push(callback) });
+    stop = swipeBack({ root, host, under, enabled: patch.enabled ?? (() => true), back, reducedMotion: () => patch.reduced === true, nativeEdgeBack: () => patch.nativeEdgeBack === true, now: () => t, frame: (callback) => frames.push(callback) });
 
     const drag = (target: Element, points: [number, number][], step = 16): Event[] =>
       points.map(([x, y], index) => {
@@ -231,6 +243,20 @@ describe('the swipe on the page', () => {
     expect(host.style.transform).toBe('');
     expect(under.style.transform).toBe('');
     expect(root.querySelector('.swipe-shade')).toBeNull();
+  });
+
+  it('leaves a native edge swipe to the browser while a pan farther in still draws one list', () => {
+    const { root, host, under, back, drag, lift, text } = setup({ nativeEdgeBack: true });
+
+    expect(drag(text, [[5, 400], [25, 400], [170, 400]]).some((event) => event.defaultPrevented)).toBe(false);
+    expect(root.classList.contains('swiping')).toBe(false);
+    expect(host.style.transform).toBe('');
+    expect(under.style.transform).toBe('');
+    lift(text);
+    expect(back).not.toHaveBeenCalled();
+
+    drag(text, [[150, 400], [165, 400], [210, 400]]);
+    expect(root.classList.contains('swiping')).toBe(true);
   });
 
   it('snaps back on a short slow drag, and on a second finger or a cancel', () => {

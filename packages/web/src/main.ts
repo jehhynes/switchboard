@@ -24,7 +24,7 @@ import { renderComposer, renderComposerMenu, renderEndedNote, renderFrame, rende
 import { listHeader } from './listHeader.js';
 import { PhoneVoice } from './phoneVoice.js';
 import { MicStart } from '@switchboard/conversation/voiceControls';
-import { swipeBack } from './swipeBack.js';
+import { browserBackPreview, swipeBack } from './swipeBack.js';
 import { settings } from './settings.js';
 import { attachments, drawChips } from './attachments.js';
 import type { Attached } from './attachments.js';
@@ -2693,6 +2693,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     enabled: () => isPhone() && !root.classList.contains('listing') && shownHistory === null && document.querySelector('.menu, [role="menu"], [role="listbox"]:not([hidden]), .sheet-backdrop, .settings-backdrop, .persona-backdrop') === null,
     back,
     reducedMotion: () => typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+    nativeEdgeBack: () => browserBackPreview(navigator.userAgent, navigator.platform, navigator.maxTouchPoints, history.length),
   });
 
   listening.signal.addEventListener('abort', stopSwipe);
