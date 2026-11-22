@@ -345,7 +345,7 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
   .tab.artifact-menu-button .tab-label, .tab.artifact-menu-button .codicon-chevron-down, .tab.changes-button .tab-label, .tab.changes-button .codicon-chevron-down { display: none; }
   .tab.artifact-menu-button, .tab.changes-button { padding: 0 10px; }
   .tab.diff-tab:not(.selected) { display: none; }
-  .tab.diff-tab.selected { flex: 0 1 auto; min-width: 0; }
+  .tab.diff-tab.selected { flex: 0 1 auto; min-width: 0; border-left: 1px solid var(--vscode-panel-border); }
   .tab.diff-tab.selected, .tab.changes-button { margin-left: auto; }
   .tab.diff-tab.selected ~ .tab.changes-button, .artifact-more ~ .tab.diff-tab.selected, .artifact-more ~ .tab.changes-button { margin-left: 0; }
 }

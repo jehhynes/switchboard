@@ -92,6 +92,9 @@ describe('the theme copy', () => {
     expect(css).not.toMatch(/\.detail-head \.tab \{/);
     expect(css).toMatch(/\.tab \{[^}]*height: 35px;[^}]*border-top: 1px solid transparent;/);
     expect(css).toMatch(/\.tab\.selected \{[^}]*border-top-color: var\(--vscode-panelTitle-activeBorder\);/);
+    // A tab pushed to the strip's end has its own left border, since the tab before it is not beside it, as a diff tab is on a narrow strip.
+    expect(css).toMatch(/\.tab\.push \{[^}]*margin-left: auto;[^}]*border-left: 1px solid var\(--vscode-panel-border\);/);
+    expect(css).toMatch(/\.tab\.diff-tab\.selected \{[^}]*border-left: 1px solid var\(--vscode-panel-border\);/);
     // The console's typing border is drawn inside its own box, dimmed, on all four sides, above xterm.js's layers.
     expect(css).toMatch(/\.console \{[^}]*position: relative;[^}]*isolation: isolate;/);
     expect(css).toMatch(/\.console\.typing::after \{[^}]*inset: 0;[^}]*z-index: 50;[^}]*border: 1px solid color-mix\(in srgb, var\(--vscode-focusBorder\) 45%, transparent\);/);

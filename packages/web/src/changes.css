@@ -4,8 +4,9 @@
 @media (prefers-color-scheme: light) { :root { --sb-git-added: #587c0c; --sb-git-modified: #895503; --sb-git-deleted: #ad0707; --sb-git-untracked: #007100; --sb-git-renamed: #007100; --sb-git-conflict: #ad0707; } }
 #head, .detail-head { position: relative; }
 .tab.changes-button { flex: none; border-right: none; border-left: 1px solid var(--vscode-panel-border); cursor: pointer; }
-/* The diff tabs and the Changes button sit at the strip's end, after the Artifacts menu where it shows. */
-.tab.push { margin-left: auto; }
+/* The diff tabs and the Changes button sit at the strip's end, after the Artifacts menu where it shows. A tab pushed there has a left border
+   of its own, as the Changes button has, since the tab before it is not beside it. */
+.tab.push { margin-left: auto; border-left: 1px solid var(--vscode-panel-border); }
 .artifact-more + .tab.push { margin-left: 0; }
 .tab.changes-button.open { color: var(--vscode-panelTitle-activeForeground); }
 .tab.changes-button .codicon-chevron-down { font-size: 12px; }
