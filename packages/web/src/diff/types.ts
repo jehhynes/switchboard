@@ -63,7 +63,7 @@ export interface ChangesMount {
   scrollToFile(path: string): void;
   /** The row whose header is at the top of the view, or null for none. */
   current(): string | null;
-  /** The indexes of the first and last rows that meet the view, or null with no rows. */
+  /** The indexes of the first and last rows that meet the view, no taller than the window; null with no rows or while the view has no height. */
   visible(): { first: number; last: number } | null;
   /** Calls `listener` once a frame at most while the view scrolls or resizes. */
   onWant(listener: () => void): void;

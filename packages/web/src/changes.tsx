@@ -502,6 +502,7 @@ export class ChangesController {
       this.#collapsed = collapse ? new Set(this.view.list?.rows.map((row) => row.path)) : new Set();
       this.#rows().forEach((row) => this.#mount?.mount.setCollapsed(row.path, collapse));
       this.deps.draw();
+      this.#pump();
       return true;
     }
 
@@ -681,7 +682,10 @@ export class ChangesController {
 
     const rows = this.#rows();
     const visible = mounted.mount.visible();
-    const wanted = wantedIndexes(visible, rows.length).map((index) => rows[index]!);
+    // A collapsed file shows only its header, so its diff is not read until it is expanded.
+    const wanted = wantedIndexes(visible, rows.length)
+      .map((index) => rows[index]!)
+      .filter((row) => !this.#collapsed.has(row.path));
 
     for (const row of wanted) {
       if (this.#inFlight.size >= MAX_IN_FLIGHT) {
@@ -974,6 +978,7 @@ export class ChangesController {
 
     this.#mount?.mount.setCollapsed(path, collapsed);
     this.deps.draw();
+    this.#pump();
   }
 
   /** A collapsed file's header clicked, away from its controls: it expands. */

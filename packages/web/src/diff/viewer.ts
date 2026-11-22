@@ -235,8 +235,8 @@ const CHANGES_CSS = `
 @media (prefers-reduced-motion: reduce) { :host([data-sb-item="placeholder"]) pre { animation: none; opacity: 0.4; } }
 `;
 
-/** A placeholder's header suffix: the row's own counts, which its blank lines do not have, and that it is loading. */
-function headerSuffix(fileDiff: FileDiffMetadata): Element | null {
+/** A placeholder's header suffix: the row's own counts, which its blank lines do not have, and that it is loading unless it is collapsed, when it is not read. */
+function headerSuffix(fileDiff: FileDiffMetadata, collapsed: ReadonlySet<string>): Element | null {
   const kind = kinds.get(fileDiff);
 
   if (kind?.kind !== 'placeholder') {
@@ -249,7 +249,7 @@ function headerSuffix(fileDiff: FileDiffMetadata): Element | null {
   span.className = 'sb-loading';
   const counts = [additions === null || (additions === 0 && (deletions ?? 0) > 0) ? null : `+${additions}`, deletions === null || deletions === 0 ? null : `−${deletions}`].filter((one) => one !== null);
 
-  span.textContent = [...(binary ? ['binary'] : counts), 'Loading…'].join(' · ');
+  span.textContent = [...(binary ? ['binary'] : counts), ...(collapsed.has(kind.path) ? [] : ['Loading…'])].join(' · ');
   return span;
 }
 
@@ -299,7 +299,7 @@ export function mountChanges(host: HTMLElement, rows: ChangesRowInput[], mount: 
         // Pierre takes a pure rename's new side alone.
         return fileDiff.type === 'rename-pure' ? { oldFile: null, newFile } : { oldFile: { name: data.from ?? data.path, contents: lf(data.old ?? '', data.patch) }, newFile };
       },
-      renderHeaderFilenameSuffix: headerSuffix,
+      renderHeaderFilenameSuffix: (fileDiff: FileDiffMetadata) => headerSuffix(fileDiff, collapsed),
       renderHeaderPrefix: (fileDiff: FileDiffMetadata) => {
         const path = kinds.get(fileDiff)?.path;
 
@@ -427,7 +427,11 @@ export function mountChanges(host: HTMLElement, rows: ChangesRowInput[], mount: 
       return range === null ? null : order[range.first]!.path;
     },
     visible() {
-      return visibleRange(order.length, top, view.getScrollTop(), host.clientHeight, view.getScrollHeight());
+      // Nothing is on screen while the view has no size (a tab not shown yet, or before layout), and never more than the window shows, so a
+      // host that grew with its content does not count every row as on screen.
+      const height = Math.min(host.clientHeight, typeof innerHeight === 'number' && innerHeight > 0 ? innerHeight : host.clientHeight);
+
+      return height <= 0 ? null : visibleRange(order.length, top, view.getScrollTop(), height, view.getScrollHeight());
     },
     onWant(listener) {
       listeners.push(listener);

@@ -366,10 +366,11 @@ describe('the Changes list', () => {
     diffAnswers['src/new.ts'] = { status: 404, body: { error: 'src/new.ts is not one of the changes now.' } };
     diffAnswers['logo.png'] = { status: 200, body: { path: 'logo.png', status: 'U', patch: null, old: null, new: null, binary: true, tooLarge: null, partial: true } };
     start();
+    visible = { first: 0, last: 1 };
     await openRow(0);
     await flush();
 
-    // The first row on screen and two ahead.
+    // The two rows on screen and the next one.
     expect(diffGets()).toEqual(['/v1/conversation/diff?window=pk&path=docs%2Fa.md&sides=0', '/v1/conversation/diff?window=pk&path=src%2Fnew.ts&sides=0', '/v1/conversation/diff?window=pk&path=logo.png&sides=0']);
     expect(changesMounts[0]!.sets).toEqual([
       ['docs/a.md', 'diff'],
@@ -396,7 +397,7 @@ describe('the Changes list', () => {
     visible = { first: 0, last: 2 };
     await openRow(0);
     await flush();
-    // On screen 0 to 2, two ahead: five wanted, three read at once.
+    // On screen 0 to 2 and the next: four wanted, three read at once.
     expect(diffGets()).toHaveLength(3);
 
     // Scrolled far down before they answer: the rows wanted then are read next, never the ones left behind.
@@ -407,7 +408,41 @@ describe('the Changes list', () => {
       await flush();
     }
 
-    expect(diffGets().map((one) => /path=([^&]*)/.exec(one)![1])).toEqual(['f0.ts', 'f1.ts', 'f2.ts', 'f9.ts', 'f10.ts', 'f11.ts', 'f8.ts']);
+    expect(diffGets().map((one) => /path=([^&]*)/.exec(one)![1])).toEqual(['f0.ts', 'f1.ts', 'f2.ts', 'f9.ts', 'f10.ts']);
+  });
+
+  it('ChangesTab_With142Files_ReadsNothingUpFrontAndOnlyTheViewAndTheNext', async () => {
+    const many: ChangesList = { ...LIST, rows: Array.from({ length: 142 }, (_, index) => ({ ...LIST.rows[0]!, path: `f${index}.ts`, hash: `h${index}` })), shown: 142, total: 142 };
+
+    answers.push({ status: 200, body: many }, { status: 200, body: many });
+    start();
+    // The tab is not laid out yet: no height, so nothing is on screen.
+    visible = null;
+    await openRow(0);
+    for (let index = 0; index < 6; index++) {
+      await flush();
+    }
+
+    expect(changesMounts[0]!.rows).toHaveLength(142);
+    expect(diffGets()).toEqual([]);
+
+    // Laid out with two files on screen: those and the next one, nothing more however long it waits.
+    visible = { first: 0, last: 1 };
+    changesMounts[0]!.want();
+    for (let index = 0; index < 10; index++) {
+      await flush();
+    }
+
+    expect(diffGets().map((one) => /path=([^&]*)/.exec(one)![1])).toEqual(['f0.ts', 'f1.ts', 'f2.ts']);
+
+    // A jump from the list far down reads only there.
+    visible = { first: 100, last: 100 };
+    changesMounts[0]!.want();
+    for (let index = 0; index < 10; index++) {
+      await flush();
+    }
+
+    expect(diffGets().map((one) => /path=([^&]*)/.exec(one)![1]).slice(3)).toEqual(['f100.ts', 'f101.ts']);
   });
 
   it('ChangesTab_WhenAFileChanges_ReadsItAgainWithItsETagAndKeepsItOn304', async () => {
@@ -516,6 +551,35 @@ describe('the Changes list', () => {
     // Collapse all and Expand all still apply to every file.
     root.querySelector<HTMLElement>('[data-action="changes-expand-all"]')!.click();
     expect(root.querySelectorAll('.diff-host .diff-chevron[aria-expanded="true"]')).toHaveLength(3);
+  });
+
+  it('ChangesTab_CollapsedFiles_AreNotReadUntilExpanded', async () => {
+    const many: ChangesList = { ...LIST, rows: Array.from({ length: 142 }, (_, index) => ({ ...LIST.rows[0]!, path: `f${index}.ts`, hash: `h${index}` })), shown: 142, total: 142 };
+
+    answers.push({ status: 200, body: many }, { status: 200, body: many }, { status: 200, body: many });
+    start();
+    visible = null;
+    await openRow(0);
+    await flush();
+    button().click();
+    await flush();
+    root.querySelector<HTMLElement>('[data-action="changes-collapse-all"]')!.click();
+    // Collapsed, many headers fit the view: none of their diffs is read.
+    visible = { first: 0, last: 20 };
+    changesMounts[0]!.want();
+    for (let index = 0; index < 6; index++) {
+      await flush();
+    }
+
+    expect(diffGets()).toEqual([]);
+
+    // Expanding one reads it alone.
+    changesMounts[0]!.header('f3.ts');
+    for (let index = 0; index < 6; index++) {
+      await flush();
+    }
+
+    expect(diffGets().map((one) => /path=([^&]*)/.exec(one)![1])).toEqual(['f3.ts']);
   });
 
   it('ChangesMenu_Buttons_HideViewedCollapseAndExpandEveryFile', async () => {

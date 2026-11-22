@@ -223,9 +223,13 @@ describe('mountChanges', () => {
     expect(node.getAttribute('data-sb-item')).toBe('placeholder');
     expect((view.options['renderHeaderFilenameSuffix'] as (diff: unknown) => Element)(placeholder).textContent).toBe('+3 · −1 · Loading…');
     expect((view.options['renderHeaderFilenameSuffix'] as (diff: unknown) => Element | null)(view.items[2]!.fileDiff)!.textContent).toBe('binary · Loading…');
+    // A collapsed file is not read, so it does not say it is loading.
+    mount.setCollapsed('a.ts', true);
+    expect((view.options['renderHeaderFilenameSuffix'] as (diff: unknown) => Element)(view.updates.at(-1)!.fileDiff).textContent).toBe('+3 · −1');
+    mount.setCollapsed('a.ts', false);
 
     mount.setRow('a.ts', { note: 'x' });
-    expect((view.options['renderHeaderFilenameSuffix'] as (diff: unknown) => Element | null)(view.updates[0]!.fileDiff)).toBeNull();
+    expect((view.options['renderHeaderFilenameSuffix'] as (diff: unknown) => Element | null)(view.updates.at(-1)!.fileDiff)).toBeNull();
 
     (view.options['onLineNumberClick'] as (props: unknown, context: unknown) => void)({ lineNumber: 4, annotationSide: 'deletions' }, { item: { id: 'b.ts' } });
     expect(onLine).toHaveBeenCalledWith('b.ts', 'old', 4);
@@ -274,5 +278,20 @@ describe('mountChanges', () => {
     mount.dispose();
     header.click();
     expect(onHeader).toHaveBeenCalledTimes(1);
+  });
+
+  it('Visible_WithNoHeightOrTallerThanTheWindow_IsNullOrCut', () => {
+    const host = document.createElement('div');
+    const { mount, view } = mounted(undefined, host);
+
+    view.tops = new Map([['a.ts', 0], ['b.ts', 500], ['c.png', 900]]);
+    // Not laid out yet: nothing is on screen, so nothing is read.
+    Object.defineProperty(host, 'clientHeight', { configurable: true, value: 0 });
+    expect(mount.visible()).toBeNull();
+    // A host as tall as its content counts only what the window shows.
+    Object.defineProperty(host, 'clientHeight', { configurable: true, value: 3000 });
+    vi.stubGlobal('innerHeight', 400);
+    expect(mount.visible()).toEqual({ first: 0, last: 0 });
+    vi.unstubAllGlobals();
   });
 });
