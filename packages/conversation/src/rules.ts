@@ -3,29 +3,38 @@ import { ARTIFACTS_ENV } from '@switchboard/core';
 /**
  * The conversation rules of a Code Mode session's prompt (architecture.md § Conversation): the tags and the question shape
  * the Conversation view reads, from claude-collab's `instructions/live-collaboration.md`, and why to ask in a reply rather than with AskUserQuestion. They never change how a session writes, its length,
- * format or verbosity (voice-design decision 21). Each slice of the view adds the rules for what it shows, so a session is never told to write
+ * format or verbosity (voice-design decision 21), except how it asks the operator a question (PRD R103), the one place the card's usefulness depends on the content. Each slice of the view adds the rules for what it shows, so a session is never told to write
  * what nothing reads; the contract hook gives a resumed or compacted session the current rules. `artifactsDir` is the session's artifact folder (architecture.md § Artifacts), which its environment
  * also names; the artifact rules say only where and how to write an artifact, not when or how much. With `voice` (`voice.enabled`) the rules add the
  * spoken-reply section, which says only how to mark the passage read aloud and the tone line, never how to write the reply (decision 21).
  */
 export function conversationRules(artifactsDir: string, voice = false, provider: 'claude' | 'codex' = 'claude'): string {
   return `## Conversation view
-The operator reads this session in a conversation view beside the terminal. It shows the operator's messages and your replies, not your tool calls, which the terminal shows. These rules only explain the tags the view reads; they do not change how you write. Keep the length, format and verbosity you would use without them.
+The operator reads this session in a conversation view beside the terminal. It shows the operator's messages and your replies, not your tool calls, which the terminal shows. These rules only explain the tags the view reads; they do not change how you write, except how you ask the operator a question, below. Keep the length, format and verbosity you would use without them.
 
 - Start text written only because the harness demanded visible output, or a progress line between tool calls, with \`[aside]\` at the very start of the text, so the view shows it dimmed.
 - When a newer message from the operator arrived after your previous reply and changes or extends what that reply answered, you may start your next reply with \`[rewrite]\` at the very start. The view then shows it in place of your previous reply, which the operator can still open. Write the rewrite as one reply covering both messages that stands on its own, never "as I said" or "also". Don't use the tag for any other reply, such as an answer to a new, unrelated message or a correction you thought of on your own.
 - The view shows a status on its own tab, beside the conversation: a fuller account of where the work stands. To write one, start it with \`[status]\` on a line of its own; the status runs from there to the end of that text, and anything before the tag is your reply. The view shows only the latest status, so each one replaces the one before it, and keeps the earlier ones for the operator to open.
 ${provider === 'claude' ? '- Text written directly before a tool call in the same response can be saved only as thinking, so it never reaches the view.' : '- File mentions use @path or @"path with spaces"; read the named files when needed. Image mentions are attached as images.'}
-- The view draws questions you ask the operator, in a reply or a status, as a card they answer by clicking, when each question is numbered and each of its options starts with a capital letter on its own line, as a nested list item under its question:
+- Use a question card only for a real decision between known alternatives that blocks or shapes your work. Never use one to gather a description or details: ask that in a plain sentence, or keep listening while the operator is still explaining. Never ask one while the operator is mid-thought, such as after a \`[partial]\` message or a dictated message that stops unfinished. When the choice is low-stakes and easy to undo, act on your clear recommendation and say what you chose instead of asking.
+- When you do ask, ask in a reply, at its end, in this shape. The view draws it as a card the operator answers one question at a time, often on a phone or by voice, without the rest of your reply in view:
 
   \`\`\`markdown
-  1. Which port?
-     - A) 8765 (recommended)
-     - B) 8799
+  1. **Persona registration.** Register a persona as soon as you save it, or only after its voice check passes? {#persona-registered}
+     Today Save registers it at once, so a persona whose voice is broken can be picked and then plays nothing. I keep building the phone layout whichever you pick.
+     - A) Register on save (recommended) — keeps today's behaviour; a broken voice shows an error the first time it speaks.
+     - B) Register after the voice check — a new persona can't be picked until its check plays; Save takes about 2 s longer.
   \`\`\`
 
-  Put the questions at the end of the message, after everything else you write in it, so the view can show them as the card alone. The card sends the answer as an ordinary message, such as "1A, 2B" or "2 Other: use port 8800"; the operator may also type an answer or ignore the card.
-${provider === 'claude' ? "- Don't ask the operator with AskUserQuestion in this session, even where the report contract or a skill says to: its menu holds the whole session until it is answered in the terminal, so the operator's messages wait behind it, and the view cannot show it. Ask in a reply instead; the answer comes as the operator's next message." : "- You may ask a question with request_user_input; the view can show its request and return the operator's answer."}
+  - Number each question and end its line with an id in braces: a short lowercase slug that names the decision, such as \`{#persona-registered}\`, never its position such as \`{#q1}\`. Give every open question its own slug. Reuse a slug only to ask that same question again, which replaces the open one.
+  - Start a question with a bold topic of one to three words when it helps the operator place it.
+  - Under the question, indented, write one or two sentences of context so that it can be answered on its own: what it is about, what you do meanwhile, and what waits on the answer.
+  - Give two to four options, each a capital letter on its own line as a nested list item: a short label, then \` — \` and what choosing it changes or costs. Mark your recommendation with \`(recommended)\` after its label. Never offer a bare "Yes", "No" or "Leave it"; say what each does. The card adds an Other choice for a free answer, so don't write one.
+  - Ask at most four questions at a time; keep the rest for a later reply.
+  - A question stays open until the operator answers it, even when their next message is about something else. When a question no longer matters, withdraw it with a line \`[withdraw: persona-registered]\` in a reply (several slugs separated by commas, optionally followed by \` — \` and why). Don't leave a question open that you no longer need.
+  - Answers arrive as a message that starts with \`[answers]\`, one line per question: its slug, its text, \`→\` and the chosen option, \`Other:\` with the operator's words, or \`No answer (dismissed)\` when the operator dismissed it. Act on each line by its slug. The operator may also type an answer, such as \`persona-registered B\`.
+  - Don't ask in a status: the Status tab shows its questions as plain text, with no card.
+${provider === 'claude' ? "- Don't ask the operator with AskUserQuestion in this session, even where the report contract or a skill says to: its menu holds the whole session until it is answered in the terminal, so the operator's messages wait behind it, and the view cannot show it. Ask in a reply instead, as above." : "- You may ask a question with request_user_input; the view can show its request and return the operator's answer."}
 
 ${voice ? `${SPOKEN_RULES}\n\n${DICTATION_RULES}\n\n` : ''}${artifactRules(artifactsDir)}`;
 }
@@ -35,6 +44,7 @@ export const SPOKEN_RULES = `## Spoken replies
 The operator may hear some replies read aloud. A message from the operator that starts with \`[spoken]\` will have its reply heard. Write that reply exactly as you would otherwise, and mark the part to read aloud by putting \`[speak]\` before it and \`[/speak]\` after it.
 
 - Mark a few plain sentences inside the reply, usually its opening, that make sense heard on their own: no lists, tables, code, file paths, commit hashes or URLs.
+- Don't read your questions in a \`[speak]\` passage; when a card follows, the voice reads its current question itself.
 - Each text you write in the turn, between tool calls, may mark its own passage; they are read in the order you write them.
 - The view shows the reply whole, without the markers. A reply with no marked passage is not read aloud. Don't mark a passage in a reply to a message without \`[spoken]\`.
 - When the message also carries \`[expressive]\`, start the reply with a tone line, \`[tone: …]\` alone on its first line, saying in a few words how the reply sounds when spoken, such as \`[tone: calm, slightly amused]\`. It is never read aloud or shown.

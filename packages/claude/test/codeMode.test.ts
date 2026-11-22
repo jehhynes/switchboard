@@ -95,24 +95,37 @@ describe('Code Mode command', () => {
   });
 
   it('appends conversation rules that name only the tags the view reads, aside, rewrite and status, and set no reply length or shape', () => {
-    expect(RULES.match(/\[[a-z]+\]/g)?.filter((tag, index, all) => all.indexOf(tag) === index)).toEqual(['[aside]', '[rewrite]', '[status]']);
-    expect(RULES).toContain('they do not change how you write');
-    expect(RULES).not.toMatch(/\d+ words\b|\bsentences\b|short answer|\blines\b|one line|don't paste/i);
+    // The question shape is the one exception (PRD R103): a card's usefulness depends on its content.
+    const questions = RULES.slice(RULES.indexOf('- Use a question card only'), RULES.indexOf("- Don't ask the operator with AskUserQuestion"));
+    const rest = RULES.replace(questions, '');
+
+    expect(rest.match(/\[[a-z]+\]/g)?.filter((tag, index, all) => all.indexOf(tag) === index)).toEqual(['[aside]', '[rewrite]', '[status]']);
+    expect(RULES).toContain('they do not change how you write, except how you ask the operator a question, below');
+    expect(rest).not.toMatch(/\d+ words\b|\bsentences\b|short answer|\blines\b|one line|don't paste/i);
     // A turn may write several replies between tool calls; the rules give only the reason text before a tool call is lost (decision 24).
     expect(RULES).not.toMatch(/end of (your|the) turn/i);
     expect(RULES).toContain('Text written directly before a tool call in the same response can be saved only as thinking, so it never reaches the view.');
     expect(PROMPT.endsWith(RULES)).toBe(true);
   });
 
-  it('explains the question shape the view draws as a card, and asks in a reply rather than with AskUserQuestion, with why (voice-design § 5)', () => {
-    // The shape the Conversation view's parser reads (packages/conversation/src/questions.ts), and the message its card sends.
-    expect(RULES).toContain('each question is numbered and each of its options starts with a capital letter on its own line, as a nested list item under its question');
-    expect(RULES).toContain('  ```markdown\n  1. Which port?\n     - A) 8765 (recommended)\n     - B) 8799\n  ```\n');
-    expect(RULES).toContain('The card sends the answer as an ordinary message, such as "1A, 2B" or "2 Other: use port 8800"');
-    // The questions end the message, so the view shows them as the card alone.
-    expect(RULES).toContain('Put the questions at the end of the message, after everything else you write in it');
+  it('asks for a card only for a real decision, in the shape the view draws, and in a reply rather than with AskUserQuestion, with why (PRD R103)', () => {
+    // When a card is worth asking, and when it is not.
+    expect(RULES).toContain('Use a question card only for a real decision between known alternatives that blocks or shapes your work.');
+    expect(RULES).toContain('Never use one to gather a description or details');
+    expect(RULES).toContain("Never ask one while the operator is mid-thought, such as after a `[partial]` message");
+    expect(RULES).toContain('act on your clear recommendation and say what you chose instead of asking');
+    // The shape the parser reads (packages/conversation/src/questions.ts): ids, topics, context, described options, at most four.
+    expect(RULES).toContain('{#persona-registered}');
+    expect(RULES).toContain("- A) Register on save (recommended) — keeps today's behaviour");
+    expect(RULES).toContain('never its position such as `{#q1}`');
+    expect(RULES).toContain('Give two to four options');
+    expect(RULES).toContain('Ask at most four questions at a time');
+    // Questions stay open; withdraw what no longer matters; answers come by slug.
+    expect(RULES).toContain('withdraw it with a line `[withdraw: persona-registered]`');
+    expect(RULES).toContain('Answers arrive as a message that starts with `[answers]`');
+    expect(RULES).toContain("Don't ask in a status");
     expect(RULES).toContain("Don't ask the operator with AskUserQuestion in this session, even where the report contract or a skill says to: its menu holds the whole session until it is answered in the terminal");
-    expect(RULES).toContain("Ask in a reply instead; the answer comes as the operator's next message.");
+    expect(RULES).toContain('Ask in a reply instead, as above.');
   });
 
   it('adds the spoken-reply section only with voice on: [spoken], the [speak] passage and the tone line, setting no reply length or shape', () => {
