@@ -4,7 +4,7 @@ import { ScreenHold } from './screenHold.js';
 import type { HoldOptions, Via } from './screenHold.js';
 import { ScreenReader } from './screenReader.js';
 import { pasteText } from './input.js';
-import { keyOf, parseReply, stripAside } from './tags.js';
+import { drawnKeyOf, keyOf, parseReply, stripAside } from './tags.js';
 import type { HeardTag } from './tags.js';
 import { parseLine, readHead, readLines, readLinesBefore, transcriptEnd } from './transcript.js';
 import type { TranscriptEntry } from './transcript.js';
@@ -125,7 +125,7 @@ export class SessionConversation extends ConversationLog {
     for (const reply of deps.store.latestReplies(sessionId, SEED_REPLIES)) {
       const key = keyOf(reply.opening);
 
-      this.#reader.sent.add(key);
+      this.#reader.saw(reply.opening);
 
       // A screen copy still waiting when the hub stopped waits again, so it is replaced or withdrawn rather than left as a reply.
       if (reply.source === 'screen' && !reply.withdrawn) {
@@ -137,7 +137,7 @@ export class SessionConversation extends ConversationLog {
 
     // The screen draws each line of a joined reply as a block of its own.
     for (const text of deps.store.replyBlocks(sessionId, SEED_REPLIES)) {
-      this.#reader.sent.add(keyOf(stripAside(text).text));
+      this.#reader.saw(stripAside(text).text);
     }
   }
 
@@ -310,11 +310,23 @@ export class SessionConversation extends ConversationLog {
     }
   }
 
-  /** The waiting copy a transcript copy with this key replaces: the same key or one it starts with, of those in `among` when given. */
-  #waiting(key: string, among?: Set<string>): string | undefined {
+  /**
+   * The waiting copy a transcript copy with these keys replaces: one with the same key, else the longest one a key starts with, of those in
+   * `among` when given. A copy cut off matches a shorter one waiting beside it too, so every exact match is tried first.
+   */
+  #waiting(keys: Array<string | null>, among?: Set<string>): string | undefined {
     const waiting = [...this.#reader.ids.keys()].filter((one) => among === undefined || among.has(one));
+    const mine = keys.filter((key): key is string => key !== null);
 
-    return waiting.includes(key) ? key : waiting.find((one) => one !== '' && key.startsWith(one));
+    const exact = mine.find((key) => waiting.includes(key));
+
+    if (exact !== undefined) {
+      return exact;
+    }
+
+    const starts = waiting.filter((one) => one !== '' && mine.some((key) => key.startsWith(one)));
+
+    return starts.reduce<string | undefined>((best, one) => (best === undefined || one.length > best.length ? one : best), undefined);
   }
 
   /**
@@ -470,13 +482,15 @@ export class SessionConversation extends ConversationLog {
 
     const { text, aside } = stripAside(entry.text);
     const key = keyOf(text);
+    const drawn = drawnKeyOf(text);
 
     // So a later redraw of it is not published again.
-    this.#reader.sent.add(key);
+    this.#reader.saw(text);
 
     // Its screen copy, whole or cut off while still being drawn, if one waits: the raw Markdown replaces the screen's rendered copy. Only copies
     // still waiting count, because each transcript reply is a reply of its own, and a second "Yes." is a second answer.
-    const shown = this.#waiting(key) ?? this.#waiting(keyOf(parseReply(entry.text).opening), this.#reader.adopted);
+    const opening = parseReply(entry.text).opening;
+    const shown = this.#waiting([key, drawn]) ?? this.#waiting([keyOf(opening), drawnKeyOf(opening)], this.#reader.adopted);
     const handle = shown === undefined ? undefined : this.#reader.take(shown);
     // The store keeps which reply each API message became, so a hub restart between two of its lines still joins them.
     const joined = entry.messageId === null ? null : this.deps.store.replyOfApiMessage(this.sessionId, entry.messageId);

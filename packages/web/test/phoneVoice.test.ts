@@ -135,6 +135,7 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
     let changes = 0;
     let hidden = false;
     let visibility: () => void = () => undefined;
+    let pageHide: () => void = () => undefined;
     const contexts: FakeContext[] = [];
     const nodes: FakeNode[] = [];
     const timers: Array<{ run: () => void; ms: number; cleared: boolean }> = [];
@@ -174,6 +175,7 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
       },
       hidden: () => hidden,
       onVisibility: (changed) => (visibility = changed),
+      onPageHide: (hidden) => (pageHide = hidden),
       setTimer: (run, ms) => {
         const timer = { run, ms, cleared: false };
 
@@ -224,6 +226,8 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
         hidden = on;
         visibility();
       },
+      /** The page unloads, as by a reload. */
+      unload: () => pageHide(),
       /** The page's stream got a new key, as after a hub restart. */
       setKey: (next: string) => (key = next),
     };
@@ -260,6 +264,8 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
     expect(voice.offset).toBe(5_000);
 
     voice.stop();
+    // Voice off is the operator's choice: the page says it leaves before it closes, so the hub notes no lost phone.
+    expect(sockets[0]!.sent.at(-1)).toEqual({ type: 'leave' });
     expect(sockets[0]!.closedWith).toBe(1000);
     expect([voice.state, voice.error]).toEqual(['off', null]);
     // Pings stop with it.
@@ -418,6 +424,19 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
     expect(nodes[0]!.disconnected).toBe(true);
   });
 
+  it('tells the hub it leaves when the page unloads while the voice is on, and nothing while it is off', () => {
+    const { voice, sockets, unload } = setup();
+
+    unload();
+    voice.start();
+    sockets[0]!.open();
+    unload();
+    expect(sockets[0]!.sent).toEqual([{ type: 'hello' }]);
+    sockets[0]!.message({ type: 'welcome', at: 0 });
+    unload();
+    expect(sockets[0]!.sent.at(-1)).toEqual({ type: 'leave' });
+  });
+
   it('loses the voice without an error when the page stays hidden, with why when the phone takes its audio for good, and keeps it when the page comes back in time', async () => {
     const { voice, sockets, contexts, timers, hide, advance } = setup();
 
@@ -432,8 +451,9 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
 
     hide(true);
     timers.at(-1)!.run();
-    // Leaving the page plainly ends talking, so nothing says why.
+    // Leaving the page plainly ends talking, so nothing says why, here or on the computer.
     expect([voice.state, voice.error]).toEqual(['off', null]);
+    expect(sockets[0]!.sent.at(-1)).toEqual({ type: 'leave' });
     expect(sockets[0]!.closedWith).toBe(1000);
     expect(contexts[0]!.closed).toBe(true);
     // It stays off when the page shows again.
@@ -453,6 +473,8 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
     }
 
     expect([voice.state, voice.error]).toEqual(['off', 'Voice stopped because this device\'s audio did not resume.']);
+    // A loss with a reason is a failure: no leave, so the computer notes the lost phone.
+    expect(sockets[1]!.sent).not.toContainEqual({ type: 'leave' });
     expect(sockets[1]!.closedWith).toBe(1000);
   });
 
@@ -770,10 +792,11 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
       expect(await voice.micOn((name) => steps.push(name))).toBeNull();
       // The voice was on this phone before the tap: only the microphone's parts are timed.
       expect(steps).toEqual(['microphone allowed', 'capture connected']);
+      // Whether the page is hidden goes too, so the hub notes no lost phone for a socket that closes while it is, as when the app is closed.
       hide(true);
-      expect(sockets[0]!.sent.at(-1)).toEqual({ type: 'state', busy: true });
+      expect(sockets[0]!.sent.slice(-2)).toEqual([{ type: 'state', busy: true }, { type: 'visibility', hidden: true }]);
       hide(false);
-      expect(sockets[0]!.sent.at(-1)).toEqual({ type: 'state', busy: false });
+      expect(sockets[0]!.sent.slice(-2)).toEqual([{ type: 'state', busy: false }, { type: 'visibility', hidden: false }]);
 
       sockets[0]!.closeFromHub(4001, 'Voice is now on another device.');
       expect(tracks[0]!.stopped).toBe(true);

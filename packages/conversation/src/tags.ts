@@ -370,7 +370,36 @@ export const squash = (text: string): string =>
   text
     .replace(/<!--[\s\S]*?-->/g, '')
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    // The screen draws a bare "www." link with the scheme its target gets.
+    .replace(/\bhttps?:\/\/(?=www\.)/gi, '')
     .replace(/[^\p{L}\p{N}]+/gu, '');
+
+const LINK = /\[([^\]]*)\]\(\s*<?([^)\s>]*)>?(?:\s+"([^"]*)")?\s*\)/g;
+
+/**
+ * Markdown links as Claude Code draws them in a terminal without hyperlinks (2.1.330): "text (target)", or the target alone when it is the text,
+ * and a title after as ("title"). Code spans are left as they are, since the screen shows them as written.
+ */
+export function drawnLinks(text: string): string {
+  const draw = (part: string): string =>
+    part.replace(LINK, (_whole, label: string, href: string, title: string | undefined) => {
+      const mail = /^mailto:/i.test(href);
+      const target = mail ? href.replace(/^mailto:/i, '') : href;
+      const shown = label === '' || label === target ? target : `${label} (${target})`;
+
+      return title === undefined ? shown : `${shown} ("${title}")`;
+    });
+  let out = '';
+  let from = 0;
+
+  // A code span closes at the next run of as many backticks as opened it.
+  for (const span of text.matchAll(/(?<!`)(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)/g)) {
+    out += draw(text.slice(from, span.index)) + span[0];
+    from = span.index + span[0].length;
+  }
+
+  return out + draw(text.slice(from));
+}
 
 /** A reply with no letters or digits, such as "👍", is keyed by its text without comments, spaces or ASCII punctuation instead. */
 const bareOf = (text: string): string => text.replace(/<!--[\s\S]*?-->/g, '').replace(/[\s!-/:-@[-`{-~]+/g, '');
@@ -380,6 +409,13 @@ export function keyOf(text: string): string {
   const body = splitRewrite(text).text;
 
   return squash(body) || bareOf(body);
+}
+
+/** The key a transcript copy's screen copy has when the terminal draws its links with their targets; null when that is its own key. */
+export function drawnKeyOf(text: string): string | null {
+  const key = keyOf(drawnLinks(text));
+
+  return key === keyOf(text) ? null : key;
 }
 
 const TAG_WORDS = ['aside', 'rewrite', 'status', 'details', 'speak', '/speak', 'tone'];

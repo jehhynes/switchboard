@@ -289,6 +289,8 @@ export interface VoiceHandover {
   at: number;
   /** The replies that asked to be heard and waited for the voice, which the hub that takes over offers. */
   held: string[];
+  /** With no device: whether the phone was lost rather than left by the operator (`VoiceControl.phoneLost`); absent from an older hub's. */
+  phoneLost?: boolean;
 }
 
 /** How long before the handover a reply may have come and still not been offered by the hub that handed over, which saw it too late. */
@@ -336,6 +338,7 @@ export function parseVoiceHandover(raw: unknown): VoiceHandover | null {
     phoneBusy: one['phoneBusy'],
     at: one['at'],
     held: one['held'] as string[],
+    ...(one['phoneLost'] === true ? { phoneLost: true } : {}),
   };
 }
 
@@ -413,6 +416,12 @@ export class VoiceControl {
   /** Where the voice's microphone and speaker are, and the page key of the phone that has it (PRD R119). */
   #device: VoiceDevice = 'computer';
   #phoneKey: string | null = null;
+  /** With no device, whether the phone was lost rather than left by the operator (`phoneLost`). */
+  #phoneWasLost = false;
+  /** The phone's page said it leaves by the operator's choice, said it is hidden, or stopped playing, for how its close counts (`phoneClosed`). */
+  #phoneLeaving = false;
+  #phoneHidden = false;
+  #phoneStalled = false;
   /**
    * Whether this hub has chosen the device itself: a move, or an action on this computer that takes the voice back. Until then, a voice process
    * that greets it with another device keeps the voice off; after, the hub's own device wins.
@@ -445,10 +454,23 @@ export class VoiceControl {
   }
 
   /**
+   * Whether no device has the voice because the phone was lost, which the dock and the page note (PRD R119): its connection dropped or stalled,
+   * or it did not come back after a hub restart. False after the operator's own Voice off, a hidden or closed page, or a refusal for a sign-out,
+   * a forbidden device or voice turned off, since the operator chose those.
+   */
+  get phoneLost(): boolean {
+    return this.#device === 'none' && this.#phoneWasLost;
+  }
+
+  /**
    * A paired phone's page took the voice with its tap (PRD R119): the voice moves to its speaker, and to the conversation it shows, as Talk
    * here there would move it.
    */
   phoneOpened(key: string, hash: string | null = null): void {
+    this.#phoneLeaving = false;
+    this.#phoneHidden = false;
+    this.#phoneStalled = false;
+
     // After a hub restart the phone that had the voice takes it back as it was, its mic and capture too, with nothing played or heard
     // elsewhere meanwhile (architecture.md § Hub lifecycle).
     if (this.#resume !== null && hash !== null && hash === this.#resume.hash && this.#device === 'phone') {
@@ -531,6 +553,7 @@ export class VoiceControl {
       phoneBusy: this.#phoneBusy,
       at: this.deps.now(),
       held: [...this.#heldReplies],
+      ...(this.phoneLost ? { phoneLost: true } : {}),
     };
   }
 
@@ -565,10 +588,11 @@ export class VoiceControl {
       this.#resume = { hash: state.phoneHash, timer: this.#timer(() => this.#resumeEnded(), PHONE_RESUME_MS) };
       this.deps.log(`voice: device phone: waiting up to ${PHONE_RESUME_MS / 1000} seconds for the phone to take the voice back after the hub restart`);
     } else if (state.device !== 'computer') {
-      // A phone whose sign-in is not known cannot take the voice back: it is off, as when the phone left.
+      // A phone whose sign-in is not known cannot take the voice back: it is off, as when the phone was lost.
       this.#device = 'none';
       this.#deviceChosen = true;
       this.#micOn = false;
+      this.#phoneWasLost = state.device === 'phone' || state.phoneLost === true;
     }
 
     this.update();
@@ -583,7 +607,7 @@ export class VoiceControl {
     this.#resume = null;
     this.#phoneHash = null;
     this.#carried = null;
-    this.#setDevice('none', `the phone did not take the voice back within ${PHONE_RESUME_MS / 1000} seconds of the hub restart`);
+    this.#setDevice('none', `the phone did not take the voice back within ${PHONE_RESUME_MS / 1000} seconds of the hub restart`, true);
     this.update();
     this.#offerHeld();
   }
@@ -630,17 +654,23 @@ export class VoiceControl {
     }
   }
 
-  /** The phone's voice socket closed: the voice stays off, never moving back to this computer's speakers on its own (PRD R119, decision 1). */
-  phoneClosed(reason: string): void {
+  /**
+   * The phone's voice socket closed: the voice stays off, never moving back to this computer's speakers on its own (PRD R119, decision 1).
+   * `refused`: the hub closed it for a sign-out, a forbidden device, voice turned off or the page that opened it closing. The phone counts as
+   * lost unless the operator chose its leaving: a refusal, the page's own `leave` (Voice off) or a page hidden when it closed.
+   */
+  phoneClosed(reason: string, refused = false): void {
     // A hub that handed over leaves the device to the hub that takes over.
     if (this.#closed || this.#device !== 'phone') {
       return;
     }
 
+    const lost = !this.#phoneLeaving && !this.#phoneHidden && (this.#phoneStalled || !refused);
+
     this.#phoneKey = null;
     this.#phoneHash = null;
     this.#micOn = false;
-    this.#setDevice('none', `the phone left: ${reason}`);
+    this.#setDevice('none', `the phone left${lost ? ' unexpectedly' : ''}: ${reason}`, lost);
     this.update();
   }
 
@@ -661,7 +691,18 @@ export class VoiceControl {
    * microphone cannot be heard now (no track open, the track muted, the page hidden).
    */
   phoneMessage(data: Record<string, unknown>): void {
-    const { type, id, ms, done, busy, out } = data;
+    const { type, id, ms, done, busy, out, hidden } = data;
+
+    // The page leaves by the operator's choice (Voice off, or its page hidden) just before it closes the socket, so the close notes nothing.
+    if (this.#device === 'phone' && type === 'leave') {
+      this.#phoneLeaving = true;
+      return;
+    }
+
+    if (this.#device === 'phone' && type === 'visibility' && typeof hidden === 'boolean') {
+      this.#phoneHidden = hidden;
+      return;
+    }
 
     if (this.#device === 'phone' && type === 'state' && typeof busy === 'boolean') {
       this.#phoneBusy = busy;
@@ -722,12 +763,17 @@ export class VoiceControl {
     this.#offerHeld();
   }
 
-  #setDevice(device: VoiceDevice, why: string): void {
+  /** Moves the voice; `lost`, with none, marks the phone as lost rather than left (`phoneLost`). */
+  #setDevice(device: VoiceDevice, why: string, lost = false): void {
     if (device === this.#device) {
       return;
     }
 
     this.#device = device;
+    this.#phoneWasLost = device === 'none' && lost;
+    this.#phoneLeaving = false;
+    this.#phoneHidden = false;
+    this.#phoneStalled = false;
     this.#deviceChosen = true;
     // The voice process turns the mic off with any move, closing what it captured from; the operator turns it on where the voice is now.
     this.#micOn = false;
@@ -2003,7 +2049,8 @@ export class VoiceControl {
             this.deps.log(`voice: device ${this.#device}: the voice process had ${had} when the hub connected, and is told this hub's device`);
             this.#client?.send({ type: 'device', device: this.#device });
           } else if (message.device !== 'computer') {
-            this.#setDevice('none', `the voice process had ${had} when the hub connected`);
+            // The phone's socket closed with the hub that stopped, a loss; none was already off, as the operator may have chosen.
+            this.#setDevice('none', `the voice process had ${had} when the hub connected`, message.device === 'phone');
             this.update();
           }
         }
@@ -2099,6 +2146,7 @@ export class VoiceControl {
         // The phone stopped playing while its socket stayed open: the voice leaves it, as when it is lost.
         if (this.#device === 'phone') {
           this.deps.log(`voice: the phone stopped playing: ${message.reason}`);
+          this.#phoneStalled = true;
           this.deps.phone?.close(message.reason);
         }
 

@@ -304,6 +304,135 @@ describe('SessionConversation', () => {
     expect(changes.map((change) => (change.type === 'reply' ? change.reply.id : null))).toEqual([id, id]);
   });
 
+  describe('a reply with a link the screen draws with its target', () => {
+    // Session 311b1ad4's reply of 2026-11-22T21:12:38Z, which showed twice until its screen copy was withdrawn.
+    const raw =
+      "The Changes list compares the worktree with the remote's main branch. It finds where the worktree's HEAD branched off `origin/HEAD`, which is normally `origin/main`, and falls back to `origin/main` or `origin/master`. From that commit (the merge base) to what's on disk now, it lists every committed, staged, unstaged and untracked change. If none of those remote branches exist, it shows only uncommitted changes.\n\nOne catch: the remote is the reference, not your local `main`. If local `main` has commits that aren't pushed yet, a worktree branched from it also shows those commits as changes. That's why everything looks like a big diff until you push. The code is at [changes.ts:280](file:///D:/git/switchboard/packages/hub/src/changes.ts#L280).\n\nShould the base be the local `main` instead, or whichever comes later of local `main` and `origin/main`?";
+    const drawn = [
+      "● The Changes list compares the worktree with the remote's main branch. It finds",
+      "  where the worktree's HEAD branched off `origin/HEAD`, which is normally",
+      "  `origin/main`, and falls back to `origin/main` or `origin/master`. From that",
+      "  commit (the merge base) to what's on disk now, it lists every committed,",
+      "  staged, unstaged and untracked change. If none of those remote branches exist,",
+      "  it shows only uncommitted changes.",
+      "",
+      "  One catch: the remote is the reference, not your local `main`. If local `main`",
+      "  has commits that aren't pushed yet, a worktree branched from it also shows",
+      "  those commits as changes. That's why everything looks like a big diff until",
+      "  you push. The code is at changes.ts:280",
+      "  (file:///D:/git/switchboard/packages/hub/src/changes.ts#L280).",
+      "",
+      "  Should the base be the local `main` instead, or whichever comes later of local",
+      "  `main` and `origin/main`?",
+    ];
+
+    it('publishes no screen copy read after its transcript copy', () => {
+      // The short one has its link within the letters that tell a redraw of a sent reply.
+      const short = 'See [changes.ts:280](file:///D:/git/switchboard/packages/hub/src/changes.ts#L280) for the base.';
+
+      for (const [text, lines] of [
+        [raw, drawn],
+        [short, ['● See changes.ts:280 (file:///D:/git/switchboard/packages/hub/src/changes.ts#L280) for the', '  base.']],
+      ] as const) {
+        const { conversation, path, append, items, advance, logs } = setup();
+
+        rmSync(path, { force: true });
+
+        append(assistant('a1', T0, text));
+        conversation.readTranscript(path);
+        advance(300);
+        conversation.readScreen(screen(...lines));
+        advance(25_000);
+        conversation.tick(false);
+
+        expect(items()).toMatchObject([{ type: 'reply', source: 'transcript', opening: text, withdrawn: false }]);
+        expect(items()).toHaveLength(1);
+        expect(logs.filter((line) => line.includes('withdrawn'))).toEqual([]);
+      }
+    });
+
+    it('publishes a later reply that opens with the same long link as one read before', () => {
+      const { conversation, path, append, items, advance } = setup();
+      const target = 'file:///D:/git/switchboard.worktrees/reply-dup/packages/conversation/src/conversation.ts#L479';
+      const link = `[conversation.ts:479](${target})`;
+      const drawnB = `See conversation.ts:479 (${target}), then do B.`;
+
+      append(assistant('a1', T0, `See ${link}, then do A.`));
+      conversation.readTranscript(path);
+      advance(300);
+      conversation.readScreen(screen(`● ${drawnB}`));
+      advance(300);
+
+      expect(items()).toMatchObject([
+        { type: 'reply', source: 'transcript', opening: `See ${link}, then do A.` },
+        { type: 'reply', source: 'screen', opening: drawnB },
+      ]);
+    });
+
+    it('replaces the screen copy its drawn key matches, whole or cut off, rather than a shorter one its own key starts with', () => {
+      for (const drawnLong of ['See docs (https://example.com/long/path) done.', 'See docs (https://example.com/long/path)']) {
+        const { conversation, path, append, items, advance } = setup();
+
+        rmSync(path, { force: true });
+        conversation.readScreen(screen('● See docs.', '', '● Other.', '', `● ${drawnLong}`));
+        advance(300);
+
+        const [short, , long] = items() as Array<{ id: string }>;
+
+        append(assistant('a1', T0 + 300, 'See [docs](https://example.com/long/path) done.'));
+        conversation.readTranscript(path);
+
+        // The replaced copy takes its transcript line's place, before the copies still waiting.
+        expect(items()).toMatchObject([
+          { id: long!.id, source: 'transcript', opening: 'See [docs](https://example.com/long/path) done.' },
+          { id: short!.id, source: 'screen', opening: 'See docs.' },
+          { source: 'screen', opening: 'Other.' },
+        ]);
+      }
+    });
+
+    it('publishes only its transcript copy when that comes while the screen copy is held', () => {
+      const { conversation, path, append, items, advance, changes, logs } = setup();
+
+      conversation.readScreen(screen(...drawn));
+      advance(100);
+      append(assistant('a1', T0 + 100, raw));
+      conversation.readTranscript(path);
+      advance(25_000);
+      conversation.tick(false);
+
+      expect(items()).toMatchObject([{ type: 'reply', source: 'transcript', opening: raw, withdrawn: false }]);
+      expect(items()).toHaveLength(1);
+      expect(changes).toHaveLength(1);
+      expect(logs.filter((line) => line.includes('withdrawn'))).toEqual([]);
+    });
+
+    it('replaces its screen copy, whole or cut off before the target, in place with its transcript copy', () => {
+      for (const shown of [drawn, drawn.slice(0, 11)]) {
+        const { conversation, path, append, items, advance, changes, logs } = setup();
+
+        rmSync(path, { force: true });
+
+        conversation.readScreen(screen(...shown));
+        advance(300);
+        expect(items()).toMatchObject([{ type: 'reply', source: 'screen' }]);
+
+        const id = (items()[0] as { id: string }).id;
+
+        advance(500);
+        append(assistant('a1', T0 + 800, raw));
+        conversation.readTranscript(path);
+        advance(25_000);
+        conversation.tick(false);
+
+        expect(items()).toMatchObject([{ id, source: 'transcript', opening: raw, withdrawn: false }]);
+        expect(items()).toHaveLength(1);
+        expect(changes.map((change) => (change.type === 'reply' ? change.reply.id : null))).toEqual([id, id]);
+        expect(logs.filter((line) => line.includes('withdrawn'))).toEqual([]);
+      }
+    });
+  });
+
   it('orders by transcript line, not timestamp, and moves a message sent mid-turn from the bottom to where Claude received it', () => {
     const { conversation, path, append, items, changes } = setup();
     const shown = () => items().map((item) => `${item.type === 'message' ? `${item.text}${item.provisional ? ' (sent)' : ''}` : item.opening}`);

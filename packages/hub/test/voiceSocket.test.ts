@@ -183,7 +183,7 @@ describe('the voice socket on the page origin', () => {
       log: () => undefined,
       opened: (device) => events.push(`opened ${device.key}`),
       resumable: (device) => (events.push(`resumable ${device.key}`), resumeRefused),
-      closed: (device, reason) => events.push(`closed ${device.key}: ${reason}`),
+      closed: (device, reason, refused) => events.push(`closed ${device.key}: ${reason}${refused ? ' (refused)' : ''}`),
       audio: (_device, data) => audio.push(data),
       message: (device, data) => events.push(`message ${device.key} ${String(data['type'])}`),
     });
@@ -207,7 +207,7 @@ describe('the voice socket on the page origin', () => {
       voice: {
         enabled: () => enabled,
         accept: (request, socket, head, device: VoiceDevice) => sockets.accept(request, socket, head, device),
-        close: (match, reason) => sockets.close(match, reason),
+        close: (match, reason, code) => sockets.close(match, reason, code),
       },
     };
 
@@ -488,7 +488,8 @@ describe('the voice socket on the page origin', () => {
 
     phonePage.end();
     await second.closed;
-    expect([second.closeCode, second.closeReason]).toEqual([VOICE_CLOSE.refused, 'The page that opened the voice closed.']);
+    // Going away, not refused: a stream that ends may be a dropped connection.
+    expect([second.closeCode, second.closeReason]).toEqual([1001, 'The page that opened the voice closed.']);
 
     // Remote access no longer allows the login.
     const third = await connected((await openPage({ ...REMOTE, Cookie: phone })).key);
@@ -525,8 +526,9 @@ describe('the voice socket on the page origin', () => {
 
     expect(await refused.status).toBe(403);
     expect(refused.body.trim()).toBe(VOICE_NOT_ALLOWED);
-    // The socket a newer device took over is no loss of the voice, so it is not reported closed.
-    expect(events.filter((line) => line.startsWith('closed'))).toHaveLength(4);
+    // The socket a newer device took over is no loss of the voice, so it is not reported closed; the refusals are the operator's choice rather
+    // than a lost phone, and the ended page stream is neither.
+    expect(events.filter((line) => line.startsWith('closed')).map((line) => line.endsWith(' (refused)'))).toEqual([true, false, true, true]);
   });
 
   it('checks the sign-in again at each message, so a socket does not outlive an expired or trimmed sign-in, voice turned off or a lost login', async () => {

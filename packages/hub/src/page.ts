@@ -768,6 +768,8 @@ export interface PageHeader {
   notes: string[];
   /** The dock's note while a held session has no work item, "N held sessions without a work item" (PRD R94); absent otherwise. */
   heldNote?: string;
+  /** The dock's neutral note while no device has the voice because the phone was lost (PRD R119); absent otherwise. */
+  voiceNote?: string;
   /** The configured sources but ad-hoc, by kind, as the dock's header icons show them. */
   sources: DockSourceGroup[];
   /** The repos an ad-hoc prompt can run in, the first being the default (PRD R6). */
@@ -787,7 +789,7 @@ export interface PageHeader {
  * The page's list header, from the built dock view, so the page and the dock show the same sources. A page cannot browse this computer's
  * folders, so its folder choices are the ones the hub knows: the repo roots, then each folder a conversation is hosted by, once each.
  */
-export function pageHeader(dock: Pick<DockView, 'notes' | 'heldNote' | 'sources' | 'repoRoots' | 'schedules' | 'holderNotice' | 'holderResult'>, snapshot: Pick<Snapshot, 'workItems'>): PageHeader {
+export function pageHeader(dock: Pick<DockView, 'notes' | 'heldNote' | 'voiceNote' | 'sources' | 'repoRoots' | 'schedules' | 'holderNotice' | 'holderResult'>, snapshot: Pick<Snapshot, 'workItems'>): PageHeader {
   const folders = new Map<string, string>();
 
   for (const folder of [...dock.repoRoots, ...snapshot.workItems.flatMap((item) => (item.ticket.hostWindow != null && isFolderHost(item.ticket.hostWindow) ? [item.ticket.hostWindow] : []))]) {
@@ -799,6 +801,7 @@ export function pageHeader(dock: Pick<DockView, 'notes' | 'heldNote' | 'sources'
   return {
     notes: dock.notes,
     ...(dock.heldNote === undefined ? {} : { heldNote: dock.heldNote }),
+    ...(dock.voiceNote === undefined ? {} : { voiceNote: dock.voiceNote }),
     sources: dock.sources,
     repoRoots: dock.repoRoots,
     folders: [...folders.values()],

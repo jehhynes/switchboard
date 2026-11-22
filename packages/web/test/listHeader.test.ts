@@ -467,6 +467,23 @@ describe('the list header (architecture.md § Web page)', () => {
     expect(root.querySelector('.list-note')).toBeNull();
   });
 
+  it('shows the note for a lost phone after the warning notes, as an untoned voice note, and nothing while the voice is off by choice (PRD R119)', () => {
+    const { source } = start();
+    const lost = 'Voice stopped unexpectedly on the paired device. Select Voice on this device there, or Talk here on this computer.';
+
+    hello(source);
+    // Voice off by choice: the hub sends where the voice is, and no note.
+    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ voiceDevice: 'none' }) });
+    expect(root.querySelector('.list-note')).toBeNull();
+    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ notes: ['Voice: the voice process stopped.'], voiceNote: lost, voiceDevice: 'none' }) });
+    expect([...root.querySelectorAll('.list-note')].map((note) => [note.className, note.textContent])).toEqual([
+      ['list-note', 'Voice: the voice process stopped.'],
+      ['list-note voice-note', lost],
+    ]);
+    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header() });
+    expect(root.querySelector('.voice-note')).toBeNull();
+  });
+
   it('offers Voice on the computer on this computer\'s page only while the voice is not here, and says why it did not move (PRD R119)', async () => {
     const { page, source } = start(true);
 

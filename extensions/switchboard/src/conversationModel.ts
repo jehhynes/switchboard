@@ -348,9 +348,10 @@ export function voiceStatus(voice: VoiceView | null): { text: string; tooltip: s
     return { text: '$(circle-slash) Voice not here', tooltip: 'Click to use voice for this session.', command: 'switchboard.talkHere', warning: false };
   }
 
-  // After the phone left, no device has the voice: nothing plays or listens until it is taken back (PRD R119).
+  // After the phone left, no device has the voice: nothing plays or listens until it is taken back (PRD R119). Voice off is a state, not a
+  // problem, so the item is untoned.
   if (voice.deviceOff === true) {
-    return { text: '$(circle-slash) Voice off', tooltip: DEVICE_OFF_TIP, command: 'switchboard.talkHere', warning: true };
+    return { text: '$(circle-slash) Voice off', tooltip: DEVICE_OFF_TIP, command: 'switchboard.talkHere', warning: false };
   }
 
   if (voice.error !== null) {

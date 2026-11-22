@@ -460,6 +460,9 @@
                   ToolTip.Tip="Open held sessions" AutomationProperties.Name="Open held sessions">
             <TextBlock Text="{Binding HeldNote}" TextWrapping="Wrap" Classes="warning" />
           </Button>
+          <!-- Why no device has the voice when the phone was lost (PRD R119): information, so untoned. -->
+          <TextBlock Name="VoiceNoteLine" Text="{Binding VoiceNote}" IsVisible="{Binding VoiceNote, Converter={x:Static ObjectConverters.IsNotNull}}"
+                     TextWrapping="Wrap" Margin="8,4" Classes="muted" />
           <!-- A terminal holder from an older build, or restarting (architecture.md § Restarting the holder). -->
           <StackPanel Name="HolderNotice" IsVisible="{Binding HolderNoticeText, Converter={x:Static ObjectConverters.IsNotNull}}" Margin="8,4">
             <TextBlock Name="HolderNoticeLine" Text="{Binding HolderNoticeText}" TextWrapping="Wrap" Classes="warning" />

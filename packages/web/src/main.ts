@@ -35,7 +35,7 @@ import { EMPTY_HISTORY_UI, renderHistory } from './history.js';
 import type { HistoryOpen, HistoryUi } from './history.js';
 import type { HistoryCategory, HistoryView } from '@switchboard/protocol';
 import { askForNotifications, notificationsAllowed, notifyNeeds, playChime } from './alerts.js';
-import { ChangesController, changesButton, diffTabs, renderChangesMenu } from './changes.js';
+import { ChangesController, changesTab } from './changes.js';
 import { LocalFilesController, localTabs } from './localFiles.js';
 import type { DiffModule } from './diff/types.js';
 import { useFileIcons } from './fileIcons.js';
@@ -455,10 +455,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     showDiff: () => {
       leaving('diff');
       chooseTab('diff');
-      draw();
-    },
-    closedDiff: () => {
-      chooseTab(wide() ? 'status' : 'conversation');
       draw();
     },
     loadDiff: () => deps.loadDiff?.() ?? Promise.resolve(null),
@@ -1485,6 +1481,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       const parts = [...folder];
       let decoded: string;
 
+      // A scheme, a drive or a rooted path names no artifact: such a link opens in a file tab.
+      if (/^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith('/') || target.startsWith('\\')) {
+        return null;
+      }
+
       try {
         decoded = decodeURIComponent(target.split(/[?#]/)[0]!);
       } catch {
@@ -1988,9 +1989,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     const strip = { open: openArtifact(), fit: view.artifactFit, menu: view.artifactMenu, now: deps.now(), closed: closedNow() };
 
-    const changeTabs = (shown: Tab): ComponentChild[] => [diffTabs(changes.view, shown === 'diff'), localTabs(localFiles.view, shown === 'file', !changes.view.tab), changesButton(changes.view, localFiles.view.tabs.length > 0)];
+    // The file tabs, then the one Changes tab, last so it keeps its place as file tabs come and go.
+    const changeTabs = (shown: Tab): ComponentChild[] => [localTabs(localFiles.view, shown === 'file', true), changesTab(changes.view, shown === 'diff', localFiles.view.tabs.length === 0)];
 
-    mount(head, [renderHeader(state, view), side ? null : renderTabs({ ...view, tab: mainTab() }, state, showBrowser(), strip, changeTabs(mainTab()), showConsole()), side ? null : renderChangesMenu(changes.view)]);
+    mount(head, [renderHeader(state, view), side ? null : renderTabs({ ...view, tab: mainTab() }, state, showBrowser(), strip, changeTabs(mainTab()), showConsole())]);
 
     const artifact = view.artifact === null ? undefined : state.artifacts.find((one) => one.path === view.artifact);
     const now = deps.now();
@@ -2048,7 +2050,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     drawTab(panel, mainTab());
 
     if (side) {
-      mount(detailHead, [renderSideSwitch(sideTab(), state, showBrowser(), strip, [...changeTabs(sideTab()), renderMaximize(panelMaximized)], showConsole()), renderChangesMenu(changes.view)]);
+      mount(detailHead, renderSideSwitch(sideTab(), state, showBrowser(), strip, [...changeTabs(sideTab()), renderMaximize(panelMaximized)], showConsole()));
       drawTab(detailBody, sideTab());
     }
     // The composer first, so the conversation is scrolled against its final height.
@@ -3340,7 +3342,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       event.stopImmediatePropagation();
     } else if (event.key === 'Escape' && changes.escape()) {
       draw();
-      root.querySelector<HTMLElement>('.changes-button')?.focus();
+      root.querySelector<HTMLElement>('.changes-files')?.focus();
       event.stopImmediatePropagation();
     } else if (event.key === 'Escape' && view.drawer !== null) {
       closeDrawer();

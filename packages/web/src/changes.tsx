@@ -1,6 +1,6 @@
-// The Changes list and the Changes tab (PRD R118, architecture.md § Web page): the open conversation's worktree changes from its merge base to
-// disk, as the VS Code window's Open changes shows them, in a menu from the Changes button at the end of the tab strips, and every changed file's
-// diff in one scrolling Changes tab, drawn by the diff viewer the page loads on first use, which reads only the files near the view.
+// The Changes tab (PRD R118, architecture.md § Web page): the open conversation's worktree changes from its merge base to disk, as the VS Code
+// window's Open changes shows them, every changed file's diff in one scrolling tab at the end of the tab strips, drawn by the diff viewer the page
+// loads on first use, which reads only the files near the view, under a bar with the list's counts, its toggles and a Files menu to go to a file.
 import type { ComponentChildren, VNode } from 'preact';
 import { DIFF_BUDGET, evictions, largeReason, MAX_IN_FLIGHT, rowKey, wantedIndexes } from './changesWindow.js';
 import { FileIcon } from './fileIcons.js';
@@ -10,7 +10,7 @@ import type { ChangesMount, DiffModule, DiffMount, RowContent } from './diff/typ
 
 export type { ChangeRow, ChangesList, ChangeStage, ChangeStatus } from '@switchboard/protocol';
 
-/** What the page keeps of the Changes list: the list as last read, a read on its way or why one failed, whether its menu is open, and the Changes tab. */
+/** What the page keeps of the Changes tab: the list as last read, a read on its way or why one failed, whether its Files menu is open, and the tab. */
 export interface ChangesView {
   list: ChangesList | null;
   loading: boolean;
@@ -18,7 +18,7 @@ export interface ChangesView {
   menu: boolean;
   /** The conversation the list was read for: the page key, scope generation and work item. */
   for: string | null;
-  /** Whether the Changes tab is open. */
+  /** Whether the Changes tab was opened since the page came to the conversation: its list is read again when a turn ends. */
   tab: boolean;
   /** Whether the Changes tab leaves out the files ticked viewed. */
   hideViewed: boolean;
@@ -69,40 +69,20 @@ function totals(list: ChangesList): { viewed: number; additions: number; deletio
   return list.rows.reduce((sum, row) => ({ viewed: sum.viewed + (row.viewed === true ? 1 : 0), additions: sum.additions + (row.additions ?? 0), deletions: sum.deletions + (row.deletions ?? 0) }), { viewed: 0, additions: 0, deletions: 0 });
 }
 
-/** The Changes tab, after the strip's other tabs and before the Changes button, with how many files are viewed of all and a close mark; `shown` is whether the strip shows it now. */
-export function diffTabs(changes: ChangesView, shown: boolean): ComponentChildren {
-  if (!changes.tab) {
-    return null;
-  }
-
+/**
+ * The Changes tab, the strip's one Changes item, after its other tabs and any file tabs: how many files are viewed of all once the list was read.
+ * Choosing it opens the diffs; it has no close mark, as the other fixed tabs have none. `push` when nothing comes between it and the tabs before.
+ */
+export function changesTab(changes: ChangesView, shown: boolean, push = true): VNode {
   const list = changes.list;
-  const progress = list === null ? null : `${totals(list).viewed}/${list.total}`;
-
-  return (
-    <span class={`tab diff-tab push${shown ? ' selected' : ''}`} role="presentation">
-      <button class="tab-open" type="button" role="tab" data-action="diff-tab" aria-selected={shown} tabindex={shown ? 0 : -1} title={changes.uncommitted ? "Every uncommitted file's diff" : "Every changed file's diff"} aria-label={progress === null ? 'Changes' : `Changes, ${progress} viewed`}>
-        <span class="codicon codicon-diff-multiple" aria-hidden="true"></span>
-        <span class="tab-label">Changes</span>
-        {progress === null ? null : <span class="tab-badge muted">{progress}</span>}
-      </button>
-      <button class="tab-close" type="button" data-action="diff-close" aria-label="Close Changes" title="Close" tabindex={shown ? 0 : -1}>
-        <span class="codicon codicon-close" aria-hidden="true"></span>
-      </button>
-    </span>
-  );
-}
-
-/** The Changes button, after the strip's tabs, with the count once a list was read; `after` when other tabs, such as file tabs, come before it. */
-export function changesButton(changes: ChangesView, after = false): VNode {
-  const count = changes.list?.total;
+  const viewed = list === null ? 0 : totals(list).viewed;
   const files = changes.uncommitted ? 'uncommitted files' : 'files';
 
   return (
-    <button class={`tab changes-button${changes.tab || after ? '' : ' push'}${changes.menu ? ' open' : ''}`} type="button" data-action="changes-menu" aria-expanded={changes.menu} aria-label={count === undefined ? 'Changes list' : `Changes list, ${count} ${files}`} title={changes.uncommitted ? "The worktree's uncommitted changes" : "The worktree's changes since its base"}>
+    <button class={`tab changes-tab${push ? ' push' : ''}${shown ? ' selected' : ''}`} type="button" role="tab" data-action="diff-tab" aria-selected={shown} tabindex={shown ? 0 : -1} title={changes.uncommitted ? "Every uncommitted file's diff" : "Every changed file's diff since the base"} aria-label={list === null ? 'Changes' : `Changes, ${viewed} of ${list.total} ${files} viewed`}>
       <span class="codicon codicon-diff-multiple" aria-hidden="true"></span>
       <span class="tab-label">Changes</span>
-      {count === undefined ? null : <span class="tab-badge muted">{count}</span>}
-      <span class="codicon codicon-chevron-down" aria-hidden="true"></span>
+      {list === null ? null : <span class="tab-badge muted">{`${viewed}/${list.total}`}</span>}
     </button>
   );
 }
@@ -150,7 +130,7 @@ function Row({ row }: { row: ChangeRow }): VNode {
   );
 }
 
-/** What the menu says above its rows: how many files, uncommitted ones when the list has those alone, the lines added and deleted, how many are viewed, and a first cut when the worktree has more than the hub lists. */
+/** What the Changes tab's bar says: how many files, uncommitted ones when the list has those alone, the lines added and deleted, how many are viewed, and a first cut when the worktree has more than the hub lists. */
 export function listNote(list: ChangesList): string {
   const kind = list.uncommitted ? ' uncommitted' : '';
   const files = list.total === 1 ? `1${kind} file` : `${list.total}${kind} files`;
@@ -161,17 +141,17 @@ export function listNote(list: ChangesList): string {
   return list.shown < list.total ? `Showing ${list.shown} of ${files}${lines}${ticked}` : `${files}${lines}${ticked}`;
 }
 
-/** The menu note's tooltip: since which base. */
+/** The bar note's tooltip: since which base. */
 export function listBase(list: ChangesList): string {
   return list.uncommitted ? 'Uncommitted changes, against HEAD' : list.base === null ? 'Uncommitted changes only, no merge base' : `Since ${list.base.slice(0, 7)}`;
 }
 
-/** What the menu and the Changes tab say when the list has no rows. */
+/** What the Files menu and the Changes tab say when the list has no rows. */
 export function emptyNote(list: ChangesList): string {
   return list.uncommitted ? 'No uncommitted changes.' : list.base === null ? 'No uncommitted changes, and no merge base was found.' : 'No changes since the merge base.';
 }
 
-/** A header button of the Changes menu: a codicon with its name as tooltip. */
+/** A button of the Changes tab's bar: a codicon with its name as tooltip. */
 function HeadButton({ action, icon, label, pressed, disabled }: { action: string; icon: string; label: string; pressed?: boolean; disabled?: boolean }): VNode {
   return (
     <button class="icon" type="button" data-action={action} title={label} aria-label={label} aria-pressed={pressed} disabled={disabled}>
@@ -180,15 +160,8 @@ function HeadButton({ action, icon, label, pressed, disabled }: { action: string
   );
 }
 
-/**
- * The Changes menu while open, under the strip: its note, Uncommitted only, Hide viewed, Collapse all, Expand all and Refresh, then the rows, or
- * why there are none. Open in VS Code is in the work item's Actions menu, not here.
- */
-export function renderChangesMenu(changes: ChangesView): VNode | null {
-  if (!changes.menu) {
-    return null;
-  }
-
+/** The Files menu's rows, or why there are none. */
+function FilesMenu({ changes }: { changes: ChangesView }): VNode {
   const list = changes.list;
   let body: ComponentChildren;
 
@@ -200,7 +173,7 @@ export function renderChangesMenu(changes: ChangesView): VNode | null {
     body = <p class="changes-empty">{emptyNote(list)}</p>;
   } else {
     body = (
-      <ul class="changes-rows" aria-label="Changes">
+      <ul class="changes-rows" aria-label="Files">
         {list.rows.map((row) => (
           <Row row={row} />
         ))}
@@ -208,25 +181,35 @@ export function renderChangesMenu(changes: ChangesView): VNode | null {
     );
   }
 
+  return <div class="glass changes-menu">{body}</div>;
+}
+
+/**
+ * The Changes tab's bar, above the diffs: Files, which opens the list of files to go to one, the note, then Uncommitted only, Hide viewed,
+ * Collapse all, Expand all and Refresh. Open in VS Code is in the work item's Actions menu, not here.
+ */
+export function renderChangesBar(changes: ChangesView): ComponentChildren {
+  const list = changes.list;
   const empty = list === null || list.rows.length === 0;
 
-  return (
-    <div class="glass changes-menu">
-      <div class="changes-head">
-        <span class="changes-note" title={list === null ? undefined : listBase(list)}>
-          {list === null ? 'Changes' : listNote(list)}
-        </span>
-        <HeadButton action="changes-uncommitted" icon={changes.uncommitted ? 'filter-filled' : 'filter'} label={changes.uncommitted ? 'Show all changes since the base' : 'Show uncommitted changes only'} pressed={changes.uncommitted} />
-        <HeadButton action="changes-hide-viewed" icon={changes.hideViewed ? 'eye-closed' : 'eye'} label={changes.hideViewed ? 'Show viewed files' : 'Hide viewed files'} pressed={changes.hideViewed} disabled={empty} />
-        <HeadButton action="changes-collapse-all" icon="collapse-all" label="Collapse all" disabled={empty} />
-        <HeadButton action="changes-expand-all" icon="expand-all" label="Expand all" disabled={empty} />
-        <button class="icon" type="button" data-action="changes-refresh" title="Refresh" aria-label="Refresh" disabled={changes.loading}>
-          <span class={`codicon codicon-refresh${changes.loading ? ' codicon-modifier-spin' : ''}`} aria-hidden="true"></span>
-        </button>
-      </div>
-      {body}
-    </div>
-  );
+  return [
+    <button class={`changes-files${changes.menu ? ' open' : ''}`} type="button" data-action="changes-menu" aria-expanded={changes.menu} title="Go to a file" aria-label="Files">
+      <span class="codicon codicon-list-flat" aria-hidden="true"></span>
+      <span class="changes-files-label">Files</span>
+      <span class="codicon codicon-chevron-down" aria-hidden="true"></span>
+    </button>,
+    changes.menu ? <FilesMenu changes={changes} /> : null,
+    <span class={`changes-note${changes.error !== null && list !== null ? ' error' : ''}`} title={list === null ? undefined : listBase(list)}>
+      {changes.error !== null && list !== null ? changes.error : list === null ? 'Changes' : listNote(list)}
+    </span>,
+    <HeadButton action="changes-uncommitted" icon={changes.uncommitted ? 'filter-filled' : 'filter'} label={changes.uncommitted ? 'Show all changes since the base' : 'Show uncommitted changes only'} pressed={changes.uncommitted} />,
+    <HeadButton action="changes-hide-viewed" icon={changes.hideViewed ? 'eye-closed' : 'eye'} label={changes.hideViewed ? 'Show viewed files' : 'Hide viewed files'} pressed={changes.hideViewed} disabled={empty} />,
+    <HeadButton action="changes-collapse-all" icon="collapse-all" label="Collapse all" disabled={empty} />,
+    <HeadButton action="changes-expand-all" icon="expand-all" label="Expand all" disabled={empty} />,
+    <button class="icon" type="button" data-action="changes-refresh" title="Refresh" aria-label="Refresh" disabled={changes.loading}>
+      <span class={`codicon codicon-refresh${changes.loading ? ' codicon-modifier-spin' : ''}`} aria-hidden="true"></span>
+    </button>,
+  ];
 }
 
 export interface ChangesDeps {
@@ -236,8 +219,6 @@ export interface ChangesDeps {
   draw(): void;
   /** Shows the Changes tab, in the side column on a wide screen and in the conversation's strip on a narrower one. */
   showDiff(): void;
-  /** The Changes tab closed while it showed: the strip shows another tab. */
-  closedDiff(): void;
   /** Loads the diff viewer's module on first use; null when it cannot load. */
   loadDiff(): Promise<DiffModule | null>;
   /** Empties a pane Preact drew into, before the Changes tab draws into it itself. */
@@ -341,7 +322,7 @@ function slot(): HTMLElement {
   return element;
 }
 
-/** The page's side of the Changes list and tab: reads them from the hub, and answers the clicks and presses on the list, its menu and the tab. */
+/** The page's side of the Changes tab: reads the list and the diffs from the hub, and answers the clicks and presses on the tab, its bar and its Files menu. */
 export class ChangesController {
   readonly view: ChangesView = newChanges();
   #reading = 0;
@@ -422,7 +403,7 @@ export class ChangesController {
 
   /**
    * Follows the page's conversation: `id` names it (page key, scope generation, work item), so another one drops the list, its diffs and the
-   * Changes tab; `turnEnded` reads the list again when the session's turn ends while the menu or the tab is open.
+   * Changes tab; `turnEnded` reads the list again when the session's turn ends once the tab was opened.
    */
   follow(id: string | null, turnEnded: boolean): void {
     if (id !== this.view.for) {
@@ -554,17 +535,12 @@ export class ChangesController {
     }
   }
 
-  /** Handles a click on the Changes button, its menu or the Changes tab; false for any other click. */
+  /** Handles a click on the Changes tab, its bar, its Files menu or its diffs; false for any other click. */
   click(target: HTMLElement): boolean {
     const action = target.closest<HTMLElement>('[data-action]')?.dataset['action'];
 
     if (action === 'changes-menu') {
       this.view.menu = !this.view.menu;
-
-      if (this.view.menu) {
-        void this.refresh();
-      }
-
       this.deps.draw();
       return true;
     }
@@ -619,11 +595,6 @@ export class ChangesController {
       return true;
     }
 
-    if (action === 'diff-close') {
-      this.closeChanges();
-      return true;
-    }
-
     if (action === 'diff-viewed' && path !== undefined) {
       void this.toggleViewed(path);
       return true;
@@ -638,7 +609,7 @@ export class ChangesController {
     return target.closest('.changes-menu') !== null;
   }
 
-  /** Opens the Changes tab, or shows it, at a file's diff when `path` names one; opening it reads the list again. */
+  /** Shows the Changes tab, at a file's diff when `path` names one; its first showing in a conversation reads the list. */
   openChanges(path: string | null): void {
     const opening = !this.view.tab;
 
@@ -666,19 +637,6 @@ export class ChangesController {
     }
 
     this.deps.showDiff();
-  }
-
-  /** Closes the Changes tab; the strip shows another tab. */
-  closeChanges(): void {
-    if (!this.view.tab) {
-      return;
-    }
-
-    this.view.tab = false;
-    this.#file = null;
-    this.#hunk = null;
-    this.#unmount();
-    this.deps.closedDiff();
   }
 
   #scrollToJump(): void {
@@ -1031,8 +989,8 @@ export class ChangesController {
   }
 
   /**
-   * Draws the Changes tab into a pane: every row's diff in one view, mounted once per conversation and given the layout again when the pane's
-   * width changes, and over it the file view while one is open. Nothing sits above the diffs.
+   * Draws the Changes tab into a pane: its bar, then every row's diff in one view, mounted once per conversation and given the layout again when
+   * the pane's width changes, and over both the file view while one is open.
    */
   drawDiff(pane: HTMLElement): void {
     if (!this.view.tab) {
@@ -1055,16 +1013,20 @@ export class ChangesController {
       // Focusable, so a click in the diffs gives it the focus its keys need.
       view.tabIndex = 0;
 
+      const bar = document.createElement('div');
       const host = document.createElement('div');
 
+      bar.className = 'changes-bar';
       host.className = 'diff-host';
-      view.append(host);
+      view.append(bar, host);
       pane.replaceChildren(view);
       this.drop();
     }
 
     const host = view.querySelector<HTMLElement>(':scope > .diff-host')!;
     const list = this.view.list;
+
+    mount(view.querySelector<HTMLElement>(':scope > .changes-bar')!, renderChangesBar(this.view));
 
     if (this.#mount === null || this.#mount.host !== host) {
       if (this.view.error !== null && list === null) {
@@ -1185,6 +1147,8 @@ export class ChangesController {
       }
 
       this.#mount = { host, mount, layout: `${shown.layout} ${shown.wrap}`, paths: rows.map(rowShape) };
+      // A viewer mounted again, as when the tab is chosen again, starts n and p from the line at the top.
+      this.#hunk = null;
 
       for (const row of rows) {
         const held = this.#held.get(row.path);
@@ -1307,7 +1271,7 @@ export class ChangesController {
   key(event: KeyboardEvent): boolean {
     const target = event.target instanceof Element ? event.target : null;
 
-    if (event.ctrlKey || event.metaKey || event.altKey || target === null || target.closest('.diff-view') === null || target.closest('input, textarea, select, [contenteditable="true"]') !== null) {
+    if (event.ctrlKey || event.metaKey || event.altKey || target === null || target.closest('.diff-view') === null || target.closest('input, textarea, select, [contenteditable="true"], .changes-menu') !== null) {
       return false;
     }
 
@@ -1398,9 +1362,9 @@ export class ChangesController {
     }
   }
 
-  /** Closes the menu on a press outside it and its button; true when it closed. */
+  /** Closes the Files menu on a press outside it and its button; true when it closed. */
   pointerDown(target: EventTarget | null): boolean {
-    if (!this.view.menu || (target instanceof Element && target.closest('.changes-menu, .changes-button') !== null)) {
+    if (!this.view.menu || (target instanceof Element && target.closest('.changes-menu, .changes-files') !== null)) {
       return false;
     }
 
@@ -1408,7 +1372,7 @@ export class ChangesController {
     return true;
   }
 
-  /** Closes the menu on Escape; true when it closed. */
+  /** Closes the Files menu on Escape; true when it closed. */
   escape(): boolean {
     if (!this.view.menu) {
       return false;

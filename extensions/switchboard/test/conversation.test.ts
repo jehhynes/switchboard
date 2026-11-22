@@ -165,7 +165,7 @@ describe('the conversation state', () => {
     expect(voiceStatus({ ...voice, here: false })).toEqual({ text: '$(circle-slash) Voice not here', tooltip: 'Click to use voice for this session.', command: 'switchboard.talkHere', warning: false });
     expect(voiceStatus({ ...voice, error: 'no device' })).toMatchObject({ text: '$(warning) Voice', command: 'switchboard.showVoiceLog', warning: true });
     // After the phone left: the voice is off until Talk here takes it back.
-    expect(voiceStatus({ ...voice, deviceOff: true as const })).toEqual({ text: '$(circle-slash) Voice off', tooltip: DEVICE_OFF_TIP, command: 'switchboard.talkHere', warning: true });
+    expect(voiceStatus({ ...voice, deviceOff: true as const })).toEqual({ text: '$(circle-slash) Voice off', tooltip: DEVICE_OFF_TIP, command: 'switchboard.talkHere', warning: false });
     expect(voiceStatus({ ...voice, speaking: 'r1' })).toMatchObject({ text: '$(unmute) Speaking', command: 'switchboard.stopSpeaking' });
     // The mic (architecture.md § Dictation).
     expect(voiceStatus(voice)).toEqual({ text: '$(mic) Mic off', tooltip: 'Click to turn the mic on.', command: 'switchboard.toggleMicrophone', warning: false });

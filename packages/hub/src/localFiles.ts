@@ -1,9 +1,9 @@
-import { open, readdir, realpath, stat } from 'node:fs/promises';
+import { open, readdir, readFile, realpath, stat } from 'node:fs/promises';
 import type { BigIntStats } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
 import { looksBinary } from './changes.js';
 
 /** The most bytes of a text, code or Markdown file the page is sent. */
@@ -12,8 +12,8 @@ export const LOCAL_TEXT_MAX_BYTES = 4 * 1024 * 1024;
 export const LOCAL_RAW_MAX_BYTES = 32 * 1024 * 1024;
 /** The most entries a folder's listing holds. */
 export const LOCAL_DIR_MAX = 500;
-/** Why a paired device gets no folder and no file outside the session's working folder (architecture.md § Remote access). */
-export const LOCAL_FILES_PAIRED_ONLY = 'On a paired device, only files in the session’s working folder open, not folders or files elsewhere.';
+/** Why a paired device gets no folder and no file outside its session's working folder and work item's checkouts (architecture.md § Remote access). */
+export const LOCAL_FILES_PAIRED_ONLY = 'On a paired device, only files in the session’s working folder and its work item’s worktree and repository open, not folders or files elsewhere.';
 
 const IMAGES: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif', svg: 'image/svg+xml' };
 const MARKDOWN = new Set(['md', 'markdown']);
@@ -36,26 +36,80 @@ export interface LocalRoots {
 }
 
 /**
- * The roots of a page's selected conversation: relative links against its current session's working folder; its own folders and each of its
- * work item's sessions' working folders; and those sessions' Claude session IDs, earlier ones a fork or a clear replaced included. For a paired
- * device (`paired`), only the working folder the current session runs in, or the checkout before its first session, with no scratchpad and no
- * folder listing (architecture.md § Remote access).
+ * The roots of a page's selected conversation: relative links against its current session's working folder; its own folders, each of its
+ * work item's sessions' working folders and its work item's checkouts (`checkouts`: its ticket's worktree and the repository root it belongs
+ * to); and those sessions' Claude session IDs, earlier ones a fork or a clear replaced included. For a paired device (`paired`), only the
+ * working folder the current session runs in, or the checkout before its first session, and the work item's checkouts, with no scratchpad and
+ * no folder listing (architecture.md § Remote access).
  */
-export function localRoots(scope: { folder: string | null; cwd: string | null }, sessions: ReadonlyArray<{ id: string; cwd: string; nativeSessionId: string | null; retiredIds: readonly string[] }>, currentId: string | null, paired = false): LocalRoots {
+export function localRoots(
+  scope: { folder: string | null; cwd: string | null },
+  sessions: ReadonlyArray<{ id: string; cwd: string; nativeSessionId: string | null; retiredIds: readonly string[] }>,
+  currentId: string | null,
+  paired = false,
+  checkouts: ReadonlyArray<string | null> = [],
+): LocalRoots {
   const current = sessions.find((one) => one.id === currentId);
   const named = (one: string | null | undefined): one is string => typeof one === 'string' && one !== '';
   const cwd = current?.cwd || scope.cwd || scope.folder;
 
   if (paired) {
     // One folder only, even should the scope's folder ever differ from the session's.
-    return { cwd, folders: [current?.cwd || scope.cwd].filter(named), sessionIds: [], listFolders: false };
+    return { cwd, folders: [current?.cwd || scope.cwd, ...checkouts].filter(named), sessionIds: [], listFolders: false };
   }
 
   return {
     cwd,
-    folders: [scope.folder, scope.cwd, ...sessions.map((one) => one.cwd)].filter(named),
+    folders: [scope.folder, scope.cwd, ...sessions.map((one) => one.cwd), ...checkouts].filter(named),
     sessionIds: sessions.flatMap((one) => [one.nativeSessionId, ...one.retiredIds]).filter(named),
   };
+}
+
+/**
+ * The main checkout a git worktree belongs to, read from its `.git` file (`gitdir: <main>/.git/worktrees/<name>`) and that folder's
+ * `commondir`; the folder itself when its `.git` is a folder; null when it is no checkout or its repository is bare. Runs no git process.
+ */
+export async function mainCheckout(worktree: string): Promise<string | null> {
+  const dotGit = join(worktree, '.git');
+  const info = await stat(dotGit).catch(() => null);
+
+  if (info === null) {
+    return null;
+  }
+
+  if (info.isDirectory()) {
+    return worktree;
+  }
+
+  const pointer = /^gitdir:\s*(.+?)\s*$/m.exec(await readFile(dotGit, 'utf8').catch(() => ''));
+
+  if (pointer === null) {
+    return null;
+  }
+
+  const gitDir = resolve(worktree, pointer[1]!);
+  const common = (await readFile(join(gitDir, 'commondir'), 'utf8').catch(() => null))?.trim();
+  const commonDir = common === undefined || common === '' ? null : resolve(gitDir, common);
+
+  if (commonDir === null || basename(commonDir).toLowerCase() !== '.git') {
+    return null;
+  }
+
+  // The repository must list this worktree as its own: its `worktrees/<name>` folder, whose `gitdir` file names this worktree's `.git`, so a
+  // `.git` file pointed at another repository gains no root.
+  const back = (await readFile(join(gitDir, 'gitdir'), 'utf8').catch(() => null))?.trim();
+  const [listed, own, entry, entries, realCommon] = await Promise.all([
+    back === undefined || back === '' ? null : realpath(resolve(gitDir, back)).catch(() => null),
+    realpath(dotGit).catch(() => null),
+    realpath(gitDir).catch(() => null),
+    realpath(join(commonDir, 'worktrees')).catch(() => null),
+    realpath(commonDir).catch(() => null),
+  ]);
+
+  // The real repository's folder, never the folder of a link that leads to its .git.
+  const owned = listed !== null && listed === own && entry !== null && entries !== null && dirname(entry) === entries;
+
+  return owned && realCommon !== null && basename(realCommon).toLowerCase() === '.git' ? dirname(realCommon) : null;
 }
 
 export type LocalKind = 'text' | 'markdown' | 'image' | 'pdf' | 'binary' | 'dir';

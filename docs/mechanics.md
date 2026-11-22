@@ -1590,3 +1590,15 @@ Current use: the console's resync after each fit ([architecture.md](architecture
   - With the delays, the worklet was fetched again by every cold start, because the hub served it `no-cache`: 157 to 183 ms cold. Served `immutable` and fetched once at page load, `addModule` took 3 to 4 ms with one fetch in all, and `micOn` cold 79 to 109 ms, the rest the socket's welcome.
 - **Not verified:** the page's steps on the iPhone and the Surface themselves, including the microphone prompt and WebKit's cache for a worklet; a load ahead that blocks the voice process while a phone takes the voice in the seconds after a restart.
 - **Current use:** the hub logs a page's `mic-timing`; the recogniser loads ahead once the voice process has its settings and for each target, whether or not a device has the voice; the audio worklet is named by its content's hash, kept by the browser and fetched when voice is on (architecture.md § Dictation).
+
+## M130. How Claude Code draws a Markdown link in a Code Mode session's terminal, 2026-11-22
+
+- **Versions:** Claude Code 2.1.330, classic renderer, in the terminal holder's headless terminal; the hub store of 2026-11-22.
+- **Method:** a screen copy of session 311b1ad4 showed beside its transcript copy until the hub withdrew it ("no transcript copy came", 21:12:59Z). Its stored text was compared with its transcript copy, then all 69 screen copies in the store, every one withdrawn, with the transcript copies within a minute of each; the link case of the markdown renderer in the Claude Code binary was read.
+- **Result:**
+  - The screen draws `[text](target)` as `text (target)`, for `file:///`, `https:` and relative targets alike: "changes.ts:280 (file:///D:/git/switchboard/packages/hub/src/changes.ts#L280)". A link whose text is its target is drawn as the target alone, a `mailto:` link without the scheme, and a title as ` ("title")` after it. A long target wraps mid-word like any other text.
+  - The letters of the target made the screen copy's key differ from the transcript copy's, which counted the link's text only, so neither copy matched the other: 32 of the 69 withdrawn screen copies, from 2026-11-19 to 2026-11-22, had a link with its target drawn after it. A screen copy of a long reply read after its transcript copy was mostly kept back as a redraw of it, since their first 80 letters agree, but one with a link in those letters, or read before its transcript copy, was published and shown twice.
+  - A bare `www.` link was drawn with `http://` before it (one copy, 2026-11-20).
+  - Of the other withdrawn copies, most predate fixes for rows drawn beside a reply (M120); one was a table, which the screen draws as a box with each cell wrapped in place, so its text runs in another order.
+- **Not verified:** whether the renderer draws only a link's text in a terminal that supports hyperlinks; no screen copy in the store was drawn so.
+- **Current use:** a transcript copy is matched by its key and by the key with its links drawn this way (architecture.md § Reading a session, Hold).

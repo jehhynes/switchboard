@@ -2381,8 +2381,12 @@ describe('the page in use', () => {
     strip()[0]!.focus();
     strip()[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
     expect(document.activeElement).toBe(strip()[1]);
+    // The Changes tab is the strip's last tab, after the artifact tabs.
     strip()[1]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+    expect(document.activeElement).toBe(root.querySelector('#detail .changes-tab'));
+    (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
     expect((document.activeElement as HTMLElement).closest<HTMLElement>('.artifact-tab')!.dataset['path']).toBe('chat/a1.md');
+    (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
     (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
     expect(document.activeElement).toBe(strip()[0]);
     // A tab a narrow strip hides (page.css) is skipped, since it cannot take the focus.
@@ -2725,7 +2729,7 @@ describe('the page in use', () => {
   it("draws a Markdown artifact's links as claude-collab does, redraws a new version in place, and opens it as drawn in a new window", async () => {
     const { page, source } = start();
 
-    answers['/artifact/'] = { status: 200, body: {}, text: '# Plan\n\n[page](p.html) [notes](plan/notes.txt) [up](../x.md) [web](https://example.com/a)\n\n| a | b |\n|---|---|\n| 1 | 2 |' };
+    answers['/artifact/'] = { status: 200, body: {}, text: '# Plan\n\n[page](p.html) [notes](plan/notes.txt) [up](../x.md) [web](https://example.com/a) [uri](file:///D:/w/src/a.ts#L3)\n\n| a | b |\n|---|---|\n| 1 | 2 |' };
     hello(source);
     click('#head .artifact-tab[data-path="chat/plan.md"]');
     await flush();
@@ -2739,6 +2743,8 @@ describe('the page in use', () => {
     expect(doc.querySelector('a[data-path="chat/p.html"]')!.getAttribute('data-action')).toBe('artifact');
     expect(doc.querySelector('a[href$="plan/notes.txt"]')!.getAttribute('target')).toBe('_blank');
     expect(doc.querySelector('a.path-link')!.textContent).toBe('up');
+    // A file: URI names no artifact: it opens in a file tab.
+    expect([...doc.querySelectorAll<HTMLElement>('a.path-link')].map((one) => one.dataset['target'])).toEqual(['../x.md', 'file:///D:/w/src/a.ts#L3']);
     expect(doc.querySelector('a[href="https://example.com/a"]')!.getAttribute('target')).toBe('_blank');
 
     // A new version is fetched again and keeps the reader's place.

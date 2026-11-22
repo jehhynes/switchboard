@@ -202,7 +202,9 @@ describe('the page', () => {
     root.querySelector<HTMLElement>('.artifact-menu-button')?.click();
     expect([...root.querySelectorAll('.artifact-menu .menu-gutter > span')].map((icon) => icon.className)).toEqual([...artifacts].reverse().map((one) => seti(one.path)));
 
-    root.querySelector<HTMLElement>('.changes-button')!.click();
+    root.querySelector<HTMLElement>('.changes-tab')!.click();
+    await flush();
+    root.querySelector<HTMLElement>('.changes-files')!.click();
     await flush();
     expect([...root.querySelectorAll('.change-row > span:first-child')].map((icon) => icon.className)).toEqual([seti('src/main.ts'), seti('Dockerfile')]);
     expect(fetch.mock.calls.filter(([url]) => url === '/page/file-icons.json')).toHaveLength(1);

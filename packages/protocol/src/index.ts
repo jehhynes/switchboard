@@ -278,6 +278,8 @@ export interface PageHeader {
   notes: string[];
   /** "N held sessions without a work item", while a held session has none. */
   heldNote?: string;
+  /** The neutral note while no device has the voice because the phone was lost; absent otherwise. */
+  voiceNote?: string;
   sources: SourceGroup[];
   /** The repos an ad-hoc prompt can run in, the first being the default. */
   repoRoots: string[];

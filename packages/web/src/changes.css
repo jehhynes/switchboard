@@ -1,22 +1,30 @@
-/* The Changes list (architecture.md § Web page): its button at the end of a tab strip, and its menu under the strip, as wide as a path needs up
-   to the strip's width. Status letters and counts take VS Code's default git decoration colours, Dark Modern's and Light Modern's. */
+/* The Changes tab (architecture.md § Web page): its tab at the end of a tab strip, its bar above the diffs, and its Files menu under the bar, as
+   wide as a path needs up to the pane's width. Status letters and counts take VS Code's default git decoration colours, Dark Modern's and Light
+   Modern's. */
 :root { --sb-git-added: #81b88b; --sb-git-modified: #e2c08d; --sb-git-deleted: #c74e39; --sb-git-untracked: #73c991; --sb-git-renamed: #73c991; --sb-git-conflict: #e4676b; }
 @media (prefers-color-scheme: light) { :root { --sb-git-added: #587c0c; --sb-git-modified: #895503; --sb-git-deleted: #ad0707; --sb-git-untracked: #007100; --sb-git-renamed: #007100; --sb-git-conflict: #ad0707; } }
-#head, .detail-head { position: relative; }
-.tab.changes-button { flex: none; border-right: none; border-left: 1px solid var(--vscode-panel-border); cursor: pointer; }
-/* The diff tabs and the Changes button sit at the strip's end, after the Artifacts menu where it shows. A tab pushed there has a left border
-   of its own, as the Changes button has, since the tab before it is not beside it. */
+.tab.changes-tab { flex: none; border-right: none; border-left: 1px solid var(--vscode-panel-border); }
+/* The file tabs and the Changes tab sit at the strip's end, after the Artifacts menu where it shows. A tab pushed there has a left border
+   of its own, as the Changes tab has, since the tab before it is not beside it. */
 .tab.push { margin-left: auto; border-left: 1px solid var(--vscode-panel-border); }
 .artifact-more + .tab.push { margin-left: 0; }
-.tab.changes-button.open { color: var(--vscode-panelTitle-activeForeground); }
-.tab.changes-button .codicon-chevron-down { font-size: 12px; }
-.changes-menu { position: absolute; z-index: 30; top: calc(100% - 1px); right: 8px; box-sizing: border-box; display: flex; flex-direction: column; width: min(560px, calc(100% - 16px)); max-height: min(70vh, 560px); padding: 4px; border-radius: 8px; font-size: 13px; }
-.changes-head { flex: none; display: flex; align-items: center; gap: 6px; padding: 2px 4px 4px 8px; color: var(--vscode-descriptionForeground); }
+/* The bar above the diffs, on the pane's surface: Files, the note, then the toggles. */
+/* A size container, for its Files label; a stacking context too, raised so its menu lies over the diffs. */
+.changes-bar { position: relative; z-index: 3; container-type: inline-size; flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; box-sizing: border-box; min-height: 32px; padding: 2px 6px; border-bottom: 1px solid var(--vscode-panel-border); color: var(--vscode-descriptionForeground); font-size: 13px; }
+.changes-files { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 6px; border: none; border-radius: 4px; background: transparent; color: var(--vscode-foreground); font: inherit; cursor: pointer; }
+.changes-files:hover, .changes-files.open { background: var(--vscode-toolbar-hoverBackground); }
+.changes-files .codicon { font-size: 14px; }
+.changes-files .codicon-chevron-down { font-size: 12px; }
+.changes-menu { position: absolute; z-index: 30; top: calc(100% - 1px); left: 4px; box-sizing: border-box; display: flex; flex-direction: column; width: min(560px, calc(100% - 8px)); max-height: min(70vh, 560px); padding: 4px; border-radius: 8px; font-size: 13px; }
 .changes-note { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.changes-head button.icon { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: none; border-radius: 4px; background: transparent; color: var(--vscode-foreground); cursor: pointer; }
-.changes-head button.icon:hover { background: var(--vscode-toolbar-hoverBackground); }
-.changes-head button.icon:disabled { cursor: default; opacity: 0.6; }
-.changes-head button.icon[aria-pressed="true"] { background: var(--vscode-toolbar-activeBackground, var(--vscode-toolbar-hoverBackground)); }
+/* On a touch screen, whose 44 px buttons leave a bar under 480 px no room for the note, as on a phone, the note takes a row of its own under
+   Files and the buttons, so it is not cut where no tooltip shows it whole. */
+@media (hover: none), (pointer: coarse) { @container (max-width: 479px) { .changes-files { margin-right: auto; } .changes-note { order: 1; flex-basis: 100%; padding: 0 6px 4px; } } }
+.changes-note.error { color: var(--vscode-errorForeground); }
+.changes-bar button.icon { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: none; border-radius: 4px; background: transparent; color: var(--vscode-foreground); cursor: pointer; }
+.changes-bar button.icon:hover { background: var(--vscode-toolbar-hoverBackground); }
+.changes-bar button.icon:disabled { cursor: default; opacity: 0.6; }
+.changes-bar button.icon[aria-pressed="true"] { background: var(--vscode-toolbar-activeBackground, var(--vscode-toolbar-hoverBackground)); }
 .changes-rows { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; margin: 0; padding: 0 0 var(--sb-end); list-style: none; }
 .change-row { display: flex; align-items: center; gap: 6px; box-sizing: border-box; height: 22px; padding: 0 6px 0 8px; border-radius: 4px; white-space: nowrap; }
 .change-row > .codicon { flex: none; font-size: 14px; }
@@ -35,8 +43,10 @@
 .status-C .change-status, .status-C .change-name { color: var(--sb-git-conflict); }
 .changes-empty { margin: 0; padding: 8px; color: var(--vscode-descriptionForeground); white-space: normal; }
 .changes-empty.error { color: var(--vscode-errorForeground); }
-@media (hover: none), (pointer: coarse) { .change-row { height: 44px; } .changes-head button.icon { width: 44px; height: 44px; } }
-/* The Changes tab, drawn as an artifact's tab: its name, how many files are viewed of all, and a close mark. */
+@media (hover: none), (pointer: coarse) { .change-row { height: 44px; } .changes-bar button.icon { width: 44px; height: 44px; } .changes-files { height: 44px; padding: 0 10px; } }
+/* In a bar under 600 px, as on a phone or in the side column, Files is its icon and chevron, so the note keeps the bar's room. */
+@container (max-width: 599px) { .changes-files-label { display: none; } }
+/* A file tab, drawn as an artifact's tab: its name and a close mark. */
 .tab.diff-tab { box-sizing: border-box; max-width: 200px; padding: 0 6px 0 0; }
 .tab.diff-tab .tab-label { overflow: hidden; text-overflow: ellipsis; }
 .changes-rows button.change-row { width: 100%; border: none; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
@@ -47,7 +57,7 @@
 .diff-view { position: relative; display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .diff-view:focus { outline: none; }
 .diff-view:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
-.file-overlay { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; background: var(--vscode-editor-background); }
+.file-overlay { position: absolute; inset: 0; z-index: 4; display: flex; flex-direction: column; background: var(--vscode-editor-background); }
 .diff-slot { display: inline-flex; align-items: center; gap: 6px; font-family: var(--vscode-font-family); }
 .diff-from { color: var(--vscode-descriptionForeground); }
 .diff-at { font-family: var(--diffs-font-family); }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PRIMARY_SHORT_MAX, endsInOpenTag, interruptNote, keyOf, messageTags, parseReply, splitHeard, splitPrimary, splitRewrite, splitSpeak, splitStatus, splitTone, spokenText, stripAside, stripMessageTags } from '../src/tags.js';
+import { PRIMARY_SHORT_MAX, drawnKeyOf, drawnLinks, endsInOpenTag, interruptNote, keyOf, messageTags, parseReply, splitHeard, splitPrimary, splitRewrite, splitSpeak, splitStatus, splitTone, spokenText, stripAside, stripMessageTags } from '../src/tags.js';
 import { typedText } from '../src/transcript.js';
 
 describe('reply tags', () => {
@@ -152,6 +152,27 @@ describe('reply tags', () => {
     expect(keyOf('**Done**, see [tts.js](src/tts.js).')).toBe(keyOf('Done, see tts.js.'));
     expect(keyOf('[rewrite] 👍')).not.toBe(keyOf('[rewrite] 👎'));
     expect(keyOf('[rewrite] Yes.')).toBe('Yes');
+  });
+
+  it('draws links as the terminal does: the text and its target, the target alone when it is the text, and code spans as written', () => {
+    expect(drawnLinks('At [changes.ts:280](file:///D:/x/changes.ts#L280).')).toBe('At changes.ts:280 (file:///D:/x/changes.ts#L280).');
+    expect(drawnLinks('See [https://a.dev/x](https://a.dev/x) and [](./b.md).')).toBe('See https://a.dev/x and ./b.md.');
+    expect(drawnLinks('Mail [alex@a.dev](mailto:alex@a.dev) or [Alex](mailto:alex@a.dev).')).toBe('Mail alex@a.dev or Alex (alex@a.dev).');
+    expect(drawnLinks('[Doc](./d.md "The doc") and `[x](y)`')).toBe('Doc (./d.md) ("The doc") and `[x](y)`');
+    // Text that differs from its target only in punctuation or case is not its target.
+    expect(drawnLinks('[docs/x](docs-x) and [README](readme)')).toBe('docs/x (docs-x) and README (readme)');
+    // A code span closes only at a run of as many backticks as opened it.
+    expect(drawnLinks('Use ``a`[x](y)`` and [guide](z).')).toBe('Use ``a`[x](y)`` and guide (z).');
+  });
+
+  it("keys a transcript copy by its links' text and also with their targets, so the screen copy drawn either way matches", () => {
+    const raw = 'The code is at [changes.ts:280](file:///D:/git/switchboard/packages/hub/src/changes.ts#L280), in `main`.';
+
+    expect(keyOf(raw)).toBe(keyOf('The code is at changes.ts:280, in main.'));
+    expect(drawnKeyOf(raw)).toBe(keyOf('The code is at changes.ts:280 (file:///D:/git/switchboard/packages/hub/src/changes.ts#L280), in main.'));
+    expect(drawnKeyOf('No links, **bold** and `code`.')).toBeNull();
+    // The screen draws a bare www. link with the scheme of its target.
+    expect(keyOf('- http://www.i21692: 200')).toBe(keyOf('- www.i21692: 200'));
   });
 
   it('tells a tag or comment still being drawn', () => {

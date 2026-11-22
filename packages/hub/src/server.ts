@@ -128,7 +128,7 @@ export interface PageVoice {
   enabled(): boolean;
   accept(request: IncomingMessage, socket: Duplex, head: Buffer, device: VoiceDevice): void;
   /** Closes the voice sockets of the devices `match` picks, telling each page `reason`. */
-  close(match: (device: VoiceDevice) => boolean, reason: string): void;
+  close(match: (device: VoiceDevice) => boolean, reason: string, code?: number): void;
 }
 
 /** The page's read-only change routes, under `/v1/conversation/` (architecture.md § Web page). */
@@ -843,7 +843,9 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
 
           pageKeyOrigins.delete(key);
           pageKeySessions.delete(key);
-          page.voice?.close((device) => device.key === ended, 'The page that opened the voice closed.');
+          // A stream that ends may be a dropped connection rather than the page leaving, so it closes as going away, not refused: the voice
+          // counts the phone lost unless its page said it leaves or was hidden (architecture.md § Remote access).
+          page.voice?.close((device) => device.key === ended, 'The page that opened the voice closed.', 1001);
           options.windowClosed?.(key);
           key = null;
         }

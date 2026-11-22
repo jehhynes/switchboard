@@ -151,6 +151,7 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
 
     IReadOnlyList<DockHeld> held = [];
     string? heldNote;
+    string? voiceNote;
 
     /// <summary>The held sessions, orphans first, for the held sessions window (PRD R94).</summary>
     public IReadOnlyList<DockHeld> Held
@@ -172,6 +173,13 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
     {
         get => heldNote;
         private set => Set(ref heldNote, value);
+    }
+
+    /// <summary>Why no device has the voice when the phone was lost, shown untoned above the groups (PRD R119); null otherwise.</summary>
+    public string? VoiceNote
+    {
+        get => voiceNote;
+        private set => Set(ref voiceNote, value);
     }
 
     DockHolderNotice? holderNotice;
@@ -584,6 +592,7 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
         Schedules = view.Schedules ?? [];
         Held = view.Held ?? [];
         HeldNote = view.HeldNote;
+        VoiceNote = view.VoiceNote;
         HolderNotice = view.HolderNotice;
 
         if (view.HolderResult != holderResult)

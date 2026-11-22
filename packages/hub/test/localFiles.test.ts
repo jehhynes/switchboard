@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { renameSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { allowedPath, LOCAL_DIR_MAX, LOCAL_TEXT_MAX_BYTES, localRoots, localTarget, openLocalFile, rawMime } from '../src/localFiles.js';
+import { allowedPath, LOCAL_DIR_MAX, LOCAL_TEXT_MAX_BYTES, localRoots, localTarget, mainCheckout, openLocalFile, rawMime } from '../src/localFiles.js';
 import type { LocalRoots } from '../src/localFiles.js';
 
 let dir: string;
@@ -71,6 +71,8 @@ describe('localRoots', () => {
     expect(localRoots({ folder: 'D:/worktree', cwd: 'D:/worktree' }, sessions, 's1')).toEqual({ cwd: 'D:/repo', folders: ['D:/worktree', 'D:/worktree', 'D:/repo', 'D:/worktree'], sessionIds: ['n1', 'old1'] });
     expect(localRoots({ folder: 'D:/f', cwd: null }, [], null)).toEqual({ cwd: 'D:/f', folders: ['D:/f'], sessionIds: [] });
     expect(localRoots({ folder: null, cwd: null }, [], null)).toEqual({ cwd: null, folders: [], sessionIds: [] });
+    // The work item's worktree and repository root, when it has them.
+    expect(localRoots({ folder: 'D:/f', cwd: null }, [], null, false, ['D:/wt', null, 'D:/repo'])).toEqual({ cwd: 'D:/f', folders: ['D:/f', 'D:/wt', 'D:/repo'], sessionIds: [] });
   });
 
   it("names for a paired device only the current session's working folder, with no scratchpad and no folder listing", () => {
@@ -84,6 +86,8 @@ describe('localRoots', () => {
     expect(localRoots({ folder: 'D:/host', cwd: 'D:/other' }, sessions, 's1', true)).toEqual({ cwd: 'D:/repo', folders: ['D:/repo'], sessionIds: [], listFolders: false });
     // Before its first session, the checkout it will run in.
     expect(localRoots({ folder: 'D:/host', cwd: 'D:/repo' }, [], null, true)).toEqual({ cwd: 'D:/repo', folders: ['D:/repo'], sessionIds: [], listFolders: false });
+    // The work item's worktree and repository root, but still no other session's folder, the host folder or a scratchpad.
+    expect(localRoots({ folder: 'D:/host', cwd: 'D:/worktree' }, sessions, 's2', true, ['D:/wt', 'D:/main', null])).toEqual({ cwd: 'D:/worktree', folders: ['D:/worktree', 'D:/wt', 'D:/main'], sessionIds: [], listFolders: false });
   });
 });
 
@@ -297,5 +301,127 @@ describe('openLocalFile for a paired device', () => {
     expect((await readFile(join(work, 'secret-link.txt'), 'utf8'))).toBe('secret');
 
     expect(await read('secret-link.txt')).toBeNull();
+  });
+});
+
+describe("openLocalFile for a paired device, with the work item's checkouts", () => {
+  let repo: string;
+  let worktree: string;
+  let paired: LocalRoots;
+
+  beforeEach(() => {
+    repo = join(dir, 'repo');
+    worktree = join(dir, 'repo.worktrees', 'fix');
+    mkdirSync(join(repo, '.git'), { recursive: true });
+    mkdirSync(join(repo, 'src'), { recursive: true });
+    mkdirSync(join(worktree, 'src'), { recursive: true });
+    writeFileSync(join(repo, 'src', 'main.ts'), 'main');
+    writeFileSync(join(repo, '.git', 'config'), '[core]\n');
+    writeFileSync(join(worktree, 'src', 'fix.ts'), 'fix');
+    writeFileSync(join(worktree, '.git'), 'gitdir: ../../repo/.git/worktrees/fix\n');
+    // The session runs in its own working folder; the ticket's worktree and repository lie outside it.
+    paired = localRoots({ folder: dir, cwd: work }, [{ id: 's', cwd: work, nativeSessionId: SESSION, retiredIds: [] }], 's', true, [worktree, repo]);
+    paired.temp = temp;
+  });
+
+  const read = async (target: string) => {
+    const opened = await openLocalFile(paired, target);
+
+    await opened?.handle?.close();
+    return opened?.view ?? null;
+  };
+
+  it("reads a file in the ticket's worktree and in its repository root, by path or file: URI", async () => {
+    expect(await read(join(worktree, 'src', 'fix.ts'))).toMatchObject({ kind: 'text', contents: 'fix' });
+    expect(await read(pathToFileURL(join(repo, 'src', 'main.ts')).href)).toMatchObject({ kind: 'text', contents: 'main' });
+    // The working folder still reads, relative links against it.
+    expect(await read('src/a.ts')).toMatchObject({ contents: 'export const a = 1;\n' });
+  });
+
+  it('still lists no folder, reads nothing in .git and nothing beside the checkouts', async () => {
+    writeFileSync(join(dir, 'repo.worktrees', 'beside.txt'), 'beside');
+
+    expect(await read(worktree)).toBeNull();
+    expect(await read(join(repo, 'src'))).toBeNull();
+    expect(await read(join(repo, '.git', 'config'))).toBeNull();
+    expect(await read(join(worktree, '.git'))).toBeNull();
+    expect(await read(join(dir, 'repo.worktrees', 'beside.txt'))).toBeNull();
+    expect(await read(join(worktree, '..', 'beside.txt'))).toBeNull();
+    expect(await read(join(dir, 'outside', 'secret.txt'))).toBeNull();
+  });
+
+  it('refuses a junction out of a checkout', async () => {
+    symlinkSync(join(dir, 'outside'), join(worktree, 'linked'), 'junction');
+
+    expect(await read(join(worktree, 'linked', 'secret.txt'))).toBeNull();
+  });
+
+  it('reads no checkout the work item does not have', async () => {
+    paired = localRoots({ folder: dir, cwd: work }, [{ id: 's', cwd: work, nativeSessionId: SESSION, retiredIds: [] }], 's', true, [null, null]);
+
+    expect(await read(join(worktree, 'src', 'fix.ts'))).toBeNull();
+    expect(await read(join(repo, 'src', 'main.ts'))).toBeNull();
+  });
+});
+
+describe('mainCheckout', () => {
+  it("finds a linked worktree's main checkout through its .git file and commondir, and a main checkout's own folder", async () => {
+    const main = join(dir, 'other-repo');
+    const linked = join(dir, 'elsewhere', 'wt');
+
+    mkdirSync(join(main, '.git', 'worktrees', 'wt'), { recursive: true });
+    mkdirSync(linked, { recursive: true });
+    writeFileSync(join(main, '.git', 'worktrees', 'wt', 'commondir'), '../..\n');
+    writeFileSync(join(main, '.git', 'worktrees', 'wt', 'gitdir'), `${join(linked, '.git')}\n`);
+    writeFileSync(join(linked, '.git'), `gitdir: ${join(main, '.git', 'worktrees', 'wt')}\n`);
+
+    expect(await mainCheckout(linked)).toBe(main);
+    expect(await mainCheckout(main)).toBe(main);
+
+    // Pointed through another folder whose .git is a link to the repository's, it still names the repository, not that folder.
+    const alias = join(dir, 'alias');
+
+    mkdirSync(alias);
+    symlinkSync(join(main, '.git'), join(alias, '.git'), 'junction');
+    writeFileSync(join(linked, '.git'), `gitdir: ${join(alias, '.git', 'worktrees', 'wt')}\n`);
+    expect(await mainCheckout(linked)).toBe(main);
+  });
+
+  it("refuses a .git file pointed at a repository that does not list the worktree as its own", async () => {
+    const main = join(dir, 'unrelated');
+    const linked = join(dir, 'pretender');
+    const real = join(dir, 'real-wt');
+
+    mkdirSync(join(main, '.git', 'worktrees', 'wt'), { recursive: true });
+    mkdirSync(join(main, '.git', 'objects'), { recursive: true });
+    mkdirSync(linked, { recursive: true });
+    mkdirSync(real, { recursive: true });
+    writeFileSync(join(real, '.git'), 'gitdir: x\n');
+    writeFileSync(join(main, '.git', 'worktrees', 'wt', 'commondir'), '../..\n');
+    // The repository lists another worktree under that name.
+    writeFileSync(join(main, '.git', 'worktrees', 'wt', 'gitdir'), `${join(real, '.git')}\n`);
+    writeFileSync(join(linked, '.git'), `gitdir: ${join(main, '.git', 'worktrees', 'wt')}\n`);
+    expect(await mainCheckout(linked)).toBeNull();
+
+    // A gitdir that is no entry of its repository's worktrees folder, such as the .git folder itself with a commondir and gitdir planted in it.
+    writeFileSync(join(main, '.git', 'commondir'), '.\n');
+    writeFileSync(join(main, '.git', 'gitdir'), `${join(linked, '.git')}\n`);
+    writeFileSync(join(linked, '.git'), `gitdir: ${join(main, '.git')}\n`);
+    expect(await mainCheckout(linked)).toBeNull();
+  });
+
+  it('gives null for a folder that is no checkout, a .git file with no gitdir, and a bare repository', async () => {
+    const bare = join(dir, 'bare.git');
+    const linked = join(dir, 'bare-wt');
+
+    mkdirSync(join(bare, 'worktrees', 'w'), { recursive: true });
+    mkdirSync(linked, { recursive: true });
+    writeFileSync(join(bare, 'worktrees', 'w', 'commondir'), '../..\n');
+    writeFileSync(join(linked, '.git'), `gitdir: ${join(bare, 'worktrees', 'w')}\n`);
+
+    expect(await mainCheckout(join(dir, 'outside'))).toBeNull();
+    expect(await mainCheckout(linked)).toBeNull();
+    writeFileSync(join(linked, '.git'), 'nonsense');
+    expect(await mainCheckout(linked)).toBeNull();
   });
 });

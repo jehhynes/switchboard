@@ -277,6 +277,8 @@ export interface DockView {
   held?: DockHeld[];
   /** The note above the groups while a held session has no work item, which opens the held sessions window (PRD R94); absent otherwise. */
   heldNote?: string;
+  /** The neutral note above the groups while no device has the voice because the phone was lost (PRD R119); absent otherwise. */
+  voiceNote?: string;
   /** The notice above the groups while the terminal holder is from an older build or restarting (architecture.md § Restarting the holder); absent otherwise. */
   holderNotice?: DockHolderNotice;
   /** The last holder restart's result, until the hub restarts; each client hides it once dismissed, by its `at`. */
