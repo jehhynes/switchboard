@@ -17,7 +17,7 @@
 .changes-head button.icon:hover { background: var(--vscode-toolbar-hoverBackground); }
 .changes-head button.icon:disabled { cursor: default; opacity: 0.6; }
 .changes-head button.icon[aria-pressed="true"] { background: var(--vscode-toolbar-activeBackground, var(--vscode-toolbar-hoverBackground)); }
-.changes-rows { flex: 1; min-height: 0; overflow-y: auto; margin: 0; padding: 0 0 var(--sb-end); list-style: none; }
+.changes-rows { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; margin: 0; padding: 0 0 var(--sb-end); list-style: none; }
 .change-row { display: flex; align-items: center; gap: 6px; box-sizing: border-box; height: 22px; padding: 0 6px 0 8px; border-radius: 4px; white-space: nowrap; }
 .change-row > .codicon { flex: none; font-size: 14px; }
 .change-name { flex: none; max-width: 60%; overflow: hidden; text-overflow: ellipsis; }

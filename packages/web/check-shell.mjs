@@ -2,7 +2,7 @@
 // app's standalone mode, portrait and landscape, light and dark, the list, a conversation, an empty one, History, Settings, the drawer, a sheet
 // and the persona dialog.
 // Nothing outside the scrollers can move: the document is exactly the viewport, nothing reaches past it outside a scroller, every scroller keeps
-// a drag to itself, and the page outside the scrollers takes no pan. Chrome has no display-mode emulation, so the page's standalone rules are
+// a drag to itself or hands it to the pane around it, and the page outside the scrollers takes no pan. Chrome has no display-mode emulation, so the page's standalone rules are
 // applied to every width here, and safe-area insets come from the DevTools protocol.
 // Run `npm run build` first; the browser is SWITCHBOARD_CHROME, else Chrome or Edge where they install. --report prints the measurements.
 import { spawn } from 'node:child_process';
@@ -55,7 +55,7 @@ const personas = [{ id: 'nova', name: 'Nova', voice: 'cedar', style: 'pair', per
 const items = [];
 for (let i = 0; view !== 'empty' && open && i < 30; i++) {
   items.push({ type: 'message', id: 'm' + i, sessionId: 's', workItemId: 1, at: now - 100000 + i * 2000, ord: i * 2, provisional: false, withdrawn: false, origin: 'typed', text: 'Message ' + i, delivery: 'sent', error: null });
-  items.push({ type: 'reply', id: 'r' + i, sessionId: 's', at: now - 99000 + i * 2000, ord: i * 2 + 1, provisional: false, kind: 'reply', answers: null, opening: 'Reply ' + i + ', long enough to wrap across a phone screen.', rewrittenBy: null, withdrawn: false, unread: false, speak: null, tone: null, spoken: { state: 'none', atMs: null, saidChars: null } });
+  items.push({ type: 'reply', id: 'r' + i, sessionId: 's', at: now - 99000 + i * 2000, ord: i * 2 + 1, provisional: false, kind: 'reply', answers: null, opening: 'Reply ' + i + ', long enough to wrap across a phone screen.' + (i === 29 ? '\\n\\n| Column | Another column |\\n|---|---|\\n| a | b |' : ''), rewrittenBy: null, withdrawn: false, unread: false, speak: null, tone: null, spoken: { state: 'none', atMs: null, saidChars: null } });
 }
 history.replaceState(null, '', location.search + (open ? '#w=1' : '#'));
 class FakeSource {
@@ -80,7 +80,9 @@ const measure = `(() => {
   const name = (node) => node.tagName.toLowerCase() + (node.id ? '#' + node.id : '') + (typeof node.className === 'string' && node.className ? '.' + node.className.trim().split(/ +/).join('.') : '');
   const nodes = [...document.querySelectorAll('body *')].filter(shown);
   const past = nodes.filter((node) => { const box = node.getBoundingClientRect(); return box.height > 0 && box.width > 0 && (box.bottom > innerHeight + 0.5 || box.right > innerWidth + 0.5 || box.top < -0.5) && getComputedStyle(node).position !== 'fixed' && !clipped(node); }).map(name);
-  const scrollers = nodes.filter((node) => scrolls(node) && node.clientHeight > 0).map((node) => ({ name: name(node), over: node.scrollHeight - node.clientHeight, overscroll: getComputedStyle(node).overscrollBehaviorY + ' ' + getComputedStyle(node).overscrollBehaviorX }));
+  /** Whether a drag that reaches the end of the node stops there or at a scroller around it, never reaching the page. A scroller inside a pane, such as a table, leaves a drag to its pane. */
+  const kept = (node) => { for (let one = node; one && one !== document.body; one = one.parentElement) { const style = getComputedStyle(one); if (scrolls(one) && /^(contain|none)$/.test(style.overscrollBehaviorY) && /^(contain|none)$/.test(style.overscrollBehaviorX)) return true; } return false; };
+  const scrollers = nodes.filter((node) => scrolls(node) && node.clientHeight > 0).map((node) => ({ name: name(node), over: node.scrollHeight - node.clientHeight, overscroll: getComputedStyle(node).overscrollBehaviorY + ' ' + getComputedStyle(node).overscrollBehaviorX, kept: kept(node) }));
   const top = (selector) => { const node = [...document.querySelectorAll(selector)].find(shown); return node ? Math.round(node.getBoundingClientRect().top * 100) / 100 : null; };
   return {
     root: document.getElementById('root').className,
@@ -135,7 +137,7 @@ function failures(view, size, m) {
   if (d.height !== d.client || d.width !== d.clientWidth || d.body !== d.bodyClient) out.push('the document is ' + d.width + 'x' + d.height + ' (body ' + d.body + ') in ' + d.clientWidth + 'x' + d.client);
   if (m.past.length > 0) out.push('reaches past the viewport outside a scroller: ' + m.past.slice(0, 5).join(', '));
   for (const one of m.scrollers) {
-    if (!/^(contain|none) (contain|none)$/.test(one.overscroll)) out.push(one.name + ' hands a drag on to the page (overscroll-behavior ' + one.overscroll + ')');
+    if (!one.kept) out.push(one.name + ' hands a drag on to the page (overscroll-behavior ' + one.overscroll + ', and no scroller around it keeps it)');
   }
   if (m.touchAction !== 'pinch-zoom') out.push('the page outside the scrollers takes a pan or no pinch (body touch-action ' + m.touchAction + ')');
   // No band above the bars: under the opaque status bar the top inset is 0, and each view's top bar starts at the page's top edge.
@@ -273,6 +275,26 @@ try {
 
           if (view === 'empty' && JSON.stringify(scrolled) !== JSON.stringify(before)) found.push('a drag on the empty conversation moved it: ' + JSON.stringify(scrolled));
           if (view === 'conversation' && !(scrolled.panel < before.panel)) found.push('a drag on the conversation did not scroll it: ' + before.panel + ' to ' + scrolled.panel);
+          // A drag that starts on a table in a reply scrolls the conversation too: no box inside it keeps the drag (mechanics.md M125).
+          if (view === 'conversation') {
+            await evaluate('(() => { const panel = document.getElementById("panel"); panel.scrollTop = panel.scrollHeight; })()');
+            await wait(100);
+            const { x, top } = await box('#panel .body table');
+            const end = JSON.parse(await state()).panel;
+
+            await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y: top + 4 }] });
+            for (let step = 1; step <= 10; step++) {
+              await send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: top + 4 + step * 20 }] });
+              await wait(16);
+            }
+            await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+            await wait(300);
+            const fromTable = JSON.parse(await state()).panel;
+
+            if (!(fromTable < end)) found.push('a drag that starts on a table did not scroll the conversation: ' + end + ' to ' + fromTable);
+            await evaluate('(() => { const panel = document.getElementById("panel"); panel.scrollTop = ' + scrolled.panel + '; })()');
+            await wait(100);
+          }
           await drag('.header');
           const dragged = JSON.parse(await state());
 

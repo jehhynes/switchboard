@@ -80,12 +80,36 @@ describe('the page on a phone', () => {
 
   it('never scrolls or bounces as a whole, its panes panning only up and down and code and tables also sideways', () => {
     expect(css).toMatch(/html, body \{ height: 100%; margin: 0; overflow: hidden; overscroll-behavior: none; \}/);
-    // No scroller hands a drag on to the page, the composer's box never bounces, and a pan outside every scroller does nothing; a pinch zooms.
-    expect(css).toContain('body { touch-action: pinch-zoom; }\n* { overscroll-behavior: contain; }\ntextarea { overscroll-behavior: none; }');
+    // The composer's box never bounces, and a pan outside every scroller does nothing; a pinch zooms.
+    expect(css).toContain('body { touch-action: pinch-zoom; }\ntextarea { overscroll-behavior: none; }');
     expect(css).toMatch(/#list \{[^}]*touch-action: pan-y pinch-zoom;/);
     expect(css).toMatch(/\.scroll \{[^}]*touch-action: pan-y pinch-zoom;/);
     expect(css).toMatch(/\.body pre \{[^}]*touch-action: pan-x pan-y pinch-zoom;/);
     expect(css).toMatch(/\.body table \{[^}]*touch-action: pan-x pan-y pinch-zoom;/);
+  });
+
+  it('keeps each drag in the pane, popup or dialog that scrolls, while a vertical pan from a table, code, a nested scroller or clipped text scrolls its pane', () => {
+    // Chrome and Edge give a pan to the innermost scroll container with contain, even one that cannot scroll that way or clips with overflow: hidden.
+    const rules = [...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, selector, body]) => ({ selector: selector!.trim(), body: body! }));
+    const overscroll = (selector: string): string[] => rules.filter((rule) => rule.selector === selector).flatMap((rule) => [...rule.body.matchAll(/overscroll-behavior(-[xy])?: (\w+)/g)].map((match) => match[2]!));
+    /** Scrollers inside a pane, which hand a vertical pan to it. */
+    const nested = ['.prompt-screen'];
+    const vertical = rules.filter((rule) => /(^|[\s;])overflow(-y)?: (auto|scroll)/.test(rule.body)).map((rule) => rule.selector);
+    const sideways = rules.filter((rule) => /overflow-x: (auto|scroll)/.test(rule.body) && !/(^|[\s;])overflow(-y)?: /.test(rule.body)).map((rule) => rule.selector);
+
+    // No rule for every box, however written, such as `*` or `:where(*)`.
+    expect(rules.filter((rule) => rule.selector.includes('*') && rule.body.includes('overscroll-behavior')).map((rule) => rule.selector)).toEqual([]);
+    expect(vertical).toEqual(expect.arrayContaining(['#list', '.scroll', '.artifact-doc', '.local-entries', '.menu', '.sheet', '.hist-body', '.settings-page', '.changes-rows', '.diff-host', '.prompt-screen']));
+    for (const selector of vertical) {
+      expect([selector, overscroll(selector)]).toEqual([selector, nested.includes(selector) ? [] : expect.arrayContaining(['contain'])]);
+    }
+    expect(sideways).toEqual(expect.arrayContaining(['.body pre', '.body table', '.body.artifact-doc pre', '.body.artifact-doc table', '.settings-table-scroll']));
+    for (const selector of sideways) {
+      expect([selector, overscroll(selector)]).toEqual([selector, []]);
+    }
+    for (const rule of rules.filter((one) => /overflow(-[xy])?: (hidden|clip)/.test(one.body))) {
+      expect([rule.selector, rule.body]).not.toEqual([rule.selector, expect.stringMatching(/overscroll-behavior(-y)?: contain/)]);
+    }
   });
 
   it("makes every icon button in the bars 44 px with its glyph at 20 px, centred, on a touch screen, without showing a button the layout hides", () => {
