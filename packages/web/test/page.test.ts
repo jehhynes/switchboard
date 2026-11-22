@@ -2648,6 +2648,33 @@ describe('the page in use', () => {
     page.close();
   });
 
+  it("opens a link in the device's own browser from an installed page on another device, which the hub would open on the computer", async () => {
+    const opened: string[] = [];
+    const fetch = vi.fn(async (url: string, init?: { body?: string }) => (posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) }), { status: 200, ok: true, json: async () => ({}), text: async () => '' }) as unknown as Response);
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, openUrl: (url) => opened.push(url), standalone: () => true, local: false });
+    const links = [{ label: 'PR #5', url: 'https://github.com/o/r/pull/5', kind: 'pr' as const, badge: '5', glyph: null, mentioned: false }];
+
+    hello(FakeSource.last!, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', links })])] });
+    posts = [];
+    click('button.actions');
+    click('.actions-menu [data-link="0"]');
+    await flush();
+    expect(posts.map((post) => post.url)).not.toContain('/v1/conversation/row-open');
+    expect(opened).toEqual(['https://github.com/o/r/pull/5']);
+    page.close();
+
+    // Left to the browser, the link opens in a new tab without an opener or referrer.
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    const own = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, standalone: () => true, local: false });
+
+    hello(FakeSource.last!, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', links })])] });
+    click('button.actions');
+    click('.actions-menu [data-link="0"]');
+    await flush();
+    expect(open).toHaveBeenCalledWith('https://github.com/o/r/pull/5', '_blank', 'noopener,noreferrer');
+    own.close();
+  });
+
   it("lists Open ticket and each link in the actions menu, more than two in an Open link submenu, a long label cut with its whole text in the tooltip", async () => {
     const { page, source, opened } = start();
     const link = (label: string, url: string) => ({ label, url, kind: 'url' as const, badge: label, glyph: null, mentioned: false });
@@ -3064,6 +3091,14 @@ describe('the page in use', () => {
     source.emit('pane', { pane: paired });
     expect(root.querySelector('#detail [data-side="browser"]')).toBeNull();
     expect(root.querySelector<HTMLElement>('#detail .side-switch .tab.selected')!.dataset['side']).toBe('status');
+    // Nor does its view options menu speak of the computer's pane, and its title carries no marker.
+    click('[data-action="view-menu"]');
+    expect(root.querySelector('.view-options-menu .pane-note')).toBeNull();
+    expect(root.querySelector('.view-options-menu [data-action="pane-pair"]')).toBeNull();
+    source.emit('pane', { pane: { ...paired, marker: '0123456789ab', extension: 'unpaired' } });
+    expect(root.querySelector('.view-options-menu .pane-note')).toBeNull();
+    expect(document.title).not.toContain('[sb-pane');
+    click('[data-action="view-menu"]');
     const remote = rects().length;
 
     window.dispatchEvent(new Event('focus'));

@@ -130,7 +130,7 @@ export const PAGE_COMMANDS = new Set(['page-voice-state', 'page-device-voice', '
  * list, so a paired device cannot pair others or sign this computer out; the Chrome pane's, which works only beside this computer's page;
  * restarting the terminal holder; and Settings', which the operator keeps to this computer.
  */
-export const LOCAL_PAGE_COMMANDS = new Set(['page-pair', 'page-devices', 'page-device-revoke', 'page-device-voice', 'pane-pair', 'pane-rect', 'pane-open', 'page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer']);
+export const LOCAL_PAGE_COMMANDS = new Set(['page-pair', 'page-devices', 'page-device-revoke', 'page-device-voice', 'pane-pair', 'pane-rect', 'pane-open', 'row-open', 'page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer']);
 
 /** The page routes only the hub token reaches, which the page's own routes never answer. */
 const HUB_PAGE_ROUTES = new Set(['/page/link', '/page/revoke', '/page/pair', '/page/devices', '/page/voice']);

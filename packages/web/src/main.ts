@@ -367,7 +367,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     view.side = chosen as SideTab;
     view.tab = chosen === 'status' ? 'conversation' : chosen;
     view.artifact = chosen === 'artifacts' ? path : null;
-    paneKnown = view.pane !== null;
+    paneKnown = view.pane !== null || !paneLocal();
   };
   /**
    * Keeps the operator's choice in the hub, for every device: Status or Browser as the tab every work item opens on, and Console or an artifact for
@@ -3169,8 +3169,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     view.linkMenu = false;
   };
   /**
-   * Opens a row's ticket or link, an http or https URL from the hub's row, in a new tab; the installed app asks the
-   * hub, which opens it in the default browser, since a link it opened itself would stay in the browser that installed it.
+   * Opens a row's ticket or link, an http or https URL from the hub's row, in a new tab; the installed app on this computer asks the
+   * hub, which opens it in the default browser, since a link it opened itself would stay in the browser that installed it. A page on another
+   * device opens it in its own browser, as the hub's browser is on the computer.
    */
   const openLink = (key: string, which: string): void => {
     const row = rowByKey(key);
@@ -3186,7 +3187,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
-    if (deps.standalone?.() ?? (typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches)) {
+    if (standalone() && paneLocal()) {
       void post('row-open', { ...rowTarget(row), url }).then((answer) => answer.status === 200 || refusedFor(row, String(answer.body['error'] ?? `The link did not open (status ${answer.status}).`)));
       return;
     }
@@ -3684,7 +3685,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       }
 
       if (type === 'pane') {
-        view.pane = (data['pane'] as PaneView | undefined) ?? null;
+        // The pane glues a window on the computer that runs Switchboard, so a page on another device has none: no menu rows, no Browser tab.
+        view.pane = paneLocal() ? ((data['pane'] as PaneView | undefined) ?? null) : null;
         paneChanged();
       } else if (type === 'hello' || type === 'scope') {
         // A new key or work item: the hub reads the column, and the work item's tabs, again.
