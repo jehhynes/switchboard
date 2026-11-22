@@ -1313,7 +1313,7 @@ const dockWithRuns = () => {
       '/v1/conversation/page-folder-conversation': async (body) => (isRecord(body) ? conversation.pageFolderConversation(body) : { status: 400, body: { error: 'Expected {window, opId, folder, provider?}.' } }),
       // A changed file opened at a line in the work item's VS Code window (architecture.md § Web page).
       // A changed file ticked viewed, or its tick cleared, for every device (architecture.md § Web page).
-      '/v1/conversation/viewed': async (body) => (isRecord(body) ? pageChanges.viewedCommand(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, path, hash, viewed}.' } }),
+      '/v1/conversation/viewed': async (body) => (isRecord(body) ? pageChanges.viewedCommand(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, path, hash, viewed[, uncommitted]}.' } }),
       '/v1/conversation/open-file': async (body) => (isRecord(body) ? pageChanges.openFileCommand(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, path, line}.' } }),
       '/v1/conversation/page-search': async (body) => (isRecord(body) ? conversation.pageSearch(body) : { status: 400, body: { error: 'Expected {window, text, since}.' } }),
       // The page's tabs for its work item, kept for every device (architecture.md § Web page).
@@ -1684,11 +1684,11 @@ const dockWithRuns = () => {
       console: (key, sessionId, send, end) => pageConsole.open(key, sessionId, send, end),
       changes: (route, key, query) =>
         route === 'changes'
-          ? pageChanges.changes(key)
+          ? pageChanges.changes(key, query.get('uncommitted'))
           : route === 'diff'
-            ? pageChanges.diff(key, query.get('path'), query.get('sides'))
+            ? pageChanges.diff(key, query.get('path'), query.get('sides'), query.get('uncommitted'))
             : route === 'file'
-              ? pageChanges.file(key, query.get('path'), query.get('side'))
+              ? pageChanges.file(key, query.get('path'), query.get('side'), query.get('uncommitted'))
               : Promise.resolve({ status: 404, body: { error: 'not found' } }),
       voice: {
         enabled: () => config.settings.voice.enabled,

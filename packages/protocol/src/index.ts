@@ -349,6 +349,8 @@ export interface ChangesList {
   scopeGen: number;
   base: string | null;
   head: string;
+  /** Whether the rows are the uncommitted changes alone, against HEAD, as asked for with `uncommitted=1`. */
+  uncommitted: boolean;
   rows: ChangeRow[];
   stages: Record<ChangeStage, number>;
   shown: number;

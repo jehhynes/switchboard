@@ -8,7 +8,8 @@ import type { WindowScope } from './windows.js';
 
 /**
  * The web page's Changes list (PRD R118, architecture.md § Web page): a worktree's changes from its merge base to disk, read with the git CLI as
- * VS Code's Open changes shows them (PRD R57), committed, staged, unstaged, conflicted and untracked, each file once.
+ * VS Code's Open changes shows them (PRD R57), committed, staged, unstaged, conflicted and untracked, each file once; or, when the page asks for
+ * them alone, its uncommitted changes from HEAD to disk.
  */
 
 /** A row's status letter, as VS Code's Source Control shows it: added, modified, deleted, renamed, untracked, or a conflict. */
@@ -38,6 +39,8 @@ export interface ChangesView {
   /** The merge base, or null when the worktree shares no history with `origin/HEAD`, `origin/main` or `origin/master`: the rows are then uncommitted changes against HEAD. */
   base: string | null;
   head: string;
+  /** Whether the page asked for the uncommitted changes alone: `base` is then null and the rows compare HEAD with disk. */
+  uncommitted: boolean;
   /** The rows sorted by path, the first {@link MAX_ROWS} of `total`. */
   rows: ChangeRow[];
   /** How many files each stage changes, since one row can fold changes from several stages. */
@@ -50,7 +53,7 @@ export interface ChangesView {
 export interface WorktreeChanges {
   /** The worktree's top folder, as git prints it. */
   root: string;
-  /** The ref the rows compare disk with: the merge base, else HEAD. */
+  /** The ref the rows compare disk with: the merge base, else HEAD, and HEAD for the uncommitted changes alone. */
   ref: string;
   view: ChangesView;
   /** Each shown row's two sides, by its `path`, and whether its file is untracked. */
@@ -287,8 +290,8 @@ async function mergeBase(root: string, git: Git): Promise<string | null> {
   return null;
 }
 
-/** A worktree's changes from its merge base to disk, read in `folder`'s repository; why not when git cannot read it. */
-export async function readChanges(folder: string, git: Git = nodeGit, withCounts = true): Promise<WorktreeChanges | { error: string }> {
+/** A worktree's changes from its merge base to disk, or from HEAD with `uncommitted`, read in `folder`'s repository; why not when git cannot read it. */
+export async function readChanges(folder: string, git: Git = nodeGit, withCounts = true, uncommitted = false): Promise<WorktreeChanges | { error: string }> {
   const top = await git(['rev-parse', '--show-toplevel'], folder);
   const root = top.stdout.toString('utf8').trim();
 
@@ -311,7 +314,7 @@ export async function readChanges(folder: string, git: Git = nodeGit, withCounts
     return { error: 'The repository has no commit yet.' };
   }
 
-  const base = await mergeBase(root, git);
+  const base = uncommitted ? null : await mergeBase(root, git);
   const ref = base ?? head;
   const diff = ['diff', '-z', '--no-ext-diff', '--no-textconv', '--no-color'];
   const [committed, staged, working, untracked, conflicts, numstat] = await Promise.all([
@@ -421,7 +424,7 @@ export async function readChanges(folder: string, git: Git = nodeGit, withCounts
   return {
     root,
     ref,
-    view: { base, head, rows, stages: { committed: stages.committed.length, staged: stages.staged.length, working: stages.working.length, untracked: stages.untracked.length }, shown: planned.shown, total: planned.total },
+    view: { base, head, uncommitted, rows, stages: { committed: stages.committed.length, staged: stages.staged.length, working: stages.working.length, untracked: stages.untracked.length }, shown: planned.shown, total: planned.total },
     sides,
   };
 }
@@ -595,6 +598,13 @@ export async function readFileView(changes: WorktreeChanges, path: string, side:
   return looksBinary(bytes) ? { path, side, contents: null, binary: true, tooLarge: false } : { path, side, contents: bytes.toString('utf8'), binary: false, tooLarge: false };
 }
 
+/** The routes' `uncommitted` parameter: `1` for the uncommitted changes alone, `0` or none for every change since the base; null for another value. */
+function uncommittedParam(value: unknown): boolean | null {
+  return value === null || value === undefined || value === '0' ? false : value === '1' ? true : null;
+}
+
+const UNCOMMITTED_REFUSED = { status: 400, body: { error: 'Expected uncommitted 0 or 1.' } };
+
 /** Why a page key gets no changes: not a page's, or no selected conversation with a folder yet. */
 function unscoped(deps: PageChangesDeps, key: string): ChangesReply | WindowScope {
   const scope = deps.isPage(key) ? deps.scope(key) : null;
@@ -627,15 +637,24 @@ export function etagOf(body: unknown): string {
 export class PageChanges {
   constructor(private readonly deps: PageChangesDeps) {}
 
-  /** `GET /v1/conversation/changes?window=<page key>`: the selected conversation's worktree's `ChangesView`. */
-  async changes(key: string): Promise<ChangesReply> {
+  /**
+   * `GET /v1/conversation/changes?window=<page key>[&uncommitted=1]`: the selected conversation's worktree's `ChangesView`, with `uncommitted` `1`
+   * its uncommitted changes alone, against HEAD; 400 for another `uncommitted`.
+   */
+  async changes(key: string, uncommitted: unknown = null): Promise<ChangesReply> {
+    const only = uncommittedParam(uncommitted);
+
+    if (only === null) {
+      return UNCOMMITTED_REFUSED;
+    }
+
     const scope = unscoped(this.deps, key);
 
     if ('status' in scope) {
       return scope;
     }
 
-    const read = await readChanges(scope.cwd!, this.deps.git);
+    const read = await readChanges(scope.cwd!, this.deps.git, true, only);
 
     if (!same(this.deps, key, scope)) {
       return { status: 409, body: { error: CONVERSATION_MOVED } };
@@ -652,13 +671,20 @@ export class PageChanges {
   }
 
   /**
-   * `GET /v1/conversation/diff?window=<page key>&path=<path>[&sides=0]`: one change row's `DiffView`, for a path that is one of the selected
-   * conversation's change rows now, with both sides, or with `sides` `0` the patch alone; 400 for a path that is not a plain relative one or
-   * another `sides`, 404 for one that is no row.
+   * `GET /v1/conversation/diff?window=<page key>&path=<path>[&sides=0][&uncommitted=1]`: one change row's `DiffView`, for a path that is one of
+   * the selected conversation's change rows now, with both sides, or with `sides` `0` the patch alone; with `uncommitted` `1` a row of the
+   * uncommitted changes, from HEAD to disk. 400 for a path that is not a plain relative one or another `sides` or `uncommitted`, 404 for one
+   * that is no row.
    */
-  async diff(key: string, path: unknown, sides: unknown = null): Promise<ChangesReply> {
+  async diff(key: string, path: unknown, sides: unknown = null, uncommitted: unknown = null): Promise<ChangesReply> {
     if (!relativePath(path) || (sides !== null && sides !== '0' && sides !== '1')) {
       return { status: 400, body: { error: 'Expected a path relative to the worktree, and sides 0 or 1.' } };
+    }
+
+    const only = uncommittedParam(uncommitted);
+
+    if (only === null) {
+      return UNCOMMITTED_REFUSED;
     }
 
     const scope = unscoped(this.deps, key);
@@ -667,7 +693,7 @@ export class PageChanges {
       return scope;
     }
 
-    const read = await readChanges(scope.cwd!, this.deps.git, false);
+    const read = await readChanges(scope.cwd!, this.deps.git, false, only);
     const diff = 'error' in read ? null : await readDiff(read, path, this.deps.git, sides !== '0');
 
     if (!same(this.deps, key, scope)) {
@@ -682,12 +708,19 @@ export class PageChanges {
   }
 
   /**
-   * `GET /v1/conversation/file?window=<page key>&path=<path>&side=disk|base`: a file of the selected conversation's worktree read whole
-   * (`readFileView`); 400 for a path that is not plain and relative or another side, 404 for one it does not answer.
+   * `GET /v1/conversation/file?window=<page key>&path=<path>&side=disk|base[&uncommitted=1]`: a file of the selected conversation's worktree read
+   * whole (`readFileView`), the base being HEAD with `uncommitted` `1`; 400 for a path that is not plain and relative or another side or
+   * `uncommitted`, 404 for one it does not answer.
    */
-  async file(key: string, path: unknown, side: unknown): Promise<ChangesReply> {
+  async file(key: string, path: unknown, side: unknown, uncommitted: unknown = null): Promise<ChangesReply> {
     if (!relativePath(path) || (side !== 'disk' && side !== 'base')) {
       return { status: 400, body: { error: 'Expected a path relative to the worktree and a side, disk or base.' } };
+    }
+
+    const only = uncommittedParam(uncommitted);
+
+    if (only === null) {
+      return UNCOMMITTED_REFUSED;
     }
 
     const scope = unscoped(this.deps, key);
@@ -696,7 +729,7 @@ export class PageChanges {
       return scope;
     }
 
-    const read = await readChanges(scope.cwd!, this.deps.git, false);
+    const read = await readChanges(scope.cwd!, this.deps.git, false, only);
     const view = 'error' in read ? null : await readFileView(read, path, side, this.deps.git);
 
     if (!same(this.deps, key, scope)) {
@@ -770,15 +803,16 @@ export class PageChanges {
   }
 
   /**
-   * `viewed {window, scopeGen, opId, path, hash, viewed}`: ticks a change row viewed at the content hash the page showed, or clears its tick, for
-   * the selected conversation's work item, and tells the other pages showing it. 409 when the file's content changed since, so a tick is never
+   * `viewed {window, scopeGen, opId, path, hash, viewed[, uncommitted]}`: ticks a change row viewed at the content hash the page showed, or clears
+   * its tick, for the selected conversation's work item, and tells the other pages showing it; `uncommitted` true looks the row up among the
+   * uncommitted changes alone, as the page listed it. 409 when the file's content changed since, so a tick is never
    * kept for content the operator did not see, or for a stale `scopeGen`; 404 for a path that is no row.
    */
   async viewedCommand(body: Record<string, unknown>): Promise<ChangesReply> {
-    const { window, scopeGen, opId, path, hash, viewed } = body;
+    const { window, scopeGen, opId, path, hash, viewed, uncommitted = false } = body;
 
-    if (typeof window !== 'string' || !Number.isInteger(scopeGen) || typeof opId !== 'string' || opId === '' || opId.length > 100 || !relativePath(path) || typeof hash !== 'string' || hash.length > 100 || typeof viewed !== 'boolean') {
-      return { status: 400, body: { error: 'Expected {window, scopeGen, opId, path, hash, viewed}.' } };
+    if (typeof window !== 'string' || !Number.isInteger(scopeGen) || typeof opId !== 'string' || opId === '' || opId.length > 100 || !relativePath(path) || typeof hash !== 'string' || hash.length > 100 || typeof viewed !== 'boolean' || typeof uncommitted !== 'boolean') {
+      return { status: 400, body: { error: 'Expected {window, scopeGen, opId, path, hash, viewed[, uncommitted]}.' } };
     }
 
     // A retried `opId` answers as the first did, so a lost answer never sets a tick again after a later one.
@@ -788,7 +822,7 @@ export class PageChanges {
       return done;
     }
 
-    const reply = await this.#tick(window, scopeGen as number, path, hash, viewed);
+    const reply = await this.#tick(window, scopeGen as number, path, hash, viewed, uncommitted);
 
     this.#ticked.set(`${window} ${opId}`, reply);
 
@@ -802,7 +836,7 @@ export class PageChanges {
   /** Each `viewed`'s answer by page key and `opId`, the last {@link OPENED_KEPT}. */
   readonly #ticked = new Map<string, ChangesReply>();
 
-  async #tick(window: string, scopeGen: number, path: string, hash: string, viewed: boolean): Promise<ChangesReply> {
+  async #tick(window: string, scopeGen: number, path: string, hash: string, viewed: boolean, uncommitted: boolean): Promise<ChangesReply> {
     const scope = unscoped(this.deps, window);
 
     if ('status' in scope) {
@@ -817,7 +851,7 @@ export class PageChanges {
       return { status: 409, body: { error: 'This hub keeps no viewed ticks.' } };
     }
 
-    const read = await readChanges(scope.cwd!, this.deps.git, false);
+    const read = await readChanges(scope.cwd!, this.deps.git, false, uncommitted);
 
     if (!same(this.deps, window, scope)) {
       return { status: 409, body: { error: CONVERSATION_MOVED } };

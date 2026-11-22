@@ -75,6 +75,28 @@ describe('readChanges', () => {
     expect(read.view.rows.map((row) => [row.path, row.status])).toEqual([['a.txt', 'M']]);
   });
 
+  it('ReadChanges_Uncommitted_ListsOnlyChangesFromHeadToDisk', async () => {
+    const repo = busyRepo();
+
+    // Committed after the base, then changed again on disk: the uncommitted list has only the change since HEAD.
+    repo.write('committed.ts', lines(5));
+
+    const read = (await readChanges(repo.root, nodeGit, true, true)) as WorktreeChanges;
+
+    expect(read.view).toMatchObject({ base: null, head: repo.git('rev-parse', 'HEAD').trim(), uncommitted: true, stages: { committed: 0, staged: 1, working: 3, untracked: 3 } });
+    expect(read.ref).toBe(read.view.head);
+    expect(read.view.rows.map(({ path, status, stages, additions, deletions }) => [path, status, stages.join(), additions, deletions])).toEqual([
+      ['.gitignore', 'U', 'untracked', 1, 0],
+      ['committed.ts', 'M', 'working', 1, 0],
+      ['edited.md', 'M', 'working', 1, 1],
+      ['gone.txt', 'D', 'working', 0, 1],
+      ['image.bin', 'U', 'untracked', null, null],
+      ['notes/new.txt', 'U', 'untracked', 3, 0],
+      ['src/new-name.ts', 'R', 'staged', 0, 0],
+    ]);
+    expect(((await readChanges(repo.root)) as WorktreeChanges).view).toMatchObject({ uncommitted: false, stages: { committed: 2 } });
+  });
+
   it('answers no rows for a worktree that matches its base', async () => {
     const read = (await readChanges(makeRepo({ 'a.txt': 'a\n' }).root)) as WorktreeChanges;
 
@@ -422,6 +444,58 @@ describe('PageChanges.diff', () => {
     expect(full.body).not.toHaveProperty('partial');
     expect(await changes.diff('p1', 'edited.md', '1')).toEqual(full);
     expect((await changes.diff('p1', 'edited.md', 'no')).status).toBe(400);
+  });
+});
+
+describe('PageChanges with uncommitted', () => {
+  const scope = (cwd: string): WindowScope => ({ kind: 'page', key: 'p1', folder: cwd, title: 'T', scopeGen: 1, conversations: [], workItemId: 7, cwd, sessionId: 's1' });
+
+  it('PageChanges_Uncommitted_AnswersTheListDiffsAndFilesAgainstHead', { timeout: 30_000 }, async () => {
+    const repo = busyRepo();
+
+    repo.write('committed.ts', lines(5));
+
+    const changes = new PageChanges({ isPage: () => true, scope: () => scope(repo.root) });
+    const all = await changes.changes('p1');
+    const only = await changes.changes('p1', '1');
+
+    expect(only).toMatchObject({ status: 200, body: { scopeGen: 1, uncommitted: true, base: null, shown: 7 } });
+    expect(all).toMatchObject({ status: 200, body: { uncommitted: false, shown: 8 } });
+    expect(only.etag).not.toBe(all.etag);
+    expect(await changes.changes('p1', '0')).toEqual(all);
+
+    // The patch from HEAD has the one line added since the commit; from the base it has every line the work added.
+    const patch = (reply: { body: unknown }) => (reply.body as { patch: string }).patch;
+    const fromHead = patch(await changes.diff('p1', 'committed.ts', '0', '1'));
+    const fromBase = patch(await changes.diff('p1', 'committed.ts', '0'));
+
+    expect(fromHead.match(/^\+line \d+$/gm)).toEqual(['+line 5']);
+    expect(fromBase.match(/^\+line \d+$/gm)).toEqual(['+line 3', '+line 4', '+line 5']);
+    expect(await changes.diff('p1', 'added-in-commit.ts', '0', '1')).toEqual({ status: 404, body: { error: 'added-in-commit.ts is not one of the changes now.' } });
+    expect((await changes.diff('p1', 'added-in-commit.ts', '0')).status).toBe(200);
+
+    // The base side is the file at HEAD.
+    expect(await changes.file('p1', 'committed.ts', 'base', '1')).toMatchObject({ status: 200, body: { contents: lines(4) } });
+    expect(await changes.file('p1', 'committed.ts', 'base')).toMatchObject({ status: 200, body: { contents: lines(2) } });
+
+    for (const reply of [await changes.changes('p1', 'yes'), await changes.diff('p1', 'edited.md', '0', 'true'), await changes.file('p1', 'edited.md', 'disk', '2')]) {
+      expect(reply).toEqual({ status: 400, body: { error: 'Expected uncommitted 0 or 1.' } });
+    }
+  });
+
+  it('ViewedCommand_Uncommitted_TicksARowOfTheUncommittedList', async () => {
+    const repo = busyRepo();
+
+    repo.write('committed.ts', lines(5));
+
+    const ticks = new Map<string, string>();
+    const changes = new PageChanges({ isPage: () => true, scope: () => scope(repo.root), viewed: { list: () => new Map(ticks), set: (_id, path, hash) => (hash === null ? ticks.delete(path) : ticks.set(path, hash)) } });
+    const row = ((await changes.changes('p1', '1')).body as ChangesView).rows.find((one) => one.path === 'committed.ts')!;
+    const tick = (opId: string, uncommitted?: unknown) => changes.viewedCommand({ window: 'p1', scopeGen: 1, opId, path: 'committed.ts', hash: row.hash, viewed: true, ...(uncommitted === undefined ? {} : { uncommitted }) });
+
+    expect((await tick('b', 'yes')).status).toBe(400);
+    expect(await tick('c', true)).toEqual({ status: 200, body: { path: 'committed.ts', hash: row.hash, viewed: true } });
+    expect(((await changes.changes('p1', '1')).body as ChangesView).rows.find((one) => one.path === 'committed.ts')!.viewed).toBe(true);
   });
 });
 

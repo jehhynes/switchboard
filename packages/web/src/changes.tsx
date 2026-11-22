@@ -22,9 +22,19 @@ export interface ChangesView {
   tab: boolean;
   /** Whether the Changes tab leaves out the files ticked viewed. */
   hideViewed: boolean;
+  /** Whether the list and the tab show the uncommitted changes alone, against HEAD, rather than every change since the base; kept per device. */
+  uncommitted: boolean;
 }
 
-export const newChanges = (): ChangesView => ({ list: null, loading: false, error: null, menu: false, for: null, tab: false, hideViewed: false });
+export const newChanges = (uncommitted = false): ChangesView => ({ list: null, loading: false, error: null, menu: false, for: null, tab: false, hideViewed: false, uncommitted });
+
+/** Where a device keeps its Uncommitted only choice. */
+export const UNCOMMITTED_KEY = 'switchboard.changesUncommitted';
+
+/** What a file's diff is read against, for the key a held diff is kept by: the merge base, else HEAD, whose commit a new commit changes. */
+export function listRef(list: ChangesList | null): string | null {
+  return list === null ? null : (list.base ?? `HEAD ${list.head}`);
+}
 
 /** Where the diff's sides go: side by side, one above the other, or by the pane's width (`auto`, stacked and wrapped under {@link SPLIT_MIN_WIDTH}). */
 export type DiffLayout = 'auto' | 'split' | 'stacked';
@@ -70,7 +80,7 @@ export function diffTabs(changes: ChangesView, shown: boolean): ComponentChildre
 
   return (
     <span class={`tab diff-tab push${shown ? ' selected' : ''}`} role="presentation">
-      <button class="tab-open" type="button" role="tab" data-action="diff-tab" aria-selected={shown} tabindex={shown ? 0 : -1} title="Every changed file's diff" aria-label={progress === null ? 'Changes' : `Changes, ${progress} viewed`}>
+      <button class="tab-open" type="button" role="tab" data-action="diff-tab" aria-selected={shown} tabindex={shown ? 0 : -1} title={changes.uncommitted ? "Every uncommitted file's diff" : "Every changed file's diff"} aria-label={progress === null ? 'Changes' : `Changes, ${progress} viewed`}>
         <span class="codicon codicon-diff-multiple" aria-hidden="true"></span>
         <span class="tab-label">Changes</span>
         {progress === null ? null : <span class="tab-badge muted">{progress}</span>}
@@ -85,9 +95,10 @@ export function diffTabs(changes: ChangesView, shown: boolean): ComponentChildre
 /** The Changes button, after the strip's tabs, with the count once a list was read; `after` when other tabs, such as file tabs, come before it. */
 export function changesButton(changes: ChangesView, after = false): VNode {
   const count = changes.list?.total;
+  const files = changes.uncommitted ? 'uncommitted files' : 'files';
 
   return (
-    <button class={`tab changes-button${changes.tab || after ? '' : ' push'}${changes.menu ? ' open' : ''}`} type="button" data-action="changes-menu" aria-expanded={changes.menu} aria-label={count === undefined ? 'Changes list' : `Changes list, ${count} files`} title="The worktree's changes since its base">
+    <button class={`tab changes-button${changes.tab || after ? '' : ' push'}${changes.menu ? ' open' : ''}`} type="button" data-action="changes-menu" aria-expanded={changes.menu} aria-label={count === undefined ? 'Changes list' : `Changes list, ${count} ${files}`} title={changes.uncommitted ? "The worktree's uncommitted changes" : "The worktree's changes since its base"}>
       <span class="codicon codicon-diff-multiple" aria-hidden="true"></span>
       <span class="tab-label">Changes</span>
       {count === undefined ? null : <span class="tab-badge muted">{count}</span>}
@@ -139,9 +150,10 @@ function Row({ row }: { row: ChangeRow }): VNode {
   );
 }
 
-/** What the menu says above its rows: how many files, the lines added and deleted, how many are viewed, and a first cut when the worktree has more than the hub lists. */
+/** What the menu says above its rows: how many files, uncommitted ones when the list has those alone, the lines added and deleted, how many are viewed, and a first cut when the worktree has more than the hub lists. */
 export function listNote(list: ChangesList): string {
-  const files = list.total === 1 ? '1 file' : `${list.total} files`;
+  const kind = list.uncommitted ? ' uncommitted' : '';
+  const files = list.total === 1 ? `1${kind} file` : `${list.total}${kind} files`;
   const { viewed, additions, deletions } = totals(list);
   const ticked = viewed === 0 ? '' : ` · ${viewed} viewed`;
   const lines = ` · +${additions} −${deletions}`;
@@ -151,7 +163,12 @@ export function listNote(list: ChangesList): string {
 
 /** The menu note's tooltip: since which base. */
 export function listBase(list: ChangesList): string {
-  return list.base === null ? 'Uncommitted changes only, no merge base' : `Since ${list.base.slice(0, 7)}`;
+  return list.uncommitted ? 'Uncommitted changes, against HEAD' : list.base === null ? 'Uncommitted changes only, no merge base' : `Since ${list.base.slice(0, 7)}`;
+}
+
+/** What the menu and the Changes tab say when the list has no rows. */
+export function emptyNote(list: ChangesList): string {
+  return list.uncommitted ? 'No uncommitted changes.' : list.base === null ? 'No uncommitted changes, and no merge base was found.' : 'No changes since the merge base.';
 }
 
 /** A header button of the Changes menu: a codicon with its name as tooltip. */
@@ -164,8 +181,8 @@ function HeadButton({ action, icon, label, pressed, disabled }: { action: string
 }
 
 /**
- * The Changes menu while open, under the strip: its note, Hide viewed, Collapse all, Expand all and Refresh, then the rows, or why there are
- * none. Open in VS Code is in the work item's Actions menu, not here.
+ * The Changes menu while open, under the strip: its note, Uncommitted only, Hide viewed, Collapse all, Expand all and Refresh, then the rows, or
+ * why there are none. Open in VS Code is in the work item's Actions menu, not here.
  */
 export function renderChangesMenu(changes: ChangesView): VNode | null {
   if (!changes.menu) {
@@ -180,7 +197,7 @@ export function renderChangesMenu(changes: ChangesView): VNode | null {
   } else if (list === null) {
     body = <p class="changes-empty">Reading the changes…</p>;
   } else if (list.rows.length === 0) {
-    body = <p class="changes-empty">{list.base === null ? 'No uncommitted changes, and no merge base was found.' : 'No changes since the merge base.'}</p>;
+    body = <p class="changes-empty">{emptyNote(list)}</p>;
   } else {
     body = (
       <ul class="changes-rows" aria-label="Changes">
@@ -199,6 +216,7 @@ export function renderChangesMenu(changes: ChangesView): VNode | null {
         <span class="changes-note" title={list === null ? undefined : listBase(list)}>
           {list === null ? 'Changes' : listNote(list)}
         </span>
+        <HeadButton action="changes-uncommitted" icon={changes.uncommitted ? 'filter-filled' : 'filter'} label={changes.uncommitted ? 'Show all changes since the base' : 'Show uncommitted changes only'} pressed={changes.uncommitted} />
         <HeadButton action="changes-hide-viewed" icon={changes.hideViewed ? 'eye-closed' : 'eye'} label={changes.hideViewed ? 'Show viewed files' : 'Hide viewed files'} pressed={changes.hideViewed} disabled={empty} />
         <HeadButton action="changes-collapse-all" icon="collapse-all" label="Collapse all" disabled={empty} />
         <HeadButton action="changes-expand-all" icon="expand-all" label="Expand all" disabled={empty} />
@@ -357,7 +375,50 @@ export class ChangesController {
   /** Each file's header element the viewer shows before its name, by path, drawn again on every draw. */
   readonly #prefixes = new Map<string, HTMLElement>();
 
-  constructor(private readonly deps: ChangesDeps) {}
+  constructor(private readonly deps: ChangesDeps) {
+    try {
+      this.view.uncommitted = localStorage.getItem(UNCOMMITTED_KEY) === '1';
+    } catch {
+      // Off without local storage.
+    }
+  }
+
+  /** The change routes' query for Uncommitted only. */
+  #only(): string {
+    return this.view.uncommitted ? '&uncommitted=1' : '';
+  }
+
+  /**
+   * Shows the uncommitted changes alone, or every change since the base again, kept for this device: the diffs read for the other list are
+   * dropped and the list is read again; which files are collapsed stays.
+   */
+  #setUncommitted(on: boolean): void {
+    this.view.uncommitted = on;
+
+    try {
+      if (on) {
+        localStorage.setItem(UNCOMMITTED_KEY, '1');
+      } else {
+        localStorage.removeItem(UNCOMMITTED_KEY);
+      }
+    } catch {
+      // A page without local storage keeps the choice until it reloads.
+    }
+
+    this.#reading++;
+    this.#generation++;
+    this.#held.clear();
+    this.#inFlight.clear();
+    this.#failed.clear();
+    this.#hunk = null;
+    this.#jump = null;
+    this.#file = null;
+    this.#collapseViewed = true;
+    this.#unmount();
+    this.view.list = null;
+    this.view.error = null;
+    void this.refresh();
+  }
 
   /**
    * Follows the page's conversation: `id` names it (page key, scope generation, work item), so another one drops the list, its diffs and the
@@ -376,7 +437,7 @@ export class ChangesController {
       this.#jump = null;
       this.#file = null;
       this.#unmount();
-      Object.assign(this.view, newChanges(), { for: id });
+      Object.assign(this.view, newChanges(this.view.uncommitted), { for: id });
       return;
     }
 
@@ -402,7 +463,7 @@ export class ChangesController {
     let error: string | null = null;
 
     try {
-      const response = await this.deps.fetch(`/v1/conversation/changes?window=${encodeURIComponent(key)}`, { credentials: 'same-origin' });
+      const response = await this.deps.fetch(`/v1/conversation/changes?window=${encodeURIComponent(key)}${this.#only()}`, { credentials: 'same-origin' });
       const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
 
       if (response.ok) {
@@ -510,6 +571,11 @@ export class ChangesController {
 
     if (action === 'changes-refresh') {
       void this.refresh();
+      return true;
+    }
+
+    if (action === 'changes-uncommitted') {
+      this.#setUncommitted(!this.view.uncommitted);
       return true;
     }
 
@@ -639,7 +705,7 @@ export class ChangesController {
     let failed = false;
 
     try {
-      const response = await this.deps.fetch(`/v1/conversation/diff?window=${encodeURIComponent(pageKey)}&path=${encodeURIComponent(row.path)}&sides=0`, {
+      const response = await this.deps.fetch(`/v1/conversation/diff?window=${encodeURIComponent(pageKey)}&path=${encodeURIComponent(row.path)}&sides=0${this.#only()}`, {
         credentials: 'same-origin',
         ...(held?.etag == null ? {} : { headers: { 'If-None-Match': held.etag } }),
       });
@@ -673,7 +739,7 @@ export class ChangesController {
     const now = this.view.list?.rows.find((one) => one.path === row.path);
 
     // The list was read again meanwhile and the row changed: this answer is for content no longer shown.
-    if (now === undefined || rowKey(this.view.list?.base ?? null, now) !== key) {
+    if (now === undefined || rowKey(listRef(this.view.list), now) !== key) {
       this.#pump();
       return;
     }
@@ -698,7 +764,7 @@ export class ChangesController {
   /** Starts the reads the view wants, at most {@link MAX_IN_FLIGHT} at a time, then gives up held diffs past the budget, the furthest first. */
   #pump(): void {
     const mounted = this.#mount;
-    const base = this.view.list?.base ?? null;
+    const base = listRef(this.view.list);
 
     if (mounted === null || !this.view.tab) {
       return;
@@ -754,7 +820,7 @@ export class ChangesController {
     }
 
     try {
-      const response = await this.deps.fetch(`/v1/conversation/diff?window=${encodeURIComponent(key)}&path=${encodeURIComponent(path)}`, { credentials: 'same-origin' });
+      const response = await this.deps.fetch(`/v1/conversation/diff?window=${encodeURIComponent(key)}&path=${encodeURIComponent(path)}${this.#only()}`, { credentials: 'same-origin' });
 
       if (!response.ok) {
         return null;
@@ -805,7 +871,7 @@ export class ChangesController {
     }
 
     try {
-      const response = await this.deps.fetch(`/v1/conversation/file?window=${encodeURIComponent(key)}&path=${encodeURIComponent(open.path)}&side=${open.side}`, { credentials: 'same-origin' });
+      const response = await this.deps.fetch(`/v1/conversation/file?window=${encodeURIComponent(key)}&path=${encodeURIComponent(open.path)}&side=${open.side}${this.#only()}`, { credentials: 'same-origin' });
       const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
 
       open.entry = response.ok ? { state: 'ok', data: body as unknown as FileData, version: response.headers?.get?.('ETag') ?? String(Date.now()) } : { state: 'error', error: String(body['error'] ?? `Switchboard answered ${response.status}.`) };
@@ -840,11 +906,14 @@ export class ChangesController {
 
     this.#ticking.add(row);
 
+    // The list the row was shown in, kept for every post, even after Uncommitted only is toggled meanwhile.
+    const uncommitted = this.view.uncommitted;
+
     try {
       for (let sent: boolean | null = null; row.viewed !== sent; ) {
         sent = row.viewed === true;
 
-        const answer = await this.deps.command('viewed', { path, hash: row.hash, viewed: sent });
+        const answer = await this.deps.command('viewed', { path, hash: row.hash, viewed: sent, uncommitted });
 
         if (answer.status !== 200) {
           row.viewed = !sent;
@@ -1003,7 +1072,7 @@ export class ChangesController {
       } else if (list === null) {
         this.#say(host, 'Reading the changes…');
       } else if (list.rows.length === 0) {
-        this.#say(host, list.base === null ? 'No uncommitted changes, and no merge base was found.' : 'No changes since the merge base.');
+        this.#say(host, emptyNote(list));
       } else if (host.dataset['mounting'] !== 'yes') {
         host.dataset['mounting'] = 'yes';
         this.#mountInto(host);
@@ -1088,6 +1157,12 @@ export class ChangesController {
       if (module === null) {
         this.#module = null;
         this.#say(host, 'The diff viewer could not be loaded. Reload the page to try again.');
+        return;
+      }
+
+      // The list went or emptied while the module loaded, as when Uncommitted only was toggled: the next draw says why, or mounts once it is read.
+      if (this.view.list === null || this.view.list.rows.length === 0) {
+        this.deps.draw();
         return;
       }
 
@@ -1202,7 +1277,7 @@ export class ChangesController {
       const suffix = slot();
 
       mount(prefix, <BackButton />);
-      mount(suffix, <span class="diff-at">:{file.line}{file.side === 'base' ? <span class="diff-from"> at the base</span> : null}</span>);
+      mount(suffix, <span class="diff-at">:{file.line}{file.side === 'base' ? <span class="diff-from">{this.view.list?.uncommitted === true ? ' at HEAD' : ' at the base'}</span> : null}</span>);
       host.replaceChildren();
       kept.mount = module.mountFile(host, entry.data, entry.version, { wrap: this.#shownLayout(host.closest<HTMLElement>('.diff-pane') ?? host).wrap, line: file.line, prefix, suffix });
     });

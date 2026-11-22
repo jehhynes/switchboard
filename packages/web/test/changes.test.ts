@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { listBase, listNote, rowTitle } from '../src/changes.js';
+import { emptyNote, listBase, listNote, listRef, rowTitle, UNCOMMITTED_KEY } from '../src/changes.js';
 import type { ChangesList } from '../src/changes.js';
 import { diffLayout, diffNote } from '../src/changes.js';
 import type { DiffModule } from '../src/diff/types.js';
@@ -32,6 +32,7 @@ const LIST: ChangesList = {
   scopeGen: 3,
   base: '0123456789abcdef0123456789abcdef01234567',
   head: 'fedcba9876543210fedcba9876543210fedcba98',
+  uncommitted: false,
   rows: [
     { path: 'docs/a.md', status: 'M', stages: ['committed', 'working'], additions: 3, deletions: 1, binary: false, hash: 'h-a', viewed: false },
     { path: 'src/new.ts', from: 'src/old.ts', status: 'R', stages: ['staged'], additions: 0, deletions: 0, binary: false, hash: 'h-new', viewed: true },
@@ -50,6 +51,10 @@ describe('the Changes list', () => {
   let root: HTMLElement;
   let answers: Array<{ status: number; body: unknown; wait?: Promise<void> }>;
   let gets: string[];
+  /** The bodies of the viewed commands posted. */
+  let ticks: Array<Record<string, unknown>>;
+  /** Held while a test keeps the viewed commands' answers back. */
+  let ticksGate: Promise<void> | undefined;
   let pages: Array<{ close(): void }>;
 
   beforeEach(() => {
@@ -58,6 +63,8 @@ describe('the Changes list', () => {
     localStorage.clear();
     answers = [];
     gets = [];
+    ticks = [];
+    ticksGate = undefined;
     pages = [];
   });
 
@@ -71,6 +78,8 @@ describe('the Changes list', () => {
   const files: Array<{ path: string; side: string; line: number | null }> = [];
   const fileSets: string[] = [];
   let module: DiffModule | null;
+  /** Held while a test keeps the diff viewer's module loading. */
+  let moduleGate: Promise<void> | undefined;
   let diffAnswers: Record<string, { status: number; body: unknown }>;
   /** What each mountChanges was given and asked, and the rows the fake view says are on screen. */
   type FakeChanges = { header: (path: string) => void; meta: (path: string) => HTMLElement | null; rows: string[]; layout: string; wrap: boolean; layouts: string[]; scrolls: string[]; sets: Array<[string, string]>; collapsed: string[]; disposed: boolean; onLine?: (path: string, side: 'old' | 'new', line: number) => void; loadSides: (path: string) => Promise<unknown>; want: () => void };
@@ -99,6 +108,7 @@ describe('the Changes list', () => {
     files.length = 0;
     fileSets.length = 0;
     diffAnswers = {};
+    moduleGate = undefined;
     module = {
       mountDiff: (host, data, _version, options) => {
         const mount = { path: data.path, layout: options.layout, wrap: options.wrap, sets: [] as string[], disposed: false, ...(options.onLine === undefined ? {} : { onLine: options.onLine }) };
@@ -174,6 +184,8 @@ describe('the Changes list', () => {
       if (url === '/v1/conversation/viewed') {
         const sent = JSON.parse(String((init as { body?: string } | undefined)?.body)) as Record<string, unknown>;
 
+        ticks.push(sent);
+        await ticksGate;
         gets.push(`VIEWED ${String(sent['path'])} ${String(sent['hash'])} ${String(sent['viewed'])} ${String(sent['scopeGen'])}`);
         return (sent['path'] === 'logo.png'
           ? { status: 409, ok: false, json: async () => ({ error: 'logo.png changed since it was shown; read it again.' }) }
@@ -218,7 +230,7 @@ describe('the Changes list', () => {
 
       return { status: answer.status, ok: answer.status === 200, headers: new Headers(etag === undefined ? {} : { ETag: etag }), json: async () => answer.body } as unknown as Response;
     });
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, loadDiff: async () => module });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, loadDiff: async () => (await moduleGate, module) });
     const source = FakeSource.last!;
 
     pages.push(page);
@@ -271,6 +283,70 @@ describe('the Changes list', () => {
     expect(root.querySelector('.changes-menu')).not.toBeNull();
     document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
     expect(root.querySelector('.changes-menu')).toBeNull();
+  });
+
+  it('UncommittedOnly_Toggled_ReadsTheUncommittedListAndSaysSoAndKeepsTheChoice', async () => {
+    const only = structuredClone({ ...LIST, base: null, uncommitted: true, rows: LIST.rows.slice(1), stages: { ...LIST.stages, committed: 0 }, shown: 2, total: 2 });
+
+    answers.push({ status: 200, body: structuredClone(LIST) }, { status: 200, body: only }, { status: 200, body: { ...only, rows: [], shown: 0, total: 0 } });
+    start();
+    button().click();
+    await flush();
+
+    const toggle = () => root.querySelector<HTMLButtonElement>('[data-action="changes-uncommitted"]')!;
+
+    expect(toggle().getAttribute('aria-pressed')).toBe('false');
+    expect(toggle().title).toBe('Show uncommitted changes only');
+    expect(button().title).toBe("The worktree's changes since its base");
+
+    toggle().click();
+    expect(root.querySelector('.changes-empty')!.textContent).toBe('Reading the changes…');
+    await flush();
+    expect(gets.at(-1)).toBe('/v1/conversation/changes?window=pk&uncommitted=1');
+    expect(localStorage.getItem(UNCOMMITTED_KEY)).toBe('1');
+    expect(toggle().getAttribute('aria-pressed')).toBe('true');
+    expect(toggle().title).toBe('Show all changes since the base');
+    expect(toggle().querySelector('.codicon-filter-filled')).not.toBeNull();
+    expect(root.querySelectorAll('.change-row')).toHaveLength(2);
+    expect(root.querySelector<HTMLElement>('.changes-note')!.title).toBe('Uncommitted changes, against HEAD');
+    expect(button().querySelector('.tab-badge')!.textContent).toBe('2');
+    expect(button().getAttribute('aria-label')).toBe('Changes list, 2 uncommitted files');
+    expect(button().title).toBe("The worktree's uncommitted changes");
+
+    // A tick names the list it was shown in.
+    root.querySelectorAll<HTMLElement>('.change-viewed input')[0]!.click();
+    await flush();
+    expect(ticks.at(-1)).toMatchObject({ path: 'src/new.ts', uncommitted: true });
+
+    root.querySelector<HTMLElement>('[data-action="changes-refresh"]')!.click();
+    await flush();
+    expect(root.querySelector('.changes-empty')!.textContent).toBe('No uncommitted changes.');
+    // The toggle stays usable with no rows, so the operator can go back.
+    expect(toggle().disabled).toBe(false);
+
+    toggle().click();
+    await flush();
+    expect(gets.at(-1)).toBe('/v1/conversation/changes?window=pk');
+    expect(localStorage.getItem(UNCOMMITTED_KEY)).toBeNull();
+    expect(root.querySelectorAll('.change-row')).toHaveLength(3);
+  });
+
+  it('UncommittedOnly_KeptOnThisDevice_IsReadFromTheStartAndOutlastsAMoveToAnotherConversation', async () => {
+    localStorage.setItem(UNCOMMITTED_KEY, '1');
+
+    const { source } = start();
+
+    button().click();
+    await flush();
+    expect(gets).toEqual(['/v1/conversation/changes?window=pk&uncommitted=1']);
+    expect(root.querySelector('[data-action="changes-uncommitted"]')!.getAttribute('aria-pressed')).toBe('true');
+
+    source.emit('scope', { scope: scope(4, 2) });
+    source.emit('hello', { key: 'pk', groups: [], scope: scope(4, 2), sessions: [session], items: [], more: false, status: null, artifacts: [], unread: 0 });
+    expect(root.querySelector('.changes-menu')).toBeNull();
+    button().click();
+    await flush();
+    expect(gets).toEqual(['/v1/conversation/changes?window=pk&uncommitted=1', '/v1/conversation/changes?window=pk&uncommitted=1']);
   });
 
   it("says why when the hub refuses, and says when the worktree matches its base", async () => {
@@ -864,6 +940,82 @@ describe('the Changes list', () => {
     expect(changesMounts[0]!.rows).toEqual(['docs/a.md', 'src/new.ts', 'logo.png']);
   });
 
+  it('ChangesTab_UncommittedOnlyToggled_DropsTheDiffsAndReadsThemAgainstHead', async () => {
+    const only = structuredClone({ ...LIST, base: null, uncommitted: true });
+
+    // The menu's read, the tab's and the menu's again, then the uncommitted list.
+    answers.push({ status: 200, body: structuredClone(LIST) }, { status: 200, body: structuredClone(LIST) }, { status: 200, body: structuredClone(LIST) }, { status: 200, body: only });
+    start();
+    await openRow(0);
+    expect(diffGets()[0]).toBe('/v1/conversation/diff?window=pk&path=docs%2Fa.md&sides=0');
+    expect(diffGets().some((one) => one.includes('uncommitted'))).toBe(false);
+
+    button().click();
+    await flush();
+    root.querySelector<HTMLElement>('[data-action="changes-uncommitted"]')!.click();
+    await flush();
+    await flush();
+    await flush();
+
+    // The viewer for the list since the base ends, and a new one reads the same file again, from HEAD.
+    expect(changesMounts).toHaveLength(2);
+    expect(changesMounts[0]!.disposed).toBe(true);
+    expect(diffGets().at(-1)).toBe('/v1/conversation/diff?window=pk&path=docs%2Fa.md&sides=0&uncommitted=1');
+    await expect(changesMounts[1]!.loadSides('docs/a.md')).resolves.toMatchObject({ path: 'docs/a.md' });
+    expect(diffGets().at(-1)).toBe('/v1/conversation/diff?window=pk&path=docs%2Fa.md&uncommitted=1');
+
+    // A line's file on the old side is the file at HEAD.
+    changesMounts[1]!.onLine!('docs/a.md', 'old', 2);
+    await flush();
+    await flush();
+    expect(gets.at(-1)).toBe('/v1/conversation/file?window=pk&path=docs%2Fa.md&side=base&uncommitted=1');
+    expect(root.querySelector('.file-overlay .diff-at')!.textContent).toBe(':2 at HEAD');
+  });
+
+  it('ChangesTab_UncommittedOnlyToggledWhileTheViewerLoads_SaysThereAreNoUncommittedChanges', async () => {
+    let release: () => void = () => {};
+
+    moduleGate = new Promise<void>((resolve) => (release = resolve));
+    answers.push({ status: 200, body: structuredClone(LIST) }, { status: 200, body: structuredClone(LIST) }, { status: 200, body: structuredClone(LIST) }, { status: 200, body: { ...LIST, rows: [], shown: 0, total: 0, base: null, uncommitted: true } });
+    start();
+    await openRow(0);
+    expect(root.querySelector('.diff-host')!.textContent).toBe('Loading the diff viewer…');
+
+    button().click();
+    await flush();
+    root.querySelector<HTMLElement>('[data-action="changes-uncommitted"]')!.click();
+    await flush();
+    release();
+    await flush();
+    await flush();
+
+    expect(changesMounts).toHaveLength(0);
+    expect(root.querySelector('.diff-host')!.textContent).toBe('No uncommitted changes.');
+  });
+
+  it('ViewedTick_QueuedBeforeUncommittedOnlyIsToggled_PostsForTheListItWasShownIn', async () => {
+    let answer: () => void = () => {};
+    const held = new Promise<void>((resolve) => (answer = resolve));
+
+    start();
+    button().click();
+    await flush();
+
+    const box = () => root.querySelectorAll<HTMLElement>('.change-viewed input')[0]!;
+
+    // The first post waits for its answer while a second click and the toggle come.
+    ticksGate = held;
+    box().click();
+    box().click();
+    root.querySelector<HTMLElement>('[data-action="changes-uncommitted"]')!.click();
+    answer();
+    await flush();
+    await flush();
+    await flush();
+
+    expect(ticks.map((one) => one['uncommitted'])).toEqual([false, false]);
+  });
+
   it("ChangesTab_LineNumberClicked_ShowsTheFileOverTheDiffsAndBackKeepsThem", async () => {
     start();
     await openRow(1);
@@ -1056,8 +1208,18 @@ describe('the Changes list text', () => {
     expect(listNote(LIST)).toBe('3 files · +3 −1 · 1 viewed');
     expect(listNote({ ...LIST, shown: 400, total: 512 })).toBe('Showing 400 of 512 files · +3 −1 · 1 viewed');
     expect(listNote({ ...LIST, total: 1 })).toBe('1 file · +3 −1 · 1 viewed');
+    expect(listNote({ ...LIST, uncommitted: true })).toBe('3 uncommitted files · +3 −1 · 1 viewed');
+    expect(listNote({ ...LIST, uncommitted: true, total: 1 })).toBe('1 uncommitted file · +3 −1 · 1 viewed');
     expect(listBase(LIST)).toBe('Since 0123456');
     expect(listBase({ ...LIST, base: null })).toBe('Uncommitted changes only, no merge base');
+    expect(listBase({ ...LIST, base: null, uncommitted: true })).toBe('Uncommitted changes, against HEAD');
+    expect(emptyNote({ ...LIST, uncommitted: true })).toBe('No uncommitted changes.');
+    expect(emptyNote({ ...LIST, base: null })).toBe('No uncommitted changes, and no merge base was found.');
+    expect(emptyNote(LIST)).toBe('No changes since the merge base.');
+    // A held diff against HEAD is read again after a commit.
+    expect(listRef(LIST)).toBe(LIST.base);
+    expect(listRef({ ...LIST, base: null })).toBe(`HEAD ${LIST.head}`);
+    expect(listRef(null)).toBeNull();
   });
 
   it("names a row's stages in its tooltip", () => {
