@@ -19,6 +19,7 @@ import {
   codeModeSettings,
   codeModeStartArgs,
   makeArtifactsDir,
+  LAUNCH_TAIL_BYTES,
   readTranscriptLaunch,
   showsStartPrompt,
   transcriptLaunch,
@@ -976,6 +977,19 @@ describe('transcriptLaunch (mechanics M117)', () => {
       writeFileSync(join(dir, 't.jsonl'), line({ type: 'repl-mode', replMode: true, sessionId: NATIVE }));
       expect(readTranscriptLaunch(join(dir, 't.jsonl'))).toEqual({ codeMode: true, permissionMode: null, model: null });
       expect(readTranscriptLaunch(join(dir, 'missing.jsonl'))).toBeNull();
+      // Only the end is read for the mode and the model: a line before it, here the only one with the model, and one it cuts are not.
+      const tail = `${line({ type: 'repl-mode', replMode: true, sessionId: NATIVE })}\n${line({ type: 'permission-mode', permissionMode: 'plan', sessionId: NATIVE })}`;
+      writeFileSync(join(dir, 't.jsonl'), `${line({ type: 'assistant', message: { model: 'claude-opus-5-5', content: [] } })}\n${tail}`);
+      expect(readTranscriptLaunch(join(dir, 't.jsonl'), tail.length + 1)).toEqual({ codeMode: true, permissionMode: 'plan', model: null });
+      // Code Mode is found before the end, however far, as a turn can write more than the end after its last mode line.
+      expect(readTranscriptLaunch(join(dir, 't.jsonl'), tail.length - 5)).toEqual({ codeMode: true, permissionMode: 'plan', model: null });
+      writeFileSync(join(dir, 't.jsonl'), `${line({ type: 'repl-mode', replMode: true, sessionId: NATIVE })}\n${'x'.repeat(LAUNCH_TAIL_BYTES + 10)}\n${tail.split('\n')[1]}`);
+      expect(readTranscriptLaunch(join(dir, 't.jsonl'))).toEqual({ codeMode: true, permissionMode: 'plan', model: null });
+      writeFileSync(join(dir, 't.jsonl'), `${line({ type: 'mode', mode: 'normal' })}\n${'x'.repeat(LAUNCH_TAIL_BYTES + 10)}\n${tail.split('\n')[1]}`);
+      expect(readTranscriptLaunch(join(dir, 't.jsonl'))).toEqual({ codeMode: false, permissionMode: 'plan', model: null });
+      // A mode line in the tail decides, over an earlier one.
+      writeFileSync(join(dir, 't.jsonl'), `${line({ type: 'repl-mode', replMode: true, sessionId: NATIVE })}\n${'x'.repeat(LAUNCH_TAIL_BYTES + 10)}\n${line({ type: 'repl-mode', replMode: false, sessionId: NATIVE })}`);
+      expect(readTranscriptLaunch(join(dir, 't.jsonl'))).toMatchObject({ codeMode: false });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

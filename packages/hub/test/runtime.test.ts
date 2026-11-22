@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer as createNetServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
@@ -3424,6 +3424,20 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
         expect(await context.runtime.attach('s1')).toEqual(HOLDER);
         expect(context.calls).toEqual([{ withoutCodeMode: true, permissionMode: 'bypassPermissions', model: 'claude-sonnet-5', contract: expect.stringMatching(/^Report to Switchboard with these commands:\n/) }]);
         expect(context.store.session('s1')).toMatchObject({ state: 'idle', codeMode: true, withoutCodeMode: true, released: false });
+        context.runtime.stop();
+      });
+
+      it('follows its conversation from the resume on, so the history before it is not read as new', async () => {
+        const context = await registeredEnded(null);
+        const path = join(home, '.claude', 'projects', 'D--git-widgets', 's1-native.jsonl');
+
+        transcript([{ type: 'user', message: { role: 'user', content: 'days of history' }, sessionId: 's1-native' }, assistant('claude-sonnet-5')]);
+        // The last line is complete; a line still being written would wait for its newline.
+        appendFileSync(path, '\n');
+
+        expect(await context.runtime.attach('s1')).toEqual(HOLDER);
+        // The path as the conversation's transcript lookup names it, so its first read starts at the checkpoint.
+        expect(context.store.checkpoint('s1')).toEqual({ sessionId: 's1', transcript: `${join(home, '.claude', 'projects')}/D--git-widgets/s1-native.jsonl`, offset: statSync(path).size, lastUuid: null, lastAt: expect.any(Number) });
         context.runtime.stop();
       });
 

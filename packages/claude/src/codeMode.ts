@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { ARTIFACTS_ENV, artifactsDir, PERMISSION_MODES, START_PROMPT } from '@switchboard/core';
 import type { LiveState, StopReason, MarkerReading, ObservedFork, ObservedSession, PermissionMode, Reconciled, Session, SessionRunner, SessionTarget, StartAction, StartResult } from '@switchboard/core';
@@ -212,12 +212,69 @@ export function transcriptLaunch(text: string): TranscriptLaunch {
   return { codeMode: codeMode ?? false, permissionMode: permissionMode ?? null, model: model ?? null };
 }
 
-/** `transcriptLaunch` of the transcript at `path`, or null when it cannot be read. */
-export function readTranscriptLaunch(path: string): TranscriptLaunch | null {
+/**
+ * How much of a transcript's end `readTranscriptLaunch` reads. A Code Mode session writes a `repl-mode` line with each mode line, thousands in a
+ * long transcript (mechanics M117), and a transcript can grow to hundreds of megabytes, which read whole would hold up the hub.
+ */
+export const LAUNCH_TAIL_BYTES = 8 * 1024 * 1024;
+
+/** The start of the lines a Code Mode session writes, and of one that says it is on (mechanics M117). */
+const REPL_MODE = Buffer.from('{"type":"repl-mode"');
+const REPL_MODE_ON = Buffer.from('{"type":"repl-mode","replMode":true');
+
+/** Whether a file's first `end` bytes hold `bytes`, read from the end in chunks. */
+function holdsBefore(fd: number, end: number, bytes: Buffer): boolean {
+  const chunk = Buffer.alloc(LAUNCH_TAIL_BYTES + bytes.length);
+
+  for (let to = end; to > 0; ) {
+    const from = Math.max(0, to - LAUNCH_TAIL_BYTES);
+    // Each chunk overlaps the one after it, so a match across their boundary is found.
+    const length = Math.min(to + bytes.length, end) - from;
+
+    readSync(fd, chunk, 0, length, from);
+
+    if (chunk.subarray(0, length).includes(bytes)) {
+      return true;
+    }
+
+    to = from;
+  }
+
+  return false;
+}
+
+/** `transcriptLaunch` of the end of the transcript at `path`, with Code Mode also from any earlier line, or null when it cannot be read. */
+export function readTranscriptLaunch(path: string, tailBytes = LAUNCH_TAIL_BYTES): TranscriptLaunch | null {
+  let fd: number;
+
   try {
-    return transcriptLaunch(readFileSync(path, 'utf8'));
+    fd = openSync(path, 'r');
   } catch {
     return null;
+  }
+
+  try {
+    const size = fstatSync(fd).size;
+    const length = Math.min(size, tailBytes);
+    const buffer = Buffer.alloc(length);
+
+    readSync(fd, buffer, 0, length, size - length);
+
+    // A line the tail cuts does not parse, and is passed over.
+    const launch = transcriptLaunch(buffer.toString('utf8'));
+
+    // A turn can write more than the tail after the last mode line: with none in the tail, the rest is searched for a Code Mode line as bytes,
+    // without parsing it.
+    if (!buffer.includes(REPL_MODE) && size > length) {
+      // Up to the tail's start and a little into it, for a line the tail cuts.
+      launch.codeMode = holdsBefore(fd, Math.min(size, size - length + REPL_MODE_ON.length), REPL_MODE_ON);
+    }
+
+    return launch;
+  } catch {
+    return null;
+  } finally {
+    closeSync(fd);
   }
 }
 

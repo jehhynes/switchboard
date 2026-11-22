@@ -12,7 +12,7 @@ import { noKind } from './config.js';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
 import { HolderError, Viewer, recordPath } from '@switchboard/holder';
-import { answers, NotWritten, unansweredCard } from '@switchboard/conversation';
+import { answers, NotWritten, transcriptEnd, unansweredCard } from '@switchboard/conversation';
 import type { SessionEntry } from '@switchboard/holder';
 import { findHeld, heldFromHolder } from './held.js';
 import type { HeldSession, HolderRestartState, HolderState } from './held.js';
@@ -2698,7 +2698,7 @@ export class Runtime {
    * window, since a resume would run a second copy (mechanics M18), and without a transcript to resume; otherwise in Code Mode only when it ran in
    * Code Mode, with the permission mode and model it last ran with, where the transcript recorded them (mechanics M117).
    */
-  private async registeredLaunch(session: Session, name: string): Promise<{ codeMode: boolean; permissionMode: PermissionMode | null; model: string | null } | { refused: string }> {
+  private async registeredLaunch(session: Session, name: string): Promise<{ codeMode: boolean; permissionMode: PermissionMode | null; model: string | null; transcript: string } | { refused: string }> {
     if (session.nativeSessionId === null) {
       return { refused: 'The session never started, so it cannot be resumed.' };
     }
@@ -2716,7 +2716,7 @@ export class Runtime {
     const transcript = findTranscript(join(dirname(this.deps.claudeSettings), 'projects'), session.cwd, session.nativeSessionId);
     const launch = transcript === null ? null : readTranscriptLaunch(transcript.path);
 
-    return launch ?? { refused: `Claude keeps no transcript of session ${name}, so it cannot be resumed.` };
+    return launch === null || transcript === null ? { refused: `Claude keeps no transcript of session ${name}, so it cannot be resumed.` } : { ...launch, transcript: transcript.path };
   }
 
   /** Spawns the ended session again; roster reads leave it alone meanwhile, since they cannot tell its new process from its old launch. */
@@ -2750,6 +2750,12 @@ export class Runtime {
     try {
       // Stored before the spawn, so a hub that stops during it finds the live process under this launch.
       const launchId = this.runners.codeMode.newLaunchId?.() ?? randomUUID();
+
+      // The conversation of a registered session is followed from its first resume on: its transcript's earlier lines, often days of work in the
+      // operator's window, are not read as new, which would flood every page showing it (architecture.md § Code Mode sessions).
+      if (registered !== null && session.codeMode !== true) {
+        store.setCheckpoint({ sessionId, transcript: registered.transcript, offset: transcriptEnd(registered.transcript), lastUuid: null, lastAt: this.deps.now() });
+      }
 
       this.send({ type: 'held-resuming', sessionId, launchId, ...(registered === null || session.codeMode === true ? {} : { adopt: { codeMode: registered.codeMode } }) });
 
