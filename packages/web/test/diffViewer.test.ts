@@ -56,6 +56,8 @@ describe("the diff viewer's file header", () => {
 
     expect(view.options.map((options) => header(options, 'renderHeaderMetadata'))).toEqual([meta, meta]);
     expect(view.options.map((options) => options['diffStyle'])).toEqual(['split', 'unified']);
+    // The page's editor background, in both schemes, over the theme's.
+    expect(view.options.every((options) => String(options['unsafeCSS']).includes('--diffs-dark-bg: var(--vscode-editor-background)') && String(options['unsafeCSS']).includes('--diffs-light-bg: var(--vscode-editor-background)'))).toBe(true);
   });
 
   it("puts the file view's Back before the name and its line after it, and keeps them when the wrapping changes", () => {

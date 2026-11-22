@@ -11,6 +11,11 @@ registerCustomTheme('sb-dark-modern', () => import('./themes/sb-dark-modern.json
 registerCustomTheme('sb-light-modern', () => import('./themes/sb-light-modern.json').then((module) => module.default as never));
 
 const THEME = { dark: 'sb-dark-modern', light: 'sb-light-modern' } as const;
+/**
+ * The page's editor background under the code, its gutters and the file's header in both schemes, in place of the theme's own, so the viewer
+ * matches the page around it; Pierre's `unsafe` layer comes after the theme's.
+ */
+const BACKGROUND_CSS = ':host { --diffs-light-bg: var(--vscode-editor-background); --diffs-dark-bg: var(--vscode-editor-background); }';
 /** Files longer than this many lines show uncoloured (`tokenizeMaxLength` counts lines), so a lock file never ties up the workers. */
 export const TOKENIZE_MAX_LINES = 10_000;
 
@@ -70,6 +75,7 @@ function options(layout: 'split' | 'stacked', wrap: boolean): CodeViewOptions<un
     overflow: wrap ? 'wrap' : 'scroll',
     tokenizeMaxLength: TOKENIZE_MAX_LINES,
     stickyHeaders: true,
+    unsafeCSS: BACKGROUND_CSS,
     enableLineSelection: true,
     layout: { paddingTop: 0, paddingBottom: 16, gap: 8 },
   };
