@@ -166,6 +166,9 @@ describe('drawing', () => {
     host.innerHTML = markup;
     expect([...host.querySelectorAll('.timeline > li')].map((li) => li.getAttribute('data-id') ?? li.textContent)).toEqual(['Tue, Nov 17', 'm1', 'r1', 'Yesterday', 'm2', 'Today', 'm3']);
     expect(html(renderTimeline(pageState([message('m1', 1, { at: new Date(2025, 11, 31, 9).getTime() })]), newView(), at(20, 12)))).toContain('>Wed, Dec 31, 2025</li>');
+    // A message dated before the items above it, such as one queued days ago and placed last, starts no divider back in time.
+    host.innerHTML = html(renderTimeline(pageState([message('m2', 3, { at: at(19, 9) }), message('m3', 4, { at: at(20, 9) }), message('m0', 5, { at: at(17, 21), provisional: true })]), newView(), at(20, 12)));
+    expect([...host.querySelectorAll('.timeline > li')].map((li) => li.getAttribute('data-id') ?? li.textContent)).toEqual(['Yesterday', 'm2', 'Today', 'm3', 'm0']);
   });
 
   it('shows the time only on the first item after a day\'s divider, and the optional marks and every time only with message details on', () => {

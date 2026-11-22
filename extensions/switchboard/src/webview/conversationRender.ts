@@ -65,11 +65,11 @@ const DAY = new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short',
 const DAY_WITH_YEAR = new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
 
 
-/** The local calendar day of a time, to tell when a turn starts on another day. */
-function dayOf(at: number): string {
+/** The local midnight starting the day of a time, to tell when a turn starts on a later day. */
+function dayOf(at: number): number {
   const date = new Date(at);
 
-  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
 }
 
 /** A day as its divider names it: "Today", "Yesterday", the weekday and date this year, or the full date with the year. */
@@ -690,7 +690,8 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
   // The turn's row after the newest item, so replies written mid-turn show above it; it has no data-id, so the keys skip it.
   const spinner = turnRow(state.session, awaitingReply(state.items, state.session));
   // A turn starts at each message; the first item shown, and each turn that starts on another day than the turn before it, has a divider.
-  let turnDay: string | null = null;
+  // In conversation order, not by time, so an item dated before the ones above it, such as one still queued from days ago, starts no divider.
+  let turnDay: number | null = null;
   const entries = shown.map((entry) => {
     if (entry.type === 'artifact') {
       return artifactRow(entry.artifact);
@@ -701,8 +702,8 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
     if (turnDay === null || entry.type === 'message') {
       const day = dayOf(entry.item.at);
 
-      divider = day !== turnDay ? dayDivider(entry.item.at, now) : '';
-      turnDay = day;
+      divider = turnDay === null || day > turnDay ? dayDivider(entry.item.at, now) : '';
+      turnDay = turnDay === null ? day : Math.max(turnDay, day);
     }
 
     // A note has no time; the first item after a day's divider shows its time, and with message details on every item does (`stamped`).

@@ -172,6 +172,13 @@ function answerAfter(state: PageState, replyId: string): string | null {
   return later?.type === 'message' ? later.text : null;
 }
 
+/** The local midnight starting the day of a time. */
+function startOfDay(at: number): number {
+  const date = new Date(at);
+
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+}
+
 /** The Conversation tab: why the page cannot talk to the session, earlier messages, and the timeline with its spinner. */
 export function renderTimeline(state: PageState, view: View, now: number = Date.now()): VNode {
   if (state.session === null) {
@@ -183,22 +190,23 @@ export function renderTimeline(state: PageState, view: View, now: number = Date.
   // After the newest item, so replies written mid-turn show above it.
   const shownPrompt = view.prompt !== null && view.prompt.sessionId === state.session.id ? view.prompt : null;
   const spinner = turnRow(state.session, awaitingReply(state.items, state.session), shownPrompt?.prompt != null);
-  let lastDay: string | null = null;
+  let lastDay: number | null = null;
   const rows = entries.flatMap((entry) => {
     if (entry.type === 'artifact') {
       return [<ArtifactRow key={`artifact:${entry.artifact.path}`} artifact={entry.artifact} />];
     }
 
-    // The first item shown, and each turn that starts on another day than the turn before it, has a divider.
-    const day = new Date(entry.item.at).toDateString();
+    // The first item shown, and each turn that starts on a later day than the turns before it, has a divider. The order is the transcript's, not
+    // the items' times, so an item dated before the ones above it, such as one still queued from days ago, starts no divider back in time.
+    const day = startOfDay(entry.item.at);
     const divider =
-      day !== lastDay && (lastDay === null || entry.type === 'message') ? (
+      (lastDay === null || (entry.type === 'message' && day > lastDay)) ? (
         <li class="day" role="separator" key={`day:${day}`}>
           {dayLabel(entry.item.at, now)}
         </li>
       ) : null;
 
-    lastDay = entry.type === 'message' || lastDay === null ? day : lastDay;
+    lastDay = divider !== null ? day : lastDay;
 
     // The first item after a day's divider shows its time; with message details on, every item does.
     const timed = entry.type === 'message' || entry.item.kind !== 'note';

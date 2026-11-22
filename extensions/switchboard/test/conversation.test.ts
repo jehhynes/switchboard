@@ -529,6 +529,9 @@ describe('the Conversation view page', () => {
     root.innerHTML = renderConversation(state([message('m1', at(17, 9, 5), 'Older')]), new Set(), at(20, 9, 0));
     expect(root.querySelector('.day')?.textContent).toBe('Tue, Nov 17');
     expect(root.querySelector('li[data-id="m1"] .stamp')?.textContent).toBe('9:05 AM');
+    // A message dated before the items above it, such as one queued days ago and placed last, starts no divider back in time.
+    root.innerHTML = renderConversation(state([message('m1', at(19, 9, 0), 'First'), message('m2', at(20, 9, 0), 'Second'), message('m0', at(17, 21, 0), 'Old notice')], { session: { ...SESSION, state: 'idle' } }), new Set(), at(20, 12, 0));
+    expect([...root.querySelectorAll('.timeline > li')].map((li) => li.getAttribute('data-id') ?? li.className)).toEqual(['day', 'm1', 'day', 'm2', 'm0']);
   });
 
   it('shows a spinner after the newest item while the session works on a reply, gone when the reply arrives or the turn ends', () => {
