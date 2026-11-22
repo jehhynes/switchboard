@@ -120,3 +120,13 @@ describe('the tab strip on a narrow screen', () => {
     expect(html(changesButton({ ...newChanges(), list: { total: 3, rows: [] } as never }))).toContain('aria-label="Changes list, 3 files"');
   });
 });
+
+describe('the Changes tab on a narrow pane', () => {
+  it('ViewedTick_InAPaneUnder600px_ShowsItsBoxAlone', () => {
+    const changesCss = PAGE_ASSETS['page.css']!.body;
+
+    expect(changesCss).toContain('container-type: inline-size;');
+    expect(changesCss).toContain('@container (max-width: 599px) { .diff-viewed-label { display: none; } }');
+    expect(changesCss).toMatch(/\.diff-viewed \{ justify-content: center; min-width: 44px; min-height: 44px; \}/);
+  });
+});

@@ -54,7 +54,7 @@
 .diff-back { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; margin-right: 2px; border: none; border-radius: 4px; background: transparent; color: var(--vscode-foreground); cursor: pointer; vertical-align: middle; }
 .diff-back:hover { background: var(--vscode-toolbar-hoverBackground); }
 .diff-host > .empty .diff-back { margin-right: 6px; }
-.diff-host { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding-bottom: var(--sb-end);
+.diff-host { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; container-type: inline-size; padding-bottom: var(--sb-end);
   --diffs-font-family: var(--vscode-editor-font-family);
   --diffs-header-font-family: var(--vscode-font-family);
   --diffs-font-size: 14px; --diffs-line-height: 19px;
@@ -75,10 +75,12 @@
 .change-item.viewed .change-name, .change-item.viewed .change-dir { opacity: 0.6; }
 /* Pierre stops pointer events on its headers while the view scrolls; the tick takes them still, so a tap just after a fling lands. */
 .diff-viewed { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; pointer-events: auto; }
+/* In a pane under 600 px, as on a phone or in the side column, a file's Viewed tick is its box alone, so its name keeps the header's room. */
+@container (max-width: 599px) { .diff-viewed-label { display: none; } }
 /* A placeholder's counts and state after its name give way first, so the name keeps the header's room. */
 .sb-loading { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* A file's collapse chevron, before its name; a collapsed file's header expands it too. */
 .diff-chevron { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; margin-right: 2px; padding: 0; border: none; border-radius: 4px; background: transparent; color: var(--vscode-foreground); cursor: pointer; pointer-events: auto; }
 .diff-chevron:hover { background: var(--vscode-toolbar-hoverBackground); }
 @media (hover: none), (pointer: coarse) { .diff-chevron { width: 36px; height: 36px; } }
-@media (hover: none), (pointer: coarse) { .change-viewed { width: 44px; height: 44px; } .change-viewed input, .diff-viewed input { width: 20px; height: 20px; } }
+@media (hover: none), (pointer: coarse) { .change-viewed { width: 44px; height: 44px; } .change-viewed input, .diff-viewed input { width: 20px; height: 20px; } .diff-viewed { justify-content: center; min-width: 44px; min-height: 44px; } }

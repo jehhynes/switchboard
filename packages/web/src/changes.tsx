@@ -300,8 +300,8 @@ function BackButton(): VNode {
 function DiffTools({ row }: { row: ChangeRow | undefined }): VNode | null {
   return row === undefined ? null : (
     <label class="diff-viewed" title={row.viewed === true ? 'Viewed; untick to read it again' : 'Mark viewed'}>
-      <input type="checkbox" data-action="diff-viewed" data-path={row.path} checked={row.viewed === true} />
-      Viewed
+      <input type="checkbox" data-action="diff-viewed" data-path={row.path} checked={row.viewed === true} aria-label={`Viewed ${row.path}`} />
+      <span class="diff-viewed-label">Viewed</span>
     </label>
   );
 }

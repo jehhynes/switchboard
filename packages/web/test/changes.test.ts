@@ -821,6 +821,17 @@ describe('the Changes list', () => {
     expect(changesMounts[1]!.scrolls.at(-1)).toBe('docs/a.md:3');
   });
 
+  it('ViewedTick_InAHeader_KeepsItsNameForScreenReadersWhenOnlyTheBoxShows', async () => {
+    start();
+    await openRow(0);
+
+    const box = root.querySelector<HTMLInputElement>('.diff-host .diff-viewed input')!;
+
+    // A narrow pane hides the word (changes.css), so the box carries its own name.
+    expect(box.getAttribute('aria-label')).toBe('Viewed docs/a.md');
+    expect(box.parentElement!.querySelector('.diff-viewed-label')!.textContent).toBe('Viewed');
+  });
+
   it('Escape_InAFileView_GoesBackToTheDiffs', async () => {
     start();
     await openRow(1);
