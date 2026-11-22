@@ -199,7 +199,7 @@ export function controlsOf(item: WorkItemView, mode: OpenVSCode = 'always'): Con
 
   // Runs in the item window, not the hub (PRD R57).
   if (item.worktree !== null) {
-    controls.push({ label: 'Open changes', icon: 'diff-multiple', message: { type: 'changes', path: item.worktree.path, key: ticketKey(item.ticket), title: item.ticket.title } });
+    controls.push({ label: 'Open changes', icon: 'diff-multiple', message: { type: 'changes', path: item.worktree.path, key: shownKey(item.ticket, undefined), title: item.ticket.title } });
   }
 
   const terminal = terminalCommand(item);
@@ -226,7 +226,7 @@ function deleteConfirm(item: WorkItemView, stops: boolean): NonNullable<Control[
     item.ticket.source === 'adhoc' ? null : item.ticket.source === 'schedule' ? 'Its schedule makes the next work item at its next time or Run now.' : 'The ticket gets a new work item only when it is assigned to you again.',
   ];
 
-  return { question: `Delete ${ticketKey(item.ticket)}?`, detail: detail.filter((text) => text !== null).join(' '), action: 'Delete' };
+  return { question: `Delete ${shownKey(item.ticket, undefined)}?`, detail: detail.filter((text) => text !== null).join(' '), action: 'Delete' };
 }
 
 /**
@@ -237,7 +237,7 @@ function deleteConfirm(item: WorkItemView, stops: boolean): NonNullable<Control[
 export function terminalCommand(item: WorkItemView): Record<string, unknown> | null {
   const latest = item.sessions.at(-1) ?? null;
   const session = activeSession(item);
-  const name = ticketKey(item.ticket);
+  const name = shownKey(item.ticket, undefined);
 
   if (latest?.codeMode === true) {
     return codeModeTerminal(item.ticket, latest);
@@ -265,8 +265,8 @@ export function terminalCommand(item: WorkItemView): Record<string, unknown> | n
  * A Code Mode session's attach terminal (PRD R95), which runs `hub.js attach <Switchboard session ID>` and resumes an ended session; the
  * Switchboard session ID, unlike the Claude one, survives `/clear`, `/branch` and `/resume`.
  */
-export function codeModeTerminal(ticket: { source: string; sourceKey: string }, session: Pick<SessionView, 'id' | 'cwd' | 'shortId'>): Record<string, unknown> {
-  return { type: 'terminal', provider: 'claude', sessionId: session.id, cwd: session.cwd, name: ticketKey(ticket), shortId: session.shortId, active: false, codeMode: true };
+export function codeModeTerminal(ticket: { source: string; sourceKey: string; repoRoot?: string }, session: Pick<SessionView, 'id' | 'cwd' | 'shortId'>): Record<string, unknown> {
+  return { type: 'terminal', provider: 'claude', sessionId: session.id, cwd: session.cwd, name: shownKey(ticket, undefined), shortId: session.shortId, active: false, codeMode: true };
 }
 
 /**
@@ -571,7 +571,7 @@ export function sourceLabel(source: string): string {
  * The ticket's source and stored key, such as `gh 18941` or `gh acme/widgets-dashboard#63`. It does not change with labels, so it names
  * VS Code windows and workspace files; rows show {@link shownKey}.
  */
-export function ticketKey(ticket: { source: string; sourceKey: string }): string {
+export function ticketKey(ticket: { source: string; sourceKey: string; repoRoot?: string }): string {
   return `${sourceLabel(ticket.source)} ${ticket.sourceKey}`;
 }
 
@@ -600,7 +600,11 @@ export function issueKey(source: string, repo: string, number: string, keys: Rep
 }
 
 /** The ticket's key as rows show it: {@link issueKey} for another repository's issue, else {@link ticketKey}. */
-export function shownKey(ticket: { source: string; sourceKey: string }, keys: RepoKeys | undefined): string {
+export function shownKey(ticket: { source: string; sourceKey: string; repoRoot?: string }, keys: RepoKeys | undefined): string {
+  if (ticket.source === 'adhoc' && ticket.repoRoot) {
+    const folder = ticket.repoRoot.replace(/[\\/]+$/, '').split(/[\\/]/).at(-1) || ticket.repoRoot;
+    return `${folder} ${ticket.sourceKey}`;
+  }
   const qualified = /^([\w.-]+\/[\w.-]+)#(\d+)$/.exec(ticket.sourceKey);
 
   return qualified === null || keys === undefined ? ticketKey(ticket) : issueKey(ticket.source, qualified[1]!, qualified[2]!, keys);

@@ -531,6 +531,12 @@ export const MIGRATIONS = [
     reportedIn TEXT,
     PRIMARY KEY (sessionId, replyId, slug)
   );`,
+  // Standalone interactive sessions and their titles. Existing hosted conversations use the same lifecycle.
+  `ALTER TABLE workItems ADD COLUMN interactive INTEGER NOT NULL DEFAULT 0;
+  UPDATE workItems SET interactive = 1 WHERE ticketId IN (SELECT id FROM tickets WHERE hostWindow IS NOT NULL);
+  ALTER TABLE workItems ADD COLUMN titleOrigin TEXT;
+  ALTER TABLE workItems ADD COLUMN lastProviderName TEXT;`,
+  `ALTER TABLE workItems ADD COLUMN model TEXT;`,
 ];
 
 /**
@@ -566,7 +572,7 @@ const REPLY_PLACE = "(source = 'screen' AND withdrawn = 0)";
 /** A reply that counts as unread (`countsUnread`) and was not seen. */
 const UNREAD_REPLY = "seenAt IS NULL AND withdrawn = 0 AND rewrittenBy IS NULL AND kind <> 'note' AND opening <> ''";
 
-const BOOLEANS = new Set(['assigned', 'pool', 'snoozed', 'released', 'releasing', 'approvalHeld', 'external', 'mentioned', 'codeMode', 'promptless', 'personaPinned', 'registered', 'withoutCodeMode']);
+const BOOLEANS = new Set(['assigned', 'pool', 'snoozed', 'released', 'releasing', 'approvalHeld', 'external', 'mentioned', 'codeMode', 'promptless', 'personaPinned', 'registered', 'withoutCodeMode', 'interactive']);
 /** Stored as comma-separated text. */
 const LISTS = new Set(['reports', 'retiredIds']);
 /** Stored as JSON text. */

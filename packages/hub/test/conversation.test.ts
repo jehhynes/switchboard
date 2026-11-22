@@ -155,6 +155,7 @@ describe('hosted conversations in a window (architecture.md § Window scope)', (
     const projects = join(dir, 'projects');
     const held = new FakeHeld();
     let id = 0;
+    const titles: Array<{ workItemId: number; title: string; origin: string }> = [];
     const service = new ConversationService({
       store,
       windows: scopes,
@@ -165,6 +166,7 @@ describe('hosted conversations in a window (architecture.md § Window scope)', (
       hooks: () => true,
       now: () => NOW,
       newId: () => String(++id),
+      providerTitle: (workItemId, title, origin) => titles.push({ workItemId, title, origin }),
       ...(made === undefined ? {} : { newConversation: made }),
       log: () => {},
     });
@@ -193,8 +195,22 @@ describe('hosted conversations in a window (architecture.md § Window scope)', (
       writeFileSync(join(projects, projectSlug('D:/w12'), `${native}.jsonl`), lines.map((line) => `${line}\n`).join(''));
     };
 
-    return { store, view, scopes, service, host, open, transcript };
+    return { store, view, scopes, service, host, open, transcript, titles };
   }
+
+  it('reads Claude automatic and manual titles from the transcript', async () => {
+    const context = setup();
+    const id = context.host(context.view.file, 'titles');
+    context.transcript('n-titles', [JSON.stringify({ type: 'ai-title', aiTitle: 'Investigate build failure' })]);
+    await context.service.poll();
+    expect(context.titles).toEqual([{ workItemId: id, title: 'Investigate build failure', origin: 'provider-auto' }]);
+    context.transcript('n-titles', [JSON.stringify({ type: 'ai-title', aiTitle: 'Investigate build failure' }), JSON.stringify({ type: 'custom-title', customTitle: 'Investigate build failure' })]);
+    await context.service.poll();
+    expect(context.titles.at(-1)).toEqual({ workItemId: id, title: 'Investigate build failure', origin: 'provider-manual' });
+    context.transcript('n-titles', [JSON.stringify({ type: 'ai-title', aiTitle: 'Investigate build failure' }), JSON.stringify({ type: 'custom-title', customTitle: 'Build regression' })]);
+    await context.service.poll();
+    expect(context.titles.at(-1)).toEqual({ workItemId: id, title: 'Build regression', origin: 'provider-manual' });
+  });
 
   it("lists only the conversations its binding hosts, even for windows on one folder, and refuses the other window's", () => {
     const { view, scopes, service, host, open } = setup();

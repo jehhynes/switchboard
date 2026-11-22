@@ -148,7 +148,7 @@ export class AppServerRunner implements SessionRunner {
       this.deps.created(action.sessionId, native);
       this.#joined.set(native, this.deps.server.generation);
       this.#rememberInstructions(action.sessionId, native, instructions, null);
-      await this.deps.server.request('thread/name/set', { threadId: native, name: action.name }).catch(() => {});
+      if (action.name !== '') await this.deps.server.request('thread/name/set', { threadId: native, name: action.name }).catch(() => {});
       if (action.prompt !== '') {
         const attachments: Json[] = [];
         const skill = /^\/([\w:-]+)(?=\s|$)/.exec(action.prompt)?.[1];

@@ -245,6 +245,7 @@ export interface ConversationServiceDeps {
   newConversation?(hostWindow: string, folder: string, provider?: Provider): { workItemId: number } | { refused: string };
   /** A message was added to a work item's conversation, whose first titles a hosted conversation. */
   messageAdded?(workItemId: number, text: string): void;
+  providerTitle?(workItemId: number, title: string, origin: 'provider-manual' | 'provider-auto'): void;
   /** Resumes an ended Codex app-server session before a message typed to it is sent (PRD R107); why not, or null. */
   resume?(sessionId: string): Promise<string | null>;
   /** Speech out (architecture.md § Voice); without it no window has voice. */
@@ -265,6 +266,8 @@ export interface ConversationServiceDeps {
   restartHolder?(detail?: string): string | null;
   /** Runs an operator event the page's New ad-hoc session sends, `adhoc` or `run-schedule`, as the dock's `/action` does: why not, or null. */
   operatorEvent?(event: Record<string, unknown>): string | null;
+  /** Creates a standalone promptless work item and returns its ID. */
+  newStandalone?(folder: string, provider: Provider, model: string | null): { workItemId: number } | { refused: string };
   /** The Done rows from `since` up to the Done list whose search text holds every word of `text`, as the dock's search further back (PRD R63). */
   searchDone?(text: string, since: number): { rows: PageRow[]; more: boolean };
   /** A page's focus changed: a focused, visible page counts as a focused window for the voice; `notify`, when sent, whether it may show notifications. */
@@ -1788,6 +1791,33 @@ export class ConversationService {
 
   /** Each `page-adhoc` that created, by page key and `opId`, so a retried one creates once; the last 100. A refusal is not kept, so a retry after it runs again. */
   readonly #pageAdhocs = new Map<string, { status: number; body: unknown }>();
+
+  readonly #standalone = new Map<string, { status: number; body: { workItemId: number; folder: string } }>();
+
+  /** A new standalone session from the dock or a page, retried safely with the same operation ID. */
+  standalone(body: Record<string, unknown>, page: boolean): { status: number; body: unknown } {
+    const { window, opId, folder, provider, model } = body;
+    if (typeof opId !== 'string' || opId === '' || opId.length > 200 || typeof folder !== 'string' || (provider !== 'claude' && provider !== 'codex') || !(model === null || model === undefined || (typeof model === 'string' && model.trim() !== '' && model.length <= 200))) {
+      return { status: 400, body: { error: 'Expected {opId, folder, provider, model?}.' } };
+    }
+    if (page && (typeof window !== 'string' || !this.deps.windows.isPage(window))) return { status: 403, body: { error: 'Not in this window.' } };
+    const canonical = page ? knownFolder(this.deps.pageHeader?.().folders ?? [], folder) : canonicalFolder(folder);
+    if (canonical === null) return { status: 400, body: { error: `${folder} is not a folder a session can run in.` } };
+    const key = `${page ? window : 'dock'} ${opId}`;
+    const earlier = this.#standalone.get(key);
+    if (earlier !== undefined) return earlier;
+    const made = this.deps.newStandalone?.(canonical, provider, typeof model === 'string' ? model.trim() : null) ?? { refused: 'The session was not made.' };
+    if ('refused' in made) return { status: 409, body: { error: made.refused } };
+    const answer = { status: 200, body: { workItemId: made.workItemId, folder: canonical } };
+    this.#standalone.set(key, answer);
+    for (const old of [...this.#standalone.keys()].slice(0, -100)) this.#standalone.delete(old);
+    if (page) {
+      this.deps.windows.select(window as string, made.workItemId);
+      this.scopesChanged([window as string]);
+    }
+    this.conversationsChanged();
+    return answer;
+  }
 
   /**
    * `page-adhoc {window, opId, prompt, repoRoot, start, provider}` or `{window, opId, schedule}` (architecture.md § Web page): More Actions' New

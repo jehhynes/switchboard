@@ -677,7 +677,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     log: deps.log,
   });
   const conversation: ConversationService = new ConversationService({
-    adapters: changed => [new CodexConversationAdapter({ server: runtime.codexServer, runner: runtime.codexAppServer, store, now: deps.now, newId: randomUUID, log: deps.log, requestsChanged: () => conversation.sessionsChanged() }, changed)],
+    adapters: changed => [new CodexConversationAdapter({ server: runtime.codexServer, runner: runtime.codexAppServer, store, now: deps.now, newId: randomUUID, log: deps.log, requestsChanged: () => conversation.sessionsChanged(), providerTitle: (workItemId, title, origin) => runtime.send({ type: 'conversation-title', workItemId, text: title, origin }) }, changed)],
     store,
     windows: scopes,
     voice: {
@@ -715,6 +715,15 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       const made = refused === null ? store.hostedWorkItems(hostWindow)[0] : undefined;
 
       return made === undefined ? { refused: refused ?? 'The conversation was not made.' } : { workItemId: made.id };
+    },
+    newStandalone: (folder, provider, model) => {
+      const before = new Set(store.adhocKeys());
+      const { refused } = runtime.send({ type: 'new-session', repoRoot: folder, provider, model });
+      if (refused !== null) return { refused };
+      const key = store.adhocKeys().find((one) => !before.has(one));
+      const ticket = key === undefined ? null : store.findTicket('adhoc', key);
+      const item = ticket === null ? null : store.workItemsForTicket(ticket.id)[0];
+      return item === undefined || item === null ? { refused: 'The session was not made.' } : { workItemId: item.id };
     },
     pageList: () => {
       const built = views();
@@ -844,15 +853,16 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
       voice.update();
     },
-    // A hosted conversation is titled by its first message (architecture.md § Hosted conversations).
+    // Give an unnamed interactive conversation a short label until its provider names it.
     messageAdded: (workItemId, text) => {
       const item = store.workItem(workItemId);
       const ticket = item === null ? null : store.ticket(item.ticketId);
 
-      if (ticket?.hostWindow != null && ticket.title === NEW_CONVERSATION_TITLE) {
+      if (ticket?.source === 'adhoc' && ticket.title === NEW_CONVERSATION_TITLE && (item?.interactive || ticket.hostWindow != null)) {
         runtime.send({ type: 'conversation-title', workItemId, text });
       }
     },
+    providerTitle: (workItemId, title, origin) => runtime.send({ type: 'conversation-title', workItemId, text: title, origin }),
     log: deps.log,
   });
   pageListChanged = () => conversation.pageListChanged();
@@ -1289,12 +1299,13 @@ const dockWithRuns = () => {
       '/v1/conversation/card-draft': async (body) => (isRecord(body) ? conversation.cardCommand('card-draft', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, card, draft}.' } }),
       '/v1/conversation/card-dismiss': async (body) => (isRecord(body) ? conversation.cardCommand('card-dismiss', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, card, slug}.' } }),
       // `installed` lets the dock skip its provider choice when only one CLI is found (PRD R104).
-      '/v1/conversation/providers': async () => ({ status: 200, body: { defaultProvider: config.settings.sessions.provider, installed: await installedProviders(config.settings.sessions) } }),
+      '/v1/conversation/providers': async () => ({ status: 200, body: { defaultProvider: config.settings.sessions.provider, installed: await installedProviders(config.settings.sessions), models: { claude: config.settings.sessions.model, codex: config.settings.sessions.codex.model } } }),
         '/v1/conversation/answer': async (body) => isRecord(body) ? conversation.answer(body) : { status: 400, body: { error: 'Expected a request answer.' } },
       '/v1/conversation/history': async (body) => (isRecord(body) ? conversation.history(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, before, limit?}.' } }),
       '/v1/conversation/seen': async (body) => (isRecord(body) ? conversation.seen(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, ids}.' } }),
       '/v1/conversation/select': async (body) => (isRecord(body) ? conversation.select(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId}.' } }),
       '/v1/conversation/new-conversation': async (body) => (isRecord(body) ? conversation.newConversation(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId}.' } }),
+      '/v1/conversation/page-new-session': async (body) => (isRecord(body) ? conversation.standalone(body, true) : { status: 400, body: { error: 'Expected {window, opId, folder, provider, model?}.' } }),
       '/v1/conversation/statuses': async (body) => (isRecord(body) ? conversation.statuses(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, before, limit?}.' } }),
       '/v1/conversation/commands': async (body) => (isRecord(body) ? conversation.commands(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } }),
       '/v1/conversation/talk-here': async (body) => (isRecord(body) ? conversation.voiceCommand('talk-here', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId}.' } }),
@@ -1599,6 +1610,7 @@ const dockWithRuns = () => {
       },
       // The dock's New conversation in a folder (architecture.md § Hosted conversations): a conversation hosted by a folder, selected there before its window opens.
       '/dock/new-conversation': async (body) => (isRecord(body) ? conversation.dockConversation(body) : { status: 400, body: { error: 'Expected {folder, opId}.' } }),
+      '/dock/new-session': async (body) => (isRecord(body) ? conversation.standalone(body, false) : { status: 400, body: { error: 'Expected {opId, folder, provider, model?}.' } }),
       '/dock/show': async () =>
         sendDock('show', {}) > 0 ? { status: 200, body: { shown: true } } : { status: 409, body: { error: 'The dock is not running.' } },
       // The dock's Settings window (PRD R54).

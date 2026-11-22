@@ -1570,7 +1570,7 @@ public sealed class MainWindowTests
         var (window, _) = Open();
         var names = window.GetVisualDescendants().OfType<Button>().Where((button) => button.Classes.Contains("header")).Select((button) => Avalonia.Automation.Peers.ControlAutomationPeer.CreatePeerForElement(button).GetName());
 
-        Assert.Equal(["github", "zoho", "Search", "Auto-hide", "More Actions", "Close the dock"], names);
+        Assert.Equal(["github", "zoho", "Search", "New session", "Auto-hide", "More Actions", "Close the dock"], names);
     }
 
     [AvaloniaFact]
@@ -1669,7 +1669,7 @@ public sealed class MainWindowTests
         var (window, _) = Open();
         var sizes = window.GetVisualDescendants().OfType<Button>().Where((button) => button.Classes.Contains("header")).Select((button) => button.Bounds.Size).ToList();
 
-        Assert.Equal(6, sizes.Count);
+        Assert.Equal(7, sizes.Count);
         Assert.All(sizes, (size) => Assert.Equal(new Size(28, 28), size));
     }
 

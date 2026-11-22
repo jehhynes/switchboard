@@ -79,6 +79,22 @@ public sealed class DialogTests
     }
 
     [AvaloniaFact]
+    public void NewSession_ModelFollowsProviderAndCanBeChanged()
+    {
+        NewSessionDialog.Choice? answer = null;
+        var (owner, dialog) = Show(async owner => answer = await NewSessionDialog.Ask(owner, "D:/git/widgets", "codex", "sonnet", "gpt-6.2-sol", ["claude", "codex"]));
+        var provider = Named<ComboBox>(dialog, "SessionProvider");
+        var model = Named<TextBox>(dialog, "SessionModel");
+        Assert.Equal("gpt-6.2-sol", model.Text);
+        provider.SelectedIndex = 0;
+        Assert.Equal("sonnet", model.Text);
+        model.Text = "opus";
+        Press(dialog, Key.Enter);
+        Assert.Equal(new NewSessionDialog.Choice("claude", "opus"), answer);
+        owner.Close();
+    }
+
+    [AvaloniaFact]
     public void Input_EnterStartsALineAndCtrlEnterRunsTheAction()
     {
         InputAnswer? answer = null;

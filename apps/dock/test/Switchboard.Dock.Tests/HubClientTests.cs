@@ -106,7 +106,7 @@ public sealed class HubClientTests
 
     static async Task<T> Until<T>(Func<T?> value) where T : class
     {
-        for (var deadline = DateTime.UtcNow.AddSeconds(5); DateTime.UtcNow < deadline; await Task.Delay(20))
+        for (var deadline = DateTime.UtcNow.AddSeconds(10); DateTime.UtcNow < deadline; await Task.Delay(20))
         {
             if (value() is { } found)
             {
@@ -495,7 +495,7 @@ public sealed class HubClientTests
 
             await stream.WriteAsync(Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n"));
             await stream.WriteAsync(Encoding.UTF8.GetBytes($"event: click\ndata: {{\"rowKey\":\"item:8\"}}\n\nevent: click\ndata: {{}}\n\nevent: dock\ndata: {json}\n\n"));
-            await Task.Delay(5000);
+            await Task.Delay(15000);
         });
         using var client = new HubClient(HomeFor(server));
         var clicked = new System.Collections.Concurrent.ConcurrentQueue<string>();

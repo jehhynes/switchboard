@@ -192,6 +192,7 @@ const PROVIDERS = [
  * have yet. `opId` stays the same for the sheet's retries, so the hub creates once.
  */
 export type HeaderSheet =
+  | { kind: 'session'; opId: string; folder: string; provider: string; model: string; models: Record<string, string>; installed: string[] | null; busy: boolean; error: string | null }
   | { kind: 'adhoc'; opId: string; schedule: string; repo: string; provider: string; providerChosen: boolean; prompt: string; start: boolean; providerNote: string | null; busy: boolean; error: string | null }
   | { kind: 'folder'; opId: string; folder: string; provider: string; providerChosen: boolean; installed: string[] | null; busy: boolean; error: string | null }
   | { kind: 'later'; title: string }
@@ -355,6 +356,9 @@ export function renderListHeader(header: PageHeader | null, view: HeaderView): V
         <button type="button" class="icon search-toggle" data-action="list-search" aria-pressed={search.open} title="Search" aria-label="Search">
           <span class="codicon codicon-search" aria-hidden="true"></span>
         </button>
+        <button type="button" class="icon" data-action="list-new-session" title="New session" aria-label="New session">
+          <span class="codicon codicon-add" aria-hidden="true"></span>
+        </button>
         <div class="menu-anchor" data-key="more">
           <button type="button" class="icon more-actions" data-action="list-more" aria-haspopup="menu" aria-expanded={view.menu === 'more'} title="More Actions…" aria-label="More Actions">
             <span class="codicon codicon-ellipsis" aria-hidden="true"></span>
@@ -450,7 +454,8 @@ export function renderMoreMenu(header: PageHeader | null, local = false, phoneVo
   return (
     <ul class="glass menu more-menu" role="menu" aria-label="More Actions">
       {sources.length === 0 ? null : [...sources, <Separator classes="menu-separator more-source" />]}
-      <MoreRow action="list-adhoc" icon="add" label="New ad-hoc session…" />
+      <MoreRow action="list-new-session" icon="add" label="New session…" />
+      <MoreRow action="list-adhoc" icon="edit" label="New task from prompt…" />
       <MoreRow action="list-folder" icon="folder" label="New conversation in a folder…" />
       <Separator />
       <MoreRow action="list-later-held" icon="terminal" label="Held sessions" />
@@ -758,6 +763,19 @@ export function renderHeaderSheet(sheet: HeaderSheet | null, header: PageHeader 
     </>
   );
 
+  if (sheet.kind === 'session') {
+    const installed = sheet.installed;
+    const choices = installed === null ? [] : PROVIDERS.filter((one) => installed.includes(one.provider));
+    const ready = !sheet.busy && sheet.folder !== '' && installed !== null && installed.length > 0;
+    return (
+      <Frame title="New session" buttons={go(ready, 'Start')}>
+        <Select label="Folder" field="folder" items={[{ value: '', label: 'Choose a folder' }, ...folders.map((one) => ({ value: one, label: one }))]} chosen={sheet.folder} />
+        {installed === null ? <p class="sheet-detail">Loading the providers…</p> : <Select label="Provider" field="provider" items={choices.map((one) => ({ value: one.provider, label: one.name }))} chosen={sheet.provider} />}
+        <label class="sheet-field"><span class="sheet-label">Model</span><input class="sheet-select" data-field="model" value={sheet.model} placeholder="Provider default" /></label>
+        {error}
+      </Frame>
+    );
+  }
   if (sheet.kind === 'folder') {
     const installed = sheet.installed;
     const choices = installed === null ? [] : PROVIDERS.filter((one) => installed.length > 1 || installed.includes(one.provider));
@@ -1056,6 +1074,25 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
     }
   };
   const focusSheet = (): void => sheetHost.querySelector<HTMLElement>('textarea, select')?.focus();
+  const openSession = async (): Promise<void> => {
+    const folders = shown?.folders ?? [];
+    const folder = lastRepo !== null && folders.includes(lastRepo) ? lastRepo : (shown?.repoRoots[0] ?? folders[0] ?? '');
+    const sheet: Extract<HeaderSheet, { kind: 'session' }> = { kind: 'session', opId: newOp(), folder, provider: 'claude', model: '', models: {}, installed: null, busy: false, error: null };
+    view.sheet = sheet;
+    redraw();
+    focusSheet();
+    const answer = await deps.post('providers', {});
+    if (view.sheet !== sheet) return;
+    const installed = answer.status === 200 && Array.isArray(answer.body['installed']) ? (answer.body['installed'] as unknown[]).filter((one): one is string => one === 'claude' || one === 'codex') : [];
+    sheet.installed = installed;
+    sheet.error = installed.length === 0 ? String(answer.body['error'] ?? 'Neither Claude nor Codex is installed.') : null;
+    const named = String(answer.body['defaultProvider'] ?? '');
+    sheet.provider = installed.includes(named) ? named : (installed[0] ?? 'claude');
+    const models = answer.body['models'];
+    sheet.models = models !== null && typeof models === 'object' ? Object.fromEntries(Object.entries(models).filter((entry): entry is [string, string] => typeof entry[1] === 'string')) : {};
+    sheet.model = sheet.models[sheet.provider] ?? '';
+    redraw();
+  };
   /** New ad-hoc session…: the repository used last or the first repo root, the default provider, or a schedule when there is no repository. */
   const openAdhoc = async (): Promise<void> => {
     const folders = shown?.folders ?? [];
@@ -1185,6 +1222,8 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
         ? await deps.post('page-holder-restart', { detail: shown?.holderNotice?.confirm?.detail ?? '' })
         : sheet.kind === 'adhoc'
         ? await deps.post('page-adhoc', sheet.schedule !== '' ? { opId: sheet.opId, schedule: sheet.schedule } : { opId: sheet.opId, prompt: sheet.prompt, repoRoot: sheet.repo, start: sheet.start, provider: sheet.provider })
+        : sheet.kind === 'session'
+        ? await deps.post('page-new-session', { opId: sheet.opId, folder: sheet.folder, provider: sheet.provider, model: sheet.model.trim() || null })
         : await deps.post('page-folder-conversation', { opId: sheet.opId, folder: sheet.folder, provider: sheet.provider });
 
     sheet.busy = false;
@@ -1197,6 +1236,8 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
 
     if (sheet.kind === 'adhoc' && sheet.schedule === '') {
       lastRepo = sheet.repo;
+    } else if (sheet.kind === 'session') {
+      lastRepo = sheet.folder;
     }
 
     if (view.sheet === sheet) {
@@ -1205,7 +1246,7 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
 
     redraw();
 
-    if (sheet.kind === 'folder' && typeof answer.body['workItemId'] === 'number') {
+    if ((sheet.kind === 'folder' || sheet.kind === 'session') && typeof answer.body['workItemId'] === 'number') {
       deps.select(answer.body['workItemId']);
     }
   };
@@ -1224,7 +1265,8 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
     (sheet as unknown as Record<string, unknown>)[name] = value;
 
     if (name === 'provider') {
-      sheet.providerChosen = true;
+      if (sheet.kind === 'session') sheet.model = sheet.models[value as string] ?? '';
+      else sheet.providerChosen = true;
     }
     redraw();
   };
@@ -1342,6 +1384,10 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
       case 'list-adhoc':
         view.menu = null;
         void openAdhoc();
+        break;
+      case 'list-new-session':
+        view.menu = null;
+        void openSession();
         break;
       case 'list-folder':
         view.menu = null;

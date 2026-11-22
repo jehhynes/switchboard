@@ -258,7 +258,8 @@ export class Runtime {
       resumeOptions: session => {
         const item = deps.store.workItem(session.workItemId);
         const playbook = item?.playbook == null ? null : (this.config.playbooks.get(item.playbook) ?? null);
-        return launchOptions(this.config.settings, playbook, session.kind, session.provider);
+        const options = launchOptions(this.config.settings, playbook, session.kind, session.provider);
+        return item?.model != null && playbook === null ? { ...options, model: item.model } : options;
       },
       configured: session => { this.send({ type: 'persona-delivered', sessionId: session.id }); },
       instructionsDelivered: (id, hash, compactionId) => { if (deps.store.session(id) !== null) deps.store.updateSession(id, { instructionsHash: hash, instructionsCompactionId: compactionId }); },
@@ -2756,7 +2757,7 @@ export class Runtime {
       return refuse('A newer session of this work item started; this one cannot resume.');
     }
 
-    const options = { permissionMode: registered?.permissionMode ?? defaults.permissionMode, model: registered?.model ?? defaults.model };
+    const options = { permissionMode: registered?.permissionMode ?? defaults.permissionMode, model: registered?.model ?? (playbook === null ? item.model : null) ?? defaults.model };
 
     this.resuming.add(sessionId);
 
@@ -2793,7 +2794,7 @@ export class Runtime {
             `${sessionName(session.kind, item, ticket)} ${session.nativeSessionId ?? ''}`,
             launchId,
             // A session started with no prompt that ended before its first message starts again with its contract (mechanics M87).
-            session.promptless === true ? { contract, name: sessionName(session.kind, item, ticket) } : undefined,
+            session.promptless === true ? { contract, name: item.interactive || ticket.hostWindow !== null ? '' : sessionName(session.kind, item, ticket) } : undefined,
             // A registered session's contract was only in its conversation (PRD R81).
             registered === null ? undefined : contract,
           );

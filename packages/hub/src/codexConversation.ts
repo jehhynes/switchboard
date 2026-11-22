@@ -16,6 +16,7 @@ export interface CodexConversationDeps {
   newId(): string;
   log(line: string): void;
   requestsChanged(): void;
+  providerTitle?(workItemId: number, title: string, origin: 'provider-manual' | 'provider-auto'): void;
 }
 
 /** Codex history and structured events, with message confirmation by client ID. No terminal or transcript parsing. */
@@ -87,8 +88,9 @@ export class CodexConversationAdapter implements ConversationAdapter {
       if (changed) this.#uncertainChecks.delete(session.id);
       if (uncertain) this.#uncertainChecks.set(session.id, (this.#uncertainChecks.get(session.id) ?? 0) + 1);
       try {
-        await this.deps.runner.follow(session);
+        const thread = await this.deps.runner.follow(session);
         if (this.#closed) return;
+        if (typeof thread['name'] === 'string') this.deps.providerTitle?.(session.workItemId, thread['name'], 'provider-manual');
         await this.#history(session);
         if (this.#closed) return;
         this.#followed.set(session.id, this.#revision(session));
@@ -114,8 +116,9 @@ export class CodexConversationAdapter implements ConversationAdapter {
   /** Follows the session's thread and imports its history and the live items held for it now, as a poll does, so its last reply is stored. */
   async catchUp(session: Session): Promise<void> {
     if (!this.pending(session)) return;
-    await this.deps.runner.follow(session);
+    const thread = await this.deps.runner.follow(session);
     if (this.#closed) return;
+    if (typeof thread['name'] === 'string') this.deps.providerTitle?.(session.workItemId, thread['name'], 'provider-manual');
     await this.#history(session);
     if (this.#closed) return;
     this.#followed.set(session.id, this.#revision(session));
@@ -154,10 +157,14 @@ export class CodexConversationAdapter implements ConversationAdapter {
   }
 
   #event(event: Json): void {
-    if (!['item/started', 'item/completed', 'serverRequest/resolved', 'turn/completed', 'thread/tokenUsage/updated', 'thread/settings/updated'].includes(String(event['method'])) && event['id'] === undefined) return;
+    if (!['item/started', 'item/completed', 'serverRequest/resolved', 'turn/completed', 'thread/tokenUsage/updated', 'thread/settings/updated', 'thread/name/updated'].includes(String(event['method'])) && event['id'] === undefined) return;
     const params = object(event['params']);
     const session = typeof params['threadId'] === 'string' ? this.deps.store.sessionByNativeId(params['threadId']) : null;
     if (session === null || !this.supports(session) || session.state === 'ended') return;
+    if (event['method'] === 'thread/name/updated' && typeof params['threadName'] === 'string') {
+      this.deps.providerTitle?.(session.workItemId, params['threadName'], 'provider-manual');
+      return;
+    }
     if (event['method'] === 'thread/settings/updated') {
       this.#settingsChanged(session, threadSettings(object(params['threadSettings'])));
       return;

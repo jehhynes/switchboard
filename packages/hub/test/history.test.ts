@@ -145,7 +145,7 @@ describe('History model', () => {
     const moved = historyView(JSON.parse(JSON.stringify(run.store.ticketHistory(2))) as TicketHistory, run.now).sections[0]!;
 
     expect(moved.title).toBe('Registered session');
-    expect(moved.entries.at(-1)).toMatchObject({ text: 'Moved this work from adhoc 2 to gh 115', lines: [] });
+    expect(moved.entries.at(-1)).toMatchObject({ text: 'Moved this work from widgets 2 to gh 115', lines: [] });
 
     // A later work item of the ticket, here with no playbook loaded to triage it, is not the moved one.
     run.send({ type: 'mark-done', workItemId: 2 });

@@ -79,13 +79,23 @@ describe('hosted conversations (architecture.md § Hosted conversations)', () =>
     expect(h.item(1)).toMatchObject({ status: 'running', error: null });
   });
 
-  it('titles the conversation by its first message only', () => {
+  it('summarizes the first message and follows provider titles', () => {
     const h = new Harness({ settings: settings({ sessions: { codeMode: true } }) });
 
     conversation(h);
     h.act({ type: 'conversation-title', workItemId: 1, text: '\n  Why does the build fail?\nIt says…' });
     h.act({ type: 'conversation-title', workItemId: 1, text: 'Second message' });
     expect(h.store.ticket(h.item(1).ticketId)?.title).toBe('Why does the build fail?');
+    h.act({ type: 'conversation-title', workItemId: 1, text: 'switchboard · ad-hoc · adhoc 1', origin: 'provider-manual' });
+    expect(h.store.ticket(h.item(1).ticketId)?.title).toBe('Why does the build fail?');
+    h.act({ type: 'conversation-title', workItemId: 1, text: 'Build failure in test setup', origin: 'provider-auto' });
+    expect(h.store.ticket(h.item(1).ticketId)?.title).toBe('Build failure in test setup');
+    h.act({ type: 'conversation-title', workItemId: 1, text: 'Build failure in test setup', origin: 'provider-manual' });
+    h.act({ type: 'conversation-title', workItemId: 1, text: 'Unwanted later title', origin: 'provider-auto' });
+    expect(h.store.ticket(h.item(1).ticketId)?.title).toBe('Build failure in test setup');
+    h.act({ type: 'conversation-title', workItemId: 1, text: 'Test setup fails', origin: 'provider-manual' });
+    h.act({ type: 'conversation-title', workItemId: 1, text: 'Later automatic title', origin: 'provider-auto' });
+    expect(h.store.ticket(h.item(1).ticketId)?.title).toBe('Test setup fails');
 
     const other = new Harness();
 

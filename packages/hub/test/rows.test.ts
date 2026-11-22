@@ -21,12 +21,20 @@ import {
   snapshotErrors,
   startPromptText,
   stripeOf,
+  shownKey,
   waitTexts,
   limitTexts,
   limitTime,
 } from '../src/rows.js';
 import type { WorkItemView } from '../src/runtime.js';
 import { item, NOW, pool, session, snapshot, triage } from './views.js';
+
+describe('ad hoc key', () => {
+  it('shows the folder name before the stored sequence', () => {
+    expect(shownKey({ source: 'adhoc', sourceKey: '12', repoRoot: 'D:/git/switchboard/' }, undefined)).toBe('switchboard 12');
+    expect(shownKey({ source: 'adhoc', sourceKey: '13', repoRoot: 'D:\\git\\support' }, undefined)).toBe('support 13');
+  });
+});
 
 const labels = (entry: WorkItemView) => controlsOf(entry).map((control) => control.label);
 

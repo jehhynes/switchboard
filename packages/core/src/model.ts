@@ -83,6 +83,12 @@ export interface TicketBlocker {
 }
 
 export interface WorkItem {
+  /** An empty, interactive session that stays open between turns. */
+  interactive?: boolean;
+  /** Model chosen when this interactive work item was created; null uses the provider default. */
+  model?: string | null;
+  titleOrigin?: 'provider-manual' | 'provider-auto' | 'generated' | null;
+  lastProviderName?: string | null;
   /** Provider chosen when this ad-hoc work item was created, used while it has no playbook; absent keeps the configured default. */
   provider?: Provider | null;
   id: number;

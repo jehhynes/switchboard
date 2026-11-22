@@ -2,7 +2,7 @@
 // browser-safe modules, so the History webview bundles it through `@switchboard/hub/history`.
 import type { HistoryChange, HistoryEvent, Session, TicketHistory, WorkItemStatus } from '@switchboard/core';
 import { adhocLabel, DONE_WORDS, PERMISSION_PROMPT, resumesHeld, START_PROMPT } from '@switchboard/core/group';
-import { ticketKey } from './rows.js';
+import { shownKey, ticketKey } from './rows.js';
 
 /** The filter chips of History (PRD R59). */
 export type Category = 'you' | 'session' | 'report' | 'triage' | 'ticket';
@@ -538,7 +538,7 @@ class Builder {
         const target = `${ticketKey({ source: str(detail['source']), sourceKey: str(detail['sourceKey']) })}${detail['playbook'] ? ` as ${str(detail['playbook'])}` : ''}`;
 
         skip.add('*');
-        return { category: 'report', icon: 'issues', text: typeof detail['adhocKey'] === 'string' ? `Moved this work from adhoc ${detail['adhocKey']} to ${target}` : `Asked to move this work to ${target}` };
+        return { category: 'report', icon: 'issues', text: typeof detail['adhocKey'] === 'string' ? `Moved this work from ${shownKey({ source: 'adhoc', sourceKey: detail['adhocKey'], repoRoot: this.history.ticket.repoRoot }, undefined)} to ${target}` : `Asked to move this work to ${target}` };
       }
       case 'marker':
       case 'roster': {
@@ -933,7 +933,7 @@ export function historyView(history: TicketHistory, now: number): HistoryView {
   links.push(...history.links.map((link) => targetLink(link.label, link.target)));
 
   return {
-    key: ticketKey(ticket),
+    key: shownKey(ticket, undefined),
     title: oneLine(ticket.title),
     url: ticket.url,
     facts,
