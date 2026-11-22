@@ -1,31 +1,23 @@
 // The Status and Artifacts tabs (architecture.md § Web page), in the tab strip or the column right of the conversation.
 import type { VNode } from 'preact';
 import { stampTime } from '@switchboard/conversation/messageMeta';
-import { answersCard } from '@switchboard/conversation/questions';
 import { artifactIcon } from './model.js';
 import type { PageState } from './model.js';
 import { renderMarkdown } from './markdown.js';
-import { ago, artifactShow, artifactUrl, withoutQuestions } from './render.js';
-import type { View } from './render.js';
-import { cardOf } from './timeline.js';
+import { ago, artifactShow, artifactUrl } from './render.js';
 import { trusted } from './trusted.js';
 import type { ArtifactView, StatusView } from '@switchboard/protocol';
 
-/** The Status tab: the latest status as Markdown with its time and age and a New mark while unread, or the stage dimmed. */
-export function renderStatus(state: PageState, view: View, now: number): VNode {
+/**
+ * The Status tab: the latest status as Markdown with its time and age and a New mark while unread, or the stage dimmed. Questions in a status are
+ * plain Markdown; question cards show only in the conversation.
+ */
+export function renderStatus(state: PageState, now: number): VNode {
   const status: StatusView | null = state.status;
 
   if (status === null) {
     return <p class="empty">No status yet. It appears here when the session reports one.</p>;
   }
-
-  const answer = (): string | null => {
-    const from = state.items.findIndex((item) => item.type === 'reply' && `st-${item.id}` === status.id);
-    const later = (from === -1 ? state.items.filter((item) => item.at > status.at) : state.items.slice(from + 1)).find((item) => item.type === 'message' && answersCard(item, status.at));
-
-    return later?.type === 'message' ? later.text : null;
-  };
-  const card = status.fallback ? null : cardOf(`status:${status.id}`, status.markdown, answer(), view, state.connected && state.session?.conversation === 'full');
 
   return (
     <div class={`status-tab${status.fallback ? ' fallback' : ''}${status.unread ? ' unread' : ''}`} data-unread={status.unread ? status.id : undefined}>
@@ -37,8 +29,7 @@ export function renderStatus(state: PageState, view: View, now: number): VNode {
         </span>
         {status.unread ? <span class="status-new">New</span> : null}
       </div>
-      <div class="status-body body">{trusted(card === null ? renderMarkdown(status.markdown) : withoutQuestions(status.markdown, `status:${status.id}`, view.open))}</div>
-      {card}
+      <div class="status-body body">{trusted(renderMarkdown(status.markdown))}</div>
     </div>
   );
 }

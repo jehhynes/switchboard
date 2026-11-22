@@ -1955,7 +1955,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
         drawDiagrams(pane);
       } else {
-        drawPane(pane, tab === 'status' ? renderStatus(state, view, now) : tab === 'artifacts' ? renderArtifacts(state, now) : renderTimeline(state, view));
+        drawPane(pane, tab === 'status' ? renderStatus(state, now) : tab === 'artifacts' ? renderArtifacts(state, now) : renderTimeline(state, view));
         drawDiagrams(pane);
       }
 

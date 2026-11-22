@@ -52,8 +52,8 @@ describe('HTML from the shared renderers', () => {
       const view = { ...newView(), details: true };
       const host = document.createElement('div');
 
-      expect(markupText(renderStatus(state({ status: one }), view, AT + 23 * 3_600_000))).toEqual([]);
-      mount(host, renderStatus(state({ status: one }), view, AT + 23 * 3_600_000));
+      expect(markupText(renderStatus(state({ status: one }), AT + 23 * 3_600_000))).toEqual([]);
+      mount(host, renderStatus(state({ status: one }), AT + 23 * 3_600_000));
       expect(host.querySelector('.status-age time.stamp')?.getAttribute('datetime')).toBe('2026-11-20T19:03:41.000Z');
       expect(host.querySelector('.status-age')!.textContent).toMatch(/^\d{1,2}:03 [AP]M · 23 h ago$/);
     }

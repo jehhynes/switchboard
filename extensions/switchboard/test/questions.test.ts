@@ -203,26 +203,16 @@ describe('question cards in the Conversation view', () => {
     expect(root.querySelector('li[data-id="r1"] .speech-bubble')?.textContent?.trim()).toBe('Then I start.');
   });
 
-  it('draws a card under the status on the Status tab, answered by a message after the reply it came from', () => {
-    const { show, root, option, submit, sends } = page();
+  it("shows a status's questions on the Status tab as plain Markdown, with no card or fold", () => {
+    const { show, root } = page();
     const status: StatusView = { id: 'st-r1', sessionId: 's2', at: T0, markdown: `Blocked on two choices.\n\n${ASKED}`, fallback: false, unread: false };
 
     show(state([reply('r1', T0, '')], { status }));
     root.querySelector<HTMLElement>('[role="tab"][data-tab="status"]')!.click();
-    expect(root.querySelector('.status-tab .question-card')).not.toBeNull();
-    option(1, 'B').click();
-    // Every question needs an answer before Submit, since the next message answers the whole card.
-    expect(submit().disabled).toBe(true);
-    submit().click();
-    expect(sends()).toEqual([]);
-    option(0, 'A').click();
-    submit().click();
-    expect(sends().map((one) => one['text'])).toEqual(['1A, 2B']);
-    show(state([reply('r1', T0, ''), message('m1', T0 + 1, '1A, 2B')], { status }));
-    expect(root.querySelector('.status-tab .question-card.answered')).not.toBeNull();
-    // The stage before the first status asks nothing.
-    show(state([], { status: { ...status, id: 'stage-2', fallback: true } }));
+    expect(root.querySelector('.status-tab .status-body')?.textContent).toContain('Blocked on two choices.');
+    expect(root.querySelectorAll('.status-tab .status-body ol > li')).toHaveLength(2);
     expect(root.querySelector('.question-card')).toBeNull();
+    expect(root.querySelector('.questions-fold')).toBeNull();
   });
 
   it('says the session waits for an answer or a permission in the terminal while a menu holds it, with Open in terminal', () => {
@@ -257,12 +247,10 @@ describe('question cards in the Conversation view', () => {
     expect(root.querySelector('.question-submit')).not.toBeNull();
   });
 
-  it('keeps the focus on the option picked on the Status tab, and sends a not-sent composer message from another conversation back to the composer', () => {
+  it('keeps the focus on the option picked, and sends a not-sent composer message back to the composer once the card was answered', () => {
     const { show, root, option, submit, post, host } = page();
-    const status: StatusView = { id: 'st-r1', sessionId: 's2', at: T0, markdown: ASKED, fallback: false, unread: false };
 
-    show(state([reply('r1', T0, '')], { status }));
-    root.querySelector<HTMLElement>('[role="tab"][data-tab="status"]')!.click();
+    show(state([reply('r1', T0, ASKED)]));
     option(1, 'B').focus();
     option(1, 'B').click();
     expect(document.activeElement).toBe(option(1, 'B'));
@@ -271,16 +259,15 @@ describe('question cards in the Conversation view', () => {
     // An answer still being typed can come back to its card; once sent, a later composer message with the same text that was not sent is the composer's.
     submit().click();
     post({ type: 'sent', id: 1_000_000, error: null });
-    show(state([reply('r1', T0, ''), message('m1', T0 + 1, '1A, 2B', { delivery: 'open', provisional: true })], { status }));
+    show(state([reply('r1', T0, ASKED), message('m1', T0 + 1, '1A, 2B', { delivery: 'open', provisional: true })]));
     // A message that was not sent leaves the conversation as it comes back.
-    show(state([reply('r1', T0, '')], { status }));
+    show(state([reply('r1', T0, ASKED)]));
     post({ type: 'unsent', returned: [{ text: '1A, 2B', error: 'Not sent.', workItemId: 2 }] });
     expect(root.querySelector('.question-error')?.textContent).toBe('Not sent.');
     expect(host.querySelector('textarea')?.value).toBe('');
     submit().click();
     post({ type: 'sent', id: 1_000_001, error: null });
-    show(state([reply('r1', T0, ''), message('m1', T0 + 1, '1A, 2B')], { status }));
-    root.querySelector<HTMLElement>('[role="tab"][data-tab="conversation"]')!.click();
+    show(state([reply('r1', T0, ASKED), message('m1', T0 + 1, '1A, 2B')]));
     post({ type: 'unsent', returned: [{ text: '1A, 2B', error: 'Not sent.', workItemId: 2 }] });
     expect(host.querySelector('textarea')?.value).toBe('1A, 2B');
   });

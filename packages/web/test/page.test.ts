@@ -5,7 +5,7 @@ import { afterEach, onTestFinished, beforeEach, describe, expect, it, vi } from 
 import { applyEvent, awaitingReply, EMPTY, mentionOf, mentionQuery, commandQuery, timeline, withEarlier } from '../src/model.js';
 import { answerText, answersIn, complete, parseQuestions } from '@switchboard/conversation/questions';
 import { artifactUrl, BROWSER_MIN_WIDTH, browserNote, paneLink, paneStatus, collapsedGroups, newView, renderMicButton, renderVoice, markdownBody } from '../src/render.js';
-import { renderArtifactView } from '../src/side.js';
+import { renderArtifactView, renderStatus } from '../src/side.js';
 import { renderTimeline, turnRow } from '../src/timeline.js';
 import { renderHeader } from '../src/header.js';
 import { renderList } from '../src/list.js';
@@ -123,6 +123,17 @@ describe('question cards in replies', () => {
     expect(host.querySelector('.question-card')?.className).toBe('question-card answered');
     host.innerHTML = html(renderTimeline(pageState([reply('r1', 1, { opening: ending }), message('m1', 2, { text: '1B', delivery: 'open' })]), newView()));
     expect(host.querySelector('.question-card')?.className).toBe('question-card');
+  });
+
+  it("shows a status's questions on the Status tab as plain Markdown, with no card or fold", () => {
+    const host = document.createElement('div');
+    const state = { ...pageState([reply('r1', 1, { opening: '' })]), status: { id: 'st-r1', sessionId: 's', at: 1, markdown: `Blocked on a choice.\n\n${ending}`, fallback: false, unread: false } };
+
+    host.innerHTML = html(renderStatus(state, 2));
+    expect(host.querySelector('.status-body')?.textContent).toContain('Blocked on a choice.');
+    expect(host.querySelectorAll('.status-body ol > li')).toHaveLength(1);
+    expect(host.querySelector('.question-card')).toBeNull();
+    expect(host.querySelector('.questions-fold')).toBeNull();
   });
 
   it('leaves a card answerable under a provisional message queued before the reply, and answered by one queued after it', () => {

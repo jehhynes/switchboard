@@ -50,14 +50,6 @@ export interface SendTarget {
   launch: string | null;
 }
 
-/** The text of the first message after the reply a status came from, or after the status's time when that reply is not loaded; null for none. */
-function statusAnswer(items: readonly ItemView[], status: StatusView): string | null {
-  const from = items.findIndex((item) => item.type === 'reply' && `st-${item.id}` === status.id);
-  const later = (from === -1 ? items.filter((item) => item.at > status.at) : items.slice(from + 1)).find((item) => item.type === 'message' && answersCard(item, status.at));
-
-  return later?.type === 'message' ? later.text : null;
-}
-
 /** What a typed message's line under its box says (architecture.md § Conversation view). */
 const DELIVERY = { open: 'sending', sent: 'sent', 'not-sent': 'not sent', uncertain: 'delivery unknown; check before resending' } as const;
 
@@ -361,7 +353,7 @@ export function statusBadge(status: StatusView | null, fresh: boolean): boolean 
  * `fresh`, and the buttons that open it and the earlier statuses in the Markdown preview. Before the first status, the work item's stage, dimmed;
  * with neither, a line that says so.
  */
-export function renderStatus(status: StatusView | null, fresh: boolean, now: number, card = '', open: ReadonlySet<string> = new Set(), earlier: EarlierStatuses | null = null): string {
+export function renderStatus(status: StatusView | null, fresh: boolean, now: number, earlier: EarlierStatuses | null = null): string {
   if (status === null) {
     return '<p class="empty">No status yet. It appears here when the session reports one.</p>';
   }
@@ -384,7 +376,7 @@ export function renderStatus(status: StatusView | null, fresh: boolean, now: num
   return (
     `<div class="status-tab${fresh ? ' fresh' : ''}${unread}" role="region" aria-label="${unread === '' ? 'Status' : 'Status, unread'}">` +
     `<div class="status-head"><span class="codicon codicon-pulse" aria-hidden="true"></span>${time}<span class="status-dot" aria-hidden="true">·</span>${age(status.at, now, 'status-age')}${mark}${actions}</div>` +
-    `<div class="status-body body">${card === '' ? renderMarkdown(status.markdown) : withoutQuestions(status.markdown, `status:${status.id}`, open)}</div>${card}</div>`
+    `<div class="status-body body">${renderMarkdown(status.markdown)}</div></div>`
   );
 }
 
@@ -722,14 +714,13 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
   const unopened = state.artifacts.filter((artifact) => page.unopened.has(artifact.path)).length;
   const tabs = renderTabs(page.tab, { conversation: '', status: statusBadge(state.status, fresh) ? 'New' : '', artifacts: unopened === 0 ? '' : String(unopened) });
   const status = state.status;
-  const statusCard = status === null || status.fallback ? '' : cardOf(cardKey('status', status.id), status.markdown, statusAnswer(state.items, status));
   // Each tab's panel, and each conversation's, is its own node, so a redraw keeps its scroll position and another tab or conversation starts afresh.
   const shownKey = `${state.scope.scopeGen}-${state.session?.id ?? ''}`;
   // The New messages pill sits at the bottom of the conversation's own area, just above the composer, never behind it.
   const pill = `<button class="glass pill" type="button" data-action="pill"${page.pill === true ? '' : ' hidden'}><span class="pill-dot" aria-hidden="true"></span>New messages</button>`;
   const panel =
     page.tab === 'status'
-      ? `<div class="panel" id="panel" data-key="status-${shownKey}" role="tabpanel" aria-labelledby="tab-status">${renderStatus(status, fresh, now, statusCard, open, page.earlier ?? null)}</div>`
+      ? `<div class="panel" id="panel" data-key="status-${shownKey}" role="tabpanel" aria-labelledby="tab-status">${renderStatus(status, fresh, now, page.earlier ?? null)}</div>`
       : page.tab === 'artifacts'
         ? `<div class="panel" id="panel" data-key="artifacts-${shownKey}" role="tabpanel" aria-labelledby="tab-artifacts">${renderArtifacts(state.artifacts, page.unopened, now)}</div>`
         : `${notes.map((note) => `<p class="notice">${escape(note)}</p>`).join('')}<div class="scroll-area" data-key="conversation-${shownKey}"><div class="scroll" id="panel" role="tabpanel" aria-labelledby="tab-conversation">${earlier}${body}</div>${pill}</div>`;
