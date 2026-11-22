@@ -1,6 +1,13 @@
 /* The web page (architecture.md § Web page), drawn as the VS Code Conversation view is, from the theme copy's variables. */
-/* The page never scrolls or bounces as a whole: its panes scroll themselves, and nothing is wider than the screen. */
+/* The page never scrolls or bounces as a whole: its panes scroll themselves, and nothing is wider than the screen. Nothing outside them moves
+   either: no scroller hands a drag on to the page at its end or with nothing to scroll, the composer's box never bounces, and a pan that
+   starts outside every scroller does nothing, though a pinch still zooms (each scroller sets its own touch-action, and auto or scroll
+   overflow starts it afresh), since
+   iOS can still pan a page with overflow: hidden by a few pixels where its visual viewport is shorter than its layout viewport. */
 html, body { height: 100%; margin: 0; overflow: hidden; overscroll-behavior: none; }
+body { touch-action: pinch-zoom; }
+* { overscroll-behavior: contain; }
+textarea { overscroll-behavior: none; }
 /* The page's own colours, which VS Code's theme has no variable for: the dock's in Dark Modern and, with the operating system's light setting,
    in Light Modern (theme.css). The composer's fill in light follows the Conversation view's light themes (composer.css).
    Surfaces: Dark Modern draws the conversation on the side bar's colour, as Claude Code's panel does. Light Modern keeps white for the editor

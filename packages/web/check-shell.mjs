@@ -1,0 +1,243 @@
+// Checks the page's shell at iPhone sizes in a real headless Chrome or Edge (testing.md § Web page shell check): in the installed app's
+// standalone mode, portrait and landscape, light and dark, the list, a conversation, an empty one, History, Settings, the drawer and a sheet.
+// Nothing outside the scrollers can move: the document is exactly the viewport, nothing reaches past it outside a scroller, every scroller keeps
+// a drag to itself, and the page outside the scrollers takes no pan. Chrome has no display-mode emulation, so the page's standalone rules are
+// applied to every width here, and safe-area insets come from the DevTools protocol.
+// Run `npm run build` first; the browser is SWITCHBOARD_CHROME, else Chrome or Edge where they install. --report prints the measurements.
+import { spawn } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { createServer } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { PAGE_ASSETS } from './dist/index.js';
+
+/** iPhone 16 Pro in the installed app under the opaque status bar: 393 by 852 pt, less the 59 pt status bar in portrait; none in landscape. */
+const SIZES = [
+  { orientation: 'portrait', width: 393, height: 793, insets: { top: 0, bottom: 34, left: 0, right: 0 } },
+  { orientation: 'landscape', width: 852, height: 393, insets: { top: 0, bottom: 21, left: 59, right: 59 } },
+];
+const VIEWS = ['list', 'conversation', 'empty', 'history', 'settings', 'drawer', 'sheet'];
+const report = process.argv.includes('--report');
+
+const browsers = [
+  process.env.SWITCHBOARD_CHROME,
+  'C:/Program Files/Google/Chrome/Application/chrome.exe',
+  'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+  '/usr/bin/google-chrome',
+  '/usr/bin/chromium',
+  '/usr/bin/chromium-browser',
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+].filter((path) => path !== undefined && existsSync(path));
+
+if (browsers.length === 0) {
+  console.error('No Chrome or Edge found; set SWITCHBOARD_CHROME to one.');
+  process.exit(2);
+}
+
+// The page with a fake stream and fetch in place of the hub's: a work item with a long conversation, one with none, and the list.
+const fake = `<script>
+const view = new URLSearchParams(location.search).get('view');
+const now = Date.now();
+const row = (id, title, patch = {}) => ({ workItemId: id, ticketId: id, title, priority: null, time: null, ticket: 'gh ' + id, sourceKind: 'github', url: '', playbook: 'dev:build', links: [], returned: 0, comment: null, mark: null, details: [], stripe: null, dim: false, host: null, actions: [], main: null, pastes: [], search: '', opens: [], terminal: false, band: null, voice: null, history: null, ...patch });
+const remove = { label: 'Delete', action: 'delete', icon: 'trash', group: 'state', confirm: { question: 'Delete Fix it?', detail: 'It goes for good.', action: 'delete' }, input: null };
+const groups = [{ key: 'progress', title: 'In progress', glyph: '\u{ea70}', empty: null, rows: [row(1, 'Fix it', { history: { ticketId: 1, key: 'gh 1' }, actions: [remove] }), row(2, 'Another thing')] }];
+const open = view !== 'list' && view !== 'settings';
+const scope = open ? { kind: 'page', key: 'k', folder: 'D:/w', title: 'Fix it', scopeGen: 3, conversations: [{ workItemId: 1, title: 'Fix it', primary: true, sessionId: 's', state: 'idle', conversation: 'full', unread: 0 }], workItemId: 1, cwd: 'D:/w', sessionId: 's' } : null;
+const session = { id: 's', title: 'Task session s', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, persona: null };
+const items = [];
+for (let i = 0; view !== 'empty' && open && i < 30; i++) {
+  items.push({ type: 'message', id: 'm' + i, sessionId: 's', workItemId: 1, at: now - 100000 + i * 2000, ord: i * 2, provisional: false, withdrawn: false, origin: 'typed', text: 'Message ' + i, delivery: 'sent', error: null });
+  items.push({ type: 'reply', id: 'r' + i, sessionId: 's', at: now - 99000 + i * 2000, ord: i * 2 + 1, provisional: false, kind: 'reply', answers: null, opening: 'Reply ' + i + ', long enough to wrap across a phone screen.', rewrittenBy: null, withdrawn: false, unread: false, speak: null, tone: null, spoken: { state: 'none', atMs: null, saidChars: null } });
+}
+history.replaceState(null, '', location.search + (open ? '#w=1' : '#'));
+class FakeSource {
+  constructor() { this.listeners = {}; setTimeout(() => this.emit('hello', { key: 'pk', groups, scope, sessions: open ? [session] : [], items, more: false, status: null, artifacts: [], unread: 0 }), 20); }
+  addEventListener(type, listener) { (this.listeners[type] ??= []).push(listener); }
+  removeEventListener() {}
+  close() {}
+  emit(type, data) { for (const listener of this.listeners[type] ?? []) listener({ data: JSON.stringify({ type, ...data }) }); }
+}
+window.EventSource = FakeSource;
+window.fetch = async () => ({ status: 200, ok: true, headers: new Headers(), json: async () => ({}), text: async () => '' });
+const matchMedia = window.matchMedia.bind(window);
+window.matchMedia = (query) => (query.includes('display-mode: standalone') ? { matches: true, media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} } : matchMedia(query));
+</script>`;
+
+/** Measures the open view: the document, whatever reaches past the viewport outside a scroller, and the scrollers. */
+const measure = `(() => {
+  const root = document.documentElement;
+  const shown = (node) => { for (let one = node; one; one = one.parentElement) { const style = getComputedStyle(one); if (style.display === 'none' || style.visibility === 'hidden') return false; } return true; };
+  const scrolls = (node) => /auto|scroll/.test(getComputedStyle(node).overflowY + getComputedStyle(node).overflowX);
+  const clipped = (node) => { for (let one = node.parentElement; one && one !== document.body; one = one.parentElement) { if (/auto|scroll|hidden|clip/.test(getComputedStyle(one).overflowY)) return true; } return false; };
+  const name = (node) => node.tagName.toLowerCase() + (node.id ? '#' + node.id : '') + (typeof node.className === 'string' && node.className ? '.' + node.className.trim().split(/ +/).join('.') : '');
+  const nodes = [...document.querySelectorAll('body *')].filter(shown);
+  const past = nodes.filter((node) => { const box = node.getBoundingClientRect(); return box.height > 0 && box.width > 0 && (box.bottom > innerHeight + 0.5 || box.right > innerWidth + 0.5 || box.top < -0.5) && getComputedStyle(node).position !== 'fixed' && !clipped(node); }).map(name);
+  const scrollers = nodes.filter((node) => scrolls(node) && node.clientHeight > 0).map((node) => ({ name: name(node), over: node.scrollHeight - node.clientHeight, overscroll: getComputedStyle(node).overscrollBehaviorY + ' ' + getComputedStyle(node).overscrollBehaviorX }));
+  const top = (selector) => { const node = [...document.querySelectorAll(selector)].find(shown); return node ? Math.round(node.getBoundingClientRect().top * 100) / 100 : null; };
+  return {
+    root: document.getElementById('root').className,
+    document: { height: root.scrollHeight, client: root.clientHeight, width: root.scrollWidth, clientWidth: root.clientWidth, body: document.body.scrollHeight, bodyClient: document.body.clientHeight },
+    touchAction: getComputedStyle(document.body).touchAction,
+    past, scrollers,
+    tops: { header: top('.header'), listHeader: top('.list-header'), historyBar: top('.hist-bar'), settingsHead: top('.settings-head'), tabs: top('.tabs'), panel: top('#panel'), list: top('#list') },
+  };
+})()`;
+
+/** What each view opens with, clicked in order. */
+const OPEN = {
+  history: ['[data-action=actions]', '[data-action=row-history]'],
+  settings: ['[data-action=list-more]', '[data-action=list-settings]'],
+  drawer: ['[data-action=drawer]'],
+  sheet: ['[data-action=actions]', '[data-action=row-action][data-label=Delete]'],
+};
+
+/** Checks one view's measurements; answers its failures. */
+function failures(view, size, m) {
+  const out = [];
+  const { document: d } = m;
+
+  if (d.height !== d.client || d.width !== d.clientWidth || d.body !== d.bodyClient) out.push('the document is ' + d.width + 'x' + d.height + ' (body ' + d.body + ') in ' + d.clientWidth + 'x' + d.client);
+  if (m.past.length > 0) out.push('reaches past the viewport outside a scroller: ' + m.past.slice(0, 5).join(', '));
+  for (const one of m.scrollers) {
+    if (!/^(contain|none) (contain|none)$/.test(one.overscroll)) out.push(one.name + ' hands a drag on to the page (overscroll-behavior ' + one.overscroll + ')');
+  }
+  if (m.touchAction !== 'pinch-zoom') out.push('the page outside the scrollers takes a pan or no pinch (body touch-action ' + m.touchAction + ')');
+  return out;
+}
+
+const server = createServer((request, response) => {
+  const path = new URL(request.url, 'http://x').pathname;
+  const name = path === '/page/' ? 'index.html' : path.replace(/^\/page\//, '');
+  const asset = PAGE_ASSETS[name];
+
+  if (asset === undefined) {
+    response.writeHead(404).end();
+    return;
+  }
+
+  // The installed app's rules, everywhere: Chrome cannot emulate display-mode.
+  const body = name === 'index.html' ? asset.body.replace('<script src="page.js">', fake + '<script src="page.js">') : name === 'page.css' ? asset.body.replaceAll('(display-mode: standalone)', 'all') : asset.base64 ? Buffer.from(asset.body, 'base64') : asset.body;
+
+  response.writeHead(200, { 'content-type': name === 'index.html' ? 'text/html; charset=utf-8' : asset.mime }).end(body);
+});
+
+await new Promise((done) => server.listen(0, '127.0.0.1', done));
+
+const base = 'http://127.0.0.1:' + server.address().port + '/page/';
+const dir = mkdtempSync(join(tmpdir(), 'sb-shell-check-'));
+const browser = spawn(browsers[0], ['--headless=new', '--disable-gpu', '--no-first-run', '--remote-debugging-port=0', '--user-data-dir=' + join(dir, 'profile'), 'about:blank'], { stdio: 'ignore' });
+const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+const exited = new Promise((done) => browser.once('exit', done));
+let failed = 0;
+
+try {
+  const deadline = Date.now() + 60_000;
+  let port;
+
+  while (port === undefined) {
+    if (Date.now() > deadline) throw new Error(browsers[0] + ' opened no DevTools port');
+    try {
+      port = readFileSync(join(dir, 'profile', 'DevToolsActivePort'), 'utf8').split('\n')[0];
+    } catch {
+      await wait(100);
+    }
+  }
+
+  let target;
+
+  while (target === undefined) {
+    if (Date.now() > deadline) throw new Error('The browser opened no page');
+    target = (await fetch('http://127.0.0.1:' + port + '/json').then((answer) => answer.json()).catch(() => [])).find((one) => one.type === 'page');
+    if (target === undefined) await wait(100);
+  }
+
+  const socket = new WebSocket(target.webSocketDebuggerUrl);
+  const replies = new Map();
+  let id = 0;
+
+  await new Promise((done, fail) => { socket.onopen = done; socket.onerror = () => fail(new Error('DevTools refused the connection')); });
+  socket.onmessage = (message) => { const data = JSON.parse(message.data); replies.get(data.id)?.(data); };
+
+  /** Sends one DevTools command and answers its result, throwing its error. */
+  const send = async (method, params = {}) => {
+    const reply = await new Promise((done) => { replies.set(++id, done); socket.send(JSON.stringify({ id, method, params })); });
+
+    if (reply.error) throw new Error(method + ': ' + reply.error.message);
+    return reply.result;
+  };
+  const evaluate = async (expression) => (await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })).result.value;
+  const results = [];
+
+  for (const scheme of ['dark', 'light']) {
+    for (const size of SIZES) {
+      for (const view of VIEWS) {
+        // A phone's portrait width shows the list or the conversation, never a drawer.
+        if (view === 'drawer' && size.orientation === 'portrait') continue;
+        await send('Emulation.setDeviceMetricsOverride', { width: size.width, height: size.height, deviceScaleFactor: 3, mobile: true });
+        await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+        await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: scheme }, { name: 'hover', value: 'none' }, { name: 'pointer', value: 'coarse' }] });
+        await send('Emulation.setSafeAreaInsetsOverride', { insets: size.insets });
+        await send('Page.navigate', { url: base + '?view=' + view });
+        await evaluate('new Promise((done) => { const wait = () => (document.querySelector("#root .header, #root .list-header") ? setTimeout(done, 200) : setTimeout(wait, 50)); wait(); })');
+        const name = scheme + ' ' + size.orientation + ' ' + view;
+        const steps = OPEN[view] ?? [];
+        const missing = [];
+
+        for (const selector of steps) {
+          if (!(await evaluate('(() => { const node = document.querySelector(' + JSON.stringify(selector) + '); node?.click(); return node !== null; })()'))) missing.push(selector);
+          await wait(150);
+        }
+
+        await wait(200);
+        const m = await evaluate(measure);
+        const found = missing.length > 0 ? ['could not open the view: no ' + missing.join(', ')] : failures(view, size, m);
+
+        // A drag on the long conversation still scrolls it, one on the header moves nothing, and nor does one on an empty conversation.
+        if (view === 'conversation' || view === 'empty') {
+          const box = (selector) => evaluate('(() => { const box = document.querySelector(' + JSON.stringify(selector) + ').getBoundingClientRect(); return { x: box.left + box.width / 2, top: box.top, bottom: box.bottom }; })()');
+          /** Drags a finger down from just inside the top of `selector` to just inside its bottom, or 200 px, whichever is shorter. */
+          const drag = async (selector) => {
+            const { x, top, bottom } = await box(selector);
+            const from = top + 4;
+            const to = Math.min(bottom - 4, from + 200);
+
+            await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y: from }] });
+            for (let step = 1; step <= 10; step++) {
+              await send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: from + ((to - from) * step) / 10 }] });
+              await wait(16);
+            }
+            await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+            await wait(300);
+          };
+          const state = () => evaluate('JSON.stringify({ panel: document.getElementById("panel").scrollTop, page: document.scrollingElement.scrollTop, header: document.querySelector(".header").getBoundingClientRect().top })');
+          const before = JSON.parse(await state());
+
+          await drag('#panel');
+          const scrolled = JSON.parse(await state());
+
+          if (view === 'empty' && JSON.stringify(scrolled) !== JSON.stringify(before)) found.push('a drag on the empty conversation moved it: ' + JSON.stringify(scrolled));
+          if (view === 'conversation' && !(scrolled.panel < before.panel)) found.push('a drag on the conversation did not scroll it: ' + before.panel + ' to ' + scrolled.panel);
+          await drag('.header');
+          const dragged = JSON.parse(await state());
+
+          if (dragged.page !== 0 || dragged.header !== before.header || dragged.panel !== scrolled.panel) found.push('a drag on the header moved the page: ' + JSON.stringify(dragged));
+        }
+
+        results.push({ name, ...m });
+        console.log((found.length === 0 ? 'ok   ' : 'FAIL ') + name);
+        found.forEach((one) => console.log('     ' + one));
+        failed += found.length === 0 ? 0 : 1;
+      }
+    }
+  }
+
+  socket.close();
+  if (report) console.log(JSON.stringify(results, null, 1));
+} finally {
+  browser.kill();
+  await exited;
+  server.close();
+  rmSync(dir, { recursive: true, force: true, maxRetries: 5 });
+}
+
+process.exitCode = failed === 0 ? 0 : 1;

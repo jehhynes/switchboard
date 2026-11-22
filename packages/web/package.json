@@ -16,7 +16,8 @@
     "build": "node build.mjs",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run --coverage",
-    "check:console": "node check-console.mjs"
+    "check:console": "node check-console.mjs",
+    "check:shell": "node check-shell.mjs"
   },
   "devDependencies": {
     "@pierre/diffs": "1.6.4",

@@ -60,6 +60,8 @@ describe('the page on a phone', () => {
 
   it('never scrolls or bounces as a whole, its panes panning only up and down and code and tables also sideways', () => {
     expect(css).toMatch(/html, body \{ height: 100%; margin: 0; overflow: hidden; overscroll-behavior: none; \}/);
+    // No scroller hands a drag on to the page, the composer's box never bounces, and a pan outside every scroller does nothing; a pinch zooms.
+    expect(css).toContain('body { touch-action: pinch-zoom; }\n* { overscroll-behavior: contain; }\ntextarea { overscroll-behavior: none; }');
     expect(css).toMatch(/#list \{[^}]*touch-action: pan-y pinch-zoom;/);
     expect(css).toMatch(/\.scroll \{[^}]*touch-action: pan-y pinch-zoom;/);
     expect(css).toMatch(/\.body pre \{[^}]*touch-action: pan-x pan-y pinch-zoom;/);
