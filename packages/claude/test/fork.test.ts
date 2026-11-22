@@ -181,6 +181,17 @@ describe('relationOf', () => {
     expect(relationOf(transcripts(), 'aaaaaaaa-0000-4000-8000-000000000004', null, session())).toBe('unrelated');
     expect(relationOf(transcripts(), FORK, null, session({ nativeSessionId: 'bbbbbbbb-0000-4000-8000-000000000005' }))).toBe('unrelated');
   });
+
+  it('reads no transcript of a session in another project, and matches the project directory ignoring case', async () => {
+    await put([ORIGINAL, 'plain-original', 'D--git-other'], [FORK, 'plain-copy']);
+    const index = transcripts();
+    const read = vi.spyOn(index, 'index');
+
+    expect(relationOf(index, FORK, null, session({ cwd: 'D:\\git\\other' }))).toBe('unrelated');
+    expect(read.mock.calls.map(([id]) => id)).toEqual([FORK]);
+    expect(relationOf(index, FORK, null, session({ cwd: 'd:\\GIT\\repo' }))).toBe('unrelated');
+    expect(read.mock.calls.map(([id]) => id)).toEqual([FORK, FORK, ORIGINAL]);
+  });
 });
 
 describe('forkTargets', () => {

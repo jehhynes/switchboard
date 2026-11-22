@@ -171,9 +171,15 @@ export function relationOf(transcripts: Transcripts, nativeSessionId: string, cw
   }
 
   const copy = transcripts.index(nativeSessionId, cwd);
-  const current = copy?.key == null ? null : transcripts.index(session.nativeSessionId, session.cwd);
 
-  if (copy?.key == null || current === null || copy.project !== current.project) {
+  // The session's transcripts are in its own project directory, so another project's are never read: reading every session's would block the hub.
+  if (copy?.key == null || copy.project !== projectSlug(session.cwd).toLowerCase()) {
+    return 'unrelated';
+  }
+
+  const current = transcripts.index(session.nativeSessionId, session.cwd);
+
+  if (current === null) {
     return 'unrelated';
   }
 
