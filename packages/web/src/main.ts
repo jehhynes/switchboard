@@ -11,7 +11,7 @@ import type { ArtifactView, ItemView, PageRow, ScreenPrompt } from '@switchboard
 import { mount, unmount } from './island.js';
 import type { ComponentChild, VNode } from 'preact';
 import { renderList, renderListPane } from './list.js';
-import { menuRows, renderHeader, renderSideSwitch, renderTabs } from './header.js';
+import { menuRows, renderHeader, renderMaximize, renderSideSwitch, renderTabs } from './header.js';
 import { CHAT_MIN, chatNeed, fitLayout, isPhone, sideLimit, sideWidth, type Layout } from './layout.js';
 import { pageCards, renderTimeline } from './timeline.js';
 import { renderArtifacts, renderArtifactView, renderEmpty, renderStatus } from './side.js';
@@ -196,6 +196,18 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       root.querySelector<HTMLElement>('.side-head .list-pin')?.focus();
     }
   };
+  /**
+   * Whether the Status and Artifacts column covers the whole page, list and conversation too, for a wide artifact or diff; until restored,
+   * the column folds into tabs or the page reloads. Kept nowhere.
+   */
+  let panelMaximized = false;
+  /** Maximizes the column or restores it, the focus staying on the button, which the draw moves with the strip. */
+  const maximizePanel = (on: boolean): void => {
+    panelMaximized = on && wide();
+    root.classList.toggle('maximized', panelMaximized);
+    draw();
+    detailHead.querySelector<HTMLElement>('.panel-max')?.focus();
+  };
   const sideSash = resizer(root, [root.querySelector<HTMLElement>('.side-sash')!, root.querySelector<HTMLElement>('.drawer-sash')!], root.querySelector<HTMLElement>('.side')!, {
     property: '--side-width',
     key: SIDE_WIDTH,
@@ -236,6 +248,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     document.documentElement.classList.toggle('phone', phone);
     // Outside the phone's layout, an unpinned list is a drawer (page.css), shown only with a work item open.
     root.classList.toggle('drawers', !phone && !next.list);
+
+    // The Status and Artifacts column is maximized only while it is a column.
+    panelMaximized &&= next.wide;
+    root.classList.toggle('maximized', panelMaximized);
 
     return changed;
   };
@@ -2061,7 +2077,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     drawTab(panel, mainTab());
 
     if (side) {
-      mount(detailHead, [renderSideSwitch(sideTab(), state, showBrowser(), strip, changeTabs(sideTab()), showConsole()), renderChangesMenu(changes.view)]);
+      mount(detailHead, [renderSideSwitch(sideTab(), state, showBrowser(), strip, [...changeTabs(sideTab()), renderMaximize(panelMaximized)], showConsole()), renderChangesMenu(changes.view)]);
       drawTab(detailBody, sideTab());
     }
     // The composer first, so the conversation is scrolled against its final height.
@@ -2735,6 +2751,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       case 'list-pin':
         pinList(!listPinned);
         break;
+      case 'panel-max':
+        maximizePanel(!panelMaximized);
+        break;
       case 'drawer':
         if (view.drawer === null) {
           openDrawer('open');
@@ -3205,6 +3224,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       event.stopImmediatePropagation();
     } else if (event.key === 'Escape' && view.drawer !== null) {
       closeDrawer();
+      event.stopImmediatePropagation();
+    } else if (event.key === 'Escape' && panelMaximized) {
+      // A console typing into its session stops its keys first (console.ts), so its Escape stays the session's.
+      maximizePanel(false);
       event.stopImmediatePropagation();
     } else if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && (view.picker || view.actions || view.providers !== null || view.viewMenu || view.rowMenu !== null)) {
       // Up and Down move between a header menu's rows, or a pool row's menu's, as in a VS Code menu.

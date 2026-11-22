@@ -4270,6 +4270,76 @@ describe('the page in use', () => {
     page.close();
   });
 
+  it('maximizes the Status and Artifacts column over the whole page from its strip and restores it from the same button or Escape, only while it is a column', () => {
+    window.innerWidth = 1440;
+
+    const { page, source } = start();
+    const button = () => root.querySelector<HTMLButtonElement>('#detail .detail-head .panel-max');
+
+    hello(source);
+    expect(button()!.getAttribute('aria-label')).toBe('Maximize panel');
+    expect(button()!.title).toBe('Maximize panel');
+    expect(button()!.querySelector('.codicon-screen-full')).not.toBeNull();
+    // The strip's last control, after Changes.
+    expect(button()!.parentElement!.lastElementChild).toBe(button());
+    button()!.focus();
+    button()!.click();
+    expect(root.classList.contains('maximized')).toBe(true);
+    expect(button()!.getAttribute('aria-label')).toBe('Restore panel');
+    expect(button()!.querySelector('.codicon-screen-normal')).not.toBeNull();
+    expect(document.activeElement).toBe(button());
+    // The list and the conversation stay where they were, under it.
+    expect(root.classList.contains('drawers')).toBe(false);
+    expect(root.querySelector('#panel .timeline')).not.toBeNull();
+    button()!.click();
+    expect(root.classList.contains('maximized')).toBe(false);
+    expect(button()!.getAttribute('aria-label')).toBe('Maximize panel');
+
+    // Escape restores it, from an idle console too, but not from one typing into its session, which stops its keys (console.ts).
+    button()!.click();
+    const console = root.querySelector('#detail .detail-body')!.appendChild(document.createElement('div'));
+    let typing = true;
+
+    console.className = 'console';
+    console.addEventListener('keydown', (event) => typing && event.stopPropagation());
+    console.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(root.classList.contains('maximized')).toBe(true);
+    typing = false;
+    console.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(root.classList.contains('maximized')).toBe(false);
+    expect(document.activeElement).toBe(button());
+    button()!.click();
+    button()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(root.classList.contains('maximized')).toBe(false);
+
+    // Where the column folds into tabs it has no button, and a maximized column is restored; a reload keeps nothing.
+    button()!.click();
+    resizeTo(1100);
+    expect(root.classList.contains('wide')).toBe(false);
+    expect(root.classList.contains('maximized')).toBe(false);
+    expect(root.querySelector('.panel-max')).toBeNull();
+    resizeTo(1440);
+    expect(root.classList.contains('maximized')).toBe(false);
+    button()!.click();
+    page.close();
+
+    const again = start();
+
+    hello(again.source);
+    expect(root.classList.contains('maximized')).toBe(false);
+    again.page.close();
+  });
+
+  it('has no maximize button on a phone, which shows one tab at a time', () => {
+    window.innerWidth = 700;
+
+    const { page, source } = start();
+
+    hello(source);
+    expect(root.querySelector('.panel-max')).toBeNull();
+    page.close();
+  });
+
   it('takes a list width kept elsewhere as it is', () => {
     localStorage.setItem('switchboard.sideWidth', '440');
     window.innerWidth = 1440;
@@ -4824,7 +4894,7 @@ describe("the list's CSS", () => {
 
   it('stacks the page\'s layers by one scale: the sashes over the top bars, a bar\'s open menu over the sashes, and the drawer and its backdrop over all of them', () => {
     const scale = Object.fromEntries([...css.matchAll(/--sb-z-([a-z-]+): (\d+);/g)].map(([, name, value]) => [name, Number(value)]));
-    const order = ['bar', 'sash', 'bar-menu', 'sliver', 'drawer-backdrop', 'drawer', 'sheet', 'persona', 'settings', 'settings-sheet', 'top-line', 'top-band'];
+    const order = ['bar', 'sash', 'bar-menu', 'sliver', 'drawer-backdrop', 'drawer', 'maximized', 'sheet', 'persona', 'settings', 'settings-sheet', 'top-line', 'top-band'];
 
     expect(Object.keys(scale).sort()).toEqual([...order].sort());
     expect(order.map((name) => scale[name])).toEqual(order.map((name) => scale[name]).sort((a, b) => a! - b!));

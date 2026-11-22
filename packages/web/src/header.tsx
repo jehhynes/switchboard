@@ -398,6 +398,17 @@ export function renderSideSwitch(side: SideTab, state: PageState, browser = fals
   );
 }
 
+/** The Status and Artifacts column's maximize button, at its strip's end: it covers the whole page with the column, or restores it. */
+export function renderMaximize(maximized: boolean): VNode {
+  const label = maximized ? 'Restore panel' : 'Maximize panel';
+
+  return (
+    <button type="button" class="tab panel-max" data-action="panel-max" title={label} aria-label={label} aria-controls="detail">
+      <span class={`codicon codicon-${maximized ? 'screen-normal' : 'screen-full'}`} aria-hidden="true"></span>
+    </button>
+  );
+}
+
 /** The conversation's tab strip on a narrower screen: Conversation, Status, Console and Browser, each while it has something to show, then a tab per artifact as in the column, and `extra`, as the Changes button. */
 export function renderTabs(view: View, state: PageState, browser = false, strip: ArtifactStrip = { open: null, fit: 0, menu: false, now: 0 }, extra: ComponentChildren = null, console = true): VNode {
   const fresh = state.status?.unread === true;
