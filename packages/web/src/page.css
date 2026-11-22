@@ -578,6 +578,11 @@ body.artifact-window > .artifact-view { height: 100%; }
 @media (max-width: 600px) and (height < 800px) {
   #root.off-conversation:not(:has(#composer:focus-within, #composer .composer-error:not([hidden]))) > .main { padding-bottom: env(safe-area-inset-bottom); }
 }
+/* On a touch screen the bars' icon buttons draw their glyphs at 20 px, centred in the 44 px target. */
+@media (hover: none), (pointer: coarse) {
+  :is(.header, .list-header, .hist-bar, .settings-head, .artifact-head, .changes-head, .diff-head) :is(button.icon, a.icon, button.actions, button.persona) { align-items: center; justify-content: center; }
+  :is(.header, .list-header, .hist-bar, .settings-head, .artifact-head, .changes-head, .diff-head) :is(button.icon, a.icon, button.actions, button.persona) > .codicon { font-size: 20px; line-height: 1; }
+}
 /* A narrow screen gives the conversation its width: less padding round the timeline and the composer, and wider bubbles. */
 @media (max-width: 600px) {
   .scroll { padding: 12px 12px 12px; }

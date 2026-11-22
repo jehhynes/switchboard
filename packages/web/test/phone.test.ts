@@ -44,4 +44,13 @@ describe('the page on a phone', () => {
     expect(css).toMatch(/\.body table \{[^}]*touch-action: pan-x pan-y pinch-zoom;/);
   });
 
+  it("draws the bars' icon glyphs at 20 px, centred, on a touch screen, without showing a button the layout hides", () => {
+    const touch = /@media \(hover: none\), \(pointer: coarse\) \{\n  :is\(\.header, [^)]*\) :is\(button\.icon, a\.icon, button\.actions, button\.persona\) \{([^}]*)\}\n  :is\([^)]*\) :is\([^)]*\) > \.codicon \{([^}]*)\}/.exec(css);
+
+    expect(touch?.[1]).toContain('align-items: center; justify-content: center;');
+    // A display here would show the Work items button, which only a drawer shows.
+    expect(touch?.[1]).not.toContain('display');
+    expect(touch?.[2]).toContain('font-size: 20px; line-height: 1;');
+  });
+
 });
