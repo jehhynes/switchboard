@@ -2622,6 +2622,48 @@ describe('registered sessions (PRD R81)', () => {
     expect(store.tickets('adhoc')).toHaveLength(1);
     expect(unlisted.store.tickets('adhoc')).toEqual([]);
   });
+
+  it('answers the same key and contract to a retry sent while the first registration still reads the roster', async () => {
+    const reads: Array<() => void> = [];
+    const claude = Object.assign(registering(null), {
+      live: () => new Promise<{ shortId: string; cwd: string }>((done) => reads.push(() => done({ shortId: '9273f594', cwd: 'D:/git/widgets' }))),
+    });
+    const { runtime, store } = setup(config(), () => T0, { claude });
+
+    const first = runtime.register(NATIVE, 'First');
+    const retry = runtime.register(NATIVE, 'First');
+    expect(reads).toHaveLength(2);
+    reads[0]!();
+    const answered = await first;
+    reads[1]!();
+
+    expect(answered).toMatchObject({ key: 'adhoc 1', already: false });
+    expect(await retry).toEqual({ ...answered, already: true });
+    expect(store.tickets('adhoc')).toHaveLength(1);
+  });
+
+  it("answers a retry whose own roster read fails once the first registered, and refuses a copy related to a session registered during its read", async () => {
+    const reads: Array<(live: { shortId: string; cwd: string } | { error: string }) => void> = [];
+    const related: Record<string, CopyRelation> = {};
+    const claude = Object.assign(registering(null, (native) => related[native] ?? 'unrelated'), {
+      live: () => new Promise<{ shortId: string; cwd: string } | { error: string }>((done) => reads.push(done)),
+    });
+    const { runtime, store } = setup(config(), () => T0, { claude });
+
+    const first = runtime.register(NATIVE, 'First');
+    const retry = runtime.register(NATIVE, 'First');
+    const copy = runtime.register('newer-copy', 'Copy');
+    expect(reads).toHaveLength(3);
+    reads[0]!({ shortId: '9273f594', cwd: 'D:/git/widgets' });
+    const answered = await first;
+    related['newer-copy'] = 'newer';
+    reads[1]!({ error: 'claude agents timed out' });
+    reads[2]!({ shortId: 'newer-co', cwd: 'D:/git/widgets' });
+
+    expect(await retry).toEqual({ ...answered, already: true });
+    expect(await copy).toEqual({ refused: 'This session is a copy of adhoc 1, which Switchboard continues in its latest copy.' });
+    expect(store.tickets('adhoc')).toHaveLength(1);
+  });
 });
 
 describe('ticket reports (PRD R83)', () => {

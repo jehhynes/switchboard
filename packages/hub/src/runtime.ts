@@ -1510,10 +1510,20 @@ export class Runtime {
 
       return `${ticket.source} ${ticket.sourceKey}`;
     };
+    const answer = (session: Session, already: boolean) => ({ key: keyOf(session), contract: sessionContract(session.id, this.reportCommand, session.reports, session.provider), already });
     const known = this.deps.store.sessionByNativeId(nativeSessionId);
 
     if (known !== null) {
-      return { key: keyOf(known), contract: sessionContract(known.id, this.reportCommand, known.reports, known.provider), already: true };
+      return answer(known, true);
+    }
+
+    const live = this.runners.claude.live === undefined ? { error: 'The Claude runner cannot register sessions.' } : await this.runners.claude.live(nativeSessionId);
+    // The store is read again after the roster read, because another request can register this session or a related one meanwhile, as a retry
+    // after a lost reply does.
+    const registered = this.deps.store.sessionByNativeId(nativeSessionId);
+
+    if (registered !== null) {
+      return answer(registered, true);
     }
 
     const family = this.deps.store.startedSessions().find((session) => session.provider === 'claude' && (session.retiredIds.includes(nativeSessionId) || (session.codeMode !== true && (this.runners.claude.relation?.(nativeSessionId, session) ?? 'unrelated') !== 'unrelated')));
@@ -1529,8 +1539,6 @@ export class Runtime {
       return { refused: `This session runs in the terminal holder for ${keyOf(held)}, which Switchboard follows there.` };
     }
 
-    const live = this.runners.claude.live === undefined ? { error: 'The Claude runner cannot register sessions.' } : await this.runners.claude.live(nativeSessionId);
-
     if (live === null) {
       return { refused: `Claude does not list session ${nativeSessionId} as running.` };
     }
@@ -1545,9 +1553,7 @@ export class Runtime {
       return { refused };
     }
 
-    const session = this.deps.store.sessionByNativeId(nativeSessionId)!;
-
-    return { key: keyOf(session), contract: sessionContract(session.id, this.reportCommand, session.reports, session.provider), already: false };
+    return answer(this.deps.store.sessionByNativeId(nativeSessionId)!, false);
   }
 
   /**
