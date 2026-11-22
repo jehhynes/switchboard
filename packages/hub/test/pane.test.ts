@@ -44,6 +44,7 @@ function setup() {
   const focus: Array<[string, boolean]> = [];
   const tabs = new Map<string, { workItemId: number; urls: string[]; active: string } | null>([['page-1', { workItemId: 1, urls: [ISSUE, PR], active: ISSUE }], ['page-2', { workItemId: 2, urls: [PR], active: PR }]]);
   let markers = 0;
+  const selected = new Map<string, number>([['page-1', 1], ['page-2', 2]]);
   const state = new PaneState({
     enabled: () => enabled,
     extension: () => extension,
@@ -53,6 +54,7 @@ function setup() {
     toPage: (key, view) => pageSent.push([key, view]),
     pages: () => ['page-1', 'page-2'],
     tabsOf: (key) => tabs.get(key) ?? null,
+    selected: (key) => selected.get(key) ?? null,
     focused: (key, focused) => focus.push([key, focused]),
     log: () => {},
     marker: () => `00000000000${++markers}`,
@@ -66,6 +68,7 @@ function setup() {
     pageSent,
     focus,
     tabs,
+    selected,
     lastPage: (key: string) => pageSent.filter(([one]) => one === key).at(-1)?.[1],
     set: (next: { enabled?: boolean; extension?: PaneLinkState; helper?: boolean }) => {
       enabled = next.enabled ?? enabled;
@@ -76,6 +79,78 @@ function setup() {
 }
 
 describe('PaneState', () => {
+  it("opens a web link the page asks for in the pane's own tabs, after the work item's, in front, and drops it with the work item or the page", () => {
+    const pane = setup();
+    const SITE = 'https://example.com/a';
+
+    pane.state.helperReport({ state: 'ready', marker: null });
+    pane.state.pageRect('page-1', RECT);
+    pane.state.helperReport({ state: 'found', marker: '000000000001' });
+
+    pane.state.open('page-1', 1, SITE);
+    expect(pane.extensionSent.at(-1)).toEqual({ type: 'tabs', urls: [ISSUE, PR, SITE], active: SITE });
+
+    // A link the work item already has is brought to the front, not opened twice; the last one opened stays in front.
+    pane.state.open('page-1', 1, PR);
+    expect(pane.extensionSent.at(-1)).toEqual({ type: 'tabs', urls: [ISSUE, PR, SITE], active: PR });
+
+    // A work item with no links of its own still gets a pane for the link.
+    pane.tabs.set('page-1', null);
+    pane.state.update();
+    expect(pane.extensionSent.at(-1)).toEqual({ type: 'tabs', urls: [SITE, PR], active: PR });
+
+    // The links go when the page shows another work item.
+    pane.selected.set('page-1', 3);
+    pane.tabs.set('page-1', { workItemId: 3, urls: [ISSUE], active: ISSUE });
+    pane.state.update();
+    expect(pane.extensionSent.at(-1)).toEqual({ type: 'tabs', urls: [ISSUE], active: ISSUE });
+
+    // At most 20 tabs, keeping the one opened last.
+    for (let index = 0; index < 25; index++) {
+      pane.state.open('page-1', 3, `https://a.test/${index}`);
+    }
+
+    const many = pane.extensionSent.at(-1) as { urls: string[]; active: string };
+
+    expect(many.urls).toHaveLength(20);
+    expect(many.urls[0]).toBe(ISSUE);
+    expect(many.active).toBe('https://a.test/24');
+    expect(many.urls).toContain('https://a.test/24');
+
+    // Another page's links are its own, and a closed page's are dropped.
+    pane.state.open('page-2', 2, SITE);
+    expect(pane.extensionSent.at(-1)).toBe(many);
+    pane.state.pageClosed('page-1');
+    pane.tabs.set('page-1', { workItemId: 3, urls: [ISSUE], active: ISSUE });
+    pane.state.pageRect('page-1', RECT);
+    pane.state.helperReport({ state: 'found', marker: '000000000002' });
+    expect(pane.extensionSent.at(-1)).toEqual({ type: 'tabs', urls: [ISSUE], active: ISSUE });
+  });
+
+  it('opens the pane again for a link after the operator closed its window, the same link included', () => {
+    const pane = setup();
+
+    pane.state.helperReport({ state: 'ready', marker: null });
+    pane.state.pageRect('page-1', RECT);
+    pane.state.helperReport({ state: 'found', marker: '000000000001' });
+    pane.state.open('page-1', 1, 'https://example.com/a');
+    pane.state.extensionMessage({ type: 'closed' });
+    expect(pane.helperSent.at(-1)).toEqual({ marker: null, rect: null });
+    // The same link again, which changes no tab, still opens the pane again.
+    expect(pane.state.open('page-1', 1, 'https://example.com/a')).toBe(true);
+    expect(pane.extensionSent.at(-1)).toEqual({ type: 'window', marker: '000000000002' });
+  });
+
+  it('refuses a link while the pane helper will not run, so the page opens it itself', () => {
+    const pane = setup();
+
+    pane.state.pageRect('page-1', RECT);
+    pane.state.helperStopped('The pane helper is not installed.');
+    expect(pane.state.open('page-1', 1, 'https://example.com/a')).toBe(false);
+    pane.state.helperReport({ state: 'ready', marker: null });
+    expect(pane.state.open('page-1', 1, 'https://example.com/a')).toBe(true);
+  });
+
   it('wants the helper once a page owns the pane, starts nothing until it is ready, then marks the window, sends the tabs once it found it, and shows the pane', () => {
     const pane = setup();
 

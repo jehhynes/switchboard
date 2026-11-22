@@ -396,6 +396,29 @@ describe('createHubApp', () => {
     expect(helperStarts).toBe(0);
   });
 
+  it("takes a web link for the Chrome pane only from a page with a selected work item, an http or https URL, and a paired extension (architecture.md § Pane state)", async () => {
+    writeSettings({ sessions: { installHooks: false }, sources: { adhoc: { repoRoot: 'D:/scratch' } }, web: { chromePane: true } });
+    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli }, startPaneHelper: async () => ({ error: 'not in tests' }) });
+
+    closers.push(() => app.close());
+
+    const page = app.page!.opened();
+    const open = (body: unknown) => app.post['/v1/conversation/pane-open']!(body);
+
+    expect(await open({ window: page, url: 'https://example.com/' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(await open({ window: 'nobody', url: 'https://example.com/' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+
+    for (const url of ['javascript:alert(1)', 'file:///C:/x', 'https://', `https://a.test/${'x'.repeat(2048)}`, 3]) {
+      expect(await open({ window: page, url })).toEqual({ status: 400, body: { error: 'Expected {window, url} with an http or https URL.' } });
+    }
+
+    app.runtime.send({ type: 'adhoc', prompt: 'Fix the badge', repoRoot: 'D:/scratch', start: false });
+    await app.runtime.settled();
+    expect(await app.post['/v1/conversation/select']!({ window: page, opId: 'o1', workItemId: 1 })).toMatchObject({ status: 200 });
+    // No extension is paired, so the page opens the link itself.
+    expect(await open({ window: page, url: 'https://example.com/' })).toEqual({ status: 409, body: { error: 'The Chrome pane is not connected.' } });
+  });
+
   it('refuses Continue in Background with a bad body, and answers the roster’s refusal (PRD R89)', async () => {
     writeSettings({ sessions: { installHooks: false } });
     const roster: Exec = async (file, args) =>

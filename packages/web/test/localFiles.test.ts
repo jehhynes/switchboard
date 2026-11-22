@@ -76,6 +76,100 @@ describe('local file link targets', () => {
   });
 });
 
+describe('web links with the Chrome pane', () => {
+  let root: HTMLElement;
+  let pages: Array<{ close(): void }>;
+
+  beforeEach(() => {
+    root = document.createElement('div');
+    document.body.replaceChildren(root);
+    localStorage.clear();
+    pages = [];
+  });
+
+  afterEach(() => {
+    pages.forEach((page) => page.close());
+    vi.restoreAllMocks();
+  });
+
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const start = (options: { installed: boolean; paneOpen?: number; width?: number }) => {
+    const posts: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const opened: string[] = [];
+    const fetch = vi.fn(async (url: string, init?: { body?: string }) => {
+      posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) });
+
+      const status = url.endsWith('/pane-open') ? (options.paneOpen ?? 200) : 200;
+
+      return { status, ok: status === 200, json: async () => (status === 200 ? {} : { error: 'The Chrome pane is not connected.' }) } as unknown as Response;
+    });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, standalone: () => options.installed, openUrl: (url) => opened.push(url), toExtension: async () => ({ ok: true }) });
+    const source = FakeSource.last!;
+    const scope = { kind: 'page', key: 'pk', folder: 'D:/w', title: 'Fix it', scopeGen: 3, conversations: [{ workItemId: 1, title: 'Fix it', primary: true, sessionId: 's', state: 'idle', conversation: 'full', unread: 0 }], workItemId: 1, cwd: 'D:/w', sessionId: 's' };
+    const session = { id: 's', title: 'Task', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, persona: null };
+    const reply = { type: 'reply', id: 'r1', sessionId: 's', at: 1_000, ord: 1, provisional: false, kind: 'reply', answers: null, opening: 'See [the docs](https://example.com/docs).', rewrittenBy: null, withdrawn: false, unread: false, speak: null, tone: null, spoken: { state: 'none', atMs: null, saidChars: null } };
+    // A work item with no links of its own, so only the opened link gives the Browser tab something to show.
+    const row = { workItemId: 1, ticketId: null, title: 'Fix it', priority: null, time: null, ticket: 'gh 1', sourceKind: 'github', url: '', playbook: 'dev:build', links: [], returned: 0, comment: null, mark: null, details: [], stripe: null, dim: false, host: null, actions: [], main: null, pastes: [], search: '', opens: [], terminal: false, band: null, voice: null, history: null };
+
+    pages.push(page);
+    vi.spyOn(root.querySelector('#detail .detail-body')!, 'getBoundingClientRect').mockReturnValue({ left: 1000, top: 40, width: options.width ?? 600, height: 800 } as DOMRect);
+    window.innerWidth = 1600;
+    window.dispatchEvent(new Event('resize'));
+    source.emit('hello', { key: 'pk', groups: [{ key: 'progress', title: 'In progress', glyph: '', empty: null, rows: [row] }], scope, sessions: [session], items: [reply], more: false, status: null, artifacts: [], unread: 0 });
+    source.emit('pane', { pane: { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: null } });
+    return { posts, opened };
+  };
+  const clickLink = (): MouseEvent => {
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true });
+
+    root.querySelector<HTMLElement>('.body a[href="https://example.com/docs"]')!.dispatchEvent(event);
+    return event;
+  };
+
+  it("opens a reply's web link in the pane's window and shows the Browser tab, instead of a new tab in the last focused browser window", async () => {
+    const { posts, opened } = start({ installed: true });
+
+    await flush();
+    expect(root.querySelector('[data-side="browser"]')).toBeNull();
+
+    const event = clickLink();
+
+    expect(event.defaultPrevented).toBe(true);
+    await flush();
+    expect(posts.filter((post) => post.url.endsWith('/pane-open')).map((post) => post.body['url'])).toEqual(['https://example.com/docs']);
+    expect(root.querySelector('#detail .side-switch [aria-selected="true"]')!.textContent).toBe('Browser');
+    expect(opened).toEqual([]);
+  });
+
+  it('opens the link in a new browser tab when the hub refuses it', async () => {
+    const refused = start({ installed: true, paneOpen: 409 });
+
+    await flush();
+    clickLink();
+    await flush();
+    await flush();
+    expect(refused.opened).toEqual(['https://example.com/docs']);
+    expect(root.querySelector('[data-side="browser"]')).toBeNull();
+  });
+
+  it('opens the link in a new browser tab at once when the Browser area is too narrow for the pane', async () => {
+    const { posts, opened } = start({ installed: true, width: 400 });
+
+    await flush();
+    expect(clickLink().defaultPrevented).toBe(false);
+    expect(posts.filter((post) => post.url.endsWith('/pane-open'))).toEqual([]);
+    expect(opened).toEqual([]);
+  });
+
+  it('leaves a web link to the browser on a page that is not the installed app', async () => {
+    const plain = start({ installed: false });
+
+    await flush();
+    expect(clickLink().defaultPrevented).toBe(false);
+    expect(plain.posts.filter((post) => post.url.endsWith('/pane-open'))).toEqual([]);
+  });
+});
+
 describe('local file tabs', () => {
   let root: HTMLElement;
   let gets: string[];

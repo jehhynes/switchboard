@@ -463,6 +463,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     want: (on) => paneHelper.want(on),
     toPage: (key, view) => conversation.notify(key, 'pane', { pane: view }),
     pages: () => conversation.pages(),
+    selected: (key) => scopes.scope(key)?.workItemId ?? null,
     tabsOf: (key) => {
       const workItemId = scopes.scope(key)?.workItemId ?? null;
       const dock = views().dock;
@@ -1281,6 +1282,26 @@ const dockWithRuns = () => {
         }
 
         return { status: 200, body: { token: paneLink.pairingToken(), extensionId: PANE_EXTENSION_ID } };
+      },
+      // A web link the page's conversation shows, opened in the Chrome pane's window rather than a new browser tab (architecture.md § Pane state).
+      '/v1/conversation/pane-open': async (body) => {
+        const url = isRecord(body) ? body['url'] : undefined;
+
+        if (!isRecord(body) || typeof body['window'] !== 'string' || typeof url !== 'string' || url.length > 2048 || !/^https?:\/\//i.test(url) || !URL.canParse(url)) {
+          return { status: 400, body: { error: 'Expected {window, url} with an http or https URL.' } };
+        }
+
+        const workItemId = scopes.isPage(body['window']) ? (scopes.scope(body['window'])?.workItemId ?? null) : null;
+
+        if (workItemId === null) {
+          return { status: 403, body: { error: 'Not in this window.' } };
+        }
+
+        if (!config.settings.web.chromePane || paneLink.state() !== 'paired') {
+          return { status: 409, body: { error: 'The Chrome pane is not connected.' } };
+        }
+
+        return pane.open(body['window'], workItemId, url) ? { status: 200, body: { opened: true } } : { status: 409, body: { error: 'The Chrome pane cannot show the link.' } };
       },
       // The page's right column for the Chrome pane, or null (architecture.md § Pane state).
       '/v1/conversation/pane-rect': async (body) => {

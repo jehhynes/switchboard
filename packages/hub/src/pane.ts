@@ -84,6 +84,8 @@ export interface PaneStateDeps {
   pages(): string[];
   /** The tabs of the work item a page shows, with its ID, or null. */
   tabsOf(key: string): { workItemId: number; urls: string[]; active: string } | null;
+  /** The work item a page shows, or null; without it, the one `tabsOf` names. */
+  selected?(key: string): number | null;
   /** Whether focus in the pane window counts as focus in the page now. */
   focused(key: string, focused: boolean): void;
   log(line: string): void;
@@ -116,6 +118,8 @@ export class PaneState {
   #sentHelper = '';
   #sentTabs = '';
   readonly #sentPages = new Map<string, string>();
+  /** The web links each page opened in the pane for the work item it showed (`pane-open`), the last one opened in front. */
+  readonly #opened = new Map<string, { workItemId: number; urls: string[]; active: string }>();
 
   constructor(private readonly deps: PaneStateDeps) {}
 
@@ -164,7 +168,52 @@ export class PaneState {
     }
   }
 
+  /**
+   * `pane-open`: a web link the page's conversation shows, opened in the pane's window among the work item's own tabs and brought to the front
+   * there, so it never opens in whichever browser window had the focus last. The links last while the page shows that work item. False when the
+   * pane helper will not run, so nothing would show it.
+   */
+  open(key: string, workItemId: number, url: string): boolean {
+    // A pane helper that will not start again cannot show the link: the page opens it itself.
+    if (!this.#helperReady && this.#helperError !== null) {
+      return false;
+    }
+
+    const kept = this.#opened.get(key);
+    const urls = (kept?.workItemId === workItemId ? kept.urls : []).filter((one) => one !== url);
+
+    this.#opened.set(key, { workItemId, urls: [...urls, url].slice(-PANE_MAX_TABS), active: url });
+
+    // Asking for a link starts again a pane the operator closed or a failure stopped, even for a link it already had.
+    if (key === this.#owner) {
+      this.#dismissed = null;
+      this.#error = null;
+    }
+
+    this.update();
+    return true;
+  }
+
+  /** A page's tabs: its work item's own, then the links it opened for that work item, at most {@link PANE_MAX_TABS}, the last opened in front. */
+  #tabsOf(key: string): { workItemId: number; urls: string[]; active: string } | null {
+    const own = this.deps.tabsOf(key);
+    const opened = this.#opened.get(key);
+    const workItemId = this.deps.selected?.(key) ?? own?.workItemId ?? null;
+
+    if (opened === undefined || opened.workItemId !== workItemId) {
+      return own;
+    }
+
+    const base = own?.workItemId === workItemId ? own.urls : [];
+    const extra = opened.urls.filter((url) => !base.includes(url));
+    const kept = extra.slice(-Math.max(1, PANE_MAX_TABS - base.length));
+    const urls = [...base.slice(0, PANE_MAX_TABS - kept.length), ...kept];
+
+    return { workItemId, urls, active: urls.includes(opened.active) ? opened.active : (own?.active ?? urls[0]!) };
+  }
+
   pageClosed(key: string): void {
+    this.#opened.delete(key);
     this.#sentPages.delete(key);
     this.#rects.delete(key);
     this.#seqs.delete(key);
@@ -234,7 +283,7 @@ export class PaneState {
 
   /** The pane's state after any change: the setting, the extension, a page's selection or the views. */
   update(): void {
-    const tabs = this.#owner === null ? null : this.deps.tabsOf(this.#owner);
+    const tabs = this.#owner === null ? null : this.#tabsOf(this.#owner);
     const tabsKey = JSON.stringify(tabs);
 
     // Showing another work item lifts a dismissal and an error.
@@ -296,7 +345,7 @@ export class PaneState {
   }
 
   #tabsKey(): string {
-    return JSON.stringify(this.#owner === null ? null : this.deps.tabsOf(this.#owner));
+    return JSON.stringify(this.#owner === null ? null : this.#tabsOf(this.#owner));
   }
 
   #setOwner(key: string | null): void {

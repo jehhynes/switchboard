@@ -2,8 +2,8 @@ import { applyEvent, commandQuery, EMPTY, mentionOf, mentionQuery, pageTitle, ro
 import { snoozeChoices } from '@switchboard/core/snooze';
 import type { PageState } from './model.js';
 import { placeMenus } from '@switchboard/conversation/menuPlace';
-import { escape, renderMarkdown } from './markdown.js';
-import { answerText, artifactShow, artifactTabsFit, artifactUrl, textArtifactHtml, bandOpen, browserNote, closedArtifacts, paneLink, collapsedGroups, complete, firstSnoozeDay, GROUPS_KEY, inputReady, renderMicButton, markdownBody, newView, parseQuestions, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, hasConsole, SIDE_TABS } from './render.js';
+import { escape, renderMarkdown, webLink } from './markdown.js';
+import { answerText, artifactShow, artifactTabsFit, artifactUrl, textArtifactHtml, bandOpen, browserNote, BROWSER_MIN_WIDTH, closedArtifacts, paneLink, collapsedGroups, complete, firstSnoozeDay, GROUPS_KEY, inputReady, renderMicButton, markdownBody, newView, parseQuestions, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, hasConsole, SIDE_TABS } from './render.js';
 import type { CardDraft, PaneView, SideTab, Tab, View } from './render.js';
 import type { ConsoleOptions, MountedConsole } from './console.js';
 import { LIGHT_SCHEME } from './console.js';
@@ -224,11 +224,13 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /** Whether this page can drive the Chrome pane: only a page on this computer posts its area (`pane-rect` is a local command). */
   const paneLocal = (): boolean => deps.local ?? ['127.0.0.1', 'localhost'].includes(location.hostname);
   const browserTab = (): boolean => view.pane?.enabled === true && standalone() && paneLocal();
-  /** Whether the open work item has links the Chrome pane can show. */
+  /** The work item whose conversation's web links this page opened in the Chrome pane (`pane-open`), which then has links to show too. */
+  let paneOpened: number | null = null;
+  /** Whether the open work item has links the Chrome pane can show: its own, or a web link of its conversation opened there. */
   const itemLinks = (): boolean => {
     const row = selectedRow(state);
 
-    return row !== null && (paneLink(row.url) || row.links.some((link) => paneLink(link.url)));
+    return (row !== null && (paneLink(row.url) || row.links.some((link) => paneLink(link.url)))) || (paneOpened !== null && paneOpened === state.scope?.workItemId);
   };
   /** Whether the Browser tab shows: the pane on for this page, and links of the open work item to show; the operator's Status or Browser choice stays. */
   const showBrowser = (): boolean => browserTab() && itemLinks();
@@ -346,6 +348,33 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       // A tab of the column chosen here is the column's choice too; Conversation leaves the column's choice, but Browser.
       view.side = tab !== 'conversation' ? tab : view.side === 'browser' ? 'status' : view.side;
     }
+  };
+  /** Whether a web link can open in the Chrome pane: the Browser tab is offered on this computer's installed page and the extension is paired. */
+  const paneReady = (): boolean => {
+    // The Browser tab's area must be wide enough for the pane, or the link would wait unseen; it opens in a new browser tab instead.
+    const area = (wide() ? detailBody : panel).getBoundingClientRect().width;
+
+    return browserTab() && view.pane?.extension === 'paired' && state.scope !== null && state.key !== null && area >= BROWSER_MIN_WIDTH;
+  };
+  /**
+   * Opens a web link of the conversation in the Chrome pane (`pane-open`, architecture.md § Pane state) and shows the Browser tab, where the
+   * pane's window lies; the link opens in a new browser tab instead when the hub refuses it.
+   */
+  const openInPane = (url: string): void => {
+    const workItemId = state.scope?.workItemId ?? null;
+
+    paneOpened = workItemId;
+    leaving('browser');
+    chooseTab('browser');
+    draw();
+    saveTab();
+    void post('pane-open', { url }).then((answer) => {
+      if (answer.status !== 200) {
+        paneOpened = null;
+        (deps.openUrl ?? ((one: string) => void window.open(one, '_blank', 'noopener,noreferrer')))(url);
+        draw();
+      }
+    });
   };
   /** Reports the Browser tab's area to the hub after each draw, once the pane's report is set up below; sent again after a tab change. */
   let reportBrowser = (): void => {};
@@ -1708,7 +1737,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       if (tab === 'browser') {
         // The Chrome pane's window lies over this area while it shows; until then the area says why it does not.
         const row = selectedRow(state);
-        const note = browserNote(view.pane, pane.getBoundingClientRect().width, row !== null && (paneLink(row.url) || row.links.some((link) => paneLink(link.url))), paneHidden());
+        const note = browserNote(view.pane, pane.getBoundingClientRect().width, itemLinks(), paneHidden());
 
         drawPane(pane, note === null ? null : renderEmpty(note));
       } else if (tab === 'console') {
@@ -2329,6 +2358,16 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const target = event.target as HTMLElement;
 
     if (changes.click(target) || localFiles.click(target)) {
+      return;
+    }
+
+    // A web link in a reply, a status or an artifact opens in the Chrome pane's window while the pane is on, never in whichever browser window
+    // had the focus last; without the pane it opens in a new browser tab, as its target says.
+    const web = target.closest<HTMLAnchorElement>('.body a[href][target="_blank"]');
+
+    if (web !== null && webLink(web.getAttribute('href') ?? '') && paneReady()) {
+      event.preventDefault();
+      openInPane(web.href);
       return;
     }
     const sideTab = target.closest<HTMLElement>('[data-side]')?.dataset['side'];
