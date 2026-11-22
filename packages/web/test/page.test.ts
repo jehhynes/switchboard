@@ -4910,6 +4910,11 @@ describe("the list's CSS", () => {
     expect(css).not.toMatch(/\.(sash|sliver|sheet-backdrop|persona-backdrop|composer-menu)\b[^{]*\{[^}]*z-index: \d/);
   });
 
+  it('makes every box in a scrolling pane a touch target, so a drag starting just under a tab strip scrolls the pane, not the strip', () => {
+    // Chrome's touch adjustment moves a touch onto a nearby box with a :hover style; with one on every box in the pane, the touch stays put.
+    expect(declarationsOf((selector) => selector === '.scroll :hover')).toEqual(['--sb-touch-target: 1;']);
+  });
+
   it('hides the list\'s pin in the phone\'s layout, and drops the snap a drag once had', () => {
     expect(declarationsOf((selector) => selector === ':where(html.phone) .list-header > .list-pin')).toEqual(['display: none;']);
     expect(css).not.toMatch(/snapping|#root\.snap\b|data-snap/);

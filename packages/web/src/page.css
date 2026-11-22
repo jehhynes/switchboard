@@ -417,6 +417,10 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 .artifact-menu .menu-note { margin-left: 12px; }
 .tab-badge { box-sizing: border-box; min-width: 16px; height: 16px; padding: 0 5px; border-radius: 8px; font-size: 11px; line-height: 16px; text-align: center; text-transform: none; color: var(--vscode-activityBarBadge-foreground); background: var(--vscode-activityBarBadge-background); }
 .scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 20px 20px calc(16px + var(--sb-end)); touch-action: pan-y pinch-zoom; }
+/* Chrome and Edge move a touch that starts near a box with a :hover or :active style, such as a tab strip, onto that box (touch adjustment),
+   so a drag starting just under a tab strip panned the strip, which does not scroll, rather than the pane under the finger. A :hover rule on
+   everything in a scrolling pane makes each of its boxes such a box too, and the touch stays on the one under it. */
+.scroll :hover { --sb-touch-target: 1; }
 .scroll.framed { display: flex; flex-direction: column; padding: 0 0 var(--sb-end); }
 
 /* The timeline. */
