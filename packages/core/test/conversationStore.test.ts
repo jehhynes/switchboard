@@ -21,6 +21,33 @@ const reply = (id: string, at: number, patch: Partial<ConversationReply> = {}): 
 const unspoken = { speak: null, tone: null, spokenState: 'none', spokenAtMs: null, saidChars: null } as const;
 
 describe('conversation store', () => {
+  it('keeps the questions a message answered, null for one stored without them, and the dismissed questions until a message tells the session (PRD R103)', () => {
+    const store = Store.open(':memory:');
+    const answers = [{ replyId: 'r1', slug: 'port-choice', letters: ['B'], other: '', via: 'card' as const }, { replyId: 'r1', slug: 'keep-route', letters: [], other: '', via: 'card' as const, dismissed: true }];
+
+    store.addMessage({ id: 'm1', sessionId: 's1', workItemId: 1, at: 10, origin: 'typed', text: '[answers]', transcriptUuid: null, provisional: true, withdrawn: false, delivery: 'open', error: null, opId: 'o', pastedAt: null, answers });
+    store.addMessage({ id: 'm2', sessionId: 's1', workItemId: 1, at: 11, origin: 'typed', text: 'hi', transcriptUuid: null, provisional: true, withdrawn: false, delivery: 'open', error: null, opId: 'p', pastedAt: null, answers: [] });
+    store.addMessage({ id: 'm3', sessionId: 's1', workItemId: 1, at: 12, origin: 'terminal', text: 'hi', transcriptUuid: 'support', provisional: false, withdrawn: false, delivery: null, error: null, opId: null, pastedAt: null });
+
+    expect(store.message('m1')?.answers).toEqual(answers);
+    expect(store.message('m2')?.answers).toEqual([]);
+    expect(store.message('m3')).not.toHaveProperty('answers');
+    expect(Object.fromEntries(store.conversation('s1', null, 10).items.map((item) => [item.id, item.type === 'message' ? (item.answers ?? null) : undefined]))).toEqual({ m1: answers, m2: [], m3: null });
+
+    store.addDismissal('s1', 'r1', 'keep-route', 20);
+    store.addDismissal('s1', 'r1', 'keep-route', 30);
+    store.addDismissal('s1', 'r2', 'colour', 25);
+    store.addDismissal('s2', 'r9', 'other-session', 26);
+    store.addDismissal('s1', 'r3', 'after-item', 27, 'm2');
+    expect(store.dismissals('s1')).toEqual([{ replyId: 'r1', slug: 'keep-route', at: 20, afterId: null, reportedIn: null }, { replyId: 'r2', slug: 'colour', at: 25, afterId: null, reportedIn: null }, { replyId: 'r3', slug: 'after-item', at: 27, afterId: 'm2', reportedIn: null }]);
+    store.reportDismissals('s1', [{ replyId: 'r1', slug: 'keep-route' }], 'm1');
+    expect(store.dismissals('s1').map((one) => one.reportedIn)).toEqual(['m1', null, null]);
+    expect(store.dismissals('s2')).toHaveLength(1);
+    // A message that was not sent told nothing.
+    store.unreportDismissals('s1', 'm1');
+    expect(store.dismissals('s1').map((one) => one.reportedIn)).toEqual([null, null, null]);
+  });
+
   it('keeps whether a message asked for a spoken reply, and a reply\'s passage, tone line and speech', () => {
     const store = Store.open(':memory:');
 

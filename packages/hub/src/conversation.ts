@@ -2,8 +2,12 @@ import { countsUnread, inTranscript } from '@switchboard/core';
 import type { ConversationMessage, ConversationReply, ConversationStatus, Interruption, Piece, Provider, Session, SpokenState, Store } from '@switchboard/core';
 import { artifactsDir, backgroundCounts, hostKey, PERMISSION_PROMPT, personaById, resumesHeld, sessionTone, START_PROMPT, toneVersion, waitsOnLimit } from '@switchboard/core';
 import type { BackgroundCounts, PersonaSettings, ViewSettings } from '@switchboard/core';
-import { ArtifactFolder, MAX_MESSAGE_CHARS, NotWritten, interruptNote, messageTags, pasteText } from '@switchboard/conversation';
+import { ArtifactFolder, MAX_MESSAGE_CHARS, NotWritten, answerMessage, cardSteps, cardUtterance, currentStep, draftAnswers, interruptNote, messageTags, moveStep, pasteText, picked, pickLetter, questionKey, questionSpeech, resolveAnswers, setOther, SLUG } from '@switchboard/conversation';
+import type { CardDraft, LedgerCard, LedgerQuestion, QuestionLedger } from '@switchboard/conversation';
+import type { MessageAnswer } from '@switchboard/core';
+import { dismissedAt, questionsSince, sessionLedger } from './questions.js';
 import { promptKeyData, readPrompt, screenRows, stepsText, TYPING_PAUSE_MS } from '@switchboard/conversation';
+import type { QuestionsView } from '@switchboard/protocol';
 import type { Artifact, ContextView, ConversationChange, HeardTag, InputOutcome, InputSteps, PromptKey, ScreenPrompt, SlashCommand } from '@switchboard/conversation';
 import { SESSION_ENDED, SESSION_RELAUNCHED } from './runtime.js';
 import { canonicalFolder } from './windows.js';
@@ -16,6 +20,8 @@ import type { VoiceView } from './voice.js';
 import { ClaudeConversationAdapter } from './claudeConversation.js';
 import type { ConversationAdapter, ConversationChanged, DeliveryOutcome, NativeRequest } from './conversationAdapter.js';
 export { ansiTheme, claudePaths } from './claudeConversation.js';
+
+export type { CardDraftView, QuestionsView } from '@switchboard/protocol';
 
 /** Conversation API version (architecture.md § Conversation API). */
 export const CONVERSATION_PROTOCOL = 1;
@@ -286,8 +292,13 @@ export interface ConversationServiceDeps {
   rowOpen?(rowKey: string, url: string): string | null;
   /** Runs one of a pool ticket's row controls, by its label, after checking that its dock row still offers it: why not, or null. */
   poolAction?(ticketId: number, label: string, extra: PageActionExtra): string | null;
+  /** A session's questions were settled outside a turn, as by a dismissal, which can end its wait on them (PRD R103). */
+  questionsSettled?(sessionId: string): void;
   log(line: string): void;
 }
+
+/** How long the hub gathers a session's changes before it sends its windows the questions again. */
+export const QUESTIONS_SETTLE_MS = 40;
 
 /** What the conversation layer asks of the hub's voice (`VoiceControl`). */
 export interface ConversationVoice {
@@ -522,7 +533,408 @@ export class ConversationService {
 
     // A new message can push an unread reply past the retention limit, so every change counts again.
     this.#unreadChanged(sessionId);
+
+    if (change.type === 'message' || change.reply.kind === 'reply') {
+      this.#questionsChanged(sessionId);
+    }
   }
+
+  // ---- Questions (PRD R103) ----
+
+  /** Each session's card drafts by card key, kept for every window, page and the voice (design § 5.2). */
+  readonly #drafts = new Map<string, Map<string, CardDraft>>();
+  /** The card a session's operator last worked in, whose current question a lone typed or spoken letter answers. */
+  readonly #lastCard = new Map<string, string>();
+  readonly #questionTimers = new Map<string, NodeJS.Timeout>();
+  /** The questions each window was last sent, by window key. */
+  readonly #questionsShown = new Map<string, string>();
+
+  /** A session's question ledger, from the store. */
+  ledger(sessionId: string): QuestionLedger {
+    return sessionLedger(this.deps.store, sessionId, questionsSince(this.deps.store, this.deps.now()));
+  }
+
+  /** A session's card drafts, by card key. */
+  drafts(sessionId: string): Map<string, CardDraft> {
+    let drafts = this.#drafts.get(sessionId);
+
+    if (drafts === undefined) {
+      drafts = new Map();
+      this.#drafts.set(sessionId, drafts);
+    }
+
+    return drafts;
+  }
+
+  /** A session's questions for a window's `hello`, remembered as shown to it. */
+  #questionsHello(key: string, sessionId: string): QuestionsView {
+    const view = this.questionsView(sessionId);
+
+    this.#questionsShown.set(key, JSON.stringify(view));
+    return view;
+  }
+
+  /** A session's questions as its windows get them: the cutover, the open count, the oldest open card, the drafts and the dismissed keys. */
+  questionsView(sessionId: string, ledger: QuestionLedger = this.ledger(sessionId)): QuestionsView {
+    const drafts = this.drafts(sessionId);
+
+    // A pick for a question asked again, by a rewrite or the same slug, moves to the new question when its options' labels match (design § 8).
+    for (const [key, draft] of [...drafts]) {
+      for (const [slug, pick] of Object.entries(draft.picks)) {
+        const was = ledger.questions.get(`${key}#${slug}`);
+        const now = was?.state === 'replaced' && was.replacedBy !== null ? ledger.questions.get(was.replacedBy) : undefined;
+        const same = (one: typeof was) => JSON.stringify(one!.question.options.map((option) => option.label));
+
+        if (now !== undefined && now.state === 'open' && same(was) === same(now) && drafts.get(now.card)?.picks[now.question.slug] === undefined) {
+          const target = drafts.get(now.card) ?? { step: null, picks: {} };
+
+          drafts.set(now.card, { ...target, picks: { ...target.picks, [now.question.slug]: pick } });
+        }
+      }
+    }
+
+    // A draft of a card with nothing open left is dropped, once no answer to it is still being sent, which could come back not sent.
+    for (const key of [...drafts.keys()]) {
+      const card = ledger.cards.get(key);
+
+      if (card === undefined || (cardSteps(card).length === 0 && !card.questions.some((one) => one.answer?.sending === true))) {
+        drafts.delete(key);
+      }
+    }
+
+    return {
+      sessionId,
+      since: questionsSince(this.deps.store, this.deps.now()),
+      open: ledger.open.length,
+      oldest: ledger.open.length === 0 ? null : ledger.questions.get(ledger.open[0]!)!.card,
+      drafts: Object.fromEntries(drafts),
+      dismissed: dismissedAt(this.deps.store, sessionId),
+    };
+  }
+
+  /** The open card's current question, which a lone letter answers: the card the operator last worked in, else the oldest open one. */
+  currentQuestion(sessionId: string, ledger: QuestionLedger = this.ledger(sessionId)): { replyId: string; slug: string; card: string } | null {
+    const last = this.#lastCard.get(sessionId);
+    const worked = last === undefined ? undefined : ledger.cards.get(last);
+    // A card whose questions are all settled no longer has a current question; the oldest open card does.
+    const card = (worked !== undefined && cardSteps(worked).length > 0 ? worked : undefined) ?? (ledger.open.length === 0 ? undefined : ledger.cards.get(ledger.questions.get(ledger.open[0]!)!.card));
+    const step = card === undefined || cardSteps(card).length === 0 ? null : currentStep(card, this.drafts(sessionId).get(card.key));
+
+    return step === null ? null : { replyId: step.replyId, slug: step.question.slug, card: step.card };
+  }
+
+  /** Sends the windows showing a session its questions again, once its changes settle. */
+  #questionsChanged(sessionId: string): void {
+    if (this.#questionTimers.has(sessionId) || this.#closed) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      this.#questionTimers.delete(sessionId);
+      this.questionsChangedNow(sessionId);
+    }, QUESTIONS_SETTLE_MS);
+
+    timer.unref?.();
+    this.#questionTimers.set(sessionId, timer);
+  }
+
+  /** Sends the windows showing a session its questions now, each only when they changed for it. */
+  questionsChangedNow(sessionId: string): void {
+    if (this.#closed) {
+      return;
+    }
+
+    const keys = this.deps.windows.showing(sessionId).filter((key) => this.#streams.has(key));
+
+    if (keys.length === 0) {
+      return;
+    }
+
+    const view = this.questionsView(sessionId);
+    const text = JSON.stringify(view);
+
+    for (const key of keys) {
+      if (this.#questionsShown.get(key) !== text) {
+        this.#questionsShown.set(key, text);
+        this.#send(key, 'questions', { questions: view });
+      }
+    }
+  }
+
+  /**
+   * `card-draft {window, scopeGen, opId, sessionId, card, draft}` (design § 5.2): where the operator is in a card and the picks so far, kept by
+   * the hub and sent to every window showing the session. `card-dismiss {…, sessionId, card, slug}`: the operator dismissed an open question,
+   * which stops counting and is told to the session with the next answer message. Refused with 403 outside the window's scope, 409 for a stale
+   * `scopeGen` or a question that is not open, and 400 for a malformed body.
+   */
+  cardCommand(name: 'card-draft' | 'card-dismiss', body: Record<string, unknown>): { status: number; body: unknown } {
+    const { window, scopeGen, opId, sessionId, card, draft, slug } = body;
+    const fields = name === 'card-draft' ? 'card, draft' : 'card, slug';
+
+    if (typeof window !== 'string' || typeof scopeGen !== 'number' || typeof opId !== 'string' || typeof sessionId !== 'string' || typeof card !== 'string' || !/^reply:[^#\s]{1,200}$/.test(card)) {
+      return { status: 400, body: { error: `Expected {window, scopeGen, opId, sessionId, ${fields}}.` } };
+    }
+
+    const parsed = name === 'card-draft' ? parseDraft(draft) : null;
+
+    if ((name === 'card-draft' && parsed === null) || (name === 'card-dismiss' && (typeof slug !== 'string' || !SLUG.test(slug)))) {
+      return { status: 400, body: { error: `Expected {window, scopeGen, opId, sessionId, ${fields}}.` } };
+    }
+
+    const refused = refusal(this.deps.windows.scope(window), scopeGen, sessionId);
+
+    if (refused !== null) {
+      return refused;
+    }
+
+    const ledger = this.ledger(sessionId);
+    const asked = ledger.cards.get(card);
+
+    if (asked === undefined) {
+      return { status: 409, body: { error: 'That card is no longer in the conversation.' } };
+    }
+
+    if (name === 'card-draft') {
+      this.drafts(sessionId).set(card, parsed!);
+      this.#lastCard.set(sessionId, card);
+      this.questionsChangedNow(sessionId);
+      return { status: 200, body: { done: true } };
+    }
+
+    const one = ledger.questions.get(questionKey(asked.replyId, slug as string));
+
+    if (one === undefined || one.card !== card) {
+      return { status: 409, body: { error: 'That question is not on this card.' } };
+    }
+
+    if (one.state !== 'open') {
+      return { status: 409, body: { error: closedReason(one.state) } };
+    }
+
+    this.deps.store.addDismissal(sessionId, one.replyId, one.question.slug, this.deps.now(), this.deps.store.conversation(sessionId, null, 1, false).items.at(-1)?.id ?? null);
+
+    const drafts = this.drafts(sessionId).get(card);
+
+    if (drafts !== undefined) {
+      const { [one.question.slug]: _gone, ...picks } = drafts.picks;
+
+      this.drafts(sessionId).set(card, { step: drafts.step === one.question.slug ? null : drafts.step, picks });
+    }
+
+    this.questionsChangedNow(sessionId);
+    this.deps.questionsSettled?.(sessionId);
+    return { status: 200, body: { done: true } };
+  }
+
+  /**
+   * The answer message for a card's Send (design § 4): each given answer checked against the questions open now, with the session's dismissals
+   * no answer message has told it yet; why not when a question is no longer open or nothing is answered.
+   */
+  #answerText(sessionId: string, given: ReadonlyArray<{ card: string; slug: string; letters: string[]; other: string }>, via: MessageAnswer['via'] = 'card'): { text: string; answers: MessageAnswer[]; dismissals: Array<{ replyId: string; slug: string }> } | { refused: string } {
+    const ledger = this.ledger(sessionId);
+    const entries: Parameters<typeof answerMessage>[0][number][] = [];
+    const answers: MessageAnswer[] = [];
+
+    for (const one of given) {
+      const asked = ledger.questions.get(`${one.card}#${one.slug}`);
+
+      if (asked === undefined) {
+        return { refused: 'That question is no longer in the conversation.' };
+      }
+
+      if (asked.state !== 'open') {
+        return { refused: closedReason(asked.state) };
+      }
+
+      const letters = asked.question.options.map((option) => option.letter).filter((letter) => one.letters.includes(letter));
+      const kept = asked.question.multi ? letters : letters.slice(0, 1);
+      const other = one.other.replace(/\s+/g, ' ').trim();
+
+      if (kept.length === 0 && other === '') {
+        continue;
+      }
+
+      entries.push({ question: asked.question, letters: kept, other });
+      answers.push({ replyId: asked.replyId, slug: asked.question.slug, letters: kept, other, via });
+    }
+
+    if (entries.length === 0) {
+      return { refused: 'Pick an answer first.' };
+    }
+
+    const dismissals = this.deps.store
+      .dismissals(sessionId)
+      .filter((one) => one.reportedIn === null)
+      .flatMap((one) => {
+        const asked = ledger.questions.get(questionKey(one.replyId, one.slug));
+
+        return asked === undefined ? [] : [{ asked, one }];
+      });
+
+    for (const { asked } of dismissals) {
+      entries.push({ question: asked.question, letters: [], other: '', dismissed: true });
+      answers.push({ replyId: asked.replyId, slug: asked.question.slug, letters: [], other: '', via, dismissed: true });
+    }
+
+    const text = answerMessage(entries);
+
+    if (text.length > MAX_MESSAGE_CHARS) {
+      return { refused: `The answers are longer than ${MAX_MESSAGE_CHARS.toLocaleString('en-US')} characters.` };
+    }
+
+    return { text, answers, dismissals: dismissals.map(({ one }) => ({ replyId: one.replyId, slug: one.slug })) };
+  }
+
+  /**
+   * Sends a card's draft as its answer message, as the voice does after the last answer (design § 7): a `[spoken] [voice] [answers]` message
+   * when the reply will be heard. The message, or why not.
+   */
+  sendCard(sessionId: string, card: string, key: string | null): { message: ConversationMessage } | { refused: string } {
+    const session = this.deps.store.session(sessionId);
+
+    if (session === null) {
+      return { refused: SESSION_ENDED };
+    }
+
+    const view = this.#view(session, true, this.deps.hooks(), this.deps.personas?.() ?? null);
+
+    if (view.conversation !== 'full') {
+      return { refused: view.reason ?? SESSION_ENDED };
+    }
+
+    const asked = this.ledger(sessionId).cards.get(card);
+    const given = asked === undefined ? [] : draftAnswers(asked, this.drafts(sessionId).get(card)).map(({ one, pick }) => ({ card, slug: one.question.slug, letters: pick.letters, other: pick.other ?? '' }));
+    const written = this.#answerText(sessionId, given, 'voice');
+
+    if ('refused' in written) {
+      return written;
+    }
+
+    const message = this.#type(session, key, session.launchId ?? null, written.text, { opId: `card-${this.deps.newId()}`, command: false, pieces: null, partial: false, answers: written.answers, voiced: true });
+
+    if (written.dismissals.length > 0) {
+      this.deps.store.reportDismissals(session.id, written.dismissals, message.id);
+    }
+
+    return { message };
+  }
+
+  /** The current question of a reply's open card as speech (design § 7); null when the reply has none open. */
+  cardSpeech(sessionId: string, replyId: string): { id: string; text: string } | null {
+    const ledger = this.ledger(sessionId);
+    const card = ledger.cards.get(`reply:${replyId}`);
+    const steps = card === undefined ? [] : cardSteps(card);
+    const current = card === undefined ? null : currentStep(card, this.drafts(sessionId).get(card.key));
+
+    return current === null ? null : { id: `card:${replyId}#${current.question.slug}`, text: questionSpeech(current.question, steps.indexOf(current) + 1, steps.length) };
+  }
+
+  /**
+   * A whole utterance applied to the session's open card when it is a card command (design § 7): a letter, an ordinal, "the recommended one",
+   * "other, …", "back", "next", "repeat" or "send". A single-choice pick moves on and reads the next unanswered question; once every question of
+   * the card's batch has a pick, its answers are sent as a `[spoken] [voice] [answers]` message. What to say back, or null for dictation.
+   */
+  cardUtterance(key: string, sessionId: string, text: string): { say: string } | null {
+    const command = cardUtterance(text);
+
+    if (command === null) {
+      return null;
+    }
+
+    const ledger = this.ledger(sessionId);
+    const current = this.currentQuestion(sessionId, ledger);
+    const card = current === null ? undefined : ledger.cards.get(current.card);
+
+    if (current === null || card === undefined) {
+      return null;
+    }
+
+    const drafts = this.drafts(sessionId);
+    const steps = cardSteps(card);
+    const step = currentStep(card, drafts.get(card.key))!;
+    const speak = (draft: CardDraft | undefined): string => {
+      const now = currentStep(card, draft)!;
+
+      return questionSpeech(now.question, steps.indexOf(now) + 1, steps.length);
+    };
+    const save = (draft: CardDraft): void => {
+      drafts.set(card.key, draft);
+      this.#lastCard.set(sessionId, card.key);
+      this.questionsChangedNow(sessionId);
+    };
+    const send = (said: string): { say: string } => {
+      const sent = this.sendCard(sessionId, card.key, key);
+      const count = 'refused' in sent ? 0 : (sent.message.answers ?? []).filter((one) => one.dismissed !== true).length;
+
+      return { say: 'refused' in sent ? `${said}Not sent: ${sent.refused}` : `${said}Sending ${count === 1 ? 'one answer' : `${count} answers`}.` };
+    };
+    const options = step.question.options;
+    const letter = command.type === 'pick' ? command.letter : command.type === 'pick-index' ? options[command.index]?.letter : command.type === 'recommended' ? options.find((option) => option.recommended)?.letter : undefined;
+
+    switch (command.type) {
+      case 'repeat':
+        return { say: speak(drafts.get(card.key)) };
+      case 'back':
+      case 'next': {
+        const draft = moveStep(card, drafts.get(card.key), command.type);
+
+        save(draft);
+        return { say: speak(draft) };
+      }
+      case 'send':
+        return draftAnswers(card, drafts.get(card.key)).length === 0 ? { say: 'Nothing to send yet. Pick an answer first.' } : send('');
+      case 'other': {
+        if (command.text === '') {
+          return { say: 'Say Other and then your answer.' };
+        }
+
+        const draft = setOther(card, drafts.get(card.key), step.question.slug, command.text);
+
+        save(draft);
+        return this.#afterVoicePick(card, draft, steps, step, 'Other.', speak, save, send);
+      }
+      default: {
+        if (letter === undefined || !options.some((option) => option.letter === letter)) {
+          return { say: command.type === 'recommended' ? 'No option is recommended.' : 'There is no such option.' };
+        }
+
+        const { draft } = pickLetter(card, drafts.get(card.key), step.question.slug, letter);
+
+        save(draft);
+        return step.question.multi ? { say: `${letter}. Say next when you are done.` } : this.#afterVoicePick(card, draft, steps, step, `${letter}.`, speak, save, send);
+      }
+    }
+  }
+
+  /** After a spoken answer: sends the card once every question of its batch has one, else moves to the next question without one and reads it. */
+  #afterVoicePick(card: LedgerCard, draft: CardDraft, steps: LedgerQuestion[], step: LedgerQuestion, said: string, speak: (draft: CardDraft) => string, save: (draft: CardDraft) => void, send: (said: string) => { say: string }): { say: string } {
+    const after = steps.slice(steps.indexOf(step) + 1).concat(steps.slice(0, steps.indexOf(step)));
+    const next = after.find((one) => !picked(draft.picks[one.question.slug]));
+
+    if (next === undefined) {
+      return send(`${said} `);
+    }
+
+    const moved = moveStep(card, draft, next.question.slug);
+
+    save(moved);
+    return { say: `${said} ${speak(moved)}` };
+  }
+
+  /** What a typed or dictated message answers, against the questions open now; empty when it answers none. */
+  #resolveTyped(sessionId: string, text: string, via: MessageAnswer['via']): MessageAnswer[] {
+    const ledger = this.ledger(sessionId);
+
+    if (ledger.open.length === 0) {
+      return [];
+    }
+
+    const open = ledger.open.map((key) => ledger.questions.get(key)!).map((one) => ({ replyId: one.replyId, question: one.question }));
+
+    return resolveAnswers(text, open, this.currentQuestion(sessionId, ledger)).map((answer) => ({ ...answer, via }));
+  }
+
+
 
   /** The unread count each window was last sent, by window key and work item. */
   readonly #unreadShown = new Map<string, number>();
@@ -1289,6 +1701,7 @@ export class ConversationService {
       unread,
       artifactsDir: folder?.dir ?? null,
       artifacts: folder?.list() ?? [],
+      questions: scope.sessionId === null ? null : this.#questionsHello(key, scope.sessionId),
       ...this.#voiceHello(key),
       ...pageHello,
       // A page's tabs for its work item, kept for every device (architecture.md § Web page).
@@ -1640,10 +2053,13 @@ export class ConversationService {
    * list without the escape that keeps every other message a message; it must be one line that starts with `/name`.
    */
   send(body: Record<string, unknown>): { status: number; body: unknown } {
-    const { window, scopeGen, opId, sessionId, launch, text, command } = body;
+    const { window, scopeGen, opId, sessionId, launch, command, answers } = body;
+    const given = answers === undefined ? null : parseAnswers(answers);
+    // A card's Send posts its answers, whose text the hub writes (`answerMessage`).
+    const text = given === null ? body['text'] : '';
 
-    if (typeof window !== 'string' || typeof scopeGen !== 'number' || typeof opId !== 'string' || opId === '' || opId.length > 200 || typeof sessionId !== 'string' || !(launch === null || typeof launch === 'string') || typeof text !== 'string' || !(command === undefined || typeof command === 'boolean')) {
-      return { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, text, command?}.' } };
+    if (typeof window !== 'string' || typeof scopeGen !== 'number' || typeof opId !== 'string' || opId === '' || opId.length > 200 || typeof sessionId !== 'string' || !(launch === null || typeof launch === 'string') || typeof text !== 'string' || !(command === undefined || typeof command === 'boolean') || (answers !== undefined && (given === null || command === true))) {
+      return { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, text | answers: [{card, slug, letters, other}], command?}.' } };
     }
 
     const scope = this.deps.windows.scope(window);
@@ -1670,7 +2086,7 @@ export class ConversationService {
       return { status: 200, body: { message: itemView({ type: 'message', ...earlier }) } };
     }
 
-    if (text.trim() === '') {
+    if (given === null && text.trim() === '') {
       return { status: 400, body: { error: 'The message is empty.' } };
     }
 
@@ -1703,6 +2119,22 @@ export class ConversationService {
 
     if (cannotType !== null) {
       return { status: 409, body: { error: cannotType } };
+    }
+
+    if (given !== null) {
+      const written = this.#answerText(session.id, given);
+
+      if ('refused' in written) {
+        return { status: 409, body: { error: written.refused } };
+      }
+
+      const message = this.#type(session, window, launch, written.text, { opId, command: false, pieces: null, partial: false, answers: written.answers });
+
+      if (written.dismissals.length > 0) {
+        this.deps.store.reportDismissals(session.id, written.dismissals, message.id);
+      }
+
+      return { status: 200, body: { message: itemView({ type: 'message', ...message }) } };
     }
 
     // A draft that holds dictation goes as a [voice] message with its pieces, however it was sent (architecture.md § Dictation); a command never.
@@ -1752,11 +2184,13 @@ export class ConversationService {
     window: string | null,
     launch: string | null,
     text: string,
-    options: { opId: string; command: boolean; pieces: Piece[] | null; partial: boolean; auto?: boolean; olderToo?: boolean; interrupted?: Interruption | null; guard?: () => string | null },
+    options: { opId: string; command: boolean; pieces: Piece[] | null; partial: boolean; auto?: boolean; olderToo?: boolean; interrupted?: Interruption | null; guard?: () => string | null; answers?: MessageAnswer[]; voiced?: boolean },
   ): ConversationMessage {
     const sessionId = session.id;
-    const { spoken, expressive } = this.deps.voice?.spokenFor(sessionId, options.command || options.partial, options.pieces === null ? window : null) ?? { spoken: false, expressive: false };
-    const dictated = options.pieces === null ? null : options.partial ? 'partial' : 'voice';
+    const { spoken, expressive } = this.deps.voice?.spokenFor(sessionId, options.command || options.partial, options.pieces === null && options.voiced !== true ? window : null) ?? { spoken: false, expressive: false };
+    const dictated = options.voiced === true ? 'voice' : options.pieces === null ? null : options.partial ? 'partial' : 'voice';
+    // What it answers, resolved once now against the questions open (design § 4); a command, a [partial] part or the hub's own message none.
+    const answers = options.answers ?? (options.command || options.partial || options.auto === true || window === null ? [] : this.#resolveTyped(sessionId, text, options.pieces === null ? 'typed' : 'voice'));
     const added: Omit<ConversationMessage, 'ord'> = {
       id: `m-${this.deps.newId()}`,
       sessionId,
@@ -1777,6 +2211,7 @@ export class ConversationService {
       ...(options.pieces === null ? {} : { pieces: options.pieces }),
       ...(options.partial ? { partial: true } : {}),
       ...(dictated !== 'voice' || options.interrupted == null ? {} : { interrupted: options.interrupted }),
+      answers,
     };
     const note = dictated !== 'voice' || options.interrupted == null ? null : interruptNote(options.interrupted);
     const typed = spoken || dictated !== null ? `${messageTags(spoken, expressive, dictated, note)}${session.codeMode === true ? pasteText(text) : text}` : text;
@@ -1917,6 +2352,8 @@ export class ConversationService {
     // and the one that sent it puts its text back in the composer with why.
     if (outcome.delivery === 'not-sent') {
       this.deps.store.deleteMessage(id);
+      // Its answers reopen with the message gone, the card's picks still in its draft; the dismissals it told are told by the next one.
+      this.deps.store.unreportDismissals(message.sessionId, id);
       this.#unsent.set(`${message.sessionId} ${message.opId}`, outcome.error);
 
       for (const key of [...this.#unsent.keys()].slice(0, -UNSENT_KEPT)) {
@@ -2391,4 +2828,62 @@ export function refusal(scope: WindowScope | null, scopeGen: number, sessionId: 
   }
 
   return scope.scopeGen === scopeGen ? null : { status: 409, body: { error: CONVERSATION_CHANGED } };
+}
+
+/** Why a question cannot be answered or dismissed now, by its state. */
+function closedReason(state: string): string {
+  switch (state) {
+    case 'withdrawn':
+      return 'That question was withdrawn.';
+    case 'replaced':
+      return 'That question was replaced; answer the new one.';
+    case 'dismissed':
+      return 'That question was dismissed.';
+    default:
+      return 'Already answered.';
+  }
+}
+
+/** A card draft from a command body, checked: a step slug or null, and picks by slug of letters A to H and an Other text or null; null when malformed. */
+function parseDraft(value: unknown): CardDraft | null {
+  if (typeof value !== 'object' || value === null) {
+    return null;
+  }
+
+  const { step, picks } = value as { step?: unknown; picks?: unknown };
+
+  if (!(step === null || (typeof step === 'string' && SLUG.test(step))) || typeof picks !== 'object' || picks === null || Array.isArray(picks) || Object.keys(picks).length > 40) {
+    return null;
+  }
+
+  const checked: CardDraft['picks'] = {};
+
+  for (const [slug, pick] of Object.entries(picks as Record<string, unknown>)) {
+    const { letters, other } = (pick ?? {}) as { letters?: unknown; other?: unknown };
+
+    if (!SLUG.test(slug) || !Array.isArray(letters) || letters.length > 8 || !letters.every((letter) => typeof letter === 'string' && /^[A-H]$/.test(letter)) || !(other === null || (typeof other === 'string' && other.length <= MAX_MESSAGE_CHARS))) {
+      return null;
+    }
+
+    checked[slug] = { letters: letters as string[], other: other as string | null };
+  }
+
+  return { step: step as string | null, picks: checked };
+}
+
+/** A card's answers from a `send` body: 1 to 8 of `{card, slug, letters, other}`; null when malformed. */
+function parseAnswers(value: unknown): Array<{ card: string; slug: string; letters: string[]; other: string }> | null {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 8) {
+    return null;
+  }
+
+  const parsed = value.map((one: unknown) => {
+    const { card, slug, letters, other } = (typeof one === 'object' && one !== null ? one : {}) as Record<string, unknown>;
+
+    return typeof card === 'string' && /^reply:[^#\s]{1,200}$/.test(card) && typeof slug === 'string' && SLUG.test(slug) && Array.isArray(letters) && letters.length <= 8 && letters.every((letter) => typeof letter === 'string' && /^[A-H]$/.test(letter)) && typeof other === 'string' && other.length <= MAX_MESSAGE_CHARS
+      ? { card, slug, letters: letters as string[], other }
+      : null;
+  });
+
+  return parsed.every((one) => one !== null) ? (parsed as Array<{ card: string; slug: string; letters: string[]; other: string }>) : null;
 }

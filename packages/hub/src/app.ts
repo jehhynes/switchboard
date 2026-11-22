@@ -28,6 +28,7 @@ import { PageConsole } from './console.js';
 import { CodexConversationAdapter } from './codexConversation.js';
 import { runAppServerDebrief } from '@switchboard/codex';
 import { alertDetail, alertKind, VoiceControl, voiceMark } from './voice.js';
+import { currentStep, questionSpeech } from '@switchboard/conversation';
 import { VoiceLink } from './voiceLink.js';
 import { enrolledAt, parseRemote } from '@switchboard/voice';
 import { buildSnapshot } from './snapshot.js';
@@ -570,6 +571,8 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     },
     persona: (sessionId) => personaById(config.settings.voice, store.session(sessionId)?.personaId),
     // Spoken alerts (architecture.md § Spoken alerts): the work item's title and what an answer reads.
+    cardSpeech: (sessionId, replyId) => conversation.cardSpeech(sessionId, replyId),
+    cardUtterance: (key, sessionId, text) => conversation.cardUtterance(key, sessionId, text),
     alertText: (sessionId, cause) => {
       const session = store.session(sessionId);
       const item = session === null ? null : store.workItem(session.workItemId);
@@ -581,7 +584,13 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       const latest = [...store.conversation(sessionId, null, 20, false).items].reverse().find((one) => one.type === 'reply' && one.kind === 'reply' && !one.withdrawn && one.rewrittenBy === null);
       const reply = latest?.type === 'reply' ? { speak: latest.speak ?? null, opening: latest.opening } : null;
 
-      return { title: store.ticket(item.ticketId)?.title ?? '', detail: alertDetail(cause, session.state === 'waiting', reply, store.latestStatus(sessionId)?.markdown ?? null) };
+      const ledger = conversation.ledger(sessionId);
+      const first = ledger.open.length === 0 ? null : ledger.questions.get(ledger.open[0]!)!;
+      const card = first === null ? null : ledger.cards.get(first.card)!;
+      const current = card === null ? null : currentStep(card, conversation.drafts(sessionId).get(card.key));
+      const questions = current === null ? null : { count: ledger.open.length, first: questionSpeech(current.question, 1, 1) };
+
+      return { title: store.ticket(item.ticketId)?.title ?? '', detail: alertDetail(cause, session.state === 'waiting', reply, store.latestStatus(sessionId)?.markdown ?? null, questions) };
     },
     replyChanged: (replyId) => conversation.replyUpdated(replyId),
     notify: (key, type, payload) => conversation.notify(key, type, payload),
@@ -771,6 +780,8 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
       return session?.execution === 'app-server' ? runtime.resumeThread(sessionId) : 'This session resumes only in Claude.';
     },
+    // A dismissal can leave a session waiting on questions with none open (PRD R103).
+    questionsSettled: (sessionId) => runtime.questionsSettled(sessionId),
     // A pool ticket's controls, which the page runs from its row's menu, rechecked against the row as it is now (architecture.md § Web page).
     poolAction: (ticketId, label, extra) => {
       const row = poolRowOf(views().dock, ticketId);
@@ -1255,6 +1266,8 @@ const dockWithRuns = () => {
         return history === null ? { status: 409, body: { error: `Unknown ticket ${body['ticketId']}.` } } : { status: 200, body: history };
       },
       '/v1/conversation/send': async (body) => (isRecord(body) ? conversation.send(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, text, command?}.' } }),
+      '/v1/conversation/card-draft': async (body) => (isRecord(body) ? conversation.cardCommand('card-draft', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, card, draft}.' } }),
+      '/v1/conversation/card-dismiss': async (body) => (isRecord(body) ? conversation.cardCommand('card-dismiss', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, card, slug}.' } }),
       // `installed` lets the dock skip its provider choice when only one CLI is found (PRD R104).
       '/v1/conversation/providers': async () => ({ status: 200, body: { defaultProvider: config.settings.sessions.provider, installed: await installedProviders(config.settings.sessions) } }),
         '/v1/conversation/answer': async (body) => isRecord(body) ? conversation.answer(body) : { status: 400, body: { error: 'Expected a request answer.' } },

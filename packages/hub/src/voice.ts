@@ -158,7 +158,14 @@ export function alertKind(session: Pick<Session, 'state' | 'stateDetail'>): Aler
  * What an answered alert reads: a permission prompt or a question menu waits in the session's terminal, which the hub cannot read; otherwise the
  * latest reply's `[speak]` passage, else its text, else the latest status, as speech without Markdown, cut at a sentence to `ALERT_DETAIL_MAX`.
  */
-export function alertDetail(cause: AlertCause, inTerminal: boolean, reply: { speak: string | null; opening: string } | null, status: string | null): string {
+export function alertDetail(cause: AlertCause, inTerminal: boolean, reply: { speak: string | null; opening: string } | null, status: string | null, questions: { count: number; first: string } | null = null): string {
+  const base = alertText(cause, inTerminal, reply, status);
+
+  // A session idle on open questions reads its passage, then how many questions it has and the current one only (design § 7).
+  return questions === null || questions.count === 0 || cause === 'permission' || inTerminal ? base : `${base} It has ${questions.count === 1 ? 'one question' : `${questions.count} questions`}; ${questions.count === 1 ? 'it is' : 'the first'}: ${questions.first}`;
+}
+
+function alertText(cause: AlertCause, inTerminal: boolean, reply: { speak: string | null; opening: string } | null, status: string | null): string {
   if (cause === 'permission') {
     return 'It is waiting for your permission in its terminal.';
   }
@@ -208,6 +215,16 @@ export interface VoiceControlDeps {
   persona?(sessionId: string): Persona | null;
   /** A spoken alert's title, its work item's, and the detail an answer reads (`alertDetail`); null for a session the store does not have. */
   alertText?(sessionId: string, cause: AlertCause): { title: string; detail: string } | null;
+  /**
+   * The current question of a reply's open card as speech (design § 7), offered after the reply's passage: its speak item's ID,
+   * `card:<reply ID>#<slug>`, and text; null when the reply has no open question.
+   */
+  cardSpeech?(sessionId: string, replyId: string): { id: string; text: string } | null;
+  /**
+   * Applies a whole utterance to the session's open card when it matches the card grammar (design § 7): what to say back, or null for ordinary
+   * dictation, which is sent as a message.
+   */
+  cardUtterance?(key: string, sessionId: string, text: string): { say: string } | null;
   /** Whether the session is in a turn, when a long dictated message goes in `[partial]` parts. */
   busy?(sessionId: string): boolean;
   /** The text of the session's latest reply, which the turn model reads; null with none. */
@@ -1027,6 +1044,54 @@ export class VoiceControl {
     }
 
     this.#offer(reply, reply.answers);
+    this.#offerCard(reply);
+  }
+
+  /** After a reply's passage, the current question of its open card, in the same turn so it plays next (design § 7). */
+  #offerCard(reply: ConversationReply): void {
+    const item = this.deps.cardSpeech?.(reply.sessionId, reply.id) ?? null;
+
+    if (item !== null && this.#client !== null) {
+      this.#speakLine(reply.sessionId, item.id, item.text, reply.answers);
+    }
+  }
+
+  /** Speaks a line that is not a reply's passage, as a card's question or the answer to a card command, in the session's voice. */
+  #speakLine(sessionId: string, id: string, text: string, turn: string | null): void {
+    const settings = this.deps.settings();
+    const persona = this.deps.persona?.(sessionId) ?? null;
+    const voice = persona?.voice ?? settings.voice;
+
+    this.#offered.set(id, { gen: this.#target.gen, sessionId, voice, atMs: null, said: null });
+    this.#client!.send({ type: 'speak', gen: this.#target.gen, replyId: id, sessionId, text, tone: null, turn, voice, style: persona?.style ?? settings.style, personality: persona === null || persona.personality === '' ? null : persona.personality });
+  }
+
+  /**
+   * An utterance that is only a card command, such as "B" or "next", while the session has an open card: it changes the card's draft instead of
+   * being sent, and the hub says what it did and the next question (design § 7). False for ordinary dictation.
+   */
+  #cardAnswer(heard: Heard, composer: Composer): boolean {
+    const text = composer.draft.trim();
+    const answer = text === '' ? null : (this.deps.cardUtterance?.(heard.key, heard.sessionId, text) ?? null);
+
+    if (answer === null) {
+      return false;
+    }
+
+    composer.draft = '';
+    composer.pieces = [];
+    composer.interrupted = null;
+    composer.held = false;
+    this.#notify(heard.key, 'draft', { text: '', sessionId: heard.sessionId });
+
+    if (answer.say !== '' && this.#client !== null) {
+      // Each answer is its own turn, so one still waiting, as while the operator goes on speaking, is skipped by the next rather than read late.
+      const id = `card-say:${this.deps.now()}`;
+
+      this.#speakLine(heard.sessionId, id, answer.say, id);
+    }
+
+    return true;
   }
 
   /** The target's latest reply, for the turn model, when it changed. */
@@ -1356,6 +1421,10 @@ export class VoiceControl {
       return;
     }
 
+    if (heard.key !== TERMINAL && this.#cardAnswer(heard, composer)) {
+      return;
+    }
+
     this.#submit(heard, composer, false, message.timing === undefined ? null : { ...message.timing, receivedAt: this.deps.now() });
   }
 
@@ -1625,6 +1694,7 @@ export class VoiceControl {
     }
 
     this.#offer(reply, reply.answers);
+    this.#offerCard(reply);
     return null;
   }
 

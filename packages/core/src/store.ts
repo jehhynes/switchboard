@@ -2,7 +2,7 @@ import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 import type { Comment, Link, Paste, Session, Ticket, Triage, WorkItem, WorkItemStatus, Worktree } from './model.js';
 import { ownPrompt } from './group.js';
 import { CONVERSATION_RETENTION } from './conversation.js';
-import type { ConversationMessage, ConversationReply, ConversationStatus, Piece, TranscriptCheckpoint, WindowBinding } from './conversation.js';
+import type { ConversationMessage, ConversationReply, ConversationStatus, MessageAnswer, Piece, TranscriptCheckpoint, WindowBinding } from './conversation.js';
 import { windowFileKey } from './conversation.js';
 
 export const MIGRATIONS = [
@@ -518,6 +518,19 @@ export const MIGRATIONS = [
   UPDATE sessions SET registered = 1
     WHERE EXISTS (SELECT 1 FROM changes c JOIN events e ON e.id = c.eventId
       WHERE c.entity = 'session' AND c.op = 'insert' AND c.entityId = sessions.id AND e.type = 'register');`,
+  // Question cards (PRD R103): the questions a message answered, as JSON, stored when it is added; and the questions the operator dismissed, until
+  // an answer message tells the session (`reportedIn`).
+  `ALTER TABLE messages ADD COLUMN answers TEXT;
+  CREATE TABLE questionDismissals (
+    sessionId TEXT NOT NULL,
+    replyId TEXT NOT NULL,
+    slug TEXT NOT NULL,
+    at INTEGER NOT NULL,
+    -- The newest conversation item when the operator dismissed it, after which the dismissal takes its place.
+    afterId TEXT,
+    reportedIn TEXT,
+    PRIMARY KEY (sessionId, replyId, slug)
+  );`,
 ];
 
 /**
@@ -1403,7 +1416,7 @@ export class Store {
   /** Adds a message to a session's conversation, outside the activity log, keeping the newest `CONVERSATION_RETENTION` items. */
   addMessage(message: Omit<ConversationMessage, 'ord'>): void {
     this.#db
-      .prepare('INSERT INTO messages (ord, id, sessionId, workItemId, at, origin, text, transcriptUuid, provisional, withdrawn, delivery, error, opId, pastedAt, launch, spokenRequested, pieces, partial, interruptedReplyId, interruptedSaid, interruptedRest) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .prepare('INSERT INTO messages (ord, id, sessionId, workItemId, at, origin, text, transcriptUuid, provisional, withdrawn, delivery, error, opId, pastedAt, launch, spokenRequested, pieces, partial, interruptedReplyId, interruptedSaid, interruptedRest, answers) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(
         this.#nextOrd(),
         message.id,
@@ -1426,6 +1439,7 @@ export class Store {
         message.interrupted?.replyId ?? null,
         message.interrupted?.said ?? null,
         message.interrupted?.rest ?? null,
+        message.answers == null ? null : JSON.stringify(message.answers),
       );
     this.#prune(message.sessionId);
   }
@@ -1438,6 +1452,30 @@ export class Store {
         .prepare(`UPDATE messages SET ${entries.map(([key]) => `${key} = ?`).join(', ')} WHERE id = ?`)
         .run(...entries.map(([, value]) => (typeof value === 'boolean' ? (value ? 1 : 0) : (value as SQLInputValue))), id);
     }
+  }
+
+  /** Records that the operator dismissed a question (PRD R103); a second dismissal of it changes nothing. */
+  addDismissal(sessionId: string, replyId: string, slug: string, at: number, afterId: string | null = null): void {
+    this.#db.prepare('INSERT INTO questionDismissals (sessionId, replyId, slug, at, afterId) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING').run(sessionId, replyId, slug, at, afterId);
+  }
+
+  /** A session's dismissed questions, oldest first, with the answer message that told the session, or null while none has. */
+  dismissals(sessionId: string): Array<{ replyId: string; slug: string; at: number; afterId: string | null; reportedIn: string | null }> {
+    return this.#db.prepare('SELECT replyId, slug, at, afterId, reportedIn FROM questionDismissals WHERE sessionId = ? ORDER BY at, rowid').all(sessionId) as Array<{ replyId: string; slug: string; at: number; afterId: string | null; reportedIn: string | null }>;
+  }
+
+  /** Marks dismissals as told to the session by an answer message. */
+  reportDismissals(sessionId: string, keys: ReadonlyArray<{ replyId: string; slug: string }>, messageId: string): void {
+    const update = this.#db.prepare('UPDATE questionDismissals SET reportedIn = ? WHERE sessionId = ? AND replyId = ? AND slug = ?');
+
+    for (const key of keys) {
+      update.run(messageId, sessionId, key.replyId, key.slug);
+    }
+  }
+
+  /** Marks the dismissals a message told as untold again, as when the message was not sent. */
+  unreportDismissals(sessionId: string, messageId: string): void {
+    this.#db.prepare('UPDATE questionDismissals SET reportedIn = NULL WHERE sessionId = ? AND reportedIn = ?').run(sessionId, messageId);
   }
 
   /** Removes a message, as a typed message that was not sent leaves the conversation. */
@@ -1792,7 +1830,7 @@ export class Store {
 
   #messageRows(sql: string, ...params: Array<SQLInputValue | Record<string, SQLInputValue>>): ConversationMessage[] {
     return (this.#db.prepare(sql).all(...(params as SQLInputValue[])) as unknown as Array<
-        Omit<ConversationMessage, 'provisional' | 'withdrawn' | 'spokenRequested' | 'pieces' | 'partial' | 'interrupted'> & {
+        Omit<ConversationMessage, 'provisional' | 'withdrawn' | 'spokenRequested' | 'pieces' | 'partial' | 'interrupted' | 'answers'> & {
           seq: number;
           provisional: number;
           withdrawn: number;
@@ -1802,9 +1840,12 @@ export class Store {
           interruptedReplyId: string | null;
           interruptedSaid: string | null;
           interruptedRest: string | null;
+          answers: string | null;
         }
-      >).map(({ seq: _seq, pieces, partial, interruptedReplyId, interruptedSaid, interruptedRest, ...message }) => ({
+      >).map(({ seq: _seq, pieces, partial, interruptedReplyId, interruptedSaid, interruptedRest, answers, ...message }) => ({
       ...message,
+      // Left out for a message stored without them, which is read by its text.
+      ...(answers === null ? {} : { answers: JSON.parse(answers) as MessageAnswer[] }),
       provisional: message.provisional === 1,
       withdrawn: message.withdrawn === 1,
       spokenRequested: message.spokenRequested === 1,

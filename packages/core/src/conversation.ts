@@ -47,6 +47,21 @@ export interface ConversationMessage {
    * note is typed (architecture.md § Voice check and barge-in); left out for any other message.
    */
   interrupted?: Interruption;
+  /**
+   * The questions it answered or dismissed (PRD R103), resolved once when it was stored; null for a message stored before the column existed or
+   * read from the transcript, whose text is read instead, and left out the same.
+   */
+  answers?: MessageAnswer[] | null;
+}
+
+/** A question a message answered: the reply that asked it and its slug, the letters and Other text, how it was given, and a dismissal. */
+export interface MessageAnswer {
+  replyId: string;
+  slug: string;
+  letters: string[];
+  other: string;
+  via: 'card' | 'typed' | 'voice';
+  dismissed?: boolean;
 }
 
 /** A reply an utterance spoke over, as the voice process reports it. */

@@ -66,6 +66,8 @@ async function setup(patch: Partial<VoiceSettings> = {}) {
   let refuse: string | null = null;
   let focused: string | null = 'k1';
   let lastReply: string | null = 'Which port?';
+  let card: (text: string) => { say: string } | null = () => null;
+  const cardHeard: string[] = [];
   const logs: string[] = [];
   const control = new VoiceControl({
     link: { find: async () => connection, connected: () => connection, stop: () => undefined },
@@ -81,6 +83,10 @@ async function setup(patch: Partial<VoiceSettings> = {}) {
     dictate: (key, sessionId, text, pieces, partial, interrupted) => {
       dictated.push({ key, sessionId, text, pieces, partial, ...(interrupted == null ? {} : { interrupted }) });
       return refuse === null ? { message: { id: `m${dictated.length}` } as ConversationMessage } : { refused: refuse };
+    },
+    cardUtterance: (_key, _sessionId, text) => {
+      cardHeard.push(text);
+      return card(text);
     },
     fragmentsDir: dir,
     replyChanged: () => undefined,
@@ -141,12 +147,34 @@ async function setup(patch: Partial<VoiceSettings> = {}) {
       .filter(Boolean)
       .map((line) => JSON.parse(line) as Record<string, unknown>);
 
-  return { control, connection, windows, notified, dictated, busy, advance, settle, piece, end, fragments, logs, refuse: (why: string | null) => (refuse = why), focus: (key: string | null) => (focused = key), setLastReply: (text: string) => (lastReply = text) };
+  return { control, connection, windows, notified, dictated, busy, advance, settle, piece, end, fragments, logs, cardHeard, setCard: (run: typeof card) => (card = run), refuse: (why: string | null) => (refuse = why), focus: (key: string | null) => (focused = key), setLastReply: (text: string) => (lastReply = text) };
 }
 
 const events = (notified: Array<{ key: string; type: string; payload: Record<string, unknown> }>, type: string) => notified.filter((one) => one.type === type).map((one) => [one.key, one.payload]);
 
 describe('VoiceControl dictation', () => {
+  it('applies a whole utterance that is a card command to the open card instead of sending it, and says the reply (PRD R103)', async () => {
+    const { connection, dictated, piece, end, cardHeard, setCard, notified } = await setup();
+
+    setCard((text) => (text === 'bee' ? { say: 'B. Question 2 of 2. Keep the route?' } : null));
+    piece('bee');
+    end();
+
+    expect(cardHeard).toEqual(['bee']);
+    expect(dictated).toEqual([]);
+    const said = connection.sent.filter((message) => message.type === 'speak');
+
+    expect(said).toMatchObject([{ type: 'speak', sessionId: 's1', text: 'B. Question 2 of 2. Keep the route?' }]);
+    // Its own turn, so the voice process skips it for a newer answer rather than read it late.
+    expect(said[0]).toMatchObject({ turn: (said[0] as { replyId: string }).replyId });
+    expect(notified.filter((one) => one.type === 'draft').at(-1)).toMatchObject({ key: 'k1', payload: { text: '' } });
+
+    // Anything else is dictation, sent as a message, and leaves the questions open.
+    piece('fix the login flow', 'u2');
+    end(true, 'u2');
+    expect(dictated).toMatchObject([{ key: 'k1', sessionId: 's1', text: 'fix the login flow' }]);
+  });
+
   it('turns the mic on in a window by moving the voice there, and refuses turning it off from a window it is not in', async () => {
     const { control, connection } = await setup();
 

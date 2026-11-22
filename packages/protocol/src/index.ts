@@ -84,6 +84,29 @@ export interface MessageView {
   pieces?: Array<{ text: string; score: number | null; f0: number | null; dropped: boolean }>;
   partial?: boolean;
   interrupted?: { replyId: string; said: string; rest: string };
+  /** The questions it answered or dismissed, as the hub stored them (PRD R103); null or left out for one read by its text. */
+  answers?: Array<{ replyId: string; slug: string; letters: string[]; other: string; via: 'card' | 'typed' | 'voice'; dismissed?: boolean }> | null;
+}
+
+/** A card's draft, which the hub keeps for every window, page and the voice (PRD R103): its current question by slug, and the picks so far. */
+export interface CardDraftView {
+  step: string | null;
+  picks: Record<string, { letters: string[]; other: string | null }>;
+}
+
+/** A session's questions as the hub sends them (`questions` event, `hello.questions`). */
+export interface QuestionsView {
+  sessionId: string;
+  /** The cutover: replies before it keep the rules from before question ids. */
+  since: number;
+  /** How many questions are open across the conversation. */
+  open: number;
+  /** The card of the oldest open question, which the chip goes to; null with none. */
+  oldest: string | null;
+  /** Each card's draft by card key. */
+  drafts: Record<string, CardDraftView>;
+  /** The questions the operator dismissed, by key, with when and the newest conversation item then. */
+  dismissed: Array<{ key: string; at: number; after: string | null }>;
 }
 
 export interface ReplyView {

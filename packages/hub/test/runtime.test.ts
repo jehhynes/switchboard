@@ -2934,24 +2934,71 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
     expect(logs).toEqual([]);
   });
 
-  it('finds a card after more replies than one page, and takes no message still being typed as its answer (PRD R103)', () => {
+  it('keeps a question open across more replies than one page and an unrelated message, until it is answered or withdrawn (PRD R103)', () => {
     const store = Store.open(':memory:');
     const reply = (id: string, opening: string, at: number, kind: 'reply' | 'aside' = 'reply') => store.addReply({ id, sessionId: 's1', workItemId: 1, at, kind, answers: null, opening, source: 'transcript', replaces: null, rewrittenBy: null, withdrawn: false, transcriptUuid: id });
+    const message = (id: string, text: string, at: number, answers: Array<{ replyId: string; slug: string; letters: string[]; other: string; via: 'card' | 'typed' | 'voice' }> | null = []) =>
+      store.addMessage({ id, sessionId: 's1', workItemId: 1, at, origin: 'typed', text, transcriptUuid: id, provisional: false, withdrawn: false, delivery: 'sent', error: null, opId: null, pastedAt: null, answers });
+    const since = T0;
 
-    store.addMessage({ id: 'm1', sessionId: 's1', workItemId: 1, at: T0, origin: 'terminal', text: 'Go', transcriptUuid: 'm1', provisional: false, withdrawn: false, delivery: null, error: null, opId: null, pastedAt: null });
-    reply('card', '1. Which?\n   - A) One\n   - B) Two', T0 + 1);
-    // Asides, which leave the card answerable; a reply with text would supersede it.
+    message('m1', 'Go', T0);
+    reply('card', '1. Which port? {#port-choice}\n   - A) One\n   - B) Two\n2. Keep the route? {#keep-route}\n   - A) Yes\n   - B) No', T0 + 1);
     for (let index = 0; index < 150; index++) reply(`r${index}`, `Step ${index}.`, T0 + 2 + index, 'aside');
-    expect(questionCardOpen(store, 's1')).toBe(true);
+    expect(questionCardOpen(store, 's1', since)).toBe(true);
 
-    // A notice an earlier run left queued, placed after everything, dated before the card.
-    store.addMessage({ id: 'm-q', sessionId: 's1', workItemId: 1, at: T0 - 1, origin: 'terminal', text: 'Stopped.', transcriptUuid: null, provisional: true, withdrawn: false, delivery: null, error: null, opId: null, pastedAt: null });
-    expect(questionCardOpen(store, 's1')).toBe(true);
-    store.addMessage({ id: 'm2', sessionId: 's1', workItemId: 1, at: T0 + 500, origin: 'typed', text: '1A', transcriptUuid: null, provisional: true, withdrawn: false, delivery: 'open', error: null, opId: 'o', pastedAt: null });
-    expect(questionCardOpen(store, 's1')).toBe(true);
-    store.updateMessage('m2', { delivery: 'sent', provisional: false });
-    expect(questionCardOpen(store, 's1')).toBe(false);
+    // A message that answers nothing, and a reply with text, leave both open; a status never asks.
+    message('m2', 'Hold off on the route for now.', T0 + 200);
+    reply('later', 'Working on the rest.', T0 + 201);
+    expect(questionCardOpen(store, 's1', since)).toBe(true);
+
+    // A stored answer settles one; a withdraw line the other.
+    message('m3', '[answers]\n- port-choice: Which port? → A) One', T0 + 300, [{ replyId: 'card', slug: 'port-choice', letters: ['A'], other: '', via: 'card' }]);
+    expect(questionCardOpen(store, 's1', since)).toBe(true);
+    reply('done', 'Dropping that.\n[withdraw: keep-route]', T0 + 301);
+    expect(questionCardOpen(store, 's1', since)).toBe(false);
+
+    // A question the operator dismissed no longer counts.
+    reply('again', '1. Which colour? {#colour-choice}\n   - A) Red\n   - B) Blue', T0 + 400);
+    expect(questionCardOpen(store, 's1', since)).toBe(true);
+    store.addDismissal('s1', 'again', 'colour-choice', T0 + 401);
+    expect(questionCardOpen(store, 's1', since)).toBe(false);
     store.close();
+  });
+
+  it('keeps the old rules for a card asked before the cutover: the next message settles it (PRD R103)', () => {
+    const store = Store.open(':memory:');
+
+    store.addReply({ id: 'old', sessionId: 's1', workItemId: 1, at: T0, kind: 'reply', answers: null, opening: '1. Which?\n   - A) One\n   - B) Two', source: 'transcript', replaces: null, rewrittenBy: null, withdrawn: false, transcriptUuid: 'old' });
+    expect(questionCardOpen(store, 's1', T0 + 1000)).toBe(true);
+    store.addMessage({ id: 'm1', sessionId: 's1', workItemId: 1, at: T0 + 1, origin: 'terminal', text: 'something else', transcriptUuid: 'm1', provisional: false, withdrawn: false, delivery: null, error: null, opId: null, pastedAt: null });
+    expect(questionCardOpen(store, 's1', T0 + 1000)).toBe(false);
+    // The same card after the cutover stays open.
+    expect(questionCardOpen(store, 's1', T0 - 1)).toBe(true);
+    store.close();
+  });
+
+  it('ends a wait on questions when the operator dismisses the last one outside a turn (PRD R103)', async () => {
+    const codeMode = fakeRunner();
+    const { runtime, store } = setup(config({ codeMode: true }), () => T0, { codeMode });
+
+    runtime.send({ type: 'adhoc', prompt: 'held', repoRoot: 'D:/git/widgets', start: true });
+    await runtime.settled();
+    const id = store.activeSessions()[0]!.id;
+
+    runtime.setConversationReader({ read: () => {}, catchUp: () => null });
+    store.addReply({ id: 'r1', sessionId: id, workItemId: 1, at: T0 + 10, kind: 'reply', answers: null, opening: '1. Which? {#which-port}\n   - A) One\n   - B) Two', source: 'transcript', replaces: null, rewrittenBy: null, withdrawn: false, transcriptUuid: 'r1' });
+    runtime.send({ type: 'marker', sessionId: id, state: 'idle', detail: null });
+    await runtime.settled();
+    expect(store.session(id)).toMatchObject({ state: 'idle', stateDetail: QUESTION_CARD });
+
+    // Nothing settled yet: the wait stays.
+    runtime.questionsSettled(id);
+    expect(store.session(id)).toMatchObject({ state: 'idle', stateDetail: QUESTION_CARD });
+    store.addDismissal(id, 'r1', 'which-port', T0 + 20);
+    runtime.questionsSettled(id);
+    await runtime.settled();
+    expect(store.session(id)).toMatchObject({ state: 'idle', stateDetail: null });
+    runtime.stop();
   });
 
   it('reads the conversation before a held turn ends, so a question card written last keeps its work item waiting on the answer (PRD R103)', async () => {

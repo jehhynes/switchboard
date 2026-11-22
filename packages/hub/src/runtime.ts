@@ -12,7 +12,8 @@ import { noKind } from './config.js';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
 import { HolderError, Viewer, recordPath } from '@switchboard/holder';
-import { answers, NotWritten, transcriptEnd, unansweredCard } from '@switchboard/conversation';
+import { NotWritten, transcriptEnd } from '@switchboard/conversation';
+import { questionsSince, sessionLedger } from './questions.js';
 import type { SessionEntry } from '@switchboard/holder';
 import { findHeld, heldFromHolder } from './held.js';
 import type { HeldSession, HolderRestartState, HolderState } from './held.js';
@@ -468,6 +469,18 @@ export class Runtime {
     this.conversation = reader;
   }
 
+  /**
+   * A session's questions were settled outside a turn, as when the operator dismissed the last open one (PRD R103): a session idle waiting on its
+   * questions with none left open is idle again, through an idle marker, which the flow reads with `questionCard`.
+   */
+  questionsSettled(sessionId: string): void {
+    const session = this.deps.store.session(sessionId);
+
+    if (session !== null && session.state === 'idle' && session.stateDetail === QUESTION_CARD && !questionCardOpen(this.deps.store, sessionId, questionsSince(this.deps.store, this.deps.now()))) {
+      this.send({ type: 'marker', sessionId, state: 'idle', detail: null });
+    }
+  }
+
   /** Applies one event in one transaction and starts its actions. */
   send(event: FlowEvent): FlowResult {
     return this.deferTurnEnd(event) ? { actions: [], refused: null } : this.apply(event);
@@ -519,7 +532,7 @@ export class Runtime {
     }
 
     const result = this.deps.store.transaction(() =>
-      handle(this.deps.store, event, { now: this.deps.now(), settings, playbooks, report: this.reportCommand, newSessionId: this.deps.newSessionId, newUuid: randomUUID, questionCard: (sessionId) => questionCardOpen(this.deps.store, sessionId) }),
+      handle(this.deps.store, event, { now: this.deps.now(), settings, playbooks, report: this.reportCommand, newSessionId: this.deps.newSessionId, newUuid: randomUUID, questionCard: (sessionId) => questionCardOpen(this.deps.store, sessionId, questionsSince(this.deps.store, this.deps.now())) }),
     );
 
     for (const action of result.actions) {
@@ -3124,20 +3137,10 @@ function turnEnds(store: Store, event: FlowEvent): string[] {
   });
 }
 
-/** Whether a session's conversation holds a question card no message has answered yet, read from the store as the view reads it (PRD R103). */
-export function questionCardOpen(store: Store, sessionId: string): boolean {
-  // Pages back to the newest message that answers, since a turn can write more replies after its card than one page holds.
-  let page = store.conversation(sessionId, null, QUESTION_CARD_PAGE, false);
-  let items = page.items;
-
-  // A provisional message shows after the transcript's items however long ago it was queued, so it cannot say whether the card before it is answered.
-  while (page.more && !items.some((item) => answers(item) && !(item.type === 'message' && item.provisional)) && items.length > 0) {
-    page = store.conversation(sessionId, items[0]!.id, QUESTION_CARD_PAGE, false);
-    items = [...page.items, ...items];
-  }
-
-  return unansweredCard(items, store.latestStatus(sessionId));
+/**
+ * Whether a session's conversation holds an open question (PRD R103): one a reply asked that no message answered and that was not withdrawn,
+ * replaced or dismissed, read from the store as the views read it (`sessionLedger`). A status's questions get no card and never count.
+ */
+export function questionCardOpen(store: Store, sessionId: string, since: number): boolean {
+  return sessionLedger(store, sessionId, since).open.length > 0;
 }
-
-/** How many of a session's messages and replies `questionCardOpen` reads at a time. */
-const QUESTION_CARD_PAGE = 100;

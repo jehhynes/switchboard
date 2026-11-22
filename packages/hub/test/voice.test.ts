@@ -86,6 +86,7 @@ function setup(patch: Partial<VoiceSettings> = { enabled: true }) {
     full: (sessionId) => full.has(sessionId),
     session: (sessionId) => (['s1', 's2', 's3'].includes(sessionId) ? { workItemId: Number(sessionId.slice(1)), cwd: 'D:/w' } : null),
     persona: (sessionId) => personas.get(sessionId) ?? null,
+    cardSpeech: (_sessionId, replyId) => (replyId === 'r-card' ? { id: 'card:r-card#port-choice', text: 'Question 1 of 1. Which port? A: 8765. B: 8799. Or say Other.' } : null),
     alertText: (sessionId, cause) => (sessionId === 's9' ? null : { title: 'Fix the badge', detail: `${cause} of ${sessionId}` }),
     replyChanged: (id) => void changedReplies.push(`${id} ${replies.get(id)?.spokenState}`),
     notify: (key, type, payload) => void notified.push({ key, type, payload }),
@@ -708,6 +709,27 @@ describe('VoiceControl', () => {
       ['ash', 'deadpan', null],
     ]);
   });
+
+  it("offers a reply's open card's current question right after its passage, in the same turn, and again with a Replay (PRD R103)", async () => {
+    const { control, connections, windows, reply, settle } = setup({ enabled: true });
+    const speaks = () => connections[0]!.sent.flatMap((one) => (one.type === 'speak' ? [[one.replyId, one.text, one.turn]] : []));
+
+    windows.set('k1', scope('k1', 1, 's1'));
+    control.update();
+    await settle();
+    connections[0]!.receive({ type: 'active', gen: 2, sessionId: 's1', reason: 'talk-here' });
+
+    const asked = reply('r-card');
+
+    control.replyChanged(asked);
+    expect(speaks()).toEqual([
+      ['r-card', expect.any(String), asked.answers],
+      ['card:r-card#port-choice', 'Question 1 of 1. Which port? A: 8765. B: 8799. Or say Other.', asked.answers],
+    ]);
+    // A reply with no open question gets no card item.
+    control.replyChanged(reply('r-plain'));
+    expect(speaks().map(([id]) => id)).toEqual(['r-card', 'card:r-card#port-choice', 'r-plain']);
+  });
 });
 
 describe('spoken alerts in the hub', () => {
@@ -730,6 +752,10 @@ describe('spoken alerts in the hub', () => {
     expect(alertDetail('turn-finished', false, null, null)).toBe('It has no reply to read.');
     expect(alertDetail('question', true, { speak: 'x', opening: 'x' }, null)).toBe('It is waiting for your answer in its terminal.');
     expect(alertDetail('permission', false, { speak: 'x', opening: 'x' }, null)).toBe('It is waiting for your permission in its terminal.');
+    // A session idle on open questions reads its passage, then the count and the current question (PRD R103).
+    expect(alertDetail('question', false, { speak: 'Two decisions.', opening: 'x' }, null, { count: 2, first: 'Which port? A: 8765. Or say Other.' })).toBe('Two decisions. It has 2 questions; the first: Which port? A: 8765. Or say Other.');
+    expect(alertDetail('question', false, { speak: 'One.', opening: 'x' }, null, { count: 1, first: 'Which?' })).toBe('One. It has one question; it is: Which?');
+    expect(alertDetail('permission', false, { speak: 'x', opening: 'x' }, null, { count: 1, first: 'Which?' })).toBe('It is waiting for your permission in its terminal.');
 
     const long = `${'One sentence here. '.repeat(30)}`;
     const cut = alertDetail('turn-finished', false, { speak: null, opening: long }, null);
