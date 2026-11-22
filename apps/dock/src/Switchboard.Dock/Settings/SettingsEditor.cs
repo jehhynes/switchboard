@@ -89,6 +89,56 @@ public sealed class SettingsEditor(IConfigHub hub, Func<CancellationToken, Task>
         }
     }
 
+    // Each devices request, so an answer that a later one overtook is dropped.
+    int deviceRequests;
+
+    /// <summary>The devices signed in to the web page as the hub last listed them, or null before General asked (architecture.md § Remote access).</summary>
+    public IReadOnlyList<PairedDevice>? Devices { get; private set; }
+
+    /// <summary>The pairing link Pair a device… showed last, or null.</summary>
+    public Pairing? Pairing { get; private set; }
+
+    /// <summary>Why the last devices request was refused or failed, or null.</summary>
+    public string? DevicesError { get; private set; }
+
+    /// <summary>While a devices request runs, so the window disables Pair a device… and Sign out.</summary>
+    public bool DevicesBusy { get; private set; }
+
+    public event Action? DevicesChanged;
+
+    /// <summary>
+    /// General's paired devices: lists them, with <paramref name="pair"/> a new pairing link first, and with <paramref name="revoke"/> after
+    /// signing that device out. Nothing of it changes settings.json.
+    /// </summary>
+    public async Task ListDevices(bool pair = false, string? revoke = null)
+    {
+        var mine = ++deviceRequests;
+
+        DevicesBusy = true;
+        DevicesError = null;
+        DevicesChanged?.Invoke();
+
+        var refused = revoke is null ? null : await hub.RevokeDevice(revoke);
+        var paired = pair ? await hub.Pair() : null;
+        var listed = await hub.Devices();
+
+        if (mine != deviceRequests)
+        {
+            return;
+        }
+
+        DevicesBusy = false;
+        Devices = listed.Devices ?? Devices ?? [];
+        DevicesError = refused ?? paired?.Error ?? listed.Error;
+
+        if (pair)
+        {
+            Pairing = paired?.Pairing;
+        }
+
+        DevicesChanged?.Invoke();
+    }
+
     /// <summary>Asks before a delete, with a question, a detail and the action's button label; true to go ahead.</summary>
     public Func<string, string, string, Task<bool>>? Confirm { get; set; }
 

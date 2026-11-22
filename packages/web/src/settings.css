@@ -65,6 +65,11 @@ textarea.settings-text.prompt { font-family: var(--vscode-editor-font-family, mo
 .settings-assign .settings-select { min-width: 200px; }
 .settings-assign-help { flex-basis: 100%; }
 .settings-assign-note { color: var(--vscode-descriptionForeground); }
+/* General's paired devices and Pair a device under Remote access (architecture.md § Remote access); the list and the code are drawn as the Pair a device sheet's. */
+.settings-devices { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin-top: 8px; }
+.settings-devices-heading { margin: 4px 0 0; font-size: 13px; font-weight: 600; }
+.settings-devices .device-list { align-self: stretch; margin-bottom: 4px; }
+.settings-devices .pair { align-self: stretch; margin-top: 8px; }
 .settings-enroll { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin-top: 16px; }
 .settings-enroll-status { margin: 0; }
 .settings-enroll-sentences { margin-left: 12px; font-size: 14px; }

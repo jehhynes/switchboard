@@ -476,7 +476,7 @@ export function QrCode({ text }: { text: string }) {
 }
 
 /** When a device was last used, as the device list says it. */
-function usedText(at: number): string {
+export function usedText(at: number): string {
   return new Date(at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 }
 

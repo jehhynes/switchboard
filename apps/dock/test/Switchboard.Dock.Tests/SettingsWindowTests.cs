@@ -62,6 +62,49 @@ public sealed class SettingsWindowTests
     }
 
     [AvaloniaFact]
+    public void RemoteAccess_GeneralPage_ListsDevicesSignsOneOutAndPairsWithoutChangingTheFile()
+    {
+        var now = DateTimeOffset.Now.ToUnixTimeMilliseconds();
+        var phone = new PairedDevice("0123abcd", "Android · Chrome", "pc.tail.ts.net", "alex@example.com", now);
+        var own = new PairedDevice("89abcdef", "Windows · Edge", null, null, now);
+
+        hub.DevicesReplies.Enqueue(new DevicesReply(null, [phone, own]));
+        hub.DevicesReplies.Enqueue(new DevicesReply(null, [own]));
+
+        var (window, _) = Open();
+        Button Named(string name) => window.GetVisualDescendants().OfType<Button>().Single((button) => button.Name == name);
+        var texts = Texts(window);
+
+        Assert.Equal(["read", "devices"], hub.Calls.Where((call) => !call.StartsWith("check", StringComparison.Ordinal)));
+        Assert.Contains("Paired devices", texts);
+        Assert.Contains("Android · Chrome", texts);
+        Assert.Contains(texts, (text) => text.StartsWith("pc.tail.ts.net as alex@example.com · last used ", StringComparison.Ordinal));
+        Assert.Contains(texts, (text) => text.StartsWith("This computer · last used ", StringComparison.Ordinal));
+        // The devices follow Remote access's fields.
+        Assert.True(texts.IndexOf("Remote access") < texts.IndexOf("Paired devices"));
+
+        Click(Named("SignOut:0123abcd"));
+        Assert.Contains("revoke 0123abcd", hub.Calls);
+        Assert.DoesNotContain("Android · Chrome", Texts(window));
+
+        // A refused pairing shows why and no code.
+        Click(Named("PairDevice"));
+        Assert.Contains("Pairing a device needs remote access.", Texts(window));
+        Assert.DoesNotContain(window.GetVisualDescendants().OfType<SelectableTextBlock>(), (text) => text.Name == "PairingCode");
+
+        hub.PairReplies.Enqueue(new PairReply(null, new Pairing("https://pc.tail.ts.net/page?t=abc", "ABCD-EFGH", "pc.tail.ts.net", now + 5 * 60_000)));
+        Click(Named("PairDevice"));
+        Assert.DoesNotContain("Pairing a device needs remote access.", Texts(window));
+        Assert.Equal("ABCD-EFGH", window.GetVisualDescendants().OfType<SelectableTextBlock>().Single((text) => text.Name == "PairingCode").Text);
+        Assert.Equal("https://pc.tail.ts.net/page?t=abc", window.GetVisualDescendants().OfType<SelectableTextBlock>().Single((text) => text.Name == "PairingLink").Text);
+        Assert.Contains("Open https://pc.tail.ts.net/ on the device and type this code:", Texts(window));
+        Assert.Contains("It works once, for 5 more minutes.", Texts(window));
+        Assert.Equal("New code", Named("PairDevice").Content);
+        Assert.Empty(hub.Saves);
+        Assert.Contains("Saved", Texts(window));
+    }
+
+    [AvaloniaFact]
     public void Theme_Discard_RestoresSavedChoice()
     {
         var dock = new DockViewModel(new DockSettings { Theme = "dark" }, _ => throw new InvalidOperationException("Unexpected save"));

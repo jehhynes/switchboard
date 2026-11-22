@@ -286,6 +286,36 @@ public sealed record Enrollment(string State, long? EndsAt, string? Error, strin
 /// <summary>An enrolment request's refusal or failure, or null, and how enrolment stands when the hub said.</summary>
 public sealed record EnrollReply(string? Error, Enrollment? Enrollment);
 
+/// <summary>
+/// A device signed in to the web page (architecture.md § Remote access): its ID, the first 8 hex characters of the stored hash; its name; the
+/// remote host and Tailscale login it signs in through, both null for this computer; and when it was last used, in epoch milliseconds.
+/// </summary>
+public sealed record PairedDevice(string Id, string Label, string? Host, string? Login, long UsedAt)
+{
+    /// <summary>The devices of a <c>/page/devices</c> answer; an entry without an ID is left out.</summary>
+    public static IReadOnlyList<PairedDevice> ParseList(JsonNode? node) =>
+        node is JsonArray list
+            ? list.OfType<JsonObject>().Select((entry) => new PairedDevice(Text(entry, "id") ?? "", Text(entry, "label") ?? "", Text(entry, "host"), Text(entry, "login"), entry["usedAt"] is JsonValue used && used.TryGetValue<long>(out var at) ? at : 0)).Where((device) => device.Id != "").ToList()
+            : [];
+
+    internal static string? Text(JsonObject value, string key) => value[key] is JsonValue text && text.TryGetValue<string>(out var read) ? read : null;
+}
+
+/// <summary>A pairing link for a device on a remote host (architecture.md § Remote access): the link, its code, the host and when both stop working.</summary>
+public sealed record Pairing(string Url, string Code, string Host, long ExpiresAt)
+{
+    public static Pairing? Parse(JsonNode? node) =>
+        node is JsonObject value && PairedDevice.Text(value, "url") is { } url && PairedDevice.Text(value, "code") is { } code && PairedDevice.Text(value, "host") is { } host
+            ? new Pairing(url, code, host, value["expiresAt"] is JsonValue at && at.TryGetValue<long>(out var expires) ? expires : 0)
+            : null;
+}
+
+/// <summary>The signed-in devices, or null and why the hub did not list them.</summary>
+public sealed record DevicesReply(string? Error, IReadOnlyList<PairedDevice>? Devices);
+
+/// <summary>A new pairing link, or null and why not, such as remote access being off.</summary>
+public sealed record PairReply(string? Error, Pairing? Pairing);
+
 /// <summary>The hub's config requests for the Settings window (PRD R54).</summary>
 public interface IConfigHub
 {
@@ -300,4 +330,13 @@ public interface IConfigHub
 
     /// <summary>Voiceprint enrolment: <c>start</c>, <c>cancel</c> or <c>status</c>; a hub without it answers a refusal.</summary>
     Task<EnrollReply> Enroll(string action) => Task.FromResult(new EnrollReply("This hub cannot enrol a voice; restart Switchboard.", null));
+
+    /// <summary>The devices signed in to the web page (architecture.md § Remote access), the one used last first.</summary>
+    Task<DevicesReply> Devices() => Task.FromResult(new DevicesReply("This hub cannot list devices; restart Switchboard.", null));
+
+    /// <summary>A new pairing link and code for a device on the first remote host.</summary>
+    Task<PairReply> Pair() => Task.FromResult(new PairReply("This hub cannot pair a device; restart Switchboard.", null));
+
+    /// <summary>Signs one device out of the web page by its ID; returns why not, or null.</summary>
+    Task<string?> RevokeDevice(string id) => Task.FromResult<string?>("This hub cannot sign a device out; restart Switchboard.");
 }

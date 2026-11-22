@@ -508,6 +508,33 @@ sealed class FakeConfigHub : Switchboard.Dock.Settings.IConfigHub
     /// <summary>When set, checks get no answer, as when the hub stopped.</summary>
     public bool Silent { get; set; }
 
+    /// <summary>Each devices request's reply; an empty queue answers no devices.</summary>
+    public Queue<Switchboard.Dock.Settings.DevicesReply> DevicesReplies { get; } = new();
+
+    /// <summary>Each pairing request's reply; an empty queue answers that remote access is off.</summary>
+    public Queue<Switchboard.Dock.Settings.PairReply> PairReplies { get; } = new();
+
+    public Task<Switchboard.Dock.Settings.DevicesReply> Devices()
+    {
+        Calls.Add("devices");
+
+        return Task.FromResult(DevicesReplies.Count > 0 ? DevicesReplies.Dequeue() : new Switchboard.Dock.Settings.DevicesReply(null, []));
+    }
+
+    public Task<Switchboard.Dock.Settings.PairReply> Pair()
+    {
+        Calls.Add("pair");
+
+        return Task.FromResult(PairReplies.Count > 0 ? PairReplies.Dequeue() : new Switchboard.Dock.Settings.PairReply("Pairing a device needs remote access.", null));
+    }
+
+    public Task<string?> RevokeDevice(string id)
+    {
+        Calls.Add($"revoke {id}");
+
+        return Task.FromResult<string?>(null);
+    }
+
     /// <summary>Each enrolment request's reply; an empty queue answers an idle enrolment with no voiceprint.</summary>
     public Queue<Switchboard.Dock.Settings.EnrollReply> EnrollReplies { get; } = new();
 

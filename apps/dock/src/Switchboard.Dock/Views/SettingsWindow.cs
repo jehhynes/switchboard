@@ -52,6 +52,11 @@ public sealed class SettingsWindow : Window
     string? tableShape;
     readonly Dictionary<string, Action<TableCell>> cells = [];
     readonly Dictionary<string, (TextBlock Dot, StackPanel Errors)> tableRows = [];
+    // General's paired devices under Remote access, which a devices answer updates in place.
+    StackPanel? devicesList;
+    Button? pairButton;
+    TextBlock? devicesError;
+    StackPanel? pairingPanel;
     // The Voice page's enrolment row, which a poll updates in place.
     TextBlock? enrollStatus;
     Button? enrollButton;
@@ -100,6 +105,7 @@ public sealed class SettingsWindow : Window
         Content = root;
 
         editor.EnrollmentChanged += () => Dispatcher.UIThread.Post(UpdateEnrollment);
+        editor.DevicesChanged += () => Dispatcher.UIThread.Post(UpdateDevices);
         editor.Changed += (redraw) => Dispatcher.UIThread.Post(() =>
         {
             if (redraw)
@@ -376,6 +382,10 @@ public sealed class SettingsWindow : Window
         }
 
         advanced.Clear();
+        devicesList = null;
+        pairButton = null;
+        devicesError = null;
+        pairingPanel = null;
 
         foreach (var section in view.Sections)
         {
@@ -439,6 +449,17 @@ public sealed class SettingsWindow : Window
             }
 
             page.Children.Add(rows);
+
+            // The paired devices and Pair a device follow Remote access's fields (architecture.md § Remote access).
+            if (state.Page == "general" && section.Heading == "Remote access")
+            {
+                page.Children.Add(DevicesBlock());
+
+                if (editor.Devices is null && !editor.DevicesBusy)
+                {
+                    _ = editor.ListDevices();
+                }
+            }
         }
 
         table.Child = null;
@@ -469,6 +490,89 @@ public sealed class SettingsWindow : Window
         }
 
         Update();
+    }
+
+    /// <summary>
+    /// General's paired devices (architecture.md § Remote access), as the web page's Pair a device lists them: each with its name, where it signs
+    /// in from, when it was last used and Sign out; then Pair a device…, which shows a new pairing link and its code.
+    /// </summary>
+    Control DevicesBlock()
+    {
+        devicesList = new StackPanel { Name = "Devices", Spacing = 4 };
+        pairButton = new Button { Name = "PairDevice", HorizontalAlignment = HorizontalAlignment.Left };
+        devicesError = Tinted(new TextBlock { Name = "DevicesError", TextWrapping = TextWrapping.Wrap, IsVisible = false }, "DockError");
+        pairingPanel = new StackPanel { Name = "Pairing", Spacing = 4 };
+        ToolTip.SetTip(pairButton, "Show a one-time link and code that sign a phone or another device of yours in to the web page");
+        pairButton.Click += async (_, _) => await editor.ListDevices(pair: true);
+        UpdateDevices();
+
+        return new StackPanel
+        {
+            Spacing = 6,
+            Margin = new Thickness(0, 6, 0, 0),
+            Children =
+            {
+                new TextBlock { Text = "Paired devices", FontWeight = FontWeight.SemiBold },
+                devicesList,
+                pairButton,
+                devicesError,
+                pairingPanel,
+            },
+        };
+    }
+
+    void UpdateDevices()
+    {
+        if (devicesList is null || pairButton is null || devicesError is null || pairingPanel is null)
+        {
+            return;
+        }
+
+        devicesList.Children.Clear();
+
+        if (editor.Devices is not { } devices)
+        {
+            devicesList.Children.Add(new TextBlock { Text = "Loading…" });
+        }
+        else if (devices.Count == 0)
+        {
+            devicesList.Children.Add(new TextBlock { Text = "No device is signed in." });
+        }
+
+        foreach (var device in editor.Devices ?? [])
+        {
+            var signOut = new Button { Name = $"SignOut:{device.Id}", Content = "Sign out", IsEnabled = !editor.DevicesBusy, VerticalAlignment = VerticalAlignment.Center };
+            var text = new StackPanel
+            {
+                Children =
+                {
+                    new TextBlock { Text = device.Label == "" ? "Unknown device" : device.Label, TextWrapping = TextWrapping.Wrap },
+                    Tinted(new TextBlock { Text = SettingsPages.DeviceDetail(device), TextWrapping = TextWrapping.Wrap, FontSize = 12 }, "DockMuted"),
+                },
+            };
+            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Children = { text, signOut } };
+            var id = device.Id;
+
+            ToolTip.SetTip(signOut, "Sign this device out of the web page");
+            signOut.Click += async (_, _) => await editor.ListDevices(revoke: id);
+            Grid.SetColumn(signOut, 1);
+            devicesList.Children.Add(row);
+        }
+
+        pairButton.Content = editor.Pairing is null ? "Pair a device…" : "New code";
+        pairButton.IsEnabled = !editor.DevicesBusy;
+        devicesError.Text = editor.DevicesError ?? "";
+        devicesError.IsVisible = editor.DevicesError is not null;
+        pairingPanel.Children.Clear();
+
+        if (editor.Pairing is { } pairing)
+        {
+            pairingPanel.Children.Add(new TextBlock { Text = $"Open https://{pairing.Host}/ on the device and type this code:", TextWrapping = TextWrapping.Wrap });
+            pairingPanel.Children.Add(new SelectableTextBlock { Name = "PairingCode", Text = pairing.Code, FontSize = 24, FontWeight = FontWeight.SemiBold, FontFamily = new FontFamily("Consolas, monospace") });
+            pairingPanel.Children.Add(new TextBlock { Text = "Or open this link on it:", TextWrapping = TextWrapping.Wrap });
+            pairingPanel.Children.Add(new SelectableTextBlock { Name = "PairingLink", Text = pairing.Url, TextWrapping = TextWrapping.Wrap, FontSize = 12 });
+            pairingPanel.Children.Add(new TextBlock { Text = SettingsPages.PairingLeft(pairing, DateTimeOffset.Now), TextWrapping = TextWrapping.Wrap });
+        }
     }
 
     /// <summary>The Voice page's enrolment (architecture.md § Voice check and barge-in): how it stands, its button, and the sentences to read.</summary>

@@ -69,6 +69,18 @@ public static class SettingsPages
         "Now keep talking about anything, in your usual voice, until the minute is up.",
     ];
 
+    /// <summary>A paired device's second line, as the web page's device list: where it signs in from and when it was last used.</summary>
+    public static string DeviceDetail(PairedDevice device) =>
+        $"{(device.Host is null ? "This computer" : $"{device.Host} as {device.Login ?? ""}")} · last used {DateTimeOffset.FromUnixTimeMilliseconds(device.UsedAt).ToLocalTime():yyyy-MM-dd HH:mm}";
+
+    /// <summary>How long a pairing link and code still work, as the web page's Pair a device says it.</summary>
+    public static string PairingLeft(Pairing pairing, DateTimeOffset now)
+    {
+        var minutes = Math.Max(0, (long)Math.Ceiling((pairing.ExpiresAt - now.ToUnixTimeMilliseconds()) / 60_000.0));
+
+        return minutes > 0 ? $"It works once, for {(minutes == 1 ? "1 more minute" : $"{minutes} more minutes")}." : "It has expired. Choose New code.";
+    }
+
     /// <summary>
     /// The enrolment row (architecture.md § Voice check and barge-in): how enrolment stands, with a refusal first, and Enroll my voice, Enroll
     /// again or Cancel; the sentences show only while it records.

@@ -78,7 +78,7 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     posts = [];
-    answers = { 'page-settings-read': { status: 200, body: config({ sessions: { installHooks: false } }) }, 'page-settings-check': { status: 200, body: { errors: [] } } };
+    answers = { 'page-settings-read': { status: 200, body: config({ sessions: { installHooks: false } }) }, 'page-settings-check': { status: 200, body: { errors: [] } }, 'page-devices': { status: 200, body: { devices: [] } } };
     host = document.createElement('div');
     document.body.replaceChildren(host);
   });
@@ -196,6 +196,54 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     type('web.remoteHosts', '');
     await settle(CHECK_DELAY_MS);
     expect(named('page-settings-check').at(-1)!.body['settings']).toEqual({ sessions: { installHooks: false }, web: { tailscale: true, remoteLogins: ['alex@example.com'] } });
+  });
+
+  it('lists the paired devices under Remote access, signs one out, and pairs a device with a QR code and code, showing a refusal', async () => {
+    const now = Date.now();
+    const phone = { id: '0123abcd', label: 'Android · Chrome', host: 'pc.tail.ts.net', login: 'alex@example.com', createdAt: now, usedAt: now, current: false };
+    const own = { id: '89abcdef', label: 'Windows · Edge', host: null, login: null, createdAt: now, usedAt: now, current: true };
+
+    answers['page-devices'] = { status: 200, body: { devices: [phone, own] } };
+    answers['page-pair'] = { status: 409, body: { error: 'Pairing a device needs remote access.' } };
+    const { pane } = await opened();
+
+    expect(named('page-devices')).toHaveLength(1);
+    expect(texts('.settings-devices .device-name')).toEqual(['Android · Chrome', 'Windows · Edge (this browser)']);
+    expect(texts('.settings-devices .device-detail').map((text) => text?.split(' · ')[0])).toEqual(['pc.tail.ts.net as alex@example.com', 'This computer']);
+    // The list sits in the Remote access section, after its fields.
+    expect(host.querySelector('.settings-devices')?.closest('.settings-section')?.querySelector('.settings-section-heading')?.textContent).toBe('Remote access');
+
+    // Sign out posts the device's ID and lists the devices again.
+    answers['page-device-revoke'] = { status: 200, body: { revoked: 1 } };
+    answers['page-devices'] = { status: 200, body: { devices: [own] } };
+    host.querySelector<HTMLButtonElement>('[data-key="device-0123abcd"] button')!.click();
+    await settle();
+    expect(named('page-device-revoke').map((one) => one.body)).toEqual([{ id: '0123abcd' }]);
+    expect(texts('.settings-devices .device-name')).toEqual(['Windows · Edge (this browser)']);
+
+    // A refused pairing shows why, with no code.
+    button('Pair a device…').click();
+    await settle();
+    expect(host.querySelector('.settings-devices .settings-error')?.textContent).toBe('Pairing a device needs remote access.');
+    expect(host.querySelector('.settings-devices .pair')).toBeNull();
+
+    answers['page-pair'] = { status: 200, body: { url: 'https://pc.tail.ts.net/page?t=' + 'a'.repeat(64), code: 'ABCD-EFGH', host: 'pc.tail.ts.net', expiresAt: now + 5 * 60_000 } };
+    button('Pair a device…').click();
+    await settle();
+    expect(host.querySelector('.settings-devices .settings-error')).toBeNull();
+    expect(host.querySelector('.settings-devices .pair-qr')).not.toBeNull();
+    expect(host.querySelector('.settings-devices .pair-code')?.textContent).toBe('ABCD-EFGH');
+    expect(host.querySelector('.settings-devices .pair strong')?.textContent).toBe('https://pc.tail.ts.net/');
+    expect(button('New code')).toBeDefined();
+    // Pairing changes nothing in settings.json.
+    expect(host.querySelector('.settings-status')?.textContent).toBe('Saved');
+
+    // Closing drops the code; opening again lists the devices again.
+    pane.requestClose();
+    pane.open();
+    await settle();
+    expect(named('page-devices')).toHaveLength(5);
+    expect(host.querySelector('.settings-devices .pair')).toBeNull();
   });
 
   it('keeps what was typed in a field while the draft holds its reading, and keeps a key the page has no field for', async () => {

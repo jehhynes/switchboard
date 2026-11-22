@@ -387,6 +387,27 @@ public sealed class HubClient(string switchboardHome, HubStarter? starter = null
         return status == HttpStatusCode.OK ? new EnrollReply(null, enrollment) : new EnrollReply(RefusalOf(reply?.ToJsonString() ?? "") ?? $"The hub answered {(int?)status}.", enrollment);
     }
 
+    public async Task<DevicesReply> Devices()
+    {
+        var (status, reply, failure) = await Send("/page/devices", []);
+
+        return status == HttpStatusCode.OK ? new DevicesReply(null, PairedDevice.ParseList(reply?["devices"])) : new DevicesReply(failure ?? RefusalOf(reply?.ToJsonString() ?? "") ?? $"The hub answered {(int?)status}.", null);
+    }
+
+    public async Task<PairReply> Pair()
+    {
+        var (status, reply, failure) = await Send("/page/pair", []);
+
+        return status == HttpStatusCode.OK && Pairing.Parse(reply) is { } pairing ? new PairReply(null, pairing) : new PairReply(failure ?? RefusalOf(reply?.ToJsonString() ?? "") ?? $"The hub answered {(int?)status}.", null);
+    }
+
+    public async Task<string?> RevokeDevice(string id)
+    {
+        var (status, reply, failure) = await Send("/page/revoke", new JsonObject { ["id"] = id });
+
+        return status == HttpStatusCode.OK ? null : failure ?? RefusalOf(reply?.ToJsonString() ?? "") ?? $"The hub answered {(int?)status}.";
+    }
+
     /// <summary>A write's refusal: the <c>errors</c> of a 409, else the failure; empty, with the reply, when the hub wrote the file.</summary>
     async Task<(IReadOnlyList<string> Errors, JsonNode? Reply)> Written(string path, JsonObject body)
     {

@@ -2,6 +2,8 @@
 // hub's config routes as page commands. Its state, fields and pages are the dock's, in settingsModel.ts.
 import type { VNode } from 'preact';
 import { mount } from './island.js';
+import { QrCode, usedText } from './listHeader.js';
+import type { Device, Pairing } from './listHeader.js';
 import { applyPlaybookCell, applyPlaybookField, bar, enrollmentActive, enrollmentRow, parseEnrollment, clone, COMMON_SOURCE_KEYS, EditorState, emptyNewPlaybook, getAt, nav, newPlaybookName, pageSections, pageView, parseConfig, playbookEntry, readField, readPlaybook, samePlaybook, setAt, sourceKind } from './settingsModel.js';
 import type { Enrollment, Field, FieldOption, FieldView, Json, JsonObject, NavEntry, NewNameView, PageButton, PageView, PlaybookFields, PlaybookTable, SectionView } from './settingsModel.js';
 
@@ -48,7 +50,19 @@ interface View {
   enrollment: Enrollment | null;
   /** Why the last enrolment request was refused or failed, or null. */
   enrollError: string | null;
+  /** General's paired devices and Pair a device (architecture.md § Remote access). */
+  remote: RemoteView;
 }
+
+/** The paired devices as the hub last listed them, or null before General asked; the pairing link shown, or null; and a refusal. */
+interface RemoteView {
+  devices: Device[] | null;
+  pairing: Pairing | null;
+  busy: boolean;
+  error: string | null;
+}
+
+const NO_REMOTE = (): RemoteView => ({ devices: null, pairing: null, busy: false, error: null });
 
 export interface Settings {
   /** Opens Settings and reads settings.json. */
@@ -64,7 +78,7 @@ export interface Settings {
 
 /** Settings drawn into `host`: the navigation, the page and the bar, as the dock's window, and a phone's list that drills into each page. */
 export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
-  const view: View = { open: false, drill: 'nav', error: null, notice: null, opened: new Set(), help: new Set(), erred: new Set(), typing: new Map(), ask: null, enrollment: null, enrollError: null };
+  const view: View = { open: false, drill: 'nav', error: null, notice: null, opened: new Set(), help: new Set(), erred: new Set(), typing: new Map(), ask: null, enrollment: null, enrollError: null, remote: NO_REMOTE() };
   let state: EditorState | null = null;
   let loads = 0;
   let seq = 0;
@@ -78,6 +92,55 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
   let asked = false;
   // Each enrolment request, so an answer that a later request or a close overtook is dropped.
   let enrollSeq = 0;
+  // Whether General listed the devices since Settings opened, and each devices request, so an answer a close overtook is dropped.
+  let devicesAsked = false;
+  let remoteSeq = 0;
+
+  /**
+   * General's paired devices (architecture.md § Remote access): lists them, with `pair` a new pairing link first and with `revoke` after
+   * signing one out, through the page's device commands, which the hub refuses from a paired device.
+   */
+  const devices = async (action: { pair?: true; revoke?: string } = {}): Promise<void> => {
+    const remote = view.remote;
+
+    if (remote.busy && action.pair === undefined && action.revoke === undefined) {
+      return;
+    }
+
+    const mine = ++remoteSeq;
+
+    remote.busy = true;
+    remote.error = null;
+    draw();
+
+    const [first, listed] = await (async () => {
+      if (action.revoke !== undefined) {
+        const answer = await deps.post('page-device-revoke', { id: action.revoke });
+
+        return [answer, await deps.post('page-devices', {})] as const;
+      }
+
+      return action.pair === true ? Promise.all([deps.post('page-pair', {}), deps.post('page-devices', {})]) : Promise.all([null, deps.post('page-devices', {})]);
+    })();
+
+    if (mine !== remoteSeq) {
+      return;
+    }
+
+    remote.busy = false;
+    remote.devices = listed.status === 200 ? ((listed.body['devices'] as Device[] | undefined) ?? []) : (remote.devices ?? []);
+    remote.error = listed.status === 200 ? null : String(listed.body['error'] ?? 'Switchboard did not list the devices.');
+
+    if (first !== null && first.status !== 200) {
+      remote.error = String(first.body['error'] ?? (action.pair === true ? 'Switchboard did not give a code.' : 'The device was not signed out.'));
+    }
+
+    if (action.pair === true) {
+      remote.pairing = first?.status === 200 ? (first.body as unknown as Pairing) : null;
+    }
+
+    draw();
+  };
 
   /** Enroll my voice: `start`, `cancel` or `status`; while enrolment starts or records, asks again every second until it ends. */
   const enroll = async (action: string): Promise<void> => {
@@ -147,6 +210,12 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
     if (!view.open) {
       mount(host, null);
       return;
+    }
+
+    // General lists the paired devices when it first shows.
+    if (state?.page === 'general' && !devicesAsked) {
+      devicesAsked = true;
+      void devices();
     }
 
     // The Voice page reads how enrolment stands when it first shows.
@@ -674,6 +743,9 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
     enrollSeq++;
     view.enrollment = null;
     view.enrollError = null;
+    devicesAsked = false;
+    remoteSeq++;
+    view.remote = NO_REMOTE();
     loads++;
     draw();
     deps.closed?.();
@@ -753,6 +825,8 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
     editCell,
     assignPersona,
     enroll: (action) => void enroll(action),
+    pair: () => void devices({ pair: true }),
+    signOut: (id) => void devices({ revoke: id }),
     answer: async (choice) => {
       const asked = view.ask;
 
@@ -865,6 +939,8 @@ interface Handlers {
   editCell(name: string, path: string, checked: boolean): void;
   assignPersona(playbook: string, persona: string): void;
   enroll(action: string): void;
+  pair(): void;
+  signOut(id: string): void;
 }
 
 /** Settings: its header, the navigation and the page side by side (on a phone, one of them), and the bar under both. */
@@ -993,6 +1069,7 @@ function SectionBlock({ state, section, view, on }: { state: EditorState; sectio
       <section class="settings-section">
         {section.heading === '' ? null : <h3 class="settings-section-heading">{section.heading}</h3>}
         {rows}
+        {state.page === 'general' && section.heading === 'Remote access' ? <DevicesBlock remote={view.remote} on={on} /> : null}
       </section>
     );
   }
@@ -1141,6 +1218,63 @@ function AssignRow({ assign, view, on }: { assign: { playbooks: string[]; person
         </button>
         {view.help.has(field.path) ? <p class="settings-help settings-assign-help">{field.help}</p> : null}
       </div>
+    </div>
+  );
+}
+
+/**
+ * General's paired devices under Remote access (architecture.md § Remote access), as Pair a device in More Actions shows them: each with its
+ * name, where it signs in from, when it was last used and Sign out; then Pair a device…, which shows a new link's QR code and code.
+ */
+function DevicesBlock({ remote, on }: { remote: RemoteView; on: Handlers }) {
+  const pairing = remote.pairing;
+  const minutes = pairing === null ? 0 : Math.max(0, Math.ceil((pairing.expiresAt - Date.now()) / 60_000));
+
+  return (
+    <div class="settings-devices" data-key="settings-devices">
+      <h4 class="settings-devices-heading">Paired devices</h4>
+      {remote.devices === null ? (
+        <p class="settings-help">Loading…</p>
+      ) : remote.devices.length === 0 ? (
+        <p class="settings-help">No device is signed in.</p>
+      ) : (
+        <ul class="device-list">
+          {remote.devices.map((one) => (
+            <li class="device" data-key={`device-${one.id}`}>
+              <span class="device-text">
+                <span class="device-name">
+                  {one.label || 'Unknown device'}
+                  {one.current ? ' (this browser)' : ''}
+                </span>
+                <span class="device-detail">
+                  {one.host === null ? 'This computer' : `${one.host} as ${one.login ?? ''}`} · last used {usedText(one.usedAt)}
+                </span>
+              </span>
+              <button type="button" class="sheet-button secondary" title="Sign this device out of the web page" disabled={remote.busy} onClick={() => on.signOut(one.id)}>
+                Sign out
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <button type="button" class="sheet-button secondary" title="Show a one-time link and code that sign a phone or another device of yours in" disabled={remote.busy} onClick={on.pair}>
+        {pairing === null ? 'Pair a device…' : 'New code'}
+      </button>
+      {remote.error === null ? null : (
+        <p class="settings-error" role="alert">
+          {remote.error}
+        </p>
+      )}
+      {pairing === null ? null : (
+        <div class="pair" data-key="pair">
+          <QrCode text={pairing.url} />
+          <p class="settings-help">
+            Scan this with the device's camera, or open <strong>https://{pairing.host}/</strong> on it and type this code:
+          </p>
+          <p class="pair-code">{pairing.code}</p>
+          <p class="settings-help">{minutes > 0 ? `It works once, for ${minutes === 1 ? '1 more minute' : `${minutes} more minutes`}.` : 'It has expired. Choose New code.'}</p>
+        </div>
+      )}
     </div>
   );
 }
