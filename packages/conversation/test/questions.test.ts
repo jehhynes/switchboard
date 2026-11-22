@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { answersIn, answerText, complete, parseQuestions, unansweredCard , cardOutcome, questionLines, questionSegments } from '../src/questions.js';
+import { answersIn, answerText, complete, parseQuestions, unansweredCard , cardOutcome, questionLines, questionSegments, withoutEndingQuestions } from '../src/questions.js';
 import type { CardItem, QuestionChoice } from '../src/questions.js';
 
 /** The shape the conversation rules show, with a second question. */
@@ -154,6 +154,12 @@ describe('where the questions are, and how a later message left them', () => {
     expect(questionSegments('Intro\n1. Port?\n   - A) 1\n   - B) 2\n\nMore after.')).toEqual([{ questions: 0, text: 'Intro' }, { questions: 1, text: '1. Port?\n   - A) 1\n   - B) 2' }, { questions: 0, text: '\nMore after.' }]);
     expect(questionSegments('1. Port?\n   - A) 1\n   - B) 2\n\nWhy it matters.\n\n2. Name?\n   - A) x\n   - B) y')).toEqual([{ questions: 1, text: '1. Port?\n   - A) 1\n   - B) 2' }, { questions: 0, text: '\nWhy it matters.\n' }, { questions: 1, text: '2. Name?\n   - A) x\n   - B) y' }]);
     expect(questionSegments('Nothing asked.')).toBeNull();
+  });
+
+  it('leaves out the run of questions that ends the Markdown, and keeps questions written mid-message', () => {
+    expect(withoutEndingQuestions(asked)).toBe('Two things before I go on.\n');
+    expect(withoutEndingQuestions('Intro\n1. Port?\n   - A) 1\n   - B) 2\n\nMore after.')).toBe('Intro\n1. Port?\n   - A) 1\n   - B) 2\n\nMore after.');
+    expect(withoutEndingQuestions('Nothing asked.')).toBe('Nothing asked.');
   });
 
   it('counts a message as an answer only when it answers one of the questions, else as skipping them', () => {

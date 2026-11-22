@@ -259,6 +259,17 @@ describe('drawing', () => {
     expect([...host.querySelector('li[data-id="r1"]')!.children].map((child) => child.className)).toEqual(['dot', 'body', 'meta']);
   });
 
+  it('gives a reply whose only text besides its passage is the questions its card draws no Show more', () => {
+    const host = document.createElement('div');
+    const asked = 'Fixed it.\n\n1. Ship it?\n   - A) Yes\n   - B) No';
+
+    host.innerHTML = html(renderTimeline(pageState([reply('r1', 1, { opening: asked, speak: 'Fixed it.' }), reply('r2', 2, { opening: `${asked}\n\nMore after.`, speak: 'Fixed it.' })]), newView()));
+    expect(host.querySelector('li[data-id="r1"] .show-more')).toBeNull();
+    expect(host.querySelector('li[data-id="r1"] .question-card')).not.toBeNull();
+    // Questions written mid-message stay in the text, folded, so Show more still has them and the text after them to show.
+    expect(host.querySelector('li[data-id="r2"] .show-more')).not.toBeNull();
+  });
+
   it("keeps raw HTML out of Markdown, opens web links in a new tab and shows paths as text", () => {
     const html = renderMarkdown('<img src=x onerror=alert(1)> [web](https://example.com) [file](src/a.ts) [bad](javascript:alert(1))');
 

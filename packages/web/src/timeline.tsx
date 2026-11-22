@@ -3,7 +3,7 @@
 import type { VNode } from 'preact';
 import { fullTime, metaLine, spokenMark, stamped, toneMark, voiceMark } from '@switchboard/conversation/messageMeta';
 import { hasUnspokenText, spokenBody } from '@switchboard/conversation/spokenBubble';
-import { answersCard, answersIn, cardOutcome, complete, parseQuestions } from '@switchboard/conversation/questions';
+import { answersCard, answersIn, cardOutcome, complete, parseQuestions, withoutEndingQuestions } from '@switchboard/conversation/questions';
 import type { Question, QuestionChoice } from '@switchboard/conversation/questions';
 import { artifactIcon, awaitingReply, timeline } from './model.js';
 import type { PageState } from './model.js';
@@ -42,7 +42,8 @@ function Reply({ item, earlier, view, stamped: shown, card, expandReplies }: { i
   // Focused mode, as in the Conversation view: a reply with a [speak] passage shows the passage first and the whole reply behind Show more. The
   // passage is a bubble on the left, in its place when the whole reply shows; after the operator spoke over it, the part not heard is dimmed.
   const passage = item.kind === 'reply' && item.speak !== null && item.speak.trim() !== '' ? item.speak : null;
-  const folded = passage !== null && hasUnspokenText(item.opening, passage);
+  // The questions that end a reply show in its card, so they alone give Show more nothing to show.
+  const folded = passage !== null && hasUnspokenText(card === null ? item.opening : withoutEndingQuestions(item.opening), passage);
   const expanded = !folded || expandReplies !== view.open.has(`more:${item.id}`);
   // Only the text that ends the reply can end in the card's questions, which it leaves out; questions before a passage fold into one line.
   const markdownPart = (text: string, last: boolean): string => (card === null ? renderMarkdown(text) : withoutQuestions(text, last ? `reply:${item.id}` : `reply:${item.id}:before`, view.open, last));

@@ -942,6 +942,12 @@ describe('speech in the view (architecture.md § Voice)', () => {
 
     expect(expanded).toContain('<li>one</li>');
     expect(expanded).toContain('aria-expanded="true">Show less</button>');
+
+    // Nor does a reply whose only other text is the questions its card draws; questions mid-message stay in the text, so that one has.
+    show(state([reply('r4', T0 + 3, { opening: 'Fixed it.\n\n1. Ship it?\n   - A) Yes\n   - B) No', speak: 'Fixed it.' }), reply('r5', T0 + 4, { opening: 'Fixed it.\n\n1. Ship it?\n   - A) Yes\n   - B) No\n\nMore after.', speak: 'Fixed it.' })]));
+    expect(root.querySelector('li[data-id="r4"] .question-card')).not.toBeNull();
+    expect(root.querySelector('li[data-id="r4"] .show-more')).toBeNull();
+    expect(root.querySelector('li[data-id="r5"] .show-more')).not.toBeNull();
   });
 
   it('draws a passage as a bubble on the left, once, in its place when the whole reply shows, and a reply that is all passage as only its bubble', () => {

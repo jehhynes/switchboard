@@ -8,7 +8,7 @@ import { fullTime, metaLine, spokenMark, stamped, toneMark, voiceMark } from '@s
 import { hasUnspokenText, spokenBody } from '@switchboard/conversation/spokenBubble';
 import { artifactIcon, awaitingReply, selectedEntry, stateIcon, statusLine, timeline } from '../conversationModel.js';
 import type { ConversationState } from '../conversationModel.js';
-import { answersCard, answersIn, answerText, cardOutcome, complete, parseQuestions, questionSegments } from '@switchboard/conversation/questions';
+import { answersCard, answersIn, answerText, cardOutcome, complete, parseQuestions, questionSegments, withoutEndingQuestions } from '@switchboard/conversation/questions';
 import type { Question, QuestionChoice } from '@switchboard/conversation/questions';
 
 /** What the page posts to the extension. */
@@ -156,7 +156,8 @@ function reply(item: ReplyView, earlier: ReplyView | null, open: ReadonlySet<str
   // Focused mode (voice-design decision 21): a reply with a [speak] passage shows the passage first, the whole reply behind Show more. The
   // passage is a bubble on the left, in its place when the whole reply shows; after the operator spoke over it, the part not heard is dimmed.
   const passage = item.kind === 'reply' && item.speak !== null && item.speak.trim() !== '' ? item.speak : null;
-  const folded = passage !== null && hasUnspokenText(item.opening, passage);
+  // The questions that end a reply show in its card, so they alone give Show more nothing to show.
+  const folded = passage !== null && hasUnspokenText(card === '' ? item.opening : withoutEndingQuestions(item.opening), passage);
   const expanded = !folded || expandReplies !== open.has(moreKey(item.id));
   // Only the text that ends the reply can end in the card's questions, which it leaves out; questions before a passage fold into one line.
   const markdownPart = (text: string, last: boolean): string => (card === '' ? renderMarkdown(text) : withoutQuestions(text, last ? `reply:${item.id}` : `reply:${item.id}:before`, open, last));

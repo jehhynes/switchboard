@@ -220,6 +220,22 @@ export function questionSegments(markdown: string): Array<{ questions: number; t
 }
 
 /**
+ * The Markdown without the run of questions that ends it, which the card alone shows (`questionSegments`); unchanged when no run ends it, as
+ * questions written mid-message stay in the text, folded. Focused mode reads it to tell whether Show more would show anything the card does not.
+ */
+export function withoutEndingQuestions(markdown: string): string {
+  const segments = questionSegments(markdown);
+
+  if (segments === null) {
+    return markdown;
+  }
+
+  const last = segments.reduce((found, segment, index) => (segment.questions > 0 ? index : found), -1);
+
+  return segments.slice(last + 1).every((segment) => segment.text.trim() === '') ? segments.slice(0, last).map((segment) => segment.text).join('\n') : markdown;
+}
+
+/**
  * How a later message left a card (voice-design § 5): `answered` when it gives an answer to one of the card's questions, as "1A" or
  * "2 Other: …" or Submit writes; `skipped` when it ignores them, so the card is set aside unanswered with no picks; null with no later message.
  * Either way the session's wait on the card ends (`unansweredCard`).
