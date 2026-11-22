@@ -345,6 +345,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   };
   /** Reports the Browser tab's area to the hub after each draw, once the pane's report is set up below; sent again after a tab change. */
   let reportBrowser = (): void => {};
+  /** Whether the pane is hidden for a floating layer of the page, set up with the pane's report below. */
+  let paneHidden = (): boolean => false;
   let forcePane = false;
 
   let state: PageState = EMPTY;
@@ -1580,7 +1582,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       if (tab === 'browser') {
         // The Chrome pane's window lies over this area while it shows; until then the area says why it does not.
         const row = selectedRow(state);
-        const note = browserNote(view.pane, pane.getBoundingClientRect().width, row !== null && (paneLink(row.url) || row.links.some((link) => paneLink(link.url))));
+        const note = browserNote(view.pane, pane.getBoundingClientRect().width, row !== null && (paneLink(row.url) || row.links.some((link) => paneLink(link.url))), paneHidden());
 
         drawPane(pane, note === null ? null : renderEmpty(note));
       } else if (tab === 'console') {
@@ -3089,13 +3091,26 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     return paneHold !== null;
   };
+  paneHidden = () => floating() || paneHold !== null;
+  /** Whether the Browser tab was last told the pane is hidden for a layer, so it is drawn again when that changes. */
+  let noteCovered = false;
   const reportPane = (force = false): void => {
     // A page on another device cannot drive the pane; the hub refuses its reports. A closed page reports nothing more.
     if (!paneLocal() || listening.signal.aborted) {
       return;
     }
 
-    const area = paneCovered() ? null : browserArea();
+    const covered = paneCovered();
+
+    if (covered !== noteCovered) {
+      noteCovered = covered;
+      // A layer can open or close without a redraw, as the composer's list does; the Browser tab then says so.
+      if (browserArea() !== null) {
+        queueMicrotask(draw);
+      }
+    }
+
+    const area = covered ? null : browserArea();
     const box = area === null ? null : area.getBoundingClientRect();
     const rect = box === null || box.width === 0 ? null : { left: box.left, top: box.top, width: box.width, height: box.height, dpr: window.devicePixelRatio || 1, innerWidth: window.innerWidth, innerHeight: window.innerHeight };
     const text = JSON.stringify(rect);

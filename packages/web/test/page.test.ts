@@ -2421,6 +2421,60 @@ describe('the page in use', () => {
     page.close();
   });
 
+  it('says on the Browser tab that the Chrome pane is hidden while a menu or the composer list is open, and no longer once they close', async () => {
+    vi.useFakeTimers();
+    window.innerWidth = 1920;
+    onTestFinished(() => {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    });
+
+    const page = startPage(root, { fetch: (async (url: string, init?: { body?: string }) => (posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) }), { status: 200, ok: true, json: async () => ({}), text: async () => '' })) as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000, standalone: () => true, toExtension: async () => ({ ok: true }) });
+    const source = FakeSource.last!;
+    const note = () => root.querySelector('#detail .detail-body')!.textContent!.trim();
+    const turn = async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    };
+    const pane = { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: null };
+
+    vi.spyOn(root.querySelector('#detail .detail-body')!, 'getBoundingClientRect').mockReturnValue({ left: 1300, top: 85, width: 600, height: 855 } as DOMRect);
+    hello(source, { openOn: 'browser', groups: [listGroup('progress', [listRow(1, { title: 'Fix it', url: 'https://github.com/o/r/issues/1' })])] });
+    source.emit('pane', { pane });
+    expect(note()).toBe('Opening the work item’s links…');
+
+    // The actions menu opens and the hub hides the pane: the tab says why, not that it is opening.
+    click('button.actions');
+    source.emit('pane', { pane });
+    await turn();
+    expect(note()).toBe('The browser is hidden while a menu or dialog is open.');
+    click('button.actions');
+    await turn();
+    vi.advanceTimersByTime(PANE_SHOW_DELAY_MS);
+    await turn();
+    expect(note()).toBe('Opening the work item’s links…');
+
+    // The composer's list opens without a redraw: the tab says so all the same.
+    const list = root.querySelector<HTMLElement>('.composer-menu')!;
+
+    list.hidden = false;
+    await turn();
+    await turn();
+    expect(note()).toBe('The browser is hidden while a menu or dialog is open.');
+    list.hidden = true;
+    await turn();
+    vi.advanceTimersByTime(PANE_SHOW_DELAY_MS);
+    await turn();
+    expect(note()).toBe('Opening the work item’s links…');
+    // Shown: no note. A menu opening says why at once, before the hub reports the pane hidden.
+    source.emit('pane', { pane: { ...pane, shown: true } });
+    expect(note()).toBe('');
+    click('button.actions');
+    await turn();
+    expect(note()).toBe('The browser is hidden while a menu or dialog is open.');
+    page.close();
+  });
+
   it('shows the Browser tab only for a work item with links and the Console tab only for an active held session, falling back to Status', async () => {
     window.innerWidth = 1920;
     onTestFinished(() => {
@@ -2635,6 +2689,13 @@ describe('the page in use', () => {
     expect(browserNote(pane, 600, false)).toBe('This work item has no web links to show.');
     expect(browserNote(pane, BROWSER_MIN_WIDTH - 1, true)).toBe('Widen this area to at least 515 pixels to show the browser here.');
     expect(browserNote(pane, BROWSER_MIN_WIDTH, true)).toBe('Opening the work item’s links…');
+    // Hidden for a menu or dialog: says so, unless something else keeps it from showing anyway.
+    expect(browserNote(pane, BROWSER_MIN_WIDTH, true, true)).toBe('The browser is hidden while a menu or dialog is open.');
+    // Before the hub reports the pane hidden, too.
+    expect(browserNote({ ...pane, shown: true }, BROWSER_MIN_WIDTH, true, true)).toBe('The browser is hidden while a menu or dialog is open.');
+    expect(browserNote({ ...pane, extension: 'unpaired' }, BROWSER_MIN_WIDTH, true, true)).toContain('Pair the Chrome extension');
+    expect(browserNote(pane, BROWSER_MIN_WIDTH, false, true)).toBe('This work item has no web links to show.');
+    expect(browserNote(pane, BROWSER_MIN_WIDTH - 1, true, true)).toContain('Widen this area');
     // Only links the hub opens tabs for count.
     expect(paneLink('https://github.com/o/r/issues/1')).toBe(true);
     expect(paneLink('https://%')).toBe(false);
@@ -2699,12 +2760,13 @@ describe('the page in use', () => {
     expect(root.classList.contains('wide')).toBe(true);
     expect(root.querySelector('#head .tabs')).toBeNull();
     expect(root.querySelector('#detail .side-switch [aria-selected="true"]')!.textContent).toBe('Browser');
-    expect(root.querySelector('#detail .detail-body')!.textContent).toBe('');
     expect(root.querySelector('[data-action="pane-pair"]')).toBeNull();
-    // The view options menu is still open, so the pane stays hidden until a moment after it closes.
+    // The view options menu is still open, so the pane stays hidden, and the area says so, until a moment after it closes.
     expect(root.querySelector('.view-options-menu')).not.toBeNull();
+    expect(root.querySelector('#detail .detail-body')!.textContent).toBe('The browser is hidden while a menu or dialog is open.');
     click('[data-action="view-menu"]');
     await new Promise((resolve) => setTimeout(resolve, PANE_SHOW_DELAY_MS + 20));
+    expect(root.querySelector('#detail .detail-body')!.textContent).toBe('');
 
     // Another tab hides the pane; Browser again shows it.
     click('#detail [data-side="status"]');

@@ -85,10 +85,11 @@ export function paneLink(url: string): boolean {
 
 /**
  * What the Browser tab says while the Chrome pane does not cover it (PRD R113), or null while it does: the pane window then lies over the tab's
- * area, under its tab strip.
+ * area, under its tab strip. `covered` is whether the pane is hidden for a menu, dropdown, sheet or dialog of the page.
  */
-export function browserNote(pane: PaneView | null, width: number, hasLinks: boolean): string | null {
-  if (pane === null || !pane.enabled || pane.shown) {
+export function browserNote(pane: PaneView | null, width: number, hasLinks: boolean, covered = false): string | null {
+  // A layer hides the pane at once, before the hub reports it hidden.
+  if (pane === null || !pane.enabled || (pane.shown && !covered)) {
     return null;
   }
 
@@ -108,7 +109,11 @@ export function browserNote(pane: PaneView | null, width: number, hasLinks: bool
     return 'This work item has no web links to show.';
   }
 
-  return width < BROWSER_MIN_WIDTH ? `Widen this area to at least ${BROWSER_MIN_WIDTH} pixels to show the browser here.` : 'Opening the work item’s links…';
+  if (width < BROWSER_MIN_WIDTH) {
+    return `Widen this area to at least ${BROWSER_MIN_WIDTH} pixels to show the browser here.`;
+  }
+
+  return covered ? 'The browser is hidden while a menu or dialog is open.' : 'Opening the work item’s links…';
 }
 
 /**
