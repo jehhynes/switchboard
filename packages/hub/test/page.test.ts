@@ -16,6 +16,7 @@ import { Store } from '@switchboard/core';
 import { artifactFile, cookieValue, deviceLabel, pairHtml, SIGNED_OUT_HTML, PAIR_CODE_TRIES, PAIR_MS, PAIR_SCRIPT, pageOrigin, dockRowOf, findFiles, knownFolder, pageHeader, loopbackHost, PageAccess, pageCookie, PUBLIC_PAGE_FILES, PAGE_LINK_MS, PAGE_SESSION_MS, PAGE_SESSIONS_KEPT, pageActionEvent, pageActions, pageCommandOf, pageGroups, pageList, pageOpens, pasteText, poolRowOf, rowOpenUrl, tabUrl } from '../src/page.js';
 import { dockView } from '../src/dock.js';
 import type { DockView } from '../src/dock.js';
+import { PAGE_ASSETS } from '@switchboard/web';
 import { pageAsset } from '../src/pageAssets.js';
 import { LOCAL_FILES_PAIRED_ONLY, localRoots, openLocalFile } from '../src/localFiles.js';
 import { item, NOW, session, snapshot, triage } from './views.js';
@@ -638,6 +639,20 @@ describe('pageAsset', () => {
     expect(String(pageAsset('mermaid.min.js', dir)?.body)).toBe('mermaid');
     expect(pageAsset('toString', dir)).toBeNull();
     expect(pageAsset('../hub.json', dir)).toBeNull();
+  });
+
+  it("serves the audio worklet for good under its content's hash, and under another build's name or none without keeping it", () => {
+    const name = Object.keys(PAGE_ASSETS).find((one) => /^voice-worklet-[0-9a-f]{16}\.js$/.test(one))!;
+    const worklet = pageAsset(name, dir);
+
+    expect(worklet).toMatchObject({ mime: 'text/javascript; charset=utf-8', immutable: true });
+    expect(String(worklet?.body)).toContain('sb-capture');
+
+    for (const other of ['voice-worklet.js', 'voice-worklet-0123456789abcdef.js']) {
+      expect(pageAsset(other, dir)).toEqual({ mime: worklet!.mime, body: worklet!.body });
+    }
+
+    expect(pageAsset('voice-worklet-x.js', dir)).toBeNull();
   });
 });
 

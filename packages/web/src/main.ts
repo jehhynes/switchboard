@@ -587,7 +587,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
   };
   // Voice on this phone, on a paired device's page (architecture.md § Remote access).
-  const phoneVoice = local ? null : new PhoneVoice({ key: () => state.key, post: (name, body) => post(name, body), changed: () => draw(), now: () => deps.now() });
+  const phoneVoice = local
+    ? null
+    : new PhoneVoice({ key: () => state.key, post: (name, body) => post(name, body), fetch: (url) => deps.fetch(url, { credentials: 'same-origin' }).then((response) => response.arrayBuffer?.()), changed: () => draw(), now: () => deps.now() });
   const header = listHeader(root.querySelector<HTMLElement>('.side-head')!, list, root.querySelector<HTMLElement>('#list-sheet')!, {
     post: (name, body) => post(name, body),
     redraw: () => draw(),
@@ -1366,6 +1368,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     mount(voiceControls, renderShared(renderVoice(state.voice, full)));
     // On a paired device the mic shows while the voice is elsewhere too, off: its tap takes the voice to this phone (PRD R119).
     const micView = phoneVoice !== null && state.voice?.enabled === true && !state.voice.here ? { ...state.voice, here: true, mic: 'off' as const, error: null } : state.voice;
+
+    // While voice is on, a paired device keeps the audio worklet in its cache, so a Mic on tap does not wait to fetch it.
+    if (state.voice?.enabled === true) {
+      phoneVoice?.preload();
+    }
 
     // A start or its failure belongs to the conversation it was tapped in.
     if (state.scope?.workItemId !== micScope) {

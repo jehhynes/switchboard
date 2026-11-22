@@ -23,6 +23,9 @@ export const RESUME_RETRY_MS = 500;
 const PCM_FRAME = 1;
 /** The first byte of the page's binary frame of its microphone's PCM, as `PHONE_MIC_FRAME` in the hub. */
 export const MIC_FRAME = 2;
+/** The audio worklet's name under `/page/`, a hash of its content (`packages/web/build.mjs`), so the browser keeps it for good. */
+declare const __VOICE_WORKLET__: string | undefined;
+export const VOICE_WORKLET = typeof __VOICE_WORKLET__ === 'string' ? __VOICE_WORKLET__ : 'voice-worklet.js';
 /** What the page asks of the phone's microphone: iOS's voice processing, which cancels the page's own playback, at the hardware's rate. */
 export const MIC_CONSTRAINTS = { audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } } as const;
 
@@ -88,6 +91,8 @@ export interface PhoneVoiceDeps {
   /** The state or the error changed. */
   changed(): void;
   now(): number;
+  /** Fetches a file of the page into the browser's cache; the browser's `fetch` when left out. */
+  fetch?(url: string): Promise<unknown>;
   /** Opens a WebSocket; the browser's, a fake in tests. */
   socket?(url: string): WebSocket;
   /** The page's origin, `https://<host>` through a remote host. */
@@ -143,6 +148,8 @@ export class PhoneVoice {
   #resumedAt: number | null = null;
   #workletAt: number | null = null;
   #welcomedAt: number | null = null;
+  /** The audio worklet was fetched ahead of a tap. */
+  #preloaded = false;
   /** After the hub closed the socket to restart: the page key the closed socket named, and the timer that gives up taking the voice back. */
   #resuming: { from: string; timer: unknown } | null = null;
 
@@ -222,7 +229,7 @@ export class PhoneVoice {
         this.#recover(context);
       }
     };
-    this.#node = context.audioWorklet.addModule(`${origin}/page/voice-worklet.js`).then(
+    this.#node = context.audioWorklet.addModule(`${origin}/page/${VOICE_WORKLET}`).then(
       () => {
         if (this.#context !== context) {
           return null;
@@ -336,6 +343,22 @@ export class PhoneVoice {
     this.#quiet = why === null;
     socket?.close(1000);
     this.deps.changed();
+  }
+
+  /**
+   * Fetches the audio worklet into the browser's cache, once, while voice is on, so the tap that opens the phone's audio loads it without a
+   * round trip to the hub (mechanics.md M129). The audio itself starts only in a tap, as iOS needs; a failed fetch leaves that tap to fetch it.
+   */
+  preload(): void {
+    if (this.#preloaded) {
+      return;
+    }
+
+    this.#preloaded = true;
+
+    const url = `${this.deps.origin?.() ?? location.origin}/page/${VOICE_WORKLET}`;
+
+    void (this.deps.fetch?.(url) ?? fetch(url, { credentials: 'same-origin' }).then((response) => response.arrayBuffer())).catch(() => undefined);
   }
 
   /** Opens the voice socket. Called from the tap that asks for the voice, where iOS lets audio start. */

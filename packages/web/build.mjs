@@ -65,6 +65,10 @@ const bundle = async (entry, define = {}) =>
       define,
     })
   ).outputFiles[0].text;
+// The phone's audio worklet (architecture.md § Remote access, Voice on a phone), named by a hash of its content, so the browser keeps it for good
+// and a Mic on tap that opens the phone's audio loads it from the browser's cache, not over the network.
+const worklet = await bundle('src/voiceWorklet.ts');
+const workletName = `voice-worklet-${createHash('sha256').update(worklet).digest('hex').slice(0, 16)}.js`;
 const codicons = dirname(require.resolve('@vscode/codicons/dist/codicon.css'));
 const theme = readFileSync('src/theme.css', 'utf8');
 // The installed page's window and splash take the colour of the page's side bar and header: Dark Modern's, the default, and in the pages'
@@ -94,10 +98,9 @@ const manifest = {
 };
 const assets = {
   'index.html': text('text/html; charset=utf-8', html('src/index.html')),
-  // The page imports the diff viewer from the build it was built with (`__DIFF_BUILD__`).
-  'page.js': text('text/javascript; charset=utf-8', await bundle('src/entry.ts', { __DIFF_BUILD__: JSON.stringify(diffBuild) })),
-  // The phone's audio worklet (architecture.md § Remote access, Voice on a phone), loaded when the voice moves to a phone.
-  'voice-worklet.js': text('text/javascript; charset=utf-8', await bundle('src/voiceWorklet.ts')),
+  // The page imports the diff viewer from the build it was built with (`__DIFF_BUILD__`), and the audio worklet by its name (`__VOICE_WORKLET__`).
+  'page.js': text('text/javascript; charset=utf-8', await bundle('src/entry.ts', { __DIFF_BUILD__: JSON.stringify(diffBuild), __VOICE_WORKLET__: JSON.stringify(workletName) })),
+  [workletName]: { ...text('text/javascript; charset=utf-8', worklet), immutable: true },
   // The console's script and xterm.js's styles, loaded only when a console first shows.
   'console.js': text('text/javascript; charset=utf-8', await bundle('src/consoleEntry.ts')),
   'xterm.css': text('text/css; charset=utf-8', readFileSync(require.resolve('@xterm/xterm/css/xterm.css'), 'utf8')),
@@ -125,5 +128,5 @@ mkdirSync('dist', { recursive: true });
 writeFileSync('dist/index.js', `/** The web page's files, by their name under /page/. Written by build.mjs. */\nexport const PAGE_ASSETS = ${JSON.stringify(assets)};\n`);
 writeFileSync(
   'dist/index.d.ts',
-  '/** The web page\'s files, by their name under /page/; a binary file\'s body is base64. */\nexport declare const PAGE_ASSETS: Record<string, { mime: string; body: string; base64: boolean }>;\n',
+  '/** The web page\'s files, by their name under /page/; a binary file\'s body is base64, and an immutable one never changes under its name. */\nexport declare const PAGE_ASSETS: Record<string, { mime: string; body: string; base64: boolean; immutable?: boolean }>;\n',
 );

@@ -6,7 +6,7 @@ import { PAGE_ASSETS } from '@switchboard/web';
 /** Mermaid's self-contained build, which the extension installs in `<home>/web/` beside the hub bundle, since it is too large to carry in it. */
 export const PAGE_MERMAID = 'mermaid.min.js';
 
-/** A page file the hub serves: its type and bytes, and for the diff viewer's files that they never change under their name and go gzipped. */
+/** A page file the hub serves: its type and bytes, and for the audio worklet and the diff viewer's files that they never change under their name, the diff viewer's going gzipped. */
 export interface PageFileAsset {
   mime: string;
   body: Buffer | string;
@@ -140,7 +140,17 @@ export function pageAsset(name: string, home: string): PageFileAsset | null {
     return diffAsset(name, home);
   }
 
-  const asset = Object.hasOwn(PAGE_ASSETS, name) ? PAGE_ASSETS[name] : undefined;
+  const asset = Object.hasOwn(PAGE_ASSETS, name) ? PAGE_ASSETS[name] : VOICE_WORKLET.test(name) ? currentWorklet() : undefined;
 
-  return asset === undefined ? null : { mime: asset.mime, body: asset.base64 ? Buffer.from(asset.body, 'base64') : asset.body };
+  return asset === undefined ? null : { mime: asset.mime, body: asset.base64 ? Buffer.from(asset.body, 'base64') : asset.body, ...(asset.immutable === true && Object.hasOwn(PAGE_ASSETS, name) ? { immutable: true } : {}) };
+}
+
+/** The audio worklet's names: the build's, a hash of its content, and another build's or none, which a page from another build asks for. */
+const VOICE_WORKLET = /^voice-worklet(-[0-9a-f]{16})?\.js$/;
+
+/** This build's audio worklet, for a page of another build that still has the voice: served under its name, but not kept by the browser. */
+function currentWorklet(): (typeof PAGE_ASSETS)[string] | undefined {
+  const name = Object.keys(PAGE_ASSETS).find((one) => VOICE_WORKLET.test(one));
+
+  return name === undefined ? undefined : PAGE_ASSETS[name];
 }

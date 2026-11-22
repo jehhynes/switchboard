@@ -141,6 +141,8 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
     const tracks: FakeTrack[] = [];
     const captures: FakeCaptureNode[] = [];
     const asked: unknown[] = [];
+    const fetched: string[] = [];
+    let fetchFails = false;
     let media: () => Promise<PhoneMicStream> = async () => {
       const track = new FakeTrack();
 
@@ -187,6 +189,13 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
       changed: () => changes++,
       now: () => now,
       origin: () => 'https://pc.tail.ts.net',
+      fetch: async (url) => {
+        fetched.push(url);
+
+        if (fetchFails) {
+          throw new Error('offline');
+        }
+      },
       socket: (url) => {
         const socket = new FakeSocket(url);
 
@@ -200,6 +209,8 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
       tracks,
       captures,
       asked,
+      fetched,
+      failFetch: () => (fetchFails = true),
       media: (next: () => Promise<PhoneMicStream>) => (media = next),
       sockets,
       posts,
@@ -334,6 +345,21 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
     voice.stop();
     sockets[5]!.closeFromHub(1000, 'late');
     expect(voice.error).toBeNull();
+  });
+
+  it('fetches the audio worklet ahead of a tap once, opening no audio, microphone or socket, and a failed fetch leaves the tap to load it', async () => {
+    const { voice, fetched, failFetch, contexts, sockets, asked } = setup();
+
+    failFetch();
+    voice.preload();
+    voice.preload();
+    await flush();
+    expect(fetched).toEqual(['https://pc.tail.ts.net/page/voice-worklet.js']);
+    expect([contexts.length, sockets.length, asked.length, voice.state]).toEqual([0, 0, 0, 'off']);
+    // The tap loads the same file into its audio context, from the cache when the fetch kept it.
+    voice.start();
+    expect(contexts[0]!.loaded).toEqual(fetched);
+    expect(fetched).toHaveLength(1);
   });
 
   it('opens the phone\'s speaker in the tap and plays the hub\'s playbacks through the worklet in order, reporting heard time less the output latency', async () => {

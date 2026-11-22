@@ -4764,14 +4764,19 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it('shows a paired device\'s mic off while the voice is elsewhere, so its tap can take the voice to the phone (PRD R119)', () => {
+  it('shows a paired device\'s mic off while the voice is elsewhere, so its tap can take the voice to the phone, and fetches its audio worklet ahead (PRD R119)', () => {
     const fetch = vi.fn(async () => ({ status: 200, ok: true, json: async () => ({}), text: async () => '' }) as unknown as Response);
     const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, local: false });
     const source = FakeSource.last!;
 
     hello(source);
+    const worklets = () => fetch.mock.calls.filter((call) => String((call as unknown[])[0]).endsWith('/page/voice-worklet.js')).length;
+
+    // The audio worklet is fetched once voice is on, ahead of the tap, and once only.
     source.emit('voice', { voice: { enabled: true, here: false, mic: 'off', speaking: null, speakReplies: true, error: null } });
     expect(root.querySelector('.composer-mic [data-voice="mic"]')?.getAttribute('data-on')).toBe('true');
+    source.emit('voice', { voice: { enabled: true, here: false, mic: 'off', speaking: null, speakReplies: false, error: null } });
+    expect(worklets()).toBe(1);
     page.close();
 
     // This computer's page shows Talk here instead, as the Conversation view does.
@@ -4780,6 +4785,7 @@ describe('the page in use', () => {
     hello(FakeSource.last!);
     FakeSource.last!.emit('voice', { voice: { enabled: true, here: false, mic: 'off', speaking: null, speakReplies: true, error: null } });
     expect(root.querySelector('.composer-mic [data-voice="mic"]')).toBeNull();
+    expect(worklets()).toBe(1);
     local.close();
   });
 
