@@ -370,7 +370,7 @@ function artifactTabs(state: PageState, strip: ArtifactStrip): ComponentChildren
     }),
     rest === 0 ? null : (
       <span class="artifact-more">
-        <button class={`tab artifact-menu-button${strip.menu ? ' open' : ''}`} type="button" data-action="artifact-menu" aria-haspopup="menu" aria-expanded={strip.menu} title="Every artifact, newest first">
+        <button class={`tab artifact-menu-button${strip.menu ? ' open' : ''}`} type="button" data-action="artifact-menu" aria-haspopup="menu" aria-expanded={strip.menu} aria-label={`Artifacts, ${rest} more`} title="Every artifact, newest first">
           <span class="codicon codicon-files" aria-hidden="true"></span>
           <span class="tab-label">Artifacts</span>
           <span class="tab-badge muted">+{rest}</span>

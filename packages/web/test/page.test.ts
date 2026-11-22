@@ -1441,6 +1441,14 @@ describe('the page in use', () => {
     expect((document.activeElement as HTMLElement).closest<HTMLElement>('.artifact-tab')!.dataset['path']).toBe('chat/a1.md');
     (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
     expect(document.activeElement).toBe(strip()[0]);
+    // A tab a narrow strip hides (page.css) is skipped, since it cannot take the focus.
+    const hidden = strip()[1]!.closest<HTMLElement>('.tab')!;
+
+    hidden.style.display = 'none';
+    strip()[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    expect(document.activeElement).toBe(strip()[2]);
+    hidden.style.display = '';
+    strip()[0]!.focus();
     // The open artifact's close button is its own, and shows Status.
     root.querySelector<HTMLElement>('#detail .artifact-tab.selected .tab-close')!.click();
     expect(root.querySelector('#detail .tab.selected')!.getAttribute('data-side')).toBe('status');

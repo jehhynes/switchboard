@@ -4,6 +4,8 @@ import { ARTIFACT_MENU_WIDTH, ARTIFACT_TAB_WIDTH, ARTIFACT_TABS_MAX, artifactBar
 import { EMPTY } from '../src/model.js';
 import type { ArtifactView } from '@switchboard/protocol';
 import { html } from './html.js';
+import { changesButton, newChanges } from '../src/changes.js';
+import { PAGE_ASSETS } from '../dist/index.js';
 
 const artifact = (index: number): ArtifactView => ({ path: `chat/a${index}.md`, owner: 'chat', kind: 'note', title: `Note ${index}`, ext: 'md', type: 'markdown', updatedAt: 1_000 + index });
 const eight = [0, 1, 2, 3, 4, 5, 6, 7].map(artifact);
@@ -90,5 +92,29 @@ describe('the artifact tabs', () => {
     expect(paths(markup, 'data-tab')).toEqual(['conversation', 'status', 'console']);
     expect(tabPaths(markup)).toEqual(['chat/a7.md']);
     expect(markup).toContain('+7');
+  });
+});
+
+describe('the tab strip on a narrow screen', () => {
+  const css = PAGE_ASSETS['page.css']!.body;
+  const narrow = /@container \(max-width: 600px\) \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
+
+  it('never wraps, and under 600 px shows Artifacts and Changes as their icons and counts, with the shown diff tab only', () => {
+    // A size container is a stacking context: the strip stands above the pane after it, so the Artifacts menu inside it does too.
+    expect(css).toMatch(/\.tabs \{ position: relative; z-index: 3; display: flex; flex-wrap: nowrap; container-type: inline-size;/);
+    expect(narrow).toContain('.tab.artifact-menu-button .tab-label, .tab.artifact-menu-button .codicon-chevron-down, .tab.changes-button .tab-label, .tab.changes-button .codicon-chevron-down { display: none; }');
+    expect(narrow).toContain('.tab.diff-tab:not(.selected) { display: none; }');
+    // Conversation, Status, Console and Browser are never hidden.
+    expect(narrow).not.toMatch(/\.tab(\[data-tab|\.selected|:not\(\.diff-tab)[^{]*\{[^}]*display: none/);
+    expect(css).toMatch(/@container \(max-width: 360px\) \{\n  \.tab \{ padding: 0 9px; \}/);
+    expect(css).toMatch(/@media \(hover: none\), \(pointer: coarse\) \{ \.tab\.artifact-menu-button, \.tab\.changes-button \{ min-width: 44px;/);
+  });
+
+  it('names the Artifacts and Changes buttons with their counts, as their labels may be hidden', () => {
+    const state = { ...EMPTY, artifacts: eight };
+
+    expect(html(renderTabs(newView(), state, false, { open: null, fit: 1, menu: false, now: 0 }))).toContain('aria-label="Artifacts, 7 more"');
+    expect(html(changesButton(newChanges()))).toContain('aria-label="Changes"');
+    expect(html(changesButton({ ...newChanges(), list: { total: 3, rows: [] } as never }))).toContain('aria-label="Changes, 3 files"');
   });
 });

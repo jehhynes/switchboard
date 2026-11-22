@@ -80,7 +80,7 @@ export function changesButton(changes: ChangesView): VNode {
   const count = changes.list?.total;
 
   return (
-    <button class={`tab changes-button${changes.tabs.length === 0 ? ' push' : ''}${changes.menu ? ' open' : ''}`} type="button" data-action="changes-menu" aria-expanded={changes.menu} title="The worktree's changes since its base">
+    <button class={`tab changes-button${changes.tabs.length === 0 ? ' push' : ''}${changes.menu ? ' open' : ''}`} type="button" data-action="changes-menu" aria-expanded={changes.menu} aria-label={count === undefined ? 'Changes' : `Changes, ${count} files`} title="The worktree's changes since its base">
       <span class="codicon codicon-diff-multiple" aria-hidden="true"></span>
       <span class="tab-label">Changes</span>
       {count === undefined ? null : <span class="tab-badge muted">{count}</span>}

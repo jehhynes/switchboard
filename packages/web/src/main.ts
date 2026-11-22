@@ -2513,7 +2513,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   root.addEventListener('keydown', (event) => {
     // Left and Right, Home and End move between a tab strip's tabs, as in a tab list; Enter or Space then chooses one.
     const tab = event.target instanceof HTMLElement && event.target.getAttribute('role') === 'tab' ? event.target : null;
-    const tabs = tab === null ? [] : [...(tab.closest('.tabs')?.querySelectorAll<HTMLElement>('[role="tab"]') ?? [])];
+    // A narrow strip hides some diff tabs (page.css), which cannot take the focus.
+    const tabs = tab === null ? [] : [...(tab.closest('.tabs')?.querySelectorAll<HTMLElement>('[role="tab"]') ?? [])].filter((one) => getComputedStyle(one.closest('.tab') ?? one).display !== 'none');
 
     if (tab !== null && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key) && tabs.length > 1) {
       const at = tabs.indexOf(tab);
