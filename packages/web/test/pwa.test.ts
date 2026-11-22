@@ -226,6 +226,16 @@ describe('the installable page', () => {
     expect(css).toMatch(/^:root \{ --sb-overlay-scrollbar: 10px;/m);
   });
 
+  it("leaves a reply's copy button out on a touch screen, where the text is copied as the system does, and keeps a code block's", () => {
+    const css = PAGE_ASSETS['page.css']!.body;
+    const touch = /@media \(hover: none\), \(pointer: coarse\) \{\n  \.code-block > \.copy \{ opacity: 1; \}\n  \.meta \.copy \{ display: none; \}\n/.exec(css);
+
+    expect(touch).not.toBeNull();
+    // The hover rule a desktop uses is unchanged.
+    expect(css).toContain('.code-block:hover > .copy, .reply:hover .meta .copy, .copy:focus-visible { opacity: 1; }');
+    expect(css).not.toMatch(/\.meta \.copy::after/);
+  });
+
   it('links the manifest from the page and the offline page, with the theme colour, light first while the system is light, and serves every file the worker keeps', () => {
     for (const name of ['index.html', 'offline.html']) {
       const html = PAGE_ASSETS[name]!.body;

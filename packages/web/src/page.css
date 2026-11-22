@@ -533,10 +533,12 @@ body.artifact-window > .artifact-view { height: 100%; }
 .voice-controls .ghost .codicon { font-size: 16px; }
 .voice-controls .ghost:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
 
-/* Phones first (architecture.md § Web page): on a touch screen every target is at least 44 px and nothing shows only on hover, so the copy
-   buttons always show; a copy button on the metadata line keeps its 14 px glyph flush with the text and takes taps on a 44 px area around it. */
+/* Phones first (architecture.md § Web page): on a touch screen every target is at least 44 px and nothing shows only on hover, so a code
+   block's copy button always shows, and a reply's copy button on the metadata line is left out, since the reply's text is selected and copied
+   as the system does. */
 @media (hover: none), (pointer: coarse) {
-  .copy { opacity: 1; }
+  .code-block > .copy { opacity: 1; }
+  .meta .copy { display: none; }
   button.picker, button.persona, .header > button.icon, .tab, .composer-tool, .send, .voice-controls .ghost, .row, .group-head, .question-option, .show-more, .earlier-items, .question-submit, .artifact-open, .artifact-head .icon, .composer-error .dismiss { min-height: 44px; }
   button.persona, .header > button.icon, .composer-tool, .send, .voice-controls .ghost.icon, .artifact-head .icon, .composer-error .dismiss { min-width: 44px; }
   .attachments { gap: 12px 8px; }
@@ -545,8 +547,6 @@ body.artifact-window > .artifact-view { height: 100%; }
   .attachment-remove::after { content: ""; position: absolute; inset: -11px; }
   .artifact-head .icon { display: inline-flex; align-items: center; justify-content: center; }
   .menu-row { height: 44px; }
-  .meta .copy { position: relative; }
-  .meta .copy::after { content: ""; position: absolute; inset: -14px; }
 }
 /* iOS zooms the page into a text field under 16 px when it takes the focus, so on a touch screen every field types at 16 px; the composer's
    box sets it, so its live-words mirror keeps the textarea's size. */
