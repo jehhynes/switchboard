@@ -9,8 +9,9 @@ import { LOCAL_PAGE_COMMANDS, listenHub } from '../src/server.js';
 import type { HubServer, PageRoutes } from '../src/server.js';
 import type { RemoteAccess } from '../src/page.js';
 import { createHash } from 'node:crypto';
+import { runInNewContext } from 'node:vm';
 import { Store } from '@switchboard/core';
-import { artifactFile, cookieValue, deviceLabel, PAIR_CODE_TRIES, PAIR_MS, pageOrigin, dockRowOf, findFiles, knownFolder, pageHeader, loopbackHost, PageAccess, pageCookie, PUBLIC_PAGE_FILES, PAGE_LINK_MS, PAGE_SESSION_MS, PAGE_SESSIONS_KEPT, pageActionEvent, pageActions, pageCommandOf, pageGroups, pageList, pageOpens, pasteText, poolRowOf, rowOpenUrl, tabUrl } from '../src/page.js';
+import { artifactFile, cookieValue, deviceLabel, PAIR_CODE_TRIES, PAIR_MS, PAIR_SCRIPT, pageOrigin, dockRowOf, findFiles, knownFolder, pageHeader, loopbackHost, PageAccess, pageCookie, PUBLIC_PAGE_FILES, PAGE_LINK_MS, PAGE_SESSION_MS, PAGE_SESSIONS_KEPT, pageActionEvent, pageActions, pageCommandOf, pageGroups, pageList, pageOpens, pasteText, poolRowOf, rowOpenUrl, tabUrl } from '../src/page.js';
 import { dockView } from '../src/dock.js';
 import type { DockView } from '../src/dock.js';
 import { pageAsset } from '../src/pageAssets.js';
@@ -25,6 +26,70 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
+});
+
+describe('PAIR_SCRIPT', () => {
+  // Runs the pairing page's script against a stand-in for its input: each call sets the value and caret as the browser would before `input`.
+  function codeBox() {
+    const input = {
+      value: '',
+      selectionStart: 0 as number | null,
+      listener: (_event: { isComposing: boolean }) => {},
+      addEventListener(type: string, listener: (event: { isComposing: boolean }) => void) {
+        expect(type).toBe('input');
+        input.listener = listener;
+      },
+      setSelectionRange(start: number, end: number) {
+        expect(end).toBe(start);
+        input.selectionStart = start;
+      },
+    };
+
+    runInNewContext(PAIR_SCRIPT, { document: { querySelector: (selector: string) => (selector === 'input[name=code]' ? input : null) } });
+    return (value: string, caret = value.length, isComposing = false) => {
+      input.value = value;
+      input.selectionStart = caret;
+      input.listener({ isComposing });
+      return [input.value, input.selectionStart];
+    };
+  }
+
+  it('upper-cases the code and adds the dash after the fourth character as it is typed', () => {
+    const type = codeBox();
+
+    expect(type('abc')).toEqual(['ABC', 3]);
+    expect(type('ABCd')).toEqual(['ABCD', 4]);
+    expect(type('ABCDe')).toEqual(['ABCD-E', 6]);
+    expect(type('ABCD-EFGHJ')).toEqual(['ABCD-EFGH', 9]);
+  });
+
+  it('drops spaces, dashes and other characters from a paste and keeps 8', () => {
+    const type = codeBox();
+
+    expect(type(' abcd efgh ')).toEqual(['ABCD-EFGH', 9]);
+    expect(type('a-b c.d_e/f g h j k')).toEqual(['ABCD-EFGH', 9]);
+  });
+
+  it('keeps the caret after the same characters on a backspace or an edit in the middle', () => {
+    const type = codeBox();
+
+    // Backspace over the dash puts it back, the caret before it.
+    expect(type('ABCDEFGH', 4)).toEqual(['ABCD-EFGH', 4]);
+    // Backspace over the character after the dash.
+    expect(type('ABCD-FGH', 5)).toEqual(['ABCD-FGH', 5]);
+    // Backspace over the second character.
+    expect(type('ACD-EFGH', 1)).toEqual(['ACDE-FGH', 1]);
+    // A character typed before the dash pushes the rest along.
+    expect(type('ABXCD-EFG', 3)).toEqual(['ABXC-DEFG', 3]);
+    expect(type('ABCDX-EFG', 5)).toEqual(['ABCD-XEFG', 6]);
+  });
+
+  it('leaves a value it would not change, and one still being composed, alone', () => {
+    const type = codeBox();
+
+    expect(type('ABCD-E', 2)).toEqual(['ABCD-E', 2]);
+    expect(type('abc', 3, true)).toEqual(['abc', 3]);
+  });
 });
 
 describe('PageAccess', () => {
@@ -929,7 +994,9 @@ describe('the web page routes', () => {
     expect(signedOut.status).toBe(401);
     expect(signedOut.body).toContain('<form method="get" action="/page">');
     expect(signedOut.body).not.toContain('wrong or has expired');
-    expect(signedOut.headers['content-security-policy']).toBe("default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
+    expect(signedOut.headers['content-security-policy']).toBe(`default-src 'none'; style-src 'unsafe-inline'; script-src 'sha256-${createHash('sha256').update(PAIR_SCRIPT).digest('base64')}'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`);
+    expect(signedOut.body).toContain(`<script>${PAIR_SCRIPT}</script>`);
+    expect(signedOut.body).toMatch(/<input name="code" autocomplete="one-time-code" autocapitalize="characters" autocorrect="off" spellcheck="false" inputmode="text" enterkeyhint="go" placeholder="ABCD-EFGH" aria-label="Pairing code" required>/);
     expect((await send(server.port, 'GET', '/page', ts)).status).toBe(200);
 
     const wrong = await send(server.port, 'GET', '/page?code=AAAA-AAAA', ts);
