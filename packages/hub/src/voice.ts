@@ -228,6 +228,10 @@ export interface VoiceControlDeps {
 
 /** The first byte of a binary frame the hub sends the phone: a playback's 24 kHz PCM, after its playback number (Voice on a phone). */
 export const PHONE_PCM_FRAME = 1;
+/** The first byte of a binary frame the phone sends: its microphone's 16 kHz PCM (Voice on a phone). */
+export const PHONE_MIC_FRAME = 2;
+/** Why a paired device's page cannot turn on this computer's microphone. */
+export const PHONE_MIC_HERE = 'Tap Voice on this phone to use the mic here.';
 
 interface Offered {
   gen: number;
@@ -301,6 +305,10 @@ export class VoiceControl {
   /** Where the voice's microphone and speaker are, and the page key of the phone that has it (PRD R119). */
   #device: VoiceDevice = 'computer';
   #phoneKey: string | null = null;
+  /** Whether the voice process has the phone's capture open, so the phone's audio is relayed. */
+  #phoneCapture = false;
+  /** Whether the phone's microphone cannot be heard, as its page last said, for a voice process started again. */
+  #phoneBusy = true;
 
   constructor(private readonly deps: VoiceControlDeps) {}
 
@@ -341,9 +349,30 @@ export class VoiceControl {
     this.update();
   }
 
-  /** A JSON message from the phone's page: `played {id, ms, done}`, the position of one of its playbacks. */
+  /**
+   * A binary frame from the phone's page: its microphone's PCM after the kind byte, relayed to the voice process only while it has the phone's
+   * capture open, in whole samples.
+   */
+  phoneAudio(key: string, data: Buffer): void {
+    if (this.#device !== 'phone' || key !== this.#phoneKey || !this.#phoneCapture || data.length < 3 || data.readUInt8(0) !== PHONE_MIC_FRAME || (data.length - 1) % 2 !== 0) {
+      return;
+    }
+
+    this.#client?.send({ type: 'phone-mic', pcm: data.subarray(1).toString('base64') });
+  }
+
+  /**
+   * A JSON message from the phone's page: `played {id, ms, done}`, the position of one of its playbacks, or `state {busy}`, whether its
+   * microphone cannot be heard now (no track open, the track muted, the page hidden).
+   */
   phoneMessage(data: Record<string, unknown>): void {
-    const { type, id, ms, done } = data;
+    const { type, id, ms, done, busy } = data;
+
+    if (this.#device === 'phone' && type === 'state' && typeof busy === 'boolean') {
+      this.#phoneBusy = busy;
+      this.#client?.send({ type: 'phone-state', busy });
+      return;
+    }
 
     if (this.#device === 'phone' && type === 'played' && typeof id === 'number' && Number.isSafeInteger(id) && id >= 0 && typeof ms === 'number' && Number.isFinite(ms) && ms >= 0 && typeof done === 'boolean') {
       this.#client?.send({ type: 'phone-played', id, ms, done });
@@ -372,6 +401,10 @@ export class VoiceControl {
     }
 
     this.#device = device;
+    // The voice process turns the mic off with any move, closing what it captured from; the operator turns it on where the voice is now.
+    this.#micOn = false;
+    this.#phoneCapture = false;
+    this.#phoneBusy = true;
     this.deps.log(`voice: device ${device}: ${why}`);
     this.#client?.send({ type: 'device', device });
     this.#targetsSent = '';
@@ -651,8 +684,9 @@ export class VoiceControl {
    * operator turned it on; turning it off stops capture wherever the voice is. Why not, or null.
    */
   mic(key: string, on: boolean): string | null {
-    if (on && this.#device === 'phone' && key === this.#phoneKey) {
-      return 'The phone does not dictate yet: type, or use the mic on the computer.';
+    // A paired device's mic is its own, used only while it has the voice: it never turns on this computer's microphone (PRD R119).
+    if (on && this.deps.remotePage?.(key) === true && !(this.#device === 'phone' && key === this.#phoneKey)) {
+      return PHONE_MIC_HERE;
     }
 
     if (on) {
@@ -1541,6 +1575,14 @@ export class VoiceControl {
         }
 
         return;
+      case 'phone-capture':
+        this.#phoneCapture = this.#device === 'phone' && message.on;
+
+        if (this.#device === 'phone') {
+          this.deps.phone?.send({ type: 'capture', on: message.on });
+        }
+
+        return;
       case 'phone-stalled':
         // The phone stopped playing while its socket stayed open: the voice leaves it, as when it is lost.
         if (this.#device === 'phone') {
@@ -1677,6 +1719,10 @@ export class VoiceControl {
       found.send({ type: 'device', device: this.#device });
     }
 
+    if (this.#device === 'phone' && !this.#phoneBusy) {
+      found.send({ type: 'phone-state', busy: false });
+    }
+
     this.#typingSent = null;
     this.#contextSent.clear();
 
@@ -1717,6 +1763,13 @@ export class VoiceControl {
 
     this.#dropTerminalDrafts('the voice process stopped');
     this.#stopFlush();
+
+    // Its phone capture is gone with it: the phone stops sending.
+    if (this.#phoneCapture) {
+      this.#phoneCapture = false;
+      this.deps.phone?.send({ type: 'capture', on: false });
+    }
+
     this.#mic = 'off';
     this.#halfDuplex = null;
     this.#recognizer = null;

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from '@switchboard/core';
 import type { HubMessage, VoiceMessage } from '@switchboard/voice';
-import { PHONE_HAS_VOICE, PHONE_PCM_FRAME, VOICE_RESTART_MS, VoiceControl } from '../src/voice.js';
+import { PHONE_HAS_VOICE, PHONE_MIC_FRAME, PHONE_MIC_HERE, PHONE_PCM_FRAME, VOICE_RESTART_MS, VoiceControl } from '../src/voice.js';
 import type { VoiceConnection } from '../src/voiceLink.js';
 import type { WindowScope } from '../src/windows.js';
 
@@ -171,7 +171,8 @@ describe('VoiceControl with the voice on a phone (PRD R119)', () => {
     await settle();
     expect(control.mic('pc', true)).toBeNull();
     control.phoneOpened('phone');
-    expect(control.mic('phone', true)).toBe('The phone does not dictate yet: type, or use the mic on the computer.');
+    expect(control.mic('phone', true)).toBeNull();
+    expect(sentOf('mic').at(-1)).toEqual({ type: 'mic', on: true });
     control.phoneClosed('closed by the page');
     expect(control.device).toBe('none');
     expect(sentOf('device').at(-1)).toEqual({ type: 'device', device: 'none' });
@@ -238,5 +239,78 @@ describe('VoiceControl with the voice on a phone (PRD R119)', () => {
     // With none, a paired page still cannot bring the voice to this computer.
     expect(control.talkHere('phone')).toBe('Tap Voice on this phone to use the voice here.');
     expect(control.device).toBe('none');
+  });
+
+  it('relays the phone\'s microphone only while the voice process has its capture open, and its busy state, and keeps both for a restarted process', async () => {
+    const { control, connections, toPhone, sentOf, restart } = setup();
+    const frame = (...bytes: number[]) => Buffer.from([PHONE_MIC_FRAME, ...bytes]);
+
+    control.update();
+    await settle();
+    // Before the phone has the voice, nothing of it is relayed.
+    control.phoneAudio('phone', frame(1, 2));
+    control.phoneMessage({ type: 'state', busy: false });
+    connections[0]!.receive({ type: 'phone-capture', on: true });
+    expect(sentOf('phone-mic')).toEqual([]);
+    expect(sentOf('phone-state')).toEqual([]);
+    expect(toPhone).toEqual([]);
+
+    control.phoneOpened('phone');
+    control.phoneMessage({ type: 'state', busy: false });
+    control.phoneMessage({ type: 'state', busy: 'no' });
+    expect(sentOf('phone-state')).toEqual([{ type: 'phone-state', busy: false }]);
+    // Audio while capture is closed is dropped.
+    control.phoneAudio('phone', frame(1, 2));
+    expect(sentOf('phone-mic')).toEqual([]);
+
+    connections[0]!.receive({ type: 'phone-capture', on: true });
+    expect(toPhone.at(-1)).toEqual({ type: 'capture', on: true });
+    control.phoneAudio('phone', frame(1, 2, 3, 4));
+    // Another page's audio, another kind, half a sample or an empty frame are dropped.
+    control.phoneAudio('tablet', frame(1, 2));
+    control.phoneAudio('phone', Buffer.from([PHONE_PCM_FRAME, 1, 2]));
+    control.phoneAudio('phone', frame(1, 2, 3));
+    control.phoneAudio('phone', frame());
+    expect(sentOf('phone-mic')).toEqual([{ type: 'phone-mic', pcm: Buffer.from([1, 2, 3, 4]).toString('base64') }]);
+
+    // A restarted voice process is told the phone can be heard; the capture it had is closed on the phone.
+    await restart();
+    expect(toPhone.at(-1)).toEqual({ type: 'capture', on: false });
+    expect(connections[1]!.sent.filter((one) => one.type === 'phone-state')).toEqual([{ type: 'phone-state', busy: false }]);
+    control.phoneAudio('phone', frame(1, 2));
+    expect(connections[1]!.sent.filter((one) => one.type === 'phone-mic')).toEqual([]);
+
+    connections[1]!.receive({ type: 'phone-capture', on: false });
+    expect(toPhone.at(-1)).toEqual({ type: 'capture', on: false });
+  });
+
+  it('turns the mic on only on the device that has the voice, and off with every move', async () => {
+    const { control, connections, sentOf } = setup();
+
+    control.update();
+    await settle();
+    // A paired page never turns on this computer's microphone, nor the phone's before it has the voice.
+    expect(control.mic('phone', true)).toBe(PHONE_MIC_HERE);
+    expect(control.mic('tablet', true)).toBe(PHONE_MIC_HERE);
+    expect(sentOf('mic')).toEqual([]);
+
+    expect(control.mic('pc', true)).toBeNull();
+    // The phone taking the voice turns the mic off: it must be turned on there.
+    control.phoneOpened('phone');
+    expect(control.mic('tablet', true)).toBe(PHONE_MIC_HERE);
+    expect(control.mic('phone', true)).toBeNull();
+    expect(sentOf('mic').at(-1)).toEqual({ type: 'mic', on: true });
+
+    // Mic off from the phone page goes through, once the voice is there.
+    connections[0]!.receive({ type: 'active', gen: 5, sessionId: 's2', reason: 'talk-here' });
+    expect(control.mic('phone', false)).toBeNull();
+    expect(sentOf('mic').at(-1)).toEqual({ type: 'mic', on: false });
+    expect(control.mic('phone', true)).toBeNull();
+
+    // Taken back by Talk here on this computer: the mic is off there until turned on.
+    expect(control.talkHere('pc')).toBeNull();
+    expect(control.device).toBe('computer');
+    control.phoneAudio('phone', Buffer.from([PHONE_MIC_FRAME, 1, 2]));
+    expect(sentOf('phone-mic')).toEqual([]);
   });
 });

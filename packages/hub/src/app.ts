@@ -534,6 +534,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     opened: (device) => voice.phoneOpened(device.key),
     closed: (_device, reason) => voice.phoneClosed(reason),
     message: (_device, data) => voice.phoneMessage(data),
+    audio: (device, data) => voice.phoneAudio(device.key, data),
   });
   const voice: VoiceControl = new VoiceControl({
     link: new VoiceLink({ home, nodePath: () => config.settings.sessions.nodePath, log: (line) => deps.log(line), now: deps.now, sleep: deps.sleep }),
