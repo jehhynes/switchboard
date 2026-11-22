@@ -69,6 +69,20 @@ describe('the theme copy', () => {
     }
   });
 
+  it("draws the console's terminal on the panel's background, with readable text, selection and cursor, in both schemes", () => {
+    for (const [scheme, colours] of Object.entries(blocks())) {
+      const background = colours.get('--vscode-terminal-background')!;
+
+      expect(background, scheme).toBe(colours.get('--vscode-panel-background'));
+      expect(contrast(colours.get('--vscode-terminal-foreground')!, background), `text in ${scheme}`).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(colours.get('--vscode-terminal-foreground')!, colours.get('--vscode-terminal-selectionBackground')!), `selected text in ${scheme}`).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(colours.get('--vscode-terminalCursor-foreground')!, background), `cursor in ${scheme}`).toBeGreaterThanOrEqual(3);
+    }
+
+    // VS Code's light terminal palette: its white is a mid grey, so white text stays visible on a light background.
+    expect(blocks().light.get('--vscode-terminal-ansiWhite')).toBe('#555555');
+  });
+
   it("draws the page's own colours, its surfaces and the composer's light fill from variables that follow the scheme", () => {
     const css = PAGE_ASSETS['page.css']!.body;
     const light = /@media \(prefers-color-scheme: light\) \{\s*:root \{([^}]*)\}/.exec(css)?.[1] ?? '';

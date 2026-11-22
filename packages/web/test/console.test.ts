@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CONSOLE_FONT_PX, CONSOLE_INPUT_CHARS, CONSOLE_MIN_FONT_PX, CONSOLE_THEME, fittedFont, fittedSize, keptModes, LIGHT_SCHEME, mountConsole, XTERM_SCROLLBAR_PX } from '../src/console.js';
+import { CONSOLE_FONT_PX, CONSOLE_INPUT_CHARS, CONSOLE_MIN_FONT_PX, fittedFont, fittedSize, keptModes, LIGHT_SCHEME, mountConsole, XTERM_SCROLLBAR_PX } from '../src/console.js';
 import type { ConsoleOptions, ConsoleTerm, MountedConsole, TermOptions } from '../src/console.js';
 import { startPage } from '../src/main.js';
 import type { ConsoleModule } from '../src/main.js';
@@ -45,7 +45,7 @@ class FakeTerm implements ConsoleTerm {
   rows = 24;
   element: HTMLElement | undefined;
   textarea: HTMLTextAreaElement | undefined;
-  options: { fontSize?: number; theme?: Record<string, string> };
+  options: { fontSize?: number; theme?: Record<string, string>; minimumContrastRatio?: number };
   readonly written: string[] = [];
   readonly calls: string[] = [];
   selection = '';
@@ -160,27 +160,131 @@ function mounted(type: ConsoleOptions['type'] = async () => null) {
   return { host, term: terms[0]!, typed, copied, console, source: () => FakeSource.last };
 }
 
+/** A stand-in for the system's scheme: `set` changes it and tells the page, as the browser does. */
+function systemScheme(light: boolean) {
+  const listeners: Array<() => void> = [];
+  const query = {
+    matches: light,
+    addEventListener: (_type: string, listener: () => void) => listeners.push(listener),
+    removeEventListener: (_type: string, listener: () => void) => listeners.splice(listeners.indexOf(listener), 1),
+  };
+
+  vi.stubGlobal('matchMedia', (text: string) => (text === LIGHT_SCHEME ? query : { matches: false, addEventListener: () => {}, removeEventListener: () => {} }));
+  return {
+    listeners,
+    set(next: boolean): void {
+      query.matches = next;
+      // The page's variables for the new scheme, as theme.css gives them.
+      document.documentElement.style.setProperty('--vscode-terminal-background', next ? '#F8F8F8' : '#181818');
+      document.documentElement.style.setProperty('--vscode-terminal-ansiRed', next ? '#CD3131' : '#CD3131');
+      document.documentElement.style.setProperty('--vscode-terminal-ansiWhite', next ? '#555555' : '#E5E5E5');
+      document.documentElement.style.setProperty('--vscode-terminal-foreground', next ? '#3B3B3B' : '#CCCCCC');
+
+      for (const name of ['Black', 'Green', 'Yellow', 'Blue', 'Magenta', 'Cyan', ...['Black', 'Red', 'Green', 'Yellow', 'Blue', 'Magenta', 'Cyan', 'White'].map((one) => `Bright${one}`)]) {
+        document.documentElement.style.setProperty(`--vscode-terminal-ansi${name}`, '#777777');
+      }
+
+      [...listeners].forEach((listener) => listener());
+    },
+  };
+}
+
+/** Claude Code's dark theme: a sent message's row and text, its grey and amber text, and an ANSI red. */
+const DARK_DRAWN = '\u001b[48;2;55;55;55m\u001b[38;2;255;255;255mhi\u001b[m \u001b[38;2;153;153;153mgrey \u001b[38:2::255:193:7mamber\u001b[31m red';
+const LIGHT_DRAWN = '\u001b[48;2;240;240;240m\u001b[38;2;0;0;0mhi\u001b[m \u001b[38;2;102;102;102mgrey \u001b[38:2::150:108:30mamber\u001b[31m red';
+
 describe("the console's colours", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    document.documentElement.removeAttribute('style');
+  });
 
-  it("draws in Dark Modern's terminal colours whatever the system's scheme, on a background that matches its own", () => {
-    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === LIGHT_SCHEME, addEventListener: () => {}, removeEventListener: () => {} }));
+  it("takes the page's terminal colours for the scheme, with VS Code's minimum contrast only in the light one", () => {
+    systemScheme(false).set(false);
 
-    const { term } = mounted();
+    const { host, term } = mounted();
     const css = PAGE_ASSETS['page.css']!.body;
 
-    expect(term.created.theme).toEqual(CONSOLE_THEME);
-    expect(term.created.theme).toMatchObject({ background: '#181818', foreground: '#cccccc', white: '#e5e5e5' });
-    expect(css).toMatch(new RegExp(`\\.console \\{[^}]*color-scheme: dark;[^}]*background: ${CONSOLE_THEME.background!};`, 'i'));
-    // xterm.js's scrollbar takes the page's: the console's slider colours, and the page's 8 px width, which the fit leaves out.
-    for (const [option, variable] of [['scrollbarSliderBackground', 'background'], ['scrollbarSliderHoverBackground', 'hoverBackground'], ['scrollbarSliderActiveBackground', 'activeBackground']] as const) {
-      expect(css).toMatch(new RegExp(`\\.console \\{[^}]*--vscode-scrollbarSlider-${variable}: ${CONSOLE_THEME[option]!.replace(/[()]/g, '\\$&')};`));
-    }
-
-    expect(css).toMatch(/::-webkit-scrollbar \{ width: 8px;/);
+    expect(term.created.theme).toMatchObject({ background: '#181818', cursorAccent: '#181818', foreground: '#CCCCCC', red: '#CD3131', white: '#E5E5E5', brightBlue: '#777777' });
+    expect(term.created.minimumContrastRatio).toBe(1);
+    expect(host.querySelector('style')!.textContent).toBe('');
+    // The console's box and its pane are drawn on the terminal's background, in the page's scheme, with no colours of its own.
+    expect(css).toMatch(/\.console \{[^}]*background: var\(--vscode-terminal-background\);/);
+    expect(css).toMatch(/\.scroll\.console-pane \{[^}]*background: var\(--vscode-terminal-background\);/);
+    expect(/\.console \{([^}]*)\}/.exec(css)?.[1]).not.toMatch(/color-scheme|--vscode-[\w-]+:|#[0-9a-f]{6}/i);
     expect(css).toContain(`.console .xterm .xterm-scrollable-element > .scrollbar.vertical { width: ${XTERM_SCROLLBAR_PX}px !important;`);
-    // The light scheme's block never gives the console another background.
-    expect(/@media \(prefers-color-scheme: light\) \{\s*:root \{([^}]*)\}/.exec(css)?.[1]).not.toMatch(/console/);
+  });
+
+  it("writes the program's colours as drawn in the dark scheme, and Claude Code's light theme colours in the light one", () => {
+    systemScheme(true).set(true);
+
+    const { term, source } = mounted();
+
+    source().emit('data', { data: DARK_DRAWN });
+    expect(term.written).toEqual([LIGHT_DRAWN]);
+    expect(term.created.theme).toMatchObject({ background: '#F8F8F8', white: '#555555' });
+    expect(term.created.minimumContrastRatio).toBe(4.5);
+  });
+
+  it('rewrites a colour cut between two chunks once the second completes it, and writes what is held back before an exit note', () => {
+    systemScheme(true).set(true);
+
+    const { term, source } = mounted();
+
+    source().emit('data', { data: 'a\u001b[48;2;55;' });
+    source().emit('data', { data: '55;55mb\u001b' });
+    source().emit('exited', { exitCode: 0 });
+    expect(term.written.slice(0, 3)).toEqual(['a', '\u001b[48;2;240;240;240mb', '\u001b']);
+    expect(term.written[3]).toContain('The session exited with code 0.');
+  });
+
+  it("switches live with the system's scheme, drawing a streaming session again from a new replay in the new colours", () => {
+    const scheme = systemScheme(false);
+
+    scheme.set(false);
+
+    const { host, term, source, console } = mounted();
+    const first = source();
+
+    first.emit('data', { data: DARK_DRAWN });
+    scheme.set(true);
+    // The old stream closes, the screen clears after what it already wrote, and the new stream's replay is drawn in light colours.
+    expect(first.closed).toBe(true);
+    expect(source()).not.toBe(first);
+    expect(term.options.theme).toMatchObject({ background: '#F8F8F8', white: '#555555' });
+    expect(term.options.minimumContrastRatio).toBe(4.5);
+    // Dim text takes the light scheme's dim colours, for the default colour and the 256 numbered ones.
+    expect(host.querySelector('style')!.textContent!.split('\n')).toHaveLength(257);
+    first.emit('data', { data: 'late' });
+    source().emit('data', { data: DARK_DRAWN });
+    expect(term.written).toEqual([DARK_DRAWN, '\u001bc', LIGHT_DRAWN]);
+
+    scheme.set(false);
+    source().emit('data', { data: DARK_DRAWN });
+    expect(term.written.slice(3)).toEqual(['\u001bc', DARK_DRAWN]);
+    expect(term.options.theme).toMatchObject({ background: '#181818', white: '#E5E5E5' });
+    expect(term.options.minimumContrastRatio).toBe(1);
+    expect(host.querySelector('style')!.textContent).toBe('');
+    expect(FakeSource.all).toHaveLength(3);
+
+    console.dispose();
+    expect(scheme.listeners).toHaveLength(0);
+  });
+
+  it('keeps an ended console on screen at a scheme change, taking only the new colours, and Reconnect draws it in them', () => {
+    const scheme = systemScheme(false);
+
+    scheme.set(false);
+
+    const { host, term, source } = mounted();
+
+    source().emit('exited', { exitCode: 1 });
+    scheme.set(true);
+    expect(FakeSource.all).toHaveLength(1);
+    expect(term.options.theme).toMatchObject({ background: '#F8F8F8' });
+    host.querySelector<HTMLButtonElement>('.console-reconnect')!.click();
+    source().emit('data', { data: DARK_DRAWN });
+    expect(term.written.at(-1)).toBe(LIGHT_DRAWN);
   });
 });
 
@@ -196,7 +300,7 @@ describe('the console', () => {
     expect(term.calls).toEqual(['reset', 'resize 120x40']);
     expect(term.written).toEqual(['hello']);
     // No bar and no instruction text: the screen names itself, and only the focus border shows that it types.
-    expect([...host.children].map((child) => child.className)).toEqual(['console-screen', 'console-foot']);
+    expect([...host.children].map((child) => child.className)).toEqual(['console-screen', 'console-foot', '']);
     expect(host.querySelector<HTMLElement>('.console-foot')!.hidden).toBe(true);
     expect(host.querySelector('.console-screen')!.getAttribute('aria-label')).toBe('Session console');
     expect(host.querySelector('.console-screen')!.getAttribute('title')).toBe('Session console');

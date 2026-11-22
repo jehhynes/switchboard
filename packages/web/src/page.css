@@ -822,10 +822,9 @@ button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }
 
 /* The console (architecture.md § Web page): the held session's terminal, with no bar above it: the focus border shows that it types. It fills its pane and
    nothing round it scrolls: the font fits the screen to the pane, so xterm.js's scrollback is the only scroller. */
-.scroll.console-pane { display: flex; flex-direction: column; padding: 0 0 var(--sb-end); overflow: hidden; background: #181818; }
-/* The console stays in Dark Modern's colours in both schemes, as its terminal does (console.ts), so its note, its button and its scrollbars take
-   Dark Modern's values too. */
-.console { --vscode-foreground: #CCCCCC; --vscode-errorForeground: #F85149; --vscode-button-border: #ffffff1a; --vscode-button-secondaryBackground: #00000000; --vscode-button-secondaryForeground: #CCCCCC; --vscode-scrollbarSlider-background: rgba(121, 121, 121, 0.4); --vscode-scrollbarSlider-hoverBackground: rgba(100, 100, 100, 0.7); --vscode-scrollbarSlider-activeBackground: rgba(191, 191, 191, 0.4); color-scheme: dark; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; color: var(--vscode-foreground); background: #181818; position: relative; isolation: isolate; }
+.scroll.console-pane { display: flex; flex-direction: column; padding: 0 0 var(--sb-end); overflow: hidden; background: var(--vscode-terminal-background); }
+/* The console takes the page's scheme, as its terminal does (consoleColors.ts), on the terminal's background. */
+.console { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; color: var(--vscode-foreground); background: var(--vscode-terminal-background); position: relative; isolation: isolate; }
 /* While it types, a dimmed focus border inside the console's own box, on all four sides: drawn over xterm.js's positioned layers, which cover an
    outline, and inside the box, so the tab strip and the header beside it never cover it; isolated, so it never rises above the page's menus. */
 .console.typing::after { content: ''; position: absolute; inset: 0; z-index: 50; border: 1px solid color-mix(in srgb, var(--vscode-focusBorder) 45%, transparent); pointer-events: none; }

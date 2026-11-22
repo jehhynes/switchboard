@@ -3,7 +3,8 @@
  * from VS Code's theme-defaults dark_modern.json and dark_vs.json, and light_modern.json, light_plus.json and light_vs.json; the colours those
  * files leave to VS Code's built-in defaults are VS Code's dark or light defaults. The page follows the operating system's light or dark
  * setting (prefers-color-scheme), live; Dark Modern is the default. Where Light Modern's own colour for text or a mark is under 4.5:1 on the
- * side bar (errorForeground, editorWarning.foreground, testing.iconPassed), the light copy takes VS Code's Light High Contrast value.
+ * side bar (errorForeground, editorWarning.foreground, testing.iconPassed), the light copy takes VS Code's Light High Contrast value. The terminal
+ * colours are VS Code's terminal defaults on the panel's background, with Light Modern's terminal foreground and cursor, for the console.
  */
 :root {
   --vscode-foreground: #CCCCCC;
@@ -71,6 +72,26 @@
   --vscode-scrollbarSlider-background: rgba(121, 121, 121, 0.4);
   --vscode-scrollbarSlider-hoverBackground: rgba(100, 100, 100, 0.7);
   --vscode-scrollbarSlider-activeBackground: rgba(191, 191, 191, 0.4);
+  --vscode-terminal-background: #181818;
+  --vscode-terminal-foreground: #CCCCCC;
+  --vscode-terminalCursor-foreground: #CCCCCC;
+  --vscode-terminal-selectionBackground: #264F78;
+  --vscode-terminal-ansiBlack: #000000;
+  --vscode-terminal-ansiRed: #CD3131;
+  --vscode-terminal-ansiGreen: #0DBC79;
+  --vscode-terminal-ansiYellow: #E5E510;
+  --vscode-terminal-ansiBlue: #2472C8;
+  --vscode-terminal-ansiMagenta: #BC3FBC;
+  --vscode-terminal-ansiCyan: #11A8CD;
+  --vscode-terminal-ansiWhite: #E5E5E5;
+  --vscode-terminal-ansiBrightBlack: #666666;
+  --vscode-terminal-ansiBrightRed: #F14C4C;
+  --vscode-terminal-ansiBrightGreen: #23D18B;
+  --vscode-terminal-ansiBrightYellow: #F5F543;
+  --vscode-terminal-ansiBrightBlue: #3B8EEA;
+  --vscode-terminal-ansiBrightMagenta: #D670D6;
+  --vscode-terminal-ansiBrightCyan: #29B8DB;
+  --vscode-terminal-ansiBrightWhite: #E5E5E5;
   --vscode-font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", system-ui, "Ubuntu", "Droid Sans", sans-serif;
   --vscode-font-size: 13px;
   --vscode-editor-font-family: Consolas, "Courier New", monospace;
@@ -144,6 +165,26 @@
     --vscode-scrollbarSlider-background: rgba(100, 100, 100, 0.4);
     --vscode-scrollbarSlider-hoverBackground: rgba(100, 100, 100, 0.7);
     --vscode-scrollbarSlider-activeBackground: rgba(0, 0, 0, 0.6);
+    --vscode-terminal-background: #F8F8F8;
+    --vscode-terminal-foreground: #3B3B3B;
+    --vscode-terminalCursor-foreground: #005FB8;
+    --vscode-terminal-selectionBackground: #ADD6FF;
+    --vscode-terminal-ansiBlack: #000000;
+    --vscode-terminal-ansiRed: #CD3131;
+    --vscode-terminal-ansiGreen: #107C10;
+    --vscode-terminal-ansiYellow: #949800;
+    --vscode-terminal-ansiBlue: #0451A5;
+    --vscode-terminal-ansiMagenta: #BC05BC;
+    --vscode-terminal-ansiCyan: #0598BC;
+    --vscode-terminal-ansiWhite: #555555;
+    --vscode-terminal-ansiBrightBlack: #666666;
+    --vscode-terminal-ansiBrightRed: #F14C4C;
+    --vscode-terminal-ansiBrightGreen: #14CE14;
+    --vscode-terminal-ansiBrightYellow: #B5BA00;
+    --vscode-terminal-ansiBrightBlue: #3B8EEA;
+    --vscode-terminal-ansiBrightMagenta: #D670D6;
+    --vscode-terminal-ansiBrightCyan: #29B8DB;
+    --vscode-terminal-ansiBrightWhite: #A5A5A5;
     color-scheme: light;
   }
 }

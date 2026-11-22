@@ -6,13 +6,15 @@
  * off, so a pointer over it never types (mechanics M101), and the terminal's own answers to the program's queries are never sent.
  */
 
+import { dimCss, LightColors, MINIMUM_CONTRAST, terminalTheme } from './consoleColors.js';
+
 /** The part of xterm.js's `Terminal` the console uses, so tests can pass a fake. */
 export interface ConsoleTerm {
   readonly cols: number;
   readonly rows: number;
   readonly element: HTMLElement | undefined;
   readonly textarea: HTMLTextAreaElement | undefined;
-  options: { fontSize?: number; theme?: Record<string, string> };
+  options: { fontSize?: number; theme?: Record<string, string>; minimumContrastRatio?: number };
   open(parent: HTMLElement): void;
   write(data: string): void;
   resize(cols: number, rows: number): void;
@@ -32,6 +34,7 @@ export interface TermOptions {
   scrollback: number;
   cursorBlink: boolean;
   theme: Record<string, string>;
+  minimumContrastRatio: number;
 }
 
 export interface ConsoleOptions {
@@ -66,38 +69,7 @@ const MOUSE_REPORT = /^\u001b\[(?:M[\s\S]{3}|<\d+;\d+;\d+[mM])$/;
 export const XTERM_SCROLLBAR_PX = 8;
 /** The fonts the console draws with: VS Code's editor font. */
 const FONT_FAMILY = 'Consolas, "Courier New", monospace';
-/**
- * VS Code's Dark Modern terminal colours, with VS Code's dark defaults for those it leaves out, in both of the page's schemes. Claude Code draws
- * for its own theme, dark unless the operator picks another, much of it in 24-bit colours such as its message and logo backgrounds and its grey
- * and amber text, which no light palette can map (mechanics M106), so a light console showed dark blocks and unreadable text.
- */
-export const CONSOLE_THEME: Readonly<Record<string, string>> = {
-  background: '#181818',
-  foreground: '#cccccc',
-  cursor: '#cccccc',
-  selectionBackground: '#264f78',
-  black: '#000000',
-  red: '#cd3131',
-  green: '#0dbc79',
-  yellow: '#e5e510',
-  blue: '#2472c8',
-  magenta: '#bc3fbc',
-  cyan: '#11a8cd',
-  white: '#e5e5e5',
-  brightBlack: '#666666',
-  brightRed: '#f14c4c',
-  brightGreen: '#23d18b',
-  brightYellow: '#f5f543',
-  brightBlue: '#3b8eea',
-  brightMagenta: '#d670d6',
-  brightCyan: '#29b8db',
-  brightWhite: '#e5e5e5',
-  // Dark Modern's slider colours, as the page's own scrollbars and the console's (page.css) take them.
-  scrollbarSliderBackground: 'rgba(121, 121, 121, 0.4)',
-  scrollbarSliderHoverBackground: 'rgba(100, 100, 100, 0.7)',
-  scrollbarSliderActiveBackground: 'rgba(191, 191, 191, 0.4)',
-};
-/** The media query under which the page draws Light Modern (theme.css). */
+/** The media query under which the page draws Light Modern (theme.css), and the console its light colours. */
 export const LIGHT_SCHEME = '(prefers-color-scheme: light)';
 
 /** The modes of a DECSET the console lets through: all but the report modes. */
@@ -148,8 +120,22 @@ export function mountConsole(host: HTMLElement, createTerm: (options: TermOption
   note.hidden = true;
   foot.hidden = true;
   foot.append(note, reconnect);
-  host.replaceChildren(screen, foot);
-  const term = createTerm({ fontSize: CONSOLE_FONT_PX, fontFamily: FONT_FAMILY, scrollback: 10_000, cursorBlink: false, theme: { ...CONSOLE_THEME } });
+  /** The light scheme's dim colours (consoleColors.ts `dimCss`). */
+  const dimStyle = element('style', '');
+
+  host.replaceChildren(screen, foot, dimStyle);
+  const scheme = typeof matchMedia === 'function' ? matchMedia(LIGHT_SCHEME) : null;
+  const contrast = (): number => (scheme?.matches === true ? MINIMUM_CONTRAST : 1);
+  /** The page's terminal colours for the scheme now, with the light scheme's dim colours. */
+  const colourTheme = (): Record<string, string> => {
+    const theme = terminalTheme(getComputedStyle(host));
+
+    dimStyle.textContent = scheme?.matches === true ? dimCss(theme) : '';
+    return theme;
+  };
+  const term = createTerm({ fontSize: CONSOLE_FONT_PX, fontFamily: FONT_FAMILY, scrollback: 10_000, cursorBlink: false, theme: colourTheme(), minimumContrastRatio: contrast() });
+  /** Rewrites the stream's colours while the console draws in light colours; null in dark ones. */
+  let colours: LightColors | null = null;
 
   let source: EventSource | null = null;
   let ended = false;
@@ -457,17 +443,34 @@ export function mountConsole(host: HTMLElement, createTerm: (options: TermOption
     ended = true;
     error = why;
     source?.close();
+    colours = null;
     source = null;
     drawState();
   };
-  const connect = (): void => {
+  /** Opens the stream on a cleared terminal; `queued` clears it in order with the writes still queued, so none of them lands after the clear. */
+  const connect = (queued = false): void => {
     ended = false;
     error = null;
-    term.reset();
-    source = new options.EventSource(options.url);
 
+    if (queued) {
+      // RIS, the reset `term.reset()` does, parsed after the data written before it.
+      term.write('\u001bc');
+    } else {
+      term.reset();
+    }
+
+    colours = scheme?.matches === true ? new LightColors() : null;
+    const own = new options.EventSource(options.url);
+
+    source = own;
+
+    // Only the open stream draws: one closed for a new one, or ended, is done.
     const on = (type: string, listener: (data: Record<string, unknown>) => void): void =>
-      source!.addEventListener(type, (event) => listener(JSON.parse((event as MessageEvent<string>).data) as Record<string, unknown>));
+      own.addEventListener(type, (event) => {
+        if (source === own) {
+          listener(JSON.parse((event as MessageEvent<string>).data) as Record<string, unknown>);
+        }
+      });
 
     on('size', (data) => {
       const cols = Number(data['cols']);
@@ -479,19 +482,44 @@ export function mountConsole(host: HTMLElement, createTerm: (options: TermOption
 
       fit();
     });
-    on('data', (data) => term.write(String(data['data'] ?? '')));
+    on('data', (data) => {
+      const text = String(data['data'] ?? '');
+
+      term.write(colours === null ? text : colours.push(text));
+    });
     on('replayed', () => drawState());
     on('exited', (data) => {
+      term.write(colours?.flush() ?? '');
       term.write(`\r\n\u001b[2m[The session exited with code ${String(data['exitCode'])}.]\u001b[0m\r\n`);
       end('The session exited. Resume continues it.');
     });
     on('closed', (data) => end(typeof data['error'] === 'string' ? data['error'] : 'The console closed.'));
     on('unavailable', (data) => end(String(data['reason'] ?? 'The session has no console.')));
     // The browser would open the stream again by itself and replay the screen over it; the operator reconnects instead.
-    source.addEventListener('error', () => end('The console lost its connection to Switchboard.'));
+    own.addEventListener('error', () => {
+      if (source === own) {
+        end('The console lost its connection to Switchboard.');
+      }
+    });
     drawState();
   };
 
+  /**
+   * Follows the operating system's scheme, live: xterm.js takes the page's terminal colours for it, and a console still streaming draws the session
+   * again from a new replay, since the colours the program drew were rewritten, or not, as they arrived. An ended console keeps what it drew.
+   */
+  const schemeChanged = (): void => {
+    term.options.theme = colourTheme();
+    term.options.minimumContrastRatio = contrast();
+
+    if (!ended && source !== null) {
+      source.close();
+      source = null;
+      connect(true);
+    }
+  };
+
+  scheme?.addEventListener('change', schemeChanged);
   reconnect.addEventListener('click', () => connect());
   connect();
 
@@ -499,6 +527,7 @@ export function mountConsole(host: HTMLElement, createTerm: (options: TermOption
     dispose: () => {
       disposed = true;
       source?.close();
+      scheme?.removeEventListener('change', schemeChanged);
       resized?.disconnect();
       scale?.removeEventListener('change', rescaled);
 
