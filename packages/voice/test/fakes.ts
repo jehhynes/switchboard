@@ -260,6 +260,14 @@ export class FakeEngine implements AsrEngine {
   streams = 0;
   /** Samples fed to every stream. */
   accepted = 0;
+  /** Set, recognition skips audio below it, as the real recogniser does. */
+  silenceRms: number | undefined = undefined;
+  /** Times the recogniser was freed. */
+  freed = 0;
+
+  free(): void {
+    this.freed++;
+  }
 
   stream(): AsrStream {
     this.streams++;

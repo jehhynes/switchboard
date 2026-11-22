@@ -34,6 +34,8 @@ export const WARM_SETTLE_MS = 2_000;
 export const WARM_RETRY_MS = 5_000;
 /** After a phone takes the voice, the recogniser loads this soon, once the hub's target for the phone's conversation has come. */
 export const WARM_SOON_MS = 50;
+/** A load ahead waits this long after freeing the recogniser it replaces, whose memory goes a few turns of the event loop later (M131). */
+export const WARM_RELEASE_MS = 100;
 /** The spoken commands (architecture.md § Dictation), recognised only as a whole utterance in the operator's voice and never sent. */
 export const SPOKEN_COMMANDS: Readonly<Record<string, SpokenCommand>> = {
   'stop listening': 'stop-listening',
@@ -161,6 +163,10 @@ export class Dictation {
   #recognizerFailed = false;
   #loggedRecognizerError: string | null = null;
   #engine: { key: string; engine: AsrEngine } | null = null;
+  /** A freed recogniser whose memory has not gone yet; the next one loads once it resolves. */
+  #released: Promise<void> | null = null;
+  /** The open capture's recogniser loads once `#released` resolves. */
+  #reloading = false;
   #transcriber: Transcriber | null = null;
   #utterance: Utterance | null = null;
   readonly #contexts = new Map<string, string>();
@@ -383,8 +389,13 @@ export class Dictation {
       }
 
       // The recogniser loads while the other-app watcher starts, not after its first answer; a failure is reported by the attempt to listen.
+      // One for other terms is freed now, and the attempt to listen loads the new one once its memory has gone.
       if (this.#target !== null && this.#enrollment === null && !this.#recognizerFailed) {
-        this.#loadEngine(true);
+        if (this.#engine !== null && this.#engine.key !== this.#termsKey()) {
+          this.#releaseEngine();
+        } else if (this.#released === null) {
+          this.#loadEngine(true);
+        }
       }
     } else {
       this.#starting = null;
@@ -422,8 +433,8 @@ export class Dictation {
 
     this.#target = sessionId === null ? null : { gen, sessionId, repo };
 
-    if (this.#target !== null && this.#stream !== null && !this.#loadEngine()) {
-      this.#stopCapture();
+    if (this.#target !== null && this.#stream !== null) {
+      this.#reloadListening();
     }
 
     // Focus moves the target several times a second: the recogniser loads once it settles.
@@ -475,6 +486,21 @@ export class Dictation {
 
     if ((this.deps.playing?.() ?? null) !== null || this.#utterance !== null) {
       this.#warmTimer = this.#timer(() => this.warm(), WARM_RETRY_MS);
+      return;
+    }
+
+    // The recogniser for other terms goes first, and the new one loads once its memory is released, so two never coexist. With capture open,
+    // the target's change and the open itself replace it; while the device opens, or a freed one's memory has not gone, the load waits.
+    if (this.#engine !== null || this.#released !== null) {
+      if (this.#stream !== null && this.#engine !== null) {
+        return;
+      }
+
+      if (this.#engine !== null && this.#stream === null && !this.#opening) {
+        this.#releaseEngine();
+      }
+
+      this.#warmTimer = this.#timer(() => this.warm(), WARM_RELEASE_MS);
       return;
     }
 
@@ -743,6 +769,12 @@ export class Dictation {
 
     // Mic on's load ahead failed for these terms: its attempt to listen reports that, rather than paying for the load again.
     const failed = !ahead && starting?.failed?.key === key ? starting.failed : null;
+
+    // One recogniser at a time: each holds gigabytes of GPU memory (mechanics.md M131).
+    if (failed === null) {
+      this.#releaseEngine();
+    }
+
     const engine = failed === null ? this.deps.recognizer(terms) : { error: failed.error };
 
     if (starting !== null && !starting.engine) {
@@ -784,8 +816,83 @@ export class Dictation {
     return true;
   }
 
+  /** Frees the loaded recogniser, if any; its transcriber goes with it, and `#released` resolves once its memory has gone. */
+  #releaseEngine(): void {
+    if (this.#engine === null) {
+      return;
+    }
+
+    this.#engine.engine.free();
+    this.#engine = null;
+    this.#transcriber = null;
+
+    let done = (): void => undefined;
+
+    const released = new Promise<void>((resolve) => (done = resolve));
+
+    this.#released = released;
+    this.#timer(() => {
+      if (this.#released === released) {
+        this.#released = null;
+      }
+
+      done();
+    }, WARM_RELEASE_MS);
+  }
+
+  /**
+   * With capture open, loads the recogniser for the target's terms when they changed: the old one is freed first and the new one loads once its
+   * memory has gone, the audio until then heard by none; capture stops when it cannot load.
+   */
+  #reloadListening(): void {
+    if (this.#engine !== null && this.#engine.key === this.#termsKey()) {
+      return;
+    }
+
+    this.#releaseEngine();
+
+    const stream = this.#stream;
+    // One load for the capture, for the terms of the target then; a new capture, or an enrolment's, loads its own.
+    const load = (): void => {
+      this.#reloading = false;
+
+      if (this.#stream !== stream || stream === null || this.#enrollment !== null || this.#engine !== null) {
+        return;
+      }
+
+      if ((this.#target !== null || this.#answer !== null) && !this.#loadEngine()) {
+        this.#stopCapture();
+      }
+
+      this.#sync();
+    };
+
+    if (this.#released === null) {
+      load();
+    } else if (!this.#reloading) {
+      this.#reloading = true;
+      void this.#released.then(load);
+    }
+  }
+
   async #startCapture(): Promise<void> {
     const forEnrollment = this.#enrollment !== null;
+
+    // A recogniser for other terms is freed, and one being freed has gone, before this one loads.
+    if (!forEnrollment && (this.#engine?.key !== this.#termsKey() || this.#released !== null)) {
+      this.#releaseEngine();
+
+      if (this.#released !== null) {
+        this.#opening = true;
+        await this.#released;
+        this.#opening = false;
+
+        if (!this.#wanted() || this.#enrollment !== null) {
+          this.#sync();
+          return;
+        }
+      }
+    }
 
     if (!forEnrollment && !this.#loadEngine()) {
       this.#started('unavailable');
@@ -824,6 +931,15 @@ export class Dictation {
     this.#stream = stream;
     this.#deaf = false;
     this.#echo.restart();
+
+    // The target moved to other terms while the device opened.
+    if (!forEnrollment && this.#target !== null) {
+      this.#reloadListening();
+
+      if (this.#stream !== stream) {
+        return;
+      }
+    }
 
     if (!forEnrollment) {
       this.#step('capture open');
@@ -916,7 +1032,7 @@ export class Dictation {
     }
 
     // Paused by voice, a reply is not stopped by talking over it.
-    if (this.#holding() && !this.#pausedByVoice) {
+    if (this.#holding() && !this.#pausedByVoice && this.#transcriber !== null) {
       this.#checkBarge();
     }
   }

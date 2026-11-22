@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { pcmToSamples, sherpaEngine, sherpaRecognizer, Transcriber } from '../src/asr.js';
+import { ASR_RATE, DECODE_HANGOVER_MS, pcmToSamples, sherpaEngine, sherpaRecognizer, SILENCE_RMS, Transcriber } from '../src/asr.js';
 import type { AsrEngine } from '../src/asr.js';
 import { CPU_MODEL, GPU_MODEL } from '../src/sherpa.js';
 import type { Sherpa, SherpaRuntime } from '../src/sherpa.js';
@@ -93,6 +93,62 @@ describe('Transcriber', () => {
     expect(audios.at(-1)!.length).toBe(64_000);
   });
 
+  it('stops decoding silence once the hangover after the last loud audio or new words passed, and resumes with the half second before speech', () => {
+    const { engine, events, transcriber, feed } = setup();
+    const loud = new Float32Array(1600).fill(SILENCE_RMS * 2);
+    const hangover = (DECODE_HANGOVER_MS * ASR_RATE) / 1000;
+
+    engine.silenceRms = SILENCE_RMS;
+    engine.text = 'hello there';
+    transcriber.feed(loud);
+    // Silence is decoded through the hangover, so the held-back words come and the piece settles.
+    feed('hello there', hangover / 1600);
+    expect(engine.accepted).toBe(1600 + hangover);
+    expect(events).toContain('piece hello there');
+    // Then nothing more is decoded, though the clock of the pauses still runs.
+    feed('hello there', 50);
+    expect(engine.accepted).toBe(1600 + hangover);
+    expect(transcriber.total).toBe(1600 * 51 + hangover);
+    // Speech again: the half second before it goes in first, then each chunk as it comes.
+    engine.text = 'hello there again';
+    transcriber.feed(loud);
+    expect(engine.accepted).toBe(1600 + hangover + 8000 + 1600);
+    expect(transcriber.words).toBe('again');
+    transcriber.feed(loud);
+    expect(engine.accepted).toBe(1600 + hangover + 8000 + 3200);
+  });
+
+  it('keeps decoding through silence while new words come, and feeds no audio twice after a message ends on skipped silence', () => {
+    const { engine, transcriber, feed } = setup();
+    const loud = new Float32Array(1600).fill(SILENCE_RMS * 2);
+    const hangover = (DECODE_HANGOVER_MS * ASR_RATE) / 1000;
+
+    engine.silenceRms = SILENCE_RMS;
+    engine.text = 'one';
+    transcriber.feed(loud);
+    feed('one', 15);
+    // A word the model gave up 1.5 s into the silence moves the hangover on.
+    feed('one two', 1);
+    feed('one two', hangover / 1600 + 10);
+    expect(engine.accepted).toBe(1600 * 17 + hangover);
+    transcriber.end();
+    expect(engine.accepted).toBe(1600 * 17 + hangover + 8000);
+    // The primed half second is not fed again when speech resumes.
+    transcriber.feed(loud);
+    expect(engine.accepted).toBe(1600 * 18 + hangover + 8000);
+    feed('', 30);
+    transcriber.restartFrom(transcriber.total - 3200);
+    transcriber.feed(loud);
+    expect(engine.accepted).toBe(1600 * 18 + hangover * 2 + 8000 + 3200 + 1600);
+  });
+
+  it('decodes all audio when the engine sets no silence level', () => {
+    const { engine, feed } = setup();
+
+    feed('', 100);
+    expect(engine.accepted).toBe(160_000);
+  });
+
   it('reads 16-bit PCM as samples from -1 to 1', () => {
     const pcm = Buffer.alloc(6);
 
@@ -106,6 +162,7 @@ describe('Transcriber', () => {
 /** A sherpa-onnx module whose recogniser records its config, or throws `fail` when created with that provider. */
 function fakeSherpa(fail: string | null = null) {
   const configs: Array<Record<string, any>> = [];
+  const accepted: number[] = [];
   const module = {
     OnlineRecognizer: class {
       constructor(config: Record<string, any>) {
@@ -117,7 +174,7 @@ function fakeSherpa(fail: string | null = null) {
       }
 
       createStream() {
-        return { acceptWaveform: () => undefined, inputFinished: () => undefined };
+        return { acceptWaveform: (wave: { samples: Float32Array }) => void accepted.push(wave.samples.length), inputFinished: () => undefined };
       }
 
       isReady() {
@@ -132,7 +189,7 @@ function fakeSherpa(fail: string | null = null) {
     },
   };
 
-  return { module, configs };
+  return { module, configs, accepted };
 }
 
 function models(files: string[]) {
@@ -175,6 +232,31 @@ describe('sherpaEngine', () => {
       expect(sherpaEngine(fakeSherpa().module, 'gpu', dir, () => (written++, HOT))).toEqual({ error: `No speech recognition model in ${dir}.` });
       expect(written).toBe(0);
       expect(sherpaEngine(fakeSherpa('cpu').module, 'cpu', dir, () => HOT)).toEqual({ error: 'The speech recognition model could not load: no cpu' });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('sherpaEngine free', () => {
+  it('skips silence, and once freed its streams and new ones take no audio and read no words', async () => {
+    const dir = models(['encoder.onnx', 'tokens.txt']);
+    const { module, accepted } = fakeSherpa();
+
+    try {
+      const engine = sherpaEngine(module, 'gpu', dir, () => HOT) as AsrEngine;
+      const stream = engine.stream();
+
+      expect(engine.silenceRms).toBe(SILENCE_RMS);
+      stream.accept(CHUNK);
+      expect([accepted, stream.text()]).toEqual([[1600], 'hello']);
+      engine.free();
+      await new Promise((resolve) => setImmediate(resolve));
+      stream.accept(CHUNK);
+      stream.finish();
+      engine.stream().accept(CHUNK);
+      expect([accepted, stream.text(), engine.stream().text()]).toEqual([[1600], '', '']);
+      engine.free();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
