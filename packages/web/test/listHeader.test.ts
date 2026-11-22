@@ -454,8 +454,9 @@ describe('the list header (architecture.md § Web page)', () => {
 
     hello(remote.source);
     click('.more-actions');
-    // Settings stays on this computer too, and the menu ends with Show hub log rather than a separator.
-    expect(menuRows().slice(-4)).toEqual(['-', 'Refresh sources', 'Reload', 'Show hub log']);
+    // Settings stays on this computer too; the menu ends with Voice on this phone, off until tapped.
+    expect(menuRows().slice(-6)).toEqual(['-', 'Refresh sources', 'Reload', 'Show hub log', '-', 'Voice on this phone']);
+    expect(root.querySelector('[data-action="list-phone-voice"]')?.getAttribute('aria-checked')).toBe('false');
     expect(root.querySelector('[data-action="list-settings"]')).toBeNull();
     remote.page.close();
 
@@ -482,6 +483,22 @@ describe('the list header (architecture.md § Web page)', () => {
     expect([...sheet.querySelectorAll('.device-name')].map((one) => one.textContent)).toEqual(['Android · Chrome', 'Windows · Edge (this browser)']);
     expect(sheet.querySelector('.device-detail')?.textContent).toMatch(/^pc\.tail\.ts\.net as alex@example\.com · last used /);
     expect([...sheet.querySelectorAll('.device-detail')][1]?.textContent).toMatch(/^This computer · last used /);
+    // This computer's page offers no voice of its own, and only a paired device has Allow voice.
+    expect(root.querySelector('[data-action="list-phone-voice"]')).toBeNull();
+    expect([...sheet.querySelectorAll('[data-action="list-device-voice"]')].map((one) => [(one as HTMLElement).dataset['id'], one.textContent])).toEqual([['0123abcd', 'Allow voice']]);
+
+    // Allow voice posts the device's ID and lists the devices again, which then say so.
+    answers['/page-devices'] = { status: 200, body: { devices: [{ ...phone, voice: true }, own] } };
+    click('#list-sheet [data-action="list-device-voice"][data-id="0123abcd"]');
+    await flush();
+    await flush();
+    expect(posts.filter((one) => one.url === '/v1/conversation/page-device-voice').map((one) => [one.body['id'], one.body['allow']])).toEqual([['0123abcd', true]]);
+    expect(root.querySelector('#list-sheet .device-detail')?.textContent).toMatch(/ · voice allowed$/);
+    expect(root.querySelector('#list-sheet [data-action="list-device-voice"]')?.textContent).toBe('Forbid voice');
+    click('#list-sheet [data-action="list-device-voice"][data-id="0123abcd"]');
+    await flush();
+    await flush();
+    expect(posts.filter((one) => one.url === '/v1/conversation/page-device-voice').map((one) => one.body['allow'])).toEqual([true, false]);
 
     // Sign out posts the device's ID and lists the devices again.
     answers['/page-devices'] = { status: 200, body: { devices: [own] } };

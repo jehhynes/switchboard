@@ -97,13 +97,14 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
   let remoteSeq = 0;
 
   /**
-   * General's paired devices (architecture.md § Remote access): lists them, with `pair` a new pairing link first and with `revoke` after
-   * signing one out, through the page's device commands, which the hub refuses from a paired device.
+   * General's paired devices (architecture.md § Remote access): lists them, with `pair` a new pairing link first, with `revoke` after
+   * signing one out and with `voice` after allowing or forbidding voice on one, through the page's device commands, which the hub refuses
+   * from a paired device.
    */
-  const devices = async (action: { pair?: true; revoke?: string } = {}): Promise<void> => {
+  const devices = async (action: { pair?: true; revoke?: string; voice?: { id: string; allow: boolean } } = {}): Promise<void> => {
     const remote = view.remote;
 
-    if (remote.busy && action.pair === undefined && action.revoke === undefined) {
+    if (remote.busy && action.pair === undefined && action.revoke === undefined && action.voice === undefined) {
       return;
     }
 
@@ -114,8 +115,8 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
     draw();
 
     const [first, listed] = await (async () => {
-      if (action.revoke !== undefined) {
-        const answer = await deps.post('page-device-revoke', { id: action.revoke });
+      if (action.revoke !== undefined || action.voice !== undefined) {
+        const answer = action.voice !== undefined ? await deps.post('page-device-voice', action.voice) : await deps.post('page-device-revoke', { id: action.revoke });
 
         return [answer, await deps.post('page-devices', {})] as const;
       }
@@ -132,7 +133,7 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
     remote.error = listed.status === 200 ? null : String(listed.body['error'] ?? 'Switchboard did not list the devices.');
 
     if (first !== null && first.status !== 200) {
-      remote.error = String(first.body['error'] ?? (action.pair === true ? 'Switchboard did not give a code.' : 'The device was not signed out.'));
+      remote.error = String(first.body['error'] ?? (action.pair === true ? 'Switchboard did not give a code.' : action.voice !== undefined ? 'Voice was not changed on the device.' : 'The device was not signed out.'));
     }
 
     if (action.pair === true) {
@@ -827,6 +828,7 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
     enroll: (action) => void enroll(action),
     pair: () => void devices({ pair: true }),
     signOut: (id) => void devices({ revoke: id }),
+    deviceVoice: (id, allow) => void devices({ voice: { id, allow } }),
     answer: async (choice) => {
       const asked = view.ask;
 
@@ -941,6 +943,8 @@ interface Handlers {
   enroll(action: string): void;
   pair(): void;
   signOut(id: string): void;
+  /** Allows or forbids voice on a paired device. */
+  deviceVoice(id: string, allow: boolean): void;
 }
 
 /** Settings: its header, the navigation and the page side by side (on a phone, one of them), and the bar under both. */
@@ -1248,8 +1252,14 @@ function DevicesBlock({ remote, on }: { remote: RemoteView; on: Handlers }) {
                 </span>
                 <span class="device-detail">
                   {one.host === null ? 'This computer' : `${one.host} as ${one.login ?? ''}`} · last used {usedText(one.usedAt)}
+                  {one.voice === true ? ' · voice allowed' : ''}
                 </span>
               </span>
+              {one.host === null ? null : (
+                <button type="button" class="sheet-button secondary" title={one.voice === true ? 'Stop this device using the voice; its voice connection closes' : 'Let this device use the voice with its own microphone and speaker'} disabled={remote.busy} onClick={() => on.deviceVoice(one.id, one.voice !== true)}>
+                  {one.voice === true ? 'Forbid voice' : 'Allow voice'}
+                </button>
+              )}
               <button type="button" class="sheet-button secondary" title="Sign this device out of the web page" disabled={remote.busy} onClick={() => on.signOut(one.id)}>
                 Sign out
               </button>

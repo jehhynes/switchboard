@@ -2,6 +2,7 @@ import type { ComponentChildren, VNode } from 'preact';
 import qrcode from 'qrcode-generator';
 import { mount } from './island.js';
 import type { PageGroup, PageHeader, PageRow, SourceGroup } from '@switchboard/protocol';
+import type { PhoneVoiceState } from './phoneVoice.js';
 
 type Answer = { status: number; body: Record<string, unknown> };
 
@@ -19,6 +20,8 @@ export interface ListHeaderDeps {
   now(): number;
   /** Whether the page is the one on this computer, which may pair devices, open Settings and restart the holder (architecture.md § Remote access); false on a paired device. */
   local?: boolean;
+  /** Voice on this phone (architecture.md § Remote access), on a paired device's page only: where it is, its last error, and the tap that moves it. */
+  phoneVoice?: { state(): PhoneVoiceState; error(): string | null; toggle(): void };
 }
 
 /** A pairing link the hub gave out (architecture.md § Remote access): its URL, its code and when both stop working. */
@@ -29,7 +32,7 @@ export interface Pairing {
   expiresAt: number;
 }
 
-/** A signed-in device as the hub lists it. */
+/** A signed-in device as the hub lists it, with whether voice is allowed on it (architecture.md § Remote access). */
 export interface Device {
   id: string;
   label: string;
@@ -37,6 +40,7 @@ export interface Device {
   login: string | null;
   usedAt: number;
   current: boolean;
+  voice?: boolean;
 }
 
 /** The search box searches once it holds this many characters (PRD R63), as the dock's. */
@@ -203,6 +207,8 @@ export interface HeaderView {
   holderDismissed?: number | null;
   /** Whether the page is this computer's, which offers Pair a device, Open Settings and Restart and resume; false on a paired device. */
   local?: boolean;
+  /** Voice on this phone in More Actions, on a paired device's page; null or left out where it is not offered. */
+  phoneVoice?: PhoneVoiceState | null;
   /** The last work item that started needing the operator, with the dock's message, shown until it times out or is dismissed (PRD R65). */
   needs?: { workItemId: number; message: string } | null;
 }
@@ -345,7 +351,7 @@ export function renderListHeader(header: PageHeader | null, view: HeaderView): V
           <button type="button" class="icon more-actions" data-action="list-more" aria-haspopup="menu" aria-expanded={view.menu === 'more'} title="More Actions…" aria-label="More Actions">
             <span class="codicon codicon-ellipsis" aria-hidden="true"></span>
           </button>
-          {view.menu === 'more' ? renderMoreMenu(header, view.local === true) : null}
+          {view.menu === 'more' ? renderMoreMenu(header, view.local === true, view.phoneVoice ?? null) : null}
         </div>
       </div>
       {/* The box and the searched range under the title row while the search is open, as the dock's. */}
@@ -410,10 +416,10 @@ const Separator = ({ classes = 'menu-separator' }: { classes?: string }) => <li 
 
 /**
  * More Actions (PRD R71), in the dock's groups: New ad-hoc session… and New conversation in a folder…; Held sessions; Refresh sources,
- * Reload and Show hub log; then Pair a device and Open Settings, on this computer's page only. On a phone, where the header has no room for them,
- * the source icons come first as a check row per source.
+ * Reload and Show hub log; then Pair a device and Open Settings, on this computer's page only, or Voice on this phone, on a paired device's.
+ * On a phone, where the header has no room for them, the source icons come first as a check row per source.
  */
-export function renderMoreMenu(header: PageHeader | null, local = false): VNode {
+export function renderMoreMenu(header: PageHeader | null, local = false, phoneVoice: PhoneVoiceState | null = null): VNode {
   const sources = (header?.sources ?? []).flatMap((group) =>
     group.sources.map((one) => (
       <li role="none" class="more-source">
@@ -442,6 +448,17 @@ export function renderMoreMenu(header: PageHeader | null, local = false): VNode 
           <Separator />
           <MoreRow action="list-devices" icon="device-mobile" label="Pair a device…" />
           <MoreRow action="list-settings" icon="settings-gear" label="Open Settings" />
+        </>
+      ) : null}
+      {!local && phoneVoice !== null ? (
+        <>
+          <Separator />
+          <li role="none">
+            <button type="button" class="menu-row" role="menuitemcheckbox" aria-checked={phoneVoice !== 'off'} data-action="list-phone-voice" title="Use this phone's microphone and speaker for the voice instead of the computer's">
+              <Gutter checked={phoneVoice !== 'off'} />
+              <span class="title">{phoneVoice === 'connecting' ? 'Voice on this phone…' : 'Voice on this phone'}</span>
+            </button>
+          </li>
         </>
       ) : null}
     </ul>
@@ -534,8 +551,14 @@ function DevicesSheet({ sheet, now }: { sheet: Extract<HeaderSheet, { kind: 'dev
                 </span>
                 <span class="device-detail">
                   {one.host === null ? 'This computer' : `${one.host} as ${one.login ?? ''}`} · last used {usedText(one.usedAt)}
+                  {one.voice === true ? ' · voice allowed' : ''}
                 </span>
               </span>
+              {one.host === null ? null : (
+                <button type="button" class="sheet-button secondary" data-action="list-device-voice" data-id={one.id} data-allow={one.voice === true ? '0' : '1'} disabled={sheet.busy} title={one.voice === true ? "Stop this device using the voice; its voice connection closes" : "Let this device use the voice with its own microphone and speaker"}>
+                  {one.voice === true ? 'Forbid voice' : 'Allow voice'}
+                </button>
+              )}
               <button type="button" class="sheet-button secondary" data-action="list-device-revoke" data-id={one.id} disabled={sheet.busy}>
                 Sign out
               </button>
@@ -790,6 +813,7 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
   let ops = 0;
   const newOp = (): string => `header-${deps.now().toString(36)}-${(++ops).toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   let shown: PageHeader | null = null;
+  let shownVoiceError: string | null = null;
   let groups: readonly PageGroup[] = [];
   let timer: ReturnType<typeof setTimeout> | null = null;
   // Each search asked of the hub, so a newer search or range drops an older answer (F7).
@@ -1041,8 +1065,8 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
     sheetHost.querySelector<HTMLElement>('.sheet-button.primary')?.focus();
     await pairAgain(sheet);
   };
-  /** Signs one device out, then lists the devices again. */
-  const revokeDevice = async (id: string): Promise<void> => {
+  /** Signs one device out, or allows or forbids voice on it, then lists the devices again. */
+  const changeDevice = async (command: 'page-device-revoke' | 'page-device-voice', body: Record<string, unknown>, failed: string): Promise<void> => {
     const sheet = view.sheet;
 
     if (sheet?.kind !== 'devices' || sheet.busy) {
@@ -1053,14 +1077,15 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
     sheet.error = null;
     redraw();
 
-    const answer = await deps.post('page-device-revoke', { id });
+    const answer = await deps.post(command, body);
     const devices = await deps.post('page-devices', {});
 
     sheet.busy = false;
-    sheet.error = answer.status === 200 ? null : String(answer.body['error'] ?? 'The device was not signed out.');
+    sheet.error = answer.status === 200 ? null : String(answer.body['error'] ?? failed);
     sheet.devices = devices.status === 200 ? ((devices.body['devices'] as Device[] | undefined) ?? []) : sheet.devices;
     redraw();
   };
+  const revokeDevice = (id: string): Promise<void> => changeDevice('page-device-revoke', { id }, 'The device was not signed out.');
   const closeSheet = (): void => {
     if (view.sheet !== null && view.sheet.kind !== 'later' && view.sheet.kind !== 'devices' && view.sheet.busy) {
       return;
@@ -1146,6 +1171,8 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
       void sheetGo();
     } else if (button?.dataset['action'] === 'list-device-revoke') {
       void revokeDevice(button.dataset['id'] ?? '');
+    } else if (button?.dataset['action'] === 'list-device-voice') {
+      void changeDevice('page-device-voice', { id: button.dataset['id'] ?? '', allow: button.dataset['allow'] === '1' }, 'Voice was not changed on the device.');
     } else if (button?.dataset['action'] === 'list-sheet-cancel' && (!button.classList.contains('sheet-backdrop') || target === button)) {
       // A press on the sheet itself is not one on its backdrop.
       closeSheet();
@@ -1270,6 +1297,12 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
         redraw();
         deps.openSettings?.();
         break;
+      case 'list-phone-voice':
+        // Called in the tap itself, which iOS needs to let the page start audio.
+        view.menu = null;
+        deps.phoneVoice?.toggle();
+        redraw();
+        break;
       default: {
         const later = LATER[button?.dataset['action'] ?? ''];
 
@@ -1353,6 +1386,16 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
         view.menu = null;
       }
 
+      view.phoneVoice = view.local === true ? null : (deps.phoneVoice?.state() ?? null);
+
+      const voiceError = view.local === true ? null : (deps.phoneVoice?.error() ?? null);
+
+      // Why the voice left this phone shows as the header's notice once, until dismissed or the next action.
+      if (voiceError !== null && voiceError !== shownVoiceError) {
+        view.notice = voiceError;
+      }
+
+      shownVoiceError = voiceError;
       mount(host, renderListHeader(header, view));
       mount(sheetHost, renderHeaderSheet(view.sheet, header, deps.now()));
     },

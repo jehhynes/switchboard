@@ -119,6 +119,7 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
   };
   const texts = (selector: string) => [...host.querySelectorAll(selector)].map((node) => node.textContent);
   const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('button')].find((one) => one.textContent?.trim() === label)!;
+  const buttonIn = (selector: string, label: string) => [...host.querySelectorAll<HTMLButtonElement>(`${selector} button`)].find((one) => one.textContent?.trim() === label)!;
   const named = (name: string) => posts.filter((one) => one.name === name);
 
   it('reads settings.json and draws General as the dock does: its sections in order, the file, Saved, and Advanced collapsed', async () => {
@@ -213,10 +214,24 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     // The list sits in the Remote access section, after its fields.
     expect(host.querySelector('.settings-devices')?.closest('.settings-section')?.querySelector('.settings-section-heading')?.textContent).toBe('Remote access');
 
+    // Voice is allowed only on a paired device, never this computer's sign-in, and the list then says so.
+    expect([...host.querySelectorAll('[data-key="device-89abcdef"] button')].map((one) => one.textContent)).toEqual(['Sign out']);
+    answers['page-device-voice'] = { status: 200, body: { voice: true } };
+    answers['page-devices'] = { status: 200, body: { devices: [{ ...phone, voice: true }, own] } };
+    buttonIn('[data-key="device-0123abcd"]', 'Allow voice').click();
+    await settle();
+    expect(named('page-device-voice').map((one) => one.body)).toEqual([{ id: '0123abcd', allow: true }]);
+    expect(texts('.settings-devices .device-detail')[0]).toMatch(/ · voice allowed$/);
+    answers['page-device-voice'] = { status: 404, body: { error: 'No paired device has the ID 0123abcd.' } };
+    buttonIn('[data-key="device-0123abcd"]', 'Forbid voice').click();
+    await settle();
+    expect(named('page-device-voice').at(-1)!.body).toEqual({ id: '0123abcd', allow: false });
+    expect(host.querySelector('.settings-devices .settings-error')?.textContent).toBe('No paired device has the ID 0123abcd.');
+
     // Sign out posts the device's ID and lists the devices again.
     answers['page-device-revoke'] = { status: 200, body: { revoked: 1 } };
     answers['page-devices'] = { status: 200, body: { devices: [own] } };
-    host.querySelector<HTMLButtonElement>('[data-key="device-0123abcd"] button')!.click();
+    buttonIn('[data-key="device-0123abcd"]', 'Sign out').click();
     await settle();
     expect(named('page-device-revoke').map((one) => one.body)).toEqual([{ id: '0123abcd' }]);
     expect(texts('.settings-devices .device-name')).toEqual(['Windows · Edge (this browser)']);
@@ -242,7 +257,7 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     pane.requestClose();
     pane.open();
     await settle();
-    expect(named('page-devices')).toHaveLength(5);
+    expect(named('page-devices')).toHaveLength(7);
     expect(host.querySelector('.settings-devices .pair')).toBeNull();
   });
 
