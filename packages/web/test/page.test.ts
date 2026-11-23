@@ -5315,6 +5315,206 @@ describe('the page in use', () => {
     page.close();
   });
 
+  it('starts on the work item and tab this device kept when the address has none, as an installed app started again, and keeps each tab change', async () => {
+    window.innerWidth = 375;
+    localStorage.setItem('switchboard.route', '#w=1&t=status');
+
+    const { page, source } = start();
+
+    // At once: the work item, before its hello.
+    expect(location.hash).toBe('#w=1&t=status');
+    hello(source);
+    expect(root.classList.contains('listing')).toBe(false);
+    expect(root.querySelector<HTMLElement>('#head .tab.selected')?.dataset['tab']).toBe('status');
+    if (root.querySelector('#head [data-action="artifact"][data-path="chat/plan.md"]') === null) {
+      click('#head .artifact-menu-button');
+    }
+
+    click('#head [data-action="artifact"][data-path="chat/plan.md"]');
+    expect(location.hash).toBe('#w=1&t=artifact%3Achat%2Fplan.md');
+    expect(localStorage.getItem('switchboard.route')).toBe('#w=1&t=artifact%3Achat%2Fplan.md');
+    click('#head [data-tab="conversation"]');
+    expect(location.hash).toBe('#w=1');
+    expect(localStorage.getItem('switchboard.route')).toBe('#w=1');
+    page.close();
+    window.innerWidth = 1024;
+  });
+
+  it("keeps the conversation's place for a reload by the first item in view, and comes back to it", async () => {
+    window.innerWidth = 375;
+    history.replaceState(null, '', '#w=1');
+    sessionStorage.clear();
+
+    const first = start();
+    const panel = root.querySelector<HTMLElement>('#panel')!;
+
+    hello(first.source);
+    Object.defineProperty(panel, 'scrollHeight', { value: 2000, configurable: true });
+    Object.defineProperty(panel, 'clientHeight', { value: 500, configurable: true });
+    vi.spyOn(panel, 'getBoundingClientRect').mockReturnValue({ top: 100, bottom: 600 } as DOMRect);
+
+    for (const [id, top] of [['m1', -200], ['r1', 80]] as const) {
+      vi.spyOn(panel.querySelector<HTMLElement>(`li[data-id="${id}"]`)!, 'getBoundingClientRect').mockReturnValue({ top, bottom: top + 150 } as DOMRect);
+    }
+
+    panel.scrollTop = 40;
+    panel.dispatchEvent(new Event('scroll'));
+    window.dispatchEvent(new Event('pagehide'));
+    expect(JSON.parse(sessionStorage.getItem('switchboard.scroll')!)).toEqual({ '1 conversation': { id: 'r1', offset: -20, pinned: false, top: 40 } });
+    first.page.close();
+    vi.restoreAllMocks();
+
+    // The reload: the item that was first in view goes back 20 px above the pane's top.
+    const second = start();
+    const again = root.querySelector<HTMLElement>('#panel')!;
+    const realQuery = again.querySelectorAll.bind(again);
+
+    vi.spyOn(again, 'getBoundingClientRect').mockReturnValue({ top: 100, bottom: 600 } as DOMRect);
+    vi.spyOn(again, 'querySelectorAll').mockImplementation(((selector: string) => {
+      const found = realQuery(selector);
+
+      for (const item of found) {
+        if ((item as HTMLElement).dataset['id'] === 'r1') {
+          vi.spyOn(item, 'getBoundingClientRect').mockReturnValue({ top: 400, bottom: 550 } as DOMRect);
+        }
+      }
+
+      return found;
+    }) as typeof again.querySelectorAll);
+    Object.defineProperty(again, 'scrollHeight', { value: 2000, configurable: true });
+    hello(second.source);
+    // From the end (scrollHeight), up by the anchor's offset: 2000 + (400 - 100 - -20).
+    expect(again.scrollTop).toBe(2000 + 320);
+    second.page.close();
+    window.innerWidth = 1024;
+  });
+
+  it('restores the Changes tab at its file, a local file tab at its line, and History, from the route after a reload, and keeps them in it', async () => {
+    window.innerWidth = 375;
+    history.replaceState(null, '', '#w=1&t=changes&f=src%2Fa.ts&h=7&hk=gh%207');
+    // The reads' answers do not matter here: only that the page asks for them.
+    answers['/v1/conversation/changes'] = { status: 403, body: { error: 'Not in this window.' } };
+    answers['/page-history'] = { status: 409, body: { error: 'No such ticket.' } };
+    answers['/local-file'] = { status: 404, body: { error: 'not found' } };
+
+    const first = start();
+
+    hello(first.source);
+    await flush();
+    expect(root.querySelector('#panel')!.classList.contains('diff-pane')).toBe(true);
+    expect(posts.some((post) => post.url.startsWith('/v1/conversation/changes?'))).toBe(true);
+    expect(posts.find((post) => post.url.endsWith('/page-history'))?.body).toMatchObject({ ticketId: 7 });
+    expect(root.classList.contains('history')).toBe(true);
+    expect(location.hash).toBe('#w=1&t=changes&f=src%2Fa.ts&h=7&hk=gh%207');
+    first.page.close();
+
+    history.replaceState(null, '', '#w=1&t=file&p=D%3A%2Fw%2FREADME.md&l=4');
+    posts = [];
+
+    const second = start();
+
+    hello(second.source);
+    await flush();
+    expect(posts.some((post) => post.url.includes('/local-file') && post.url.includes(encodeURIComponent('D:/w/README.md')))).toBe(true);
+    expect(location.hash).toBe('#w=1&t=file&p=D%3A%2Fw%2FREADME.md&l=4');
+    expect(localStorage.getItem('switchboard.route')).toBe('#w=1&t=file&p=D%3A%2Fw%2FREADME.md&l=4');
+    second.page.close();
+    window.innerWidth = 1024;
+  });
+
+  it("keeps a conversation's kept place through a reload onto another tab, gives it back on A to B to A, and reads the Changes tab again after a reconnect", async () => {
+    window.innerWidth = 375;
+    sessionStorage.setItem('switchboard.scroll', JSON.stringify({ '1 conversation': { id: 'm1', offset: -20, pinned: false, top: 0 } }));
+    history.replaceState(null, '', '#w=1&t=status');
+
+    const { page, source } = start();
+
+    hello(source);
+    // Choosing another tab before the conversation was drawn leaves its kept place as it was.
+    click('#head [data-tab="artifacts"], #head [data-tab="status"]');
+    window.dispatchEvent(new Event('pagehide'));
+    expect(JSON.parse(sessionStorage.getItem('switchboard.scroll')!)['1 conversation']).toEqual({ id: 'm1', offset: -20, pinned: false, top: 0 });
+
+    // A to B: A's place is kept; back to A, the conversation takes it again rather than its end.
+    const panel = root.querySelector<HTMLElement>('#panel')!;
+
+    click('#head [data-tab="conversation"]');
+    root.querySelector<HTMLElement>('[data-work-item="2"]')!.click();
+    hello(source, { scope: { ...scope, workItemId: 2, scopeGen: 4 } });
+    // Where A was when it was left, as the operator had scrolled it.
+    sessionStorage.setItem('switchboard.scroll', JSON.stringify({ '1 conversation': { id: 'r1', offset: 0, pinned: false, top: 0 } }));
+    vi.spyOn(panel, 'getBoundingClientRect').mockReturnValue({ top: 100, bottom: 600 } as DOMRect);
+    Object.defineProperty(panel, 'scrollHeight', { value: 2000, configurable: true });
+    const realQuery = panel.querySelectorAll.bind(panel);
+
+    vi.spyOn(panel, 'querySelectorAll').mockImplementation(((selector: string) => {
+      const found = realQuery(selector);
+
+      for (const item of found) {
+        vi.spyOn(item, 'getBoundingClientRect').mockReturnValue({ top: (item as HTMLElement).dataset['id'] === 'r1' ? 400 : 0, bottom: 500 } as DOMRect);
+      }
+
+      return found;
+    }) as typeof panel.querySelectorAll);
+    root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
+    hello(source, { scope: { ...scope, scopeGen: 5 } });
+    expect(panel.scrollTop).toBe(2000 + 300);
+    vi.restoreAllMocks();
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+
+    // The Changes tab, kept through a reconnect, reads its list again once the new stream shows the work item.
+    answers['/v1/conversation/changes'] = { status: 403, body: { error: 'Not in this window.' } };
+    click('#head [data-action="diff-tab"]');
+    const reads = () => posts.filter((post) => post.url.startsWith('/v1/conversation/changes?')).length;
+    const before = reads();
+
+    expect(before).toBeGreaterThan(0);
+
+    source.emit('hello', { key: 'pk9', groups: [listGroup('progress', [listRow(1, { title: 'Fix it' }), listRow(2, { title: 'Side' })])], scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    expect(reads()).toBe(before);
+    hello(source, { key: 'pk9', scope: { ...scope, scopeGen: 6 } });
+    expect(reads()).toBe(before + 1);
+    page.close();
+    window.innerWidth = 1024;
+  });
+
+  it("keeps an artifact document's place over a reload", async () => {
+    window.innerWidth = 375;
+    history.replaceState(null, '', '#w=1&t=artifact%3Achat%2Fplan.md');
+    sessionStorage.setItem('switchboard.scroll', JSON.stringify({ '1 artifact:chat/plan.md': { id: null, offset: 0, pinned: false, top: 240 } }));
+    answers['/v1/conversation/artifact/'] = { status: 200, body: {}, text: '# Plan\n\nLong.' };
+
+    const { page, source } = start();
+
+    hello(source);
+    await vi.waitFor(() => expect(root.querySelector<HTMLElement>('#panel .artifact-doc')?.textContent).toContain('Long.'));
+    expect(root.querySelector<HTMLElement>('#panel .artifact-doc')!.scrollTop).toBe(240);
+    root.querySelector<HTMLElement>('#panel .artifact-doc')!.scrollTop = 300;
+    window.dispatchEvent(new Event('pagehide'));
+    expect(JSON.parse(sessionStorage.getItem('switchboard.scroll')!)['1 artifact:chat/plan.md']).toMatchObject({ top: 300 });
+    page.close();
+    window.innerWidth = 1024;
+  });
+
+  it('keeps each tab its own scroll place for the work item, and gives it back when the tab shows again', () => {
+    window.innerWidth = 375;
+    history.replaceState(null, '', '#w=1');
+    sessionStorage.clear();
+
+    const { page, source } = start();
+    const panel = root.querySelector<HTMLElement>('#panel')!;
+
+    hello(source);
+    click('#head [data-tab="status"]');
+    panel.scrollTop = 120;
+    click('#head [data-tab="conversation"]');
+    expect(JSON.parse(sessionStorage.getItem('switchboard.scroll')!)['1 status']).toMatchObject({ top: 120 });
+    click('#head [data-tab="status"]');
+    expect(panel.scrollTop).toBe(120);
+    page.close();
+    window.innerWidth = 1024;
+  });
+
   it('tries a send whose answer was lost again with the same opId, and the same text sent again after it failed reuses it', async () => {
     vi.useFakeTimers();
 

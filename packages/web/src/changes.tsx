@@ -620,6 +620,7 @@ export class ChangesController {
    */
   follow(id: string | null, turnEnded: boolean): void {
     if (id !== this.view.for) {
+      this.#focusPath = null;
       this.#reading++;
       this.#generation++;
       this.#held.clear();
@@ -876,8 +877,19 @@ export class ChangesController {
   }
 
   /** Shows the Changes tab, at a file's diff when `path` names one; its first showing in a conversation reads the list. */
+  /** The file the operator last went to in the diff, from a row or a line, for the route (route.ts); null for none. */
+  get focusPath(): string | null {
+    return this.#focusPath;
+  }
+
+  #focusPath: string | null = null;
+
   openChanges(path: string | null): void {
     const opening = !this.view.tab;
+
+    if (path !== null) {
+      this.#focusPath = path;
+    }
 
     if (opening) {
       this.#collapseViewed = true;
@@ -1086,6 +1098,7 @@ export class ChangesController {
     const base = side === 'old' || row?.status === 'D';
     const open: FileOpen = { path: base ? (row?.from ?? path) : path, side: base ? 'base' : 'disk', line, entry: { state: 'loading' } };
 
+    this.#focusPath = path;
     this.#file = open;
     this.deps.draw();
     void this.#readFile(open);

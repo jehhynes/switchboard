@@ -420,7 +420,11 @@ describe('local file tabs', () => {
     await flush();
     expect(tabs()).toEqual([['review.md', true]]);
 
+    // A reconnect's new scope generation for the same conversation keeps them; another session closes them.
     source.emit('scope', { scope: scope(4) });
+    await flush();
+    expect(tabs()).toHaveLength(1);
+    source.emit('scope', { scope: { ...scope(5), sessionId: 's2' } });
     await flush();
     expect(tabs()).toEqual([]);
   });

@@ -109,7 +109,7 @@ export class LocalFilesController {
 
   constructor(private readonly deps: LocalFilesDeps) {}
 
-  /** Follows the page's conversation: another one (page key, scope generation, work item) closes every file tab. */
+  /** Follows the page's conversation: another one (its work item and session, `followed` in main.ts) closes every file tab. */
   follow(id: string | null): void {
     if (id !== this.#for) {
       this.#for = id;
