@@ -4,6 +4,7 @@ import { MARK_ICONS, SPINNING_MARKS } from '@switchboard/core/group';
 import { bandOpen, rowKey } from './render.js';
 import type { PageGroup, PageRow } from '@switchboard/protocol';
 import type { DragView } from './reorder.js';
+import { WindowRows } from './windowRows.js';
 
 /** The codicon Returned shows, as the dock's pill does. */
 const RETURNED_GLYPH = '\u{eae2}';
@@ -27,7 +28,7 @@ function Pill({ classes, glyph, text, title, opens }: { classes: string; glyph: 
  * link pills and Returned, those that do not fit left out whole by the page's CSS (page.css, Line 2); line 3 the mark and the
  * details, a muted " · " between them, in their tones. The dock's stripe is on its left edge.
  */
-function Row({ row, selected, menu, pillsOpen, movable, drag }: { row: PageRow; selected: boolean; menu: ComponentChildren | null; pillsOpen: boolean; movable: boolean; drag: DragView | null }) {
+function Row({ row, selected, menu, pillsOpen, movable, drag, position }: { row: PageRow; selected: boolean; menu: ComponentChildren | null; pillsOpen: boolean; movable: boolean; drag: DragView | null; position?: { index: number; total: number } }) {
   const kind = row.mark?.kind;
   const mark =
     row.mark === null || kind === undefined ? null : (
@@ -61,7 +62,7 @@ function Row({ row, selected, menu, pillsOpen, movable, drag }: { row: PageRow; 
       : { 'data-action': 'select', 'data-work-item': String(row.workItemId), 'aria-current': String(selected) };
 
   return (
-    <li class={row.workItemId === null ? 'pool-row' : undefined}>
+    <li class={row.workItemId === null ? 'pool-row' : undefined} data-window-row={position === undefined ? undefined : key} aria-posinset={position === undefined ? undefined : position.index + 1} aria-setsize={position?.total}>
       <button type="button" class={classes} {...click} title={row.title}>
         <span class="row-head">
           {row.priority === null ? null : <span class="priority" role="img" title={row.priority} aria-label={row.priority}></span>}
@@ -139,7 +140,11 @@ export function renderList(groups: readonly PageGroup[], selected: number | null
         const open = filtering || !collapsed.has(group.key);
         const rows = open ? group.rows : group.rows.filter((row) => row.workItemId === selected);
         const rowList = (shown: readonly PageRow[]) =>
-          shown.length === 0 ? null : (
+          shown.length === 0 ? null : group.key === 'done' ? (
+            <WindowRows rows={shown} selected={selected} renderRow={(row, index) => (
+              <Row key={rowKey(row)} row={row} selected={row.workItemId !== null && row.workItemId === selected} menu={null} pillsOpen={pillsOpen} movable={false} drag={null} position={{ index, total: shown.length }} />
+            )} />
+          ) : (
             <ul class="rows">
               {shown.map((row) => (
                 <Row key={rowKey(row)} row={row} selected={row.workItemId !== null && row.workItemId === selected} menu={menu !== null && menu.row === rowKey(row) ? menu.rows : null} pillsOpen={pillsOpen} movable={group.key === 'review' && row.workItemId !== null} drag={drag} />
