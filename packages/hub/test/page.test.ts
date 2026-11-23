@@ -718,7 +718,7 @@ describe('the web page routes', () => {
   // The remote hosts and logins the served page reads, none until a test sets them.
   let remoteAccess: RemoteAccess = { hosts: [], logins: [] };
 
-  async function serve(hubLog: PageRoutes['hubLog'] = async (lines) => ({ text: `2026-11-22T12:00:00Z ${lines} lines\n`, more: lines < 1000, limited: false, missing: false })) {
+  async function serve(hubLog: PageRoutes['hubLog'] = async (lines) => ({ text: `2026-11-22T12:00:00Z ${lines} lines\n`, more: lines < 1000, limited: false, missing: false }), heartbeatMs?: number) {
     const uploadLogs: string[] = [];
     remoteAccess = { hosts: [], logins: [] };
     const posted: unknown[] = [];
@@ -786,6 +786,7 @@ describe('the web page routes', () => {
       log: (line) => uploadLogs.push(line),
       page,
       build: 'b7',
+      ...(heartbeatMs === undefined ? {} : { heartbeatMs }),
       windowClosed: (key) => closed.push(key),
       conversation: (key, write) => {
         write(`event: hello\ndata: {"key":"${key}"}\n\n`);
@@ -1025,6 +1026,38 @@ describe('the web page routes', () => {
     expect((await send(server.port, 'GET', '/page/manifest.webmanifest', { Cookie: cookie })).headers['set-cookie']).toBeUndefined();
   });
 
+  it("answers ping with the build and whether the browser is signed in, and ticks on a page's stream in place of the heartbeat comment", async () => {
+    const { url } = await serve(undefined, 20);
+    const cookie = String((await send(server.port, 'GET', `${url.pathname}${url.search}`, {})).headers['set-cookie']).split(';')[0]!;
+    const ping = await send(server.port, 'GET', '/page/ping', { Cookie: cookie });
+
+    expect(JSON.parse(ping.body)).toEqual({ build: 'b7', signedIn: true });
+    expect(ping.headers['cache-control']).toBe('no-store');
+    expect(JSON.parse((await send(server.port, 'GET', '/page/ping', { Cookie: 'sb_page=' + '0'.repeat(64) })).body)).toEqual({ build: 'b7', signedIn: false });
+
+    // The page's watchdog sees a named event; a comment never reaches its script.
+    const text = await new Promise<string>((done) => {
+      let got = '';
+      const stream = request({ host: '127.0.0.1', port: server.port, path: '/v1/conversation/events?page=1', headers: { Host: `127.0.0.1:${server.port}`, Cookie: cookie } }, (response) => {
+        response.setEncoding('utf8');
+        response.on('data', (chunk: string) => {
+          got += chunk;
+
+          if (got.includes('event: tick')) {
+            stream.destroy();
+            done(got);
+          }
+        });
+      });
+
+      stream.on('error', () => {});
+      stream.end();
+    });
+
+    expect(text).toContain('event: tick\ndata: {}\n\n');
+    expect(text).not.toContain(': ping');
+  });
+
   it('ends the streams of a sign-in that a new link replaces, and only those', async () => {
     const { url } = await serve();
     const signIn = async (cookie?: string): Promise<string> => {
@@ -1069,7 +1102,7 @@ describe('the web page routes', () => {
     // A public name the page lacks is not found.
     expect((await send(server.port, 'GET', '/page/offline.js', {})).status).toBe(404);
     expect((await send(server.port, 'GET', '/page/page.js', {})).status).toBe(401);
-    expect(JSON.parse((await send(server.port, 'GET', '/page/ping', {})).body)).toEqual({ build: 'b7' });
+    expect(JSON.parse((await send(server.port, 'GET', '/page/ping', {})).body)).toEqual({ build: 'b7', signedIn: false });
     expect((await send(server.port, 'GET', '/page/ping', { Host: `evil.example:${server.port}` })).status).toBe(403);
     expect((await send(server.port, 'GET', '/page/manifest.webmanifest', { Host: `evil.example:${server.port}` })).status).toBe(403);
   });
@@ -1093,7 +1126,7 @@ describe('the web page routes', () => {
     expect(root.status).toBe(303);
     expect(root.headers['location']).toBe('/page/');
     expect(root.headers['strict-transport-security']).toBe('max-age=31536000');
-    expect(JSON.parse((await send(server.port, 'GET', '/page/ping', ts)).body)).toEqual({ build: 'b7' });
+    expect(JSON.parse((await send(server.port, 'GET', '/page/ping', ts)).body)).toEqual({ build: 'b7', signedIn: false });
     expect((await send(server.port, 'GET', '/page/manifest.webmanifest', ts)).status).toBe(200);
     expect((await send(server.port, 'GET', '/page/ping', { ...ts, 'X-Forwarded-Proto': 'http' })).status).toBe(403);
     expect((await send(server.port, 'GET', '/page/ping', { ...ts, 'Tailscale-User-Login': 'mallory@example.com' })).status).toBe(403);

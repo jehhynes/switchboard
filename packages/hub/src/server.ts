@@ -231,7 +231,10 @@ export interface OpenWindows {
   folders: string[];
 }
 
+/** How often each stream hears from the hub: a comment, or for a web page's stream a `tick` event, which its watchdog sees (architecture.md § Web page). */
 const HEARTBEAT_MS = 15_000;
+/** How long a page waits before it sends a `POST` the hub held during a restart again. */
+const RETRY_AFTER_S = 2;
 /** How long the page's fixed port is tried again while taken. */
 const PAGE_PORT_WAIT_MS = 3_000;
 const BODY_LIMIT = 1024 * 1024;
@@ -327,7 +330,8 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
 
     if (held !== null) {
       request.resume();
-      json(response, 503, { error: held });
+      response.writeHead(503, { 'Content-Type': 'application/json', 'Retry-After': String(RETRY_AFTER_S) });
+      response.end(JSON.stringify({ error: held }));
       return true;
     }
 
@@ -541,6 +545,8 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
   // The open page and console streams of remote devices with the host and login each came through, so a change of remote access that no
   // longer allows them ends them (architecture.md § Remote access).
   const remoteStreams = new Map<ServerResponse, { host: string; login: string }>();
+  // Web pages' conversation streams, which get a `tick` event in place of the heartbeat comment, since a browser shows a page no comment.
+  const tickStreams = new Set<ServerResponse>();
   // Where each open page key's stream came from, this computer or a remote host and login, so its artifact links work only from there.
   const pageKeyOrigins = new Map<string, string>();
   const originOf = (origin: PageOrigin): string => (origin.host === null ? 'local' : `${origin.host} ${origin.login}`);
@@ -768,9 +774,10 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       return true;
     }
 
-    // Whether the hub answers, and which build, for the offline page and a page that lost its stream.
+    // Whether the hub answers, which build, and whether this browser is signed in, for a page that lost its stream or could not start.
     if (request.method === 'GET' && path === '/page/ping') {
-      json(response, 200, { build: options.build ?? '' });
+      response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      response.end(JSON.stringify({ build: options.build ?? '', signedIn: page.access.allows(request.headers.cookie, origin) }));
       return true;
     }
 
@@ -867,6 +874,10 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       openConversation(request, response, key);
       pageStreams.set(response, page.access.sessionOf(request.headers.cookie));
 
+      if (streams.get(response) === 'conversation') {
+        tickStreams.add(response);
+      }
+
       if (origin.host !== null) {
         remoteStreams.set(response, { host: origin.host, login: origin.login });
       }
@@ -874,6 +885,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       request.on('close', () => {
         pageStreams.delete(response);
         remoteStreams.delete(response);
+        tickStreams.delete(response);
 
         if (key !== null) {
           const ended = key;
@@ -1388,7 +1400,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
 
   const heartbeat = setInterval(() => {
     for (const stream of streams.keys()) {
-      stream.write(': ping\n\n');
+      stream.write(tickStreams.has(stream) ? 'event: tick\ndata: {}\n\n' : ': ping\n\n');
     }
   }, options.heartbeatMs ?? HEARTBEAT_MS);
 

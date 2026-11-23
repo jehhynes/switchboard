@@ -613,7 +613,7 @@ describe('hub entry point', () => {
       expect(keeper.current()?.token).toBe(after.token);
       await dockEnded;
       expect(await streamStatus(after, '/dock/events')).toBe(200);
-      expect(JSON.parse(await get(after.port, '/page/ping'))).toEqual({ build: after.build });
+      expect(JSON.parse(await get(after.port, '/page/ping'))).toEqual({ build: after.build, signedIn: false });
     } finally {
       keeper.dispose();
       await start('--stop').exited;

@@ -658,6 +658,8 @@ describe('listenHub restart support', () => {
 
     expect(refused?.status).toBe(503);
     expect(JSON.parse(refused!.body)).toEqual({ error: 'The hub is restarting onto a new build; try again in a few seconds.' });
+    // A page waits this long before it sends the command again.
+    expect((await fetch(`http://127.0.0.1:${server.port}/fast`, { method: 'POST', headers: { Authorization: `Bearer ${server.token}`, 'Content-Type': 'application/json' }, body: '{}' })).headers.get('retry-after')).toBe('2');
     expect(server.inFlight()).toBe(0);
     expect((await call(server.port, 'GET', '/hub', null, 2000))?.status).toBe(200);
   });
