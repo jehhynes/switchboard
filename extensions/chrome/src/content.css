@@ -39,13 +39,20 @@
 }
 
 .switchboard-pill {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  height: 20px;
   margin-left: 6px;
   padding: 0 6px;
   border: 1px solid var(--borderColor-default, #d1d9e0);
-  border-radius: 999px;
-  color: var(--fgColor-default, #1f2328);
+  border-radius: var(--borderRadius-full, 999px);
+  background: var(--bgColor-neutral-muted, #eff1f3);
+  color: #3d444d;
+  font-family: inherit;
   font-size: 12px;
-  line-height: 18px;
+  font-weight: var(--base-text-weight-semibold, 600);
+  line-height: 1;
   white-space: nowrap;
   cursor: pointer;
 }
@@ -71,12 +78,7 @@
   display: inline-block;
   margin-right: 4px;
   font: normal normal 16px/1 switchboard-codicon;
-  vertical-align: -3px;
   user-select: none;
-}
-
-.switchboard-pill .switchboard-mark[data-switchboard-mark="failed"] {
-  color: var(--fgColor-danger, #d1242f);
 }
 
 .switchboard-pill .switchboard-mark[data-switchboard-mark="running"],
@@ -94,26 +96,40 @@
 }
 
 .switchboard-pill .switchboard-namespace {
-  color: var(--fgColor-muted, #59636e);
+  color: inherit;
+}
+
+/* Pale light-theme fills need neutral gray text; dark themes keep white. */
+:where([data-color-mode="light"][data-light-theme^="dark"], [data-color-mode="dark"][data-dark-theme^="dark"]) .switchboard-pill {
+  color: #fff;
+}
+
+@media (prefers-color-scheme: light) {
+  :where([data-color-mode="auto"][data-light-theme^="dark"]) .switchboard-pill {
+    color: #fff;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :where([data-color-mode="auto"][data-dark-theme^="dark"]) .switchboard-pill {
+    color: #fff;
+  }
 }
 
 /* The dock row's stripe colours: a failure, a block or question, and a review or approval on the operator's turn. */
 .switchboard-pill[data-switchboard-tone="error"] {
-  border-color: var(--borderColor-danger-emphasis, #cf222e);
+  border-color: color-mix(in srgb, var(--borderColor-danger-emphasis, #cf222e) 50%, var(--borderColor-default, #d1d9e0));
   background: var(--bgColor-danger-muted, #ffebe9);
-  color: var(--fgColor-danger, #d1242f);
 }
 
 .switchboard-pill[data-switchboard-tone="warning"] {
-  border-color: var(--borderColor-attention-emphasis, #9a6700);
+  border-color: color-mix(in srgb, var(--borderColor-attention-emphasis, #9a6700) 50%, var(--borderColor-default, #d1d9e0));
   background: var(--bgColor-attention-muted, #fff8c5);
-  color: var(--fgColor-attention, #9a6700);
 }
 
 .switchboard-pill[data-switchboard-tone="turn"] {
-  border-color: var(--borderColor-accent-emphasis, #0969da);
+  border-color: color-mix(in srgb, var(--borderColor-accent-emphasis, #0969da) 50%, var(--borderColor-default, #d1d9e0));
   background: var(--bgColor-accent-muted, #ddf4ff);
-  color: var(--fgColor-accent, #0969da);
 }
 
 .switchboard-snooze-menu {

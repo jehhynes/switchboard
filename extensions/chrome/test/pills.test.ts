@@ -116,24 +116,72 @@ describe('applyPills', () => {
     ]);
   });
 
-  it("colours a pill as the dock row's stripe with content.css, and leaves one without a stripe the default colour", () => {
+  it("keeps pill text, namespaces and marks neutral gray on pale light-theme fills", () => {
     document.head.innerHTML = `<style>${readFileSync(join(import.meta.dirname, '..', 'src', 'content.css'), 'utf8')}</style>`;
     const ready: Card = { url: 'https://github.com/github/roadmap/issues/1153', playbook: 'dev:review-pr', group: 'review', mark: 'send', snoozed: false, stripe: 'turn' };
     applyPills(document, cardsByIssue([{ ...needs, stripe: 'warning' }, working, ready]));
 
     const colour = (id: string) => getComputedStyle(card(id).querySelector('.switchboard-pill')!).color;
 
-    expect(colour('88050488')).toBe('var(--fgColor-attention, #9a6700)');
-    expect(colour('94970044')).toBe('var(--fgColor-default, #1f2328)');
-    expect(colour('126571572')).toBe('var(--fgColor-accent, #0969da)');
+    expect(colour('88050488')).toBe('rgb(61, 68, 77)');
+    expect(colour('94970044')).toBe('rgb(61, 68, 77)');
+    expect(colour('126571572')).toBe('rgb(61, 68, 77)');
 
     applyPills(document, cardsByIssue([{ ...needs, mark: 'failed', stripe: 'error' }, { ...ready, stripe: null }]));
-    expect(colour('88050488')).toBe('var(--fgColor-danger, #d1242f)');
-    expect(colour('126571572')).toBe('var(--fgColor-default, #1f2328)');
+    expect(colour('88050488')).toBe('rgb(61, 68, 77)');
+    expect(colour('126571572')).toBe('rgb(61, 68, 77)');
+
+    for (const part of document.querySelectorAll('.switchboard-pill, .switchboard-namespace, .switchboard-mark')) {
+      expect(getComputedStyle(part).color).toBe('rgb(61, 68, 77)');
+    }
 
     // A hub older than the stripe sends none.
     applyPills(document, cardsByIssue([needs]));
-    expect(colour('88050488')).toBe('var(--fgColor-default, #1f2328)');
+    expect(colour('88050488')).toBe('rgb(61, 68, 77)');
+    document.head.innerHTML = '';
+  });
+
+  it.each([
+    ['light', 'light', 'dark', 'rgb(61, 68, 77)'],
+    ['dark', 'light', 'dark', 'rgb(255, 255, 255)'],
+    ['light', 'dark_dimmed', 'light', 'rgb(255, 255, 255)'],
+    ['dark', 'dark', 'light', 'rgb(61, 68, 77)'],
+  ])('uses neutral text for the selected theme: %s, day %s, night %s', (mode, day, night, colour) => {
+    document.documentElement.dataset['colorMode'] = mode;
+    document.documentElement.dataset['lightTheme'] = day;
+    document.documentElement.dataset['darkTheme'] = night;
+    document.head.innerHTML = `<style>${readFileSync(join(import.meta.dirname, '..', 'src', 'content.css'), 'utf8')}</style>`;
+    applyPills(document, cardsByIssue([{ ...needs, stripe: 'warning', mark: 'failed' }, working]));
+
+    const parts = document.querySelectorAll('.switchboard-pill, .switchboard-namespace, .switchboard-mark');
+    expect(parts.length).toBe(5);
+    for (const part of parts) expect(getComputedStyle(part).color).toBe(colour);
+    document.head.innerHTML = '';
+    delete document.documentElement.dataset['colorMode'];
+    delete document.documentElement.dataset['lightTheme'];
+    delete document.documentElement.dataset['darkTheme'];
+  });
+
+  it('uses native label sizing and muted fills and borders with readable light-theme text', () => {
+    document.head.innerHTML = `<style>${readFileSync(join(import.meta.dirname, '..', 'src', 'content.css'), 'utf8')}</style>`;
+    const rules = [...document.styleSheets[0]!.cssRules] as CSSStyleRule[];
+    const luminance = (hex: string) => hex.match(/\w{2}/g)!.map((pair) => {
+      const channel = parseInt(pair, 16) / 255;
+      return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+    }).reduce((sum, channel, i) => sum + channel * [0.2126, 0.7152, 0.0722][i]!, 0);
+
+    for (const stripe of ['error', 'warning', 'turn', null] as const) {
+      applyPills(document, cardsByIssue([{ ...needs, stripe }]));
+      const style = getComputedStyle(card('88050488').querySelector('.switchboard-pill')!);
+      expect([style.height, style.boxSizing, style.fontSize, style.lineHeight]).toEqual(['20px', 'border-box', '12px', '1']);
+      // jsdom does not resolve theme variables or color-mix; use the stylesheet's fallbacks.
+      const rule = rules.find((rule) => rule.selectorText === (stripe === null ? '.switchboard-pill' : `.switchboard-pill[data-switchboard-tone="${stripe}"]`))!;
+      const background = rule.style.getPropertyValue('background');
+      const hex = /#([a-f0-9]{6})/.exec(background)![1]!;
+      expect((luminance(hex) + 0.05) / (luminance('3d444d') + 0.05)).toBeGreaterThanOrEqual(4.5);
+      expect(1.05 / (luminance(hex) + 0.05)).toBeLessThan(4.5);
+      if (stripe !== null) expect(rule.style.getPropertyValue('border-color')).toMatch(/color-mix\(in srgb, var\(--borderColor-[\w-]+, #[a-f0-9]{6}\) 50%, var\(--borderColor-default, #d1d9e0\)\)/);
+    }
     document.head.innerHTML = '';
   });
 
@@ -222,7 +270,7 @@ describe('applyPills', () => {
 
     const style = (id: string) => getComputedStyle(card(id).querySelector('.switchboard-mark')!);
 
-    expect(style('88050488').color).toBe('var(--fgColor-danger, #d1242f)');
+    expect(style('88050488').color).toBe('rgb(61, 68, 77)');
     expect(style('88050488').animationName).toBe('none');
     expect(style('94970044').animationName).toBe('switchboard-spin');
     expect(style('126571572').animationName).toBe('switchboard-spin');
