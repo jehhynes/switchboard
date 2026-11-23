@@ -1899,6 +1899,71 @@ it("turns the mic off through Back's path when a phone's conversation is left by
     page.close();
   });
 
+  it('keeps every column in its place while another work item opens and after its open fails, with a placeholder strip and the composer kept hidden', async () => {
+    history.replaceState(null, '', '#');
+    window.innerWidth = 1440;
+
+    let refuse = false;
+    const fetch = vi.fn(async (url: string) => {
+      const refused = refuse && url.endsWith('/select');
+
+      return { status: refused ? 404 : 200, ok: !refused, json: async () => (refused ? { error: 'That work item is gone.' } : {}), text: async () => '' } as unknown as Response;
+    });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000 });
+    const source = FakeSource.last!;
+    const groups = [listGroup('progress', [listRow(1), listRow(2)])];
+    const composer = root.querySelector<HTMLElement>('#composer')!;
+    const labels = (selector: string) => [...root.querySelectorAll(selector)].map((one) => one.textContent);
+    const scope2 = { ...scope, workItemId: 2, scopeGen: 4, title: 'Item 2', conversations: [{ ...scope.conversations[0]!, workItemId: 2, title: 'Item 2' }] };
+
+    source.emit('hello', { key: 'pk', groups, scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    expect(root.classList.contains('wide')).toBe(true);
+    expect(composer.hidden).toBe(false);
+    root.querySelector<HTMLElement>('#detail .panel-max')!.click();
+    expect(root.classList.contains('maximized')).toBe(true);
+    root.querySelector<HTMLElement>('[data-work-item="2"]')!.click();
+    // The maximized column restores, so the placeholder shows.
+    expect(root.classList.contains('maximized')).toBe(false);
+    // At once: the column stays, its strip Status and Console dimmed over a loading note, and the composer keeps its place, hidden by page.css.
+    expect(root.classList.contains('wide')).toBe(true);
+    expect(root.classList.contains('item-opening')).toBe(true);
+    expect(labels('#detail .detail-head .opening-tabs .tab')).toEqual(['Status', 'Console']);
+    expect(root.querySelector('#detail .detail-head .opening-tabs')?.getAttribute('aria-hidden')).toBe('true');
+    expect(root.querySelector('#detail .detail-body .opening-side')?.textContent).toContain('Loading…');
+    expect(root.querySelector('#head .opening-tabs')).toBeNull();
+    expect(root.querySelector('#panel .opening-note')).not.toBeNull();
+    expect(composer.hidden).toBe(false);
+    // Its hello: the work item's own strip and status in the same column.
+    source.emit('hello', { key: 'pk', groups, scope: scope2, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    expect(root.classList.contains('wide')).toBe(true);
+    expect(root.classList.contains('item-opening')).toBe(false);
+    expect(root.querySelector('#detail .opening-tabs')).toBeNull();
+    expect(root.querySelector('#detail .detail-head [data-side="status"]')).not.toBeNull();
+    expect(root.querySelector('#detail .detail-body .opening-side')).toBeNull();
+
+    // Where the tabs fold into the conversation's, the placeholder strip is under its head; a refused open keeps it, and the column comes back
+    // with no loading note when the page widens.
+    resizeTo(1000);
+    refuse = true;
+    root.querySelector<HTMLElement>('#head [data-tab="status"]')!.click();
+    expect(root.classList.contains('off-conversation')).toBe(true);
+    root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
+    // It opens on the Conversation tab, so the short screen's rule keeps the composer's place meanwhile.
+    expect(root.classList.contains('off-conversation')).toBe(false);
+    expect(labels('#head .opening-tabs .tab')).toEqual(['Conversation', 'Status', 'Console']);
+    await flush();
+    await flush();
+    expect(root.querySelector('#panel .opening-failed')).not.toBeNull();
+    expect(root.classList.contains('wide')).toBe(false);
+    expect(labels('#head .opening-tabs .tab')).toEqual(['Conversation', 'Status', 'Console']);
+    resizeTo(1440);
+    expect(root.classList.contains('wide')).toBe(true);
+    expect(labels('#detail .detail-head .opening-tabs .tab')).toEqual(['Status', 'Console']);
+    expect(root.querySelector('#detail .detail-body')?.textContent).toBe('');
+    expect(root.querySelector('#head .opening-tabs')).toBeNull();
+    page.close();
+  });
+
   it('opens and collapses a group from its header, keeping the focus on the header', () => {
     const { page, source } = start();
 
@@ -5707,7 +5772,9 @@ describe('the page in use', () => {
     expect(root.querySelector('#head .opening-title')?.textContent).toBe('Other work');
     expect(root.querySelector('#panel .timeline')).toBeNull();
     expect(root.querySelector('#panel .opening-note')?.textContent).toContain('Opening…');
-    expect(root.querySelector<HTMLElement>('#composer')!.hidden).toBe(true);
+    // The composer keeps its place, hidden by page.css, so nothing moves when the work item comes.
+    expect(root.querySelector<HTMLElement>('#composer')!.hidden).toBe(false);
+    expect(root.classList.contains('item-opening')).toBe(true);
     // The row it opens is the one marked.
     expect(root.querySelector('[data-work-item="3"]')!.classList.contains('selected')).toBe(true);
     // An event for the work item shown before changes nothing.

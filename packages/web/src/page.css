@@ -1142,7 +1142,7 @@ button.toast-open:hover { color: var(--vscode-textLink-activeForeground); text-d
 .conn-update { position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom)); z-index: var(--sb-z-sheet); transform: translateX(-50%); display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 14px; border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); border-radius: 16px; background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background)); box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36)); white-space: nowrap; }
 
 /* A work item being opened (opening.tsx): its head, a placeholder, or why it could not be opened, in place of the conversation shown before. */
-.opening-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; padding: 0 6px; }
+button.picker.opening-title { background: transparent; cursor: default; font-weight: 600; }
 .opening { display: flex; flex-direction: column; gap: 10px; padding: 12px 16px; }
 .opening-note { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--vscode-descriptionForeground); }
 .opening-skeleton { height: 46px; width: 85%; border-radius: 8px; background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent); }
@@ -1165,3 +1165,9 @@ button.toast-open:hover { color: var(--vscode-textLink-activeForeground); text-d
 /* Link tabs scroll inside the strip, leaving fixed tabs and artifact menus accessible. */
 .link-tabs { display: flex; flex: 0 1 auto; min-width: 0; max-width: 50%; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
 .link-tabs .link-tab { width: 120px; }
+
+/* Its tabs, dimmed and inert, and the composer and the note above it kept in their places but hidden, so nothing moves when the work item comes. */
+.opening-tabs { pointer-events: none; }
+.opening-tabs .tab { cursor: default; opacity: 0.5; }
+#root.item-opening #composer, #root.item-opening #note { visibility: hidden; }
+.opening-skeleton.short { width: 55%; }

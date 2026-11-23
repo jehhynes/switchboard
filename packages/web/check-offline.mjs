@@ -1,6 +1,7 @@
 // Checks the page's offline and error handling against a fake hub in a real headless Chrome or Edge (testing.md § Required checks): a stopped
 // hub behind `tailscale serve` (502), one that hangs, a dropped stream for 1 s and for 10 s, a half-open stream, a failed and a slow open, a
-// send whose answer is lost, a restart onto the same and another build, a failed page.js, and the route, scroll and draft after a reload.
+// send whose answer is lost, a restart onto the same and another build, a failed page.js, the route, scroll and draft after a reload, and
+// opening a work item on a wide page, a narrower one and a phone with no column moving.
 // Each scenario prints ok or FAIL with why; --shots <dir> saves a screenshot of each; --assets <dist/index.js> runs against another build of the
 // page, as the one before a change. Run `npm run build` first; the browser is SWITCHBOARD_CHROME, else Chrome or Edge where they install.
 import { spawn } from 'node:child_process';
@@ -134,6 +135,7 @@ await new Promise((done) => server.listen(0, '127.0.0.1', done));
 const base = 'http://127.0.0.1:' + server.address().port + '/page/';
 const dir = mkdtempSync(join(tmpdir(), 'sb-offline-check-'));
 const browser = spawn(browsers[0], ['--headless=new', '--disable-gpu', '--no-first-run', '--remote-debugging-port=0', '--user-data-dir=' + join(dir, 'profile'), 'about:blank'], { stdio: 'ignore' });
+const PHONE = { width: 393, height: 793, deviceScaleFactor: 2, mobile: true };
 const wait = (ms) => new Promise((done) => setTimeout(done, ms));
 const exited = new Promise((done) => browser.once('exit', done));
 let failed = 0;
@@ -213,8 +215,64 @@ try {
   const marked = () => evaluate('window.__marker === 1');
   const banner = () => evaluate('document.querySelector(".conn-banner") !== null');
 
+  /** Each column's left edge and width, the heights of the conversation's head, the column's strip and the composer, and the conversation's top. */
+  const layoutNow = () =>
+    evaluate(`(() => {
+      const shown = (selector) => { const one = document.querySelector(selector); return one !== null && getComputedStyle(one).display !== 'none' ? one.getBoundingClientRect() : null; };
+      const box = (selector) => { const rect = shown(selector); return rect === null ? null : [Math.round(rect.left), Math.round(rect.width)]; };
+      const tall = (selector) => { const rect = shown(selector); return rect === null ? null : Math.round(rect.height); };
+      return { list: box('#root > .side'), conversation: box('#root > .main'), column: box('#detail'), head: tall('#head'), columnHead: tall('#detail .detail-head'), panelTop: Math.round(document.querySelector('#panel').getBoundingClientRect().top), composer: tall('#composer') };
+    })()`);
+  /** A scenario that opens work item 3 from work item 1 at `metrics`, slowly or refused (`fails`), and checks that nothing moved at each step. */
+  const openLayout = (metrics, name, fails = false) => async () => {
+    const found = [];
+
+    await send('Emulation.setDeviceMetricsOverride', metrics);
+    await send('Emulation.setTouchEmulationEnabled', { enabled: metrics.mobile, maxTouchPoints: metrics.mobile ? 5 : 1 });
+
+    try {
+      if (!(await open(1))) found.push('work item 1 did not open: ' + (await evaluate('location.hash + " " + document.body.innerText.slice(0, 200)')));
+      const steps = { selected: await layoutNow() };
+
+      await shot('open-layout-' + name + '-1-selected');
+      if (metrics.mobile) await evaluate('document.querySelector(".header .back-toggle").click()');
+      setMode(fails ? { selectFail: true, delay: 1_500 } : { delay: 3_000 });
+      await evaluate('document.querySelector("[data-work-item=\\"3\\"]").click()');
+      await wait(300);
+      if (!(await evaluate('document.querySelector("#panel .opening-note") !== null'))) found.push('no Opening… placeholder');
+      steps.opening = await layoutNow();
+      await shot('open-layout-' + name + '-2-opening');
+
+      if (fails) {
+        if (!(await until('document.querySelector("#panel .opening-failed")', 6_000))) found.push('no error in the work item\'s place');
+        steps.failed = await layoutNow();
+        await shot('open-layout-' + name + '-3-failed');
+      } else {
+        if (!(await until('document.body.innerText.includes("Work item 3: message")', 8_000))) found.push('work item 3 did not open');
+        await wait(300);
+        steps.loaded = await layoutNow();
+        await shot('open-layout-' + name + '-3-loaded');
+      }
+
+      if (!metrics.mobile && steps.selected.conversation === null) found.push('no conversation column');
+      if (metrics.width >= 1_400 && steps.selected.column === null) found.push('no Status column on a wide page');
+
+      for (const [step, layout] of Object.entries(steps)) {
+        for (const [part, value] of Object.entries(layout)) {
+          if (JSON.stringify(value) !== JSON.stringify(steps.selected[part])) found.push(step + ' moved ' + part + ': ' + JSON.stringify(steps.selected[part]) + ' to ' + JSON.stringify(value));
+        }
+      }
+    } finally {
+      setMode({ delay: 0, selectFail: false });
+      await send('Emulation.setDeviceMetricsOverride', PHONE);
+      await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+    }
+
+    return found;
+  };
+
   await send('Page.enable');
-  await send('Emulation.setDeviceMetricsOverride', { width: 393, height: 793, deviceScaleFactor: 2, mobile: true });
+  await send('Emulation.setDeviceMetricsOverride', PHONE);
   await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
   await scheme('dark');
 
@@ -351,6 +409,14 @@ try {
       await until('document.body.innerText.includes("Work item 3: message")', 8_000);
       return found;
     },
+    // Opening another work item keeps every column's place and width, its strip's height and the composer's place, from the one selected through
+    // the Opening… placeholder to the one loaded, or to why it could not be opened: on a wide page with the column, a narrower one with the tabs,
+    // and a phone.
+    'open-layout-wide': openLayout({ width: 1600, height: 900, deviceScaleFactor: 1, mobile: false }, 'wide'),
+    'open-layout-wide-fails': openLayout({ width: 1600, height: 900, deviceScaleFactor: 1, mobile: false }, 'wide-fails', true),
+    'open-layout-narrow': openLayout({ width: 1100, height: 800, deviceScaleFactor: 1, mobile: false }, 'narrow'),
+    'open-layout-narrow-fails': openLayout({ width: 1100, height: 800, deviceScaleFactor: 1, mobile: false }, 'narrow-fails', true),
+    'open-layout-phone': openLayout(PHONE, 'phone'),
     // The hub takes a message and its answer is lost: the retry has the same opId, so it is typed once.
     'send-lost': async () => {
       const found = [];
@@ -451,6 +517,9 @@ try {
     mode = fresh();
     hung.splice(0).forEach((one) => one.destroy());
     await send('Page.navigate', { url: 'about:blank' });
+    // A page left for about:blank can leave its stream open here; six of them take every connection the browser allows to the host.
+    for (const stream of streams) stream.destroy();
+    streams.clear();
     await forget();
 
     let found;

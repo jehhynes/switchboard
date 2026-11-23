@@ -20,9 +20,10 @@ export function renderOpeningHead(opening: Opening, dot: DotView | null | undefi
       <button type="button" class="icon list-toggle" data-action="drawer" title="Work items" aria-label="Work items" aria-controls="list">
         <span class="codicon codicon-layout-sidebar-left" aria-hidden="true"></span>
       </button>
-      <span class="opening-title" title={opening.title}>
-        {opening.title}
-      </span>
+      {/* Drawn as the picker the work item's own head has, so the head keeps its height. */}
+      <button type="button" class="picker opening-title" title={opening.title} tabindex={-1} disabled>
+        <span class="title">{opening.title}</span>
+      </button>
       <ConnectionDot dot={dot} />
     </header>
   );
@@ -56,6 +57,41 @@ export function renderOpening(opening: Opening): VNode {
       <div class="opening-skeleton"></div>
       <div class="opening-skeleton mine"></div>
       <div class="opening-skeleton"></div>
+    </div>
+  );
+}
+
+/**
+ * The tab strip in the place of the work item's own while it opens: Conversation where the tabs hold it, then Status and Console, dimmed and
+ * inert, so the strip keeps its height and the work item's own replaces it in place. `column` for the strip atop the column right of the conversation.
+ */
+export function renderOpeningTabs(column: boolean): VNode {
+  const labels = column ? ['Status', 'Console'] : ['Conversation', 'Status', 'Console'];
+
+  return (
+    <nav class={`tabs opening-tabs${column ? ' side-switch' : ''}`} aria-hidden="true">
+      {labels.map((label, index) => (
+        <button type="button" class={`tab${index === 0 ? ' selected' : ''}`} tabindex={-1} disabled>
+          {label}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+/** The column right of the conversation while the work item opens: a loading note, or nothing once the open failed, whose reason the conversation's place shows. */
+export function renderOpeningSide(opening: Opening): VNode | null {
+  if (opening.error !== null) {
+    return null;
+  }
+
+  return (
+    <div class="opening opening-side" aria-busy="true">
+      <p class="opening-note">
+        <span class="codicon codicon-loading codicon-modifier-spin" aria-hidden="true"></span> Loading…
+      </p>
+      <div class="opening-skeleton"></div>
+      <div class="opening-skeleton short"></div>
     </div>
   );
 }

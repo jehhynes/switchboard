@@ -37,7 +37,7 @@ import { COMMAND_MS, FAILURE_TEXT, NAVIGATION_MS, READ_MS, request, timedFetch, 
 import type { Answer } from './request.js';
 import { dotView, renderBanner, renderScreen, renderUpdate } from './connectionView.js';
 import type { ConnectionView } from './connectionView.js';
-import { renderOpening, renderOpeningHead } from './opening.js';
+import { renderOpening, renderOpeningHead, renderOpeningSide, renderOpeningTabs } from './opening.js';
 import type { Opening } from './opening.js';
 import { parseScrolls, ROUTE_KEY, routeHash, SCROLL_KEY, startRoute, withScroll } from './route.js';
 import type { Route, ScrollPlace } from './route.js';
@@ -1598,7 +1598,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const full = state.connected && state.session?.conversation === 'full';
 
     // On every tab, so the operator can type and dictate from the status or the artifacts too, but on a short screen (page.css).
-    composerHost.hidden = state.scope === null || openingShown() !== null;
+    composerHost.hidden = state.scope === null;
     input.disabled = !full;
     attachButton.disabled = !full;
     input.placeholder = full
@@ -1970,6 +1970,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     mount(pane, tree);
   };
+  /** Drops the classes a tab's drawing set on a pane, for a placeholder drawn in it. */
+  const plainPane = (pane: HTMLElement): void => {
+    pane.classList.remove('console-pane', 'browser-pane', 'history-pane', 'diff-pane', 'framed');
+  };
   const takePane = (pane: HTMLElement): void => {
     if (preactPanes.delete(pane)) {
       unmount(pane);
@@ -2252,12 +2256,21 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     mount(note, renderEndedNote(state.session, resuming));
 
     // From the wide layout Status, Artifacts, Console and Browser are a column of their own; embedded tabs covers the Browser tab's area.
+    // While another work item opens, the columns keep their widths and the conversation's composer its place (page.css), so nothing moves when it comes.
     const pending = openingShown();
-    const side = wide() && state.scope !== null && pending === null;
+    const side = wide() && (state.scope !== null || pending !== null);
+
+    // The maximized column restores for another work item's open, so its placeholder or why it failed shows.
+    if (pending !== null && panelMaximized) {
+      panelMaximized = false;
+      root.classList.remove('maximized');
+    }
 
     root.classList.toggle('wide', side);
+    root.classList.toggle('item-opening', pending !== null);
     // Under 800 px of height the composer shows only on the Conversation tab (page.css).
-    root.classList.toggle('off-conversation', state.scope !== null && mainTab() !== 'conversation');
+    // A work item being opened opens on the Conversation tab there, so its composer keeps its place meanwhile.
+    root.classList.toggle('off-conversation', state.scope !== null && pending === null && mainTab() !== 'conversation');
 
     if (!side) {
       mount(detailHead, null);
@@ -2273,8 +2286,16 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     if (state.scope === null || pending !== null) {
       iframe.follow(null);
       followHistory(false);
-      mount(head, pending === null ? null : renderOpeningHead(pending, view.connection));
+      mount(head, pending === null ? null : [renderOpeningHead(pending, view.connection), side ? null : renderOpeningTabs(false)]);
+      plainPane(panel);
       drawPane(panel, pending === null ? renderEmpty(state.connected ? 'Choose a work item on the left.' : 'Connecting to Switchboard…') : renderOpening(pending));
+
+      if (side && pending !== null) {
+        mount(detailHead, renderOpeningTabs(true));
+        plainPane(detailBody);
+        drawPane(detailBody, renderOpeningSide(pending));
+      }
+
       shown = null;
       updateComposer();
       return;
@@ -4699,7 +4720,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     if (listening.signal.aborted) return;
     if (frame !== null) draw();
     const covered = framesCovered();
-    iframe.place(state.iframeBrowser === true && state.connected && showBrowser() && (wide() ? sideTab() : mainTab()) === 'browser' && !covered && !settingsPane.isOpen() && !(isPhone() && root.classList.contains('listing')));
+    iframe.place(state.iframeBrowser === true && state.connected && openingShown() === null && showBrowser() && (wide() ? sideTab() : mainTab()) === 'browser' && !covered && !settingsPane.isOpen() && !(isPhone() && root.classList.contains('listing')));
   };
   const browserResize = typeof ResizeObserver === 'function' ? new ResizeObserver(() => reportFrames()) : null;
 
