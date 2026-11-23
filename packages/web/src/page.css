@@ -559,12 +559,14 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 .body { overflow-wrap: anywhere; }
 .body p { margin: 0.1em 0 0.2em; }
 .body ul, .body ol { margin: 1em 0; padding-inline-start: 2em; }
-.body a { color: var(--vscode-textLink-foreground); text-decoration: none; }
-.body a:hover { text-decoration: underline; }
-.body a.path-link { color: inherit; text-decoration: underline dotted; cursor: default; }
+/* Every link in Markdown, a web page's, a file's or a place's in the text, is the theme's link colour, visited or not, always underlined, with the
+   focus ring on keyboard focus. */
+.body a, .body a:visited { color: var(--vscode-textLink-foreground); text-decoration: underline; }
+.body a:hover { color: var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground)); }
+.body a:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; border-radius: 2px; }
+.body a.path-link { cursor: default; }
 /* A local file link opens in a file tab (architecture.md § Web page); a paired device's page gets only files in the session's working folder. */
 #root .body a.path-link[data-action="local-file"] { cursor: pointer; }
-#root .body a.path-link[data-action="local-file"]:hover { color: var(--vscode-textLink-foreground); }
 .local-entries { list-style: none; margin: 0; padding: 6px 0 60px; overflow-y: auto; overscroll-behavior: contain; flex: 1; }
 .local-entry { display: flex; align-items: center; gap: 6px; width: 100%; padding: 3px 20px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .local-entry:hover, .local-entry:focus-visible { background: var(--vscode-list-hoverBackground); }
@@ -576,6 +578,8 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 .body code { font-family: var(--vscode-editor-font-family); font-size: 0.9em; color: var(--vscode-textPreformat-foreground); background: var(--vscode-textPreformat-background); border-radius: 3px; padding: 2px 4px; }
 .body pre { margin: 8px 0; padding: 8px; border-radius: 4px; overflow-x: auto; touch-action: pan-x pan-y pinch-zoom; background: var(--vscode-textCodeBlock-background); }
 .body pre code { background: none; padding: 0; color: inherit; }
+/* Code in a link takes the link's colour, on a lighter ground so it keeps its contrast. */
+.body a code { color: inherit; background: color-mix(in srgb, var(--vscode-textPreformat-background) 50%, transparent); }
 .body pre.mermaid { text-align: center; }
 .body table { display: block; max-width: 100%; overflow-x: auto; touch-action: pan-x pan-y pinch-zoom; border-collapse: collapse; }
 .body th, .body td { border: 1px solid var(--vscode-input-border); padding: 2px 6px; }
@@ -643,8 +647,7 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 .body details:not(.fold) > summary { cursor: pointer; }
 .body kbd { display: inline-block; padding: 2px 5px; font: 0.8em/1 var(--vscode-editor-font-family, ui-monospace, Consolas, monospace); vertical-align: middle; color: var(--vscode-keybindingLabel-foreground, inherit); background: var(--vscode-keybindingLabel-background, var(--vscode-textCodeBlock-background)); border: 1px solid var(--vscode-keybindingLabel-border, var(--vscode-panel-border)); border-bottom-color: var(--vscode-keybindingLabel-bottomBorder, var(--vscode-panel-border)); border-radius: 4px; box-shadow: inset 0 -1px 0 var(--vscode-keybindingLabel-bottomBorder, var(--vscode-panel-border)); }
 .body sub, .body sup { line-height: 0; }
-.body a.anchor-link { color: var(--vscode-textLink-foreground); cursor: pointer; }
-.body .footnote-backref { text-decoration: none; }
+.body a.anchor-link { cursor: pointer; }
 .body .footnotes { margin-top: 1.5em; padding-top: 0.5em; border-top: 1px solid var(--vscode-panel-border); color: var(--vscode-descriptionForeground); font-size: 0.9em; }
 .body hr { height: 0; margin: 1.2em 0; border: 0; border-top: 1px solid var(--vscode-panel-border); }
 .body code.language-diff .diff-add { color: var(--sb-alert-tip); }

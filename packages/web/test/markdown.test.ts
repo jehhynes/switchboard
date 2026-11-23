@@ -19,6 +19,14 @@ const rule = (selector: string): string => {
 };
 
 describe('GitHub-flavoured Markdown', () => {
+  it('draws every link in Markdown in the link colour, visited or not, always underlined, with the focus ring on keyboard focus', () => {
+    expect(rule('.body a, .body a:visited')).toBe('.body a, .body a:visited { color: var(--vscode-textLink-foreground); text-decoration: underline; }');
+    expect(rule('.body a:focus-visible')).toContain('outline: 1px solid var(--vscode-focusBorder);');
+    expect(css).not.toMatch(/\.body a(?! code)[^{]*\{[^}]*(text-decoration: (none|underline dotted)|color: inherit)/);
+    // Code in a link takes the link's colour.
+    expect(rule('.body a code')).toContain('color: inherit;');
+  });
+
   it("styles only the renderer's own disclosures, not the page's folds, and gives an alert's title its own spacing over a document's paragraphs", () => {
     expect(rule('.body details:not(.fold)')).toContain('margin: 0.5em 0;');
     expect(css).not.toMatch(/\n\.body details \{/);
