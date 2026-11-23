@@ -73,12 +73,12 @@ describe('standalone interactive sessions', () => {
     expect(h.store.adhocKeys()).toHaveLength(0);
   });
 
-  it('refuses Claude without Code Mode or hooks before creating an item', () => {
+  it('holds Claude without Code Mode while it is off, and refuses it without hooks before creating an item', () => {
     const h = new Harness();
-    expect(h.send({ type: 'new-session', repoRoot: 'D:/git/switchboard', provider: 'claude' }).refused).toContain('Code Mode');
-    expect(h.store.workItemsWithStatus('running')).toHaveLength(0);
+    expect(h.act({ type: 'new-session', repoRoot: 'D:/git/switchboard', provider: 'claude' })).toMatchObject([{ type: 'start-session', codeMode: true, withoutCodeMode: true }]);
     const hooks = new Harness({ settings: settings({ sessions: { codeMode: true, installHooks: false } }) });
     expect(hooks.send({ type: 'new-session', repoRoot: 'D:/git/switchboard', provider: 'claude' }).refused).toContain('installHooks');
+    expect(hooks.store.workItemsWithStatus('running')).toHaveLength(0);
   });
 
   it('stays in progress while idle and after the process ends, releasing its slot', () => {

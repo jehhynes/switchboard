@@ -2,7 +2,8 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSyn
 import { createServer as createNetServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
-import { ClaudeRunner, conversationRules, projectSlug } from '@switchboard/claude';
+import { ClaudeRunner, conversationRules, markerState, projectSlug, readMarkers, rosterState } from '@switchboard/claude';
+import type { RosterEntry } from '@switchboard/claude';
 import { CodexRunner } from '@switchboard/codex';
 import type { Exec, ExecResult } from '@switchboard/claude';
 import { BACKOFF_MS, CLI_MARGIN_MS, CONTINUE_TEXT, CONVERSATION_RETENTION, DEFAULT_SETTINGS, launchOptions, MESSAGES, parsePlaybook, QUESTION_CARD, Store, toneSection, toneVersion, UNCONFIRMED_DONE } from '@switchboard/core';
@@ -85,7 +86,9 @@ class FakeCli {
   startResult: ExecResult | null = null;
   stopResult = ok('');
   worktrees = 'worktree D:/git/widgets\nHEAD abc\nbranch refs/heads/master\n\nworktree D:/git/widgets-wt/7-fix\nHEAD def\nbranch refs/heads/7-fix\n';
-  private started = 0;
+  started = 0;
+  /** The start actions the held runner was given. */
+  heldStarts: StartAction[] = [];
   /** The folder of each git call. */
   gitCwds: string[] = [];
 
@@ -112,17 +115,6 @@ class FakeCli {
     if (args[0] === 'exec' && args.includes('--output-schema')) {
       writeFileSync(args[args.indexOf('--output-last-message') + 1]!, '{"playbook":"dev:develop"}');
       return this.codexClassifyResult;
-    }
-
-    if (args[0] === '--bg') {
-      if (this.startResult !== null) {
-        return this.startResult;
-      }
-
-      const id = `0000000${++this.started}`;
-      this.roster.push({ id, sessionId: `${id}-native`, pid: 100 + this.started, kind: 'background', cwd: '', state: 'working' });
-
-      return ok(`backgrounded · ${id} · name\n`);
     }
 
     if (args[0] === 'agents') {
@@ -261,6 +253,69 @@ class FakeCodex {
   }
 }
 
+/**
+ * A stand-in for the terminal holder's runner, which holds every Claude session (PRD R93): a start lists the session in the fake CLI's roster under
+ * a short ID, so a test drives its state through that list and the hook markers, and a stop takes it off the list.
+ */
+function heldRunner(cli: FakeCli, hooks: () => boolean): SessionRunner {
+  const markers = () => (hooks() ? readMarkers(join(home, '.switchboard')) : new Map<string, ReturnType<typeof readMarkers> extends Map<string, infer M> ? M : never>());
+
+  return {
+    start: async (action) => {
+      cli.heldStarts.push(action);
+      // A start waits on the holder, as a real one does.
+      await new Promise((done) => setImmediate(done));
+
+      if (cli.startResult !== null && cli.startResult.code !== 0) {
+        return { error: cli.startResult.stderr.trim() };
+      }
+
+      const id = `0000000${++cli.started}`;
+
+      cli.roster.push({ id, sessionId: `${id}-native`, pid: 100 + cli.started, kind: 'interactive', cwd: action.cwd, status: 'busy' });
+
+      return { shortId: id, nativeSessionId: `${id}-native`, ...(action.launchId === undefined ? {} : { launchId: action.launchId }) };
+    },
+    observe: async (sessions) => {
+      const read = await cli.exec('claude', ['agents', '--json'], { timeoutMs: 1 });
+
+      if (read.code !== 0) {
+        return { error: read.stderr };
+      }
+
+      const entries: unknown = JSON.parse(read.stdout);
+      const known = markers();
+
+      if (!Array.isArray(entries)) {
+        return { error: 'claude agents returned an unexpected response.' };
+      }
+
+      return {
+        sessions: sessions.flatMap((session) => {
+          const entry = (entries as RosterEntry[]).find((one) => one.id === session.shortId && one.pid !== undefined);
+          const marker = session.nativeSessionId === null ? undefined : known.get(session.nativeSessionId);
+
+          return entry === undefined ? [] : [{ sessionId: session.id, ...((marker === undefined ? null : markerState(marker)) ?? { state: rosterState(entry), detail: null }), interactive: false }];
+        }),
+      };
+    },
+    markers: () => new Map([...markers()].map(([id, marker]) => [id, { at: marker.at ?? 0, cwd: marker.cwd ?? null, observed: markerState(marker), recheck: false }])),
+    isBackground: async () => true,
+    stop: async (target) => {
+      const result = await cli.exec('claude', ['stop', target.shortId ?? ''], { timeoutMs: 1 });
+
+      return result.code === 0 ? null : { error: result.stderr };
+    },
+    reconcile: async (sessions) =>
+      sessions.map((session) => {
+        const entry = (cli.roster as RosterEntry[]).find((one) => one.sessionId === session.nativeSessionId && one.pid !== undefined);
+
+        return entry === undefined ? { sessionId: session.id, failed: 'The hub stopped while the session was starting.' } : { sessionId: session.id, started: { shortId: entry.id!, nativeSessionId: entry.sessionId } };
+      }),
+    installHooks: async () => null,
+  };
+}
+
 /** A null `codex` leaves the runtime to build its own Codex runner. */
 function setup(cfg = config(), now = () => T0, runners?: RuntimeDeps['runners'], codex: FakeCodex | null = new FakeCodex(), named: Record<string, FakeSource> = {}, extra: Partial<RuntimeDeps> = {}) {
   const store = Store.open(':memory:');
@@ -289,7 +344,7 @@ function setup(cfg = config(), now = () => T0, runners?: RuntimeDeps['runners'],
       claudeSettings: join(home, '.claude', 'settings.json'),
       configDir: join(home, 'cfg'),
       log: (line) => logs.push(line),
-      runners: { ...(codex === null ? {} : { codex: codex.runner() }), ...runners },
+      runners: { codeMode: heldRunner(cli, () => cfg.settings.sessions.installHooks), ...(codex === null ? {} : { codex: codex.runner() }), ...runners },
       ...extra,
     },
     cfg,
@@ -610,14 +665,14 @@ describe('Runtime', () => {
     expect(store.workItem(1)).toMatchObject({ status: 'failed', error: 'Issue 7 was not found in acme/widgets.' });
   });
 
-  it('names what a hub restart waits for: an action, then a starting session, and nothing once settled', async () => {
+  it('names what a hub restart waits for: a session the holder is starting, and nothing once settled', async () => {
     const { store, source, runtime } = setup();
 
     expect(runtime.restartBlocker()).toBeNull();
 
     source.result = { tickets: [issue('8')] };
     await runtime.pollSource('github');
-    expect(runtime.restartBlocker()).toBe('an action is running');
+    expect(runtime.restartBlocker()).toBe('a session is starting');
 
     await runtime.settled();
     expect(store.session('s1')?.state).not.toBe('starting');
@@ -638,7 +693,7 @@ describe('Runtime', () => {
     expect(store.workItem(1)).toMatchObject({ status: 'failed', error: 'Workspace not trusted. Run `claude` in D:\\git\\widgets once and accept the trust prompt, then retry.' });
   });
 
-  it('observes markers and the roster, releases the finished turn, and ends sessions that leave the roster', async () => {
+  it('observes markers and the roster, keeps a held session after its turn, and ends sessions that leave the roster', async () => {
     const { store, cli, source, runtime } = setup(config({ installHooks: true }));
     source.result = { tickets: [issue('8')] };
     await runtime.pollSource('github');
@@ -653,27 +708,14 @@ describe('Runtime', () => {
     await runtime.readRoster();
     await runtime.settled();
 
-    expect(cli.calls.filter((call) => call[1] === 'stop')).toEqual([['claude', 'stop', '00000001']]);
-    expect(store.session('s1')).toMatchObject({ state: 'ended', released: true });
-    expect(store.workItem(1)).toMatchObject({ status: 'blocked', error: 'The turn ended without a done report.' });
-    expect(runtime.hasActiveSessions()).toBe(false);
-  });
-
-  it('never releases a session the roster lists as interactive', async () => {
-    const { store, cli, source, runtime, logs } = setup(config({ installHooks: true }));
-    source.result = { tickets: [issue('8')] };
-    await runtime.pollSource('github');
-    await runtime.settled();
-
-    (cli.roster[0] as { kind: string }).kind = 'interactive';
-    mkdirSync(join(home, '.switchboard', 'activity'), { recursive: true });
-    writeFileSync(join(home, '.switchboard', 'activity', '00000001-native.json'), JSON.stringify({ sessionId: '00000001-native', event: 'Stop', backgroundTasks: 0 }));
-    runtime.readMarkers();
-    await runtime.settled();
-
     expect(cli.calls.filter((call) => call[1] === 'stop')).toEqual([]);
-    expect(logs).toEqual(['release skipped: session s1 is not a background process']);
-    expect(store.session('s1')).toMatchObject({ state: 'idle', released: true });
+    expect(store.session('s1')).toMatchObject({ state: 'idle', released: false });
+    expect(store.workItem(1)).toMatchObject({ status: 'blocked', error: 'The turn ended without a done report.' });
+
+    cli.roster = [];
+    await runtime.readRoster();
+    expect(store.session('s1')).toMatchObject({ state: 'ended', released: true });
+    expect(runtime.hasActiveSessions()).toBe(false);
   });
 
   it('reads a marker as soon as the hook writes it, before the marker timer fires', async () => {
@@ -717,16 +759,19 @@ describe('Runtime', () => {
     }
   });
 
-  it('reads the roster when a session that ended writes a marker, so a resumed session returns to Working at once', async () => {
+  it('reads the roster when a session that ended writes a marker, so a session resumed outside the holder returns to Working at once', async () => {
     let now = T0;
     const { store, cli, source, runtime } = setup(config({ installHooks: true }), () => now);
     source.result = { tickets: [issue('8')] };
     await runtime.pollSource('github');
     await runtime.settled();
+    // A session Switchboard does not hold, which Claude's roster follows, as an earlier hub's background session (PRD R93).
+    store.updateSession('s1', { codeMode: false, launchId: null, released: true });
 
     const dir = join(home, '.switchboard', 'activity');
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, '00000001-native.json'), JSON.stringify({ sessionId: '00000001-native', event: 'Stop', backgroundTasks: 0, at: T0 }));
+    cli.roster = [];
     await runtime.readRoster();
     await runtime.settled();
     expect(store.session('s1')?.state).toBe('ended');
@@ -786,7 +831,7 @@ describe('Runtime', () => {
   });
 
   it('leaves a marker reading that needs the roster read to it, without changing the session', async () => {
-    const real = new ClaudeRunner({ claudePath: () => 'claude', exec: async () => ({ code: 0, stdout: '[]', stderr: '', missing: false, timedOut: false }), sleep: async () => {}, now: () => T0, home, claudeSettings: join(home, '.claude', 'settings.json'), hooks: () => true, nodePath: () => 'node' });
+    const real = new ClaudeRunner({ claudePath: () => 'claude', exec: async () => ({ code: 0, stdout: '[]', stderr: '', missing: false, timedOut: false }), now: () => T0, home, claudeSettings: join(home, '.claude', 'settings.json'), hooks: () => true, nodePath: () => 'node' });
     const roster = deferred();
     let reads = 0;
     const runner: SessionRunner = Object.assign(Object.create(real) as SessionRunner, {
@@ -798,7 +843,7 @@ describe('Runtime', () => {
         return { sessions: sessions.map((session) => ({ sessionId: session.id, state: 'running' as const, detail: null })) };
       },
     });
-    const { runtime, store } = setup(config(), () => T0, { claude: runner });
+    const { runtime, store } = setup(config(), () => T0, { codeMode: runner });
 
     runtime.send({ type: 'adhoc', prompt: 'test', repoRoot: 'D:/git/widgets', start: true });
     await runtime.settled();
@@ -898,7 +943,7 @@ describe('Runtime', () => {
     await runtime.readRoster();
 
     expect(store.session('s1')?.state).toBe('running');
-    expect(logs).toEqual(['claude roster read failed: claude agents returned an unexpected response.']);
+    expect(logs).toEqual(['codeMode roster read failed: claude agents returned an unexpected response.']);
   });
 
   it('records reports, validating a worktree with git', async () => {
@@ -980,9 +1025,9 @@ describe('Runtime', () => {
     await runtime.settled();
 
     expect(store.sessionsFor(child!.id)).toMatchObject([{ cwd: 'D:/git/widgets', state: 'running' }]);
-    const start = cli.calls.filter((call) => call[1] === '--bg').at(-1);
-    expect(start?.at(-1)).toBe('Fix the flaky CartTests');
-    expect(start?.at(-2)).toMatch(/^Report to Switchboard/);
+    const start = cli.heldStarts.at(-1);
+    expect(start?.prompt).toBe('Fix the flaky CartTests');
+    expect(start?.contract).toMatch(/^Report to Switchboard/);
   });
 
   it('leaves a done report open while a fresh read lists the ticket as assigned, and blocks it when the recheck still does, without telling the session (PRD R10)', async () => {
@@ -1317,130 +1362,21 @@ describe('Runtime', () => {
     store.insertTicket({ source: 'adhoc', sourceKey: '1', ref: '#1', repo: '', sourceId: null, title: 'x', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: 'D:/x' });
     runtime.send({ type: 'adhoc', prompt: 'Do it', repoRoot: 'D:/scratch', start: true });
     await runtime.settled();
-    store.updateSession('s1', { state: 'starting', shortId: null, nativeSessionId: null });
+    store.updateSession('s1', { state: 'starting', shortId: null });
 
     await runtime.startup();
 
-    expect(store.session('s1')).toMatchObject({ state: 'starting', outcome: null });
-    expect(store.workItem(1)).toMatchObject({ status: 'running', error: null });
-    now += 120_000;
-    await runtime.readRoster();
-    expect(store.session('s1')).toMatchObject({ state: 'starting', outcome: null, released: false });
-    expect(store.workItem(1)).toMatchObject({ status: 'running', error: null, warning: 'The Claude start is still unconfirmed; inspect claude agents for the label ending · s1, then use Stop session to clear this unconfirmed start if needed.' });
-    expect(await runtime.report({ sessionId: 's1', kind: 'done' })).toEqual({ refused: 'The session start is still unconfirmed; retry the report after it is identified.' });
-    expect(store.workItem(1)?.status).toBe('running');
-    cli.roster = [{ id: '00000001', sessionId: '00000001-native', pid: 101, kind: 'background', cwd: 'D:/scratch', name: 'name · s1', state: 'working' }];
-    await runtime.readRoster();
-    expect(store.session('s1')).toMatchObject({ state: 'running', nativeSessionId: '00000001-native', stateDetail: null });
-    expect(store.workItem(1)?.warning).toBeNull();
+    expect(store.session('s1')).toMatchObject({ state: 'running', nativeSessionId: '00000001-native', shortId: '00000001', stateDetail: null, outcome: null });
+    expect(store.workItem(1)).toMatchObject({ status: 'running', error: null, warning: null });
+
+    // One the holder no longer holds failed to start.
+    store.updateSession('s1', { state: 'starting', shortId: null });
+    cli.roster = [];
+    now += 1_000;
+    await runtime.startup();
+    expect(store.session('s1')).toMatchObject({ state: 'ended', outcome: 'failed', outcomeDetail: 'The hub stopped while the session was starting.' });
     expect(Object.keys(JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8')).hooks)).toHaveLength(13);
     expect(runtime.snapshot().errors.hooks).toBeNull();
-  });
-
-  it.each(['clear', 'identified'])('rechecks an unconfirmed start on operator Stop: %s', async result => {
-    let now = T0;
-    const { store, runtime, cli, logs } = setup(config(), () => now);
-    runtime.send({ type: 'adhoc', prompt: 'Do it', repoRoot: 'D:/scratch', start: true });
-    await runtime.settled();
-    store.updateSession('s1', { state: 'starting', shortId: null, nativeSessionId: null });
-    cli.roster = [];
-    await runtime.startup();
-    now += 120_000;
-    await runtime.readRoster();
-    const logCount = logs.filter(line => line.includes('not settled yet')).length;
-    await runtime.readRoster();
-    expect(logs.filter(line => line.includes('not settled yet'))).toHaveLength(logCount);
-    cli.calls = [];
-    if (result === 'identified') cli.roster = [{ id: 'real', sessionId: 'real-native', pid: 101, kind: 'background', cwd: 'D:/scratch', name: 'name · s1', state: 'working' }];
-    runtime.send({ type: 'stop', workItemId: 1 });
-    await runtime.settled();
-    expect(store.session('s1')).toMatchObject({ state: 'ended', released: true });
-    expect(store.workItem(1)?.warning).toBeNull();
-    if (result === 'clear') {
-      expect(cli.calls.filter(call => call[1] === 'stop')).toEqual([]);
-      expect(store.workItem(1)).toMatchObject({ status: 'failed', error: 'Unconfirmed start cleared. No process was stopped; inspect claude agents before retrying.' });
-      expect(await runtime.report({ sessionId: 's1', kind: 'done' })).toEqual({ refused: 'The session failed to start; retry the work item before reporting.' });
-      runtime.send({ type: 'delete', workItemId: 1 });
-      await runtime.settled();
-      expect(store.workItem(1)).toBeNull();
-    } else {
-      expect(cli.calls.some(call => call[1] === 'stop' && call[2] === 'real')).toBe(true);
-      expect(store.workItem(1)?.status).toBe('blocked');
-    }
-  });
-
-  it('keeps an ambiguous start owned when Stop cannot identify its process', async () => {
-    let now = T0;
-    const { store, runtime, cli } = setup(config(), () => now);
-    runtime.send({ type: 'adhoc', prompt: 'Do it', repoRoot: 'D:/scratch', start: true });
-    await runtime.settled();
-    store.updateSession('s1', { state: 'starting', shortId: null, nativeSessionId: null });
-    cli.roster = ['first', 'extra'].map(id => ({ id, sessionId: id + '-native', pid: 101, kind: 'background', cwd: 'D:/scratch', name: 'name · s1', state: 'working' }));
-    await runtime.startup();
-    now += 120_000;
-    cli.calls = [];
-    runtime.send({ type: 'stop', workItemId: 1 });
-    await runtime.settled();
-    expect(store.session('s1')).toMatchObject({ state: 'starting', released: false });
-    expect(cli.calls.some(call => call[1] === 'stop')).toBe(false);
-    expect(store.workItem(1)?.error).toContain('stop the extra session so the original can be recovered');
-    expect(await runtime.report({ sessionId: 's1', kind: 'done' })).toMatchObject({ refused: expect.stringContaining('unconfirmed') });
-    cli.roster = cli.roster.slice(0, 1);
-    await runtime.readRoster();
-    expect(store.session('s1')).toMatchObject({ state: 'running', shortId: 'first' });
-    expect(store.workItem(1)).toMatchObject({ error: null, warning: null });
-  });
-
-  it.each(['before', 'after'])('keeps dock recovery Stop reachable when Mark done clears the item warning %s the deadline', async when => {
-    let now = T0;
-    const { store, runtime, cli } = setup(config(), () => now);
-    runtime.send({ type: 'adhoc', prompt: 'Do it', repoRoot: 'D:/scratch', start: true });
-    await runtime.settled();
-    store.updateSession('s1', { state: 'starting', shortId: null, nativeSessionId: null });
-    cli.roster = [];
-    await runtime.startup();
-    if (when === 'before') runtime.send({ type: 'mark-done', workItemId: 1 });
-    now += 120_000;
-    await runtime.readRoster();
-    if (when === 'after') runtime.send({ type: 'mark-done', workItemId: 1 });
-    expect(store.workItem(1)?.status).toBe('done');
-    const row = runtime.snapshot().workItems.find(item => item.id === 1)!;
-    expect(controlsOf(row).find(control => control.label === 'Stop session')?.message).toEqual({ type: 'action', action: { type: 'stop', workItemId: 1 } });
-    runtime.send({ type: 'stop', workItemId: 1 });
-    await runtime.settled();
-    expect(store.session('s1')?.state).toBe('ended');
-    runtime.send({ type: 'delete', workItemId: 1 });
-    await runtime.settled();
-    expect(store.workItem(1)).toBeNull();
-  });
-
-  it.each(['started', 'stopped'])('ignores a stale reconcile result after the session or hub %s', async state => {
-    const { store, runtime, cli } = setup();
-    runtime.send({ type: 'adhoc', prompt: 'Do it', repoRoot: 'D:/scratch', start: true });
-    await runtime.settled();
-    store.updateSession('s1', { state: 'starting', shortId: null, nativeSessionId: null });
-    cli.roster = [];
-    await runtime.startup();
-    cli.roster = [{ id: 'old', sessionId: 'old-native', pid: 101, kind: 'background', cwd: 'D:/scratch', name: 'name · s1', state: 'working' }];
-    const gate = deferred();
-    cli.rosterGate = gate.promise;
-    const reading = runtime.readRoster();
-    await vi.waitFor(() => expect(cli.rosterGate).toBeNull());
-    if (state === 'started') {
-      runtime.send({ type: 'session-started', sessionId: 's1', nativeSessionId: 'new-native', shortId: 'new' });
-      cli.roster = [{ id: 'new', sessionId: 'new-native', pid: 102, kind: 'background', cwd: 'D:/scratch', state: 'working' }];
-    } else {
-      runtime.stop();
-      store.close();
-    }
-    gate.resolve();
-    await expect(reading).resolves.toBeUndefined();
-    if (state === 'started') {
-      expect(store.session('s1')?.nativeSessionId).toBe('new-native');
-      runtime.send({ type: 'session-start-pending', sessionId: 's1', message: 'stale warning' });
-      expect(store.session('s1')?.stateDetail).toBeNull();
-      expect(store.workItem(1)?.warning).toBeNull();
-    }
   });
 
   it("installs both agents' hooks at startup and shows each failure", async () => {
@@ -1500,9 +1436,6 @@ describe('Runtime', () => {
     await runtime.pollSource('github');
     await runtime.settled();
 
-    const rosterReads = cli.calls.filter((call) => call[1] === 'agents').map((call) => call[0]);
-    expect(rosterReads[0]).toBe('claude');
-    expect(rosterReads.at(-1)).toBe('/opt/claude/bin/claude');
     const triages = cli.calls.filter((call) => call.includes('--json-schema')).map((call) => call[0]);
     expect(triages[0]).toBe('claude');
     expect(triages.at(-1)).toBe('/opt/claude/bin/claude');
@@ -1747,7 +1680,7 @@ describe('Runtime', () => {
 
     expect(store.session('s1')).toMatchObject({ provider: 'claude', state: 'running' });
     expect(store.session('s2')).toMatchObject({ state: 'ended' });
-    expect(logs).toContain('claude roster read failed: claude agents returned an unexpected response.');
+    expect(logs).toContain('codeMode roster read failed: claude agents returned an unexpected response.');
   });
 
   it('counts Claude and Codex sessions against one concurrency limit (PRD R38)', async () => {
@@ -1763,36 +1696,6 @@ describe('Runtime', () => {
 
     expect(store.workItem(2)).toMatchObject({ status: 'queued' });
     expect(codex.spawned).toHaveLength(0);
-  });
-
-  it("offers Open in Codex once the turn that reported a question ends, and stops the session for it (PRD R70)", async () => {
-    const codex = new FakeCodex();
-    const { store, runtime } = setup(config({ provider: 'codex' }), () => T0, undefined, codex);
-    const log = join(home, '.switchboard', 'codex', 's1.jsonl');
-    const opens = () => controlsOf(runtime.snapshot().workItems[0]!).filter((control) => control.message['type'] === 'open-question');
-
-    runtime.send({ type: 'adhoc', prompt: 'Work', repoRoot: 'D:/git/widgets', start: true });
-    await runtime.settled();
-    store.updateSession('s1', { execution: null });
-    expect(await runtime.report({ sessionId: 's1', kind: 'question', text: 'Which tree?' })).toEqual({ refused: null });
-    expect(store.session('s1')!.question).toEqual({ id: 's2', text: 'Which tree?' });
-
-    // Running: the question waits for the turn to end.
-    await runtime.readRoster();
-    expect(opens()).toEqual([]);
-
-    writeFileSync(log, '{"type":"thread.started","thread_id":"thread-1"}\n{"type":"turn.started"}\n{"type":"turn.completed"}\n');
-    codex.alive.clear();
-    await runtime.readRoster();
-    await runtime.settled();
-    expect(store.session('s1')).toMatchObject({ state: 'waiting', released: false });
-    expect(opens().map((control) => control.label)).toEqual(['Open in Codex']);
-
-    expect(runtime.send({ type: 'open-question', workItemId: 1, nativeSessionId: 'thread-1' }).refused).toBeNull();
-    await runtime.settled();
-    expect(store.workItem(1)).toMatchObject({ status: 'running', error: null });
-    expect(store.session('s1')).toMatchObject({ state: 'ended', question: null, outcome: 'opened' });
-    expect(markOf({ ...runtime.snapshot().workItems[0]!, approvalSends: false })).toBe('question');
   });
 
   describe('Codex question races and recovery (PRD R70)', () => {
@@ -1905,11 +1808,11 @@ describe('Runtime', () => {
     expect(runtime.send({ type: 'pick', ticketId: pool[0]!.ticket.id }).refused).toBeNull();
     await runtime.settled();
 
-    const start = cli.calls.find((call) => call[1] === '--bg');
-    expect(start?.slice(-3)).toEqual(['--append-system-prompt', expect.stringMatching(/^Report to Switchboard with these commands:\n- .* stage s1 /), 'Build 8.']);
+    const start = cli.heldStarts[0];
+    expect(start).toMatchObject({ contract: expect.stringMatching(/^Report to Switchboard with these commands:\n- .* stage s1 /), prompt: 'Build 8.' });
     expect(store.session('s1')).toMatchObject({ kind: 'task', state: 'running' });
-    // After a compaction, the hook gets the contract the session started with (mechanics M30).
-    expect(runtime.contract(store.session('s1')!.nativeSessionId!)).toBe(start?.at(-2));
+    // After a compaction, the hook gets the contract the session started with, then the conversation rules (mechanics M30).
+    expect(runtime.contract(store.session('s1')!.nativeSessionId!)?.startsWith(`${start!.contract}\n\n`)).toBe(true);
     expect(runtime.contract('not-a-switchboard-session')).toBeNull();
     expect(runtime.snapshot().pool.map((entry) => entry.ticket.sourceKey)).toEqual(['9']);
     expect(runtime.snapshot().workItems).toMatchObject([{ status: 'running', playbook: 'dev:develop', triage: { playbook: 'dev:develop' } }]);
@@ -1937,7 +1840,7 @@ describe('Runtime', () => {
       runtime.send({ type: 'roster', sessions: [], checked: [sessionId] });
     }
 
-    expect(cli.calls.filter((call) => call[1] === '--bg')).toHaveLength(2);
+    expect(cli.heldStarts).toHaveLength(2);
   });
 
   it('lists the pool oldest first with each rating, counts the started done work items of a returned ticket with the same playbook or one it is a return of, and hides a disabled source (PRD R50, R51)', async () => {
@@ -2267,33 +2170,6 @@ describe('Runtime', () => {
   });
 });
 
-describe('Open in Claude (PRD R70)', () => {
-  /** A running dev:develop session s1 (short ID 00000001) for ticket 8. */
-  async function started() {
-    const context = setup(config(), () => T0);
-    context.source.result = { tickets: [issue('8')] };
-    await context.runtime.pollSource('github');
-    await context.runtime.settled();
-
-    return context;
-  }
-
-  it('stops the session for Open in Claude without the release check, and keeps the work item waiting on the question', async () => {
-    const { store, cli, runtime } = await started();
-    runtime.send({ type: 'marker', sessionId: 's1', state: 'waiting', detail: null });
-    const roster = cli.calls.filter((call) => call[1] === 'agents').length;
-
-    runtime.send({ type: 'open-question', workItemId: 1, nativeSessionId: '00000001-native' });
-    await runtime.settled();
-
-    expect(cli.calls.filter((call) => call[1] === 'stop')).toEqual([['claude', 'stop', '00000001']]);
-    expect(cli.calls.filter((call) => call[1] === 'agents')).toHaveLength(roster);
-    expect(store.workItem(1)).toMatchObject({ status: 'running', error: null });
-    expect(store.session('s1')).toMatchObject({ state: 'ended', released: true, outcome: 'opened' });
-    expect(markOf({ ...runtime.snapshot().workItems[0]!, approvalSends: false })).toBe('question');
-  });
-});
-
 describe('focus (PRD R79)', () => {
   const ISSUE = 'https://github.com/o/r/issues/7';
   const COMMENT = `${ISSUE}#issuecomment-1`;
@@ -2416,7 +2292,7 @@ describe('forks (PRD R78)', () => {
 
   /** A Claude runner whose roster, markers and transcript answers the test sets. */
   function forking() {
-    const real = new ClaudeRunner({ claudePath: () => 'claude', exec: async () => ok('[]'), sleep: async () => {}, now: () => T0, home, claudeSettings: join(home, '.claude', 'settings.json'), hooks: () => true, nodePath: () => 'node' });
+    const real = new ClaudeRunner({ claudePath: () => 'claude', exec: async () => ok('[]'), now: () => T0, home, claudeSettings: join(home, '.claude', 'settings.json'), hooks: () => true, nodePath: () => 'node' });
     const state = {
       reads: 0,
       listed: true,
@@ -2441,13 +2317,15 @@ describe('forks (PRD R78)', () => {
     return { runner, state };
   }
 
+  /** A session Switchboard does not hold, which Claude's roster follows, as a registered one is (PRD R81), whose turn ended. */
   async function released() {
     const fake = forking();
-    const setUp = setup(config(), () => T0, { claude: fake.runner });
+    const setUp = setup(config(), () => T0, { claude: fake.runner, codeMode: fake.runner });
 
     setUp.runtime.send({ type: 'adhoc', prompt: 'test', repoRoot: 'D:/git/widgets', start: true });
     await setUp.runtime.settled();
-    // The turn ends, and the release stop ends the background process.
+    setUp.store.updateSession('s1', { codeMode: false, launchId: null });
+    // The turn ends, and the session is released.
     await setUp.runtime.readRoster();
     await setUp.runtime.settled();
     fake.state.listed = false;
@@ -2527,10 +2405,11 @@ describe('forks (PRD R78)', () => {
 
   it('refuses a done report from the copy a fork retired while the assignment read ran', async () => {
     const fake = forking();
-    const { runtime, store, source } = setup(config(), () => T0, { claude: fake.runner });
+    const { runtime, store, source } = setup(config(), () => T0, { claude: fake.runner, codeMode: fake.runner });
     source.result = { tickets: [issue('8')] };
     await runtime.pollSource('github');
     await runtime.settled();
+    store.updateSession('s1', { codeMode: false, launchId: null });
     await runtime.readRoster();
     await runtime.settled();
     fake.state.listed = false;
@@ -2585,7 +2464,7 @@ describe('registered sessions (PRD R81)', () => {
 
   /** A Claude runner whose roster lists `live` and whose transcripts relate a native ID to a session by `relation`. */
   function registering(live: Awaited<ReturnType<NonNullable<SessionRunner['live']>>>, relation: (native: string) => CopyRelation = () => 'unrelated') {
-    const real = new ClaudeRunner({ claudePath: () => 'claude', exec: async () => ok('[]'), sleep: async () => {}, now: () => T0, home, claudeSettings: join(home, '.claude', 'settings.json'), hooks: () => true, nodePath: () => 'node' });
+    const real = new ClaudeRunner({ claudePath: () => 'claude', exec: async () => ok('[]'), now: () => T0, home, claudeSettings: join(home, '.claude', 'settings.json'), hooks: () => true, nodePath: () => 'node' });
 
     return Object.assign(Object.create(real) as SessionRunner, { live: async () => live, relation });
   }
@@ -2673,7 +2552,7 @@ describe('ticket reports (PRD R83)', () => {
   const found = (open = true) => ({ ticket: { sourceKey: '115', ref: '#115', repo: '', title: 'Snapshot wrapper', url: URL, open } });
 
   async function registered() {
-    const real = new ClaudeRunner({ claudePath: () => 'claude', exec: async () => ok('[]'), sleep: async () => {}, now: () => T0, home, claudeSettings: join(home, '.claude', 'settings.json'), hooks: () => true, nodePath: () => 'node' });
+    const real = new ClaudeRunner({ claudePath: () => 'claude', exec: async () => ok('[]'), now: () => T0, home, claudeSettings: join(home, '.claude', 'settings.json'), hooks: () => true, nodePath: () => 'node' });
     // `old-copy` is a copy a fork retired, and so is the registered copy once a fork named `fork-copy` continues it (PRD R78).
     const claude = Object.assign(Object.create(real) as SessionRunner, {
       live: async () => ({ shortId: '9273f594', cwd: 'D:/git/widgets' }),
@@ -2687,7 +2566,7 @@ describe('ticket reports (PRD R83)', () => {
   }
 
   it('asks each enabled source until one has the issue on its board, refuses when none has, and treats a failed read as a refusal (PRD R83)', async () => {
-    const real = new ClaudeRunner({ claudePath: () => 'claude', exec: async () => ok('[]'), sleep: async () => {}, now: () => T0, home, claudeSettings: join(home, '.claude', 'settings.json'), hooks: () => true, nodePath: () => 'node' });
+    const real = new ClaudeRunner({ claudePath: () => 'claude', exec: async () => ok('[]'), now: () => T0, home, claudeSettings: join(home, '.claude', 'settings.json'), hooks: () => true, nodePath: () => 'node' });
     const claude = Object.assign(Object.create(real) as SessionRunner, { live: async () => ({ shortId: '9273f594', cwd: 'D:/git/widgets' }), relation: (): CopyRelation => 'unrelated' });
     const cfg = config();
     cfg.settings.sources['personal'] = { ...cfg.settings.sources['github']! };
@@ -2827,7 +2706,7 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
     };
   }
 
-  /** A background session s1 and a held Code Mode session s2, both running. */
+  /** A session s1 Switchboard does not hold, which Claude's roster follows, and a held Code Mode session s2, both running. */
   async function twoSessions(codeMode: SessionRunner) {
     const claude = fakeRunner();
     const context = setup(config(), () => T0, { claude, codeMode });
@@ -2835,6 +2714,7 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
     context.runtime.send({ type: 'adhoc', prompt: 'background', repoRoot: 'D:/git/widgets', start: true });
     context.runtime.send({ type: 'adhoc', prompt: 'held', repoRoot: 'D:/git/widgets', start: true });
     await context.runtime.settled();
+    context.store.updateSession('s1', { codeMode: false, launchId: null });
     context.store.updateSession('s2', { codeMode: true, launchId: 'launch-2' });
 
     return { ...context, claude };
@@ -3147,12 +3027,13 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
     context.runtime.stop();
   });
 
-  it('gives a background session nothing after a resume, which keeps its contract, and only its contract after a compaction', async () => {
+  it('gives a session Switchboard does not hold nothing after a resume, which keeps its contract, and only its contract after a compaction', async () => {
     const { source, runtime, store } = setup();
 
     source.result = { tickets: [issue('8')] };
     await runtime.pollSource('github');
     await runtime.settled();
+    store.updateSession('s1', { codeMode: false, launchId: null });
 
     const native = store.session('s1')!.nativeSessionId!;
 
@@ -3473,7 +3354,7 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
 
       expect(await runtime.attach('nope')).toEqual({ refused: 'No session nope.', status: 404 });
       store.updateSession('s1', { codeMode: false });
-      expect(await runtime.attach('s1')).toEqual({ refused: 'Session s1-short is not a Code Mode session; open it in Claude.', status: 409 });
+      expect(await runtime.attach('s1')).toEqual({ refused: 'Session s1-short is not held in the terminal holder.', status: 409 });
       runtime.stop();
     });
 
@@ -3549,7 +3430,7 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
       it('refuses while Claude lists it with a process, when the roster cannot be read, and without a transcript, and leaves it as it was', async () => {
         const running = await registeredEnded({ shortId: 's1-short', cwd: 'D:/git/widgets' });
         transcript([assistant('claude-sonnet-5')]);
-        expect(await running.runtime.attach('s1')).toEqual({ refused: 'Session s1-short still runs in another Claude window; close it there, then resume it here.', status: 409 });
+        expect(await running.runtime.attach('s1')).toEqual({ refused: "Session s1-short still runs outside Switchboard's terminal holder, in a Claude window or the background service; end it there, then resume it here.", status: 409 });
         running.runtime.stop();
 
         const unread = await registeredEnded({ error: 'claude agents timed out' });
@@ -3609,7 +3490,7 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
         const context = await registeredEnded(null);
 
         context.store.updateSession('s1', { state: 'idle', endedAt: null, external: true });
-        expect(await context.runtime.attach('s1')).toEqual({ refused: 'Session s1-short is not a Code Mode session; open it in Claude.', status: 409 });
+        expect(await context.runtime.attach('s1')).toEqual({ refused: 'Session s1-short is not held in the terminal holder.', status: 409 });
         expect(context.runtime.snapshot().workItems[0]!.sessions[0]).toMatchObject({ codeMode: false });
         context.runtime.stop();
       });

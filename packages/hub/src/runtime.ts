@@ -7,7 +7,7 @@ import { classifyCodex, CodexRunner, AppServer, AppServerRunner } from '@switchb
 import type { Exec } from '@switchboard/claude';
 import type { FlowAction, FlowEvent, FlowResult, HandledWork, LimitReading, MarkerReading, SessionLimit, ObservedFork, ObservedSession, PermissionMode, PolledTicket, Provider, PullRequestStatus, WorkItemStatus, Session, SessionRunner, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, Worktree, Reconciled } from '@switchboard/core';
 import { CONTINUE_TEXT, givesUp, waitsOnLimit } from '@switchboard/core';
-import { activeSession, ADHOC_SOURCE, artifactsDir, awaitsRecheck, QUESTION_CARD, RESUME_PROMPT, executableDirOnPath, handle, launchOptions, nothingNew, PROVIDERS, recordRefusal, homeRepo, repoOf, resumesHeld, sessionName, deliveredTone, ticketRoot, sessionContract, switchboardHome, triageModel } from '@switchboard/core';
+import { activeSession, ADHOC_SOURCE, artifactsDir, awaitsRecheck, QUESTION_CARD, executableDirOnPath, handle, launchOptions, nothingNew, PROVIDERS, recordRefusal, homeRepo, repoOf, resumesHeld, sessionName, deliveredTone, ticketRoot, sessionContract, switchboardHome, triageModel } from '@switchboard/core';
 import { noKind } from './config.js';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
@@ -33,9 +33,6 @@ export const PULL_REQUESTS_FOCUS_MS = 30_000;
 /** The work item statuses that are not done. */
 const OPEN_STATUSES: WorkItemStatus[] = ['triaging', 'unstarted', 'queued', 'setup', 'running', 'awaiting-approval', 'finished', 'blocked', 'failed'];
 
-const NOT_SWITCHBOARD = "This session is not one of Switchboard's work items.";
-const NEVER_BACKGROUND = 'This session never ran in the background, so it cannot continue there.';
-
 export const ROSTER_MS = 30_000;
 export const MARKER_MS = 5_000;
 /** How long a marker change waits for the hook's other writes before the hub reads the markers. */
@@ -50,14 +47,6 @@ const FIXED_TIMERS = 3;
 export const REPORT_CHECK_MS = 6_000;
 /** When the source is read again after a done report it lists as assigned; GitHub issue search lags an unassignment by seconds (mechanics M34). */
 export const RECHECK_MS = 30_000;
-/** How long Continue in Background waits for the tab's process to exit (PRD R89); closing the tab ended it within 4 seconds (mechanics M55). */
-export const MOVE_EXIT_MS = 30_000;
-const MOVE_POLL_MS = 250;
-/** Time the window's close leaves the tab's process to exit before the wait gives up; it exited within 4.4 seconds (mechanics M55). */
-const MOVE_CLOSE_MARGIN_MS = 10_000;
-/** How long a resumed session may take to be listed in its background process with a pid, as for a start. */
-export const RESUME_CONFIRM_MS = 60_000;
-const RESUME_POLL_MS = 2_000;
 /** How long `<sessions.nodePath> --version` may take. */
 const NODE_CHECK_TIMEOUT_MS = 10_000;
 /** How long input to a held session after its turn defers its end, for the prompt's marker to be read. */
@@ -293,7 +282,7 @@ export class Runtime {
     this.runners = {
       claude:
         deps.runners?.claude ??
-        new ClaudeRunner({ claudePath, nodePath, exec: deps.exec, sleep: deps.sleep, now: deps.now, home: this.home, claudeSettings: deps.claudeSettings, hooks }),
+        new ClaudeRunner({ claudePath, nodePath, exec: deps.exec, now: deps.now, home: this.home, claudeSettings: deps.claudeSettings, hooks }),
       codex:
         deps.runners?.codex ??
         new CodexRunner({ codexPath, nodePath, exec: deps.exec, sleep: deps.sleep, now: deps.now, home: this.home, codexHome: codex.home, env: codex.env, hooks }),
@@ -665,9 +654,9 @@ export class Runtime {
       this.send({ type: 'triage-cancelled', triageId: triage.id });
     }
 
-    await this.reconcile(this.deps.store.activeSessions().filter((entry) => entry.state === 'starting'));
+    this.send({ type: 'end-legacy' });
 
-    this.resumeMoves();
+    await this.reconcile(this.deps.store.activeSessions().filter((entry) => entry.state === 'starting'));
 
     await this.readRoster();
 
@@ -1130,10 +1119,10 @@ export class Runtime {
     // Sessions of a terminal holder that is gone, and held sessions past the idle limit (PRD R94, R95).
     const lost: string[] = [];
     const idle: string[] = [];
-    // A question reported, or a move to the background begun or ended, while the reads ran makes their result stale for that session, which the
-    // next read decides (PRD R70, R89). A held session resumed, or being resumed, meanwhile is left to the next timed read and its markers (PRD R95).
-    // Checked once all providers' reads are done, since the event applies them together.
-    const marks = (session: Session | null) => `${session?.question?.id ?? ''}|${session?.move?.id ?? ''}|${session?.movedAt ?? ''}`;
+    // A question reported while the reads ran makes their result stale for that session, which the next read decides (PRD R70). A held session
+    // resumed, or being resumed, meanwhile is left to the next timed read and its markers (PRD R95). Checked once all providers' reads are done,
+    // since the event applies them together.
+    const marks = (session: Session | null) => session?.question?.id ?? '';
     const asked = new Map(sessions.map((session) => [session.id, marks(session)]));
     const launches = new Map(sessions.map((session) => [session.id, session.launchId ?? null]));
     const endedBefore = new Set(sessions.filter((session) => session.state === 'ended').map((session) => session.id));
@@ -1570,179 +1559,6 @@ export class Runtime {
     }
 
     return answer(this.deps.store.sessionByNativeId(nativeSessionId)!, false);
-  }
-
-  /**
-   * Continue in Background (PRD R89): finds the session in the Claude tab labelled `label` of the window whose extension host is `hostPid`, which
-   * must belong to one of `workItemIds`, and starts its move. A long label is cut, so the tab's process, a child of that extension host, tells it
-   * apart from other sessions the label may name. It answers once the flow has stored the move with that process, so the window closes the tab
-   * only after that.
-   */
-  async background(label: string | null, hostPid: number, workItemIds: number[]): Promise<{ refused: string } | { pid: number }> {
-    const runner = this.runners.claude;
-    const tab = runner.tab === undefined ? { error: 'The Claude runner cannot move sessions.' } : await runner.tab(label, hostPid);
-
-    if ('error' in tab) {
-      return { refused: tab.error };
-    }
-
-    if (tab.others > 0) {
-      return { refused: 'Another Claude session runs in this window; closing the window would end it.' };
-    }
-
-    if (tab.candidates.length > 1) {
-      return {
-        refused:
-          label === null
-            ? 'Several Claude sessions run in this window, so Switchboard cannot tell which one the sidebar holds.'
-            : `Several Claude sessions in this window are named "${label}", so Switchboard cannot tell which one this tab holds.`,
-      };
-    }
-
-    const [found] = tab.candidates;
-    const session = found === undefined ? null : this.deps.store.sessionByNativeId(found.nativeSessionId);
-
-    if (found === undefined || session === null || !workItemIds.includes(session.workItemId)) {
-      return { refused: NOT_SWITCHBOARD };
-    }
-
-    if (!found.background) {
-      return { refused: NEVER_BACKGROUND };
-    }
-
-    const { refused } = this.send({ type: 'background', sessionId: session.id, nativeSessionId: found.nativeSessionId, pid: found.pid, busy: found.busy, workItemIds });
-
-    return refused === null ? { pid: found.pid } : { refused };
-  }
-
-  /**
-   * Whether the window may close: the moving process `pid` is still the window's only live Claude session, so a session opened in the window while
-   * the hub answered does not end with it, and its move still waits with time left for the process to exit before the wait gives up (PRD R89).
-   */
-  async windowAlone(hostPid: number, pid: number): Promise<boolean | { error: string }> {
-    const pending = () => this.deps.store.movingSessions().some((session) => session.move?.pid === pid && session.move.phase === 'waiting' && this.deps.now() - session.move.at < MOVE_EXIT_MS - MOVE_CLOSE_MARGIN_MS);
-
-    if (!pending()) {
-      return { error: 'The move is no longer waiting for the window to close.' };
-    }
-
-    const runner = this.runners.claude;
-    const window = runner.tab === undefined ? { error: 'The Claude runner cannot move sessions.' } : await runner.tab(null, hostPid);
-
-    if ('error' in window) {
-      return window;
-    }
-
-    return pending() ? window.candidates.length === 1 && window.candidates[0]!.pid === pid : { error: 'The move is no longer waiting for the window to close.' };
-  }
-
-  /** Waits for the tab's process to exit, then resumes the session in its background process, unless Stop or Delete ended the move first. */
-  private async resumeSession(action: Extract<FlowAction, { type: 'resume-session' }>): Promise<void> {
-    const alive = this.deps.alive ?? processAlive;
-    const current = () => this.deps.store.session(action.sessionId)?.move?.id === action.moveId;
-
-    // A stopped hub has closed the store; the move stays stored, and the next hub's startup continues it.
-    for (const until = (this.deps.store.session(action.sessionId)?.move?.at ?? this.deps.now()) + MOVE_EXIT_MS; alive(action.pid); await this.deps.sleep(MOVE_POLL_MS)) {
-      if (this.stopped || !current()) {
-        return;
-      }
-
-      if (this.deps.now() >= until) {
-        this.deps.log(`session ${action.sessionId} stays in its tab: process ${action.pid} did not exit within ${MOVE_EXIT_MS / 1000} seconds`);
-        this.send({ type: 'move-cancelled', sessionId: action.sessionId, moveId: action.moveId });
-        return;
-      }
-    }
-
-    const runner = this.runners[action.provider];
-
-    if (this.stopped || !current() || runner.resume === undefined) {
-      return;
-    }
-
-    const deadline = this.deps.now() + RESUME_CONFIRM_MS;
-
-    this.send({ type: 'move-launching', sessionId: action.sessionId, moveId: action.moveId, deadline });
-
-    const launched = await runner.resume(action.nativeSessionId, action.prompt, action.cwd);
-
-    if ('copy' in launched && launched.copy !== null) {
-      const failure = await runner.stop({ sessionId: action.sessionId, shortId: launched.copy }, 'operator');
-      const stopped = failure === null ? 'and Switchboard stopped it' : `and stopping it failed: ${failure.error}`;
-
-      if (this.stopped) {
-        this.deps.log(`session ${action.sessionId}: Claude started a copy as ${launched.copy} instead of resuming it, ${stopped}`);
-        return;
-      }
-
-      this.resumeResult(action.sessionId, action.moveId, { failed: `Claude started a copy as ${launched.copy} instead of resuming the session, ${stopped}.` });
-      return;
-    }
-
-    await this.confirmResume(action.sessionId, action.moveId, action.nativeSessionId, deadline, 'error' in launched ? launched.error : null);
-  }
-
-  /**
-   * Waits until the roster lists the session in its background process with a pid, or the deadline passes. A failed read, or an entry with no pid
-   * yet, decides nothing, because a launch takes seconds to list its pid (mechanics M5).
-   */
-  private async confirmResume(sessionId: string, moveId: string, nativeSessionId: string, deadline: number, launchError: string | null): Promise<void> {
-    const runner = this.runners.claude;
-
-    for (;;) {
-      const listed = runner.background === undefined ? null : await runner.background(nativeSessionId);
-
-      if (this.stopped) {
-        return;
-      }
-
-      // A process listed after the deadline still runs the session, so it is taken rather than left running unseen.
-      if (listed !== null && 'shortId' in listed) {
-        this.resumeResult(sessionId, moveId, { shortId: listed.shortId });
-        return;
-      }
-
-      if (this.deps.now() >= deadline) {
-        this.resumeResult(sessionId, moveId, { failed: launchError ?? `The session did not appear in claude agents within ${RESUME_CONFIRM_MS / 1000} seconds.` });
-        return;
-      }
-
-      await this.deps.sleep(RESUME_POLL_MS);
-    }
-  }
-
-  /** Sends the resume's result; a process started for a move that Delete ended belongs to no work item, so it is stopped. */
-  private resumeResult(sessionId: string, moveId: string, result: { shortId: string } | { failed: string }): void {
-    if ('shortId' in result && this.deps.store.session(sessionId)?.move?.id !== moveId) {
-      this.deps.log(`session ${sessionId} resumed in the background as ${result.shortId} after its move ended; stopping it`);
-      this.track(
-        this.runners.claude.stop({ sessionId, shortId: result.shortId }, 'operator').then((failure) => {
-          if (failure !== null) {
-            this.deps.log(`stop of ${result.shortId} failed; it may still be running: ${failure.error}`);
-          }
-        }),
-      );
-      return;
-    }
-
-    this.send('shortId' in result ? { type: 'session-resumed', sessionId, moveId, shortId: result.shortId } : { type: 'resume-failed', sessionId, moveId, message: result.failed });
-  }
-
-  /** After a restart (PRD R89): a move still waiting runs again from the wait, and a launch is never repeated, only confirmed by its deadline. */
-  private resumeMoves(): void {
-    for (const session of this.deps.store.movingSessions()) {
-      const move = session.move;
-
-      if (move === null || session.nativeSessionId === null) {
-        continue;
-      }
-
-      if (move.phase === 'waiting') {
-        this.track(this.resumeSession({ type: 'resume-session', sessionId: session.id, moveId: move.id, provider: session.provider, nativeSessionId: session.nativeSessionId, cwd: session.cwd, pid: move.pid, prompt: RESUME_PROMPT }));
-      } else {
-        this.track(this.confirmResume(session.id, move.id, session.nativeSessionId, move.deadline ?? this.deps.now(), null));
-      }
-    }
   }
 
   /**
@@ -2490,9 +2306,9 @@ export class Runtime {
 
     const name = first.shortId ?? sessionId;
 
-    // An ended registered session resumes in the holder and becomes held there (PRD R81).
+    // An ended registered session, or one an earlier hub ran in the background, resumes in the holder and becomes held there (PRD R81, R93).
     if (first.codeMode !== true && !resumesHeld(first)) {
-      return { refused: `Session ${name} is not a Code Mode session; open it in Claude.`, status: 409 };
+      return { refused: `Session ${name} is not held in the terminal holder.`, status: 409 };
     }
 
     for (const [id, until] of this.reservations) {
@@ -2710,11 +2526,12 @@ export class Runtime {
   }
 
   /**
-   * How an ended registered session resumes in the holder (PRD R81): refused while Claude's roster lists it with a process, as in the operator's
-   * window, since a resume would run a second copy (mechanics M18), and without a transcript to resume; otherwise in Code Mode only when it ran in
-   * Code Mode, with the permission mode and model it last ran with, where the transcript recorded them (mechanics M117).
+   * How an ended session that was never held resumes in the holder, a registered one (PRD R81) or one an earlier hub ran in Claude's background
+   * service (PRD R93): refused while Claude's roster lists it with a process, as in the operator's window or the background service, since a resume
+   * would run a second copy (mechanics M18), and without a transcript to resume; otherwise in Code Mode only when it ran in Code Mode, with the
+   * permission mode and model it last ran with, where the transcript recorded them (mechanics M117).
    */
-  private async registeredLaunch(session: Session, name: string): Promise<{ codeMode: boolean; permissionMode: PermissionMode | null; model: string | null; transcript: string } | { refused: string }> {
+  private async adoptedLaunch(session: Session, name: string): Promise<{ codeMode: boolean; permissionMode: PermissionMode | null; model: string | null; transcript: string } | { refused: string }> {
     if (session.nativeSessionId === null) {
       return { refused: 'The session never started, so it cannot be resumed.' };
     }
@@ -2726,7 +2543,7 @@ export class Runtime {
     const live = this.runners.claude.live === undefined ? { error: 'The Claude runner cannot read the roster.' } : await this.runners.claude.live(session.nativeSessionId);
 
     if (live !== null) {
-      return { refused: 'error' in live ? `Switchboard could not check that session ${name} no longer runs elsewhere: ${live.error}` : `Session ${name} still runs in another Claude window; close it there, then resume it here.` };
+      return { refused: 'error' in live ? `Switchboard could not check that session ${name} no longer runs elsewhere: ${live.error}` : `Session ${name} still runs outside Switchboard's terminal holder, in a Claude window or the background service; end it there, then resume it here.` };
     }
 
     const transcript = findTranscript(join(dirname(this.deps.claudeSettings), 'projects'), session.cwd, session.nativeSessionId);
@@ -2748,18 +2565,19 @@ export class Runtime {
     const ticket = store.ticket(item.ticketId)!;
     const playbook = item.playbook === null ? null : (this.config.playbooks.get(item.playbook) ?? null);
     const defaults = launchOptions(this.config.settings, playbook, session.kind, session.provider);
-    const registered = session.registered === true ? await this.registeredLaunch(session, name) : null;
+    // A session that was never held resumes with its contract, which a registered one's start never had, and is followed from its resume on.
+    const adopted = session.codeMode !== true ? await this.adoptedLaunch(session, name) : null;
 
-    if (registered !== null && 'refused' in registered) {
-      return refuse(registered.refused);
+    if (adopted !== null && 'refused' in adopted) {
+      return refuse(adopted.refused);
     }
 
     // A newer session may have started during the roster read.
-    if (registered !== null && store.sessionsFor(session.workItemId).at(-1)?.id !== sessionId) {
+    if (adopted !== null && store.sessionsFor(session.workItemId).at(-1)?.id !== sessionId) {
       return refuse('A newer session of this work item started; this one cannot resume.');
     }
 
-    const options = { permissionMode: registered?.permissionMode ?? defaults.permissionMode, model: registered?.model ?? (playbook === null ? item.model : null) ?? defaults.model };
+    const options = { permissionMode: adopted?.permissionMode ?? defaults.permissionMode, model: adopted?.model ?? (playbook === null ? item.model : null) ?? defaults.model };
 
     this.resuming.add(sessionId);
 
@@ -2767,15 +2585,15 @@ export class Runtime {
       // Stored before the spawn, so a hub that stops during it finds the live process under this launch.
       const launchId = this.runners.codeMode.newLaunchId?.() ?? randomUUID();
 
-      // The conversation of a registered session is followed from its first resume on: its transcript's earlier lines, often days of work in the
+      // The conversation of an adopted session is followed from its first resume on: its transcript's earlier lines, often days of work in the
       // operator's window, are not read as new, which would flood every page showing it (architecture.md § Code Mode sessions).
-      if (registered !== null && session.codeMode !== true) {
-        store.setCheckpoint({ sessionId, transcript: registered.transcript, offset: transcriptEnd(registered.transcript), lastUuid: null, lastAt: this.deps.now() });
+      if (adopted !== null && session.codeMode !== true) {
+        store.setCheckpoint({ sessionId, transcript: adopted.transcript, offset: transcriptEnd(adopted.transcript), lastUuid: null, lastAt: this.deps.now() });
       }
 
-      this.send({ type: 'held-resuming', sessionId, launchId, ...(registered === null || session.codeMode === true ? {} : { adopt: { codeMode: registered.codeMode } }) });
+      this.send({ type: 'held-resuming', sessionId, launchId, ...(adopted === null || session.codeMode === true ? {} : { adopt: { codeMode: adopted.codeMode } }) });
 
-      // A roster read during the registered session's checks may have found it running again, so the flow did not hold it.
+      // A roster read during the adopted session's checks may have found it running again, so the flow did not hold it.
       const held = store.session(sessionId);
 
       if (held === null) {
@@ -2797,8 +2615,8 @@ export class Runtime {
             launchId,
             // A session started with no prompt that ended before its first message starts again with its contract (mechanics M87).
             session.promptless === true ? { contract, name: item.interactive || ticket.hostWindow !== null ? '' : sessionName(session.kind, item, ticket) } : undefined,
-            // A registered session's contract was only in its conversation (PRD R81).
-            registered === null ? undefined : contract,
+            // A session that was never held gets its contract first in the appended prompt: a registered one's was only in its conversation (PRD R81).
+            adopted === null ? undefined : contract,
           );
 
       if ('error' in resumed) {
@@ -2994,8 +2812,6 @@ export class Runtime {
         );
         return;
       }
-      case 'resume-session':
-        return this.resumeSession(action);
       case 'stop-session': {
         const runner = this.runners[runnerKey(action)];
 
@@ -3046,26 +2862,6 @@ export class Runtime {
   }
 
   private async stopSession(action: Extract<FlowAction, { type: 'stop-session' }>): Promise<void> {
-    if (action.reason === 'operator' && runnerKey(action) === 'claude' && this.unreconciled.has(action.sessionId)) {
-      const session = this.deps.store.session(action.sessionId);
-      if (session?.state === 'starting') {
-        const result = (await this.reconcile([session])).find(entry => entry.sessionId === session.id);
-        if (this.stopped) return;
-        const current = this.deps.store.session(action.sessionId);
-        if (current?.state === 'starting' && current.nativeSessionId === null && current.shortId === null && result !== undefined && 'pending' in result && result.clearable === true) {
-          this.unreconciled.delete(current.id);
-          this.reconcileMessages.delete(current.id);
-          this.send({ type: 'session-start-failed', sessionId: current.id, message: 'Unconfirmed start cleared. No process was stopped; inspect claude agents before retrying.' });
-          return;
-        }
-        if (current?.state === 'starting') {
-          this.send({ type: 'stop-failed', sessionId: current.id, reason: 'operator', shortId: current.shortId, message: result !== undefined && 'pending' in result ? result.pending : 'The session start is still unconfirmed.' });
-          return;
-        }
-        if (current?.state === 'ended') return;
-        if (current !== null) action = { ...action, shortId: current.shortId };
-      }
-    }
     const { leftovers, ...target } = action;
     const failure = await this.runners[runnerKey(action)].stop(leftovers === true ? { ...target, lastTree: this.deps.store.session(action.sessionId)?.lastTree ?? [] } : target, action.reason);
 

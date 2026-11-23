@@ -148,7 +148,7 @@ describe('dockView', () => {
   });
 
   it('marks a permission prompt, says what answers it on line 3 without the stage, and opens a terminal from its main control (PRD R70)', () => {
-    const permission = row(item(7, { status: 'running', sessions: [session({ state: 'waiting', stateDetail: PERMISSION_PROMPT })], stage: 'checking refunds', stageAt: NOW - 60_000 }));
+    const permission = row(item(7, { status: 'running', sessions: [session({ codeMode: true, withoutCodeMode: true, state: 'waiting', stateDetail: PERMISSION_PROMPT })], stage: 'checking refunds', stageAt: NOW - 60_000 }));
 
     expect(permission).toMatchObject({
       mark: { kind: 'permission', glyph: '\u{eb53}', title: 'Approve a permission' },
@@ -156,7 +156,7 @@ describe('dockView', () => {
       main: 'Open in terminal',
       details: [{ text: 'Waits on a permission prompt', title: 'Claude asks to approve a tool call. Open in terminal to answer it; stopping the session would drop the prompt.', tone: null }],
     });
-    expect(permission.open).toBeNull();
+    expect(permission.open).toEqual({ type: 'session', sessionId: 's1', cwd: 'D:/git/widgets', provider: 'claude' });
   });
 
   it('marks a held turn that ended on an unanswered question card Answer a question in Blocked on you, without the stage or a main control (PRD R103)', () => {
@@ -285,8 +285,9 @@ describe('dockView', () => {
     expect(row(started)).toMatchObject({ mark: { kind: 'failed' }, stripe: 'error', turn: 'operator', main: 'Retry' });
   });
 
-  it('opens Open in Claude for a waiting background session, the latest session when it is not running, and nothing while it runs', () => {
-    expect(row(item(7, { sessions: [session({ state: 'waiting' })] })).open).toEqual({ type: 'question', workItemId: 7, sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', provider: 'claude' });
+  it('opens the latest session when it is not running, and nothing while it runs', () => {
+    expect(row(item(7, { sessions: [session({ codeMode: true, state: 'waiting' })] })).open).toEqual({ type: 'session', sessionId: 's1', cwd: 'D:/git/widgets', provider: 'claude' });
+    expect(row(item(7, { sessions: [session({ state: 'waiting' })] })).open).toBeNull();
     expect(row(item(7, { status: 'blocked', sessions: [session({ state: 'ended' })] })).open).toEqual({ type: 'session', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', provider: 'claude' });
     expect(row(item(7, { sessions: [session({ state: 'idle', released: true })] })).open).toEqual({ type: 'session', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', provider: 'claude' });
     expect(row(item(7, { sessions: [session({ provider: 'codex', nativeSessionId: 'thread-1', state: 'ended' })] })).open).toEqual({ type: 'session', sessionId: 'thread-1', cwd: 'D:/git/widgets', provider: 'codex' });
@@ -313,17 +314,17 @@ describe('dockView', () => {
     const waiting = row(
       item(7, {
         worktree,
-        sessions: [session({ state: 'waiting' })],
+        sessions: [session({ codeMode: true, state: 'waiting' })],
         links: [{ id: 1, ticketId: 7, label: 'PR', target: 'https://github.com/o/r/pull/19002', reportedAt: NOW, mentioned: false }],
       }),
     );
 
-    expect(waiting.main).toBe('Open in Claude');
-    expect(waiting.mainTitle).toBe('Open in Claude');
-    expect(waiting.mainGlyph).toBe('\u{eac7}');
+    expect(waiting.main).toBe('Open in terminal');
+    expect(waiting.mainTitle).toBe('Open in terminal: attaches to the Code Mode session');
+    expect(waiting.mainGlyph).toBe('\u{ea85}');
     expect(waiting.commands).toEqual([
       { label: 'Open changes', glyph: '\u{ec23}', command: { type: 'changes', path: 'D:/git/widgets/.worktrees/107-fix', key: 'gh 107', title: 'Issue <7>' } },
-      { label: 'Open in terminal', glyph: '\u{ea85}', command: { type: 'terminal', provider: 'claude', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', name: 'gh 107', shortId: 'aaaa1111', active: false } },
+      { label: 'Open in terminal', glyph: '\u{ea85}', command: { type: 'terminal', provider: 'claude', sessionId: 's1', cwd: 'D:/git/widgets', name: 'gh 107', shortId: 'aaaa1111', active: false, codeMode: true } },
       { label: 'History', glyph: '\u{ea82}', command: { type: 'history', ticketId: 7, key: 'gh 107' } },
     ]);
     expect(waiting.search).toBe('Issue <7> · gh 107 · PR #19002 · dev:develop · Blocked on you · 107-fix');
@@ -473,7 +474,7 @@ describe('dockView', () => {
             pastes: [{ id: 1, workItemId: 10, label: 'Customer reply', file: 'D:/drafts/reply.md', reportedAt: NOW }],
             sessions: [session({ state: 'ended', cwd: 'D:/git/support' })],
           }),
-          item(13, { status: 'running', readyAt: NOW - 5 * 3_600_000, orderAt: NOW - 6 * 3_600_000, stage: 'posting', stageAt: NOW - 60_000, sessions: [session({ cwd: 'D:/git/widgets' })] }),
+          item(13, { status: 'running', readyAt: NOW - 5 * 3_600_000, orderAt: NOW - 6 * 3_600_000, stage: 'posting', stageAt: NOW - 60_000, sessions: [session({ cwd: 'D:/git/widgets', codeMode: true })] }),
           item(14, { status: 'failed', error: 'Setup ended without a worktree.', statusAt: NOW - 600_000 }),
           item(15, { sessions: [session({ id: 'cm15', workItemId: 15, codeMode: true, state: 'waiting', nativeSessionId: 'eeee5555-native', shortId: 'eeee5555', cwd: 'D:/git/widgets' })] }),
           // Done rows carry their date band; 12:00 UTC less a minute is the same local day in any zone within ±11 hours.
@@ -495,7 +496,13 @@ describe('dockView', () => {
     );
 
     // The fixture was recorded on Windows; elsewhere the workspace file is joined to the windows folder with '/'.
-    expect(JSON.parse(JSON.stringify(view).replaceAll(`${JSON.stringify(W).slice(1, -1)}/`, `${JSON.stringify(W).slice(1, -1)}\\\\`))).toEqual(recorded);
+    const sent = JSON.parse(JSON.stringify(view).replaceAll(`${JSON.stringify(W).slice(1, -1)}/`, `${JSON.stringify(W).slice(1, -1)}\\\\`)) as { groups: { rows: { key: string }[] }[] };
+    // item:8 is the question row of a session in Claude's background service, whose Open in Claude the hub no longer sends (PRD R93); the dock reads it
+    // until the dock is removed, so the fixture keeps it, and every other row is the hub's.
+    const without8 = (message: { groups: { rows: { key: string }[] }[] }) => ({ ...message, groups: message.groups.map((group) => ({ ...group, rows: group.rows.filter((one) => one.key !== 'item:8') })) });
+
+    expect(sent.groups.flatMap((group) => group.rows).some((one) => one.key === 'item:8')).toBe(true);
+    expect(without8(sent)).toEqual(without8(recorded as typeof sent));
   });
 });
 
@@ -507,25 +514,10 @@ describe('dockView with dock.openVSCode review (PRD R71)', () => {
   const attach = { type: 'terminal', provider: 'claude', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', args: ['attach', 'aaaa1111'], name: `${base}-aaaa1111`, title: `Issue <7> · sb:${base}-aaaa1111`, handoff: null, active: false };
   const resume = { ...attach, args: ['--resume', 'aaaa1111-native'] };
 
-  it('opens a terminal on a Claude session its background process holds, whatever the status', () => {
-    expect(review(item(7, { sessions: [session()] })).open).toEqual(attach);
-    expect(review(item(7, { sessions: [session({ state: 'waiting' })] })).open).toEqual(attach);
-    expect(review(item(7, { status: 'awaiting-approval', sessions: [session({ state: 'waiting' })] })).open).toEqual(attach);
-    expect(review(item(7, { sessions: [session({ state: 'waiting', stateDetail: 'start-prompt' })] })).open).toEqual(attach);
-  });
-
-  it('answers a Codex question in a terminal after the Open in Codex stop, and only selects a running Codex session', () => {
+  it('only selects a running Codex exec session, waiting on its question or not, and resumes an ended one', () => {
     const codex = session({ provider: 'codex', nativeSessionId: 'thread-1234567', shortId: 'run-1' });
 
-    expect(review(item(7, { sessions: [{ ...codex, state: 'waiting', question: { id: 'q1', text: 'Red or blue?' } }] })).open).toEqual({
-      ...attach,
-      provider: 'codex',
-      sessionId: 'thread-1234567',
-      args: ['resume', 'thread-1234567'],
-      name: `${base}-thread-1`,
-      title: `Issue <7> · sb:${base}-thread-1`,
-      handoff: { workItemId: 7, sessionId: 'thread-1234567' },
-    });
+    expect(review(item(7, { sessions: [{ ...codex, state: 'waiting', question: { id: 'q1', text: 'Red or blue?' } }] })).open).toEqual({ type: 'select' });
     expect(review(item(7, { sessions: [codex] })).open).toEqual({ type: 'select' });
     expect(review(item(7, { status: 'blocked', sessions: [{ ...codex, state: 'ended', shortId: null }] })).open).toMatchObject({ type: 'terminal', args: ['resume', 'thread-1234567'], handoff: null });
   });
@@ -540,20 +532,6 @@ describe('dockView with dock.openVSCode review (PRD R71)', () => {
     expect(review(item(7, { status: 'awaiting-approval', worktree })).open).toBeNull();
     expect(review(item(7, { status: 'finished', worktree, sessions: [session({ state: 'ended', nativeSessionId: null, cwd: worktree.path })] })).open).toBeNull();
     expect(review(item(7, { status: 'finished', worktree })).window).not.toBeNull();
-  });
-
-  it('keeps one terminal name for a session across attach and resume, and gives another session its own', () => {
-    const attached = review(item(7, { sessions: [session()] })).open as { name: string };
-    const resumed = review(item(7, { status: 'blocked', sessions: [session({ state: 'ended' })] })).open as { name: string };
-    const next = review(item(7, { sessions: [session({ state: 'ended' }), session({ id: 's2', nativeSessionId: 'bbbb2222-native', shortId: 'bbbb2222' })] })).open as { name: string };
-
-    expect(resumed.name).toBe(attached.name);
-    expect(next.name).toBe(`${base}-bbbb2222`);
-  });
-
-  it('attaches to a session whose fork waits for its release, and only selects a Codex session waiting on a permission prompt', () => {
-    expect(review(item(7, { sessions: [session({ state: 'waiting', pendingFork: 'cccc3333' })] })).open).toEqual(attach);
-    expect(review(item(7, { sessions: [session({ provider: 'codex', nativeSessionId: 'thread-1', shortId: 'run-1', state: 'waiting' })] })).open).toEqual({ type: 'select' });
   });
 
   it('brings forward the terminal of a session resumed elsewhere, even on review, and resumes no copy', () => {
@@ -574,12 +552,11 @@ describe('dockView with dock.openVSCode review (PRD R71)', () => {
     expect(review(item(7, { status: 'blocked', sessions: [session({ external: true, state: 'ended', shortId: null })] })).open).toEqual(resume);
   });
 
-  it('offers Answer in terminal in place of Open in Claude, Open in Codex and a prompt before start\'s Open in terminal', () => {
-    const waiting = review(item(7, { sessions: [session({ state: 'waiting' })] }));
-    const starting = review(item(7, { sessions: [session({ state: 'waiting', stateDetail: 'start-prompt' })] }));
-    const codex = review(item(7, { sessions: [session({ provider: 'codex', nativeSessionId: 'thread-1', state: 'waiting', question: { id: 'q1', text: 'Red?' } })] }));
+  it('offers Answer in terminal for a held session waiting on a question or on a prompt before it starts', () => {
+    const waiting = review(item(7, { sessions: [session({ codeMode: true, state: 'waiting' })] }));
+    const starting = review(item(7, { sessions: [session({ codeMode: true, withoutCodeMode: true, state: 'waiting', stateDetail: 'start-prompt' })] }));
 
-    expect([waiting.main, starting.main, codex.main]).toEqual(['Answer in terminal', 'Answer in terminal', 'Answer in terminal']);
+    expect([waiting.main, starting.main]).toEqual(['Answer in terminal', 'Answer in terminal']);
     expect(review(item(7, { status: 'awaiting-approval', sessions: [session({ state: 'ended' })] })).main).toBe('Approve');
   });
 
@@ -631,7 +608,7 @@ describe('dockView of Code Mode sessions (PRD R95)', () => {
     expect(waiting.main).toBe('Open in terminal');
     expect(waiting.mainTitle).toBe('Open in terminal: attaches to the Code Mode session');
     expect(shown(item(7, { sessions: [held({ state: 'waiting' })] }), { openVSCode: 'review' }).mainTitle).toBe('Answer in terminal: attaches to the Code Mode session');
-    expect(shown(item(7, { sessions: [session({ state: 'waiting', stateDetail: PERMISSION_PROMPT })] })).mainTitle).toBe('Open in terminal');
+    expect(shown(item(7, { sessions: [held({ withoutCodeMode: true, state: 'waiting', stateDetail: PERMISSION_PROMPT })] })).mainTitle).toBe('Open in terminal: attaches to the session in the terminal holder');
   });
 
   it('sends the item window the attach terminal command, with no Open in Claude', () => {
@@ -781,10 +758,10 @@ describe('dockView with dock.openTerminal (PRD R28)', () => {
   });
 
   it('keeps a prompt before start\'s Open in terminal as the main control and attaches in the terminal app', () => {
-    const starting = shown(item(7, { sessions: [session({ state: 'waiting', stateDetail: 'start-prompt' })] }), { openTerminal: 'app' });
+    const starting = shown(item(7, { sessions: [session({ codeMode: true, state: 'waiting', stateDetail: 'start-prompt' })] }), { openTerminal: 'app' });
 
     expect(starting.main).toBe('Open in terminal');
-    expect(starting.terminal).toMatchObject({ args: ['attach', 'aaaa1111'] });
+    expect(starting.terminal).toMatchObject({ args: ['attach', 's1'] });
   });
 
   it('offers no terminal while the session starts, whatever the setting', () => {

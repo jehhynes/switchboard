@@ -95,12 +95,13 @@ describe('a turn that ends with an unanswered question card (PRD R103)', () => {
   });
 
   it('settles as before for a background session, a hosted conversation, a report, an unassigned ticket, or a hub that reads no cards', () => {
-    // A background Claude session has no conversation the view reads.
+    // A session Switchboard does not hold, such as one an earlier hub ran in the background, has no conversation the view reads.
     const background = harness({ codeMode: false });
     const [triage] = background.poll(issue('7'));
     background.triaged(triage, 'dev:read');
     const start = background.act({ type: 'start', workItemId: 1 })[0] as Extract<FlowAction, { type: 'start-session' }>;
     background.act({ type: 'session-started', sessionId: start.sessionId, nativeSessionId: null, shortId: 'abc12345' });
+    background.legacy(start.sessionId);
     background.questionCards.add(start.sessionId);
     background.act({ type: 'marker', sessionId: start.sessionId, state: 'idle', detail: null });
     expect(background.status(1)).toBe('finished');

@@ -431,7 +431,7 @@ describe('stop', () => {
 
     fake.alive.add(100);
     const before = fake.now;
-    expect(await runner.stop({ sessionId: 's1', shortId: THREAD }, 'open')).toBeNull();
+    expect(await runner.stop({ sessionId: 's1', shortId: THREAD }, 'release')).toBeNull();
     expect(fake.now - before).toBeGreaterThanOrEqual(EXIT_WAIT_MS);
     expect(fake.kills).toEqual([100]);
   });
@@ -463,7 +463,7 @@ describe('stop', () => {
 
     writeFileSync(join(home, 'codex', 's1.json'), JSON.stringify({ ...record, v: 1, attempt: 2 }));
     expect(await runner.stop({ sessionId: 's1', shortId: THREAD }, 'operator')).toEqual(unreadable);
-    expect(await runner.stop({ sessionId: 's1', shortId: THREAD }, 'open')).toEqual(unreadable);
+    expect(await runner.stop({ sessionId: 's1', shortId: THREAD }, 'release')).toEqual(unreadable);
     expect(fake.kills).toEqual([]);
   });
 });

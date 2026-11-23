@@ -451,9 +451,9 @@ export interface Card {
 }
 
 /**
- * An ended registered Claude session (PRD R81) that is not held yet: opening it resumes it in the terminal holder, where it becomes a held session
- * (PRD R95).
+ * An ended Claude session that is not held yet: a registered one (PRD R81), or one an earlier hub ran in Claude's background service (PRD R93).
+ * Opening it resumes it in the terminal holder, where it becomes a held session (PRD R95).
  */
-export function resumesHeld(session: Pick<Session, 'registered' | 'codeMode' | 'provider' | 'state' | 'nativeSessionId'>): boolean {
-  return session.registered === true && session.codeMode !== true && session.provider === 'claude' && session.state === 'ended' && session.nativeSessionId !== null;
+export function resumesHeld(session: Pick<Session, 'codeMode' | 'provider' | 'state' | 'nativeSessionId'>): boolean {
+  return session.codeMode !== true && session.provider === 'claude' && session.state === 'ended' && session.nativeSessionId !== null;
 }

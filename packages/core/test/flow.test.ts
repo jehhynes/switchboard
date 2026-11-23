@@ -212,6 +212,10 @@ describe('triage', () => {
       name: 'switchboard · dev:question · github 1',
       permissionMode: 'plan',
       model: 'opus',
+      codeMode: true,
+      withoutCodeMode: true,
+      nativeSessionId: 'uuid-1',
+      launchId: 'uuid-2',
     });
     expect(h.item(1)).toMatchObject({ status: 'running', taskPrompt: start.prompt });
     expect(h.store.session('s1')).toMatchObject({ kind: 'task', state: 'starting', cwd: 'D:/git/widgets', provider: 'claude' });
@@ -393,7 +397,7 @@ describe('sessions', () => {
     return { item, session };
   }
 
-  it('finishes the work item on a done report and releases the session once its turn ends', () => {
+  it('finishes the work item on a done report, and keeps the held session between turns until its idle end', () => {
     const h = new Harness({ playbooks: playbooks(undefined, FINISH) });
     const { item, session } = running(h, '1', 'dev:finish');
 
@@ -401,9 +405,10 @@ describe('sessions', () => {
     expect(h.item(item)).toMatchObject({ status: 'done', doneReason: 'session', warning: null });
 
     expect(h.act({ type: 'marker', sessionId: session, state: 'waiting', detail: null })).toEqual([]);
-    expect(h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null })).toEqual([{ type: 'stop-session', sessionId: session, provider: 'claude', shortId: 'abc12345', reason: 'release' }]);
+    expect(h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null })).toEqual([]);
     expect(h.act({ type: 'marker', sessionId: session, state: 'running', detail: null })).toEqual([]);
     expect(h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null })).toEqual([]);
+    expect(h.act({ type: 'held-idle', sessionId: session })).toEqual([{ type: 'stop-session', sessionId: session, provider: 'claude', shortId: 'abc12345', reason: 'release', codeMode: true }]);
 
     h.act({ type: 'stop-succeeded', sessionId: session, reason: 'release' });
     expect(h.store.session(session)).toMatchObject({ state: 'ended', outcome: 'done', outcomeDetail: null, endedAt: T0 });
@@ -418,8 +423,7 @@ describe('sessions', () => {
     expect(h.item(item)).toMatchObject({ status: 'running', error: null, doneAt: null });
     expect(h.store.session(session)?.outcome).toBe('done');
 
-    expect(h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null })).toEqual([{ type: 'stop-session', sessionId: session, provider: 'claude', shortId: 'abc12345', reason: 'release' }]);
-    h.act({ type: 'stop-succeeded', sessionId: session, reason: 'release' });
+    expect(h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null })).toEqual([]);
     expect(h.item(item).status).toBe('running');
 
     h.act({ type: 'done-checked', sessionId: session, token: h.store.session(session)?.outcomeDetail ?? '', assigned: true });
@@ -617,14 +621,6 @@ describe('sessions', () => {
     expect(h.store.session(session)?.state).toBe('idle');
   });
 
-  it('never releases a session the roster lists as interactive, even if its end was not observed', () => {
-    const h = new Harness();
-    const { session } = running(h);
-
-    expect(h.act({ type: 'roster', sessions: [{ sessionId: session, state: 'idle', detail: null, interactive: true }] })).toEqual([]);
-    expect(h.store.session(session)).toMatchObject({ state: 'idle', released: true });
-  });
-
   it('leaves a starting session alone until its start is confirmed', () => {
     const h = new Harness();
     const [triage] = h.poll(issue('1'));
@@ -769,7 +765,7 @@ describe('sessions', () => {
     expect(h.item(item)).toMatchObject({ status: 'done', doneReason: 'operator' });
     expect(h.send({ type: 'mark-done', workItemId: item }).refused).toBe('The work item is done.');
 
-    expect(h.act({ type: 'stop', workItemId: item })).toEqual([{ type: 'stop-session', sessionId: session, provider: 'claude', shortId: 'abc12345', reason: 'operator' }]);
+    expect(h.act({ type: 'stop', workItemId: item })).toEqual([{ type: 'stop-session', sessionId: session, provider: 'claude', shortId: 'abc12345', reason: 'operator', codeMode: true }]);
     h.act({ type: 'stop-succeeded', sessionId: session, reason: 'operator' });
     expect(h.item(item)).toMatchObject({ status: 'done', doneReason: 'operator', error: null });
     expect(h.store.session(session)?.state).toBe('ended');
@@ -973,7 +969,7 @@ describe('stop', () => {
     h.triaged(triage, 'dev:question');
     const session = h.started(h.act({ type: 'start', workItemId: 1 })[0]);
 
-    expect(h.act({ type: 'stop', workItemId: 1 })).toEqual([{ type: 'stop-session', sessionId: session, provider: 'claude', shortId: 'abc12345', reason: 'operator' }]);
+    expect(h.act({ type: 'stop', workItemId: 1 })).toEqual([{ type: 'stop-session', sessionId: session, provider: 'claude', shortId: 'abc12345', reason: 'operator', codeMode: true }]);
     expect(h.status(1)).toBe('running');
 
     h.act({ type: 'stop-failed', sessionId: session, reason: 'operator', message: 'timed out' });
@@ -1034,9 +1030,8 @@ describe('setup', () => {
     h.report(setup, { kind: 'done' });
     expect(h.status(1)).toBe('setup');
 
-    expect(h.act({ type: 'marker', sessionId: setup, state: 'idle', detail: null })).toEqual([{ type: 'stop-session', sessionId: setup, provider: 'claude', shortId: 'abc12345', reason: 'release' }]);
-
-    const task = only(h.act({ type: 'stop-succeeded', sessionId: setup, reason: 'release' }), 'start-session');
+    // The held setup session's turn end starts the task; the setup session keeps running until its idle end (PRD R95).
+    const task = only(h.act({ type: 'marker', sessionId: setup, state: 'idle', detail: null }), 'start-session');
 
     expect(task).toMatchObject({ kind: 'task', cwd: 'D:/git/widgets-wt/15619', prompt: '/sb-plan 15619', contract: CONTRACT(task.sessionId, FINISHING_REPORTS), name: 'switchboard · dev:develop · github 15619' });
     expect(h.status(1)).toBe('running');
@@ -1280,9 +1275,7 @@ describe('limits and the one-session-in-a-turn rule', () => {
 
     h.report(setup, { kind: 'worktree', path: 'D:/wt/1', branch: null });
     h.report(setup, { kind: 'done' });
-    expect(only(h.act({ type: 'marker', sessionId: setup, state: 'idle', detail: null }), 'stop-session').sessionId).toBe(setup);
-
-    const task = only(h.act({ type: 'stop-succeeded', sessionId: setup, reason: 'release' }), 'start-session');
+    const task = only(h.act({ type: 'marker', sessionId: setup, state: 'idle', detail: null }), 'start-session');
     expect(task).toMatchObject({ workItemId: 1, kind: 'task' });
     expect(h.status(2)).toBe('queued');
   });
@@ -1438,6 +1431,10 @@ describe('ad-hoc', () => {
       name: 'switchboard · ad-hoc · adhoc 1',
       permissionMode: 'auto',
       model: null,
+      codeMode: true,
+      withoutCodeMode: true,
+      nativeSessionId: 'uuid-1',
+      launchId: 'uuid-2',
     });
     expect(h.store.ticket(1)).toMatchObject({ source: 'adhoc', sourceKey: '1', title: 'Write hello.txt', repoRoot: 'D:/scratch' });
     expect(h.item(1)).toMatchObject({ playbook: null, taskPrompt: '  Write hello.txt\nthen report done', status: 'running' });
@@ -1591,6 +1588,10 @@ describe('task reports (PRD R68)', () => {
       name: 'switchboard · ad-hoc · adhoc 1',
       permissionMode: 'auto',
       model: null,
+      codeMode: true,
+      withoutCodeMode: true,
+      nativeSessionId: expect.any(String) as unknown as string,
+      launchId: expect.any(String) as unknown as string,
     });
     expect(h.item(2)).toMatchObject({ status: 'running', runStartedAt: T0 + MINUTE });
   });
@@ -1676,7 +1677,7 @@ describe('registered sessions (PRD R81)', () => {
     expect(h.store.session('s1')).toMatchObject({ state: 'idle', released: false, endedAt: null, launchId: 'l2' });
   });
 
-  it('becomes a Code Mode held session when it ran in Code Mode, and an ad-hoc session never adopts', () => {
+  it('becomes a Code Mode held session when it ran in Code Mode, a background session from an earlier hub adopts too, and a Codex session never does', () => {
     const h = new Harness();
     register(h);
     h.act({ type: 'roster', sessions: [] });
@@ -1685,8 +1686,12 @@ describe('registered sessions (PRD R81)', () => {
     expect(h.store.session('s1')).toMatchObject({ codeMode: true, withoutCodeMode: false, launchId: 'l1' });
 
     h.store.updateSession('s1', { registered: false, codeMode: false });
+    h.act({ type: 'held-resuming', sessionId: 's1', launchId: 'l2', adopt: { codeMode: false } });
+    expect(h.store.session('s1')).toMatchObject({ codeMode: true, withoutCodeMode: true, launchId: 'l2' });
+
+    h.store.updateSession('s1', { codeMode: false, provider: 'codex' });
     h.act({ type: 'held-resuming', sessionId: 's1', launchId: 'l3', adopt: { codeMode: true } });
-    expect(h.store.session('s1')).toMatchObject({ codeMode: false, launchId: 'l1' });
+    expect(h.store.session('s1')).toMatchObject({ codeMode: false, launchId: 'l2' });
   });
 
   it('refuses Stop, because the session runs in the operator window', () => {
@@ -1978,22 +1983,7 @@ describe('agents (PRD R22)', () => {
 });
 
 describe('release in progress (PRD R39)', () => {
-  it('marks a session releasing until its release stop finishes, fails, or the operator is seen running it', () => {
-    const h = new Harness();
-    const [triage] = h.poll(issue('1'));
-    const session = h.started(only(h.triaged(triage, 'support:defect'), 'start-session'));
-
-    expect(h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null })).toEqual([{ type: 'stop-session', sessionId: session, provider: 'claude', shortId: 'abc12345', reason: 'release' }]);
-    expect(h.store.session(session)).toMatchObject({ released: true, releasing: true });
-
-    h.act({ type: 'stop-failed', sessionId: session, reason: 'release', message: 'busy' });
-    expect(h.store.session(session)).toMatchObject({ releasing: true });
-
-    h.act({ type: 'roster', sessions: [{ sessionId: session, state: 'running', detail: null, interactive: true }] });
-    expect(h.store.session(session)).toMatchObject({ released: true, releasing: false, state: 'running' });
-  });
-
-  it('lets the operator stop or delete a session whose release stop failed, which ends its background process', () => {
+  it('lets the operator stop or delete a held session whose idle end failed', () => {
     const h = new Harness();
     const [first, second] = h.poll(issue('1'), issue('2'));
     const one = h.started(only(h.triaged(first, 'support:defect'), 'start-session'), 'abc00001');
@@ -2001,13 +1991,15 @@ describe('release in progress (PRD R39)', () => {
 
     for (const session of [one, two]) {
       h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
+      h.act({ type: 'held-idle', sessionId: session });
       h.act({ type: 'stop-failed', sessionId: session, reason: 'release', message: 'busy' });
+      expect(h.store.session(session)).toMatchObject({ state: 'idle', released: false, releasing: false });
     }
 
-    expect(h.act({ type: 'stop', workItemId: 1 })).toEqual([{ type: 'stop-session', sessionId: one, provider: 'claude', shortId: 'abc00001', reason: 'operator' }]);
+    expect(h.act({ type: 'stop', workItemId: 1 })).toEqual([{ type: 'stop-session', sessionId: one, provider: 'claude', shortId: 'abc00001', reason: 'operator', codeMode: true }]);
     h.act({ type: 'stop-succeeded', sessionId: one, reason: 'operator' });
     expect(h.store.session(one)).toMatchObject({ state: 'ended', releasing: false });
-    expect(h.act({ type: 'delete', workItemId: 2 })).toEqual([{ type: 'stop-session', sessionId: two, provider: 'claude', shortId: 'abc00002', reason: 'operator' }]);
+    expect(h.act({ type: 'delete', workItemId: 2 })).toEqual([{ type: 'stop-session', sessionId: two, provider: 'claude', shortId: 'abc00002', reason: 'operator', codeMode: true }]);
   });
 
   it('clears releasing when the release stop succeeds', () => {

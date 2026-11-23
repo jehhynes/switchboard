@@ -353,7 +353,7 @@ public static partial class SettingsFields
             [
                 new Field("sessions.provider", "Default agent", FieldKind.Select, "The agent playbook and ad-hoc sessions run in. A playbook can name its own.", "claude", providers),
                 new Field("sessions.concurrency", "Concurrency", FieldKind.Integer, "Sessions that run at once, 1 to 10. A start with no free slot waits as queued.", "2"),
-                new Field("sessions.codeMode", "Code Mode (experimental)", FieldKind.Boolean, "New Claude sessions use Claude Code’s Code Mode and open in a terminal instead of the Claude view. They keep running between turns until you stop them or they sit idle for an hour. They use your Claude subscription sign-in; the gateway in your Claude settings does not apply. Sessions already started keep their mode. Needs Install hooks.", Fallback: false),
+                new Field("sessions.codeMode", "Code Mode (experimental)", FieldKind.Boolean, "New Claude sessions use Claude Code’s Code Mode. With it on they use your Claude subscription sign-in, and the gateway in your Claude settings does not apply; with it off they run as your own claude does. Either way they run in Switchboard’s terminal holder and keep running between turns until you stop them or they sit idle for an hour. Sessions already started keep their mode.", Fallback: false),
                 new Field("sessions.debriefs", "Friction debriefs", FieldKind.Boolean, "Ask each session what slowed it down, once its work item is done or 45 minutes after its last turn. The answers go to ~/.claude/.wip/debrief for the friction-review skill.", Fallback: false),
             ]),
             new Section("Claude sessions",

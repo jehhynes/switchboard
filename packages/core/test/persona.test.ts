@@ -161,13 +161,14 @@ describe('personas in the flow (architecture.md § Personas)', () => {
     expect(h.store.session(action.sessionId)).toMatchObject({ personaId: 'nova', personaVersion: null });
   });
 
-  it('gives a background session no persona', () => {
+  it('gives a held session without Code Mode a persona as a Code Mode session gets one', () => {
     const base = withRoster();
     const h = new Harness({ settings: { ...base, sessions: { ...base.sessions, codeMode: false } } });
     const action = adhoc(h);
 
-    expect(action.tone).toBeUndefined();
-    expect(h.store.session(action.sessionId)?.personaId).toBeNull();
+    expect(action).toMatchObject({ codeMode: true, withoutCodeMode: true });
+    expect(action.tone).toContain('## Persona');
+    expect(h.store.session(action.sessionId)?.personaId).not.toBeNull();
   });
 
   it('pins a persona to a session, and clearing the pin resolves it again', () => {

@@ -126,11 +126,12 @@
               "command": {
                 "type": "terminal",
                 "provider": "claude",
-                "sessionId": "aaaa1111-native",
+                "sessionId": "s1",
                 "cwd": "D:/git/widgets",
                 "name": "gh 113",
                 "shortId": "aaaa1111",
-                "active": false
+                "active": false,
+                "codeMode": true
               }
             },
             {

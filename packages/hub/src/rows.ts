@@ -121,11 +121,6 @@ export function mainControl(item: WorkItemView, mode: OpenVSCode = 'always'): Co
     return mode === 'review' ? ANSWER_IN_TERMINAL : (controls.find((control) => control.label === 'Open in terminal') ?? null);
   }
 
-  // A question the session waits on comes before an approval it reported earlier, as the row's mark does.
-  if (waitsInBackground(activeSession(item))) {
-    return controls.find((control) => control.message['type'] === 'open-question' || control === ANSWER_IN_TERMINAL) ?? null;
-  }
-
   // An ad-hoc or task work item's Start opens its prompt first (PRD R77).
   const wanted = item.status === 'unstarted' ? (ownPrompt(item) === null ? 'Start' : 'Start with prompt…') : item.status === 'awaiting-approval' ? 'Approve' : retries(item) ? 'Retry' : null;
 
@@ -143,8 +138,8 @@ export function mainTitle(item: WorkItemView, control: Control): string {
 
   const latest = item.sessions.at(-1);
 
-  // A registered session may run without Code Mode once held (PRD R81).
-  return control.icon === 'terminal' && latest?.codeMode === true ? `${control.label}: attaches to the ${latest.registered === true ? 'session in the terminal holder' : 'Code Mode session'}` : control.label;
+  // A held session runs without Code Mode when sessions.codeMode was off at its start, or a registered one ran without it (PRD R81, R93).
+  return control.icon === 'terminal' && latest?.codeMode === true ? `${control.label}: attaches to the ${latest.withoutCodeMode === true || latest.registered === true ? 'session in the terminal holder' : 'Code Mode session'}` : control.label;
 }
 
 /** The controls that apply to a work item (PRD R27); with `dock.openVSCode: review`, Answer in terminal replaces Open in Claude or Codex. */
@@ -168,16 +163,9 @@ export function controlsOf(item: WorkItemView, mode: OpenVSCode = 'always'): Con
     controls.push({ label: 'Copy', icon: 'copy', message: { type: 'copy', pastes: item.pastes.map(({ label, file }) => ({ label, file })) } });
   }
 
-  const question = openQuestion(item);
-
-  if (question !== null) {
-    controls.push(mode === 'review' ? ANSWER_IN_TERMINAL : { label: `Open in ${PROVIDER_NAMES[question.provider]}`, icon: 'comment-discussion', message: question });
-  }
-
   // Processes an ended Code Mode session left can keep it from resuming, so Stop session ends them (PRD R95).
-  const unconfirmed = session?.state === 'starting' && session.provider === 'claude' && session.codeMode !== true && session.nativeSessionId === null && session.shortId === null && session.stateDetail !== null;
-  if (unconfirmed || isBackground(session) || (session?.execution === 'app-server' && session.nativeSessionId !== null) || (session === null && (item.leftovers?.length ?? 0) > 0)) {
-    controls.push({ label: 'Stop session', icon: 'debug-stop', message: action('stop'), ...(unconfirmed ? { confirm: { question: 'Recheck this start?', detail: 'Only an overdue start with no matching session can be cleared without stopping a process. Resolve duplicate sessions in claude agents first. Inspect it before retrying.', action: 'Stop session' } } : {}) });
+  if (isBackground(session) || (session?.execution === 'app-server' && session.nativeSessionId !== null) || (session === null && (item.leftovers?.length ?? 0) > 0)) {
+    controls.push({ label: 'Stop session', icon: 'debug-stop', message: action('stop') });
   }
 
   // Retries from the step that failed, or setup that stopped at a usage limit (PRD R34, R111).
@@ -230,9 +218,9 @@ function deleteConfirm(item: WorkItemView, stops: boolean): NonNullable<Control[
 }
 
 /**
- * Open in terminal (PRD R28): `claude attach` while a Claude session runs in its background process, else `claude --resume` or `codex resume`
- * once it has ended; Codex has no attach (mechanics M31). `active` marks a session the operator resumed, in a terminal or a VS Code tab, which is
- * shown rather than resumed again. Null while it starts, except for a Code Mode session, whose attach terminal opens in every state.
+ * Open in terminal (PRD R28): a held Claude session's attach terminal, which opens in every state and resumes an ended session in the holder; Codex's
+ * terminal app on an app-server thread; else `codex resume` once a Codex exec session has ended, since Codex has no attach (mechanics M31). Null
+ * while a registered session lives in the operator's own window (PRD R81).
  */
 export function terminalCommand(item: WorkItemView): Record<string, unknown> | null {
   const latest = item.sessions.at(-1) ?? null;
@@ -247,13 +235,11 @@ export function terminalCommand(item: WorkItemView): Record<string, unknown> | n
   }
 
   if (isBackground(session)) {
-    return session.provider === 'codex'
-      ? null
-      : { type: 'terminal', provider: session.provider, sessionId: session.nativeSessionId ?? session.shortId, cwd: session.cwd, name, shortId: session.shortId, active: false };
+    return null;
   }
 
-  // A session whose release stop has not finished may still be held by its background process (PRD R39), and a registered one by the
-  // operator's window, which the terminal cannot find (PRD R81).
+  // A session whose release stop has not finished may still run, and a registered one runs in the operator's window, which the terminal cannot
+  // find (PRD R81).
   if (latest?.nativeSessionId == null || (session !== null && (session.state === 'starting' || !session.released || session.releasing || session.external === true))) {
     return null;
   }
@@ -321,39 +307,19 @@ function historyControl(ticket: { id: number; source: string; sourceKey: string 
 type SessionView = WorkItemView['sessions'][number];
 
 /**
- * A session running in its background process, including one whose release stop has not finished or failed, so Stop session stays offered; a released
- * session that is active again was resumed elsewhere, such as in a VS Code tab.
+ * A session Switchboard runs, held in the terminal holder or on Codex's app-server, including one whose end has not finished or failed, so Stop session
+ * stays offered; a released session that is active is a registered one in the operator's own window (PRD R81).
  */
 export function isBackground(session: SessionView | null): session is SessionView & { shortId: string } {
   return session !== null && session.state !== 'starting' && session.shortId !== null && (!session.released || session.releasing);
 }
 
 /**
- * A session waiting on the operator in its background process, which Open in Claude or Codex stops and opens in a tab (PRD R70). While a fork
- * waits for its release (PRD R78) Stop session is offered instead, as Open would open the retired copy; a hub older than forks sends no `pendingFork`.
- * A session waiting on a prompt before it starts has nothing to open in a tab yet (PRD R41), and stopping one that waits on a permission prompt
- * drops the prompt (PRD R70).
- */
-function waitsInBackground(session: SessionView | null): session is SessionView & { shortId: string; nativeSessionId: string } {
-  return isBackground(session) && session.state === 'waiting' && !waitsInTerminal(session) && session.nativeSessionId !== null && (session.pendingFork ?? null) === null;
-}
-
-/**
  * A wait the operator answers by attaching to the session in a terminal: a prompt before it starts (PRD R41), a permission prompt (PRD R70), or
- * any wait of a Code Mode session, because the Claude view refuses Code Mode (PRD R95).
+ * any wait of a held session or an app-server thread (PRD R95).
  */
 function waitsInTerminal(session: SessionView | null): boolean {
   return waitsToStart(session) || waitsOnPermission(session) || ((session?.codeMode === true || session?.execution === 'app-server') && session.state === 'waiting');
-}
-
-/**
- * Open in Claude or Codex: the hub stops the session, which then opens in the item window's view of its provider (PRD R70). A Codex session offers it
- * only while it waits on a question it reported, not on a permission prompt.
- */
-export function openQuestion(item: WorkItemView): { type: 'open-question'; workItemId: number; sessionId: string; cwd: string; provider: Provider } | null {
-  const session = activeSession(item);
-
-  return waitsInBackground(session) && (session.provider !== 'codex' || session.question !== null) ? { type: 'open-question', workItemId: item.id, sessionId: session.nativeSessionId, cwd: session.cwd, provider: session.provider } : null;
 }
 
 /** How labels name each provider. */
@@ -621,7 +587,7 @@ export function issueOfUrl(target: string): { repo: string; number: string } | n
 export function startPromptText(item: WorkItemView): { text: string; title: string }[] {
   const session = activeSession(item);
   // Tooltips name a Code Mode session, which the row does not show (PRD R22).
-  const codeMode = session?.codeMode === true;
+  const codeMode = session?.codeMode === true && session.withoutCodeMode !== true;
 
   if (waitsToStart(session)) {
     const before = codeMode ? 'Claude asks before the Code Mode session starts, such as to trust the folder.' : "Claude asks before the session starts, such as to approve the project's MCP servers.";

@@ -63,7 +63,10 @@ const RELOAD_DEBOUNCE_MS = 300;
 export const PHONE_LOST_NOTE = 'Voice stopped unexpectedly on the paired device. Select Voice on this device there, or Talk here on this computer.';
 
 /** Operator events the dock may send (PRD R27). */
-const OPERATOR_EVENTS = new Set(['adhoc', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retry', 'stop', 'delete', 'open-question', 'pick', 'retriage-pool', 'snooze', 'restore', 'comment', 'move', 'reset-position', 'persona']);
+/** Why `/background` refuses: Switchboard no longer runs Claude sessions in Claude's background service (PRD R89, R93). */
+export const CONTINUE_IN_BACKGROUND_REMOVED = "Continue in Background is no longer available: Switchboard runs every Claude session in its terminal holder. Start a new session from the web page.";
+
+const OPERATOR_EVENTS = new Set(['adhoc', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retry', 'stop', 'delete', 'pick', 'retriage-pool', 'snooze', 'restore', 'comment', 'move', 'reset-position', 'persona']);
 
 const REPORT_KINDS = new Set(['stage', 'worktree', 'done', 'approval', 'link', 'playbook', 'paste', 'task', 'question']);
 
@@ -167,13 +170,6 @@ export function parseAction(body: unknown): FlowEvent | null {
     const { workItemId, text } = body;
 
     return Number.isInteger(workItemId) && typeof text === 'string' ? { type: 'comment', workItemId: workItemId as number, text } : null;
-  }
-
-  // Only the fields the core reads, because a `sessionId` field would make the activity log name another subject.
-  if (body['type'] === 'open-question') {
-    const { workItemId, nativeSessionId } = body;
-
-    return Number.isInteger(workItemId) && typeof nativeSessionId === 'string' ? { type: 'open-question', workItemId: workItemId as number, nativeSessionId } : null;
   }
 
   if ((body['type'] === 'start' || body['type'] === 'pick') && ((body['guidance'] != null && typeof body['guidance'] !== 'string') || (body['playbook'] != null && typeof body['playbook'] !== 'string') || (body['prompt'] != null && typeof body['prompt'] !== 'string'))) {
@@ -1222,31 +1218,9 @@ const dockWithRuns = () => {
 
         return refused === null ? { status: 200, body: { started: true } } : { status: 409, body: { error: refused } };
       },
-      // Continue in Background from an item window's Claude tab (PRD R89).
-      '/background': async (body) => {
-        const { label, hostPid, workItemIds } = isRecord(body) ? body : {};
-
-        // A null label is the Claude sidebar, which has no tab.
-        if ((label !== null && (typeof label !== 'string' || label === '')) || !Number.isInteger(hostPid) || !Array.isArray(workItemIds) || !workItemIds.every((id) => Number.isInteger(id))) {
-          return { status: 400, body: { error: 'Expected {label, hostPid, workItemIds}.' } };
-        }
-
-        const result = await runtime.background(label as string | null, hostPid as number, workItemIds as number[]);
-
-        return 'pid' in result ? { status: 200, body: { pid: result.pid } } : { status: 409, body: { error: result.refused } };
-      },
-      // Continue in Background's last check before the window closes (PRD R89).
-      '/background/check': async (body) => {
-        const { hostPid, pid } = isRecord(body) ? body : {};
-
-        if (!Number.isInteger(hostPid) || !Number.isInteger(pid)) {
-          return { status: 400, body: { error: 'Expected {hostPid, pid}.' } };
-        }
-
-        const alone = await runtime.windowAlone(hostPid as number, pid as number);
-
-        return typeof alone === 'boolean' ? { status: 200, body: { alone } } : { status: 409, body: { error: alone.error } };
-      },
+      // Continue in Background from an item window's Claude tab is gone with Claude's background sessions (PRD R89, R93); a window that still asks is told.
+      '/background': () => Promise.resolve({ status: 409, body: { error: CONTINUE_IN_BACKGROUND_REMOVED } }),
+      '/background/check': () => Promise.resolve({ status: 409, body: { error: CONTINUE_IN_BACKGROUND_REMOVED } }),
       // The ticket report (PRD R83), which no report contract or usage text lists.
       '/ticket': async (body) => {
         const { sessionId, url, playbook, nativeSessionId } = isRecord(body) ? body : {};

@@ -189,9 +189,9 @@ describe('paneModel (PRD R92)', () => {
 });
 
 describe('mainTerminal (PRD R28, R92)', () => {
-  const waiting = { id: 's7', workItemId: 7, kind: 'task' as const, provider: 'claude' as const, nativeSessionId: 'native-7', shortId: 'ab12', cwd: WORKTREE, state: 'waiting' as const, stateAt: NOW, stateDetail: 'permission-prompt', outcome: null, outcomeDetail: null, startedAt: NOW, endedAt: null, released: false, releasing: false, question: null, reports: [], retiredIds: [], pendingFork: null, external: false, move: null, movedAt: null };
+  const waiting = { id: 's7', workItemId: 7, kind: 'task' as const, provider: 'claude' as const, nativeSessionId: 'native-7', shortId: 'ab12', cwd: WORKTREE, state: 'waiting' as const, stateAt: NOW, stateDetail: 'permission-prompt', outcome: null, outcomeDetail: null, startedAt: NOW, endedAt: null, released: false, releasing: false, question: null, reports: [], retiredIds: [], pendingFork: null, external: false, move: null, movedAt: null, codeMode: true, withoutCodeMode: true };
   const row = (openTerminal: Snapshot['openTerminal']): DockRow => windowRows({ ...snapshot([item({ sessions: [waiting] })]), openTerminal }, FILE, WINDOWS, NOW)[0]!;
-  const attach = { type: 'terminal', provider: 'claude', sessionId: 'native-7', cwd: WORKTREE, shortId: 'ab12', active: false };
+  const attach = { type: 'terminal', provider: 'claude', sessionId: 's7', cwd: WORKTREE, active: false, codeMode: true };
 
   it("takes the row's window command for a permission prompt in VS Code's terminal", () => {
     expect(row('vscode').main).toBe('Open in terminal');
@@ -203,13 +203,13 @@ describe('mainTerminal (PRD R28, R92)', () => {
     expect(mainTerminal(row('app'))).toMatchObject(attach);
   });
 
-  it('attaches to a Code Mode session waiting on a question by its Switchboard session ID, where a background session opens in Claude (PRD R95)', () => {
-    const question = { ...waiting, stateDetail: 'Which branch?' };
+  it('attaches to a Code Mode session waiting on a question by its Switchboard session ID, where a background session offers nothing (PRD R93, R95)', () => {
+    const question = { ...waiting, stateDetail: 'Which branch?', codeMode: false, withoutCodeMode: false };
     const held = { ...question, codeMode: true };
     const rowOf = (session: typeof waiting, openTerminal: Snapshot['openTerminal']): DockRow => windowRows({ ...snapshot([item({ sessions: [session] })]), openTerminal }, FILE, WINDOWS, NOW)[0]!;
     const expected = { type: 'terminal', provider: 'claude', sessionId: 's7', cwd: WORKTREE, name: 'gh 107', shortId: null, active: false, codeMode: true };
 
-    expect(rowOf(question, 'vscode').main).toBe('Open in Claude');
+    expect(rowOf(question, 'vscode').main).toBeNull();
     expect(mainTerminal(rowOf(question, 'vscode'))).toBeNull();
     expect(paneModel(snapshot([item({ sessions: [held] })]), FILE, WINDOWS, NOW).items[0]!.main).toMatchObject({ label: 'Open in terminal', title: 'Open in terminal: attaches to the Code Mode session' });
     expect(mainTerminal(rowOf(held, 'vscode'))).toMatchObject({ ...expected, shortId: 'ab12' });

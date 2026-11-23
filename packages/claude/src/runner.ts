@@ -1,6 +1,4 @@
-import { readFileSync } from 'node:fs';
-import { PERMISSION_PROMPT, START_PROMPT } from '@switchboard/core';
-import type { LiveState, ObservedFork, ObservedSession, StartAction, StartResult } from '@switchboard/core';
+import type { LiveState, ObservedFork, ObservedSession } from '@switchboard/core';
 import type { Exec } from './exec.js';
 import { claudeEnvironment, failureOf } from './exec.js';
 import { markerState } from './hooks.js';
@@ -20,41 +18,11 @@ export interface RosterEntry {
   name?: string;
 }
 
-export const START_TIMEOUT_MS = 60_000;
-export const LAUNCH_TIMEOUT_MS = 60_000;
 const ROSTER_TIMEOUT_MS = 15_000;
-export const STOP_TIMEOUT_MS = 15_000;
-const ROSTER_POLL_MS = 2_000;
-
-/**
- * Background session start (GC M33). `bgIsolation: none` lets the session edit its working directory; the prompt is one
- * argument, so a leading slash command survives. `--bg` ignores `--session-id`, so the short ID comes from its output.
- * The contract goes in the system prompt, which Claude records and reuses on resume until compaction (mechanics M30).
- */
-export function startArgs(action: StartAction): string[] {
-  return [
-    '--bg',
-    '--permission-mode',
-    action.permissionMode,
-    '--settings',
-    JSON.stringify({ worktree: { bgIsolation: 'none' } }),
-    '-n',
-    `${action.name} · ${action.sessionId}`,
-    ...(action.model === null ? [] : ['--model', action.model]),
-    '--append-system-prompt',
-    action.contract,
-    action.prompt,
-  ];
-}
-
-/** Reads the short ID from `backgrounded · <id> · <name>`. */
-export function shortIdFrom(stdout: string): string | null {
-  return /^\s*backgrounded\s+·\s+([0-9a-f]{8})\s+·/m.exec(stdout)?.[1] ?? null;
-}
 
 export type RosterResult = { entries: RosterEntry[] } | { error: string };
 
-/** `claude agents --json`; `all` also lists background jobs whose process ended, such as one released to a VS Code tab (mechanics M55). */
+/** `claude agents --json`; `all` also lists background jobs whose process ended (mechanics M55). */
 export async function readRoster(claudePath: string, exec: Exec, all = false): Promise<RosterResult> {
   const result = await exec(claudePath, ['agents', '--json', ...(all ? ['--all'] : [])], { timeoutMs: ROSTER_TIMEOUT_MS, env: claudeEnvironment(claudePath) });
 
@@ -71,7 +39,7 @@ export async function readRoster(claudePath: string, exec: Exec, all = false): P
   }
 }
 
-/** The roster entry of a background session, matched by short ID. */
+/** The roster entry of a session, matched by short ID. */
 export function entryFor(entries: RosterEntry[], shortId: string): RosterEntry | undefined {
   return entries.find((entry) => entry.id === shortId || entry.sessionId.startsWith(shortId));
 }
@@ -96,173 +64,21 @@ export function rosterState(entry: RosterEntry): LiveState {
   }
 }
 
-export interface StartDeps {
-  exec: Exec;
-  sleep(ms: number): Promise<void>;
-  now(): number;
-}
-
 /**
- * Starts a background session and waits for its roster entry to have a pid. Claude's own message explains a refusal, such as an untrusted
- * directory. A session waiting on a prompt before it starts, such as approving the project's MCP servers, is listed `blocked` with no pid until
- * the operator answers (mechanics M41). Two such reads in a row start it as waiting on that prompt, which the operator answers by attaching.
+ * The roster event for sessions Switchboard does not hold, such as a registered session in the operator's own window (PRD R81): those an interactive
+ * roster entry with a process holds, with the state their hook marker gives, else the roster's. A background entry is a session an earlier hub ran in
+ * Claude's background service, which the hub no longer follows (PRD R93), and an entry without a pid holds no process (GC M33).
  */
-export async function startSession(claudePath: string, action: StartAction, deps: StartDeps): Promise<StartResult> {
-  const launched = await deps.exec(claudePath, startArgs(action), { cwd: action.cwd, timeoutMs: LAUNCH_TIMEOUT_MS, env: claudeEnvironment(claudePath) });
-
-  if (launched.code !== 0) {
-    return { error: failureOf(claudePath, launched, LAUNCH_TIMEOUT_MS, { cwd: action.cwd }) };
-  }
-
-  const shortId = shortIdFrom(launched.stdout);
-
-  if (shortId === null) {
-    return { error: `Claude started a session without printing its ID: ${launched.stdout.trim()}` };
-  }
-
-  let blockedReads = 0;
-
-  for (const deadline = deps.now() + START_TIMEOUT_MS; deps.now() < deadline; await deps.sleep(ROSTER_POLL_MS)) {
-    const roster = await readRoster(claudePath, deps.exec);
-    const entry = 'entries' in roster ? entryFor(roster.entries, shortId) : undefined;
-
-    // A new entry has no pid for its first seconds (mechanics M5); the session is alive once it does.
-    if (entry?.pid !== undefined) {
-      return { shortId, nativeSessionId: entry.sessionId };
-    }
-
-    blockedReads = entry?.state === 'blocked' ? blockedReads + 1 : 0;
-
-    if (entry !== undefined && blockedReads === 2) {
-      return { shortId, nativeSessionId: entry.sessionId, startPrompt: true };
-    }
-  }
-
-  return { error: `Session ${shortId} did not appear in claude agents within ${START_TIMEOUT_MS / 1000} seconds.` };
-}
-
-/**
- * Continue in Background's resume (PRD R89): no flag but the prompt, so Claude wakes the session with the options it started with and keeps its
- * IDs; any flag, or a session still live, starts a copy instead (mechanics M18, M30, M55).
- */
-export function resumeArgs(nativeSessionId: string, prompt: string): string[] {
-  return ['--bg', '--resume', nativeSessionId, prompt];
-}
-
-/** The short ID from `… so this started a copy as <id>`, which `claude --bg --resume` prints when it did not resume the session itself (M55). */
-export function copyFrom(output: string): string | null {
-  return /started a copy as ([0-9a-f]{8})/.exec(output)?.[1] ?? null;
-}
-
-/**
- * A live session a Claude tab may hold; `background` says Claude holds options to resume it with in the background, and `busy` that the roster
- * lists its process running a turn.
- */
-export interface TabCandidate {
-  nativeSessionId: string;
-  pid: number;
-  background: boolean;
-  busy: boolean;
-}
-
-/**
- * The live sessions a Claude tab labelled `label` may hold (PRD R89), or every live session for the Claude sidebar, which has no label (null). The
- * tab's label is the session's name, cut to its start and `…` when long, so several sessions can match; `--all` lists a session's earlier
- * background job beside its live interactive entry (mechanics M55).
- */
-export function tabCandidates(entries: RosterEntry[], label: string | null): TabCandidate[] {
-  const cut = label?.endsWith('…') ? label.slice(0, -1) : null;
-  const named = (name: string | undefined) => label === null || (name !== undefined && (cut === null ? name === label : name.startsWith(cut)));
-
-  return entries
-    .filter((entry) => named(entry.name) && entry.pid !== undefined && entry.kind !== 'background')
-    .map((entry) => ({
-      nativeSessionId: entry.sessionId,
-      pid: entry.pid!,
-      background: entries.some((other) => other.sessionId === entry.sessionId && other.kind === 'background'),
-      busy: entry.status === 'busy',
-    }));
-}
-
-/** Where parent PIDs are read: Windows PowerShell's CIM, or a `/proc` folder elsewhere. Tests pass their own. */
-export interface ProcessTable {
-  platform?: NodeJS.Platform;
-  proc?: string;
-}
-
-/**
- * The parent PID of each live process among `pids`. A Claude tab's process is a child of its window's extension host (mechanics M55), so the
- * parent tells which window holds a session.
- */
-export async function parentPids(exec: Exec, pids: number[], table: ProcessTable = {}): Promise<Map<number, number> | { error: string }> {
-  if (pids.length === 0) {
-    return new Map();
-  }
-
-  if ((table.platform ?? process.platform) !== 'win32') {
-    const proc = table.proc ?? '/proc';
-
-    return new Map(
-      pids.flatMap((pid) => {
-        try {
-          const stat = readFileSync(`${proc}/${pid}/stat`, 'utf8');
-          // The name may hold spaces and parentheses, so the fields are counted from the last ')'.
-          const parent = Number.parseInt(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1] ?? '', 10);
-
-          return Number.isInteger(parent) ? [[pid, parent] as const] : [];
-        } catch {
-          return [];
-        }
-      }),
-    );
-  }
-
-  const filter = pids.map((pid) => `ProcessId=${pid}`).join(' OR ');
-  const script = `ConvertTo-Json -Compress -InputObject @(Get-CimInstance Win32_Process -Filter "${filter}" -ErrorAction Stop | ForEach-Object { [pscustomobject]@{ pid = $_.ProcessId; parent = $_.ParentProcessId } })`;
-  const result = await exec('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { timeoutMs: ROSTER_TIMEOUT_MS });
-
-  if (result.code !== 0) {
-    return { error: result.stderr.trim() || `The process query exited with code ${String(result.code)}.` };
-  }
-
-  try {
-    const found: unknown = JSON.parse(result.stdout.trim() || '[]');
-
-    return Array.isArray(found) ? new Map((found as { pid: number; parent: number }[]).map((entry) => [entry.pid, entry.parent])) : { error: 'The process query returned an unexpected answer.' };
-  } catch {
-    return { error: 'The process query returned output that is not JSON.' };
-  }
-}
-
-/** `claude stop`, never `claude rm`, which can delete the session's worktree (GC M33). */
-export async function stopSession(claudePath: string, shortId: string, exec: Exec): Promise<{ error: string } | null> {
-  const result = await exec(claudePath, ['stop', shortId], { timeoutMs: STOP_TIMEOUT_MS, env: claudeEnvironment(claudePath) });
-
-  return result.code === 0 ? null : { error: failureOf(claudePath, result, STOP_TIMEOUT_MS) };
-}
-
-/**
- * The roster event for Switchboard's sessions: those whose roster entry holds a process, with the state their hook
- * marker gives, else the roster's. A listed entry without a pid holds no process (GC M33).
- */
-export function observe(entries: RosterEntry[], sessions: { id: string; shortId: string | null; state?: string; stateDetail?: string | null }[], markers: ReadonlyMap<string, Marker>): ObservedSession[] {
+export function observe(entries: RosterEntry[], sessions: { id: string; shortId: string | null }[], markers: ReadonlyMap<string, Marker>): ObservedSession[] {
   const observed: ObservedSession[] = [];
+  const live = entries.filter((entry) => entry.pid !== undefined && entry.kind !== 'background');
 
   for (const session of sessions) {
-    const entry = session.shortId === null ? undefined : entryFor(entries, session.shortId);
+    const entry = session.shortId === null ? undefined : entryFor(live, session.shortId);
 
-    // A session that started waiting on a prompt has no pid until the operator answers it. The roster lists a gone process the same way, so
-    // only a session that started so is taken to wait (mechanics M41).
-    if (entry !== undefined && entry.pid === undefined && entry.state === 'blocked' && session.state === 'waiting' && session.stateDetail === START_PROMPT) {
-      observed.push({ sessionId: session.id, state: 'waiting', detail: START_PROMPT, interactive: false });
-      continue;
+    if (entry !== undefined) {
+      observed.push({ sessionId: session.id, ...stateOf(entry, markers), interactive: true });
     }
-
-    if (entry?.pid === undefined) {
-      continue;
-    }
-
-    observed.push({ sessionId: session.id, ...stateOf(entry, markers), interactive: entry.kind !== 'background' });
   }
 
   return observed;
@@ -273,20 +89,14 @@ export function observeForks(forks: ReadonlyMap<string, RosterEntry>, markers: R
   return [...forks].map(([sessionId, entry]) => ({ sessionId, nativeSessionId: entry.sessionId, shortId: entry.id ?? entry.sessionId.slice(0, 8), ...stateOf(entry, markers) }));
 }
 
-/** A background entry's `waitingFor` decides what a wait is on once the roster lists it (mechanics M57). */
+/** The hook marker's state, else the roster's. */
 function stateOf(entry: RosterEntry, markers: ReadonlyMap<string, Marker>): { state: LiveState; detail: string | null } {
   const marker = markers.get(entry.sessionId);
 
   // A tab or terminal that resumed the session has run no turn yet, though the roster lists it as busy while it loads (M25).
-  if (entry.kind !== 'background' && marker?.event === 'SessionStart' && marker.source !== 'compact') {
+  if (marker?.event === 'SessionStart' && marker.source !== 'compact') {
     return { state: 'idle', detail: null };
   }
 
-  const seen = (marker === undefined ? null : markerState(marker)) ?? { state: rosterState(entry), detail: null };
-
-  if (seen.state === 'waiting' && entry.kind === 'background' && entry.state === 'blocked' && entry.waitingFor !== undefined) {
-    return { state: 'waiting', detail: entry.waitingFor === 'permission prompt' ? PERMISSION_PROMPT : null };
-  }
-
-  return seen;
+  return (marker === undefined ? null : markerState(marker)) ?? { state: rosterState(entry), detail: null };
 }

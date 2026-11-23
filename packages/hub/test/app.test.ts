@@ -3,7 +3,7 @@ import { join, resolve } from 'node:path';
 import type { Exec } from '@switchboard/claude';
 import { Store } from '@switchboard/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createHubApp, parseAction, parseReport } from '../src/app.js';
+import { CONTINUE_IN_BACKGROUND_REMOVED, createHubApp, parseAction, parseReport } from '../src/app.js';
 import { windowOf, windowsDir } from '../src/dock.js';
 import { loadConfig } from '../src/config.js';
 import { postToHub } from '../src/client.js';
@@ -228,13 +228,11 @@ describe('parseReport and reportBody', () => {
     expect(parseAction({ type: 'poll', source: 'github', tickets: [] })).toBeNull();
   });
 
-  it('keeps only the fields of Open in Claude, refuses it without a work item or the session, and refuses an answer (PRD R70)', () => {
-    expect(parseAction({ type: 'open-question', workItemId: 3, nativeSessionId: 'native-3', sessionId: 's1', cwd: 'D:/wt' })).toEqual({ type: 'open-question', workItemId: 3, nativeSessionId: 'native-3' });
-
+  it('refuses Open in Claude or Codex, which Switchboard no longer offers (PRD R93), and an answer', () => {
     for (const body of [
       { type: 'answer', workItemId: 3, nativeSessionId: 'native-3', question: 'Which tree?', answer: 'Birch' },
+      { type: 'open-question', workItemId: 3, nativeSessionId: 'native-3' },
       { type: 'open-question', workItemId: 3 },
-      { type: 'open-question', workItemId: 1.5, nativeSessionId: 'native-3' },
     ]) {
       expect(parseAction(body), JSON.stringify(body)).toBeNull();
     }
@@ -310,8 +308,7 @@ describe('createHubApp', () => {
     expect(await app.post['/action']!({ type: 'poll' })).toEqual({ status: 400, body: { error: 'Unknown action.' } });
     expect(await app.post['/action']!({ type: 'retriage', workItemId: 1 })).toEqual({ status: 400, body: { error: 'Unknown action.' } });
     expect(await app.post['/action']!({ type: 'answer', workItemId: 9, nativeSessionId: 'n', question: 'Which?', answer: 'Birch' })).toEqual({ status: 400, body: { error: 'Unknown action.' } });
-    expect(await app.post['/action']!({ type: 'open-question', workItemId: 9, nativeSessionId: 'n' })).toEqual({ status: 409, body: { error: 'Unknown work item 9.' } });
-    expect(await app.post['/action']!({ type: 'open-question', workItemId: 'x', nativeSessionId: 'n' })).toEqual({ status: 400, body: { error: 'Unknown action.' } });
+    expect(await app.post['/action']!({ type: 'open-question', workItemId: 9, nativeSessionId: 'n' })).toEqual({ status: 400, body: { error: 'Unknown action.' } });
     expect(await app.post['/report']!({ sessionId: 's9', kind: 'stage', stage: 'x' })).toEqual({ status: 409, body: { error: 'Unknown session s9.' } });
     expect(await app.post['/report']!({ kind: 'stage' })).toEqual({ status: 400, body: { error: 'Expected {sessionId, kind, stage|path|reason|prompt|label and target}.' } });
     expect(await app.post['/contract']!({ nativeSessionId: 'n' })).toEqual({ status: 404, body: { error: 'No Switchboard session has this Claude session ID.' } });
@@ -397,26 +394,15 @@ describe('createHubApp', () => {
     for (const command of ['pane-pair', 'pane-open', 'pane-rect']) expect(app.post[`/v1/conversation/${command}`]).toBeUndefined();
   });
 
-  it('refuses Continue in Background with a bad body, and answers the roster’s refusal (PRD R89)', async () => {
+  it('refuses Continue in Background, whatever the body, since Switchboard no longer runs Claude background sessions (PRD R89, R93)', async () => {
     writeSettings({ sessions: { installHooks: false } });
-    const roster: Exec = async (file, args) =>
-      file === 'claude' && args.join(' ') === 'agents --json --all'
-        ? { code: 0, stdout: JSON.stringify([{ sessionId: 'n', kind: 'background', state: 'done', cwd: 'D:/git/widgets', name: 'My tab' }]), stderr: '', missing: false, timedOut: false }
-        : noCli(file, args, { timeoutMs: 0 });
-    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: roster } });
-    closers.push(() => app.close());
+    const app = await start();
 
-    expect(await app.post['/background']!({ label: 'My tab', workItemIds: [1] })).toEqual({ status: 400, body: { error: 'Expected {label, hostPid, workItemIds}.' } });
-    expect(await app.post['/background']!({ label: '', hostPid: 1, workItemIds: [1] })).toEqual({ status: 400, body: { error: 'Expected {label, hostPid, workItemIds}.' } });
-    expect(await app.post['/background']!({ label: 'My tab', hostPid: 1, workItemIds: ['1'] })).toEqual({ status: 400, body: { error: 'Expected {label, hostPid, workItemIds}.' } });
-    expect(await app.post['/background']!({ label: 'My tab', hostPid: 1, workItemIds: [1] })).toEqual({ status: 409, body: { error: "This session is not one of Switchboard's work items." } });
-    expect(await app.post['/background']!({ label: 'Other tab', hostPid: 1, workItemIds: [1] })).toEqual({ status: 409, body: { error: "This session is not one of Switchboard's work items." } });
-    // A null label is the Claude sidebar.
-    expect(await app.post['/background']!({ label: null, hostPid: 1, workItemIds: [1] })).toEqual({ status: 409, body: { error: "This session is not one of Switchboard's work items." } });
-    expect(await app.post['/background']!({ label: 7, hostPid: 1, workItemIds: [1] })).toEqual({ status: 400, body: { error: 'Expected {label, hostPid, workItemIds}.' } });
-    // No move waits for this process.
-    expect(await app.post['/background/check']!({ hostPid: 1, pid: 7 })).toEqual({ status: 409, body: { error: 'The move is no longer waiting for the window to close.' } });
-    expect(await app.post['/background/check']!({ hostPid: 1 })).toEqual({ status: 400, body: { error: 'Expected {hostPid, pid}.' } });
+    for (const body of [{ label: 'My tab', hostPid: 1, workItemIds: [1] }, { label: 'My tab' }, null]) {
+      expect(await app.post['/background']!(body)).toEqual({ status: 409, body: { error: CONTINUE_IN_BACKGROUND_REMOVED } });
+    }
+
+    expect(await app.post['/background/check']!({ hostPid: 1, pid: 7 })).toEqual({ status: 409, body: { error: CONTINUE_IN_BACKGROUND_REMOVED } });
   });
 
   it('registers a session the Claude roster lists, answering its key and contract, and refuses a bad body (PRD R81)', async () => {
@@ -885,35 +871,6 @@ describe('createHubApp', () => {
     expect(JSON.parse(readFileSync(window.file, 'utf8')).settings['window.title']).toBe(`${window.title}\${separator}\${activeEditorShort}\${separator}sb:${window.name}`);
   });
 
-  it('names the agent CLI on each terminal the dock view carries with dock.openVSCode review (PRD R28, R71)', async () => {
-    writeSettings({ sessions: { installHooks: false, claudePath: '/opt/claude/bin/claude' }, sources: { adhoc: { repoRoot: 'D:/scratch' } }, dock: { openVSCode: 'review' } });
-    const done = { code: 0, stderr: '', missing: false, timedOut: false };
-    // `claude --bg` starts a session the roster lists as running in its background process (mechanics M5).
-    const bg: Exec = async (file, args) => {
-      if (file === 'node' && args.join(' ') === '--version') {
-        return { ...done, stdout: 'v24.0.0\n' };
-      }
-
-      if (args[0] === '--bg') {
-        return { ...done, stdout: 'backgrounded · 00000001 · name\n' };
-      }
-
-      return { ...done, stdout: args[0] === 'agents' ? JSON.stringify([{ id: '00000001', sessionId: '00000001-native', pid: 101, kind: 'background', cwd: 'D:/scratch', state: 'working' }]) : '' };
-    };
-    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: bg } });
-
-    closers.push(() => app.close());
-
-    expect(await app.post['/action']!({ type: 'adhoc', prompt: 'Look around', repoRoot: 'D:/scratch', start: true })).toMatchObject({ status: 200 });
-    await until(() => ((app.snapshot() as { workItems: { sessions: { shortId: string | null }[] }[] }).workItems[0]?.sessions[0]?.shortId ? true : null));
-
-    const shown = (app.dock() as { groups: { rows: { open: { type: string; executable?: string; args?: string[] } | null; terminal: { executable?: string } | null }[] }[] }).groups.flatMap((group) => group.rows)[0]!;
-
-    expect(shown.open).toMatchObject({ type: 'terminal', executable: '/opt/claude/bin/claude' });
-    expect(shown.open?.args?.[0]).toBe('attach');
-    expect(shown.terminal).toMatchObject({ executable: '/opt/claude/bin/claude' });
-  });
-
   it('searches Done rows before the Done list for the dock, and selects one it found (PRD R63)', async () => {
     writeSettings({ sessions: { installHooks: false }, sources: { adhoc: { repoRoot: 'D:/scratch' } } });
     const app = await start();
@@ -1311,15 +1268,15 @@ describe('createHubApp', () => {
     const row = (app.dock() as { groups: { rows: { key: string; window: { file: string } | null }[] }[] }).groups.flatMap((group) => group.rows)[0]!;
     const window = app.windowOpened!(row.window!.file);
 
-    // Code Mode sessions need hooks: the flow's refusal comes back on the command, and nothing is made.
-    expect(await app.post['/v1/conversation/new-conversation']!({ window, scopeGen: 1, opId: 'n1' })).toEqual({ status: 409, body: { error: 'Code Mode sessions need sessions.installHooks.' } });
+    // Claude sessions need hooks: the flow's refusal comes back on the command, and nothing is made.
+    expect(await app.post['/v1/conversation/new-conversation']!({ window, scopeGen: 1, opId: 'n1' })).toEqual({ status: 409, body: { error: 'Claude sessions need sessions.installHooks.' } });
     expect(app.runtime.snapshot().workItems).toHaveLength(1);
     expect(await app.post['/dock/select']!({ rowKey: row.key })).toEqual({ status: 200, body: { selected: true } });
     expect(await app.post['/dock/select']!({})).toEqual({ status: 400, body: { error: 'Expected {rowKey}.' } });
     expect(await app.post['/dock/select']!({ rowKey: 'nope' })).toEqual({ status: 404, body: { error: 'No work item has that row.' } });
 
     // The dock's New session gets the flow's refusal the same way, and no longer makes a folder-hosted conversation.
-    expect(await app.post['/dock/new-session']!({ folder: temp.home, opId: 'd1', provider: 'claude' })).toEqual({ status: 409, body: { error: 'Code Mode sessions need sessions.installHooks.' } });
+    expect(await app.post['/dock/new-session']!({ folder: temp.home, opId: 'd1', provider: 'claude' })).toEqual({ status: 409, body: { error: 'Claude sessions need sessions.installHooks.' } });
     expect(app.post['/dock/new-conversation']).toBeUndefined();
     expect(app.runtime.snapshot().workItems).toHaveLength(1);
   });

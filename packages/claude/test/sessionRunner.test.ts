@@ -1,10 +1,10 @@
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '@switchboard/core';
 import type { Exec, ExecResult } from '../src/exec.js';
-import { ClaudeRunner, rosterDirectory } from '../src/sessionRunner.js';
+import { ClaudeRunner, NOT_HELD } from '../src/sessionRunner.js';
 import type { ClaudeRunnerDeps } from '../src/sessionRunner.js';
 
 const ran = (patch: Partial<ExecResult>): ExecResult => ({ code: 0, stdout: '', stderr: '', missing: false, timedOut: false, ...patch });
@@ -45,7 +45,6 @@ function runner(exec: Exec, patch: Partial<ClaudeRunnerDeps> = {}): ClaudeRunner
   return new ClaudeRunner({
     claudePath: () => 'claude',
     exec,
-    sleep: async () => {},
     now: () => 0,
     home: join(root, '.switchboard'),
     claudeSettings: join(root, '.claude', 'settings.json'),
@@ -63,12 +62,17 @@ function marker(event: string, at: number): void {
 const ENTRY = { id: '1a2b3c4d', sessionId: '1a2b3c4d-0000-4000-8000-000000000000', pid: 5, kind: 'background', cwd: 'D:/git/widgets', state: 'working' };
 
 describe('ClaudeRunner', () => {
-  it('observes the roster with the hook marker state, and reports a failed read', async () => {
+  it('observes a session in a tab with the hook marker state, never one in the background service, and reports a failed read', async () => {
     marker('Stop', 7);
-    const exec = vi.fn<Exec>().mockResolvedValueOnce(ran({ stdout: JSON.stringify([ENTRY]) })).mockResolvedValueOnce(ran({ code: 1, stderr: 'boom' }));
+    const exec = vi
+      .fn<Exec>()
+      .mockResolvedValueOnce(ran({ stdout: JSON.stringify([{ ...ENTRY, kind: 'interactive' }]) }))
+      .mockResolvedValueOnce(ran({ stdout: JSON.stringify([ENTRY]) }))
+      .mockResolvedValueOnce(ran({ code: 1, stderr: 'boom' }));
     const claude = runner(exec);
 
-    expect(await claude.observe([session()])).toEqual({ sessions: [{ sessionId: 's1', state: 'idle', detail: null, interactive: false }], forks: [] });
+    expect(await claude.observe([session()])).toEqual({ sessions: [{ sessionId: 's1', state: 'idle', detail: null, interactive: true }], forks: [] });
+    expect(await claude.observe([session()])).toEqual({ sessions: [], forks: [] });
     expect(await claude.observe([session()])).toEqual({ error: 'boom' });
     expect(exec).toHaveBeenCalledWith('claude', ['agents', '--json'], expect.anything());
   });
@@ -113,75 +117,15 @@ describe('ClaudeRunner', () => {
     expect(runner(vi.fn<Exec>(), { hooks: () => false }).markers([session()]).size).toBe(0);
   });
 
-  it('tells a background process from an interactive one, and a session without a short ID from both', async () => {
-    const exec = vi.fn<Exec>().mockResolvedValueOnce(ran({ stdout: JSON.stringify([ENTRY]) })).mockResolvedValueOnce(ran({ stdout: JSON.stringify([{ ...ENTRY, kind: 'interactive' }]) }));
+  it('starts, stops and releases no session, since every Claude session Switchboard starts is held (PRD R93)', async () => {
+    const exec = vi.fn<Exec>();
     const claude = runner(exec);
 
-    expect(await claude.isBackground({ sessionId: 's1', shortId: '1a2b3c4d' })).toBe(true);
+    expect(await claude.start({ type: 'start-session', sessionId: 's1', workItemId: 1, kind: 'task', provider: 'claude', cwd: 'D:/git/widgets', prompt: 'p', contract: 'c', name: 'n', permissionMode: 'auto', model: null })).toEqual({ error: NOT_HELD });
+    expect(await claude.stop({ sessionId: 's1', shortId: '1a2b3c4d' }, 'operator')).toEqual({ error: NOT_HELD });
     expect(await claude.isBackground({ sessionId: 's1', shortId: '1a2b3c4d' })).toBe(false);
-    expect(await claude.isBackground({ sessionId: 's1', shortId: null })).toBe(false);
-    expect(exec).toHaveBeenCalledTimes(2);
-  });
-
-  it('stops with claude stop, and refuses a session that has not started', async () => {
-    const exec = vi.fn<Exec>().mockResolvedValue(ran({}));
-    const claude = runner(exec);
-
-    expect(await claude.stop({ sessionId: 's1', shortId: '1a2b3c4d' }, 'operator')).toBeNull();
-    expect(exec).toHaveBeenCalledWith('claude', ['stop', '1a2b3c4d'], expect.anything());
-    expect(await claude.stop({ sessionId: 's1', shortId: null }, 'operator')).toEqual({ error: 'The session has not started yet.' });
-  });
-
-  it('rejoins an interrupted start only by its stored ID label and working directory', async () => {
-    const exec = vi.fn<Exec>().mockResolvedValue(ran({ stdout: JSON.stringify([{ ...ENTRY, name: 'same title · s1' }]) }));
-    expect(await runner(exec).reconcile([session({ state: 'starting', shortId: null, nativeSessionId: null })])).toEqual([{ sessionId: 's1', started: { shortId: '1a2b3c4d', nativeSessionId: '1a2b3c4d-0000-4000-8000-000000000000' } }]);
-  });
-
-  it('waits for registration, refuses ambiguity and does not adopt another label or directory', async () => {
-    for (const entries of [[], [{ ...ENTRY, name: 'same title · s2' }], [{ ...ENTRY, name: 'same title · s1', cwd: 'D:/elsewhere' }], [{ ...ENTRY, name: 'same title · s1', pid: undefined }]]) {
-      const exec = vi.fn<Exec>().mockResolvedValue(ran({ stdout: JSON.stringify(entries) }));
-      expect(await runner(exec).reconcile([session({ state: 'starting', shortId: null, nativeSessionId: null })])).toEqual([{ sessionId: 's1', pending: 'Waiting for the Claude background session to appear in the roster.' }]);
-    }
-    const exec = vi.fn<Exec>().mockResolvedValue(ran({ stdout: JSON.stringify([{ ...ENTRY, name: 'same title · s1' }, { ...ENTRY, sessionId: 'another', name: 'same title · s1' }]) }));
-    expect(await runner(exec).reconcile([session({ state: 'starting', shortId: null, nativeSessionId: null })])).toEqual([{ sessionId: 's1', pending: 'More than one Claude background session matches this start; inspect claude agents and stop the extra session so the original can be recovered.', attention: true }]);
-  });
-
-  it('keeps overdue or renamed starts owned and pending, and keeps failed reads pending', async () => {
-    const exec = vi.fn<Exec>().mockResolvedValue(ran({ stdout: '[]' }));
-    expect(await runner(exec, { now: () => 120_000 }).reconcile([session({ state: 'starting', shortId: null, nativeSessionId: null })])).toEqual([{ sessionId: 's1', pending: 'The Claude start is still unconfirmed; inspect claude agents for the label ending · s1, then use Stop session to clear this unconfirmed start if needed.', attention: true, clearable: true }]);
-    exec.mockResolvedValue(ran({ code: 1, stderr: 'unavailable' }));
-    expect(await runner(exec).reconcile([session({ state: 'starting' })])).toMatchObject([{ sessionId: 's1', pending: expect.any(String) }]);
-  });
-
-  it.each(['native', 'short'])('recovers a known %s identity after a rename', async identity => {
-    const exec = vi.fn<Exec>().mockResolvedValue(ran({ stdout: JSON.stringify([{ ...ENTRY, name: 'renamed' }]) }));
-    expect(await runner(exec).reconcile([session({ state: 'starting', ...(identity === 'native' ? { shortId: null } : { nativeSessionId: null }) })])).toEqual([{ sessionId: 's1', started: { shortId: '1a2b3c4d', nativeSessionId: '1a2b3c4d-0000-4000-8000-000000000000' } }]);
-  });
-
-  it('adopts a startup prompt only after two blocked reads of the same identity', async () => {
-    const exec = vi.fn<Exec>().mockResolvedValue(ran({ stdout: JSON.stringify([{ ...ENTRY, pid: undefined, state: 'blocked', name: 'name · s1' }]) }));
-    const claude = runner(exec);
-    const starting = [session({ state: 'starting', shortId: null, nativeSessionId: null })];
-    expect(await claude.reconcile(starting)).toMatchObject([{ pending: expect.any(String) }]);
-    expect(await claude.reconcile(starting)).toEqual([{ sessionId: 's1', started: { shortId: '1a2b3c4d', nativeSessionId: '1a2b3c4d-0000-4000-8000-000000000000', startPrompt: true } }]);
-  });
-
-  it.skipIf(process.platform === 'win32')('recovers a real directory listed for a symlinked repository', async () => {
-    const real = join(root, 'Repo');
-    const link = join(root, 'link');
-    mkdirSync(real); symlinkSync(real, link);
-    const exec = vi.fn<Exec>().mockResolvedValue(ran({ stdout: JSON.stringify([{ ...ENTRY, cwd: real, name: 'name · s1' }]) }));
-    expect(await runner(exec).reconcile([session({ state: 'starting', shortId: null, nativeSessionId: null, cwd: link })])).toMatchObject([{ started: { nativeSessionId: ENTRY.sessionId } }]);
-  });
-
-  it('compares recorded Windows and macOS directory spellings on any platform', async () => {
-    expect(rosterDirectory('D:/Git/Repo/', 'win32')).toBe('d:\\git\\repo');
-    expect(rosterDirectory('D:\\Git\\Repo\\', 'win32')).toBe('d:\\git\\repo');
-    expect(rosterDirectory('C:/', 'win32')).toBe('c:\\');
-    expect(rosterDirectory('/Repos/Repo/', 'darwin')).toBe('/repos/repo');
-    expect(rosterDirectory('/', 'linux')).toBe('/');
-    const exec = vi.fn<Exec>().mockResolvedValue(ran({ stdout: JSON.stringify([{ ...ENTRY, cwd: 'd:/GIT/WIDGETS/', name: 'name · s1' }]) }));
-    expect(await runner(exec, { platform: 'win32' }).reconcile([session({ state: 'starting', shortId: null, nativeSessionId: null, cwd: 'D:\\git\\widgets\\' })])).toMatchObject([{ started: { shortId: '1a2b3c4d' } }]);
+    expect(await claude.reconcile([session({ state: 'starting', shortId: null, nativeSessionId: null })])).toEqual([{ sessionId: 's1', failed: 'The hub stopped while the session was starting.' }]);
+    expect(exec).not.toHaveBeenCalled();
   });
 
   it('installs the hooks into the settings file, and reports a settings file it must not change', async () => {

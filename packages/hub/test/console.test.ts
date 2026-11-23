@@ -188,7 +188,9 @@ describe('the page console stream', () => {
     expect(noConsole(held())).toBeNull();
     // An ended registered session resumes in the holder (PRD R81).
     expect(noConsole(held({ codeMode: false, registered: true, state: 'ended', provider: 'claude', nativeSessionId: 'n1' } as Partial<Session>))).toBeNull();
-    expect(noConsole(held({ codeMode: false, registered: true, state: 'idle', provider: 'claude', nativeSessionId: 'n1' } as Partial<Session>))).toContain("does not run in Switchboard's terminal holder");
+    expect(noConsole(held({ codeMode: false, registered: true, state: 'idle', provider: 'claude', nativeSessionId: 'n1' } as Partial<Session>))).toBe('This session runs in your own Claude window, so it has a console here only once it ends there.');
+    // So does one an earlier hub ran in Claude's background service (PRD R93).
+    expect(noConsole(held({ codeMode: false, state: 'ended', provider: 'claude', nativeSessionId: 'n1' } as Partial<Session>))).toBeNull();
 
     // A Codex app-server session with a thread has its console: the view starts its Codex terminal.
     t.sessions.set('s1', held({ codeMode: false, execution: 'app-server', nativeSessionId: 'thread-1' } as Partial<Session>));

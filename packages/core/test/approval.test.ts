@@ -126,13 +126,9 @@ describe('a resumed session after an approval report (PRD R34)', () => {
     const { item, session } = awaitingApproval(h);
 
     resume(h, session);
-    h.act({ type: 'marker', sessionId: session, state: 'failed', detail: 'rate_limit' });
-    expect(h.item(item)).toMatchObject({ status: 'awaiting-approval', error: 'The turn stopped at a usage limit. Open the session to continue it after the reset.', ...APPROVAL });
-
-    h.act({ type: 'marker', sessionId: session, state: 'running', detail: null });
     expect(h.item(item)).toMatchObject({ status: 'running', approvalHeld: true, error: null });
     h.act({ type: 'marker', sessionId: session, state: 'failed', detail: null });
-    expect(h.item(item).error).toBe('The turn failed: unknown error.');
+    expect(h.item(item)).toMatchObject({ status: 'awaiting-approval', error: 'The turn failed: unknown error.', ...APPROVAL });
 
     h.act({ type: 'marker', sessionId: session, state: 'running', detail: null });
     h.act({ type: 'stop', workItemId: item });

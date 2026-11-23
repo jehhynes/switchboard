@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { FlowAction } from '../src/flow.js';
-import { NEEDS_CODE_MODE, NEW_CONVERSATION_TITLE } from '../src/flow.js';
+import { NEEDS_HOOKS, NEW_CONVERSATION_TITLE } from '../src/flow.js';
 import { heldSlots } from '../src/queue.js';
 import { hostKey } from '../src/conversation.js';
 import { Harness, settings } from './flowHarness.js';
@@ -53,11 +53,9 @@ describe('hosted conversations (architecture.md § Hosted conversations)', () =>
     expect(h.store.session(start.sessionId)).toMatchObject({ promptless: true, codeMode: true, reports: ['stage', 'worktree', 'link', 'paste', 'task'] });
   });
 
-  it('refuses a conversation while Code Mode or hooks are off', () => {
-    expect(new Harness().send({ type: 'new-conversation', hostWindow: HOST, folder: 'D:/git/support' }).refused).toBe(NEEDS_CODE_MODE);
-    expect(new Harness({ settings: settings({ sessions: { codeMode: true, installHooks: false } }) }).send({ type: 'new-conversation', hostWindow: HOST, folder: 'D:/git/support' }).refused).toBe(
-      'Code Mode sessions need sessions.installHooks.',
-    );
+  it('holds a conversation without Code Mode while it is off, and refuses one while hooks are off', () => {
+    expect(new Harness().act({ type: 'new-conversation', hostWindow: HOST, folder: 'D:/git/support' })).toMatchObject([{ type: 'start-session', codeMode: true, withoutCodeMode: true, prompt: '' }]);
+    expect(new Harness({ settings: settings({ sessions: { codeMode: true, installHooks: false } }) }).send({ type: 'new-conversation', hostWindow: HOST, folder: 'D:/git/support' }).refused).toBe(NEEDS_HOOKS);
   });
 
   it('comes up idle, holds a slot only during a turn, and stays open when a turn or its session ends', () => {

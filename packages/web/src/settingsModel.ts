@@ -1162,7 +1162,7 @@ export function generalFields(state: EditorState): Section[] {
           path: 'sessions.codeMode',
           label: 'Code Mode (experimental)',
           kind: 'boolean',
-          help: 'New Claude sessions use Claude Code’s Code Mode and open in a terminal instead of the Claude view. They keep running between turns until you stop them or they sit idle for an hour. They use your Claude subscription sign-in; the gateway in your Claude settings does not apply. Sessions already started keep their mode. Needs Install hooks.',
+          help: 'New Claude sessions use Claude Code’s Code Mode. With it on they use your Claude subscription sign-in, and the gateway in your Claude settings does not apply; with it off they run as your own claude does. Either way they run in Switchboard’s terminal holder and keep running between turns until you stop them or they sit idle for an hour. Sessions already started keep their mode.',
           fallback: false,
         },
         { path: 'sessions.debriefs', label: 'Friction debriefs', kind: 'boolean', help: 'Ask each session what slowed it down, once its work item is done or 45 minutes after its last turn. The answers go to ~/.claude/.wip/debrief for the friction-review skill.', fallback: false },

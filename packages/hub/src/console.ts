@@ -28,15 +28,19 @@ export interface PageConsoleDeps {
 export type ConsoleSend = (event: string, data: unknown) => boolean;
 
 /**
- * Why a session has no console on the page, or null when the terminal holder holds it: a Code Mode session, an ended registered one, which
- * resumes there (PRD R81), or Codex's terminal app on a Codex app-server session's thread, which the hub starts in the holder when a console opens.
+ * Why a session has no console on the page, or null when the terminal holder holds it: a held session, an ended one that was never held, which
+ * resumes there (PRD R81, R93), or Codex's terminal app on a Codex app-server session's thread, which the hub starts in the holder when a console opens.
  */
 export function noConsole(session: Session): string | null {
   if (session.codeMode === true || resumesHeld(session) || (session.execution === 'app-server' && session.nativeSessionId !== null)) {
     return null;
   }
 
-  return session.execution === 'app-server' ? 'This Codex session has no thread yet, so it has no console.' : "This session does not run in Switchboard's terminal holder, so it has no console here.";
+  return session.execution === 'app-server'
+    ? 'This Codex session has no thread yet, so it has no console.'
+    : session.provider === 'claude'
+      ? 'This session runs in your own Claude window, so it has a console here only once it ends there.'
+      : "This session does not run in Switchboard's terminal holder, so it has no console here.";
 }
 
 const isSize = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 1000;

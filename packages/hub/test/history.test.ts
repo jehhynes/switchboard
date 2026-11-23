@@ -48,6 +48,8 @@ function approvedRun(): Run {
   run.send({ type: 'triage-succeeded', triageId: 1, context: 'ctx', playbook: 'dev:question', immediacy: null, severity: null, model: 'claude-sonnet-5' });
   run.now += 2 * MINUTE;
   run.send({ type: 'start', workItemId: 1 });
+  // A session an earlier hub ran in Claude's background service, whose history these tests read (PRD R93).
+  run.store.updateSession('s1', { codeMode: false, withoutCodeMode: false, launchId: null });
   run.send({ type: 'session-started', sessionId: 's1', nativeSessionId: 'native-1', shortId: 'abc12345' });
   run.now += MINUTE;
   run.send({ type: 'report', sessionId: 's1', report: { kind: 'stage', stage: 'researching' } });
@@ -155,16 +157,17 @@ describe('History model', () => {
     expect(sections.map((section) => section.title)).toEqual(['No playbook yet', 'Registered session', 'Ticket']);
   });
 
-  it("names each entry by the copy the session had then, and shows a fork waiting for the background process (PRD R78)", () => {
+  it("names each entry by the copy the session had then (PRD R78)", () => {
     const run = new Run();
     const fork = { sessionId: 's1', nativeSessionId: '9e8d7c6b-0000', shortId: '9e8d7c6b', state: 'running' as const, detail: null };
 
     run.send({ type: 'poll', source: 'github', tickets: [ISSUE] });
     run.send({ type: 'triage-succeeded', triageId: 1, context: 'ctx', playbook: 'dev:question', immediacy: null, severity: null, model: 'claude-sonnet-5' });
     run.send({ type: 'start', workItemId: 1 });
+    run.store.updateSession('s1', { codeMode: false, withoutCodeMode: false, launchId: null });
     run.send({ type: 'session-started', sessionId: 's1', nativeSessionId: 'native-1', shortId: 'abc12345' });
     run.now += MINUTE;
-    run.send({ type: 'roster', sessions: [{ sessionId: 's1', state: 'idle', detail: null, interactive: false }], forks: [fork] });
+    run.send({ type: 'roster', sessions: [{ sessionId: 's1', state: 'idle', detail: null, interactive: false }] });
     run.now += MINUTE;
     run.send({ type: 'stop-succeeded', sessionId: 's1', reason: 'release', shortId: 'abc12345' });
     run.now += MINUTE;
@@ -185,7 +188,6 @@ describe('History model', () => {
       'Session 9e8d7c6b finished its turn',
     ]);
     expect(entries[6]).toMatchObject({ detail: 'Session abc12345 is retired.', lines: ['session 9e8d7c6b: ended → running', 'Status: Blocked → Running'] });
-    expect(entries[4]!.lines).toContain('Fork 9e8d7c6b waits for the background session to be released; Stop session releases one waiting on a question');
   });
 
   it('says a triage waits for Start when nothing is newer than the earlier work item (PRD R80)', () => {
@@ -281,11 +283,12 @@ describe('History model', () => {
     expect(view.sections[0]!.entries[0]).toMatchObject({ text: 'Stage: old stage', reconstructed: true, category: 'report' });
     expect(sessionOpen({ ...session, state: 'running' })).toBeNull();
     expect(sessionOpen({ ...session, state: 'idle', released: true })).toEqual({ type: 'open', sessionId: 'native-1', cwd: 'D:/git/widgets', provider: 'claude', session: session.id, workItemId: session.workItemId });
-    expect(sessionOpen({ ...session, state: 'ended', released: true })).toEqual({ type: 'open', sessionId: 'native-1', cwd: 'D:/git/widgets', provider: 'claude', session: session.id, workItemId: session.workItemId });
+    // An ended session that was never held resumes in the terminal holder, by its Switchboard session ID (PRD R93).
+    expect(sessionOpen({ ...session, state: 'ended', released: true })).toEqual({ type: 'open', sessionId: session.id, cwd: 'D:/git/widgets', provider: 'claude', codeMode: true, session: session.id, workItemId: session.workItemId });
     expect(sessionOpen({ ...session, state: 'ended', nativeSessionId: null })).toBeNull();
     // A registered session opens only once it has left the operator's window (PRD R81).
     expect(sessionOpen({ ...session, state: 'idle', released: true, external: true })).toBeNull();
-    expect(sessionOpen({ ...session, state: 'ended', released: true, external: false })).toEqual({ type: 'open', sessionId: 'native-1', cwd: 'D:/git/widgets', provider: 'claude', session: session.id, workItemId: session.workItemId });
+    expect(sessionOpen({ ...session, state: 'ended', released: true, external: false })).toEqual({ type: 'open', sessionId: session.id, cwd: 'D:/git/widgets', provider: 'claude', codeMode: true, session: session.id, workItemId: session.workItemId });
     // An ended registered session resumes in the terminal holder, by its Switchboard session ID (PRD R81).
     expect(sessionOpen({ ...session, state: 'ended', released: true, registered: true })).toEqual({ type: 'open', sessionId: session.id, cwd: 'D:/git/widgets', provider: 'claude', codeMode: true, session: session.id, workItemId: session.workItemId });
     expect(sessionOpen({ ...session, state: 'idle', released: true, external: true, registered: true })).toBeNull();
@@ -298,7 +301,7 @@ describe('History model', () => {
     run.send({ type: 'poll', source: 'github', tickets: [ISSUE] });
     run.send({ type: 'triage-succeeded', triageId: 1, context: 'ctx', playbook: 'dev:question', immediacy: null, severity: null, model: 'claude-sonnet-5' });
     run.send({ type: 'start', workItemId: 1 });
-    run.store.updateSession('s1', { codeMode: true });
+    run.store.updateSession('s1', { codeMode: true, withoutCodeMode: false });
     run.send({ type: 'session-started', sessionId: 's1', nativeSessionId: 'native-1', shortId: 'abc12345' });
     run.now += MINUTE;
     run.send({ type: 'marker', sessionId: 's1', state: 'waiting', detail: 'Which branch?' });
@@ -312,8 +315,11 @@ describe('History model', () => {
 
     expect(entries.find((entry) => entry.text.startsWith('Session abc12345 started'))).toMatchObject({ text: 'Session abc12345 started in Code Mode', links: [link] });
     expect(entries.filter((entry) => entry.links.length > 0).map((entry) => entry.links)).toEqual([[link], [link]]);
-    // A background session's start keeps its wording.
+    // A background session's start keeps its wording, and so does one held without Code Mode, whose link names no Code Mode.
     expect(texts(historyView(approvedRun().history(), run.now).sections[0]!.entries)).toContain('Session abc12345 started');
+    run.store.updateSession('s1', { withoutCodeMode: true });
+    const plain = historyView(run.history(), run.now).sections[0]!.entries;
+    expect(plain.find((entry) => entry.text.startsWith('Session abc12345 started'))).toMatchObject({ text: 'Session abc12345 started', links: [{ ...link, title: 'Attach to session abc12345 in a terminal' }] });
 
     for (const state of ['starting', 'running', 'waiting', 'idle', 'ended'] as const) {
       expect(sessionOpen({ ...session, state, released: false })).toEqual(open);

@@ -4,30 +4,12 @@ import { delimiter, join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { Exec, ExecResult } from '../src/exec.js';
 import type { Marker } from '../src/hooks.js';
-import { entryFor, observe, observeForks, readRoster, rosterState, shortIdFrom, startArgs, startSession, stopSession } from '../src/runner.js';
-import { PERMISSION_PROMPT, START_PROMPT } from '@switchboard/core';
-import type { StartAction } from '@switchboard/core';
+import { entryFor, observe, observeForks, readRoster, rosterState } from '../src/runner.js';
+import { PERMISSION_PROMPT } from '@switchboard/core';
 import type { RosterEntry } from '../src/runner.js';
 
 const AGENTS = readFileSync(join(import.meta.dirname, 'fixtures', 'agents.json'), 'utf8');
 const ENTRIES = JSON.parse(AGENTS) as RosterEntry[];
-
-const ACTION: StartAction = {
-  type: 'start-session',
-  sessionId: 's1',
-  workItemId: 1,
-  kind: 'task',
-  provider: 'claude',
-  cwd: 'D:/git/widgets',
-  prompt: '/sb-plan 15619',
-  contract: 'Report to Switchboard with these commands:',
-  name: 'switchboard · dev:develop · github 15619',
-  permissionMode: 'auto',
-  model: 'opus',
-};
-
-/** Recorded `--bg` output (mechanics M5). */
-const LAUNCHED = 'backgrounded · 1a2b3c4d · switchboard · mech · e2\n  claude agents             list sessions\n  claude attach 1a2b3c4d    open in this terminal\n  claude logs 1a2b3c4d      show recent output\n  claude stop 1a2b3c4d      stop this session\n';
 
 const ran = (patch: Partial<ExecResult>): ExecResult => ({ code: 0, stdout: '', stderr: '', missing: false, timedOut: false, ...patch });
 
@@ -43,133 +25,6 @@ function fakeExec(...answers: ExecResult[]) {
     return answer;
   });
 }
-
-function clock() {
-  let now = 0;
-
-  return { now: () => now, sleep: async (ms: number) => void (now += ms) };
-}
-
-describe('startArgs and shortIdFrom', () => {
-  it('starts in the background with the mode, name, model and the prompt as one argument', () => {
-    expect(startArgs(ACTION)).toEqual([
-      '--bg',
-      '--permission-mode',
-      'auto',
-      '--settings',
-      '{"worktree":{"bgIsolation":"none"}}',
-      '-n',
-      'switchboard · dev:develop · github 15619 · s1',
-      '--model',
-      'opus',
-      '--append-system-prompt',
-      'Report to Switchboard with these commands:',
-      '/sb-plan 15619',
-    ]);
-    expect(startArgs({ ...ACTION, model: null })).not.toContain('--model');
-  });
-
-  it('reads the short ID from the backgrounded line only', () => {
-    expect(shortIdFrom(LAUNCHED)).toBe('1a2b3c4d');
-    expect(shortIdFrom('Starting…\r\nbackgrounded · 1a2b3c4d · switchboard · x\r\n')).toBe('1a2b3c4d');
-    expect(shortIdFrom('usage: claude --bg')).toBeNull();
-  });
-});
-
-describe('startSession', () => {
-  it('launches in the work directory and waits for the session on the roster with a pid', async () => {
-    const entry = { id: '1a2b3c4d', sessionId: '1a2b3c4d-0000-4000-8000-000000000000', kind: 'background', cwd: 'D:/git/widgets', state: 'working' };
-    const launching = JSON.stringify([...ENTRIES, entry]);
-    const listed = JSON.stringify([...ENTRIES, { ...entry, pid: 5 }]);
-    const exec = fakeExec(ran({ stdout: LAUNCHED }), ran({ stdout: AGENTS }), ran({ code: 1, stderr: 'busy' }), ran({ stdout: launching }), ran({ stdout: listed }));
-
-    expect(await startSession('claude', ACTION, { exec, ...clock() })).toEqual({ shortId: '1a2b3c4d', nativeSessionId: '1a2b3c4d-0000-4000-8000-000000000000' });
-    expect(exec.mock.calls[0]).toEqual(['claude', startArgs(ACTION), { cwd: 'D:/git/widgets', timeoutMs: 60_000, env: {} }]);
-    expect(exec.mock.calls[1]).toEqual(['claude', ['agents', '--json'], { timeoutMs: 15_000, env: {} }]);
-    expect(exec).toHaveBeenCalledTimes(5);
-  });
-
-  it("runs an absolute claude path with its directory first on PATH, for the node an npm install's launcher runs", async () => {
-    const claudePath = join(tmpdir(), 'nvm', 'bin', 'claude');
-    const exec = fakeExec(ran({ code: 1, stderr: 'no' }));
-
-    const reads = fakeExec(ran({ stdout: AGENTS }), ran({}));
-
-    await startSession(claudePath, ACTION, { exec, ...clock() });
-    await readRoster(claudePath, reads);
-    await stopSession(claudePath, '1a2b3c4d', reads);
-
-    for (const call of [exec.mock.calls[0]!, ...reads.mock.calls]) {
-      const env = call[2].env!;
-      expect(env[Object.keys(env).find((name) => name.toUpperCase() === 'PATH')!]!.split(delimiter)[0]).toBe(join(tmpdir(), 'nvm', 'bin'));
-    }
-  });
-
-  it('names a missing Claude Code CLI, and a missing work directory as such', async () => {
-    const missing = () => fakeExec(ran({ code: null, missing: true }));
-
-    expect(await startSession('/opt/claude', { ...ACTION, cwd: tmpdir() }, { exec: missing(), ...clock() })).toEqual({ error: 'Claude Code was not found at /opt/claude. Install it or set sessions.claudePath.' });
-    const gone = join(tmpdir(), 'switchboard-no-such-dir');
-    expect(await startSession('/opt/claude', { ...ACTION, cwd: gone }, { exec: missing(), ...clock() })).toEqual({ error: `The directory ${gone} was not found.` });
-  });
-
-  it('fails when the entry never gets a pid', async () => {
-    const launching = JSON.stringify([{ id: '1a2b3c4d', sessionId: '1a2b3c4d-0000', kind: 'background', cwd: '', state: 'working' }]);
-    const exec = fakeExec(ran({ stdout: LAUNCHED }), ...Array.from({ length: 30 }, () => ran({ stdout: launching })));
-
-    expect(await startSession('claude', ACTION, { exec, ...clock() })).toEqual({ error: 'Session 1a2b3c4d did not appear in claude agents within 60 seconds.' });
-    expect(exec).toHaveBeenCalledTimes(31);
-  });
-
-  it('fails when the roster cannot be read', async () => {
-    const exec = fakeExec(ran({ stdout: LAUNCHED }), ...Array.from({ length: 30 }, () => ran({ code: 1, stderr: 'busy' })));
-
-    expect(await startSession('claude', ACTION, { exec, ...clock() })).toEqual({ error: 'Session 1a2b3c4d did not appear in claude agents within 60 seconds.' });
-  });
-
-  it('starts a session that waits on a prompt before it starts as such (mechanics M41)', async () => {
-    const entry = { id: '1a2b3c4d', sessionId: '1a2b3c4d-0000', kind: 'background', cwd: 'D:/git/widgets' };
-    const working = JSON.stringify([{ ...entry, state: 'working' }]);
-    const blocked = JSON.stringify([{ ...entry, state: 'blocked' }]);
-    const exec = fakeExec(ran({ stdout: LAUNCHED }), ran({ stdout: blocked }), ran({ stdout: working }), ran({ stdout: blocked }), ran({ stdout: blocked }));
-
-    expect(await startSession('claude', ACTION, { exec, ...clock() })).toEqual({ shortId: '1a2b3c4d', nativeSessionId: '1a2b3c4d-0000', startPrompt: true });
-    expect(exec).toHaveBeenCalledTimes(5);
-  });
-
-  it('starts a session that is blocked once before its pid appears', async () => {
-    const entry = { id: '1a2b3c4d', sessionId: '1a2b3c4d-0000', kind: 'background', cwd: '' };
-    const exec = fakeExec(ran({ stdout: LAUNCHED }), ran({ stdout: JSON.stringify([{ ...entry, state: 'blocked' }]) }), ran({ stdout: JSON.stringify([{ ...entry, state: 'working', pid: 5 }]) }));
-
-    expect(await startSession('claude', ACTION, { exec, ...clock() })).toEqual({ shortId: '1a2b3c4d', nativeSessionId: '1a2b3c4d-0000' });
-  });
-
-  it('starts a session whose blocked reads are not in a row', async () => {
-    const entry = { id: '1a2b3c4d', sessionId: '1a2b3c4d-0000', kind: 'background', cwd: '' };
-    const blocked = ran({ stdout: JSON.stringify([{ ...entry, state: 'blocked' }]) });
-    const exec = fakeExec(ran({ stdout: LAUNCHED }), blocked, ran({ code: 1, stderr: 'busy' }), blocked, ran({ stdout: JSON.stringify([{ ...entry, state: 'working', pid: 5 }]) }));
-
-    expect(await startSession('claude', ACTION, { exec, ...clock() })).toEqual({ shortId: '1a2b3c4d', nativeSessionId: '1a2b3c4d-0000' });
-  });
-
-  it("fails with Claude's message, such as the trust refusal", async () => {
-    const refusal = 'Workspace not trusted. Run `claude` in D:\\git\\x once and accept the trust prompt, then retry.\n';
-
-    expect(await startSession('claude', ACTION, { exec: fakeExec(ran({ code: 1, stderr: refusal })), ...clock() })).toEqual({
-      error: 'Workspace not trusted. Run `claude` in D:\\git\\x once and accept the trust prompt, then retry.',
-    });
-  });
-
-  it('fails when no ID is printed or the session never reaches the roster', async () => {
-    expect(await startSession('claude', ACTION, { exec: fakeExec(ran({ stdout: 'odd output' })), ...clock() })).toEqual({ error: 'Claude started a session without printing its ID: odd output' });
-
-    const roster = Array.from({ length: 30 }, () => ran({ stdout: AGENTS }));
-    const exec = fakeExec(ran({ stdout: 'backgrounded · 1a2b3c4d · x' }), ...roster);
-
-    expect(await startSession('claude', ACTION, { exec, ...clock() })).toEqual({ error: 'Session 1a2b3c4d did not appear in claude agents within 60 seconds.' });
-    expect(exec).toHaveBeenCalledTimes(31);
-  });
-});
 
 describe('roster', () => {
   it('reads entries and fails on a CLI error or bad output', async () => {
@@ -192,68 +47,42 @@ describe('roster', () => {
     expect(['idle', 'busy', 'waiting'].map((status) => rosterState({ sessionId: 'x', kind: 'interactive', cwd: '', status }))).toEqual(['idle', 'running', 'waiting']);
   });
 
-  it('observes sessions whose entry holds a process, preferring the hook marker', () => {
+  it('observes sessions an interactive entry with a process holds, preferring the hook marker, and never a background entry (PRD R93)', () => {
     const marker = (event: string): Marker => ({ sessionId: '', event, notificationType: null, source: null, toolName: null, backgroundTasks: 0, error: null, errorMessage: null });
+    const tab = ENTRIES.find((entry) => entry.sessionId.startsWith('3e065e9f'))!;
     const sessions = [
       { id: 's-gone', shortId: '45503b04' },
-      { id: 's-roster', shortId: 'a54bd2e6' },
+      { id: 's-background', shortId: 'a54bd2e6' },
       { id: 's-unstarted', shortId: null },
       { id: 's-missing', shortId: 'ffffffff' },
+      { id: 's-tab', shortId: '3e065e9f' },
     ];
 
-    expect(observe(ENTRIES, sessions, new Map())).toEqual([{ sessionId: 's-roster', state: 'waiting', detail: null, interactive: false }]);
-    expect(observe(ENTRIES, sessions, new Map([['a54bd2e6-d6aa-4867-bf31-e1fa0b9e8aa9', marker('Stop')]]))).toEqual([{ sessionId: 's-roster', state: 'idle', detail: null, interactive: false }]);
-    expect(observe(ENTRIES, sessions, new Map([['a54bd2e6-d6aa-4867-bf31-e1fa0b9e8aa9', marker('SessionStart')]]))).toEqual([{ sessionId: 's-roster', state: 'waiting', detail: null, interactive: false }]);
-    expect(observe(ENTRIES, [{ id: 's-tab', shortId: '3e065e9f' }], new Map())).toEqual([{ sessionId: 's-tab', state: 'running', detail: null, interactive: true }]);
+    expect(ENTRIES.find((entry) => entry.sessionId.startsWith('a54bd2e6'))).toMatchObject({ kind: 'background', pid: 8292 });
+    expect(observe(ENTRIES, sessions, new Map())).toEqual([{ sessionId: 's-tab', state: 'running', detail: null, interactive: true }]);
+    expect(observe(ENTRIES, sessions, new Map([[tab.sessionId, marker('Stop')]]))).toEqual([{ sessionId: 's-tab', state: 'idle', detail: null, interactive: true }]);
   });
 
-  it('observes a session that started waiting on a prompt while its entry is blocked without a pid (mechanics M41)', () => {
-    const entry = { id: '1a2b3c4d', sessionId: '1a2b3c4d-0000', kind: 'background', cwd: '', state: 'blocked' };
-    const waiting = { id: 's1', shortId: '1a2b3c4d', state: 'waiting', stateDetail: START_PROMPT };
-
-    expect(observe([entry], [waiting], new Map())).toEqual([{ sessionId: 's1', state: 'waiting', detail: START_PROMPT, interactive: false }]);
-    // Answered: the pid appears and the roster's state takes over.
-    expect(observe([{ ...entry, pid: 5, state: 'working' }], [waiting], new Map())).toEqual([{ sessionId: 's1', state: 'running', detail: null, interactive: false }]);
-    // A gone process is listed the same way, so a session that did not start waiting has ended.
-    expect(observe([entry], [{ ...waiting, state: 'running', stateDetail: null }], new Map())).toEqual([]);
-    expect(observe([{ ...entry, state: 'done' }], [waiting], new Map())).toEqual([]);
-  });
-
-  // Entries as `claude agents --json` listed a background session at a tool call's permission prompt and at an AskUserQuestion (mechanics M57).
-  it("tells a permission prompt from a question by the roster's waitingFor, over a notification marker", () => {
-    const entry = { id: '1a2b3c4d', sessionId: '1a2b3c4d-0000', pid: 5, kind: 'background', cwd: '', status: 'waiting', state: 'blocked' };
-    const session = { id: 's1', shortId: '1a2b3c4d', state: 'running', stateDetail: null };
+  it('takes a permission prompt from the hook marker of a session in a tab', () => {
+    const entry = { sessionId: '1a2b3c4d-0000', pid: 5, kind: 'interactive', cwd: '', status: 'busy' };
+    const session = { id: 's1', shortId: '1a2b3c4d' };
     const notification: Marker = { sessionId: entry.sessionId, event: 'Notification', notificationType: 'permission_prompt', source: null, toolName: null, backgroundTasks: 0, error: null, errorMessage: null };
-    const request: Marker = { ...notification, event: 'PermissionRequest', notificationType: null, toolName: 'PowerShell' };
     const markers = (marker: Marker) => new Map([[entry.sessionId, marker]]);
 
-    expect(observe([{ ...entry, waitingFor: 'permission prompt' }], [session], markers(notification))).toEqual([{ sessionId: 's1', state: 'waiting', detail: PERMISSION_PROMPT, interactive: false }]);
-    expect(observe([{ ...entry, waitingFor: 'input needed' }], [session], markers(notification))).toEqual([{ sessionId: 's1', state: 'waiting', detail: null, interactive: false }]);
-    expect(observe([{ ...entry, waitingFor: 'permission prompt' }], [session], new Map())).toEqual([{ sessionId: 's1', state: 'waiting', detail: PERMISSION_PROMPT, interactive: false }]);
-    // Before the roster lists the wait, the permission request's marker decides, and so does the notification that carries its tool, whatever
-    // the session was when the read began.
-    const working = { ...entry, status: 'busy', state: 'working' };
-    expect(observe([working], [session], markers(request))).toEqual([{ sessionId: 's1', state: 'waiting', detail: PERMISSION_PROMPT, interactive: false }]);
-    expect(observe([working], [session], markers({ ...notification, promptTool: 'PowerShell' }))).toEqual([{ sessionId: 's1', state: 'waiting', detail: PERMISSION_PROMPT, interactive: false }]);
-    expect(observe([working], [session], markers({ ...notification, promptTool: null }))).toEqual([{ sessionId: 's1', state: 'waiting', detail: null, interactive: false }]);
-    // A notification marker from before the writer recorded the tool leaves a listed wait to the roster.
-    expect(observe([{ ...entry, waitingFor: 'permission prompt' }], [session], markers(notification))).toEqual([{ sessionId: 's1', state: 'waiting', detail: PERMISSION_PROMPT, interactive: false }]);
-    // An answered prompt runs again whatever the roster still lists.
-    expect(observe([{ ...entry, waitingFor: 'permission prompt' }], [session], markers({ ...notification, event: 'PostToolBatch', notificationType: null }))).toEqual([{ sessionId: 's1', state: 'running', detail: null, interactive: false }]);
+    expect(observe([entry], [session], markers({ ...notification, event: 'PermissionRequest', notificationType: null, toolName: 'PowerShell' }))).toEqual([{ sessionId: 's1', state: 'waiting', detail: PERMISSION_PROMPT, interactive: true }]);
+    expect(observe([entry], [session], markers({ ...notification, promptTool: 'PowerShell' }))).toEqual([{ sessionId: 's1', state: 'waiting', detail: PERMISSION_PROMPT, interactive: true }]);
+    expect(observe([entry], [session], markers({ ...notification, promptTool: null }))).toEqual([{ sessionId: 's1', state: 'waiting', detail: null, interactive: true }]);
+    expect(observe([entry], [session], markers({ ...notification, event: 'PostToolBatch', notificationType: null }))).toEqual([{ sessionId: 's1', state: 'running', detail: null, interactive: true }]);
   });
 
   it('observes a resumed tab as idle until its first turn, though the roster lists it as busy', () => {
     const tab = ENTRIES.find((entry) => entry.sessionId.startsWith('3e065e9f'))!;
     const marker = (event: string, source: string | null): Marker => ({ sessionId: tab.sessionId, event, notificationType: null, source, toolName: null, backgroundTasks: 0, error: null, errorMessage: null });
     const sessions = [{ id: 's-tab', shortId: '3e065e9f' }];
-    const background = [{ id: 's-roster', shortId: 'a54bd2e6' }];
-    const backgroundId = 'a54bd2e6-d6aa-4867-bf31-e1fa0b9e8aa9';
 
     expect(observe(ENTRIES, sessions, new Map([[tab.sessionId, marker('SessionStart', 'resume')]]))).toEqual([{ sessionId: 's-tab', state: 'idle', detail: null, interactive: true }]);
     expect(observe(ENTRIES, sessions, new Map([[tab.sessionId, marker('SessionStart', 'compact')]]))).toMatchObject([{ state: 'running' }]);
     expect(observe(ENTRIES, sessions, new Map([[tab.sessionId, marker('UserPromptSubmit', null)]]))).toMatchObject([{ state: 'running' }]);
-    // A background session's start is followed by its prompt, so the roster's state stands.
-    expect(observe(ENTRIES, background, new Map([[backgroundId, { ...marker('SessionStart', 'startup'), sessionId: backgroundId }]]))).toMatchObject([{ state: 'waiting' }]);
   });
 
   it("observes each fork with its own marker's state, else the roster's, and names it by its ID", () => {
@@ -268,12 +97,3 @@ describe('roster', () => {
   });
 });
 
-describe('stopSession', () => {
-  it('runs claude stop and reports a failure', async () => {
-    const exec = fakeExec(ran({}), ran({ code: 1, stderr: 'No such agent' }));
-
-    expect(await stopSession('claude', '1a2b3c4d', exec)).toBeNull();
-    expect(exec.mock.calls[0]).toEqual(['claude', ['stop', '1a2b3c4d'], { timeoutMs: 15_000, env: {} }]);
-    expect(await stopSession('claude', '1a2b3c4d', exec)).toEqual({ error: 'No such agent' });
-  });
-});

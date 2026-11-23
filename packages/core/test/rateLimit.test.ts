@@ -233,15 +233,14 @@ describe('the end of a wait nothing will continue', () => {
 });
 
 describe('a background session at a limit (display only)', () => {
-  it('is released and blocks its task with the cause, keeping the limit for the row', () => {
+  it("blocks a registered session's work item with the cause, keeping the limit for the row, and stops nothing", () => {
     const h = new Harness();
-    const [triage] = h.poll(issue('7'));
 
-    h.triaged(triage, 'dev:question');
-    const id = h.started(h.act({ type: 'start', workItemId: 1 })[0]);
+    h.act({ type: 'register', nativeSessionId: 'native-7', shortId: 'native-7', cwd: 'D:/git/widgets', title: 'Mine' });
+    const id = h.store.sessionByNativeId('native-7')!.id;
     const actions = h.act({ type: 'marker', sessionId: id, state: 'failed', detail: 'rate_limit', limit: USAGE });
 
-    expect(actions).toEqual([expect.objectContaining({ type: 'stop-session', sessionId: id, reason: 'release' })]);
+    expect(actions).toEqual([]);
     expect(h.item(1)).toMatchObject({ status: 'blocked', error: MESSAGES.turnAtLimit });
     expect(h.store.session(id)!.rateLimit).toMatchObject({ resetsAt: RESET });
   });
@@ -298,7 +297,7 @@ describe('a background session at a limit (display only)', () => {
     const [triage] = h.poll(issue('7'));
 
     h.triaged(triage, 'dev:question');
-    const id = h.started(h.act({ type: 'start', workItemId: 1 })[0]);
+    const id = h.legacy(h.started(h.act({ type: 'start', workItemId: 1 })[0]));
 
     h.act({ type: 'marker', sessionId: id, state: 'failed', detail: 'rate_limit', limit: USAGE });
     expect(h.item(1)).toMatchObject({ status: 'blocked', error: MESSAGES.turnAtLimit });

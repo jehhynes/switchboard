@@ -214,53 +214,7 @@ describe('the Switchboard pane (PRD R92)', () => {
     assert.deepStrictEqual(warned, ['Switchboard: Unknown work item 7.'], 'the hub never received the Start');
   });
 
-  it("opens Open in terminal in this window with the agent's CLI from the hub's sessions.claudePath", async () => {
-    const settingsFile = join(process.env.SWITCHBOARD_TEST_HOME, 'repo', 'switchboard', 'settings.json');
-    const saved = existsSync(settingsFile) ? readFileSync(settingsFile, 'utf8') : null;
-    const realCreate = Object.getOwnPropertyDescriptor(vscode.window, 'createTerminal');
-    const created = [];
-    const waiting = { ...item(folder, 'running').sessions[0], state: 'waiting', stateDetail: 'permission-prompt', shortId: 'ab12', released: false };
-
-    // A stand-in, so no Claude process starts.
-    Object.defineProperty(vscode.window, 'createTerminal', { configurable: true, value: (options) => (created.push(options), { options, exitStatus: undefined, show: () => {} }) });
-    // The hub reads settings.json again when it changes.
-    writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(saved ?? '{}'), sessions: { ...JSON.parse(saved ?? '{}').sessions, claudePath: '/opt/pane-test/claude' } }));
-
-    const cleanups = [];
-
-    try {
-      extension.itemWindow(file);
-      show([item(folder, 'running', { sessions: [waiting] })]);
-      assert.strictEqual(shown('switchboard.pane').items[0].main.label, 'Open in terminal');
-
-      const key = shown('switchboard.pane').items[0].key;
-      // The terminal command is left for the item window, which only a window whose key binds its file claims.
-      const bound = await bindTo(extension, file);
-      const ownKey = extension.windowKey();
-
-      extension.useWindowKey(bound.key);
-      cleanups.push(() => (extension.useWindowKey(ownKey), bound.close()));
-
-      await until(async () => {
-        created.length = 0;
-        // The reload sends the hub's own state, which has no work item 7.
-        show([item(folder, 'running', { sessions: [waiting] })]);
-        await extension.paneClick({ type: 'main', key });
-        return created.some((options) => options.shellPath === '/opt/pane-test/claude');
-      }, 'the terminal never ran the configured CLI', 10_000);
-      assert.deepStrictEqual(created.map(({ name, shellArgs, cwd }) => ({ name, shellArgs, cwd })), [{ name: 'Switchboard · gh 7', shellArgs: ['attach', 'ab12'], cwd: folder }]);
-    } finally {
-      cleanups.forEach((cleanup) => cleanup());
-      Object.defineProperty(vscode.window, 'createTerminal', realCreate);
-      if (saved === null) {
-        rmSync(settingsFile, { force: true });
-      } else {
-        writeFileSync(settingsFile, saved);
-      }
-    }
-  });
-
-  it("opens a Code Mode session waiting on a question in its attach terminal, with the hub's sessions.nodePath and hub.js, where Open in Claude would be (PRD R95)", async () => {
+  it("opens a held session waiting on a question in its attach terminal, with the hub's sessions.nodePath and hub.js (PRD R93, R95)", async () => {
     const settingsFile = join(process.env.SWITCHBOARD_TEST_HOME, 'repo', 'switchboard', 'settings.json');
     const saved = existsSync(settingsFile) ? readFileSync(settingsFile, 'utf8') : null;
     const realCreate = Object.getOwnPropertyDescriptor(vscode.window, 'createTerminal');
@@ -276,9 +230,6 @@ describe('the Switchboard pane (PRD R92)', () => {
 
     try {
       extension.itemWindow(file);
-      show([item(folder, 'running', { sessions: [question] })]);
-      assert.strictEqual(shown('switchboard.pane').items[0].main.label, 'Open in Claude');
-
       show([item(folder, 'running', { sessions: [held] })]);
       assert.strictEqual(shown('switchboard.pane').items[0].main.label, 'Open in terminal');
       assert.strictEqual(shown('switchboard.pane').items[0].main.title, 'Open in terminal: attaches to the Code Mode session');
@@ -298,7 +249,7 @@ describe('the Switchboard pane (PRD R92)', () => {
         return created.some((options) => options.shellPath === '/opt/pane-test/node');
       }, 'the terminal never ran the configured Node.js', 10_000);
       assert.deepStrictEqual(created.map(({ name, shellArgs, cwd }) => ({ name, shellArgs, cwd })), [{ name: 'Switchboard · gh 7', shellArgs: [hubJs, 'attach', 's7'], cwd: folder }]);
-      // No Open in Claude stop reached the hub, which would refuse it for work item 7.
+      // Nothing reached the hub, which would refuse it for work item 7.
       assert.deepStrictEqual(warned, []);
     } finally {
       cleanups.forEach((cleanup) => cleanup());

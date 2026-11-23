@@ -136,12 +136,15 @@ export function sessionView(session: Session, current: boolean, hooks: boolean, 
   const waitingFor = session.state !== 'waiting' ? null : session.stateDetail === PERMISSION_PROMPT ? 'permission' : session.stateDetail === START_PROMPT ? 'start-prompt' : 'question';
   // A message to an ended app-server session resumes its thread first (PRD R107); an ended Code Mode session resumes through its attach terminal.
   const resumable = session.execution === 'app-server' && session.nativeSessionId !== null;
-  // An ended registered session resumes in the holder as an ended Code Mode session does (PRD R81).
+  // An ended session that was never held, a registered one or one an earlier hub ran in the background, resumes in the holder as an ended held
+  // session does (PRD R81, R93).
   const held = session.codeMode === true || resumesHeld(session);
   const conversation = !held && session.execution !== 'app-server' ? 'none' : (session.state === 'ended' && !resumable) || (session.codeMode === true && !hooks) ? 'read-only' : 'full';
   const reason =
     conversation === 'none'
-      ? `This session runs in the background; open it in ${session.provider === 'codex' ? 'Codex' : 'Claude'} to talk to it.`
+      ? session.provider === 'codex'
+        ? 'This session is a Codex exec run, which has no conversation here.'
+        : 'This session runs in your own Claude window; talk to it there.'
       : session.state === 'ended' && !resumable
         ? 'The session has ended. Open it in the terminal to resume it.'
         : conversation === 'read-only'

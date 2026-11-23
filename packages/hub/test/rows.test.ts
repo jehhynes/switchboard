@@ -11,7 +11,6 @@ import {
   doneSince,
   doneStamp,
   mainControl,
-  openQuestion,
   poolControls,
   priorityTitle,
   queueTime,
@@ -38,20 +37,6 @@ describe('ad hoc key', () => {
 
 const labels = (entry: WorkItemView) => controlsOf(entry).map((control) => control.label);
 
-describe('unconfirmed start recovery controls', () => {
-  it('offers Stop for a warned ordinary start, including a done item, and keeps Delete unavailable until it ends', () => {
-    for (const status of ['running', 'done'] as const) {
-      const entry = item(1, { status, warning: status === 'done' ? null : 'Unconfirmed start', sessions: [session({ provider: 'claude', state: 'starting', nativeSessionId: null, shortId: null, stateDetail: 'Unconfirmed start' })] });
-      expect(controlsOf(entry).find(control => control.label === 'Stop session')).toEqual({ label: 'Stop session', icon: 'debug-stop', message: { type: 'action', action: { type: 'stop', workItemId: 1 } }, confirm: { question: 'Recheck this start?', detail: 'Only an overdue start with no matching session can be cleared without stopping a process. Resolve duplicate sessions in claude agents first. Inspect it before retrying.', action: 'Stop session' } });
-      expect(labels(entry)).not.toContain('Delete');
-    }
-  });
-
-  it('does not offer local clearing for an ordinary in-flight start without recovery detail', () => {
-    expect(labels(item(1, { warning: 'Unrelated warning', sessions: [session({ state: 'starting', nativeSessionId: null, shortId: null, stateDetail: null })] }))).not.toContain('Stop session');
-  });
-});
-
 describe('groupOf', () => {
   it('puts done first, then unstarted, triaging and queued work, then ready work, then work blocked on the operator, then the rest', () => {
     expect(groupOf(item(1, { status: 'done', sessions: [session({ state: 'waiting' })] }))).toBe('done');
@@ -71,7 +56,7 @@ describe('controlsOf', () => {
   it('shows only the controls that apply, with no session controls and no Change playbook', () => {
     expect(labels(item(1, { status: 'unstarted' }))).toEqual(['Start', 'Start with guidance…', 'Mark done', 'Snooze…', 'Add comment…', 'Delete', 'History']);
     expect(labels(item(1, { status: 'awaiting-approval' }))).toEqual(['Approve', 'Mark done', 'Snooze…', 'Add comment…', 'Delete', 'History']);
-    expect(labels(item(1, { sessions: [session()] }))).toEqual(['Stop session', 'Mark done', 'Snooze…', 'Add comment…', 'Open in terminal', 'Delete', 'History']);
+    expect(labels(item(1, { sessions: [session({ codeMode: true })] }))).toEqual(['Stop session', 'Mark done', 'Snooze…', 'Add comment…', 'Open in terminal', 'Delete', 'History']);
     expect(labels(item(1, { sessions: [session({ state: 'starting', shortId: null })] }))).toEqual(['Mark done', 'Snooze…', 'Add comment…', 'History']);
     expect(labels(item(1, { status: 'blocked', sessions: [session({ state: 'ended' })] }))).toEqual(['Mark done', 'Snooze…', 'Add comment…', 'Open in terminal', 'Delete', 'History']);
     expect(labels(item(1, { status: 'finished', sessions: [session({ state: 'ended' })] }))).toEqual(['Mark done', 'Snooze…', 'Add comment…', 'Open in terminal', 'Delete', 'History']);
@@ -87,12 +72,12 @@ describe('controlsOf', () => {
     expect(labels(item(1, { status: 'failed', ticket: { ...item(1).ticket, source: 'adhoc' } }))).toEqual(['Retry', 'Mark done', 'Snooze…', 'Add comment…', 'Delete', 'History']);
     expect(labels(item(1, { status: 'failed', ticket: { ...item(1).ticket, source: 'schedule' } }))).toEqual(['Retry', 'Mark done', 'Snooze…', 'Add comment…', 'Delete', 'History']);
     expect(labels(item(1, { status: 'blocked', sessions: [session({ released: true })] }))).toEqual(['Mark done', 'Snooze…', 'Add comment…', 'Open in terminal', 'Delete', 'History']);
-    expect(controlsOf(item(7, { sessions: [session()] })).map((control) => control.message)).toEqual([
+    expect(controlsOf(item(7, { sessions: [session({ codeMode: true })] })).map((control) => control.message)).toEqual([
       { type: 'action', action: { type: 'stop', workItemId: 7 } },
       { type: 'action', action: { type: 'mark-done', workItemId: 7 } },
       { type: 'action', action: { type: 'snooze', ticketId: 7 } },
       { type: 'action', action: { type: 'comment', workItemId: 7 } },
-      { type: 'terminal', provider: 'claude', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', name: 'gh 107', shortId: 'aaaa1111', active: false },
+      { type: 'terminal', provider: 'claude', sessionId: 's1', cwd: 'D:/git/widgets', name: 'gh 107', shortId: 'aaaa1111', active: false, codeMode: true },
       { type: 'action', action: { type: 'delete', workItemId: 7 } },
       { type: 'history', ticketId: 7, key: 'gh 107' },
     ]);
@@ -159,47 +144,33 @@ describe('controlsOf', () => {
     expect(confirm(item(7, { sessions: [session({ state: 'starting', shortId: null })] }))).toBeNull();
   });
 
-  it('offers Stop in place of Open in Claude while a fork waits for the session to be released (PRD R78)', () => {
-    const waiting = item(7, { status: 'blocked', sessions: [session({ state: 'waiting', pendingFork: '9e8d7c6b' })] });
+  it('offers Open in terminal while a held session without Code Mode waits on a prompt before it starts (PRD R41)', () => {
+    const waiting = item(7, { status: 'running', sessions: [session({ codeMode: true, withoutCodeMode: true, state: 'waiting', stateDetail: START_PROMPT })] });
 
-    expect(openQuestion(waiting)).toBeNull();
-    expect(labels(waiting)).not.toContain('Open in Claude');
-    expect(labels(waiting)).toContain('Stop session');
-    expect(mainControl(waiting)?.label).not.toBe('Open in Claude');
-  });
-
-  it('offers Open in terminal, not Open in Claude, while a session waits on a prompt before it starts (PRD R41)', () => {
-    const waiting = item(7, { status: 'running', sessions: [session({ state: 'waiting', stateDetail: START_PROMPT })] });
-
-    expect(openQuestion(waiting)).toBeNull();
-    expect(labels(waiting)).not.toContain('Open in Claude');
     expect(labels(waiting)).toContain('Stop session');
     expect(mainControl(waiting)).toMatchObject({ label: 'Open in terminal', message: { type: 'terminal', shortId: 'aaaa1111', active: false } });
     expect(startPromptText(waiting)).toEqual([{ text: 'Waits on a prompt before it starts', title: "Claude asks before the session starts, such as to approve the project's MCP servers. Open in terminal to answer it." }]);
-    expect(startPromptText(item(7, { sessions: [session({ state: 'waiting' })] }))).toEqual([]);
-    expect(mainControl(item(7, { sessions: [session({ state: 'waiting' })] }))?.label).toBe('Open in Claude');
+    expect(startPromptText(item(7, { sessions: [session({ codeMode: true, state: 'waiting' })] }))).toEqual([]);
+    expect(mainControl(item(7, { sessions: [session({ codeMode: true, state: 'waiting' })] }))?.label).toBe('Open in terminal');
   });
 
-  it('offers Open in terminal, not Open in Claude, while a background session waits on a permission prompt (PRD R70)', () => {
-    const waiting = item(7, { status: 'running', sessions: [session({ state: 'waiting', stateDetail: PERMISSION_PROMPT })] });
+  it('offers Open in terminal while a held session without Code Mode waits on a permission prompt (PRD R70)', () => {
+    const waiting = item(7, { status: 'running', sessions: [session({ codeMode: true, withoutCodeMode: true, state: 'waiting', stateDetail: PERMISSION_PROMPT })] });
 
-    expect(openQuestion(waiting)).toBeNull();
-    expect(labels(waiting)).not.toContain('Open in Claude');
     expect(labels(waiting)).toContain('Stop session');
     expect(mainControl(waiting)).toMatchObject({ label: 'Open in terminal', message: { type: 'terminal', shortId: 'aaaa1111', active: false } });
     expect(mainControl(waiting, 'review')).toBe(ANSWER_IN_TERMINAL);
     expect(startPromptText(waiting)).toEqual([{ text: 'Waits on a permission prompt', title: 'Claude asks to approve a tool call. Open in terminal to answer it; stopping the session would drop the prompt.' }]);
-    // Released to a VS Code tab, the tab shows the prompt.
+    // A registered session shows the prompt in the operator's own window.
     expect(startPromptText(item(7, { sessions: [session({ state: 'waiting', stateDetail: PERMISSION_PROMPT, released: true })] }))).toEqual([]);
   });
 
-  it('attaches a terminal to a background session, resumes the latest ended session, shows one the operator resumed, and offers none while a session starts (PRD R28)', () => {
+  it('attaches a terminal to a held session, resumes the latest ended session, shows one the operator resumed, and offers none while a session starts (PRD R28)', () => {
     const terminal = (entry: WorkItemView) => controlsOf(entry).find((control) => control.label === 'Open in terminal')?.message ?? null;
-    const waiting = item(7, { sessions: [session({ state: 'waiting' })] });
 
-    expect(terminal(waiting)).toEqual({ type: 'terminal', provider: 'claude', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', name: 'gh 107', shortId: 'aaaa1111', active: false });
-    expect(labels(waiting)).toContain('Open in Claude');
-    expect(terminal(item(7, { sessions: [session({ nativeSessionId: null })] }))).toMatchObject({ sessionId: 'aaaa1111', shortId: 'aaaa1111' });
+    expect(terminal(item(7, { sessions: [session({ codeMode: true, state: 'waiting' })] }))).toEqual({ type: 'terminal', provider: 'claude', sessionId: 's1', cwd: 'D:/git/widgets', name: 'gh 107', shortId: 'aaaa1111', active: false, codeMode: true });
+    // Switchboard no longer attaches to a session in Claude's background service (PRD R93).
+    expect(terminal(item(7, { sessions: [session({ state: 'waiting' })] }))).toBeNull();
     expect(terminal(item(7, { sessions: [session({ id: 's0', nativeSessionId: 'old-native', state: 'ended' }), session({ state: 'ended', cwd: 'D:/wt' })] }))).toEqual({ type: 'terminal', provider: 'claude', sessionId: 'aaaa1111-native', cwd: 'D:/wt', name: 'gh 107', shortId: null, active: false });
     // Released and not ended: the roster lists it as interactive, as for a terminal or a VS Code tab.
     expect(terminal(item(7, { sessions: [session({ state: 'idle', released: true })] }))).toEqual({ type: 'terminal', provider: 'claude', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', name: 'gh 107', shortId: null, active: true });
@@ -216,14 +187,12 @@ describe('Codex sessions (PRD R22)', () => {
   const codex = (patch: Partial<WorkItemView['sessions'][number]> = {}) => session({ provider: 'codex', nativeSessionId: 'thread-1', shortId: 'thread-1', ...patch });
   const terminal = (entry: WorkItemView) => controlsOf(entry).find((control) => control.label === 'Open in terminal')?.message ?? null;
 
-  it('names Codex on Open, as the main control of a waiting session, and in Delete', () => {
+  it('offers no Open in Codex for an exec run waiting on its question, and names Codex in Delete', () => {
     const waiting = item(7, { sessions: [codex({ state: 'waiting', question: { id: 'q1', text: 'Which?' } })] });
 
-    // A Codex session waiting on a permission prompt rather than a reported question offers nothing to open.
     expect(mainControl(item(7, { sessions: [codex({ state: 'waiting' })] }))).toBeNull();
-
-    expect(mainControl(waiting)).toEqual({ label: 'Open in Codex', icon: 'comment-discussion', message: { type: 'open-question', workItemId: 7, sessionId: 'thread-1', cwd: 'D:/git/widgets', provider: 'codex' } });
-    expect(labels(waiting)).not.toContain('Open in Claude');
+    expect(mainControl(waiting)).toBeNull();
+    expect(labels(waiting)).not.toContain('Open in Codex');
     expect(controlsOf(item(7, { sessions: [codex({ state: 'ended' })] })).find((control) => control.label === 'Delete')?.confirm?.detail).toContain("its worktree and Codex's session files stay");
   });
 
@@ -249,7 +218,6 @@ describe('Code Mode sessions (PRD R95)', () => {
     for (const stateDetail of [null, PERMISSION_PROMPT, START_PROMPT]) {
       const waiting = item(7, { sessions: [held({ state: 'waiting', stateDetail })] });
 
-      expect(openQuestion(waiting)).toBeNull();
       expect(labels(waiting)).not.toContain('Open in Claude');
       expect(mainControl(waiting)).toMatchObject({ label: 'Open in terminal', message: attach });
       expect(mainControl(waiting, 'review')).toBe(ANSWER_IN_TERMINAL);
@@ -292,7 +260,7 @@ describe('mainControl', () => {
     expect(mainControl(item(1, { status: 'failed', triage: triage({ error: 'Timed out.' }) }))?.label).toBe('Retry');
     // A ready row keeps the control of what it waits on.
     expect(mainControl(item(1, { status: 'failed', readyAt: NOW }))?.label).toBe('Retry');
-    expect(mainControl(item(1, { status: 'awaiting-approval', readyAt: NOW, sessions: [session({ state: 'waiting' })] }))?.label).toBe('Open in Claude');
+    expect(mainControl(item(1, { status: 'awaiting-approval', readyAt: NOW, sessions: [session({ codeMode: true, state: 'waiting' })] }))?.label).toBe('Open in terminal');
     expect(mainControl(item(1, { status: 'failed', ticket: { ...item(1).ticket, source: 'adhoc' } }))?.label).toBe('Retry');
     expect(mainControl(item(1, { status: 'blocked', sessions: [session({ state: 'ended' })] }))).toBeNull();
     expect(mainControl(item(1, { status: 'unstarted' }))?.label).toBe('Start');

@@ -24,7 +24,6 @@ import {
   mainControl,
   mainTitle,
   moveControls,
-  openQuestion,
   listGroups,
   playbookText,
   poolControls,
@@ -689,14 +688,8 @@ export function windowTabs(snapshot: Snapshot, file: string, windows: string): {
   };
 }
 
-/** Open in Claude or Codex while the background session waits on a question (PRD R70), else the latest session when it is not running in its background process. */
+/** The latest session, when Switchboard does not run it now. */
 export function openOf(item: WorkItemView, windows: string): DockOpen | null {
-  const question = openQuestion(item);
-
-  if (question !== null) {
-    return { type: 'question', workItemId: question.workItemId, sessionId: question.sessionId, cwd: question.cwd, provider: question.provider };
-  }
-
   // A row with no window opens its focus (PRD R71, R79), and a registered session opens nowhere while it lives in the operator's window (PRD R81).
   if (windowOf(item, windows) === null) {
     return item.focus === null ? null : { type: 'url', url: item.focus };
@@ -713,7 +706,7 @@ export function openOf(item: WorkItemView, windows: string): DockOpen | null {
     return active?.state === 'starting' || active?.state === 'running' ? null : { type: 'session', sessionId: latest.id, cwd: latest.cwd, provider: latest.provider };
   }
 
-  // A session whose release stop has not finished may still be held by its background process (PRD R39).
+  // A session whose end has not finished may still run.
   if (latest?.nativeSessionId != null && (active === null || (active.released && !active.releasing))) {
     return { type: 'session', sessionId: latest.nativeSessionId, cwd: latest.cwd, provider: latest.provider };
   }
@@ -752,13 +745,7 @@ export function reviewOpenOf(item: WorkItemView, windows: string): DockOpen | nu
   }
 
   if (isBackground(session)) {
-    const question = openQuestion(item);
-
-    if (session.provider === 'codex') {
-      return question === null ? { type: 'select' } : terminal(codexAnswer(item, windows, question));
-    }
-
-    return terminal(menuTerminal(item, windows));
+    return session.provider === 'codex' ? { type: 'select' } : terminal(menuTerminal(item, windows));
   }
 
   if (session !== null) {
@@ -799,19 +786,6 @@ function codeModeDockTerminal(item: WorkItemView, session: WorkItemView['session
   const own = { ...item, sessions: item.sessions.slice(0, item.sessions.indexOf(session) + 1) };
 
   return { provider: 'claude', sessionId: session.id, cwd: session.cwd, args: ['attach', session.id], ...terminalName(own, windows, session.id), handoff: null, active: false, codeMode: true };
-}
-
-/** Answer in terminal for a Codex question: the Open in Codex stop first, then `codex resume` once its turn's process has exited (PRD R70). */
-function codexAnswer(item: WorkItemView, windows: string, question: NonNullable<ReturnType<typeof openQuestion>>): DockTerminal {
-  return {
-    provider: 'codex',
-    sessionId: question.sessionId,
-    cwd: question.cwd,
-    args: ['resume', question.sessionId],
-    ...terminalName(item, windows, question.sessionId.slice(0, 8)),
-    handoff: { workItemId: question.workItemId, sessionId: question.sessionId },
-    active: false,
-  };
 }
 
 /**

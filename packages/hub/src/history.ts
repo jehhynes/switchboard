@@ -150,8 +150,8 @@ const str = (value: unknown): string => (value === null || value === undefined ?
 
 /**
  * What a click on a session opens: the session in Claude, unless it runs in its background process, lives in the operator's window it was
- * registered from (PRD R81), or has no native ID yet; then null. A Code Mode session opens in its attach terminal in every state, by its
- * Switchboard session ID (PRD R95), and so does an ended registered session, which resumes in the holder (PRD R81).
+ * registered from (PRD R81), or has no native ID yet; then null. A held session opens in its attach terminal in every state, by its
+ * Switchboard session ID (PRD R95), and so does an ended one that was never held, which resumes in the holder (PRD R81, R93).
  */
 export function sessionOpen(session: Session): EntryLink['open'] | null {
   if (session.codeMode === true || resumesHeld(session)) {
@@ -224,7 +224,7 @@ class Builder {
     }
 
     return session !== undefined && (session.codeMode === true || resumesHeld(session))
-      ? [{ label: 'Open in terminal', icon: 'terminal', title: `Attach to ${session.registered === true ? '' : 'Code Mode '}${this.sessionName(sessionId)} in a terminal`, open }]
+      ? [{ label: 'Open in terminal', icon: 'terminal', title: `Attach to ${session.codeMode === true && session.withoutCodeMode !== true && session.registered !== true ? 'Code Mode ' : ''}${this.sessionName(sessionId)} in a terminal`, open }]
       : [{ label: `Open in ${name}`, icon: 'comment-discussion', title: `Open ${this.sessionName(sessionId)} in ${name}`, open }];
   }
 
@@ -591,7 +591,7 @@ class Builder {
       }
       case 'session-started':
         skip.add('state').add('nativeSessionId').add('shortId');
-        return { category: 'session', icon: 'terminal', text: `${capital(session)} started${event.sessionId !== null && this.sessions.get(event.sessionId)?.codeMode === true ? ' in Code Mode' : ''}` };
+        return { category: 'session', icon: 'terminal', text: `${capital(session)} started${event.sessionId !== null && this.sessions.get(event.sessionId)?.codeMode === true && this.sessions.get(event.sessionId)?.withoutCodeMode !== true ? ' in Code Mode' : ''}` };
       case 'session-start-failed':
         skip.add('state').add('outcome').add('outcomeDetail').add('released');
         return { category: 'session', icon: 'error', text: 'The session failed to start', detail: str(detail['message']), tone: 'error' };

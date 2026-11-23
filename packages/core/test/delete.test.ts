@@ -12,11 +12,11 @@ function running(h: Harness): string {
 }
 
 describe('delete (PRD R120)', () => {
-  it('stops a background session, deletes the work item with its sessions and triages, and refuses the stopped session afterwards', () => {
+  it('stops a held session, deletes the work item with its sessions and triages, and refuses the stopped session afterwards', () => {
     const h = new Harness();
     const session = running(h);
 
-    expect(h.act({ type: 'delete', workItemId: 1 })).toEqual([{ type: 'stop-session', sessionId: session, provider: 'claude', shortId: 'abc12345', reason: 'operator' }]);
+    expect(h.act({ type: 'delete', workItemId: 1 })).toEqual([{ type: 'stop-session', sessionId: session, provider: 'claude', shortId: 'abc12345', reason: 'operator', codeMode: true }]);
 
     expect(h.store.workItem(1)).toBeNull();
     expect(h.store.session(session)).toBeNull();
@@ -39,20 +39,19 @@ describe('delete (PRD R120)', () => {
     expect(h.store.workItemsForTicket(1)).toMatchObject([{ id: 2, status: 'triaging' }]);
   });
 
-  it("does not stop a session the operator resumed, because it is theirs", () => {
+  it("does not stop a registered session in the operator's window, because it is theirs", () => {
     const h = new Harness();
-    const session = running(h);
-    h.act({ type: 'roster', sessions: [{ sessionId: session, state: 'running', detail: null, interactive: true }] });
+    h.act({ type: 'register', nativeSessionId: 'native-1', shortId: 'native-1', cwd: 'D:/git/widgets', title: 'Mine' });
 
     expect(h.act({ type: 'delete', workItemId: 1 })).toEqual([]);
     expect(h.store.workItem(1)).toBeNull();
   });
 
-  it('refuses while the session starts, because it has no short ID to stop yet', () => {
+  it('refuses while a session Switchboard does not hold starts, because it has no short ID to stop yet', () => {
     const h = new Harness();
     const [triage] = h.poll(issue('1'));
     h.triaged(triage, 'dev:question');
-    h.act({ type: 'start', workItemId: 1 });
+    h.legacy((h.act({ type: 'start', workItemId: 1 })[0] as { sessionId: string }).sessionId);
 
     expect(h.send({ type: 'delete', workItemId: 1 }).refused).toBe('The session is starting. Delete the work item once it has started.');
     expect(h.status(1)).toBe('running');
@@ -149,7 +148,7 @@ describe('delete (PRD R120)', () => {
     const h = new Harness();
     const [triage] = h.poll(issue('1'));
     h.triaged(triage, 'dev:question');
-    h.act({ type: 'start', workItemId: 1 });
+    h.legacy((h.act({ type: 'start', workItemId: 1 })[0] as { sessionId: string }).sessionId);
     h.send({ type: 'delete', workItemId: 1 });
 
     expect(h.store.ticketHistory(1)!.events.at(-1)).toMatchObject({ type: 'delete', refused: 'The session is starting. Delete the work item once it has started.' });

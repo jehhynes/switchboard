@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { FlowAction } from '../src/flow.js';
 import { launchOptions, MESSAGES } from '../src/flow.js';
+import { resumesHeld } from '../src/group.js';
 import { Harness, issue, playbooks, settings } from './flowHarness.js';
 
 function only<T extends FlowAction['type']>(actions: FlowAction[], type: T): Extract<FlowAction, { type: T }> {
@@ -42,14 +43,12 @@ function heldSetup(h: Harness): string {
 describe('sessions.codeMode (PRD R93)', () => {
   const adhoc = (h: Harness, prompt = 'Write hello.txt') => only(h.act({ type: 'adhoc', prompt, repoRoot: 'D:/scratch', start: true }), 'start-session');
 
-  it('starts a background Claude session while it is off', () => {
+  it('starts a held Claude session without Code Mode while it is off, with its Claude session ID and launch stored before the start', () => {
     const h = new Harness();
     const start = adhoc(h);
 
-    expect(start.codeMode).toBeUndefined();
-    expect(start.nativeSessionId).toBeUndefined();
-    expect(start.launchId).toBeUndefined();
-    expect(h.store.session(start.sessionId)).toMatchObject({ codeMode: false, nativeSessionId: null, launchId: null, state: 'starting' });
+    expect(start).toMatchObject({ provider: 'claude', codeMode: true, withoutCodeMode: true, nativeSessionId: 'uuid-1', launchId: 'uuid-2' });
+    expect(h.store.session(start.sessionId)).toMatchObject({ codeMode: true, withoutCodeMode: true, nativeSessionId: 'uuid-1', launchId: 'uuid-2', state: 'starting' });
   });
 
   it('starts a Code Mode session with its Claude session ID and launch stored before the start while it is on', () => {
@@ -94,9 +93,9 @@ describe('sessions.codeMode (PRD R93)', () => {
     h.settings = settings({ sessions: { codeMode: false, concurrency: 2 } });
     const second = adhoc(h, 'Second');
 
-    expect(second.codeMode).toBeUndefined();
-    expect(h.store.session(first)).toMatchObject({ codeMode: true, launchId: 'uuid-2' });
-    expect(h.store.session(second.sessionId)).toMatchObject({ codeMode: false });
+    expect(second).toMatchObject({ codeMode: true, withoutCodeMode: true });
+    expect(h.store.session(first)).toMatchObject({ codeMode: true, withoutCodeMode: false, launchId: 'uuid-2' });
+    expect(h.store.session(second.sessionId)).toMatchObject({ codeMode: true, withoutCodeMode: true });
   });
 });
 
@@ -268,7 +267,7 @@ describe('Code Mode sessions in the flow (PRD R93-R95)', () => {
       const [again] = other.poll(issue('7'));
 
       other.triaged(again, 'dev:question');
-      const background = other.started(other.act({ type: 'start', workItemId: 1 })[0]);
+      const background = other.legacy(other.started(other.act({ type: 'start', workItemId: 1 })[0]));
 
       other.act({ type: 'holder-lost', sessionId: background });
       expect(other.store.session(background)).toMatchObject({ state: 'running' });
@@ -341,15 +340,6 @@ describe('Code Mode sessions in the flow (PRD R93-R95)', () => {
     expect(h.send({ type: 'stop', workItemId: 1, sessionId: first }).refused).toBe(`Session ${first} is not a running held session of the work item.`);
     expect(h.send({ type: 'stop', workItemId: 1, sessionId: 'nope' }).refused).toBe('Session nope is not a running held session of the work item.');
     expect(h.act({ type: 'stop', workItemId: 1, sessionId: second })).toEqual([{ type: 'stop-session', sessionId: second, provider: 'claude', shortId: `${second}-short`, reason: 'operator', codeMode: true }]);
-  });
-
-  it('refuses Open in Claude and Continue in Background', () => {
-    const h = new Harness();
-    const id = heldTask(h);
-
-    h.act({ type: 'marker', sessionId: id, state: 'waiting', detail: 'question' });
-    expect(h.send({ type: 'open-question', workItemId: 1, nativeSessionId: `${id}-native-uuid` }).refused).toBe(MESSAGES.codeModeQuestion);
-    expect(h.send({ type: 'background', sessionId: id, nativeSessionId: `${id}-native-uuid`, pid: 42, busy: true, workItemIds: [1] }).refused).toBe(MESSAGES.codeModeBackground);
   });
 
   it('follows an ID change of the held process at once, never as an interactive session', () => {
@@ -434,7 +424,7 @@ describe('Code Mode attach and the resume guard (PRD R95)', () => {
     const [triage] = h.poll(issue('7'));
 
     h.triaged(triage, 'dev:question');
-    const id = h.started(h.act({ type: 'start', workItemId: 1 })[0]);
+    const id = h.legacy(h.started(h.act({ type: 'start', workItemId: 1 })[0]));
 
     h.act({ type: 'roster', checked: [id], sessions: [{ sessionId: id, state: 'running', detail: null, interactive: false, tree: TREE }] });
     expect(h.store.session(id)!.lastTree).toBeNull();
@@ -477,7 +467,7 @@ describe('Code Mode attach and the resume guard (PRD R95)', () => {
     const [triage] = other.poll(issue('7'));
 
     other.triaged(triage, 'dev:question');
-    const background = other.started(other.act({ type: 'start', workItemId: 1 })[0]);
+    const background = other.legacy(other.started(other.act({ type: 'start', workItemId: 1 })[0]));
 
     other.act({ type: 'stop', workItemId: 1 });
     other.act({ type: 'stop-succeeded', sessionId: background, reason: 'operator', shortId: 'abc12345' });
@@ -525,5 +515,73 @@ describe('launchOptions', () => {
     expect(launchOptions(s, own, 'setup', 'claude')).toEqual({ permissionMode: 'auto', model: 'haiku' });
     expect(launchOptions(s, null, 'task', 'codex')).toEqual({ permissionMode: 'bypassPermissions', model: 'gpt-5' });
     expect(launchOptions(settings({ sessions: { model: '' } }), null, 'task', 'claude').model).toBeNull();
+  });
+});
+
+describe('sessions an earlier hub ran in the background (PRD R93)', () => {
+  const task = (h: Harness): string => {
+    const [triage] = h.poll(issue('7'));
+
+    h.triaged(triage, 'dev:question');
+
+    return h.legacy(h.started(h.act({ type: 'start', workItemId: 1 })[0]));
+  };
+
+  it('ends a background session in a turn at startup and blocks its work item with why, so opening it resumes it in the holder', () => {
+    const h = new Harness();
+    const id = task(h);
+
+    expect(h.act({ type: 'end-legacy' })).toEqual([]);
+    expect(h.store.session(id)).toMatchObject({ state: 'ended', released: true, releasing: false, outcome: 'stopped', outcomeDetail: MESSAGES.legacyEnded });
+    expect(h.item(1)).toMatchObject({ status: 'blocked', error: MESSAGES.legacyEnded });
+    expect(resumesHeld(h.store.session(id)!)).toBe(true);
+
+    // A second startup finds nothing more to end.
+    expect(h.act({ type: 'end-legacy' })).toEqual([]);
+    expect(h.item(1)).toMatchObject({ status: 'blocked', error: MESSAGES.legacyEnded });
+  });
+
+  it('keeps an approval waiting, fails a start in flight, and leaves a session whose turn had ended with its work item as it was', () => {
+    const h = new Harness();
+    const approval = task(h);
+
+    h.report(approval, { kind: 'approval', prompt: '/publish 7', summary: 'Post the answer', report: null });
+    h.act({ type: 'marker', sessionId: approval, state: 'running', detail: null });
+
+    const [triage] = h.poll(issue('7'), issue('8'));
+    h.triaged(triage, 'dev:question');
+    const starting = only(h.act({ type: 'start', workItemId: 2 }), 'start-session').sessionId;
+    h.legacy(starting);
+
+    const [third] = h.poll(issue('7'), issue('8'), issue('9'));
+    h.triaged(third, 'dev:question');
+    const idle = h.legacy(h.started(h.act({ type: 'start', workItemId: 3 })[0], 'def12345'));
+    h.report(idle, { kind: 'approval', prompt: '/publish 9', summary: 'Post it', report: null });
+    h.act({ type: 'marker', sessionId: idle, state: 'idle', detail: null });
+
+    h.act({ type: 'end-legacy' });
+    expect(h.item(1)).toMatchObject({ status: 'awaiting-approval', error: MESSAGES.legacyEnded, approvalPrompt: '/publish 7' });
+    expect(h.store.session(starting)).toMatchObject({ state: 'ended', outcome: 'failed', outcomeDetail: MESSAGES.legacyEnded });
+    expect(h.item(2)).toMatchObject({ status: 'failed', error: MESSAGES.legacyEnded });
+    expect(h.store.session(idle)).toMatchObject({ state: 'ended', outcome: null });
+    expect(h.item(3)).toMatchObject({ status: 'awaiting-approval', error: null });
+  });
+
+  it('leaves held sessions, Codex sessions and a registered session in the operator\'s window alone', () => {
+    const h = new Harness();
+    const id = heldTask(h);
+
+    h.act({ type: 'register', nativeSessionId: 'operator-native', shortId: 'operator', cwd: 'D:/git/widgets', title: 'Mine' });
+
+    const codex = new Harness({ settings: settings({ sessions: { provider: 'codex' } }) });
+    const [triage] = codex.poll(issue('7'));
+    codex.triaged(triage, 'dev:question');
+    const thread = codex.started(codex.act({ type: 'start', workItemId: 1 })[0], 'thread-1');
+
+    h.act({ type: 'end-legacy' });
+    codex.act({ type: 'end-legacy' });
+    expect(h.store.session(id)).toMatchObject({ state: 'running' });
+    expect(h.store.sessionByNativeId('operator-native')).toMatchObject({ state: 'running', external: true });
+    expect(codex.store.session(thread)).toMatchObject({ state: 'running' });
   });
 });

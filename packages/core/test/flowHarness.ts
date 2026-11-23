@@ -107,9 +107,17 @@ export class Harness {
       throw new Error(`Expected a start-session action, got ${JSON.stringify(action)}`);
     }
 
-    this.act({ type: 'session-started', sessionId: action.sessionId, nativeSessionId: null, shortId });
+    // A held Claude session's ID and launch are chosen before its start (PRD R93).
+    this.act({ type: 'session-started', sessionId: action.sessionId, nativeSessionId: action.nativeSessionId ?? null, shortId, ...(action.launchId === undefined ? {} : { launchId: action.launchId }) });
 
     return action.sessionId;
+  }
+
+  /** Makes a started Claude session one an earlier hub ran in Claude's background service, which no hub starts now (PRD R93). */
+  legacy(sessionId: string): string {
+    this.store.updateSession(sessionId, { codeMode: false, withoutCodeMode: false, launchId: null });
+
+    return sessionId;
   }
 
   report(sessionId: string, report: Extract<FlowEvent, { type: 'report' }>['report']): FlowResult {

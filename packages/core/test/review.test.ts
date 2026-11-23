@@ -34,7 +34,7 @@ function order(h: Harness): number[] {
 }
 
 describe('readyAt (PRD R27)', () => {
-  it('is set by the first approval report and kept in Ready for review through Approve, a question, Open in Claude, a stop and a snooze', () => {
+  it('is set by the first approval report and kept in Ready for review through Approve, a question, a stop and a snooze', () => {
     const h = new Harness({ playbooks: playbooks(undefined, QUESTION), settings: settings({ sessions: { concurrency: 2 } }) });
     const session = running(h, '1', 1);
 
@@ -43,7 +43,7 @@ describe('readyAt (PRD R27)', () => {
     h.report(session, { kind: 'approval', prompt: '/publish', summary: 'Ready.', report: null });
     expect(h.item(1)).toMatchObject({ status: 'awaiting-approval', readyAt: T0 + HOUR });
 
-    // Resumed with a question and opened in Claude, the run keeps its approval until the tab's turn ends, without moving readyAt.
+    // Resumed with a question, the run keeps its approval until its turn ends, without moving readyAt.
     h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
     h.now = T0 + 2 * HOUR;
     h.act({ type: 'marker', sessionId: session, state: 'running', detail: null });
@@ -51,10 +51,7 @@ describe('readyAt (PRD R27)', () => {
     expect(groupOfItem(h, 1)).toBe('review');
     h.act({ type: 'marker', sessionId: session, state: 'waiting', detail: null });
     expect(groupOfItem(h, 1)).toBe('review');
-    h.act({ type: 'stop-succeeded', sessionId: session, reason: 'open' });
     expect(h.item(1)).toMatchObject({ status: 'running', approvalHeld: true, readyAt: T0 + HOUR });
-    expect(groupOfItem(h, 1)).toBe('review');
-    h.act({ type: 'roster', sessions: [{ sessionId: session, state: 'waiting', detail: null, interactive: true }] });
     h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
     expect(h.item(1)).toMatchObject({ status: 'awaiting-approval', readyAt: T0 + HOUR });
 

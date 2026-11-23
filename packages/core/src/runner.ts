@@ -44,7 +44,7 @@ export type Reconciled =
 
 /** Starts, observes and stops the sessions of one agent provider (architecture.md § Components). */
 export interface SessionRunner {
-  /** Starts a background session and resolves once it runs. */
+  /** Starts a session and resolves once it runs. */
   start(action: StartAction): Promise<StartResult>;
   /**
    * Liveness and state of the given started sessions; a session left out has ended. `forks` holds live forks that may replace a session
@@ -57,16 +57,6 @@ export interface SessionRunner {
   forkOf?(nativeSessionId: string, sessions: Session[]): Session | null;
   /** The live session with this native ID, which the operator started outside Switchboard, or null; a provider that cannot register leaves it out (PRD R81). */
   live?(nativeSessionId: string): Promise<{ shortId: string; cwd: string } | null | { error: string }>;
-  /**
-   * Continue in Background (PRD R89): the live sessions a Claude tab labelled `label`, or the Claude sidebar (null), in the window whose extension host is `hostPid` may hold, by
-   * the roster's session name, with their process and whether they ran in the background before, and how many other live sessions the window holds, which its close would end;
-   * a provider that cannot move sessions leaves it out.
-   */
-  tab?(label: string | null, hostPid: number): Promise<{ candidates: { nativeSessionId: string; pid: number; background: boolean; busy: boolean }[]; others: number } | { error: string }>;
-  /** Resumes the session in its background process with `prompt`; `copy` is the short ID of a copy it started instead. */
-  resume?(nativeSessionId: string, prompt: string, cwd: string): Promise<{ copy: string | null } | { error: string }>;
-  /** The short ID of the session's background process when the roster lists it with a process, null when not. */
-  background?(nativeSessionId: string): Promise<{ shortId: string } | null | { error: string }>;
   /** The Code Mode runner only: the given session whose held process, or a nested run of it, wrote the native session's marker, or null (PRD R81). */
   heldBy?(nativeSessionId: string, sessions: Session[]): Session | null;
   /** Fast readings of the given started sessions by native session ID, read without starting a process. */

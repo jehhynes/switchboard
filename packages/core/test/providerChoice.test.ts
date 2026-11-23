@@ -16,9 +16,7 @@ describe('session provider choice', () => {
   it('checks the chosen provider prerequisites and refuses invalid input before creating work', () => {
     const h = new Harness({ settings: settings({ sessions: { provider: 'codex', codeMode: false, installHooks: false } }) });
     const event = { type: 'new-conversation', hostWindow: 'D:/folder', folder: 'D:/folder' } as const;
-    expect(h.send({ ...event, provider: 'claude' }).refused).toBe('New sessions need Code Mode (sessions.codeMode).');
-    h.settings.sessions.codeMode = true;
-    expect(h.send({ ...event, provider: 'claude' }).refused).toBe('Code Mode sessions need sessions.installHooks.');
+    expect(h.send({ ...event, provider: 'claude' }).refused).toBe('Claude sessions need sessions.installHooks.');
     expect(h.send({ ...event, provider: 'other' } as unknown as FlowEvent).refused).toBe('Choose Claude or Codex.');
     expect(h.store.activeSessions()).toHaveLength(0);
     expect(h.act({ ...event, provider: 'codex' })).toMatchObject([{ provider: 'codex', execution: 'app-server' }]);

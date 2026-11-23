@@ -45,7 +45,7 @@ export interface SessionSettings {
   installHooks: boolean;
   /** Ask each finished Claude session what slowed it down, for the friction-review skill (PRD R55). */
   debriefs: boolean;
-  /** Start new Claude sessions in Code Mode in the terminal holder (PRD R93); experimental, off by default. */
+  /** Start new Claude sessions in Code Mode; every Claude session is held in the terminal holder either way (PRD R93). Experimental, off by default. */
   codeMode: boolean;
 }
 

@@ -63,7 +63,7 @@ describe('activity log', () => {
     expect(events[2]!.changes.map((change) => `${change.entity}:${Object.keys(change.fields).join(',')}`)).toEqual([
       'workItem:status',
       'workItem:taskPrompt',
-      'session:workItemId,kind,provider,cwd,state,startedAt,released,reports',
+      'session:workItemId,kind,provider,nativeSessionId,cwd,state,startedAt,released,reports',
       'workItem:status',
     ]);
     expect(events[2]!.changes.find((change) => change.entity === 'workItem' && 'taskPrompt' in change.fields)!.fields['taskPrompt']).toEqual([null, true]);
