@@ -5128,7 +5128,8 @@ describe('the page in use', () => {
       await vi.advanceTimersByTimeAsync(OTHER_SETTLE_MS);
       expect(drafts().at(-1)).toEqual({ step: 'keep-route', picks: { 'port-choice': { letters: ['B'], other: null }, 'keep-route': { letters: [], other: 'keep it, for now' } } });
 
-      // The hub's draft, as another device changed it, shows once this page has nothing on its way.
+      // The hub's draft, as another device changed it, shows once the hub has carried this page's last draft back to it.
+      source.emit('questions', { questions: { ...questions, drafts: { 'reply:r1': drafts().at(-1) } } });
       source.emit('questions', { questions: { ...questions, drafts: { 'reply:r1': { step: 'keep-route', picks: { 'port-choice': { letters: ['A'], other: null }, 'keep-route': { letters: ['A'], other: null } } } } } });
       expect(root.querySelector('[data-letter="A"]')!.getAttribute('aria-checked')).toBe('true');
       expect(root.querySelector('[data-action="card-send"]')!.textContent).toBe('Send 2 answers');
@@ -5177,6 +5178,275 @@ describe('the page in use', () => {
     await flush();
     expect(posts.find((post) => post.url.endsWith('/send'))?.body).toMatchObject({ answers: [{ slug: 'port-choice', letters: ['B'] }, { slug: 'keep-route', letters: [], other: 'later' }] });
     page.close();
+  });
+
+  it('keeps Other text typed before the pause through a questions event, waits for each card on its own, and sends it to the conversation it was typed in', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+
+    try {
+      const { page, source } = start();
+      const questions = { sessionId: 's', since: 0, open: 2, oldest: 'reply:r1', drafts: {}, dismissed: [] };
+      const drafts = () => posts.filter((post) => post.url.endsWith('/card-draft')).map((post) => post.body);
+      const field = (card: string) => root.querySelector<HTMLTextAreaElement>(`textarea.qc-other[data-card="${card}"]`)!;
+      const type = (card: string, text: string) => {
+        field(card).value = text;
+        field(card).dispatchEvent(new Event('input', { bubbles: true }));
+      };
+
+      hello(source, { items: [reply('r1', 2, { opening: '1. Which port? {#port-choice}\n   - A) 1\n   - B) 2' }), reply('r2', 3, { opening: '1. Keep the route? {#keep-route}\n   - A) Keep\n   - B) Remove' })], questions });
+      click('.question-card[data-card="reply:r1"] [data-action="card-other"]');
+      click('.question-card[data-card="reply:r2"] [data-action="card-other"]');
+      await vi.advanceTimersByTimeAsync(0);
+      posts = [];
+
+      type('reply:r1', 'first');
+      await vi.advanceTimersByTimeAsync(OTHER_SETTLE_MS / 2);
+      // Typing in another card leaves this one's pause running.
+      type('reply:r2', 'second');
+      // The hub's older draft, as another device last sent it, does not take the place of the text not sent yet.
+      source.emit('questions', { questions: { ...questions, drafts: { 'reply:r1': { step: 'port-choice', picks: { 'port-choice': { letters: ['A'], other: null } } } } } });
+      expect(field('reply:r1').value).toBe('first');
+      await vi.advanceTimersByTimeAsync(OTHER_SETTLE_MS / 2);
+      expect(drafts()).toEqual([expect.objectContaining({ sessionId: 's', scopeGen: 3, card: 'reply:r1', draft: { step: 'port-choice', picks: { 'port-choice': { letters: [], other: 'first' } } } })]);
+      await vi.advanceTimersByTimeAsync(OTHER_SETTLE_MS / 2);
+      expect(drafts().map((one) => [one['card'], (one['draft'] as { picks: Record<string, { other: string }> }).picks])).toEqual([
+        ['reply:r1', { 'port-choice': { letters: [], other: 'first' } }],
+        ['reply:r2', { 'keep-route': { letters: [], other: 'second' } }],
+      ]);
+
+      // Opening another work item first sends the text still waiting to the conversation it was typed in, and nothing follows after the pause.
+      posts = [];
+      type('reply:r1', 'third');
+      click('#list [data-work-item="2"]');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(posts.map((post) => post.url.split('/').at(-1))).toEqual(['card-draft', 'select']);
+      expect(drafts()[0]).toMatchObject({ sessionId: 's', scopeGen: 3, card: 'reply:r1', draft: { picks: { 'port-choice': { other: 'third' } } } });
+      await vi.advanceTimersByTimeAsync(OTHER_SETTLE_MS);
+      expect(drafts()).toHaveLength(1);
+      page.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the newest Other text through a questions event from before the hub took it, so Send sends it', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+
+    try {
+      const { page, source } = start();
+      const questions = { sessionId: 's', since: 0, open: 1, oldest: 'reply:r1', drafts: {}, dismissed: [] };
+      const field = () => root.querySelector<HTMLTextAreaElement>('textarea.qc-other[data-card="reply:r1"]')!;
+      const older = { step: 'port-choice', picks: { 'port-choice': { letters: [], other: 'older' } } };
+
+      hello(source, { items: [reply('r1', 2, { opening: '1. Which port? {#port-choice}\n   - A) 1\n   - B) 2' })], questions });
+      click('[data-action="card-other"]');
+      field().value = 'newest';
+      field().dispatchEvent(new Event('input', { bubbles: true }));
+      await vi.advanceTimersByTimeAsync(OTHER_SETTLE_MS);
+      expect(posts.filter((post) => post.url.endsWith('/card-draft')).at(-1)?.body['draft']).toEqual({ step: 'port-choice', picks: { 'port-choice': { letters: [], other: 'newest' } } });
+
+      // The hub answered; events it sent before it took the draft arrive after, with an older draft or none.
+      source.emit('questions', { questions: { ...questions, drafts: { 'reply:r1': older } } });
+      expect(field().value).toBe('newest');
+      source.emit('questions', { questions: { ...questions, drafts: {} } });
+      expect(field().value).toBe('newest');
+      click('[data-action="card-send"]');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(posts.find((post) => post.url.endsWith('/send'))?.body['answers']).toEqual([{ card: 'reply:r1', slug: 'port-choice', letters: [], other: 'newest' }]);
+      page.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows another device\'s draft once its own is carried back, whatever order the answers and events come in, and opens the work item chosen last', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+
+    try {
+      const { page, source } = start();
+      const questions = { sessionId: 's', since: 0, open: 1, oldest: 'reply:r1', drafts: {}, dismissed: [] };
+      const field = () => root.querySelector<HTMLTextAreaElement>('textarea.qc-other[data-card="reply:r1"]')!;
+      const draft = (other: string) => ({ step: 'port-choice', picks: { 'port-choice': { letters: [], other } } });
+      // Another device picks B.
+      const picked = { step: 'port-choice', picks: { 'port-choice': { letters: ['B'], other: null } } };
+      const chose = () => root.querySelector('.question-card[data-card="reply:r1"] [data-letter="B"]')!.getAttribute('aria-checked');
+      const type = async (text: string) => {
+        field().value = text;
+        field().dispatchEvent(new Event('input', { bubbles: true }));
+        await vi.advanceTimersByTimeAsync(OTHER_SETTLE_MS);
+      };
+      const held = () => {
+        let release = (): void => {};
+        const wait = new Promise<void>((resolve) => (release = resolve));
+
+        return { wait, release };
+      };
+
+      hello(source, { items: [reply('r1', 2, { opening: '1. Which port? {#port-choice}\n   - A) 1\n   - B) 2' })], questions });
+      click('[data-action="card-other"]');
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Its own draft carried back, then another device's, both before the hub's answer: the other device's shows once the answer comes.
+      let slow = held();
+
+      answers['/card-draft'] = { status: 200, body: {}, wait: slow.wait };
+      await type('mine');
+      source.emit('questions', { questions: { ...questions, drafts: { 'reply:r1': draft('mine') } } });
+      source.emit('questions', { questions: { ...questions, drafts: { 'reply:r1': picked } } });
+      expect(field().value).toBe('mine');
+      expect(chose()).toBe('false');
+      slow.release();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(chose()).toBe('true');
+
+      // An older draft refused after the newest was carried back changes nothing.
+      click('[data-action="card-other"]');
+      await vi.advanceTimersByTimeAsync(0);
+      slow = held();
+      answers['/card-draft'] = { status: 409, body: { error: 'x' }, wait: slow.wait };
+      await type('first');
+      answers['/card-draft'] = { status: 200, body: {} };
+      await type('second');
+      source.emit('questions', { questions: { ...questions, drafts: { 'reply:r1': draft('second') } } });
+      slow.release();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(chose()).toBe('false');
+      source.emit('questions', { questions: { ...questions, drafts: { 'reply:r1': picked } } });
+      expect(chose()).toBe('true');
+
+      // A work item chosen while Other text is on its way wins over one chosen before it.
+      click('[data-action="card-other"]');
+      await vi.advanceTimersByTimeAsync(0);
+      slow = held();
+      answers['/card-draft'] = { status: 200, body: {}, wait: slow.wait };
+      field().value = 'leaving';
+      field().dispatchEvent(new Event('input', { bubbles: true }));
+      posts = [];
+      click('#list [data-work-item="2"]');
+      click('#list [data-work-item="1"]');
+      slow.release();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(posts.filter((post) => post.url.endsWith('/card-draft')).map((post) => (post.body['draft'] as ReturnType<typeof draft>).picks['port-choice'].other)).toEqual(['leaving']);
+      expect(posts.filter((post) => post.url.endsWith('/select')).map((post) => post.body['workItemId'])).not.toContain(2);
+      page.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('trusts a matching questions event for a draft whose answer never came, so another device\'s draft still shows', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const { page, source } = start();
+    try {
+      const questions = { sessionId: 's', since: 0, open: 1, oldest: 'reply:r1', drafts: {}, dismissed: [] };
+      hello(source, { items: [reply('r1', 2, { opening: '1. Which port? {#port-choice}\n   - A) 1\n   - B) 2' })], questions });
+      click('[data-action="card-other"]');
+      await vi.advanceTimersByTimeAsync(0);
+      let release = () => {};
+      answers['/card-draft'] = { status: 200, body: {}, wait: new Promise<void>(done => release = done) };
+      const field = root.querySelector<HTMLTextAreaElement>('textarea.qc-other')!;
+      field.value = 'acknowledged';
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+      await vi.advanceTimersByTimeAsync(OTHER_SETTLE_MS);
+      const mine = { step: 'port-choice', picks: { 'port-choice': { letters: [], other: 'acknowledged' } } };
+      const other = { step: 'port-choice', picks: { 'port-choice': { letters: ['B'], other: null } } };
+      source.emit('questions', { questions: { ...questions, drafts: { 'reply:r1': mine } } });
+      source.emit('questions', { questions: { ...questions, drafts: { 'reply:r1': other } } });
+      await vi.advanceTimersByTimeAsync(20_000);
+      release();
+      expect(root.querySelector('.question-card [data-letter="B"]')!.getAttribute('aria-checked')).toBe('true');
+    } finally {
+      page.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it('sends Other text at the scope generation the same session is shown at after a reconnect, and keeps it', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const { page, source } = start();
+    try {
+      const questions = { sessionId: 's', since: 0, open: 1, oldest: 'reply:r1', drafts: {}, dismissed: [] };
+      const items = [reply('r1', 2, { opening: '1. Which port? {#port-choice}\n   - A) 1\n   - B) 2' })];
+      hello(source, { items, questions });
+      click('[data-action="card-other"]');
+      await vi.advanceTimersByTimeAsync(0);
+      const field = () => root.querySelector<HTMLTextAreaElement>('textarea.qc-other')!;
+      field().value = 'keep across reconnect';
+      field().dispatchEvent(new Event('input', { bubbles: true }));
+      // The stream reconnects and the hub shows the same session at a new scope generation before the typing pauses.
+      hello(source, { key: 'reconnected', items, questions, scope: { ...scope, scopeGen: 1 } });
+      await vi.advanceTimersByTimeAsync(OTHER_SETTLE_MS);
+      expect(posts.filter((post) => post.url.endsWith('/card-draft')).at(-1)?.body).toMatchObject({ sessionId: 's', scopeGen: 1, draft: { picks: { 'port-choice': { other: 'keep across reconnect' } } } });
+      expect(field()?.value).toBe('keep across reconnect');
+    } finally {
+      page.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it('waits for every Other text still on its way before it opens another work item', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const { page, source } = start();
+    try {
+      const questions = { sessionId: 's', since: 0, open: 1, oldest: 'reply:r1', drafts: {}, dismissed: [] };
+      hello(source, { items: [reply('r1', 2, { opening: '1. Which port? {#port-choice}\n   - A) 1\n   - B) 2' })], questions });
+      click('[data-action="card-other"]');
+      await vi.advanceTimersByTimeAsync(0);
+      const type = (text: string) => {
+        const field = root.querySelector<HTMLTextAreaElement>('textarea.qc-other')!;
+        field.value = text;
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+      };
+      let first = () => {};
+      let second = () => {};
+      answers['/card-draft'] = { status: 200, body: {}, wait: new Promise<void>(done => first = done) };
+      type('first');
+      click('#list [data-work-item="2"]');
+      answers['/card-draft'] = { status: 200, body: {}, wait: new Promise<void>(done => second = done) };
+      type('second');
+      click('#list [data-work-item="1"]');
+      first();
+      await vi.advanceTimersByTimeAsync(0);
+      posts = [];
+      click('#list [data-work-item="2"]');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(posts.filter(post => post.url.endsWith('/select'))).toEqual([]);
+      second();
+      await vi.advanceTimersByTimeAsync(0);
+    } finally {
+      page.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps newer Other text when an older draft the hub carried back times out, so Send sends the newer text', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const { page, source } = start();
+    let release = () => {};
+    try {
+      const questions = { sessionId: 's', since: 0, open: 1, oldest: 'reply:r1', drafts: {}, dismissed: [] };
+      hello(source, { items: [reply('r1', 2, { opening: '1. Which port? {#port-choice}\n   - A) 1\n   - B) 2' })], questions });
+      click('[data-action="card-other"]');
+      await vi.advanceTimersByTimeAsync(0);
+      answers['/card-draft'] = { status: 200, body: {}, wait: new Promise<void>(done => release = done) };
+      const field = () => root.querySelector<HTMLTextAreaElement>('textarea.qc-other')!;
+      field().value = 'acknowledged';
+      field().dispatchEvent(new Event('input', { bubbles: true }));
+      await vi.advanceTimersByTimeAsync(OTHER_SETTLE_MS);
+      source.emit('questions', { questions: { ...questions, drafts: { 'reply:r1': { step: 'port-choice', picks: { 'port-choice': { letters: [], other: 'acknowledged' } } } } } });
+      await vi.advanceTimersByTimeAsync(19_900);
+      field().value = 'newest still typing';
+      field().dispatchEvent(new Event('input', { bubbles: true }));
+      await vi.advanceTimersByTimeAsync(100);
+      expect(field()?.value).toBe('newest still typing');
+      click('[data-action="card-send"]');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(posts.filter(post => post.url.endsWith('/send')).at(-1)?.body['answers']).toEqual([{ card: 'reply:r1', slug: 'port-choice', letters: [], other: 'newest still typing' }]);
+    } finally {
+      release();
+      page.close();
+      vi.useRealTimers();
+    }
   });
 
   it('opens a folded reply for good on a click on its fade, with no Show less', () => {

@@ -187,6 +187,12 @@ export interface CardDraft {
   local: SharedDraft | null;
   /** `card-draft` posts not yet answered. */
   pending: number;
+  /** Other text typed that no `card-draft` has carried yet, so a `questions` event leaves `local` alone until one does. */
+  unsent?: boolean;
+  /** The draft this page sent last, as `sameDraft` writes it, until a `questions` event carries it. */
+  awaiting?: string | undefined;
+  /** How many drafts this page has sent, so only the newest one's answer counts. */
+  gen?: number;
   sending: boolean;
   /** The message the answer became, once the hub took it. */
   sentId?: string | null;

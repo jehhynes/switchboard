@@ -2975,9 +2975,36 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     return state.scope === null || state.key === null ? null : `${state.scope.workItemId ?? ''} ${state.scope.sessionId ?? ''}`;
   }
 
+  /** The newest `select`, and the Other text it waits to send first. */
+  let selecting = 0;
+  let flushing: Promise<unknown> | null = null;
   /** Opens a work item; `sameHead` for a conversation the shown work item's dropdown made, which opens under its head. */
   const select = async (workItemId: number, sameHead = false): Promise<void> => {
+    const mine = ++selecting;
+
+    // Other text still waiting goes to its conversation before the page moves on, while the hub still takes it from this page; a later choice
+    // wins over this one while it waits.
+    if (otherTimers.size > 0) {
+      const all = Promise.all([flushing, flushOther()]);
+
+      flushing = all;
+      void all.finally(() => {
+        if (flushing === all) {
+          flushing = null;
+        }
+      });
+    }
+
+    if (flushing !== null) {
+      await flushing;
+
+      if (mine !== selecting) {
+        return;
+      }
+    }
+
     const listing = view.list || wanted === null;
+
     listSelection = `item:${workItemId}`;
     if (pendingRowControl?.key !== listSelection) pendingRowControl = null;
     closeMenus();
@@ -3191,34 +3218,99 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   };
   const cardNow = (key: string): LedgerCard | null => pageLedger(state).cards.get(key) ?? null;
   const cardDraftOf = (key: string): SharedDraft | undefined => view.cards.get(key)?.local ?? state.questions?.drafts[key];
-  let otherTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Drops a card's own draft once the hub holds it: nothing on its way, no Other text waiting, and the last draft sent carried back. */
+  const settleCard = (ui: CardDraft): boolean => {
+    if (ui.local === null || ui.pending > 0 || ui.unsent === true || ui.awaiting !== undefined) {
+      return false;
+    }
+
+    ui.local = null;
+    return true;
+  };
+  /** Marks each card's last draft carried back once the hub's drafts hold it; an event from before the hub took it leaves this page's. */
+  const takeDrafts = (questions: unknown): void => {
+    const hub = (questions as { drafts?: Record<string, unknown> } | null | undefined)?.drafts ?? {};
+
+    for (const [key, ui] of view.cards) {
+      if (ui.awaiting !== undefined && hub[key] !== undefined && sameDraft(hub[key]) === ui.awaiting) {
+        ui.awaiting = undefined;
+      }
+
+      settleCard(ui);
+    }
+  };
+  /** A draft as text whatever its keys' order, to tell whether the hub's draft is the one this page sent. */
+  const sameDraft = (draft: unknown): string => JSON.stringify(draft, (_key, value: unknown) => (value !== null && typeof value === 'object' && !Array.isArray(value) ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : value));
+  /** The conversation a card command goes to: the session shown, at the scope generation it is shown at. */
+  type CardTarget = { sessionId: string; scopeGen: number };
+  const cardTarget = (): CardTarget | null => (state.session === null ? null : { sessionId: state.session.id, scopeGen: state.scope?.scopeGen ?? -1 });
+  /** Each card's Other text waiting for the typing to pause, by `<session ID> <card key>`, with the conversation it was typed in. */
+  const otherTimers = new Map<string, { timer: ReturnType<typeof setTimeout>; target: CardTarget; key: string }>();
   let advanceTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Shows a card's new draft and tells the hub; `quiet` leaves the page undrawn, as while an Other field is typed in. */
-  const setDraft = (key: string, draft: SharedDraft, quiet = false): void => {
+  /**
+   * Shows a card's new draft and tells the hub, for the conversation shown or the one given; `quiet` leaves the page undrawn, as while an Other
+   * field is typed in. The draft carries any Other text still waiting, so its timer goes.
+   */
+  const setDraft = (key: string, draft: SharedDraft, quiet = false, target: CardTarget | null = cardTarget()): Promise<void> => {
     const ui = cardUi(key);
-    const session = state.session;
+    const waiting = target === null ? undefined : otherTimers.get(`${target.sessionId} ${key}`);
+
+    if (waiting !== undefined) {
+      clearTimeout(waiting.timer);
+      otherTimers.delete(`${target!.sessionId} ${key}`);
+    }
 
     ui.local = draft;
+    ui.unsent = false;
     ui.error = null;
 
     if (!quiet) {
       draw();
     }
 
-    if (session === null) {
-      return;
+    if (target === null) {
+      return Promise.resolve();
     }
 
+    const gen = (ui.gen ?? 0) + 1;
+
+    ui.gen = gen;
     ui.pending++;
-    void command('card-draft', { sessionId: session.id, card: key, draft }).then((answer) => {
+    ui.awaiting = sameDraft(draft);
+    // A conversation still shown goes at the generation it is shown at now, as after a reconnect.
+    const scopeGen = target.sessionId === state.session?.id ? (state.scope?.scopeGen ?? target.scopeGen) : target.scopeGen;
+
+    return command('card-draft', { ...target, scopeGen, card: key, draft }).then((answer) => {
       ui.pending--;
 
-      if (answer.status !== 200 && ui.pending === 0) {
-        ui.local = null;
+      // Only the newest draft's answer counts; an older one's is overtaken by it.
+      if (gen === ui.gen) {
+        if (answer.status === 0) {
+          // No answer came: unless an event already carried it back, it stays this page's, to go with the next change; newer typing stays too.
+          ui.unsent = ui.unsent === true || ui.awaiting !== undefined;
+        } else if (answer.status !== 200) {
+          // The hub refused it: the hub's draft shows.
+          ui.awaiting = undefined;
+        } else if (ui.awaiting !== undefined && sameDraft(state.questions?.drafts[key]) === ui.awaiting) {
+          // The hub already showed this page the same draft, so no event will carry it.
+          ui.awaiting = undefined;
+        }
+      }
+
+      if (settleCard(ui)) {
         draw();
       }
     });
   };
+  /** Sends each card's Other text still waiting for a pause now, to the session it was typed in, as before the page shows another conversation. */
+  const flushOther = (): Promise<unknown> =>
+    Promise.all(
+      [...otherTimers.values()].map(({ target, key }) => {
+        const local = cardUi(key).local;
+
+        return local === null ? undefined : setDraft(key, local, true, target);
+      }),
+    );
   const sendCard = async (key: string): Promise<void> => {
     const card = cardNow(key);
     const ui = cardUi(key);
@@ -3893,10 +3985,22 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
 
     const draft = setOther(card, cardDraftOf(key), slug, field.value);
+    const ui = cardUi(key);
+    const target = cardTarget();
 
-    cardUi(key).local = draft;
-    clearTimeout(otherTimer ?? undefined);
-    otherTimer = setTimeout(() => setDraft(key, cardDraftOf(key) ?? draft, true), OTHER_SETTLE_MS);
+    // Held as this page's until a card-draft carries it, whatever `questions` events come meanwhile.
+    ui.local = draft;
+    ui.unsent = true;
+
+    if (target === null) {
+      return;
+    }
+
+    // Each card waits for its own pause and sends its newest text to the conversation it was typed in.
+    const id = `${target.sessionId} ${key}`;
+
+    clearTimeout(otherTimers.get(id)?.timer);
+    otherTimers.set(id, { target, key, timer: setTimeout(() => setDraft(key, cardUi(key).local ?? draft, true, target), OTHER_SETTLE_MS) });
   });
   // The dropdown closes on a press outside the header and on Escape, which gives the focus back to its button.
   document.addEventListener('pointerdown', (event) => {
@@ -4908,13 +5012,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         }
       }
 
-      // The hub's drafts now hold what this page changed, unless a change is still on its way.
-      if (type === 'questions') {
-        for (const ui of view.cards.values()) {
-          if (ui.pending === 0) {
-            ui.local = null;
-          }
-        }
+      // The hub's drafts hold what this page changed once they carry the draft it sent last.
+      if (type === 'questions' || (type === 'hello' && data['questions'] != null)) {
+        takeDrafts(data['questions']);
       }
 
       if (type === 'words') {
@@ -5067,6 +5167,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       settingsShown?.disconnect();
       clearInterval(promptTimer);
       clearTimeout(showTimer);
+
+      for (const { timer } of otherTimers.values()) {
+        clearTimeout(timer);
+      }
+
       // A start still pending neither redraws nor reports its timing from a closed page.
       micStart.clear();
       micTiming = null;
