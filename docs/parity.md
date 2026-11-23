@@ -19,7 +19,7 @@ The dock's list is in `apps/dock/src/Switchboard.Dock/Views/`, the page's in `pa
 
 1. More Actions' dock windows (H2): Held sessions and Show hub log only say to use the dock, and New session, New task from prompt and New conversation in a folder cannot choose a folder the hub does not know.
 2. Held sessions (H4): the held-session note shows, but the page has no Held sessions window to open.
-3. Keyboard (K2, K4, K5, O3, O4): no arrow-key walk, F8, menu key, drag or Alt+arrow reordering.
+3. Keyboard (K2, K4, K5): no arrow-key walk, F8 or menu key.
 4. Web-only behaviours the dock lacks (R8, C13, G10, H7): a hosted conversation's host on line 2, Stop session asking first, the selected row kept in a collapsed group.
 
 ## Groups
@@ -46,8 +46,8 @@ The dock's list is in `apps/dock/src/Switchboard.Dock/Views/`, the page's in `pa
 |---|---|---|---|
 | O1 | Blocked on you oldest wait first; Ready for review by the operator's position, else `readyAt`; In progress oldest run first; Done newest first | Present | Both take the hub's order |
 | O2 | Unstarted work items and pool tickets together, by importance rank then oldest | Present | Both take the hub's order |
-| O3 | Drag a Ready for review row to a new place, with a drop line; Escape or lost capture cancels | Missing | |
-| O4 | Alt+Up and Alt+Down move the selected Ready for review row | Missing | |
+| O3 | Drag a Ready for review row to a new place, with a drop line; Escape or lost capture cancels | Present | On a touch screen, which the dock does not take, a drag starts once the finger has held still on the row for a moment, so a touch that moves at once scrolls the list; a cancelled touch also ends the drag |
+| O4 | Alt+Up and Alt+Down move the selected Ready for review row | Present | Not while the focus is in a text field or the console, where the keys are the field's |
 | O5 | Move to top, Move up, Move down and Reset position in the row's menu | Present | In the actions menu's order group |
 | O6 | A Ready for review row on the agent's turn is dimmed to 60% | Present | |
 

@@ -1011,6 +1011,45 @@ describe('createHubApp', () => {
     expect(opened).toHaveLength(1);
   });
 
+  it("moves a Ready for review row for the page as a drag in the dock does, and refuses a row or a place outside Ready for review (PRD R73)", async () => {
+    writeSettings({ sessions: { installHooks: false }, sources: { adhoc: { repoRoot: 'D:/scratch' } } });
+    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli } });
+
+    closers.push(() => app.close());
+
+    for (const title of ['First', 'Second', 'Third', 'Unstarted']) {
+      app.runtime.send({ type: 'adhoc', prompt: title, repoRoot: 'D:/scratch', start: false });
+      await app.runtime.settled();
+    }
+
+    const writer = Store.open(join(temp.home, '.switchboard', 'switchboard.db'));
+
+    [1, 2, 3].forEach((id) => writer.updateWorkItem(id, { status: 'awaiting-approval', readyAt: id * 1000 }));
+    writer.close();
+    // Another work item builds a snapshot with the three ready.
+    app.runtime.send({ type: 'adhoc', prompt: 'Rebuild', repoRoot: 'D:/scratch', start: false });
+    await app.runtime.settled();
+
+    const page = app.page!.opened();
+    const order = () => {
+      const reader = Store.open(join(temp.home, '.switchboard', 'switchboard.db'));
+      const ids = reader.readyWorkItems().map((item) => item.id);
+
+      reader.close();
+      return ids;
+    };
+
+    expect(order()).toEqual([1, 2, 3]);
+    expect(await app.post['/v1/conversation/row-move']!({ window: page, opId: 'm1', workItemId: 3, after: null })).toEqual({ status: 200, body: { done: true } });
+    expect(order()).toEqual([3, 1, 2]);
+    expect(await app.post['/v1/conversation/row-move']!({ window: page, opId: 'm2', workItemId: 3, after: 1 })).toEqual({ status: 200, body: { done: true } });
+    expect(order()).toEqual([1, 3, 2]);
+    expect(await app.post['/v1/conversation/row-move']!({ window: page, opId: 'm3', workItemId: 4, after: null })).toEqual({ status: 409, body: { error: 'The work item is not in Ready for review.' } });
+    expect(await app.post['/v1/conversation/row-move']!({ window: page, opId: 'm4', workItemId: 1, after: 4 })).toEqual({ status: 409, body: { error: 'The work item is not in Ready for review.' } });
+    expect(await app.post['/v1/conversation/row-move']!({ window: page, opId: 'm5', workItemId: 1, after: 1 })).toEqual({ status: 409, body: { error: 'A work item cannot move after itself.' } });
+    expect(order()).toEqual([1, 3, 2]);
+  });
+
   it('forwards a click to the dock only while a dock that runs clicks is connected (PRD R65, R69)', async () => {
     writeSettings({ sessions: { installHooks: false } });
     const app = await start();

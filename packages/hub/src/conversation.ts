@@ -295,6 +295,8 @@ export interface ConversationServiceDeps {
   rowOpen?(rowKey: string, url: string): string | null;
   /** Runs one of a pool ticket's row controls, by its label, after checking that its dock row still offers it: why not, or null. */
   poolAction?(ticketId: number, label: string, extra: PageActionExtra): string | null;
+  /** Places a Ready for review work item after `after`, or first when null, as a drag in the dock does (PRD R73): why not, or null. */
+  rowMove?(workItemId: number, after: number | null): string | null;
   /** A session's questions were settled outside a turn, as by a dismissal, which can end its wait on them (PRD R103). */
   questionsSettled?(sessionId: string): void;
   log(line: string): void;
@@ -1182,6 +1184,40 @@ export class ConversationService {
 
     const extra = { until: (until as number | null | undefined) ?? null, comment: typeof comment === 'string' && comment.trim() !== '' ? comment.trim() : null, text: (text as string | null | undefined) ?? null, choice: (choice as string | null | undefined) ?? null };
     const why = this.deps.poolAction === undefined ? 'This hub runs no actions from the page.' : this.deps.poolAction(ticketId as number, label, extra);
+    const answer = why === null ? { status: 200, body: { done: true } } : { status: 409, body: { error: why } };
+
+    this.#rowActions.set(`${window} ${opId}`, answer);
+
+    for (const old of [...this.#rowActions.keys()].slice(0, -100)) {
+      this.#rowActions.delete(old);
+    }
+
+    return answer;
+  }
+
+  /**
+   * `row-move {window, opId, workItemId, after}` (architecture.md § Web page): a drag of a Ready for review row to after the work item `after`, or
+   * first when null (PRD R73), for any row the page lists, since a drag selects no row. 403 for a key that is not a page's, 409 with why not. A
+   * repeated `opId` answers the first result.
+   */
+  rowMove(body: Record<string, unknown>): { status: number; body: unknown } {
+    const { window, opId, workItemId, after } = body;
+
+    if (typeof window !== 'string' || typeof opId !== 'string' || opId === '' || !Number.isInteger(workItemId) || !(after === null || Number.isInteger(after))) {
+      return { status: 400, body: { error: 'Expected {window, opId, workItemId, after}.' } };
+    }
+
+    if (!this.deps.windows.isPage(window)) {
+      return { status: 403, body: { error: 'Not in this window.' } };
+    }
+
+    const done = this.#rowActions.get(`${window} ${opId}`);
+
+    if (done !== undefined) {
+      return done;
+    }
+
+    const why = this.deps.rowMove === undefined ? 'This hub runs no actions from the page.' : this.deps.rowMove(workItemId as number, after as number | null);
     const answer = why === null ? { status: 200, body: { done: true } } : { status: 409, body: { error: why } };
 
     this.#rowActions.set(`${window} ${opId}`, answer);

@@ -3,6 +3,7 @@ import type { ComponentChildren, VNode } from 'preact';
 import { MARK_ICONS, SPINNING_MARKS } from '@switchboard/core/group';
 import { bandOpen, rowKey } from './render.js';
 import type { PageGroup, PageRow } from '@switchboard/protocol';
+import type { DragView } from './reorder.js';
 
 /** The codicon Returned shows, as the dock's pill does. */
 const RETURNED_GLYPH = '\u{eae2}';
@@ -26,7 +27,7 @@ function Pill({ classes, glyph, text, title, opens }: { classes: string; glyph: 
  * link pills and Returned, those that do not fit left out whole by the page's CSS (page.css, Line 2); line 3 the mark and the
  * details, a muted " · " between them, in their tones. The dock's stripe is on its left edge.
  */
-function Row({ row, selected, menu, pillsOpen }: { row: PageRow; selected: boolean; menu: ComponentChildren | null; pillsOpen: boolean }) {
+function Row({ row, selected, menu, pillsOpen, movable, drag }: { row: PageRow; selected: boolean; menu: ComponentChildren | null; pillsOpen: boolean; movable: boolean; drag: DragView | null }) {
   const kind = row.mark?.kind;
   const mark =
     row.mark === null || kind === undefined ? null : (
@@ -42,7 +43,10 @@ function Row({ row, selected, menu, pillsOpen }: { row: PageRow; selected: boole
         {row.playbook.slice(colon + 1)}
       </span>
     );
-  const classes = ['row', ...(row.stripe === null ? [] : [`stripe-${row.stripe}`]), ...(row.dim ? ['dim'] : []), ...(selected ? ['selected'] : [])].join(' ');
+  // A Ready for review row can be dragged to a new place (reorder.ts); the drop line is on the edge of the row the drop lands next to.
+  const dropEdge = drag?.drop?.edge === row.workItemId ? (drag.drop.below ? ['drop-below'] : ['drop-above']) : [];
+  const dragged = drag !== null && drag.dragging === row.workItemId ? ['dragging'] : [];
+  const classes = ['row', ...(row.stripe === null ? [] : [`stripe-${row.stripe}`]), ...(row.dim ? ['dim'] : []), ...(selected ? ['selected'] : []), ...(movable ? ['movable'] : []), ...dragged, ...dropEdge].join(' ');
   const key = rowKey(row);
   // Without the browser pane a pill with a link opens it instead of the row's click, as the dock's `OnPillTapped` (PRD R52).
   const opens = (which: string): Record<string, string> => (pillsOpen ? { 'data-action': 'open-link', 'data-row': key, 'data-link': which } : {});
@@ -122,8 +126,9 @@ export function bandRuns(rows: readonly PageRow[]): Array<{ band: string | null;
  * only the groups with rows show, every one open, and the search's end says when none matched. `menu` is the pool ticket row whose menu is
  * open, by its key, with the menu's rows. An open group's rows with a band, Done's, sit under their band's heading, a muted label with its count
  * and a rule that opens or closes it (`bands`, else `OPEN_BANDS`); a closed band still shows the selected row, and a search opens every band.
+ * `drag` is a drag of a Ready for review row under way (reorder.ts): the dragged row and its drop line.
  */
-export function renderList(groups: readonly PageGroup[], selected: number | null, collapsed: ReadonlySet<string>, filtering = false, menu: { row: string; rows: ComponentChildren } | null = null, bands: ReadonlyMap<string, boolean> = new Map(), pillsOpen = false): VNode | null {
+export function renderList(groups: readonly PageGroup[], selected: number | null, collapsed: ReadonlySet<string>, filtering = false, menu: { row: string; rows: ComponentChildren } | null = null, bands: ReadonlyMap<string, boolean> = new Map(), pillsOpen = false, drag: DragView | null = null): VNode | null {
   if (groups.every((group) => group.rows.length === 0)) {
     return filtering ? null : <p class="empty">No work items yet. They appear here when Switchboard starts one.</p>;
   }
@@ -137,7 +142,7 @@ export function renderList(groups: readonly PageGroup[], selected: number | null
           shown.length === 0 ? null : (
             <ul class="rows">
               {shown.map((row) => (
-                <Row key={rowKey(row)} row={row} selected={row.workItemId !== null && row.workItemId === selected} menu={menu !== null && menu.row === rowKey(row) ? menu.rows : null} pillsOpen={pillsOpen} />
+                <Row key={rowKey(row)} row={row} selected={row.workItemId !== null && row.workItemId === selected} menu={menu !== null && menu.row === rowKey(row) ? menu.rows : null} pillsOpen={pillsOpen} movable={group.key === 'review' && row.workItemId !== null} drag={drag} />
               ))}
             </ul>
           );

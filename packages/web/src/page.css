@@ -192,6 +192,14 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 .row.selected { background: var(--sb-row-selected); }
 .row.selected::before { top: 0; bottom: 0; }
 .row.dim > * { opacity: 0.6; }
+/* A Ready for review row can be dragged to a new place (reorder.ts): a held finger opens no callout or selection, the dragged row is lifted
+   in the hover colour, and the drop line is the dock's, 2 px in the turn blue, across the edge of the row the drop lands next to. */
+.row.movable { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+#list.reordering, #list.reordering .row { cursor: grabbing; }
+.row.dragging { background: var(--vscode-list-hoverBackground); }
+.row.drop-above::after, .row.drop-below::after { content: ''; position: absolute; z-index: 1; left: 0; right: 0; height: 2px; background: var(--sb-status-turn); pointer-events: none; }
+.row.drop-above::after { top: -1px; }
+.row.drop-below::after { bottom: -1px; }
 /* Line 1: the priority dot, the title, the mic mark and the time at its end, muted; its texts at the line's top, as the dock's. */
 .row-head { display: flex; align-items: flex-start; gap: 6px; height: 18px; min-width: 0; }
 .row-head .priority { flex: none; align-self: center; width: 8px; height: 8px; border-radius: 50%; background: #e8820c; }

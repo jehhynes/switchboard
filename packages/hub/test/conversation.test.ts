@@ -2054,6 +2054,10 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
         commands.push([workItemId, label]);
         return label === 'Open report' ? null : 'The work item no longer offers this.';
       },
+      rowMove: (workItemId, after) => {
+        moves.push([workItemId, after]);
+        return workItemId === 8 ? 'The work item is not in Ready for review.' : null;
+      },
       poolAction: (ticketId, label, extra) => {
         pools.push([ticketId, label, extra]);
         return label === 'Start' ? null : 'The ticket no longer offers this.';
@@ -2079,6 +2083,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     const setHeader = (next: typeof header) => void (header = next);
     const opens: Array<[string, string]> = [];
     const pools: Array<[number, string, unknown]> = [];
+    const moves: Array<[number, number | null]> = [];
     const commands: Array<[number, string]> = [];
     const resumed: string[] = [];
     let resumeRefusal: string | null = null;
@@ -2096,7 +2101,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
       return { key, frames };
     };
 
-    return { store, view, scopes, service, openPage, focus, actions, opens, commands, pools, resumed, refuseResume, held, sourceCalls, setHeader, events, made, refusePoll, restarts };
+    return { store, view, scopes, service, openPage, focus, actions, opens, commands, pools, moves, resumed, refuseResume, held, sourceCalls, setHeader, events, made, refusePoll, restarts };
   }
 
   it("runs the list header's Restart and resume for a page key only, answering the hub's refusal (architecture.md § Restarting the holder)", () => {
@@ -2438,6 +2443,24 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
       [9, 'Start', { until: null, comment: null, text: null, choice: null }],
       [9, 'Start with guidance…', { until: null, comment: null, text: 'Use staging', choice: 'dev:fix' }],
     ]);
+  });
+
+  it("moves a dragged Ready for review row for a page key without a selection, once per opId, and says why not (PRD R73)", () => {
+    const { scopes, service, openPage, view, moves } = setup();
+    const page = openPage();
+    const window = scopes.open(view.file, view.view);
+
+    expect(service.rowMove({ window, opId: 'a', workItemId: 3, after: null }).status).toBe(403);
+    expect(service.rowMove({ window: page.key, opId: 'a', workItemId: '3', after: null }).status).toBe(400);
+    expect(service.rowMove({ window: page.key, opId: 'a', workItemId: 3 }).status).toBe(400);
+    expect(service.rowMove({ window: page.key, opId: 'a', workItemId: 3, after: 1.5 }).status).toBe(400);
+    expect(service.rowMove({ window: page.key, opId: '', workItemId: 3, after: null }).status).toBe(400);
+    expect(moves).toEqual([]);
+    expect(service.rowMove({ window: page.key, opId: 'a', workItemId: 3, after: 4 })).toEqual({ status: 200, body: { done: true } });
+    expect(service.rowMove({ window: page.key, opId: 'a', workItemId: 3, after: 4 })).toEqual({ status: 200, body: { done: true } });
+    expect(service.rowMove({ window: page.key, opId: 'b', workItemId: 3, after: null })).toEqual({ status: 200, body: { done: true } });
+    expect(service.rowMove({ window: page.key, opId: 'c', workItemId: 8, after: 3 })).toEqual({ status: 409, body: { error: 'The work item is not in Ready for review.' } });
+    expect(moves).toEqual([[3, 4], [3, null], [8, 3]]);
   });
 
   it("resumes the page's own current session once it has ended, and only that", async () => {

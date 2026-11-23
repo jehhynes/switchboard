@@ -11,6 +11,8 @@ import type { ArtifactView, ItemView, PageRow, ScreenPrompt } from '@switchboard
 import { mount, unmount } from './island.js';
 import type { ComponentChild, VNode } from 'preact';
 import { renderList, renderListPane } from './list.js';
+import { rowDrag } from './reorder.js';
+import type { DragView } from './reorder.js';
 import { menuRows, renderHeader, renderMaximize, renderSideSwitch, renderTabs } from './header.js';
 import { CHAT_MIN, chatNeed, fitLayout, isPhone, sideLimit, sideWidth, type Layout } from './layout.js';
 import { pageLedger, renderTimeline } from './timeline.js';
@@ -532,8 +534,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // Off without local storage.
   }
 
-  /** A select refused while no conversation was shown, which the list shows until the next select. */
+  /** A select refused while no conversation was shown, or a refused drag of a row, which the list shows until the next select. */
   let listError: string | null = null;
+  /** A drag of a Ready for review row under way (reorder.ts), which the list draws. */
+  let dragView: DragView | null = null;
   let wanted: number | null = Number(/^#w=(\d+)$/.exec(location.hash)?.[1] ?? NaN) || null;
 
   // A reload keeps the entry's mark, but the list's entry before it belonged to the page before the reload; Back then stays in this page.
@@ -666,6 +670,15 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const chips = composerHost.querySelector<HTMLElement>('.attachments')!;
   // Document listeners end with the page.
   const listening = new AbortController();
+  // A drag of a Ready for review row moves it, as the dock's (PRD R73); its drop line redraws before the next repaint.
+  const reorder = rowDrag(list, {
+    changed: (drag) => {
+      dragView = drag;
+      drawSoon();
+    },
+    drop: (workItemId, after) => void moveRow(workItemId, after),
+    signal: listening.signal,
+  });
 
   // Another of this device's pages opened an artifact.
   window.addEventListener(
@@ -2014,7 +2027,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     mount(personaHost, renderPersonaDialog(state.session?.persona, view.personas));
     coverForPersonas(view.personas !== null);
-    mount(list, renderListPane(expired, listError, renderList(listed.groups, state.scope?.workItemId ?? null, view.collapsed, listed.filtering, poolMenu(), view.bands, !paneWorks()), header.end(listed.groups)));
+    mount(list, renderListPane(expired, listError, renderList(listed.groups, state.scope?.workItemId ?? null, view.collapsed, listed.filtering, poolMenu(), view.bands, !paneWorks(), dragView), header.end(listed.groups)));
+    // The rows may have moved under a still pointer.
+    reorder.refresh();
 
     // An ended session's note sits just above the composer on every tab, with Resume, as in the Conversation view; the page resumes it in the
     // terminal holder, or a Codex thread in its daemon, without a terminal.
@@ -3625,6 +3640,37 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       showError(why);
     }
   };
+  /** Places a dragged Ready for review row after `after`, or first (PRD R73); the hub's list then shows the new order, or the list why not. */
+  const moveRow = async (workItemId: number, after: number | null): Promise<void> => {
+    const answer = await post('row-move', { workItemId, after });
+
+    if (answer.status !== 200) {
+      listError = String(answer.body['error'] ?? `Not moved (status ${answer.status}).`);
+      draw();
+    }
+  };
+  // Alt+Up and Alt+Down move the selected Ready for review row, as the dock's (PRD R73), with its Move up and Move down; not while typing.
+  document.addEventListener(
+    'keydown',
+    (event) => {
+      const up = event.key === 'ArrowUp';
+      const typing = event.target instanceof Element && event.target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), .console') !== null;
+
+      if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || !(up || event.key === 'ArrowDown') || typing || view.acting) {
+        return;
+      }
+
+      const selected = state.scope?.workItemId ?? null;
+      const row = state.groups.find((group) => group.key === 'review')?.rows.find((one) => one.workItemId !== null && one.workItemId === selected);
+      const label = up ? 'Move up' : 'Move down';
+
+      if (row !== undefined && row.actions.some((action) => action.label === label)) {
+        event.preventDefault();
+        void runAction(rowKey(row), label, {});
+      }
+    },
+    { signal: listening.signal },
+  );
   /** Closes the header's actions menu and a pool row's menu. */
   const closeMenus = (): void => {
     view.actions = false;

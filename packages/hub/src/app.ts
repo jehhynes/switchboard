@@ -794,6 +794,16 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     },
     // A dismissal can leave a session waiting on questions with none open (PRD R103).
     questionsSettled: (sessionId) => runtime.questionsSettled(sessionId),
+    // A drag of a Ready for review row on the page, the same move a drag in the dock posts to `/action` (PRD R73).
+    rowMove: (workItemId, after) => {
+      const { dock } = views();
+
+      if (dockRowOf(dock, workItemId)?.movable !== true || (after !== null && dockRowOf(dock, after)?.movable !== true)) {
+        return 'The work item is not in Ready for review.';
+      }
+
+      return runtime.send({ type: 'move', workItemId, after }).refused;
+    },
     // A pool ticket's controls, which the page runs from its row's menu, rechecked against the row as it is now (architecture.md § Web page).
     poolAction: (ticketId, label, extra) => {
       const row = poolRowOf(views().dock, ticketId);
@@ -1325,6 +1335,7 @@ const dockWithRuns = () => {
       '/v1/conversation/page-conversation': async (body) => (isRecord(body) ? conversation.pageConversation(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, provider?}.' } }),
       '/v1/conversation/resume': async (body) => (isRecord(body) ? conversation.resume(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } }),
       '/v1/conversation/pool-action': async (body) => (isRecord(body) ? conversation.poolAction(body) : { status: 400, body: { error: 'Expected {window, opId, ticketId, label}.' } }),
+      '/v1/conversation/row-move': async (body) => (isRecord(body) ? conversation.rowMove(body) : { status: 400, body: { error: 'Expected {window, opId, workItemId, after}.' } }),
       '/v1/conversation/row-command': async (body) => (isRecord(body) ? conversation.rowCommand(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId, label}.' } }),
       '/v1/conversation/row-open': async (body) => (isRecord(body) ? conversation.rowOpen(body) : { status: 400, body: { error: 'Expected {window, opId, workItemId, url}.' } }),
       '/v1/conversation/row-paste': async (body) => (isRecord(body) ? conversation.rowPaste(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId, label}.' } }),

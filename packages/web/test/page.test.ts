@@ -443,7 +443,8 @@ describe('drawing', () => {
     const first = root.querySelector<HTMLElement>('[data-work-item="1"]')!;
 
     expect(first.querySelector('.row-title')!.textContent).toBe('Fix <the> badge');
-    expect(first.className).toBe('row stripe-turn');
+    // A Ready for review row can be dragged (PRD R73).
+    expect(first.className).toBe('row stripe-turn movable');
     // The mark by the shared icon name, the ticket key in its source's colour, the playbook's namespace muted.
     expect(first.querySelector('.mark')!.className).toBe('codicon codicon-eye mark');
     expect(first.querySelector('.mark')!.getAttribute('aria-label')).toBe('Review, then approve');
@@ -451,7 +452,7 @@ describe('drawing', () => {
     // The ticket key is its text alone: it never shrinks to an icon.
     expect(first.querySelector('.pill')!.innerHTML).toBe('<span class="pill-text">gh 1</span>');
     expect(first.querySelector('.playbook')!.innerHTML).toBe('<span class="namespace">dev:</span>build');
-    expect(root.querySelector('[data-work-item="2"]')!.className).toBe('row stripe-warning dim');
+    expect(root.querySelector('[data-work-item="2"]')!.className).toBe('row stripe-warning dim movable');
     expect(root.querySelectorAll('.voice-mark')).toHaveLength(0);
     expect(root.querySelector('[data-work-item="2"] .pill')!.className).toBe('pill ticket source-zoho');
     expect(root.querySelector('[data-work-item="2"] .playbook')!.innerHTML).toBe('triage');
@@ -2966,6 +2967,78 @@ describe('the page in use', () => {
     await flush();
     click('.artifact-doc a[data-path="chat/p.html"]');
     expect(root.querySelector('iframe')!.getAttribute('src')).toBe('/v1/conversation/artifact/pk/chat/p.html?v=1500');
+    page.close();
+  });
+
+  it("moves a dragged Ready for review row with row-move, drawing its drop line, without the release's click, and shows a refused move over the list (PRD R73)", async () => {
+    const { page, source } = start();
+    const move = (label: string) => ({ label, action: 'move' as const, icon: 'arrow-up', group: 'order' as const, confirm: null, input: null });
+    const rect = (top: number, height: number) => ({ top, height, bottom: top + height, left: 0, right: 300, width: 300, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+
+    hello(source, { groups: [listGroup('review', [listRow(1, { actions: [move('Move down')] }), listRow(2), listRow(3, { actions: [move('Move up')] })]), listGroup('progress', [listRow(4)])] });
+    // The list from the top, Ready for review's heading 32 px tall, then its rows 40 px apart and In progress's.
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      const id = Number((this as HTMLElement).dataset?.['workItem'] ?? NaN);
+
+      return this.id === 'list' ? rect(0, 600) : this.classList.contains('group-head') ? rect(this.closest('[data-group="review"]') === null ? 160 : 0, 32) : this.classList.contains('row') && id > 0 ? rect(id * 40, 40) : rect(0, 0);
+    });
+
+    const list = root.querySelector<HTMLElement>('#list')!;
+    const row = (id: number) => list.querySelector<HTMLElement>(`.row[data-work-item="${id}"]`)!;
+    const pointer = (target: Element, type: string, y: number) => target.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 1, pointerType: 'mouse', button: 0, buttons: type === 'pointerup' ? 0 : 1, clientX: 20, clientY: y }));
+
+    expect([1, 2, 3].map((id) => row(id).classList.contains('movable'))).toEqual([true, true, true]);
+    expect(row(4).classList.contains('movable')).toBe(false);
+    pointer(row(3), 'pointerdown', 140);
+    pointer(list, 'pointermove', 50);
+    expect(row(3).classList.contains('dragging')).toBe(true);
+    expect([...list.querySelectorAll<HTMLElement>('.drop-above, .drop-below')].map((one) => [one.dataset['workItem'], one.classList.contains('drop-above')])).toEqual([['1', true]]);
+    pointer(list, 'pointerup', 50);
+    row(3).click();
+    await flush();
+    expect(posts.filter((post) => post.url.endsWith('/row-move')).map((post) => post.body)).toEqual([{ window: 'pk', opId: expect.any(String), workItemId: 3, after: null }]);
+    expect(posts.some((post) => post.url.endsWith('/select'))).toBe(false);
+    expect(list.querySelector('.dragging, .drop-above, .drop-below')).toBeNull();
+
+    // Below the last row, the hub refuses: the list says why.
+    answers['/row-move'] = { status: 409, body: { error: 'The work item is not in Ready for review.' } };
+    pointer(row(1), 'pointerdown', 60);
+    pointer(list, 'pointermove', 150);
+    expect(row(3).classList.contains('drop-below')).toBe(true);
+    pointer(list, 'pointerup', 150);
+    await flush();
+    expect(posts.filter((post) => post.url.endsWith('/row-move')).at(-1)?.body).toMatchObject({ workItemId: 1, after: 3 });
+    expect(root.querySelector('.list-error')?.textContent).toBe('The work item is not in Ready for review.');
+    page.close();
+  });
+
+  it('moves the selected Ready for review row with Alt+Up and Alt+Down, not while typing, with other keys held, or for a row in another group (PRD R73)', async () => {
+    const { page, source } = start();
+    const move = (label: string) => ({ label, action: 'move' as const, icon: 'arrow-up', group: 'order' as const, confirm: null, input: null });
+    const press = (target: EventTarget, key: string, patch: KeyboardEventInit = {}) => target.dispatchEvent(new KeyboardEvent('keydown', { key, altKey: true, bubbles: true, cancelable: true, ...patch }));
+    const moves = () => posts.filter((post) => post.url.endsWith('/row-action')).map((post) => [post.body['workItemId'], post.body['label']]);
+
+    hello(source, { groups: [listGroup('review', [listRow(5, { actions: [move('Move down')] }), listRow(1, { actions: [move('Move to top'), move('Move up'), move('Move down')] })])] });
+    expect(press(document.body, 'ArrowUp')).toBe(false);
+    await flush();
+    press(document.body, 'ArrowDown');
+    await flush();
+    expect(moves()).toEqual([[1, 'Move up'], [1, 'Move down']]);
+
+    press(root.querySelector('textarea')!, 'ArrowUp');
+    press(document.body, 'ArrowUp', { shiftKey: true });
+    press(document.body, 'ArrowUp', { ctrlKey: true });
+    press(document.body, 'ArrowUp', { altKey: false });
+    await flush();
+    expect(moves()).toHaveLength(2);
+
+    // The last row has no Move down, and a row in another group none at all.
+    source.emit('list', { groups: [listGroup('review', [listRow(5, { actions: [move('Move down')] }), listRow(1, { actions: [move('Move up')] })])] });
+    expect(press(document.body, 'ArrowDown')).toBe(true);
+    source.emit('list', { groups: [listGroup('progress', [listRow(1, { actions: [move('Move up')] })])] });
+    press(document.body, 'ArrowUp');
+    await flush();
+    expect(moves()).toHaveLength(2);
     page.close();
   });
 
