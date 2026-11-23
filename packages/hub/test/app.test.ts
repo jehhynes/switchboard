@@ -935,6 +935,30 @@ describe('createHubApp', () => {
     writer.close();
   });
 
+  it("starts the page's New conversation… as a new session of the work item it shows, keeping the earlier one (architecture.md § Web page)", async () => {
+    writeSettings({ sessions: { provider: 'codex' }, sources: { adhoc: { repoRoot: temp.home } } });
+    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli } });
+    closers.push(() => app.close());
+    const page = app.page!.opened();
+
+    expect((await app.post['/v1/conversation/page-new-session']!({ window: page, opId: 'one', folder: temp.home, provider: 'codex', prompt: 'Find the bug' })).status).toBe(200);
+    await app.runtime.settled();
+
+    const writer = Store.open(join(temp.home, '.switchboard', 'switchboard.db'));
+    const first = writer.sessionsFor(1)[0]!;
+
+    writer.updateSession(first.id, { state: 'idle' });
+
+    const scopeGen = (await app.post['/v1/conversation/select']!({ window: page, opId: 's', workItemId: 1 })).body as { scopeGen: number };
+    const made = await app.post['/v1/conversation/page-conversation']!({ window: page, scopeGen: scopeGen.scopeGen, opId: 'n', text: 'Start over', provider: 'codex' });
+
+    expect(made).toMatchObject({ status: 200, body: { workItemId: 1 } });
+    expect(writer.sessionsFor(1).map((one) => one.id)).toEqual([first.id, (made.body as { sessionId: string }).sessionId]);
+    // No new work item: the conversation stays the one the operator had selected.
+    expect(writer.workItem(2)).toBeNull();
+    writer.close();
+  });
+
   it("opens a listed row's link, runs a pool ticket's control and a VS Code control for the page only as each row offers it now (architecture.md § Web page)", async () => {
     writeSettings({ sessions: { installHooks: false }, sources: { adhoc: { repoRoot: 'D:/scratch' } } });
     const opened: string[] = [];

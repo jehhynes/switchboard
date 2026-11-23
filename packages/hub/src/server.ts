@@ -149,7 +149,7 @@ const GZIP_MIN_BYTES = 1024;
 
 /**
  * The conversation commands a page may post with its cookie; never `new-conversation`, since a page hosts none: its New conversation… is
- * `page-conversation`, hosted by the shown conversation's folder. `row-action`, `row-move`, `row-paste`, `resume`, `prompt`, `prompt-key` and `console-input` take only a page key.
+ * `page-conversation`, a new session of the work item the page shows. `row-action`, `row-move`, `row-paste`, `resume`, `prompt`, `prompt-key` and `console-input` take only a page key.
  * `held-list`, `held-stop` and `held-open` share the holder routes after the page's origin and key checks.
  * The hub itself answers `page-pair`, `page-devices` and `page-device-revoke` (architecture.md § Remote access).
  */

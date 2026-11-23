@@ -297,6 +297,11 @@ function startOfDay(at: number): number {
 
 /** The Conversation tab: why the page cannot talk to the session, earlier messages, and the timeline with its spinner. */
 export function renderTimeline(state: PageState, view: View, now: number = Date.now()): VNode {
+  // New conversation…'s draft is empty until its first message starts its session (architecture.md § Web page).
+  if (view.newDraft !== null && view.newDraft.workItemId === state.scope?.workItemId) {
+    return <p class="empty new-draft">A new conversation in this work item. It starts when you send its first message; the earlier sessions stay in the dropdown.</p>;
+  }
+
   if (state.session === null) {
     return <p class="empty">No session yet. Messages appear here once the work item's session starts.</p>;
   }

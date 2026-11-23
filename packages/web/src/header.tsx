@@ -238,15 +238,6 @@ function ViewOptions({ view, briefReplies, session }: { view: View; briefReplies
   );
 }
 
-/** The menu's message rows: an error, or Loading… while the items load. */
-function Message({ text }: { text: string }) {
-  return (
-    <li class="menu-message" role="none">
-      {text}
-    </li>
-  );
-}
-
 /** The header: the dropdown of the selected work item's conversations, its button drawn as its rows are, the row's actions and the view options. */
 export function renderHeader(state: PageState, view: View, now = Date.now()): VNode {
   const scope = state.scope!;
@@ -258,34 +249,14 @@ export function renderHeader(state: PageState, view: View, now = Date.now()): VN
   const tooltip = shownName === undefined || shownName === title ? title : `${shownName} · ${title}`;
   // The button carries the dot while a conversation the operator is not looking at has unseen items.
   const othersUnread = scope.conversations.some((entry) => entry.workItemId !== scope.workItemId && entry.unread > 0);
-  // After a separator, New conversation… as in the Conversation view; it opens the providers under the same button when there is a choice.
-  const providers = view.providers;
-  const providerRows =
-    providers === null
-      ? null
-      : providers.error !== null
-        ? <Message text={providers.error} />
-        : providers.items === null
-          ? <Message text="Loading…" />
-          : providers.items.map((one) => (
-              <li role="none">
-                <button type="button" class="menu-row" role="menuitem" data-action="new-provider" data-provider={one.provider}>
-                  <Gutter checked={false} />
-                  <span class="title">{one.name}</span>
-                  {one.default ? <span class="menu-note">Default</span> : null}
-                </button>
-              </li>
-            ));
+  // New conversation…'s draft shows in the shown work item in place of its current session until its first message starts one.
+  const drafting = view.newDraft !== null && view.newDraft.workItemId === scope.workItemId;
   const pickerMenu =
-    providers !== null ? (
-      <ul class="glass menu conversation-menu" role="menu" aria-label="Provider">
-        {providerRows}
-      </ul>
-    ) : view.picker ? (
+    view.picker ? (
       <ul class="glass menu conversation-menu" role="menu" aria-label="Conversations">
         {scope.conversations.flatMap((entry) => [
           <li role="none" key={entry.workItemId}>
-            <button type="button" class="menu-row conversation-row" role="menuitemradio" aria-checked={entry.workItemId === scope.workItemId && scope.earlier !== true} data-action="select" data-work-item={String(entry.workItemId)}>
+            <button type="button" class="menu-row conversation-row" role="menuitemradio" aria-checked={entry.workItemId === scope.workItemId && scope.earlier !== true && !drafting} data-action="select" data-work-item={String(entry.workItemId)}>
               <ConversationLabel entry={entry} state={state} unread={entry.workItemId !== scope.workItemId && entry.unread > 0} />
             </button>
           </li>,
@@ -312,8 +283,14 @@ export function renderHeader(state: PageState, view: View, now = Date.now()): VN
         <span class="codicon codicon-layout-sidebar-left" aria-hidden="true"></span>
       </button>
       <div class="menu-anchor picker-anchor">
-        <button type="button" class="picker" data-action="picker" aria-haspopup="menu" aria-expanded={view.picker || providers !== null} title={tooltip}>
-          {earlier !== null ? (
+        <button type="button" class="picker" data-action="picker" aria-haspopup="menu" aria-expanded={view.picker} title={tooltip}>
+          {drafting ? (
+            <>
+              <span class="codicon codicon-add state-icon tone-muted" aria-hidden="true"></span>
+              <span class="title">{title}</span>
+              <span class="picker-session">New conversation</span>
+            </>
+          ) : earlier !== null ? (
             <SessionLabel icon={stateIcon(state.session?.state, state.session?.waitingFor, state.session?.limit)} provider={state.session?.provider ?? earlier.provider} title={earlier.title} />
           ) : selected === null ? (
             <>

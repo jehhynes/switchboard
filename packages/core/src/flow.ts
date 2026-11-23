@@ -236,6 +236,11 @@ export type FlowEvent =
    * `folder`, whose session starts at once with no prompt.
    */
   | { type: 'new-conversation'; hostWindow: string; folder: string; provider?: Provider }
+  /**
+   * New conversation… on the web page (architecture.md § Web page): a new session of the work item, in its folder, with `prompt`, the
+   * operator's first message, as its prompt; in `provider`, else its latest session's.
+   */
+  | { type: 'item-session'; workItemId: number; prompt: string; provider?: Provider }
   | { type: 'conversation-title'; workItemId: number; text: string; origin?: 'provider-manual' | 'provider-auto' }
   /** The operator pins a persona to a Code Mode session, or clears its pin with null (architecture.md § Personas). */
   | { type: 'persona'; sessionId: string; personaId: string | null }
@@ -413,7 +418,7 @@ function textOf(text: string | null | undefined): string | null {
   return text?.trim() || null;
 }
 
-const OPERATOR_EVENTS: ReadonlySet<FlowEvent['type']> = new Set(['adhoc', 'new-session', 'new-conversation', 'register', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retry', 'stop', 'delete', 'pick', 'retriage-pool', 'restore', 'snooze', 'comment', 'move', 'reset-position', 'persona']);
+const OPERATOR_EVENTS: ReadonlySet<FlowEvent['type']> = new Set(['adhoc', 'new-session', 'new-conversation', 'item-session', 'register', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retry', 'stop', 'delete', 'pick', 'retriage-pool', 'restore', 'snooze', 'comment', 'move', 'reset-position', 'persona']);
 
 /**
  * Events logged even when they change nothing, because they record a request or a report (PRD R59). The rest, such as polls and
@@ -534,6 +539,8 @@ function detailOf(store: Store, event: FlowEvent): Record<string, unknown> | nul
       return { repoRoot: event.repoRoot, provider: event.provider ?? null, model: event.model ?? null };
     case 'new-conversation':
       return { folder: event.folder };
+    case 'item-session':
+      return { provider: event.provider ?? null };
     case 'persona':
       return { personaId: event.personaId };
     case 'register':
@@ -740,6 +747,8 @@ class Flow {
         return this.newSession(event.repoRoot, event.provider, event.model, event.prompt);
       case 'new-conversation':
         return this.newConversation(event.hostWindow, event.folder, event.provider);
+      case 'item-session':
+        return this.itemSession(this.openItem(event.workItemId), event.prompt, event.provider);
       case 'conversation-title':
         return this.conversationTitle(event.workItemId, event.text, event.origin);
       case 'persona':
@@ -1064,6 +1073,31 @@ class Flow {
     }
 
     this.startSession(this.insertAdhoc(null, NEW_CONVERSATION_TITLE, folder, null, 'running', hostWindow, provider));
+  }
+
+  /**
+   * New conversation… on the web page (architecture.md § Web page): another session of the work item, started at once with the operator's first
+   * message as its prompt, in the folder its sessions run in; its earlier sessions stay, read-only on the page. Only a work item whose work has
+   * started and stopped for the operator takes one, and never while a session of its ticket is in a turn (PRD R17).
+   */
+  private itemSession(item: WorkItem, prompt: string, provider?: Provider): void {
+    const message = prompt.trim();
+
+    if (message === '') throw new Refusal('Write the first message of the new conversation.');
+    if (item.status !== 'running' && item.status !== 'blocked' && item.status !== 'finished' && item.status !== 'failed') {
+      throw new Refusal('A new conversation starts only in a work item whose work has started and is not done.');
+    }
+
+    const sessions = this.store.workItemsForTicket(item.ticketId).flatMap((one) => this.store.sessionsFor(one.id));
+
+    if (sessions.some((one) => one.state !== 'ended' && !TURN_ENDED.includes(one.state))) {
+      throw new Refusal('A session of this work item is in a turn. Wait for it to end, or stop it, before starting a new conversation.');
+    }
+
+    const chosen = provider ?? this.store.sessionsFor(item.id).at(-1)?.provider ?? itemProvider(this.context.settings, this.context.playbooks, item);
+
+    this.checkInteractiveProvider(chosen);
+    this.startSession(item, { prompt: message, provider: chosen });
   }
 
   private checkInteractiveProvider(provider?: Provider): void {
@@ -2888,8 +2922,11 @@ class Flow {
     }
   }
 
-  /** Starts the work item's setup or task session. The task after a setup session takes the setup session's slot (PRD R38). */
-  private startSession(item: WorkItem): void {
+  /**
+   * Starts the work item's setup or task session. The task after a setup session takes the setup session's slot (PRD R38). `fresh`, from New
+   * conversation… (`itemSession`), starts a task session with the operator's message as its prompt in that provider instead, never a setup.
+   */
+  private startSession(item: WorkItem, fresh: { prompt: string; provider: Provider } | null = null): void {
     const ticket = this.store.ticket(item.ticketId)!;
     const source = this.context.settings.sources[ticket.source];
     const sessions = this.context.settings.sessions;
@@ -2909,7 +2946,7 @@ class Flow {
     const resolved = ticketRoot(this.context.settings, ticket, this.store.reposBySource());
     const repoRoot = 'root' in resolved ? resolved.root : '';
     const approved = item.approvalPrompt !== null;
-    const kind: SessionKind = !approved && playbook?.requiresWorktree === true && worktree === null ? 'setup' : 'task';
+    const kind: SessionKind = fresh === null && !approved && playbook?.requiresWorktree === true && worktree === null ? 'setup' : 'task';
     const cwd = playbook?.workdir === 'repoRoot' ? repoRoot : (worktree?.path ?? repoRoot);
 
     // A linked worktree does not lift a refusal: the root's repository may be ambiguous or not the ticket's.
@@ -2922,7 +2959,9 @@ class Flow {
     const values = this.values(ticket, item);
     let prompt: string;
 
-    if (kind === 'setup') {
+    if (fresh !== null) {
+      prompt = fresh.prompt;
+    } else if (kind === 'setup') {
       const template = source?.setupPrompt ?? '';
 
       if (template === '') {
@@ -2958,21 +2997,23 @@ class Flow {
     // A playbook runs its sessions in its own provider, else sessions.provider, the one its permission mode and model were checked against
     // (playbook.ts); an explicit choice applies only while the work item has no playbook, through queued starts and retries.
     const hosted = this.interactive(item);
-    const provider = playbook === null ? (item.provider ?? sessions.provider) : (playbook.provider ?? sessions.provider);
-    const reports = sessionReports(kind, approved, playbook, provider).filter((report) => !hosted || (report !== 'done' && report !== 'approval'));
+    const provider = fresh?.provider ?? (playbook === null ? (item.provider ?? sessions.provider) : (playbook.provider ?? sessions.provider));
+    // A playbook's permission mode and model were checked against its own provider, so a new conversation in another takes the sessions' own.
+    const launchPlaybook = fresh !== null && provider !== (playbook?.provider ?? sessions.provider) ? null : playbook;
+    const reports = sessionReports(kind, approved && fresh === null, playbook, provider).filter((report) => !hosted || (report !== 'done' && report !== 'approval'));
     // Every Claude session is held in the terminal holder, in Code Mode as sessions.codeMode says at its start; resumes keep the mode (PRD R93).
     // The Claude session ID and launch are stored before the start, so a hub restarted during it finds the process in the holder.
     const held =
       provider === 'claude' ? { codeMode: true as const, nativeSessionId: this.context.newUuid(), launchId: this.context.newUuid(), ...(sessions.codeMode ? {} : { withoutCodeMode: true as const }) } : null;
     const appServer = provider === 'codex';
     // The guidance waits through a setup session and a failed start for the task session, and an approved prompt does not take it (PRD R77).
-    const guided = kind === 'task' && !approved;
+    const guided = kind === 'task' && !approved && fresh === null;
     const full = sessionPrompt(prompt, id, guided ? item.guidance : null);
     // A Code Mode session's persona is resolved once, here, and kept for its life (architecture.md § Personas).
     const persona = held === null && !appServer ? null : resolvePersona(this.context.settings.voice, item.playbook, this.livePersonas(null));
     const tone = held === null && !appServer ? null : sessionTone(this.context.settings.voice, { personaId: persona?.id ?? null });
 
-    if (kind === 'task' && playbook !== null) {
+    if (kind === 'task' && playbook !== null && fresh === null) {
       this.store.updateWorkItem(item.id, { taskPrompt: full });
     }
 
@@ -3024,7 +3065,7 @@ class Flow {
       prompt: full,
       contract: sessionContract(id, this.context.report, reports, provider),
       name: this.interactive(item) ? '' : sessionName(kind, item, ticket),
-      ...launchOptions(this.context.settings, playbook, kind, provider),
+      ...launchOptions(this.context.settings, launchPlaybook, kind, provider),
       ...(playbook === null && item.model != null ? { model: item.model } : {}),
       ...(held ?? {}),
       ...(appServer ? { execution: 'app-server' as const } : {}),

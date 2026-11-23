@@ -3987,72 +3987,96 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it("starts a new conversation in the shown conversation's folder from the dropdown, asking for the provider only when there is a choice", async () => {
+  it("opens New conversation… as an empty draft in the shown work item, starting nothing until its first message is sent", async () => {
     const { page, source } = start();
+    const input = root.querySelector<HTMLTextAreaElement>('#composer textarea')!;
+    const typed = (text: string) => {
+      input.value = text;
+      input.dispatchEvent(new Event('input'));
+    };
+    const draftPosts = () => posts.filter((post) => post.url.endsWith('/page-conversation'));
 
     answers['/providers'] = { status: 200, body: { defaultProvider: 'codex', installed: ['claude', 'codex'] } };
-    answers['/page-conversation'] = { status: 200, body: { workItemId: 9, folder: 'D:/w' } };
+    answers['/page-conversation'] = { status: 200, body: { workItemId: 1, sessionId: 's2' } };
     hello(source);
+    typed('The work item draft');
     click('[data-action="picker"]');
+    expect([...root.querySelectorAll('.conversation-menu .menu-row')].map((row) => row.textContent)).toEqual(['Fix it', 'Side', 'New conversation…']);
     click('[data-action="new-conversation"]');
     await flush();
-    expect([...root.querySelectorAll('.conversation-menu .menu-row')].map((row) => row.textContent)).toEqual(['CodexDefault', 'Claude']);
-    click('[data-action="new-provider"][data-provider="claude"]');
-    await flush();
-    await flush();
-    expect(posts.find((post) => post.url.endsWith('/page-conversation'))?.body).toMatchObject({ window: 'pk', scopeGen: 3, provider: 'claude' });
-    expect(posts.find((post) => post.url.endsWith('/page-conversation'))?.body).not.toHaveProperty('folder');
-    expect(posts.filter((post) => post.url.endsWith('/select')).at(-1)?.body['workItemId']).toBe(9);
+
+    // An empty draft in the same work item, its composer focused, its provider the shown conversation's; nothing is made.
     expect(root.querySelector('.conversation-menu')).toBeNull();
+    expect(root.querySelector('#panel .new-draft')!.textContent).toContain('It starts when you send its first message');
+    expect(root.querySelector('button.picker')!.textContent).toContain('New conversation');
+    expect(input.value).toBe('');
+    expect(document.activeElement).toBe(input);
+    expect([...root.querySelectorAll('.draft-note [data-action="draft-provider"]')].map((one) => [one.textContent, one.getAttribute('aria-pressed')])).toEqual([['Claude', 'true'], ['Codex', 'false']]);
+    expect(draftPosts()).toEqual([]);
 
-    // A selection while the conversation is being made keeps the page where the operator went.
-    let release: () => void = () => {};
+    // Dictation for the session shown never fills the draft, which is no session's.
+    source.emit('draft', { text: 'spoken words', sessionId: 's' });
+    expect(input.value).toBe('');
 
-    answers['/providers'] = { status: 200, body: { defaultProvider: 'claude', installed: ['claude'] } };
-    answers['/page-conversation'] = { status: 200, body: { workItemId: 11, folder: 'D:/w' }, wait: new Promise<void>((resolve) => void (release = resolve)) };
-    posts = [];
+    // Cancel leaves it, starting nothing, with the work item's own draft back.
+    click('[data-action="draft-cancel"]');
+    expect(root.querySelector('.draft-note')).toBeNull();
+    expect(input.value).toBe('The work item draft');
+    expect(draftPosts()).toEqual([]);
+
+    // Another selection leaves it too.
     click('[data-action="picker"]');
     click('[data-action="new-conversation"]');
     await flush();
-    await flush();
-    expect(posts.some((post) => post.url.endsWith('/page-conversation'))).toBe(true);
+    typed('Never sent');
     click('#list [data-work-item="2"]');
-    release();
-    await flush();
-    await flush();
-    expect(posts.filter((post) => post.url.endsWith('/select')).map((post) => post.body['workItemId'])).not.toContain(11);
-    delete answers['/page-conversation'].wait;
-    answers['/providers'] = { status: 200, body: { defaultProvider: 'codex', installed: ['claude', 'codex'] } };
-    answers['/page-conversation'] = { status: 200, body: { workItemId: 9, folder: 'D:/w' } };
+    expect(root.querySelector('.draft-note')).toBeNull();
+    expect(draftPosts()).toEqual([]);
     click('#list [data-work-item="1"]');
     await flush();
 
-    // A selection while the providers load drops the choice, so nothing starts in the other conversation's folder.
-    posts = [];
+    // A refused send keeps the draft and its text, with why.
+    answers['/page-conversation'] = { status: 409, body: { error: 'A session of this work item is in a turn.' } };
     click('[data-action="picker"]');
     click('[data-action="new-conversation"]');
-    click('#list [data-work-item="2"]');
+    await flush();
+    click('[data-action="draft-provider"][data-provider="codex"]');
+    typed('Why did it fail?');
+    click('button.send');
     await flush();
     await flush();
-    expect(root.querySelector('.conversation-menu')).toBeNull();
-    expect(posts.some((post) => post.url.endsWith('/page-conversation'))).toBe(false);
+    expect(draftPosts().at(-1)?.body).toMatchObject({ window: 'pk', scopeGen: 3, provider: 'codex', text: 'Why did it fail?' });
+    expect(draftPosts().at(-1)?.body).not.toHaveProperty('workItemId');
+    expect(root.querySelector('.toast.warning .toast-text')!.textContent).toBe('A session of this work item is in a turn.');
+    expect(root.querySelector('.draft-note')).not.toBeNull();
+    expect(input.value).toBe('Why did it fail?');
 
-    // One provider installed: no menu.
-    answers['/providers'] = { status: 200, body: { defaultProvider: 'claude', installed: ['codex'] } };
-    answers['/page-conversation'] = { status: 409, body: { error: 'New sessions need Code Mode (sessions.codeMode).' } };
-    posts = [];
-    click('[data-action="picker"]');
-    click('[data-action="new-conversation"]');
+    // Sent: the hub starts the session with the message and shows it; the draft goes and the work item's own draft comes back.
+    const refused = draftPosts().at(-1)!.body['opId'];
+
+    answers['/page-conversation'] = { status: 200, body: { workItemId: 1, sessionId: 's2' } };
+    click('button.send');
     await flush();
     await flush();
-    expect(posts.find((post) => post.url.endsWith('/page-conversation'))?.body).toMatchObject({ provider: 'codex' });
-    expect(root.querySelector('.toast.warning .toast-text')!.textContent).toBe('New sessions need Code Mode (sessions.codeMode).');
+    expect(draftPosts()).toHaveLength(2);
+    expect(draftPosts().at(-1)!.body['opId']).toBe(refused);
+    expect(root.querySelector('.draft-note')).toBeNull();
+    expect(root.querySelector('#panel .new-draft')).toBeNull();
+    expect(input.value).toBe('The work item draft');
     page.close();
   });
 
+  it("presets New conversation…'s provider to the session shown, an earlier one included, not to the work item's current one", async () => {
+    const { page, source } = start();
 
-
-
+    answers['/providers'] = { status: 200, body: { defaultProvider: 'claude', installed: ['claude', 'codex'] } };
+    hello(source, { sessions: [session({ provider: 'codex' })] });
+    click('[data-action="picker"]');
+    click('[data-action="new-conversation"]');
+    await flush();
+    expect(root.querySelector('.draft-note [aria-pressed="true"]')!.textContent).toBe('Codex');
+    page.close();
+  });
 
   it("opens every work item on the Conversation tab in the phone's layout, whatever tab it kept or the column would show, and keeps a tab chosen until another work item opens", async () => {
     window.innerWidth = 375;

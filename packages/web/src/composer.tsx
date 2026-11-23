@@ -2,6 +2,9 @@
 // its `@` and `/` lists, its voice controls and the ended session's note above it.
 import type { VNode } from 'preact';
 import type { PageState } from './model.js';
+import type { NewDraft } from './render.js';
+import { providerMark } from '@switchboard/conversation/providerIcons';
+import { PROVIDERS } from './listHeader.js';
 import { trusted } from './trusted.js';
 
 /** The page's hosts: the list and its sheet and the drawer's sash, the sashes, the hidden list's sliver and the open drawer's backdrop, the conversation's header, pane, note and composer, the side column and the sheet. */
@@ -151,6 +154,35 @@ export function renderEndedNote(session: PageState['session'], resuming: boolean
           {resuming ? 'Resuming…' : 'Resume'}
         </button>
       ) : null}
+    </div>
+  );
+}
+
+
+/**
+ * The note above the composer while New conversation…'s draft shows: that nothing has started yet, the New session form's provider switch while
+ * more than one provider is installed, and Cancel, which goes back to the current session and starts nothing.
+ */
+export function renderDraftNote(draft: NewDraft): VNode {
+  const installed = draft.installed ?? [];
+
+  return (
+    <div class="session-note draft-note" role="status">
+      <span class="codicon codicon-add state-icon tone-muted" aria-hidden="true"></span>
+      <span class="session-note-text">{draft.sending ? 'Starting the new conversation…' : 'New conversation. It starts when you send the first message.'}</span>
+      {installed.length > 1 ? (
+        <div class="provider-switch" role="group" aria-label="Provider">
+          {PROVIDERS.filter((one) => installed.includes(one.provider)).map((one) => (
+            <button type="button" class="provider-option" data-action="draft-provider" data-provider={one.provider} aria-pressed={one.provider === draft.provider} disabled={draft.sending}>
+              {trusted(providerMark(one.provider, 'provider-option-mark'))}
+              <span>{one.name}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <button type="button" class="session-resume" data-action="draft-cancel" disabled={draft.sending}>
+        Cancel
+      </button>
     </div>
   );
 }

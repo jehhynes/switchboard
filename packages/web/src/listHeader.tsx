@@ -203,7 +203,7 @@ function Gutter({ checked }: { checked: boolean }) {
 }
 
 /** The providers a new session can start in, as the dock's provider box lists them. */
-const PROVIDERS = [
+export const PROVIDERS = [
   { provider: 'claude', name: 'Claude' },
   { provider: 'codex', name: 'Codex' },
 ];

@@ -280,6 +280,11 @@ export interface ConversationServiceDeps {
    * its work item, or why it was refused.
    */
   newConversation?(hostWindow: string, folder: string, provider?: Provider): { workItemId: number } | { refused: string };
+  /**
+   * Starts a new session of the work item with `prompt`, the operator's first message, as New conversation… on the page does (architecture.md
+   * § Web page): the session, or why it was refused.
+   */
+  newItemSession?(workItemId: number, prompt: string, provider?: Provider): { sessionId: string } | { refused: string };
   /** A message was added to a work item's conversation, whose first titles a hosted conversation. */
   messageAdded?(workItemId: number, text: string): void;
   providerTitle?(workItemId: number, title: string, origin: 'provider-manual' | 'provider-auto'): void;
@@ -3066,31 +3071,63 @@ export class ConversationService {
   }
 
   /**
-   * `page-conversation {window, scopeGen, opId, provider?}` (architecture.md § Web page): the dropdown's New conversation… on the page, which
-   * makes a folder-hosted conversation, as a VS Code folder window's New conversation… does, in the folder of the conversation the page shows, never
-   * one the page names; answers `{workItemId, folder}`. 403 for a key that is not a page's or a page with no selection, 409 for a stale
-   * `scopeGen` and with the flow's refusal.
+   * `page-conversation {window, scopeGen, opId, text, provider?}` (architecture.md § Web page): the dropdown's New conversation… on the page, sent
+   * with the draft's first message. Starts a new session of the work item the page shows, never one the page names, with `text` as its prompt, in
+   * `provider` or else its latest session's; its earlier sessions stay listed, read-only. Shows the new session and answers `{workItemId, sessionId}`.
+   * 403 for a key that is not a page's or a page with no selection, 409 for a stale `scopeGen` and with the flow's refusal. A repeated `opId`,
+   * from the same page or the page reconnected under a new key, answers the first session and starts none while the page shows its work item.
    */
   pageConversation(body: Record<string, unknown>): { status: number; body: unknown } {
-    const { window, scopeGen, opId, provider } = body;
+    const { window, scopeGen, opId, provider, text } = body;
 
-    if (typeof window !== 'string' || typeof scopeGen !== 'number' || typeof opId !== 'string') {
-      return { status: 400, body: { error: 'Expected {window, scopeGen, opId, provider?}.' } };
+    if (typeof window !== 'string' || typeof scopeGen !== 'number' || typeof opId !== 'string' || opId === '' || opId.length > 200 || typeof text !== 'string' || text.length > MAX_MESSAGE_CHARS) {
+      return { status: 400, body: { error: 'Expected {window, scopeGen, opId, text, provider?}.' } };
     }
+    if (provider !== undefined && provider !== 'claude' && provider !== 'codex') return { status: 400, body: { error: 'Choose Claude or Codex.' } };
 
     const scope = this.deps.windows.isPage(window) ? this.deps.windows.scope(window) : null;
+    // Kept by opId alone, since a page that reconnects retries under a new key and scope generation; answered only to a page that shows the
+    // same work item.
+    const earlier = this.#itemSessions.get(opId);
+
+    if (earlier !== undefined && scope?.workItemId === earlier.workItemId) {
+      return { status: 200, body: earlier };
+    }
+
     const refused = refusal(scope?.workItemId == null ? null : scope, scopeGen, null);
 
     if (refused !== null) {
       return refused;
     }
 
-    if (scope!.folder == null) {
-      return { status: 409, body: { error: 'This conversation has no folder to start another in.' } };
+    if (text.trim() === '') {
+      return { status: 400, body: { error: 'Write the first message of the new conversation.' } };
     }
 
-    return this.folderConversation({ folder: scope!.folder, opId, ...(provider === undefined ? {} : { provider }) });
+    const workItemId = scope!.workItemId!;
+    const made = this.deps.newItemSession?.(workItemId, text, provider) ?? { refused: 'The conversation was not started.' };
+
+    if ('refused' in made) {
+      return { status: 409, body: { error: made.refused } };
+    }
+
+    const answer = { workItemId, sessionId: made.sessionId };
+
+    this.#itemSessions.set(opId, answer);
+
+    for (const old of [...this.#itemSessions.keys()].slice(0, -UNSENT_KEPT)) {
+      this.#itemSessions.delete(old);
+    }
+
+    // The page shows the new session, its current one, even when it showed an earlier one when New conversation… was chosen.
+    this.deps.windows.select(window, workItemId);
+    this.scopesChanged([window]);
+    this.conversationsChanged();
+
+    return { status: 200, body: answer };
   }
+  /** The sessions `page-conversation` started, by opId, keeping the last `UNSENT_KEPT`. */
+  readonly #itemSessions = new Map<string, { workItemId: number; sessionId: string }>();
 
   /** Remembers the work item a `new-conversation` made, keeping the last `UNSENT_KEPT`. */
   #remember(done: string, workItemId: number): void {

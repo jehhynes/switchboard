@@ -700,6 +700,13 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
       return made === undefined ? { refused: refused ?? 'The conversation was not made.' } : { workItemId: made.id };
     },
+    newItemSession: (workItemId, prompt, provider) => {
+      const before = store.sessionsFor(workItemId).at(-1)?.id;
+      const { refused } = runtime.send({ type: 'item-session', workItemId, prompt, ...(provider === undefined ? {} : { provider }) });
+      const made = store.sessionsFor(workItemId).at(-1);
+
+      return refused === null && made !== undefined && made.id !== before ? { sessionId: made.id } : { refused: refused ?? 'The conversation was not started.' };
+    },
     newStandalone: (folder, provider, model, prompt) => madeAdhoc({ type: 'new-session', repoRoot: folder, provider, model, ...(prompt === null ? {} : { prompt }) }, 'The session was not made.'),
     newTask: (folder, provider, model, prompt, start) => madeAdhoc({ type: 'adhoc', prompt, repoRoot: folder, start, provider, model }, 'The task was not made.'),
     folderRoots: () => ({
@@ -1340,7 +1347,7 @@ const dockWithRuns = () => {
       '/v1/conversation/prompt': async (body) => (isRecord(body) ? conversation.prompt(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } }),
       '/v1/conversation/console-input': async (body) => (isRecord(body) ? pageConsole.input(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, data, cols?, rows?}.' } }),
       '/v1/conversation/prompt-key': async (body) => (isRecord(body) ? conversation.promptKey(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, prompt, key}.' } }),
-      '/v1/conversation/page-conversation': async (body) => (isRecord(body) ? conversation.pageConversation(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, provider?}.' } }),
+      '/v1/conversation/page-conversation': async (body) => (isRecord(body) ? conversation.pageConversation(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, text, provider?}.' } }),
       '/v1/conversation/resume': async (body) => (isRecord(body) ? conversation.resume(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } }),
       '/v1/conversation/pool-action': async (body) => (isRecord(body) ? conversation.poolAction(body) : { status: 400, body: { error: 'Expected {window, opId, ticketId, label}.' } }),
       '/v1/conversation/row-move': async (body) => (isRecord(body) ? conversation.rowMove(body) : { status: 400, body: { error: 'Expected {window, opId, workItemId, after}.' } }),

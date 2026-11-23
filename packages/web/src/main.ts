@@ -1,11 +1,11 @@
-import { applyEvent, commandQuery, EMPTY, mentionOf, mentionQuery, pageTitle, rowLink, selectedRow, sentTexts, tabUrl, withEarlier } from './model.js';
+import { applyEvent, commandQuery, EMPTY, mentionOf, mentionQuery, pageTitle, rowLink, selectedEntry, selectedRow, sentTexts, tabUrl, withEarlier } from './model.js';
 import { snoozeChoices } from '@switchboard/core/snooze';
 import { BROWSER_EXTENSION_ID } from '@switchboard/core/hubRecord';
 import type { PageState } from './model.js';
 import { MENU_MAX_WIDTH, placeMenus } from '@switchboard/conversation/menuPlace';
 import { escape, renderMarkdown, webLink } from './markdown.js';
 import { ARTIFACTS_SEEN, artifactShow, artifactTabsFit, artifactUrl, openArtifactsSeen, parseArtifactsSeen, unreadArtifacts, textArtifactHtml, bandOpen, closedArtifacts, collapsedGroups, firstSnoozeDay, GROUPS_KEY, inputReady, renderMicButton, markdownBody, newView, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, hasConsole, SIDE_TABS } from './render.js';
-import type { CardDraft, SideTab, Tab, View } from './render.js';
+import type { CardDraft, NewDraft, SideTab, Tab, View } from './render.js';
 import type { ConsoleOptions, MountedConsole } from './console.js';
 import { LIGHT_SCHEME } from './console.js';
 import type { ArtifactView, ItemView, PageRow, ScreenPrompt } from '@switchboard/protocol';
@@ -25,7 +25,7 @@ import { renderArtifacts, renderArtifactView, renderEmpty, renderStatus } from '
 import { renderPersonaDialog } from './personas.js';
 import { renderSheet } from './sheet.js';
 import { toast } from './toast.js';
-import { renderComposer, renderComposerMenu, renderEndedNote, renderFrame, renderShared } from './composer.js';
+import { renderComposer, renderComposerMenu, renderDraftNote, renderEndedNote, renderFrame, renderShared } from './composer.js';
 import { listHeader } from './listHeader.js';
 import { PhoneVoice } from './phoneVoice.js';
 import { MicStart } from '@switchboard/conversation/voiceControls';
@@ -818,7 +818,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     hubDrafts.set(sessionId, text);
 
-    if (sessionId !== state.session?.id) {
+    // New conversation…'s draft is no session's: dictation for the session shown waits in the hub's draft for it.
+    if (sessionId !== state.session?.id || draftShown()) {
       return;
     }
 
@@ -906,6 +907,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   let active = 0;
   let asked = 0;
 
+  /** How many times the operator chose a work item or a session, so an answer that arrives later leaves a newer choice alone. */
+  let selections = 0;
+  /** Whether the page shows New conversation…'s draft for the work item it shows. */
+  const draftShown = (): boolean => view.newDraft !== null && view.newDraft.workItemId === (state.scope?.workItemId ?? null);
   const drafts = (): Record<string, string> => {
     try {
       return JSON.parse(localStorage.getItem(DRAFTS) ?? '{}') as Record<string, string>;
@@ -914,7 +919,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
   };
   const keepDraft = (): void => {
-    if (draftOf === null || sending) {
+    // New conversation…'s text is not the work item's draft, which waits for its session.
+    if (draftOf === null || sending || draftShown()) {
       return;
     }
 
@@ -1015,7 +1021,23 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       mirror.scrollTop = input.scrollTop;
     }
   };
-  const canSend = (): boolean => state.connected && state.session?.conversation === 'full' && !sending && !uploading() && (input.value.trim() !== '' || shownAttachments().length > 0);
+  /** Leaves New conversation…'s draft unsent, starting nothing, and puts the work item's own draft back in the box. */
+  const leaveDraft = (): void => {
+    if (view.newDraft === null) {
+      return;
+    }
+
+    view.newDraft = null;
+    input.value = draftOf === null ? '' : (drafts()[draftOf] ?? '');
+    chosen = null;
+    showError(null);
+    grow();
+    refresh();
+    tellHub();
+  };
+  // New conversation…'s draft sends its text alone, with no session yet to take files or commands.
+  const canSend = (): boolean =>
+    state.connected && !sending && (draftShown() ? view.newDraft?.sending === false && input.value.trim() !== '' : state.session?.conversation === 'full' && !uploading() && (input.value.trim() !== '' || shownAttachments().length > 0));
   const refresh = (): void => {
     send.disabled = !canSend();
   };
@@ -1051,7 +1073,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         active = 0;
         drawMenu();
       }
-    } else if (slash !== null && state.session !== null) {
+    } else if (slash !== null && state.session !== null && !draftShown()) {
       const answer = await command('commands', { sessionId: state.session.id });
       const commands = ((answer.body['commands'] as Array<{ name: string; description: string }> | undefined) ?? []).filter((one) => one.name.toLowerCase().includes(slash.toLowerCase()));
 
@@ -1090,6 +1112,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     keepDraft();
   };
   const submit = async (): Promise<void> => {
+    if (draftShown()) {
+      void sendDraft();
+      return;
+    }
+
     if (!canSend() || state.scope === null || state.session === null) {
       return;
     }
@@ -1356,7 +1383,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     { signal: listening.signal },
   );
   composerHost.querySelector('button.slash')!.addEventListener('click', () => {
-    if (input.value === '' && !input.disabled) {
+    if (input.value === '' && !input.disabled && !draftShown()) {
       input.value = '/';
       input.focus();
       input.setSelectionRange(1, 1);
@@ -1498,7 +1525,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   // slash command to the session the page shows, leaving the box's draft alone.
   let contextMenu: ContextMenuState = 'closed';
   const drawContext = (): void => {
-    const full = state.connected && state.session?.conversation === 'full';
+    // New conversation…'s draft has no session whose context to show yet.
+    const full = state.connected && state.session?.conversation === 'full' && !draftShown();
 
     if (!full && contextMenu === 'confirm') {
       contextMenu = 'open';
@@ -1575,7 +1603,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     clearTimeout(composerTimer);
 
     if (state.scope !== null && state.voice?.enabled === true) {
-      void command('composer', { focused: document.activeElement === input, draft: sending ? '' : input.value, listen: true });
+      // New conversation…'s box is not the session's: the hub sees it unfocused, its draft for the session as it was.
+      const drafting = draftShown();
+
+      void command('composer', { focused: !drafting && document.activeElement === input, draft: drafting ? (hubDrafts.get(state.session?.id ?? '') ?? '') : sending ? '' : input.value, listen: true });
     }
   };
   /** The hint that dictation joins the draft and waits for Send, while the box has the focus and the mic is on here. */
@@ -1601,6 +1632,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const id = state.scope?.workItemId ?? null;
 
     if (id !== draftOf) {
+      // New conversation…'s draft belongs to the work item it was chosen in.
+      if (view.newDraft !== null && view.newDraft.workItemId !== id) {
+        view.newDraft = null;
+      }
+
       draftOf = id;
       // Live words belong to the conversation they were heard for; its clearing event may never reach this one.
       liveWords.textContent = '';
@@ -1618,19 +1654,24 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       }
     }
 
-    const full = state.connected && state.session?.conversation === 'full';
+    const drafting = draftShown();
+    // The draft's composer types the new conversation's first message; the voice and the mic stay with the sessions.
+    const live = state.connected && state.session?.conversation === 'full' && !drafting;
+    const full = live || (state.connected && drafting);
 
     // On every tab, so the operator can type and dictate from the status or the artifacts too, but on a short screen (page.css).
     composerHost.hidden = state.scope === null;
     input.disabled = !full;
-    attachButton.disabled = !full;
-    input.placeholder = full
+    attachButton.disabled = !live;
+    input.placeholder = drafting
+      ? 'First message of the new conversation…'
+      : full
       ? 'Message…'
       : state.session?.state === 'ended' && state.session.conversation !== 'none'
         ? 'Resume the session to send a message.'
         : (state.session?.reason ?? (state.connected ? 'No session has started yet.' : connection.state === 'offline' ? "Can't send while offline." : connection.state === 'signedOut' ? 'Signed out.' : 'Connecting to Switchboard…'));
     // The same controls as the Conversation view's, acting on this computer's voice process (architecture.md § Web page).
-    mount(voiceControls, renderShared(renderVoice(state.voice, full)));
+    mount(voiceControls, renderShared(renderVoice(state.voice, live)));
     syncHint();
     // On a paired device the mic shows while the voice is elsewhere too, off: its tap takes the voice to this phone (PRD R119).
     const micView = phoneVoice !== null && state.voice?.enabled === true && !state.voice.here ? { ...state.voice, here: true, mic: 'off' as const, error: null } : state.voice;
@@ -1657,7 +1698,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       micTimed(micStart.pending === null ? (micView?.mic ?? 'off') : `failed: ${micStart.pending.error}`);
     }
 
-    mount(micSlot, full ? renderShared(renderMicButton(micView, micStart.pending)) : null);
+    mount(micSlot, live ? renderShared(renderMicButton(micView, micStart.pending)) : null);
     // The hub's mic turned off while the voice is here, as by Mic off in another of this phone's views: the phone's microphone is released too.
     if (state.voice?.here === true) {
       phoneVoice?.viewMic(state.voice.mic);
@@ -2278,7 +2319,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     // An ended session's note sits just above the composer on every tab, with Resume, as in the Conversation view; the page resumes it in the
     // terminal holder, or a Codex thread in its daemon, without a terminal.
-    mount(note, renderEndedNote(state.session, resuming, state.scope?.earlier === true ? (state.scope.workItemId ?? null) : null));
+    mount(note, draftShown() ? renderDraftNote(view.newDraft!) : renderEndedNote(state.session, resuming, state.scope?.earlier === true ? (state.scope.workItemId ?? null) : null));
 
     // From the wide layout Status, Artifacts, Console and Browser are a column of their own; embedded tabs covers the Browser tab's area.
     // While another work item opens, the columns keep their widths and the conversation's composer its place (page.css), so nothing moves when it comes.
@@ -3234,8 +3275,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     view.picker = false;
     view.actions = false;
     view.sheet = null;
-    view.providers = null;
-    newFrom = null;
+    leaveDraft();
+    selections++;
     view.artifact = null;
     // On a phone, a conversation opened from the list is a history entry of its own, which the browser's back, as Android's back button, leaves.
     if (listing && isPhone() && !conversationEntry(history.state)) {
@@ -3269,6 +3310,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
    */
   const selectSession = (workItemId: number, sessionId: string | null): void => {
     closeMenus();
+    leaveDraft();
+    selections++;
     view.picker = false;
     showError(null);
     wanted = workItemId;
@@ -3864,12 +3907,18 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       case 'new-conversation':
         void newConversation();
         break;
-      case 'new-provider':
-        view.providers = null;
-        void createConversation(button!.dataset['provider'] ?? '');
+      case 'draft-provider':
+        if (view.newDraft !== null && !view.newDraft.sending) {
+          view.newDraft.provider = button!.dataset['provider'] ?? view.newDraft.provider;
+          draw();
+          input.focus();
+        }
+        break;
+      case 'draft-cancel':
+        leaveDraft();
+        draw();
         break;
       case 'picker':
-        view.providers = null;
         view.picker = !view.picker;
         // One header menu at a time.
         view.actions = false;
@@ -4108,7 +4157,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       case 'view-menu':
         view.viewMenu = !view.viewMenu;
         // One header menu at a time.
-        view.providers = null;
         view.picker = false;
         view.actions = false;
         draw();
@@ -4326,8 +4374,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       draw();
     }
 
-    if ((view.picker || view.actions || view.providers !== null || view.viewMenu) && !(event.target instanceof Node && head.querySelector('.header')?.contains(event.target) === true)) {
-      view.providers = null;
+    if ((view.picker || view.actions || view.viewMenu) && !(event.target instanceof Node && head.querySelector('.header')?.contains(event.target) === true)) {
       view.picker = false;
       view.actions = false;
       view.viewMenu = false;
@@ -4438,10 +4485,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       draw();
       listRowElement(opener)?.focus();
       event.stopImmediatePropagation();
-    } else if (event.key === 'Escape' && (view.picker || view.actions || view.providers !== null || view.viewMenu)) {
-      const opener = view.picker || view.providers !== null ? 'button.picker' : view.actions ? 'button.actions' : 'button.view-options';
+    } else if (event.key === 'Escape' && (view.picker || view.actions || view.viewMenu)) {
+      const opener = view.picker ? 'button.picker' : view.actions ? 'button.actions' : 'button.view-options';
 
-      view.providers = null;
       view.picker = false;
       view.actions = false;
       view.viewMenu = false;
@@ -4459,7 +4505,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       // A console typing into its session stops its keys first (console.ts), so its Escape stays the session's.
       maximizePanel(false);
       event.stopImmediatePropagation();
-    } else if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && (view.picker || view.actions || view.providers !== null || view.viewMenu || view.rowMenu !== null)) {
+    } else if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && (view.picker || view.actions || view.viewMenu || view.rowMenu !== null)) {
       // Up and Down move between the open menu's enabled rows.
       const rows = [...(view.rowMenu !== null ? list.querySelectorAll<HTMLElement>('.row-menu .menu-row:not(:disabled)') : head.querySelectorAll<HTMLElement>('.header .menu .menu-row:not(:disabled)'))];
       const at = rows.indexOf(document.activeElement as HTMLElement);
@@ -4526,62 +4572,104 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   };
 
   // ---- New conversation… (architecture.md § Web page) ----
-  /** The dropdown's New conversation…: straight away with one provider installed, else the providers to pick from, the default first. */
-  /** The conversation New conversation… was chosen in, whose folder the new one runs in; another selection since drops the choice. */
-  let newFrom: { key: string | null; scopeGen: number; workItemId: number | null } | null = null;
+  /**
+   * The dropdown's New conversation…: an empty draft in the shown work item, its composer focused, in the provider of the conversation shown; nothing
+   * starts until its first message is sent (`sendDraft`). The work item's own draft is kept for when the page goes back to its session.
+   */
   const newConversation = async (): Promise<void> => {
+    const workItemId = state.scope?.workItemId ?? null;
+
     view.picker = false;
-    view.providers = { items: null, error: null };
-    newFrom = { key: state.key, scopeGen: state.scope?.scopeGen ?? -1, workItemId: wanted };
-    draw();
 
-    const from = newFrom;
+    if (workItemId === null) {
+      draw();
+      return;
+    }
+
+    keepDraft();
+
+    // The session shown, current or earlier, names the provider; a Claude session's view names none.
+    const shown = state.session !== null ? (state.session.provider ?? 'claude') : selectedEntry(state)?.provider;
+    const draft: NewDraft = { workItemId, provider: shown === 'codex' ? 'codex' : 'claude', installed: null, opId: newOp(), sending: false };
+
+    view.newDraft = draft;
+    view.tab = 'conversation';
+    input.value = '';
+    chosen = null;
+    closeMenu();
+    showError(null);
+    draw();
+    input.focus();
+
     const answer = await post('providers', {});
-    const installed = (answer.body['installed'] as string[] | undefined) ?? [];
-    const preferred = String(answer.body['defaultProvider'] ?? 'claude');
 
-    if (view.providers === null || newFrom !== from || from.key !== state.key || from.scopeGen !== (state.scope?.scopeGen ?? -1)) {
+    if (view.newDraft !== draft) {
       return;
     }
 
-    if (answer.status !== 200 || installed.length === 0) {
-      view.providers = { items: null, error: answer.status === 200 ? 'Neither Claude nor Codex is installed.' : String(answer.body['error'] ?? 'Switchboard did not answer.') };
-    } else if (installed.length === 1) {
-      view.providers = null;
-      void createConversation(installed[0]!);
-    } else {
-      const names: Record<string, string> = { claude: 'Claude', codex: 'Codex' };
+    const installed: string[] = answer.status === 200 ? ((answer.body['installed'] as string[] | undefined) ?? []).filter((one) => one === 'claude' || one === 'codex') : [];
+    const preferred = String(answer.body['defaultProvider'] ?? '');
 
-      view.providers = { items: [...installed].sort((a, b) => Number(b === preferred) - Number(a === preferred)).map((provider) => ({ provider, name: names[provider] ?? provider, default: provider === preferred })), error: null };
+    draft.installed = installed;
+
+    if (installed.length === 0) {
+      showError(answer.status === 200 ? 'Neither Claude nor Codex is installed.' : String(answer.body['error'] ?? 'Switchboard did not answer.'));
+    } else if (!installed.includes(draft.provider)) {
+      draft.provider = installed.includes(preferred) ? preferred : installed[0]!;
     }
 
     draw();
-    head.querySelector<HTMLElement>('.conversation-menu .menu-row')?.focus();
   };
-  /** Makes the conversation in the shown conversation's folder, then opens it in the page. */
-  const createConversation = async (provider: string): Promise<void> => {
-    const from = newFrom;
+  /**
+   * Sends the draft's first message: the hub starts a new session of the work item with it as its prompt and shows that session, its earlier ones
+   * staying in the dropdown. The draft keeps its opId across retries, so the hub starts one session however often it arrives; refused, the text
+   * stays in the draft with why.
+   */
+  const sendDraft = async (): Promise<void> => {
+    const draft = view.newDraft;
+    const text = input.value;
 
-    newFrom = null;
-    draw();
-
-    if (from === null || from.key !== state.key) {
+    if (draft === null || draft.sending || !draftShown() || text.trim() === '' || !state.connected) {
       return;
     }
 
-    // With the scope generation of the conversation it was chosen in, so the hub refuses it after another selection.
-    const answer = await post('page-conversation', { scopeGen: from.scopeGen, provider });
+    // The operator's choices of a work item or session so far; one made while it is sent stands.
+    const chosenBefore = selections;
 
-    if (answer.status === 200 && typeof answer.body['workItemId'] === 'number') {
-      showError(null);
+    draft.sending = true;
+    input.readOnly = true;
+    composerHost.classList.add('sending');
+    draw();
 
-      // Opened only while the operator is still on the conversation it was made from; the list shows it either way.
-      if (wanted === from.workItemId && state.key === from.key) {
-        void select(answer.body['workItemId'], true);
+    // A retry after the page moved to another work item goes with no scope generation the hub takes, so it never starts there; one after a
+    // reconnect to the same work item takes its new generation.
+    const answer = await post('page-conversation', () => ({ scopeGen: state.scope?.workItemId === draft.workItemId ? state.scope.scopeGen : -1, provider: draft.provider, text }), false, { timeout: SEND_TRY_MS, retryFor: SEND_RETRY_MS, opId: draft.opId });
+
+    draft.sending = false;
+    input.readOnly = false;
+    composerHost.classList.remove('sending');
+
+    if (answer.status === 200) {
+      if (view.newDraft === draft) {
+        view.newDraft = null;
+        input.value = draftOf === null ? '' : (drafts()[draftOf] ?? '');
+        chosen = null;
+        showError(null);
       }
-    } else {
-      showError(String(answer.body['error'] ?? 'The conversation was not made.'));
+
+      // The hub shows the new session, the work item's current one, so the page asks for no earlier one again, unless the operator chose
+      // another session or work item while it was sent.
+      if (wanted === draft.workItemId && selections === chosenBefore) {
+        wantedSession = null;
+        ackedSession = null;
+      }
+    } else if (view.newDraft === draft) {
+      showError(String(answer.body['error'] ?? 'The conversation was not started.'));
     }
+
+    grow();
+    refresh();
+    draw();
   };
 
   // ---- Prompts in the terminal (architecture.md § Web page) ----
@@ -4933,7 +5021,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const choosePersona = async (): Promise<void> => {
     view.viewMenu = false;
     view.picker = false;
-    view.providers = null;
     view.actions = false;
     personaScope = state.scope?.scopeGen ?? null;
     view.personas = { items: null, error: null };

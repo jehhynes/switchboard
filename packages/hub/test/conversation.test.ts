@@ -2911,8 +2911,9 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     expect(held.writes).toHaveLength(2);
   });
 
-  it("starts a page's new conversation in the shown conversation's folder only, as the dock's New conversation in a folder does", () => {
-    const made: Array<[string, string, string | undefined]> = [];
+  it("starts New conversation…'s session in the work item the page shows, with the draft's first message, once per opId (architecture.md § Web page)", () => {
+    const made: Array<[number, string, string | undefined]> = [];
+    let refuse: string | null = null;
     const store = Store.open(':memory:');
     const view = world();
     const scopes = new WindowScopes({ store, windows: WINDOWS, now: () => NOW, newKey: () => 'pk' });
@@ -2926,9 +2927,13 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
       hooks: () => true,
       now: () => NOW,
       newId: () => 'id',
-      newConversation: (hostWindow, folder, provider) => {
-        made.push([hostWindow, folder, provider]);
-        return { workItemId: 41 };
+      newItemSession: (workItemId, prompt, provider) => {
+        if (refuse !== null) return { refused: refuse };
+        made.push([workItemId, prompt, provider]);
+        return { sessionId: `new-${made.length}` };
+      },
+      newConversation: () => {
+        throw new Error('A page makes no new work item.');
       },
       log: () => {},
     });
@@ -2938,19 +2943,38 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
 
     const page = scopes.openPage();
 
-    expect(service.pageConversation({ window: page, scopeGen: 0, opId: 'n' }).status).toBe(403);
+    expect(service.pageConversation({ window: page, scopeGen: 0, opId: 'n', text: 'Hi' }).status).toBe(403);
     service.select({ window: page, opId: 'o', workItemId: 3 });
-
-    const folder = scopes.scope(page)!.folder;
-
-    expect(service.pageConversation({ window: page, scopeGen: 0, opId: 'n' }).status).toBe(409);
-    expect(service.pageConversation({ window: page, scopeGen: 1, opId: 'n', provider: 'gpt' }).status).toBe(400);
+    expect(service.pageConversation({ window: page, scopeGen: 0, opId: 'n', text: 'Hi' }).status).toBe(409);
+    expect(service.pageConversation({ window: page, scopeGen: 1, opId: 'n', text: 'Hi', provider: 'gpt' }).status).toBe(400);
+    expect(service.pageConversation({ window: page, scopeGen: 1, opId: 'n' }).status).toBe(400);
+    expect(service.pageConversation({ window: page, scopeGen: 1, opId: 'n', text: '  ' })).toEqual({ status: 400, body: { error: 'Write the first message of the new conversation.' } });
     expect(made).toEqual([]);
 
-    // The folder is the shown conversation's, checked as the dock's is, never one the page names.
-    expect(folder).toBe('D:/w3');
-    expect(service.pageConversation({ window: page, scopeGen: 1, opId: 'n', provider: 'codex', folder: dir })).toEqual({ status: 400, body: { error: 'D:/w3 is not a folder a session can run in.' } });
-    expect(made).toEqual([]);
+    // The work item is the page's, never one it names; the flow's refusal comes back as it is.
+    refuse = 'A session of this work item is in a turn.';
+    expect(service.pageConversation({ window: page, scopeGen: 1, opId: 'r', text: 'Hi', workItemId: 2 })).toEqual({ status: 409, body: { error: refuse } });
+    refuse = null;
+    expect(service.pageConversation({ window: page, scopeGen: 1, opId: 'n', text: 'Why did it fail?', provider: 'codex', workItemId: 2 })).toEqual({ status: 200, body: { workItemId: 3, sessionId: 'new-1' } });
+    expect(made).toEqual([[3, 'Why did it fail?', 'codex']]);
+    // The page shows the new session, its work item's current one, with a new scope generation.
+    expect(scopes.scope(page)).toMatchObject({ workItemId: 3, scopeGen: 2 });
+    expect(scopes.scope(page)!.earlier).not.toBe(true);
+
+    // A retry of the same send starts nothing more, even after the scope moved on.
+    expect(service.pageConversation({ window: page, scopeGen: 1, opId: 'n', text: 'Why did it fail?', provider: 'codex' })).toEqual({ status: 200, body: { workItemId: 3, sessionId: 'new-1' } });
+    expect(made).toHaveLength(1);
+
+    // So does one from the page reconnected under a new key and scope generation, while it shows the same work item.
+    const again = scopes.openPage();
+
+    service.select({ window: again, opId: 'o2', workItemId: 3 });
+    expect(service.pageConversation({ window: again, scopeGen: scopes.scope(again)!.scopeGen, opId: 'n', text: 'Why did it fail?' })).toEqual({ status: 200, body: { workItemId: 3, sessionId: 'new-1' } });
+    expect(made).toHaveLength(1);
+    // A page showing another work item gets no answer of it, and a stale scope generation is refused as any other.
+    service.select({ window: again, opId: 'o3', workItemId: 2 });
+    expect(service.pageConversation({ window: again, scopeGen: 0, opId: 'n', text: 'Why did it fail?' }).status).toBe(409);
+    expect(made).toHaveLength(1);
   });
 
   it("unbinds a page whose work item was deleted, raising its scope generation", () => {

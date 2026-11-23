@@ -196,8 +196,11 @@ export interface View {
    * `voice.briefReplies`, as this computer's page always does.
    */
   briefReplies: boolean | null;
-  /** New conversation…'s provider menu under the dropdown: the providers, null while they load, or why not. */
-  providers: { items: Array<{ provider: string; name: string; default: boolean }> | null; error: string | null } | null;
+  /**
+   * New conversation…'s draft in the shown work item (architecture.md § Web page), which starts nothing until its first message is sent; null
+   * while the page shows a session.
+   */
+  newDraft: NewDraft | null;
   /** The prompt the session waits on in its terminal, as last read, for the session it was read for; a key being sent waits. */
   prompt: { sessionId: string; prompt: ScreenPrompt | null; sending: boolean } | null;
   /** How many artifact tabs the shown strip fits, measured after each draw, and whether its Artifacts menu is open. */
@@ -207,6 +210,18 @@ export interface View {
   connection?: DotView | null;
 }
 
+/**
+ * New conversation…'s draft: the work item its session will start in, the provider chosen, the providers installed (null while they load), the
+ * opId its send keeps across retries so the hub starts one session, and whether that send waits for its answer.
+ */
+export interface NewDraft {
+  workItemId: number;
+  provider: string;
+  installed: string[] | null;
+  opId: string;
+  sending: boolean;
+}
+
 /** A sheet: Delete's or Stop session's question, Snooze…'s choices, a control's text (and choice) as the dock's input dialog asks for it, or a drafted text the clipboard refused. */
 export type Sheet =
   | { kind: 'input'; row: string; label: string; input: NonNullable<PageAction['input']>; text: string; picked: string }
@@ -214,7 +229,7 @@ export type Sheet =
   | { kind: 'snooze'; row: string; label: string; title: string; choices: SnoozeChoice[]; picked: string; date: string; comment: string }
   | { kind: 'text'; title: string; text: string };
 
-export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), bands: new Map(), list: false, drawer: null, actions: false, linkMenu: false, copyMenu: false, rowMenu: null, sheet: null, acting: false, prompt: null, providers: null, side: 'status', viewMenu: false, details: false, briefReplies: null, artifactFit: ARTIFACT_TABS_MAX, artifactMenu: false });
+export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), bands: new Map(), list: false, drawer: null, actions: false, linkMenu: false, copyMenu: false, rowMenu: null, sheet: null, acting: false, prompt: null, newDraft: null, side: 'status', viewMenu: false, details: false, briefReplies: null, artifactFit: ARTIFACT_TABS_MAX, artifactMenu: false });
 
 /** The longest menu label for a link, as the dock's `LinkLabelMax`; a longer one is cut with an ellipsis and shown whole in its tooltip. */
 export const LINK_LABEL_MAX = 48;
