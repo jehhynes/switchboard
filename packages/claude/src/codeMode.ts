@@ -28,7 +28,7 @@ const POLL_MS = 1_000;
 const COLS = 120;
 const ROWS = 40;
 
-export const HOOKS_REQUIRED = 'Code Mode sessions need sessions.installHooks.';
+export const HOOKS_REQUIRED = 'Claude sessions need sessions.installHooks.';
 /** The credential variables only Code Mode must drop (mechanics M64). */
 const CREDENTIALS = /^(ANTHROPIC_AUTH_TOKEN|ANTHROPIC_CUSTOM_HEADERS|ANTHROPIC_API_KEY)$/i;
 /** The variable that turns Code Mode on (mechanics M63). */
@@ -109,9 +109,15 @@ export function codeModeSettings(codeMode = true): string {
 
 /**
  * An interactive `claude` with a known session ID; the prompt is one argument and runs as the first turn (mechanics M63). An empty prompt is left
- * out, so the session waits for the operator's first message (mechanics M87).
+ * out, so the session waits for the operator's first message (mechanics M87). `codeMode` false starts it without Code Mode, with the operator's
+ * own API settings (mechanics M148).
  */
-export function codeModeStartArgs(action: Pick<StartAction, 'permissionMode' | 'name' | 'model' | 'contract' | 'prompt' | 'cwd' | 'workItemId' | 'tone'>, nativeSessionId: string, voice = false): string[] {
+export function codeModeStartArgs(
+  action: Pick<StartAction, 'permissionMode' | 'name' | 'model' | 'contract' | 'prompt' | 'cwd' | 'workItemId' | 'tone'>,
+  nativeSessionId: string,
+  voice = false,
+  codeMode = true,
+): string[] {
   return [
     '--session-id',
     nativeSessionId,
@@ -122,7 +128,7 @@ export function codeModeStartArgs(action: Pick<StartAction, 'permissionMode' | '
     '--append-system-prompt',
     `${action.contract}\n\n${codeModePrompt(artifactsDir(action.cwd, action.workItemId), voice, action.tone ?? null)}`,
     '--settings',
-    codeModeSettings(),
+    codeModeSettings(codeMode),
     ...(action.prompt === '' ? [] : [action.prompt]),
   ];
 }
@@ -358,7 +364,7 @@ export interface CodeModeRunnerDeps {
   claudePath(): string;
   /** The Switchboard home, which holds the activity markers. */
   home: string;
-  /** Whether hook markers are written (`sessions.installHooks`); Code Mode sessions need them (PRD R93). */
+  /** Whether hook markers are written (`sessions.installHooks`); held sessions need them (PRD R93). */
   hooks(): boolean;
   /** The running holder; with `start`, one is started when none runs. */
   holder(start: boolean): Promise<HolderLookup>;
@@ -495,13 +501,15 @@ export class CodeModeRunner implements SessionRunner {
 
     const nativeSessionId = action.nativeSessionId ?? this.newId();
     const launchId = action.launchId ?? this.newId();
-    const spawned = await this.spawn(action.sessionId, `${action.name} ${nativeSessionId}`, codeModeStartArgs(action, nativeSessionId, this.deps.voice?.() === true), action.cwd, launchId, artifactsDir(action.cwd, action.workItemId));
+    const codeMode = action.withoutCodeMode !== true;
+    const args = codeModeStartArgs(action, nativeSessionId, this.deps.voice?.() === true, codeMode);
+    const spawned = await this.spawn(action.sessionId, `${action.name} ${nativeSessionId}`, args, action.cwd, launchId, artifactsDir(action.cwd, action.workItemId), codeMode);
 
     if ('error' in spawned) {
       return spawned;
     }
 
-    return this.check(spawned.holder, action.sessionId, nativeSessionId, launchId, this.deps.now());
+    return this.check(spawned.holder, action.sessionId, nativeSessionId, launchId, this.deps.now(), codeMode);
   }
 
   newLaunchId(): string {
@@ -533,7 +541,7 @@ export class CodeModeRunner implements SessionRunner {
     const codeMode = session.withoutCodeMode !== true;
     const tone = this.deps.tone?.(session.id) ?? null;
     const args = again
-      ? codeModeStartArgs({ permissionMode, name: fresh.name, model, contract: fresh.contract, prompt: '', cwd: session.cwd, workItemId: session.workItemId, ...(tone === null ? {} : { tone }) }, session.nativeSessionId, this.deps.voice?.() === true)
+      ? codeModeStartArgs({ permissionMode, name: fresh.name, model, contract: fresh.contract, prompt: '', cwd: session.cwd, workItemId: session.workItemId, ...(tone === null ? {} : { tone }) }, session.nativeSessionId, this.deps.voice?.() === true, codeMode)
       : codeModeResumeArgs(session.nativeSessionId, permissionMode, model, artifacts, this.deps.voice?.() === true, tone, { codeMode, ...(contract === undefined ? {} : { contract }) });
     const spawned = await this.spawn(session.id, label, args, session.cwd, launchId, artifacts, codeMode);
 
@@ -568,14 +576,15 @@ export class CodeModeRunner implements SessionRunner {
   /**
    * The start check (architecture.md § Code Mode sessions): Claude's refusal line, or a marker of the launch without the `is on` line, fails
    * the start and ends the process; an exit fails it with the screen's last lines; a dialog on screen, or no marker past the start-prompt wait,
-   * starts it waiting on that prompt.
+   * starts it waiting on that prompt. A session without Code Mode (`codeMode` false) has no line to look for, so its launch's first marker
+   * starts it (mechanics M148).
    */
-  private async check(holder: HolderAccess, sessionId: string, nativeSessionId: string, launchId: string, startedAt: number): Promise<StartResult> {
+  private async check(holder: HolderAccess, sessionId: string, nativeSessionId: string, launchId: string, startedAt: number, codeMode: boolean): Promise<StartResult> {
     let markedAt: number | null = null;
     let unread: string | null = null;
 
     for (;;) {
-      const verdict = await this.verdict(holder, sessionId, { nativeSessionId, launchId }, startedAt, markedAt);
+      const verdict = await this.verdict(holder, sessionId, { nativeSessionId, launchId }, startedAt, markedAt, codeMode);
 
       if (verdict !== null && 'marked' in verdict) {
         markedAt ??= this.deps.now();
@@ -603,6 +612,7 @@ export class CodeModeRunner implements SessionRunner {
     session: { nativeSessionId: string; launchId: string },
     startedAt: number,
     markedAt: number | null,
+    codeMode: boolean,
   ): Promise<{ error: string } | { startPrompt: boolean } | { marked: true } | { unread: string } | null> {
     let screen: { head: string; text: string };
     let entry: SessionEntry | undefined;
@@ -614,7 +624,7 @@ export class CodeModeRunner implements SessionRunner {
       return { unread: (error as Error).message };
     }
 
-    const evidence = codeModeEvidence(screen.head);
+    const evidence = codeMode ? codeModeEvidence(screen.head) : null;
 
     if (evidence !== null && 'off' in evidence) {
       return { error: `${evidence.off}${await end(holder, sessionId, this.readMs())}` };
@@ -632,7 +642,7 @@ export class CodeModeRunner implements SessionRunner {
 
     const marked = ownMarker(this.markerMap(), session) !== undefined;
 
-    if (marked && evidence !== null) {
+    if (marked && (evidence !== null || !codeMode)) {
       return { startPrompt: false };
     }
 
@@ -651,7 +661,7 @@ export class CodeModeRunner implements SessionRunner {
   /**
    * Liveness from the holder's list, state from markers of the current launch; a session the holder no longer holds live has ended. A launch's
    * SessionStart with source clear, fork or resume under another session ID is the held process changing its ID (mechanics M73), reported as a
-   * fork. A session started waiting on a prompt is checked for Code Mode when its first marker arrives.
+   * fork. A Code Mode session started waiting on a prompt is checked for Code Mode when its first marker arrives.
    */
   async observe(sessions: Session[]): Promise<{ sessions: ObservedSession[]; forks: ObservedFork[]; gone?: true; idle: string[] } | { error: string }> {
     const found = await this.deps.holder(false);
@@ -703,7 +713,7 @@ export class CodeModeRunner implements SessionRunner {
         forks.push({ sessionId: session.id, nativeSessionId: moved.sessionId, shortId: moved.sessionId.slice(0, 8), ...(heldState(moved, session.promptless === true) ?? { state: 'running', detail: null }) });
       }
 
-      if (marker !== undefined && session.stateDetail === START_PROMPT) {
+      if (marker !== undefined && session.stateDetail === START_PROMPT && session.withoutCodeMode !== true) {
         const screen = await found.holder.screen(session.id).catch(() => null);
         const evidence = screen === null ? null : codeModeEvidence(screen.head);
 
@@ -908,7 +918,7 @@ export class CodeModeRunner implements SessionRunner {
         }
 
         // The banner came long before a restarted hub looks, so a marker without the evidence fails at once.
-        const verdict = await this.verdict(found.holder, session.id, { nativeSessionId: session.nativeSessionId, launchId: session.launchId }, session.startedAt, session.startedAt - POLL_MS);
+        const verdict = await this.verdict(found.holder, session.id, { nativeSessionId: session.nativeSessionId, launchId: session.launchId }, session.startedAt, session.startedAt - POLL_MS, session.withoutCodeMode !== true);
 
         if (verdict !== null && 'unread' in verdict) {
           return { sessionId: session.id, pending: verdict.unread };

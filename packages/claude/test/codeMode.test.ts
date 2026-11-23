@@ -457,6 +457,31 @@ describe('CodeModeRunner.start', () => {
     expect(holder.killed).toEqual(['sb-1']);
   });
 
+  it('starts a session without Code Mode on its launch\'s first marker, with neither Code Mode nor the direct API, and ignores a Code Mode line (mechanics M148)', async () => {
+    const regular: StartAction = { ...ACTION, withoutCodeMode: true };
+
+    holder.screens.set('sb-1', { head: 'Claude Code v2.1.330\r\n', text: '' });
+    onSleep = (now) => {
+      if (now >= 3_000) {
+        marker(NATIVE, { event: 'UserPromptSubmit', launch: LAUNCH });
+      }
+    };
+
+    expect(await runner({ environment: { PATH: 'C:/bin', CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: '1', ANTHROPIC_AUTH_TOKEN: 'token' } }).start(regular)).toEqual({ shortId: NATIVE.slice(0, 8), nativeSessionId: NATIVE, launchId: LAUNCH });
+    expect(clock).toBe(3_000);
+    expect(holder.spawned[0]!.args).toEqual(codeModeStartArgs(regular, NATIVE, false, false));
+    expect(holder.spawned[0]!.args[holder.spawned[0]!.args.indexOf('--settings') + 1]).toBe(codeModeSettings(false));
+    expect(holder.spawned[0]!.env).toEqual({ PATH: 'C:/bin', ANTHROPIC_AUTH_TOKEN: 'token', TERM: 'xterm-256color', SWITCHBOARD_LAUNCH: LAUNCH, CLAUDE_ARTIFACTS_DIR: join('D:/work', '.wip', 'artifacts', 'w1') });
+    expect(holder.killed).toEqual([]);
+
+    // A refusal line means nothing to a session that never asked for Code Mode.
+    holder = new FakeHolder();
+    lookup = { holder };
+    holder.screens.set('sb-1', OFF);
+    expect(await runner().start(regular)).toEqual({ shortId: NATIVE.slice(0, 8), nativeSessionId: NATIVE, launchId: LAUNCH });
+    expect(holder.killed).toEqual([]);
+  });
+
   it('ignores a marker of an older launch or another session, and starts waiting on a prompt after the start-prompt wait', async () => {
     holder.screens.set('sb-1', { head: ON.head, text: '' });
     marker(NATIVE, { event: 'Stop', launch: 'older' });
@@ -632,6 +657,14 @@ describe('CodeModeRunner.observe', () => {
     expect(await runner().observe([session({ state: 'waiting', stateDetail: START_PROMPT })])).toMatchObject({ sessions: [{ state: 'running', detail: null }] });
   });
 
+  it('takes the first marker of a session without Code Mode that started on a prompt as its state, without looking for Code Mode', async () => {
+    holder.entries = [entry('sb-1')];
+    marker(NATIVE, { event: 'SessionStart', source: 'startup', launch: LAUNCH });
+
+    expect(await runner().observe([session({ state: 'waiting', stateDetail: START_PROMPT, withoutCodeMode: true })])).toMatchObject({ sessions: [{ state: 'running', detail: null }] });
+    expect(holder.killed).toEqual([]);
+  });
+
   it('reports a gone holder and a failed read apart', async () => {
     lookup = { gone: true };
     expect(await runner().observe([session()])).toEqual({ sessions: [], forks: [], gone: true, idle: [] });
@@ -727,6 +760,11 @@ describe('CodeModeRunner stop, resume and reconcile', () => {
     expect(await runner({ transcriptExists: () => true }).resumeHeld(session(), 'auto', 'haiku', 'label', 'l3', fresh)).toEqual({ launchId: 'l3' });
     expect(await runner({ transcriptExists: () => false }).resumeHeld(session(), 'auto', 'haiku', 'label', 'l4')).toEqual({ launchId: 'l4' });
     expect(holder.spawned.slice(1).map((one) => one.args[0])).toEqual(['--resume', '--resume']);
+
+    // A session without Code Mode starts again without it.
+    expect(await runner({ transcriptExists: () => false }).resumeHeld(session({ withoutCodeMode: true }), 'auto', 'haiku', 'label', 'l5', fresh)).toEqual({ launchId: 'l5' });
+    expect(holder.spawned[3]!.args).toEqual(codeModeStartArgs({ permissionMode: 'auto', name: fresh.name, model: 'haiku', contract: fresh.contract, prompt: '', cwd: 'D:/work', workItemId: 1 }, NATIVE, false, false));
+    expect(holder.spawned[3]!.env).not.toHaveProperty('CLAUDE_CODE_EXPERIMENTAL_CODE_MODE');
   });
 
   it('reads a promptless start as idle and a prompted one as running (mechanics M87)', () => {
@@ -797,6 +835,16 @@ describe('CodeModeRunner stop, resume and reconcile', () => {
       { sessionId: 'sb-6', failed: 'Claude started the session without Code Mode: its output has no "Code Mode (experimental) is on" line.' },
     ]);
     expect(holder.killed).toEqual(['sb-2', 'sb-6']);
+  });
+
+  it('settles a starting session without Code Mode on its marker alone', async () => {
+    holder.entries = [entry('sb-1')];
+    holder.screens.set('sb-1', { head: 'no banner', text: '' });
+    marker(NATIVE, { event: 'Stop', launch: LAUNCH });
+    clock = 5_000;
+
+    expect(await runner().reconcile([session({ state: 'starting', withoutCodeMode: true })])).toEqual([{ sessionId: 'sb-1', started: { shortId: NATIVE.slice(0, 8), nativeSessionId: NATIVE } }]);
+    expect(holder.killed).toEqual([]);
   });
 
   it('fails starting sessions when the holder is gone, and waits when it does not answer', async () => {

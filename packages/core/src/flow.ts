@@ -323,8 +323,10 @@ export type FlowAction =
       /** A Code Mode session's Claude session ID and the launch of its process, chosen before the start so a restarted hub can find it (PRD R93). */
       nativeSessionId?: string;
       launchId?: string;
-      /** Runs in Code Mode in the terminal holder (PRD R93). */
+      /** Held in the terminal holder (PRD R93), in Code Mode unless `withoutCodeMode`. */
       codeMode?: true;
+      /** A held Claude session started with `sessions.codeMode` off, as a plain interactive `claude` (PRD R93). */
+      withoutCodeMode?: true;
       execution?: 'app-server';
       /** A Code Mode session's tone section, appended after its conversation rules (architecture.md § Personas). */
       tone?: string;

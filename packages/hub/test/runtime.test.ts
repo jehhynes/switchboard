@@ -3922,7 +3922,7 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
       const context = await attaching(codeMode, config({ installHooks: false }));
 
       endIt(context);
-      expect(await context.runtime.attach('s1')).toEqual({ refused: 'Code Mode sessions need sessions.installHooks.', status: 409 });
+      expect(await context.runtime.attach('s1')).toEqual({ refused: 'Claude sessions need sessions.installHooks.', status: 409 });
       expect(codeMode.resumes).toEqual([]);
       context.runtime.stop();
     });
