@@ -75,7 +75,7 @@ export function renderScreen(view: ConnectionView, local: boolean, now: number):
         <div class="conn-screen-body">
           <img class="conn-screen-icon" src="icon-192.png" alt="" width="48" height="48" />
           <h2>Signed out</h2>
-          <p>{local ? 'This browser is signed out. Open it again from VS Code.' : 'This device is signed out. Pair it again to continue.'}</p>
+          <p>{local ? 'This browser is signed out. Run node ~/.switchboard/hub.js web on this computer and open the link it prints.' : 'This device is signed out. Pair it again to continue.'}</p>
           {local ? null : (
             <a class="conn-primary" href="/page/">
               Pair again

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, posix, win32 } from 'node:path';
 import { isFolderHost, switchboardHome } from '@switchboard/core';
 import type { OpenTerminal, OpenVSCode, Provider, PullRequestStatus } from '@switchboard/core';
 import { activeSession, MARK_GLYPHS, MARK_TITLES, markOf, turnOf } from '@switchboard/core/group';
@@ -616,7 +616,15 @@ function progress(item: WorkItemView, now: number): DockText[] {
  */
 export function windowOf(item: WorkItemView, windows: string): DockWindow | null {
   const latest = item.sessions.at(-1);
-  const host = item.ticket.hostWindow ?? null;
+  const hostWindow = item.ticket.hostWindow ?? null;
+  const host = hostWindow === null || hostIsPath(hostWindow) ? hostWindow : null;
+
+  // A host that is no path, such as a web page's key, names no window: the conversation opens its own folder.
+  if (hostWindow !== null && host === null) {
+    const folder = latest?.cwd || item.ticket.repoRoot;
+
+    return folder === '' ? null : { name: folderName(folder), title: item.ticket.title, folders: [folder], file: null, hosted: true, folder };
+  }
 
   // A hosted conversation has no window of its own: it opens its host's (architecture.md § Hosted conversations).
   if (host !== null && isFolderHost(host)) {
@@ -646,6 +654,11 @@ export function windowOf(item: WorkItemView, windows: string): DockWindow | null
   const name = key.replace(/[^A-Za-z0-9._-]+/g, '-');
 
   return { name, title: item.ticket.title, folders: worktree === null || inWorktree ? [first] : [first, worktree], file: join(windows, `${name}.code-workspace`) };
+}
+
+/** Whether a `Ticket.hostWindow` is a path, a workspace file or a folder, rather than a key that names no window, such as a web page's. */
+export function hostIsPath(host: string): boolean {
+  return win32.isAbsolute(host) || posix.isAbsolute(host);
 }
 
 /** The work items whose window is the one opened from `file` (PRD R72, R76), without the conversations it hosts. */

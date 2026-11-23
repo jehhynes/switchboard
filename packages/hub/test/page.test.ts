@@ -14,7 +14,7 @@ import { createHash } from 'node:crypto';
 import { runInNewContext } from 'node:vm';
 import { Store } from '@switchboard/core';
 import { PAGE_CSP } from '../src/page.js';
-import { artifactFile, cookieValue, deviceLabel, pairHtml, SIGNED_OUT_HTML, PAIR_CODE_TRIES, PAIR_MS, PAIR_SCRIPT, pageOrigin, dockRowOf, findFiles, pageHeader, loopbackHost, PageAccess, pageCookie, PUBLIC_PAGE_FILES, PAGE_LINK_MS, PAGE_SESSION_MS, PAGE_SESSIONS_KEPT, pageActionEvent, pageActions, pageCommandOf, pageGroups, pageList, pageOpens, pasteText, poolRowOf, rowOpenUrl, tabUrl } from '../src/page.js';
+import { artifactFile, cookieValue, deviceLabel, pairHtml, SIGNED_OUT_HTML, PAIR_CODE_TRIES, PAIR_MS, PAIR_SCRIPT, pageOrigin, dockRowOf, findFiles, pageHeader, loopbackHost, PageAccess, pageCookie, PUBLIC_PAGE_FILES, PAGE_LINK_MS, PAGE_SESSION_MS, PAGE_SESSIONS_KEPT, pageActionEvent, pageActions, pageCommandOf, pageGroups, pageList, pageOpens, pageReportOf, pasteText, poolRowOf, rowOpenUrl, tabUrl } from '../src/page.js';
 import { dockView } from '../src/dock.js';
 import type { DockView } from '../src/dock.js';
 import { PAGE_ASSETS } from '@switchboard/web';
@@ -330,6 +330,12 @@ describe('pageGroups', () => {
     expect(groups.find((group) => group.ids.includes(1))).toEqual({ kind: 'item', title: 'Fix the badge', ids: [1] });
     expect(view.workItems).toHaveLength(2);
   });
+
+  it("lists a conversation whose host is no path, such as a web page's key, as a work item of its own, not under a group named after the key", () => {
+    const keyed = item(5, { ticket: { ...item(5).ticket, title: 'Page chat', hostWindow: 'a3f9c0de11b2a3f9c0de11b2' } });
+
+    expect(pageGroups(snapshot([keyed]), 'C:/sb/windows')).toEqual([{ kind: 'item', title: 'Page chat', ids: [5] }]);
+  });
 });
 
 describe('pageList', () => {
@@ -529,26 +535,30 @@ describe('pageActions', () => {
     }
   });
 
-  it("offers Open in VS Code for a row with a window, then the dock's Open report, never History, Open changes or Open in terminal", () => {
+  it("offers Open in VS Code for a row with a window, then the dock's Open report with its draft, never History, Open changes or Open in terminal", () => {
     const worktree = { id: 1, ticketId: 1, path: 'D:/git/wt/101', branch: '101', linkedBy: 'report' as const };
     const review = rowOf(item(1, { status: 'awaiting-approval', worktree, approvalReport: 'D:/git/wt/101/report.md' }));
 
-    expect(pageOpens(review)).toEqual([{ label: 'Open in VS Code', icon: 'vscode' }, { label: 'Open report', icon: 'symbol-file' }]);
+    expect(pageOpens(review)).toEqual([{ label: 'Open in VS Code', icon: 'vscode' }, { label: 'Open report', icon: 'symbol-file', file: 'D:/git/wt/101/report.md' }]);
+    expect(pageReportOf(review)).toBe('D:/git/wt/101/report.md');
     // The dock offers History and Open changes; the page shows History itself and its Changes tab replaces Open changes.
     expect(review.commands.map((one) => one.label)).toEqual(expect.arrayContaining(['History', 'Open changes']));
     expect(pageCommandOf(review, 'Open changes')).toEqual({ refused: 'The work item no longer offers this.' });
-    expect(pageCommandOf(review, 'Open report')).toEqual({ destination: review.window!.file, command: { type: 'openUrl', url: 'D:/git/wt/101/report.md' } });
-    expect(pageCommandOf(review, 'Open in VS Code')).toEqual({ destination: review.window!.file, command: null });
+    // Open report opens on the page, never through VS Code.
+    expect(pageCommandOf(review, 'Open report')).toEqual({ refused: 'Open report opens on the page.' });
+    expect(pageCommandOf(review, 'Open in VS Code')).toEqual({ destination: review.window!.file });
     expect(pageCommandOf(review, 'History')).toEqual({ refused: 'The work item no longer offers this.' });
     expect(pageCommandOf(review, 'Open in terminal')).toEqual({ refused: 'The work item no longer offers this.' });
 
-    // A row with no window opens nothing in VS Code.
+    // A row with no window opens nothing in VS Code, and still opens its report on the page.
     const windowless = { window: null, commands: review.commands };
 
-    expect(pageOpens(windowless)).toEqual([]);
-    expect(pageCommandOf(windowless, 'Open report')).toEqual({ refused: 'The work item no longer offers this.' });
+    expect(pageOpens(windowless)).toEqual([{ label: 'Open report', icon: 'symbol-file', file: 'D:/git/wt/101/report.md' }]);
+    expect(pageCommandOf(windowless, 'Open in VS Code')).toEqual({ refused: 'The work item no longer offers this.' });
+    // A row that is not awaiting approval has no report.
+    expect(pageReportOf(rowOf(item(1, { worktree, approvalReport: 'D:/git/wt/101/report.md' })))).toBeNull();
     // A folder-hosted conversation opens its folder.
-    expect(pageCommandOf({ window: { name: 'f', title: 't', folders: ['D:/w'], file: null, hosted: true, folder: 'D:/w' }, commands: [] }, 'Open in VS Code')).toEqual({ destination: 'D:/w', command: null });
+    expect(pageCommandOf({ window: { name: 'f', title: 't', folders: ['D:/w'], file: null, hosted: true, folder: 'D:/w' }, commands: [] }, 'Open in VS Code')).toEqual({ destination: 'D:/w' });
   });
 
   it("opens only the row's own http or https ticket URL or link, unchanged but for the URL parser's form", () => {

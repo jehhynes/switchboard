@@ -55,6 +55,9 @@ import { useFileIcons } from './fileIcons.js';
 import type { NeedsItem } from './alerts.js';
 import { IframeBrowser, frameUrl, frameLinks, IFRAME_EXTENSION_ID, IFRAME_RENEW_MS } from './iframeBrowser.js';
 
+/** The Actions menu's control that starts VS Code on the work item (`OPEN_IN_VSCODE` in the hub's page.ts); History's folder links run it too. */
+const OPEN_IN_VSCODE = 'Open in VS Code';
+
 /** The stream's event types the page reads. */
 /** How long after a single-choice pick the card moves to the next question (design open choice 4). */
 export const ADVANCE_MS = 200;
@@ -3976,6 +3979,29 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
         break;
       }
+      case 'history-file':
+        localFiles.open(button!.dataset['path'] ?? '', null);
+        break;
+      case 'history-folder':
+        void runCommand(OPEN_IN_VSCODE);
+        break;
+      case 'history-session': {
+        const workItemId = Number(button!.dataset['workItem']);
+        const sessionId = button!.dataset['session'] ?? '';
+
+        // An earlier session shows read-only; the hub shows the current one as the conversation.
+        if (Number.isInteger(workItemId) && sessionId !== '') {
+          selectSession(workItemId, sessionId);
+        }
+
+        break;
+      }
+      case 'row-report':
+        forRow(button!.dataset['row'] ?? '', () => {
+          closeMenus();
+          localFiles.open(button!.dataset['file'] ?? '', null);
+        });
+        break;
       case 'row-menu':
       case 'pool-menu': {
         const key = button!.dataset['row'] ?? '';

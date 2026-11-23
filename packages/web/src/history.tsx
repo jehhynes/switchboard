@@ -73,24 +73,54 @@ export function entryShown(entry: HistoryEntry, ui: HistoryUi): boolean {
   return query === '' || [entry.text, entry.detail ?? '', entry.refused ?? '', entry.shortId ?? '', ...entry.lines, ...entry.links.map((link) => link.label)].some((text) => text.toLowerCase().includes(query));
 }
 
-/** The URL a link opens on the page: an http or https `openUrl`; null for a session, a folder or a file, which open only from VS Code or the dock. */
+/** The URL a link opens on the page: an http or https `openUrl`; null for anything else. */
 export function historyUrl(link: HistoryLink): string | null {
   return link.open.type === 'openUrl' && typeof link.open.url === 'string' && /^https?:\/\//i.test(link.open.url) ? link.open.url : null;
 }
 
-/** A link: a button that opens its URL in a new tab, or, for what only VS Code or the dock opens, its label with why in the tooltip. */
-function Link({ link }: { link: HistoryLink }) {
+/**
+ * What a link's button carries, as its `data-` attributes: an http or https URL opens in a browser tab, another `openUrl` in a file tab, a folder
+ * with Open in VS Code, and a session in the conversation by its work item and Switchboard session ID; null for a link the page cannot open.
+ */
+export function historyAction(link: HistoryLink): Record<string, string> | null {
   const url = historyUrl(link);
+  const { open } = link;
 
-  return url === null ? (
-    <span class="hist-link off" title={`${link.title}\nOpen it from VS Code or the dock.`}>
+  if (url !== null) {
+    return { 'data-action': 'history-open', 'data-url': url };
+  }
+
+  if (open.type === 'openUrl' && typeof open.url === 'string' && open.url !== '') {
+    return { 'data-action': 'history-file', 'data-path': open.url };
+  }
+
+  if (open.type === 'openFolder') {
+    return { 'data-action': 'history-folder' };
+  }
+
+  if (open.type === 'open' && Number.isInteger(open['workItemId']) && typeof open['session'] === 'string') {
+    return { 'data-action': 'history-session', 'data-work-item': String(open['workItemId']), 'data-session': open['session'] };
+  }
+
+  return null;
+}
+
+/** A link: a button that opens it on the page, or, for one the page cannot open, its label with its target in the tooltip. */
+function Link({ link }: { link: HistoryLink }) {
+  const action = historyAction(link);
+  // A session shows in the conversation here, not in the terminal or the panel the hub's label names.
+  const label = action?.['data-action'] === 'history-session' ? 'Show session' : link.label;
+  const title = action?.['data-action'] === 'history-folder' ? `${link.title}\nOpens the work item in VS Code.` : action?.['data-action'] === 'history-session' ? `${link.title}\nShows the session here.` : link.title;
+
+  return action === null ? (
+    <span class="hist-link off" title={link.title}>
       <span class={`codicon codicon-${link.icon}`} aria-hidden="true"></span>
       {link.label}
     </span>
   ) : (
-    <button type="button" class="hist-link" data-action="history-open" data-url={url} title={link.title}>
+    <button type="button" class="hist-link" {...action} title={title}>
       <span class={`codicon codicon-${link.icon}`} aria-hidden="true"></span>
-      {link.label}
+      {label}
     </button>
   );
 }

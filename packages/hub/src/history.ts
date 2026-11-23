@@ -155,14 +155,14 @@ const str = (value: unknown): string => (value === null || value === undefined ?
  */
 export function sessionOpen(session: Session): EntryLink['open'] | null {
   if (session.codeMode === true || resumesHeld(session)) {
-    return { type: 'open', sessionId: session.id, cwd: session.cwd, provider: 'claude', codeMode: true };
+    return { type: 'open', sessionId: session.id, cwd: session.cwd, provider: 'claude', codeMode: true, session: session.id, workItemId: session.workItemId };
   }
 
   if (session.state !== 'starting' && session.state !== 'ended' && session.shortId !== null && (!session.released || session.releasing || session.external === true)) {
     return null;
   }
 
-  return session.nativeSessionId === null ? null : { type: 'open', sessionId: session.nativeSessionId, cwd: session.cwd, provider: session.provider };
+  return session.nativeSessionId === null ? null : { type: 'open', sessionId: session.nativeSessionId, cwd: session.cwd, provider: session.provider, session: session.id, workItemId: session.workItemId };
 }
 
 /** A link to open a reported URL or file. */

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { startPage } from '../src/main.js';
-import { EMPTY_HISTORY_UI, entryShown, gapText, historyUrl, renderHistory, RUN_LIMIT } from '../src/history.js';
+import { EMPTY_HISTORY_UI, entryShown, gapText, historyAction, historyUrl, renderHistory, RUN_LIMIT } from '../src/history.js';
 import type { HistoryOpen } from '../src/history.js';
 import { html } from './html.js';
 import type { HistoryCategory, HistoryEntry, HistoryView, PageGroup, PageRow } from '@switchboard/protocol';
@@ -84,10 +84,11 @@ describe("the page's History (architecture.md § Web page)", () => {
     expect([...root.querySelectorAll('[data-entry="c"] .hist-detail')].map((one) => one.textContent)).toEqual(['Not now.']);
     expect(root.querySelector('[data-entry="c"] .hist-lines li')?.textContent).toBe('gh 78 moved');
     expect(root.querySelector('[data-section="ticket"] .hist-prompt-text')?.textContent).toBe('Fix the badge');
-    // An http link opens in a tab; a folder, a session or a file opens only from VS Code or the dock, which its tooltip says.
+    // An http link opens in a tab; a folder opens the work item in VS Code, which its tooltip says.
     expect(root.querySelector('.hist-hero-links button.hist-link')?.getAttribute('data-url')).toBe('https://github.com/o/r/issues/77');
-    expect(root.querySelector('[data-entry="b"] .hist-link.off')?.getAttribute('title')).toBe('D:/w1\nOpen it from VS Code or the dock.');
-    expect(root.querySelector('[data-entry="b"] button.hist-link')).toBeNull();
+    expect(root.querySelector('[data-entry="b"] button.hist-link')?.getAttribute('data-action')).toBe('history-folder');
+    expect(root.querySelector('[data-entry="b"] button.hist-link')?.getAttribute('title')).toBe('D:/w1\nOpens the work item in VS Code.');
+    expect(root.querySelector('[data-entry="b"] .hist-link.off')).toBeNull();
     expect(root.querySelector('.hist-banner')).toBeNull();
   });
 
@@ -122,6 +123,11 @@ describe("the page's History (architecture.md § Web page)", () => {
     expect(gapText(45_000)).toBe('45s');
     expect(gapText(3 * 86_400_000 + 4 * 3_600_000)).toBe('3d 4h');
     expect(historyUrl({ label: 'f', icon: 'file', title: '', open: { type: 'openUrl', url: 'D:/report.md' } })).toBeNull();
+    // A file opens in a file tab, a session in the conversation by its work item and Switchboard ID; a session without them opens nowhere.
+    expect(historyAction({ label: 'f', icon: 'file', title: '', open: { type: 'openUrl', url: 'D:/report.md' } })).toEqual({ 'data-action': 'history-file', 'data-path': 'D:/report.md' });
+    expect(historyAction({ label: 's', icon: 'terminal', title: '', open: { type: 'open', sessionId: 'native-1', session: 's1', workItemId: 4 } })).toEqual({ 'data-action': 'history-session', 'data-work-item': '4', 'data-session': 's1' });
+    expect(historyAction({ label: 's', icon: 'terminal', title: '', open: { type: 'open', sessionId: 'native-1' } })).toBeNull();
+    expect(historyAction({ label: 'x', icon: 'x', title: '', open: { type: 'javascript' } })).toBeNull();
   });
 });
 
@@ -416,6 +422,40 @@ describe("the page's History tab in use", () => {
     expect(root.querySelector('.row-menu [data-action="row-history"]')).toBeNull();
     await vi.advanceTimersByTimeAsync(60_000);
     expect(histories()).toEqual([77, 78, 77]);
+    page.close();
+  });
+
+  it("opens a History link's file in a file tab, its session in the conversation and its folder with Open in VS Code", async () => {
+    vi.useFakeTimers();
+    const links = [
+      { label: 'Draft', icon: 'file', title: 'D:/w/draft.md', open: { type: 'openUrl', url: 'D:/w/draft.md' } },
+      { label: 'Open in terminal', icon: 'terminal', title: 'Attach', open: { type: 'open', sessionId: 's0', session: 's0', workItemId: 1 } },
+      { label: 'Open', icon: 'folder-opened', title: 'D:/w', open: { type: 'openFolder', path: 'D:/w' } },
+    ];
+    const withLinks = view({ sections: [{ ...view().sections[0]!, entries: [entry('l', T0, { links })] }] });
+
+    answers['/page-history'] = { status: 200, body: { view: withLinks, categories: CATEGORIES } };
+    answers['/select'] = { status: 200, body: { scopeGen: 2 } };
+    answers[`path=${encodeURIComponent('D:/w/draft.md')}`] = { status: 200, body: { path: 'D:/w/draft.md', name: 'draft.md', kind: 'markdown', contents: '# Draft', tooLarge: false, size: 7, entries: null, more: false } };
+    const { page, source } = start();
+
+    hello(source);
+    openFromMenu();
+    await flush();
+    expect(root.querySelector('[data-entry="l"] [data-action="history-session"]')?.textContent).toBe('Show session');
+    root.querySelector<HTMLElement>('[data-entry="l"] [data-action="history-file"]')!.click();
+    await flush();
+    expect(posts.some((one) => one.url.startsWith('/v1/conversation/local-file?') && one.url.includes(encodeURIComponent('D:/w/draft.md')))).toBe(true);
+
+    historyTab()!.click();
+    await flush();
+    root.querySelector<HTMLElement>('[data-entry="l"] [data-action="history-session"]')!.click();
+    await flush();
+    expect(posts.filter((one) => one.url === '/v1/conversation/select').at(-1)?.body).toMatchObject({ workItemId: 1, sessionId: 's0' });
+
+    root.querySelector<HTMLElement>('[data-entry="l"] [data-action="history-folder"]')!.click();
+    await flush();
+    expect(posts.filter((one) => one.url === '/v1/conversation/row-command').at(-1)?.body).toMatchObject({ workItemId: 1, label: 'Open in VS Code' });
     page.close();
   });
 

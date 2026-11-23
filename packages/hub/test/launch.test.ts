@@ -58,5 +58,10 @@ describe('launcher (architecture.md § Web page)', () => {
 
     launcher((file, args, env) => runs.push({ file, args, env }), 'linux', { PATH: '/snap/bin', ELECTRON_RUN_AS_NODE: '1' }, has('/snap/bin/code')).openCode('/w/sb.code-workspace');
     expect(runs).toEqual([{ file: '/snap/bin/code', args: ['/w/sb.code-workspace'], env: { PATH: '/snap/bin' } }]);
+
+    // Open in VS Code at a changed file's line opens that file in the same window.
+    runs.length = 0;
+    launcher((file, args, env) => runs.push({ file, args, env }), 'linux', { PATH: '/snap/bin' }, has('/snap/bin/code')).openCode('/w/sb.code-workspace', { path: '/wt/src/a.ts', line: 12 });
+    expect(runs[0]!.args).toEqual(['/w/sb.code-workspace', '--goto', '/wt/src/a.ts:12']);
   });
 });

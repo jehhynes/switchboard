@@ -7,7 +7,7 @@ import type { PageDevice, Store } from '@switchboard/core';
 import type { IncomingHttpHeaders } from 'node:http';
 import { artifactType } from '@switchboard/conversation';
 import { PAGE_SCRIPT_HASHES } from '@switchboard/web';
-import { windowOf } from './dock.js';
+import { hostIsPath, windowOf } from './dock.js';
 import type { DockHolderNotice, DockHolderResult, DockRow, DockSourceGroup, DockView } from './dock.js';
 import { CONTROL_GLYPHS } from './rows.js';
 import type { RowGroup } from './rows.js';
@@ -407,8 +407,11 @@ export function pageGroups(snapshot: Snapshot, windows: string, keep: number | n
   const groups = new Map<string, PageGroup & { newest: number }>();
   const hostOf = new Map<string, string>();
 
+  // A host that is no path, such as a web page's key, hosts nothing: the conversation is a group of its own.
+  const hostOfItem = (item: Snapshot['workItems'][number]): string | null => (item.ticket.hostWindow != null && hostIsPath(item.ticket.hostWindow) ? item.ticket.hostWindow : null);
+
   for (const item of [...open].sort((a, b) => b.id - a.id)) {
-    if (item.ticket.hostWindow != null) {
+    if (hostOfItem(item) !== null) {
       continue;
     }
 
@@ -423,7 +426,7 @@ export function pageGroups(snapshot: Snapshot, windows: string, keep: number | n
   }
 
   for (const item of [...open].sort((a, b) => b.id - a.id)) {
-    const host = item.ticket.hostWindow ?? null;
+    const host = hostOfItem(item);
 
     if (host === null) {
       continue;
@@ -477,7 +480,7 @@ export interface PageRow {
   pastes: string[];
   /** What the list's search matches, as the dock's search box does: the title, key, linked pull requests and issues, playbook, group and branch (PRD R63). */
   search: string;
-  /** What the row opens in VS Code, run with `row-command`. */
+  /** What the row opens: Open in VS Code, run with `row-command`, and Open report, opened in a file tab. */
   opens: PageOpen[];
   /** A Done row's date band, such as `Today`, or an older Done row's month, such as `October 2026` (PRD R27); null in the other groups. */
   band: string | null;
@@ -608,21 +611,28 @@ export function pageActionEvent(row: Pick<DockRow, 'controls' | 'main' | 'ticket
   return { event: { ...control.action, [input.field]: text, ...(choice === null ? {} : { [input.choice!.field]: choice }) } };
 }
 
-/** What a row opens in VS Code from the page: the dock's window commands it can run there, and the row's click. */
+/** What a row opens from the page: Open in VS Code, run with `row-command`, and Open report, which the page opens in a file tab at `file`. */
 export interface PageOpen {
   label: string;
   icon: string;
+  /** Open report's draft, which the page reads through `local-file`. */
+  file?: string;
 }
 
 /** The label of the page's counterpart of the dock row's click, which opens its VS Code window. */
 export const OPEN_IN_VSCODE = 'Open in VS Code';
 
+/** The label of the control that opens an awaiting-approval row's draft, which the page opens in a file tab. */
+export const OPEN_REPORT = 'Open report';
+
 /**
- * Whether a dock row command is one the page runs in VS Code: Open report. The page shows History itself, and leaves out Open changes and Open in
- * terminal, which its Changes and Console tabs replace.
+ * The draft the dock row's Open report names, which the page opens in a file tab and `local-file` reads for the page's selected work item; null
+ * without one. The page shows History itself, and leaves out Open changes and Open in terminal, which its Changes and Console tabs replace.
  */
-function pageCommand(command: DockRow['commands'][number]): boolean {
-  return command.command['type'] === 'openUrl' && command.label === 'Open report';
+export function pageReportOf(row: Pick<DockRow, 'commands'>): string | null {
+  const url = row.commands.find((command) => command.command['type'] === 'openUrl' && command.label === OPEN_REPORT)?.command['url'];
+
+  return typeof url === 'string' && url !== '' ? url : null;
 }
 
 /** The window the page's VS Code controls open: an item window's workspace file, or a folder-hosted conversation's folder; null for none. */
@@ -630,27 +640,25 @@ function destinationOf(row: Pick<DockRow, 'window'>): string | null {
   return row.window?.file ?? row.window?.folder ?? null;
 }
 
-/** What the row opens in VS Code from the page: Open in VS Code when it has a window, then Open report when the dock lists it. */
+/** What the row opens from the page: Open in VS Code when it has a window, then Open report when the dock lists a draft, with or without a window. */
 export function pageOpens(row: Pick<DockRow, 'window' | 'commands'>): PageOpen[] {
-  if (destinationOf(row) === null) {
-    return [];
-  }
+  const report = pageReportOf(row);
 
-  return [{ label: OPEN_IN_VSCODE, icon: 'vscode' }, ...row.commands.filter(pageCommand).map((command) => ({ label: command.label, icon: CONTROL_ICONS.get(command.glyph) ?? 'go-to-file' }))];
+  return [...(destinationOf(row) === null ? [] : [{ label: OPEN_IN_VSCODE, icon: 'vscode' }]), ...(report === null ? [] : [{ label: OPEN_REPORT, icon: 'symbol-file', file: report }])];
 }
 
 /**
- * What `row-command` runs for a row's VS Code control, by its label: the window to open and the dock's command to leave for it, none for Open in
- * VS Code; why not when the row no longer offers it.
+ * What `row-command` runs, by its label: Open in VS Code's workspace file or folder, which VS Code opens without the Switchboard extension; why
+ * not when the row no longer offers it. Open report opens on the page, not through this.
  */
-export function pageCommandOf(row: Pick<DockRow, 'window' | 'commands'>, label: string): { destination: string; command: Record<string, unknown> | null } | { refused: string } {
+export function pageCommandOf(row: Pick<DockRow, 'window' | 'commands'>, label: string): { destination: string } | { refused: string } {
   const destination = destinationOf(row);
 
-  if (destination === null || !pageOpens(row).some((one) => one.label === label)) {
-    return { refused: 'The work item no longer offers this.' };
+  if (destination === null || label !== OPEN_IN_VSCODE) {
+    return { refused: label === OPEN_REPORT && pageReportOf(row) !== null ? 'Open report opens on the page.' : 'The work item no longer offers this.' };
   }
 
-  return { destination, command: label === OPEN_IN_VSCODE ? null : { ...row.commands.find((one) => one.label === label && pageCommand(one))!.command } };
+  return { destination };
 }
 
 /** A link as the hub opens it for the page: an http or https URL, normalised by the URL parser; null for any other URL. */

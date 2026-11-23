@@ -825,6 +825,17 @@ describe('windowOf', () => {
     expect(hostedItems(view, file)).toEqual([]);
   });
 
+  it("opens a conversation whose host is no path, such as a web page's key, in its own folder, never in a workspace file named after the key", () => {
+    const key = 'a3f9c0de11b2a3f9c0de11b2a3f9c0de11b2a3f9c0de11b2';
+    const ticket = { ...item(9).ticket, source: 'adhoc', sourceKey: '4', url: '', hostWindow: key, repoRoot: 'D:/git/root' };
+    const hosted = item(9, { ticket, focus: null, sessions: [session({ cwd: 'D:\\git\\support' })] });
+
+    expect(windowOf(hosted, W)).toEqual({ name: 'support', title: hosted.ticket.title, folders: ['D:\\git\\support'], file: null, hosted: true, folder: 'D:\\git\\support' });
+    // Before its first session, its ticket's repository root.
+    expect(windowOf(item(9, { ticket, focus: null }), W)).toMatchObject({ folders: ['D:/git/root'], file: null, folder: 'D:/git/root' });
+    expect(windowOf(item(9, { ticket: { ...ticket, repoRoot: '' }, focus: null }), W)).toBeNull();
+  });
+
   it('opens a folder-hosted conversation in the folder window, with no workspace file, and never in an item window on that folder (architecture.md § Hosted conversations)', () => {
     const host = 'D:\\git\\support';
     const hosted = item(9, { ticket: { ...item(9).ticket, source: 'adhoc', sourceKey: '4', url: '', hostWindow: host }, focus: null, sessions: [session({ cwd: host })] });

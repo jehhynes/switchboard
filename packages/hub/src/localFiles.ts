@@ -29,6 +29,10 @@ export interface LocalRoots {
   folders: string[];
   /** The Claude session IDs whose scratchpads may be read. */
   sessionIds: string[];
+  /** Single files that may be read wherever they are, such as the selected work item's approval draft, except inside `never`. */
+  files?: string[];
+  /** Folders nothing is read from, through `files` or any root, such as the Switchboard home, which holds the hub's keys and sign-ins. */
+  never?: string[];
   /** Whether a folder's entries may be listed; false for a paired device. */
   listFolders?: boolean;
   /** The temporary folder Claude Code keeps its `claude` folder in; the system's by default. */
@@ -163,6 +167,26 @@ export function localTarget(target: string, cwd: string | null): string | null {
   return cwd === null ? null : resolve(cwd, path);
 }
 
+/** Whether `real` is one of the roots' single files: a regular file, by real path, outside every `never` folder. */
+async function singleFile(roots: LocalRoots, real: string): Promise<boolean> {
+  const named = await Promise.all((roots.files ?? []).map((one) => realpath(one).catch(() => null)));
+
+  if (!named.includes(real) || !(await stat(real).catch(() => null))?.isFile()) {
+    return false;
+  }
+
+  for (const folder of roots.never ?? []) {
+    const top = await realpath(folder).catch(() => null);
+
+    // A folder that cannot be resolved may still hold the file under another spelling, so it refuses.
+    if (top === null || under(top, real)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 /** Whether `real` is `root` or lies under it. */
 function under(root: string, real: string): boolean {
   const inside = relative(root, real);
@@ -181,6 +205,19 @@ export async function allowedPath(roots: LocalRoots, target: string): Promise<st
   // Nothing in or of a .git folder, wherever it is, a root that is one included.
   if (real === null || real.split(sep).some((part) => part.toLowerCase() === '.git')) {
     return null;
+  }
+
+  // Nothing in a never folder, such as the Switchboard home a session's home folder holds, through any root.
+  for (const folder of roots.never ?? []) {
+    const top = await realpath(folder).catch(() => null);
+
+    if (top !== null && under(top, real)) {
+      return null;
+    }
+  }
+
+  if ((roots.files ?? []).length > 0 && (await singleFile(roots, real))) {
+    return real;
   }
 
   for (const folder of new Set(roots.folders)) {

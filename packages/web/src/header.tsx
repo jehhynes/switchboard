@@ -78,7 +78,8 @@ export function menuRows(row: PageRow, view: Pick<View, 'acting' | 'linkMenu' | 
           ];
   const opens = [
     ...copy,
-    ...commands.map((one) => item({ 'data-action': 'row-command', 'data-label': one.label }, one.icon, one.label)),
+    // Open report opens its draft in a file tab of the page; Open in VS Code asks the hub to start VS Code.
+    ...commands.map((one) => item(one.file === undefined ? { 'data-action': 'row-command', 'data-label': one.label } : { 'data-action': 'row-report', 'data-file': one.file, title: one.file }, one.icon, one.label)),
     // The dock's History, which selects the work item's History tab; a pool ticket has no work item open, so no tab to show it in.
     ...(row.history === null || row.workItemId === null ? [] : [item({ 'data-action': 'row-history' }, 'history', 'History')]),
     ...(row.url === '' ? [] : [link('ticket', 'Open ticket', 'link-external')]),

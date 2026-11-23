@@ -280,14 +280,14 @@ describe('History model', () => {
     expect(view.reconstructed).toBe(true);
     expect(view.sections[0]!.entries[0]).toMatchObject({ text: 'Stage: old stage', reconstructed: true, category: 'report' });
     expect(sessionOpen({ ...session, state: 'running' })).toBeNull();
-    expect(sessionOpen({ ...session, state: 'idle', released: true })).toEqual({ type: 'open', sessionId: 'native-1', cwd: 'D:/git/widgets', provider: 'claude' });
-    expect(sessionOpen({ ...session, state: 'ended', released: true })).toEqual({ type: 'open', sessionId: 'native-1', cwd: 'D:/git/widgets', provider: 'claude' });
+    expect(sessionOpen({ ...session, state: 'idle', released: true })).toEqual({ type: 'open', sessionId: 'native-1', cwd: 'D:/git/widgets', provider: 'claude', session: session.id, workItemId: session.workItemId });
+    expect(sessionOpen({ ...session, state: 'ended', released: true })).toEqual({ type: 'open', sessionId: 'native-1', cwd: 'D:/git/widgets', provider: 'claude', session: session.id, workItemId: session.workItemId });
     expect(sessionOpen({ ...session, state: 'ended', nativeSessionId: null })).toBeNull();
     // A registered session opens only once it has left the operator's window (PRD R81).
     expect(sessionOpen({ ...session, state: 'idle', released: true, external: true })).toBeNull();
-    expect(sessionOpen({ ...session, state: 'ended', released: true, external: false })).toEqual({ type: 'open', sessionId: 'native-1', cwd: 'D:/git/widgets', provider: 'claude' });
+    expect(sessionOpen({ ...session, state: 'ended', released: true, external: false })).toEqual({ type: 'open', sessionId: 'native-1', cwd: 'D:/git/widgets', provider: 'claude', session: session.id, workItemId: session.workItemId });
     // An ended registered session resumes in the terminal holder, by its Switchboard session ID (PRD R81).
-    expect(sessionOpen({ ...session, state: 'ended', released: true, registered: true })).toEqual({ type: 'open', sessionId: session.id, cwd: 'D:/git/widgets', provider: 'claude', codeMode: true });
+    expect(sessionOpen({ ...session, state: 'ended', released: true, registered: true })).toEqual({ type: 'open', sessionId: session.id, cwd: 'D:/git/widgets', provider: 'claude', codeMode: true, session: session.id, workItemId: session.workItemId });
     expect(sessionOpen({ ...session, state: 'idle', released: true, external: true, registered: true })).toBeNull();
     expect(sessionOpen({ ...session, state: 'idle', released: true, releasing: true })).toBeNull();
   });
@@ -305,7 +305,8 @@ describe('History model', () => {
 
     const history = run.history();
     const entries = historyView(history, run.now).sections[0]!.entries;
-    const open = { type: 'open', sessionId: 's1', cwd: 'D:/git/widgets', provider: 'claude', codeMode: true };
+    // The page shows the session by its work item and Switchboard session ID.
+    const open = { type: 'open', sessionId: 's1', cwd: 'D:/git/widgets', provider: 'claude', codeMode: true, session: 's1', workItemId: 1 };
     const link = { label: 'Open in terminal', icon: 'terminal', title: 'Attach to Code Mode session abc12345 in a terminal', open };
     const session = history.workItems[0]!.sessions[0]!;
 

@@ -7,8 +7,8 @@ import type { DockTerminal } from './dock.js';
 export interface Launcher {
   /** Opens an http or https URL in the default browser. */
   openUrl(url: string): void;
-  /** Opens a workspace file or a folder in VS Code, which brings forward the window already on it. */
-  openCode(target: string): void;
+  /** Opens a workspace file or a folder in VS Code, which brings forward the window already on it, and in it `goto`'s file at its line when given. */
+  openCode(target: string, goto?: { path: string; line: number | null }): void;
   /** Opens the held session's attach client in the dock's terminal app. */
   openTerminal?(terminal: DockTerminal): void | Promise<void>;
 }
@@ -99,8 +99,10 @@ export function launcher(run: Start = start, platform: NodeJS.Platform = process
       if (run === start) await startTerminal(app, command, clean);
       else run(app, command, clean);
     },
-    openCode(target) {
-      run(codeExecutable(platform, env, exists), [target], launchEnvironment(env));
+    openCode(target, goto) {
+      const at = goto === undefined ? [] : ['--goto', goto.line === null ? goto.path : `${goto.path}:${goto.line}`];
+
+      run(codeExecutable(platform, env, exists), [target, ...at], launchEnvironment(env));
     },
     openUrl(url) {
       if (!/^https?:\/\//i.test(url)) {

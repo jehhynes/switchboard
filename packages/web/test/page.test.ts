@@ -3571,9 +3571,11 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it("runs Open in VS Code and Open report through the hub from the menu's opens group, and shows a refusal", async () => {
+  it("runs Open in VS Code through the hub and opens Open report's draft in a file tab from the menu's opens group, and shows a refusal", async () => {
     const { page, source } = start();
-    const opens = [{ label: 'Open in VS Code', icon: 'vscode' }, { label: 'Open report', icon: 'symbol-file' }];
+    const opens = [{ label: 'Open in VS Code', icon: 'vscode' }, { label: 'Open report', icon: 'symbol-file', file: 'D:/git/wt/1/reply.md' }];
+
+    answers['/local-file?'] = { status: 200, body: { path: 'D:/git/wt/1/reply.md', name: 'reply.md', kind: 'markdown', contents: '# Reply', tooLarge: false, size: 7, entries: null, more: false } };
 
     hello(source, { groups: [listGroup('review', [listRow(1, { title: 'Fix it', opens, pastes: ['Reply'], url: 'https://github.com/o/r/issues/1' })])] });
     click('button.actions');
@@ -3581,10 +3583,13 @@ describe('the page in use', () => {
     expect([...root.querySelectorAll('.actions-menu .menu-row')].map((row) => row.textContent)).toEqual(['Copy Reply', 'Open in VS Code', 'Open report', 'Open ticket']);
     expect(root.querySelectorAll('.actions-menu .menu-separator')).toHaveLength(0);
     expect(root.querySelector('.actions-menu [data-label="Open in VS Code"] .codicon-vscode')).not.toBeNull();
-    click('.actions-menu [data-label="Open report"]');
+    // Open report reads its draft through local-file into a file tab, never through VS Code.
+    click('.actions-menu [data-action="row-report"]');
     await flush();
-    expect(posts.find((post) => post.url.endsWith('/row-command'))?.body).toMatchObject({ window: 'pk', scopeGen: 3, workItemId: 1, label: 'Open report' });
+    expect(posts.find((post) => post.url.endsWith('/row-command'))).toBeUndefined();
+    expect(posts.some((post) => post.url.startsWith('/v1/conversation/local-file?') && post.url.endsWith(`path=${encodeURIComponent('D:/git/wt/1/reply.md')}`))).toBe(true);
     expect(root.querySelector('.actions-menu')).toBeNull();
+    expect(root.querySelector('[data-action="local-tab"]')?.textContent).toContain('reply.md');
 
     answers['/row-command'] = { status: 409, body: { error: 'VS Code did not start: Code.exe was not found beside code on PATH.' } };
     click('button.actions');
@@ -6456,7 +6461,7 @@ describe('the page in use', () => {
     source.emit('error', {});
     await vi.advanceTimersByTimeAsync(BACKOFF_MS[0]! * (1 + JITTER));
     expect(root.querySelector('.conn-screen h2')?.textContent).toBe('Signed out');
-    expect(root.querySelector('.conn-screen')?.textContent).toContain('This browser is signed out. Open it again from VS Code.');
+    expect(root.querySelector('.conn-screen')?.textContent).toContain('This browser is signed out. Run node ~/.switchboard/hub.js web on this computer and open the link it prints.');
     expect(root.querySelector('.header .conn-dot')?.getAttribute('aria-label')).toBe('Signed out');
 
     const pings = posts.filter((post) => post.url === '/page/ping').length;

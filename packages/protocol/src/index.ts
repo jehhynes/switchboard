@@ -217,8 +217,11 @@ export interface PageRow {
   pastes: string[];
   /** What the list's search matches: the title, key, linked pull requests and issues, playbook, group and branch. */
   search: string;
-  /** What the row opens in VS Code through the hub, run with `row-command`: Open in VS Code and Open report, each with its codicon's name. */
-  opens: Array<{ label: string; icon: string }>;
+  /**
+   * What the row opens, each with its codicon's name: Open in VS Code, which the hub runs with `row-command`, and Open report, whose draft
+   * (`file`) the page opens in a file tab.
+   */
+  opens: Array<{ label: string; icon: string; file?: string }>;
   /** A Done row's date band, such as `Today`, or an older Done row's month, such as `October 2026`; null in the other groups. */
   band: string | null;
   /** Line 1's mic mark before the time on the voice target's row: its codicon glyph and tooltip; null on the others. */
@@ -234,7 +237,11 @@ export interface HistoryCategory {
   icon: string;
 }
 
-/** Something a History entry names: `open` is what the VS Code History tab runs, of which the page opens only an http or https `openUrl`. */
+/**
+ * Something a History entry names: `open` is what the VS Code History tab runs. The page opens an http or https `openUrl` in a browser tab,
+ * another `openUrl` in a file tab, an `openFolder` with Open in VS Code, and an `open` session, by its `workItemId` and Switchboard `session`
+ * ID, in the conversation.
+ */
 export interface HistoryLink {
   label: string;
   icon: string;

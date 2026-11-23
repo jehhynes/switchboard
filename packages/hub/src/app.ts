@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { mkdirSync, watch, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, watch, writeFileSync } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { dirname, join, posix, win32 } from 'node:path';
 import { homedir } from 'node:os';
@@ -39,7 +39,7 @@ import { liveScope, WindowScopes } from './windows.js';
 import { tailscaleIdentity } from './tailscale.js';
 import { readHubLog } from './hubLog.js';
 import type { RemoteAccess } from './page.js';
-import { dockRowOf, PageAccess, pageActionEvent, OPEN_IN_VSCODE, pageCommandOf, pageHeader, pageList, pageRow, pasteText, poolRowOf, rowOpenUrl } from './page.js';
+import { dockRowOf, PageAccess, pageActionEvent, OPEN_IN_VSCODE, pageCommandOf, pageHeader, pageReportOf, pageList, pageRow, pasteText, poolRowOf, rowOpenUrl } from './page.js';
 import { launcher } from './launch.js';
 import type { Launcher } from './launch.js';
 import { pageAsset } from './pageAssets.js';
@@ -589,10 +589,11 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   });
   // The web page's console of a held session (architecture.md § Web page).
   /**
-   * Runs a VS Code control of a work item's row from the page (architecture.md § Web page): opens or brings forward the row's window and leaves it
-   * the dock's command for the label, or `command` in its place, after checking the row offers the label now: why not, or null.
+   * Open in VS Code from the page (architecture.md § Web page): writes the row's workspace file and starts VS Code on it, or on a folder-hosted
+   * conversation's folder, at `goto`'s file and line when given, after checking the row offers it now; why not, or null. VS Code runs without the
+   * Switchboard extension, so the hub leaves no command for the window.
    */
-  const commandInWindow = (workItemId: number, label: string, command?: Record<string, unknown>): string | null => {
+  const commandInWindow = (workItemId: number, label: string, goto?: { path: string; line: number | null }): string | null => {
     const row = dockRowOf(views().dock, workItemId);
     const built = row === null ? { refused: 'The work item is gone.' } : pageCommandOf(row, label);
 
@@ -600,32 +601,48 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       return built.refused;
     }
 
-    const destination = built.destination;
-    const left = command ?? built.command;
-    // A window not open yet shows its tabs once it opens, as one the dock opens does (PRD R72); a folder window has none.
-    const ids = [...(row!.window?.file != null && scopes.keysOf(destination).length === 0 ? [{ type: 'openTabs' }] : []), ...(left === null ? [] : [left])].map((one) => windowQueue.recordCommand(one, destination));
+    const window = row!.window!;
+    let destination = built.destination;
 
-    if (ids.includes(null)) {
-      ids.forEach((id) => id !== null && windowQueue.withdrawCommand(id));
-      return 'The hub could not save the command; see its log.';
+    if (window.file !== null && window.hosted !== true) {
+      try {
+        writeWorkspaceFile(window, written);
+      } catch (error) {
+        deps.log(`workspace file ${window.file} not written: ${String(error)}`);
+        return `The workspace file was not written: ${(error as Error).message}`;
+      }
+    } else if (window.file !== null) {
+      // A hosted conversation opens its host's window, whose file the host's own row writes; with no such row and no file, its own folder opens.
+      const host = views().dock.groups.flatMap((group) => group.rows).map((one) => one.window).find((one) => one !== null && one.hosted !== true && one.file !== null && hostKey(one.file) === hostKey(window.file!));
+
+      try {
+        if (host !== undefined && host !== null) {
+          writeWorkspaceFile(host, written);
+        }
+      } catch (error) {
+        deps.log(`workspace file ${window.file} not written: ${String(error)}`);
+        return `The workspace file was not written: ${(error as Error).message}`;
+      }
+
+      if (!existsSync(window.file)) {
+        destination = window.folders[0] ?? destination;
+      }
     }
 
     try {
-      launch.openCode(destination);
+      launch.openCode(destination, goto);
     } catch (error) {
-      ids.forEach((id) => windowQueue.withdrawCommand(id!));
       return `VS Code did not start: ${(error as Error).message}`;
     }
 
-    askToClaim(destination);
-    deps.log(`page: ${label}${command === undefined ? '' : ` (${String(command['type'])})`} for work item ${workItemId} in ${destination}`);
+    deps.log(`page: ${label}${goto === undefined ? '' : ` at ${goto.path}`} for work item ${workItemId} in ${destination}`);
     return null;
   };
   // The web page's Changes list and diffs, read with git in the page's selected conversation's folder (architecture.md § Web page).
   const pageChanges = new PageChanges({
     isPage: (key) => scopes.isPage(key),
     scope: (key) => scopes.scope(key),
-    openFile: (workItemId, path, line) => commandInWindow(workItemId, OPEN_IN_VSCODE, { type: 'openFile', path, line }),
+    openFile: (workItemId, path, line) => commandInWindow(workItemId, OPEN_IN_VSCODE, { path, line }),
     viewed: { list: (workItemId, scope) => store.viewedFiles(workItemId, scope), set: (workItemId, scope, path, hash) => store.setViewedFile(workItemId, path, hash, deps.now(), scope) },
     viewedChanged: (workItemId, from, payload) => {
       for (const key of conversation.pages()) {
@@ -795,7 +812,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
       return parsed === null ? 'The ticket no longer offers this.' : runtime.send(parsed).refused;
     },
-    // The page's VS Code controls: the dock's command left for the row's window, which VS Code opens or brings forward (architecture.md § Web page).
+    // The page's Open in VS Code, which starts VS Code on the row's workspace file or folder (architecture.md § Web page).
     rowCommand: (workItemId, label) => commandInWindow(workItemId, label),
     // The installed page's link, opened in the default browser only when its row holds it now (architecture.md § Web page).
     rowOpen: (rowKey, url) => {
@@ -1700,7 +1717,11 @@ const dockWithRuns = () => {
         // A reported worktree may belong to another repository than the ticket's root names, so its own main checkout counts too.
         const checkouts = [worktree, worktree === null ? null : await mainCheckout(worktree), root !== null && 'root' in root ? root.root : null];
 
-        return openLocalFile(localRoots(scope, store.sessionsFor(scope.workItemId), scope.sessionId, paired, checkouts), target);
+        // Open report's draft, which may lie outside them, opens as that one file (architecture.md § Web page).
+        const row = dockRowOf(views().dock, scope.workItemId);
+        const report = row === null ? null : pageReportOf(row);
+
+        return openLocalFile({ ...localRoots(scope, store.sessionsFor(scope.workItemId), scope.sessionId, paired, checkouts), files: report === null ? [] : [report], never: [home] }, target);
       },
       upload: (key, scopeGen, name, bytes) => conversation.pageUpload(key, scopeGen, name, bytes),
       console: (key, sessionId, send, end) => pageConsole.open(key, sessionId, send, end),

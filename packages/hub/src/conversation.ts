@@ -320,7 +320,7 @@ export interface ConversationServiceDeps {
   rowPaste?(workItemId: number, label: string): Promise<string | null>;
   /** The folder the files a page attaches are written to; `UPLOAD_DIR` by default. */
   uploads?: string;
-  /** Runs a VS Code control of a work item's row by its label (Open in VS Code, Open changes, Open report), after checking its dock row offers it now: why not, or null. */
+  /** Runs the page's Open in VS Code for a work item's row by its label, after checking its row offers it now: why not, or null. */
   rowCommand?(workItemId: number, label: string): string | null;
   /**
    * Opens a row's ticket URL or link in the default browser, the row named by its dock key (`item:<id>` or a pool ticket's `ticket:<id>`), after
@@ -1297,8 +1297,8 @@ export class ConversationService {
   }
 
   /**
-   * `row-command {window, scopeGen, opId, workItemId, label}` (architecture.md § Web page): one of the row's VS Code controls on the page's
-   * selected work item, which opens its window in VS Code through the hub; refused as `row-action` is. A repeated `opId` answers the first result.
+   * `row-command {window, scopeGen, opId, workItemId, label}` (architecture.md § Web page): Open in VS Code on the page's selected work item,
+   * which the hub starts VS Code for; refused as `row-action` is. A repeated `opId` answers the first result.
    */
   rowCommand(body: Record<string, unknown>): { status: number; body: unknown } {
     const { window, scopeGen, opId, workItemId, label } = body;

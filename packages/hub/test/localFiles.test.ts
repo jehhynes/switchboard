@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { renameSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { readFile, realpath } from 'node:fs/promises';
 import { allowedPath, LOCAL_DIR_MAX, LOCAL_TEXT_MAX_BYTES, localRoots, localTarget, mainCheckout, openLocalFile, rawMime } from '../src/localFiles.js';
 import type { LocalRoots } from '../src/localFiles.js';
 
@@ -110,6 +110,35 @@ describe('allowedPath', () => {
     expect(await allowedPath(roots, join(dir, 'outside', 'secret.txt'))).toBeNull();
     expect(await allowedPath(roots, pathToFileURL(join(dir, 'outside', 'secret.txt')).href)).toBeNull();
     expect(await allowedPath(roots, 'src/missing.ts')).toBeNull();
+  });
+
+  it('takes a single file named in files, such as the approval draft, wherever it is, and nothing beside it or in .git', async () => {
+    const secret = join(dir, 'outside', 'secret.txt');
+
+    writeFileSync(join(dir, 'outside', 'other.txt'), 'other');
+    expect(await allowedPath({ ...roots, files: [secret] }, secret)).toBe(await realpath(secret));
+    expect(await allowedPath({ ...roots, files: [secret] }, join(dir, 'outside', 'other.txt'))).toBeNull();
+    expect(await allowedPath({ ...roots, files: [secret] }, join(dir, 'outside'))).toBeNull();
+    expect(await allowedPath({ ...roots, files: [join(work, '.git', 'config')] }, join(work, '.git', 'config'))).toBeNull();
+    // A folder named as the file is no file, and a junction to one is not either.
+    expect(await allowedPath({ ...roots, files: [join(dir, 'outside')] }, join(dir, 'outside'))).toBeNull();
+    symlinkSync(join(dir, 'outside'), join(dir, 'to-outside'), 'junction');
+    expect(await allowedPath({ ...roots, files: [join(dir, 'to-outside')] }, join(dir, 'to-outside'))).toBeNull();
+  });
+
+  it('never takes a single file inside a never folder, such as the Switchboard home, by any spelling or link', async () => {
+    const keys = join(dir, 'home', 'hub.json');
+
+    mkdirSync(join(dir, 'home'));
+    writeFileSync(keys, '{"token":"fake"}');
+    symlinkSync(join(dir, 'home'), join(dir, 'linked-home'), 'junction');
+    expect(await allowedPath({ ...roots, files: [keys], never: [join(dir, 'home')] }, keys)).toBeNull();
+    expect(await allowedPath({ ...roots, files: [join(dir, 'linked-home', 'hub.json')], never: [join(dir, 'home')] }, join(dir, 'linked-home', 'hub.json'))).toBeNull();
+    expect(await allowedPath({ ...roots, files: [keys], never: [join(dir, 'missing')] }, keys)).toBeNull();
+    expect(await allowedPath({ ...roots, files: [keys], never: [join(dir, 'outside')] }, keys)).toBe(await realpath(keys));
+    // Nor through a root that holds it, as a session working in the home folder makes its .switchboard one.
+    expect(await allowedPath({ ...roots, cwd: dir, folders: [dir], never: [join(dir, 'home')] }, keys)).toBeNull();
+    expect(await allowedPath({ ...roots, cwd: dir, folders: [dir], never: [join(dir, 'home')] }, join(dir, 'outside', 'secret.txt'))).toBe(await realpath(join(dir, 'outside', 'secret.txt')));
   });
 
   it('refuses a link or junction that leads out of the folders, and anything in .git', async () => {
