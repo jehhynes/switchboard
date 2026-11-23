@@ -3011,6 +3011,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     opening = null;
     wanted = state.scope?.workItemId ?? null;
     acked = wanted;
+    // The list's keyboard selection follows back to the work item shown, as after a refused select of the shown one's dropdown.
+    listSelection = wanted === null ? null : `item:${wanted}`;
+    pendingRowControl = null;
     history.replaceState(history.state, '', wanted === null ? '#' : `#w=${wanted}`);
 
     if (isPhone() || wanted === null) {

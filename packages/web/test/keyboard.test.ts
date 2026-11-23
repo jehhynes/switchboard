@@ -186,7 +186,9 @@ it('keeps a phone list and its menu shown without opening a conversation, and re
   expect(posts.filter((post) => post.url.endsWith('/select'))).toEqual([]);
   el('.row-menu [data-label="Mark done"]').click();
   await flush();
-  expect(el('#toast .toast-text').textContent).toContain('No longer available.');
+  await flush();
+  // The refused select shows in the work item's own opening place (opening.tsx).
+  expect(el('#panel .opening-why').textContent).toContain('No longer available.');
 });
 
 it('restores focus when keyed rows reorder inside the same group and closes the menu when its work-item row is clicked', () => {
@@ -206,6 +208,11 @@ it('falls back to the opened row after a refused select or a local selection who
   refused = true;
   el('.row[data-row="item:2"]').click();
   await flush();
+  await flush();
+  // The refused open keeps its row marked under its reason until Back to the list (opening.tsx), which marks the opened row again.
+  expect(el('.row.selected').dataset['row']).toBe('item:2');
+  expect(el('#panel .opening-why').textContent).toContain('No longer available.');
+  el('[data-action="open-back"]').click();
   expect(el('.row.selected').dataset['row']).toBe('item:1');
   el('.row[data-row="item:2"]').focus();
   source.emit('list', { groups: [group('review', []), group('done', [row(1)])] });
