@@ -171,6 +171,11 @@ describe("the page's History tab in use", () => {
   const hello = (source: FakeSource, workItemId = 1) => source.emit('hello', { key: 'pk', groups: groups(rows), scope: scopeOf(workItemId), sessions: [], items: [], more: false, status: null, artifacts: [] });
   const histories = () => posts.filter((one) => one.url === '/v1/conversation/page-history').map((one) => one.body['ticketId']);
   const historyTab = () => root.querySelector<HTMLElement>('[data-side="history"], [data-tab="history"]');
+  /** Opens a work item as a click on its row does, then its stream's `hello`. */
+  const openItem = (source: FakeSource, workItemId: number) => {
+    root.querySelector<HTMLElement>(`#list [data-action="select"][data-work-item="${workItemId}"]`)!.click();
+    hello(source, workItemId);
+  };
   const openFromMenu = () => {
     root.querySelector<HTMLElement>('.header [data-action="actions"]')!.click();
     root.querySelector<HTMLElement>('.actions-menu [data-action="row-history"]')!.click();
@@ -206,18 +211,19 @@ describe("the page's History tab in use", () => {
     const { page, source } = start();
 
     hello(source);
-    // The tab shows while the row offers History, and reads nothing until it is chosen.
-    expect(historyTab()?.textContent).toBe('History');
-    expect(historyTab()?.getAttribute('aria-selected')).toBe('false');
+    // The row offers History, but its tab is hidden, and reads nothing, until the actions menu opens it.
+    expect(historyTab()).toBeNull();
     await flush();
     expect(histories()).toEqual([]);
     openFromMenu();
     expect(root.querySelector('.actions-menu')).toBeNull();
+    expect(historyTab()?.textContent).toBe('History');
     expect(historyTab()?.getAttribute('aria-selected')).toBe('true');
     expect(document.activeElement).toBe(historyTab());
     expect(root.querySelector('.history-pane .history-view .empty')?.textContent).toBe('Loading…');
-    // No bar of its own: the tab names it, and nothing closes it but another tab.
+    // No bar of its own: the tab names it, and its close mark closes it.
     expect(root.querySelector('.hist-bar, .hist-close')).toBeNull();
+    expect(root.querySelector('.history-tab [data-action="close-history"]')).not.toBeNull();
     await flush();
     expect(histories()).toEqual([77]);
     expect(root.querySelector('.history-view h1')?.textContent).toBe('Inbox <badge>');
@@ -269,6 +275,104 @@ describe("the page's History tab in use", () => {
     await flush();
     expect(histories()).toEqual([77, 77, 77, 77]);
     expect(root.querySelector('.history-view h1')?.textContent).toBe('Renamed');
+
+    // Its close mark hides it again, shows the tab before it with the focus, and stops the reads; the menu opens it again.
+    root.querySelector<HTMLElement>('.history-tab [data-action="close-history"]')!.click();
+    expect(historyTab()).toBeNull();
+    expect(root.querySelector('.history-view')).toBeNull();
+    expect(document.activeElement?.getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement?.matches('[data-side="status"], [data-tab="conversation"]')).toBe(true);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(histories()).toEqual([77, 77, 77, 77]);
+    openFromMenu();
+    expect(historyTab()?.getAttribute('aria-selected')).toBe('true');
+    page.close();
+  });
+
+  it("keeps whether each work item's History tab is open with its tabs, and closing one leaves the others' as they were", async () => {
+    vi.useFakeTimers();
+    answers['/page-history'] = { status: 200, body: { view: view(), categories: CATEGORIES } };
+    const { page, source } = start();
+    const kept = () => JSON.parse(localStorage.getItem('switchboard.tabs') ?? '{}') as Record<string, { history?: boolean }>;
+
+    hello(source);
+    openFromMenu();
+    await flush();
+    expect(kept()['w1']?.history).toBe(true);
+
+    // Another work item opens with History closed.
+    openItem(source, 2);
+    expect(historyTab()).toBeNull();
+    expect(kept()['w2']?.history).toBe(false);
+
+    // Back on the first, its History tab is open as it was left; the strip opens on the conversation (PRD R109).
+    openItem(source, 1);
+    expect(historyTab()).not.toBeNull();
+    expect(root.querySelector('[data-tab="conversation"]')?.getAttribute('aria-selected')).toBe('true');
+
+    // Opened on the first and the second, closed on the first: the second keeps its own.
+    openItem(source, 2);
+    openFromMenu();
+    openItem(source, 1);
+    root.querySelector<HTMLElement>('.history-tab [data-action="close-history"]')!.click();
+    expect(historyTab()).toBeNull();
+    expect(kept()['w1']?.history).toBe(false);
+    openItem(source, 2);
+    expect(historyTab()).not.toBeNull();
+    openItem(source, 1);
+    expect(historyTab()).toBeNull();
+    page.close();
+  });
+
+  it("opens History chosen from another row's menu once that work item's hello has put its kept tabs back, kept or not", async () => {
+    vi.useFakeTimers();
+    answers['/page-history'] = { status: 200, body: { view: view(), categories: CATEGORIES } };
+    const pick = () => {
+      root.querySelector<HTMLElement>('#list .row[data-row="item:2"]')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      root.querySelector<HTMLElement>('.row-menu [data-action="row-history"]')!.click();
+    };
+    let { page, source } = start();
+
+    // Work item 2 has kept tabs with History closed.
+    hello(source);
+    openItem(source, 2);
+    openItem(source, 1);
+    pick();
+    source.emit('scope', { scope: scopeOf(2) });
+    await flush();
+    hello(source, 2);
+    await flush();
+    expect(historyTab()?.getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(historyTab());
+    expect(histories()).toEqual([78]);
+    page.close();
+
+    // And with none kept.
+    localStorage.clear();
+    history.replaceState(null, '', '#w=1');
+    ({ page, source } = start());
+    hello(source);
+    pick();
+    source.emit('scope', { scope: scopeOf(2) });
+    await flush();
+    hello(source, 2);
+    await flush();
+    expect(historyTab()?.getAttribute('aria-selected')).toBe('true');
+    page.close();
+  });
+
+  it('gives the focus to the tab shown when the History tab it was on closes, chosen or not', () => {
+    const { page, source } = start();
+
+    hello(source);
+    openFromMenu();
+    root.querySelector<HTMLElement>('[data-tab="conversation"]')!.click();
+    const close = root.querySelector<HTMLElement>('.history-tab [data-action="close-history"]')!;
+
+    close.focus();
+    close.click();
+    expect(historyTab()).toBeNull();
+    expect(document.activeElement).toBe(root.querySelector('[data-tab="conversation"]'));
     page.close();
   });
 
@@ -283,24 +387,25 @@ describe("the page's History tab in use", () => {
     root.querySelector<HTMLElement>('.hist-chip[data-category="you"]')!.click();
     expect(histories()).toEqual([77]);
 
-    // Another work item's conversation opens on its own tabs; chosen there, History reads that work item's ticket, at Loading… first.
-    hello(source, 2);
-    expect(historyTab()?.getAttribute('aria-selected')).toBe('false');
-    historyTab()!.click();
+    // Another work item's conversation opens on its own tabs, History closed; opened there, it reads that work item's ticket, at Loading… first.
+    openItem(source, 2);
+    expect(historyTab()).toBeNull();
+    openFromMenu();
     expect(root.querySelector('.history-view .empty')?.textContent).toBe('Loading…');
     await flush();
     expect(histories()).toEqual([77, 78]);
     expect(root.querySelector('.hist-chip[data-category="you"]')?.getAttribute('aria-pressed')).toBe('true');
 
-    // Back on the first, its chips stay as the operator set them.
-    hello(source, 1);
+    // Back on the first, its History tab is still open; the strip opens on the conversation (PRD R109). Chosen, its chips are as the operator set them.
+    openItem(source, 1);
+    expect(historyTab()?.getAttribute('aria-selected')).toBe('false');
     historyTab()!.click();
     await flush();
     expect(histories()).toEqual([77, 78, 77]);
     expect(root.querySelector('.hist-chip[data-category="you"]')?.getAttribute('aria-pressed')).toBe('false');
 
     // A work item whose row offers no History has neither the tab nor the menu item.
-    hello(source, 3);
+    openItem(source, 3);
     expect(historyTab()).toBeNull();
     root.querySelector<HTMLElement>('.header [data-action="actions"]')?.click();
     expect(root.querySelector('[data-action="row-history"]')).toBeNull();
@@ -314,7 +419,7 @@ describe("the page's History tab in use", () => {
     page.close();
   });
 
-  it("puts History in a phone's one tab strip, after the conversation's fixed tabs", async () => {
+  it("puts History in a phone's one tab strip once the menu opens it, after the conversation's fixed tabs, and Console after Changes", async () => {
     vi.stubGlobal('innerWidth', 390);
     vi.useFakeTimers();
     answers['/page-history'] = { status: 200, body: { view: view(), categories: CATEGORIES } };
@@ -322,11 +427,18 @@ describe("the page's History tab in use", () => {
 
     hello(source);
     expect(document.documentElement.classList.contains('phone')).toBe(true);
-    expect([...root.querySelectorAll('#head .tabs > .tab')].map((one) => one.textContent)).toEqual(['Conversation', 'Status', 'History', 'Changes']);
+    const tabs = () => [...root.querySelectorAll('#head .tabs > .tab')].map((one) => one.textContent);
+
+    expect(tabs()).toEqual(['Conversation', 'Status', 'Changes']);
     openFromMenu();
+    expect(tabs()).toEqual(['Conversation', 'Status', 'History', 'Changes']);
     expect(historyTab()?.getAttribute('aria-selected')).toBe('true');
     await flush();
     expect(root.querySelector('#panel.history-pane .history-view h1')?.textContent).toBe('Inbox <badge>');
+    // Closed, the phone shows the conversation.
+    root.querySelector<HTMLElement>('.history-tab [data-action="close-history"]')!.click();
+    expect(tabs()).toEqual(['Conversation', 'Status', 'Changes']);
+    expect(root.querySelector('#head [data-tab="conversation"]')?.getAttribute('aria-selected')).toBe('true');
     page.close();
   });
 });

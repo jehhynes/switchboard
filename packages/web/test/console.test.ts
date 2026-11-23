@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { h } from 'preact';
 import { CONSOLE_FONT_PX, CONSOLE_INPUT_CHARS, CONSOLE_MIN_FONT_PX, fittedFont, fittedSize, keptModes, LIGHT_SCHEME, mountConsole, XTERM_SCROLLBAR_PX } from '../src/console.js';
 import type { ConsoleOptions, ConsoleTerm, MountedConsole, TermOptions } from '../src/console.js';
 import { startPage } from '../src/main.js';
@@ -762,13 +763,16 @@ describe('the Console tab', () => {
     vi.restoreAllMocks();
   });
 
-  it('is a tab beside Status and Artifacts, and the third of the wide column', () => {
+  it('is a tab of the right-hand group, after Changes, in both strips', () => {
     const state = { ...EMPTY, connected: true, scope, session: session() };
 
     expect([...html(renderTabs(newView(), state)).matchAll(/data-tab="(\w+)"/g)].map((match) => match[1])).toEqual(['conversation', 'status', 'console']);
     expect([...html(renderSideSwitch('console', state)).matchAll(/data-side="(\w+)"/g)].map((match) => match[1])).toEqual(['status', 'console']);
     expect(html(renderSideSwitch('console', state))).toMatch(/aria-selected="true"[^>]*aria-label="Console">/);
-    expect([...html(renderSideSwitch('browser', state, true)).matchAll(/data-side="(\w+)"/g)].map((match) => match[1])).toEqual(['status', 'console', 'browser']);
+    expect([...html(renderSideSwitch('browser', state, true)).matchAll(/data-side="(\w+)"/g)].map((match) => match[1])).toEqual(['status', 'browser', 'console']);
+    // After what comes before the column's end, as Changes, and before its end, as the maximize button.
+    expect(html(renderSideSwitch('status', state, false, undefined, h('b', { class: 'changes' }), true, false, h('i', { class: 'end' })))).toMatch(/class="changes"[\s\S]*data-side="console"[\s\S]*class="end"/);
+    expect(html(renderTabs(newView(), state, false, undefined, h('b', { class: 'changes' })))).toMatch(/class="changes"[\s\S]*data-tab="console"/);
   });
 
   it('says why a session has no console without loading it', () => {

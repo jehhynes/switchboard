@@ -128,6 +128,8 @@ export interface TabSet {
   files: Array<{ target: string; line: number | null }>;
   /** The index in `files` of the file tab shown, or null. */
   file: number | null;
+  /** Whether the History tab is open; absent in a set kept before it could close. */
+  history?: boolean;
 }
 
 /** Where this device keeps each work item's tabs. */
@@ -164,7 +166,8 @@ export function parseTabSets(raw: string | null): Record<string, TabSet> {
           textOrNull(set.changesFile) &&
           Array.isArray(set.files) &&
           set.files.every((one) => one !== null && typeof one === 'object' && text(one.target) && lineOrNull(one.line)) &&
-          (set.file === null || (typeof set.file === 'number' && Number.isSafeInteger(set.file) && set.file >= 0 && set.file < set.files.length)),
+          (set.file === null || (typeof set.file === 'number' && Number.isSafeInteger(set.file) && set.file >= 0 && set.file < set.files.length)) &&
+          (set.history === undefined || typeof set.history === 'boolean'),
       ),
     ) as Record<string, TabSet>;
   } catch {

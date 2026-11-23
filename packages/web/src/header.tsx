@@ -376,12 +376,13 @@ function artifactTabs(state: PageState, strip: ArtifactStrip): ComponentChildren
     }),
     rest === 0 ? null : (
       <span class="artifact-more">
-        <button class={`tab artifact-menu-button${strip.menu ? ' open' : ''}`} type="button" data-action="artifact-menu" aria-haspopup="menu" aria-expanded={strip.menu} aria-label={`Artifacts, ${ordered.length}${unreadCount > 0 ? `, ${unreadCount} unread` : ''}`} title="Every artifact, newest first">
+        <button class={`tab artifact-menu-button${strip.menu ? ' open' : ''}`} type="button" data-action="artifact-menu" aria-haspopup="menu" aria-expanded={strip.menu} aria-label={`Artifacts, ${ordered.length}${unreadCount > 0 ? `, ${unreadCount} unread` : ''}`} title="Every artifact, newest first, in a menu">
           <span class="codicon codicon-files" aria-hidden="true"></span>
           <span class="tab-label">Artifacts</span>
-          <span class="tab-badge muted">{ordered.length}</span>
-          {unreadCount > 0 ? <span class="unread-dot" aria-hidden="true"></span> : null}
-          <span class="codicon codicon-chevron-down" aria-hidden="true"></span>
+          <span class="tab-badge muted">
+            {ordered.length}
+            {unreadCount > 0 ? <span class="unread-dot" aria-hidden="true"></span> : null}
+          </span>
         </button>
         {strip.menu ? (
           <div class="menu glass artifact-menu" role="menu" aria-label="Artifacts">
@@ -420,26 +421,44 @@ function linkTabs(strip: ArtifactStrip, selected: boolean): ComponentChildren {
 }
 
 /**
- * The tab strip atop the column right of the conversation on a wide screen: Status, Console, Browser and History, each while it has something to show, then a tab per
- * artifact (`artifactTabs`); the conversation keeps its own pane beside it. `extra` follows them, as the Changes button does.
+ * The History tab, shown only once the operator chose History from an actions menu, with a close mark that hides it again, as a file tab's
+ * does; its codicon and label, which a narrow strip hides as the fixed tabs' (page.css).
  */
-export function renderSideSwitch(side: SideTab, state: PageState, browser = false, strip: ArtifactStrip = { open: null, fit: 0, menu: false, now: 0 }, extra: ComponentChildren = null, console = true, history = false): VNode {
+function HistoryTab({ selected, attr }: { selected: boolean; attr: 'data-side' | 'data-tab' }) {
+  return (
+    <span class={`tab history-tab${selected ? ' selected' : ''}`} role="presentation">
+      <button class="tab-open" type="button" role="tab" {...{ [attr]: 'history' }} aria-selected={selected} tabindex={selected ? 0 : -1} title="History" aria-label="History">
+        <span class="codicon codicon-history" aria-hidden="true"></span>
+        <span class="tab-label">History</span>
+      </button>
+      <button class="tab-close" type="button" data-action="close-history" aria-label="Close History" title="Close" tabindex={selected ? 0 : -1}>
+        <span class="codicon codicon-close" aria-hidden="true"></span>
+      </button>
+    </span>
+  );
+}
+
+/** The column's tab strip named by its tabs, in their order: "Status, browser and artifacts". */
+const stripLabel = (names: string[]): string => `${names.slice(0, -1).join(', ')} and ${names.at(-1)!}`;
+
+/**
+ * The tab strip atop the column right of the conversation on a wide screen: Status, Browser and History, each while it has something to show, then a
+ * tab per artifact (`artifactTabs`); the conversation keeps its own pane beside it. The right-hand group follows: `extra`, as the file tabs and
+ * Changes, then Console while it shows, then `end`, as the maximize button.
+ */
+export function renderSideSwitch(side: SideTab, state: PageState, browser = false, strip: ArtifactStrip = { open: null, fit: 0, menu: false, now: 0 }, extra: ComponentChildren = null, console = true, history = false, end: ComponentChildren = null): VNode {
   const fresh = state.status?.unread === true;
-  const tabs: Array<[SideTab, string, boolean]> = [
-    ['status', 'Status', fresh],
-    ...(console ? [['console', 'Console', false] as [SideTab, string, boolean]] : []),
-    ...(browser && strip.links === undefined ? [['browser', 'Browser', false] as [SideTab, string, boolean]] : []),
-    ...(history ? [['history', 'History', false] as [SideTab, string, boolean]] : []),
-  ];
 
   return (
-    <nav class="tabs side-switch" role="tablist" aria-label={['Status', ...(console ? ['console'] : []), ...(browser ? ['browser'] : []), ...(history ? ['history'] : [])].join(', ') + ' and artifacts'}>
-      {tabs.map(([tab, label, unread]) => (
-        <TabButton selected={tab === side} label={label} icon={tabIcon(tab)} unread={unread} attrs={{ 'data-side': tab }} />
-      ))}
+    <nav class="tabs side-switch" role="tablist" aria-label={stripLabel(['Status', ...(browser ? ['browser'] : []), ...(history ? ['history'] : []), 'artifacts', ...(console ? ['console'] : [])])}>
+      <TabButton selected={side === 'status'} label="Status" icon={tabIcon('status')} unread={fresh} attrs={{ 'data-side': 'status' }} />
+      {browser && strip.links === undefined ? <TabButton selected={side === 'browser'} label="Browser" icon={tabIcon('browser')} attrs={{ 'data-side': 'browser' }} /> : null}
       {linkTabs(strip, side === 'browser')}
+      {history ? <HistoryTab selected={side === 'history'} attr="data-side" /> : null}
       {artifactTabs(state, { ...strip, open: side === 'artifacts' ? strip.open : null, fit: strip.fit })}
       {extra}
+      {console ? <TabButton selected={side === 'console'} label="Console" icon={tabIcon('console')} attrs={{ 'data-side': 'console' }} /> : null}
+      {end}
     </nav>
   );
 }
@@ -455,19 +474,29 @@ export function renderMaximize(maximized: boolean): VNode {
   );
 }
 
-/** The conversation's tab strip on a narrower screen: Conversation, Status, Console, Browser and History, each while it has something to show, then a tab per artifact as in the column, and `extra`, as the Changes button. */
+/**
+ * The conversation's tab strip on a narrower screen: Conversation, Status, Browser and History, each while it has something to show, then a tab per
+ * artifact as in the column, then the right-hand group: `extra`, as the file tabs and Changes, and Console while it shows.
+ */
 export function renderTabs(view: View, state: PageState, browser = false, strip: ArtifactStrip = { open: null, fit: 0, menu: false, now: 0 }, extra: ComponentChildren = null, console = true, history = false): VNode {
   const fresh = state.status?.unread === true;
-  // As in the VS Code view, Status has the unread dot while its status is unread; the page shows no unread counts.
+  const fixed = (tab: Tab): VNode => {
+    const { label, icon } = TABS.find((one) => one.tab === tab)!;
+
+    // As in the VS Code view, Status has the unread dot while its status is unread; the page shows no unread counts.
+    return <TabButton selected={tab === view.tab} label={label} icon={icon} unread={tab === 'status' && fresh} attrs={{ 'data-tab': tab }} />;
+  };
 
   return (
     <nav class="tabs" role="tablist">
-      {TABS.filter(({ tab }) => tab !== 'artifacts' && ((browser && strip.links === undefined) || tab !== 'browser') && (console || tab !== 'console') && (history || tab !== 'history')).map(({ tab, label, icon }) => (
-        <TabButton selected={tab === view.tab} label={label} icon={icon} unread={tab === 'status' && fresh} attrs={{ 'data-tab': tab }} />
-      ))}
+      {fixed('conversation')}
+      {fixed('status')}
+      {browser && strip.links === undefined ? fixed('browser') : null}
       {linkTabs(strip, view.tab === 'browser')}
+      {history ? <HistoryTab selected={view.tab === 'history'} attr="data-tab" /> : null}
       {artifactTabs(state, { ...strip, open: view.tab === 'artifacts' ? strip.open : null })}
       {extra}
+      {console ? fixed('console') : null}
     </nav>
   );
 }

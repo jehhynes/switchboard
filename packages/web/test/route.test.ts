@@ -73,6 +73,8 @@ describe('the route', () => {
     expect(Object.keys(sets)[0]).toBe('w6');
     expect(parseTabSets(JSON.stringify(sets))).toEqual(sets);
     expect(parseTabSets(JSON.stringify({ w1: set, w2: { ...set, file: 2 }, w3: { ...set, files: [{ target: 1, line: null }] }, w4: { ...set, changes: 'yes' }, '5': set, w6: null }))).toEqual({ w1: set });
+    // Whether History is open: a boolean, or absent in a set kept before it could close.
+    expect(parseTabSets(JSON.stringify({ w1: { ...set, history: true }, w2: { ...set, history: false }, w3: set, w4: { ...set, history: 'yes' } }))).toEqual({ w1: { ...set, history: true }, w2: { ...set, history: false }, w3: set });
     expect(parseTabSets('not json')).toEqual({});
     expect(parseTabSets('[]')).toEqual({});
     expect(parseTabSets(null)).toEqual({});

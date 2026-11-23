@@ -350,8 +350,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const showBrowser = (): boolean => browserTab() && itemLinks();
   /** Whether the Console tab shows: an active session, not ended, that the terminal holder may hold; otherwise its console would be blank, so there is no tab. */
   const showConsole = (): boolean => hasConsole(state.session);
-  /** Whether the History tab shows: the open work item's row offers History, as the dock's does. */
-  const showHistory = (): boolean => (selectedRow(state)?.history ?? null) !== null;
+  /** Whether the open work item's row offers History, as the dock's does. */
+  const offersHistory = (): boolean => (selectedRow(state)?.history ?? null) !== null;
+  /** The work item whose History tab the operator opened from an actions menu, or null; its close mark hides it again. Kept in its `TabSet`. */
+  let historyOpen: number | null = null;
+  /** The work item whose History a row's menu chose before its `hello` came, to open once its kept tabs are back. */
+  let historyOnHello: number | null = null;
+  /** Whether the History tab shows: opened for the open work item, while its row offers History. */
+  const showHistory = (): boolean => historyOpen !== null && historyOpen === state.scope?.workItemId && offersHistory();
   /** The tab the conversation's pane shows: always the conversation while Status and Artifacts have their own column, and never a Browser tab that is gone. */
   const mainTab = (): Tab => (wide() || (view.tab === 'browser' && !showBrowser()) || (view.tab === 'history' && !showHistory()) || (view.tab === 'artifacts' && openArtifact() === null) || (view.tab === 'diff' && !changes.view.tab) || (view.tab === 'file' && localFiles.shown() === null) ? 'conversation' : view.tab === 'console' && !showConsole() ? 'status' : view.tab);
   /** The work item whose tabs were last chosen on its opening, and whether the operator has chosen a tab since. */
@@ -2414,7 +2420,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         }
       }
 
-      mount(detailHead, renderSideSwitch(sideTab(), state, showBrowser(), strip, [...changeTabs(sideTab()), renderMaximize(panelMaximized)], showConsole(), showHistory()));
+      mount(detailHead, renderSideSwitch(sideTab(), state, showBrowser(), strip, changeTabs(sideTab()), showConsole(), showHistory(), renderMaximize(panelMaximized)));
       drawTab(detailBody, sideTab());
     }
     // The composer first, so the conversation is scrolled against its final height.
@@ -2778,7 +2784,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     const files = localFiles.view.tabs;
     const shownFile = files.findIndex((one) => one.id === localFiles.view.open);
-    const set: TabSet = { side: view.side, tab: view.tab, artifact: view.artifact, changes: changes.view.tab, changesFile: changes.view.tab ? changes.focusPath : null, files: files.map((one) => ({ target: one.target, line: one.line })), file: shownFile === -1 ? null : shownFile };
+    const set: TabSet = { side: view.side, tab: view.tab, artifact: view.artifact, changes: changes.view.tab, changesFile: changes.view.tab ? changes.focusPath : null, files: files.map((one) => ({ target: one.target, line: one.line })), file: shownFile === -1 ? null : shownFile, history: historyOpen === w };
     const key = tabSetKey(w);
 
     if (Object.keys(tabSets).at(-1) === key && JSON.stringify(tabSets[key]) === JSON.stringify(set)) {
@@ -2809,6 +2815,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
 
     localFiles.view.open = (set.file === null ? undefined : localFiles.view.tabs[set.file])?.id ?? localFiles.view.tabs.at(-1)?.id ?? null;
+    historyOpen = set.history === true ? (state.scope?.workItemId ?? null) : null;
 
     if ([...SIDE_TABS, 'diff', 'file'].includes(set.side)) {
       view.side = set.side as SideTab;
@@ -3625,6 +3632,19 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     pendingRowControl = { key, run };
     void select(row.workItemId);
   };
+  /** Opens the open work item's History tab, selects it and gives it the focus, while its row offers History. */
+  const openHistory = (): void => {
+    if (offersHistory()) {
+      historyOpen = state.scope?.workItemId ?? null;
+      leaving('history');
+      chooseTab('history');
+      view.artifact = null;
+      draw();
+      (wide() ? detailHead : head).querySelector<HTMLElement>('[data-side="history"], [data-tab="history"]')?.focus();
+    } else {
+      draw();
+    }
+  };
   const openRowMenu = (key: string, point?: { x: number; y: number }): void => {
     const row = rowByKey(key);
     if (row === null || menuRows(row, view).length === 0) return;
@@ -3876,17 +3896,39 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         forRow(button!.dataset['row'] ?? '', () => {
           closeMenus();
 
-          if (showHistory()) {
-            leaving('history');
-            chooseTab('history');
-            view.artifact = null;
+          // A row's menu runs this once its work item's scope comes; its `hello` then puts its kept tabs back, so History opens after that.
+          if (offersHistory() && state.scope?.workItemId != null && state.scope.workItemId !== openedItem) {
+            historyOnHello = state.scope.workItemId;
             draw();
-            (wide() ? detailHead : head).querySelector<HTMLElement>('[data-side="history"], [data-tab="history"]')?.focus();
           } else {
-            draw();
+            openHistory();
           }
         });
         break;
+      case 'close-history': {
+        // Hides the History tab until History is chosen again; closing the shown one shows Status in the column, or the conversation.
+        const shown = (wide() ? view.side : mainTab()) === 'history';
+        // The focus on the tab or its close mark goes to the tab shown, rather than to the page.
+        const focused = button!.closest('.history-tab')?.contains(document.activeElement) === true;
+
+        historyOpen = null;
+
+        if (view.side === 'history') {
+          view.side = 'status';
+        }
+
+        if (shown) {
+          chooseTab(wide() ? 'status' : 'conversation');
+        }
+
+        draw();
+
+        if (shown || focused) {
+          (wide() ? detailHead : head).querySelector<HTMLElement>('.tabs [role="tab"][aria-selected="true"]')?.focus();
+        }
+
+        break;
+      }
       case 'history-chip':
         if (shownHistory !== null) {
           const category = button!.dataset['category'] ?? '';
@@ -5275,7 +5317,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         if (path !== null && state.artifacts.some((one) => one.path === path)) {
           view.artifact = path;
           chooseTab('artifacts');
-        } else if (tab === 'status' || (tab === 'console' && showConsole()) || (tab === 'browser' && showBrowser()) || (tab === 'history' && showHistory())) {
+        } else if (tab === 'history' && offersHistory()) {
+          historyOpen = opened;
+          chooseTab(tab);
+        } else if (tab === 'status' || (tab === 'console' && showConsole()) || (tab === 'browser' && showBrowser())) {
           chooseTab(tab);
         } else if (tab === 'changes') {
           changes.openChanges(firstRoute.f ?? null);
@@ -5284,6 +5329,17 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         }
 
         restoringTabs = false;
+      }
+
+      // History a row's menu chose for this work item before its `hello`, now that its kept tabs are back.
+      if (type === 'hello' && historyOnHello !== null) {
+        const asked = historyOnHello;
+
+        historyOnHello = null;
+
+        if (asked === opened) {
+          queueMicrotask(() => state.scope?.workItemId === asked && openHistory());
+        }
       }
 
       if (type === 'hello' && opened !== null && opened !== firstRoute.w) {

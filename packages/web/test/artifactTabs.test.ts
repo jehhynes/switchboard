@@ -71,13 +71,15 @@ describe('the artifacts this device opened', () => {
   });
 });
 
+const css = PAGE_ASSETS['page.css']!.body;
+
 describe('the artifact tabs', () => {
   const state = { ...EMPTY, connected: true, artifacts: eight };
 
-  it('follow Status, Console and Browser in the column, the open one chosen with a close mark, then Artifacts with the rest', () => {
+  it('follow Status and Browser in the column, the open one chosen with a close mark, then Artifacts with the rest and Console after them', () => {
     const markup = html(renderSideSwitch('artifacts', state, true, { open: 'chat/a2.md', fit: 3, menu: false, now: 2_000 }));
 
-    expect(paths(markup, 'data-side')).toEqual(['status', 'console', 'browser']);
+    expect(paths(markup, 'data-side')).toEqual(['status', 'browser', 'console']);
     expect(tabPaths(markup)).toEqual(['chat/a7.md', 'chat/a6.md', 'chat/a2.md']);
     expect(markup).toMatch(/class="tab artifact-tab selected"[^>]*data-path="chat\/a2.md"/);
     // The close mark is a button of its own beside the tab's, so each takes the keyboard.
@@ -151,7 +153,11 @@ describe('the artifact tabs', () => {
     const strip = new DOMParser().parseFromString(markup, 'text/html');
 
     expect(strip.querySelectorAll('.artifact-tab .unread-dot')).toHaveLength(0);
-    expect(strip.querySelectorAll('.artifact-menu-button > .unread-dot')).toHaveLength(1);
+    // On the count's corner, as a notification badge; the button has no caret, its menu named by aria-haspopup and its tooltip.
+    expect(strip.querySelectorAll('.artifact-menu-button .tab-badge > .unread-dot')).toHaveLength(1);
+    expect(strip.querySelector('.artifact-menu-button .codicon-chevron-down')).toBeNull();
+    expect(strip.querySelector('.artifact-menu-button')!.getAttribute('aria-haspopup')).toBe('menu');
+    expect(css).toContain('.tab.artifact-menu-button .tab-badge > .unread-dot { position: absolute; top: -3px; right: -3px;');
     expect(strip.querySelector('.artifact-menu-button')!.getAttribute('aria-label')).toBe('Artifacts, 8, 2 unread');
     expect(strip.querySelector('.artifact-menu-button .tab-badge')!.textContent).toBe('8');
   });
@@ -190,7 +196,7 @@ describe('the tab strip on a narrow screen', () => {
   it('never wraps, and under 600 px shows Artifacts and the Changes tab as their icons and counts, and a file tab only while chosen', () => {
     // A size container is a stacking context: the strip stands above the pane after it, so the Artifacts menu inside it does too.
     expect(css).toMatch(/\.tabs \{ position: relative; z-index: 3; display: flex; flex-wrap: nowrap; container-type: inline-size;/);
-    expect(narrow).toContain('.tab.artifact-menu-button .tab-label, .tab.artifact-menu-button .codicon-chevron-down, .tab.changes-tab .tab-label, .tab.diff-tab .tab-label, .tab.diff-tab .tab-badge { display: none; }');
+    expect(narrow).toContain('.tab.artifact-menu-button .tab-label, .tab.changes-tab .tab-label, .tab.diff-tab .tab-label, .tab.diff-tab .tab-badge { display: none; }');
     // The Changes tab is never hidden; a file tab keeps its icon and close mark whole.
     expect(narrow).not.toMatch(/\.changes-tab(?![^{]*\.tab-label)[^{]*\{[^}]*display: none/);
     expect(narrow).toContain('.tab.diff-tab.selected { flex: none;');

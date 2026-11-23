@@ -2705,7 +2705,7 @@ describe('the page in use', () => {
     again.page.close();
   });
 
-  it("shows History as a tab of the column after Status while the row offers it, which the Actions menu selects and an artifact's tab replaces", () => {
+  it("shows History as a tab of the column after Status only once the Actions menu opens it, with Console in the right-hand group, and an artifact's tab replaces it", () => {
     window.innerWidth = 1920;
     history.replaceState(null, '', '#w=1');
     onTestFinished(() => {
@@ -2719,11 +2719,13 @@ describe('the page in use', () => {
     expect(tabs()).not.toContain('History');
     hello(source, { artifacts: [], groups: [listGroup('progress', [listRow(1, { title: 'Fix it', history: { ticketId: 1, key: 'gh 1' } })])] });
     source.emit('artifact', { artifact: { path: 'chat/new.md', owner: 'chat', kind: 'note', title: 'New', ext: 'md', type: 'markdown', updatedAt: 1 } });
-    expect(tabs().slice(0, 2)).toEqual(['Status', 'Console']);
-    expect(tabs()).toContain('History');
+    // Hidden until chosen from the menu; Console follows Changes, before the maximize button.
+    expect(tabs()).toEqual(['Status', 'Changes', 'Console']);
+    expect(root.querySelector('#detail .side-switch > :last-child')?.classList.contains('panel-max')).toBe(true);
     expect(root.querySelector('#detail .artifact-tab[data-path="chat/new.md"]')).not.toBeNull();
     click('[data-action="actions"]');
     click('.actions-menu [data-action="row-history"]');
+    expect(tabs()).toEqual(['Status', 'History', 'Changes', 'Console']);
     expect(root.querySelector('.actions-menu')).toBeNull();
     expect(root.querySelector('#detail [data-side="history"]')?.getAttribute('aria-selected')).toBe('true');
     expect(document.activeElement).toBe(root.querySelector('#detail [data-side="history"]'));
@@ -2801,8 +2803,10 @@ describe('the page in use', () => {
     strip()[0]!.focus();
     strip()[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
     expect(document.activeElement).toBe(strip()[1]);
-    // The Changes tab is the strip's last tab, after the artifact tabs.
+    // The right-hand group follows the artifact tabs in the keyboard's order as on screen: Changes, then Console last.
     strip()[1]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+    expect(document.activeElement).toBe(root.querySelector('#detail [data-side="console"]'));
+    (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
     expect(document.activeElement).toBe(root.querySelector('#detail .changes-tab'));
     (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
     expect((document.activeElement as HTMLElement).closest<HTMLElement>('.artifact-tab')!.dataset['path']).toBe('chat/a1.md');

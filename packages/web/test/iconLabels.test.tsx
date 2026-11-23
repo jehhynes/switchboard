@@ -51,15 +51,19 @@ describe('the tab strips', () => {
   it('FixedTabs_Drawn_NameTheirIconAndKeepTheirNameWithoutTheLabel', () => {
     const tabs = [...strips[0]!.querySelectorAll<HTMLElement>('[data-tab]')];
 
+    // In the strip's order: Console in the right-hand group, after Changes.
     expect(tabs.map((tab) => [tab.dataset['tab'], tab.querySelector('.codicon')!.className, tab.querySelector('.tab-label')!.textContent, tab.title])).toEqual([
       ['conversation', 'codicon codicon-comment-discussion', 'Conversation', 'Conversation'],
       ['status', 'codicon codicon-pulse', 'Status', 'Status'],
-      ['console', 'codicon codicon-terminal', 'Console', 'Console'],
       ['browser', 'codicon codicon-globe', 'Browser', 'Browser'],
       ['history', 'codicon codicon-history', 'History', 'History'],
+      ['console', 'codicon codicon-terminal', 'Console', 'Console'],
     ]);
     // Status's unread dot stays in its name once the label is hidden.
-    expect(tabs.map((tab) => tab.getAttribute('aria-label'))).toEqual(['Conversation', 'Status, unread', 'Console', 'Browser', 'History']);
+    expect(tabs.map((tab) => tab.getAttribute('aria-label'))).toEqual(['Conversation', 'Status, unread', 'Browser', 'History', 'Console']);
+    expect(strips[0]!.querySelector('.changes-tab ~ [data-tab="console"]')).not.toBeNull();
+    // History has a close mark, as a file tab has.
+    expect(strips.map((strip) => strip.querySelector('.history-tab [data-action="close-history"]')?.getAttribute('aria-label'))).toEqual(['Close History', 'Close History']);
     expect(TABS.every((one) => one.icon !== '')).toBe(true);
   });
 
@@ -83,11 +87,11 @@ describe('the tab strips', () => {
   it('NarrowStrip_Under600px_ShowsTheFixedTabsAsTheirIcons', () => {
     const narrow = /@container \(max-width: 600px\) \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
 
-    expect(narrow).toContain('.tab:is([data-tab], [data-side]) .tab-label { display: none; }');
-    // With Browser or History as well, under 760 px.
+    expect(narrow).toContain('.tab:is([data-tab], [data-side]) .tab-label, .tab.history-tab .tab-label { display: none; }');
+    // With Browser or History as well, under 760 px, every fixed tab's, Console's in the right-hand group too.
     const crowded = /@container \(max-width: 760px\) \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
 
-    expect(crowded).toMatch(/:has\(~ :is\(\[data-tab="browser"\], \[data-tab="history"\][^)]*\)\)\) \.tab-label \{ display: none; \}/);
+    expect(crowded).toContain('.tabs:has(> :is([data-tab="browser"], [data-side="browser"], .history-tab)) > :is(.tab:is([data-tab], [data-side]), .history-tab) .tab-label { display: none; }');
     // No rule hides a tab's icon.
     expect(narrow).not.toMatch(/codicon(?!-chevron-down)[^{]*\{[^}]*display: none/);
   });

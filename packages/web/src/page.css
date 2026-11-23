@@ -444,9 +444,17 @@ button.picker .picker-session { flex: 0 1 auto; min-width: 0; overflow: hidden; 
 .file-icon::before { font-family: seti; font-size: 150%; font-style: normal; font-weight: normal; line-height: 1; -webkit-font-smoothing: antialiased; }
 .tab-close { display: flex; flex: none; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; border: none; border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
 .tab-close:hover { background: color-mix(in srgb, var(--vscode-foreground) 15%, transparent); }
+/* History, once opened from an actions menu, has a close mark as a file tab has. */
+.tab.history-tab { box-sizing: border-box; padding: 0 6px 0 0; }
+/* Console sits in the strip's right-hand group, after Changes, so it takes that group's left border. */
+.tab:is([data-tab="console"], [data-side="console"]) { border-right: none; border-left: 1px solid var(--vscode-panel-border); }
 /* Artifacts and its count, at the strip's end after the artifact tabs that fit, opening a menu of every artifact. */
 .artifact-more { position: relative; display: flex; margin-left: auto; }
 .tab.artifact-menu-button { border-right: none; border-left: 1px solid var(--vscode-panel-border); padding: 0 10px; }
+/* Its count carries the unread dot on its top-right corner, as a notification badge; the button has no caret, its menu named by aria-haspopup. */
+.tab.artifact-menu-button .tab-badge { position: relative; }
+.tab.artifact-menu-button .tab-badge > .unread-dot { position: absolute; top: -3px; right: -3px; box-shadow: 0 0 0 1.5px var(--sb-tab-strip); }
+.tab.artifact-menu-button.open .tab-badge > .unread-dot { box-shadow: 0 0 0 1.5px var(--sb-tab-surface); }
 .tab.artifact-menu-button.open { color: var(--vscode-panelTitle-activeForeground); background: var(--sb-tab-surface); }
 .tab-badge.muted { color: var(--vscode-badge-foreground); background: var(--vscode-badge-background); }
 /* The strip never wraps. Narrower than 600 px it keeps its own tabs whole, shows Artifacts as its icon with its count, still opening its list,
@@ -454,9 +462,9 @@ button.picker .picker-session { flex: 0 1 auto; min-width: 0; overflow: hidden; 
 @container (max-width: 600px) {
   /* Conversation, Status, Console and Browser show their icons alone, named by their tooltips: with their labels, the four and the icons of
      Artifacts and Changes take over 500 px. */
-  .tab:is([data-tab], [data-side]) .tab-label { display: none; }
+  .tab:is([data-tab], [data-side]) .tab-label, .tab.history-tab .tab-label { display: none; }
   .tab:is([data-tab], [data-side]) { justify-content: center; min-width: 44px; padding: 0 12px; }
-  .tab.artifact-menu-button .tab-label, .tab.artifact-menu-button .codicon-chevron-down, .tab.changes-tab .tab-label, .tab.diff-tab .tab-label, .tab.diff-tab .tab-badge { display: none; }
+  .tab.artifact-menu-button .tab-label, .tab.changes-tab .tab-label, .tab.diff-tab .tab-label, .tab.diff-tab .tab-badge { display: none; }
   .tab.artifact-menu-button, .tab.changes-tab { padding: 0 10px; }
   .tab.diff-tab:not(.selected) { display: none; }
   .tab.diff-tab.selected { flex: none; border-left: 1px solid var(--vscode-panel-border); }
@@ -470,8 +478,8 @@ button.picker .picker-session { flex: 0 1 auto; min-width: 0; overflow: hidden; 
 /* With Browser or History too, the fixed tabs' labels need about 740 px beside Artifacts and Changes, so they show their icons alone under
    760 px. */
 @container (max-width: 760px) {
-  .tab:is([data-tab], [data-side]):is([data-tab="browser"], [data-tab="history"], [data-side="browser"], [data-side="history"], :has(~ :is([data-tab="browser"], [data-tab="history"], [data-side="browser"], [data-side="history"]))) .tab-label { display: none; }
-  .tab:is([data-tab], [data-side]):is([data-tab="browser"], [data-tab="history"], [data-side="browser"], [data-side="history"], :has(~ :is([data-tab="browser"], [data-tab="history"], [data-side="browser"], [data-side="history"]))) { justify-content: center; min-width: 44px; padding: 0 12px; }
+  .tabs:has(> :is([data-tab="browser"], [data-side="browser"], .history-tab)) > :is(.tab:is([data-tab], [data-side]), .history-tab) .tab-label { display: none; }
+  .tabs:has(> :is([data-tab="browser"], [data-side="browser"], .history-tab)) > .tab:is([data-tab], [data-side]) { justify-content: center; min-width: 44px; padding: 0 12px; }
 }
 @container (max-width: 360px) {
   .tab { padding: 0 9px; }
