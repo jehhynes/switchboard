@@ -2,7 +2,7 @@
 // turn row, and the prompt or Codex request the session waits on.
 import type { VNode } from 'preact';
 import { fullTime, metaLine, spokenMark, stamped, toneMark, voiceMark } from '@switchboard/conversation/messageMeta';
-import { hasUnspokenText, replyBody } from '@switchboard/conversation/replyBody';
+import { hasUnspokenText, replyBody, spokenParts } from '@switchboard/conversation/replyBody';
 import { answerBrief, plain, questionBrief, questionLedger, stripQuestionMarkup, withoutEndingQuestions } from '@switchboard/conversation/questions';
 import type { LedgerItem, LedgerQuestion, QuestionLedger } from '@switchboard/conversation/questions';
 import { isAnswerMessage, renderAnswersBubble, renderQuestionCard } from '@switchboard/conversation/questionCard';
@@ -67,34 +67,39 @@ function Reply({ item, earlier, view, stamped: shown, card, briefReplies }: { it
     );
   }
 
-  // Focused mode, as in the Conversation view, with Brief replies on: a reply shows its primary response first, spoken or not, and its details behind Show more. The
-  // primary response keeps its place when the whole reply shows; after the operator spoke over it, the part not heard is dimmed.
+  // Focused mode, as in the Conversation view, with Brief replies on: a reply shows its primary response first, spoken or not, then the first lines of its
+  // details fading out, and a click or a tap on it, or Enter or Space on the fade, opens it. The primary response keeps its place when the whole reply
+  // shows; after the operator spoke over it, the part not heard is dimmed.
   // A reply with no [details] line is all primary response, question markup included, which shows no more than the text does.
   const passage = item.kind === 'reply' && item.speak !== null && item.speak.trim() !== '' ? stripQuestionMarkup(item.speak) : null;
   // Question ids and withdraw lines are for the view and the session, not the operator.
   const opening = stripQuestionMarkup(item.opening);
-  // The questions that end a reply show in its card, so they alone give Show more nothing to show.
+  // The questions that end a reply show in its card, so they alone leave nothing to fold.
   const unasked = (text: string): string => (card === null ? text : withoutEndingQuestions(text));
   const folded = passage !== null && hasUnspokenText(unasked(opening), unasked(passage));
-  // Show more opens a reply for good: an open reply has nothing to fold it again.
+  // Opening a reply is for good: an open reply has nothing to fold it again.
   const expanded = !folded || !briefReplies || view.open.has(`more:${item.id}`);
   // Only the text that ends the reply can end in the card's questions, which it leaves out; questions before a passage fold into one line.
   const markdownPart = (text: string, last: boolean): string => (card === null ? renderMarkdown(text) : withoutQuestions(text, last ? `reply:${item.id}` : `reply:${item.id}:before`, view.open, last));
   const said = item.spoken.state === 'interrupted' ? item.spoken.saidChars : null;
   const body = passage === null ? markdownPart(opening, true) : replyBody(opening, passage, said, !expanded, replyRender(markdownPart));
+  const preview = expanded || passage === null ? '' : detailsPreview(opening, passage, markdownPart);
   const tone = toneMark(item.tone, view.details);
   // The copy button comes first on the line under the reply, then the tone and a speech failure with message details on, and the time at the right.
   const meta = metaLine([item.provisional ? '' : copyButton('copy-reply', 'Copy response'), tone, spokenMark(item.spoken.state, view.details)], item.at, shown);
 
   return (
-    <li class={`reply ${item.kind}${item.unread ? ' unread' : ''}`} data-unread={item.unread ? item.id : undefined} data-id={item.id} data-speak={item.speak === null ? undefined : '1'} tabIndex={-1}>
+    <li class={`reply ${item.kind}${item.unread ? ' unread' : ''}${expanded ? '' : ' folded'}`} data-unread={item.unread ? item.id : undefined} data-id={item.id} data-speak={item.speak === null ? undefined : '1'} tabIndex={-1}>
       <span class="dot" title={item.unread ? 'Unread' : undefined}></span>
       <div class="body">
         {trusted(body)}
         {expanded ? null : (
-          <button class="show-more" type="button" data-action="more" data-reply={item.id} aria-expanded="false">
-            Show more
-          </button>
+          // The fade is the reply's control; its text is only a glimpse, which neither a screen reader nor a click reaches.
+          <div class="reply-fade" role="button" tabIndex={0} aria-expanded="false" aria-label="Show more" data-action="more" data-reply={item.id}>
+            <div class="reply-fade-text" aria-hidden="true" inert>
+              {trusted(preview)}
+            </div>
+          </div>
         )}
         {earlier === null ? null : (
           <details class="fold" data-fold={`earlier:${item.id}`} open={view.open.has(`earlier:${item.id}`)}>
@@ -107,6 +112,17 @@ function Reply({ item, earlier, view, stamped: shown, card, briefReplies }: { it
       {card}
     </li>
   );
+}
+
+/** The details a folded reply leaves out, in order, for its fade; a reply whose passage is not found in its text shows its text. */
+function detailsPreview(opening: string, passage: string, markdownPart: (text: string, last: boolean) => string): string {
+  const parts = spokenParts(opening, passage);
+
+  if (parts === null) {
+    return markdownPart(opening, true);
+  }
+
+  return parts.map((part, index) => (part.spoken ? '' : `<div class="reply-details">${markdownPart(part.text, index === parts.length - 1)}</div>`)).join('');
 }
 
 function ArtifactRow({ artifact }: { artifact: ArtifactView }) {

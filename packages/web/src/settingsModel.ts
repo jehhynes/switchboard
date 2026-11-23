@@ -567,7 +567,7 @@ export function voiceFields(state: EditorState): Section[] {
         { path: 'voice.style', label: 'Style', kind: 'select', help: 'How replies are read when no persona applies, unless Expressive delivery is on.', placeholder: 'none', options: withCurrent(choices(SPEECH_STYLES), getAt(value, 'voice.style')) },
         { path: 'voice.speed', label: 'Speed', kind: 'number', help: '0.25 to 1.5; 1 is the voice’s own pace.', placeholder: '1' },
         { path: 'voice.expressive', label: 'Expressive delivery', kind: 'boolean', help: 'Ask Claude for a tone line with each spoken reply, and read the reply in that tone instead of the style.', fallback: false },
-        { path: 'voice.briefReplies', label: 'Brief replies', kind: 'boolean', help: 'Show only the primary response of a reply that has details, with the details behind Show more. Off, replies show in full.', fallback: false },
+        { path: 'voice.briefReplies', label: 'Brief replies', kind: 'boolean', help: 'Show only the primary response of a reply that has details, with the details folded until the reply is opened. Off, replies show in full.', fallback: false },
         { path: 'voice.awayMinutes', label: 'Away timeout (minutes)', kind: 'integer', help: '1 to 1440. With the focus outside every Switchboard window for this long, the voice stops speaking for its session.', placeholder: '2' },
         { path: 'voice.needsYouSound', label: 'Needs-you sound', kind: 'boolean', help: 'Play a short sound between spoken replies when another work item starts needing you.', fallback: true },
         { path: 'voice.outputDevice', label: 'Output device', kind: 'text', help: 'Part of the playback device’s name, such as Speakers. Empty uses the system default.', placeholder: 'System default' },

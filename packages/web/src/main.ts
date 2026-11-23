@@ -3422,6 +3422,15 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
+    // A click or a tap anywhere on a folded reply's text opens it, as one on its fade does; a link, a button or a fold in it does its own thing,
+    // and a drag that selects text does nothing.
+    const foldedBody = target.closest<HTMLElement>('li.reply.folded > .body');
+
+    if (foldedBody !== null && target.closest('a, button, summary, details, input, textarea, select, label') === null && (document.getSelection()?.isCollapsed ?? true)) {
+      openReply(foldedBody.parentElement!.dataset['id']!);
+      return;
+    }
+
     const button = target.closest<HTMLElement>('[data-action]');
     const action = button?.dataset['action'];
 
@@ -3604,10 +3613,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         void earlier();
         break;
       case 'more':
-        // Show more opens the reply for good, and the reply takes the focus the button had.
-        view.open.add(`more:${button!.dataset['reply']}`);
-        draw();
-        [...root.querySelectorAll<HTMLElement>('li.reply')].find((reply) => reply.dataset['id'] === button!.dataset['reply'])?.focus();
+        openReply(button!.dataset['reply']!);
         break;
       case 'artifact':
         // A link to another artifact in a Markdown artifact opens it in place, unless asked for a new tab.
@@ -3994,6 +4000,21 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         rows[at === -1 ? (event.key === 'ArrowDown' ? 0 : rows.length - 1) : Math.max(0, Math.min(rows.length - 1, at + (event.key === 'ArrowDown' ? 1 : -1)))]!.focus();
         event.preventDefault();
       }
+    }
+  });
+  /** Opens a folded reply for good; the reply takes the focus its fade had, rather than leaving it to the page. */
+  const openReply = (id: string): void => {
+    view.open.add(`more:${id}`);
+    draw();
+    [...root.querySelectorAll<HTMLElement>('li.reply')].find((reply) => reply.dataset['id'] === id)?.focus();
+  };
+  root.addEventListener('keydown', (event) => {
+    // A folded reply's fade is a button: Enter or Space opens the reply.
+    const fade = event.target instanceof HTMLElement && event.target.matches('.reply-fade') ? event.target : null;
+
+    if (fade !== null && (event.key === 'Enter' || event.key === ' ') && !event.ctrlKey && !event.metaKey && !event.altKey && !event.isComposing) {
+      event.preventDefault();
+      openReply(fade.dataset['reply']!);
     }
   });
   root.addEventListener('keydown', (event) => {
