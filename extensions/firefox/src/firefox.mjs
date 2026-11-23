@@ -14,7 +14,7 @@ const VERSION_PART = /^(0|[1-9]\d{0,8})$/;
  * The permissions only the Chrome pane and the Switchboard tab group use, which take messages from the web page that Firefox does not deliver:
  * `storage` for their state and pairing, `tabs` to read tab URLs, `tabGroups` to find and name the group.
  */
-const CHROME_PERMISSIONS = ['storage', 'tabs', 'tabGroups'];
+const CHROME_PERMISSIONS = ['storage', 'tabs', 'tabGroups', 'alarms', 'declarativeNetRequestWithHostAccess'];
 
 const CHROME_FONT = "url('chrome-extension://__MSG_@@extension_id__/codicon.ttf')";
 
@@ -59,7 +59,8 @@ export function firefoxManifest(chrome, build) {
     ...(firefoxPermissions.length === 0 ? {} : { permissions: firefoxPermissions }),
     version: `${chrome.version}.${build}`,
     background: { scripts: [background.service_worker] },
-    host_permissions: hosts.map((host) => host.replace(/^([a-z]+:\/\/[^/:]+):\d+\//, '$1/')),
+    // These two exact hosts were added for the Chrome-only iframe experiment.
+    host_permissions: hosts.filter((host) => host !== 'https://github.com/*' && host !== 'http://localhost/*').map((host) => host.replace(/^([a-z]+:\/\/[^/:]+):\d+\//, '$1/')),
     browser_specific_settings: {
       gecko: { id: GECKO_ID, strict_min_version: MIN_VERSION, data_collection_permissions: { required: ['none'] } },
     },

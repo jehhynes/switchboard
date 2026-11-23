@@ -16,6 +16,6 @@
   ],
   "web_accessible_resources": [{ "resources": ["codicon.ttf"], "matches": ["https://github.com/*"] }],
   "externally_connectable": { "matches": ["http://127.0.0.1/*", "http://localhost/*"] },
-  "permissions": ["storage", "tabs", "tabGroups"],
-  "host_permissions": ["http://127.0.0.1:47615/*"]
+  "permissions": ["storage", "tabs", "tabGroups", "alarms", "declarativeNetRequestWithHostAccess"],
+  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*", "https://github.com/*"]
 }

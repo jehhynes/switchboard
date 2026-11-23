@@ -105,10 +105,10 @@ export function browserExtensionZip(webDir: string, origin: string | null): Buff
       return { name, body };
     }
 
-    const manifest = JSON.parse(body.toString('utf8')) as { host_permissions?: string[]; externally_connectable?: { matches?: string[] } };
+    const manifest = JSON.parse(body.toString('utf8')) as { host_permissions?: string[]; externally_connectable?: { matches: string[] } };
 
     manifest.host_permissions = [...(manifest.host_permissions ?? []), `${origin}/*`];
-    manifest.externally_connectable = { ...manifest.externally_connectable, matches: [...(manifest.externally_connectable?.matches ?? []), `${origin}/*`] };
+    manifest.externally_connectable = { matches: [`${origin}/*`] };
     return { name, body: Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`) };
   });
 

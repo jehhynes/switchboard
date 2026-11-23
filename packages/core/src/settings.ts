@@ -138,6 +138,7 @@ export type DiffWrapSetting = (typeof DIFF_WRAPS)[number];
 
 /** The settings a VS Code window's view and the web page read, in a stream's `hello` and its `settings` event. */
 export interface ViewSettings {
+  iframeBrowser?: boolean;
   briefReplies: boolean;
   /** The inverse of `briefReplies`, for a VS Code window that still runs an extension build from before Brief replies, until it reloads. */
   expandReplies: boolean;
@@ -154,6 +155,8 @@ export interface WebSettings {
    * page's Browser tab. Experimental and Windows only; off by default.
    */
   chromePane: boolean;
+  /** GitHub iframe proof of concept; off by default. */
+  iframeBrowser: boolean;
   /**
    * Names the page also answers as when a request comes through a local HTTPS proxy, `tailscale serve` (architecture.md § Remote access), such as
    * `pc.tailnet.ts.net`; read at hub start. Empty by default, so the page answers only on this computer.
@@ -284,7 +287,7 @@ export const DEFAULT_SETTINGS: Settings = {
   dock: { openVSCode: 'always', openTerminal: 'vscode', openIn: 'vscode' },
   alerts: { surface: 'auto' },
   voice: { enabled: false, voice: 'marin', style: 'none', speed: 1, expressive: false, briefReplies: false, awayMinutes: 2, needsYouSound: true, outputDevice: null, micIdleMinutes: 10, endPauseMs: 3000, inputDevice: null, halfDuplexTailMs: 800, duplex: { local: 'auto', remote: 'auto' }, matchThreshold: 0.6, pitchLowFactor: 1.22, pitchMinLowShare: 0.2, roomHold: true, roomHoldSeconds: 60, personas: [], playbookPersonas: {}, spokenAlerts: true, alertOn: { finished: true, question: true, permission: true }, alertAnswerSeconds: 10, operatorName: '' },
-  web: { port: 47616, chromePane: false, remoteHosts: [], remoteLogins: [], tailscale: false, diffLayout: 'auto', diffWrap: 'auto' },
+  web: { port: 47616, chromePane: false, iframeBrowser: false, remoteHosts: [], remoteLogins: [], tailscale: false, diffLayout: 'auto', diffWrap: 'auto' },
 };
 
 /** A source's or schedule's name: it keys tickets in the store and History. */
@@ -633,10 +636,11 @@ export function parseSettings(text: string): SettingsResult {
   voice.playbookPersonas = parsePlaybookPersonas(read, voiceIn['playbookPersonas'], voice.personas);
 
   const webIn = read.section(root, 'web', 'web');
-  read.unknown(webIn, ['port', 'chromePane', 'remoteHosts', 'remoteLogins', 'tailscale', 'diffLayout', 'diffWrap'], 'web');
+  read.unknown(webIn, ['port', 'chromePane', 'iframeBrowser', 'remoteHosts', 'remoteLogins', 'tailscale', 'diffLayout', 'diffWrap'], 'web');
   const web: WebSettings = {
     port: read.integer(webIn, 'port', 'web', defaults.web.port, 0, 65535),
     chromePane: read.boolean(webIn, 'chromePane', 'web', defaults.web.chromePane),
+    iframeBrowser: read.boolean(webIn, 'iframeBrowser', 'web', defaults.web.iframeBrowser),
     remoteHosts: read.names(webIn, 'remoteHosts', 'web', REMOTE_HOST, 'host names such as pc.tailnet.ts.net, without a port'),
     remoteLogins: read.names(webIn, 'remoteLogins', 'web', /^[^\s,;]+$/, 'logins without spaces'),
     tailscale: read.boolean(webIn, 'tailscale', 'web', defaults.web.tailscale),

@@ -386,6 +386,7 @@ public static partial class SettingsFields
             new Section("Web page",
             [
                 new Field("web.chromePane", "Chrome pane (experimental)", FieldKind.Boolean, "Experimental, Windows only, and may break with Chrome updates. Shows the selected work item's ticket and pull request in a Chrome window that Switchboard keeps over the installed web page's right column, without the dock. Needs the Switchboard Chrome extension, paired from the page's view options.", Fallback: false),
+                new Field("web.iframeBrowser", "GitHub iframe (experiment)", FieldKind.Boolean, "Experimental GitHub embedding on local and paired devices. Needs this branch's Chrome/Edge extension and Chromium 145+. Open with sign-in support keeps the existing page inside an extension tab beside GitHub. Allows that extension to frame Switchboard and removes GitHub framing headers and CSP in verified experiment tabs. Reload the page after changing this setting. Takes precedence over Chrome pane.", Fallback: false),
             ]),
             // The Settings window draws the paired devices and Pair a device after this section (architecture.md § Remote access).
             new Section("Remote access",

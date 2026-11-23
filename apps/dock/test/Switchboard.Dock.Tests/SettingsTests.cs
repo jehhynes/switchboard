@@ -21,13 +21,13 @@ public sealed class SettingsFieldsTests
                 "triage.concurrency", "triage.model", "triage.timeoutSeconds",
                 "dock.openVSCode", "dock.openIn", "dock.openTerminal",
                 "alerts.surface",
-                "web.chromePane",
+                "web.chromePane", "web.iframeBrowser",
                 "web.tailscale", "web.remoteHosts", "web.remoteLogins",
                 "sessions.installHooks", "sessions.claudePath", "sessions.codexPath", "sessions.nodePath",
             ],
             sections.SelectMany((section) => section.Fields).Select((field) => field.Path));
         Assert.Equal(
-            ["Default agent", "Concurrency", "Code Mode (experimental)", "Friction debriefs", "Model", "Permission mode", "Model", "Permission mode", "Concurrency", "Model", "Timeout (seconds)", "Rows open in", "Row click opens", "Terminal for \"Open in terminal\"", "Needs-you alerts from", "Chrome pane (experimental)", "Tailscale", "Allowed hosts", "Allowed logins", "Install hooks", "Claude Code path", "Codex path", "Node.js path"],
+            ["Default agent", "Concurrency", "Code Mode (experimental)", "Friction debriefs", "Model", "Permission mode", "Model", "Permission mode", "Concurrency", "Model", "Timeout (seconds)", "Rows open in", "Row click opens", "Terminal for \"Open in terminal\"", "Needs-you alerts from", "Chrome pane (experimental)", "GitHub iframe (experiment)", "Tailscale", "Allowed hosts", "Allowed logins", "Install hooks", "Claude Code path", "Codex path", "Node.js path"],
             sections.SelectMany((section) => section.Fields).Select((field) => field.Label));
         Assert.Equal(["claude", "codex"], fields["sessions.provider"].Options!.Select((option) => option.Value));
         Assert.Equal(["Claude", "Codex"], fields["sessions.provider"].Options!.Select((option) => option.Label));
@@ -49,6 +49,8 @@ public sealed class SettingsFieldsTests
         Assert.Equal("vscode", fields["dock.openTerminal"].Placeholder);
         Assert.Contains("when Rows open in is Always", fields["dock.openTerminal"].Help);
         Assert.Equal((FieldKind.Boolean, false), (fields["web.chromePane"].Kind, fields["web.chromePane"].Fallback));
+        Assert.Equal((FieldKind.Boolean, false), (fields["web.iframeBrowser"].Kind, fields["web.iframeBrowser"].Fallback));
+        Assert.Contains("Reload the page", fields["web.iframeBrowser"].Help);
         Assert.StartsWith("Experimental, Windows only, and may break with Chrome updates.", fields["web.chromePane"].Help);
         Assert.Equal((FieldKind.Boolean, false), (fields["web.tailscale"].Kind, fields["web.tailscale"].Fallback));
         Assert.Contains("tailscale serve --bg 47616", fields["web.tailscale"].Help);

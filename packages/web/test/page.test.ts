@@ -4393,6 +4393,34 @@ describe('the page in use', () => {
     expect(paneLink(`https://a.test/${'x'.repeat(2048)}`)).toBe(false);
   });
 
+  it('shows the experimental GitHub frame on a remote page only after extension confirmation and removes it when disabled', async () => {
+    window.innerWidth = 1920;
+    const sent: unknown[] = [];
+    let resolve!: (reply: unknown) => void;
+    const page = startPage(root, {
+      fetch: (async (url: string, init?: { body?: string }) => { posts.push({ url, body: init?.body ? JSON.parse(init.body) : {} }); return { status: 200, ok: true, json: async () => ({}) } as Response; }) as typeof globalThis.fetch,
+      EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, local: false, standalone: () => false,
+      toExtension: async (_id, message) => { sent.push(message); return message['type'] === 'iframe-enable' ? new Promise((done) => { resolve = done; }) : { ok: true }; },
+    });
+    const source = FakeSource.last!;
+    hello(source, { settings: { iframeBrowser: true }, groups: [listGroup('progress', [listRow(1, { url: 'https://github.com/o/r/issues/1' })])] });
+    expect(root.querySelector('[data-side="browser"]')).not.toBeNull();
+    click('#detail [data-side="browser"]');
+    expect(root.querySelector('iframe[title="GitHub browser experiment"]')).toBeNull();
+    resolve({ ok: true }); await flush();
+    const frame = root.querySelector<HTMLIFrameElement>('iframe[title="GitHub browser experiment"]')!;
+    expect(frame.src).toBe('https://github.com/o/r/issues/1');
+    source.emit('reply', { reply: reply('r9', 9) }); expect(root.querySelector('iframe[title="GitHub browser experiment"]')).toBe(frame);
+    click('[data-action="artifact"][data-path="chat/p.html"]');
+    expect(root.querySelector('#detail .detail-body')!.classList.contains('framed')).toBe(true);
+    click('#detail [data-side="browser"]');
+    expect(root.querySelector('#detail .detail-body')!.classList.contains('framed')).toBe(false);
+    expect(posts.filter((post) => post.url.endsWith('/pane-pair') || post.url.endsWith('/pane-rect'))).toEqual([]);
+    source.emit('settings', { settings: { iframeBrowser: false } });
+    expect(root.querySelector('iframe[title="GitHub browser experiment"]')).toBeNull(); expect(sent.at(-1)).toEqual({ type: 'iframe-disable' });
+    page.close();
+  });
+
   it('adds a Browser tab for the Chrome pane, reports its area under the tab strip only while it is chosen, marks the title, and wakes and pairs the extension (PRD R113)', async () => {
     window.innerWidth = 1920;
 

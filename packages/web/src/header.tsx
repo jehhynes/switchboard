@@ -337,6 +337,8 @@ export function UnreadDot({ label = 'Unread' }: { label?: string }) {
 
 /** What a strip's artifact tabs show: the open artifact while one shows, how many tabs fit, whether the Artifacts menu is open, and the time for its ages. */
 export interface ArtifactStrip {
+  links?: Array<{ url: string; label: string }>;
+  link?: string;
   open: string | null;
   fit: number;
   menu: boolean;
@@ -412,6 +414,15 @@ function artifactTabs(state: PageState, strip: ArtifactStrip): ComponentChildren
   ];
 }
 
+function linkTabs(strip: ArtifactStrip, selected: boolean): ComponentChildren {
+  return strip.links?.map((link) => (
+    <span class={`tab artifact-tab${selected && strip.link === link.url ? ' selected' : ''}`} role="presentation">
+      <button class="tab-open" type="button" role="tab" data-action="iframe-open" data-url={link.url} title={link.url} aria-selected={selected && strip.link === link.url} tabindex={selected && strip.link === link.url ? 0 : -1}><span class="tab-label">{link.label}</span></button>
+      <button class="tab-close" type="button" data-action="iframe-close" data-url={link.url} aria-label={`Close ${link.label}`} title="Close"><span class="codicon codicon-close" aria-hidden="true" /></button>
+    </span>
+  ));
+}
+
 /**
  * The tab strip atop the column right of the conversation on a wide screen: Status, Console, Browser and History, each while it has something to show, then a tab per
  * artifact (`artifactTabs`); the conversation keeps its own pane beside it. `extra` follows them, as the Changes button does.
@@ -421,7 +432,7 @@ export function renderSideSwitch(side: SideTab, state: PageState, browser = fals
   const tabs: Array<[SideTab, string, boolean]> = [
     ['status', 'Status', fresh],
     ...(console ? [['console', 'Console', false] as [SideTab, string, boolean]] : []),
-    ...(browser ? [['browser', 'Browser', false] as [SideTab, string, boolean]] : []),
+    ...(browser && strip.links === undefined ? [['browser', 'Browser', false] as [SideTab, string, boolean]] : []),
     ...(history ? [['history', 'History', false] as [SideTab, string, boolean]] : []),
   ];
 
@@ -430,6 +441,7 @@ export function renderSideSwitch(side: SideTab, state: PageState, browser = fals
       {tabs.map(([tab, label, unread]) => (
         <TabButton selected={tab === side} label={label} icon={tabIcon(tab)} unread={unread} attrs={{ 'data-side': tab }} />
       ))}
+      {linkTabs(strip, side === 'browser')}
       {artifactTabs(state, { ...strip, open: side === 'artifacts' ? strip.open : null, fit: strip.fit })}
       {extra}
     </nav>
@@ -454,9 +466,10 @@ export function renderTabs(view: View, state: PageState, browser = false, strip:
 
   return (
     <nav class="tabs" role="tablist">
-      {TABS.filter(({ tab }) => tab !== 'artifacts' && (browser || tab !== 'browser') && (console || tab !== 'console') && (history || tab !== 'history')).map(({ tab, label, icon }) => (
+      {TABS.filter(({ tab }) => tab !== 'artifacts' && ((browser && strip.links === undefined) || tab !== 'browser') && (console || tab !== 'console') && (history || tab !== 'history')).map(({ tab, label, icon }) => (
         <TabButton selected={tab === view.tab} label={label} icon={icon} unread={tab === 'status' && fresh} attrs={{ 'data-tab': tab }} />
       ))}
+      {linkTabs(strip, view.tab === 'browser')}
       {artifactTabs(state, { ...strip, open: view.tab === 'artifacts' ? strip.open : null })}
       {extra}
     </nav>

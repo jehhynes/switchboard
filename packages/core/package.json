@@ -7,6 +7,10 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./hubRecord": {
+      "types": "./dist/hubRecord.d.ts",
+      "default": "./dist/hubRecord.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
@@ -22,10 +26,6 @@
     "./settings": {
       "types": "./dist/settings.d.ts",
       "default": "./dist/settings.js"
-    },
-    "./hubRecord": {
-      "types": "./dist/hubRecord.d.ts",
-      "default": "./dist/hubRecord.js"
     },
     "./limit": {
       "types": "./dist/limit.d.ts",

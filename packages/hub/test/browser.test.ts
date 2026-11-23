@@ -28,6 +28,15 @@ function get(port: number, path: string, host = `127.0.0.1:${port}`, method = 'G
 }
 
 describe('listenBrowser', () => {
+  it('vouches for the actual iframe page origins only, with no CORS and a refused rebound Host', async () => {
+    server = await listenBrowser(0, () => [], () => [], undefined, undefined, undefined, undefined, async () => ({ enabled: true, origins: ['http://127.0.0.1:4000', 'http://localhost:4000'] }));
+    const response = await get(server.port, '/iframe');
+    expect(JSON.parse(response.body)).toEqual({ enabled: true, origins: ['http://127.0.0.1:4000', 'http://localhost:4000'] });
+    expect(response.headers['access-control-allow-origin']).toBeUndefined();
+    expect((await get(server.port, '/iframe', 'evil.test')).status).toBe(403);
+    await server.close(); server = await listenBrowser(0, () => [], () => []);
+    expect(JSON.parse((await get(server.port, '/iframe')).body)).toEqual({ enabled: false, origins: [] });
+  });
   it('lists the snoozed URLs on each request, with no CORS header', async () => {
     let urls = ['https://github.com/o/r/issues/1'];
 

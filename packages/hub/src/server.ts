@@ -5,6 +5,7 @@ import { gzipSync } from 'node:zlib';
 import { pipeline } from 'node:stream';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
+import { PANE_EXTENSION_ID } from '@switchboard/core';
 import type { Card, HubIdentity } from '@switchboard/core';
 import { handleSnooze, handleUnsnooze } from './browserSnooze.js';
 import type { SnoozeByUrl, UnsnoozeByUrl } from './browserSnooze.js';
@@ -114,6 +115,7 @@ export interface PageRoutes {
  * this computer, and the extension's download.
  */
 export interface PageBrowser {
+  iframeEnabled?(): boolean;
   snoozed(): string[];
   cards(): Card[];
   snooze: SnoozeByUrl;
@@ -179,6 +181,7 @@ export const VOICE_NOT_ALLOWED = 'Voice is not allowed on this device. Allow it 
 export const REMOTE_OFF = 'Pairing a device needs remote access: turn on Tailscale, or set the allowed hosts and logins, under Remote access on the General page of Settings, and run tailscale serve.';
 
 export interface HubServer {
+  pageUrl(): Promise<string>;
   port: number;
   token: string;
   /** Connected event streams. */
@@ -764,7 +767,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
         'Content-Type': asset.mime,
         'Cache-Control': asset.immutable === true ? 'private, max-age=31536000, immutable' : 'no-cache',
         'X-Frame-Options': 'DENY',
-        'Content-Security-Policy': PAGE_CSP,
+        'Content-Security-Policy': page.browser?.iframeEnabled?.() === true ? PAGE_CSP.replace("frame-src 'self'", "frame-src 'self' https://github.com").replace("frame-ancestors 'none'", `frame-ancestors chrome-extension://${PANE_EXTENSION_ID}`) : PAGE_CSP,
         ...(asset.gzip === undefined ? {} : { Vary: 'Accept-Encoding' }),
         ...(gzip ? { 'Content-Encoding': 'gzip' } : {}),
         ...etag,
@@ -854,6 +857,8 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
         json(response, 200, { urls: browser.snoozed() });
       } else if (request.method === 'GET' && route === 'cards') {
         json(response, 200, { cards: browser.cards() });
+      } else if (request.method === 'GET' && route === 'iframe') {
+        json(response, 200, { enabled: browser.iframeEnabled?.() === true });
       } else if (request.method === 'POST' && route === 'snooze') {
         void handleSnooze(request, (url, until) => allowed(() => browser.snooze(url, until))).then(({ status, body }) => json(response, status, body));
       } else if (request.method === 'POST' && route === 'unsnooze') {
@@ -1422,6 +1427,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       ownPort = port;
 
       resolve({
+        pageUrl: () => pageReady.then(() => `http://127.0.0.1:${pagePort ?? ownPort}/page/`),
         port,
         token,
         clients: () => streams.size,

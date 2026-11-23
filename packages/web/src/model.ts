@@ -22,6 +22,7 @@ export interface PageState {
   /** The session's questions as the hub keeps them (PRD R103): the open count, the oldest open card and the card drafts; null before the hub sent them. */
   questions: QuestionsView | null;
   briefReplies: boolean;
+  iframeBrowser?: boolean;
   /** The diff viewer's settings (`web.diffLayout`, `web.diffWrap`), from the `hello` and each `settings` event. */
   diffLayout: 'auto' | 'split' | 'stacked';
   diffWrap: 'auto' | 'on' | 'off';
@@ -84,6 +85,7 @@ export function applyEvent(state: PageState, event: Event): PageState {
         voice: event['voice'] ?? null,
         questions: event['questions'] ?? null,
         briefReplies: event['settings']?.briefReplies ?? state.briefReplies,
+        iframeBrowser: event['settings']?.iframeBrowser === true,
         ...diffSettings(event['settings'], state),
       };
     case 'list':
@@ -118,7 +120,7 @@ export function applyEvent(state: PageState, event: Event): PageState {
     case 'questions':
       return event['questions']?.sessionId === state.scope?.sessionId ? { ...state, questions: event['questions'] } : state;
     case 'settings':
-      return { ...state, briefReplies: event['settings']?.briefReplies === true, ...diffSettings(event['settings'], state) };
+      return { ...state, briefReplies: event['settings']?.briefReplies === true, iframeBrowser: event['settings']?.iframeBrowser === true, ...diffSettings(event['settings'], state) };
     case 'progress':
       return { ...state, items: state.items.map((item) => (item.id === event['replyId'] && item.type === 'reply' ? { ...item, spoken: { state: 'playing', atMs: event['atMs'], saidChars: event['chars'] } } : item)) };
     default:

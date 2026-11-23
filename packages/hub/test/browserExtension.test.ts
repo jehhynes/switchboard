@@ -85,11 +85,8 @@ describe('the browser extension download (PRD R121)', () => {
 
     expect([...files.keys()]).toEqual(['switchboard-extension/background.js', 'switchboard-extension/icons/icon-16.png', 'switchboard-extension/manifest.json', 'switchboard-extension/remote.json']);
     expect(JSON.parse(files.get('switchboard-extension/remote.json')!.toString('utf8'))).toEqual({ origin: 'https://pc.tail.ts.net' });
-    const manifest = JSON.parse(files.get('switchboard-extension/manifest.json')!.toString('utf8'));
-
-    expect(manifest.host_permissions).toEqual(['http://127.0.0.1:47615/*', 'https://pc.tail.ts.net/*']);
-    // The page there may message the copy, which opens its links in the tab group.
-    expect(manifest.externally_connectable).toEqual({ matches: ['http://127.0.0.1/*', 'http://localhost/*', 'https://pc.tail.ts.net/*'] });
+    expect(JSON.parse(files.get('switchboard-extension/manifest.json')!.toString('utf8')).host_permissions).toEqual(['http://127.0.0.1:47615/*', 'https://pc.tail.ts.net/*']);
+    expect(JSON.parse(files.get('switchboard-extension/manifest.json')!.toString('utf8')).externally_connectable).toEqual({ matches: ['https://pc.tail.ts.net/*'] });
     // The installed build is unchanged.
     const installed = JSON.parse(readFileSync(join(web, 'chrome', 'manifest.json'), 'utf8'));
 

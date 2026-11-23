@@ -523,7 +523,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   // The window in front, which the voice follows (architecture.md § Voice).
   let focusedWindow: string | null = null;
   // What a window's view and the web page read of the settings, in each `hello` and again when settings.json is reloaded.
-  const viewSettings = (): ViewSettings => ({ briefReplies: config.settings.voice.briefReplies, expandReplies: !config.settings.voice.briefReplies, diffLayout: config.settings.web.diffLayout, diffWrap: config.settings.web.diffWrap });
+  const viewSettings = (): ViewSettings => ({ briefReplies: config.settings.voice.briefReplies, expandReplies: !config.settings.voice.briefReplies, diffLayout: config.settings.web.diffLayout, diffWrap: config.settings.web.diffWrap, iframeBrowser: config.settings.web.iframeBrowser });
   // The page's list and header, sent again when the voice changes the dock's view; set once the conversation service exists.
   let pageListChanged = (): void => {};
   const builtNow = (): void => {
@@ -1162,6 +1162,7 @@ const dockWithRuns = () => {
 
   // What the browser extension reads and posts, on the browser endpoint and through the web page's origin (architecture.md § Browser extension).
   const browser: PageBrowser = {
+    iframeEnabled: () => config.settings.web.iframeBrowser,
     snoozed: () => store.snoozedTickets(deps.now()).flatMap((ticket) => (ticket.url === '' ? [] : [ticket.url])),
     cards: () => cardsOf(views().snapshot),
     snooze: (url, until) => {

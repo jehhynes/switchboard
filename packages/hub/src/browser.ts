@@ -17,7 +17,7 @@ export interface BrowserServer {
  * Host other than the loopback address, against DNS rebinding. `/pane` upgrades to the Chrome pane's paired socket (PRD R113); a plain
  * `GET /pane` answers whether the pane is on, so the extension opens no socket the hub would refuse.
  */
-export function listenBrowser(port: number, snoozed: () => string[], cards: () => Card[], snooze?: SnoozeByUrl, unsnooze?: UnsnoozeByUrl, pane?: (request: IncomingMessage, socket: Duplex, head: Buffer) => void, paneEnabled?: () => boolean): Promise<BrowserServer> {
+export function listenBrowser(port: number, snoozed: () => string[], cards: () => Card[], snooze?: SnoozeByUrl, unsnooze?: UnsnoozeByUrl, pane?: (request: IncomingMessage, socket: Duplex, head: Buffer) => void, paneEnabled?: () => boolean, iframe?: () => Promise<{ enabled: boolean; origins: string[] }>): Promise<BrowserServer> {
   const server: Server = createServer((request, response) => {
     const listening = (server.address() as { port: number }).port;
     const hosts = new Set([`127.0.0.1:${listening}`, `localhost:${listening}`]);
@@ -36,6 +36,8 @@ export function listenBrowser(port: number, snoozed: () => string[], cards: () =
       reply(200, { cards: cards() });
     } else if (request.method === 'GET' && path === '/pane') {
       reply(200, { enabled: pane !== undefined && paneEnabled?.() === true });
+    } else if (request.method === 'GET' && path === '/iframe') {
+      void (iframe?.() ?? Promise.resolve({ enabled: false, origins: [] })).then((state) => reply(200, state), () => reply(503, { enabled: false, origins: [] }));
     } else if (request.method === 'POST' && path === '/snooze' && snooze !== undefined) {
       void handleSnooze(request, snooze).then(({ status, body }) => reply(status, body));
     } else if (request.method === 'POST' && path === '/unsnooze' && unsnooze !== undefined) {

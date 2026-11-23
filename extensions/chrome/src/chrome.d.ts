@@ -7,7 +7,7 @@ declare namespace chrome.runtime {
   function getURL(path: string): string;
 
   const onMessageExternal: {
-    addListener(listener: (message: unknown, sender: { origin?: string }, sendResponse: (response: unknown) => void) => boolean): void;
+    addListener(listener: (message: unknown, sender: import('./iframe.js').IframeSender, sendResponse: (response: unknown) => void) => boolean): void;
   };
 
   const onMessage: {
@@ -24,12 +24,13 @@ declare namespace chrome.tabs {
 
   function query(query: { windowId: number } | { groupId: number }): Promise<Tab[]>;
   function update(tabId: number, properties: { url: string } | { active: true }): Promise<Tab | undefined>;
-  function create(properties: { windowId: number; url: string; active: boolean }): Promise<Tab>;
+  function create(properties: { windowId?: number; url: string; active: boolean }): Promise<Tab>;
   function remove(tabId: number): Promise<void>;
   function group(options: { tabIds: number; groupId?: number; createProperties?: { windowId: number } }): Promise<number>;
 
   const onRemoved: { addListener(listener: (tabId: number) => void): void };
-  const onUpdated: { addListener(listener: (tabId: number, change: { groupId?: number }) => void): void };
+  const onUpdated: { addListener(listener: (tabId: number, change: { groupId?: number; url?: string }) => void): void };
+  function get(tabId: number): Promise<Tab>;
 }
 
 declare namespace chrome.storage {
@@ -67,4 +68,12 @@ declare namespace chrome.tabGroups {
   function get(groupId: number): Promise<TabGroup>;
   function query(query: { title: string }): Promise<TabGroup[]>;
   function update(groupId: number, properties: { title: string; color: 'cyan' }): Promise<TabGroup | undefined>;
+}
+declare namespace chrome.declarativeNetRequest {
+  function getSessionRules(): Promise<Array<{ id: number }>>;
+  function updateSessionRules(options: { removeRuleIds: number[]; addRules: import('./iframe.js').IframeRule[] }): Promise<void>;
+}
+declare namespace chrome.alarms {
+  function create(name: string, info: { periodInMinutes: number }): Promise<void>;
+  const onAlarm: { addListener(listener: (alarm: { name: string }) => void): void };
 }

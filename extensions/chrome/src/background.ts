@@ -5,6 +5,8 @@ import { readCards } from './pills.js';
 import { postSnooze, postUnsnooze, snoozeMessage, unsnoozeMessage } from './snooze.js';
 import { GROUP_TITLE, answerLink, linkOpener, linkRequest, placedKinds } from './tabs.js';
 import type { Tabs } from './tabs.js';
+import { IframeRules, iframeEnabled } from './iframe.js';
+import type { IframeLease } from './iframe.js';
 
 // The hub on this computer, or the one whose web page gave this copy (architecture.md § Browser extension).
 const routes = readRoutes((url) => fetch(url), chrome.runtime.getURL(REMOTE_FILE));
@@ -69,6 +71,31 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 // nor externally_connectable. The pane works only with the hub on this computer, since it keeps a window there; the tab group takes the links of
 // the page this copy reaches. The listeners are added at once, as a service worker that an event wakes gets only the listeners its first run adds.
 if (!FIREFOX) {
+  const iframe = routes.then((hub) => new IframeRules({
+    origin: hub.origin,
+    now: () => Date.now(),
+    tab: (id) => chrome.tabs.get(id).then((tab) => tab.url, () => undefined),
+    enabled: (origin) => iframeEnabled((url) => fetch(url, { credentials: 'include', cache: 'no-store' }), origin, hub.origin),
+    leases: async () => (await chrome.storage.session.get('iframeLeases'))['iframeLeases'] as Record<string, IframeLease> | undefined ?? {},
+    save: (leases) => chrome.storage.session.set({ iframeLeases: leases }),
+    rules: () => chrome.declarativeNetRequest.getSessionRules(),
+    update: (removeRuleIds, addRules) => chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds, addRules }),
+  }));
+  const cleanup = (run: Promise<unknown>): void => { void run.catch((error: unknown) => console.error('Switchboard could not clear iframe rules', error)); };
+  chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
+    const type = (message as { type?: unknown } | null)?.type;
+    if (type !== 'iframe-enable' && type !== 'iframe-disable' && type !== 'iframe-launch') return false;
+    void iframe.then((rules) => rules.external(message, sender)).then(async (answer) => {
+      if (type === 'iframe-launch' && answer.ok === true) await chrome.tabs.create({ url: `${chrome.runtime.getURL('iframeHost.html')}?origin=${encodeURIComponent(sender.origin!)}`, active: true });
+      sendResponse(answer);
+    }).catch(() => sendResponse({ error: 'Could not open the iframe browser.' }));
+    return true;
+  });
+  chrome.tabs.onRemoved.addListener((id) => cleanup(iframe.then((rules) => rules.remove(id))));
+  chrome.tabs.onUpdated.addListener((id, change) => { if (change.url !== undefined) cleanup(iframe.then((rules) => rules.navigated(id))); });
+  chrome.alarms.onAlarm.addListener((alarm) => { if (alarm.name === 'iframe-cleanup') cleanup(iframe.then((rules) => rules.sweep())); });
+  cleanup(chrome.alarms.create('iframe-cleanup', { periodInMinutes: 0.5 }));
+  cleanup(iframe.then((rules) => rules.sweep()));
   const store = (area: chrome.storage.StorageArea): KeyValue => ({ get: (key) => area.get(key), set: (items) => area.set(items), remove: (key) => area.remove(key) });
   const markerPage = chrome.runtime.getURL('pane.html');
   const pane = new PaneConnection({
@@ -146,6 +173,7 @@ if (!FIREFOX) {
   // The page wakes the service worker, which Chrome stops while no socket keeps it busy, hands it the pairing token, and has its links opened in
   // the tab group.
   chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
+    if (String((message as { type?: unknown } | null)?.type).startsWith('iframe-')) return false;
     const link = linkRequest(message);
 
     void routes.then(async (hub) => sendResponse(link !== null ? await answerLink(link, sender.origin, hub.origin, open) : hub.origin === null ? pane.external(message, sender.origin) : null));

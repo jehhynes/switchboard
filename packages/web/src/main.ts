@@ -52,6 +52,7 @@ import { LocalFilesController, localTabs } from './localFiles.js';
 import type { DiffModule } from './diff/types.js';
 import { useFileIcons } from './fileIcons.js';
 import type { NeedsItem } from './alerts.js';
+import { IframeBrowser, githubFrameUrl, githubLinks, IFRAME_EXTENSION_ID, IFRAME_RENEW_MS } from './iframeBrowser.js';
 
 /** The stream's event types the page reads. */
 /** How long after a single-choice pick the card moves to the next question (design open choice 4). */
@@ -307,7 +308,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /** Whether the Browser tab shows: on the installed page while the Chrome pane is on (PRD R113). */
   /** Whether this page can drive the browser pane: only a page on this computer posts its area (`pane-rect` is a local command). */
   const paneLocal = (): boolean => deps.local ?? ['127.0.0.1', 'localhost'].includes(location.hostname);
-  const browserTab = (): boolean => view.pane?.enabled === true && standalone() && paneLocal();
+  const browserTab = (): boolean => state.iframeBrowser === true || (view.pane?.enabled === true && standalone() && paneLocal());
   /** Whether this page's browser pane is paired and running, so it shows the links and the list's pills are labels. */
   const paneWorks = (): boolean => browserTab() && view.pane?.extension === 'paired' && view.pane.error === null;
   /** Opens a link in a new browser tab, through `deps.openUrl` when given. */
@@ -354,6 +355,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /** Whether the open work item has links the Chrome pane can show: its own, or a web link of its conversation opened there. */
   const itemLinks = (): boolean => {
     const row = selectedRow(state);
+    if (state.iframeBrowser === true) return githubLinks(row).length > 0 || (paneOpened !== null && paneOpened === state.scope?.workItemId);
 
     return (row !== null && (paneLink(row.url) || row.links.some((link) => paneLink(link.url)))) || (paneOpened !== null && paneOpened === state.scope?.workItemId);
   };
@@ -418,7 +420,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const browserUseful = (): boolean => {
     const row = selectedRow(state);
 
-    return browserTab() && view.pane?.extension === 'paired' && row !== null && itemLinks();
+    return browserTab() && (state.iframeBrowser === true ? iframe.ready : view.pane?.extension === 'paired') && row !== null && itemLinks();
   };
   const browserFirst = (): boolean => browserUseful() && state.session === null;
   /** The tab every work item opens on, Status or Browser, as the operator last chose it on any device; null before any choice. */
@@ -535,6 +537,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   };
   /** Whether a web link can open in the Chrome pane: it runs for this computer's installed page, paired and not stopped. */
   const paneReady = (): boolean => {
+    if (state.iframeBrowser === true) return iframe.ready && state.scope !== null;
     // The Browser tab's area must be wide enough for the pane, or the link would wait unseen; it opens in a new browser tab instead.
     const area = (wide() ? detailBody : panel).getBoundingClientRect().width;
 
@@ -545,6 +548,13 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
    * pane's window lies; the link opens in a new browser tab instead when the hub refuses it.
    */
   const openInPane = (url: string): void => {
+    if (state.iframeBrowser === true) {
+      if (iframe.open(url, state.scope?.workItemId ?? null)) {
+        paneOpened = state.scope?.workItemId ?? null;
+        leaving('browser'); chooseTab('browser'); draw(); saveTab();
+      } else (deps.openUrl ?? ((one: string) => void window.open(one, '_blank', 'noopener,noreferrer')))(url);
+      return;
+    }
     const workItemId = state.scope?.workItemId ?? null;
 
     paneOpened = workItemId;
@@ -567,6 +577,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   let forcePane = false;
 
   let state: PageState = EMPTY;
+  let iframeAtLoad: boolean | null = null;
   const view: View = newView();
   // The Changes list, its menu and the session state it was last drawn at, so a turn's end reads it again (architecture.md § Web page).
   const changes = new ChangesController({
@@ -2323,6 +2334,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
+    iframe.follow(selectedRow(state), state.groups.some((group) => group.key === 'review' && group.rows.includes(selectedRow(state)!)));
     const shownArtifact = openArtifact();
 
     // Opened only while it shows: not under the phone's list.
@@ -2330,14 +2342,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       artifactsOpened([shownArtifact]);
     }
 
-    const strip = { open: shownArtifact, fit: view.artifactFit, menu: view.artifactMenu, now: deps.now(), closed: closedNow(), unread: unreadArtifacts(state.artifacts, state.scope.workItemId ?? null, artifactsSeen) };
+    const strip = { ...(state.iframeBrowser === true ? { links: iframe.tabs, link: iframe.selected } : {}), open: shownArtifact, fit: view.artifactFit, menu: view.artifactMenu, now: deps.now(), closed: closedNow(), unread: unreadArtifacts(state.artifacts, state.scope.workItemId ?? null, artifactsSeen) };
 
     // The file tabs, then the one Changes tab, last so it keeps its place as file tabs come and go.
     const changeTabs = (shown: Tab): ComponentChild[] => [localTabs(localFiles.view, shown === 'file', true), changesTab(changes.view, shown === 'diff', localFiles.view.tabs.length === 0)];
 
     // The History tab reads the hub only while it shows.
     followHistory((side ? sideTab() : mainTab()) === 'history' && !(isPhone() && listing));
-    mount(head, [renderHeader(state, view), side ? null : renderTabs({ ...view, tab: mainTab() }, state, showBrowser(), strip, changeTabs(mainTab()), showConsole(), showHistory())]);
+    mount(head, [renderHeader(state, state.iframeBrowser === true ? { ...view, pane: null } : view), side ? null : renderTabs({ ...view, tab: mainTab() }, state, showBrowser(), strip, changeTabs(mainTab()), showConsole(), showHistory())]);
 
     const artifact = view.artifact === null ? undefined : state.artifacts.find((one) => one.path === view.artifact);
     const now = deps.now();
@@ -2349,11 +2361,16 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       pane.classList.toggle('diff-pane', tab === 'diff' || (tab === 'file' && localFiles.codeShown()));
 
       if (tab === 'browser') {
-        // The Chrome pane's window lies over this area while it shows; until then the area says why it does not.
-        const row = selectedRow(state);
-        const note = browserNote(view.pane, pane.getBoundingClientRect().width, itemLinks(), paneHidden());
+        if (state.iframeBrowser === true) {
+          takePane(pane);
+          iframe.draw(pane, selectedRow(state), state.groups.some((group) => group.key === 'review' && group.rows.includes(selectedRow(state)!)));
+        } else {
+          // The Chrome pane's window lies over this area while it shows; until then the area says why it does not.
+          const row = selectedRow(state);
+          const note = browserNote(view.pane, pane.getBoundingClientRect().width, itemLinks(), paneHidden());
 
-        drawPane(pane, note === null ? null : renderEmpty(note));
+          drawPane(pane, note === null ? null : renderEmpty(note));
+        }
       } else if (tab === 'console') {
         drawConsole(pane);
       } else if (tab === 'history') {
@@ -3814,6 +3831,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         view.actions = false;
         draw();
         break;
+      case 'iframe-open':
+        openInPane(target.dataset['url'] ?? '');
+        break;
+      case 'iframe-close':
+        iframe.close(target.dataset['url'] ?? '');
+        if (iframe.tabs.length === 0) chooseTab('status');
+        draw();
+        break;
       case 'pane-pair':
         void pairPane();
         break;
@@ -4664,9 +4689,27 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
       return new Promise((resolve) => runtime.sendMessage!(extensionId, message, (answer) => resolve(runtime.lastError === undefined ? (answer ?? null) : null)));
     });
+  const iframe = new IframeBrowser({
+    send: (message) => toExtension(IFRAME_EXTENSION_ID, message),
+    changed: (becameReady) => { if (becameReady && !tabChosen) openTabs(); draw(); },
+    external: (url) => { if (githubFrameUrl(url)) (deps.openUrl ?? ((one: string) => void window.open(one, '_blank', 'noopener,noreferrer')))(url); },
+  });
+  const iframeRenew = setInterval(() => void iframe.renew(), IFRAME_RENEW_MS);
+  const resumeIframe = (): void => {
+    if (state.iframeBrowser === true && state.connected && document.visibilityState !== 'hidden') { void iframe.renew(); reportPane(true); }
+  };
+  window.addEventListener('focus', resumeIframe, { signal: listening.signal });
+  document.addEventListener('visibilitychange', resumeIframe, { signal: listening.signal });
+  window.addEventListener('message', (event) => {
+    if (window.parent !== window && event.source === window.parent && event.origin === `chrome-extension://${IFRAME_EXTENSION_ID}` && event.data?.type === 'switchboard-iframe-resume') resumeIframe();
+  }, { signal: listening.signal });
+  window.addEventListener('pagehide', () => iframe.configure(false), { signal: listening.signal });
+  window.addEventListener('pageshow', () => { if (iframeAtLoad === (state.iframeBrowser === true)) iframe.configure(state.iframeBrowser === true && state.connected); }, { signal: listening.signal });
+  const iframePlace = setInterval(() => iframe.place(state.iframeBrowser === true && showBrowser() && (wide() ? sideTab() : mainTab()) === 'browser' && !paneHidden()), 5_000);
   let paneSent = 'null';
   /** The Browser tab's area under its tab strip, while it is the tab shown; the Chrome pane covers it (architecture.md § Web page). */
   const browserArea = (): HTMLElement | null => {
+    if (state.iframeBrowser === true) return null;
     // The pane window stays above the page, so it hides while Settings or a sheet (the page's or the list header's) covers the page.
     const listSheet = root.querySelector('#list-sheet .sheet-backdrop') !== null;
 
@@ -4716,6 +4759,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /** Whether the Browser tab was last told the pane is hidden for a layer, so it is drawn again when that changes. */
   let noteCovered = false;
   const reportPane = (force = false): void => {
+    iframe.place(state.iframeBrowser === true && showBrowser() && (wide() ? sideTab() : mainTab()) === 'browser' && !paneHidden());
     // A page on another device cannot drive the pane; the hub refuses its reports. A closed page reports nothing more.
     if (!paneLocal() || listening.signal.aborted) {
       return;
@@ -4839,6 +4883,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   watchScale();
 
   const wake = (): void => {
+    if (state.iframeBrowser === true) return;
     if (view.pane?.enabled === true && view.pane.extension === 'none' && view.pane.extensionId !== undefined && standalone()) {
       void toExtension(view.pane.extensionId, { type: 'wake' });
     }
@@ -4901,6 +4946,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       const before = state;
 
       state = applyEvent(state, data);
+      if (type === 'hello' && iframeAtLoad === null) iframeAtLoad = state.iframeBrowser === true;
+      if (type === 'hello' || type === 'settings') {
+        if (iframeAtLoad !== (state.iframeBrowser === true)) iframe.requireReload();
+        else iframe.configure(state.iframeBrowser === true && state.connected);
+        if (iframeAtLoad === true && state.iframeBrowser !== true && window.parent !== window) window.parent.postMessage({ type: 'switchboard-iframe-disabled' }, `chrome-extension://${IFRAME_EXTENSION_ID}`);
+      }
       if (state.key !== keyBefore) pendingRowControl = null;
       const pending = pendingRowControl;
       if (pending !== null && state.scope?.workItemId === wanted && pending.key === `item:${wanted}`) {
@@ -4976,8 +5027,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       }
 
       if (type === 'pane') {
-        // The pane glues a window on the computer that runs Switchboard, so a page on another device has none: no menu rows, no Browser tab.
-        view.pane = paneLocal() ? ((data['pane'] as PaneView | undefined) ?? null) : null;
+        // The native pane belongs to the hub's computer; the iframe experiment uses this device's extension instead.
+        view.pane = paneLocal() && state.iframeBrowser !== true ? ((data['pane'] as PaneView | undefined) ?? null) : null;
         paneChanged();
       } else if (type === 'hello' || type === 'scope') {
         // A new key or work item: the hub reads the column, and the work item's tabs, again.
@@ -5152,6 +5203,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   return {
     state: () => state,
     close: () => {
+      clearInterval(iframeRenew);
+      clearInterval(iframePlace);
+      iframe.dispose();
       // A draw still asked for would draw the closed page.
       if (frame !== null) {
         frame.cancelled = true;

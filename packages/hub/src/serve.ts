@@ -268,7 +268,10 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
 
   if (app !== undefined && browserPort !== null) {
     // A taken port, such as one held by a second hub for another home, costs only the Chrome extension.
-    browser = await listenBrowser(browserPort, () => app.snoozedUrls(), () => app.cards(), (url, until) => app.snoozeUrl(url, until), (url) => app.unsnoozeUrl(url), app.paneUpgrade === undefined ? undefined : (request, socket, head) => app.paneUpgrade!(request, socket, head), () => app.paneEnabled?.() === true).catch((error: unknown) => {
+    browser = await listenBrowser(browserPort, () => app.snoozedUrls(), () => app.cards(), (url, until) => app.snoozeUrl(url, until), (url) => app.unsnoozeUrl(url), app.paneUpgrade === undefined ? undefined : (request, socket, head) => app.paneUpgrade!(request, socket, head), () => app.paneEnabled?.() === true, async () => {
+      const origin = new URL(await server.pageUrl()).origin;
+      return { enabled: app.page?.browser?.iframeEnabled?.() === true, origins: [origin, origin.replace('127.0.0.1', 'localhost')] };
+    }).catch((error: unknown) => {
       log(`browser endpoint not served on 127.0.0.1:${browserPort}: ${String(error)}`);
 
       return null;

@@ -12,16 +12,16 @@ describe('firefoxManifest', () => {
 
     expect([chromeVersion, version]).toEqual(['0.0.1', '0.0.1.446400']);
 
-    expect(chromeHosts).toEqual(['http://127.0.0.1:47615/*']);
+    expect(chromeHosts).toEqual(['http://127.0.0.1/*', 'http://localhost/*', 'https://github.com/*']);
     expect(host_permissions).toEqual(['http://127.0.0.1/*']);
     expect(background).toEqual({ scripts: ['background.js'] });
     expect(browser_specific_settings).toEqual({ gecko: { id: 'switchboard@switchboard', strict_min_version: '140.0', data_collection_permissions: { required: ['none'] } } });
     expect(rest).toEqual(chromeRest);
     expect([typeof key, externally_connectable]).toEqual(['string', { matches: ['http://127.0.0.1/*', 'http://localhost/*'] }]);
-    // Only the Chrome pane and the tab group use storage, tabs and tabGroups, so Firefox asks for no permission; one they do not use is kept.
-    expect(permissions).toEqual(['storage', 'tabs', 'tabGroups']);
+    // The native pane and iframe experiment are Chrome-only; other permissions are kept.
+    expect(permissions).toEqual(['storage', 'tabs', 'tabGroups', 'alarms', 'declarativeNetRequestWithHostAccess']);
     expect('permissions' in rest).toBe(false);
-    expect(firefoxManifest({ ...chromeManifest, permissions: ['tabs', 'alarms', 'tabGroups', 'storage'] }, 1).permissions).toEqual(['alarms']);
+    expect(firefoxManifest({ ...chromeManifest, permissions: ['tabs', 'notifications', 'storage'] }, 1).permissions).toEqual(['notifications']);
   });
 
   it('refuses a manifest without a background service worker', () => {
@@ -32,7 +32,8 @@ describe('firefoxManifest', () => {
   it('drops only a port, and refuses a manifest without host permissions', () => {
     const manifest = (hosts: unknown) => ({ ...chromeManifest, host_permissions: hosts });
 
-    expect(firefoxManifest(manifest(['http://localhost:8080/a/*', 'https://github.com/*', 'http://127.0.0.1/*']), 1).host_permissions).toEqual(['http://localhost/a/*', 'https://github.com/*', 'http://127.0.0.1/*']);
+    expect(firefoxManifest(manifest(['http://localhost:8080/a/*', 'https://example.com/*', 'http://127.0.0.1/*']), 1).host_permissions).toEqual(['http://localhost/a/*', 'https://example.com/*', 'http://127.0.0.1/*']);
+    expect(firefoxManifest(manifest(['https://github.com/*', 'http://localhost/*', 'http://127.0.0.1/*']), 1).host_permissions).toEqual(['http://127.0.0.1/*']);
     expect(() => firefoxManifest(manifest(undefined), 1)).toThrow('no host permissions');
     expect(() => firefoxManifest(manifest([7]), 1)).toThrow('no host permissions');
   });

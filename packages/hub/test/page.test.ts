@@ -746,6 +746,7 @@ describe('the web page routes', () => {
   let remoteAccess: RemoteAccess = { hosts: [], logins: [] };
 
   async function serve(hubLog: PageRoutes['hubLog'] = async (lines) => ({ text: `2026-11-22T12:00:00Z ${lines} lines\n`, more: lines < 1000, limited: false, missing: false }), heartbeatMs?: number) {
+    const iframe = { enabled: false };
     const uploadLogs: string[] = [];
     remoteAccess = { hosts: [], logins: [] };
     const posted: unknown[] = [];
@@ -766,6 +767,7 @@ describe('the web page routes', () => {
       remote: () => remoteAccess,
       hubLog,
       browser: {
+        iframeEnabled: () => iframe.enabled,
         snoozed: () => ['https://github.com/o/r/issues/1'],
         cards: () => [{ url: 'https://github.com/o/r/issues/2', playbook: 'dev:new-dev', group: 'progress', snoozed: false, workItemId: 7 }],
         snooze: (url, until) => {
@@ -872,7 +874,7 @@ describe('the web page routes', () => {
     const link = await send(server.port, 'POST', '/page/link', { Authorization: `Bearer ${server.token}` });
     const url = new URL(JSON.parse(link.body).url as string);
 
-    return { posted, uploaded, uploadLogs, closed, consoles, url, folder, installed, browserPosts, access: page.access, open: () => page.opened() };
+    return { posted, uploaded, uploadLogs, closed, consoles, url, folder, installed, browserPosts, iframe, access: page.access, open: () => page.opened() };
   }
 
   it('serves a read-only hub log tail only to a signed-in page with a valid line count', async () => {
@@ -931,6 +933,22 @@ describe('the web page routes', () => {
     const refused = await pending;
     expect(refused.status).toBe(403);
     expect(refused.body).not.toContain('private');
+  });
+
+  it('gates the iframe status by page sign-in and permits only GitHub frames in the experiment page CSP', async () => {
+    const { url, iframe } = await serve();
+    expect((await send(server.port, 'GET', '/v1/browser/iframe', {})).status).toBe(401);
+    const exchange = await send(server.port, 'GET', `${url.pathname}${url.search}`, {});
+    const Cookie = String(exchange.headers['set-cookie']).split(';')[0]!;
+    expect(JSON.parse((await send(server.port, 'GET', '/v1/browser/iframe', { Cookie })).body)).toEqual({ enabled: false });
+    const off = await send(server.port, 'GET', '/page/', { Cookie });
+    expect(off.headers['content-security-policy']).toContain("frame-src 'self';");
+    iframe.enabled = true;
+    expect(JSON.parse((await send(server.port, 'GET', '/v1/browser/iframe', { Cookie })).body)).toEqual({ enabled: true });
+    const on = await send(server.port, 'GET', '/page/', { Cookie });
+    expect(on.headers['content-security-policy']).toContain("frame-src 'self' https://github.com;");
+    expect(on.headers['content-security-policy']).toContain('frame-ancestors chrome-extension://hlbibnhgkgnjkbfledhgjblacloneije');
+    expect(on.headers['x-frame-options']).toBe('DENY');
   });
 
   it("serves the page on its fixed port, which the link names, by that port's Host only, and nothing but the page there", async () => {
@@ -1296,7 +1314,7 @@ describe('the web page routes', () => {
   });
 
   it("serves the browser extension's download and routes through the page's origin to a signed-in browser, taking posts only from an extension (PRD R121)", async () => {
-    const { url, browserPosts, access } = await serve();
+    const { url, browserPosts, access, iframe } = await serve();
     const localCookie = String((await send(server.port, 'GET', `${url.pathname}${url.search}`, {})).headers['set-cookie']).split(';')[0]!;
     const ts = { Host: 'pc.tail.ts.net', 'X-Forwarded-Proto': 'https', 'X-Forwarded-For': '100.64.0.2', 'Tailscale-User-Login': 'alex@example.com' };
     const download = async (headers: Record<string, string>) => {
@@ -1331,6 +1349,11 @@ describe('the web page routes', () => {
     const link = new URL(access.pair('pc.tail.ts.net').url);
     const phone = String((await send(server.port, 'GET', `${link.pathname}${link.search}`, ts)).headers['set-cookie']).split(';')[0]!;
 
+    iframe.enabled = true;
+    expect((await send(server.port, 'GET', '/v1/browser/iframe', ts)).status).toBe(401);
+    expect((await send(server.port, 'GET', '/v1/browser/iframe', { ...ts, Cookie: localCookie })).status).toBe(401);
+    expect(JSON.parse((await send(server.port, 'GET', '/v1/browser/iframe', { ...ts, Cookie: phone })).body)).toEqual({ enabled: true });
+
     expect((await download(ts)).status).toBe(401);
     expect(JSON.parse(unzip((await download({ ...ts, Cookie: phone })).body).get('switchboard-extension/remote.json')!.toString('utf8'))).toEqual({ origin: 'https://pc.tail.ts.net' });
 
@@ -1355,6 +1378,7 @@ describe('the web page routes', () => {
 
     // Once remote access no longer allows the device, nothing is served to it.
     remoteAccess = { hosts: [], logins: [] };
+    expect((await send(server.port, 'GET', '/v1/browser/iframe', { ...ts, Cookie: phone })).status).toBe(403);
     expect((await send(server.port, 'GET', '/v1/browser/cards', { ...ts, Cookie: phone })).status).toBe(403);
     expect((await send(server.port, 'POST', '/v1/browser/snooze', extension, { url: 'https://github.com/o/r/issues/2', until: null })).status).toBe(403);
     expect(browserPosts).toHaveLength(2);
