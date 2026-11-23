@@ -314,10 +314,12 @@ try {
         // A drag on the long conversation still scrolls it, one on the header moves nothing, and nor does one on an empty conversation.
         if (view === 'conversation' || view === 'empty') {
           const box = (selector) => evaluate('(() => { const box = document.querySelector(' + JSON.stringify(selector) + ').getBoundingClientRect(); return { x: box.left + box.width / 2, top: box.top, bottom: box.bottom }; })()');
-          /** Drags a finger down from just inside the top of `selector` to just inside its bottom, or 200 px, whichever is shorter. */
-          const drag = async (selector) => {
+          /**
+           * Drags a finger down from `start`, or just inside the top of `selector`, to just inside its bottom, or 200 px, whichever is shorter.
+           */
+          const drag = async (selector, start = null) => {
             const { x, top, bottom } = await box(selector);
-            const from = top + 4;
+            const from = start ?? top + 4;
             const to = Math.min(bottom - 4, from + 200);
 
             await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y: from }] });
@@ -331,7 +333,11 @@ try {
           const state = () => evaluate('JSON.stringify({ panel: document.getElementById("panel").scrollTop, page: document.scrollingElement.scrollTop, header: document.querySelector(".header").getBoundingClientRect().top })');
           const before = JSON.parse(await state());
 
-          await drag('#panel');
+          // On the conversation the finger lands on a reply's text. Chrome's emulated touch can take no pan on a single pixel row of a reply's own
+          // box between its text and its meta line, as if the touch fell to the body's touch-action; the rows around it scroll.
+          const text = view === 'conversation' ? await evaluate('(() => { const panel = document.getElementById("panel").getBoundingClientRect(); const line = [...document.querySelectorAll("#panel .reply .body p")].map((p) => p.getBoundingClientRect()).find((box) => box.top >= panel.top + 4 && box.bottom <= panel.bottom - 4); return line ? Math.round((line.top + line.bottom) / 2) : null; })()') : null;
+
+          await drag('#panel', text);
           const scrolled = JSON.parse(await state());
 
           if (view === 'empty' && JSON.stringify(scrolled) !== JSON.stringify(before)) found.push('a drag on the empty conversation moved it: ' + JSON.stringify(scrolled));
