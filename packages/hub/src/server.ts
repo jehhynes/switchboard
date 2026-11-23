@@ -762,7 +762,9 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       // The page learns the build of the hub that served it, so it can tell when a restarted hub serves another page; its ETag lets the browser
       // ask whether it changed.
       const body = name === 'index.html' ? String(asset.body).replaceAll('{{build}}', options.build ?? '') : asset.body;
-      const etag = name === 'index.html' ? { ETag: `"${createHash('sha256').update(body).digest('base64url').slice(0, 22)}"` } : {};
+      const csp = page.browser?.iframeEnabled?.() === true ? PAGE_CSP.replace("frame-ancestors 'none'", `frame-ancestors chrome-extension://${BROWSER_EXTENSION_ID}`) : PAGE_CSP;
+      // A 304 keeps the browser's cached CSP, so the validator must change with the framing policy too.
+      const etag = name === 'index.html' ? { ETag: `"${createHash('sha256').update(body).update(csp).digest('base64url').slice(0, 22)}"` } : {};
 
       if (etag.ETag !== undefined && request.headers['if-none-match'] === etag.ETag) {
         response.writeHead(304, { ...etag, 'Cache-Control': 'no-cache' });
@@ -774,7 +776,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
         'Content-Type': asset.mime,
         'Cache-Control': asset.immutable === true ? 'private, max-age=31536000, immutable' : 'no-cache',
         'X-Frame-Options': 'DENY',
-        'Content-Security-Policy': page.browser?.iframeEnabled?.() === true ? PAGE_CSP.replace("frame-ancestors 'none'", `frame-ancestors chrome-extension://${BROWSER_EXTENSION_ID}`) : PAGE_CSP,
+        'Content-Security-Policy': csp,
         ...(asset.gzip === undefined ? {} : { Vary: 'Accept-Encoding' }),
         ...(gzip ? { 'Content-Encoding': 'gzip' } : {}),
         ...etag,

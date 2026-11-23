@@ -961,6 +961,30 @@ describe('the web page routes', () => {
     expect(on.headers['x-frame-options']).toBe('DENY');
   });
 
+  it('invalidates cached HTML when its extension framing policy changes in either direction', async () => {
+    const { url, iframe } = await serve();
+    const exchange = await send(server.port, 'GET', `${url.pathname}${url.search}`, {});
+    const Cookie = String(exchange.headers['set-cookie']).split(';')[0]!;
+    const off = await send(server.port, 'GET', '/page/', { Cookie });
+    expect(off.headers['content-security-policy']).toContain("frame-ancestors 'none'");
+    expect((await send(server.port, 'GET', '/page/', { Cookie, 'If-None-Match': String(off.headers['etag']) })).status).toBe(304);
+
+    iframe.enabled = true;
+    const on = await send(server.port, 'GET', '/page/', { Cookie, 'If-None-Match': String(off.headers['etag']) });
+    expect(on.status).toBe(200);
+    expect(on.headers['etag']).not.toBe(off.headers['etag']);
+    expect(on.headers['content-security-policy']).toContain('frame-ancestors chrome-extension://hlbibnhgkgnjkbfledhgjblacloneije');
+    expect(on.headers['x-frame-options']).toBe('DENY');
+    expect((await send(server.port, 'GET', '/page/', { Cookie, 'If-None-Match': String(on.headers['etag']) })).status).toBe(304);
+
+    iframe.enabled = false;
+    const disabled = await send(server.port, 'GET', '/page/', { Cookie, 'If-None-Match': String(on.headers['etag']) });
+    expect(disabled.status).toBe(200);
+    expect(disabled.headers['etag']).toBe(off.headers['etag']);
+    expect(disabled.headers['content-security-policy']).toContain("frame-ancestors 'none'");
+    expect(disabled.headers['x-frame-options']).toBe('DENY');
+  });
+
   it("serves the page on its fixed port, which the link names, by that port's Host only, and nothing but the page there", async () => {
     const { posted, installed } = await serve();
 
