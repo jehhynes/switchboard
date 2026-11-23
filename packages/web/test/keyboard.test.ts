@@ -174,14 +174,13 @@ it('walks headings, rows and Done bands, selecting locally and revealing each ro
   delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
 });
 
-it('selects a row on focus and makes Tab reach its actions before its focusable link pills', () => {
+it('selects a row on focus and leaves its link pills focusable', () => {
   start([group('progress', [row(1, { url: 'https://example.test/1' }), row(2)])]);
   el('.row').focus();
   const selected = el('.row.selected');
   expect(selected.dataset['row']).toBe('item:1');
-  expect(selected.firstElementChild).toBe(selected.querySelector('.row-actions'));
-  expect(key(selected, 'Tab').defaultPrevented).toBe(true);
-  expect(document.activeElement).toBe(selected.querySelector('.row-actions'));
+  expect(selected.querySelector('.row-actions')).toBeNull();
+  expect(key(selected, 'Tab').defaultPrevented).toBe(false);
   const pill = el('.pill[role="link"]');
   expect(pill.tabIndex).toBe(0);
   pill.focus();

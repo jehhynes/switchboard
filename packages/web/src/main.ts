@@ -2261,7 +2261,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const focused = document.activeElement instanceof HTMLElement && list.contains(document.activeElement) ? document.activeElement : null;
     const focusedRow = focused?.closest<HTMLElement>('.list-row')?.querySelector<HTMLElement>('.row')?.dataset['row'];
     const focusLink = focused?.matches('.pill') ? focused.dataset['link'] : undefined;
-    const focusActions = focused?.matches('.row-actions') === true;
     if (listSelection !== null && !state.groups.some((group) => group.rows.some((row) => rowKey(row) === listSelection))) listSelection = null;
     mount(list, renderListPane(renderList(listed.groups, openingShown()?.workItemId ?? state.scope?.workItemId ?? null, view.collapsed, listed.filtering, rowMenu(), view.bands, true, listSelection, dragView), header.end(listed.groups)));
     // The rows may have moved under a still pointer.
@@ -2273,7 +2272,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       let target = row ?? heading;
       if (group !== undefined && view.collapsed.has(group.key) && !listed.filtering) target = heading;
       else if (focusLink !== undefined) target = row?.querySelector<HTMLElement>(`[data-link="${focusLink}"]`) ?? row;
-      else if (focusActions) target = row?.querySelector<HTMLElement>('.row-actions') ?? row;
       target?.focus({ preventScroll: true });
       target?.scrollIntoView?.({ block: 'nearest' });
     }
@@ -3722,9 +3720,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     } else if (plain && target.matches('.row') && (event.key === 'Enter' || event.key === ' ')) {
       event.preventDefault();
       target.click();
-    } else if (plain && target.matches('.row') && event.key === 'Tab' && target.classList.contains('selected')) {
-      const actions = target.parentElement?.querySelector<HTMLElement>('.row-actions');
-      if (actions !== null && actions !== undefined) { event.preventDefault(); actions.focus(); }
     }
   }, { signal: listening.signal });
   root.addEventListener('keydown', (event) => {

@@ -90,8 +90,6 @@ button { font: inherit; }
 button:focus-visible, a:focus-visible, .tab:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
 .row:focus-visible, .pill:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
 .row { box-sizing: border-box; }
-.row:has(.row-actions) { padding-right: 32px; }
-.row-actions { position: absolute; right: 4px; bottom: 4px; padding: 2px; border: none; background: transparent; color: inherit; cursor: pointer; }
 .empty, .notice { margin: 8px 0; color: var(--vscode-descriptionForeground); }
 .live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 
@@ -803,8 +801,6 @@ body.artifact-window > .artifact-view { height: 100%; }
   .meta .copy { display: none; }
   button.picker, .tab, .composer-tool, .send, .voice-controls .ghost, .row, .group-head, .question-option, .earlier-items, .question-submit, .question-link, .qc-primary, .qc-secondary, .qc-menu-button, .qc-menu button, .artifact-open, .toast .dismiss { min-height: 44px; }
   .qc-menu-button { min-width: 44px; }
-  .row-actions { min-width: 44px; min-height: 44px; }
-  .row:has(.row-actions) { padding-right: 52px; }
   /* A card's options are 56 px rows on touch (design § 6, Phone). */
   .qc-option { min-height: 56px; }
   .composer-tool, .send, .voice-controls .ghost.icon, .toast .dismiss { min-width: 44px; }

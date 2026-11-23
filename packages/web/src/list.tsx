@@ -65,7 +65,6 @@ function Row({ row, selected, menu, menuPoint, pillsOpen, movable, drag, positio
   return (
     <li class="list-row" data-window-row={position === undefined ? undefined : key} aria-posinset={position === undefined ? undefined : position.index + 1} aria-setsize={position?.total}>
       <div role="group" aria-label={row.title} aria-description="Press Enter to open" tabIndex={0} class={classes} data-row={key} {...click} title={row.title}>
-        {!selected || !hasMenu ? null : <button type="button" class="row-actions" data-action="row-menu" data-row={key} aria-label={`Actions for ${row.ticket}`} aria-haspopup="menu" aria-expanded={menu !== null}><span class="codicon codicon-ellipsis" aria-hidden="true"></span></button>}
         <span class="row-head">
           {row.priority === null ? null : <span class="priority" role="img" title={row.priority} aria-label={row.priority}></span>}
           <span class="row-title">{row.title}</span>
