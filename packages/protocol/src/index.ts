@@ -6,6 +6,7 @@
 
 import type { BackgroundCounts, Mark } from '@switchboard/core/group';
 import type { ContextView } from '@switchboard/conversation/contextMeter';
+import type { LedgerQuestion } from '@switchboard/conversation/questions';
 
 export type SessionState = 'starting' | 'running' | 'waiting' | 'idle' | 'ended';
 
@@ -120,6 +121,11 @@ export interface QuestionsView {
   drafts: Record<string, CardDraftView>;
   /** The questions the operator dismissed, by key, with when and the newest conversation item then. */
   dismissed: Array<{ key: string; at: number; after: string | null }>;
+  /**
+   * The questions of each card whose reply retention deleted, while one of them is open or its answer is still being sent, as the hub's ledger
+   * has them, in ask order; the web page draws their cards in its Still open section. Absent from a hub before it.
+   */
+  carried?: LedgerQuestion[];
 }
 
 export interface ReplyView {

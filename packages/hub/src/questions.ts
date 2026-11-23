@@ -6,7 +6,7 @@
  */
 import type { Store } from '@switchboard/core';
 import { carriedQuestions, questionKey, questionLedger } from '@switchboard/conversation';
-import type { CarriedQuestion, LedgerItem, QuestionLedger } from '@switchboard/conversation';
+import type { CarriedQuestion, LedgerItem, LedgerQuestion, QuestionLedger } from '@switchboard/conversation';
 
 /** The page preference that holds the cutover (design § 9). */
 export const QUESTIONS_SINCE = 'questionsLedgerSince';
@@ -52,6 +52,18 @@ export function sessionLedger(store: Pick<Store, 'conversation' | 'dismissals' |
   }
 
   return questionLedger(items as unknown as LedgerItem[], { since, dismissed: dismissedAt(store, sessionId), carried: store.questionCarry(sessionId) as CarriedQuestion[] });
+}
+
+/**
+ * The questions of each card carried past retention (`questionCarry`) as the ledger has them now, for the cards with a question still open or an
+ * answer still being sent, so the web page can draw a card whose reply it no longer holds.
+ */
+export function carriedCards(ledger: QuestionLedger, carried: readonly CarriedQuestion[]): LedgerQuestion[] {
+  return [...new Set(carried.map((one) => one.card))].flatMap((key) => {
+    const card = ledger.cards.get(key);
+
+    return card !== undefined && card.questions.some((one) => one.state === 'open' || one.answer?.sending === true) ? card.questions : [];
+  });
 }
 
 type IndexStore = Pick<Store, 'conversation' | 'dismissals' | 'message' | 'reply' | 'questionCarry' | 'setQuestionCarry' | 'conversationRevision' | 'pagePref' | 'setPagePref' | 'beforePrune'>;

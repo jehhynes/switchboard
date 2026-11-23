@@ -553,6 +553,10 @@ button.picker .picker-session { flex: 0 1 auto; min-width: 0; overflow: hidden; 
 .fold > summary { cursor: pointer; color: var(--vscode-descriptionForeground); font-size: 0.92em; }
 .fold .was { color: var(--vscode-descriptionForeground); }
 .earlier-items { display: block; margin: 0 auto 8px; border: 1px solid var(--vscode-button-border); border-radius: 10px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); padding: 1px 10px; cursor: pointer; }
+/* Questions carried past retention, at the top of the conversation with no reply above them, set off from the timeline under them (PRD R103). */
+.still-open { box-sizing: border-box; max-width: calc(var(--chat-width, 940px) - 40px); margin: 0 auto 12px; padding: 0 0 12px 30px; border-bottom: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, 0.35)); }
+.still-open-title { margin: 0; font-size: 0.9em; font-weight: 600; }
+.still-open-note { margin: 2px 0 0; color: var(--vscode-descriptionForeground); font-size: 0.85em; }
 .working { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .working.waiting .codicon { color: var(--vscode-editorWarning-foreground); }
 .working.waiting .working-label { font-weight: 500; }
@@ -828,6 +832,7 @@ body.artifact-window > .artifact-view { height: 100%; }
   .scroll:has(> .timeline) { padding-left: 8px; padding-right: 8px; }
   .timeline { max-width: calc(var(--chat-width, 940px) - 16px); }
   .reply, .timeline > li.artifact { padding-left: 20px; }
+  .still-open { max-width: calc(var(--chat-width, 940px) - 16px); padding-left: 20px; }
   .reply .dot { left: 4px; }
   .body ul, .body ol { padding-inline-start: 1.5em; }
   .message .bubble { max-width: calc(100% - 24px); }

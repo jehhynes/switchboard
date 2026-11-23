@@ -1,5 +1,5 @@
-// The Conversation tab (architecture.md § Web page): our messages, the replies with their primary responses and question cards, artifact rows, the
-// turn row, and the prompt or Codex request the session waits on.
+// The Conversation tab (architecture.md § Web page): the cards of questions carried past retention, our messages, the replies with their primary
+// responses and question cards, artifact rows, the turn row, and the prompt or Codex request the session waits on.
 import type { VNode } from 'preact';
 import { fullTime, metaLine, spokenMark, stamped, toneMark, voiceMark } from '@switchboard/conversation/messageMeta';
 import { hasUnspokenText, replyBody, spokenParts } from '@switchboard/conversation/replyBody';
@@ -13,7 +13,7 @@ import { dayLabel, deliveryMark, replyRender, withoutQuestions } from './render.
 import type { CardDraft, View } from './render.js';
 import { trusted } from './trusted.js';
 import { backgroundLabel } from '@switchboard/core/group';
-import type { ArtifactView, MessageView, NativeRequest, ReplyView, ScreenPrompt } from '@switchboard/protocol';
+import type { ArtifactView, MessageView, NativeRequest, QuestionsView, ReplyView, ScreenPrompt } from '@switchboard/protocol';
 
 /**
  * One of our messages: its bubble over its meta line (`metaLine`, shared with the Conversation view). A failed delivery always shows; with
@@ -150,19 +150,110 @@ function Mark({ multi, checked }: { multi: boolean; checked: boolean }) {
   );
 }
 
-let ledgerOf: { items: PageState['items']; since: number | null; dismissed: string; ledger: QuestionLedger } | null = null;
+let ledgerOf: { items: PageState['items']; since: number | null; dismissed: string; carried: QuestionsView['carried']; ledger: QuestionLedger } | null = null;
 
-/** The question ledger of the page's conversation (PRD R103), worked out again only when its items or the hub's questions change. */
+/**
+ * The question ledger of the page's conversation (PRD R103), worked out again only when its items or the hub's questions change, with the
+ * questions the hub carried past retention (`carriedInto`).
+ */
 export function pageLedger(state: PageState): QuestionLedger {
   const since = state.questions?.since ?? null;
   const dismissed = (state.questions?.dismissed ?? []).map((one) => `${one.key}@${one.at}`).join(' ');
+  const carried = state.questions?.carried;
 
-  if (ledgerOf === null || ledgerOf.items !== state.items || ledgerOf.since !== since || ledgerOf.dismissed !== dismissed) {
+  if (ledgerOf === null || ledgerOf.items !== state.items || ledgerOf.since !== since || ledgerOf.dismissed !== dismissed || ledgerOf.carried !== carried) {
     // Until the hub says where the cutover is, every card follows the rules from before it, so no old card shows open.
-    ledgerOf = { items: state.items, since, dismissed, ledger: questionLedger(state.items as unknown as LedgerItem[], { since: since ?? Number.POSITIVE_INFINITY, dismissed: state.questions?.dismissed ?? [] }) };
+    const ledger = questionLedger(state.items as unknown as LedgerItem[], { since: since ?? Number.POSITIVE_INFINITY, dismissed: state.questions?.dismissed ?? [] });
+
+    ledgerOf = { items: state.items, since, dismissed, carried, ledger: carriedInto(ledger, carried ?? [], state.items) };
   }
 
   return ledgerOf.ledger;
+}
+
+/**
+ * Adds the questions the hub carried past retention to the page's ledger, as the hub's ledger has them now, but for a reply the page still holds,
+ * whose card is under it. Being the hub's current state, they are not replayed against the page's items, which may be older than it; only an
+ * answer the page holds that is stored linked to one still open settles it before the hub's next `questions` event.
+ */
+function carriedInto(ledger: QuestionLedger, carried: readonly LedgerQuestion[], items: PageState['items']): QuestionLedger {
+  const held = new Set(items.map((item) => item.id));
+  const added = carried.filter((one) => !held.has(one.replyId) && !ledger.questions.has(one.key));
+
+  if (added.length === 0) {
+    return ledger;
+  }
+
+  const questions = new Map(ledger.questions);
+  const cards = new Map(ledger.cards);
+  const answers = new Map(ledger.answers);
+  const open: string[] = [];
+
+  for (const was of added) {
+    const one: LedgerQuestion = { ...was, answer: was.answer === null ? null : { ...was.answer } };
+    const card = cards.get(one.card) ?? { key: one.card, replyId: one.replyId, questions: [], legacy: false };
+
+    cards.set(card.key, { ...card, questions: [...card.questions, one] });
+    questions.set(one.key, one);
+  }
+
+  for (const item of items) {
+    if (item.type !== 'message' || item.withdrawn || item.delivery === 'not-sent' || item.delivery === 'refused') {
+      continue;
+    }
+
+    for (const given of item.answers ?? []) {
+      const one = questions.get(`reply:${given.replyId}#${given.slug}`);
+
+      if (one !== undefined && added.some((was) => was.key === one.key) && one.state === 'open') {
+        one.state = given.dismissed === true ? 'dismissed' : 'answered';
+        one.answer = { messageId: item.id, letters: given.letters, other: given.other, via: given.via, sending: item.delivery === 'open' };
+      }
+    }
+  }
+
+  for (const was of added) {
+    const one = questions.get(was.key)!;
+
+    if (one.state === 'open') {
+      open.push(one.key);
+    }
+
+    if (one.answer !== null && held.has(one.answer.messageId)) {
+      answers.set(one.answer.messageId, [...(answers.get(one.answer.messageId) ?? []), one]);
+    }
+  }
+
+  // The carried questions were asked before every item the page holds.
+  return { cards, questions, answers, open: [...open, ...ledger.open] };
+}
+
+/**
+ * The cards of the Still open section: each card the hub carried past retention, whose reply the page does not hold, while one of its questions
+ * is open or its answer is still being sent, in ask order.
+ */
+export function stillOpenCards(state: PageState, ledger: QuestionLedger = pageLedger(state)): string[] {
+  const held = new Set(state.items.map((item) => item.id));
+  const keys = [...new Set((state.questions?.carried ?? []).filter((one) => !held.has(one.replyId)).map((one) => one.card))];
+
+  return keys.filter((key) => ledger.cards.get(key)?.questions.some((one) => one.state === 'open' || one.answer?.sending === true) === true);
+}
+
+/** At the top of the conversation, the cards of questions still open whose replies retention deleted, which have no reply to sit under. */
+function StillOpen({ keys, ledger, view, state, canAnswer }: { keys: string[]; ledger: QuestionLedger; view: View; state: PageState; canAnswer: boolean }) {
+  return (
+    <section class="still-open" aria-labelledby="still-open-title" data-key="still-open">
+      <h2 class="still-open-title" id="still-open-title">
+        Still open
+      </h2>
+      <p class="still-open-note">Asked in replies no longer kept.</p>
+      {keys.map((key) => (
+        <div class="still-open-card" data-key={`still-open:${key}`} key={key}>
+          {cardOf(key, ledger, view, state, canAnswer)}
+        </div>
+      ))}
+    </section>
+  );
 }
 
 /** The card with this key, drawn by the renderer the Conversation view shares; null for a reply that asks no questions. */
@@ -239,11 +330,13 @@ export function renderTimeline(state: PageState, view: View, now: number = Date.
     return divider === null ? [row] : [divider, row];
   });
   const requests = state.session.requests ?? [];
+  const stillOpen = stillOpenCards(state, links);
 
   return (
     <>
       {/* An ended session's reason shows above the composer instead. */}
       {state.session.reason === null || state.session.state === 'ended' ? null : <p class="notice">{state.session.reason}</p>}
+      {stillOpen.length === 0 ? null : <StillOpen keys={stillOpen} ledger={links} view={view} state={state} canAnswer={canAnswer} />}
       {state.more ? (
         <button class="earlier-items" type="button" data-action="earlier">
           Show earlier messages

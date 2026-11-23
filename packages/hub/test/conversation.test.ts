@@ -1720,6 +1720,46 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
       expect(service.ledger('s2').questions.get('reply:q2#another-one')?.state).toBe('dismissed');
     });
 
+    it('sends the cards carried past retention as the ledger has them, while a question is open or an answer is being sent (PRD R103)', () => {
+      const { service, store, open, body, view } = setupCards();
+      const mine = open(view.file);
+      const carried = () => (service.questionsView('s2').carried ?? []).map((one) => [one.key, one.state]);
+
+      expect(service.questionsView('s2').carried).toEqual([]);
+
+      for (let index = 0; index < CONVERSATION_RETENTION + 5; index++) {
+        store.addReply({ id: `a${index}`, sessionId: 's2', workItemId: store.session('s2')!.workItemId, at: NOW, kind: 'aside', answers: null, opening: 'Step.', source: 'transcript', replaces: null, rewrittenBy: null, withdrawn: false, transcriptUuid: `a${index}` });
+      }
+
+      expect(store.reply('q1')).toBeNull();
+      const view2 = service.questionsView('s2');
+
+      expect(view2.carried!.map((one) => [one.card, one.replyId, one.question.slug, one.question.options.map((option) => option.label), one.state])).toEqual([
+        ['reply:q1', 'q1', 'port-choice', ['8765', '8799'], 'open'],
+        ['reply:q1', 'q1', 'keep-route', ['Keep it', 'Remove it'], 'open'],
+      ]);
+      expect(view2.oldest).toBe('reply:q1');
+      // The window's hello carries them too.
+      expect((open(view.file).frames[0] as { questions?: { carried?: unknown[] } }).questions?.carried).toHaveLength(2);
+
+      // Answered in part, the card keeps both questions as they stand.
+      const sent = messageOf(service.send(body(mine.key, { text: undefined, answers: [card()] })));
+
+      expect(carried()).toEqual([
+        ['reply:q1#port-choice', 'answered'],
+        ['reply:q1#keep-route', 'open'],
+      ]);
+      // With none open, it stays only while an answer is still being sent.
+      expect(service.cardCommand('card-dismiss', { window: mine.key, scopeGen: 1, opId: 'x1', sessionId: 's2', card: 'reply:q1', slug: 'keep-route' }).status).toBe(200);
+      expect(store.message(sent.id)?.delivery).toBe('open');
+      expect(carried()).toEqual([
+        ['reply:q1#port-choice', 'answered'],
+        ['reply:q1#keep-route', 'dismissed'],
+      ]);
+      store.updateMessage(sent.id, { delivery: 'sent' });
+      expect(carried()).toEqual([]);
+    });
+
     it('tells the session of a dismissal whose question retention deleted, with the next answer', () => {
       const { service, store, open, body, view } = setupCards();
       const mine = open(view.file);

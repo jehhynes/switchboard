@@ -4830,6 +4830,102 @@ describe('the page in use', () => {
     }
   });
 
+  it('draws the cards carried past retention in a Still open section at the top, answers them as any card, and the chip goes there (PRD R103)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const scrolled: string[] = [];
+    const rect = (top: number, height: number) => ({ top, bottom: top + height, height, left: 0, right: 100, width: 100, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+    const original = Element.prototype.getBoundingClientRect;
+
+    HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+      return this.id === 'panel' ? rect(0, 400) : this.classList.contains('question-card') ? rect(-500, 200) : original.call(this);
+    };
+    HTMLElement.prototype.scrollIntoView = function (this: HTMLElement) {
+      scrolled.push(this.dataset['cardKey'] ?? '');
+    };
+
+    try {
+      const { page, source } = start();
+      const asked = '1. **Port.** Which port? {#port-choice}\n   - A) 1\n   - B) 2\n2. Keep the route? {#keep-route}\n   - A) Keep\n   - B) Remove';
+      const gone = parseQuestions(asked).map((question) => ({ key: `reply:gone#${question.slug}`, card: 'reply:gone', replyId: 'gone', question, state: 'open' as const, answer: null, reason: null, replacedBy: null }));
+      const questions = { sessionId: 's', since: 0, open: 2, oldest: 'reply:gone', drafts: {}, dismissed: [], carried: gone };
+      const section = () => root.querySelector('#panel .still-open');
+      const items = [reply('r9', 9, { opening: 'Step.', kind: 'aside' })];
+      const step = () => section()!.querySelector('.question-card')!.getAttribute('data-step');
+
+      hello(source, { items, questions });
+      expect(section()!.querySelector('.still-open-title')!.textContent).toBe('Still open');
+      // The section comes before the timeline, which draws no card for these questions.
+      expect(section()!.compareDocumentPosition(root.querySelector('.timeline')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(root.querySelectorAll('.timeline .question-card')).toHaveLength(0);
+      expect(section()!.querySelector('.question-card')!.getAttribute('data-card-key')).toBe('reply:gone');
+      expect(section()!.querySelector('.qc-progress')!.textContent).toBe('Question 1 of 2');
+
+      // The chip goes to the carried card.
+      const chip = root.querySelector<HTMLElement>('#composer > .question-waiting')!;
+
+      expect(chip.hidden).toBe(false);
+      expect(chip.textContent).toBe('2 questions waiting');
+      click('#composer .question-waiting');
+      expect(scrolled).toEqual(['reply:gone']);
+
+      // One question at a time, with the draft on the hub and a send of the answered one only.
+      click('.still-open [data-action="card-pick"][data-letter="B"]');
+      expect(posts.filter((post) => post.url.endsWith('/card-draft')).at(-1)?.body).toMatchObject({ sessionId: 's', card: 'reply:gone', draft: { step: 'port-choice', picks: { 'port-choice': { letters: ['B'], other: null } } } });
+      await vi.advanceTimersByTimeAsync(ADVANCE_MS);
+      expect(step()).toBe('keep-route');
+      click('.still-open [data-action="card-other"]');
+      expect(section()!.querySelector('textarea.qc-other')).not.toBeNull();
+      click('.still-open [data-action="card-send"]');
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(posts.find((post) => post.url.endsWith('/send'))?.body['answers']).toEqual([{ card: 'reply:gone', slug: 'port-choice', letters: ['B'], other: '' }]);
+
+      // Answered in part, the card stays with its open question and the answered one as a row; Dismiss is in its menu.
+      const answered = { ...gone[0]!, state: 'answered' as const, answer: { messageId: 'm10', letters: ['B'], other: '', via: 'card' as const, sending: false } };
+
+      source.emit('questions', { questions: { ...questions, open: 1, carried: [answered, gone[1]!] } });
+      expect(step()).toBe('keep-route');
+      expect(section()!.querySelectorAll('.qc-row')).toHaveLength(1);
+      click('.still-open [data-action="card-menu"]');
+      click('.still-open [data-action="card-dismiss"]');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(posts.find((post) => post.url.endsWith('/card-dismiss'))?.body).toMatchObject({ sessionId: 's', card: 'reply:gone', slug: 'keep-route' });
+
+      // Settled, or withdrawn, it leaves the section, and the chip with it.
+      source.emit('questions', { questions: { ...questions, open: 0, oldest: null, carried: [] } });
+      expect(section()).toBeNull();
+      expect(chip.hidden).toBe(true);
+
+      // An answer the page holds settles it before the hub's next event.
+      hello(source, { items: [...items, message('m10', 10, { text: '[answers]', answers: [{ replyId: 'gone', slug: 'port-choice', letters: ['A'], other: '', via: 'card' }, { replyId: 'gone', slug: 'keep-route', letters: ['B'], other: '', via: 'card' }] })], questions });
+      expect(section()).toBeNull();
+
+      // A reply the page still holds keeps its card under it, once.
+      hello(source, { items: [reply('gone', 1, { opening: asked }), ...items], questions });
+      expect(section()).toBeNull();
+      expect(root.querySelectorAll('.question-card')).toHaveLength(1);
+      expect(root.querySelector('li[data-id="gone"] .question-card')).not.toBeNull();
+
+      // The hub's state is current, so a message the page holds from before it is not read against it again: a typed "B" that answered nothing
+      // then leaves the question open, and the answer the hub links to a question is shown with its message.
+      const linked = { ...gone[0]!, state: 'answered' as const, answer: { messageId: 'm11', letters: ['A'], other: '', via: 'card' as const, sending: false } };
+
+      hello(source, { items: [message('m8', 8, { text: 'B' }), ...items, message('m11', 11, { text: '[answers]\n- port-choice: Which port? → A) 1', answers: [{ replyId: 'gone', slug: 'port-choice', letters: ['A'], other: '', via: 'card' }] })], questions: { ...questions, open: 1, carried: [linked, gone[1]!] } });
+      expect(step()).toBe('keep-route');
+      expect(root.querySelector('li[data-id="m11"] .answers-answer')!.textContent).toBe('1');
+      expect(root.querySelector('li[data-id="m11"] [data-action="goto-card"]')!.getAttribute('data-target-card')).toBe('reply:gone');
+
+      // A session that cannot take answers shows the card locked, as under a reply.
+      hello(source, { items, questions, sessions: [session({ conversation: 'read-only' })] });
+      expect(section()!.querySelector<HTMLButtonElement>('[data-action="card-pick"]')!.disabled).toBe(true);
+      page.close();
+    } finally {
+      delete (HTMLElement.prototype as Partial<HTMLElement>).getBoundingClientRect;
+      delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
+      vi.useRealTimers();
+    }
+  });
+
   it('steps through a card one question at a time, keeps its draft on the hub, and sends the picks for the hub to write, showing a refusal on the card', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
 

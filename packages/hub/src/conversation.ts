@@ -3,9 +3,9 @@ import type { ConversationMessage, ConversationReply, ConversationStatus, Interr
 import { artifactsDir, backgroundCounts, hostKey, PERMISSION_PROMPT, personaById, resumesHeld, sessionTone, START_PROMPT, toneVersion, waitsOnLimit } from '@switchboard/core';
 import type { BackgroundCounts, PersonaSettings, ViewSettings } from '@switchboard/core';
 import { ArtifactFolder, EXTERNAL_NAME, ExternalArtifacts, externalFile, inGit, MAX_MESSAGE_CHARS, NotWritten, answerMessage, cardSteps, cardUtterance, currentStep, draftAnswers, interruptNote, messageTags, moveStep, pasteText, picked, pickLetter, questionKey, questionSpeech, resolveAnswers, setOther, SLUG } from '@switchboard/conversation';
-import type { CardDraft, LedgerCard, LedgerQuestion, QuestionLedger } from '@switchboard/conversation';
+import type { CardDraft, CarriedQuestion, LedgerCard, LedgerQuestion, QuestionLedger } from '@switchboard/conversation';
 import type { MessageAnswer } from '@switchboard/core';
-import { dismissedAt, questionIndex, questionsSince } from './questions.js';
+import { carriedCards, dismissedAt, questionIndex, questionsSince } from './questions.js';
 import { promptKeyData, readPrompt, screenRows, stepsText, TYPING_PAUSE_MS } from '@switchboard/conversation';
 import type { QuestionsView } from '@switchboard/protocol';
 import type { Artifact, ArtifactTag, ContextView, ConversationChange, HeardTag, InputOutcome, InputSteps, PromptKey, ScreenPrompt, SlashCommand } from '@switchboard/conversation';
@@ -625,7 +625,10 @@ export class ConversationService {
     return view;
   }
 
-  /** A session's questions as its windows get them: the cutover, the open count, the oldest open card, the drafts and the dismissed keys. */
+  /**
+   * A session's questions as its windows get them: the cutover, the open count, the oldest open card, the drafts, the dismissed keys and the
+   * cards carried past retention.
+   */
   questionsView(sessionId: string, ledger: QuestionLedger = this.ledger(sessionId)): QuestionsView {
     const drafts = this.drafts(sessionId);
 
@@ -660,6 +663,7 @@ export class ConversationService {
       oldest: ledger.open.length === 0 ? null : ledger.questions.get(ledger.open[0]!)!.card,
       drafts: Object.fromEntries(drafts),
       dismissed: dismissedAt(this.deps.store, sessionId),
+      carried: carriedCards(ledger, this.deps.store.questionCarry(sessionId) as CarriedQuestion[]),
     };
   }
 
