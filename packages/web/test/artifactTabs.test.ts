@@ -187,7 +187,7 @@ describe('the tab strip on a narrow screen', () => {
     const changes = PAGE_ASSETS['page.css']!.body;
 
     expect(changes).toMatch(/\.changes-bar \{[^}]*display: flex; flex-wrap: wrap;/);
-    expect(changes).toContain('@media (hover: none), (pointer: coarse) { @container (max-width: 479px) { .changes-files { margin-right: auto; } .changes-note { order: 1; flex-basis: 100%;');
+    expect(changes).toContain('@media (hover: none), (pointer: coarse) { @container (max-width: 479px) { .changes-scope { flex: 1 1 0; max-width: none; } .changes-note { order: 1; flex-basis: 100%;');
   });
 
   it('MaximizeButton_FocusedOrPressed_KeepsTheStripBackgroundNotTheChosenTabs', () => {

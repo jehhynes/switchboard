@@ -769,6 +769,24 @@ describe('Store', () => {
     again.close();
   });
 
+  it('ViewedFilesMigration_ExistingTicks_KeepsThemForTheChangesToDisk', () => {
+    const version = MIGRATIONS.length - 1;
+    const path = join(dir, 'viewed-scope.db');
+    const raw = new DatabaseSync(path);
+
+    raw.exec(MIGRATIONS.slice(0, version).join(';'));
+    raw.exec(`PRAGMA user_version = ${version};
+      INSERT INTO viewedFiles (workItemId, path, hash, at) VALUES (7, 'src/a.ts', 'h1', 10), (8, 'b.md', 'h2', 11);`);
+    raw.close();
+
+    const store = Store.open(path);
+
+    expect(store.viewedFiles(7)).toEqual(new Map([['src/a.ts', 'h1']]));
+    expect(store.viewedFiles(8)).toEqual(new Map([['b.md', 'h2']]));
+    expect(store.viewedFiles(7, 'b..c')).toEqual(new Map());
+    store.close();
+  });
+
   it("keeps a work item's viewed ticks by path at a content hash, clears one, and drops them with the work item", () => {
     const store = Store.open(join(dir, 'viewed.db'));
 
@@ -780,7 +798,16 @@ describe('Store', () => {
     expect(store.viewedFiles(7)).toEqual(new Map([['src/a.ts', 'h3'], ['src/b.ts', 'h2']]));
     store.setViewedFile(7, 'src/b.ts', null, 14);
     expect(store.viewedFiles(7)).toEqual(new Map([['src/a.ts', 'h3']]));
+    // A commit range's ticks are kept apart from the changes to disk, cleared on their own, and dropped with the work item too.
+    store.setViewedFile(7, 'src/a.ts', 'c1', 15, 'b..c');
+    store.setViewedFile(7, 'src/b.ts', 'c2', 15, 'b..c');
+    expect(store.viewedFiles(7, 'b..c')).toEqual(new Map([['src/a.ts', 'c1'], ['src/b.ts', 'c2']]));
+    expect(store.viewedFiles(7)).toEqual(new Map([['src/a.ts', 'h3']]));
+    store.setViewedFile(7, 'src/a.ts', null, 16, 'b..c');
+    expect(store.viewedFiles(7, 'b..c')).toEqual(new Map([['src/b.ts', 'c2']]));
+    expect(store.viewedFiles(7)).toEqual(new Map([['src/a.ts', 'h3']]));
     store.deleteWorkItem(7);
+    expect(store.viewedFiles(7, 'b..c')).toEqual(new Map());
     expect(store.viewedFiles(7)).toEqual(new Map());
     expect(store.viewedFiles(8)).toEqual(new Map([['src/a.ts', 'other']]));
     store.close();

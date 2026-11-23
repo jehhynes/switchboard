@@ -537,6 +537,18 @@ export const MIGRATIONS = [
   ALTER TABLE workItems ADD COLUMN titleOrigin TEXT;
   ALTER TABLE workItems ADD COLUMN lastProviderName TEXT;`,
   `ALTER TABLE workItems ADD COLUMN model TEXT;`,
+  // A viewed tick's scope (architecture.md § Web page): empty for the changes to disk, else the commit range the tick was given in.
+  `CREATE TABLE viewedFilesScoped (
+    workItemId INTEGER NOT NULL,
+    scope TEXT NOT NULL DEFAULT '',
+    path TEXT NOT NULL,
+    hash TEXT NOT NULL,
+    at INTEGER NOT NULL,
+    PRIMARY KEY (workItemId, scope, path)
+  );
+  INSERT INTO viewedFilesScoped (workItemId, scope, path, hash, at) SELECT workItemId, '', path, hash, at FROM viewedFiles;
+  DROP TABLE viewedFiles;
+  ALTER TABLE viewedFilesScoped RENAME TO viewedFiles;`,
 ];
 
 /**
@@ -1733,19 +1745,22 @@ export class Store {
   }
 
   /** Every remembered sign-in, the one used last first. */
-  /** A work item's viewed ticks on the web page (architecture.md § Web page): each ticked file's path and the content hash it was ticked at. */
-  viewedFiles(workItemId: number): Map<string, string> {
-    const rows = this.#db.prepare('SELECT path, hash FROM viewedFiles WHERE workItemId = ?').all(workItemId) as Array<{ path: string; hash: string }>;
+  /**
+   * A work item's viewed ticks on the web page in one scope (architecture.md § Web page): each ticked file's path and the content hash it was
+   * ticked at. The empty scope is the changes to disk.
+   */
+  viewedFiles(workItemId: number, scope = ''): Map<string, string> {
+    const rows = this.#db.prepare('SELECT path, hash FROM viewedFiles WHERE workItemId = ? AND scope = ?').all(workItemId, scope) as Array<{ path: string; hash: string }>;
 
     return new Map(rows.map((row) => [row.path, row.hash]));
   }
 
-  /** Ticks a changed file viewed at a content hash, or clears its tick with null. */
-  setViewedFile(workItemId: number, path: string, hash: string | null, at: number): void {
+  /** Ticks a changed file viewed at a content hash in a scope, or clears its tick with null. */
+  setViewedFile(workItemId: number, path: string, hash: string | null, at: number, scope = ''): void {
     if (hash === null) {
-      this.#db.prepare('DELETE FROM viewedFiles WHERE workItemId = ? AND path = ?').run(workItemId, path);
+      this.#db.prepare('DELETE FROM viewedFiles WHERE workItemId = ? AND scope = ? AND path = ?').run(workItemId, scope, path);
     } else {
-      this.#db.prepare('INSERT INTO viewedFiles (workItemId, path, hash, at) VALUES (?, ?, ?, ?) ON CONFLICT (workItemId, path) DO UPDATE SET hash = excluded.hash, at = excluded.at').run(workItemId, path, hash, at);
+      this.#db.prepare('INSERT INTO viewedFiles (workItemId, scope, path, hash, at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (workItemId, scope, path) DO UPDATE SET hash = excluded.hash, at = excluded.at').run(workItemId, scope, path, hash, at);
     }
   }
 

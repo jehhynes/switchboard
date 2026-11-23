@@ -8,8 +8,8 @@ import type { WindowScope } from './windows.js';
 
 /**
  * The web page's Changes list (PRD R118, architecture.md § Web page): a worktree's changes from its merge base to disk, read with the git CLI as
- * VS Code's Open changes shows them (PRD R57), committed, staged, unstaged, conflicted and untracked, each file once; or, when the page asks for
- * them alone, its uncommitted changes from HEAD to disk.
+ * VS Code's Open changes shows them (PRD R57), committed, staged, unstaged, conflicted and untracked, each file once; or the range the page's
+ * scope names: from HEAD, the base or a commit since the base, to disk or to one of those commits.
  */
 
 /** A row's status letter, as VS Code's Source Control shows it: added, modified, deleted, renamed, untracked, or a conflict. */
@@ -35,12 +35,37 @@ export interface ChangeRow {
   viewed?: boolean;
 }
 
+/** What a list compares: from the merge base (`base`), HEAD or a commit since the base, to disk (`worktree`), HEAD or a commit since the base. */
+export interface ChangeRange {
+  from: string;
+  to: string;
+}
+
+export const ALL_CHANGES: ChangeRange = { from: 'base', to: 'worktree' };
+
+/** A commit since the merge base, for the page's scope menu: its first parent, subject and commit time in seconds. */
+export interface CommitInfo {
+  sha: string;
+  parent: string | null;
+  subject: string;
+  time: number;
+}
+
+/** The most commits since the base a list names; the oldest past it cannot be chosen. */
+export const MAX_COMMITS = 200;
+
+const SHA = /^[0-9a-f]{40,64}$/;
+
 export interface ChangesView {
-  /** The merge base, or null when the worktree shares no history with `origin/HEAD`, `origin/main` or `origin/master`: the rows are then uncommitted changes against HEAD. */
+  /** The merge base, or null when the worktree shares no history with `origin/HEAD`, `origin/main` or `origin/master`: `base` then means HEAD. */
   base: string | null;
   head: string;
-  /** Whether the page asked for the uncommitted changes alone: `base` is then null and the rows compare HEAD with disk. */
-  uncommitted: boolean;
+  /** The range the rows compare, as the page asked for it. */
+  from: string;
+  to: string;
+  /** The commits from the base to HEAD, newest first, the first {@link MAX_COMMITS}; `commitsMore` when there are more. */
+  commits: CommitInfo[];
+  commitsMore: boolean;
   /** The rows sorted by path, the first {@link MAX_ROWS} of `total`. */
   rows: ChangeRow[];
   /** How many files each stage changes, since one row can fold changes from several stages. */
@@ -53,8 +78,12 @@ export interface ChangesView {
 export interface WorktreeChanges {
   /** The worktree's top folder, as git prints it. */
   root: string;
-  /** The ref the rows compare disk with: the merge base, else HEAD, and HEAD for the uncommitted changes alone. */
+  /** The commit the rows compare from: the merge base, else HEAD, or the range's commit. */
   ref: string;
+  /** The commit the rows compare to, or null for disk. */
+  to: string | null;
+  /** What the rows' viewed ticks are kept under: empty for a range to disk, whose hash is the file on disk, else `<from>..<to>`. */
+  tickScope: string;
   view: ChangesView;
   /** Each shown row's two sides, by its `path`, and whether its file is untracked. */
   sides: Map<string, DiffRow & { untracked: boolean }>;
@@ -290,8 +319,61 @@ async function mergeBase(root: string, git: Git): Promise<string | null> {
   return null;
 }
 
-/** A worktree's changes from its merge base to disk, or from HEAD with `uncommitted`, read in `folder`'s repository; why not when git cannot read it. */
-export async function readChanges(folder: string, git: Git = nodeGit, withCounts = true, uncommitted = false): Promise<WorktreeChanges | { error: string }> {
+/** The commits from `base` to HEAD, newest first, at most {@link MAX_COMMITS}; null when git cannot read them. */
+async function readCommits(root: string, base: string, git: Git): Promise<{ commits: CommitInfo[]; more: boolean } | null> {
+  const log = await git(['log', '-z', '--no-color', '--no-show-signature', '--format=%H%x1f%P%x1f%ct%x1f%s', `--max-count=${MAX_COMMITS + 1}`, `${base}..HEAD`, '--'], root);
+
+  if (log.code !== 0) {
+    return null;
+  }
+
+  const commits = fields(log.stdout).map((entry) => {
+    const [sha = '', parents = '', time = '0', ...subject] = entry.replace(/^\n/, '').split('\x1f');
+
+    return { sha, parent: parents.split(' ')[0] || null, subject: subject.join('\x1f'), time: Number(time) };
+  });
+
+  return { commits: commits.slice(0, MAX_COMMITS), more: commits.length > MAX_COMMITS };
+}
+
+/** Parses `git diff -z --raw --no-abbrev` into each file's blob ID at the range's end, by its path now. */
+export function parseRaw(output: Buffer): Map<string, string> {
+  const parts = fields(output);
+  const blobs = new Map<string, string>();
+
+  for (let index = 0; index < parts.length; ) {
+    const [, , , blob = '', status = ''] = parts[index++]!.split(' ');
+    const path = status.startsWith('R') || status.startsWith('C') ? (index++, parts[index++]!) : parts[index++]!;
+
+    blobs.set(path, blob);
+  }
+
+  return blobs;
+}
+
+/**
+ * The routes' `from` and `to`: from `base` (none), `HEAD` or a commit's full ID, to `worktree` (none), `HEAD`, which follows new commits, or a
+ * commit's; from HEAD only to disk, and never a range from a point to itself. Null for anything else. Whether a commit is one since the base is checked when the changes are read.
+ */
+export function parseRange(from: unknown, to: unknown): ChangeRange | null {
+  const start = from ?? 'base';
+  const end = to ?? 'worktree';
+
+  if (typeof start !== 'string' || typeof end !== 'string' || !(start === 'base' || start === 'HEAD' || SHA.test(start)) || !(end === 'worktree' || end === 'HEAD' || SHA.test(end))) {
+    return null;
+  }
+
+  return start === end || (start === 'HEAD' && end !== 'worktree') ? null : { from: start, to: end };
+}
+
+export const COMMIT_GONE = 'The chosen commit is no longer on this branch.';
+
+/**
+ * A worktree's changes in a range read in `folder`'s repository, from its merge base to disk by default; why not when git cannot read it, and
+ * `stale` when the range names a commit that is not one since the base, as after a rebase. A commit the range starts from may also be the first
+ * parent of one since the base, so a commit's own changes can be asked for.
+ */
+export async function readChanges(folder: string, git: Git = nodeGit, withCounts = true, range: ChangeRange = ALL_CHANGES): Promise<WorktreeChanges | { error: string; stale?: true }> {
   const top = await git(['rev-parse', '--show-toplevel'], folder);
   const root = top.stdout.toString('utf8').trim();
 
@@ -314,33 +396,61 @@ export async function readChanges(folder: string, git: Git = nodeGit, withCounts
     return { error: 'The repository has no commit yet.' };
   }
 
-  const base = uncommitted ? null : await mergeBase(root, git);
-  const ref = base ?? head;
+  const base = await mergeBase(root, git);
+  const log = base === null ? { commits: [], more: false } : await readCommits(root, base, git);
+
+  if (log === null) {
+    return { error: 'git could not read the commits since the base.' };
+  }
+
+  // A commit the range names must be one since the base, or a range's start the first parent of one, so only this branch's commits are read.
+  // Every commit since the base counts, not only those the menu lists, so a commit chosen before more were made is still found.
+  const listed = base === null ? '' : await git(['rev-list', '--parents', `${base}..HEAD`, '--'], root);
+
+  if (typeof listed !== 'string' && listed.code !== 0) {
+    return { error: 'git could not read the commits since the base.' };
+  }
+
+  const lines = typeof listed === 'string' ? [] : listed.stdout.toString('utf8').split('\n').filter((line) => line !== '').map((line) => line.split(' '));
+  const commitIds = new Set(lines.map(([sha = '']) => sha));
+  const starts = new Set([...(base === null ? [] : [base]), ...commitIds, ...lines.map(([, parent = '']) => parent)]);
+
+  if ((SHA.test(range.from) && !starts.has(range.from)) || (SHA.test(range.to) && !commitIds.has(range.to))) {
+    return { error: COMMIT_GONE, stale: true };
+  }
+
+  const ref = range.from === 'HEAD' ? head : range.from === 'base' ? (base ?? head) : range.from;
+  const to = range.to === 'worktree' ? null : range.to === 'HEAD' ? head : range.to;
   const diff = ['diff', '-z', '--no-ext-diff', '--no-textconv', '--no-color'];
-  const [committed, staged, working, untracked, conflicts, numstat] = await Promise.all([
-    base === null ? null : git([...diff, '--name-status', '-M', base, 'HEAD'], root),
-    git([...diff, '--cached', '--name-status', '-M'], root),
-    git([...diff, '--name-status'], root),
-    git(['ls-files', '-z', '--others', '--exclude-standard'], root),
-    git([...diff, '--name-only', '--diff-filter=U'], root),
-    git([...diff, '--numstat', '-M', ref], root),
+  // To disk: the commits from `ref` to HEAD, then the index, the working tree and the untracked files; to a commit, that commit's tree alone.
+  const onDisk = to === null;
+  const [committed, staged, working, untracked, conflicts, numstat, raw] = await Promise.all([
+    to !== null ? git([...diff, '--name-status', '-M', ref, to], root) : ref === head ? null : git([...diff, '--name-status', '-M', ref, 'HEAD'], root),
+    onDisk ? git([...diff, '--cached', '--name-status', '-M'], root) : null,
+    onDisk ? git([...diff, '--name-status'], root) : null,
+    onDisk ? git(['ls-files', '-z', '--others', '--exclude-standard'], root) : null,
+    onDisk ? git([...diff, '--name-only', '--diff-filter=U'], root) : null,
+    git([...diff, '--numstat', '-M', ref, ...(to === null ? [] : [to])], root),
+    to === null ? null : git([...diff, '--raw', '--no-abbrev', '-M', ref, to], root),
   ]);
-  const failed = [committed, staged, working, untracked, conflicts, numstat].find((result) => result !== null && result.code !== 0);
+  const failed = [committed, staged, working, untracked, conflicts, numstat, raw].find((result) => result !== null && result.code !== 0);
 
   if (failed !== undefined) {
     return { error: `git could not read the changes: ${failed!.stderr.trim() || `exit ${String(failed!.code)}`}` };
   }
 
+  const parsed = (result: GitResult | null): ChangedPath[] => (result === null ? [] : parseNameStatus(result.stdout));
   const stages: Record<ChangeStage, ChangedPath[]> = {
-    committed: committed === null ? [] : parseNameStatus(committed.stdout),
-    staged: parseNameStatus(staged.stdout),
-    working: parseNameStatus(working.stdout),
-    untracked: fields(untracked.stdout).map((path) => ({ path, kind: 'added' as const })),
+    committed: parsed(committed),
+    staged: parsed(staged),
+    working: parsed(working),
+    untracked: untracked === null ? [] : fields(untracked.stdout).map((path) => ({ path, kind: 'added' as const })),
   };
-  const plan = changesPlan({ label: '', base, committed: stages.committed, staged: stages.staged, working: [...stages.working, ...stages.untracked] });
-  const planned = 'refusal' in plan ? { rows: [], shown: 0, total: 0 } : plan;
+  const plan = changesPlan({ label: '', base: committed === null ? null : ref, committed: stages.committed, staged: stages.staged, working: [...stages.working, ...stages.untracked] });
+  // Each side read at the range's own ends: the start's commit, and the end's commit or disk.
+  const planned = 'refusal' in plan ? { rows: [], shown: 0, total: 0 } : { ...plan, rows: plan.rows.map((row) => ({ original: row.original === null ? null : { ...row.original, ref }, modified: row.modified === null ? null : { ...row.modified, ref: to } })) };
   const untrackedKeys = new Set(stages.untracked.map((change) => pathKey(change.path)));
-  const conflictKeys = new Set(fields(conflicts.stdout).map(pathKey));
+  const conflictKeys = new Set(conflicts === null ? [] : fields(conflicts.stdout).map(pathKey));
   const counts = parseNumstat(numstat.stdout);
   const sides = new Map<string, DiffRow & { untracked: boolean }>();
   // Each path's stages, by both its paths for a rename, read once for every row.
@@ -395,11 +505,18 @@ export async function readChanges(folder: string, git: Git = nodeGit, withCounts
     rows.push(...(await Promise.all(planned.rows.slice(start, start + COUNT_AT_ONCE).map(rowOf))));
   }
 
+  if (raw !== null) {
+    // To a commit, each file's content hash is its blob ID in that commit.
+    const blobs = parseRaw(raw.stdout);
+
+    rows.filter((row) => row.status !== 'D').forEach((row) => (row.hash = SHA.test(blobs.get(row.path) ?? '') ? blobs.get(row.path)! : 'unreadable'));
+  }
+
   // Each file's content hash on disk: its blob ID, without running the repository's filters, for a file inside the worktree only (`fileInside`),
   // in one git process; a file that went meanwhile fails that process, so each is then hashed on its own.
   const present: ChangeRow[] = [];
 
-  for (let start = 0; start < rows.length; start += COUNT_AT_ONCE) {
+  for (let start = 0; onDisk && start < rows.length; start += COUNT_AT_ONCE) {
     const batch = rows.slice(start, start + COUNT_AT_ONCE).filter((row) => row.status !== 'D');
     const inside = await Promise.all(batch.map((row) => fileInside(root, row.path)));
 
@@ -424,7 +541,9 @@ export async function readChanges(folder: string, git: Git = nodeGit, withCounts
   return {
     root,
     ref,
-    view: { base, head, uncommitted, rows, stages: { committed: stages.committed.length, staged: stages.staged.length, working: stages.working.length, untracked: stages.untracked.length }, shown: planned.shown, total: planned.total },
+    to,
+    tickScope: to === null ? '' : `${ref}..${to}`,
+    view: { base, head, from: range.from, to: range.to, commits: log.commits, commitsMore: log.more, rows, stages: { committed: stages.committed.length, staged: stages.staged.length, working: stages.working.length, untracked: stages.untracked.length }, shown: planned.shown, total: planned.total },
     sides,
   };
 }
@@ -453,10 +572,10 @@ export interface DiffView {
 
 const DIFF_ARGS = ['diff', '--no-ext-diff', '--no-textconv', '--no-color', '--no-relative', '--src-prefix=a/', '--dst-prefix=b/'];
 
-/** A side of a diff read whole: a blob at the base by `<ref>:<path>`, or the file on disk by real path inside the worktree; `large` past the cap. */
+/** A side of a diff read whole: a blob at one of the range's commits by `<ref>:<path>`, or the file on disk by real path inside the worktree; `large` past the cap. */
 async function readSide(changes: WorktreeChanges, side: { path: string; ref: string | null }, git: Git): Promise<Buffer | 'large' | null> {
   if (side.ref !== null) {
-    const blob = await git(['cat-file', 'blob', `${changes.ref}:${side.path}`], changes.root, { maxBytes: SIDE_MAX_BYTES });
+    const blob = await git(['cat-file', 'blob', `${side.ref}:${side.path}`], changes.root, { maxBytes: SIDE_MAX_BYTES });
 
     return blob.tooLarge ? 'large' : blob.code === 0 ? blob.stdout : null;
   }
@@ -475,9 +594,9 @@ const BINARY_PATCH = /^(Binary files .* differ|GIT binary patch)$/m;
 
 /**
  * One change row's diff, `path` being its path now (a deleted file's at the base): git's patch, from `git diff --no-index` against nothing for
- * an untracked file and `git diff -M1% <base>` limited to the row's paths otherwise, so a rename pairs as the row does, and, unless
+ * an untracked file and `git diff -M1% <from> [<to>]` limited to the row's paths otherwise, so a rename pairs as the row does, and, unless
  * `withSides` is false, both whole sides; null for a path that is not one of the rows. Only the rows' own paths are read: a git-side path as
- * `<base>:<path>`, never a ref the caller names, and a disk-side path by real path inside the worktree. Without the sides no side is read:
+ * `<commit>:<path>` at a commit of the range `readChanges` checked, and a disk-side path by real path inside the worktree. Without the sides no side is read:
  * a binary file is known by git's numstat or its patch's binary line.
  */
 export async function readDiff(changes: WorktreeChanges, path: string, git: Git = nodeGit, withSides = true): Promise<DiffView | null> {
@@ -493,7 +612,7 @@ export async function readDiff(changes: WorktreeChanges, path: string, git: Git 
   const patchRead = () =>
     sides.untracked
       ? git([...DIFF_ARGS, '--no-index', '--', '/dev/null', path], changes.root, { maxBytes: PATCH_MAX_BYTES })
-      : git([...DIFF_ARGS, '-M1%', changes.ref, '--', ...paths], changes.root, { maxBytes: PATCH_MAX_BYTES });
+      : git([...DIFF_ARGS, '-M1%', changes.ref, ...(changes.to === null ? [] : [changes.to]), '--', ...paths], changes.root, { maxBytes: PATCH_MAX_BYTES });
 
   if (!withSides) {
     if (row.binary) {
@@ -554,10 +673,10 @@ export interface PageChangesDeps {
   git?: Git;
   /** Opens a file at a line in the work item's VS Code window, opening the window when it is closed: why not, or null. */
   openFile?(workItemId: number, path: string, line: number): string | null;
-  /** The work items' viewed ticks (the store's `viewedFiles`); without them no file shows as viewed. */
-  viewed?: { list(workItemId: number): Map<string, string>; set(workItemId: number, path: string, hash: string | null): void };
+  /** The work items' viewed ticks (the store's `viewedFiles`), by tick scope (`WorktreeChanges.tickScope`); without them no file shows as viewed. */
+  viewed?: { list(workItemId: number, scope: string): Map<string, string>; set(workItemId: number, scope: string, path: string, hash: string | null): void };
   /** Tells the other pages showing a work item that a tick changed, as a `viewed` event. */
-  viewedChanged?(workItemId: number, from: string, payload: { path: string; hash: string; viewed: boolean }): void;
+  viewedChanged?(workItemId: number, from: string, payload: { path: string; hash: string; viewed: boolean; scope: string }): void;
 }
 
 /** The hub's `file` answer: a file read whole, on disk or at the base, for the page's file view. */
@@ -571,8 +690,8 @@ export interface FileView {
 
 /**
  * A file of the worktree for the file view (`side` disk): one git tracks or would track, never an ignored one or one under `.git`, read by real
- * path inside the worktree; or (`side` base) a change row's file at the base, read as `<base>:<path>` for the row's own base path only. Null for
- * any other path.
+ * path inside the worktree; or (`side` base) a change row's file at the range's start, read as `<from>:<path>` for the row's own path there only;
+ * for a range to a commit, `disk` is a change row's file in that commit. Null for any other path.
  */
 export async function readFileView(changes: WorktreeChanges, path: string, side: 'disk' | 'base', git: Git = nodeGit): Promise<FileView | null> {
   let bytes: Buffer | 'large' | null;
@@ -581,6 +700,10 @@ export async function readFileView(changes: WorktreeChanges, path: string, side:
     const row = [...changes.sides.values()].find((one) => one.original?.path === path);
 
     bytes = row?.original == null ? null : await readSide(changes, row.original, git);
+  } else if (changes.to !== null) {
+    const row = [...changes.sides.values()].find((one) => one.modified?.path === path);
+
+    bytes = row?.modified == null ? null : await readSide(changes, row.modified, git);
   } else {
     const listed = await git(['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', path], changes.root);
 
@@ -598,12 +721,7 @@ export async function readFileView(changes: WorktreeChanges, path: string, side:
   return looksBinary(bytes) ? { path, side, contents: null, binary: true, tooLarge: false } : { path, side, contents: bytes.toString('utf8'), binary: false, tooLarge: false };
 }
 
-/** The routes' `uncommitted` parameter: `1` for the uncommitted changes alone, `0` or none for every change since the base; null for another value. */
-function uncommittedParam(value: unknown): boolean | null {
-  return value === null || value === undefined || value === '0' ? false : value === '1' ? true : null;
-}
-
-const UNCOMMITTED_REFUSED = { status: 400, body: { error: 'Expected uncommitted 0 or 1.' } };
+const RANGE_REFUSED = { status: 400, body: { error: 'Expected from base, HEAD or a commit, and to worktree or a commit.' } };
 
 /** Why a page key gets no changes: not a page's, or no selected conversation with a folder yet. */
 function unscoped(deps: PageChangesDeps, key: string): ChangesReply | WindowScope {
@@ -624,6 +742,7 @@ function same(deps: PageChangesDeps, key: string, scope: WindowScope): boolean {
 }
 
 export const CONVERSATION_MOVED = "The window's conversation changed.";
+export const VIEWED_REFUSED = 'Expected {window, scopeGen, opId, path, hash, viewed[, from, to]}.';
 
 /** How many `open-file` answers a page's retried `opId` can find. */
 const OPENED_KEPT = 100;
@@ -638,14 +757,14 @@ export class PageChanges {
   constructor(private readonly deps: PageChangesDeps) {}
 
   /**
-   * `GET /v1/conversation/changes?window=<page key>[&uncommitted=1]`: the selected conversation's worktree's `ChangesView`, with `uncommitted` `1`
-   * its uncommitted changes alone, against HEAD; 400 for another `uncommitted`.
+   * `GET /v1/conversation/changes?window=<page key>[&from=<point>][&to=<point>]`: the selected conversation's worktree's `ChangesView` for the range
+   * (`parseRange`), every change since the base by default; 400 for another `from` or `to`, 409 with `stale` for a commit no longer on the branch.
    */
-  async changes(key: string, uncommitted: unknown = null): Promise<ChangesReply> {
-    const only = uncommittedParam(uncommitted);
+  async changes(key: string, from: unknown = null, to: unknown = null): Promise<ChangesReply> {
+    const range = parseRange(from, to);
 
-    if (only === null) {
-      return UNCOMMITTED_REFUSED;
+    if (range === null) {
+      return RANGE_REFUSED;
     }
 
     const scope = unscoped(this.deps, key);
@@ -654,7 +773,7 @@ export class PageChanges {
       return scope;
     }
 
-    const read = await readChanges(scope.cwd!, this.deps.git, true, only);
+    const read = await readChanges(scope.cwd!, this.deps.git, true, range);
 
     if (!same(this.deps, key, scope)) {
       return { status: 409, body: { error: CONVERSATION_MOVED } };
@@ -664,27 +783,26 @@ export class PageChanges {
       return { status: 409, body: read };
     }
 
-    const ticked = scope.workItemId === null ? new Map<string, string>() : (this.deps.viewed?.list(scope.workItemId) ?? new Map<string, string>());
+    const ticked = scope.workItemId === null ? new Map<string, string>() : (this.deps.viewed?.list(scope.workItemId, read.tickScope) ?? new Map<string, string>());
     const body = { scopeGen: scope.scopeGen, ...read.view, rows: read.view.rows.map((row) => ({ ...row, viewed: row.hash !== 'unreadable' && ticked.get(row.path) === row.hash })) };
 
     return { status: 200, body, etag: etagOf(body) };
   }
 
   /**
-   * `GET /v1/conversation/diff?window=<page key>&path=<path>[&sides=0][&uncommitted=1]`: one change row's `DiffView`, for a path that is one of
-   * the selected conversation's change rows now, with both sides, or with `sides` `0` the patch alone; with `uncommitted` `1` a row of the
-   * uncommitted changes, from HEAD to disk. 400 for a path that is not a plain relative one or another `sides` or `uncommitted`, 404 for one
-   * that is no row.
+   * `GET /v1/conversation/diff?window=<page key>&path=<path>[&sides=0][&from=<point>][&to=<point>]`: one change row's `DiffView`, for a path
+   * that is one of the selected conversation's change rows in the range now, with both sides, or with `sides` `0` the patch alone. 400 for a
+   * path that is not a plain relative one or another `sides`, `from` or `to`, 404 for one that is no row.
    */
-  async diff(key: string, path: unknown, sides: unknown = null, uncommitted: unknown = null): Promise<ChangesReply> {
+  async diff(key: string, path: unknown, sides: unknown = null, from: unknown = null, to: unknown = null): Promise<ChangesReply> {
     if (!relativePath(path) || (sides !== null && sides !== '0' && sides !== '1')) {
       return { status: 400, body: { error: 'Expected a path relative to the worktree, and sides 0 or 1.' } };
     }
 
-    const only = uncommittedParam(uncommitted);
+    const range = parseRange(from, to);
 
-    if (only === null) {
-      return UNCOMMITTED_REFUSED;
+    if (range === null) {
+      return RANGE_REFUSED;
     }
 
     const scope = unscoped(this.deps, key);
@@ -693,7 +811,7 @@ export class PageChanges {
       return scope;
     }
 
-    const read = await readChanges(scope.cwd!, this.deps.git, false, only);
+    const read = await readChanges(scope.cwd!, this.deps.git, false, range);
     const diff = 'error' in read ? null : await readDiff(read, path, this.deps.git, sides !== '0');
 
     if (!same(this.deps, key, scope)) {
@@ -708,19 +826,19 @@ export class PageChanges {
   }
 
   /**
-   * `GET /v1/conversation/file?window=<page key>&path=<path>&side=disk|base[&uncommitted=1]`: a file of the selected conversation's worktree read
-   * whole (`readFileView`), the base being HEAD with `uncommitted` `1`; 400 for a path that is not plain and relative or another side or
-   * `uncommitted`, 404 for one it does not answer.
+   * `GET /v1/conversation/file?window=<page key>&path=<path>&side=disk|base[&from=<point>][&to=<point>]`: a file of the selected conversation's
+   * worktree read whole (`readFileView`), `base` at the range's start and `disk` at its end; 400 for a path that is not plain and relative or
+   * another side, `from` or `to`, 404 for one it does not answer.
    */
-  async file(key: string, path: unknown, side: unknown, uncommitted: unknown = null): Promise<ChangesReply> {
+  async file(key: string, path: unknown, side: unknown, from: unknown = null, to: unknown = null): Promise<ChangesReply> {
     if (!relativePath(path) || (side !== 'disk' && side !== 'base')) {
       return { status: 400, body: { error: 'Expected a path relative to the worktree and a side, disk or base.' } };
     }
 
-    const only = uncommittedParam(uncommitted);
+    const range = parseRange(from, to);
 
-    if (only === null) {
-      return UNCOMMITTED_REFUSED;
+    if (range === null) {
+      return RANGE_REFUSED;
     }
 
     const scope = unscoped(this.deps, key);
@@ -729,7 +847,7 @@ export class PageChanges {
       return scope;
     }
 
-    const read = await readChanges(scope.cwd!, this.deps.git, false, only);
+    const read = await readChanges(scope.cwd!, this.deps.git, false, range);
     const view = 'error' in read ? null : await readFileView(read, path, side, this.deps.git);
 
     if (!same(this.deps, key, scope)) {
@@ -803,16 +921,17 @@ export class PageChanges {
   }
 
   /**
-   * `viewed {window, scopeGen, opId, path, hash, viewed[, uncommitted]}`: ticks a change row viewed at the content hash the page showed, or clears
-   * its tick, for the selected conversation's work item, and tells the other pages showing it; `uncommitted` true looks the row up among the
-   * uncommitted changes alone, as the page listed it. 409 when the file's content changed since, so a tick is never
-   * kept for content the operator did not see, or for a stale `scopeGen`; 404 for a path that is no row.
+   * `viewed {window, scopeGen, opId, path, hash, viewed[, from, to]}`: ticks a change row viewed at the content hash the page showed, or clears
+   * its tick, for the selected conversation's work item, and tells the other pages showing it; `from` and `to` name the range the page listed
+   * the row in (`parseRange`), and a range to a commit keeps its ticks apart from those of a range to disk. 409 when the file's content changed
+   * since, so a tick is never kept for content the operator did not see, or for a stale `scopeGen`; 404 for a path that is no row.
    */
   async viewedCommand(body: Record<string, unknown>): Promise<ChangesReply> {
-    const { window, scopeGen, opId, path, hash, viewed, uncommitted = false } = body;
+    const { window, scopeGen, opId, path, hash, viewed } = body;
+    const range = parseRange(body['from'], body['to']);
 
-    if (typeof window !== 'string' || !Number.isInteger(scopeGen) || typeof opId !== 'string' || opId === '' || opId.length > 100 || !relativePath(path) || typeof hash !== 'string' || hash.length > 100 || typeof viewed !== 'boolean' || typeof uncommitted !== 'boolean') {
-      return { status: 400, body: { error: 'Expected {window, scopeGen, opId, path, hash, viewed[, uncommitted]}.' } };
+    if (typeof window !== 'string' || !Number.isInteger(scopeGen) || typeof opId !== 'string' || opId === '' || opId.length > 100 || !relativePath(path) || typeof hash !== 'string' || hash.length > 100 || typeof viewed !== 'boolean' || range === null) {
+      return { status: 400, body: { error: VIEWED_REFUSED } };
     }
 
     // A retried `opId` answers as the first did, so a lost answer never sets a tick again after a later one.
@@ -822,7 +941,7 @@ export class PageChanges {
       return done;
     }
 
-    const reply = await this.#tick(window, scopeGen as number, path, hash, viewed, uncommitted);
+    const reply = await this.#tick(window, scopeGen as number, path, hash, viewed, range);
 
     this.#ticked.set(`${window} ${opId}`, reply);
 
@@ -836,7 +955,7 @@ export class PageChanges {
   /** Each `viewed`'s answer by page key and `opId`, the last {@link OPENED_KEPT}. */
   readonly #ticked = new Map<string, ChangesReply>();
 
-  async #tick(window: string, scopeGen: number, path: string, hash: string, viewed: boolean, uncommitted: boolean): Promise<ChangesReply> {
+  async #tick(window: string, scopeGen: number, path: string, hash: string, viewed: boolean, range: ChangeRange): Promise<ChangesReply> {
     const scope = unscoped(this.deps, window);
 
     if ('status' in scope) {
@@ -851,7 +970,7 @@ export class PageChanges {
       return { status: 409, body: { error: 'This hub keeps no viewed ticks.' } };
     }
 
-    const read = await readChanges(scope.cwd!, this.deps.git, false, uncommitted);
+    const read = await readChanges(scope.cwd!, this.deps.git, false, range);
 
     if (!same(this.deps, window, scope)) {
       return { status: 409, body: { error: CONVERSATION_MOVED } };
@@ -871,8 +990,8 @@ export class PageChanges {
       return { status: 409, body: { error: `${path} changed since it was shown; read it again.`, hash: row.hash } };
     }
 
-    this.deps.viewed.set(scope.workItemId, path, viewed ? hash : null);
-    this.deps.viewedChanged?.(scope.workItemId, window, { path, hash, viewed });
+    this.deps.viewed.set(scope.workItemId, read.tickScope, path, viewed ? hash : null);
+    this.deps.viewedChanged?.(scope.workItemId, window, { path, hash, viewed, scope: read.tickScope });
     return { status: 200, body: { path, hash, viewed } };
   }
 }

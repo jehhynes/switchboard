@@ -344,13 +344,26 @@ export interface ChangeRow {
   viewed?: boolean;
 }
 
+/** A commit since the merge base, for the Changes tab's scope menu: its first parent, subject and commit time in seconds. */
+export interface CommitInfo {
+  sha: string;
+  parent: string | null;
+  subject: string;
+  time: number;
+}
+
 /** The `changes` answer. */
 export interface ChangesList {
   scopeGen: number;
+  /** The merge base, or null when there is none and `base` means HEAD. */
   base: string | null;
   head: string;
-  /** Whether the rows are the uncommitted changes alone, against HEAD, as asked for with `uncommitted=1`. */
-  uncommitted: boolean;
+  /** The range the rows compare, as asked for with `from` and `to`: `base`, `HEAD` or a commit's ID, to `worktree`, `HEAD` or a commit's ID. */
+  from: string;
+  to: string;
+  /** The commits since the base, newest first, the first 200; `commitsMore` when there are more. */
+  commits: CommitInfo[];
+  commitsMore: boolean;
   rows: ChangeRow[];
   stages: Record<ChangeStage, number>;
   shown: number;

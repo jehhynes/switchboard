@@ -1,14 +1,16 @@
 // The Changes tab (PRD R118, architecture.md § Web page): the open conversation's worktree changes from its merge base to disk, as the VS Code
 // window's Open changes shows them, every changed file's diff in one scrolling tab at the end of the tab strips, drawn by the diff viewer the page
-// loads on first use, which reads only the files near the view, under a bar with the list's counts, its toggles and a Files menu to go to a file.
+// loads on first use, which reads only the files near the view, under a bar with the list's counts, its toggles, a Files menu to go to a file
+// and a scope menu that picks what the list compares: every change since the base, the uncommitted changes, one commit, or two points.
 import type { ComponentChildren, VNode } from 'preact';
 import { DIFF_BUDGET, evictions, largeReason, MAX_IN_FLIGHT, rowKey, wantedIndexes } from './changesWindow.js';
 import { FileIcon } from './fileIcons.js';
 import { mount } from './island.js';
-import type { ChangeRow, ChangesList, ChangeStage, ChangeStatus, DiffData, FileData } from '@switchboard/protocol';
+import { ago } from './render.js';
+import type { ChangeRow, ChangesList, ChangeStage, ChangeStatus, CommitInfo, DiffData, FileData } from '@switchboard/protocol';
 import type { ChangesMount, DiffModule, DiffMount, RowContent } from './diff/types.js';
 
-export type { ChangeRow, ChangesList, ChangeStage, ChangeStatus } from '@switchboard/protocol';
+export type { ChangeRow, ChangesList, ChangeStage, ChangeStatus, CommitInfo } from '@switchboard/protocol';
 
 /** What the page keeps of the Changes tab: the list as last read, a read on its way or why one failed, whether its Files menu is open, and the tab. */
 export interface ChangesView {
@@ -22,19 +24,90 @@ export interface ChangesView {
   tab: boolean;
   /** Whether the Changes tab leaves out the files ticked viewed. */
   hideViewed: boolean;
-  /** Whether the list and the tab show the uncommitted changes alone, against HEAD, rather than every change since the base; kept per device. */
-  uncommitted: boolean;
+  /** What the list and the tab compare, every change since the base until the operator picks another; it lasts until the page leaves the conversation. */
+  range: ChangeRange;
+  /** Whether the scope menu is open, and its Compare pickers' choice while they show. */
+  scopeMenu: boolean;
+  compare: ChangeRange | null;
 }
 
-export const newChanges = (uncommitted = false): ChangesView => ({ list: null, loading: false, error: null, menu: false, for: null, tab: false, hideViewed: false, uncommitted });
+/**
+ * What the list compares, as the change routes' `from` and `to` take it: from `base`, `HEAD` or a commit since the base, to `worktree` (disk),
+ * `HEAD`, which follows new commits, or a commit since the base.
+ */
+export interface ChangeRange {
+  from: string;
+  to: string;
+}
 
-/** Where a device keeps its Uncommitted only choice. */
-export const UNCOMMITTED_KEY = 'switchboard.changesUncommitted';
+export const ALL_CHANGES: ChangeRange = { from: 'base', to: 'worktree' };
+export const UNCOMMITTED: ChangeRange = { from: 'HEAD', to: 'worktree' };
 
-/** What a file's diff is read against, for the key a held diff is kept by: the merge base, else HEAD, whose commit a new commit changes. */
+export const newChanges = (): ChangesView => ({ list: null, loading: false, error: null, menu: false, for: null, tab: false, hideViewed: false, range: ALL_CHANGES, scopeMenu: false, compare: null });
+
+const sameRange = (a: ChangeRange, b: ChangeRange): boolean => a.from === b.from && a.to === b.to;
+const short = (sha: string): string => sha.slice(0, 7);
+
+/** The commit a list's rows compare from, or HEAD by its ID: a new commit changes what a list from HEAD shows. */
+function fromRef(list: ChangesList): string {
+  return list.from === 'base' ? (list.base ?? `HEAD ${list.head}`) : list.from === 'HEAD' ? `HEAD ${list.head}` : list.from;
+}
+
+/** What a file's diff is read against, for the key a held diff is kept by: the range's start, and its end when that is a commit. */
 export function listRef(list: ChangesList | null): string | null {
-  return list === null ? null : (list.base ?? `HEAD ${list.head}`);
+  return list === null ? null : list.to === 'worktree' ? fromRef(list) : `${fromRef(list)}..${list.to === 'HEAD' ? list.head : list.to}`;
 }
+
+/** The scope a list's viewed ticks are kept under in the hub: empty for a range to disk, else `<from>..<to>` by commit IDs. */
+export function tickScope(list: ChangesList): string {
+  return list.to === 'worktree' ? '' : `${list.from === 'base' ? (list.base ?? list.head) : list.from}..${list.to === 'HEAD' ? list.head : list.to}`;
+}
+
+/** Which of the scope menu's choices a range is: every change since the base, the uncommitted ones, one commit's own, or two points compared. */
+export type ScopeKind = 'all' | 'uncommitted' | 'commit' | 'compare';
+
+export function scopeKind(range: ChangeRange, commits: readonly CommitInfo[], base: string | null = null): ScopeKind {
+  if (range.to === 'worktree') {
+    return range.from === 'base' ? 'all' : range.from === 'HEAD' ? 'uncommitted' : 'compare';
+  }
+
+  const commit = commits.find((one) => one.sha === range.to);
+  const from = range.from === 'base' ? base : range.from;
+
+  return commit !== undefined && commit.parent !== null && commit.parent === from ? 'commit' : 'compare';
+}
+
+/** A point of a range by name: the base, the working tree, HEAD, or a commit by its short ID. */
+export function pointLabel(point: string, base: string | null): string {
+  return point === 'base' || point === base ? 'Base' : point === 'worktree' ? 'Working tree' : point === 'HEAD' ? 'HEAD' : short(point);
+}
+
+/** What the scope button says: the scope in a few words. */
+export function scopeLabel(range: ChangeRange, commits: readonly CommitInfo[], base: string | null): string {
+  const kind = scopeKind(range, commits, base);
+  const commit = commits.find((one) => one.sha === range.to);
+
+  return kind === 'all' ? 'All changes' : kind === 'uncommitted' ? 'Uncommitted' : kind === 'commit' ? `${short(commit!.sha)} ${commit!.subject}` : `${pointLabel(range.from, base)} → ${pointLabel(range.to, base)}`;
+}
+
+/** The scope in full, for the scope button's tooltip and the bar note's. */
+export function scopeTitle(range: ChangeRange, commits: readonly CommitInfo[], base: string | null): string {
+  const kind = scopeKind(range, commits, base);
+  const commit = commits.find((one) => one.sha === range.to);
+
+  return kind === 'all'
+    ? base === null
+      ? 'Uncommitted changes only, no merge base'
+      : `All changes since the base, ${short(base)}`
+    : kind === 'uncommitted'
+      ? 'Uncommitted changes, against HEAD'
+      : kind === 'commit'
+        ? `Commit ${short(commit!.sha)}: ${commit!.subject}`
+        : `From ${pointLabel(range.from, base)} to ${pointLabel(range.to, base)}`;
+}
+
+/** The range a list was read for. */
+const rangeOf = (list: ChangesList): ChangeRange => ({ from: list.from, to: list.to });
 
 /** Where the diff's sides go: side by side, one above the other, or by the pane's width (`auto`, stacked and wrapped under {@link SPLIT_MIN_WIDTH}). */
 export type DiffLayout = 'auto' | 'split' | 'stacked';
@@ -76,10 +149,12 @@ function totals(list: ChangesList): { viewed: number; additions: number; deletio
 export function changesTab(changes: ChangesView, shown: boolean, push = true): VNode {
   const list = changes.list;
   const viewed = list === null ? 0 : totals(list).viewed;
-  const files = changes.uncommitted ? 'uncommitted files' : 'files';
+  const kind = scopeKind(changes.range, list?.commits ?? [], list?.base ?? null);
+  const files = kind === 'uncommitted' ? 'uncommitted files' : 'files';
+  const title = kind === 'all' ? "Every changed file's diff since the base" : kind === 'uncommitted' ? "Every uncommitted file's diff" : `Every changed file's diff: ${scopeTitle(changes.range, list?.commits ?? [], list?.base ?? null)}`;
 
   return (
-    <button class={`tab changes-tab${push ? ' push' : ''}${shown ? ' selected' : ''}`} type="button" role="tab" data-action="diff-tab" aria-selected={shown} tabindex={shown ? 0 : -1} title={changes.uncommitted ? "Every uncommitted file's diff" : "Every changed file's diff since the base"} aria-label={list === null ? 'Changes' : `Changes, ${viewed} of ${list.total} ${files} viewed`}>
+    <button class={`tab changes-tab${push ? ' push' : ''}${shown ? ' selected' : ''}`} type="button" role="tab" data-action="diff-tab" aria-selected={shown} tabindex={shown ? 0 : -1} title={title} aria-label={list === null ? 'Changes' : `Changes, ${viewed} of ${list.total} ${files} viewed`}>
       <span class="codicon codicon-diff-multiple" aria-hidden="true"></span>
       <span class="tab-label">Changes</span>
       {list === null ? null : <span class="tab-badge muted">{`${viewed}/${list.total}`}</span>}
@@ -132,7 +207,7 @@ function Row({ row }: { row: ChangeRow }): VNode {
 
 /** What the Changes tab's bar says: how many files, uncommitted ones when the list has those alone, the lines added and deleted, how many are viewed, and a first cut when the worktree has more than the hub lists. */
 export function listNote(list: ChangesList): string {
-  const kind = list.uncommitted ? ' uncommitted' : '';
+  const kind = scopeKind(rangeOf(list), list.commits, list.base) === 'uncommitted' ? ' uncommitted' : '';
   const files = list.total === 1 ? `1${kind} file` : `${list.total}${kind} files`;
   const { viewed, additions, deletions } = totals(list);
   const ticked = viewed === 0 ? '' : ` · ${viewed} viewed`;
@@ -141,14 +216,24 @@ export function listNote(list: ChangesList): string {
   return list.shown < list.total ? `Showing ${list.shown} of ${files}${lines}${ticked}` : `${files}${lines}${ticked}`;
 }
 
-/** The bar note's tooltip: since which base. */
+/** The bar note's tooltip: what the list compares. */
 export function listBase(list: ChangesList): string {
-  return list.uncommitted ? 'Uncommitted changes, against HEAD' : list.base === null ? 'Uncommitted changes only, no merge base' : `Since ${list.base.slice(0, 7)}`;
+  return scopeTitle(rangeOf(list), list.commits, list.base);
 }
 
 /** What the Files menu and the Changes tab say when the list has no rows. */
 export function emptyNote(list: ChangesList): string {
-  return list.uncommitted ? 'No uncommitted changes.' : list.base === null ? 'No uncommitted changes, and no merge base was found.' : 'No changes since the merge base.';
+  const kind = scopeKind(rangeOf(list), list.commits, list.base);
+
+  return kind === 'uncommitted'
+    ? 'No uncommitted changes.'
+    : kind === 'commit'
+      ? 'This commit changes no files.'
+      : kind === 'compare'
+        ? 'No changes between these points.'
+        : list.base === null
+          ? 'No uncommitted changes, and no merge base was found.'
+          : 'No changes since the merge base.';
 }
 
 /** A button of the Changes tab's bar: a codicon with its name as tooltip. */
@@ -184,13 +269,121 @@ function FilesMenu({ changes }: { changes: ChangesView }): VNode {
   return <div class="glass changes-menu">{body}</div>;
 }
 
+const SCOPE_ICONS: Record<ScopeKind, string> = { all: 'diff-multiple', uncommitted: 'diff-modified', commit: 'git-commit', compare: 'git-compare' };
+
+/** A choice of the scope menu, ticked while it is the scope shown. */
+function ScopeItem({ range, checked, title, children }: { range: ChangeRange; checked: boolean; title?: string; children: ComponentChildren }): VNode {
+  return (
+    <button class="scope-item" type="button" aria-pressed={checked} data-action="changes-scope-pick" data-from={range.from} data-to={range.to} title={title}>
+      <span class={`codicon codicon-${checked ? 'check' : 'blank'}`} aria-hidden="true"></span>
+      {children}
+    </button>
+  );
+}
+
 /**
- * The Changes tab's bar, above the diffs: Files, which opens the list of files to go to one, the note, then Uncommitted only, Hide viewed,
+ * Where a point stands in the branch's history, so a range's end must be newer than its start: the working tree, then each commit since the
+ * base, newest first, then the base.
+ */
+export function pointOrder(point: string, commits: readonly CommitInfo[], base: string | null): number {
+  const at = commits.findIndex((one) => one.sha === point);
+
+  return point === 'worktree' ? -1 : point === 'HEAD' ? 0 : at !== -1 ? at : point === 'base' || point === base ? commits.length : Number.NaN;
+}
+
+/** Whether Compare can show a range: its end newer than its start. */
+export function compareValid(range: ChangeRange, commits: readonly CommitInfo[], base: string | null): boolean {
+  return pointOrder(range.to, commits, base) < pointOrder(range.from, commits, base);
+}
+
+/** The scope menu's Compare pickers: From the base or a commit, To HEAD, a commit or the working tree, each newer than From. */
+function ComparePickers({ compare, commits, base }: { compare: ChangeRange; commits: readonly CommitInfo[]; base: string | null }): VNode {
+  const option = (value: string, label: string, chosen: string, disabled = false) => (
+    <option value={value} selected={value === chosen} disabled={disabled}>
+      {label}
+    </option>
+  );
+  const commitLabel = (commit: CommitInfo) => `${short(commit.sha)} ${commit.subject}`;
+  const from = pointOrder(compare.from, commits, base);
+
+  return (
+    <div class="scope-compare">
+      <label class="scope-field">
+        <span>From</span>
+        <select data-compare="from" aria-label="Compare from">
+          {option('base', base === null ? 'Base' : `Base (${short(base)})`, compare.from)}
+          {commits.map((commit) => option(commit.sha, commitLabel(commit), compare.from))}
+        </select>
+      </label>
+      <label class="scope-field">
+        <span>To</span>
+        <select data-compare="to" aria-label="Compare to">
+          {option('HEAD', 'HEAD, following new commits', compare.to, !(0 < from))}
+          {commits.map((commit, index) => option(commit.sha, commitLabel(commit), compare.to, !(index < from)))}
+          {option('worktree', 'Working tree', compare.to)}
+        </select>
+      </label>
+      <button class="scope-go" type="button" data-action="changes-compare-go" disabled={!compareValid(compare, commits, base)}>
+        Compare
+      </button>
+    </div>
+  );
+}
+
+/** The scope menu: every change since the base, the uncommitted changes, each commit since the base newest first, and Compare. */
+function ScopeMenu({ changes, now }: { changes: ChangesView; now: number }): VNode {
+  const list = changes.list;
+  const commits = list?.commits ?? [];
+  const base = list?.base ?? null;
+  const kind = scopeKind(changes.range, commits, base);
+
+  return (
+    <div class="glass changes-menu changes-scope-menu" role="group" aria-label="Changes to show">
+      <ScopeItem range={ALL_CHANGES} checked={kind === 'all'}>
+        <span class="scope-text">{base === null ? 'All changes (no merge base)' : 'All changes since the base'}</span>
+      </ScopeItem>
+      <ScopeItem range={UNCOMMITTED} checked={kind === 'uncommitted'}>
+        <span class="scope-text">Uncommitted changes</span>
+      </ScopeItem>
+      {commits.length === 0 ? null : (
+        <>
+          <div class="scope-heading">
+            Commits
+          </div>
+          <div class="scope-commits" role="group" aria-label="Commits">
+            {commits.map((commit) => (
+              <ScopeItem range={{ from: commit.parent ?? 'base', to: commit.sha }} checked={kind === 'commit' && changes.range.to === commit.sha} title={`${commit.sha}\n${commit.subject}`}>
+                <code class="scope-sha">{short(commit.sha)}</code>
+                <span class="scope-text">{commit.subject}</span>
+                <span class="scope-time">{ago(commit.time * 1000, now)}</span>
+              </ScopeItem>
+            ))}
+            {list?.commitsMore === true ? <p class="changes-empty">Only the latest {commits.length} commits are listed.</p> : null}
+          </div>
+          {changes.compare === null ? (
+            <button class="scope-item" type="button" aria-pressed={kind === 'compare'} data-action="changes-compare">
+              <span class={`codicon codicon-${kind === 'compare' ? 'check' : 'blank'}`} aria-hidden="true"></span>
+              <span class="scope-text">{kind === 'compare' ? `Compare… ${scopeLabel(changes.range, commits, base)}` : 'Compare…'}</span>
+            </button>
+          ) : (
+            <ComparePickers compare={changes.compare} commits={commits} base={base} />
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The Changes tab's bar, above the diffs: Files, which opens the list of files to go to one, the scope menu, the note, then Hide viewed,
  * Collapse all, Expand all and Refresh. Open in VS Code is in the work item's Actions menu, not here.
  */
-export function renderChangesBar(changes: ChangesView): ComponentChildren {
+export function renderChangesBar(changes: ChangesView, now = Date.now()): ComponentChildren {
   const list = changes.list;
   const empty = list === null || list.rows.length === 0;
+  const commits = list?.commits ?? [];
+  const base = list?.base ?? null;
+  const title = scopeTitle(changes.range, commits, base);
 
   return [
     <button class={`changes-files${changes.menu ? ' open' : ''}`} type="button" data-action="changes-menu" aria-expanded={changes.menu} title="Go to a file" aria-label="Files">
@@ -199,10 +392,15 @@ export function renderChangesBar(changes: ChangesView): ComponentChildren {
       <span class="codicon codicon-chevron-down" aria-hidden="true"></span>
     </button>,
     changes.menu ? <FilesMenu changes={changes} /> : null,
+    <button class={`changes-scope${changes.scopeMenu ? ' open' : ''}`} type="button" data-action="changes-scope" aria-expanded={changes.scopeMenu} title={`Showing: ${title}`} aria-label={`Changes to show: ${title}`}>
+      <span class={`codicon codicon-${SCOPE_ICONS[scopeKind(changes.range, commits, base)]}`} aria-hidden="true"></span>
+      <span class="changes-scope-label">{scopeLabel(changes.range, commits, base)}</span>
+      <span class="codicon codicon-chevron-down" aria-hidden="true"></span>
+    </button>,
+    changes.scopeMenu ? <ScopeMenu changes={changes} now={now} /> : null,
     <span class={`changes-note${changes.error !== null && list !== null ? ' error' : ''}`} title={list === null ? undefined : listBase(list)}>
       {changes.error !== null && list !== null ? changes.error : list === null ? 'Changes' : listNote(list)}
     </span>,
-    <HeadButton action="changes-uncommitted" icon={changes.uncommitted ? 'filter-filled' : 'filter'} label={changes.uncommitted ? 'Show all changes since the base' : 'Show uncommitted changes only'} pressed={changes.uncommitted} />,
     <HeadButton action="changes-hide-viewed" icon={changes.hideViewed ? 'eye-closed' : 'eye'} label={changes.hideViewed ? 'Show viewed files' : 'Hide viewed files'} pressed={changes.hideViewed} disabled={empty} />,
     <HeadButton action="changes-collapse-all" icon="collapse-all" label="Collapse all" disabled={empty} />,
     <HeadButton action="changes-expand-all" icon="expand-all" label="Expand all" disabled={empty} />,
@@ -237,6 +435,17 @@ interface FileOpen {
   side: 'disk' | 'base';
   line: number;
   entry: { state: 'loading' } | { state: 'ok'; data: FileData; version: string } | { state: 'error'; error: string };
+}
+
+/** Where the file view's file is read, after its line: the range's start for the old side, its end commit for the new side; null on disk. */
+export function fileAt(list: ChangesList | null, side: 'disk' | 'base'): string | null {
+  if (list === null) {
+    return null;
+  }
+
+  const point = side === 'base' ? list.from : list.to;
+
+  return point === 'worktree' ? null : point === 'base' && list.base === null ? ' at HEAD' : point === 'base' || point === list.base ? ' at the base' : point === 'HEAD' ? ' at HEAD' : ` at ${short(point)}`;
 }
 
 /** What the file view says in place of the file: a read on its way, why it failed, a binary file or one too large. */
@@ -356,36 +565,40 @@ export class ChangesController {
   /** Each file's header element the viewer shows before its name, by path, drawn again on every draw. */
   readonly #prefixes = new Map<string, HTMLElement>();
 
-  constructor(private readonly deps: ChangesDeps) {
-    try {
-      this.view.uncommitted = localStorage.getItem(UNCOMMITTED_KEY) === '1';
-    } catch {
-      // Off without local storage.
+  constructor(private readonly deps: ChangesDeps) {}
+
+  /**
+   * A diff or file read answered that the scope's commit is no longer on the branch: unless the page has moved on since the read began, the
+   * list goes back to every change since the base, as a list read does. True when it did.
+   */
+  #staleBack(body: Record<string, unknown>, generation: number): boolean {
+    if (body['stale'] !== true || generation !== this.#generation || sameRange(this.view.range, ALL_CHANGES)) {
+      return false;
     }
+
+    this.#setRange(ALL_CHANGES);
+    return true;
   }
 
-  /** The change routes' query for Uncommitted only. */
-  #only(): string {
-    return this.view.uncommitted ? '&uncommitted=1' : '';
+  /** The change routes' query for the scope: nothing for every change since the base. */
+  #only(range: ChangeRange = this.view.range): string {
+    return sameRange(range, ALL_CHANGES) ? '' : `&from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`;
   }
 
   /**
-   * Shows the uncommitted changes alone, or every change since the base again, kept for this device: the diffs read for the other list are
-   * dropped and the list is read again; which files are collapsed stays.
+   * Shows another scope, until the page leaves the conversation: the diffs read for the other list are dropped and the list is read again;
+   * which files are collapsed stays.
    */
-  #setUncommitted(on: boolean): void {
-    this.view.uncommitted = on;
+  #setRange(range: ChangeRange): void {
+    this.view.scopeMenu = false;
+    this.view.compare = null;
 
-    try {
-      if (on) {
-        localStorage.setItem(UNCOMMITTED_KEY, '1');
-      } else {
-        localStorage.removeItem(UNCOMMITTED_KEY);
-      }
-    } catch {
-      // A page without local storage keeps the choice until it reloads.
+    if (sameRange(range, this.view.range)) {
+      this.deps.draw();
+      return;
     }
 
+    this.view.range = range;
     this.#reading++;
     this.#generation++;
     this.#held.clear();
@@ -418,7 +631,7 @@ export class ChangesController {
       this.#jump = null;
       this.#file = null;
       this.#unmount();
-      Object.assign(this.view, newChanges(this.view.uncommitted), { for: id });
+      Object.assign(this.view, newChanges(), { for: id });
       return;
     }
 
@@ -442,21 +655,33 @@ export class ChangesController {
 
     let list: ChangesList | null = null;
     let error: string | null = null;
+    let stale = false;
 
     try {
       const response = await this.deps.fetch(`/v1/conversation/changes?window=${encodeURIComponent(key)}${this.#only()}`, { credentials: 'same-origin' });
       const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
 
       if (response.ok) {
-        list = body as unknown as ChangesList;
+        // An answer without a range, as from a hub older than the page, is every change since the base.
+        const read = body as Partial<ChangesList>;
+
+        list = { ...(body as unknown as ChangesList), from: read.from ?? 'base', to: read.to ?? 'worktree', commits: Array.isArray(read.commits) ? read.commits : [], commitsMore: read.commitsMore === true };
       } else {
         error = String(body['error'] ?? `Switchboard answered ${response.status}.`);
+        stale = body['stale'] === true;
       }
     } catch (failure) {
       error = `Switchboard did not answer: ${String(failure)}`;
     }
 
     if (reading !== this.#reading) {
+      return;
+    }
+
+    // The chosen commit is no longer on the branch, as after a rebase: the list falls back to every change since the base.
+    if (stale && !sameRange(this.view.range, ALL_CHANGES)) {
+      this.view.loading = false;
+      this.#setRange(ALL_CHANGES);
       return;
     }
 
@@ -541,17 +766,58 @@ export class ChangesController {
 
     if (action === 'changes-menu') {
       this.view.menu = !this.view.menu;
+      this.view.scopeMenu = false;
       this.deps.draw();
+      return true;
+    }
+
+    if (action === 'changes-scope') {
+      this.view.scopeMenu = !this.view.scopeMenu;
+      this.view.compare = null;
+      this.view.menu = false;
+      this.deps.draw();
+      return true;
+    }
+
+    if (action === 'changes-scope-pick') {
+      const item = target.closest<HTMLElement>('[data-action]')!;
+
+      const bar = target.closest<HTMLElement>('.changes-bar');
+
+      this.#setRange({ from: item.dataset['from'] ?? 'base', to: item.dataset['to'] ?? 'worktree' });
+      this.#focusScope(bar);
+      return true;
+    }
+
+    if (action === 'changes-compare') {
+      const list = this.view.list;
+      const range = this.view.range;
+      const kind = scopeKind(range, list?.commits ?? [], list?.base ?? null);
+      const start = range.from === list?.base ? 'base' : range.from;
+
+      // The pickers start at the scope shown when it is one commit's or a comparison, else at the base and the working tree.
+      this.view.compare = (kind === 'commit' || kind === 'compare') && list !== null && compareValid({ from: start, to: range.to }, list.commits, list.base) ? { from: start, to: range.to } : { ...ALL_CHANGES };
+      this.deps.draw();
+      return true;
+    }
+
+    if (action === 'changes-compare-go') {
+      const compare = this.view.compare;
+      const list = this.view.list;
+
+      if (compare !== null && list !== null && compareValid(compare, list.commits, list.base)) {
+        // From HEAD to the working tree is the uncommitted changes, and from the base, every change since it.
+        const bar = target.closest<HTMLElement>('.changes-bar');
+
+        this.#setRange(compare.to === 'worktree' && compare.from === list.commits[0]?.sha ? UNCOMMITTED : compare.to === 'worktree' && compare.from === 'base' ? ALL_CHANGES : compare);
+        this.#focusScope(bar);
+      }
+
       return true;
     }
 
     if (action === 'changes-refresh') {
       void this.refresh();
-      return true;
-    }
-
-    if (action === 'changes-uncommitted') {
-      this.#setUncommitted(!this.view.uncommitted);
       return true;
     }
 
@@ -679,6 +945,10 @@ export class ChangesController {
 
           next = { key, etag: response.headers?.get?.('ETag') ?? null, content: note === null ? { data } : { note }, chars: data.patch?.length ?? 0, hydrated: false };
         } else {
+          if (this.#staleBack(body, generation)) {
+            return;
+          }
+
           next = { key, etag: null, content: { note: String(body['error'] ?? `Switchboard answered ${response.status}.`) }, chars: 0, hydrated: false };
           failed = true;
         }
@@ -781,6 +1051,7 @@ export class ChangesController {
       const response = await this.deps.fetch(`/v1/conversation/diff?window=${encodeURIComponent(key)}&path=${encodeURIComponent(path)}${this.#only()}`, { credentials: 'same-origin' });
 
       if (!response.ok) {
+        this.#staleBack((await response.json().catch(() => ({}))) as Record<string, unknown>, generation);
         return null;
       }
 
@@ -832,6 +1103,10 @@ export class ChangesController {
       const response = await this.deps.fetch(`/v1/conversation/file?window=${encodeURIComponent(key)}&path=${encodeURIComponent(open.path)}&side=${open.side}${this.#only()}`, { credentials: 'same-origin' });
       const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
 
+      if (!response.ok && this.#staleBack(body, generation)) {
+        return;
+      }
+
       open.entry = response.ok ? { state: 'ok', data: body as unknown as FileData, version: response.headers?.get?.('ETag') ?? String(Date.now()) } : { state: 'error', error: String(body['error'] ?? `Switchboard answered ${response.status}.`) };
     } catch (failure) {
       open.entry = { state: 'error', error: `Switchboard did not answer: ${String(failure)}` };
@@ -864,14 +1139,14 @@ export class ChangesController {
 
     this.#ticking.add(row);
 
-    // The list the row was shown in, kept for every post, even after Uncommitted only is toggled meanwhile.
-    const uncommitted = this.view.uncommitted;
+    // The range the row was shown in, kept for every post, even after another scope is chosen meanwhile.
+    const range = this.view.list === null ? this.view.range : rangeOf(this.view.list);
 
     try {
       for (let sent: boolean | null = null; row.viewed !== sent; ) {
         sent = row.viewed === true;
 
-        const answer = await this.deps.command('viewed', { path, hash: row.hash, viewed: sent, uncommitted });
+        const answer = await this.deps.command('viewed', { path, hash: row.hash, viewed: sent, from: range.from, to: range.to });
 
         if (answer.status !== 200) {
           row.viewed = !sent;
@@ -892,7 +1167,8 @@ export class ChangesController {
 
   /** Another device ticked a file or cleared its tick: the list follows it while the file's content is the one ticked. */
   viewedEvent(data: Record<string, unknown>): void {
-    const row = data['workItemId'] === this.deps.workItemId() ? this.view.list?.rows.find((one) => one.path === data['path'] && one.hash === data['hash']) : undefined;
+    const list = this.view.list;
+    const row = data['workItemId'] === this.deps.workItemId() && list !== null && (data['scope'] ?? '') === tickScope(list) ? list.rows.find((one) => one.path === data['path'] && one.hash === data['hash']) : undefined;
 
     if (row !== undefined && typeof data['viewed'] === 'boolean') {
       row.viewed = data['viewed'];
@@ -1122,7 +1398,7 @@ export class ChangesController {
         return;
       }
 
-      // The list went or emptied while the module loaded, as when Uncommitted only was toggled: the next draw says why, or mounts once it is read.
+      // The list went or emptied while the module loaded, as when another scope was chosen: the next draw says why, or mounts once it is read.
       if (this.view.list === null || this.view.list.rows.length === 0) {
         this.deps.draw();
         return;
@@ -1241,7 +1517,7 @@ export class ChangesController {
       const suffix = slot();
 
       mount(prefix, <BackButton />);
-      mount(suffix, <span class="diff-at">:{file.line}{file.side === 'base' ? <span class="diff-from">{this.view.list?.uncommitted === true ? ' at HEAD' : ' at the base'}</span> : null}</span>);
+      mount(suffix, <span class="diff-at">:{file.line}{fileAt(this.view.list, file.side) === null ? null : <span class="diff-from">{fileAt(this.view.list, file.side)}</span>}</span>);
       host.replaceChildren();
       kept.mount = module.mountFile(host, entry.data, entry.version, { wrap: this.#shownLayout(host.closest<HTMLElement>('.diff-pane') ?? host).wrap, line: file.line, prefix, suffix });
     });
@@ -1362,23 +1638,57 @@ export class ChangesController {
     }
   }
 
-  /** Closes the Files menu on a press outside it and its button; true when it closed. */
-  pointerDown(target: EventTarget | null): boolean {
-    if (!this.view.menu || (target instanceof Element && target.closest('.changes-menu, .changes-files') !== null)) {
+  /**
+   * A Compare picker changed: the choice follows it, and a To no longer newer than From moves to the working tree. True when the field was one
+   * of them.
+   */
+  input(target: EventTarget | null): boolean {
+    const field = target instanceof HTMLSelectElement ? target : null;
+    const which = field?.dataset['compare'];
+    const compare = this.view.compare;
+
+    if (field === null || (which !== 'from' && which !== 'to') || compare === null) {
       return false;
     }
 
-    this.view.menu = false;
+    compare[which] = field.value;
+
+    if (which === 'from' && !compareValid(compare, this.view.list?.commits ?? [], this.view.list?.base ?? null)) {
+      compare.to = 'worktree';
+    }
+
+    this.deps.draw();
     return true;
   }
 
-  /** Closes the Files menu on Escape; true when it closed. */
-  escape(): boolean {
-    if (!this.view.menu) {
+  /** Closes the Files menu or the scope menu on a press outside it and its button; true when one closed. */
+  pointerDown(target: EventTarget | null): boolean {
+    if ((!this.view.menu && !this.view.scopeMenu) || (target instanceof Element && target.closest('.changes-menu, .changes-files, .changes-scope') !== null)) {
       return false;
     }
 
     this.view.menu = false;
+    this.view.scopeMenu = false;
+    this.view.compare = null;
     return true;
+  }
+
+  /** The scope button keeps the focus once a choice of its menu, which goes with the menu, is taken. */
+  #focusScope(bar: HTMLElement | null): void {
+    bar?.querySelector<HTMLElement>('.changes-scope')?.focus();
+  }
+
+  /** Closes the Files menu or the scope menu on Escape: which one closed, so its button takes the focus back, or null. */
+  escape(): 'files' | 'scope' | null {
+    if (!this.view.menu && !this.view.scopeMenu) {
+      return null;
+    }
+
+    const closed = this.view.scopeMenu ? 'scope' : 'files';
+
+    this.view.menu = false;
+    this.view.scopeMenu = false;
+    this.view.compare = null;
+    return closed;
   }
 }

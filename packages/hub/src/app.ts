@@ -43,7 +43,7 @@ import { dockRowOf, PageAccess, pageActionEvent, OPEN_IN_VSCODE, pageCommandOf, 
 import { launcher } from './launch.js';
 import type { Launcher } from './launch.js';
 import { pageAsset } from './pageAssets.js';
-import { PageChanges } from './changes.js';
+import { PageChanges, VIEWED_REFUSED } from './changes.js';
 import { needsMessage, newlyNeeding, rowFor, targetForUrl } from './needs.js';
 import { installedProviders } from './installed.js';
 import { PaneLink } from './paneLink.js';
@@ -658,7 +658,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     isPage: (key) => scopes.isPage(key),
     scope: (key) => scopes.scope(key),
     openFile: (workItemId, path, line) => commandInWindow(workItemId, OPEN_IN_VSCODE, { type: 'openFile', path, line }),
-    viewed: { list: (workItemId) => store.viewedFiles(workItemId), set: (workItemId, path, hash) => store.setViewedFile(workItemId, path, hash, deps.now()) },
+    viewed: { list: (workItemId, scope) => store.viewedFiles(workItemId, scope), set: (workItemId, scope, path, hash) => store.setViewedFile(workItemId, path, hash, deps.now(), scope) },
     viewedChanged: (workItemId, from, payload) => {
       for (const key of conversation.pages()) {
         if (key !== from && scopes.scope(key)?.workItemId === workItemId) {
@@ -1380,7 +1380,7 @@ const dockWithRuns = () => {
       '/v1/conversation/page-folder-conversation': async (body) => (isRecord(body) ? conversation.pageFolderConversation(body) : { status: 400, body: { error: 'Expected {window, opId, folder, provider?}.' } }),
       // A changed file opened at a line in the work item's VS Code window (architecture.md § Web page).
       // A changed file ticked viewed, or its tick cleared, for every device (architecture.md § Web page).
-      '/v1/conversation/viewed': async (body) => (isRecord(body) ? pageChanges.viewedCommand(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, path, hash, viewed[, uncommitted]}.' } }),
+      '/v1/conversation/viewed': async (body) => (isRecord(body) ? pageChanges.viewedCommand(body) : { status: 400, body: { error: VIEWED_REFUSED } }),
       '/v1/conversation/open-file': async (body) => (isRecord(body) ? pageChanges.openFileCommand(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, path, line}.' } }),
       '/v1/conversation/page-search': async (body) => (isRecord(body) ? conversation.pageSearch(body) : { status: 400, body: { error: 'Expected {window, text, since}.' } }),
       // The page's tabs for its work item, kept for every device (architecture.md § Web page).
@@ -1763,11 +1763,11 @@ const dockWithRuns = () => {
       console: (key, sessionId, send, end) => pageConsole.open(key, sessionId, send, end),
       changes: (route, key, query) =>
         route === 'changes'
-          ? pageChanges.changes(key, query.get('uncommitted'))
+          ? pageChanges.changes(key, query.get('from'), query.get('to'))
           : route === 'diff'
-            ? pageChanges.diff(key, query.get('path'), query.get('sides'), query.get('uncommitted'))
+            ? pageChanges.diff(key, query.get('path'), query.get('sides'), query.get('from'), query.get('to'))
             : route === 'file'
-              ? pageChanges.file(key, query.get('path'), query.get('side'), query.get('uncommitted'))
+              ? pageChanges.file(key, query.get('path'), query.get('side'), query.get('from'), query.get('to'))
               : Promise.resolve({ status: 404, body: { error: 'not found' } }),
       voice: {
         enabled: () => config.settings.voice.enabled,

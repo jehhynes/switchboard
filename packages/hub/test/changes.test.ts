@@ -1,8 +1,9 @@
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { DIFF_MAX_BYTES, fileInside, nodeGit, PageChanges, parseNameStatus, parseNumstat, readCapped, readChanges, readDiff, readFileView, relativePath, SIDE_MAX_BYTES } from '../src/changes.js';
+import { COMMIT_GONE, DIFF_MAX_BYTES, fileInside, MAX_COMMITS, nodeGit, PageChanges, parseNameStatus, parseNumstat, parseRange, readCapped, readChanges, readDiff, readFileView, relativePath, SIDE_MAX_BYTES } from '../src/changes.js';
 import type { ChangesView, WorktreeChanges } from '../src/changes.js';
 import type { WindowScope } from '../src/windows.js';
 import { isolateGit, makeRepo } from './gitFixture.js';
@@ -81,9 +82,9 @@ describe('readChanges', () => {
     // Committed after the base, then changed again on disk: the uncommitted list has only the change since HEAD.
     repo.write('committed.ts', lines(5));
 
-    const read = (await readChanges(repo.root, nodeGit, true, true)) as WorktreeChanges;
+    const read = (await readChanges(repo.root, nodeGit, true, { from: 'HEAD', to: 'worktree' })) as WorktreeChanges;
 
-    expect(read.view).toMatchObject({ base: null, head: repo.git('rev-parse', 'HEAD').trim(), uncommitted: true, stages: { committed: 0, staged: 1, working: 3, untracked: 3 } });
+    expect(read.view).toMatchObject({ base: repo.git('rev-parse', 'origin/main').trim(), head: repo.git('rev-parse', 'HEAD').trim(), from: 'HEAD', to: 'worktree', stages: { committed: 0, staged: 1, working: 3, untracked: 3 } });
     expect(read.ref).toBe(read.view.head);
     expect(read.view.rows.map(({ path, status, stages, additions, deletions }) => [path, status, stages.join(), additions, deletions])).toEqual([
       ['.gitignore', 'U', 'untracked', 1, 0],
@@ -94,7 +95,7 @@ describe('readChanges', () => {
       ['notes/new.txt', 'U', 'untracked', 3, 0],
       ['src/new-name.ts', 'R', 'staged', 0, 0],
     ]);
-    expect(((await readChanges(repo.root)) as WorktreeChanges).view).toMatchObject({ uncommitted: false, stages: { committed: 2 } });
+    expect(((await readChanges(repo.root)) as WorktreeChanges).view).toMatchObject({ from: 'base', to: 'worktree', stages: { committed: 2 } });
   });
 
   it('answers no rows for a worktree that matches its base', async () => {
@@ -447,7 +448,143 @@ describe('PageChanges.diff', () => {
   });
 });
 
-describe('PageChanges with uncommitted', () => {
+/** busyRepo with a second commit after the first, which edits committed.ts again and deletes src/kept.ts: `first` and `second`, and the base. */
+function twoCommits() {
+  const repo = busyRepo();
+
+  // Only these two files, so the staged rename and the rest of the work stay uncommitted.
+  repo.write('committed.ts', lines(6));
+  repo.git('rm', '-q', 'src/kept.ts');
+  repo.git('commit', '-qm', 'second: more lines', '--', 'committed.ts', 'src/kept.ts');
+
+  return { repo, base: repo.git('rev-parse', 'origin/main').trim(), first: repo.git('rev-parse', 'HEAD~1').trim(), second: repo.git('rev-parse', 'HEAD').trim() };
+}
+
+describe('readChanges with a range', () => {
+  it('ReadChanges_CommitsSinceTheBase_ListsThemNewestFirstWithParentSubjectAndTime', async () => {
+    const { repo, base, first, second } = twoCommits();
+    const view = ((await readChanges(repo.root)) as WorktreeChanges).view;
+
+    expect(view.commits).toEqual([
+      { sha: second, parent: first, subject: 'second: more lines', time: Number(repo.git('log', '-1', '--format=%ct', second).trim()) },
+      { sha: first, parent: base, subject: 'work', time: Number(repo.git('log', '-1', '--format=%ct', first).trim()) },
+    ]);
+    expect(view.commitsMore).toBe(false);
+  });
+
+  it('ReadChanges_OneCommit_ListsOnlyItsFilesHashedInTheCommitAndReadsItsSides', async () => {
+    const { repo, first, second } = twoCommits();
+    const read = (await readChanges(repo.root, nodeGit, true, { from: first, to: second })) as WorktreeChanges;
+
+    expect(read.view).toMatchObject({ from: first, to: second, stages: { committed: 2, staged: 0, working: 0, untracked: 0 }, total: 2 });
+    expect(read.view.rows.map(({ path, status, stages, additions, deletions, hash }) => [path, status, stages.join(), additions, deletions, hash])).toEqual([
+      ['committed.ts', 'M', 'committed', 2, 0, repo.git('rev-parse', `${second}:committed.ts`).trim()],
+      ['src/kept.ts', 'D', 'committed', 0, 5, 'deleted'],
+    ]);
+    expect(read.ref).toBe(first);
+    expect(read.to).toBe(second);
+    expect(read.tickScope).toBe(`${first}..${second}`);
+
+    // The diff is the commit's own, its new side the file in the commit, not on disk.
+    repo.write('committed.ts', 'on disk\n');
+
+    const diff = (await readDiff(read, 'committed.ts'))!;
+
+    expect(diff.patch!.match(/^\+line \d+$/gm)).toEqual(['+line 5', '+line 6']);
+    expect([diff.old, diff.new]).toEqual([lines(4), lines(6)]);
+    expect(await readFileView(read, 'committed.ts', 'disk')).toMatchObject({ contents: lines(6) });
+    expect(await readFileView(read, 'committed.ts', 'base')).toMatchObject({ contents: lines(4) });
+    expect(await readFileView(read, 'src/kept.ts', 'base')).toMatchObject({ contents: lines(5) });
+    // Only a row's own file: no file outside the commit, on disk or in it.
+    expect(await readFileView(read, 'edited.md', 'disk')).toBeNull();
+    expect(await readFileView(read, 'src/kept.ts', 'disk')).toBeNull();
+  });
+
+  it('ReadChanges_TwoPoints_ComparesThemAndACommitToDiskAddsTheUncommittedWork', async () => {
+    const { repo, base, first, second } = twoCommits();
+    const both = (await readChanges(repo.root, nodeGit, true, { from: 'base', to: second })) as WorktreeChanges;
+
+    expect(both.ref).toBe(base);
+    expect(both.tickScope).toBe(`${base}..${second}`);
+    expect(both.view.rows.map((row) => [row.path, row.status, row.additions])).toEqual([
+      ['added-in-commit.ts', 'A', 1],
+      ['committed.ts', 'M', 4],
+      ['src/kept.ts', 'D', 0],
+    ]);
+
+    // To HEAD reads HEAD's commit now, and keeps its ticks under that commit.
+    const toHead = (await readChanges(repo.root, nodeGit, true, { from: 'base', to: 'HEAD' })) as WorktreeChanges;
+
+    expect(toHead.to).toBe(second);
+    expect(toHead.tickScope).toBe(`${base}..${second}`);
+    expect(toHead.view.rows).toEqual(both.view.rows);
+
+    const toDisk = (await readChanges(repo.root, nodeGit, true, { from: second, to: 'worktree' })) as WorktreeChanges;
+
+    // From HEAD's own commit to disk: the uncommitted work alone, its ticks shared with every list to disk.
+    expect(toDisk.view.rows.map((row) => row.path)).toEqual(['.gitignore', 'edited.md', 'gone.txt', 'image.bin', 'notes/new.txt', 'src/new-name.ts']);
+    expect(toDisk.tickScope).toBe('');
+
+    const fromFirst = (await readChanges(repo.root, nodeGit, true, { from: first, to: 'worktree' })) as WorktreeChanges;
+
+    expect(fromFirst.view.rows.find((row) => row.path === 'committed.ts')).toMatchObject({ status: 'M', stages: ['committed'], additions: 2 });
+    expect(fromFirst.view.rows.find((row) => row.path === 'src/kept.ts')).toMatchObject({ status: 'D' });
+  });
+
+  it('ReadChanges_ACommitNotSinceTheBase_IsRefusedAsStale', async () => {
+    const { repo, base, first, second } = twoCommits();
+    const before = repo.git('rev-parse', 'HEAD~2').trim();
+
+    // The base itself and a commit before it, an unknown ID, and a range to the base.
+    expect(before).toBe(base);
+    for (const range of [{ from: base, to: base.replace(/^./, base[0] === 'a' ? 'b' : 'a') }, { from: 'f'.repeat(40), to: second }, { from: 'base', to: base }]) {
+      expect(await readChanges(repo.root, nodeGit, false, range)).toEqual({ error: COMMIT_GONE, stale: true });
+    }
+
+    // After a rebase onto a new base, the first commit is no longer one since the base.
+    repo.git('reset', '-q', '--hard', first);
+    repo.git('commit', '-q', '--allow-empty', '-m', 'rewritten');
+    expect(await readChanges(repo.root, nodeGit, false, { from: base, to: second })).toEqual({ error: COMMIT_GONE, stale: true });
+  });
+
+  it('ParseRange_EachValue_TakesTheBaseHeadOrACommitAndRefusesTheRest', () => {
+    const sha = 'a'.repeat(40);
+
+    expect(parseRange(null, null)).toEqual({ from: 'base', to: 'worktree' });
+    expect(parseRange('HEAD', 'worktree')).toEqual({ from: 'HEAD', to: 'worktree' });
+    expect(parseRange(sha, 'b'.repeat(64))).toEqual({ from: sha, to: 'b'.repeat(64) });
+    expect(parseRange('base', sha)).toEqual({ from: 'base', to: sha });
+    expect(parseRange(sha, 'HEAD')).toEqual({ from: sha, to: 'HEAD' });
+
+    for (const [from, to] of [['HEAD', sha], [sha, sha], ['main', null], ['HEAD~1', null], ['HEAD', 'HEAD'], [sha.slice(0, 7), null], [`${sha}:x`, null], [1, null], [null, 'base']]) {
+      expect(parseRange(from, to)).toBeNull();
+    }
+  });
+
+  it('ReadChanges_MoreCommitsThanItLists_SaysSo', { timeout: 60_000 }, async () => {
+    const repo = makeRepo({ 'a.txt': '0\n' });
+
+    // The commits in one fast-import, each on the last.
+    const stream = Array.from({ length: MAX_COMMITS + 1 }, (_, index) => `commit refs/heads/work\ncommitter T <t@example.com> ${1_700_000_000 + index} +0000\ndata ${`c${index + 1}`.length}\nc${index + 1}\n${index === 0 ? 'from refs/heads/work^0\n' : ''}\n`).join('');
+
+    execFileSync('git', ['fast-import', '--quiet'], { cwd: repo.root, input: stream });
+    repo.git('reset', '-q', '--hard');
+
+    const view = ((await readChanges(repo.root, nodeGit, false)) as WorktreeChanges).view;
+
+    expect(view.commits).toHaveLength(MAX_COMMITS);
+    expect(view.commits[0]!.subject).toBe(`c${MAX_COMMITS + 1}`);
+    expect(view.commitsMore).toBe(true);
+
+    // A commit past the listed ones can still be read, as one chosen before more were made.
+    const oldest = repo.git('rev-parse', `HEAD~${MAX_COMMITS}`).trim();
+
+    expect(view.commits.some((commit) => commit.sha === oldest)).toBe(false);
+    expect(await readChanges(repo.root, nodeGit, false, { from: 'base', to: oldest })).toMatchObject({ to: oldest });
+  });
+});
+
+describe('PageChanges with a range', () => {
   const scope = (cwd: string): WindowScope => ({ kind: 'page', key: 'p1', folder: cwd, title: 'T', scopeGen: 1, conversations: [], workItemId: 7, cwd, sessionId: 's1' });
 
   it('PageChanges_Uncommitted_AnswersTheListDiffsAndFilesAgainstHead', { timeout: 30_000 }, async () => {
@@ -457,45 +594,69 @@ describe('PageChanges with uncommitted', () => {
 
     const changes = new PageChanges({ isPage: () => true, scope: () => scope(repo.root) });
     const all = await changes.changes('p1');
-    const only = await changes.changes('p1', '1');
+    const only = await changes.changes('p1', 'HEAD', 'worktree');
 
-    expect(only).toMatchObject({ status: 200, body: { scopeGen: 1, uncommitted: true, base: null, shown: 7 } });
-    expect(all).toMatchObject({ status: 200, body: { uncommitted: false, shown: 8 } });
+    expect(only).toMatchObject({ status: 200, body: { scopeGen: 1, from: 'HEAD', to: 'worktree', shown: 7 } });
+    expect(all).toMatchObject({ status: 200, body: { from: 'base', to: 'worktree', shown: 8 } });
     expect(only.etag).not.toBe(all.etag);
-    expect(await changes.changes('p1', '0')).toEqual(all);
+    expect(await changes.changes('p1', 'base', 'worktree')).toEqual(all);
 
     // The patch from HEAD has the one line added since the commit; from the base it has every line the work added.
     const patch = (reply: { body: unknown }) => (reply.body as { patch: string }).patch;
-    const fromHead = patch(await changes.diff('p1', 'committed.ts', '0', '1'));
+    const fromHead = patch(await changes.diff('p1', 'committed.ts', '0', 'HEAD'));
     const fromBase = patch(await changes.diff('p1', 'committed.ts', '0'));
 
     expect(fromHead.match(/^\+line \d+$/gm)).toEqual(['+line 5']);
     expect(fromBase.match(/^\+line \d+$/gm)).toEqual(['+line 3', '+line 4', '+line 5']);
-    expect(await changes.diff('p1', 'added-in-commit.ts', '0', '1')).toEqual({ status: 404, body: { error: 'added-in-commit.ts is not one of the changes now.' } });
+    expect(await changes.diff('p1', 'added-in-commit.ts', '0', 'HEAD')).toEqual({ status: 404, body: { error: 'added-in-commit.ts is not one of the changes now.' } });
     expect((await changes.diff('p1', 'added-in-commit.ts', '0')).status).toBe(200);
 
     // The base side is the file at HEAD.
-    expect(await changes.file('p1', 'committed.ts', 'base', '1')).toMatchObject({ status: 200, body: { contents: lines(4) } });
+    expect(await changes.file('p1', 'committed.ts', 'base', 'HEAD')).toMatchObject({ status: 200, body: { contents: lines(4) } });
     expect(await changes.file('p1', 'committed.ts', 'base')).toMatchObject({ status: 200, body: { contents: lines(2) } });
 
-    for (const reply of [await changes.changes('p1', 'yes'), await changes.diff('p1', 'edited.md', '0', 'true'), await changes.file('p1', 'edited.md', 'disk', '2')]) {
-      expect(reply).toEqual({ status: 400, body: { error: 'Expected uncommitted 0 or 1.' } });
+    for (const reply of [await changes.changes('p1', 'main'), await changes.diff('p1', 'edited.md', '0', 'HEAD', 'HEAD'), await changes.file('p1', 'edited.md', 'disk', 'HEAD~1')]) {
+      expect(reply).toEqual({ status: 400, body: { error: 'Expected from base, HEAD or a commit, and to worktree or a commit.' } });
     }
   });
 
-  it('ViewedCommand_Uncommitted_TicksARowOfTheUncommittedList', async () => {
-    const repo = busyRepo();
+  it('PageChanges_CommitRange_AnswersItAndAStaleCommitWithStale', async () => {
+    const { repo, first, second } = twoCommits();
+    const changes = new PageChanges({ isPage: () => true, scope: () => scope(repo.root) });
 
-    repo.write('committed.ts', lines(5));
+    expect(await changes.changes('p1', first, second)).toMatchObject({ status: 200, body: { from: first, to: second, total: 2 } });
+    expect(await changes.diff('p1', 'committed.ts', '0', first, second)).toMatchObject({ status: 200, body: { path: 'committed.ts', partial: true } });
+    expect(await changes.file('p1', 'committed.ts', 'disk', first, second)).toMatchObject({ status: 200, body: { contents: lines(6) } });
 
+    for (const reply of [await changes.changes('p1', 'base', 'e'.repeat(40)), await changes.diff('p1', 'committed.ts', '0', 'e'.repeat(40), second), await changes.file('p1', 'committed.ts', 'disk', 'base', 'e'.repeat(40))]) {
+      expect(reply).toEqual({ status: 409, body: { error: COMMIT_GONE, stale: true } });
+    }
+  });
+
+  it('ViewedCommand_ByRange_KeepsACommitsTicksApartFromTheChangesToDisk', async () => {
+    const { repo, first, second } = twoCommits();
     const ticks = new Map<string, string>();
-    const changes = new PageChanges({ isPage: () => true, scope: () => scope(repo.root), viewed: { list: () => new Map(ticks), set: (_id, path, hash) => (hash === null ? ticks.delete(path) : ticks.set(path, hash)) } });
-    const row = ((await changes.changes('p1', '1')).body as ChangesView).rows.find((one) => one.path === 'committed.ts')!;
-    const tick = (opId: string, uncommitted?: unknown) => changes.viewedCommand({ window: 'p1', scopeGen: 1, opId, path: 'committed.ts', hash: row.hash, viewed: true, ...(uncommitted === undefined ? {} : { uncommitted }) });
+    const told: unknown[] = [];
+    const changes = new PageChanges({
+      isPage: () => true,
+      scope: () => scope(repo.root),
+      viewed: { list: (_id, at) => new Map([...ticks].filter(([key]) => key.startsWith(`${at} `)).map(([key, hash]) => [key.slice(at.length + 1), hash])), set: (_id, at, path, hash) => (hash === null ? ticks.delete(`${at} ${path}`) : ticks.set(`${at} ${path}`, hash)) },
+      viewedChanged: (_id, _from, payload) => told.push(payload),
+    });
+    const row = async (from?: string, to?: string) => ((await changes.changes('p1', from, to)).body as ChangesView).rows.find((one) => one.path === 'committed.ts')!;
+    const inCommit = await row(first, second);
+    const tick = (opId: string, extra: Record<string, unknown>) => changes.viewedCommand({ window: 'p1', scopeGen: 1, opId, path: 'committed.ts', hash: inCommit.hash, viewed: true, ...extra });
 
-    expect((await tick('b', 'yes')).status).toBe(400);
-    expect(await tick('c', true)).toEqual({ status: 200, body: { path: 'committed.ts', hash: row.hash, viewed: true } });
-    expect(((await changes.changes('p1', '1')).body as ChangesView).rows.find((one) => one.path === 'committed.ts')!.viewed).toBe(true);
+    expect((await tick('a', { from: 'main' })).status).toBe(400);
+    expect(await tick('b', { from: first, to: second })).toEqual({ status: 200, body: { path: 'committed.ts', hash: inCommit.hash, viewed: true } });
+    expect(told).toEqual([{ path: 'committed.ts', hash: inCommit.hash, viewed: true, scope: `${first}..${second}` }]);
+    expect((await row(first, second)).viewed).toBe(true);
+    // The same file's tick in the commit is not one in the changes to disk, nor in another range to a commit.
+    expect((await row()).viewed).toBe(false);
+    expect((await row('base', second)).viewed).toBe(false);
+    // The commit's content is the one in the commit, so a later change on disk keeps its tick.
+    repo.write('committed.ts', 'on disk\n');
+    expect((await row(first, second)).viewed).toBe(true);
   });
 });
 
@@ -557,7 +718,7 @@ describe('viewed ticks', () => {
     const changes = new PageChanges({
       isPage: () => true,
       scope: () => scope(repo.root),
-      viewed: { list: () => new Map(ticks), set: (_id, path, hash) => (hash === null ? ticks.delete(path) : ticks.set(path, hash)) },
+      viewed: { list: () => new Map(ticks), set: (_id, _scope, path, hash) => (hash === null ? ticks.delete(path) : ticks.set(path, hash)) },
       viewedChanged: (id, from, payload) => told.push([id, from, payload]),
     });
     const rows = async () => ((await changes.changes('p1')).body as ChangesView).rows;
@@ -568,7 +729,7 @@ describe('viewed ticks', () => {
     expect(edited.viewed).toBe(false);
 
     expect(await changes.viewedCommand({ window: 'p1', scopeGen: 1, opId: 'v1', path: 'edited.md', hash: edited.hash, viewed: true })).toEqual({ status: 200, body: { path: 'edited.md', hash: edited.hash, viewed: true } });
-    expect(told).toEqual([[7, 'p1', { path: 'edited.md', hash: edited.hash, viewed: true }]]);
+    expect(told).toEqual([[7, 'p1', { path: 'edited.md', hash: edited.hash, viewed: true, scope: '' }]]);
     // A retried opId answers as the first did and tells no one again.
     expect((await changes.viewedCommand({ window: 'p1', scopeGen: 1, opId: 'v1', path: 'edited.md', hash: edited.hash, viewed: true })).status).toBe(200);
     expect(told).toHaveLength(1);

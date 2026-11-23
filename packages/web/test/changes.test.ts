@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { emptyNote, listBase, listNote, listRef, rowTitle, UNCOMMITTED_KEY } from '../src/changes.js';
+import { compareValid, emptyNote, fileAt, listBase, listNote, listRef, rowTitle, scopeKind, scopeLabel, tickScope } from '../src/changes.js';
 import type { ChangesList } from '../src/changes.js';
 import { diffLayout, diffNote } from '../src/changes.js';
 import type { DiffModule } from '../src/diff/types.js';
@@ -28,11 +28,23 @@ class FakeSource {
   close(): void {}
 }
 
+const BASE = '0123456789abcdef0123456789abcdef01234567';
+const FIRST = '1111111111111111111111111111111111111111';
+const HEAD = 'fedcba9876543210fedcba9876543210fedcba98';
+/** The commits since the base, newest first: HEAD, then the first, an hour and two hours ago. */
+const COMMITS = [
+  { sha: HEAD, parent: FIRST, subject: 'Second change', time: Math.floor(Date.now() / 1000) - 3600 },
+  { sha: FIRST, parent: BASE, subject: 'First change', time: Math.floor(Date.now() / 1000) - 7200 },
+];
+
 const LIST: ChangesList = {
   scopeGen: 3,
-  base: '0123456789abcdef0123456789abcdef01234567',
-  head: 'fedcba9876543210fedcba9876543210fedcba98',
-  uncommitted: false,
+  base: BASE,
+  head: HEAD,
+  from: 'base',
+  to: 'worktree',
+  commits: COMMITS,
+  commitsMore: false,
   rows: [
     { path: 'docs/a.md', status: 'M', stages: ['committed', 'working'], additions: 3, deletions: 1, binary: false, hash: 'h-a', viewed: false },
     { path: 'src/new.ts', from: 'src/old.ts', status: 'R', stages: ['staged'], additions: 0, deletions: 0, binary: false, hash: 'h-new', viewed: true },
@@ -274,7 +286,7 @@ describe('the Changes list', () => {
     ]);
     expect(rows[1]!.title).toBe('src/old.ts → src/new.ts\nRenamed · staged');
     expect(root.querySelector('.changes-note')!.textContent).toBe('3 files · +3 −1 · 1 viewed');
-    expect(root.querySelector<HTMLElement>('.changes-note')!.title).toBe('Since 0123456');
+    expect(root.querySelector<HTMLElement>('.changes-note')!.title).toBe('All changes since the base, 0123456');
     expect([...root.querySelectorAll<HTMLInputElement>('.change-viewed input')].map((box) => box.checked)).toEqual([false, true, false]);
     expect(button().querySelector('.tab-badge')!.textContent).toBe('1/3');
     expect(button().getAttribute('aria-label')).toBe('Changes, 1 of 3 files viewed');
@@ -300,67 +312,195 @@ describe('the Changes list', () => {
     expect(root.querySelector('.changes-menu')).toBeNull();
   });
 
-  it('UncommittedOnly_Toggled_ReadsTheUncommittedListAndSaysSoAndKeepsTheChoice', async () => {
-    const only = structuredClone({ ...LIST, base: null, uncommitted: true, rows: LIST.rows.slice(1), stages: { ...LIST.stages, committed: 0 }, shown: 2, total: 2 });
+  const scopeButton = () => root.querySelector<HTMLButtonElement>('[data-action="changes-scope"]')!;
+  /** Opens the scope menu and picks the choice whose text holds `text`. */
+  const pick = async (text: string) => {
+    if (root.querySelector('.changes-scope-menu') === null) {
+      scopeButton().click();
+    }
 
-    answers.push({ status: 200, body: structuredClone(LIST) }, { status: 200, body: only }, { status: 200, body: { ...only, rows: [], shown: 0, total: 0 } });
+    [...root.querySelectorAll<HTMLElement>('.scope-item')].find((one) => one.textContent!.includes(text))!.click();
+    await flush();
+  };
+
+  it('ScopeMenu_Opened_OffersAllUncommittedEachCommitNewestFirstAndCompare', async () => {
     start();
     await openList();
+    expect(scopeButton().textContent).toBe('All changes');
+    expect(scopeButton().title).toBe('Showing: All changes since the base, 0123456');
+    expect(root.querySelector('[data-action="changes-uncommitted"]')).toBeNull();
 
-    const toggle = () => root.querySelector<HTMLButtonElement>('[data-action="changes-uncommitted"]')!;
+    scopeButton().click();
+    // One menu at a time: the scope menu closes the Files menu.
+    expect(root.querySelectorAll('.changes-menu')).toHaveLength(1);
+    expect(scopeButton().getAttribute('aria-expanded')).toBe('true');
 
-    expect(toggle().getAttribute('aria-pressed')).toBe('false');
-    expect(toggle().title).toBe('Show uncommitted changes only');
+    const items = [...root.querySelectorAll<HTMLElement>('.scope-item')];
+
+    expect(items.map((one) => [one.textContent, one.getAttribute('aria-pressed')])).toEqual([
+      ['All changes since the base', 'true'],
+      ['Uncommitted changes', 'false'],
+      ['fedcba9Second change1 h ago', 'false'],
+      ['1111111First change2 h ago', 'false'],
+      ['Compare…', 'false'],
+    ]);
+    expect(items[2]!.dataset).toMatchObject({ from: FIRST, to: HEAD });
+    expect(items[3]!.dataset).toMatchObject({ from: BASE, to: FIRST });
+
+    root.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(root.querySelector('.changes-scope-menu')).toBeNull();
+    expect(document.activeElement).toBe(scopeButton());
+    scopeButton().click();
+    document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    expect(root.querySelector('.changes-scope-menu')).toBeNull();
+  });
+
+  it('ScopeMenu_UncommittedPicked_ReadsTheUncommittedListSaysSoAndIsNotKept', async () => {
+    const only = structuredClone({ ...LIST, from: 'HEAD', rows: LIST.rows.slice(1), stages: { ...LIST.stages, committed: 0 }, shown: 2, total: 2 });
+
+    answers.push({ status: 200, body: structuredClone(LIST) }, { status: 200, body: only }, { status: 200, body: { ...only, rows: [], shown: 0, total: 0 } });
+
+    const { source } = start();
+
+    await openList();
     expect(button().title).toBe("Every changed file's diff since the base");
 
-    toggle().click();
-    expect(root.querySelector('.changes-empty')!.textContent).toBe('Reading the changes…');
-    await flush();
-    expect(listGets().at(-1)).toBe('/v1/conversation/changes?window=pk&uncommitted=1');
-    expect(localStorage.getItem(UNCOMMITTED_KEY)).toBe('1');
-    expect(toggle().getAttribute('aria-pressed')).toBe('true');
-    expect(toggle().title).toBe('Show all changes since the base');
-    expect(toggle().querySelector('.codicon-filter-filled')).not.toBeNull();
+    await pick('Uncommitted changes');
+    expect(listGets().at(-1)).toBe('/v1/conversation/changes?window=pk&from=HEAD&to=worktree');
+    expect(root.querySelector('.changes-scope-menu')).toBeNull();
+    // The scope button keeps the focus once the menu goes with the choice.
+    expect(document.activeElement).toBe(scopeButton());
+    expect(scopeButton().textContent).toBe('Uncommitted');
+    expect(scopeButton().querySelector('.codicon-diff-modified')).not.toBeNull();
+    filesButton().click();
     expect(root.querySelectorAll('.change-row')).toHaveLength(2);
     expect(root.querySelector<HTMLElement>('.changes-note')!.title).toBe('Uncommitted changes, against HEAD');
-    expect(button().querySelector('.tab-badge')!.textContent).toBe('1/2');
     expect(button().getAttribute('aria-label')).toBe('Changes, 1 of 2 uncommitted files viewed');
     expect(button().title).toBe("Every uncommitted file's diff");
 
-    // A tick names the list it was shown in.
+    // A tick names the range it was shown in.
     root.querySelectorAll<HTMLElement>('.change-viewed input')[0]!.click();
     await flush();
-    expect(ticks.at(-1)).toMatchObject({ path: 'src/new.ts', uncommitted: true });
+    expect(ticks.at(-1)).toMatchObject({ path: 'src/new.ts', from: 'HEAD', to: 'worktree' });
 
     root.querySelector<HTMLElement>('[data-action="changes-refresh"]')!.click();
     await flush();
     expect(root.querySelector('.changes-empty')!.textContent).toBe('No uncommitted changes.');
-    // The toggle stays usable with no rows, so the operator can go back.
-    expect(toggle().disabled).toBe(false);
+    expect(scopeButton().disabled).toBe(false);
+    // Nothing of the scope is kept on the device.
+    expect(Object.keys(localStorage).filter((name) => /changes|scope/i.test(name) || /HEAD|worktree/.test(localStorage.getItem(name) ?? ''))).toEqual([]);
 
-    toggle().click();
+    // Another conversation starts on every change since the base again.
+    source.emit('scope', { scope: scope(4, 2) });
+    source.emit('hello', { key: 'pk', groups: [], scope: scope(4, 2), sessions: [session], items: [], more: false, status: null, artifacts: [], unread: 0 });
+    button().click();
     await flush();
     expect(listGets().at(-1)).toBe('/v1/conversation/changes?window=pk');
-    expect(localStorage.getItem(UNCOMMITTED_KEY)).toBeNull();
+    expect(scopeButton().textContent).toBe('All changes');
+  });
+
+  it('ScopeMenu_CommitPicked_ReadsThatCommitAgainstItsParentAndNamesIt', async () => {
+    const commit = structuredClone({ ...LIST, from: FIRST, to: HEAD, rows: LIST.rows.slice(0, 1), shown: 1, total: 1 });
+
+    answers.push({ status: 200, body: structuredClone(LIST) }, { status: 200, body: commit }, { status: 200, body: { ...commit, rows: [], shown: 0, total: 0 } });
+    start();
+    await openList();
+    await pick('Second change');
+
+    expect(listGets().at(-1)).toBe(`/v1/conversation/changes?window=pk&from=${FIRST}&to=${HEAD}`);
+    expect(scopeButton().textContent).toBe('fedcba9 Second change');
+    expect(scopeButton().querySelector('.codicon-git-commit')).not.toBeNull();
+    expect(root.querySelector<HTMLElement>('.changes-note')!.title).toBe('Commit fedcba9: Second change');
+    expect(button().title).toBe("Every changed file's diff: Commit fedcba9: Second change");
+
+    scopeButton().click();
+    expect([...root.querySelectorAll<HTMLElement>('.scope-item')].map((one) => one.getAttribute('aria-pressed'))).toEqual(['false', 'false', 'true', 'false', 'false']);
+    root.querySelector<HTMLElement>('[data-action="changes-refresh"]')!.click();
+    await flush();
+    filesButton().click();
+    expect(root.querySelector('.changes-empty')!.textContent).toBe('This commit changes no files.');
+  });
+
+  it('ScopeMenu_CommitGoneAfterARebase_FallsBackToEveryChangeSinceTheBase', async () => {
+    answers.push({ status: 200, body: structuredClone(LIST) }, { status: 409, body: { error: 'The chosen commit is no longer on this branch.', stale: true } });
+    start();
+    await openList();
+    await pick('First change');
+    await flush();
+
+    expect(listGets().slice(-2)).toEqual([`/v1/conversation/changes?window=pk&from=${BASE}&to=${FIRST}`, '/v1/conversation/changes?window=pk']);
+    expect(scopeButton().textContent).toBe('All changes');
+    filesButton().click();
     expect(root.querySelectorAll('.change-row')).toHaveLength(3);
   });
 
-  it('UncommittedOnly_KeptOnThisDevice_IsReadFromTheStartAndOutlastsAMoveToAnotherConversation', async () => {
-    localStorage.setItem(UNCOMMITTED_KEY, '1');
-
-    const { source } = start();
-
-    button().click();
+  it('ChangesTab_DiffReadForACommitGone_FallsBackToEveryChangeSinceTheBase', async () => {
+    answers.push({ status: 200, body: structuredClone(LIST) }, { status: 200, body: structuredClone({ ...LIST, from: FIRST, to: HEAD }) });
+    start();
+    await openRow(0);
+    diffAnswers['docs/a.md'] = { status: 409, body: { error: 'The chosen commit is no longer on this branch.', stale: true } };
+    await pick('Second change');
     await flush();
-    expect(listGets()).toEqual(['/v1/conversation/changes?window=pk&uncommitted=1']);
-    expect(root.querySelector('[data-action="changes-uncommitted"]')!.getAttribute('aria-pressed')).toBe('true');
-
-    source.emit('scope', { scope: scope(4, 2) });
-    source.emit('hello', { key: 'pk', groups: [], scope: scope(4, 2), sessions: [session], items: [], more: false, status: null, artifacts: [], unread: 0 });
-    expect(root.querySelector('.changes-menu')).toBeNull();
-    button().click();
     await flush();
-    expect(listGets()).toEqual(['/v1/conversation/changes?window=pk&uncommitted=1', '/v1/conversation/changes?window=pk&uncommitted=1']);
+
+    expect(listGets().at(-1)).toBe('/v1/conversation/changes?window=pk');
+    expect(scopeButton().textContent).toBe('All changes');
+  });
+
+  it('ScopeMenu_ComparePickers_OfferOnlyANewerEndAndReadTheRange', async () => {
+    const compared = structuredClone({ ...LIST, from: 'base', to: HEAD });
+
+    answers.push({ status: 200, body: structuredClone(LIST) }, { status: 200, body: structuredClone({ ...LIST, from: 'base', to: 'HEAD' }) }, { status: 200, body: compared });
+    start();
+    await openList();
+    scopeButton().click();
+    root.querySelector<HTMLElement>('[data-action="changes-compare"]')!.click();
+
+    const from = () => root.querySelector<HTMLSelectElement>('select[data-compare="from"]')!;
+    const to = () => root.querySelector<HTMLSelectElement>('select[data-compare="to"]')!;
+    const go = () => root.querySelector<HTMLButtonElement>('[data-action="changes-compare-go"]')!;
+    const choose = (select: HTMLSelectElement, value: string) => {
+      select.value = value;
+      select.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+
+    expect([...from().options].map((one) => one.textContent)).toEqual(['Base (0123456)', 'fedcba9 Second change', '1111111 First change']);
+    expect([...to().options].map((one) => [one.textContent, one.disabled])).toEqual([
+      ['HEAD, following new commits', false],
+      ['fedcba9 Second change', false],
+      ['1111111 First change', false],
+      ['Working tree', false],
+    ]);
+    expect([from().value, to().value]).toEqual(['base', 'worktree']);
+
+    // From the first commit, only a newer end can be chosen, and a To no longer newer moves to the working tree.
+    choose(to(), FIRST);
+    choose(from(), FIRST);
+    expect([...to().options].map((one) => one.disabled)).toEqual([false, false, true, false]);
+    choose(from(), HEAD);
+    // From the newest commit only the working tree is newer.
+    expect([...to().options].map((one) => one.disabled)).toEqual([true, true, true, false]);
+    choose(from(), FIRST);
+    expect(to().value).toBe('worktree');
+    expect(go().disabled).toBe(false);
+
+    choose(from(), 'base');
+    choose(to(), 'HEAD');
+    go().click();
+    await flush();
+
+    expect(listGets().at(-1)).toBe('/v1/conversation/changes?window=pk&from=base&to=HEAD');
+    expect(scopeButton().textContent).toBe('Base → HEAD');
+    scopeButton().click();
+    root.querySelector<HTMLElement>('[data-action="changes-compare"]')!.click();
+    choose(to(), HEAD);
+    go().click();
+    await flush();
+
+    expect(listGets().at(-1)).toBe(`/v1/conversation/changes?window=pk&from=base&to=${HEAD}`);
+    expect(root.querySelector('.changes-scope-menu')).toBeNull();
+    expect(scopeButton().textContent).toBe('Base → fedcba9');
+    expect(scopeButton().title).toBe('Showing: From Base to fedcba9');
   });
 
   it("says why when the hub refuses, and says when the worktree matches its base", async () => {
@@ -437,7 +577,7 @@ describe('the Changes list', () => {
     // The bar, then the diffs; each file's own header carries only its Viewed tick from the page.
     expect([...root.querySelector('.diff-view')!.children].map((one) => one.className)).toEqual(['changes-bar', 'diff-host']);
     expect(root.querySelector('.changes-bar .changes-note')!.textContent).toBe('3 files · +3 −1 · 1 viewed');
-    expect([...root.querySelectorAll<HTMLElement>('.changes-bar [data-action]')].map((one) => one.dataset['action'])).toEqual(['changes-menu', 'changes-uncommitted', 'changes-hide-viewed', 'changes-collapse-all', 'changes-expand-all', 'changes-refresh']);
+    expect([...root.querySelectorAll<HTMLElement>('.changes-bar [data-action]')].map((one) => one.dataset['action'])).toEqual(['changes-menu', 'changes-scope', 'changes-hide-viewed', 'changes-collapse-all', 'changes-expand-all', 'changes-refresh']);
     expect(root.querySelector('.diff-head')).toBeNull();
     expect([...root.querySelectorAll<HTMLInputElement>('.diff-host .diff-viewed input')].map((box) => [box.dataset['path'], box.checked])).toEqual([
       ['docs/a.md', false],
@@ -961,47 +1101,72 @@ describe('the Changes list', () => {
     expect(changesMounts[0]!.rows).toEqual(['docs/a.md', 'src/new.ts', 'logo.png']);
   });
 
-  it('ChangesTab_UncommittedOnlyToggled_DropsTheDiffsAndReadsThemAgainstHead', async () => {
-    const only = structuredClone({ ...LIST, base: null, uncommitted: true });
+  it('ChangesTab_ScopeChanged_DropsTheDiffsAndReadsThemAndTheFilesForTheNewScope', async () => {
+    const commit = structuredClone({ ...LIST, from: FIRST, to: HEAD });
+    const range = `&from=${FIRST}&to=${HEAD}`;
 
-    // The tab's read, then the uncommitted list.
-    answers.push({ status: 200, body: structuredClone(LIST) }, { status: 200, body: only });
+    // The tab's read, then the commit's list.
+    answers.push({ status: 200, body: structuredClone(LIST) }, { status: 200, body: commit });
     start();
     await openRow(0);
     expect(diffGets()[0]).toBe('/v1/conversation/diff?window=pk&path=docs%2Fa.md&sides=0');
-    expect(diffGets().some((one) => one.includes('uncommitted'))).toBe(false);
 
-    root.querySelector<HTMLElement>('[data-action="changes-uncommitted"]')!.click();
-    await flush();
+    await pick('Second change');
     await flush();
     await flush();
 
-    // The viewer for the list since the base ends, and a new one reads the same file again, from HEAD.
+    // The viewer for the list since the base ends, and a new one reads the same file again, in the commit.
     expect(changesMounts).toHaveLength(2);
     expect(changesMounts[0]!.disposed).toBe(true);
-    expect(diffGets().at(-1)).toBe('/v1/conversation/diff?window=pk&path=docs%2Fa.md&sides=0&uncommitted=1');
+    expect(diffGets().at(-1)).toBe(`/v1/conversation/diff?window=pk&path=docs%2Fa.md&sides=0${range}`);
     await expect(changesMounts[1]!.loadSides('docs/a.md')).resolves.toMatchObject({ path: 'docs/a.md' });
-    expect(diffGets().at(-1)).toBe('/v1/conversation/diff?window=pk&path=docs%2Fa.md&uncommitted=1');
+    expect(diffGets().at(-1)).toBe(`/v1/conversation/diff?window=pk&path=docs%2Fa.md${range}`);
 
-    // A line's file on the old side is the file at HEAD.
+    // A line's file on the old side is the file in the commit's parent, and on the new side the file in the commit.
     changesMounts[1]!.onLine!('docs/a.md', 'old', 2);
     await flush();
     await flush();
-    expect(gets.at(-1)).toBe('/v1/conversation/file?window=pk&path=docs%2Fa.md&side=base&uncommitted=1');
-    expect(root.querySelector('.file-overlay .diff-at')!.textContent).toBe(':2 at HEAD');
+    expect(gets.at(-1)).toBe(`/v1/conversation/file?window=pk&path=docs%2Fa.md&side=base${range}`);
+    expect(root.querySelector('.file-overlay .diff-at')!.textContent).toBe(':2 at 1111111');
+    root.querySelector<HTMLElement>('[data-action="diff-back"]')!.click();
+    changesMounts[1]!.onLine!('docs/a.md', 'new', 3);
+    await flush();
+    await flush();
+    expect(gets.at(-1)).toBe(`/v1/conversation/file?window=pk&path=docs%2Fa.md&side=disk${range}`);
+    expect(root.querySelector('.file-overlay .diff-at')!.textContent).toBe(':3 at fedcba9');
   });
 
-  it('ChangesTab_UncommittedOnlyToggledWhileTheViewerLoads_SaysThereAreNoUncommittedChanges', async () => {
+  it('ViewedEvent_InAnotherScope_LeavesTheListShownAlone', async () => {
+    const commit = structuredClone({ ...LIST, from: FIRST, to: HEAD });
+
+    answers.push({ status: 200, body: structuredClone(LIST) }, { status: 200, body: commit });
+
+    const { source } = start();
+
+    await openList();
+    await pick('Second change');
+    filesButton().click();
+
+    const boxes = () => [...root.querySelectorAll<HTMLInputElement>('.change-viewed input')].map((box) => box.checked);
+
+    expect(boxes()).toEqual([false, true, false]);
+    // A tick in the changes to disk is not one in the commit.
+    source.emit('viewed', { workItemId: 1, path: 'docs/a.md', hash: 'h-a', viewed: true, scope: '' });
+    expect(boxes()).toEqual([false, true, false]);
+    source.emit('viewed', { workItemId: 1, path: 'docs/a.md', hash: 'h-a', viewed: true, scope: `${FIRST}..${HEAD}` });
+    expect(boxes()).toEqual([true, true, false]);
+  });
+
+  it('ChangesTab_UncommittedPickedWhileTheViewerLoads_SaysThereAreNoUncommittedChanges', async () => {
     let release: () => void = () => {};
 
     moduleGate = new Promise<void>((resolve) => (release = resolve));
-    answers.push({ status: 200, body: structuredClone(LIST) }, { status: 200, body: { ...LIST, rows: [], shown: 0, total: 0, base: null, uncommitted: true } });
+    answers.push({ status: 200, body: structuredClone(LIST) }, { status: 200, body: { ...LIST, rows: [], shown: 0, total: 0, from: 'HEAD' } });
     start();
     await openRow(0);
     expect(root.querySelector('.diff-host')!.textContent).toBe('Loading the diff viewer…');
 
-    root.querySelector<HTMLElement>('[data-action="changes-uncommitted"]')!.click();
-    await flush();
+    await pick('Uncommitted changes');
     release();
     await flush();
     await flush();
@@ -1010,7 +1175,7 @@ describe('the Changes list', () => {
     expect(root.querySelector('.diff-host')!.textContent).toBe('No uncommitted changes.');
   });
 
-  it('ViewedTick_QueuedBeforeUncommittedOnlyIsToggled_PostsForTheListItWasShownIn', async () => {
+  it('ViewedTick_QueuedBeforeAnotherScopeIsPicked_PostsForTheListItWasShownIn', async () => {
     let answer: () => void = () => {};
     const held = new Promise<void>((resolve) => (answer = resolve));
 
@@ -1023,13 +1188,14 @@ describe('the Changes list', () => {
     ticksGate = held;
     box().click();
     box().click();
-    root.querySelector<HTMLElement>('[data-action="changes-uncommitted"]')!.click();
+    scopeButton().click();
+    [...root.querySelectorAll<HTMLElement>('.scope-item')].find((one) => one.textContent === 'Uncommitted changes')!.click();
     answer();
     await flush();
     await flush();
     await flush();
 
-    expect(ticks.map((one) => one['uncommitted'])).toEqual([false, false]);
+    expect(ticks.map((one) => `${String(one['from'])} ${String(one['to'])}`)).toEqual(['base worktree', 'base worktree']);
   });
 
   it("ChangesTab_LineNumberClicked_ShowsTheFileOverTheDiffsAndBackKeepsThem", async () => {
@@ -1220,18 +1386,52 @@ describe('the Changes list text', () => {
     expect(listNote(LIST)).toBe('3 files · +3 −1 · 1 viewed');
     expect(listNote({ ...LIST, shown: 400, total: 512 })).toBe('Showing 400 of 512 files · +3 −1 · 1 viewed');
     expect(listNote({ ...LIST, total: 1 })).toBe('1 file · +3 −1 · 1 viewed');
-    expect(listNote({ ...LIST, uncommitted: true })).toBe('3 uncommitted files · +3 −1 · 1 viewed');
-    expect(listNote({ ...LIST, uncommitted: true, total: 1 })).toBe('1 uncommitted file · +3 −1 · 1 viewed');
-    expect(listBase(LIST)).toBe('Since 0123456');
-    expect(listBase({ ...LIST, base: null })).toBe('Uncommitted changes only, no merge base');
-    expect(listBase({ ...LIST, base: null, uncommitted: true })).toBe('Uncommitted changes, against HEAD');
-    expect(emptyNote({ ...LIST, uncommitted: true })).toBe('No uncommitted changes.');
+    expect(listNote({ ...LIST, from: 'HEAD' })).toBe('3 uncommitted files · +3 −1 · 1 viewed');
+    expect(listNote({ ...LIST, from: 'HEAD', total: 1 })).toBe('1 uncommitted file · +3 −1 · 1 viewed');
+    expect(listNote({ ...LIST, from: FIRST, to: HEAD })).toBe('3 files · +3 −1 · 1 viewed');
+    expect(listBase(LIST)).toBe('All changes since the base, 0123456');
+    expect(listBase({ ...LIST, base: null, commits: [] })).toBe('Uncommitted changes only, no merge base');
+    expect(listBase({ ...LIST, from: 'HEAD' })).toBe('Uncommitted changes, against HEAD');
+    expect(listBase({ ...LIST, from: BASE, to: FIRST })).toBe('Commit 1111111: First change');
+    expect(listBase({ ...LIST, from: 'base', to: HEAD })).toBe('From Base to fedcba9');
+    expect(emptyNote({ ...LIST, from: 'HEAD' })).toBe('No uncommitted changes.');
+    expect(emptyNote({ ...LIST, from: BASE, to: HEAD })).toBe('No changes between these points.');
     expect(emptyNote({ ...LIST, base: null })).toBe('No uncommitted changes, and no merge base was found.');
     expect(emptyNote(LIST)).toBe('No changes since the merge base.');
     // A held diff against HEAD is read again after a commit.
     expect(listRef(LIST)).toBe(LIST.base);
     expect(listRef({ ...LIST, base: null })).toBe(`HEAD ${LIST.head}`);
     expect(listRef(null)).toBeNull();
+    // From HEAD, a new commit changes the key; a range to a commit is keyed by both ends.
+    expect(listRef({ ...LIST, from: 'HEAD' })).toBe(`HEAD ${HEAD}`);
+    expect(listRef({ ...LIST, from: FIRST, to: HEAD })).toBe(`${FIRST}..${HEAD}`);
+  });
+
+  it('ScopeKind_EachRange_NamesItsChoiceLabelTickScopeAndFileSide', () => {
+    expect(scopeKind({ from: 'base', to: 'worktree' }, COMMITS, BASE)).toBe('all');
+    expect(scopeKind({ from: 'HEAD', to: 'worktree' }, COMMITS, BASE)).toBe('uncommitted');
+    expect(scopeKind({ from: FIRST, to: 'worktree' }, COMMITS, BASE)).toBe('compare');
+    expect(scopeKind({ from: FIRST, to: HEAD }, COMMITS, BASE)).toBe('commit');
+    // The base by name is the first commit's parent too.
+    expect(scopeKind({ from: 'base', to: FIRST }, COMMITS, BASE)).toBe('commit');
+    expect(scopeKind({ from: BASE, to: HEAD }, COMMITS, BASE)).toBe('compare');
+    expect(scopeLabel({ from: BASE, to: HEAD }, COMMITS, BASE)).toBe('Base → fedcba9');
+    expect(scopeLabel({ from: FIRST, to: 'worktree' }, COMMITS, BASE)).toBe('1111111 → Working tree');
+    expect(compareValid({ from: 'base', to: FIRST }, COMMITS, BASE)).toBe(true);
+    expect(compareValid({ from: FIRST, to: FIRST }, COMMITS, BASE)).toBe(false);
+    expect(compareValid({ from: HEAD, to: FIRST }, COMMITS, BASE)).toBe(false);
+    expect(compareValid({ from: 'base', to: 'gone' }, COMMITS, BASE)).toBe(false);
+    expect(tickScope(LIST)).toBe('');
+    expect(tickScope({ ...LIST, from: 'base', to: HEAD })).toBe(`${BASE}..${HEAD}`);
+    expect(tickScope({ ...LIST, from: FIRST, to: HEAD })).toBe(`${FIRST}..${HEAD}`);
+    // To HEAD is kept at the commit HEAD names now.
+    expect(tickScope({ ...LIST, from: 'base', to: 'HEAD' })).toBe(`${BASE}..${HEAD}`);
+    expect(listRef({ ...LIST, from: 'base', to: 'HEAD' })).toBe(`${BASE}..${HEAD}`);
+    expect(fileAt(LIST, 'base')).toBe(' at the base');
+    expect(fileAt({ ...LIST, base: null }, 'base')).toBe(' at HEAD');
+    expect(fileAt(LIST, 'disk')).toBeNull();
+    expect(fileAt({ ...LIST, from: BASE, to: FIRST }, 'base')).toBe(' at the base');
+    expect(fileAt({ ...LIST, from: BASE, to: FIRST }, 'disk')).toBe(' at 1111111');
   });
 
   it("names a row's stages in its tooltip", () => {

@@ -3480,6 +3480,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   root.addEventListener('input', (event) => {
     const field = event.target as HTMLInputElement;
 
+    if (changes.input(event.target)) {
+      return;
+    }
+
     if (field.classList?.contains('request-field')) {
       view.requestValues.set(field.dataset['field']!, field.value);
       return;
@@ -3605,6 +3609,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
+    let changesClosed: 'files' | 'scope' | null = null;
+
     if (event.key === 'Escape' && view.personas !== null) {
       closePersonas();
       event.stopImmediatePropagation();
@@ -3636,9 +3642,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       draw();
       head.querySelector<HTMLElement>(opener)?.focus();
       event.stopImmediatePropagation();
-    } else if (event.key === 'Escape' && changes.escape()) {
+    } else if (event.key === 'Escape' && (changesClosed = changes.escape()) !== null) {
       draw();
-      root.querySelector<HTMLElement>('.changes-files')?.focus();
+      root.querySelector<HTMLElement>(changesClosed === 'scope' ? '.changes-scope' : '.changes-files')?.focus();
       event.stopImmediatePropagation();
     } else if (event.key === 'Escape' && view.drawer !== null) {
       closeDrawer();
