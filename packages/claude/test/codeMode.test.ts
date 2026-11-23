@@ -95,17 +95,22 @@ describe('Code Mode command', () => {
   });
 
   it('appends conversation rules that name only the tags the view reads, details, aside, rewrite and status, and set no reply length or shape but the primary response', () => {
-    // The question shape (PRD R103) and the primary response that opens every reply are the exceptions: a card's usefulness depends on its
-    // content, and the view shows the primary response first, whether or not it is spoken.
+    // The question shape (PRD R103) and where the [details] line goes are the exceptions: a card's usefulness depends on its content, and the
+    // view shows the text above the line first, whether or not it is spoken.
     const questions = RULES.slice(RULES.indexOf('- Use a question card only'), RULES.indexOf("- Don't ask the operator with AskUserQuestion"));
-    const primary = RULES.slice(RULES.indexOf('- Open every reply'), RULES.indexOf('\n', RULES.indexOf('- Open every reply')) + 1);
+    const primary = RULES.slice(RULES.indexOf('- Write each reply'), RULES.indexOf('\n', RULES.indexOf('- Write each reply')) + 1);
     const tagged = RULES.replace(questions, '');
     const rest = tagged.replace(primary, '');
 
-    expect(primary).toContain('put a `[details]` line of its own after the primary response and the rest after it');
-    expect(primary).toContain('A reply with no `[details]` line is all primary response, and the view shows it whole.');
+    // The [details] line marks what the operator can skip, not a summary: what they act on stays above it, links, paths and code allowed, and
+    // nothing is restated or added.
+    expect(primary).toContain('- Write each reply as you normally would, then put a `[details]` line of its own before the part the operator can skip and still act correctly: evidence, how you checked, test counts, file and commit lists, alternatives you ruled out, background.');
+    expect(primary).toContain('Anything they need to decide or act on, such as a result, a change, a decision, a question or a risk, stays above the line, links, paths and code included.');
+    expect(primary).toContain("Don't restate or summarise the details; if nothing can be skipped, leave the `[details]` line out.");
+    expect(primary).toContain('a reply with no `[details]` line shows whole.');
+    expect(primary).not.toMatch(/no lists|file paths|URLs|at most about three|bubble|smaller/);
     expect(tagged.match(/\[[a-z]+\]/g)?.filter((tag, index, all) => all.indexOf(tag) === index)).toEqual(['[details]', '[aside]', '[rewrite]', '[status]']);
-    expect(RULES).toContain('they do not change how you write, except how you open a reply and how you ask the operator a question, below');
+    expect(RULES).toContain('they do not change how you write, except where you put a `[details]` line and how you ask the operator a question, below');
     expect(rest).not.toMatch(/\d+ words\b|\bsentences\b|short answer|\blines\b|one line|don't paste/i);
     // A turn may write several replies between tool calls; the rules give only the reason text before a tool call is lost (decision 24).
     expect(RULES).not.toMatch(/end of (your|the) turn/i);
@@ -139,7 +144,7 @@ describe('Code Mode command', () => {
     expect(RULES).not.toContain('[speak]');
     expect(RULES).not.toContain('## Spoken replies');
     expect(voiced).toContain(`${RULES.slice(0, RULES.indexOf('## Artifacts'))}## Spoken replies\n`);
-    expect(voiced).toContain("A message from the operator that starts with `[spoken]` will have its reply's primary response, the part before its `[details]` line, read aloud up to its first list, table or code block; the details never are. Write that reply exactly as you would any other.");
+    expect(voiced).toContain("A message from the operator that starts with `[spoken]` will have its reply's primary response, the part before its `[details]` line, read aloud up to its first list, table, code block, heading, quote or rule; the details never are. Write that reply exactly as you would any other.");
     expect(voiced).not.toContain('[speak]');
     expect(voiced).toContain('`[tone: …]` alone on its first line');
     expect(voiced.endsWith(RULES.slice(RULES.indexOf('## Artifacts')))).toBe(true);
