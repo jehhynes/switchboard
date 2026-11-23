@@ -402,8 +402,8 @@ function checkModel(model: string | null | undefined): void {
   if (model != null && (model.trim() === '' || model.length > 200)) throw new Refusal('Choose a model name under 200 characters.');
 }
 
-/** A short label while the provider has not named the conversation. */
-function summarizeMessage(message: string): string {
+/** A short label while the provider has not named the conversation, or for a session that has no title of its own. */
+export function summarizeMessage(message: string): string {
   const plain = message.replace(/^(?:\[(?:voice|spoken|expressive)\]\s*)+/i, '').replace(/\s+/g, ' ').trim();
   const sentence = plain.split(/(?<=[.!?])\s/, 1)[0] ?? '';
   const subject = sentence.replace(/^(?:please\s+|i(?:'d| would) like (?:you )?to\s+|can you\s+|could you\s+)/i, '').replace(/[.!]+$/, '').trim();

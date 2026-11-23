@@ -2786,13 +2786,18 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     store.updateSession('s3', { kind: 'setup', shortId: 's3', state: 'ended', startedAt: NOW - 3_000, cwd: 'D:/repo' });
     later('s4', 'task', NOW - 2_000);
     later('s5', 'task', NOW - 1_000);
+    // A session is named by its first message that stands, cut to a sentence, never by its ID; one with none by its kind.
+    const message = (id: string, sessionId: string, text: string, withdrawn = false) => store.addMessage({ id, sessionId, workItemId: 3, at: NOW, origin: 'typed', text, transcriptUuid: null, provisional: false, withdrawn, delivery: 'sent', error: null, opId: id, pastedAt: NOW });
+    message('m4a', 's4', 'Dropped draft', true);
+    message('m4b', 's4', 'Please fix the badge count. Then run the tests.');
+    message('m4c', 's4', 'And the dock too');
     service.select({ window: page.key, opId: 'o', workItemId: 3 });
     expect(scopes.scope(page.key)).toMatchObject({ workItemId: 3, sessionId: 's5' });
     expect(scopes.scope(page.key)!.earlier).toBeUndefined();
     expect(entry()).toMatchObject({ workItemId: 3, sessionId: 's5' });
     expect(entry().sessions).toEqual([
-      { sessionId: 's4', title: 'Task session s4', state: 'idle', startedAt: NOW - 2_000, provider: 'claude' },
-      { sessionId: 's3', title: 'Setup session s3', state: 'ended', startedAt: NOW - 3_000, provider: 'claude' },
+      { sessionId: 's4', title: 'fix the badge count', state: 'idle', startedAt: NOW - 2_000, provider: 'claude' },
+      { sessionId: 's3', title: 'Setup session', state: 'ended', startedAt: NOW - 3_000, provider: 'claude' },
     ]);
     // A VS Code window's dropdown does not list them.
     expect(service.scopeView(scopes.scope(window))!.conversations.every((one) => one.sessions === undefined)).toBe(true);

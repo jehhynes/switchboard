@@ -1,4 +1,4 @@
-import { countsUnread, inTranscript } from '@switchboard/core';
+import { countsUnread, inTranscript, summarizeMessage } from '@switchboard/core';
 import type { ConversationMessage, ConversationReply, ConversationStatus, Interruption, Piece, Provider, Session, SpokenState, Store } from '@switchboard/core';
 import { artifactsDir, backgroundCounts, hostKey, PERMISSION_PROMPT, personaById, resumesHeld, sessionTone, START_PROMPT, toneVersion, waitsOnLimit } from '@switchboard/core';
 import type { BackgroundCounts, PersonaSettings, ViewSettings } from '@switchboard/core';
@@ -1029,7 +1029,7 @@ export class ConversationService {
       const all = this.deps.store.sessionsFor(item.id);
       const session = all.at(-1) ?? null;
       const view = session === null ? null : this.#view(session, true, this.deps.hooks(), this.deps.personas?.() ?? null);
-      const earlier = page ? all.slice(0, -1).reverse().map((one) => sessionEntry(one)) : [];
+      const earlier = page ? all.slice(0, -1).reverse().map((one) => sessionEntry(one, this.deps.store)) : [];
 
       return [
         {
@@ -3166,11 +3166,15 @@ export function refusal(scope: WindowScope | null, scopeGen: number, sessionId: 
   return sessionId !== null && !reads && scope.earlier === true ? { status: 409, body: { error: EARLIER_SESSION } } : null;
 }
 
-/** An earlier session as a page's dropdown lists it. */
-function sessionEntry(session: Session): SessionEntry {
+/**
+ * An earlier session as a page's dropdown lists it. A session has no title of its own, so it is named by its first message, as a new
+ * conversation is before its provider names it, else Setup or Task session: never by its ID, which for a Codex thread is a long UUID.
+ */
+function sessionEntry(session: Session, store: Pick<Store, 'firstMessageText'>): SessionEntry {
   const view = sessionView(session, false, true);
+  const title = summarizeMessage(store.firstMessageText(session.id) ?? '') || `${session.kind === 'setup' ? 'Setup' : 'Task'} session`;
 
-  return { sessionId: session.id, title: view.title, state: view.state, startedAt: session.startedAt, provider: session.provider };
+  return { sessionId: session.id, title, state: view.state, startedAt: session.startedAt, provider: session.provider };
 }
 
 /** Why a question cannot be answered or dismissed now, by its state. */

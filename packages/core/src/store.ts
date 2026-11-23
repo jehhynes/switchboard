@@ -1667,6 +1667,11 @@ export class Store {
     return (this.#db.prepare('SELECT id FROM messages WHERE sessionId = ? AND provisional = 0 AND withdrawn = 0 ORDER BY ord DESC LIMIT 1').get(sessionId) as { id: string } | undefined)?.id ?? null;
   }
 
+  /** The text of a session's first message that was not withdrawn, the operator's or the prompt it started with, or null before it has one. */
+  firstMessageText(sessionId: string): string | null {
+    return (this.#db.prepare('SELECT text FROM messages WHERE sessionId = ? AND withdrawn = 0 ORDER BY ord LIMIT 1').get(sessionId) as { text: string } | undefined)?.text ?? null;
+  }
+
   /** Whether a transcript entry is already in the session's conversation. */
   hasTranscriptEntry(sessionId: string, uuid: string): boolean {
     return this.#db.prepare('SELECT 1 FROM messages WHERE sessionId = :id AND transcriptUuid = :uuid UNION ALL SELECT 1 FROM replies WHERE sessionId = :id AND transcriptUuid = :uuid').get({ id: sessionId, uuid }) !== undefined;
