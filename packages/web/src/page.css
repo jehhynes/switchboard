@@ -426,10 +426,11 @@ button.picker .picker-session { flex: 0 1 auto; min-width: 0; overflow: hidden; 
 .menu-separator { height: 1px; margin: 4px 10px; background: var(--vscode-menu-separatorBackground, var(--vscode-widget-border, rgba(127, 127, 127, 0.35))); }
 .menu-message { max-width: 320px; padding: 5px 16px 5px 34px; color: var(--vscode-descriptionForeground); white-space: normal; }
 /* The tabs drawn as VS Code's editor tabs (style A): a cell each on a strip one shade darker than the surface under it, the chosen one filled with
-   that surface, its top edge in the accent colour and no bottom border, so it joins the content below. 13 px sentence-case labels, 35 px tall. */
+   that surface, its top edge in the accent colour and no bottom border, so it joins the content below. Every other tab draws the strip's bottom
+   border under itself, over the strip's own, so the line runs the whole strip and only the chosen tab breaks it. 13 px sentence-case labels, 35 px tall. */
 /* A size container is a stacking context, so the strip stands above the pane after it, and the Artifacts menu inside it with it. */
 .tabs { position: relative; z-index: 3; display: flex; flex-wrap: nowrap; container-type: inline-size; align-items: stretch; gap: 0; padding: 0; border-bottom: 1px solid var(--vscode-panel-border); background: var(--sb-tab-strip); user-select: none; }
-.tab { position: relative; display: flex; flex: none; align-items: center; gap: 6px; height: 35px; margin-bottom: -1px; padding: 0 14px; border: none; border-top: 1px solid transparent; border-right: 1px solid var(--vscode-panel-border); border-bottom: 1px solid transparent; background: var(--sb-tab-strip); color: var(--vscode-panelTitle-inactiveForeground); font-size: 13px; cursor: pointer; white-space: nowrap; }
+.tab { position: relative; display: flex; flex: none; align-items: center; gap: 6px; height: 35px; margin-bottom: -1px; padding: 0 14px; border: none; border-top: 1px solid transparent; border-right: 1px solid var(--vscode-panel-border); border-bottom: 1px solid var(--vscode-panel-border); background: var(--sb-tab-strip); color: var(--vscode-panelTitle-inactiveForeground); font-size: 13px; cursor: pointer; white-space: nowrap; }
 .tab:hover { color: var(--vscode-panelTitle-activeForeground); background: var(--sb-tab-surface); }
 .tab.selected { color: var(--vscode-panelTitle-activeForeground); background: var(--sb-tab-surface); border-top-color: var(--vscode-panelTitle-activeBorder); border-bottom-color: var(--sb-tab-surface); }
 .main { --sb-tab-surface: var(--sb-chat-background); }

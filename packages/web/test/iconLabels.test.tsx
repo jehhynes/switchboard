@@ -84,6 +84,16 @@ describe('the tab strips', () => {
     }
   });
 
+  it('TabStrip_EveryTabButTheChosen_DrawsTheBottomBorder', () => {
+    const tab = /\n\.tab \{([^}]*)\}/.exec(css)?.[1] ?? '';
+    const chosen = /\n\.tab\.selected \{([^}]*)\}/.exec(css)?.[1] ?? '';
+
+    // Over the strip's own border, which the tabs overlap by their -1px bottom margin, so the line runs under them too.
+    expect(tab).toContain('margin-bottom: -1px;');
+    expect(tab).toContain('border-bottom: 1px solid var(--vscode-panel-border);');
+    expect(chosen).toContain('border-bottom-color: var(--sb-tab-surface);');
+  });
+
   it('NarrowStrip_Under600px_ShowsTheFixedTabsAsTheirIcons', () => {
     const narrow = /@container \(max-width: 600px\) \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
 
