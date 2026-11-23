@@ -17,7 +17,8 @@
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run --coverage",
     "check:console": "node check-console.mjs",
-    "check:shell": "node check-shell.mjs"
+    "check:shell": "node check-shell.mjs",
+    "check:offline": "node check-offline.mjs"
   },
   "devDependencies": {
     "@pierre/diffs": "1.6.4",
