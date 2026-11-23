@@ -2974,7 +2974,7 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it("moves a dragged Ready for review row with row-move, drawing its drop line, without the release's click, and shows a refused move over the list (PRD R73)", async () => {
+  it("moves a dragged Ready for review row with row-move, drawing its drop line, without the release's click, and shows a refused move in the toast (PRD R73)", async () => {
     const { page, source } = start();
     const move = (label: string) => ({ label, action: 'move' as const, icon: 'arrow-up', group: 'order' as const, confirm: null, input: null });
     const rect = (top: number, height: number) => ({ top, height, bottom: top + height, left: 0, right: 300, width: 300, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
@@ -3004,7 +3004,7 @@ describe('the page in use', () => {
     expect(posts.some((post) => post.url.endsWith('/select'))).toBe(false);
     expect(list.querySelector('.dragging, .drop-above, .drop-below')).toBeNull();
 
-    // Below the last row, the hub refuses: the list says why.
+    // Below the last row, the hub refuses: the toast says why.
     answers['/row-move'] = { status: 409, body: { error: 'The work item is not in Ready for review.' } };
     pointer(row(1), 'pointerdown', 60);
     pointer(list, 'pointermove', 150);
@@ -3012,7 +3012,7 @@ describe('the page in use', () => {
     pointer(list, 'pointerup', 150);
     await flush();
     expect(posts.filter((post) => post.url.endsWith('/row-move')).at(-1)?.body).toMatchObject({ workItemId: 1, after: 3 });
-    expect(root.querySelector('.list-error')?.textContent).toBe('The work item is not in Ready for review.');
+    expect(root.querySelector('#toast .toast-text')?.textContent).toBe('The work item is not in Ready for review.');
     page.close();
   });
 
