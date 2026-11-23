@@ -1,0 +1,240 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { renderInline, renderMarkdown, slug } from '../src/markdown.js';
+
+/** The Markdown as the page would hold it: parsed into a detached host. */
+const dom = (text: string): HTMLElement => {
+  const host = document.createElement('div');
+
+  host.innerHTML = renderMarkdown(text);
+  return host;
+};
+const css = readFileSync(join(__dirname, '../src/page.css'), 'utf8');
+const rule = (selector: string): string => {
+  const at = css.indexOf(`\n${selector} {`);
+
+  expect(at, selector).toBeGreaterThan(-1);
+  return css.slice(at + 1, css.indexOf('}', at) + 1);
+};
+
+describe('GitHub-flavoured Markdown', () => {
+  it("styles only the renderer's own disclosures, not the page's folds, and gives an alert's title its own spacing over a document's paragraphs", () => {
+    expect(rule('.body details:not(.fold)')).toContain('margin: 0.5em 0;');
+    expect(css).not.toMatch(/\n\.body details \{/);
+    expect(rule('.body blockquote.markdown-alert > .markdown-alert-title')).toContain('margin: 0 0 4px;');
+  });
+
+  it('draws root bullets as discs, then circles, then squares, in every Markdown surface, whatever list it sits in', () => {
+    expect(rule('.body ul')).toContain('list-style-type: disc;');
+    expect(rule('.body :is(ul, ol) ul')).toContain('list-style-type: circle;');
+    expect(rule('.body :is(ul, ol) :is(ul, ol) ul')).toContain('list-style-type: square;');
+    // The reply's own dot is its own box, not a list marker, and the timeline's items have none.
+    expect(css).toMatch(/\.reply \.dot \{[^}]*border-radius: 50%/);
+    expect(css).toMatch(/\.timeline \{ list-style: none;/);
+  });
+
+  it('typesets the Status tab, an artifact and a file as one Markdown document, with no Status rules of its own but the stage dimmed', () => {
+    expect(rule('.body.md-doc')).toBe('.body.md-doc { font-size: 15px; line-height: 1.55; }');
+    expect(css).not.toMatch(/\.body\.artifact-doc (?!pre\.artifact-text)/);
+    expect(css.match(/^[^\n{]*\.status-body[^\n{]*\{[^}]*\}/gm)).toEqual(['.status-tab.fallback .status-body { color: var(--vscode-descriptionForeground); }']);
+  });
+
+  it('draws <details> with its <summary> as a disclosure, its body as Markdown, nested and open', () => {
+    const host = dom('<details>\n<summary>More **here**</summary>\n\nHidden *text*\n\n<details><summary>Inner</summary>\n\n- a\n\n</details>\n\n</details>\n\n<details open>\n<summary>Shown</summary>\n\nBody\n</details>');
+    const outer = host.querySelector('details')!;
+
+    expect(outer.querySelector(':scope > summary')!.innerHTML).toBe('More <strong>here</strong>');
+    expect(outer.querySelector(':scope > p em')!.textContent).toBe('text');
+    expect(outer.querySelector(':scope > details > summary')!.textContent).toBe('Inner');
+    expect(outer.querySelector(':scope > details > ul > li')!.textContent).toBe('a');
+    expect(outer.open).toBe(false);
+    expect(host.querySelectorAll(':scope > details')).toHaveLength(2);
+    expect(host.querySelectorAll(':scope > details')[1]!.hasAttribute('open')).toBe(true);
+    expect(host.textContent).not.toContain('<');
+  });
+
+  it('takes a summary over several lines or none at all, and keeps a <details> with attributes or trailing text as text', () => {
+    expect(dom('<details>\n<summary>\nTwo\nlines\n</summary>\n\nx\n</details>').querySelector('summary')!.textContent).toBe('Two\nlines');
+    expect(dom('<details>\n\nNo summary\n\n</details>').querySelector('details > p')!.textContent).toBe('No summary');
+
+    for (const text of ['<details onclick="alert(1)">\n<summary>x</summary>\n</details>', '<details class="x">\n</details>', '<details><summary>x</summary> after\n</details>']) {
+      const host = dom(text);
+
+      expect(host.querySelector('details'), text).toBeNull();
+      expect(host.querySelector('[onclick], [class="x"]')).toBeNull();
+    }
+  });
+
+  it('keeps a <summary> to its own container and a few lines, leaving the rest as text', () => {
+    const host = dom('- <details>\n  <summary>hi\n- next\n</summary>');
+
+    expect(host.querySelector('details')).toBeNull();
+    expect(dom('- <details>\n<summary>outside</summary>\n\nafter').querySelector('li summary')).toBeNull();
+    expect(dom('> <details>\n<summary>outside</summary>').querySelector('blockquote summary')).toBeNull();
+    expect([...host.querySelectorAll('li')].map((li) => li.textContent)).toEqual(['<details>\n<summary>hi', 'next\n</summary>']);
+    expect(dom(`<details>\n<summary>${'\nline'.repeat(18)}\n</summary>\n</details>`).querySelector('summary')).not.toBeNull();
+    expect(dom(`<details>\n<summary>${'\nline'.repeat(19)}\n</summary>\n</details>`).querySelector('details')).toBeNull();
+  });
+
+  it('reads many unclosed comments and summaries in linear time', () => {
+    const started = performance.now();
+
+    renderMarkdown('<!-- x\n'.repeat(20_000));
+    renderMarkdown(`p ${'<!-- '.repeat(20_000)}`);
+    renderMarkdown('<details>\n<summary>a\n'.repeat(5_000));
+    expect(performance.now() - started).toBeLessThan(1_500);
+  });
+
+  it('closes an unclosed <details> where its container ends and drops a </details> with no opening, so none reaches outside its place', () => {
+    const host = dom('- item\n\n  <details>\n  <summary>In a list</summary>\n\n  inside\n\n- next\n\n</details>\n\nAfter');
+
+    expect(host.querySelector('ul > li > details > summary')!.textContent).toBe('In a list');
+    expect(host.querySelectorAll('ul > li')).toHaveLength(2);
+    expect(host.querySelector(':scope > p')!.textContent).toBe('After');
+    expect(renderMarkdown('</details>\n\ntext')).toBe('<p>text</p>\n');
+    expect(renderMarkdown('<details>\n<summary>s</summary>\n\nopen to the end')).toMatch(/<\/details>\n$/);
+  });
+
+  it('draws GitHub alerts with their icon, title and class, and leaves other quotes as quotes', () => {
+    const types = { NOTE: ['info', 'Note'], TIP: ['lightbulb', 'Tip'], IMPORTANT: ['report', 'Important'], WARNING: ['warning', 'Warning'], CAUTION: ['stop-circle', 'Caution'] };
+
+    for (const [type, [icon, title]] of Object.entries(types)) {
+      const quote = dom(`> [!${type}]\n> Some *text*.\n>\n> More.`).querySelector('blockquote')!;
+
+      expect(quote.className).toBe(`markdown-alert markdown-alert-${type.toLowerCase()}`);
+      expect(quote.querySelector('.markdown-alert-title')!.textContent).toBe(title);
+      expect(quote.querySelector(`.markdown-alert-title .codicon-${icon}`)).not.toBeNull();
+      expect([...quote.querySelectorAll('p:not(.markdown-alert-title)')].map((p) => p.innerHTML)).toEqual(['Some <em>text</em>.', 'More.']);
+    }
+
+    expect(dom('> [!note]\n> lower case').querySelector('blockquote')!.className).toBe('markdown-alert markdown-alert-note');
+    expect(dom('> [!NOTE]\n\n> apart').querySelector('.markdown-alert')).toBeNull();
+    expect(dom('> [!NOTE] same line').querySelector('.markdown-alert')).toBeNull();
+    expect(dom('> [!OTHER]\n> x').querySelector('.markdown-alert')).toBeNull();
+    expect(dom('> A quote').querySelector('blockquote')!.className).toBe('');
+    expect(css).toMatch(/--sb-alert-note: #4493f8;[^}]*--sb-alert-caution: #f85149;/);
+    expect(css).toMatch(/prefers-color-scheme: light\) \{\n {2}:root \{ --sb-alert-note: #0969da;/);
+  });
+
+  it('draws task list items with a read-only checkbox, only in a list', () => {
+    const host = dom('- [x] done\n- [ ] to do\n  - [X] nested\n- plain\n\n[ ] not a list');
+    const boxes = [...host.querySelectorAll<HTMLInputElement>('input')];
+
+    expect(boxes.map((box) => [box.type, box.checked, box.disabled])).toEqual([
+      ['checkbox', true, true],
+      ['checkbox', false, true],
+      ['checkbox', true, true],
+    ]);
+    expect(host.querySelector('ul')!.className).toBe('contains-task-list');
+    expect([...host.querySelectorAll('li.task-list-item')].map((li) => li.firstChild!.nextSibling!.textContent!.trim().split('\n')[0])).toEqual(['done', 'to do', 'nested']);
+    expect(host.querySelectorAll('li:not(.task-list-item)')).toHaveLength(1);
+    expect(host.querySelector(':scope > p')!.textContent).toBe('[ ] not a list');
+  });
+
+  it('draws <kbd>, <sub>, <sup> and <br> without attributes, an unpaired or unknown tag as text, and hides comments', () => {
+    expect(renderInline('<kbd>Ctrl</kbd> H<sub>2</sub>O x<sup>2</sup> a<br>b<br/>c<br />d')).toBe('<kbd>Ctrl</kbd> H<sub>2</sub>O x<sup>2</sup> a<br>b<br>c<br>d');
+    expect(renderInline('<kbd>open')).toBe('&lt;kbd&gt;open');
+    expect(renderInline('close</sup>')).toBe('close&lt;/sup&gt;');
+    expect(renderInline('<sub><kbd>x</sub></kbd>')).toBe('<sub>&lt;kbd&gt;x</sub>&lt;/kbd&gt;');
+    expect(renderInline('<kbd onclick="x()">k</kbd>')).toBe('&lt;kbd onclick=&quot;x()&quot;&gt;k&lt;/kbd&gt;');
+    expect(renderInline('<script>alert(1)</script><img src=x onerror=alert(1)>')).toBe('&lt;script&gt;alert(1)&lt;/script&gt;&lt;img src=x onerror=alert(1)&gt;');
+    expect(renderInline('a <!-- hidden --> b')).toBe('a  b');
+    expect(renderMarkdown('before\n\n<!--\nhidden\n-->\n\nafter')).toBe('<p>before</p>\n<p>after</p>\n');
+    // Text after a comment on its line stays, and so does an unclosed comment's.
+    expect(renderMarkdown('<!-- first --> visible <!-- second -->')).toBe('<p> visible </p>\n');
+    expect(renderMarkdown('<!-- open\n\ntext')).toBe('<p>&lt;!-- open</p>\n<p>text</p>\n');
+    // A comment in a list item ends with it; one that would run past it stays text.
+    expect(dom('- <!--\n- next -->').querySelectorAll('li')).toHaveLength(2);
+    expect(renderInline('`<kbd>x</kbd>`')).toBe('<code>&lt;kbd&gt;x&lt;/kbd&gt;</code>');
+  });
+
+  it('draws tables with their alignment, strikethrough, autolinks and line breaks as GitHub does', () => {
+    const cells = [...dom('| L | C | R | N |\n|:--|:-:|--:|---|\n| a | b | c | d |').querySelectorAll<HTMLElement>('td')];
+
+    expect(cells.map((cell) => cell.style.textAlign)).toEqual(['left', 'center', 'right', '']);
+    expect(renderInline('~~gone~~ ~5 min')).toBe('<s>gone</s> ~5 min');
+    expect(renderInline('see https://a.example/x and www.example.com')).toBe('see <a href="https://a.example/x" target="_blank" rel="noopener noreferrer">https://a.example/x</a> and <a href="http://www.example.com" target="_blank" rel="noopener noreferrer">www.example.com</a>');
+    expect(renderInline('mail me@example.com')).toBe('mail <a href="mailto:me@example.com">me@example.com</a>');
+    expect(renderMarkdown('one  \ntwo\\\nthree\nfour')).toBe('<p>one<br>\ntwo<br>\nthree\nfour</p>\n');
+  });
+
+  it('gives each heading its anchor and turns a #name link into one that scrolls there, never the page route', () => {
+    const host = dom('# Hello, World!\n\n## Hello World\n\n## Hello World\n\n## Ünïcode `code` :rocket:\n\n[go](#hello-world-1) [quote](#a&b)');
+
+    expect([...host.querySelectorAll('h1, h2')].map((h) => h.getAttribute('data-anchor'))).toEqual(['hello-world', 'hello-world-1', 'hello-world-2', 'ünïcode-code']);
+    expect(host.querySelector('[id]')).toBeNull();
+
+    const links = [...host.querySelectorAll<HTMLElement>('a.anchor-link')];
+
+    expect(links.map((a) => [a.dataset['action'], a.dataset['target'], a.hasAttribute('href'), a.getAttribute('tabindex')])).toEqual([
+      ['anchor', 'hello-world-1', false, '0'],
+      ['anchor', 'a&b', false, '0'],
+    ]);
+    expect(slug('  A -- b_c  ', new Map())).toBe('a----b_c');
+    const many = new Map<string, number>();
+    const started = performance.now();
+
+    expect(Array.from({ length: 5_000 }, () => slug('Same', many)).at(-1)).toBe('same-4999');
+    expect(performance.now() - started).toBeLessThan(200);
+    // A repeated name never takes one another heading has, and a heading never takes a footnote's place.
+    expect([...dom('# A\n# A\n# A-1\n# fn1\n\nx[^1]\n\n[^1]: n').querySelectorAll('h1')].map((h) => h.getAttribute('data-anchor'))).toEqual(['a', 'a-1', 'a-1-1', 'fn1']);
+    expect(dom('# fn1\n\nx[^1]\n\n[^1]: n').querySelector<HTMLElement>('sup a')!.dataset['target']).toBe('^fn1');
+  });
+
+  it('draws footnotes at the end with links both ways, and no inline ^[note]', () => {
+    const host = dom('Text[^a] and again[^a], then[^2].\n\n[^a]: First *note*.\n[^2]: Second.\n\nInline ^[not a note].');
+    const refs = [...host.querySelectorAll<HTMLElement>('sup.footnote-ref a')];
+
+    expect(refs.map((a) => [a.textContent, a.dataset['target'], a.dataset['anchor']])).toEqual([
+      ['1', '^fn1', '^fnref1'],
+      ['1', '^fn1', '^fnref1:1'],
+      ['2', '^fn2', '^fnref2'],
+    ]);
+    expect([...host.querySelectorAll<HTMLElement>('section.footnotes li')].map((li) => li.dataset['anchor'])).toEqual(['^fn1', '^fn2']);
+    expect(host.querySelector('section.footnotes li em')!.textContent).toBe('note');
+    expect([...host.querySelectorAll<HTMLElement>('.footnote-backref')].map((a) => a.dataset['target'])).toEqual(['^fnref1', '^fnref1:1', '^fnref2']);
+    expect(host.querySelector('.footnote-backref')!.className).toBe('anchor-link footnote-backref');
+    expect(host.textContent).toContain('^[not a note]');
+  });
+
+  it("draws emoji shortcodes as GitHub's, without turning :) into one", () => {
+    expect(renderInline(':+1: :sparkles: :rocket: :) :not_an_emoji: 10:30:00')).toBe('👍 ✨ 🚀 :) :not_an_emoji: 10:30:00');
+  });
+
+  it('colours a diff block by line and escapes it, keeping the copy button and a fence language as GitHub names it', () => {
+    const host = dom('```diff\n@@ -1 +1 @@\n-<old>\n+new\n same\n```\n\n```ts\nconst a = 1;\n```');
+    const code = host.querySelector('code.language-diff')!;
+
+    expect([...code.children].map((line) => [line.className, line.textContent])).toEqual([
+      ['diff-hunk', '@@ -1 +1 @@\n'],
+      ['diff-del', '-<old>\n'],
+      ['diff-add', '+new\n'],
+      ['diff-line', ' same\n'],
+    ]);
+    expect(code.closest('.code-block')!.querySelector('button[data-action="copy-code"]')).not.toBeNull();
+    expect(host.querySelector('pre')!.textContent).toBe('@@ -1 +1 @@\n-<old>\n+new\n same\n');
+    expect(host.querySelector('code.language-ts')!.textContent).toBe('const a = 1;\n');
+  });
+
+  it('draws every feature of the sample artifact', () => {
+    const host = dom(readFileSync(join(__dirname, 'gfm-sample.md'), 'utf8'));
+
+    expect(host.querySelectorAll('details')).toHaveLength(3);
+    expect(host.querySelectorAll('.markdown-alert')).toHaveLength(5);
+    expect(host.querySelectorAll('input.task-list-item-checkbox')).toHaveLength(3);
+    expect(host.querySelectorAll('kbd')).toHaveLength(3);
+    expect(host.querySelectorAll('sub, sup:not(.footnote-ref)')).toHaveLength(2);
+    expect(host.querySelectorAll('section.footnotes li')).toHaveLength(1);
+    expect(host.querySelectorAll('a.anchor-link')).toHaveLength(4);
+    expect(host.querySelectorAll('td[style*="right"]')).toHaveLength(2);
+    expect(host.querySelector('code.language-diff .diff-add')).not.toBeNull();
+    expect(host.querySelector('s')!.textContent).toBe('strikethrough');
+    expect(host.textContent).toContain('🚀');
+    expect(host.textContent).not.toMatch(/<!--|\[!NOTE\]|<\/?(details|summary|kbd)>/);
+    // Nothing but the renderer's own attributes reaches the page.
+    const names = new Set([...host.querySelectorAll('*')].flatMap((node) => [...node.attributes].map((one) => one.name)));
+
+    expect([...names].sort()).toEqual(['aria-hidden', 'aria-label', 'checked', 'class', 'data-action', 'data-anchor', 'data-target', 'disabled', 'href', 'open', 'rel', 'role', 'style', 'tabindex', 'target', 'title', 'type']);
+  });
+});

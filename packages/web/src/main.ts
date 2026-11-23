@@ -1845,6 +1845,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
       node.removeAttribute('data-action');
     });
+    // The window has no route in its address, so a link to a place in the document is a plain fragment link to an id there.
+    copy.querySelectorAll<HTMLElement>('[data-anchor]').forEach((node) => (node.id = node.dataset['anchor']!));
+    copy.querySelectorAll<HTMLElement>('a.anchor-link').forEach((node) => {
+      node.setAttribute('href', `#${node.dataset['target'] ?? ''}`);
+      node.removeAttribute('data-action');
+    });
 
     // The window's document is built from nodes, so the title and the copied Markdown go in as they are, escaped by the serializer.
     const page = document.implementation.createHTMLDocument(shown.querySelector('.artifact-title')?.textContent ?? '');
@@ -3818,6 +3824,18 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       case 'request-answer':
         void answerRequest(button!.dataset['request']!, action === 'request-decision' ? button!.dataset['decision']! : null);
         break;
+      case 'anchor': {
+        // A link to a place in the same Markdown (markdown.ts): the heading or footnote of that name in the same document.
+        const place = [...(button!.closest('.body')?.querySelectorAll<HTMLElement>('[data-anchor]') ?? [])].find((one) => one.dataset['anchor'] === button!.dataset['target']);
+
+        // A place inside a closed section is shown first, each section around it opened.
+        for (let section = place?.parentElement?.closest('details'); section; section = section.parentElement?.closest('details')) {
+          section.open = true;
+        }
+
+        place?.scrollIntoView?.({ block: 'start' });
+        break;
+      }
       case 'copy-code':
       case 'copy-reply': {
         const id = button!.closest<HTMLElement>('li[data-id]')?.dataset['id'];
@@ -3957,6 +3975,13 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     if (event.key === 'Enter' && event.target instanceof HTMLElement && event.target.matches('a.path-link[data-action="local-file"]')) {
       event.preventDefault();
       localFiles.click(event.target);
+      return;
+    }
+
+    // Enter on a focused link to a place in the same Markdown goes there, as a click does.
+    if (event.key === 'Enter' && event.target instanceof HTMLElement && event.target.matches('a.anchor-link[data-action="anchor"]')) {
+      event.preventDefault();
+      event.target.click();
       return;
     }
 

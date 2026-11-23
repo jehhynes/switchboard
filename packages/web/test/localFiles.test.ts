@@ -98,7 +98,10 @@ describe('local file link targets', () => {
 
     expect(host.querySelector('h1')!.textContent).toBe('Review');
     expect(host.querySelector('img')!.getAttribute('src')).toBe(localFileUrl('pk', 'D:/w/.wip/shots/a b.png', true));
-    expect([...host.querySelectorAll<HTMLElement>('a.path-link')].map((one) => one.dataset['target'])).toEqual(['D:/w/src/a.ts#L3', 'D:/w/b.md', '#review', 'D:/w/.wip/x&y.md']);
+    expect([...host.querySelectorAll<HTMLElement>('a.path-link')].map((one) => one.dataset['target'])).toEqual(['D:/w/src/a.ts#L3', 'D:/w/b.md', 'D:/w/.wip/x&y.md']);
+    // A link to a place in the file goes to its heading's anchor.
+    expect(host.querySelector<HTMLElement>('a.anchor-link')!.dataset['target']).toBe('review');
+    expect(host.querySelector('h1')!.getAttribute('data-anchor')).toBe('review');
   });
 });
 

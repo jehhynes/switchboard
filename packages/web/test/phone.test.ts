@@ -103,7 +103,7 @@ describe('the page on a phone', () => {
     for (const selector of vertical) {
       expect([selector, overscroll(selector)]).toEqual([selector, nested.includes(selector) ? [] : expect.arrayContaining(['contain'])]);
     }
-    expect(sideways).toEqual(expect.arrayContaining(['.body pre', '.body table', '.body.artifact-doc pre', '.body.artifact-doc table', '.settings-table-scroll']));
+    expect(sideways).toEqual(expect.arrayContaining(['.body pre', '.body table', '.body.md-doc pre', '.body.md-doc table', '.settings-table-scroll']));
     for (const selector of sideways) {
       expect([selector, overscroll(selector)]).toEqual([selector, []]);
     }

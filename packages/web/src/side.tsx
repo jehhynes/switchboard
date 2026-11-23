@@ -31,7 +31,7 @@ export function renderStatus(state: PageState, now: number): VNode {
         </span>
         {status.unread ? <UnreadDot /> : null}
       </div>
-      <div class="status-body body">{trusted(renderMarkdown(stripQuestionMarkup(status.markdown)))}</div>
+      <div class="status-body md-doc body">{trusted(renderMarkdown(stripQuestionMarkup(status.markdown)))}</div>
     </div>
   );
 }
@@ -86,7 +86,7 @@ export function renderArtifactView(key: string, artifact: ArtifactView, doc?: st
   ) : show === 'video' ? (
     <video class="media" controls preload="metadata" src={url}></video>
   ) : show === 'markdown' || show === 'text' ? (
-    <div class="artifact-doc body">{doc === undefined ? <p class="empty">Loading…</p> : doc === null ? <p class="empty">This artifact could not be read.</p> : trusted(doc)}</div>
+    <div class="artifact-doc md-doc body">{doc === undefined ? <p class="empty">Loading…</p> : doc === null ? <p class="empty">This artifact could not be read.</p> : trusted(doc)}</div>
   ) : (
     <p class="empty">The page cannot show this kind of file. Open it in a new window from the button above.</p>
   );

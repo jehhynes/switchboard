@@ -133,6 +133,8 @@ describe('question cards in replies', () => {
     host.innerHTML = html(renderStatus(state, 2));
     expect(host.querySelector('.status-body')?.textContent).toContain('Blocked on a choice.');
     expect(host.querySelectorAll('.status-body ol > li')).toHaveLength(1);
+    // The status is a Markdown document, typeset as an artifact's (`md-doc`).
+    expect(host.querySelector('.status-body')!.className).toBe('status-body md-doc body');
     expect(host.querySelector('.question-card')).toBeNull();
     expect(host.querySelector('.questions-fold')).toBeNull();
   });
@@ -2772,7 +2774,7 @@ describe('the page in use', () => {
 
     const doc = root.querySelector('.artifact-doc')!.innerHTML;
 
-    expect(doc).toContain('<h1>Plan</h1>');
+    expect(doc).toContain('<h1 data-anchor="plan">Plan</h1>');
     expect(doc).toContain('src="/v1/conversation/artifact/pk/chat/plan/pic.png"');
     expect(doc).not.toContain('x.png');
     expect(root.querySelector('#head .tab.selected')!.getAttribute('data-path')).toBe('chat/plan.md');
@@ -3122,7 +3124,7 @@ describe('the page in use', () => {
 
     const html = await blob!.text();
 
-    expect(html).toContain('<h1>Plan v2</h1>');
+    expect(html).toContain('<h1 data-anchor="plan-v2" id="plan-v2">Plan v2</h1>');
     expect(html).toContain('class="artifact-window"');
     expect(html).toContain('/page/page.css');
     expect(html).toContain('<meta name="viewport" content="width=device-width, initial-scale=1">');
@@ -3139,6 +3141,51 @@ describe('the page in use', () => {
     await flush();
     click('.artifact-doc a[data-path="chat/p.html"]');
     expect(root.querySelector('iframe')!.getAttribute('src')).toBe('/v1/conversation/artifact/pk/chat/p.html?v=1500');
+    page.close();
+  });
+
+  it('scrolls to the heading or footnote a #name link in a Markdown artifact names, by click or Enter, without changing the route, and links them in a new window', async () => {
+    const { page, source } = start();
+
+    answers['/artifact/'] = { status: 200, body: {}, text: '# Plan\n\n[to notes](#notes) and a note[^1] [hidden](#hidden)\n\n## Notes\n\n<details>\n<summary>Out</summary>\n\n<details>\n<summary>In</summary>\n\n### Hidden\n\n</details>\n</details>\n\n[^1]: The note.' };
+    hello(source);
+    click('#head .artifact-tab[data-path="chat/plan.md"]');
+    await flush();
+    await flush();
+
+    const doc = root.querySelector<HTMLElement>('.artifact-doc')!;
+    const shown: string[] = [];
+
+    expect(doc.classList.contains('md-doc')).toBe(true);
+    Object.assign(HTMLElement.prototype, { scrollIntoView(this: HTMLElement) { shown.push(this.getAttribute('data-anchor') ?? ''); } });
+    onTestFinished(() => {
+      delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
+    });
+
+    const hash = location.hash;
+
+    click('.artifact-doc a.anchor-link[data-target="notes"]');
+    click('.artifact-doc sup.footnote-ref a');
+    doc.querySelector<HTMLElement>('.footnote-backref')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(shown).toEqual(['notes', '^fn1', '^fnref1']);
+    // A place inside closed sections opens each of them first.
+    expect([...doc.querySelectorAll('details')].map((one) => one.open)).toEqual([false, false]);
+    click('.artifact-doc a.anchor-link[data-target="hidden"]');
+    expect([...doc.querySelectorAll('details')].map((one) => one.open)).toEqual([true, true]);
+    expect(shown.at(-1)).toBe('hidden');
+    expect(location.hash).toBe(hash);
+
+    const opened = vi.spyOn(window, 'open').mockReturnValue(null);
+    let blob: Blob | null = null;
+
+    Object.assign(URL, { createObjectURL: vi.fn((value: Blob) => ((blob = value), 'blob:x')), revokeObjectURL: vi.fn() });
+    click('[data-action="artifact-window"]');
+    expect(opened).toHaveBeenCalled();
+
+    const html = await blob!.text();
+
+    expect(html).toContain('<h2 data-anchor="notes" id="notes">Notes</h2>');
+    expect(html).toMatch(/<a class="anchor-link" tabindex="0" role="link" data-target="notes" href="#notes">to notes<\/a>/);
     page.close();
   });
 

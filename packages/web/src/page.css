@@ -611,25 +611,58 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 }
 .artifact-frame { flex: 1; width: 100%; border: 0; background: #fff; }
 .artifact-doc { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 8px 20px calc(60px + var(--sb-end)); max-width: 900px; width: 100%; box-sizing: border-box; margin: 0 auto; }
-/* The head shows the kind as a badge before the title, and a Markdown artifact is typeset as claude-collab's artifact viewer does, in the
-   theme's colours: 15 px text, headings, code, tables and quotes as there. */
+/* The head shows the kind as a badge before the title. A Markdown document, the Status tab's and an artifact's or a file's alike (`md-doc`), is
+   typeset as claude-collab's artifact viewer does, in the theme's colours: 15 px text, headings, code, tables and quotes as there. */
 .artifact-badge { flex: none; font-size: 12px; font-weight: 600; line-height: 16px; padding: 1px 6px; border: 1px solid currentColor; border-radius: 4px; color: var(--vscode-editorWarning-foreground); }
 .artifact-head .artifact-title { font-weight: 600; }
-.body.artifact-doc { font-size: 15px; line-height: 1.55; }
-.body.artifact-doc p, .body.artifact-doc ul, .body.artifact-doc ol { margin: 1em 0; }
-.body.artifact-doc ul, .body.artifact-doc ol { padding-inline-start: 40px; }
-.body.artifact-doc h1, .body.artifact-doc h2, .body.artifact-doc h3 { line-height: 1.25; margin: 1.4em 0 0.5em; }
-.body.artifact-doc code { font-family: ui-monospace, Consolas, monospace; font-size: 13px; color: inherit; background: var(--vscode-panel-border); padding: 1px 4px; border-radius: 4px; }
-.body.artifact-doc pre { margin: 1em 0; padding: 10px; border: 1px solid var(--vscode-panel-border); border-radius: 6px; overflow-x: auto; background: var(--vscode-editor-background); }
-.body.artifact-doc pre code { background: none; padding: 0; }
+.body.md-doc { font-size: 15px; line-height: 1.55; }
+.body.md-doc p, .body.md-doc ul, .body.md-doc ol { margin: 1em 0; }
+.body.md-doc ul, .body.md-doc ol { padding-inline-start: 40px; }
+.body.md-doc h1, .body.md-doc h2, .body.md-doc h3 { line-height: 1.25; margin: 1.4em 0 0.5em; }
+.body.md-doc code { font-family: ui-monospace, Consolas, monospace; font-size: 13px; color: inherit; background: var(--vscode-panel-border); padding: 1px 4px; border-radius: 4px; }
+.body.md-doc pre { margin: 1em 0; padding: 10px; border: 1px solid var(--vscode-panel-border); border-radius: 6px; overflow-x: auto; background: var(--vscode-editor-background); }
+.body.md-doc pre code { background: none; padding: 0; }
 /* Text, data and code shown as they are, wrapped at the pane's width. */
 .body.artifact-doc pre.artifact-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: ui-monospace, Consolas, monospace; font-size: 13px; line-height: 1.45; }
 .artifact-frame.artifact-pdf { background: none; }
-.body.artifact-doc pre.mermaid { text-align: center; }
-.body.artifact-doc table { border-collapse: collapse; margin: 0 0 12px; font-size: 14px; display: block; overflow-x: auto; }
-.body.artifact-doc th, .body.artifact-doc td { border: 1px solid var(--vscode-panel-border); padding: 5px 9px; text-align: left; vertical-align: top; }
-.body.artifact-doc th { background: var(--vscode-editor-background); }
-.body.artifact-doc blockquote { margin: 0 0 12px; padding: 2px 14px; border-left: 3px solid var(--vscode-panel-border); background: none; color: var(--vscode-descriptionForeground); }
+.body.md-doc pre.mermaid { text-align: center; }
+.body.md-doc table { border-collapse: collapse; margin: 0 0 12px; font-size: 14px; display: block; overflow-x: auto; }
+.body.md-doc th, .body.md-doc td { border: 1px solid var(--vscode-panel-border); padding: 5px 9px; text-align: left; vertical-align: top; }
+.body.md-doc th { background: var(--vscode-editor-background); }
+.body.md-doc blockquote { margin: 0 0 12px; padding: 2px 14px; border-left: 3px solid var(--vscode-panel-border); background: none; color: var(--vscode-descriptionForeground); }
+
+/* Bullets as in Claude's VS Code extension and GitHub: a disc at the root, then a circle, then a square, in every Markdown surface, whatever list
+   (such as the conversation's timeline) the Markdown sits in, which would otherwise make its root a browser's second level. */
+.body ul { list-style-type: disc; }
+.body :is(ul, ol) ul { list-style-type: circle; }
+.body :is(ul, ol) :is(ul, ol) ul { list-style-type: square; }
+/* GitHub-flavoured Markdown (markdown.ts): task lists, collapsible sections, keys, footnotes, diff blocks and alerts, drawn as GitHub does. */
+.body li.task-list-item { list-style-type: none; }
+.body .task-list-item-checkbox { margin: 0 0.2em 0.25em -1.4em; vertical-align: middle; }
+.body details:not(.fold) { margin: 0.5em 0; }
+.body details:not(.fold) > summary { cursor: pointer; }
+.body kbd { display: inline-block; padding: 2px 5px; font: 0.8em/1 var(--vscode-editor-font-family, ui-monospace, Consolas, monospace); vertical-align: middle; color: var(--vscode-keybindingLabel-foreground, inherit); background: var(--vscode-keybindingLabel-background, var(--vscode-textCodeBlock-background)); border: 1px solid var(--vscode-keybindingLabel-border, var(--vscode-panel-border)); border-bottom-color: var(--vscode-keybindingLabel-bottomBorder, var(--vscode-panel-border)); border-radius: 4px; box-shadow: inset 0 -1px 0 var(--vscode-keybindingLabel-bottomBorder, var(--vscode-panel-border)); }
+.body sub, .body sup { line-height: 0; }
+.body a.anchor-link { color: var(--vscode-textLink-foreground); cursor: pointer; }
+.body .footnote-backref { text-decoration: none; }
+.body .footnotes { margin-top: 1.5em; padding-top: 0.5em; border-top: 1px solid var(--vscode-panel-border); color: var(--vscode-descriptionForeground); font-size: 0.9em; }
+.body hr { height: 0; margin: 1.2em 0; border: 0; border-top: 1px solid var(--vscode-panel-border); }
+.body code.language-diff .diff-add { color: var(--sb-alert-tip); }
+.body code.language-diff .diff-del { color: var(--sb-alert-caution); }
+.body code.language-diff .diff-hunk { color: var(--vscode-textLink-foreground); }
+:root { --sb-alert-note: #4493f8; --sb-alert-tip: #3fb950; --sb-alert-important: #ab7df8; --sb-alert-warning: #d29922; --sb-alert-caution: #f85149; }
+@media (prefers-color-scheme: light) {
+  :root { --sb-alert-note: #0969da; --sb-alert-tip: #1a7f37; --sb-alert-important: #8250df; --sb-alert-warning: #9a6700; --sb-alert-caution: #d1242f; }
+}
+.body blockquote.markdown-alert { margin: 0 0 1em; padding: 8px 16px; border-left: 0.25em solid var(--sb-alert); background: none; color: inherit; }
+.body blockquote.markdown-alert > :first-child { margin-top: 0; }
+.body blockquote.markdown-alert > :last-child { margin-bottom: 0; }
+.body blockquote.markdown-alert > .markdown-alert-title { display: flex; align-items: center; gap: 8px; margin: 0 0 4px; color: var(--sb-alert); font-weight: 500; line-height: 1; }
+.markdown-alert-note { --sb-alert: var(--sb-alert-note); }
+.markdown-alert-tip { --sb-alert: var(--sb-alert-tip); }
+.markdown-alert-important { --sb-alert: var(--sb-alert-important); }
+.markdown-alert-warning { --sb-alert: var(--sb-alert-warning); }
+.markdown-alert-caution { --sb-alert: var(--sb-alert-caution); }
 /* A Markdown artifact opened in a window of its own. */
 body.artifact-window { display: flex; flex-direction: column; background: var(--vscode-sideBar-background); }
 body.artifact-window > .artifact-view { height: 100%; }

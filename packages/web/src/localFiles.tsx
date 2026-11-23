@@ -352,7 +352,7 @@ function LocalView({ tab, note, pageKey }: { tab: LocalTab; note: string | null;
   } else if (data.kind === 'pdf') {
     body = <iframe class="artifact-frame artifact-pdf" referrerpolicy="no-referrer" src={localFileUrl(pageKey, data.path, true)} title={data.name}></iframe>;
   } else {
-    body = <div class="artifact-doc body">{trusted(localMarkdown(pageKey, data))}</div>;
+    body = <div class="artifact-doc md-doc body">{trusted(localMarkdown(pageKey, data))}</div>;
   }
 
   return (
