@@ -30,6 +30,14 @@ import { IframeHostController } from '../src/iframeHostView.js';
 import { vi } from 'vitest';
 
 describe('extension host messages', () => {
+  it('does not renew the page heartbeat when live authority is checked again', () => {
+    let now = 0;
+    const show = vi.fn();
+    const controller = new IframeHostController({ origin: 'https://pc.tail.ts.net', appWindow: () => ({}),
+      now: () => now, show, reconcile: vi.fn(), title: vi.fn(), leave: vi.fn(), viewport: () => ({ width: 900, height: 700 }) });
+    controller.allow(); now = 10_000; controller.allow(); now = 15_001; controller.tick();
+    expect(show).toHaveBeenLastCalledWith(null);
+  });
   it('rejects stale or malformed desired state without reconciling it', () => {
     const app = {};
     const show = vi.fn(), reconcile = vi.fn();
@@ -82,13 +90,19 @@ describe('extension host messages', () => {
     expect(controller.message(event)).toBe(true);
     expect(show).toHaveBeenLastCalledWith({ url: 'https://github.com/o/r', left: 100, top: 50, width: 600, height: 400, reload: false });
     expect(title).toHaveBeenLastCalledWith('(2) Switchboard');
+    controller.block();
+    expect(show).toHaveBeenLastCalledWith(null);
+    expect(controller.message({ ...event, data: { ...event.data, seq: 2 } })).toBe(false);
+    controller.allow();
+    show.mockClear();
+    expect(controller.message({ ...event, data: { ...event.data, seq: 2 } })).toBe(true);
     now = 15_000;
     controller.tick();
     expect(show).toHaveBeenCalledTimes(1);
     now = 15_001;
     controller.tick();
     expect(show).toHaveBeenLastCalledWith(null);
-    expect(controller.message({ ...event, data: { type: 'switchboard-iframe', epoch: 'first', seq: 2, item: 1, tabs: [] } })).toBe(true);
+    expect(controller.message({ ...event, data: { type: 'switchboard-iframe', epoch: 'first', seq: 3, item: 1, tabs: [] } })).toBe(true);
     expect(show).toHaveBeenLastCalledWith(null);
     expect(controller.message({ ...event, data: { type: 'switchboard-iframe-disabled' } })).toBe(true);
     expect(leave).toHaveBeenCalledTimes(1);

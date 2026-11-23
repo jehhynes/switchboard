@@ -26,18 +26,28 @@ export function iframeTab(url: string | undefined, remote: string | null): { ori
 }
 
 /** Local origins are vouched for by the fixed hub endpoint, never by the requesting page's server. */
-export async function iframeEnabled(fetchUrl: (url: string) => Promise<Response>, origin: string, remote: string | null): Promise<boolean> {
-  try {
-    if (remote === null) {
-      const response = await fetchUrl(`http://127.0.0.1:${BROWSER_PORT}/iframe`);
-      const state = response.ok ? ((await response.json()) as { enabled?: unknown; origins?: unknown }) : null;
-      if (state?.enabled !== true || !Array.isArray(state.origins) || !state.origins.includes(origin)) return false;
-    } else if (origin !== remote) return false;
-    const response = await fetchUrl(`${origin}/v1/browser/iframe`);
-    return response.ok && ((await response.json()) as { enabled?: unknown }).enabled === true;
-  } catch {
-    return false;
+export async function iframeAccess(fetchUrl: (url: string) => Promise<Response>, origin: string, remote: string | null): Promise<import('./hostStartup.js').HostAccess> {
+  if (iframePage(`${origin}/page/`, remote) !== origin) return 'refused';
+  const read = async (url: string): Promise<{ state: 'ok'; body: unknown } | { state: 'offline' | 'refused' }> => {
+    let response: Response;
+    try { response = await fetchUrl(url); } catch { return { state: 'offline' }; }
+    if ([502, 503, 504].includes(response.status)) return { state: 'offline' };
+    if (!response.ok) return { state: 'refused' };
+    try { return { state: 'ok', body: await response.json() }; } catch { return { state: 'refused' }; }
+  };
+  if (remote === null) {
+    const response = await read(`http://127.0.0.1:${BROWSER_PORT}/iframe`);
+    if (response.state !== 'ok') return response.state;
+    const state = response.body as { enabled?: unknown; origins?: unknown } | null;
+    if (state?.enabled !== true || !Array.isArray(state.origins) || !state.origins.includes(origin)) return 'refused';
   }
+  const response = await read(`${origin}/v1/browser/iframe`);
+  if (response.state !== 'ok') return response.state;
+  return (response.body as { enabled?: unknown } | null)?.enabled === true ? 'enabled' : 'refused';
+}
+
+export async function iframeEnabled(fetchUrl: (url: string) => Promise<Response>, origin: string, remote: string | null): Promise<boolean> {
+  return await iframeAccess(fetchUrl, origin, remote) === 'enabled';
 }
 
 /** Header changes stay inside a verified extension host; its Switchboard child keeps its CSP. */

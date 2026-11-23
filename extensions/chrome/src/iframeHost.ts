@@ -1,5 +1,6 @@
+import { HostStartup } from './hostStartup.js';
 import { readRoutes, REMOTE_FILE } from './hub.js';
-import { iframeEnabled, iframePage } from './iframe.js';
+import { iframeAccess, iframePage } from './iframe.js';
 import { HostFocus } from './hostFocus.js';
 import { consumeSelection } from './iframeSelection.js';
 import { IframeFrames } from './iframeFrames.js';
@@ -8,6 +9,7 @@ const app = document.querySelector<HTMLIFrameElement>('#app')!;
 const frames = new IframeFrames(document.body);
 const note = document.querySelector<HTMLElement>('#note')!;
 const origin = new URL(location.href).searchParams.get('origin');
+let startup: HostStartup | null = null;
 const controller = new IframeHostController({
   origin: origin ?? '',
   appWindow: () => app.contentWindow,
@@ -16,7 +18,7 @@ const controller = new IframeHostController({
   title: (value) => {
     document.title = value;
   },
-  leave: () => location.replace(`${origin}/page/`),
+  leave: () => void startup?.leave(),
   show: (view) => frames.show(view),
   reconcile: (item, urls) => frames.reconcile(item, urls),
 });
@@ -35,7 +37,7 @@ window.addEventListener('hashchange', selectFromHash);
 window.addEventListener('message', (event) => controller.message(event));
 setInterval(() => controller.tick(), 5_000);
 const focus = new HostFocus(
-  () => appLoaded && document.visibilityState !== 'hidden' && document.hasFocus(),
+  () => appLoaded && !app.hidden && document.visibilityState !== 'hidden' && document.hasFocus(),
   (focused) => { if (origin !== null) app.contentWindow?.postMessage({ type: 'switchboard-iframe-focus', focused }, origin); },
 );
 const reportFocus = (force = false): void => focus.report(force);
@@ -50,17 +52,27 @@ window.addEventListener('focus', resume);
 document.addEventListener('visibilitychange', resume);
 void (async () => {
   const routes = await readRoutes((url) => fetch(url), chrome.runtime.getURL(REMOTE_FILE));
-  if (
-    origin === null ||
-    iframePage(`${origin}/page/`, routes.origin) !== origin ||
-    !(await iframeEnabled((url) => fetch(url, { credentials: 'include', cache: 'no-store' }), origin, routes.origin))
-  ) {
-    note.textContent = 'Sign in to the Switchboard page and enable the embedded browser experiment, then reopen it from that page.';
+  if (origin === null || iframePage(`${origin}/page/`, routes.origin) !== origin) {
+    note.textContent = 'This is not a configured Switchboard hub. Open the app from its signed-in page.';
     return;
   }
-  controller.allow();
-  const workItemId = new URLSearchParams(location.hash.slice(1)).get('workItemId');
-  app.src = `${origin}/page/${workItemId !== null && /^[1-9]\d*$/.test(workItemId) ? `#w=${workItemId}&t=browser` : ''}`;
-  app.hidden = false;
-  note.hidden = true;
+  const saved = `iframe-host:${origin}`;
+  startup = new HostStartup({
+    probe: () => iframeAccess((url) => fetch(url, { credentials: 'include', cache: 'no-store', signal: AbortSignal.timeout(3_000) }), origin, routes.origin),
+    remembered: async () => (await chrome.storage.local.get(saved))[saved] === true,
+    remember: async (value) => value ? chrome.storage.local.set({ [saved]: true }) : chrome.storage.local.remove(saved),
+    authority: (enabled) => enabled ? controller.allow() : controller.block(),
+    shell: (visible) => {
+      if (visible && app.getAttribute('src') === null) {
+        const workItemId = new URLSearchParams(location.hash.slice(1)).get('workItemId');
+        app.src = `${origin}/page/${workItemId !== null && /^[1-9]\d*$/.test(workItemId) ? `#w=${workItemId}&t=browser` : ''}`;
+      }
+      app.hidden = !visible;
+    },
+    note: (text) => { note.textContent = text ?? ''; note.hidden = text === null; },
+    leave: () => location.replace(`${origin}/page/`),
+  });
+  await startup.check();
+  setInterval(() => void startup?.check(), 5_000);
+  window.addEventListener('online', () => void startup?.check());
 })();

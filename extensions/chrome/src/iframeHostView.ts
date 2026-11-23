@@ -45,8 +45,13 @@ export class IframeHostController {
   #oldEpochs = new Set<string>();
   constructor(private readonly deps: HostControllerDeps) {}
   allow(): void {
+    if (this.#allowed) return;
     this.#allowed = true;
     this.#reported = this.deps.now();
+  }
+  block(): void {
+    this.#allowed = false;
+    this.deps.show(null);
   }
   message(event: { source: unknown; origin: string; data: unknown }): boolean {
     if (

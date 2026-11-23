@@ -11,6 +11,8 @@ for (const file of ['manifest.json', 'content.css', 'iframeHost.html']) {
 
 copyFileSync(createRequire(import.meta.url).resolve('@vscode/codicons/dist/codicon.ttf'), 'dist/codicon.ttf');
 
+copyFileSync('assets/switchboard.ico', 'dist/switchboard.ico');
+
 for (const size of [16, 32, 48, 128]) {
   copyFileSync(`assets/icon-${size}.png`, `dist/icon-${size}.png`);
 }

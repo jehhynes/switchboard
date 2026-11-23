@@ -17,6 +17,8 @@ import type { LocalOpened } from './localFiles.js';
 import { isWebSocketUpgrade } from './webSocket.js';
 import { VOICE_SOCKET_PATH } from './voiceSocket.js';
 import { HUB_LOG_LINES, HUB_LOG_MAX_LINES } from './hubLog.js';
+import { appShortcut } from './appShortcut.js';
+import { zip } from './browserExtension.js';
 import type { VoiceDevice } from './voiceSocket.js';
 
 export interface Reply {
@@ -839,7 +841,19 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       return true;
     }
 
-    // The browser extension for this device: for a remote one, a copy that reaches the hub through this origin (architecture.md § Browser extension).
+    // A portable Windows shortcut for this signed-in page's origin.
+    if (request.method === 'GET' && path === '/page/switchboard-shortcut.zip') {
+      try {
+        const shortcut = zip([{ name: 'Switchboard.lnk', body: appShortcut(origin.origin, url.searchParams) }]);
+        response.writeHead(200, { 'Content-Type': 'application/zip', 'Content-Disposition': 'attachment; filename="switchboard-shortcut.zip"', 'Content-Length': shortcut.length, 'Cache-Control': 'no-store' });
+        response.end(shortcut);
+      } catch {
+        json(response, 400, { error: 'Invalid shortcut options. Choose Chrome or Edge, a profile directory and a supported installation location.' });
+      }
+      return true;
+    }
+
+    // The browser extension for this device: a remote copy reaches the hub through this origin.
     if (request.method === 'GET' && path === EXTENSION_DOWNLOAD) {
       const archive = page.browser?.download(remote ? origin.origin : null) ?? null;
 

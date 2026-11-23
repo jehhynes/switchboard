@@ -19,7 +19,7 @@ describe('firefoxManifest', () => {
     expect(rest).toEqual(chromeRest);
     expect([typeof key, externally_connectable]).toEqual(['string', { matches: ['http://127.0.0.1/*', 'http://localhost/*'] }]);
     // The native pane and iframe experiment are Chrome-only; other permissions are kept.
-    expect(permissions).toEqual(['storage', 'tabs', 'tabGroups', 'alarms', 'declarativeNetRequestWithHostAccess']);
+    expect(permissions).toEqual(['downloads', 'storage', 'tabs', 'tabGroups', 'alarms', 'declarativeNetRequestWithHostAccess']);
     expect('permissions' in rest).toBe(false);
     expect(firefoxManifest({ ...chromeManifest, permissions: ['tabs', 'notifications', 'storage'] }, 1).permissions).toEqual(['notifications']);
   });

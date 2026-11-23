@@ -28,14 +28,21 @@ The extension requests access to HTTP and HTTPS sites, declarative header rules 
 
 A missing extension offers Retry; reload after changing the setting. Turning it off in the host returns to the ordinary page. Firefox and phones without extension support use external links. The native Chrome pane and its pairing menu are retired; old `web.chromePane` values are ignored. Old helper build folders and `pane-helper.json` may be removed after the old hub exits, and an old pane window can be closed normally.
 
-### App-style window on Windows
+### App shortcut on Windows
 
-Chrome can launch the installed extension host in its own app-style window. Create a Windows shortcut to `chrome.exe` with these arguments, replacing the profile directory and encoded hub origin with those used by the signed-in browser:
+On the computer where you want the shortcut:
 
-```text
---profile-directory="Profile 1" --app="chrome-extension://hlbibnhgkgnjkbfledhgjblacloneije/iframeHost.html?origin=http%3A%2F%2F127.0.0.1%3A47616"
-```
+1. Open the signed-in Switchboard web page, including its paired HTTPS page on a remote computer.
+2. Choose More Actions → Download app shortcut….
+3. Select Chrome or Edge and its profile directory, then Download shortcut. Use the last folder in Profile Path on `chrome://version` or `edge://version`, such as `Default` or `Profile 1`. Choose the profile with the extension and Switchboard sign-in.
+4. Extract `switchboard-shortcut.zip` and move its `Switchboard.lnk` to your desktop.
+5. Keep `Switchboard/switchboard.ico` in your browser's Downloads folder. The extension saves it there and includes its actual location in the shortcut, including a custom Downloads location.
+6. Pin the Switchboard shortcut to the taskbar, then open it. Remove an old Edge-only pin first; an existing pin does not inherit the new shortcut's arguments or identity.
 
-The extension must already be installed in that profile. Use the origin from the working extension-hosted tab, including its port; paired devices use their encoded HTTPS origin. This launch retains the extension host and its website sign-in behavior, with Switchboard's icon and title above the page and no browser tab strip. It does not register an installed PWA. Each launch can create another window; taskbar pinning, grouping and full browser restart have not been verified (mechanics M144).
+No installer, Node or local hub is needed. The file opens this page's hub through the browser extension in an app window, with no browser tabs or address bar. The extension must be installed and Embedded browser tabs enabled on the hub. Reload an older extension before downloading; the Chrome/Edge extension now needs Downloads permission to save the icon. The shortcut carries the hub origin and client-side icon location, never a pairing token or path on the hub computer. You can move the shortcut while leaving its icon in Downloads. Download a new shortcut if the hub origin, browser profile or icon location changes.
 
-The app window still runs Switchboard's JavaScript and service worker. The shell cache does not contain work items or conversations. Fresh extension-host startup currently needs the hub to answer its origin and setting checks, even when the inner page's shell is cached; an offline reload can therefore stop at the host's sign-in note. This also affects the ordinary extension-hosted tab. Restore connectivity and reload.
+For a browser installed only for your Windows user or in the other Program Files folder, expand Browser installation and choose its location. If Windows cannot find the browser, choose the matching location and download again. Environment variables resolve these locations on the computer opening the file. An extension cannot read the native profile directory automatically.
+
+The shortcut has Switchboard's icon and a Windows app identity matched to the selected browser profile. The extension host supplies a multi-size icon for its window. This does not register an installed PWA or write your Start menu automatically. Each launch can create another window.
+
+Open the app once while connected to verify the hub and warm its shell cache. Later offline starts and reloads may show that cached shell for the verified origin; it contains no work items or conversations. Website frames stay hidden until live origin, setting and sign-in checks pass again. An unknown origin or explicit refusal cannot use the offline fallback; a refusal forgets the earlier verification. When connectivity returns, the open app verifies again and reconnects. Desktop notification permission must still be granted from the ordinary page.

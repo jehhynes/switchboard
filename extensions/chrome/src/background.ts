@@ -1,3 +1,4 @@
+import { downloadedIcon, shortcutRequest } from './shortcut.js';
 import { REMOTE_FILE, readRoutes, readSnoozed } from './hub.js';
 import { readCards } from './pills.js';
 import { postSnooze, postUnsnooze, snoozeMessage, unsnoozeMessage } from './snooze.js';
@@ -68,6 +69,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
 // Embedded tabs and external tab groups require Chrome's fixed extension ID and externally_connectable. The listeners are added at once, as a service worker that an event wakes gets only the listeners its first run adds.
 if (!FIREFOX) {
+  chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
+    if ((message as { type?: unknown } | null)?.type !== 'iframe-shortcut') return false;
+    void routes.then(async (hub) => {
+      sendResponse(await shortcutRequest(sender, hub.origin,
+        (origin) => iframeEnabled((url) => fetch(url, { credentials: 'include', cache: 'no-store' }), origin, hub.origin),
+        async () => {
+          const bytes = new Uint8Array(await (await fetch(chrome.runtime.getURL('switchboard.ico'))).arrayBuffer());
+          const data = btoa(Array.from(bytes, (byte) => String.fromCharCode(byte)).join(''));
+          return downloadedIcon(chrome.downloads, `data:image/x-icon;base64,${data}`);
+        }));
+    }).catch(() => sendResponse({ error: 'Could not save the shortcut icon. Check browser downloads and try again.' }));
+    return true;
+  });
   const iframe = routes.then((hub) => new IframeRules({
     origin: hub.origin,
     now: () => Date.now(),

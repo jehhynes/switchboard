@@ -1,8 +1,10 @@
+import { SheetFrame as Frame } from './sheetFrame.js';
 import type { ComponentChildren, VNode } from 'preact';
 import qrcode from 'qrcode-generator';
 import { providerMark } from '@switchboard/conversation/providerIcons';
 import { mount } from './island.js';
 import { HubLog } from './hubLog.js';
+import { AppShortcut } from './appShortcut.js';
 import { trusted } from './trusted.js';
 import type { PageGroup, PageHeader, PageRow, SourceGroup } from '@switchboard/protocol';
 import type { PhoneVoiceState } from './phoneVoice.js';
@@ -277,6 +279,7 @@ export type HeaderSheet =
   | { kind: 'log' }
   | { kind: 'held'; rows: HeldRow[] | null; busy: boolean; refreshing: boolean; listError: string | null; error: string | null; result: string | null; stopping: HeldRow | null }
   | { kind: 'extension'; remote: boolean }
+  | { kind: 'shortcut' }
   | { kind: 'holder'; busy: boolean; error: string | null }
   | { kind: 'devices'; pairing: Pairing | null; devices: Device[] | null; busy: boolean; error: string | null };
 
@@ -515,6 +518,7 @@ export function renderMoreMenu(header: PageHeader | null, local = false, phoneVo
       <MoreRow action="list-reload" icon="debug-restart" label="Reload" />
       <MoreRow action="list-log" icon="output" label="Show hub log" />
       <MoreRow action="list-extension" icon="extensions" label="Get the browser extension…" />
+      <MoreRow action="list-shortcut" icon="desktop-download" label="Download app shortcut…" />
       {local ? (
         <>
           <Separator />
@@ -676,20 +680,6 @@ function Select({ label, field, items, chosen, after }: { label: string; field: 
   );
 }
 
-/** The frame every sheet of the header has: its title, its body and its buttons, over a backdrop that cancels it; `wide` names a wide sheet's class. */
-function Frame({ title, children, buttons, wide }: { title: string; children: ComponentChildren; buttons: ComponentChildren; wide?: 'hub-log-sheet' | 'held-sheet' }) {
-  return (
-    <div class="sheet-backdrop" data-action="list-sheet-cancel">
-      <div class={`sheet glass${wide === undefined ? '' : ` ${wide}`}`} role="dialog" aria-modal="true" aria-labelledby="list-sheet-title">
-        <h2 id="list-sheet-title" class="sheet-title">
-          {title}
-        </h2>
-        {children}
-        <div class="sheet-buttons">{buttons}</div>
-      </div>
-    </div>
-  );
-}
 
 function HeldSheet({ sheet }: { sheet: Extract<HeaderSheet, { kind: 'held' }> }) {
   const stopping = sheet.stopping;
@@ -776,6 +766,9 @@ export function renderHeaderSheet(sheet: HeaderSheet | null, header: PageHeader 
 
   if (sheet.kind === 'extension') {
     return <ExtensionSheet remote={sheet.remote} />;
+  }
+  if (sheet.kind === 'shortcut') {
+    return <AppShortcut />;
   }
 
   if (sheet.kind === 'later') {
@@ -1516,7 +1509,7 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
     await refreshHeld(sheet);
   };
   const closeSheet = (): void => {
-    if (view.sheet !== null && view.sheet.kind !== 'log' && view.sheet.kind !== 'later' && view.sheet.kind !== 'extension' && view.sheet.kind !== 'devices' && view.sheet.kind !== 'held' && view.sheet.busy) {
+    if (view.sheet !== null && view.sheet.kind !== 'log' && view.sheet.kind !== 'later' && view.sheet.kind !== 'extension' && view.sheet.kind !== 'shortcut' && view.sheet.kind !== 'devices' && view.sheet.kind !== 'held' && view.sheet.busy) {
       return;
     }
 
@@ -1529,7 +1522,7 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
   const sheetGo = async (): Promise<void> => {
     const sheet = view.sheet;
 
-    if (sheet === null || sheet.kind === 'log' || sheet.kind === 'later' || sheet.kind === 'extension' || sheet.kind === 'held' || sheet.busy) {
+    if (sheet === null || sheet.kind === 'log' || sheet.kind === 'later' || sheet.kind === 'extension' || sheet.kind === 'shortcut' || sheet.kind === 'held' || sheet.busy) {
       return;
     }
 
@@ -1823,6 +1816,12 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
         view.sheet = { kind: 'extension', remote: view.local !== true };
         redraw();
         sheetHost.querySelector<HTMLElement>('.sheet-button.primary')?.focus();
+        break;
+      case 'list-shortcut':
+        view.menu = null;
+        view.sheet = { kind: 'shortcut' };
+        redraw();
+        sheetHost.querySelector<HTMLElement>('select')?.focus();
         break;
       case 'list-log':
         view.menu = null;

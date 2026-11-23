@@ -78,3 +78,10 @@ declare namespace chrome.alarms {
   function create(name: string, info: { periodInMinutes: number }): Promise<void>;
   const onAlarm: { addListener(listener: (alarm: { name: string }) => void): void };
 }
+declare namespace chrome.downloads {
+  interface DownloadDelta { id: number; }
+  interface DownloadItem { filename: string; state: 'in_progress' | 'interrupted' | 'complete'; }
+  function download(options: { url: string; filename: string; conflictAction: 'overwrite'; saveAs: false }): Promise<number>;
+  function search(query: { id: number }): Promise<DownloadItem[]>;
+  const onChanged: { addListener(listener: (change: DownloadDelta) => void): void; removeListener(listener: (change: DownloadDelta) => void): void };
+}

@@ -312,7 +312,7 @@ describe('the list header (architecture.md § Web page)', () => {
     hello(source);
     click('.more-actions');
     expect(root.querySelector('.more-actions')?.getAttribute('aria-expanded')).toBe('true');
-    expect(menuRows()).toEqual(['gh', 'desk', 'help', '-', 'Held sessions', '-', 'Refresh sources', 'Reload', 'Show hub log', 'Get the browser extension…', '-', 'Pair a device…', 'Open Settings']);
+    expect(menuRows()).toEqual(['gh', 'desk', 'help', '-', 'Held sessions', '-', 'Refresh sources', 'Reload', 'Show hub log', 'Get the browser extension…', 'Download app shortcut…', '-', 'Pair a device…', 'Open Settings']);
     // The source rows are the phone's: page.css hides them outside the phone's layout, where the icons are in the header.
     expect([...root.querySelectorAll('.more-menu .more-source')]).toHaveLength(4);
     expect(root.querySelector('.more-menu [data-source="help"]')?.getAttribute('aria-checked')).toBe('false');
@@ -650,13 +650,29 @@ describe('the list header (architecture.md § Web page)', () => {
     remote.page.close();
   });
 
+  it('offers a shortcut download on this computer and on a paired device, without a local hub command', () => {
+    for (const local of [true, false]) {
+      const { page, source } = start(local); hello(source);
+      click('.more-actions'); click('.more-menu [data-action="list-shortcut"]');
+      expect(root.querySelector('#list-sheet .sheet-title')?.textContent).toBe('Download app shortcut');
+      expect(root.querySelector<HTMLButtonElement>('#list-sheet button.primary')?.disabled).toBe(false);
+      expect(root.querySelector('#list-sheet button.primary')?.textContent).toBe('Download shortcut');
+      expect(root.querySelector<HTMLInputElement>('#list-sheet input')?.value).toBe('Default');
+      expect(document.activeElement?.tagName).toBe('SELECT');
+      expect(root.querySelector('#list-sheet')?.textContent).toContain('No installer or local hub is needed.');
+      click('#list-sheet [data-action="list-sheet-cancel"]');
+      expect(root.querySelector('#list-sheet .sheet')).toBeNull(); page.close();
+    }
+    expect(posts.every((post) => post.url === '/v1/conversation/page-focus')).toBe(true);
+  });
+
   it('pairs a device from this computer with a QR code and a code, lists the signed-in devices and signs one out, and offers none of it on a paired device (architecture.md § Remote access)', async () => {
     const remote = start(false);
 
     hello(remote.source);
     click('.more-actions');
     // Settings stays on this computer too; the menu ends with Voice on this device, off until tapped.
-    expect(menuRows().slice(-7)).toEqual(['-', 'Refresh sources', 'Reload', 'Show hub log', 'Get the browser extension…', '-', 'Voice on this device']);
+    expect(menuRows().slice(-8)).toEqual(['-', 'Refresh sources', 'Reload', 'Show hub log', 'Get the browser extension…', 'Download app shortcut…', '-', 'Voice on this device']);
     expect(root.querySelector('[data-action="list-phone-voice"]')?.getAttribute('aria-checked')).toBe('false');
     expect(root.querySelector('[data-action="list-settings"]')).toBeNull();
     // A paired device's copy reaches the hub through this page, so it is loaded in this browser (PRD R121).

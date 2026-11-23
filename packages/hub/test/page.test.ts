@@ -1347,6 +1347,38 @@ describe('the web page routes', () => {
     stream.destroy();
   });
 
+  it('downloads a portable app shortcut for the authenticated page origin, including a paired device', async () => {
+    const { url, access } = await serve();
+    const localCookie = String((await send(server.port, 'GET', `${url.pathname}${url.search}`, {})).headers['set-cookie']).split(';')[0]!;
+    const path = '/page/switchboard-shortcut.zip?browser=edge&profile=Profile+1';
+    const download = (headers: Record<string, string>, target = path) => new Promise<{ status: number; headers: Record<string, unknown>; body: Buffer }>((done, fail) => {
+      const outbound = request({ host: '127.0.0.1', port: server.port, path: target, headers: { Host: `127.0.0.1:${server.port}`, ...headers } }, (response) => {
+        const chunks: Buffer[] = []; response.on('data', (chunk: Buffer) => chunks.push(chunk));
+        response.on('end', () => done({ status: response.statusCode ?? 0, headers: response.headers, body: Buffer.concat(chunks) }));
+      }); outbound.on('error', fail); outbound.end();
+    });
+    expect((await download({})).status).toBe(401);
+    const local = await download({ Cookie: localCookie });
+    expect(local.status).toBe(200); expect(local.headers['content-disposition']).toBe('attachment; filename="switchboard-shortcut.zip"');
+    expect(local.headers['cache-control']).toBe('no-store');
+    expect([...unzip(local.body).keys()]).toEqual(['Switchboard.lnk']);
+    expect(unzip(local.body).get('Switchboard.lnk')!.toString('utf16le')).toContain(encodeURIComponent(url.origin));
+    expect((await download({ Cookie: localCookie }, path + '&origin=https://evil.test')).status).toBe(400);
+    expect((await download({ Cookie: localCookie }, '/page/switchboard-shortcut.zip?browser=cmd')).status).toBe(400);
+    remoteAccess = { hosts: ['pc.tail.ts.net'], logins: ['alex@example.com'] };
+    const ts = { Host: 'pc.tail.ts.net', 'X-Forwarded-Proto': 'https', 'Tailscale-User-Login': 'alex@example.com' };
+    const link = new URL(access.pair('pc.tail.ts.net').url);
+    const paired = String((await send(server.port, 'GET', `${link.pathname}${link.search}`, ts)).headers['set-cookie']).split(';')[0]!;
+    expect((await download(ts)).status).toBe(401); expect((await download({ ...ts, Cookie: localCookie })).status).toBe(401);
+    const remote = await download({ ...ts, Cookie: paired }); expect(remote.status).toBe(200);
+    const remoteLink = unzip(remote.body).get('Switchboard.lnk')!;
+    expect(remoteLink.toString('utf16le')).toContain('https%3A%2F%2Fpc.tail.ts.net');
+    expect(remoteLink.toString('utf16le')).not.toContain('127.0.0.1');
+    expect(remoteLink.includes(Buffer.from(paired.split('=')[1]!, 'utf16le'))).toBe(false);
+    remoteAccess = { hosts: [], logins: [] };
+    expect((await download({ ...ts, Cookie: paired })).status).toBe(403);
+  });
+
   it("serves the browser extension's download and routes through the page's origin to a signed-in browser, taking posts only from an extension (PRD R121)", async () => {
     const { url, browserPosts, access, iframe } = await serve();
     const localCookie = String((await send(server.port, 'GET', `${url.pathname}${url.search}`, {})).headers['set-cookie']).split(';')[0]!;
