@@ -73,18 +73,22 @@ Run commands from the repository root:
 
 ### Reinstalling after a change
 
-For executable changes to the VS Code extension, hub, or bundled packages:
+For executable changes to the hub or the packages it carries (the holder, the voice process, the web page and the browser extension):
 
 ```bash
-npm run build
-npm run package --workspace switchboard
-code --install-extension extensions/switchboard/switchboard-0.0.0.vsix --force
-node ~/.vscode/extensions/switchboard.switchboard-0.0.0/dist/hub.js install
+npm run install-local
 ```
 
-Package with `vsce package --no-dependencies`; the workspace script includes the flag. Build first, because packaging does not build. A repository build alone does not update the installed VSIX.
+It builds every workspace and runs `hub.js install --wait` from apps/hub's standalone build, `apps/hub/dist/install`. That copies the hub bundle, the holder and voice builds with their native modules, Mermaid, the diff viewer and the browser extension into the Switchboard home, and waits while the running hub restarts onto the new hub build once it is quiet, printing the new build; no window reload is needed. `npm run install-local -- --home=<dir>` installs into another home instead.
 
-Confirm the installed bundle under `%USERPROFILE%/.vscode/extensions/switchboard.switchboard-0.0.0/dist/` (`~/.vscode/extensions/…` on Linux) contains the change. `hub.js install` copies the hub, holder and voice builds into the Switchboard home, as a window's activation does, and the running hub restarts onto the new hub build once it is quiet, so a change to the hub or a bundled package needs no reload; `node ~/.switchboard/hub.js restart` waits for the restart and prints the new build. For a change to the extension's own UI, report that the developer can reload when ready. Do not reload their window.
+While the VS Code extension is installed, also package and install it after such a change, as after a change to its own code: it carries the same builds from the same configs (`apps/hub/carried.cjs`), and each window's activation installs the builds it carries, which would put an older build back:
+
+```bash
+npm run package --workspace switchboard
+code --install-extension extensions/switchboard/switchboard-0.0.0.vsix --force
+```
+
+Package with `vsce package --no-dependencies`; the workspace script includes the flag. Build first, because packaging does not build. A repository build alone does not update the installed VSIX. Report that the developer can reload when ready. Do not reload their window.
 
 For changes to the dock, close the running dock (it holds its files open), then run `npm run publish --workspace @switchboard/dock`, which publishes it to `~/.switchboard/dock/` (`%USERPROFILE%` on Windows), and report that the operator can start `Switchboard.Dock.exe`, or `Switchboard.Dock` on Linux, there.
 

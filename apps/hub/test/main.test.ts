@@ -2,12 +2,13 @@ import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, request } from 'node:http';
+import { createServer as createNetServer } from 'node:net';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { hubBundlePath, hubLogPath, hubRecordPath, parseHubRecord, switchboardHome } from '@switchboard/core';
-import { buildOf, findHub, holdLock, keepHub, makeEnsure, openEvents, releaseLock, stopHub } from '@switchboard/hub';
+import { buildOf, findHub, holdLock, installLockAddress, keepHub, makeEnsure, openEvents, releaseLock, serveHub, stopHub } from '@switchboard/hub';
 import type { HubRecord } from '@switchboard/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -619,6 +620,71 @@ describe('hub entry point', () => {
       await start('--stop').exited;
     }
   }, 60_000);
+  it('waits on hub.js install --wait through a restart the hub begins by itself while the programs install, when no hub answers for a moment', async () => {
+    // The old hub, in this process, restarts onto the new bundle as soon as it is copied; the holder's install lock, held here, keeps the
+    // command installing until the old hub has stopped and removed its record, and the successor starts only once the command waits.
+    const board = switchboardHome(home);
+    const bundle = hubBundlePath(home);
+    const dist = join(home, 'build');
+
+    for (const dir of [join(board, 'holder'), join(dist, 'holder'), join(dist, 'voice')]) {
+      mkdirSync(dir, { recursive: true });
+    }
+
+    writeFileSync(bundle, 'old build');
+    writeFileSync(join(dist, 'hub.js'), `import(${JSON.stringify(pathToFileURL(main).href)});\n`);
+
+    for (const [program, build] of [['holder', '0123456789abcdef'], ['voice', 'fedcba9876543210']] as const) {
+      writeFileSync(join(dist, program, `${program}.js`), '');
+      writeFileSync(join(dist, program, 'manifest.json'), JSON.stringify({ build, files: [`${program}.js`] }));
+    }
+
+    const installLock = createNetServer();
+
+    await new Promise<void>((done) => installLock.listen(installLockAddress(board), done));
+
+    let handingOver!: () => void;
+    let oldExited!: () => void;
+    const handedOver = new Promise<void>((done) => (handingOver = done));
+    const exitedOld = new Promise<void>((done) => (oldExited = done));
+    const old = await serveHub({
+      home,
+      version: 'test',
+      build: buildOf(bundle),
+      configDir: board,
+      browserPort: null,
+      pagePort: 0,
+      exit: () => oldExited(),
+      log: (line) => line === 'stopping: restarting onto the installed build' && handingOver(),
+      restart: { bundle, checkMs: 10, takeoverWaitMs: 5000, successor: async () => ({ pid: process.pid, cancel: () => undefined }) },
+    });
+
+    expect('served' in old).toBe(true);
+
+    const installing = launch(join(dist, 'hub.js'), {}, ['install', '--wait']);
+    const waiting = new Promise<void>((done) => installing.child.stdout?.on('data', (chunk: string) => chunk.includes('waiting for that.') && done()));
+
+    await handedOver;
+    await (old as { served: { stop(reason: string): Promise<void> } }).served.stop('test handover');
+    expect(record()).toBeNull();
+    await new Promise<void>((done) => installLock.close(() => done()));
+    expect(await Promise.race([waiting.then(() => 'waiting'), installing.exited.then(() => 'exited')])).toBe('waiting');
+
+    const successor = await serveHub({ home, takeover: process.pid, version: 'test', build: buildOf(bundle), configDir: board, browserPort: null, pagePort: 0, log: () => undefined });
+
+    try {
+      const result = await installing.exited;
+
+      expect(result.stderr).toBe('');
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain(`Restarted: pid ${process.pid}, build ${buildOf(bundle)}.\n`);
+      await exitedOld;
+    } finally {
+      if ('served' in successor) {
+        await successor.served.stop('test done');
+      }
+    }
+  }, 30_000);
   it('restarts the hub on hub.js restart and waits for the new one, with exit codes for no hub and no installed bundle', async () => {
     const none = await start('restart').exited;
 
@@ -664,7 +730,7 @@ describe('hub entry point', () => {
     const missing = await start('start').exited;
 
     expect(missing.code).toBe(1);
-    expect(missing.stderr).toBe(`No hub is installed in ${hubBundlePath(home)}; run <extension folder>/dist/hub.js install first.\n`);
+    expect(missing.stderr).toBe(`No hub is installed in ${hubBundlePath(home)}; run npm run install-local in the repository, or hub.js install from a build folder, first.\n`);
     expect((await start('start', '--takeover=1').exited).code).toBe(1);
 
     mkdirSync(switchboardHome(home), { recursive: true });
@@ -709,11 +775,12 @@ describe('hub entry point', () => {
       expect(await start(...args).exited).toMatchObject({ code: 1, stdout: '', stderr: 'Usage: hub.js autostart [on | off] [--config=<dir>] [--dry-run]\n' });
     }
   });
-  it("installs the builds an extension's dist folder carries on hub.js install, and refuses to run from another folder", async () => {
+  it("installs the builds a build folder carries on hub.js install, and refuses to run from another folder", async () => {
     const refused = await start('install').exited;
 
     expect(refused.code).toBe(1);
-    expect(refused.stderr).toBe(`Run the hub.js in the Switchboard extension's dist folder; ${dirname(main)} carries no terminal holder build.\n`);
+    expect(refused.stderr).toBe(`Run the hub.js of a Switchboard build folder, apps/hub/dist/install or the VS Code extension's dist; ${dirname(main)} carries no terminal holder build.\n`);
+    expect(await start('install', '--now').exited).toMatchObject({ code: 1, stderr: 'Usage: <build folder>/hub.js install [--wait] [--home=<dir>]\n' });
 
     const dist = join(home, 'extension', 'dist');
     const holderBuild = '0123456789abcdef';
@@ -737,7 +804,49 @@ describe('hub entry point', () => {
     const again = await launch(join(dist, 'hub.js'), {}, ['install']).exited;
 
     expect(again.stdout).toBe(`Already installed: hub build ${buildOf(join(dist, 'hub.js'))} in ${hubBundlePath(home)}.\n`);
-    // The installed copy is not an extension's dist folder.
+    // The installed copy is not a build folder.
     expect((await launch(hubBundlePath(home), {}, ['install']).exited).code).toBe(1);
   });
+  it('waits on hub.js install --wait for the running hub to restart onto the installed build, and not when it already runs that build', async () => {
+    const dist = join(home, 'build');
+    const shim = `import(${JSON.stringify(pathToFileURL(main).href)});\n`;
+
+    mkdirSync(join(dist, 'holder'), { recursive: true });
+    mkdirSync(join(dist, 'voice'), { recursive: true });
+    writeFileSync(join(dist, 'hub.js'), shim);
+    writeFileSync(join(dist, 'holder', 'holder.js'), '');
+    writeFileSync(join(dist, 'holder', 'manifest.json'), JSON.stringify({ build: '0123456789abcdef', files: ['holder.js'] }));
+    writeFileSync(join(dist, 'voice', 'voice.js'), '');
+    writeFileSync(join(dist, 'voice', 'manifest.json'), JSON.stringify({ build: 'fedcba9876543210', files: ['voice.js'] }));
+
+    const first = await launch(join(dist, 'hub.js'), {}, ['install', '--wait']).exited;
+
+    // No hub runs, so there is nothing to wait for.
+    expect(first).toMatchObject({ code: 0, stderr: '', stdout: `Installed hub build ${buildOf(join(dist, 'hub.js'))} in ${hubBundlePath(home)}.\n` });
+
+    launch(hubBundlePath(home), {}, ['--idle-ms=60000']);
+
+    const before = await recorded();
+
+    try {
+      const same = await launch(join(dist, 'hub.js'), {}, ['install', '--wait']).exited;
+
+      expect(same).toMatchObject({ code: 0, stdout: `Already installed: hub build ${before.build} in ${hubBundlePath(home)}.\n` });
+      expect(record()?.pid).toBe(before.pid);
+
+      writeFileSync(join(dist, 'hub.js'), `${shim}// another build\n`);
+
+      const next = buildOf(join(dist, 'hub.js'));
+      const waited = await launch(join(dist, 'hub.js'), {}, ['install', '--wait']).exited;
+      const after = record()!;
+
+      expect(waited.stderr).toBe('');
+      expect(waited.code).toBe(0);
+      expect(after.pid).not.toBe(before.pid);
+      expect(after.build).toBe(next);
+      expect(waited.stdout).toMatch(new RegExp(`^Installed hub build ${next} in .*\\.\\nThe running hub \\(pid ${before.pid}, build ${before.build}\\) restarts onto it once it is quiet; waiting for that\\.\\n(It waits until it is quiet: .*\\.\\n)?Restarted: pid ${after.pid}, build ${next}\\.\\n$`));
+    } finally {
+      await start('--stop').exited;
+    }
+  }, 60_000);
 });

@@ -13,7 +13,7 @@ Load it in the same browser and profile as the paired page: the extension reache
 ## Troubleshooting
 
 - **No pills on the board:** open the web page in the same browser. A page that asks for a pairing code means the browser is not signed in; pair it again.
-- **The download answers that the hub has no browser extension:** the installed VS Code extension was built without `extensions/chrome`. Run `npm run build` in the repository, then package and install the extension (AGENTS.md § Reinstalling after a change).
+- **The download answers that the hub has no browser extension:** the installed build was made without `extensions/chrome`. Run `npm run install-local` in the repository (AGENTS.md § Reinstalling after a change).
 - **After a Switchboard update:** download the extension again, replace the folder's files and select the extension's reload button in `chrome://extensions`. An unpacked extension does not update itself.
 - **Extension tab says “127.0.0.1 refused to connect”:** update the hub, then reload that tab. If the refusal remains, hard-reload the ordinary Switchboard page with Ctrl+Shift+R and reload the extension tab. An older cached framing policy can cause this refusal (mechanics M142).
 - **Firefox:** not offered. Release Firefox installs only a signed copy, and the signed build is made from the repository ([architecture.md § Browser extension](architecture.md#browser-extension)).

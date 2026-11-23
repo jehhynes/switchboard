@@ -3,20 +3,24 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "The hub entry point. The extension bundles it as one file; the build here serves spawn tests.",
+  "description": "The hub entry point, and the standalone build that npm run install-local installs (dist/install). The tsc build in dist serves spawn tests.",
   "main": "./dist/main.js",
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsc -b && node build.cjs",
     "watch": "tsc -b -w",
     "typecheck": "tsc -b && tsc -p tsconfig.test.json",
     "test": "vitest run"
   },
   "dependencies": {
     "@switchboard/core": "*",
-    "@switchboard/hub": "*"
+    "@switchboard/holder": "*",
+    "@switchboard/hub": "*",
+    "@switchboard/voice": "*"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "esbuild": "^0.25.0",
+    "mermaid": "^12.3.0",
     "typescript": "^5.9.0",
     "vitest": "^3.2.0"
   }

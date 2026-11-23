@@ -42,11 +42,14 @@ From the repository root:
 ```bash
 npm ci
 npm run verify
+npm run install-local
 npm run test:integration
 npm run package --workspace switchboard
 code --install-extension extensions/switchboard/switchboard-0.0.0.vsix --force
 npm run publish --workspace @switchboard/gnome-shell
 ```
+
+`npm run install-local` builds Switchboard and installs the hub, the terminal holder, the voice process, the web page's assets and the browser extension into `~/.switchboard`, without VS Code; a running hub restarts onto the new build once it is quiet, and the command waits for that. `node ~/.switchboard/hub.js start` then starts the hub, and `node ~/.switchboard/hub.js autostart on` starts it at login.
 
 The integration tests need a graphical session: run them from your GNOME login, or in an isolated compositor as in [mechanics.md](mechanics.md) M39.
 

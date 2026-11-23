@@ -19,16 +19,17 @@
     "packages/codex",
     "packages/web",
     "packages/hub",
-    "apps/hub",
     "apps/dock",
     "extensions/chrome",
     "extensions/firefox",
+    "apps/hub",
     "extensions/switchboard",
     "extensions/gnome-shell"
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "watch": "node tools/watch.mjs",
+    "install-local": "npm run build && node apps/hub/dist/install/hub.js install --wait",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm test --workspaces --if-present",
     "verify": "node tools/verify.mjs",

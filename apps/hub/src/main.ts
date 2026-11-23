@@ -7,7 +7,7 @@ import { ATTACH_TIMEOUT_MS, buildOf, carriesBuilds, installCarried, reportReady,
 
 declare const __SWITCHBOARD_VERSION__: string | undefined;
 
-/** The extension's esbuild build defines the version; the plain tsc build used by spawn tests does not. */
+/** The esbuild builds (apps/hub/carried.cjs) define the version; the plain tsc build used by spawn tests does not. */
 const VERSION = typeof __SWITCHBOARD_VERSION__ === 'string' ? __SWITCHBOARD_VERSION__ : '0.0.0-dev';
 
 const REPORT_TIMEOUT_MS = 10_000;
@@ -317,23 +317,27 @@ async function web(home: string, rest: readonly string[]): Promise<number> {
 }
 
 /**
- * Installs the builds the extension's `dist` folder carries into the home, as activation does, so a new build takes over without a VS Code window
- * (architecture.md § Hub lifecycle): the running hub restarts onto the hub bundle once quiet. Run as `<extension>/dist/hub.js install`. Exit
- * codes: 0 installed, 1 usage or not an extension's `dist`, 3 a program that could not be installed.
+ * Installs the builds a build folder carries into the home, as activation does, so a new build takes over without a VS Code window
+ * (architecture.md § Hub lifecycle): the running hub restarts onto the hub bundle once quiet, and `--wait` waits for that, as `hub.js restart`
+ * does. Run as `apps/hub/dist/install/hub.js install` (`npm run install-local`) or `<extension>/dist/hub.js install`. Exit codes: 0 installed,
+ * 1 usage or not a build folder, 3 a program that could not be installed, 4 with `--wait`, the hub not restarted within 60 seconds.
  */
 async function install(home: string, rest: readonly string[], bundle: string | undefined): Promise<number> {
   const dist = bundle === undefined ? null : dirname(resolve(bundle));
 
-  if (rest.length > 0 || dist === null) {
-    process.stderr.write('Usage: <extension folder>/dist/hub.js install [--home=<dir>]\n');
+  if (rest.some((argument) => argument !== '--wait') || dist === null) {
+    process.stderr.write('Usage: <build folder>/hub.js install [--wait] [--home=<dir>]\n');
     return 1;
   }
 
   if (!carriesBuilds(dist) || resolve(dist, 'hub.js') === resolve(hubBundlePath(home))) {
-    process.stderr.write(`Run the hub.js in the Switchboard extension's dist folder; ${dist} carries no terminal holder build.\n`);
+    process.stderr.write(`Run the hub.js of a Switchboard build folder, apps/hub/dist/install or the VS Code extension's dist; ${dist} carries no terminal holder build.\n`);
     return 1;
   }
 
+  // Found before the bundle is replaced: once it is, the hub can restart onto it by itself while the programs install, and then no hub answers
+  // for a moment.
+  const running = await findHub(home);
   const installed = installCarried(dist, home);
   const errors = await installed.programs;
   const build = buildOf(hubBundlePath(home));
@@ -344,17 +348,56 @@ async function install(home: string, rest: readonly string[], bundle: string | u
     process.stderr.write(`${error}\n`);
   }
 
-  const running = await findHub(home);
+  const failed = errors.length > 0 ? 3 : 0;
 
-  if (running !== null && running.build !== build) {
-    process.stdout.write(`The running hub (pid ${running.pid}, build ${running.build}) restarts onto it once it is quiet; hub.js restart waits for that.\n`);
+  if (running === null || running.build === build) {
+    return failed;
   }
 
-  return errors.length > 0 ? 3 : 0;
+  if (!rest.includes('--wait')) {
+    process.stdout.write(`The running hub (pid ${running.pid}, build ${running.build}) restarts onto it once it is quiet; hub.js restart waits for that.\n`);
+    return failed;
+  }
+
+  process.stdout.write(`The running hub (pid ${running.pid}, build ${running.build}) restarts onto it once it is quiet; waiting for that.\n`);
+
+  // Asking reports what the restart waits for, and tries again a build whose successor failed. The hub may already be handing over, having seen
+  // the new bundle itself, and then refuses or does not answer; the wait below covers that too.
+  const reply = await postToHub(running, '/restart', {}, REPORT_TIMEOUT_MS);
+  const waiting = reply?.status === 200 ? (reply.body as { waiting: string | null }).waiting : null;
+
+  if (waiting !== null) {
+    process.stdout.write(`It waits until it is quiet: ${waiting}.\n`);
+  }
+
+  const found = await newHub(home, running.token);
+
+  if (found === null) {
+    process.stderr.write(`The hub has not restarted within ${RESTART_WAIT_MS / 1000} seconds; it restarts once it is quiet. See ${hubLogPath(home)}.\n`);
+    return 4;
+  }
+
+  process.stdout.write(`Restarted: pid ${found.pid}, build ${found.build}.\n`);
+  return failed;
 }
 
 /** How long `hub.js restart` waits for the new hub. */
 const RESTART_WAIT_MS = 60_000;
+
+/** The hub that took over from the hub with `token`, within `hub.js restart`'s wait, or null. */
+async function newHub(home: string, token: string): Promise<Awaited<ReturnType<typeof findHub>>> {
+  for (const deadline = Date.now() + RESTART_WAIT_MS; Date.now() < deadline; ) {
+    await new Promise((done) => setTimeout(done, 250));
+
+    const found = await findHub(home);
+
+    if (found !== null && found.token !== token) {
+      return found;
+    }
+  }
+
+  return null;
+}
 
 /**
  * Restarts the running hub onto the installed bundle once it is quiet, and waits for the new hub (architecture.md § Hub lifecycle). Exit codes: 0
@@ -383,15 +426,11 @@ async function restart(home: string, rest: readonly string[]): Promise<number> {
 
   process.stdout.write(`Restarting the hub (pid ${hub.pid}, build ${hub.build}) onto build ${installed}${waiting === null ? '' : `; it waits until it is quiet: ${waiting}`}.\n`);
 
-  for (const deadline = Date.now() + RESTART_WAIT_MS; Date.now() < deadline; ) {
-    await new Promise((done) => setTimeout(done, 250));
+  const found = await newHub(home, hub.token);
 
-    const found = await findHub(home);
-
-    if (found !== null && found.token !== hub.token) {
-      process.stdout.write(`Restarted: pid ${found.pid}, build ${found.build}.\n`);
-      return 0;
-    }
+  if (found !== null) {
+    process.stdout.write(`Restarted: pid ${found.pid}, build ${found.build}.\n`);
+    return 0;
   }
 
   process.stderr.write(`The hub has not restarted within ${RESTART_WAIT_MS / 1000} seconds; it restarts once it is quiet. See ${hubLogPath(home)}.\n`);
@@ -423,7 +462,7 @@ async function start(home: string, rest: readonly string[]): Promise<number> {
   const bundle = hubBundlePath(home);
 
   if (!existsSync(bundle)) {
-    process.stderr.write(`No hub is installed in ${bundle}; run <extension folder>/dist/hub.js install first.\n`);
+    process.stderr.write(`No hub is installed in ${bundle}; run npm run install-local in the repository, or hub.js install from a build folder, first.\n`);
     return 1;
   }
 

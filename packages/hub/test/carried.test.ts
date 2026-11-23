@@ -72,7 +72,7 @@ describe('installCarried', () => {
 });
 
 describe('carriesBuilds', () => {
-  it("tells an extension's dist folder, with the hub bundle and the holder's manifest, from another folder", () => {
+  it("tells a build folder, with the hub bundle and the holder's manifest, from another folder", () => {
     expect(carriesBuilds(dist)).toBe(true);
     expect(carriesBuilds(join(dist, 'holder'))).toBe(false);
     expect(carriesBuilds(switchboardHome(home))).toBe(false);
