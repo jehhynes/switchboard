@@ -11,6 +11,7 @@ import { holdLock, releaseLock } from './lock.js';
 import { clearHandover, handedOver, HubRestart, installedBuild, pendingHandover, RESTART_CHECK_MS, TAKEOVER_WAIT_MS, writeHandover } from './restart.js';
 import type { Successor } from './restart.js';
 import { listenHub } from './server.js';
+import { clearStopped, writeStopped } from './supervise.js';
 import type { PageRoutes, PostContext, Reply } from './server.js';
 
 /** What the hub serves beyond its lifecycle: the snapshot and the dock view, requests, and the sessions that keep it running. */
@@ -210,6 +211,9 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
 
   const hubLock = lock;
 
+  // Cleared as soon as this hub holds the lock, so a start that fails from here on counts as a crash rather than the earlier deliberate stop.
+  clearStopped(home);
+
   let stopping: Promise<void> | undefined;
 
   const app = options.app === undefined ? undefined : await options.app(options.takeover === undefined ? null : handedOver(home, process.pid));
@@ -338,7 +342,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
 
             app?.handedOver?.();
             server.hold('The hub is restarting onto a new build; try again in a few seconds.');
-            await stop('restarting onto the installed build');
+            await stop('restarting onto the installed build', false);
 
             const successor = await waitForHub(home, restartOptions.takeoverWaitMs ?? TAKEOVER_WAIT_MS, (found) => found.token !== record.token);
 
@@ -351,9 +355,20 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
 
   restartTimer?.unref();
 
-  const stop = (reason: string): Promise<void> => {
+  /** `deliberate`: a stop the supervisor leaves stopped, which a restart onto a new build is not. */
+  const stop = (reason: string, deliberate = true): Promise<void> => {
     stopping ??= (async () => {
       log(`stopping: ${reason}`);
+
+      // Written while this hub still holds the lock, so the supervisor never sees the lock free without it.
+      if (deliberate) {
+        try {
+          writeStopped(home, reason);
+        } catch (error) {
+          log(`hub-stopped.json could not be written: ${(error as Error).message}`);
+        }
+      }
+
       clearInterval(idle);
       clearInterval(restartTimer);
       clearImmediate(update);

@@ -1,9 +1,9 @@
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
-import { hubBundlePath, hubLogPath, switchboardHome } from '@switchboard/core';
+import { answers, hubBundlePath, hubLogPath, lockAddress, switchboardHome } from '@switchboard/core';
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { ATTACH_TIMEOUT_MS, buildOf, carriesBuilds, installCarried, loadConfigFolder, reportReady, runConfig, startSuccessor, bundleHome, killProcessTree, connectHolder, currentHolderBuild, createHubApp, findHub, gitBashRoot, handledBody, isSnapshotWorker, postToHub, recordedHubPid, registerTitle, reportBody, runAttach, runHolder, runAutostart, runSnapshotWorker, serveHub, START_FLAGS, START_WAIT_MS, startDetached, stopHub, ticketBody } from '@switchboard/hub';
+import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
+import { ATTACH_TIMEOUT_MS, buildOf, carriesBuilds, installCarried, loadConfigFolder, reportReady, runConfig, startSuccessor, bundleHome, killProcessTree, connectHolder, currentHolderBuild, createHubApp, findHub, gitBashRoot, handledBody, holdSupervisorLock, HubSupervisor, isSnapshotWorker, pendingHandover, postToHub, readStopped, recordedHubPid, registerTitle, reportBody, runAttach, runHolder, runAutostart, runSnapshotWorker, serveHub, START_FLAGS, START_WAIT_MS, startDetached, stopHub, stopSupervisor, supervisorAddress, supervisorOffPath, ticketBody } from '@switchboard/hub';
 
 declare const __SWITCHBOARD_VERSION__: string | undefined;
 
@@ -545,6 +545,18 @@ async function autostart(home: string, rest: readonly string[]): Promise<number>
 
       return 'error' in loaded ? loaded : loaded.dir;
     },
+    supervisorRunning: answers,
+    stopSupervisor: async (address) => {
+      // The step names this home's supervisor address; the request goes there with this home's token.
+      const stopped = address === supervisorAddress(home) ? await stopSupervisor(home) : false;
+
+      // Task Scheduler counts the task as running until wscript.exe, which waits for the supervisor, has exited too, and ignores a run meanwhile.
+      if (stopped && process.platform === 'win32') {
+        await new Promise((done) => setTimeout(done, 1_000));
+      }
+
+      return stopped;
+    },
     exists: existsSync,
     out: (text) => process.stdout.write(text),
     err: (text) => process.stderr.write(text),
@@ -566,16 +578,112 @@ function config(home: string, rest: readonly string[]): Promise<number> {
   });
 }
 
+const SUPERVISE_USAGE = `Usage: hub.js supervise [--config=<dir>] [--grace-ms=<ms>] [--check-ms=<ms>] [${START_FLAGS.filter((name) => name !== 'config').map((name) => `--${name}=<value>`).join('] [')}]\n`;
+
+/**
+ * Runs the supervisor that the autostart task or unit starts: it starts the installed hub again, with this runtime and the config folder `--config`
+ * names, else the one config.json names (architecture.md § Config folder), when the hub has gone without `hub.js --stop` (architecture.md § Hub lifecycle), passing on the serving flags as `hub.js start` does. It logs to the hub log. Exit codes: 0 asked to stop or another
+ * supervisor runs, 1 usage or VS Code's runtime.
+ */
+async function supervise(home: string, rest: readonly string[]): Promise<number> {
+  const known = [...START_FLAGS, 'grace-ms', 'check-ms'];
+  const passed = rest.filter((argument) => (START_FLAGS as readonly string[]).some((name) => name !== 'config' && argument.startsWith(`--${name}=`)));
+  const named = flag(rest, 'config') || null;
+
+  if (rest.some((argument) => !known.some((name) => argument.startsWith(`--${name}=`))) || [flag(rest, 'grace-ms'), flag(rest, 'check-ms')].some((value) => value !== null && !/^\d+$/.test(value))) {
+    process.stderr.write(SUPERVISE_USAGE);
+    return 1;
+  }
+
+  if (process.platform !== 'win32' && process.platform !== 'linux') {
+    process.stderr.write(`hub.js supervise works on Windows and Linux, not ${process.platform}.\n`);
+    return 1;
+  }
+
+  if (process.versions['electron'] !== undefined) {
+    process.stderr.write("Run hub.js supervise with Node.js, so the hubs it starts do not run on VS Code's runtime.\n");
+    return 1;
+  }
+
+  const bundle = hubBundlePath(home);
+  // Without --config the hub reads config.json each time it starts, so hub.js config set holds for the hubs this starts too.
+  const configArgs = named === null ? [] : [`--config=${resolve(named)}`];
+  const log = (line: string): void => {
+    try {
+      appendFileSync(hubLogPath(home), `${new Date().toISOString()} supervisor: ${line}\n`);
+    } catch {
+      // A log that cannot be written must not stop the supervisor.
+    }
+  };
+  const grace = flag(rest, 'grace-ms');
+  const check = flag(rest, 'check-ms');
+  const supervisor = new HubSupervisor({
+    hubLocked: () => answers(lockAddress(home)),
+    handover: () => pendingHandover(home) !== null,
+    stopped: () => readStopped(home),
+    start: () => {
+      if (!existsSync(bundle)) {
+        return `no hub is installed in ${bundle}`;
+      }
+
+      try {
+        startDetached(process.execPath, bundle, home, [`--home=${home}`, ...configArgs, ...passed]).on('error', (error) => log(`the hub did not start: ${error.message}`));
+        return null;
+      } catch (error) {
+        return String(error);
+      }
+    },
+    now: Date.now,
+    sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
+    log,
+    ...(grace === null ? {} : { graceMs: Number(grace) }),
+    ...(check === null ? {} : { checkMs: Number(check) }),
+  });
+
+  mkdirSync(switchboardHome(home), { recursive: true });
+
+  const lock = await holdSupervisorLock(home, () => {
+    log('stopping: asked by hub.js autostart');
+    supervisor.stop();
+  });
+
+  if (lock === null) {
+    process.stdout.write(`A supervisor is already running for this home on ${supervisorAddress(home)}.\n`);
+    return 0;
+  }
+
+  // Checked once the lock is held, so hub.js autostart off either finds this supervisor on its lock or has written the marker first.
+  if (existsSync(supervisorOffPath(home))) {
+    lock.close();
+    log('not starting: hub.js autostart off removed the supervisor; hub.js autostart on turns it on again');
+    process.stdout.write('hub.js autostart off removed the supervisor; run hub.js autostart on to turn it on again.\n');
+    return 0;
+  }
+
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    process.on(signal, () => {
+      log(`stopping: received ${signal}`);
+      supervisor.stop();
+    });
+  }
+
+  log(`watching the hub for ${home} as pid ${process.pid}, starting it with ${named === null ? 'the config folder config.json names' : `config folder ${resolve(named)}`}`);
+  await supervisor.run();
+  lock.close();
+
+  return 0;
+}
+
 /** Returns an exit code, or -1 to keep serving. */
 async function main(argv: readonly string[]): Promise<number> {
   const bundle = process.argv[1];
 
-  if (argv[0] === 'report' || argv[0] === 'register' || argv[0] === 'attach' || argv[0] === 'holder' || argv[0] === 'web' || argv[0] === 'restart' || argv[0] === 'install' || argv[0] === 'start' || argv[0] === 'autostart' || argv[0] === 'config') {
+  if (argv[0] === 'report' || argv[0] === 'register' || argv[0] === 'attach' || argv[0] === 'holder' || argv[0] === 'web' || argv[0] === 'restart' || argv[0] === 'install' || argv[0] === 'start' || argv[0] === 'autostart' || argv[0] === 'config' || argv[0] === 'supervise') {
     // A session runs `<home>/.switchboard/hub.js report …`, so the bundle's location names its home; the extension's own bundle names none.
     const home = flag(argv, 'home') || bundleHome(bundle, homedir());
     const rest = argv.slice(1).filter((argument) => !argument.startsWith('--home'));
 
-    const commands = { report, register, attach, holder, web, restart, start, autostart, config, install: (home: string, rest: readonly string[]) => install(home, rest, bundle) };
+    const commands = { report, register, attach, holder, web, restart, start, autostart, config, supervise, install: (home: string, rest: readonly string[]) => install(home, rest, bundle) };
 
     return commands[argv[0] as keyof typeof commands](home, rest);
   }

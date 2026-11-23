@@ -33,4 +33,5 @@ export * from './needs.js';
 export * from './voice.js';
 export * from './voiceLink.js';
 export * from './restart.js';
+export * from './supervise.js';
 export * from './carried.js';

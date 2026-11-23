@@ -61,6 +61,8 @@ Publish the dock, closing it first if it is running, because it holds its files 
 npm run publish --workspace @switchboard/dock
 ```
 
+To start the hub at login and from `switchboard:` links, and have it started again if it crashes, run `node ~/.switchboard/hub.js autostart on` with the Node.js the hub should use. It writes the XDG autostart entry, the link handler and the systemd user unit `switchboard-supervisor.service`, and starts the unit. `node ~/.switchboard/hub.js autostart status` shows each entry and whether the supervisor runs; `systemctl --user status switchboard-supervisor.service` and `~/.switchboard/hub.log` show what it did. `node ~/.switchboard/hub.js autostart off` removes them, leaving the hub running.
+
 Start `~/.switchboard/dock/Switchboard.Dock`. To reinstall after a change, see [AGENTS.md § Reinstalling after a change](../AGENTS.md#reinstalling-after-a-change); for checks, see [testing.md](testing.md).
 
 Optional native npm dependencies must install: without `node-pty` there are no held terminals, and without the voice native packages there is no voice. If npm blocks an install script, read its warning and approve that package before rebuilding; do not turn off script checks globally.

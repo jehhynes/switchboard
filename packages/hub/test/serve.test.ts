@@ -13,6 +13,7 @@ import { holdLock, releaseLock } from '../src/lock.js';
 import { PageAccess } from '../src/page.js';
 import { handoverPath, writeHandover } from '../src/restart.js';
 import { serveHub } from '../src/serve.js';
+import { readStopped } from '../src/supervise.js';
 import type { HubApp, ServeResult, ServeOptions, Served } from '../src/serve.js';
 import { tempHome, until } from './helpers.js';
 
@@ -197,6 +198,24 @@ describe('serveHub', () => {
 
     expect(recordOnDisk()).toBeNull();
     expect(await call(hub.record.port, 'GET', '/hub', null, 300)).toBeNull();
+  });
+
+  it('records a deliberate stop with its reason for the supervisor, which the next hub to take the lock clears', async () => {
+    const hub = served(await serve());
+
+    expect(readStopped(home)).toBeNull();
+    await hub.stop('a client asked it to stop');
+    expect(readStopped(home)).toMatchObject({ pid: process.pid, reason: 'a client asked it to stop' });
+
+    served(await serve());
+    expect(readStopped(home)).toBeNull();
+  });
+
+  it('clears a deliberate stop as soon as it holds the lock, so a hub that fails while starting counts as a crash', async () => {
+    await served(await serve()).stop('a client asked it to stop');
+    expect(readStopped(home)).not.toBeNull();
+    await expect(serve({ app: async () => Promise.reject(new Error('the store did not open')) })).rejects.toThrow('the store did not open');
+    expect(readStopped(home)).toBeNull();
   });
 
   it('leaves another hub record in place when stopped', async () => {
@@ -515,6 +534,22 @@ describe('serveHub restart onto a new build', () => {
       'stopping: restarting onto the installed build',
       `hub restart: pid ${process.pid} took over with build b2`,
     ]);
+  });
+
+  it('records no deliberate stop when it stops to hand over, so the supervisor waits for the successor', async () => {
+    const bundle = join(switchboardHome(home), 'hub.js');
+    const exit = vi.fn();
+
+    mkdirSync(switchboardHome(home), { recursive: true });
+    served(await serve({ exit, browserPort: null, app: async () => app(() => null), restart: { bundle, checkMs: 20, successor: async () => ({ pid: process.pid, cancel: () => {} }) } }));
+    writeFileSync(bundle, 'the new build');
+    // The old hub has stopped and removed its record; the successor has not started yet.
+    await until(() => (recordOnDisk() === null ? true : null));
+    expect(readStopped(home)).toBeNull();
+
+    served(await serve({ build: 'b2', takeover: process.pid, browserPort: null }));
+    await until(() => (exit.mock.calls.length > 0 ? true : null));
+    expect(readStopped(home)).toBeNull();
   });
 
   it('keeps running, its app untouched, when the handover cannot be written', async () => {

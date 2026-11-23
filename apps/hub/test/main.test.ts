@@ -8,7 +8,7 @@ import { homedir, tmpdir } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { hubBundlePath, hubLogPath, hubRecordPath, parseHubRecord, switchboardHome } from '@switchboard/core';
-import { buildOf, findHub, holdLock, installLockAddress, keepHub, makeEnsure, openEvents, releaseLock, serveHub, stopHub, vscodeSettingsPath } from '@switchboard/hub';
+import { buildOf, findHub, holdLock, installLockAddress, keepHub, makeEnsure, openEvents, releaseLock, serveHub, stopHub, stopSupervisor, supervisorAddress, supervisorOffPath, vscodeSettingsPath } from '@switchboard/hub';
 import type { HubRecord } from '@switchboard/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -803,6 +803,76 @@ describe('hub entry point', () => {
       await start('--stop').exited;
     }
   }, 60_000);
+  it('starts the hub again on hub.js supervise when it is killed, not when it restarts onto a new build or is stopped with --stop, runs one supervisor per home, and stops when asked', async () => {
+    mkdirSync(switchboardHome(home), { recursive: true });
+    writeFileSync(hubBundlePath(home), `import(${JSON.stringify(pathToFileURL(main).href)});\n`);
+
+    const usage = await start('supervise', '--grace-ms=soon').exited;
+
+    expect(usage.code).toBe(1);
+    expect(usage.stderr).toMatch(/^Usage: hub\.js supervise \[--config=<dir>\]/);
+
+    // The supervisor passes the serving flags on, here those that keep the test's hubs off the fixed ports.
+    const supervisor = start('supervise', '--grace-ms=0', '--check-ms=200');
+    const log = (): string => (existsSync(hubLogPath(home)) ? readFileSync(hubLogPath(home), 'utf8') : '');
+
+    try {
+      const first = await recorded();
+
+      expect(first.pid).not.toBe(supervisor.child.pid);
+      expect(await status(first)).toBe(200);
+
+      const second = await start('supervise').exited;
+
+      expect(second).toMatchObject({ code: 0, stdout: `A supervisor is already running for this home on ${supervisorAddress(home)}.\n` });
+
+      // A forced exit is a crash: the supervisor starts the hub again.
+      process.kill(first.pid, 'SIGKILL');
+
+      const again = await until(() => {
+        const found = record();
+
+        return found !== null && found.pid !== first.pid ? found : null;
+        // The hub ran only briefly, so the supervisor waits before this second start.
+      }, 40_000);
+
+      expect(await status(again)).toBe(200);
+      expect(log()).toContain('supervisor: the hub stopped without hub.js --stop; starting it again');
+
+      // A restart onto a new build hands over to a successor; the supervisor starts no hub of its own meanwhile.
+      const starts = (): number => log().split('\n').filter((line) => /supervisor: (no hub is running; starting one|the hub stopped without hub\.js --stop; starting it again)/.test(line)).length;
+      const before = starts();
+      const restarted = await start('restart').exited;
+
+      expect(restarted.code).toBe(0);
+      await new Promise((done) => setTimeout(done, 1_000));
+      expect(starts()).toBe(before);
+      expect(log()).not.toContain('A hub is already running');
+
+      // A deliberate stop stays stopped.
+      await start('--stop').exited;
+      await until(() => (log().includes('was stopped on purpose (a client asked it to stop)') ? true : null));
+      await new Promise((done) => setTimeout(done, 1_000));
+      expect(record()).toBeNull();
+      expect(starts()).toBe(before);
+
+      expect(await stopSupervisor(home)).toBe(true);
+      expect((await supervisor.exited).code).toBe(0);
+      expect(log()).toContain('supervisor: stopping: asked by hub.js autostart');
+
+      // After hub.js autostart off, a supervisor its task had already launched exits once it holds its lock.
+      writeFileSync(supervisorOffPath(home), 'off\n');
+
+      const late = await start('supervise', '--grace-ms=0', '--check-ms=200').exited;
+
+      expect(late).toMatchObject({ code: 0, stdout: 'hub.js autostart off removed the supervisor; run hub.js autostart on to turn it on again.\n' });
+      expect(record()).toBeNull();
+    } finally {
+      await stopSupervisor(home).catch(() => false);
+      await start('--stop').exited;
+    }
+  }, 90_000);
+
   it('refuses hub.js autostart usage errors before reading or changing any login start', async () => {
     for (const args of [['autostart', 'maybe'], ['autostart', 'on', 'off'], ['autostart', 'on', '--force']]) {
       expect(await start(...args).exited).toMatchObject({ code: 1, stdout: '', stderr: 'Usage: hub.js autostart [on | off] [--dry-run]\n' });
