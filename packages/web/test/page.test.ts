@@ -5392,9 +5392,9 @@ describe('the page in use', () => {
     window.innerWidth = 1024;
   });
 
-  it('restores the Changes tab at its file, a local file tab at its line, and History, from the route after a reload, and keeps them in it', async () => {
+  it('restores the Changes tab at its file, a local file tab at its line, and the History tab, from the route after a reload, and keeps them in it', async () => {
     window.innerWidth = 375;
-    history.replaceState(null, '', '#w=1&t=changes&f=src%2Fa.ts&h=7&hk=gh%207');
+    history.replaceState(null, '', '#w=1&t=changes&f=src%2Fa.ts');
     // The reads' answers do not matter here: only that the page asks for them.
     answers['/v1/conversation/changes'] = { status: 403, body: { error: 'Not in this window.' } };
     answers['/page-history'] = { status: 409, body: { error: 'No such ticket.' } };
@@ -5406,9 +5406,7 @@ describe('the page in use', () => {
     await flush();
     expect(root.querySelector('#panel')!.classList.contains('diff-pane')).toBe(true);
     expect(posts.some((post) => post.url.startsWith('/v1/conversation/changes?'))).toBe(true);
-    expect(posts.find((post) => post.url.endsWith('/page-history'))?.body).toMatchObject({ ticketId: 7 });
-    expect(root.classList.contains('history')).toBe(true);
-    expect(location.hash).toBe('#w=1&t=changes&f=src%2Fa.ts&h=7&hk=gh%207');
+    expect(location.hash).toBe('#w=1&t=changes&f=src%2Fa.ts');
     first.page.close();
 
     history.replaceState(null, '', '#w=1&t=file&p=D%3A%2Fw%2FREADME.md&l=4');
@@ -5422,6 +5420,19 @@ describe('the page in use', () => {
     expect(location.hash).toBe('#w=1&t=file&p=D%3A%2Fw%2FREADME.md&l=4');
     expect(localStorage.getItem('switchboard.route')).toBe('#w=1&t=file&p=D%3A%2Fw%2FREADME.md&l=4');
     second.page.close();
+
+    // History is a tab of the work item's: an address from before, which named it apart as `h`, opens that tab.
+    history.replaceState(null, '', '#w=1&h=7&hk=gh%207');
+    posts = [];
+
+    const third = start();
+
+    hello(third.source, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', history: { ticketId: 7, key: 'gh 7' } })])] });
+    await flush();
+    expect(root.querySelector('#head [data-tab="history"]')?.getAttribute('aria-selected')).toBe('true');
+    expect(posts.find((post) => post.url.endsWith('/page-history'))?.body).toMatchObject({ ticketId: 7 });
+    expect(location.hash).toBe('#w=1&t=history');
+    third.page.close();
     window.innerWidth = 1024;
   });
 
@@ -5535,7 +5546,7 @@ describe('the page in use', () => {
     await vi.advanceTimersByTimeAsync(SEND_RETRY_MS);
     expect(sends().length).toBeGreaterThan(2);
     expect(new Set(sends().map((post) => post.body['opId'])).size).toBe(1);
-    expect(root.querySelector('.composer-error-text')?.textContent).toBe('Not sent. Switchboard is restarting. Try again in a moment.');
+    expect(root.querySelector('#toast .toast-text')?.textContent).toBe('Not sent. Switchboard is restarting. Try again in a moment.');
     expect(input.value).toBe('Ship it');
 
     const first = sends()[0]!.body['opId'];
@@ -5641,7 +5652,7 @@ describe('the page in use', () => {
     answers['/send'] = { status: 409, body: { error: "The window's conversation changed." } };
     click('button.send');
     await vi.waitFor(() => expect(sends().at(-1)!.body['text']).toBe('Next'));
-    await vi.waitFor(() => expect(root.querySelector('.composer-error-text')?.textContent).not.toBe(''));
+    await vi.waitFor(() => expect(root.querySelector('#toast .toast-text')?.textContent ?? '').not.toBe(''));
     const stale = sends().at(-1)!.body['opId'];
 
     expect(JSON.parse(localStorage.getItem('switchboard.sendOps')!)).toEqual({ '1': { key: expect.stringContaining('Next'), opId: stale } });

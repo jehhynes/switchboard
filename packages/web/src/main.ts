@@ -623,9 +623,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const firstRoute = startRoute(location.hash, readStored(ROUTE_KEY));
   let wanted: number | null = firstRoute.w;
   /** The tab to show once the work item the page started on has come, then null. */
-  let restoreTab: string | null = firstRoute.t;
-  /** The History to show once the page's stream has come, then null. */
-  let restoreHistory = firstRoute.h ?? null;
+  // History is a tab of the work item's (an address from before kept it as `h`), so a route that named it opens that tab.
+  let restoreTab: string | null = firstRoute.t ?? (firstRoute.w !== null && firstRoute.h != null ? 'history' : null);
   /** The scroll places this tab kept, by `<work item> <tab>` (route.ts). */
   const scrollPlaces = (): Record<string, ScrollPlace> => {
     try {
@@ -2526,19 +2525,19 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     keepRoute();
   };
   /** The tab the route names for the shown work item: the column's on a wide page, else the conversation pane's; null for the Conversation. */
-  /** The route for what the page shows: its work item, the column's tab on a wide page, else the conversation pane's, what that tab shows, and History (route.ts). */
+  /** The route for what the page shows: its work item, the column's tab on a wide page, else the conversation pane's, History among them, and what that tab shows (route.ts). */
   const routeOf = (): Route => {
     const tab = wide() ? sideTab() : mainTab();
     const shownFile = tab === 'file' ? localFiles.shown() : null;
-    const t = tab === 'artifacts' ? `artifact:${openArtifact() ?? ''}` : tab === 'status' || tab === 'console' || tab === 'browser' ? tab : tab === 'diff' ? 'changes' : shownFile !== null ? 'file' : null;
+    const t = tab === 'artifacts' ? `artifact:${openArtifact() ?? ''}` : tab === 'status' || tab === 'console' || tab === 'browser' || tab === 'history' ? tab : tab === 'diff' ? 'changes' : shownFile !== null ? 'file' : null;
 
-    return { w: wanted, t, f: tab === 'diff' ? changes.focusPath : null, p: shownFile?.target ?? null, l: shownFile?.line ?? null, h: shownHistory === null ? null : { ticketId: shownHistory.ticketId, key: shownHistory.key } };
+    return { w: wanted, t, f: tab === 'diff' ? changes.focusPath : null, p: shownFile?.target ?? null, l: shownFile?.line ?? null, h: null };
   };
   /** Puts the route in the address and keeps it on this device, once the work item asked for shows (route.ts). */
   let keptRoute: string | null = null;
   const keepRoute = (): void => {
     // No work item: none to come back to.
-    const waiting = restoreTab !== null || restoreHistory !== null || (wanted !== null && (openingShown() !== null || state.scope?.workItemId !== wanted));
+    const waiting = restoreTab !== null || (wanted !== null && (openingShown() !== null || state.scope?.workItemId !== wanted));
     const hash = waiting ? null : routeHash(routeOf());
 
     if (hash === null || hash === keptRoute) {
@@ -2547,7 +2546,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     keptRoute = hash;
 
-    if ((wanted !== null || shownHistory !== null || /[#&]h=/.test(location.hash)) && location.hash !== hash) {
+    if ((wanted !== null || /[#&]h=/.test(location.hash)) && location.hash !== hash) {
       history.replaceState(history.state, '', hash);
     }
 
@@ -4919,7 +4918,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         if (path !== null && state.artifacts.some((one) => one.path === path)) {
           view.artifact = path;
           chooseTab('artifacts');
-        } else if (tab === 'status' || (tab === 'console' && showConsole()) || (tab === 'browser' && showBrowser())) {
+        } else if (tab === 'status' || (tab === 'console' && showConsole()) || (tab === 'browser' && showBrowser()) || (tab === 'history' && showHistory())) {
           chooseTab(tab);
         } else if (tab === 'changes') {
           changes.openChanges(firstRoute.f ?? null);
@@ -4928,13 +4927,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         }
       }
 
-      // The History the route named, once the stream has come.
-      if (type === 'hello' && restoreHistory !== null) {
-        const shown = restoreHistory;
-
-        restoreHistory = null;
-        openHistory(shown.ticketId, shown.key, () => null);
-      } else if (type === 'hello' && opened !== null && opened !== firstRoute.w) {
+      if (type === 'hello' && opened !== null && opened !== firstRoute.w) {
         // Another work item came first: the route's tab was for the one asked for.
         restoreTab = null;
       }

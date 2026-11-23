@@ -1,10 +1,11 @@
-// Where the page is (architecture.md § Web page, Route and restore): the open work item, its tab and what the tab shows, and History, in the
+// Where the page is (architecture.md § Web page, Route and restore): the open work item, its tab and what the tab shows, in the
 // address's hash and in local storage, so a reload, and an installed app the system ended and started again at its start URL with no hash,
 // comes back to it.
 
 /**
- * The open work item and its tab: `status`, `console`, `browser`, `artifact:<path>`, `changes` with the file `f` its diff was at, or
- * `file` with the local file `p` at line `l`; null for its Conversation. `h` is the ticket whose History shows, with its key.
+ * The open work item and its tab: `status`, `console`, `browser`, `history`, `artifact:<path>`, `changes` with the file `f` its diff was at, or
+ * `file` with the local file `p` at line `l`; null for its Conversation. `h` is the ticket whose History an address from before History was a
+ * tab showed, with its key, which the page opens as the History tab.
  */
 export interface Route {
   w: number | null;
@@ -28,7 +29,7 @@ const whole = (value: string | null): number | null => {
   return value !== null && Number.isSafeInteger(number) && number > 0 ? number : null;
 };
 
-/** The route a hash names, as `#w=12&t=changes&f=src%2Fa.ts`; no work item for any other, though History may show over the list. */
+/** The route a hash names, as `#w=12&t=changes&f=src%2Fa.ts`; no work item for any other. */
 export function parseRoute(hash: string): Route {
   const params = new URLSearchParams(hash.replace(/^#/, ''));
   const w = whole(params.get('w'));
