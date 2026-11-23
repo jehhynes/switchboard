@@ -1,13 +1,11 @@
 // The conversation's header (architecture.md § Web page): the dropdown of the selected work item's conversations, the row's actions, the
 // view options with the persona, and the tabs under it or the switch atop the side column.
 import type { ComponentChildren, VNode } from 'preact';
-import { providerMark } from '@switchboard/conversation/providerIcons';
 import { FileIcon } from './fileIcons.js';
 import { selectedEntry, selectedRow, stateIcon } from './model.js';
 import type { PageState } from './model.js';
 import { ago, artifactBar, LINK_LABEL_MAX, rowKey, tabIcon, TABS } from './render.js';
 import type { SideTab, Tab, View } from './render.js';
-import { trusted } from './trusted.js';
 import { ConnectionDot } from './connectionView.js';
 import type { PageAction, PageRow } from '@switchboard/protocol';
 
@@ -150,7 +148,7 @@ function SessionRowButton({ entry, one, state, now }: { entry: Entry; one: Sessi
 
 /**
  * A conversation as the dropdown's button and each of its rows draw it, from this one renderer so they never differ: its session's state
- * codicon, title, the unread dot when `unread` (architecture.md § Unread), and provider's mark.
+ * codicon, title and the unread dot when `unread` (architecture.md § Unread); no provider's mark, which the operator does not need to tell them apart.
  */
 function ConversationLabel({ entry, state, unread = false }: { entry: Entry; state: PageState; unread?: boolean }) {
   // The page's session is this entry's only while it shows the current one, not an earlier one.
@@ -162,7 +160,6 @@ function ConversationLabel({ entry, state, unread = false }: { entry: Entry; sta
       <Codicon {...icon} />
       <span class="title">{entry.title}</span>
       {unread ? <UnreadDot label="Unread replies or status" /> : null}
-      {trusted(providerMark(selected ? (state.session?.provider ?? entry.provider) : entry.provider))}
     </>
   );
 }

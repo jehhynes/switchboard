@@ -84,6 +84,13 @@ describe('the tab strips', () => {
     }
   });
 
+  it('ConversationDropdown_EarlierSessions_ShareTheRowEdgeAndTheMenuWidens', () => {
+    // An earlier session's row is drawn as its conversation's, with no indent of its own.
+    expect(css).not.toMatch(/\.session-row[^{]*\{[^}]*padding-left/);
+    // Wider than a menu's 360 px, in px, which placeMenus reads as the most it may take before the viewport's edge.
+    expect(css).toContain('.menu.conversation-menu { max-width: 720px; }');
+  });
+
   it('TabStrip_EveryTabButTheChosen_DrawsTheBottomBorder', () => {
     const tab = /\n\.tab \{([^}]*)\}/.exec(css)?.[1] ?? '';
     const chosen = /\n\.tab\.selected \{([^}]*)\}/.exec(css)?.[1] ?? '';

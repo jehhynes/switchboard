@@ -661,11 +661,9 @@ describe('drawing', () => {
     root.innerHTML = html(renderHeader({ ...EMPTY, connected: true, scope, session: session({ state: 'running' }) }, newView()));
     expect([...root.querySelector('button.picker')!.children].map((child) => child.className)).toEqual(['codicon codicon-loading codicon-modifier-spin state-icon tone-muted', 'title', 'codicon codicon-chevron-down']);
     expect(root.querySelector('.header > .codicon')).toBeNull();
-    // The session's provider as its mark inside the button, as on each option that names one, from the same renderer.
-    root.innerHTML = html(renderHeader({ ...EMPTY, connected: true, scope: { ...scope, conversations: [{ ...scope.conversations[0]!, provider: 'codex' }] }, session: session({ provider: 'codex' }) }, { ...newView(), picker: true }));
-    expect(root.querySelector('.header > .provider')).toBeNull();
-    expect(root.querySelector('button.picker > .provider')?.getAttribute('aria-label')).toBe('Codex');
-    expect(root.querySelector('.conversation-menu .provider')?.getAttribute('aria-label')).toBe('Codex');
+    // No provider's mark, in the button or the menu, though the session and the conversation name one; the button is drawn as its row is.
+    root.innerHTML = html(renderHeader({ ...EMPTY, connected: true, scope: { ...scope, conversations: [{ ...scope.conversations[0]!, provider: 'codex', sessions: [{ sessionId: 'e1', title: 'Fix the badge', state: 'ended', startedAt: 0, provider: 'codex' }] }] }, session: session({ provider: 'codex' }) }, { ...newView(), picker: true }));
+    expect(root.querySelector('.provider, [aria-label="Codex"]')).toBeNull();
     expect(root.querySelector('button.picker')!.innerHTML).toBe(`${root.querySelector('.conversation-menu [aria-checked="true"]')!.innerHTML}<span class="codicon codicon-chevron-down" aria-hidden="true"></span>`);
     root.innerHTML = html(renderHeader({ ...EMPTY, connected: true, scope, session: session() }, newView()));
     expect(root.querySelector('.provider')).toBeNull();
