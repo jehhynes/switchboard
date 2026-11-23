@@ -3,7 +3,7 @@
 import type { VNode } from 'preact';
 import { fullTime, metaLine, spokenMark, stamped, toneMark, voiceMark } from '@switchboard/conversation/messageMeta';
 import { hasUnspokenText, replyBody } from '@switchboard/conversation/replyBody';
-import { answerSummary, plain, questionLedger, stripQuestionMarkup, withoutEndingQuestions } from '@switchboard/conversation/questions';
+import { answerBrief, plain, questionBrief, questionLedger, stripQuestionMarkup, withoutEndingQuestions } from '@switchboard/conversation/questions';
 import type { LedgerItem, LedgerQuestion, QuestionLedger } from '@switchboard/conversation/questions';
 import { isAnswerMessage, renderAnswersBubble, renderQuestionCard } from '@switchboard/conversation/questionCard';
 import { artifactIcon, awaitingReply, inTurn, timeline } from './model.js';
@@ -41,7 +41,7 @@ function Message({ item, stamped: shown, details, answered }: { item: MessageVie
 
 /** Above a message that answered questions: a quoted line per question, which goes to its card. */
 function AnswerReference({ card, lines: answered }: { card: string; lines: LedgerQuestion[] }) {
-  const lines = answered.map((one) => ({ question: plain(one.question.text), answer: one.answer === null ? '' : answerSummary(one.question, one.answer.letters, one.answer.other, one.state === 'dismissed') }));
+  const lines = answered.map((one) => ({ question: plain(questionBrief(one.question)), answer: one.answer === null ? '' : answerBrief(one.question, one.answer.letters, one.answer.other, one.state === 'dismissed') }));
 
   return (
     <button type="button" class="answer-ref" data-action="goto-card" data-target-card={card} title="Show the questions">

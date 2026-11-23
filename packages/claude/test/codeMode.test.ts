@@ -128,6 +128,8 @@ describe('Code Mode command', () => {
     expect(RULES).toContain('{#persona-registered}');
     expect(RULES).toContain("- A) Register on save (recommended) — keeps today's behaviour");
     expect(RULES).toContain('never its position such as `{#q1}`');
+    expect(RULES).toContain('Write the id only in that `{#slug}` form at the end of the line, never as a backticked name or a prefix before the question.');
+    expect(RULES).toContain('Mark your recommendation with `(recommended)` after its label, before the ` — `.');
     expect(RULES).toContain('Give two to four options');
     expect(RULES).toContain('Ask at most four questions at a time');
     // Questions stay open; withdraw what no longer matters; answers come by slug.

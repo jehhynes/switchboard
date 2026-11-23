@@ -70,10 +70,18 @@ interface Block {
   /** The block's first and last lines in the Markdown: its question, or the line a lone run asks, to its last option or continuation. */
   first: number;
   last: number;
+  /** The topic and text a missing slug is derived from, when they differ from the question's own. */
+  basis?: { topic: string | null; text: string };
 }
 
-/** A question line's text split into its id, its bold topic and the question. */
-function questionHead(raw: string): { slug: string | null; topic: string | null; text: string } {
+/** A backticked slug that leads a question line before a dash or colon, as "`port-choice` — Which port?" or "**`port-choice`:** Which port?". */
+const TICK_SLUG = /^(?:\*\*|__)?`([a-z][a-z0-9-]{2,39})`(?:\*\*|__)?\s*(?:—|–|--|:)(?:\*\*|__)?\s+(\S.*)$/;
+
+/**
+ * A question line's text split into its id, its bold topic and the question. A backticked slug leading the line is left out of the question; a
+ * slug derived for such a line comes from the whole line, as before the lead was recognized, so answers stored for it still match.
+ */
+function questionHead(raw: string): { slug: string | null; topic: string | null; text: string; basis?: { topic: string | null; text: string } } {
   let rest = raw;
   let slug: string | null = null;
   const mark = SLUG_MARK.exec(rest) ?? /\s*\{#([a-z][a-z0-9-]{2,39})\}\s*(\*\*|__)$/.exec(rest);
@@ -83,6 +91,19 @@ function questionHead(raw: string): { slug: string | null; topic: string | null;
     rest = (rest.slice(0, mark.index) + (mark[2] ?? '')).trimEnd();
   }
 
+  const tick = TICK_SLUG.exec(rest);
+
+  if (tick !== null) {
+    const whole = headParts(slug, rest);
+
+    return { ...headParts(slug, tick[2]!), ...(slug === null ? { basis: { topic: whole.topic, text: whole.text } } : {}) };
+  }
+
+  return headParts(slug, rest);
+}
+
+/** A question line's text, its id taken off, split into its bold topic and the question. */
+function headParts(slug: string | null, rest: string): { slug: string | null; topic: string | null; text: string } {
   // A bold lead of one to four words ending in ".", ":" or "?", inside or just after the bold marks.
   const lead = /^(\*\*|__)([^*_\n]{1,60}?)([.:?])\1\s+(\S.*)$/.exec(rest) ?? /^(\*\*|__)([^*_\n]{1,60}?)\1([.:?])\s+(\S.*)$/.exec(rest);
 
@@ -93,9 +114,21 @@ function questionHead(raw: string): { slug: string | null; topic: string | null;
   return { slug, topic: null, text: unbold(rest) };
 }
 
-/** An option's text split into its label, a description after " — " or " -- ", and a "(recommended)" mark lifted off the label. */
+/**
+ * An option's text split into its label, a description after " — " or " -- ", or after "(recommended): ", and a "(recommended)" mark lifted
+ * off the label.
+ */
 function optionParts(letter: string, raw: string): QuestionOption {
-  const dash = /\s+(?:—|--)\s+/.exec(raw);
+  const marked = /\s*(?:\*\*)?\(recommended\)(?:\*\*)?:(?:\*\*)?\s+/i.exec(raw);
+  const dashed = /\s+(?:—|--)\s+/.exec(raw);
+
+  if (marked !== null && (dashed === null || marked.index < dashed.index)) {
+    const label = unbold(raw.slice(0, marked.index).trim());
+
+    return { letter, label, description: raw.slice(marked.index + marked[0].length).trim(), recommended: true, text: label };
+  }
+
+  const dash = dashed;
   let label = (dash === null ? raw : raw.slice(0, dash.index)).trim();
   const description = dash === null ? '' : raw.slice(dash.index + dash[0].length).trim();
   const mark = /\s*\(recommended\)\s*$/i.exec(label) ?? /\s*\*\*\(recommended\)\*\*\s*$/i.exec(label);
@@ -141,8 +174,8 @@ export function deriveSlug(topic: string | null, text: string): string {
 export function parseQuestions(markdown: string): Question[] {
   const used = new Map<string, number>();
 
-  return parseBlocks(markdown).map(({ number, slug, topic, text, context, options, multi }) => {
-    const base = slug ?? deriveSlug(topic, text);
+  return parseBlocks(markdown).map(({ number, slug, topic, text, context, options, multi, basis }) => {
+    const base = slug ?? (basis === undefined ? deriveSlug(topic, text) : deriveSlug(basis.topic, basis.text));
     const count = (used.get(base) ?? 0) + 1;
 
     used.set(base, count);
@@ -318,8 +351,10 @@ export function withdrawals(markdown: string): Array<{ slugs: string[] | 'all'; 
 export function stripQuestionMarkup(markdown: string): string {
   let fence: string | null = null;
   const kept: string[] = [];
+  const lines = markdown.replace(/\r/g, '').split('\n');
+  const starts = new Set(parseBlocks(markdown).map((block) => block.first));
 
-  for (const line of markdown.replace(/\r/g, '').split('\n')) {
+  for (const [at, line] of lines.entries()) {
     const fenced = FENCE.exec(line);
 
     if (fence !== null || fenced !== null) {
@@ -332,10 +367,18 @@ export function stripQuestionMarkup(markdown: string): string {
       continue;
     }
 
-    kept.push(line.replace(/\s*\{#[a-z][a-z0-9-]{2,39}\}(\s*(?:\*\*|__)?)\s*$/, '$1'));
+    kept.push((starts.has(at) ? withoutTickSlug(line) : line).replace(/\s*\{#[a-z][a-z0-9-]{2,39}\}(\s*(?:\*\*|__)?)\s*$/, '$1'));
   }
 
   return kept.join('\n');
+}
+
+/** A question's line without the backticked slug that leads it. */
+function withoutTickSlug(line: string): string {
+  const parts = /^(\s{0,3}(?:[-*+]\s+)?(?:(?:\*\*|__)?\d{1,2}[.)](?:\*\*|__)?\s+)?(?:#{1,6}\s+)?)(.*)$/.exec(line)!;
+  const tick = TICK_SLUG.exec(parts[2]!);
+
+  return tick === null ? line : `${parts[1]}${tick[2]}`;
 }
 
 /**
@@ -649,6 +692,32 @@ export function answerSummary(question: Question, letters: readonly string[], ot
   }
 
   const picked = question.options.filter((option) => letters.includes(option.letter)).map((option) => `${option.letter}) ${plain(option.label)}`);
+  const free = other.replace(/\s+/g, ' ').trim();
+
+  return [...picked, ...(free === '' ? [] : [`Other: ${free}`])].join('; ');
+}
+
+/**
+ * A question as the answered rows and the Answers bubble name it: its topic, or else its sentence that asks, without the context. Markdown,
+ * as the question wrote it.
+ */
+export function questionBrief(question: Question): string {
+  if (question.topic !== null) {
+    return question.topic.replace(/[.:]$/, '');
+  }
+
+  const sentences = question.text.split(/(?<=[.?!])\s+(?=[A-Z0-9"'`*_(])/);
+
+  return sentences.length < 2 ? question.text : (sentences.filter((one) => /\?["'`*_)]*$/.test(one)).at(-1) ?? question.text);
+}
+
+/** What an answer chose, as the answered rows and the Answers bubble show it: the chosen labels without their letters, then "Other: text". */
+export function answerBrief(question: Question, letters: readonly string[], other: string, dismissed = false): string {
+  if (dismissed) {
+    return 'No answer (dismissed)';
+  }
+
+  const picked = question.options.filter((option) => letters.includes(option.letter)).map((option) => plain(option.label));
   const free = other.replace(/\s+/g, ' ').trim();
 
   return [...picked, ...(free === '' ? [] : [`Other: ${free}`])].join('; ');

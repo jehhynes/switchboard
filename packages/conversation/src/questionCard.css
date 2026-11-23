@@ -1,27 +1,28 @@
 /* The question card (packages/conversation/src/questionCard.ts), shared by the web page and the VS Code Conversation view, whose builds put this
    file before their own styles. Only theme variables both front ends have. The card never scrolls or takes touch gestures of its own, so a
    vertical pan over it scrolls the conversation. */
-.question-card.qc { position: relative; --qc-border: var(--vscode-widget-border, rgba(127, 127, 127, 0.35)); --qc-accent: var(--vscode-focusBorder, #0078d4); display: flex; flex-direction: column; gap: 10px; box-sizing: border-box; max-width: 760px; margin: 8px 0 4px; padding: 12px 14px; border: 1px solid var(--qc-border); border-radius: 8px; background: color-mix(in srgb, var(--vscode-editorWidget-background, var(--vscode-input-background)) 85%, var(--vscode-foreground) 4%); color: var(--vscode-foreground); overflow: visible; touch-action: auto; }
+.question-card.qc { position: relative; --qc-border: var(--vscode-widget-border, rgba(127, 127, 127, 0.35)); --qc-accent: var(--vscode-focusBorder, #0078d4); display: flex; flex-direction: column; gap: 8px; box-sizing: border-box; max-width: 760px; margin: 8px 0 4px; padding: 10px 14px; border: 1px solid var(--qc-border); border-radius: 10px; background: color-mix(in srgb, var(--vscode-editorWidget-background, var(--vscode-input-background)) 85%, var(--vscode-foreground) 4%); color: var(--vscode-foreground); overflow: visible; touch-action: auto; }
+/* Header labels, short questions and notes: the description colour taken a little toward the background, quieter than the answers. */
+.question-card.qc, .answers-bubble { --qc-muted: color-mix(in srgb, var(--vscode-descriptionForeground) 85%, var(--vscode-editor-background, transparent)); }
+.question-card.qc.qc-collapsed { gap: 0; }
 .question-card.qc:focus { outline: none; }
 /* A card the Questions link went to is focused as well as highlighted; under reduced motion its still outline (bubbles.css) outranks the rule above. */
 @media (prefers-reduced-motion: reduce) { .question-card.qc.linked:focus { outline: 2px solid var(--vscode-focusBorder, #0078d4); } }
 .question-card.qc:focus-visible, .question-card.qc:focus-within { border-color: color-mix(in srgb, var(--qc-accent) 55%, var(--qc-border)); }
-.qc-head { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 0.9em; }
-.qc-progress { font-weight: 600; white-space: nowrap; }
+.qc-head { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 0.9em; line-height: 1.5; }
+.qc-progress { overflow: hidden; color: var(--qc-muted); font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
 .qc-dots { display: inline-flex; gap: 4px; }
 .qc-dot { width: 22px; height: 4px; padding: 0; border: none; border-radius: 2px; background: color-mix(in srgb, var(--vscode-foreground) 25%, transparent); cursor: pointer; }
 .qc-dot.qc-filled { background: color-mix(in srgb, var(--qc-accent) 55%, transparent); }
 .qc-dot.qc-current { background: var(--qc-accent); }
 .qc-dot:focus-visible { outline: 1px solid var(--qc-accent); outline-offset: 3px; }
-.qc-slug { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 1px 5px; border-radius: 3px; background: var(--vscode-textCodeBlock-background, rgba(127, 127, 127, 0.15)); color: var(--vscode-descriptionForeground); font-family: var(--vscode-editor-font-family, monospace); font-size: 0.85em; overflow-wrap: anywhere; }
-.qc-row .qc-slug, .answers-line .qc-slug { margin-left: 0; white-space: normal; overflow-wrap: anywhere; }
-.qc-menu-anchor { position: relative; flex: none; }
+.qc-menu-anchor { position: relative; flex: none; margin-left: auto; }
 .qc-menu-button { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: none; border-radius: 4px; background: transparent; color: var(--vscode-descriptionForeground); cursor: pointer; }
 .qc-menu-button:hover, .qc-menu-button:focus-visible { outline: none; background: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, 0.15)); color: var(--vscode-foreground); }
 .qc-menu { position: absolute; z-index: 3; top: 100%; right: 0; margin-top: 4px; padding: 4px; border: 1px solid var(--vscode-menu-border, var(--qc-border)); border-radius: 6px; background: var(--vscode-menu-background, var(--vscode-editorWidget-background)); box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36)); white-space: nowrap; }
 .qc-menu button { display: block; width: 100%; padding: 4px 10px; border: none; border-radius: 4px; background: transparent; color: var(--vscode-menu-foreground, var(--vscode-foreground)); font: inherit; text-align: left; cursor: pointer; }
 .qc-menu button:hover, .qc-menu button:focus-visible { outline: none; background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground)); color: var(--vscode-menu-selectionForeground, var(--vscode-foreground)); }
-.qc-topic { margin-top: 2px; color: var(--vscode-textLink-foreground, var(--qc-accent)); font-size: 0.8em; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; }
+.qc-topic { color: var(--vscode-textLink-foreground, var(--qc-accent)); font-size: 0.85em; font-weight: 600; }
 .qc-question { font-size: 1.08em; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
 .qc-context { color: var(--vscode-descriptionForeground); line-height: 1.5; overflow-wrap: anywhere; }
 .qc-question p, .qc-context p { margin: 0; }
@@ -42,7 +43,7 @@
 .qc-other:focus { border-color: var(--qc-accent); }
 .qc-other::placeholder { color: var(--vscode-input-placeholderForeground); }
 .qc-summary { display: flex; flex-wrap: wrap; gap: 6px; }
-.qc-chip { padding: 1px 8px; border: 1px solid var(--qc-border); border-radius: 10px; background: transparent; color: var(--vscode-descriptionForeground); font: inherit; font-size: 0.82em; cursor: pointer; }
+.qc-chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 1px 8px; border: 1px solid var(--qc-border); border-radius: 10px; background: transparent; color: var(--vscode-descriptionForeground); font: inherit; font-size: 0.82em; cursor: pointer; }
 .qc-chip b { color: var(--vscode-foreground); }
 .qc-chip:hover, .qc-chip:focus-visible { outline: none; border-color: var(--qc-accent); }
 .qc-later, .qc-note { margin: 0; color: var(--vscode-descriptionForeground); font-size: 0.85em; }
@@ -56,29 +57,35 @@
 .qc-error + .qc-primary { margin-left: 0; }
 .qc-link { padding: 0; border: none; background: transparent; color: var(--vscode-textLink-foreground, var(--qc-accent)); font: inherit; cursor: pointer; }
 .qc-link:hover, .qc-link:focus-visible { outline: none; text-decoration: underline; }
-.qc-settled { display: flex; flex-direction: column; gap: 8px; margin: 2px 0 0; padding: 0; list-style: none; }
+.qc-settled { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 0; padding: 0; font-size: 0.92em; list-style: none; }
 .qc-open-card .qc-settled, .question-card.qc:not(.qc-settled-card) .qc-settled { padding-top: 10px; border-top: 1px solid var(--qc-border); }
-.qc-row { display: flex; align-items: flex-start; gap: 8px; font-size: 0.92em; }
-.qc-pill { flex: none; padding: 0 7px; border-radius: 8px; background: color-mix(in srgb, var(--vscode-foreground) 12%, transparent); color: var(--vscode-descriptionForeground); font-size: 0.82em; line-height: 1.6; }
-.qc-answered .qc-pill { background: color-mix(in srgb, var(--vscode-testing-iconPassed, #388a34) 22%, transparent); color: color-mix(in srgb, var(--vscode-testing-iconPassed, #388a34) 70%, var(--vscode-foreground)); }
+.qc-row { display: flex; align-items: flex-start; gap: 8px; line-height: 1.5; }
+/* A row's state as a codicon, shown only when a card's questions differ in state: check answered, close withdrawn, dash dismissed. */
+.qc-state { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 16px; height: 1.5em; color: var(--qc-muted); }
+.qc-state .codicon { font-size: 14px; }
+.qc-answered .qc-state { color: var(--vscode-testing-iconPassed, #388a34); }
 .qc-row-main { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.qc-row-question { font-weight: 600; }
+.qc-row-question { color: var(--qc-muted); }
 .qc-row-question p { display: inline; margin: 0; }
-.qc-struck { text-decoration: line-through; color: var(--vscode-descriptionForeground); }
-.qc-row-detail { display: block; color: var(--vscode-descriptionForeground); }
-.qc-answered .qc-row-detail { color: var(--vscode-foreground); font-weight: 600; }
-.qc-done { font-size: 0.9em; color: var(--vscode-descriptionForeground); }
-.qc-done .qc-progress { font-weight: 400; }
+.qc-struck { text-decoration: line-through; }
+.qc-row-detail { display: block; color: var(--qc-muted); }
+/* An answered row is one line where it fits: "Short question: Choice". */
+.qc-answered .qc-row-detail { display: inline; color: var(--vscode-foreground); font-weight: 600; }
+/* The link between a card and its answer, at the right of the card's header and of the Answers bubble's, alike in both. */
+.qc-cross-link { flex: none; margin-left: auto; padding: 0; border: none; background: transparent; color: var(--vscode-textLink-foreground, var(--vscode-focusBorder, #0078d4)); font: inherit; cursor: pointer; }
+.qc-cross-link:hover, .qc-cross-link:focus-visible { outline: none; text-decoration: underline; }
 
-/* The Answers bubble: an answer message, its tag hidden, each slug a chip, the question dimmed and the answer bold. */
+/* The Answers bubble: an answer message, its tag hidden, a line per question, "Short question: Choice". Its box matches the card's corners,
+   padding and border, without the tail corner of our other messages. */
+.message .box.answers { border: 1px solid color-mix(in srgb, var(--vscode-button-background, #0078d4) 35%, transparent); border-radius: 10px; padding: 10px 14px; }
+body.vscode-high-contrast .message .box.answers, body.vscode-high-contrast-light .message .box.answers { border-color: var(--vscode-contrastBorder); }
 .answers-bubble { display: flex; flex-direction: column; gap: 6px; }
-.answers-title { color: var(--vscode-descriptionForeground); font-size: 0.78em; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+.answers-head { display: flex; align-items: baseline; gap: 10px; min-width: 0; font-size: 0.82em; line-height: 1.5; }
+.answers-title { overflow: hidden; color: var(--qc-muted); text-overflow: ellipsis; white-space: nowrap; }
 .answers-line { overflow-wrap: anywhere; }
-.answers-line .qc-slug { margin: 0 4px 0 0; }
-.answers-question { color: var(--vscode-descriptionForeground); }
+.answers-question { color: var(--qc-muted); }
 .answers-answer { font-weight: 600; }
-.answers-link { align-self: flex-start; padding: 0; border: none; background: transparent; color: var(--vscode-textLink-foreground, var(--vscode-focusBorder)); font: inherit; font-size: 0.85em; cursor: pointer; }
-.answers-link:hover, .answers-link:focus-visible { outline: none; text-decoration: underline; }
+.answers-dismissed { color: var(--qc-muted); font-style: italic; }
 
 /* The step's announcement, for assistive readers only. */
 .qc-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }

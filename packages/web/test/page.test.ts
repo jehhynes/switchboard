@@ -116,10 +116,10 @@ describe('question cards in replies', () => {
     host.innerHTML = html(renderTimeline(fresh([reply('r1', 1, { opening: ending }), message('m1', 2, { text: 'Later.' })]), newView()));
     expect(host.querySelector('.question-card .qc-option')).not.toBeNull();
     host.innerHTML = html(renderTimeline(fresh([reply('r1', 1, { opening: ending }), message('m1', 2, { text: 'port B' })]), newView()));
-    expect(host.querySelector('.question-card .qc-pill')?.textContent).toBe('Answered');
+    expect(host.querySelector('.question-card.qc-collapsed .qc-progress')?.textContent).toBe('Question answered');
     // Before the cutover, the old rules: the next message skips it.
     host.innerHTML = html(renderTimeline(pageState([reply('r1', 1, { opening: ending }), message('m1', 2, { text: 'Later.' })]), newView()));
-    expect(host.querySelector('.question-card .qc-pill')?.textContent).toBe('Skipped');
+    expect(host.querySelector('.question-card .qc-state')?.getAttribute('title')).toBe('Skipped');
     host.innerHTML = html(renderTimeline(pageState([reply('r1', 1, { opening: ending }), message('m1', 2, { text: '1B', delivery: 'open' })]), newView()));
     expect(host.querySelector('.question-card .qc-option')).not.toBeNull();
   });
@@ -179,7 +179,7 @@ describe('question cards in replies', () => {
     host.innerHTML = html(renderTimeline(pageState([reply('r1', 5, { opening: ending }), stale]), newView()));
     expect(host.querySelector<HTMLButtonElement>('.qc-option')?.disabled).toBe(false);
     host.innerHTML = html(renderTimeline(pageState([reply('r1', 5, { opening: ending }), message('m1', 6, { text: '1B', provisional: true, delivery: null })]), newView()));
-    expect(host.querySelector('.question-card .qc-pill')?.textContent).toBe('Answered');
+    expect(host.querySelector('.question-card.qc-collapsed .qc-progress')?.textContent).toBe('Question answered');
   });
 
   it('draws each option as a full-width button with a letter badge, its label and description, and Other last', () => {
@@ -646,7 +646,7 @@ describe('drawing', () => {
   it('draws a card under a reply that asks, answered by the next message', () => {
     const state = { ...EMPTY, connected: true, scope, session: session(), items: [reply('r1', 1, { opening: 'Pick:\n- A) x\n- B) y' }), message('m1', 2, { text: 'B' })] };
 
-    expect(html(renderTimeline(state, newView()))).toMatch(/question-card[\s\S]*qc-pill">Answered[\s\S]*→ B\) y/);
+    expect(html(renderTimeline(state, newView()))).toMatch(/question-card qc qc-settled-card qc-collapsed[\s\S]*Question answered[\s\S]*answer-ref-answer">→ y</);
   });
 });
 
@@ -4820,18 +4820,18 @@ describe('the page in use', () => {
 
     const ref = root.querySelector<HTMLButtonElement>('li[data-id="m1"] .bubble > .answer-ref')!;
 
-    expect(ref.textContent).toBe('↳Move this work to a Code Mode session?→ A) Not now, keep it here');
+    expect(ref.textContent).toBe('↳Move this work to a Code Mode session?→ Not now, keep it here');
     click('li[data-id="m1"] .answer-ref');
     expect(scrolled).toEqual(['reply:r1']);
     expect(root.querySelector('.question-card')!.classList.contains('linked')).toBe(true);
-    expect(root.querySelector('.question-card .qc-done')!.textContent).toBe('Question answered · Your answer');
+    expect(root.querySelector('.question-card .qc-done .qc-progress')!.textContent).toBe('Question answered');
     click('.question-card [data-action="goto-message"]');
     expect(scrolled).toEqual(['reply:r1', 'm1']);
     expect(root.querySelector('li[data-id="m1"]')!.classList.contains('linked')).toBe(true);
 
     // Before the cutover, a later reply supersedes the card, which takes no answer.
     hello(source, { items: [reply('r1', 2, { opening: asked }), reply('r2', 3, { opening: 'Ignore the question I asked.' })] });
-    expect(root.querySelector('.question-card .qc-pill')!.textContent).toBe('Superseded');
+    expect(root.querySelector('.question-card .qc-state')!.getAttribute('title')).toBe('Superseded');
     expect(root.querySelector('.question-card .qc-row-detail')!.textContent).toBe('Superseded: a later reply came after it.');
     expect(root.querySelector('.qc-option, [data-action="card-send"]')).toBeNull();
 
@@ -4840,9 +4840,9 @@ describe('the page in use', () => {
 
     hello(source, { questions, items: [reply('r1', 2, { opening: asked }), reply('r2', 3, { opening: 'Working on it.' }), message('m1', 4, { text: '[answers]\n- code-mode-session: Move this work to a Code Mode session? → B) Yes', answers: [{ replyId: 'r1', slug: 'move-work-code', letters: ['B'], other: '', via: 'card' }] })] });
     expect(root.querySelector('li[data-id="m1"] .answers-title')!.textContent).toBe('Answers');
-    expect(root.querySelector('li[data-id="m1"] .answers-answer')!.textContent).toBe('B) Yes');
-    expect(root.querySelector('li[data-id="m1"] .box')!.textContent).not.toContain('[answers]');
-    expect(root.querySelector('.question-card .qc-pill')!.textContent).toBe('Answered');
+    expect(root.querySelector('li[data-id="m1"] .answers-answer')!.textContent).toBe('Yes');
+    expect(root.querySelector('li[data-id="m1"] .box')!.textContent).not.toMatch(/\[answers\]|code-mode-session/);
+    expect(root.querySelector('.question-card.qc-collapsed .qc-progress')!.textContent).toBe('Question answered');
     delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
     page.close();
   });

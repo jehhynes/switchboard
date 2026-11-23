@@ -6,7 +6,7 @@
  * `goto-message`. It never scrolls or handles touch itself, so a pan over it scrolls the conversation. Imports only the questions module, for
  * browser bundles.
  */
-import { cardLater, cardSteps, currentStep, draftAnswers, picked, sendLabel, answerSummary } from './questions.js';
+import { answerBrief, cardLater, cardSteps, currentStep, draftAnswers, picked, plain, questionBrief, sendLabel } from './questions.js';
 import type { CardDraft, LedgerCard, LedgerQuestion } from './questions.js';
 
 function escape(text: string): string {
@@ -34,14 +34,27 @@ export interface CardRender {
   inline(text: string): string;
 }
 
-/** A state's pill text. */
-const PILL: Record<LedgerQuestion['state'], string> = { open: 'Open', answered: 'Answered', withdrawn: 'Withdrawn', replaced: 'Replaced', dismissed: 'Dismissed', skipped: 'Skipped', superseded: 'Superseded' };
+/** A settled state's name, which its icon's tooltip and an assistive reader give, and its codicon. */
+const STATE: Record<LedgerQuestion['state'], [name: string, icon: string]> = {
+  open: ['Open', 'circle-large-outline'],
+  answered: ['Answered', 'check'],
+  withdrawn: ['Withdrawn', 'close'],
+  replaced: ['Replaced', 'arrow-swap'],
+  dismissed: ['Dismissed', 'dash'],
+  skipped: ['Skipped', 'debug-step-over'],
+  superseded: ['Superseded', 'history'],
+};
 
-/** What a settled question's row says under it. */
+/** A question's short form as an answer line starts it: "Port:", "The page has no menu:", or "Design first?" as it is. */
+export function briefLead(brief: string): string {
+  return /[?!:]$/.test(brief) ? brief : `${brief.replace(/\.$/, '')}:`;
+}
+
+/** What a settled question's row says: the chosen labels after its question on the same line, or its state's note under it. */
 function rowDetail(one: LedgerQuestion): string {
   switch (one.state) {
     case 'answered':
-      return one.answer === null ? '' : `→ ${escape(answerSummary(one.question, one.answer.letters, one.answer.other) || '–')}`;
+      return one.answer === null ? '' : escape(answerBrief(one.question, one.answer.letters, one.answer.other) || '–');
     case 'withdrawn':
       return one.reason === null ? 'Withdrawn by the session.' : `Withdrawn by the session: "${escape(one.reason)}"`;
     case 'replaced':
@@ -57,7 +70,15 @@ function rowDetail(one: LedgerQuestion): string {
   }
 }
 
-/** The settled questions as rows: the state's pill, the question, struck through when withdrawn or replaced, its slug and what became of it. */
+/** Whether a card has only answered questions, none still being sent: its header then says it all, and it shows no rows. */
+function allAnswered(card: LedgerCard): boolean {
+  return card.questions.every((one) => one.state === 'answered' && one.answer?.sending !== true);
+}
+
+/**
+ * The settled questions as rows, each with its state's icon: the question's short form (`questionBrief`), then the chosen labels on the same
+ * line, or struck through when withdrawn or replaced with its state's note under it; the whole question in its tooltip.
+ */
 function settledRows(rows: readonly LedgerQuestion[], render: CardRender): string {
   if (rows.length === 0) {
     return '';
@@ -65,21 +86,27 @@ function settledRows(rows: readonly LedgerQuestion[], render: CardRender): strin
 
   return `<ul class="qc-settled">${rows
     .map((one) => {
-      const pill = one.answer?.sending === true ? 'Sending…' : PILL[one.state];
+      const [name, icon] = one.answer?.sending === true ? ['Sending…', 'sync'] : STATE[one.state];
       const struck = one.state === 'withdrawn' || one.state === 'replaced';
+      const whole = plain(one.question.text).replace(/\s+/g, ' ');
+      const brief = questionBrief(one.question);
+      const answered = one.state === 'answered';
 
-      return `<li class="qc-row qc-${one.state}"><span class="qc-pill">${pill}</span><span class="qc-row-main"><span class="qc-row-question${struck ? ' qc-struck' : ''}">${render.inline(one.question.text)}</span> <code class="qc-slug">${escape(one.question.slug)}</code><span class="qc-row-detail">${rowDetail(one)}</span></span></li>`;
+      return (
+        `<li class="qc-row qc-${one.state}"><span class="qc-state" title="${escape(name)}"><span class="codicon codicon-${icon}" aria-hidden="true"></span><span class="qc-sr">${escape(name)}</span></span>` +
+        `<span class="qc-row-main" title="${escape(whole)}"><span class="qc-row-question${struck ? ' qc-struck' : ''}">${render.inline(answered ? briefLead(brief) : brief)}</span>${answered ? ' ' : ''}<span class="qc-row-detail">${rowDetail(one)}</span></span></li>`
+      );
     })
     .join('')}</ul>`;
 }
 
-/** The header's line once every question is settled: "All 3 questions answered · Your answer". */
+/** The header's line once every question is settled: "All 3 questions answered", and the Your answer link at its right. */
 function doneHead(card: LedgerCard): string {
   const total = card.questions.length;
   const answered = card.questions.filter((one) => one.state === 'answered');
   const message = answered.at(-1)?.answer?.messageId ?? null;
   const what = answered.length === total ? (total === 1 ? 'Question answered' : `All ${total} questions answered`) : total === 1 ? 'Question settled' : `All ${total} questions settled`;
-  const link = message === null ? '' : ` · <button type="button" class="qc-link" data-action="goto-message" data-target="${escape(message)}" title="Show your answer">Your answer</button>`;
+  const link = message === null ? '' : `<button type="button" class="qc-link qc-cross-link" data-action="goto-message" data-target="${escape(message)}" title="Show your answer">Your answer</button>`;
 
   return `<div class="qc-head qc-done"><span class="qc-progress">${what}</span>${link}</div>`;
 }
@@ -101,7 +128,7 @@ export function renderQuestionCard(card: LedgerCard, draft: CardDraft | undefine
   const note = render.note == null ? '' : `<p class="qc-note">${escape(render.note)}</p>`;
 
   if (steps.length === 0) {
-    return `<div class="question-card qc qc-settled-card" data-card="${key}" data-card-key="${key}" role="group" aria-label="Questions, settled">${doneHead(card)}${settledRows(card.questions, render)}</div>`;
+    return `<div class="question-card qc qc-settled-card${allAnswered(card) ? ' qc-collapsed' : ''}" data-card="${key}" data-card-key="${key}" role="group" aria-label="Questions, settled">${doneHead(card)}${allAnswered(card) ? '' : settledRows(card.questions, render)}</div>`;
   }
 
   const current = currentStep(card, draft)!;
@@ -123,7 +150,7 @@ export function renderQuestionCard(card: LedgerCard, draft: CardDraft | undefine
         render.menuOpen === true ? `<span class="qc-menu" role="menu"><button type="button" role="menuitem" data-action="card-dismiss" data-card="${key}" data-slug="${slug}" title="Leave this question unanswered; the session is told with your next answers">Dismiss this question</button></span>` : ''
       }</span>`
     : '';
-  const head = `<div class="qc-head"><span class="qc-progress">Question ${at + 1} of ${steps.length}</span>${steps.length > 1 ? `<span class="qc-dots">${dots}</span>` : ''}<code class="qc-slug" title="This question's id; answers name it">${slug}</code>${menu}</div>`;
+  const head = `<div class="qc-head"><span class="qc-progress">Question ${at + 1} of ${steps.length}</span>${steps.length > 1 ? `<span class="qc-dots">${dots}</span>` : ''}${menu}</div>`;
   const body =
     (question.topic === null ? '' : `<div class="qc-topic">${escape(question.topic)}</div>`) +
     `<div class="qc-question">${render.inline(question.text)}</div>` +
@@ -154,7 +181,7 @@ export function renderQuestionCard(card: LedgerCard, draft: CardDraft | undefine
             const given = draft?.picks[one.question.slug];
             const shown = !picked(given) ? '–' : [...given!.letters, ...((given!.other ?? '').trim() === '' ? [] : ['Other'])].join(', ');
 
-            return `<button type="button" class="qc-chip" data-action="card-step" data-card="${key}" data-slug="${escape(one.question.slug)}">${escape((one.question.topic ?? one.question.slug).replace(/[.:]$/, ''))}: <b>${escape(shown)}</b></button>`;
+            return `<button type="button" class="qc-chip" data-action="card-step" data-card="${key}" data-slug="${escape(one.question.slug)}">${escape(briefLead(plain(questionBrief(one.question))))} <b>${escape(shown)}</b></button>`;
           })
           .join('')}</div>`;
   const count = draftAnswers(card, draft).length;
@@ -193,8 +220,9 @@ export function isAnswerMessage(text: string): boolean {
 }
 
 /**
- * An answer message as the Answers bubble shows it (design § 4): the tag hidden, a line per question with its slug as a chip, the question dimmed
- * and the answer bold, and a Questions link to the first card it answered. `answered` are the questions the ledger says it answered.
+ * An answer message as the Answers bubble shows it (design § 4): the tag hidden, a Questions link to the first card it answered at the right of
+ * its title, and a line per question, "Short question: Choice", its short form dimmed and the chosen labels bold; the slugs stay in the message text only. `answered` are
+ * the questions the ledger says it answered; a line for any other question shows the message's own text.
  */
 export function renderAnswersBubble(text: string, answered: readonly LedgerQuestion[]): string {
   const body = text.replace(/^\s*(?:\[(?:spoken|expressive|voice|partial)\][ \t]*)*\[answers\][ \t]*\n?/i, '');
@@ -211,18 +239,23 @@ export function renderAnswersBubble(text: string, answered: readonly LedgerQuest
 
       const one = answered.find((question) => question.question.slug === match[1]!.toLowerCase());
       const rest = match[2]!;
-      const asked = one === undefined ? null : one.question.text.replace(/\*\*|__|`/g, '').replace(/\s+/g, ' ');
+      const asked = one === undefined ? null : plain(one.question.text).replace(/\s+/g, ' ');
       const split = asked !== null && rest.startsWith(`${asked} → `) ? asked.length : rest.indexOf(' → ');
-      const question = split === -1 ? rest : rest.slice(0, split);
-      const answer = split === -1 ? '' : rest.slice(split + 3);
+      const said = split === -1 ? '' : rest.slice(split + 3);
+      const dismissed = said === 'No answer (dismissed)';
+      const question = one === undefined ? (split === -1 ? rest : rest.slice(0, split)) : plain(questionBrief(one.question));
+      const other = said.search(/(?:^|; )Other: /);
+      const picks = other === -1 ? said : said.slice(0, other);
+      const answer = dismissed ? 'Dismissed' : one?.answer == null ? picks.replace(/(^|; )[A-H]\) /g, '$1') + (other === -1 ? '' : said.slice(other)) : answerBrief(one.question, one.answer.letters, one.answer.other);
+      const shown = answer === '' ? '' : ` <span class="${dismissed ? 'answers-dismissed' : 'answers-answer'}">${escape(answer)}</span>`;
 
-      return `<div class="answers-line"><code class="qc-slug">${escape(match[1]!)}</code><span class="answers-question">${escape(question)}</span>${answer === '' ? '' : ` → <span class="answers-answer">${escape(answer)}</span>`}</div>`;
+      return `<div class="answers-line"${asked === null ? '' : ` title="${escape(asked)}"`}><span class="answers-question">${escape(answer === '' ? question : briefLead(question))}</span>${shown}</div>`;
     })
     .join('');
   const card = answered[0]?.card;
-  const link = card === undefined ? '' : `<button type="button" class="answers-link" data-action="goto-card" data-target-card="${escape(card)}" title="Show the questions">Questions</button>`;
+  const link = card === undefined ? '' : `<button type="button" class="answers-link qc-cross-link" data-action="goto-card" data-target-card="${escape(card)}" title="Show the questions">Questions</button>`;
 
-  return `<div class="answers-bubble"><span class="answers-title">Answers</span>${lines}${link}</div>`;
+  return `<div class="answers-bubble"><div class="answers-head"><span class="answers-title">Answers</span>${link}</div>${lines}</div>`;
 }
 
 /** What the chip over the composer says while questions are open (PRD R103), shared by both front ends. */

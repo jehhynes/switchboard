@@ -9,7 +9,7 @@ import { fullTime, metaLine, spokenMark, stamped, toneMark, voiceMark } from '@s
 import { hasUnspokenText, replyBody } from '@switchboard/conversation/replyBody';
 import { artifactIcon, awaitingReply, inTurn, selectedEntry, stateIcon, statusLine, timeline } from '../conversationModel.js';
 import type { ConversationState } from '../conversationModel.js';
-import { answerSummary, plain, questionLedger, questionSegments, stripQuestionMarkup, withoutEndingQuestions } from '@switchboard/conversation/questions';
+import { answerBrief, plain, questionBrief, questionLedger, questionSegments, stripQuestionMarkup, withoutEndingQuestions } from '@switchboard/conversation/questions';
 import type { CardDraft as SharedDraft, LedgerItem, LedgerQuestion, QuestionLedger } from '@switchboard/conversation/questions';
 import { isAnswerMessage, questionsWaiting, renderAnswersBubble, renderQuestionCard } from '@switchboard/conversation/questionCard';
 
@@ -133,7 +133,7 @@ export function renderMarkdown(text: string): string {
  */
 /** Above a message that answered questions: a quoted line per question, which goes to its card. */
 function answerReference(key: string, answered: readonly LedgerQuestion[]): string {
-  const lines = answered.map((one) => ({ question: plain(one.question.text), answer: one.answer === null ? '' : answerSummary(one.question, one.answer.letters, one.answer.other, one.state === 'dismissed') }));
+  const lines = answered.map((one) => ({ question: plain(questionBrief(one.question)), answer: one.answer === null ? '' : answerBrief(one.question, one.answer.letters, one.answer.other, one.state === 'dismissed') }));
   const shown = lines.map((line) => `<span class="answer-ref-line"><span class="answer-ref-mark" aria-hidden="true">↳</span><span class="answer-ref-question">${escape(line.question)}</span><span class="answer-ref-answer">→ ${escape(line.answer)}</span></span>`).join('');
 
   return `<button type="button" class="answer-ref" data-action="goto-card" data-target-card="${escape(key)}" title="Show the questions">${shown}</button>`;

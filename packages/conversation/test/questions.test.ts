@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { answerMessage, answersIn, BATCH, cardLinks, cardSteps, cardUtterance, currentStep, deriveSlug, draftAnswers, moveStep, parseQuestions, pickLetter, questionLedger, questionLines, questionSegments, questionSpeech, resolveAnswers, sendLabel, setOther, stripQuestionMarkup, withdrawals, withoutEndingQuestions } from '../src/questions.js';
+import { answerBrief, answerMessage, answersIn, BATCH, cardLinks, cardSteps, cardUtterance, currentStep, deriveSlug, draftAnswers, moveStep, parseQuestions, pickLetter, questionBrief, questionLedger, questionLines, questionSegments, questionSpeech, resolveAnswers, sendLabel, setOther, stripQuestionMarkup, withdrawals, withoutEndingQuestions } from '../src/questions.js';
 import type { CardLinks, LedgerItem, LinkItem, QuestionLedger, StoredAnswer } from '../src/questions.js';
 
 /** The shape the conversation rules show, with a second question. */
@@ -476,5 +476,63 @@ describe('the legacy answer reading', () => {
     expect(answersIn('1A, 2 Other: use port 8800', questions)).toEqual(new Map([[0, { letters: ['A'], other: '' }], [1, { letters: [], other: 'use port 8800' }]]));
     expect([...answersIn('1B and 2 C please', questions)]).toEqual([[0, { letters: ['B'], other: '' }], [1, { letters: ['C'], other: '' }]]);
     expect(answersIn('1C, 3A, port 8765A', questions)).toEqual(new Map());
+  });
+});
+
+describe('slugs and labels written loosely', () => {
+  it('leaves a backticked slug before a dash or colon out of the question, deriving the id from the whole line as before', () => {
+    const dash = parseQuestions("Should it count?\n\n`row-actions-terminal` — The dock's row menu has two items. Its Console tab covers them.\n- A) Count it\n- B) Add both")[0]!;
+    const colon = parseQuestions('1. **`port-choice`:** Which port?\n   - A) 8765\n   - B) 8799')[0]!;
+
+    const longer = parseQuestions('1. `use-the-new-api` — Switch to it now?\n   - A) Yes\n   - B) No')[0]!;
+
+    expect(dash).toMatchObject({ slug: 'row-actions-terminal', written: false, text: "The dock's row menu has two items. Its Console tab covers them." });
+    expect(colon).toMatchObject({ slug: 'port-choice', text: 'Which port?' });
+    // The id stays the one derived before the lead was recognized, so an answer stored for it still settles the question.
+    expect(longer).toMatchObject({ slug: 'use-new-api', text: 'Switch to it now?' });
+    const ledger = questionLedger([{ type: 'reply', id: 'r1', kind: 'reply', opening: '1. `use-the-new-api` — Switch to it now?\n   - A) Yes\n   - B) No', rewrittenBy: null, withdrawn: false, at: 1 }, { type: 'message', id: 'm1', text: 'x', withdrawn: false, delivery: 'sent', at: 2, answers: [{ replyId: 'r1', slug: 'use-new-api', letters: ['A'], other: '', via: 'card' }] }], { since: 0 });
+    expect(ledger.cards.get('reply:r1')!.questions[0]!.state).toBe('answered');
+  });
+
+  it('keeps the derived id when a topic follows the backticked lead', () => {
+    expect(parseQuestions('1. `use-the-new-api` — **API choice.** Switch to it now?\n   - A) Yes\n   - B) No')[0]).toMatchObject({ slug: 'use-new-api', topic: 'API choice', text: 'Switch to it now?' });
+  });
+
+  it('takes the backticked slug off the question lines the views show, leaving other prose alone', () => {
+    const once = stripQuestionMarkup('1. `package-lock` — keep this file.\n2. `old-name` — rename it? {#rename-choice}\n   - A) Rename\n   - B) Keep');
+
+    expect(once).toBe('1. `package-lock` — keep this file.\n2. rename it?\n   - A) Rename\n   - B) Keep');
+    expect(stripQuestionMarkup(once)).toBe(once);
+    expect(stripQuestionMarkup("Intro `not-a-q` — prose.\n\nShould it?\n`row-actions-terminal` — The dock.\n- A) x\n- B) y")).toBe("Intro `not-a-q` — prose.\n\nShould it?\nThe dock.\n- A) x\n- B) y");
+    expect(stripQuestionMarkup('1. **`port-choice`:** Which port?\n   - A) 1\n   - B) 2')).toBe('1. Which port?\n   - A) 1\n   - B) 2');
+  });
+
+  it('keeps a backticked lead that is not a slug as question text, and a {#slug} the line ends with as the id', () => {
+    expect(parseQuestions('1. `npm ci` — run it now?\n   - A) Yes, now\n   - B) Later')[0]).toMatchObject({ written: false, text: '`npm ci` — run it now?' });
+    expect(parseQuestions('1. `old-name` — rename it? {#rename-choice}\n   - A) Rename\n   - B) Keep')[0]).toMatchObject({ slug: 'rename-choice', written: true, text: 'rename it?' });
+  });
+
+  it('reads "(recommended): " as the end of an option\'s label and the start of its description', () => {
+    const [option] = parseQuestions('1. Which? {#which-one}\n   - A) Start right away; remember the choice (recommended): what you type is answered at once\n   - B) Ask first')[0]!.options;
+
+    expect(option).toMatchObject({ label: 'Start right away; remember the choice', description: 'what you type is answered at once', recommended: true });
+    expect(parseQuestions('1. Which? {#which-one}\n   - A) **Start now (recommended):** begin today\n   - B) Later')[0]!.options[0]).toMatchObject({ label: 'Start now', description: 'begin today', recommended: true });
+  });
+});
+
+describe('the short forms the answered rows and the Answers bubble show', () => {
+  const [topic, asks, plainText] = parseQuestions(['1. **Port.** Which port? {#port-choice}', '   - A) 8765', '   - B) 8799', '2. Today it registers at once. Register after the check instead? {#register-later}', '   - A) Yes', '   - B) No', '3. The page has no menu. {#page-menu}', '   - A) Add one', '   - B) Leave it'].join('\n'));
+
+  it('names a question by its topic, else its asking sentence, else its whole text', () => {
+    expect(questionBrief(topic!)).toBe('Port');
+    expect(questionBrief(asks!)).toBe('Register after the check instead?');
+    expect(questionBrief(plainText!)).toBe('The page has no menu.');
+  });
+
+  it('gives the chosen labels without letters or Markdown, then Other, or the dismissal', () => {
+    const [question] = parseQuestions('1. Which? {#which-one}\n   - A) **Start now**\n   - B) Ask first\n   - C) Never');
+
+    expect(answerBrief(question!, ['A', 'C'], '  my  own ')).toBe('Start now; Never; Other: my own');
+    expect(answerBrief(question!, [], '', true)).toBe('No answer (dismissed)');
   });
 });

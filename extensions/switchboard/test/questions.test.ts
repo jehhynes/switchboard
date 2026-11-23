@@ -89,8 +89,10 @@ describe('question cards in the Conversation view', () => {
       expect(option('A').getAttribute('aria-checked')).toBe('true');
       // Taken, the message settles the questions.
       show(state([reply('r1', T0, NEW), message('m1', T0 + 1, '[answers]\n- port-choice: Which port? → B) 8799\n- keep-route: Keep the old route? → A) Keep it', { answers: [{ replyId: 'r1', slug: 'port-choice', letters: ['B'], other: '', via: 'card' }, { replyId: 'r1', slug: 'keep-route', letters: ['A'], other: '', via: 'card' }] })], { questions: { ...QUESTIONS, open: 0, oldest: null } }));
-      expect(card()!.querySelector('.qc-done')?.textContent).toBe('All 2 questions answered · Your answer');
-      expect([...card()!.querySelectorAll('.qc-row-detail')].map((one) => one.textContent)).toEqual(['→ B) 8799', '→ A) Keep it']);
+      expect(card()!.querySelector('.qc-done .qc-progress')?.textContent).toBe('All 2 questions answered');
+      expect(card()!.querySelector('.qc-done [data-action="goto-message"]')?.textContent).toBe('Your answer');
+      expect(card()!.querySelectorAll('.qc-row')).toHaveLength(0);
+      expect([...document.querySelectorAll('.answers-line')].map((one) => one.textContent)).toEqual(['Port: 8799', 'Keep the old route? Keep it']);
     } finally {
       vi.useRealTimers();
     }
@@ -141,7 +143,7 @@ describe('question cards in the Conversation view', () => {
     show(state([reply('r1', T0, NEW), message('m1', T0 + 1, 'Hold off for now.')], { questions: QUESTIONS }));
     expect(card()!.querySelector('.qc-option')).not.toBeNull();
     show(state([reply('r1', T0, NEW), reply('r2', T0 + 1, 'Ok.\n[withdraw: port-choice — settled]'), reply('r3', T0 + 2, '1. Keep it? {#keep-route}\n   - A) Yes\n   - B) No')], { questions: QUESTIONS }));
-    expect([...card()!.querySelectorAll('.qc-pill')].map((one) => one.textContent)).toEqual(['Withdrawn', 'Replaced']);
+    expect([...card()!.querySelectorAll('.qc-state')].map((one) => one.getAttribute('title'))).toEqual(['Withdrawn', 'Replaced']);
     expect(card()!.querySelector('.qc-row-detail')?.textContent).toBe('Withdrawn by the session: "settled"');
   });
 
@@ -149,9 +151,10 @@ describe('question cards in the Conversation view', () => {
     const { show, card } = page();
 
     show(state([reply('r1', T0, ASKED), message('m1', T0 + 1, '1A, 2B')]));
-    expect([...card()!.querySelectorAll('.qc-row-detail')].map((one) => one.textContent)).toEqual(['→ A) 8765', '→ B) No, remove it']);
+    expect(card()!.querySelectorAll('.qc-row')).toHaveLength(0);
+    expect([...document.querySelectorAll('.answer-ref-answer')].map((one) => one.textContent)).toEqual(['→ 8765', '→ No, remove it']);
     show(state([reply('r1', T0, ASKED), message('m1', T0 + 1, 'Later.')]));
-    expect(card()!.querySelector('.qc-pill')?.textContent).toBe('Skipped');
+    expect(card()!.querySelector('.qc-state')?.getAttribute('title')).toBe('Skipped');
   });
 
   it('returns an answer message that was not sent to its card, not the composer', () => {
