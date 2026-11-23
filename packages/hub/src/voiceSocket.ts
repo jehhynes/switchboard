@@ -46,8 +46,8 @@ export interface VoiceSocketDeps {
   /** How long a silent socket stays open; {@link VOICE_IDLE_MS} when left out. */
   idleMs?: number;
   log(line: string): void;
-  /** The device's page said `hello`: it has the voice socket. */
-  opened?(device: VoiceDevice): void;
+  /** The device's page said `hello`: it has the voice socket; `resumed` when it asked to take the voice back. */
+  opened?(device: VoiceDevice, resumed: boolean): void;
   /** Why the device's page may not take the voice back after a hub restart, as its `hello {resume: true}` asks; null when it may. */
   resumable?(device: VoiceDevice): string | null;
   /** A JSON message from the page after `hello` other than `ping`. */
@@ -242,7 +242,7 @@ export class VoiceSockets {
       previous.socket.close(VOICE_CLOSE.moved, 'Voice is now on another device.');
     }
 
-    this.deps.opened?.(one.device);
+    this.deps.opened?.(one.device, resume);
   }
 
   /** The device whose page holds the voice socket, or null. */

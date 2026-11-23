@@ -571,7 +571,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   const voiceSockets = new VoiceSockets({
     now: deps.now,
     log: (line) => deps.log(line),
-    opened: (device) => voice.phoneOpened(device.key, device.hash),
+    opened: (device, resumed) => voice.phoneOpened(device.key, device.hash, resumed),
     resumable: (device) => voice.resumable(device.hash),
     closed: (_device, reason, refused) => voice.phoneClosed(reason, refused),
     message: (_device, data) => voice.phoneMessage(data),

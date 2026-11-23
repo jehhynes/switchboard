@@ -223,6 +223,55 @@ describe('VoiceControl with the voice on a phone (PRD R119)', () => {
     expect(control.device).toBe('phone');
   });
 
+  it("keeps the voice on a phone whose connection dropped, for the same sign-in to take back without a tap, and turns it off when it does not come back", async () => {
+    const { control, sentOf, logs, advance } = setup();
+
+    control.update();
+    await settle();
+    control.phoneOpened('phone', 'hash-1');
+    expect(control.mic('phone', true)).toBeNull();
+
+    const devices = sentOf('device').length;
+    const mics = sentOf('mic').length;
+
+    // A cellular blip, or the page's stream lost: the socket closes as going away, not refused.
+    control.phoneClosed('The page that opened the voice closed.');
+    expect([control.device, control.phoneLost]).toEqual(['phone', false]);
+    expect(logs.at(-1)).toBe(`voice: device phone: the phone's connection dropped (The page that opened the voice closed.); waiting up to ${PHONE_RESUME_MS / 1000} seconds for it to take the voice back`);
+    expect(control.resumable('hash-1')).toBeNull();
+    expect(control.resumable('hash-2')).toBe(NOT_RESUMED);
+    expect(control.restartBlocker()).toBe('the phone has not taken the voice back yet');
+
+    // Back on a new page key from the same sign-in: nothing moved, the mic stays on.
+    control.phoneOpened('tablet', 'hash-1', true);
+    expect(control.device).toBe('phone');
+    expect(sentOf('device')).toHaveLength(devices);
+    expect(sentOf('mic')).toHaveLength(mics);
+    expect(control.restartBlocker()).toBeNull();
+
+    // A new socket that comes before this hub saw the old one close takes it back the same way.
+    control.phoneOpened('phone', 'hash-1', true);
+    expect(sentOf('device')).toHaveLength(devices);
+    expect(sentOf('mic')).toHaveLength(mics);
+
+    // Dropped again, and not back in time: off, and lost.
+    control.phoneClosed('The page stopped answering.');
+    advance(PHONE_RESUME_MS - 1);
+    expect(control.device).toBe('phone');
+    advance(1);
+    expect([control.device, control.phoneLost]).toEqual(['none', true]);
+    expect(control.resumable('hash-1')).toBe(NOT_RESUMED);
+
+    // A refusal or the page's own Voice off never waits.
+    control.phoneOpened('phone', 'hash-1');
+    control.phoneClosed('This device was signed out.', true);
+    expect(control.device).toBe('none');
+    control.phoneOpened('phone', 'hash-1');
+    control.phoneMessage({ type: 'leave' });
+    control.phoneClosed('closed by the page');
+    expect([control.device, control.phoneLost]).toEqual(['none', false]);
+  });
+
   it('counts the phone lost only when the operator did not choose its leaving, and carries that over a hub restart', async () => {
     const { control, connections, logs } = setup();
 
@@ -664,7 +713,7 @@ describe('VoiceControl across a hub restart with the voice on a phone (architect
     expect(next.sentOf('mic')).toEqual([{ type: 'mic', on: true, restore: true }]);
     expect(next.control.target).toBe('s2');
     expect(next.control.view('pc').deviceOff).toBeUndefined();
-    expect(next.control.restartBlocker()).toBe('the phone has not taken the voice back since the last restart');
+    expect(next.control.restartBlocker()).toBe('the phone has not taken the voice back yet');
     expect(next.control.resumable('hash-2')).toBe(NOT_RESUMED);
     expect(next.control.resumable('hash-1')).toBeNull();
 
@@ -676,7 +725,7 @@ describe('VoiceControl across a hub restart with the voice on a phone (architect
     next.windows.set('phone-2', scope('phone-2', 2, 's2'));
     next.focusedPages.add('phone-2');
     next.control.phoneOpened('phone-2', 'hash-1');
-    expect(next.logs).toContain('voice: device phone: the phone took the voice back after the hub restart');
+    expect(next.logs).toContain('voice: device phone: the phone took the voice back');
     expect(next.toPhone).toEqual([{ type: 'capture', on: true }]);
     expect(next.sentOf('device')).toHaveLength(1);
     expect(next.sentOf('mic')).toHaveLength(1);
@@ -690,10 +739,11 @@ describe('VoiceControl across a hub restart with the voice on a phone (architect
     next.control.phoneAudio('phone-2', Buffer.from([PHONE_MIC_FRAME, 1, 0]));
     expect(next.sentOf('phone-mic')).toHaveLength(1);
 
-    // The wait is over: its end changes nothing.
+    // The wait is over: its end changes nothing. The phone that holds the voice may take it back again, as after a dropped connection; no other.
     next.advance(PHONE_RESUME_MS);
     expect(next.control.device).toBe('phone');
-    expect(next.control.resumable('hash-1')).toBe(NOT_RESUMED);
+    expect(next.control.resumable('hash-1')).toBeNull();
+    expect(next.control.resumable('hash-2')).toBe(NOT_RESUMED);
   });
 
   it('keeps the target while the phone is back before its page shows a conversation, and offers the replies that came while the hubs changed over', async () => {
@@ -738,7 +788,7 @@ describe('VoiceControl across a hub restart with the voice on a phone (architect
     expect(next.control.device).toBe('phone');
     next.advance(1);
     expect(next.control.device).toBe('none');
-    expect(next.logs).toContain(`voice: device none: the phone did not take the voice back within ${PHONE_RESUME_MS / 1000} seconds of the hub restart`);
+    expect(next.logs).toContain(`voice: device none: the phone did not take the voice back within ${PHONE_RESUME_MS / 1000} seconds`);
     expect(next.sentOf('device').map((one) => one.device)).toEqual(['phone', 'none']);
     expect(next.control.view('pc-2')).toMatchObject({ here: true, deviceOff: true });
     expect(next.control.micLive).toBe(false);

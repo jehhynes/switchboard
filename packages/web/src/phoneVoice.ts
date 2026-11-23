@@ -83,6 +83,15 @@ const RESTARTING = 4002;
  * hub that takes over waits 30 s for it (architecture.md § Hub lifecycle).
  */
 export const RESUME_MS = 45_000;
+/** How soon a voice socket that could not take the voice back is opened again, while the wait lasts. */
+export const RECONNECT_RETRY_MS = 2_000;
+/** How long a voice socket may take to be welcomed, a tap's or one that asks to take the voice back. */
+export const RESUME_WELCOME_MS = 10_000;
+/** Close codes of a connection that dropped rather than one the hub or the page ended: going away, none given, abnormal, and the server's own failures. */
+const DROPPED = new Set([1001, 1005, 1006, 1011, 1012, 1013, 1014]);
+/** Why the voice left this phone when it did not come back in time. */
+const RESTART_LOST = 'Voice did not resume after Switchboard restarted. Select Voice on this device to start it here.';
+const DROP_LOST = 'Voice did not come back after the connection dropped. Select Voice on this device to start it here.';
 
 export interface PhoneVoiceDeps {
   /** The page key the hub gave this page's stream, or null before its `hello`. */
@@ -154,6 +163,10 @@ export class PhoneVoice {
   #preloaded = false;
   /** After the hub closed the socket to restart: the page key the closed socket named, and the timer that gives up taking the voice back. */
   #resuming: { from: string; timer: unknown } | null = null;
+  /** When the voice socket last brought anything. */
+  #heardAt = 0;
+  /** The page key the voice socket was opened with. */
+  #socketKey: string | null = null;
 
   constructor(private readonly deps: PhoneVoiceDeps) {
     const onVisibility = deps.onVisibility ?? ((changed: () => void) => document.addEventListener('visibilitychange', changed));
@@ -406,15 +419,30 @@ export class PhoneVoice {
   keyChanged(): void {
     const key = this.deps.key();
 
-    if (this.#resuming === null || this.#socket !== null || key === null || key === this.#resuming.from) {
+    if (this.#resuming === null || key === null || key === this.#resuming.from) {
       return;
+    }
+
+    // A resume still opening on an older key, which may never connect, gives way to one on the new key.
+    if (this.#socket !== null) {
+      if (this.#socketKey === key) {
+        return;
+      }
+
+      const stale = this.#socket;
+
+      this.#socket = null;
+      stale.close(1000);
     }
 
     this.#connect(this.deps.origin?.() ?? location.origin, key, true);
   }
 
-  /** The hub closed the socket to restart: the audio, the microphone and the welcome a Mic on waits for stay, until the voice comes back or {@link RESUME_MS} passes. */
-  #suspend(key: string): void {
+  /**
+   * The hub closed the socket to restart, or the connection dropped: the audio, the microphone and the welcome a Mic on waits for stay, until the
+   * voice comes back or {@link RESUME_MS} passes, saying `lost` then.
+   */
+  #suspend(key: string, lost: string): void {
     this.#capturing = false;
 
     if (this.#ping !== null) {
@@ -429,10 +457,22 @@ export class PhoneVoice {
     this.#quiet = false;
     this.#resuming = {
       from: key,
-      timer: (this.deps.setTimer ?? ((run, ms) => setTimeout(run, ms)))(() => this.#lose('Voice did not resume after Switchboard restarted. Select Voice on this device to start it here.'), RESUME_MS),
+      timer: (this.deps.setTimer ?? ((run, ms) => setTimeout(run, ms)))(() => this.#lose(lost), RESUME_MS),
     };
     this.deps.changed();
     this.keyChanged();
+    this.#retryResume();
+  }
+
+  /** Opens the socket again with the page's key as it is then, while the voice waits to come back and no socket is open; a new key opens it at once (`keyChanged`). */
+  #retryResume(): void {
+    (this.deps.setTimer ?? ((run, ms) => setTimeout(run, ms)))(() => {
+      const key = this.deps.key();
+
+      if (this.#resuming !== null && this.#socket === null && key !== null) {
+        this.#connect(this.deps.origin?.() ?? location.origin, key, true);
+      }
+    }, RECONNECT_RETRY_MS);
   }
 
   #clearResuming(): void {
@@ -450,7 +490,24 @@ export class PhoneVoice {
 
     this.#run++;
     this.#socket = socket;
+    this.#socketKey = key;
     this.state = 'connecting';
+
+    // A socket that neither connects nor is welcomed in time, as on a connection still down, is given up: a resume is tried again, a tap's
+    // start fails with why.
+    (this.deps.setTimer ?? ((run, ms) => setTimeout(run, ms)))(() => {
+      if (this.#socket !== socket || this.state === 'on') {
+        return;
+      }
+
+      if (resume) {
+        this.#socket = null;
+        socket.close(1000);
+        this.#retryResume();
+      } else {
+        this.#lose('Voice did not start. Try again.');
+      }
+    }, RESUME_WELCOME_MS);
     this.error = null;
     this.#quiet = false;
     this.#best = Infinity;
@@ -461,6 +518,8 @@ export class PhoneVoice {
       if (this.#socket !== socket) {
         return;
       }
+
+      this.#heardAt = this.deps.now();
 
       if (event.data instanceof ArrayBuffer) {
         this.#binary(event.data);
@@ -490,7 +549,7 @@ export class PhoneVoice {
         this.#welcomedAt = this.deps.now();
         this.#clearResuming();
         this.state = 'on';
-        this.#pings(socket);
+        this.#pings(socket, key);
         this.#welcome?.resolve(true);
         this.#busySent = true;
         this.#sendBusy();
@@ -511,9 +570,18 @@ export class PhoneVoice {
         return;
       }
 
-      // The hub restarts: the voice comes back to this phone from the hub that takes over, with nothing to tap.
-      if (event.code === RESTARTING && welcomed) {
-        this.#suspend(key);
+      // The hub restarts, or the connection dropped, as on a cellular blip or with the page's stream: the voice comes back to this phone with
+      // nothing to tap (architecture.md § Remote access).
+      if (welcomed && (event.code === RESTARTING || DROPPED.has(event.code))) {
+        this.#suspend(key, event.code === RESTARTING ? RESTART_LOST : DROP_LOST);
+        return;
+      }
+
+      // Taking the voice back did not get through, as with the connection still down: tried again while the wait lasts; a refusal says why.
+      if (!welcomed && this.#resuming !== null && DROPPED.has(event.code)) {
+        this.#socket = null;
+        this.deps.changed();
+        this.#retryResume();
         return;
       }
 
@@ -791,8 +859,18 @@ export class PhoneVoice {
     this.#play({ type: 'pcm', id: view.getUint32(1, true), samples }, [samples.buffer]);
   }
 
-  #pings(socket: WebSocket): void {
-    const ping = (): void => socket.send(JSON.stringify({ type: 'ping', t: this.deps.now() }));
+  /** Pings every {@link PING_MS}; a socket that brought nothing, not even a pong, for three pings is taken for dropped and the voice comes back as for any drop. */
+  #pings(socket: WebSocket, key: string): void {
+    const ping = (): void => {
+      if (this.#socket === socket && this.deps.now() - this.#heardAt > PING_MS * 3) {
+        this.#socket = null;
+        socket.close(1000);
+        this.#suspend(key, DROP_LOST);
+        return;
+      }
+
+      socket.send(JSON.stringify({ type: 'ping', t: this.deps.now() }));
+    };
 
     ping();
     this.#ping = setInterval(ping, PING_MS);

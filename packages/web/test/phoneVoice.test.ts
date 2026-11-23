@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { HIDDEN_MS, MIC_CONSTRAINTS, MIC_FRAME, PING_MS, PhoneVoice, RECOVER_MS, RESUME_MS, RESUME_RETRY_MS } from '../src/phoneVoice.js';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { HIDDEN_MS, MIC_CONSTRAINTS, MIC_FRAME, PING_MS, PhoneVoice, RECONNECT_RETRY_MS, RECOVER_MS, RESUME_WELCOME_MS, RESUME_MS, RESUME_RETRY_MS } from '../src/phoneVoice.js';
 import type { PhoneAudioContext, PhoneAudioNode, PhoneCaptureNode, PhoneMicStream, PhoneMicTrack } from '../src/phoneVoice.js';
 import type { PlayCommand, PlayReport } from '../src/voiceWorklet.js';
 
@@ -308,9 +308,11 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
     voice.start();
     sockets[3]!.open();
     sockets[3]!.message({ type: 'welcome', at: 0 });
+    // A welcomed socket that drops is no loss yet: the page takes the voice back by itself (the drop tests below).
     sockets[3]!.closeFromHub(1006);
     await flush();
-    expect(voice.error).toBe('The voice connection closed.');
+    expect([voice.state, voice.error]).toEqual(['connecting', null]);
+    voice.stop();
 
     answer({ status: 0, body: {} });
     voice.start();
@@ -542,7 +544,8 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
       context: () => refusing,
       node: () => new FakeNode(),
       onVisibility: () => undefined,
-      setTimer: (run) => refusals.push(run),
+      // The welcome's own limit is not the audio's.
+      setTimer: (run, ms) => (ms === RESUME_WELCOME_MS ? 0 : refusals.push(run)),
       clearTimer: () => undefined,
       key: () => 'page-9',
       post: async () => ({ status: 200, body: {} }),
@@ -674,6 +677,101 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
       // The same audio and microphone throughout, and the wait's timer is gone.
       expect([contexts.length, tracks.length, captures.length]).toEqual([1, 1, 1]);
       expect(timers.filter((one) => one.ms === RESUME_MS).map((one) => one.cleared)).toEqual([true]);
+    });
+
+    it('keeps its audio and microphone when the connection drops, takes the voice back on the same key with no tap, and tries again until it gets through', async () => {
+      const { voice, sockets, tracks, contexts, timers } = setup();
+      const opened = voice.micOn();
+      const retries = () => timers.filter((one) => one.ms === RECONNECT_RETRY_MS && !one.cleared);
+      const runRetry = () => {
+        const timer = retries().at(-1)!;
+
+        timer.cleared = true;
+        timer.run();
+      };
+
+      sockets[0]!.open();
+      sockets[0]!.message({ type: 'welcome', at: 0 });
+      expect(await opened).toBeNull();
+      // A cellular blip: the socket closes abnormally, with no word.
+      sockets[0]!.closeFromHub(1006);
+      expect([voice.state, voice.error, voice.micOpen]).toEqual(['connecting', null, true]);
+      expect([contexts[0]!.closed, tracks[0]!.stopped]).toEqual([false, false]);
+
+      // Still down: the attempt fails without a welcome and is tried again.
+      runRetry();
+      expect(sockets).toHaveLength(2);
+      sockets[1]!.closeFromHub(1006);
+      expect(voice.state).toBe('connecting');
+      runRetry();
+      sockets[2]!.open();
+      expect(sockets[2]!.url).toMatch(/window=page-7$/);
+      expect(sockets[2]!.sent).toEqual([{ type: 'hello', resume: true }]);
+      sockets[2]!.message({ type: 'welcome', at: 0 });
+      expect([voice.state, voice.error, voice.micOpen]).toEqual(['on', null, true]);
+      expect([contexts.length, tracks.length]).toEqual([1, 1]);
+
+      // The page's stream dropped too: the hub closes the socket as going away, and not back within the wait, the voice leaves with why.
+      sockets[2]!.closeFromHub(1001, 'The page that opened the voice closed.');
+      expect(voice.state).toBe('connecting');
+      timers.filter((one) => one.ms === RESUME_MS && !one.cleared).at(-1)!.run();
+      expect([voice.state, voice.error, voice.micOpen]).toEqual(['off', 'Voice did not come back after the connection dropped. Select Voice on this device to start it here.', false]);
+      // Nothing is tried after that.
+      runRetry();
+      expect(sockets).toHaveLength(3);
+    });
+
+    it('gives up a resume that is not welcomed in time, and one still opening on an old key for the new key', async () => {
+      const { voice, sockets, timers, setKey } = setup();
+
+      voice.start();
+      sockets[0]!.open();
+      sockets[0]!.message({ type: 'welcome', at: 0 });
+      sockets[0]!.closeFromHub(1006);
+      timers.filter((one) => one.ms === RECONNECT_RETRY_MS && !one.cleared).at(-1)!.run();
+      expect(sockets).toHaveLength(2);
+      // Never connects: given up after the welcome's time, and tried again.
+      timers.filter((one) => one.ms === RESUME_WELCOME_MS && !one.cleared).at(-1)!.run();
+      expect(sockets[1]!.closedWith).toBe(1000);
+      timers.filter((one) => one.ms === RECONNECT_RETRY_MS && !one.cleared).at(-1)!.run();
+      expect(sockets).toHaveLength(3);
+      // The page's stream came back with a new key while that one still opens: the new key's socket replaces it.
+      setKey('page-8');
+      voice.keyChanged();
+      expect(sockets[2]!.closedWith).toBe(1000);
+      expect(sockets.at(-1)!.url).toMatch(/window=page-8$/);
+      sockets.at(-1)!.open();
+      sockets.at(-1)!.message({ type: 'welcome', at: 0 });
+      expect(voice.state).toBe('on');
+
+      // A tap's start that is never welcomed fails with why rather than wait for good.
+      voice.stop();
+      voice.start();
+      timers.filter((one) => one.ms === RESUME_WELCOME_MS && !one.cleared).at(-1)!.run();
+      expect([voice.state, voice.error]).toEqual(['off', 'Voice did not start. Try again.']);
+    });
+
+    it('takes a socket that brought nothing for three pings for dropped, as a half-open connection, and takes the voice back', async () => {
+      vi.useFakeTimers();
+      onTestFinished(() => void vi.useRealTimers());
+
+      const { voice, sockets, advance } = setup();
+
+      voice.start();
+      sockets[0]!.open();
+      sockets[0]!.message({ type: 'welcome', at: 0 });
+      // Pongs keep it: each answer counts.
+      advance(PING_MS);
+      vi.advanceTimersByTime(PING_MS);
+      sockets[0]!.message({ type: 'pong', t: 0, at: 0 });
+      advance(PING_MS * 3);
+      vi.advanceTimersByTime(PING_MS);
+      expect(voice.state).toBe('on');
+      // Nothing more arrives: the page gives the socket up and asks for the voice back on a new one.
+      advance(PING_MS);
+      vi.advanceTimersByTime(PING_MS);
+      expect(voice.state).toBe('connecting');
+      expect(sockets[0]!.closedWith).toBe(1000);
     });
 
     it('lets go of the audio and microphone when the voice does not come back in time, the hub refuses it, or the voice is turned off meanwhile', async () => {

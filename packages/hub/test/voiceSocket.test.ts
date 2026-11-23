@@ -181,7 +181,7 @@ describe('the voice socket on the page origin', () => {
       now: () => now,
       idleMs: 1_000,
       log: () => undefined,
-      opened: (device) => events.push(`opened ${device.key}`),
+      opened: (device, resumed) => events.push(`opened ${device.key}${resumed ? ' resumed' : ''}`),
       resumable: (device) => (events.push(`resumable ${device.key}`), resumeRefused),
       closed: (device, reason, refused) => events.push(`closed ${device.key}: ${reason}${refused ? ' (refused)' : ''}`),
       audio: (_device, data) => audio.push(data),
@@ -416,7 +416,7 @@ describe('the voice socket on the page origin', () => {
     expect(await resumed.status).toBe(101);
     resumed.send({ type: 'hello', resume: true });
     expect(await resumed.next()).toEqual({ type: 'welcome', at: now });
-    expect(events).toEqual([`resumable ${phonePage.key}`, `resumable ${phonePage.key}`, `opened ${phonePage.key}`]);
+    expect(events).toEqual([`resumable ${phonePage.key}`, `resumable ${phonePage.key}`, `opened ${phonePage.key} resumed`]);
 
     // A plain hello is a tap, which never asks.
     events.length = 0;

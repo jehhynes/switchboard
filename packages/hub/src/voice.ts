@@ -485,17 +485,19 @@ export class VoiceControl {
    * A paired phone's page took the voice with its tap (PRD R119): the voice moves to its speaker, and to the conversation it shows, as Talk
    * here there would move it.
    */
-  phoneOpened(key: string, hash: string | null = null): void {
+  phoneOpened(key: string, hash: string | null = null, resumed = false): void {
     this.#phoneLeaving = false;
     this.#phoneHidden = false;
     this.#phoneStalled = false;
 
-    // After a hub restart the phone that had the voice takes it back as it was, its mic and capture too, with nothing played or heard
-    // elsewhere meanwhile (architecture.md § Hub lifecycle).
-    if (this.#resume !== null && hash !== null && hash === this.#resume.hash && this.#device === 'phone') {
+    // After a hub restart or a dropped connection the phone that had the voice takes it back as it was, its mic and capture too, with nothing
+    // played or heard elsewhere meanwhile (architecture.md § Hub lifecycle, § Remote access); also one whose new socket came before this hub saw
+    // the old one close.
+    if (this.#device === 'phone' && hash !== null && (this.#resume?.hash === hash || (resumed && this.#phoneHash === hash))) {
       this.#endResume();
       this.#phoneKey = key;
-      this.deps.log('voice: device phone: the phone took the voice back after the hub restart');
+      this.#phoneHash = hash;
+      this.deps.log('voice: device phone: the phone took the voice back');
 
       if (this.#phoneCapture) {
         this.deps.phone?.send({ type: 'capture', on: true });
@@ -538,7 +540,7 @@ export class VoiceControl {
    * for it (`PHONE_RESUME_MS`). Why not, or null.
    */
   resumable(hash: string): string | null {
-    return !this.#closed && this.#resume !== null && this.#resume.hash === hash ? null : NOT_RESUMED;
+    return !this.#closed && this.#device === 'phone' && (this.#resume?.hash ?? this.#phoneHash) === hash ? null : NOT_RESUMED;
   }
 
   /**
@@ -626,7 +628,7 @@ export class VoiceControl {
     this.#resume = null;
     this.#phoneHash = null;
     this.#carried = null;
-    this.#setDevice('none', `the phone did not take the voice back within ${PHONE_RESUME_MS / 1000} seconds of the hub restart`, true);
+    this.#setDevice('none', `the phone did not take the voice back within ${PHONE_RESUME_MS / 1000} seconds`, true);
     this.update();
     this.#offerHeld();
   }
@@ -685,6 +687,18 @@ export class VoiceControl {
     }
 
     const lost = !this.#phoneLeaving && !this.#phoneHidden && (this.#phoneStalled || !refused);
+
+    // A dropped connection, as a cellular blip or the page's stream lost, rather than the operator's choice, a refusal or a stalled phone: the
+    // phone may take the voice back without a tap for PHONE_RESUME_MS, as after a hub restart, and nothing plays elsewhere meanwhile.
+    if (lost && !refused && !this.#phoneStalled && this.#phoneHash !== null && this.#resume === null) {
+      this.#phoneKey = null;
+      this.#resume = { hash: this.#phoneHash, timer: this.#timer(() => this.#resumeEnded(), PHONE_RESUME_MS) };
+      this.deps.log(`voice: device phone: the phone's connection dropped (${reason}); waiting up to ${PHONE_RESUME_MS / 1000} seconds for it to take the voice back`);
+      this.viewsChanged();
+      this.deps.dockChanged();
+      this.update();
+      return;
+    }
 
     this.#phoneKey = null;
     this.#phoneHash = null;
@@ -1924,7 +1938,7 @@ export class VoiceControl {
 
   /**
    * Why a hub restart waits (architecture.md § Hub lifecycle): a reply offered or playing, an enrolment, the operator being heard, or a phone that
-   * has not taken the voice back since the last restart; null when the voice lets it go ahead.
+   * has not taken the voice back yet, after a restart or a dropped connection; null when the voice lets it go ahead.
    */
   restartBlocker(): string | null {
     // Replies held for the phone count, as its wait is short; ones held for a voice process that does not connect are handed over instead.
@@ -1940,7 +1954,7 @@ export class VoiceControl {
       return 'the voice is hearing the operator';
     }
 
-    return this.#resume === null ? null : 'the phone has not taken the voice back since the last restart';
+    return this.#resume === null ? null : 'the phone has not taken the voice back yet';
   }
 
   close(): void {
@@ -2166,8 +2180,8 @@ export class VoiceControl {
 
         return;
       case 'phone-stalled':
-        // The phone stopped playing while its socket stayed open: the voice leaves it, as when it is lost.
-        if (this.#device === 'phone') {
+        // The phone stopped playing while its socket stayed open: the voice leaves it, as when it is lost; one whose socket dropped has none.
+        if (this.#device === 'phone' && this.#resume === null) {
           this.deps.log(`voice: the phone stopped playing: ${message.reason}`);
           this.#phoneStalled = true;
           this.deps.phone?.close(message.reason);
