@@ -9,7 +9,7 @@ import { unzip } from './zip.js';
 function built(): string {
   const dir = mkdtempSync(join(tmpdir(), 'sb-chrome-dist-'));
 
-  writeFileSync(join(dir, 'manifest.json'), JSON.stringify({ manifest_version: 3, name: 'Switchboard', host_permissions: ['http://127.0.0.1:47615/*'] }));
+  writeFileSync(join(dir, 'manifest.json'), JSON.stringify({ manifest_version: 3, name: 'Switchboard', host_permissions: ['http://127.0.0.1:47615/*'], externally_connectable: { matches: ['http://127.0.0.1/*', 'http://localhost/*'] } }));
   writeFileSync(join(dir, 'background.js'), 'console.log(1);');
   mkdirSync(join(dir, 'icons'));
   writeFileSync(join(dir, 'icons', 'icon-16.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 1, 2, 255]));
@@ -85,9 +85,15 @@ describe('the browser extension download (PRD R121)', () => {
 
     expect([...files.keys()]).toEqual(['switchboard-extension/background.js', 'switchboard-extension/icons/icon-16.png', 'switchboard-extension/manifest.json', 'switchboard-extension/remote.json']);
     expect(JSON.parse(files.get('switchboard-extension/remote.json')!.toString('utf8'))).toEqual({ origin: 'https://pc.tail.ts.net' });
-    expect(JSON.parse(files.get('switchboard-extension/manifest.json')!.toString('utf8')).host_permissions).toEqual(['http://127.0.0.1:47615/*', 'https://pc.tail.ts.net/*']);
+    const manifest = JSON.parse(files.get('switchboard-extension/manifest.json')!.toString('utf8'));
+
+    expect(manifest.host_permissions).toEqual(['http://127.0.0.1:47615/*', 'https://pc.tail.ts.net/*']);
+    // The page there may message the copy, which opens its links in the tab group.
+    expect(manifest.externally_connectable).toEqual({ matches: ['http://127.0.0.1/*', 'http://localhost/*', 'https://pc.tail.ts.net/*'] });
     // The installed build is unchanged.
-    expect(JSON.parse(readFileSync(join(web, 'chrome', 'manifest.json'), 'utf8')).host_permissions).toEqual(['http://127.0.0.1:47615/*']);
+    const installed = JSON.parse(readFileSync(join(web, 'chrome', 'manifest.json'), 'utf8'));
+
+    expect([installed.host_permissions, installed.externally_connectable.matches]).toEqual([['http://127.0.0.1:47615/*'], ['http://127.0.0.1/*', 'http://localhost/*']]);
   });
 
   it('writes an empty file and a name outside ASCII', () => {

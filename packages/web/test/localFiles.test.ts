@@ -3,7 +3,7 @@ import { joinPath, linkTarget, localFileUrl, localMarkdown } from '../src/localL
 import type { LocalFileData } from '../src/localLinks.js';
 import { renderMarkdown } from '../src/markdown.js';
 import type { DiffModule } from '../src/diff/types.js';
-import { startPage } from '../src/main.js';
+import { LINK_ANSWER_MS, startPage } from '../src/main.js';
 import { drawAtOnce } from './frame.js';
 
 class FakeSource {
@@ -119,7 +119,7 @@ describe('web links with the Chrome pane', () => {
   });
 
   const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
-  const start = (options: { installed: boolean; paneOpen?: number; width?: number; local?: boolean; error?: string }) => {
+  const start = (options: { installed: boolean; paneOpen?: number; width?: number; local?: boolean; error?: string; toExtension?: (id: string, message: Record<string, unknown>) => Promise<unknown> }) => {
     const posts: Array<{ url: string; body: Record<string, unknown> }> = [];
     const opened: string[] = [];
     const fetch = vi.fn(async (url: string, init?: { body?: string }) => {
@@ -129,7 +129,7 @@ describe('web links with the Chrome pane', () => {
 
       return { status, ok: status === 200, json: async () => (status === 200 ? {} : { error: 'The Chrome pane is not connected.' }) } as unknown as Response;
     });
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, standalone: () => options.installed, local: options.local ?? true, openUrl: (url) => opened.push(url), toExtension: async () => ({ ok: true }) });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, standalone: () => options.installed, local: options.local ?? true, openUrl: (url) => opened.push(url), toExtension: options.toExtension ?? (async () => ({ ok: true })) });
     const source = FakeSource.last!;
     const scope = { kind: 'page', key: 'pk', folder: 'D:/w', title: 'Fix it', scopeGen: 3, conversations: [{ workItemId: 1, title: 'Fix it', primary: true, sessionId: 's', state: 'idle', conversation: 'full', unread: 0 }], workItemId: 1, cwd: 'D:/w', sessionId: 's' };
     const session = { id: 's', title: 'Task', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, persona: null };
@@ -194,6 +194,61 @@ describe('web links with the Chrome pane', () => {
     expect(clickLink().defaultPrevented).toBe(false);
     expect(remote.posts.filter((post) => post.url.endsWith('/pane-open'))).toEqual([]);
     expect(root.querySelector('[data-side="browser"]')).toBeNull();
+  });
+
+  /** An extension that keeps the page's links in its tab group, answering each open with `opened`, or the given answer. */
+  const groupingExtension = (answer: unknown = { opened: true }) => {
+    const sent: Array<[string, Record<string, unknown>]> = [];
+
+    return { sent, toExtension: async (id: string, message: Record<string, unknown>) => (sent.push([id, message]), message['type'] === 'links' ? { links: true } : message['type'] === 'open' ? answer : { ok: true }) };
+  };
+
+  it("opens a web link in the extension's tab group on a page on another device, when the extension answers", async () => {
+    const extension = groupingExtension();
+    const remote = start({ installed: true, local: false, toExtension: extension.toExtension });
+
+    await flush();
+    expect(clickLink().defaultPrevented).toBe(true);
+    await flush();
+    expect(extension.sent).toEqual([
+      ['hlbibnhgkgnjkbfledhgjblacloneije', { type: 'links' }],
+      ['hlbibnhgkgnjkbfledhgjblacloneije', { type: 'open', url: 'https://example.com/docs', until: 10_000 + LINK_ANSWER_MS - 500 }],
+    ]);
+    expect(remote.opened).toEqual([]);
+    expect(remote.posts.filter((post) => post.url.endsWith('/pane-open'))).toEqual([]);
+  });
+
+  it('opens the link in a new browser tab when the extension does not open it', async () => {
+    const extension = groupingExtension({ error: 'No window with id: 5.' });
+    const remote = start({ installed: false, local: false, toExtension: extension.toExtension });
+
+    await flush();
+    clickLink();
+    await flush();
+    expect(remote.opened).toEqual(['https://example.com/docs']);
+  });
+
+  it("keeps a working pane's link in the pane, not the extension's tab group", async () => {
+    const extension = groupingExtension();
+    const { posts, opened } = start({ installed: true, toExtension: extension.toExtension });
+
+    await flush();
+    expect(clickLink().defaultPrevented).toBe(true);
+    await flush();
+    expect(posts.filter((post) => post.url.endsWith('/pane-open')).map((post) => post.body['url'])).toEqual(['https://example.com/docs']);
+    expect(extension.sent.map(([, message]) => message['type'])).not.toContain('open');
+    expect(opened).toEqual([]);
+  });
+
+  it("opens a link in the extension's tab group on this computer while the pane has stopped", async () => {
+    const extension = groupingExtension();
+    const stopped = start({ installed: true, error: 'The pane would not fit the column.', toExtension: extension.toExtension });
+
+    await flush();
+    expect(clickLink().defaultPrevented).toBe(true);
+    await flush();
+    expect(extension.sent.at(-1)).toEqual(['hlbibnhgkgnjkbfledhgjblacloneije', { type: 'open', url: 'https://example.com/docs', until: 10_000 + LINK_ANSWER_MS - 500 }]);
+    expect(stopped.opened).toEqual([]);
   });
 
   it('leaves a web link to the browser while the pane has stopped', async () => {

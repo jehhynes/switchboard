@@ -22,10 +22,14 @@ declare namespace chrome.tabs {
     pendingUrl?: string;
   }
 
-  function query(query: { windowId: number }): Promise<Tab[]>;
+  function query(query: { windowId: number } | { groupId: number }): Promise<Tab[]>;
   function update(tabId: number, properties: { url: string } | { active: true }): Promise<Tab | undefined>;
   function create(properties: { windowId: number; url: string; active: boolean }): Promise<Tab>;
   function remove(tabId: number): Promise<void>;
+  function group(options: { tabIds: number; groupId?: number; createProperties?: { windowId: number } }): Promise<number>;
+
+  const onRemoved: { addListener(listener: (tabId: number) => void): void };
+  const onUpdated: { addListener(listener: (tabId: number, change: { groupId?: number }) => void): void };
 }
 
 declare namespace chrome.storage {
@@ -35,17 +39,32 @@ declare namespace chrome.storage {
     remove(key: string): Promise<void>;
   }
 
-  const session: StorageArea;
+  const session: import('./tabs.js').SessionStorage & StorageArea;
   const local: StorageArea;
 }
 
 declare namespace chrome.windows {
   interface Window {
     id?: number;
+    tabs?: chrome.tabs.Tab[];
   }
 
   function create(properties: { type: 'normal'; url: string; focused: boolean }): Promise<Window>;
   function get(windowId: number): Promise<Window>;
+  function getLastFocused(options: { windowTypes: ['normal'] }): Promise<Window>;
+  function update(windowId: number, properties: { focused: true }): Promise<Window>;
 
   const onRemoved: { addListener(listener: (windowId: number) => void): void };
+}
+
+declare namespace chrome.tabGroups {
+  interface TabGroup {
+    id: number;
+    windowId: number;
+    title?: string;
+  }
+
+  function get(groupId: number): Promise<TabGroup>;
+  function query(query: { title: string }): Promise<TabGroup[]>;
+  function update(groupId: number, properties: { title: string; color: 'cyan' }): Promise<TabGroup | undefined>;
 }

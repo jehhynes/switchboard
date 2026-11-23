@@ -4,7 +4,7 @@
   "version": "0.0.1",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAnlaazXl2SVFVi7xxMKVjejXSxazbAuBibNwEkZu3KHkWLHudOMxD36Qnt1n+VppB6vqU3HwqmbAJBcmljcUXZ6bfM+TQ3EohydpuVHDoDWA35NE93Q3J+dWT2WMpesa7WD7iAQr6DiDkCDDVMr6eMFI9aIcRscZ61Yjqprbb2On80C6LDg4aM+h7S+VJU8I1lnydJ2hLbPxUmIQufRZTdpbDohkpKUMpFQB71yLEmw3Wq5R+90zmZMStN+dLAx32ipMTWvma9WNpray6K2Q2voPqxeDqGX073gW+GB2Hnrdz3pccKwREt46An0JcphgHcTy6dx1DHIhgyNmtiRo3OwIDAQAB",
   "icons": { "16": "icon-16.png", "32": "icon-32.png", "48": "icon-48.png", "128": "icon-128.png" },
-  "description": "Shows Switchboard's playbooks on GitHub project boards, hides and snoozes cards, and in Chrome keeps the Chrome pane's window.",
+  "description": "Shows Switchboard's playbooks on GitHub project boards, hides and snoozes cards, and in Chrome keeps the Chrome pane's window and the web page's links in a Switchboard tab group.",
   "background": { "service_worker": "background.js" },
   "content_scripts": [
     {
@@ -16,6 +16,6 @@
   ],
   "web_accessible_resources": [{ "resources": ["codicon.ttf"], "matches": ["https://github.com/*"] }],
   "externally_connectable": { "matches": ["http://127.0.0.1/*", "http://localhost/*"] },
-  "permissions": ["storage", "tabs"],
+  "permissions": ["storage", "tabs", "tabGroups"],
   "host_permissions": ["http://127.0.0.1:47615/*"]
 }

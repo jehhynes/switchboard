@@ -18,10 +18,10 @@ describe('firefoxManifest', () => {
     expect(browser_specific_settings).toEqual({ gecko: { id: 'switchboard@switchboard', strict_min_version: '140.0', data_collection_permissions: { required: ['none'] } } });
     expect(rest).toEqual(chromeRest);
     expect([typeof key, externally_connectable]).toEqual(['string', { matches: ['http://127.0.0.1/*', 'http://localhost/*'] }]);
-    // Only the Chrome pane uses storage and tabs, so Firefox asks for no permission; one the pane does not use is kept.
-    expect(permissions).toEqual(['storage', 'tabs']);
+    // Only the Chrome pane and the tab group use storage, tabs and tabGroups, so Firefox asks for no permission; one they do not use is kept.
+    expect(permissions).toEqual(['storage', 'tabs', 'tabGroups']);
     expect('permissions' in rest).toBe(false);
-    expect(firefoxManifest({ ...chromeManifest, permissions: ['tabs', 'alarms', 'storage'] }, 1).permissions).toEqual(['alarms']);
+    expect(firefoxManifest({ ...chromeManifest, permissions: ['tabs', 'alarms', 'tabGroups', 'storage'] }, 1).permissions).toEqual(['alarms']);
   });
 
   it('refuses a manifest without a background service worker', () => {

@@ -1,5 +1,6 @@
 import { applyEvent, commandQuery, EMPTY, mentionOf, mentionQuery, pageTitle, rowLink, selectedRow, sentTexts, tabUrl, withEarlier } from './model.js';
 import { snoozeChoices } from '@switchboard/core/snooze';
+import { PANE_EXTENSION_ID } from '@switchboard/core/hubRecord';
 import type { PageState } from './model.js';
 import { MENU_MAX_WIDTH, placeMenus } from '@switchboard/conversation/menuPlace';
 import { escape, renderMarkdown, webLink } from './markdown.js';
@@ -97,6 +98,10 @@ const DRAWER_TICK_MS = 100;
 export const HISTORY_REFRESH_MS = 30_000;
 /** How long the Chrome pane stays hidden after the page's last floating layer closes, so a quick close and open does not flicker it. */
 export const PANE_SHOW_DELAY_MS = 100;
+/** How long the page waits for the browser extension to say it opened a link before opening a tab itself, within a click's activation. */
+export const LINK_ANSWER_MS = 2_000;
+/** How much sooner the extension stops starting a link the page asked for than the page stops waiting. */
+const LINK_MARGIN_MS = 500;
 const HISTORY_CHANGE_MS = 1_000;
 /** The mark on the history entry a phone's conversation adds over the list, so the browser's back returns to the list (architecture.md § Web page). */
 const CONVERSATION_ENTRY = 'switchboardConversation';
@@ -278,6 +283,45 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const browserTab = (): boolean => view.pane?.enabled === true && standalone() && paneLocal();
   /** Whether this page's browser pane is paired and running, so it shows the links and the list's pills are labels. */
   const paneWorks = (): boolean => browserTab() && view.pane?.extension === 'paired' && view.pane.error === null;
+  /** Opens a link in a new browser tab, through `deps.openUrl` when given. */
+  const openNewTab = (url: string): void => (deps.openUrl ?? ((one: string) => void window.open(one, '_blank', 'noopener,noreferrer')))(url);
+  /** Whether this browser's Switchboard extension answered that it opens the page's links in its Switchboard tab group (architecture.md § Browser extension). */
+  let extensionLinks = false;
+  /**
+   * Opens a web link in the extension's Switchboard tab group, one tab per kind, while the extension answers and no working Chrome pane shows
+   * the links; runs `otherwise` without the extension, with the pane working, or when the extension does not open it.
+   */
+  const openTab = (url: string, otherwise: () => void): void => {
+    if (!extensionLinks || paneWorks()) {
+      otherwise();
+      return;
+    }
+
+    // Chrome keeps a click's activation for about five seconds, so `otherwise` waits at most LINK_ANSWER_MS for the answer and can still open
+    // a tab. An extension that does not answer in time is not asked again until it answers the next `links` probe.
+    let settled = false;
+    const fallBack = (): void => {
+      if (!settled) {
+        settled = true;
+        otherwise();
+      }
+    };
+    const late = setTimeout(() => {
+      extensionLinks = false;
+      fallBack();
+    }, LINK_ANSWER_MS);
+
+    // The extension refuses a link whose turn comes after `until`, on the same computer's clock, so a slow open seldom lands beside the page's own tab.
+    void toExtension(PANE_EXTENSION_ID, { type: 'open', url, until: deps.now() + LINK_ANSWER_MS - LINK_MARGIN_MS }).then((answer) => {
+      clearTimeout(late);
+
+      if ((answer as { opened?: unknown } | null)?.opened === true) {
+        settled = true;
+      } else {
+        fallBack();
+      }
+    });
+  };
   /** The work item whose conversation's web links this page opened in the Chrome pane (`pane-open`), which then has links to show too. */
   let paneOpened: number | null = null;
   /** Whether the open work item has links the Chrome pane can show: its own, or a web link of its conversation opened there. */
@@ -482,7 +526,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     void post('pane-open', { url }).then((answer) => {
       if (answer.status !== 200) {
         paneOpened = null;
-        (deps.openUrl ?? ((one: string) => void window.open(one, '_blank', 'noopener,noreferrer')))(url);
+        openTab(url, () => openNewTab(url));
         draw();
       }
     });
@@ -3018,6 +3062,13 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       openInPane(web.href);
       return;
     }
+
+    // Without the pane, the extension's tab group takes it when the extension answers.
+    if (web !== null && webLink(web.getAttribute('href') ?? '') && extensionLinks && !paneWorks()) {
+      event.preventDefault();
+      openTab(web.href, () => openNewTab(web.href));
+      return;
+    }
     const sideTab = target.closest<HTMLElement>('[data-side]')?.dataset['side'];
 
     if (SIDE_TABS.includes(sideTab as SideTab)) {
@@ -3168,7 +3219,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         const target = tabUrl(button!.dataset['url'] ?? '');
 
         if (target !== null) {
-          (deps.openUrl ?? ((one: string) => void window.open(one, '_blank', 'noopener,noreferrer')))(target);
+          openTab(target, () => openNewTab(target));
         }
 
         break;
@@ -3819,9 +3870,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     view.copyMenu = false;
   };
   /**
-   * Opens a row's ticket or link, an http or https URL from the hub's row, in a new tab; the installed app on this computer asks the
-   * hub, which opens it in the default browser, since a link it opened itself would stay in the browser that installed it. A page on another
-   * device opens it in its own browser, as the hub's browser is on the computer.
+   * Opens a row's ticket or link, an http or https URL from the hub's row, in the extension's tab group when the extension answers and no Chrome
+   * pane works, else in a new tab; the installed app on this computer asks the hub, which opens it in the default browser, since a link it opened
+   * itself would stay in the browser that installed it. A page on another device opens it in its own browser, as the hub's browser is on the
+   * computer.
    */
   const openLink = (key: string, which: string): void => {
     const row = rowByKey(key);
@@ -3837,12 +3889,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
-    if (standalone() && paneLocal()) {
-      void post('row-open', { ...rowTarget(row), url }).then((answer) => answer.status === 200 || showError(String(answer.body['error'] ?? `The link did not open (status ${answer.status}).`)));
-      return;
-    }
+    openTab(target, () => {
+      if (standalone() && paneLocal()) {
+        void post('row-open', { ...rowTarget(row), url }).then((answer) => answer.status === 200 || showError(String(answer.body['error'] ?? `The link did not open (status ${answer.status}).`)));
+        return;
+      }
 
-    (deps.openUrl ?? ((one: string) => void window.open(one, '_blank', 'noopener,noreferrer')))(target);
+      openNewTab(target);
+    });
   };
   /**
    * A control of a row's menu, the header's for the open work item or a pool ticket's in the list: Snooze… opens its choices, one that asks first
@@ -4268,6 +4322,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
   };
   const paneWake = setInterval(wake, PANE_WAKE_MS);
+  /** Asks the extension whether it opens the page's links, at the start and whenever the page shows again, as the extension can be added or removed. */
+  const askLinks = (): void =>
+    void toExtension(PANE_EXTENSION_ID, { type: 'links' }).then((answer) => {
+      extensionLinks = (answer as { links?: unknown } | null)?.links === true;
+    });
+
+  askLinks();
+  document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && askLinks(), { signal: listening.signal });
   let paneWasOn = false;
   const paneChanged = (): void => {
     const on = view.pane?.enabled === true;

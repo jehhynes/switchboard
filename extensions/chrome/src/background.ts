@@ -3,6 +3,8 @@ import { PaneConnection, PaneWindow, paneMarkerUrl } from './pane.js';
 import type { KeyValue, PaneSocketLike } from './pane.js';
 import { readCards } from './pills.js';
 import { postSnooze, postUnsnooze, snoozeMessage, unsnoozeMessage } from './snooze.js';
+import { GROUP_TITLE, answerLink, linkOpener, linkRequest, placedKinds } from './tabs.js';
+import type { Tabs } from './tabs.js';
 
 // The hub on this computer, or the one whose web page gave this copy (architecture.md § Browser extension).
 const routes = readRoutes((url) => fetch(url), chrome.runtime.getURL(REMOTE_FILE));
@@ -63,9 +65,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return true;
 });
 
-// The Chrome pane (architecture.md § Browser extension): Chrome only, as Firefox has neither the fixed extension ID nor externally_connectable, and
-// only with the hub on this computer, since the pane keeps a window there. Its listeners are added at once, as a service worker that an event
-// wakes gets only the listeners its first run adds.
+// The Chrome pane and the Switchboard tab group (architecture.md § Browser extension): Chrome only, as Firefox has neither the fixed extension ID
+// nor externally_connectable. The pane works only with the hub on this computer, since it keeps a window there; the tab group takes the links of
+// the page this copy reaches. The listeners are added at once, as a service worker that an event wakes gets only the listeners its first run adds.
 if (!FIREFOX) {
   const store = (area: chrome.storage.StorageArea): KeyValue => ({ get: (key) => area.get(key), set: (items) => area.set(items), remove: (key) => area.remove(key) });
   const markerPage = chrome.runtime.getURL('pane.html');
@@ -97,10 +99,72 @@ if (!FIREFOX) {
     log: (message, error) => console.error(message, error),
   });
 
-  // The page wakes the service worker, which Chrome stops while no socket keeps it busy, and hands it the pairing token.
+  const kinds = placedKinds(chrome.storage.session);
+  const tabs: Tabs = {
+    window: () => chrome.windows.getLastFocused({ windowTypes: ['normal'] }).then((window) => window.id ?? null, () => null),
+    group: async (windowId) => {
+      const groups = await chrome.tabGroups.query({ title: GROUP_TITLE });
+      const group = groups.find((one) => one.windowId === windowId) ?? groups[0];
+
+      if (group === undefined) {
+        return null;
+      }
+
+      const inGroup = (await chrome.tabs.query({ groupId: group.id })).flatMap((tab) => (tab.id === undefined ? [] : [{ id: tab.id, url: tab.pendingUrl ?? tab.url ?? '' }]));
+      const placed = await kinds.of(inGroup.map((tab) => tab.id));
+
+      return { id: group.id, windowId: group.windowId, tabs: inGroup.map((tab) => ({ ...tab, kind: placed.get(tab.id) })) };
+    },
+    create: async (windowId, url) => {
+      if (windowId === null) {
+        const window = await chrome.windows.create({ type: 'normal', url, focused: true });
+
+        return { tabId: window.tabs![0]!.id!, windowId: window.id! };
+      }
+
+      return { tabId: (await chrome.tabs.create({ windowId, url, active: true })).id!, windowId };
+    },
+    join: async (tabId, windowId, groupId) => {
+      if (groupId !== null) {
+        await chrome.tabs.group({ tabIds: tabId, groupId });
+        return;
+      }
+
+      const created = await chrome.tabs.group({ tabIds: tabId, createProperties: { windowId } });
+
+      await chrome.tabGroups.update(created, { title: GROUP_TITLE, color: 'cyan' });
+    },
+    remember: kinds.remember,
+    load: async (tabId, url) => void (await chrome.tabs.update(tabId, { url })),
+    show: async (tabId, windowId) => {
+      await chrome.tabs.update(tabId, { active: true });
+      await chrome.windows.update(windowId, { focused: true });
+    },
+  };
+  const open = linkOpener(tabs);
+
+  // The page wakes the service worker, which Chrome stops while no socket keeps it busy, hands it the pairing token, and has its links opened in
+  // the tab group.
   chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
-    void routes.then((hub) => sendResponse(hub.origin === null ? pane.external(message, sender.origin) : null));
+    const link = linkRequest(message);
+
+    void routes.then(async (hub) => sendResponse(link !== null ? await answerLink(link, sender.origin, hub.origin, open) : hub.origin === null ? pane.external(message, sender.origin) : null));
     return true;
+  });
+  chrome.tabs.onRemoved.addListener((tabId) => {
+    void kinds.forget(tabId).catch((error: unknown) => console.error('Switchboard could not forget a closed tab', error));
+  });
+  // A tab taken out of the group, or into another group, no longer has the kind it was opened for; dragged back in, it has its address's kind.
+  chrome.tabs.onUpdated.addListener((tabId, change) => {
+    const groupId = change.groupId;
+
+    if (groupId === undefined) {
+      return;
+    }
+
+    void (groupId === -1 ? Promise.resolve(true) : chrome.tabGroups.get(groupId).then((group) => group.title !== GROUP_TITLE))
+      .then((left) => (left ? kinds.forget(tabId) : undefined))
+      .catch((error: unknown) => console.error('Switchboard could not forget a tab that left its group', error));
   });
   chrome.windows.onRemoved.addListener((windowId) => void pane.windowRemoved(windowId).catch((error: unknown) => console.error('Switchboard could not forget its pane', error)));
   void routes.then((hub) => {

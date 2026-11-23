@@ -12,7 +12,7 @@ import { renderList } from '../src/list.js';
 import { html } from './html.js';
 import { REPLAY_TIP, SPEAKING_TIP, renderMicButton as viewMicButton } from '@switchboard/conversation/voiceControls';
 import { renderMarkdown } from '../src/markdown.js';
-import { ADVANCE_MS, CHAT_MAX, CHAT_MIN, DRAWER_HIDE_MS, OTHER_SETTLE_MS, DRAWER_REVEAL_MS, loadMermaid, PANE_SHOW_DELAY_MS, SENT_NOTE_MS, SHOW_MARKER_MS, SIDE_MAX, SIDE_MIN, startPage, SWIPE_OPEN } from '../src/main.js';
+import { ADVANCE_MS, LINK_ANSWER_MS, CHAT_MAX, CHAT_MIN, DRAWER_HIDE_MS, OTHER_SETTLE_MS, DRAWER_REVEAL_MS, loadMermaid, PANE_SHOW_DELAY_MS, SENT_NOTE_MS, SHOW_MARKER_MS, SIDE_MAX, SIDE_MIN, startPage, SWIPE_OPEN } from '../src/main.js';
 import { DETAIL_MIN } from '../src/layout.js';
 import { RECONNECT_MS } from '../src/reconnect.js';
 import type { ArtifactView, MessageView, PageGroup, PageRow, ReplyView, SessionView } from '@switchboard/protocol';
@@ -3592,6 +3592,79 @@ describe('the page in use', () => {
     own.close();
   });
 
+  it("opens a row's links and pills in the extension's tab group on another device, and in a new tab once the extension no longer answers", async () => {
+    const opened: string[] = [];
+    const sent: Array<Record<string, unknown>> = [];
+    let installedExtension = true;
+    const fetch = vi.fn(async (url: string, init?: { body?: string }) => (posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) }), { status: 200, ok: true, json: async () => ({}), text: async () => '' }) as unknown as Response);
+    const toExtension = async (_id: string, message: Record<string, unknown>) => (sent.push(message), installedExtension ? (message['type'] === 'links' ? { links: true } : { opened: true }) : null);
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, openUrl: (url) => opened.push(url), standalone: () => true, local: false, toExtension });
+    const links = [{ label: 'PR #5', url: 'https://github.com/o/r/pull/5', kind: 'pr' as const, badge: '5', glyph: null, mentioned: false }];
+
+    await flush();
+    hello(FakeSource.last!, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', url: 'https://github.com/o/r/issues/1', links })])] });
+    posts = [];
+    click('button.actions');
+    click('.actions-menu [data-link="ticket"]');
+    click('#list [data-work-item="1"] .pill.link.pr');
+    await flush();
+    expect(sent).toEqual([{ type: 'links' }, { type: 'open', url: 'https://github.com/o/r/issues/1', until: 10_000 + LINK_ANSWER_MS - 500 }, { type: 'open', url: 'https://github.com/o/r/pull/5', until: 10_000 + LINK_ANSWER_MS - 500 }]);
+    expect(opened).toEqual([]);
+    expect(posts.map((post) => post.url)).not.toContain('/v1/conversation/row-open');
+
+    // The extension was removed: the open falls back to a new tab, and once the page shows again it no longer asks the extension.
+    installedExtension = false;
+    click('#list [data-work-item="1"] .pill.link.pr');
+    await flush();
+    expect(opened).toEqual(['https://github.com/o/r/pull/5']);
+    document.dispatchEvent(new Event('visibilitychange'));
+    await flush();
+    sent.length = 0;
+    click('#list [data-work-item="1"] .pill.link.pr');
+    await flush();
+    expect(sent).toEqual([]);
+    expect(opened).toEqual(['https://github.com/o/r/pull/5', 'https://github.com/o/r/pull/5']);
+    page.close();
+  });
+
+  it('opens the link in a new tab when the extension does not answer in time, and opens tabs itself until the extension answers the next probe', async () => {
+    vi.useFakeTimers();
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+
+    const opened: string[] = [];
+    const sent: Array<Record<string, unknown>> = [];
+    const fetch = vi.fn(async (url: string, init?: { body?: string }) => (posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) }), { status: 200, ok: true, json: async () => ({}), text: async () => '' }) as unknown as Response);
+    // The extension answers the probe but never an open.
+    const toExtension = (_id: string, message: Record<string, unknown>) => (sent.push(message), message['type'] === 'links' ? Promise.resolve({ links: true }) : new Promise<unknown>(() => {}));
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, openUrl: (url) => opened.push(url), standalone: () => false, local: false, toExtension });
+    const links = [{ label: 'PR #5', url: 'https://github.com/o/r/pull/5', kind: 'pr' as const, badge: '5', glyph: null, mentioned: false }];
+    const turn = async () => {
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+    };
+
+    await turn();
+    hello(FakeSource.last!, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', links })])] });
+    click('#list [data-work-item="1"] .pill.link.pr');
+    await turn();
+    vi.advanceTimersByTime(LINK_ANSWER_MS - 1);
+    expect(opened).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(opened).toEqual(['https://github.com/o/r/pull/5']);
+    // The next link opens at once, without asking the extension.
+    sent.length = 0;
+    click('#list [data-work-item="1"] .pill.link.pr');
+    expect(sent).toEqual([]);
+    expect(opened).toEqual(['https://github.com/o/r/pull/5', 'https://github.com/o/r/pull/5']);
+    // Once it answers the probe again, links go to it.
+    document.dispatchEvent(new Event('visibilitychange'));
+    await turn();
+    click('#list [data-work-item="1"] .pill.link.pr');
+    expect(sent.at(-1)).toEqual({ type: 'open', url: 'https://github.com/o/r/pull/5', until: 10_000 + LINK_ANSWER_MS - 500 });
+    page.close();
+  });
+
   it("lists Open ticket and each link in the actions menu, more than two in an Open link submenu, a long label cut with its whole text in the tooltip", async () => {
     const { page, source, opened } = start();
     const link = (label: string, url: string) => ({ label, url, kind: 'url' as const, badge: label, glyph: null, mentioned: false });
@@ -4152,7 +4225,8 @@ describe('the page in use', () => {
       frame: drawAtOnce,
       now: () => 10_000,
       standalone: () => true,
-      toExtension: async (id, message) => (sent.push([id, message]), { ok: true }),
+      // The page's question whether the extension opens its links is left out: this test is the pane's.
+      toExtension: async (id, message) => (message['type'] === 'links' || sent.push([id, message]), { ok: true }),
     });
     const source = FakeSource.last!;
     const rects = () => posts.filter((post) => post.url.endsWith('/pane-rect')).map((post) => post.body['rect']);

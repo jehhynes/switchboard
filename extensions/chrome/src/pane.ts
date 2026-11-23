@@ -212,7 +212,8 @@ interface Refused {
   count: number;
   until: number | null;
 }
-const LOOPBACK_PAGE = /^http:\/\/(127\.0\.0\.1|localhost):\d{1,5}$/;
+/** A page on this computer, which may message the extension through `externally_connectable`. */
+export const LOOPBACK_PAGE = /^http:\/\/(127\.0\.0\.1|localhost):\d{1,5}$/;
 
 /**
  * The extension's end of the pane socket (architecture.md § Pane socket): connects only while it has a credential or a pairing token and the

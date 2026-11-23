@@ -81,7 +81,8 @@ function filesUnder(root: string, dir = ''): string[] {
 /**
  * The installed browser extension as a zip of one folder (PRD R121), or null when none is installed. For another device, `origin` is the web
  * page's HTTPS origin: the copy names it in `remote.json`, and its manifest adds a host permission for that name, so the extension reaches the hub
- * through the page's origin with the page's sign-in. With no origin the copy is the build as it is, which reaches the hub on this computer.
+ * through the page's origin with the page's sign-in, and lets the page there message it (`externally_connectable`), so the page's links open in
+ * its tab group. With no origin the copy is the build as it is, which reaches the hub on this computer.
  */
 export function browserExtensionZip(webDir: string, origin: string | null): Buffer | null {
   const dir = join(webDir, BROWSER_EXTENSION_DIR);
@@ -104,9 +105,10 @@ export function browserExtensionZip(webDir: string, origin: string | null): Buff
       return { name, body };
     }
 
-    const manifest = JSON.parse(body.toString('utf8')) as { host_permissions?: string[] };
+    const manifest = JSON.parse(body.toString('utf8')) as { host_permissions?: string[]; externally_connectable?: { matches?: string[] } };
 
     manifest.host_permissions = [...(manifest.host_permissions ?? []), `${origin}/*`];
+    manifest.externally_connectable = { ...manifest.externally_connectable, matches: [...(manifest.externally_connectable?.matches ?? []), `${origin}/*`] };
     return { name, body: Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`) };
   });
 

@@ -55,7 +55,7 @@ Do not test type declarations, pass-through property bags, or simple settings re
 | Switchboard pane webview | Vitest/jsdom with a `postMessage` stub | Model from a snapshot, rendering, escaping, click messages and size reports |
 | Side bar widths | Vitest with a fake workbench, and the real VS Code host | Kept and restored widths and focus |
 | Web page | Vitest/jsdom (`packages/web`) | The page's model, rendering, escaping, keys and requests |
-| Chrome extension | Vitest/jsdom with recorded board markup and an injected hub | Card marks, menus, popups, requests and refusals |
+| Chrome extension | Vitest/jsdom with recorded board markup and an injected hub | Card marks, menus, popups, requests and refusals; the Switchboard tab group and the page's link requests, with fake Chrome calls |
 | Firefox extension | Vitest on the Chrome manifest and `content.css`, with fake git, `gh` and `web-ext` steps | The Firefox build, versioning, signing and release, and refusal of Chrome inputs the build no longer recognises |
 | Extension host | Mocha inside real VS Code | Registration, hub process wiring, claims, editor calls, the status bar item |
 | Terminal holder | Vitest with an injected pseudo-terminal factory and test-owned loopback listeners | Spawn, list, kill, replay, resize, clients, the handshake, limits and idle exit |
