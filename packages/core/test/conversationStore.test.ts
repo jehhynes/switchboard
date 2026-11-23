@@ -48,7 +48,7 @@ describe('conversation store', () => {
     expect(store.dismissals('s1').map((one) => one.reportedIn)).toEqual([null, null, null]);
   });
 
-  it('advances a session\'s conversation revision on each write to its items or dismissals, and on no read (PRD R103)', () => {
+  it('advances a session\'s conversation revision on each write to its items, dismissals or carried questions, and on no read (PRD R103)', () => {
     const store = Store.open(':memory:');
     const revisions: string[] = [];
     const step = (write: () => void) => {
@@ -69,6 +69,7 @@ describe('conversation store', () => {
     step(() => store.addDismissal('s1', 'r1', 'port-choice', 30));
     step(() => store.reportDismissals('s1', [{ replyId: 'r1', slug: 'port-choice' }], 'm1'));
     step(() => store.unreportDismissals('s1', 'm1'));
+    step(() => store.setQuestionCarry('s1', [{ key: 'reply:r0#old' }]));
     step(() => store.deleteMessage('m1'));
     expect(new Set(revisions).size).toBe(revisions.length);
 
@@ -76,7 +77,31 @@ describe('conversation store', () => {
 
     store.conversation('s1', null, 10);
     store.dismissals('s1');
+    store.questionCarry('s1');
     expect(store.conversationRevision('s1')).toBe(now);
+  });
+
+  it('hands the items retention deletes to beforePrune, oldest first, and keeps carried questions until replaced (PRD R103)', () => {
+    const store = Store.open(':memory:');
+    const pruned: string[][] = [];
+
+    store.beforePrune = (sessionId, items) => pruned.push([sessionId, ...items.map((item) => item.id)]);
+
+    for (let index = 0; index < CONVERSATION_RETENTION; index++) {
+      store.addReply(reply(`r${index}`, index));
+    }
+
+    expect(pruned).toEqual([]);
+    store.addReply(reply('next', 1000));
+    store.addReply(reply('again', 1001));
+    expect(pruned).toEqual([['s1', 'r0'], ['s1', 'r1']]);
+
+    expect(store.questionCarry('s1')).toEqual([]);
+    store.setQuestionCarry('s1', [{ key: 'reply:r0#port-choice', state: 'open' }]);
+    expect(store.questionCarry('s1')).toEqual([{ key: 'reply:r0#port-choice', state: 'open' }]);
+    expect(store.questionCarry('s2')).toEqual([]);
+    store.setQuestionCarry('s1', []);
+    expect(store.questionCarry('s1')).toEqual([]);
   });
 
   it('keeps whether a message asked for a spoken reply, and a reply\'s passage, tone line and speech', () => {

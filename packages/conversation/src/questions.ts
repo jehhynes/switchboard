@@ -905,6 +905,12 @@ export interface LedgerCard {
   legacy: boolean;
 }
 
+/**
+ * A question whose reply retention deleted, kept with how it stood (`carriedQuestions`), so the ledger of the items after it starts from it:
+ * `rewrittenBy` names the reply that rewrites its own, while that rewrite is not read yet.
+ */
+export type CarriedQuestion = LedgerQuestion & { rewrittenBy: string | null };
+
 export interface QuestionLedger {
   cards: Map<string, LedgerCard>;
   questions: Map<string, LedgerQuestion>;
@@ -912,6 +918,48 @@ export interface QuestionLedger {
   open: string[];
   /** The questions each message answered or dismissed, by message ID, in the order it gave them. */
   answers: Map<string, LedgerQuestion[]>;
+}
+
+/**
+ * What a conversation's oldest items leave for the items after them once retention deletes them (PRD R103): each question that is still open,
+ * dismissed with no answer message telling the session yet (`untold`), or waiting for the rewrite of its reply, as `questionLedger` leaves it
+ * over `carried` and these items. A dismissal made after one of these items applies after it, and one placed by its time, with no item or one
+ * already deleted, applies before the first of them made after it, as over the whole conversation; one made after an item still kept
+ * (`later`), or after all of these, is left for the items after. Cards asked before the cutover are not carried.
+ */
+export function carriedQuestions(
+  items: readonly LedgerItem[],
+  options: {
+    since?: number;
+    dismissed?: ReadonlyArray<{ key: string; at: number; after: string | null }>;
+    carried?: readonly CarriedQuestion[];
+    untold?: ReadonlySet<string>;
+    later?: (id: string) => boolean;
+  } = {},
+): CarriedQuestion[] {
+  const ids = new Set(items.map((item) => item.id));
+  const dismissed = (options.dismissed ?? []).filter((one) => (one.after !== null && ids.has(one.after)) || one.after === null || options.later?.(one.after) !== true);
+  const ledger = questionLedger(items, { ...(options.since === undefined ? {} : { since: options.since }), dismissed, carried: options.carried ?? [], continues: true });
+  // A rewrite still to come, by the reply it rewrites.
+  const rewrites = new Map<string, string>();
+
+  for (const was of options.carried ?? []) {
+    if (was.rewrittenBy !== null && !ids.has(was.rewrittenBy)) {
+      rewrites.set(was.replyId, was.rewrittenBy);
+    }
+  }
+
+  for (const item of items) {
+    if (item.type === 'reply' && item.rewrittenBy !== null && !ids.has(item.rewrittenBy)) {
+      rewrites.set(item.id, item.rewrittenBy);
+    }
+  }
+
+  return [...ledger.cards.values()]
+    .filter((card) => !card.legacy)
+    .flatMap((card) => card.questions)
+    .map((one) => ({ ...one, rewrittenBy: rewrites.get(one.replyId) ?? null }))
+    .filter((one) => one.state === 'open' || (one.state === 'dismissed' && options.untold?.has(one.key) === true) || one.rewrittenBy !== null);
 }
 
 /** The key of a reply's question. */
@@ -930,7 +978,10 @@ function counts(item: Extract<LedgerItem, { type: 'message' }>): boolean {
  * nothing changes nothing. `dismissed` holds the keys the operator dismissed. Replies before `since`, the cutover, keep the rules from before
  * it: the first message after a card answers or skips it, and a later reply supersedes it (`cardLinks`).
  */
-export function questionLedger(items: readonly LedgerItem[], options: { since?: number; dismissed?: Iterable<string | { key: string; at: number; after?: string | null }> } = {}): QuestionLedger {
+export function questionLedger(
+  items: readonly LedgerItem[],
+  options: { since?: number; dismissed?: Iterable<string | { key: string; at: number; after?: string | null }>; carried?: readonly CarriedQuestion[]; continues?: boolean } = {},
+): QuestionLedger {
   const since = options.since ?? Number.NEGATIVE_INFINITY;
   const cards = new Map<string, LedgerCard>();
   const questions = new Map<string, LedgerQuestion>();
@@ -986,6 +1037,24 @@ export function questionLedger(items: readonly LedgerItem[], options: { since?: 
   // The questions of a reply a later rewrite replaced, by the rewrite's ID.
   const rewritten = new Map<string, LedgerQuestion[]>();
   const legacyItems: LinkItem[] = [];
+
+  // Carried questions come before every item, as they stood when their replies were deleted.
+  for (const { rewrittenBy, ...was } of options.carried ?? []) {
+    const one: LedgerQuestion = { ...was, answer: was.answer === null ? null : { ...was.answer } };
+    const card = cards.get(one.card) ?? { key: one.card, replyId: one.replyId, questions: [], legacy: false };
+
+    card.questions.push(one);
+    cards.set(card.key, card);
+    questions.set(one.key, one);
+
+    if (one.state === 'open') {
+      open.push(one);
+    }
+
+    if (rewrittenBy !== null) {
+      rewritten.set(rewrittenBy, [...(rewritten.get(rewrittenBy) ?? []), one]);
+    }
+  }
 
   let previous: string | null = null;
 
@@ -1092,7 +1161,10 @@ export function questionLedger(items: readonly LedgerItem[], options: { since?: 
     dismissAfter(previous);
   }
 
-  dismissUpTo(Number.POSITIVE_INFINITY);
+  // More items follow these (`continues`): a dismissal still waiting is theirs to place.
+  if (options.continues !== true) {
+    dismissUpTo(Number.POSITIVE_INFINITY);
+  }
 
   // Replies before the cutover: their cards as `cardLinks` leaves them, each question taking its card's state.
   if (since !== Number.NEGATIVE_INFINITY) {

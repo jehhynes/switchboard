@@ -5,7 +5,7 @@ import { delimiter, join } from 'node:path';
 import { ClaudeRunner, conversationRules, projectSlug } from '@switchboard/claude';
 import { CodexRunner } from '@switchboard/codex';
 import type { Exec, ExecResult } from '@switchboard/claude';
-import { BACKOFF_MS, CLI_MARGIN_MS, CONTINUE_TEXT, DEFAULT_SETTINGS, launchOptions, MESSAGES, parsePlaybook, QUESTION_CARD, Store, toneSection, toneVersion, UNCONFIRMED_DONE } from '@switchboard/core';
+import { BACKOFF_MS, CLI_MARGIN_MS, CONTINUE_TEXT, CONVERSATION_RETENTION, DEFAULT_SETTINGS, launchOptions, MESSAGES, parsePlaybook, QUESTION_CARD, Store, toneSection, toneVersion, UNCONFIRMED_DONE } from '@switchboard/core';
 import { recordPath } from '@switchboard/holder';
 import type { SessionEntry } from '@switchboard/holder';
 import { NotWritten } from '@switchboard/conversation';
@@ -18,6 +18,7 @@ import { ATTACH_RESERVATION_MS, INPUT_SETTLE_MS, PULL_REQUESTS_FOCUS_MS, questio
 import type { RuntimeDeps } from '../src/runtime.js';
 import { controlsOf, doneSince } from '../src/rows.js';
 import { dockView } from '../src/dock.js';
+import { questionIndex, QUESTIONS_SINCE } from '../src/questions.js';
 
 const T0 = Date.UTC(2026, 9, 3, 12);
 
@@ -2962,6 +2963,52 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
     expect(questionCardOpen(store, 's1', since)).toBe(true);
     store.addDismissal('s1', 'again', 'colour-choice', T0 + 401);
     expect(questionCardOpen(store, 's1', since)).toBe(false);
+    store.close();
+  });
+
+  it('keeps an unanswered question past the conversation\'s retention and a restart, until it is answered (PRD R103)', () => {
+    const file = join(home, 'carry.db');
+    let store = Store.open(file);
+    let at = T0;
+    const reply = (id: string, opening: string, kind: 'reply' | 'aside' = 'reply') =>
+      store.addReply({ id, sessionId: 's1', workItemId: 1, at: ++at, kind, answers: null, opening, source: 'transcript', replaces: null, rewrittenBy: null, withdrawn: false, transcriptUuid: id });
+    const answer = (id: string, delivery: 'open' | 'not-sent') =>
+      store.addMessage({ id, sessionId: 's1', workItemId: 1, at: ++at, origin: 'typed', text: '[answers]', transcriptUuid: null, provisional: true, withdrawn: false, delivery, error: null, opId: null, pastedAt: null, answers: [{ replyId: 'card', slug: 'port-choice', letters: ['A'], other: '', via: 'card' }] });
+    const asides = (count: number) => {
+      for (let index = 0; index < count; index++) reply(`a${at}`, 'Step.', 'aside');
+    };
+
+    store.setPagePref(QUESTIONS_SINCE, String(T0));
+    questionIndex(store, () => at);
+    reply('card', '1. Which port? {#port-choice}\n   - A) One\n   - B) Two\n2. Keep the route? {#keep-route}\n   - A) Yes\n   - B) No');
+    store.addDismissal('s1', 'card', 'keep-route', ++at, 'card');
+    asides(CONVERSATION_RETENTION + 20);
+    expect(store.reply('card')).toBeNull();
+    expect(questionCardOpen(store, 's1', T0)).toBe(true);
+    // The dismissal is kept too, so the next answer message still tells the session.
+    expect([...questionIndex(store).ledger('s1', T0).questions.values()].map((one) => [one.key, one.state])).toEqual([
+      ['reply:card#port-choice', 'open'],
+      ['reply:card#keep-route', 'dismissed'],
+    ]);
+
+    store.close();
+    store = Store.open(file);
+    expect(questionCardOpen(store, 's1', T0)).toBe(true);
+    // An answer that was not sent leaves it open; one on its way settles it while later items arrive, and once its transcript line is read and
+    // retention deletes it too, it stays settled.
+    answer('failed', 'not-sent');
+    expect(questionCardOpen(store, 's1', T0)).toBe(true);
+    answer('sent', 'open');
+    expect(questionCardOpen(store, 's1', T0)).toBe(false);
+    asides(20);
+    expect(questionCardOpen(store, 's1', T0)).toBe(false);
+    store.updateMessage('sent', { provisional: false, delivery: 'sent', transcriptUuid: 'sent' });
+    store.placeLast('sent');
+    expect(questionCardOpen(store, 's1', T0)).toBe(false);
+    asides(CONVERSATION_RETENTION);
+    expect(store.message('sent')).toBeNull();
+    expect(questionCardOpen(store, 's1', T0)).toBe(false);
+    expect((store.questionCarry('s1') as Array<{ key: string }>).map((one) => one.key)).toEqual(['reply:card#keep-route']);
     store.close();
   });
 

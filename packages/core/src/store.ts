@@ -549,6 +549,8 @@ export const MIGRATIONS = [
   INSERT INTO viewedFilesScoped (workItemId, scope, path, hash, at) SELECT workItemId, '', path, hash, at FROM viewedFiles;
   DROP TABLE viewedFiles;
   ALTER TABLE viewedFilesScoped RENAME TO viewedFiles;`,
+  // A session's unresolved questions whose replies retention deleted (PRD R103), as JSON, so they stay open past it.
+  `CREATE TABLE questionCarry (sessionId TEXT PRIMARY KEY, records TEXT NOT NULL);`,
 ];
 
 /**
@@ -786,10 +788,15 @@ export class Store {
   readonly #db: DatabaseSync;
   /** The event whose writes are logged; its ID is null until it is stored. */
   #event: (EventRecord & { id: number | null }) | null = null;
-  /** Each session's conversation revision, which every write to its messages, replies or dismissals advances. */
+  /** Each session's conversation revision, which every write to its messages, replies, dismissals or carried questions advances. */
   readonly #revisions = new Map<string, number>();
   /** Advances every session's revision, for a write that names no session. */
   #revisionEpoch = 0;
+  /**
+   * Called with a session's items, oldest first, just before retention deletes them, so the hub can keep what they hold that must outlive them
+   * (its unresolved questions).
+   */
+  beforePrune: ((sessionId: string, items: Array<({ type: 'message' } & ConversationMessage) | ({ type: 'reply' } & ConversationReply)>) => void) | null = null;
 
   private constructor(db: DatabaseSync) {
     this.#db = db;
@@ -1172,6 +1179,7 @@ export class Store {
 
     this.#db.prepare('DELETE FROM triages WHERE workItemId = ?').run(id);
     this.#db.prepare('DELETE FROM checkpoints WHERE sessionId IN (SELECT id FROM sessions WHERE workItemId = ?)').run(id);
+    this.#db.prepare('DELETE FROM questionCarry WHERE sessionId IN (SELECT id FROM sessions WHERE workItemId = ?)').run(id);
     this.#db.prepare('DELETE FROM messages WHERE workItemId = ?').run(id);
     this.#db.prepare('DELETE FROM replies WHERE workItemId = ?').run(id);
     this.#revisionEpoch++;
@@ -1515,7 +1523,25 @@ export class Store {
     this.#changed(sessionId);
   }
 
-  /** A session's conversation revision: the same value until its messages, replies or dismissals change. */
+  /** A session's carried questions (`setQuestionCarry`); empty for none. */
+  questionCarry(sessionId: string): unknown[] {
+    const row = this.#db.prepare('SELECT records FROM questionCarry WHERE sessionId = ?').get(sessionId) as { records: string } | undefined;
+
+    return row === undefined ? [] : (JSON.parse(row.records) as unknown[]);
+  }
+
+  /** Replaces a session's carried questions: the unresolved questions of items retention deleted, which no conversation read finds any more. */
+  setQuestionCarry(sessionId: string, records: readonly unknown[]): void {
+    if (records.length === 0) {
+      this.#db.prepare('DELETE FROM questionCarry WHERE sessionId = ?').run(sessionId);
+    } else {
+      this.#db.prepare('INSERT INTO questionCarry (sessionId, records) VALUES (?, ?) ON CONFLICT (sessionId) DO UPDATE SET records = excluded.records').run(sessionId, JSON.stringify(records));
+    }
+
+    this.#changed(sessionId);
+  }
+
+  /** A session's conversation revision: the same value until its messages, replies, dismissals or carried questions change. */
   conversationRevision(sessionId: string): string {
     return `${this.#revisionEpoch}:${this.#revisions.get(sessionId) ?? 0}`;
   }
@@ -1960,6 +1986,21 @@ export class Store {
       .get({ id: sessionId, offset: CONVERSATION_RETENTION - 1 }) as { place: number; ord: number } | undefined;
 
     if (kept !== undefined) {
+      const bind = { id: sessionId, place: kept.place, ord: kept.ord };
+      const older = (place: string): string => `sessionId = :id AND (${place} < :place OR (${place} = :place AND ord < :ord))`;
+
+      if (this.beforePrune !== null) {
+        const items = [
+          ...this.#messageRows(`SELECT * FROM messages WHERE ${older(MESSAGE_PLACE)}`, bind).map((message) => ({ type: 'message' as const, ...message })),
+          ...this.#replyRows(`SELECT * FROM replies WHERE ${older(REPLY_PLACE)}`, bind).map((reply) => ({ type: 'reply' as const, ...reply })),
+        ];
+        const place = (item: (typeof items)[number]): number => (item.withdrawn ? 0 : item.type === 'message' ? (item.provisional ? 1 : 0) : item.source === 'screen' ? 1 : 0);
+
+        if (items.length > 0) {
+          this.beforePrune(sessionId, items.sort((a, b) => place(a) - place(b) || a.ord - b.ord));
+        }
+      }
+
       this.#changed(sessionId);
 
       for (const [table, place] of [['messages', MESSAGE_PLACE], ['replies', REPLY_PLACE]] as const) {

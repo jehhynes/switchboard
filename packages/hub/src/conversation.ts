@@ -375,7 +375,7 @@ export class ConversationService {
   #closed = false;
 
   constructor(private readonly deps: ConversationServiceDeps) {
-    // Shared with the runtime.
+    // Shared with the runtime; made now, so retention carries unresolved questions from the first item it deletes.
     questionIndex(deps.store, deps.now);
     this.#adapters = [new ClaudeConversationAdapter(deps, (id, change) => this.#changed(id, change)), ...(deps.adapters?.((id, change) => this.#changed(id, change)) ?? [])];
 

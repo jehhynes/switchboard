@@ -2,7 +2,7 @@ import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmS
 import { homedir, tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { backgroundDetail, PERMISSION_PROMPT, Store, toneSection, toneVersion, windowFileKey } from '@switchboard/core';
+import { backgroundDetail, CONVERSATION_RETENTION, PERMISSION_PROMPT, Store, toneSection, toneVersion, windowFileKey } from '@switchboard/core';
 import type { Interruption, Session as StoredSession } from '@switchboard/core';
 import { BACKGROUND_DETAIL, projectSlug } from '@switchboard/claude';
 import { ConversationService, MIC_TIMING_MAX_MS, MIC_TIMING_STEPS, sessionView, typedText } from '../src/conversation.js';
@@ -1717,6 +1717,55 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
       store.addDismissal('s2', 'q2', 'another-one', NOW);
       expect(service.ledger('s2')).not.toBe(asked);
       expect(service.ledger('s2').questions.get('reply:q2#another-one')?.state).toBe('dismissed');
+    });
+
+    it('tells the session of a dismissal whose question retention deleted, with the next answer', () => {
+      const { service, store, open, body, view } = setupCards();
+      const mine = open(view.file);
+
+      expect(service.cardCommand('card-dismiss', { window: mine.key, scopeGen: 1, opId: 'x1', sessionId: 's2', card: 'reply:q1', slug: 'keep-route' }).status).toBe(200);
+
+      for (let index = 0; index < CONVERSATION_RETENTION + 5; index++) {
+        store.addReply({ id: `a${index}`, sessionId: 's2', workItemId: store.session('s2')!.workItemId, at: NOW, kind: 'aside', answers: null, opening: 'Step.', source: 'transcript', replaces: null, rewrittenBy: null, withdrawn: false, transcriptUuid: `a${index}` });
+      }
+
+      expect(store.reply('q1')).toBeNull();
+      expect(service.questionsView('s2')).toMatchObject({ open: 1, oldest: 'reply:q1' });
+
+      const sent = messageOf(service.send(body(mine.key, { text: undefined, answers: [card()] })));
+
+      expect(store.message(sent.id)?.answers).toEqual([
+        { replyId: 'q1', slug: 'port-choice', letters: ['B'], other: '', via: 'card' },
+        { replyId: 'q1', slug: 'keep-route', letters: [], other: '', via: 'card', dismissed: true },
+      ]);
+      expect(store.dismissals('s2')[0]?.reportedIn).toBe(sent.id);
+    });
+
+    it('tells a dismissal again after retention when the answer message that told it comes back not sent', () => {
+      const { service, store, open, body, view } = setupCards();
+      const mine = open(view.file);
+
+      service.cardCommand('card-dismiss', { window: mine.key, scopeGen: 1, opId: 'x1', sessionId: 's2', card: 'reply:q1', slug: 'keep-route' });
+      const first = messageOf(service.send(body(mine.key, { text: undefined, answers: [card()] })));
+
+      expect(store.dismissals('s2')[0]?.reportedIn).toBe(first.id);
+      expect(store.message(first.id)?.delivery).toBe('open');
+
+      for (let index = 0; index < CONVERSATION_RETENTION + 5; index++) {
+        store.addReply({ id: `a${index}`, sessionId: 's2', workItemId: store.session('s2')!.workItemId, at: NOW, kind: 'aside', answers: null, opening: 'Step.', source: 'transcript', replaces: null, rewrittenBy: null, withdrawn: false, transcriptUuid: `a${index}` });
+      }
+
+      expect(store.reply('q1')).toBeNull();
+      store.updateMessage(first.id, { delivery: 'not-sent' });
+      store.unreportDismissals('s2', first.id);
+      expect(service.questionsView('s2').open).toBe(1);
+
+      const again = messageOf(service.send(body(mine.key, { opId: 'op-2', text: undefined, answers: [card()] })));
+
+      expect(store.message(again.id)?.answers?.map((one) => [one.slug, one.dismissed === true])).toEqual([
+        ['port-choice', false],
+        ['keep-route', true],
+      ]);
     });
 
     it('writes the [answers] message a Send posts, stores its links, and types it', async () => {

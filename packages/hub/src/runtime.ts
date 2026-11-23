@@ -238,7 +238,7 @@ export class Runtime {
     config: Config,
   ) {
     this.config = config;
-    // Shared with the conversation service (`QuestionIndex`).
+    // Made now, so retention carries unresolved questions from the first item it deletes (`QuestionIndex`).
     questionIndex(deps.store, deps.now);
     this.holder = new HolderLink({ home: this.home, nodePath: () => this.config.settings.sessions.nodePath, log: (line) => deps.log(line), now: deps.now, sleep: deps.sleep, gone: () => this.holderGone(), ...deps.holder });
 

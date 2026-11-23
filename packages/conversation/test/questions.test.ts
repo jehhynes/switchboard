@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { answerBrief, answerMessage, answersIn, BATCH, cardLinks, cardSteps, cardUtterance, currentStep, deriveSlug, draftAnswers, moveStep, parseQuestions, pickLetter, questionBrief, questionLedger, questionLines, questionSegments, questionSpeech, resolveAnswers, sendLabel, setOther, stripQuestionMarkup, withdrawals, withoutEndingQuestions } from '../src/questions.js';
+import { answerBrief, answerMessage, answersIn, BATCH, cardLinks, carriedQuestions, cardSteps, cardUtterance, currentStep, deriveSlug, draftAnswers, moveStep, parseQuestions, pickLetter, questionBrief, questionLedger, questionLines, questionSegments, questionSpeech, resolveAnswers, sendLabel, setOther, stripQuestionMarkup, withdrawals, withoutEndingQuestions } from '../src/questions.js';
 import type { CardLinks, LedgerItem, LinkItem, QuestionLedger, StoredAnswer } from '../src/questions.js';
 
 /** The shape the conversation rules show, with a second question. */
@@ -329,6 +329,100 @@ describe('the question ledger (design § 5.2)', () => {
     const ledger = questionLedger([reply('r1', NEW), reply('r2', ASKED)]);
 
     expect([...ledger.cards.keys()]).toEqual(['reply:r1', 'reply:r2']);
+  });
+});
+
+describe('questions carried past retention (PRD R103)', () => {
+  // Each item at its index, so a dismissal placed after an item and the carried questions line up with the whole conversation.
+  const items: LedgerItem[] = [
+    reply('r1', NEW),
+    message('m1', '[answers]', { answers: [stored('r1', 'persona-registered', ['A'])] }),
+    reply('r2', 'Settled.\n[withdraw: phone-layout — not needed]'),
+    reply('r3', '1. Design first, really? {#design-first}\n   - A) Yes\n   - B) No\n2. Which port? {#port-choice}\n   - A) 1\n   - B) 2'),
+    message('m2', 'port-choice B'),
+    reply('r4', '1. Keep the route? {#keep-route}\n   - A) Keep\n   - B) Remove', { rewrittenBy: 'r5' }),
+    message('m3', 'keep-route A', { delivery: 'not-sent' }),
+    reply('r5', '1. Keep the old route? {#keep-route}\n   - A) Keep\n   - B) Remove'),
+    reply('r6', '1. Which colour? {#colour-choice}\n   - A) Red\n   - B) Blue', { rewrittenBy: 'r8' }),
+    message('m4', '[answers]', { answers: [stored('r6', 'colour-choice', ['B'])] }),
+    message('m5', 'Unrelated.'),
+    reply('r8', '1. Which colour now? {#colour-choice}\n   - A) Red\n   - B) Blue'),
+    reply('r9', '1. Ship it? {#ship-it}\n   - A) Yes\n   - B) No'),
+    reply('r10', '1. Pick one? {#pick-one}\n   - A) x\n   - B) y', { rewrittenBy: 'r11' }),
+    message('m6', 'Unrelated.'),
+    reply('r11', '1. Pick one, really? {#pick-one}\n   - A) x\n   - B) y'),
+  ].map((item, index) => ({ ...item, at: index }));
+  // The operator dismissed r3's design-first after m2, and r10's pick-one by its time alone, and has told the session of neither.
+  const dismissed = [
+    { key: 'reply:r3#design-first', at: 4, after: 'm2' },
+    { key: 'reply:r10#pick-one', at: 13.5, after: null },
+  ];
+  const untold = new Set(['reply:r3#design-first', 'reply:r10#pick-one']);
+  const whole = questionLedger(items, { dismissed });
+
+  it('leaves the same open questions and states, wherever retention cut the conversation, as the whole conversation does', () => {
+    expect(whole.open).toEqual(['reply:r5#keep-route', 'reply:r9#ship-it']);
+    expect(states(whole)).toMatchObject({ 'reply:r3#design-first': 'dismissed', 'reply:r8#colour-choice': 'answered', 'reply:r3#port-choice': 'answered', 'reply:r11#pick-one': 'dismissed' });
+
+    for (let cut = 0; cut <= items.length; cut++) {
+      // Retention deletes the oldest items a few at a time, each batch folded into what the batch before carried.
+      let carried: ReturnType<typeof carriedQuestions> = [];
+
+      for (let at = 0; at < cut; at += 2) {
+        const kept = new Set(items.slice(Math.min(at + 2, cut)).map((item) => item.id));
+
+        carried = carriedQuestions(items.slice(at, Math.min(at + 2, cut)), { dismissed, carried, untold, later: (id) => kept.has(id) });
+      }
+
+      const after = questionLedger(items.slice(cut), { dismissed, carried });
+
+      expect({ cut, open: after.open }).toEqual({ cut, open: whole.open });
+
+      for (const key of ['reply:r3#design-first', 'reply:r5#keep-route', 'reply:r8#colour-choice', 'reply:r9#ship-it', 'reply:r10#pick-one', 'reply:r11#pick-one']) {
+        // A question whose reply was deleted is still known while it is unresolved; a settled one goes with its reply.
+        const kept = whole.questions.get(key)!.state === 'open' || untold.has(key) || items.slice(cut).some((item) => key.startsWith(`reply:${item.id}#`));
+
+        expect({ cut, key, state: after.questions.get(key)?.state }).toEqual({ cut, key, state: kept ? whole.questions.get(key)!.state : undefined });
+      }
+    }
+  });
+
+  it('places a dismissal by its time against the items as they come, whatever their times, as the whole conversation does', () => {
+    // r1 is rewritten by r2, read with an earlier time than r1; the dismissal by time falls between them, so it comes after r2 is read.
+    const odd: LedgerItem[] = [reply('r1', '1. Pick? {#pick-one}\n   - A) x\n   - B) y', { at: 10, rewrittenBy: 'r2' }), reply('r2', '1. Pick, really? {#pick-one}\n   - A) x\n   - B) y', { at: 1 }), message('m1', 'Later.', { at: 20 })];
+    const late = [{ key: 'reply:r1#pick-one', at: 5, after: null }];
+    const full = questionLedger(odd, { dismissed: late });
+
+    expect(full.open).toEqual(['reply:r2#pick-one']);
+
+    for (let cut = 1; cut <= odd.length; cut++) {
+      let carried: ReturnType<typeof carriedQuestions> = [];
+
+      for (let at = 0; at < cut; at++) {
+        const kept = new Set(odd.slice(at + 1).map((item) => item.id));
+
+        carried = carriedQuestions(odd.slice(at, at + 1), { dismissed: late, carried, untold: new Set(['reply:r1#pick-one']), later: (id) => kept.has(id) });
+      }
+
+      expect({ cut, open: questionLedger(odd.slice(cut), { dismissed: late, carried }).open }).toEqual({ cut, open: full.open });
+    }
+  });
+
+  it('carries only what is unresolved: open, dismissed and not told yet, or waiting for its reply\'s rewrite', () => {
+    const carried = carriedQuestions(items.slice(0, 9), { dismissed, untold });
+
+    expect(carried.map((one) => [one.key, one.state, one.rewrittenBy])).toEqual([
+      ['reply:r3#design-first', 'dismissed', null],
+      ['reply:r5#keep-route', 'open', null],
+      ['reply:r6#colour-choice', 'open', 'r8'],
+    ]);
+    // Once the session is told of the dismissal, it is not carried again.
+    expect(carriedQuestions(items.slice(0, 9), { dismissed }).map((one) => one.key)).not.toContain('reply:r3#design-first');
+    // A carried question can be answered by a stored link, and leaves the carry once its answer is deleted too.
+    const answered = questionLedger([message('m9', '[answers]', { answers: [stored('r5', 'keep-route', ['B'])], at: 30 })], { carried });
+
+    expect(answered.questions.get('reply:r5#keep-route')).toMatchObject({ state: 'answered', answer: { messageId: 'm9', letters: ['B'] } });
+    expect(carriedQuestions([message('m9', '[answers]', { answers: [stored('r5', 'keep-route', ['B'])], at: 30 })], { carried }).map((one) => one.key)).toEqual(['reply:r6#colour-choice']);
   });
 });
 
