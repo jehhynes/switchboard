@@ -2,14 +2,9 @@ import type { Card } from '@switchboard/core/group';
 import { itemHref } from './board.js';
 import { PILL } from './pills.js';
 
-/** The VS Code URI whose handler runs the click of the ticket's row, bringing its item window forward (PRD R69). */
-export function openUri(ticketUrl: string): string {
-  return `vscode://switchboard.switchboard/open?url=${encodeURIComponent(ticketUrl)}`;
-}
-
 /**
- * The web page's address for a ticket's card, opened on another device in place of VS Code (PRD R121): its work item's conversation, or the page
- * for a pool ticket or a card the hub has not sent.
+ * The web page's address for a ticket's card (PRD R69, R121): its work item's conversation, or the page for a pool ticket or a card the hub has
+ * not sent.
  */
 export function pageOpenUrl(origin: string, card: Pick<Card, 'workItemId'> | undefined): string {
   const id = card?.workItemId;

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BROWSER_PORT as HUB_BROWSER_PORT } from '@switchboard/core';
 import { describe, expect, it, vi } from 'vitest';
-import { BROWSER_PORT, LOCAL_ROUTES, readRoutes, readSnoozed, remoteRoutes } from '../src/hub.js';
+import { BROWSER_PORT, LOCAL_ROUTES, readLocalPage, readRoutes, readSnoozed, remoteRoutes } from '../src/hub.js';
 
 const reply = (status: number, body: string) => async () => new Response(body, { status });
 
@@ -55,5 +55,22 @@ describe('readSnoozed', () => {
 
     expect(BROWSER_PORT).toBe(HUB_BROWSER_PORT);
     expect(manifest.host_permissions).toEqual(['http://*/*', 'https://*/*']);
+  });
+});
+
+describe('readLocalPage (PRD R69)', () => {
+  it("names this computer's page by the first origin the hub's /iframe vouches for", async () => {
+    const fetchUrl = vi.fn(reply(200, '{"enabled":false,"origins":["http://127.0.0.1:47616","http://localhost:47616"]}'));
+
+    expect(await readLocalPage(fetchUrl)).toBe('http://127.0.0.1:47616');
+    expect(fetchUrl).toHaveBeenCalledExactlyOnceWith('http://127.0.0.1:47615/iframe');
+  });
+
+  it('returns null without a hub, for an error status, and for an origin that is not loopback http', async () => {
+    expect(await readLocalPage(async () => Promise.reject(new TypeError('Failed to fetch')))).toBeNull();
+    expect(await readLocalPage(reply(503, '{"origins":["http://127.0.0.1:47616"]}'))).toBeNull();
+    expect(await readLocalPage(reply(200, '{"origins":[]}'))).toBeNull();
+    expect(await readLocalPage(reply(200, '{"origins":["https://evil.example"]}'))).toBeNull();
+    expect(await readLocalPage(reply(200, 'not json'))).toBeNull();
   });
 });

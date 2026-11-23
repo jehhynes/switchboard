@@ -21,6 +21,23 @@ export const LOCAL_ROUTES: HubRoutes = {
 };
 
 
+/**
+ * The web page's origin on this computer, such as `http://127.0.0.1:47616`, the first origin the hub's `GET /iframe` vouches for; null when the
+ * hub does not answer or names none. The extension cannot read `hub.json`, and the page's port is a setting.
+ */
+export async function readLocalPage(fetchUrl: (url: string) => Promise<Response>): Promise<string | null> {
+  try {
+    const response = await fetchUrl(`http://127.0.0.1:${BROWSER_PORT}/iframe`);
+    const body: unknown = response.ok ? await response.json() : null;
+    const origins = typeof body === 'object' && body !== null ? (body as { origins?: unknown }).origins : undefined;
+    const first = Array.isArray(origins) ? origins[0] : undefined;
+
+    return typeof first === 'string' && /^http:\/\/127\.0\.0\.1:\d+$/.test(first) ? first : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The file the hub adds to a copy it gives another device, naming its web page's origin (architecture.md § Browser extension). */
 export const REMOTE_FILE = 'remote.json';
 

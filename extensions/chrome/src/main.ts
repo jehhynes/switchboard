@@ -1,7 +1,7 @@
 import type { Card } from '@switchboard/core/group';
 import { issueKey, watchBoard } from './board.js';
 import { watchCardMenus } from './menu.js';
-import { openUri, pageOpenUrl, watchPillClicks } from './open.js';
+import { pageOpenUrl, watchPillClicks } from './open.js';
 import { cardsByIssue, watchPills } from './pills.js';
 import { snoozeMenus } from './snooze.js';
 import type { SnoozeAnswer } from './snooze.js';
@@ -32,26 +32,41 @@ const ask = async (message: object): Promise<SnoozeAnswer> => {
   return typeof answer === 'object' && answer !== null ? (answer as SnoozeAnswer) : { error: 'The Switchboard extension did not answer.' };
 };
 
-// The web page's origin when this copy came from another computer's hub (PRD R121), which has no VS Code here to open.
-let origin: string | null = null;
+// The web page's origin: this computer's, or the one whose hub gave this copy (PRD R121). Read ahead, so a click opens its tab while it still
+// counts as the operator's.
+let page: string | null = null;
+const PAGE_READ_MS = 30_000;
+const readPage = (): void => {
+  void chrome.runtime.sendMessage({ type: 'hub' }).then(
+    (hub) => {
+      const named = (hub as { page?: unknown } | null)?.page;
 
-void chrome.runtime.sendMessage({ type: 'hub' }).then(
-  (hub) => {
-    const named = (hub as { origin?: unknown } | null)?.origin;
+      page = typeof named === 'string' ? named : null;
+    },
+    () => {
+      page = null;
+    },
+  );
+};
 
-    origin = typeof named === 'string' ? named : null;
-  },
-  () => undefined,
-);
+// The page's port can change with its setting, so the origin is read again now and then, and after each click.
+readPage();
+setInterval(readPage, PAGE_READ_MS);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') readPage();
+});
 
-// A vscode:// navigation leaves the page as it is; Chrome asks before opening VS Code (mechanics M22). On another device the web page opens in a
-// new tab instead, in the click that asked for it.
+// The web page opens at the ticket's work item in a new tab, in the click that asked for it; before the hub has named the page, the click reads it
+// again and says so.
 const open = (ticketUrl: string): void => {
-  if (origin === null) {
-    location.assign(openUri(ticketUrl));
-  } else {
-    window.open(pageOpenUrl(origin, cards.get(issueKey(ticketUrl) ?? '')), '_blank', 'noopener');
+  if (page === null) {
+    readPage();
+    window.alert('Switchboard is not answering. Start it, then try again.');
+    return;
   }
+
+  window.open(pageOpenUrl(page, cards.get(issueKey(ticketUrl) ?? '')), '_blank', 'noopener');
+  readPage();
 };
 
 watchCardMenus(

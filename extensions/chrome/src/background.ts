@@ -1,5 +1,5 @@
 import { downloadedIcon, shortcutRequest } from './shortcut.js';
-import { REMOTE_FILE, readRoutes, readSnoozed } from './hub.js';
+import { REMOTE_FILE, readLocalPage, readRoutes, readSnoozed } from './hub.js';
 import { readCards } from './pills.js';
 import { postSnooze, postUnsnooze, snoozeMessage, unsnoozeMessage } from './snooze.js';
 import { GROUP_TITLE, answerLink, linkOpener, linkRequest, placedKinds } from './tabs.js';
@@ -17,7 +17,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return false;
   }
 
-  void routes.then((hub) => sendResponse({ origin: hub.origin }));
+  // This computer's page, read each time, since its port is a setting the hub can change.
+  void routes.then(async (hub) => sendResponse({ origin: hub.origin, page: hub.origin ?? (await readLocalPage((url) => fetch(url, { cache: 'no-store' }))) }));
 
   return true;
 });

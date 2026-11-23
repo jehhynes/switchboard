@@ -1,19 +1,14 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { openUri, pageOpenUrl, watchPillClicks } from '../src/open.js';
+import { pageOpenUrl, watchPillClicks } from '../src/open.js';
 import { applyPills, cardsByIssue } from '../src/pills.js';
 
 const COLUMN = readFileSync(join(import.meta.dirname, 'fixtures', 'column.html'), 'utf8');
 
-describe('openUri', () => {
-  it("encodes the ticket URL into the Switchboard extension's vscode:// URI", () => {
-    expect(openUri('https://desk.example.test/t?a=1&b=2')).toBe('vscode://switchboard.switchboard/open?url=https%3A%2F%2Fdesk.example.test%2Ft%3Fa%3D1%26b%3D2');
-  });
-});
-
-describe('pageOpenUrl (PRD R121)', () => {
+describe('pageOpenUrl (PRD R69, R121)', () => {
   it("opens the card's work item on the web page, or the page for a pool ticket, an unknown card or an older hub", () => {
+    expect(pageOpenUrl('http://127.0.0.1:47616', { workItemId: 7 })).toBe('http://127.0.0.1:47616/page/#w=7');
     expect(pageOpenUrl('https://pc.tail.ts.net', { workItemId: 42 })).toBe('https://pc.tail.ts.net/page/#w=42');
     expect(pageOpenUrl('https://pc.tail.ts.net', { workItemId: null })).toBe('https://pc.tail.ts.net/page/');
     expect(pageOpenUrl('https://pc.tail.ts.net', {})).toBe('https://pc.tail.ts.net/page/');
