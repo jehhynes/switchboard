@@ -169,18 +169,37 @@ export function deriveSlug(topic: string | null, text: string): string {
  * or a lone unnumbered run of such options under the line that asks it. A numbered list item with no options is not a question. Indented lines
  * between a question and its first option are its context; indented lines under an option continue its description. Returns none when the shape
  * is ambiguous: a number used twice, or an unnumbered run beside other questions, whose answers could not be told apart. A slug the reply uses
- * twice gets `-2`, `-3` on its later questions.
+ * twice gets the first of `-2`, `-3`, … on its later questions that no other question of the reply uses, within 40 characters.
  */
 export function parseQuestions(markdown: string): Question[] {
-  const used = new Map<string, number>();
+  const blocks = parseBlocks(markdown);
+  const bases = blocks.map(({ slug, topic, text, basis }) => slug ?? (basis === undefined ? deriveSlug(topic, text) : deriveSlug(basis.topic, basis.text)));
+  // Each slug's first question keeps it, so a written `port-choice-2` is never taken by the second `port-choice`; a later one gets the first free suffix.
+  const taken = new Set(bases);
+  const first = new Set<string>();
 
-  return parseBlocks(markdown).map(({ number, slug, topic, text, context, options, multi, basis }) => {
-    const base = slug ?? (basis === undefined ? deriveSlug(topic, text) : deriveSlug(basis.topic, basis.text));
-    const count = (used.get(base) ?? 0) + 1;
+  return blocks.map(({ number, slug, topic, text, context, options, multi }, index) => {
+    const base = bases[index]!;
+    let id = base;
 
-    used.set(base, count);
-    return { number, slug: count === 1 ? base : `${base}-${count}`.slice(0, 40), written: slug !== null, topic, text, context, multi, options };
+    if (first.has(base)) {
+      for (let count = 2; taken.has(id); count++) {
+        id = withSuffix(base, count);
+      }
+
+      taken.add(id);
+    }
+
+    first.add(base);
+    return { number, slug: id, written: slug !== null, topic, text, context, multi, options };
   });
+}
+
+/** A slug with `-<count>`, its base cut first so the whole stays within 40 characters. */
+function withSuffix(base: string, count: number): string {
+  const suffix = `-${count}`;
+
+  return `${base.slice(0, 40 - suffix.length).replace(/-+$/, '')}${suffix}`;
 }
 
 /**

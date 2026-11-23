@@ -73,6 +73,27 @@ describe('parsing questions (PRD R103)', () => {
     expect(parseQuestions('1. Which? {#Q1}\n   - A) x\n   - B) y')[0]).toMatchObject({ slug: 'question', written: false, text: 'Which? {#Q1}' });
   });
 
+  it('gives every question of a reply its own slug: a suffix fits within 40 characters and never takes a slug another question wrote', () => {
+    const ask = (slugs: string[]): string => slugs.map((slug, index) => `${index + 1}. Which? {#${slug}}\n   - A) x\n   - B) y`).join('\n');
+    const long = `a${'b'.repeat(38)}c`;
+    const cut = `a${'b'.repeat(36)}-c`;
+
+    expect(long).toHaveLength(40);
+    expect(parseQuestions(ask([long, long, long])).map((question) => question.slug)).toEqual([long, `${long.slice(0, 38)}-2`, `${long.slice(0, 38)}-3`]);
+    // A cut that ends on a hyphen loses it before the suffix.
+    expect(parseQuestions(ask([cut, cut])).map((question) => question.slug)).toEqual([cut, `a${'b'.repeat(36)}-2`]);
+    // A written `port-choice-2` keeps its slug; the repeated `port-choice` takes the next free one.
+    expect(parseQuestions(ask(['port-choice', 'port-choice', 'port-choice-2'])).map((question) => question.slug)).toEqual(['port-choice', 'port-choice-3', 'port-choice-2']);
+    expect(parseQuestions(ask(['port-choice', 'port-choice-2', 'port-choice', 'port-choice'])).map((question) => question.slug)).toEqual(['port-choice', 'port-choice-2', 'port-choice-3', 'port-choice-4']);
+
+    // So the ledger holds each question once, under its own key.
+    const ledger = questionLedger([reply('r1', ask(['port-choice', 'port-choice', 'port-choice-2']))]);
+
+    expect(ledger.cards.get('reply:r1')!.questions.map((one) => one.key)).toEqual(['reply:r1#port-choice', 'reply:r1#port-choice-3', 'reply:r1#port-choice-2']);
+    expect(ledger.open).toHaveLength(3);
+    expect(new Set(ledger.open).size).toBe(3);
+  });
+
   it('takes the option shapes Claude writes, a bold or parenthesised letter, a lower-case one, and lines that continue the context or an option', () => {
     const questions = parseQuestions('1) Scope\n   for this run\n**A)** Only the inbox\n(b) Everything\n  including the dock\nc) Nothing\n\n2. Name?\n   A. Short\n   B: Long');
 
