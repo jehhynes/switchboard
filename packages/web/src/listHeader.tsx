@@ -1121,7 +1121,7 @@ export interface ListHeader {
  */
 export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTMLElement, deps: ListHeaderDeps): ListHeader {
   const search: SearchView = { open: false, query: '', filter: '', range: 0, older: [], more: false, pending: false, error: null };
-  const view: HeaderView = { menu: null, search, sheet: null, notice: null, local: deps.local === true };
+  const view: HeaderView = { menu: null, search, sheet: null, local: deps.local === true };
   let ops = 0;
   const newOp = (): string => `header-${deps.now().toString(36)}-${(++ops).toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   let shown: PageHeader | null = null;
