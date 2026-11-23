@@ -19,8 +19,7 @@ The dock's list is in `apps/dock/src/Switchboard.Dock/Views/`, the page's in `pa
 
 1. More Actions' dock windows (H2): Held sessions only says to use the dock, and New session, New task from prompt and New conversation in a folder cannot choose a folder the hub does not know.
 2. Held sessions (H4): the held-session note shows, but the page has no Held sessions window to open.
-3. Keyboard (K2, K4, K5): no arrow-key walk, F8 or menu key.
-4. Web-only behaviours the dock lacks (R8, C13, G10, H7): a hosted conversation's host on line 2, Stop session asking first, the selected row kept in a collapsed group.
+3. Web-only behaviours the dock lacks (R8, C13, G10, H7): a hosted conversation's host on line 2, Stop session asking first, the selected row kept in a collapsed group.
 
 ## Groups
 
@@ -66,7 +65,7 @@ The dock's list is in `apps/dock/src/Switchboard.Dock/Views/`, the page's in `pa
 | R9 | Line 2: ticket key pill in its source's colour (GitHub, Zoho, Forum), key and URL in its tooltip | Present | An ad hoc key starts with the repository or folder name before its local number (R6) |
 | R10 | Line 2: link pills after the key: a pull request purple with its icon and number, an issue by its key, a link by its label, a link the ticket's text names grey and last | Present | |
 | R11 | Line 2: Returned pill outlined and filled in the warning stripe's colour, its text in the warning text colour, with the return icon and count, its meaning in its tooltip | Present | |
-| R12 | A pill with a link opens it on click or Enter instead of the row's click | Partly | A click or tap opens it, in a new tab of the device's browser, while the page has no working browser pane: on a paired device, or on this computer with the pane off, unpaired or stopped. The operator's decision, 2026-11-21: while this page's paired pane shows the links, the pills are labels, their name and URL in the tooltip, and a click or tap on one is the row's click; the links open from the Browser tab and the header's and a pool row's menu (Open ticket, Open PR, Open link). Enter on a pill does not open it. The dock's pills always open their links |
+| R12 | A pill with a link opens it on click or Enter instead of the row's click | Partly | A click, tap, Enter or Space opens it in a new tab of the device's browser while the page has no working browser pane: on a paired device, or on this computer with the pane off, unpaired or stopped. The operator's decision, 2026-11-21: while this page's paired pane shows the links, the pills are labels, their name and URL in the tooltip, and a click or tap on one is the row's click; the links open from the Browser tab and a row's menu (Open ticket, Open PR, Open link). Those labels do not take focus. The dock's pills always open their links |
 | R13 | Pills shrink to their icon rather than being cut: longest first while the playbook keeps its width, the rest once the playbook is 60 px, Returned last; a pill of 56 px or less keeps its text until then | Differs | The operator's decision, 2026-11-22: the page lays out line 2 with CSS alone, never measuring it, so a redraw never changes it. The ticket key, like the playbook, is never cut or shrunk; the link pills and Returned never shrink to an icon but drop out whole, Returned first, then the links from the last |
 | R14 | A compact key pill shows the source's logo (or a tag for a source without one); a compact link pill its PR, issue or link icon | Differs | The page has no compact pills (R13) |
 | R15 | Pills that do not fit even as icons are left out whole, the last first, Returned only when it alone does not fit; they show again when the line widens | Differs | The page leaves out whole every pill after the key that does not fit, Returned first, and shows them again when the line widens (R13) |
@@ -76,7 +75,7 @@ The dock's list is in `apps/dock/src/Switchboard.Dock/Views/`, the page's in `pa
 | R19 | Row separator rule above each row but the first in its band | Present | |
 | R20 | Pool tickets (Unstarted, Snoozed) show as rows with Start or Triage again | Differs | Operator approved 2026-11-21: a pool ticket has no conversation, so the page's click opens its menu under the row (Start, Triage again …), placed as the page's other menus are ([architecture.md § Conversation view](architecture.md#conversation-view), Menus); the dock's click opens its triage focus in the browser |
 | R21 | No unread count on rows: no work item list shows unread ([architecture.md § Unread](architecture.md#unread)) | Present | |
-| R22 | The selected row's buttons beside lines 2 and 3: main control (Approve in the accent colour, its prompt in the tooltip), Copy, Open report; hidden on other rows and on rows with none | Partly | The main control is a button in the conversation header, not on the row, and in the phone's layout only the first row of the actions menu, as the header has no room for it (the operator's decision); Copy and Open report are in the actions menu |
+| R22 | The selected row's buttons beside lines 2 and 3: main control (Approve in the accent colour, its prompt in the tooltip), Copy, Open report; hidden on other rows and on rows with none | Partly | The selected row has an Actions button opening its menu, also reached by Tab. The main control is a button in the conversation header, not on the row, and in the phone's layout only the first row of the actions menu, as the header has no room for it (the operator's decision); Copy and Open report are in the actions menu |
 | R23 | Row sizes: 3 px stripe, padding 5, 8 and 6 px, lines 18 px tall and 3 px apart in 13 px Segoe UI, the title semibold, the first row of a band without the rule's pixel; pills 18 px tall, 1 px border, 6 px padding, 14 px icons, 12 px text; the muted texts in `DockMuted` (`#9D9D9D`, `#717171` light) | Present | Text and pill positions can differ by under a pixel, since the dock rounds each width up to a whole pixel |
 
 ## Marks, stripes and colours
@@ -110,8 +109,8 @@ The dock's list is in `apps/dock/src/Switchboard.Dock/Views/`, the page's in `pa
 
 | # | Behaviour | Web | Note |
 |---|---|---|---|
-| C1 | Right-click or Menu key opens the row's menu, at the pointer or the row's corner | Partly | The selected work item's controls are under an ellipsis in the conversation header; no menu on the row itself |
-| C2 | Menu groups, separated: main action; work; state; notes; order; opens; controls that ask first | Partly | The same groups, in the same order; no Persona submenu, whose pin is in the persona dialog (C7) |
+| C1 | Right-click or Menu key opens the row's menu, at the pointer or the row's corner | Present | Right-click anchors it at the pointer; Menu key and Shift+F10 at the row's corner |
+| C2 | Menu groups, separated: main action; work; state; notes; order; opens; controls that ask first | Partly | The same groups, in the same order; no Persona submenu, whose pin is in the persona dialog (C7). Choosing a work control, Copy or a VS Code command on another row opens its conversation before running it; opening or dismissing the menu leaves the conversation alone |
 | C3 | Start, Approve, Retry, Stop session, Mark done, Snooze…, Unsnooze, Delete | Present | |
 | C4 | Reopen on a done row | Present | With the state controls |
 | C5 | Start with guidance… and Start with prompt… (text, playbook choice) | Present | The page's input sheet asks as the dock's dialog does |
@@ -199,13 +198,13 @@ The dock's Settings window (PRD R54, [architecture.md § Settings window](archit
 
 | # | Behaviour | Web | Note |
 |---|---|---|---|
-| K1 | Rows, group and band headings and link pills take the focus, shown as a focus-blue ring | Partly | Rows and group and band headings take the focus, with a 1 px outline; pills do not |
-| K2 | Up and Down move the focus along rows and headings; a row reached by keyboard is selected and scrolled into view | Missing | Tab moves between rows; focusing does not select |
+| K1 | Rows, group and band headings and link pills take the focus, shown as a focus-blue ring | Present | Pills that open links take focus; labels while the browser pane works do not (R12). Pills left out by line 2's clipping are not Tab stops |
+| K2 | Up and Down move the focus along rows and headings; a row reached by keyboard is selected and scrolled into view | Present | Focus selects locally; Enter opens the conversation. Scrolling keeps rows below the pinned group heading |
 | K3 | Enter on a row runs its click; Enter or Space on a heading toggles it | Present | |
-| K4 | Menu key or Shift+F10 opens a row's menu | Missing | |
-| K5 | F8 and Shift+F8 select the next or previous operator's-turn row in Blocked on you and Ready for review, open its group, clear a hiding search and run its click | Missing | |
-| K6 | Tab from the selected row reaches its buttons | Missing | Follows R22 |
-| K7 | A view that moves the focused row keeps the focus on it, or on its closed group's heading | Partly | The page keeps a row's focus only when the row stays in place |
+| K4 | Menu key or Shift+F10 opens a row's menu | Present | Escape returns focus to the row |
+| K5 | F8 and Shift+F8 select the next or previous operator's-turn row in Blocked on you and Ready for review, open its group, clear a hiding search and run its click | Present | Wraps in list order, skipping agent-turn and idle rows |
+| K6 | Tab from the selected row reaches its buttons | Present | Reaches the row's Actions button, then its visible link pills; the menu holds the controls (R22) |
+| K7 | A view that moves the focused row keeps the focus on it, or on its closed group's heading | Present | Restores focus by row identity after regrouping, without taking focus from another part of the page |
 | K8 | Every mark, pill, time, comment, priority and detail has its meaning in a tooltip | Present | |
 | K10 | Header icon buttons have accessible names; marks and the priority dot have an image role and label | Present | |
 

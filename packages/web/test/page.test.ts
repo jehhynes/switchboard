@@ -3313,7 +3313,7 @@ describe('the page in use', () => {
     posts = [];
     const row = () => root.querySelector<HTMLElement>('#list [data-action="pool-menu"][data-row="ticket:9"]')!;
 
-    expect(row().getAttribute('aria-expanded')).toBe('false');
+    expect(root.querySelector('#list .row-menu')).toBeNull();
     const shown = vi.fn();
 
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { value: shown, configurable: true });
@@ -3321,7 +3321,7 @@ describe('the page in use', () => {
     expect(shown).toHaveBeenCalledWith({ block: 'nearest' });
     expect(shown.mock.contexts[0]).toBe(root.querySelector('#list .row-menu'));
     delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
-    expect(row().getAttribute('aria-expanded')).toBe('true');
+    expect(root.querySelector('#list .row-actions')?.getAttribute('aria-expanded')).toBe('true');
     expect([...root.querySelectorAll('#list .row-menu .menu-row')].map((one) => one.textContent)).toEqual(['Start', 'Start with guidance…', 'Snooze…', 'Open ticket']);
     // Its click selects nothing: a pool ticket has no conversation.
     expect(posts).toEqual([]);

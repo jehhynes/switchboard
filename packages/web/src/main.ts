@@ -1754,11 +1754,31 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
   resized?.observe(panel);
 
-  /** The pool ticket row whose menu is open, with the menu's rows, while the list still has that row. */
-  const poolMenu = (): { row: string; rows: VNode[] } | null => {
+  let listSelection: string | null = null;
+  let pendingRowControl: { key: string; run: () => void } | null = null;
+  let rowMenuPoint: { x: number; y: number } | undefined;
+  const listRowElement = (key: string): HTMLElement | undefined => [...list.querySelectorAll<HTMLElement>('.row')].find((one) => one.dataset['row'] === key);
+  /** Pills clipped onto line 2's hidden wrap are not keyboard stops. */
+  const fitListLinks = (): void => {
+    for (const links of list.querySelectorAll<HTMLElement>('.row-links')) {
+      const box = links.getBoundingClientRect();
+      if (box.height === 0) continue;
+      for (const pill of links.querySelectorAll<HTMLElement>('.pill[data-action="open-link"]')) {
+        const rect = pill.getBoundingClientRect();
+        pill.tabIndex = rect.top >= box.top - 0.5 && rect.bottom <= box.bottom + 0.5 && rect.left >= box.left - 0.5 && rect.right <= box.right + 0.5 ? 0 : -1;
+        if (pill.tabIndex === -1 && document.activeElement === pill) pill.closest<HTMLElement>('.row')?.focus({ preventScroll: true });
+      }
+    }
+  };
+  window.addEventListener('resize', fitListLinks, { signal: listening.signal });
+  const listResized = typeof ResizeObserver === 'function' ? new ResizeObserver(fitListLinks) : null;
+  listResized?.observe(list);
+  listening.signal.addEventListener('abort', () => listResized?.disconnect());
+  /** The row whose menu is open, while the list still has that row. */
+  const rowMenu = (): { row: string; rows: VNode[]; point?: { x: number; y: number } } | null => {
     const row = view.rowMenu === null ? undefined : state.groups.flatMap((group) => group.rows).find((one) => rowKey(one) === view.rowMenu);
 
-    return row === undefined ? null : { row: rowKey(row), rows: menuRows(row, view) };
+    return row === undefined ? null : { row: rowKey(row), rows: menuRows(row, view), ...(rowMenuPoint === undefined ? {} : { point: rowMenuPoint }) };
   };
   // A pane holds Preact's tree, or what the page draws into it itself: an open artifact or a console, whose frame, media and terminal must not be
   // redrawn. Each hand-over empties it first.
@@ -2028,9 +2048,25 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     mount(personaHost, renderPersonaDialog(state.session?.persona, view.personas));
     coverForPersonas(view.personas !== null);
-    mount(list, renderListPane(expired, renderList(listed.groups, state.scope?.workItemId ?? null, view.collapsed, listed.filtering, poolMenu(), view.bands, !paneWorks(), dragView), header.end(listed.groups)));
+    const focused = document.activeElement instanceof HTMLElement && list.contains(document.activeElement) ? document.activeElement : null;
+    const focusedRow = focused?.closest<HTMLElement>('.list-row')?.querySelector<HTMLElement>('.row')?.dataset['row'];
+    const focusLink = focused?.matches('.pill') ? focused.dataset['link'] : undefined;
+    const focusActions = focused?.matches('.row-actions') === true;
+    if (listSelection !== null && !state.groups.some((group) => group.rows.some((row) => rowKey(row) === listSelection))) listSelection = null;
+    mount(list, renderListPane(expired, renderList(listed.groups, state.scope?.workItemId ?? null, view.collapsed, listed.filtering, rowMenu(), view.bands, !paneWorks(), listSelection, dragView), header.end(listed.groups)));
     // The rows may have moved under a still pointer.
     reorder.refresh();
+    if (focusedRow !== undefined && document.activeElement !== focused) {
+      const group = state.groups.find((one) => one.rows.some((row) => rowKey(row) === focusedRow));
+      const row = listRowElement(focusedRow);
+      const heading = group === undefined ? null : [...list.querySelectorAll<HTMLElement>('.group-head')].find((one) => one.dataset['group'] === group.key);
+      let target = row ?? heading;
+      if (group !== undefined && view.collapsed.has(group.key) && !listed.filtering) target = heading;
+      else if (focusLink !== undefined) target = row?.querySelector<HTMLElement>(`[data-link="${focusLink}"]`) ?? row;
+      else if (focusActions) target = row?.querySelector<HTMLElement>('.row-actions') ?? row;
+      target?.focus({ preventScroll: true });
+      target?.scrollIntoView?.({ block: 'nearest' });
+    }
 
     // An ended session's note sits just above the composer on every tab, with Resume, as in the Conversation view; the page resumes it in the
     // terminal holder, or a Codex thread in its daemon, without a terminal.
@@ -2241,6 +2277,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
 
     fitMenus();
+    fitListLinks();
     reportBrowser();
   };
 
@@ -2556,6 +2593,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   // ---- Selecting ----
   const select = async (workItemId: number): Promise<void> => {
     const listing = view.list || wanted === null;
+    listSelection = `item:${workItemId}`;
+    if (pendingRowControl?.key !== listSelection) pendingRowControl = null;
+    closeMenus();
 
     // Choosing a work item hides the drawer, as a row's click hides the auto-hidden dock.
     closeDrawer();
@@ -2617,6 +2657,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
         wanted = state.scope?.workItemId ?? null;
         acked = wanted;
+        listSelection = wanted === null ? null : `item:${wanted}`;
+        pendingRowControl = null;
+        if (view.rowMenu === `item:${asked}`) closeMenus();
 
         // A conversation still shown keeps its history entry; with none, the entry the refused row added goes, as Back's does.
         if (wanted !== null) {
@@ -2857,6 +2900,105 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   };
 
   // ---- Clicks ----
+  /** Scope-bound menu controls select their row only when chosen, and wait for the hub's matching scope before running. */
+  const forRow = (key: string, run: () => void): void => {
+    const row = rowByKey(key);
+    if (row === null) return;
+    if (row.workItemId === null || row.workItemId === state.scope?.workItemId) { run(); return; }
+    pendingRowControl = { key, run };
+    void select(row.workItemId);
+  };
+  const openRowMenu = (key: string, point?: { x: number; y: number }): void => {
+    const row = rowByKey(key);
+    if (row === null || menuRows(row, view).length === 0) return;
+    listSelection = key;
+    closeMenus();
+    view.picker = false;
+    view.viewMenu = false;
+    view.rowMenu = key;
+    rowMenuPoint = point;
+    draw();
+    list.querySelector<HTMLElement>('.row-menu .menu-row:not(:disabled)')?.focus();
+  };
+  list.addEventListener('contextmenu', (event) => {
+    const target = event.target as HTMLElement;
+    const entry = target.closest<HTMLElement>('.list-row');
+    if (entry === null) return;
+    event.preventDefault();
+    if (target.closest('.row-menu') !== null) return;
+    const row = entry.querySelector<HTMLElement>('.row')!;
+    // Windows can follow the Menu key's keydown with contextmenu after focus has moved into the menu.
+    if (view.rowMenu === row.dataset['row'] && event.button !== 2) return;
+    const box = row.parentElement!.getBoundingClientRect();
+    openRowMenu(row.dataset['row']!, { x: event.clientX - box.left, y: event.clientY - box.top });
+  }, { signal: listening.signal });
+  list.addEventListener('focusin', (event) => {
+    const target = event.target as HTMLElement;
+    if (!target.matches('.row') || listSelection === target.dataset['row']) return;
+    listSelection = target.dataset['row']!;
+    draw();
+    target.scrollIntoView?.({ block: 'nearest' });
+  }, { signal: listening.signal });
+  list.addEventListener('keydown', (event) => {
+    if (event.defaultPrevented || view.rowMenu !== null) return;
+    const target = event.target as HTMLElement;
+    if (target.matches('.pill[data-action="open-link"]') && (event.key === 'Enter' || event.key === ' ')) {
+      event.preventDefault();
+      target.click();
+      return;
+    }
+    if (!target.matches('.row, .group-head, .band-head')) return;
+    const plain = !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey;
+    if (target.matches('.row') && ((plain && event.key === 'ContextMenu') || (event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && event.key === 'F10'))) {
+      event.preventDefault();
+      openRowMenu(target.dataset['row']!);
+    } else if (plain && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+      event.preventDefault();
+      const stops = [...list.querySelectorAll<HTMLElement>('.row, .group-head, .band-head')];
+      const next = stops[stops.indexOf(target) + (event.key === 'ArrowDown' ? 1 : -1)];
+      if (next === undefined) return;
+      if (next.matches('.row')) { listSelection = next.dataset['row']!; draw(); }
+      next.focus({ preventScroll: true });
+      next.scrollIntoView?.({ block: 'nearest' });
+    } else if (plain && target.matches('.row') && (event.key === 'Enter' || event.key === ' ')) {
+      event.preventDefault();
+      target.click();
+    } else if (plain && target.matches('.row') && event.key === 'Tab' && target.classList.contains('selected')) {
+      const actions = target.parentElement?.querySelector<HTMLElement>('.row-actions');
+      if (actions !== null && actions !== undefined) { event.preventDefault(); actions.focus(); }
+    }
+  }, { signal: listening.signal });
+  root.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && pendingRowControl !== null) {
+      pendingRowControl = null;
+      event.preventDefault();
+      return;
+    }
+    if (event.key !== 'F8' || event.ctrlKey || event.metaKey || event.altKey || !state.connected || view.sheet !== null || view.personas !== null || settingsPane.isOpen() || root.querySelector('.sheet-backdrop') !== null) return;
+    event.preventDefault();
+    const rows = state.groups.flatMap((group) => group.rows.map((row) => ({ group, row })));
+    const selected = listSelection ?? (state.scope?.workItemId == null ? null : `item:${state.scope.workItemId}`);
+    const at = rows.findIndex(({ row }) => rowKey(row) === selected);
+    const start = at < 0 ? (event.shiftKey ? rows.length : -1) : at;
+    for (let step = 1; step <= rows.length; step++) {
+      const entry = rows[((start + (event.shiftKey ? -step : step)) % rows.length + rows.length) % rows.length]!;
+      // A stripe is the hub's operator-turn signal; an idle hosted conversation has neither a stripe nor agent-turn dimming.
+      if (!['blocked', 'review'].includes(entry.group.key) || entry.row.stripe === null || entry.row.workItemId === null) continue;
+      closeMenus();
+      listSelection = rowKey(entry.row);
+      const hidden = !header.list(state.groups).groups.some((group) => group.rows.some((row) => rowKey(row) === listSelection));
+      if (hidden) header.clearSearch();
+      view.collapsed.delete(entry.group.key);
+      keepGroup(entry.group.key, true);
+      if (entry.row.band !== null) view.bands.set(`${entry.group.key}:${entry.row.band}`, true);
+      void select(entry.row.workItemId);
+      draw();
+      const target = listRowElement(listSelection);
+      target?.focus({ preventScroll: true });
+      target?.scrollIntoView?.({ block: 'nearest' });
+      break;
+    }
+  }, { signal: listening.signal });
   root.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
 
@@ -2899,6 +3041,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     switch (action) {
       case 'select':
+        listSelection = button!.dataset['row'] ?? null;
         void select(Number(button!.dataset['workItem']));
         break;
       case 'list-pin':
@@ -2971,32 +3114,33 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         draw();
         break;
       case 'row-action':
-        chooseAction(button!.dataset['row'] ?? '', button!.dataset['label'] ?? '');
+        forRow(button!.dataset['row'] ?? '', () => chooseAction(button!.dataset['row'] ?? '', button!.dataset['label'] ?? ''));
         break;
       case 'row-paste':
-        void copyPaste(button!.dataset['label'] ?? '');
+        forRow(button!.dataset['row'] ?? '', () => void copyPaste(button!.dataset['label'] ?? ''));
         break;
       case 'row-command':
-        void runCommand(button!.dataset['label'] ?? '');
+        forRow(button!.dataset['row'] ?? '', () => void runCommand(button!.dataset['label'] ?? ''));
         break;
       case 'open-link':
-        // A pill's link, without the browser pane, opens without selecting its row; an Open item of the header's or a pool row's menu closes the menu.
+        // A pill's link opens without selecting its row; an Open item in a row's menu closes the menu.
         openLink(button!.dataset['row'] ?? '', button!.dataset['link'] ?? '');
         break;
       case 'row-history':
-        // The header's menu names the open work item, whose History tab it selects.
-        closeMenus();
+        // The menu's work item's History tab: the header's menu names the open work item; a row's menu in the list selects its row first (forRow).
+        forRow(button!.dataset['row'] ?? '', () => {
+          closeMenus();
 
-        if (showHistory()) {
-          leaving('history');
-          chooseTab('history');
-          view.artifact = null;
-          draw();
-          (wide() ? detailHead : head).querySelector<HTMLElement>('[data-side="history"], [data-tab="history"]')?.focus();
-        } else {
-          draw();
-        }
-
+          if (showHistory()) {
+            leaving('history');
+            chooseTab('history');
+            view.artifact = null;
+            draw();
+            (wide() ? detailHead : head).querySelector<HTMLElement>('[data-side="history"], [data-tab="history"]')?.focus();
+          } else {
+            draw();
+          }
+        });
         break;
       case 'history-chip':
         if (shownHistory !== null) {
@@ -3026,14 +3170,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
         break;
       }
+      case 'row-menu':
       case 'pool-menu': {
         const key = button!.dataset['row'] ?? '';
         const open = view.rowMenu === key;
 
-        closeMenus();
-        view.picker = false;
-        view.rowMenu = open ? null : key;
-        draw();
+        if (open) { closeMenus(); draw(); } else { openRowMenu(key); }
         // A row near the list's end keeps its menu in view.
         list.querySelector<HTMLElement>('.row-menu')?.scrollIntoView?.({ block: 'nearest' });
         break;
@@ -3317,8 +3459,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       draw();
     }
 
-    // A pool row's menu closes on a press outside it and its row, which toggles it itself.
-    if (view.rowMenu !== null && !(event.target instanceof Element && event.target.closest('.pool-row') !== null)) {
+    // A row's menu closes on a press outside it and its row; the row's own click closes or toggles it.
+    if (view.rowMenu !== null && !(event.target instanceof Element && event.target.closest('.list-row')?.querySelector<HTMLElement>('.row')?.dataset['row'] === view.rowMenu)) {
       view.rowMenu = null;
       view.linkMenu = false;
       view.copyMenu = false;
@@ -3431,7 +3573,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       view.linkMenu = false;
       view.copyMenu = false;
       draw();
-      list.querySelector<HTMLElement>(`[data-action="pool-menu"][data-row="${opener}"]`)?.focus();
+      listRowElement(opener)?.focus();
       event.stopImmediatePropagation();
     } else if (event.key === 'Escape' && (view.picker || view.actions || view.providers !== null || view.viewMenu)) {
       const opener = view.picker || view.providers !== null ? 'button.picker' : view.actions ? 'button.actions' : 'button.view-options';
@@ -3455,8 +3597,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       maximizePanel(false);
       event.stopImmediatePropagation();
     } else if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && (view.picker || view.actions || view.providers !== null || view.viewMenu || view.rowMenu !== null)) {
-      // Up and Down move between a header menu's rows, or a pool row's menu's, as in a VS Code menu.
-      const rows = [...(view.rowMenu !== null ? list.querySelectorAll<HTMLElement>('.row-menu .menu-row') : head.querySelectorAll<HTMLElement>('.header .menu .menu-row'))];
+      // Up and Down move between the open menu's enabled rows.
+      const rows = [...(view.rowMenu !== null ? list.querySelectorAll<HTMLElement>('.row-menu .menu-row:not(:disabled)') : head.querySelectorAll<HTMLElement>('.header .menu .menu-row:not(:disabled)'))];
       const at = rows.indexOf(document.activeElement as HTMLElement);
 
       if (rows.length > 0) {
@@ -3669,7 +3811,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     },
     { signal: listening.signal },
   );
-  /** Closes the header's actions menu and a pool row's menu. */
+  /** Closes the header's actions menu and the list's row menu. */
   const closeMenus = (): void => {
     view.actions = false;
     view.rowMenu = null;
@@ -4171,6 +4313,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       const keyBefore = state.key;
 
       state = applyEvent(state, data);
+      if (state.key !== keyBefore) pendingRowControl = null;
+      const pending = pendingRowControl;
+      if (pending !== null && state.scope?.workItemId === wanted && pending.key === `item:${wanted}`) {
+        pendingRowControl = null;
+        queueMicrotask(() => {
+          if (state.scope?.workItemId === wanted && pending.key === `item:${wanted}`) pending.run();
+        });
+      }
 
       if (type === 'hello') {
         expired = false;

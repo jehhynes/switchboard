@@ -857,6 +857,7 @@ export function renderSearchEnd(search: SearchView, empty: boolean): VNode | nul
 
 /** The list header's controls, as the page uses them. */
 export interface ListHeader {
+  clearSearch(): void;
   /** Draws the header for the hub's latest header and list. */
   draw(header: PageHeader | null, groups: readonly PageGroup[]): void;
   /** The list to draw: filtered while a search applies, with the rows the hub found before the Done list. */
@@ -1431,6 +1432,7 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
   document.addEventListener('pointerdown', outside);
 
   return {
+    clearSearch: () => { search.range = 0; setFilter(''); },
     draw: (header, listed) => {
       shown = header;
       groups = listed;
