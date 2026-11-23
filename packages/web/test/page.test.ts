@@ -4232,11 +4232,11 @@ describe('the page in use', () => {
     expect(rects().at(-1)).toMatchObject({ left: 1300, width: 600 });
     // A list header's sheet covers the page too: the area goes while it shows and comes back when it closes.
     click('.more-actions');
-    click('[data-action="list-later-held"]');
+    click('[data-action="list-log"]');
     await flush();
     expect(root.querySelector('#list-sheet .sheet-backdrop')).not.toBeNull();
     expect(rects().at(-1)).toBeNull();
-    click('#list-sheet .sheet-button');
+    click('#list-sheet [data-action="list-sheet-cancel"].sheet-button');
     await flush();
     expect(root.querySelector('#list-sheet .sheet-backdrop')).toBeNull();
     // Shown again a moment after the last layer closed.
