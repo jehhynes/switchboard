@@ -13,7 +13,7 @@ import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
 import { HolderError, Viewer, recordPath } from '@switchboard/holder';
 import { NotWritten, transcriptEnd } from '@switchboard/conversation';
-import { questionsSince, sessionLedger } from './questions.js';
+import { questionIndex, questionsSince } from './questions.js';
 import type { SessionEntry } from '@switchboard/holder';
 import { findHeld, heldFromHolder } from './held.js';
 import type { HeldSession, HolderRestartState, HolderState } from './held.js';
@@ -238,6 +238,8 @@ export class Runtime {
     config: Config,
   ) {
     this.config = config;
+    // Shared with the conversation service (`QuestionIndex`).
+    questionIndex(deps.store, deps.now);
     this.holder = new HolderLink({ home: this.home, nodePath: () => this.config.settings.sessions.nodePath, log: (line) => deps.log(line), now: deps.now, sleep: deps.sleep, gone: () => this.holderGone(), ...deps.holder });
 
     const hooks = () => this.config.settings.sessions.installHooks;
@@ -3140,8 +3142,8 @@ function turnEnds(store: Store, event: FlowEvent): string[] {
 
 /**
  * Whether a session's conversation holds an open question (PRD R103): one a reply asked that no message answered and that was not withdrawn,
- * replaced or dismissed, read from the store as the views read it (`sessionLedger`). A status's questions get no card and never count.
+ * replaced or dismissed, read from the store as the views read it (`questionIndex`). A status's questions get no card and never count.
  */
 export function questionCardOpen(store: Store, sessionId: string, since: number): boolean {
-  return sessionLedger(store, sessionId, since).open.length > 0;
+  return questionIndex(store).ledger(sessionId, since).open.length > 0;
 }

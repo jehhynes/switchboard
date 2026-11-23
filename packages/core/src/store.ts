@@ -786,6 +786,10 @@ export class Store {
   readonly #db: DatabaseSync;
   /** The event whose writes are logged; its ID is null until it is stored. */
   #event: (EventRecord & { id: number | null }) | null = null;
+  /** Each session's conversation revision, which every write to its messages, replies or dismissals advances. */
+  readonly #revisions = new Map<string, number>();
+  /** Advances every session's revision, for a write that names no session. */
+  #revisionEpoch = 0;
 
   private constructor(db: DatabaseSync) {
     this.#db = db;
@@ -1170,6 +1174,7 @@ export class Store {
     this.#db.prepare('DELETE FROM checkpoints WHERE sessionId IN (SELECT id FROM sessions WHERE workItemId = ?)').run(id);
     this.#db.prepare('DELETE FROM messages WHERE workItemId = ?').run(id);
     this.#db.prepare('DELETE FROM replies WHERE workItemId = ?').run(id);
+    this.#revisionEpoch++;
     this.#db.prepare('DELETE FROM statuses WHERE workItemId = ?').run(id);
     this.#db.prepare('DELETE FROM sessions WHERE workItemId = ?').run(id);
     this.#db.prepare('DELETE FROM pastes WHERE workItemId = ?').run(id);
@@ -1467,6 +1472,7 @@ export class Store {
         message.interrupted?.rest ?? null,
         message.answers == null ? null : JSON.stringify(message.answers),
       );
+    this.#changed(message.sessionId);
     this.#prune(message.sessionId);
   }
 
@@ -1477,12 +1483,14 @@ export class Store {
       this.#db
         .prepare(`UPDATE messages SET ${entries.map(([key]) => `${key} = ?`).join(', ')} WHERE id = ?`)
         .run(...entries.map(([, value]) => (typeof value === 'boolean' ? (value ? 1 : 0) : (value as SQLInputValue))), id);
+      this.#changedItem(id);
     }
   }
 
   /** Records that the operator dismissed a question (PRD R103); a second dismissal of it changes nothing. */
   addDismissal(sessionId: string, replyId: string, slug: string, at: number, afterId: string | null = null): void {
     this.#db.prepare('INSERT INTO questionDismissals (sessionId, replyId, slug, at, afterId) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING').run(sessionId, replyId, slug, at, afterId);
+    this.#changed(sessionId);
   }
 
   /** A session's dismissed questions, oldest first, with the answer message that told the session, or null while none has. */
@@ -1497,15 +1505,39 @@ export class Store {
     for (const key of keys) {
       update.run(messageId, sessionId, key.replyId, key.slug);
     }
+
+    this.#changed(sessionId);
   }
 
   /** Marks the dismissals a message told as untold again, as when the message was not sent. */
   unreportDismissals(sessionId: string, messageId: string): void {
     this.#db.prepare('UPDATE questionDismissals SET reportedIn = NULL WHERE sessionId = ? AND reportedIn = ?').run(sessionId, messageId);
+    this.#changed(sessionId);
+  }
+
+  /** A session's conversation revision: the same value until its messages, replies or dismissals change. */
+  conversationRevision(sessionId: string): string {
+    return `${this.#revisionEpoch}:${this.#revisions.get(sessionId) ?? 0}`;
+  }
+
+  #changed(sessionId: string): void {
+    this.#revisions.set(sessionId, (this.#revisions.get(sessionId) ?? 0) + 1);
+  }
+
+  /** Advances the revision of the session a message or reply belongs to. */
+  #changedItem(id: string): void {
+    const row = this.#db.prepare('SELECT sessionId FROM messages WHERE id = :id UNION ALL SELECT sessionId FROM replies WHERE id = :id').get({ id }) as { sessionId: string } | undefined;
+
+    if (row === undefined) {
+      this.#revisionEpoch++;
+    } else {
+      this.#changed(row.sessionId);
+    }
   }
 
   /** Removes a message, as a typed message that was not sent leaves the conversation. */
   deleteMessage(id: string): void {
+    this.#changedItem(id);
     this.#db.prepare('DELETE FROM messages WHERE id = ?').run(id);
   }
 
@@ -1545,6 +1577,7 @@ export class Store {
 
     this.#db.prepare('UPDATE messages SET ord = ? WHERE id = ?').run(ord, id);
     this.#db.prepare('UPDATE replies SET ord = ? WHERE id = ?').run(ord, id);
+    this.#changedItem(id);
   }
 
   /** The message a `send` command with this `opId` added to the session. */
@@ -1567,6 +1600,7 @@ export class Store {
     this.#db
       .prepare('INSERT INTO replies (ord, id, sessionId, workItemId, at, kind, answers, opening, source, replaces, rewrittenBy, withdrawn, transcriptUuid, speak, tone) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(this.#nextOrd(), reply.id, reply.sessionId, reply.workItemId, reply.at, reply.kind, reply.answers, reply.opening, reply.source, reply.replaces, reply.rewrittenBy, reply.withdrawn ? 1 : 0, reply.transcriptUuid, reply.speak ?? null, reply.tone ?? null);
+    this.#changed(reply.sessionId);
     this.#prune(reply.sessionId);
   }
 
@@ -1577,6 +1611,7 @@ export class Store {
       this.#db
         .prepare(`UPDATE replies SET ${entries.map(([key]) => `${key} = ?`).join(', ')} WHERE id = ?`)
         .run(...entries.map(([key, value]) => (key === 'withdrawn' ? (value ? 1 : 0) : (value as SQLInputValue))), id);
+      this.#changedItem(id);
     }
   }
 
@@ -1925,6 +1960,8 @@ export class Store {
       .get({ id: sessionId, offset: CONVERSATION_RETENTION - 1 }) as { place: number; ord: number } | undefined;
 
     if (kept !== undefined) {
+      this.#changed(sessionId);
+
       for (const [table, place] of [['messages', MESSAGE_PLACE], ['replies', REPLY_PLACE]] as const) {
         this.#db.prepare(`DELETE FROM ${table} WHERE sessionId = :id AND (${place} < :place OR (${place} = :place AND ord < :ord))`).run({ id: sessionId, place: kept.place, ord: kept.ord });
       }

@@ -48,6 +48,37 @@ describe('conversation store', () => {
     expect(store.dismissals('s1').map((one) => one.reportedIn)).toEqual([null, null, null]);
   });
 
+  it('advances a session\'s conversation revision on each write to its items or dismissals, and on no read (PRD R103)', () => {
+    const store = Store.open(':memory:');
+    const revisions: string[] = [];
+    const step = (write: () => void) => {
+      const before = store.conversationRevision('s1');
+      const other = store.conversationRevision('s2');
+
+      write();
+      revisions.push(store.conversationRevision('s1'));
+      expect(store.conversationRevision('s1')).not.toBe(before);
+      expect(store.conversationRevision('s2')).toBe(other);
+    };
+
+    step(() => store.addMessage({ id: 'm1', sessionId: 's1', workItemId: 1, at: 10, origin: 'typed', text: 'hi', transcriptUuid: null, provisional: true, withdrawn: false, delivery: 'open', error: null, opId: 'o', pastedAt: null }));
+    step(() => store.updateMessage('m1', { delivery: 'sent' }));
+    step(() => store.placeLast('m1'));
+    step(() => store.addReply(reply('r1', 20)));
+    step(() => store.updateReply('r1', { rewrittenBy: 'r2' }));
+    step(() => store.addDismissal('s1', 'r1', 'port-choice', 30));
+    step(() => store.reportDismissals('s1', [{ replyId: 'r1', slug: 'port-choice' }], 'm1'));
+    step(() => store.unreportDismissals('s1', 'm1'));
+    step(() => store.deleteMessage('m1'));
+    expect(new Set(revisions).size).toBe(revisions.length);
+
+    const now = store.conversationRevision('s1');
+
+    store.conversation('s1', null, 10);
+    store.dismissals('s1');
+    expect(store.conversationRevision('s1')).toBe(now);
+  });
+
   it('keeps whether a message asked for a spoken reply, and a reply\'s passage, tone line and speech', () => {
     const store = Store.open(':memory:');
 

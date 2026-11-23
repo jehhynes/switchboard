@@ -10,6 +10,8 @@ import type { ConversationServiceDeps, ConversationVoice, PersonaView } from '..
 import { dockView, windowOf } from '../src/dock.js';
 import { canonicalFolder, WindowScopes } from '../src/windows.js';
 import { pageList } from '../src/page.js';
+import { questionIndex } from '../src/questions.js';
+import { questionCardOpen } from '../src/runtime.js';
 import type { PageHeader } from '../src/page.js';
 import { NOW, item, session, snapshot } from './views.js';
 
@@ -1689,6 +1691,33 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
       return context;
     };
     const messageOf = (answer: { body: unknown }) => (answer.body as { message: { id: string; text: string } }).message;
+
+    it('builds one ledger per conversation change, shared with the runtime, and reads it again only once the conversation changes', () => {
+      const { service, store, open, view } = setupCards();
+      const mine = open(view.file);
+      const reads = vi.spyOn(store, 'conversation');
+      const draft = { step: 'port-choice', picks: { 'port-choice': { letters: ['B'], other: null } } };
+
+      // A draft's check and its broadcast to the windows share one read, made after the conversation last changed.
+      ask(store, 'q0', 'Working on it.');
+      expect(service.cardCommand('card-draft', { window: mine.key, scopeGen: 1, opId: 'd1', sessionId: 's2', card: 'reply:q1', draft }).status).toBe(200);
+      expect(reads.mock.calls.filter(([id]) => id === 's2')).toHaveLength(1);
+      expect(service.ledger('s2')).toBe(questionIndex(store).ledger('s2'));
+      expect(questionCardOpen(store, 's2', 1)).toBe(true);
+      expect(reads.mock.calls.filter(([id]) => id === 's2')).toHaveLength(1);
+
+      // A change to the conversation, or a dismissal, reads it again.
+      const before = service.ledger('s2');
+
+      ask(store, 'q2', '1. Another? {#another-one}\n   - A) x\n   - B) y');
+      expect(service.ledger('s2')).not.toBe(before);
+      expect(service.ledger('s2').open).toContain('reply:q2#another-one');
+      const asked = service.ledger('s2');
+
+      store.addDismissal('s2', 'q2', 'another-one', NOW);
+      expect(service.ledger('s2')).not.toBe(asked);
+      expect(service.ledger('s2').questions.get('reply:q2#another-one')?.state).toBe('dismissed');
+    });
 
     it('writes the [answers] message a Send posts, stores its links, and types it', async () => {
       const { service, store, open, body, held, view } = setupCards();

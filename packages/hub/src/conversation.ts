@@ -5,7 +5,7 @@ import type { BackgroundCounts, PersonaSettings, ViewSettings } from '@switchboa
 import { ArtifactFolder, MAX_MESSAGE_CHARS, NotWritten, answerMessage, cardSteps, cardUtterance, currentStep, draftAnswers, interruptNote, messageTags, moveStep, pasteText, picked, pickLetter, questionKey, questionSpeech, resolveAnswers, setOther, SLUG } from '@switchboard/conversation';
 import type { CardDraft, LedgerCard, LedgerQuestion, QuestionLedger } from '@switchboard/conversation';
 import type { MessageAnswer } from '@switchboard/core';
-import { dismissedAt, questionsSince, sessionLedger } from './questions.js';
+import { dismissedAt, questionIndex, questionsSince } from './questions.js';
 import { promptKeyData, readPrompt, screenRows, stepsText, TYPING_PAUSE_MS } from '@switchboard/conversation';
 import type { QuestionsView } from '@switchboard/protocol';
 import type { Artifact, ContextView, ConversationChange, HeardTag, InputOutcome, InputSteps, PromptKey, ScreenPrompt, SlashCommand } from '@switchboard/conversation';
@@ -375,6 +375,8 @@ export class ConversationService {
   #closed = false;
 
   constructor(private readonly deps: ConversationServiceDeps) {
+    // Shared with the runtime.
+    questionIndex(deps.store, deps.now);
     this.#adapters = [new ClaudeConversationAdapter(deps, (id, change) => this.#changed(id, change)), ...(deps.adapters?.((id, change) => this.#changed(id, change)) ?? [])];
 
     for (const message of deps.store.openMessages()) {
@@ -565,9 +567,9 @@ export class ConversationService {
   /** The questions each window was last sent, by window key. */
   readonly #questionsShown = new Map<string, string>();
 
-  /** A session's question ledger, from the store. */
+  /** A session's question ledger, from the store, shared with the runtime until the conversation changes. */
   ledger(sessionId: string): QuestionLedger {
-    return sessionLedger(this.deps.store, sessionId, questionsSince(this.deps.store, this.deps.now()));
+    return questionIndex(this.deps.store, this.deps.now).ledger(sessionId, questionsSince(this.deps.store, this.deps.now()));
   }
 
   /** A session's card drafts, by card key. */
