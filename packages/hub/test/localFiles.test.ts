@@ -59,6 +59,11 @@ describe('localTarget', () => {
   it.runIf(process.platform === 'win32')('reads a drive letter as a path, not a scheme', () => {
     expect(localTarget('C:/Windows/win.ini', null)).toBe(resolve('C:/Windows/win.ini'));
   });
+
+  it.runIf(process.platform === 'win32')('reads a drive path written with a leading slash as that drive', () => {
+    expect(localTarget('/D:/git/a/.wip/review.md', null)).toBe(resolve('D:/git/a/.wip/review.md'));
+    expect(localTarget('\\C:\\Windows\\win.ini', null)).toBe(resolve('C:/Windows/win.ini'));
+  });
 });
 
 describe('localRoots', () => {

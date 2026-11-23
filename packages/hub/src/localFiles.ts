@@ -151,6 +151,9 @@ export function localTarget(target: string, cwd: string | null): string | null {
     }
   } else if (/^[a-z][a-z0-9+.-]*:/i.test(path) && !/^[a-z]:[\\/]/i.test(path)) {
     return null;
+  } else if (/^[\\/][a-z]:[\\/]/i.test(path)) {
+    // A drive path written with a leading slash, as a file URI's path is ("/D:/git/…"), names that drive, not a folder "D:" on the current one.
+    path = path.slice(1);
   }
 
   if (isAbsolute(path)) {
