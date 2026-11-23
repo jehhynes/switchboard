@@ -995,19 +995,19 @@ describe('speech in the view (architecture.md § Voice)', () => {
     expect(root.querySelector('li[data-id="r5"] .show-more')).not.toBeNull();
   });
 
-  it('draws a passage as a bubble on the left, once, in its place when the whole reply shows, and a reply that is all passage as only its bubble', () => {
+  it('draws the primary response once, in its place when the whole reply shows, and a reply that is all primary response as only that', () => {
     const { root, show } = page();
     const bodyOf = (id: string) => root.querySelector(`li[data-id="${id}"] > .body`)!;
-    const kinds = (id: string) => [...bodyOf(id).children].map((child) => (child.classList.contains('speech-bubble') ? `bubble:${child.textContent!.trim()}` : child.tagName.toLowerCase()));
+    const kinds = (id: string) => [...bodyOf(id).children].map((child) => (child.classList.contains('reply-primary') ? `primary:${child.textContent!.trim()}` : child.tagName.toLowerCase()));
 
     show(state([reply('r1', T0, { opening: 'Before.\n\nFixed it.\n\n- one', speak: 'Fixed it.' }), reply('r2', T0 + 1, { opening: 'Same.', speak: 'Same.' }), reply('r3', T0 + 2, { opening: 'Plain.' })]));
 
-    expect(kinds('r1')).toEqual(['bubble:Fixed it.', 'button']);
-    expect(kinds('r2')).toEqual(['bubble:Same.']);
-    expect(bodyOf('r3').querySelector('.speech-bubble')).toBeNull();
+    expect(kinds('r1')).toEqual(['primary:Fixed it.', 'button']);
+    expect(kinds('r2')).toEqual(['primary:Same.']);
+    expect(bodyOf('r3').querySelector('.reply-primary')).toBeNull();
     root.querySelector<HTMLButtonElement>('li[data-id="r1"] .show-more')!.click();
-    // The text around the passage shows as smaller details, and the passage is not shown a second time.
-    expect(kinds('r1')).toEqual(['div', 'bubble:Fixed it.', 'div', 'button']);
+    // The text around the passage shows as details, and the passage is not shown a second time.
+    expect(kinds('r1')).toEqual(['div', 'primary:Fixed it.', 'div', 'button']);
     expect([...bodyOf('r1').querySelectorAll(':scope > .reply-details')].map((details) => details.firstElementChild!.tagName.toLowerCase())).toEqual(['p', 'ul']);
     expect(bodyOf('r1').textContent!.match(/Fixed it\./g)).toHaveLength(1);
     // The metadata line stays one line under the whole reply.
@@ -1016,27 +1016,28 @@ describe('speech in the view (architecture.md § Voice)', () => {
     const css = readFileSync(require.resolve('@switchboard/conversation/bubbles.css'), 'utf8');
     const rule = (selector: string) => css.split('\n').find((line) => line.startsWith(`${selector} {`)) ?? '';
 
-    expect(rule('.speech-bubble')).toContain('max-width: 80%;');
-    expect(rule('.reply-details')).toContain('font-size: 92%;');
-    expect(rule('.speech-bubble')).toContain('border-radius: 12px 12px 12px 4px;');
-    expect(rule('.speech-bubble')).toContain('background: var(--sb-speech-bubble);');
-    // The spoken passage reads at 110% of the reply's text, and the dot moves down by half of what that adds to the first line.
-    expect(rule('.speech-bubble')).toContain('font-size: 110%;');
-    expect(rule('.reply:has(> .body > .speech-bubble:first-child)')).toContain('--dot-shift: calc(7px + 0.075em);');
-    // Our messages' bubbles, slash commands included, read at the same 110%, so every bubble's text is one size.
+    // A reply has no bubble: its primary response is plain text, set off from its details by size alone, with no rule or extra gap.
+    expect(css).not.toContain('speech-bubble');
+    expect(css).not.toMatch(/\.reply-(primary|details)[^{]*\{[^}]*(border|padding|margin|background)/);
+    // A reply's text, primary response included, reads at --sb-reply-scale (1.1) of the theme's size, as our messages do, an aside excepted; its
+    // details, code, lists and tables included, at --sb-details-scale (1), the theme's size; and the dot moves down by half of what the larger
+    // text adds to the first line.
+    expect(css).toMatch(/\n:root \{\n  --sb-reply-scale: 1\.1;\n  --sb-details-scale: 1;\n\}/);
+    expect(rule('.reply:not(.aside) > .body')).toBe('.reply:not(.aside) > .body { font-size: calc(var(--sb-reply-scale) * 100%); }');
+    expect(rule('.reply-details')).toBe('.reply-details { font-size: calc(var(--sb-details-scale) / var(--sb-reply-scale) * 1em); }');
+    expect(rule('.reply:not(.aside)')).toBe('.reply:not(.aside) { --dot-shift: calc((var(--sb-reply-scale) - 1) * 0.75em); }');
+    // Our messages' bubbles, slash commands included, read at 110%.
     expect(rule('.message .box')).toBe('.message .box { font-size: 110%; }');
     expect(css).not.toContain('.message .box.command');
-    // That 110% is of the theme's size only while the reply and the message around a bubble keep it.
+    // Those sizes are of the theme's only while the timeline, the reply and the message around them keep it.
     const view = readFileSync(join(__dirname, '../src/webview/conversation.css'), 'utf8');
 
     expect(view).toMatch(/\nbody \{[^}]*font-size: var\(--vscode-font-size\);/);
-    for (const parent of [".timeline",".timeline > li",".reply",".reply .body",".message",".message .bubble",".message .box"]) {
+    for (const parent of [".timeline",".timeline > li",".reply",".reply .body",".message",".message .bubble",".message .box",".reply-primary",".reply-details"]) {
       expect(view.split('\n').filter((line) => line.startsWith(`${parent} {`)).join(' ')).not.toContain('font-size');
     }
     // The view's own command rule sets only the font, so a slash command's bubble keeps the shared 110%.
     expect(view.split('\n').filter((line) => line.startsWith('.message .box.command {')).join(' ')).not.toContain('font-size');
-    expect(css).toContain('--sb-speech-bubble: color-mix(in srgb, var(--vscode-editor-inactiveSelectionBackground, rgba(127, 127, 127, 0.2)) 75%, var(--vscode-sideBar-background));');
-    expect(rule('body.vscode-high-contrast .speech-bubble, body.vscode-high-contrast-light .speech-bubble')).toContain('background: transparent;');
   });
 
   it("puts all of a reply's metadata on one line under it: the copy button first, the tone and Not spoken, and the time at the right", () => {
@@ -1055,7 +1056,7 @@ describe('speech in the view (architecture.md § Voice)', () => {
     const spoken = (state_: ReplyView['spoken']['state'], atMs: number | null = null, saidChars: number | null = null, details = true) =>
       renderConversation(state([reply('r1', T0, { opening: 'Fixed it. More.', speak: 'Fixed it.', spoken: { state: state_, atMs, saidChars } })]), new Set(), Date.now(), false, { tab: 'conversation', unopened: new Set(), details });
 
-    expect(spoken('interrupted', 7_400, 3)).toContain('<div class="speech-bubble"><p class="passage">Fix<span class="unheard">ed it.</span></p></div>');
+    expect(spoken('interrupted', 7_400, 3)).toContain('<div class="reply-primary"><p class="passage">Fix<span class="unheard">ed it.</span></p></div>');
     expect(spoken('interrupted', 7_400, 3)).not.toContain('0:07');
     expect(spoken('failed')).toContain('<span>Not spoken</span>');
     // Not spoken is a message detail; the dimmed part of an interrupted passage is not.

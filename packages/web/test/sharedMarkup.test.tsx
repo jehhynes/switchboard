@@ -12,7 +12,7 @@ import { renderShared } from '../src/composer.js';
 import { renderMarkdown } from '../src/markdown.js';
 import type { MessageView, ReplyView, SessionView, StatusView } from '@switchboard/protocol';
 
-// The shared renderers (messageMeta, spokenBubble, voiceControls, providerIcons) and the page's Markdown return HTML, which a part must draw
+// The shared renderers (messageMeta, replyBody, voiceControls, providerIcons) and the page's Markdown return HTML, which a part must draw
 // through `trusted`; given to JSX as a child, it shows as text such as "<time class=…".
 const MARKUP = /<\/?[a-z][\w-]*[\s/>]/i;
 

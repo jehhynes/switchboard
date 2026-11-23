@@ -54,11 +54,11 @@ describe('the page on a phone', () => {
     expect(narrow).toContain('.reply, .timeline > li.artifact { padding-left: 20px; }');
     expect(narrow).toContain('.reply .dot { left: 4px; }');
     expect(narrow).toContain('.body ul, .body ol { padding-inline-start: 1.5em; }');
-    expect(narrow).toContain('.message .bubble, .speech-bubble { max-width: calc(100% - 24px); }');
+    expect(narrow).toContain('.message .bubble { max-width: calc(100% - 24px); }');
     expect(phone).not.toContain('.bubble');
-    // Wider, the bubbles keep their room and the replies their gutter.
+    // Wider, our messages' bubbles keep their room and the replies their gutter; a reply has no bubble.
     expect(css).toMatch(/(^|\n)\.message \.bubble \{[^}]*max-width: 85%;/);
-    expect(css).toMatch(/(^|\n)\.speech-bubble \{[^}]*max-width: 80%;/);
+    expect(css).not.toContain('speech-bubble');
     expect(css).toMatch(/(^|\n)\.reply \{ padding-left: 30px; \}/);
     expect(css).toMatch(/(^|\n)\.body ul, \.body ol \{ margin: 1em 0; padding-inline-start: 2em; \}/);
   });

@@ -188,7 +188,7 @@ describe('question cards in the Conversation view', () => {
     // Questions before a spoken passage fold too, with the whole reply shown, rather than leaving the text.
     show(state([reply('r1', T0, `${ending}\n\nThen I start.`, { speak: 'Then I start.' })], { settings: { expandReplies: true } }));
     expect(root.querySelector('li[data-id="r1"] details.questions-fold summary')?.textContent).toBe('1 question — answer below');
-    expect(root.querySelector('li[data-id="r1"] .speech-bubble')?.textContent?.trim()).toBe('Then I start.');
+    expect(root.querySelector('li[data-id="r1"] .reply-primary')?.textContent?.trim()).toBe('Then I start.');
   });
 
   it("shows a status's questions on the Status tab as plain Markdown, with no card or fold", () => {

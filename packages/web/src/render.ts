@@ -1,6 +1,5 @@
 import { renderMicButton, renderVoiceControls } from '@switchboard/conversation/voiceControls';
 import { fullTime, metaLine, stamped, stampTime, toneMark, voiceMark } from '@switchboard/conversation/messageMeta';
-import { hasUnspokenText, spokenBody } from '@switchboard/conversation/spokenBubble';
 import { artifactIcon, awaitingReply, selectedEntry, selectedRow, stateIcon, timeline } from './model.js';
 import type { PageState } from './model.js';
 import { copyButton, escape, renderInline, renderMarkdown } from './markdown.js';
@@ -410,8 +409,8 @@ export function deliveryMark(item: MessageView): string {
   return item.delivery === 'uncertain' ? `<span class="delivery uncertain" title="${escape(item.error ?? '')}">uncertain</span>` : '';
 }
 
-/** How the shared `spokenBody` draws a reply's text around its bubbles: `markdown` for the text, the page's own escaping for a passage heard in part. */
-export function spokenRender(markdown: (text: string, last: boolean) => string): { markdown: (text: string, last: boolean) => string; escape: (text: string) => string } {
+/** How the shared `replyBody` draws a reply's text: `markdown` for the text, the page's own escaping for a passage heard in part. */
+export function replyRender(markdown: (text: string, last: boolean) => string): { markdown: (text: string, last: boolean) => string; escape: (text: string) => string } {
   return { markdown, escape };
 }
 

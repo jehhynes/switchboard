@@ -1,15 +1,15 @@
-// The Conversation tab (architecture.md § Web page): our messages, the replies with their spoken bubbles and question cards, artifact rows, the
+// The Conversation tab (architecture.md § Web page): our messages, the replies with their primary responses and question cards, artifact rows, the
 // turn row, and the prompt or Codex request the session waits on.
 import type { VNode } from 'preact';
 import { fullTime, metaLine, spokenMark, stamped, toneMark, voiceMark } from '@switchboard/conversation/messageMeta';
-import { hasUnspokenText, spokenBody } from '@switchboard/conversation/spokenBubble';
+import { hasUnspokenText, replyBody } from '@switchboard/conversation/replyBody';
 import { answerSummary, plain, questionLedger, stripQuestionMarkup, withoutEndingQuestions } from '@switchboard/conversation/questions';
 import type { LedgerItem, LedgerQuestion, QuestionLedger } from '@switchboard/conversation/questions';
 import { isAnswerMessage, renderAnswersBubble, renderQuestionCard } from '@switchboard/conversation/questionCard';
 import { artifactIcon, awaitingReply, inTurn, timeline } from './model.js';
 import type { PageState } from './model.js';
 import { copyButton, renderInline, renderMarkdown } from './markdown.js';
-import { dayLabel, deliveryMark, spokenRender, withoutQuestions } from './render.js';
+import { dayLabel, deliveryMark, replyRender, withoutQuestions } from './render.js';
 import type { CardDraft, View } from './render.js';
 import { trusted } from './trusted.js';
 import { backgroundLabel } from '@switchboard/core/group';
@@ -68,7 +68,7 @@ function Reply({ item, earlier, view, stamped: shown, card, expandReplies }: { i
   }
 
   // Focused mode, as in the Conversation view: a reply shows its primary response first, spoken or not, and its details behind Show more. The
-  // passage is a bubble on the left, in its place when the whole reply shows; after the operator spoke over it, the part not heard is dimmed.
+  // primary response keeps its place when the whole reply shows; after the operator spoke over it, the part not heard is dimmed.
   const passage = item.kind === 'reply' && item.speak !== null && item.speak.trim() !== '' ? item.speak : null;
   // Question ids and withdraw lines are for the view and the session, not the operator.
   const opening = stripQuestionMarkup(item.opening);
@@ -78,7 +78,7 @@ function Reply({ item, earlier, view, stamped: shown, card, expandReplies }: { i
   // Only the text that ends the reply can end in the card's questions, which it leaves out; questions before a passage fold into one line.
   const markdownPart = (text: string, last: boolean): string => (card === null ? renderMarkdown(text) : withoutQuestions(text, last ? `reply:${item.id}` : `reply:${item.id}:before`, view.open, last));
   const said = item.spoken.state === 'interrupted' ? item.spoken.saidChars : null;
-  const body = passage === null ? markdownPart(opening, true) : spokenBody(opening, passage, said, !expanded, spokenRender(markdownPart));
+  const body = passage === null ? markdownPart(opening, true) : replyBody(opening, passage, said, !expanded, replyRender(markdownPart));
   const tone = toneMark(item.tone, view.details);
   // The copy button comes first on the line under the reply, then the tone and a speech failure with message details on, and the time at the right.
   const meta = metaLine([item.provisional ? '' : copyButton('copy-reply', 'Copy response'), tone, spokenMark(item.spoken.state, view.details)], item.at, shown);

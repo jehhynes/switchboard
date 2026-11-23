@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "The conversation layer: reads a Code Mode session's replies and messages from its transcript, with the screen as an early copy. Runs in the hub; imports no native module and must not import vscode. `./questions`, `./providerIcons`, `./voiceControls`, `./messageMeta`, `./spokenBubble`, `./menuPlace`, `./contextMeter` and `./questionCard` import nothing, for browser bundles, and `./bubbles.css` and `./questionCard.css` are styles both front ends share.",
+  "description": "The conversation layer: reads a Code Mode session's replies and messages from its transcript, with the screen as an early copy. Runs in the hub; imports no native module and must not import vscode. `./questions`, `./providerIcons`, `./voiceControls`, `./messageMeta`, `./replyBody`, `./menuPlace`, `./contextMeter` and `./questionCard` import nothing, for browser bundles, and `./bubbles.css` and `./questionCard.css` are styles both front ends share.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -31,9 +31,9 @@
       "types": "./dist/contextMeter.d.ts",
       "default": "./dist/contextMeter.js"
     },
-    "./spokenBubble": {
-      "types": "./dist/spokenBubble.d.ts",
-      "default": "./dist/spokenBubble.js"
+    "./replyBody": {
+      "types": "./dist/replyBody.d.ts",
+      "default": "./dist/replyBody.js"
     },
     "./questionCard": {
       "types": "./dist/questionCard.d.ts",

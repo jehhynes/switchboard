@@ -6,7 +6,7 @@ type NativeRequest = NonNullable<SessionView['requests']>[number];
 import { providerMark } from '@switchboard/conversation/providerIcons';
 import { backgroundLabel } from '@switchboard/core/group';
 import { fullTime, metaLine, spokenMark, stamped, toneMark, voiceMark } from '@switchboard/conversation/messageMeta';
-import { hasUnspokenText, spokenBody } from '@switchboard/conversation/spokenBubble';
+import { hasUnspokenText, replyBody } from '@switchboard/conversation/replyBody';
 import { artifactIcon, awaitingReply, inTurn, selectedEntry, stateIcon, statusLine, timeline } from '../conversationModel.js';
 import type { ConversationState } from '../conversationModel.js';
 import { answerSummary, plain, questionLedger, questionSegments, stripQuestionMarkup, withoutEndingQuestions } from '@switchboard/conversation/questions';
@@ -168,7 +168,7 @@ function reply(item: ReplyView, earlier: ReplyView | null, open: ReadonlySet<str
   }
 
   // Focused mode (voice-design decision 21): a reply shows its primary response first, spoken or not, its details behind Show more. The
-  // passage is a bubble on the left, in its place when the whole reply shows; after the operator spoke over it, the part not heard is dimmed.
+  // primary response keeps its place when the whole reply shows; after the operator spoke over it, the part not heard is dimmed.
   const passage = item.kind === 'reply' && item.speak !== null && item.speak.trim() !== '' ? item.speak : null;
   // Question ids and withdraw lines are for the view and the session, not the operator.
   const opening = stripQuestionMarkup(item.opening);
@@ -178,7 +178,7 @@ function reply(item: ReplyView, earlier: ReplyView | null, open: ReadonlySet<str
   // Only the text that ends the reply can end in the card's questions, which it leaves out; questions before a passage fold into one line.
   const markdownPart = (text: string, last: boolean): string => (card === '' ? renderMarkdown(text) : withoutQuestions(text, last ? `reply:${item.id}` : `reply:${item.id}:before`, open, last));
   const said = item.spoken.state === 'interrupted' ? item.spoken.saidChars : null;
-  const shown = passage === null ? markdownPart(opening, true) : spokenBody(opening, passage, said, !expanded, { markdown: markdownPart, escape });
+  const shown = passage === null ? markdownPart(opening, true) : replyBody(opening, passage, said, !expanded, { markdown: markdownPart, escape });
   const more = folded
     ? `<button class="show-more" type="button" data-action="more" data-reply="${escape(item.id)}" aria-expanded="${expanded}">${expanded ? 'Show less' : 'Show more'}</button>`
     : '';

@@ -1,33 +1,32 @@
-/* The chat bubbles' colours and shapes, shared by the VS Code Conversation view and the web page, whose builds put this file before their own
-   styles (architecture.md § Conversation view). */
+/* The conversation's bubbles and text sizes, shared by the VS Code Conversation view and the web page, whose builds put this file before their
+   own styles (architecture.md § Conversation view). */
 :root {
   /* Our messages, on the right: a 15% tint of the theme's button blue, #0078D426 in Dark Modern, light enough for the theme's foreground. */
   --sb-message-bubble: color-mix(in srgb, var(--vscode-button-background, #0078d4) 15%, transparent);
-  /* A reply's spoken passage, on the left: the editor's inactive selection colour, a neutral grey in every theme, clearly apart from the blue,
-     taken a quarter of the way to the side bar, #323437 in Dark Modern, so it sits quieter than the text. */
-  --sb-speech-bubble: color-mix(in srgb, var(--vscode-editor-inactiveSelectionBackground, rgba(127, 127, 127, 0.2)) 75%, var(--vscode-sideBar-background));
 }
 
-/* Every bubble's text, our messages' (slash commands included) and a reply's spoken passage's, is at 110% of a reply's, which stays at the
-   theme's size. The line height (1.5) and the padding are the same in both bubbles. */
-.message .box { font-size: 110%; }
+/* Text sizes as fractions of the theme's size, which the list item and the timeline keep: a reply's (`--sb-reply-scale`), its primary response
+   included, as our messages' 110%, and its details' (`--sb-details-scale`), the theme's own size. Change a number here to resize every
+   reply's text or every reply's details, code, lists and tables included, in both front ends. */
+:root {
+  --sb-reply-scale: 1.1;
+  --sb-details-scale: 1;
+}
 
-/* A reply's spoken passage as a bubble on the left, as a messaging app draws what it receives: at most 80% of the reply's width, with a smaller
-   bottom-left corner as the tail. High contrast themes get only the contrast border, as our messages do. */
-.speech-bubble { box-sizing: border-box; font-size: 110%; width: fit-content; max-width: 80%; margin: 2px 0 4px; padding: 6px 12px; border: 1px solid var(--vscode-contrastBorder, transparent); border-radius: 12px 12px 12px 4px; background: var(--sb-speech-bubble); color: var(--vscode-foreground); overflow-wrap: anywhere; }
-.speech-bubble > :first-child { margin-top: 0; }
-.speech-bubble > :last-child { margin-bottom: 0; }
-body.vscode-high-contrast .speech-bubble, body.vscode-high-contrast-light .speech-bubble { background: transparent; }
+/* Our messages' text, slash commands included. */
+.message .box { font-size: 110%; }
+/* A reply is plain text after its dot, with no bubble; an aside stays smaller and dimmed. Its dot moves down by half of what the larger text adds
+   to the first line's height (1.5 × the scale's excess / 2), level with it. */
+.reply:not(.aside) > .body { font-size: calc(var(--sb-reply-scale) * 100%); }
+.reply:not(.aside) { --dot-shift: calc((var(--sb-reply-scale) - 1) * 0.75em); }
+.reply-details { font-size: calc(var(--sb-details-scale) / var(--sb-reply-scale) * 1em); }
+
+/* A reply's primary response and its details are set apart by their sizes alone, with the paragraph spacing between them that the rest of the
+   reply has, as claude-collab showed what came after `[details]`; only the reply's own first and last lines lose their margin. */
+.reply .body > :first-child > :first-child { margin-top: 0; }
+.reply .body > :last-child > :last-child { margin-bottom: 0; }
 /* After the operator spoke over the passage, the part not heard. */
-.speech-bubble .unheard { color: var(--vscode-descriptionForeground); opacity: 0.7; }
-/* A reply that starts with a bubble moves its dot down by the bubble's border and padding, and by half of what its larger text adds to the
-   first line's height (1.5 × 10% / 2 of the reply's size), level with the bubble's first line. */
-.reply:has(> .body > .speech-bubble:first-child) { --dot-shift: calc(7px + 0.075em); }
-/* The rest of a reply after its primary response, its details, smaller than the reply's own size, as claude-collab showed what came after
-   `[details]`. */
-.reply-details { font-size: 92%; }
-.reply-details > :first-child { margin-top: 0; }
-.reply-details > :last-child { margin-bottom: 0; }
+.reply-primary .unheard { color: var(--vscode-descriptionForeground); opacity: 0.7; }
 
 /* Above a message that answered a question card: a quoted line per question answered, which goes to the card. Each line keeps to one line, the
    question giving way before the answer. */

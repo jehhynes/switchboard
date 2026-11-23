@@ -721,15 +721,15 @@ body.artifact-window > .artifact-view { height: 100%; }
   .composer-sent { padding: 0 12px; }
 }
 /* A conversation under 600 px wide, on a phone or in a narrow column, gives its text the width: 8 px at its sides, a 20 px gutter for the
-   replies' dots, a shallower list indent, and bubbles that stop 24 px short of the far side, our messages' at the left and a reply's spoken
-   passage at the right. A wider one keeps the room messaging apps leave. */
+   replies' dots, a shallower list indent, and our messages' bubbles that stop 24 px short of the left side. A wider one keeps the room messaging
+   apps leave. */
 @container conversation (max-width: 600px) {
   .scroll:has(> .timeline) { padding-left: 8px; padding-right: 8px; }
   .timeline { max-width: calc(var(--chat-width, 940px) - 16px); }
   .reply, .timeline > li.artifact { padding-left: 20px; }
   .reply .dot { left: 4px; }
   .body ul, .body ol { padding-inline-start: 1.5em; }
-  .message .bubble, .speech-bubble { max-width: calc(100% - 24px); }
+  .message .bubble { max-width: calc(100% - 24px); }
 }
 
 /* The selected work item's row actions (architecture.md § Web page): the dock's main control as a small button and the rest under an ellipsis. */

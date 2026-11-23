@@ -108,7 +108,7 @@ describe('question cards in replies', () => {
     view.open.add('more:r1');
     host.innerHTML = html(renderTimeline(pageState([reply('r1', 1, { opening: `${ending}\n\nThen I start.`, speak: 'Then I start.' })]), view));
     expect(host.querySelector('details.questions-fold summary')?.textContent).toBe('1 question — answer below');
-    expect(host.querySelector('li[data-id="r1"] .speech-bubble')?.textContent?.trim()).toBe('Then I start.');
+    expect(host.querySelector('li[data-id="r1"] .reply-primary')?.textContent?.trim()).toBe('Then I start.');
     // A question id and a withdraw line never show.
     host.innerHTML = html(renderTimeline(fresh([reply('r1', 1, { opening: 'Before I go on:\n[withdraw: old-one]\n\n1. Port? {#port-choice}\n   - A) 1\n   - B) 2\n\nThen I start.' })]), newView()));
     expect(host.querySelector('li[data-id="r1"] > .body')?.textContent).not.toMatch(/withdraw|\{#/);
@@ -256,7 +256,7 @@ describe('drawing', () => {
   it('dims the part of an interrupted passage not heard, and says Not spoken only when speech failed, with message details on', () => {
     const spoken = (state: ReplyView['spoken']['state'], details = true) => html(renderTimeline(pageState([reply('r1', 1, { opening: 'Fixed it. More.', speak: 'Fixed it.', spoken: { state, atMs: 7_400, saidChars: 3 } })]), { ...newView(), details }));
 
-    expect(spoken('interrupted')).toContain('<div class="speech-bubble"><p class="passage">Fix<span class="unheard">ed it.</span></p></div>');
+    expect(spoken('interrupted')).toContain('<div class="reply-primary"><p class="passage">Fix<span class="unheard">ed it.</span></p></div>');
     expect(spoken('interrupted')).not.toContain('0:07');
     expect(spoken('failed')).toContain('<span>Not spoken</span>');
     // Not spoken is a message detail, as in the Conversation view; the dimmed part of an interrupted passage is not.
@@ -269,21 +269,21 @@ describe('drawing', () => {
     }
   });
 
-  it('draws a passage as a bubble on the left, once, in its place when the whole reply shows, and a reply that is all passage as only its bubble', () => {
+  it('draws the primary response once, in its place when the whole reply shows, and a reply that is all primary response as only that', () => {
     const host = document.createElement('div');
     const items = [reply('r1', 1, { opening: 'Before.\n\nFixed it.\n\n- one', speak: 'Fixed it.' }), reply('r2', 2, { opening: 'Same.', speak: 'Same.' }), reply('r3', 3, { opening: 'Plain.' })];
-    const kinds = (id: string) => [...host.querySelector(`li[data-id="${id}"] > .body`)!.children].map((child) => (child.classList.contains('speech-bubble') ? `bubble:${child.textContent!.trim()}` : child.tagName.toLowerCase()));
+    const kinds = (id: string) => [...host.querySelector(`li[data-id="${id}"] > .body`)!.children].map((child) => (child.classList.contains('reply-primary') ? `primary:${child.textContent!.trim()}` : child.tagName.toLowerCase()));
     const view = newView();
 
     host.innerHTML = html(renderTimeline(pageState(items), view));
-    expect(kinds('r1')).toEqual(['bubble:Fixed it.', 'button']);
-    expect(kinds('r2')).toEqual(['bubble:Same.']);
-    expect(host.querySelector('li[data-id="r3"] .speech-bubble')).toBeNull();
+    expect(kinds('r1')).toEqual(['primary:Fixed it.', 'button']);
+    expect(kinds('r2')).toEqual(['primary:Same.']);
+    expect(host.querySelector('li[data-id="r3"] .reply-primary')).toBeNull();
 
     view.open.add('more:r1');
     host.innerHTML = html(renderTimeline(pageState(items), view));
-    // The text around the passage shows as smaller details.
-    expect(kinds('r1')).toEqual(['div', 'bubble:Fixed it.', 'div', 'button']);
+    // The text around the passage shows as details.
+    expect(kinds('r1')).toEqual(['div', 'primary:Fixed it.', 'div', 'button']);
     expect([...host.querySelectorAll('li[data-id="r1"] > .body > .reply-details')].map((details) => details.firstElementChild!.tagName.toLowerCase())).toEqual(['p', 'ul']);
     expect(host.querySelector('li[data-id="r1"] > .body')!.textContent!.match(/Fixed it\./g)).toHaveLength(1);
     expect([...host.querySelector('li[data-id="r1"]')!.children].map((child) => child.className)).toEqual(['dot', 'body', 'meta']);
@@ -5459,18 +5459,22 @@ describe("the list's CSS", () => {
     expect(css).not.toContain('--sb-overlay-scrollbar');
   });
 
-  it("draws replies and the composer at the theme's text size, with no size of their own, and every bubble, our messages' and spoken ones, at 110% from the shared bubbles.css", () => {
+  it("draws our messages and a reply's primary response at 110% and its details at the theme's size from the shared bubbles.css, and the composer at the theme's size", () => {
     expect(css).not.toContain('--chat-scale');
-    // The bubble's 110% is of the reply's size, so the reply and the message around it keep the theme's.
-    for (const parent of [".timeline",".timeline > li",".reply",".reply .body",".message",".message .bubble",".message .box"]) {
+    // The shared sizes are of the theme's, so the page gives the timeline, the reply and the message around them no size of its own.
+    for (const parent of [".timeline",".timeline > li",".reply",".reply .body",".message",".message .bubble",".message .box",".reply-primary",".reply-details"]) {
       expect(declarationsOf((selector) => selector === parent).join(' ')).not.toContain('font-size');
     }
     expect(declarationsOf((selector) => selector === '.composer textarea').join(' ')).toContain('font: inherit');
     expect(declarationsOf((selector) => selector === '.composer textarea').join(' ')).not.toContain('font-size');
     const bubbles = readFileSync(createRequire(import.meta.url).resolve('@switchboard/conversation/bubbles.css'), 'utf8');
 
-    expect(bubbles).toMatch(/\n\.speech-bubble \{[^}]*font-size: 110%;/);
     expect(bubbles).toContain('\n.message .box { font-size: 110%; }');
+    // A reply's text is at --sb-reply-scale (1.1) of the theme's size and its details at --sb-details-scale (1), each set in one place.
+    expect(bubbles).toMatch(/\n:root \{\n  --sb-reply-scale: 1\.1;\n  --sb-details-scale: 1;\n\}/);
+    expect(bubbles).toContain('\n.reply:not(.aside) > .body { font-size: calc(var(--sb-reply-scale) * 100%); }');
+    expect(bubbles).toContain('\n.reply-details { font-size: calc(var(--sb-details-scale) / var(--sb-reply-scale) * 1em); }');
+    expect(bubbles).not.toContain('speech-bubble');
     // A slash command's bubble keeps that 110%: the page's own command rule sets only the font.
     expect(bubbles).not.toContain('.message .box.command');
     expect(declarationsOf((selector) => selector === '.message .box.command').join(' ')).not.toContain('font-size');

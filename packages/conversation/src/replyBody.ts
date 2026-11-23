@@ -1,6 +1,7 @@
 /**
- * A reply's primary response (its spoken passage when Speak replies is on) drawn as a chat bubble on the left, and the rest as smaller details,
- * by the VS Code Conversation view and the web page alike, whether or not it was spoken (architecture.md § Conversation view, Speech). Imports only the tag reader, which imports nothing, for browser bundles.
+ * A reply's body as the VS Code Conversation view and the web page draw it: its primary response (its spoken passage when Speak replies is on),
+ * then its details, both as plain text at the size of the operator's messages, whether or not it was spoken (architecture.md § Conversation
+ * view, Speech). Imports only the tag reader, which imports nothing, for browser bundles.
  */
 import { spokenText } from './tags.js';
 
@@ -65,8 +66,8 @@ export function hasUnspokenText(opening: string, speak: string): boolean {
   return parts === null ? speak.trim() !== opening.trim() : parts.some((part) => !part.spoken);
 }
 
-/** How a front end draws the text in and around a bubble. */
-export interface SpokenRender {
+/** How a front end draws a reply's primary response and details. */
+export interface ReplyRender {
   /** Text as Markdown; `last` for the text that ends the reply, where a question card's questions are. */
   markdown(text: string, last: boolean): string;
   escape(text: string): string;
@@ -101,24 +102,24 @@ function heardEnd(passage: string, heard: number): number {
 }
 
 /**
- * One passage's bubble; after the operator spoke over it (`heard`, characters of its spoken text, not null), the part not heard is dimmed,
- * as plain text.
+ * One passage of the primary response; after the operator spoke over it (`heard`, characters of its spoken text, not null), the part not heard
+ * is dimmed, as plain text.
  */
-export function spokenBubble(passage: string, heard: number | null, render: SpokenRender): string {
+export function primaryResponse(passage: string, heard: number | null, render: ReplyRender): string {
   const cut = heard === null || heard >= spokenText(passage).length ? null : heardEnd(passage, Math.max(heard, 0));
   const inner = cut === null ? render.markdown(passage, false) : `<p class="passage">${render.escape(passage.slice(0, cut))}<span class="unheard">${render.escape(passage.slice(cut))}</span></p>`;
 
-  return `<div class="speech-bubble">${inner}</div>`;
+  return `<div class="reply-primary">${inner}</div>`;
 }
 
 /**
- * A reply's body with its passages as bubbles, each drawn once: only the passages while folded (focused mode), else the whole reply with each
- * passage in its place. `said` is how many characters of `speak`'s spoken text were heard before an interruption, else null. A reply whose
- * passage is not found in its text shows it whole, without a bubble, so no text shows twice.
+ * A reply's body with each passage of its primary response drawn once: only the primary response while folded (focused mode), else the whole
+ * reply with each passage in its place and the rest as details. `said` is how many characters of `speak`'s spoken text were heard before an
+ * interruption, else null. A reply whose passage is not found in its text shows it whole, so no text shows twice.
  */
-export function spokenBody(opening: string, speak: string, said: number | null, folded: boolean, render: SpokenRender): string {
+export function replyBody(opening: string, speak: string, said: number | null, folded: boolean, render: ReplyRender): string {
   if (folded) {
-    return spokenBubble(speak, said, render);
+    return primaryResponse(speak, said, render);
   }
 
   const parts = spokenParts(opening, speak);
@@ -132,7 +133,7 @@ export function spokenBody(opening: string, speak: string, said: number | null, 
 
   return parts
     .map((part, index) =>
-      part.spoken ? spokenBubble(part.text, said === null ? null : said - spokenAt(part.at), render) : `<div class="reply-details">${render.markdown(part.text, index === parts.length - 1)}</div>`,
+      part.spoken ? primaryResponse(part.text, said === null ? null : said - spokenAt(part.at), render) : `<div class="reply-details">${render.markdown(part.text, index === parts.length - 1)}</div>`,
     )
     .join('');
 }
