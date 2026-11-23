@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Exec } from '@switchboard/claude';
-import { PANE_EXTENSION_ID, Store } from '@switchboard/core';
+import { Store } from '@switchboard/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHubApp, parseAction, parseReport } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
@@ -364,59 +364,11 @@ describe('createHubApp', () => {
     expect(changed).toBeGreaterThan(before);
   });
 
-  it('gives a page, and only a page, a pairing token for the Chrome extension while the Chrome pane is on (PRD R113)', async () => {
-    writeSettings({ sessions: { installHooks: false } });
-    const off = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli } });
-    const offPage = off.page!.opened();
-
-    expect(await off.post['/v1/conversation/pane-pair']!({ window: offPage })).toEqual({ status: 409, body: { error: 'The Chrome pane is off. Turn on Chrome pane in the dock’s Settings, General page.' } });
-    await off.close();
-
+  it('retires native pane commands even with an old setting', async () => {
     writeSettings({ sessions: { installHooks: false }, web: { chromePane: true } });
-    let helperStarts = 0;
-    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli }, startPaneHelper: async () => (helperStarts++, { error: 'not in tests' }) });
+    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli } });
     closers.push(() => app.close());
-    const page = app.page!.opened();
-    const paired = await app.post['/v1/conversation/pane-pair']!({ window: page });
-
-    expect(paired).toMatchObject({ status: 200, body: { extensionId: PANE_EXTENSION_ID, token: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/) } });
-    expect(await app.post['/v1/conversation/pane-pair']!({ window: 'nobody' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    expect(await app.post['/v1/conversation/pane-pair']!({})).toEqual({ status: 400, body: { error: 'Expected {window}.' } });
-
-    // The page's column drives the pane; the dock takes no part in it.
-    const dock: Array<[string, unknown]> = [];
-
-    app.attachDock!((event, data) => (dock.push([event, data]), 1));
-    expect(await app.post['/v1/conversation/pane-rect']!({ window: page, rect: { left: 1300, top: 40, width: 600, height: 900, dpr: 1, innerWidth: 1900, innerHeight: 1000 } })).toEqual({ status: 200, body: { done: true } });
-    expect(await app.post['/v1/conversation/pane-rect']!({ window: 'nobody', rect: null })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    expect(await app.post['/v1/conversation/pane-rect']!({ window: page, rect: 'wide' })).toEqual({ status: 400, body: { error: 'Expected {window, rect}.' } });
-    expect(app.post['/dock/pane']).toBeUndefined();
-    expect(dock.filter(([event]) => event === 'pane')).toEqual([]);
-    // No extension is paired, so no page needs the helper and none starts.
-    expect(helperStarts).toBe(0);
-  });
-
-  it("takes a web link for the Chrome pane only from a page with a selected work item, an http or https URL, and a paired extension (architecture.md § Pane state)", async () => {
-    writeSettings({ sessions: { installHooks: false }, sources: { adhoc: { repoRoot: 'D:/scratch' } }, web: { chromePane: true } });
-    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli }, startPaneHelper: async () => ({ error: 'not in tests' }) });
-
-    closers.push(() => app.close());
-
-    const page = app.page!.opened();
-    const open = (body: unknown) => app.post['/v1/conversation/pane-open']!(body);
-
-    expect(await open({ window: page, url: 'https://example.com/' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    expect(await open({ window: 'nobody', url: 'https://example.com/' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-
-    for (const url of ['javascript:alert(1)', 'file:///C:/x', 'https://', `https://a.test/${'x'.repeat(2048)}`, 3]) {
-      expect(await open({ window: page, url })).toEqual({ status: 400, body: { error: 'Expected {window, url} with an http or https URL.' } });
-    }
-
-    app.runtime.send({ type: 'adhoc', prompt: 'Fix the badge', repoRoot: 'D:/scratch', start: false });
-    await app.runtime.settled();
-    expect(await app.post['/v1/conversation/select']!({ window: page, opId: 'o1', workItemId: 1 })).toMatchObject({ status: 200 });
-    // No extension is paired, so the page opens the link itself.
-    expect(await open({ window: page, url: 'https://example.com/' })).toEqual({ status: 409, body: { error: 'The Chrome pane is not connected.' } });
+    for (const command of ['pane-pair', 'pane-open', 'pane-rect']) expect(app.post[`/v1/conversation/${command}`]).toBeUndefined();
   });
 
   it('refuses Continue in Background with a bad body, and answers the roster’s refusal (PRD R89)', async () => {

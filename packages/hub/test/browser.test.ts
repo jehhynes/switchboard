@@ -29,7 +29,7 @@ function get(port: number, path: string, host = `127.0.0.1:${port}`, method = 'G
 
 describe('listenBrowser', () => {
   it('vouches for the actual iframe page origins only, with no CORS and a refused rebound Host', async () => {
-    server = await listenBrowser(0, () => [], () => [], undefined, undefined, undefined, undefined, async () => ({ enabled: true, origins: ['http://127.0.0.1:4000', 'http://localhost:4000'] }));
+    server = await listenBrowser(0, () => [], () => [], undefined, undefined, async () => ({ enabled: true, origins: ['http://127.0.0.1:4000', 'http://localhost:4000'] }));
     const response = await get(server.port, '/iframe');
     expect(JSON.parse(response.body)).toEqual({ enabled: true, origins: ['http://127.0.0.1:4000', 'http://localhost:4000'] });
     expect(response.headers['access-control-allow-origin']).toBeUndefined();
@@ -79,27 +79,6 @@ describe('listenBrowser', () => {
     expect((await get(server.port, '/cards', undefined, 'POST')).status).toBe(404);
   });
 
-  it('answers whether the Chrome pane is on, off without a pane socket, with no CORS header', async () => {
-    let enabled = false;
-
-    server = await listenBrowser(0, () => [], () => [], undefined, undefined, (_request, socket) => void socket.destroy(), () => enabled);
-
-    const off = await get(server.port, '/pane');
-
-    expect(off.status).toBe(200);
-    expect(JSON.parse(off.body)).toEqual({ enabled: false });
-    expect(off.headers['access-control-allow-origin']).toBeUndefined();
-    expect(off.headers['cache-control']).toBe('no-store');
-
-    enabled = true;
-    expect(JSON.parse((await get(server.port, '/pane?x=1', `localhost:${server.port}`)).body)).toEqual({ enabled: true });
-    expect((await get(server.port, '/pane', `rebound.example:${server.port}`)).status).toBe(403);
-    expect((await get(server.port, '/pane', undefined, 'POST')).status).toBe(404);
-
-    await server.close();
-    server = await listenBrowser(0, () => [], () => [], undefined, undefined, undefined, () => true);
-    expect(JSON.parse((await get(server.port, '/pane')).body)).toEqual({ enabled: false });
-  });
 
   it('refuses another Host, another path and another method', async () => {
     server = await listenBrowser(0, () => ['https://github.com/o/r/issues/1'], () => []);

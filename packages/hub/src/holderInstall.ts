@@ -7,12 +7,11 @@ import { parseHolderRecord, recordPath } from '@switchboard/holder';
 import { parseVoiceRecord, voiceRecordPath } from '@switchboard/voice';
 
 /**
- * A program installed per build in its own folder of the home, as the terminal holder is, the voice process (architecture.md § Voice) and the
- * Chrome pane helper (§ Pane helper): its folder, its entry file, what errors call it, and the build its running process loaded, read from its
+ * A program installed per build in its own folder of the home, as the terminal holder is, the voice process (architecture.md § Voice): its folder, its entry file, what errors call it, and the build its running process loaded, read from its
  * record.
  */
 export interface InstallKind {
-  name: 'holder' | 'voice' | 'pane-helper';
+  name: 'holder' | 'voice';
   entry: string;
   title: string;
   running(home: string): { build: string; pid: number } | null;
@@ -30,22 +29,6 @@ export const VOICE_INSTALL: InstallKind = {
   entry: 'voice.js',
   title: 'the voice process',
   running: (home) => parseVoiceRecord(readFileSync(voiceRecordPath(home), 'utf8')),
-};
-
-/** `<home>/pane-helper.json`: the build and process ID of the pane helper the hub runs, so an install keeps its folder. */
-export function paneHelperRecordPath(home: string): string {
-  return join(home, 'pane-helper.json');
-}
-
-export const PANE_HELPER_INSTALL: InstallKind = {
-  name: 'pane-helper',
-  entry: 'Switchboard.PaneHelper.exe',
-  title: 'the Chrome pane helper',
-  running: (home) => {
-    const raw = JSON.parse(readFileSync(paneHelperRecordPath(home), 'utf8')) as { build?: unknown; pid?: unknown };
-
-    return typeof raw.build === 'string' && typeof raw.pid === 'number' ? { build: raw.build, pid: raw.pid } : null;
-  },
 };
 
 /** The holder build the extension carries, written by its build: a hash of every file's path and content, and the files, relative to its folder. */
@@ -277,11 +260,6 @@ function recentlyUsed(dir: string, now: () => number): boolean {
 /** Installs the voice process's build the extension carries into `<home>/voice/<build>/`, as `installHolder` installs the holder's. */
 export function installVoice(source: string, home: string, running: (pid: number) => boolean = alive, now: () => number = Date.now): Promise<{ build: string } | { error: string }> {
   return installHolder(source, home, running, now, VOICE_INSTALL);
-}
-
-/** Installs the Chrome pane helper's build the extension carries on Windows into `<home>/pane-helper/<build>/`, as `installHolder` installs the holder's. */
-export function installPaneHelper(source: string, home: string, running: (pid: number) => boolean = alive, now: () => number = Date.now): Promise<{ build: string } | { error: string }> {
-  return installHolder(source, home, running, now, PANE_HELPER_INSTALL);
 }
 
 /**

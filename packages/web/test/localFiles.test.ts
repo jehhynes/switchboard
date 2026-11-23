@@ -155,31 +155,7 @@ describe('web links with the Chrome pane', () => {
     return event;
   };
 
-  it("opens a reply's web link in the pane's window and shows the Browser tab, instead of a new tab in the last focused browser window", async () => {
-    const { posts, opened } = start({ installed: true });
 
-    await flush();
-    expect(root.querySelector('[data-side="browser"]')).toBeNull();
-
-    const event = clickLink();
-
-    expect(event.defaultPrevented).toBe(true);
-    await flush();
-    expect(posts.filter((post) => post.url.endsWith('/pane-open')).map((post) => post.body['url'])).toEqual(['https://example.com/docs']);
-    expect(root.querySelector('#detail .side-switch [aria-selected="true"]')!.textContent).toBe('Browser');
-    expect(opened).toEqual([]);
-  });
-
-  it('opens the link in a new browser tab when the hub refuses it', async () => {
-    const refused = start({ installed: true, paneOpen: 409 });
-
-    await flush();
-    clickLink();
-    await flush();
-    await flush();
-    expect(refused.opened).toEqual(['https://example.com/docs']);
-    expect(root.querySelector('[data-side="browser"]')).toBeNull();
-  });
 
   it('opens the link in a new browser tab at once when the Browser area is too narrow for the pane', async () => {
     const { posts, opened } = start({ installed: true, width: 400 });
@@ -231,17 +207,6 @@ describe('web links with the Chrome pane', () => {
     expect(remote.opened).toEqual(['https://example.com/docs']);
   });
 
-  it("keeps a working pane's link in the pane, not the extension's tab group", async () => {
-    const extension = groupingExtension();
-    const { posts, opened } = start({ installed: true, toExtension: extension.toExtension });
-
-    await flush();
-    expect(clickLink().defaultPrevented).toBe(true);
-    await flush();
-    expect(posts.filter((post) => post.url.endsWith('/pane-open')).map((post) => post.body['url'])).toEqual(['https://example.com/docs']);
-    expect(extension.sent.map(([, message]) => message['type'])).not.toContain('open');
-    expect(opened).toEqual([]);
-  });
 
   it("opens a link in the extension's tab group on this computer while the pane has stopped", async () => {
     const extension = groupingExtension();

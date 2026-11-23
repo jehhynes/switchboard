@@ -6,7 +6,7 @@ const chromeManifest = JSON.parse(readFileSync(new URL('../../chrome/src/manifes
 const chromeCss = readFileSync(new URL('../../chrome/src/content.css', import.meta.url), 'utf8');
 
 describe('firefoxManifest', () => {
-  it('runs the background as a script, adds the add-on ID, drops the host permission port and the Chrome pane with its permissions, and keeps every other key of the Chrome manifest', () => {
+  it('runs the background as a script, adds the add-on ID, drops the host permission port and Chrome-only permissions, and keeps every other key of the Chrome manifest', () => {
     const { background, browser_specific_settings, host_permissions, version, ...rest } = firefoxManifest(chromeManifest, 446_400);
     const { background: _chromeBackground, host_permissions: chromeHosts, version: chromeVersion, key, externally_connectable, permissions, ...chromeRest } = chromeManifest;
 

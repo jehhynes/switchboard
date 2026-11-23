@@ -21,7 +21,6 @@
     "packages/hub",
     "apps/hub",
     "apps/dock",
-    "apps/pane-helper",
     "extensions/chrome",
     "extensions/firefox",
     "extensions/switchboard",

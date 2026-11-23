@@ -5,7 +5,7 @@ import { providerMark } from '@switchboard/conversation/providerIcons';
 import { FileIcon } from './fileIcons.js';
 import { selectedEntry, selectedRow, stateIcon } from './model.js';
 import type { PageState } from './model.js';
-import { ago, artifactBar, LINK_LABEL_MAX, paneStatus, rowKey, tabIcon, TABS } from './render.js';
+import { ago, artifactBar, LINK_LABEL_MAX, rowKey, tabIcon, TABS } from './render.js';
 import type { SideTab, Tab, View } from './render.js';
 import { trusted } from './trusted.js';
 import { ConnectionDot } from './connectionView.js';
@@ -146,34 +146,6 @@ function ConversationLabel({ entry, state, unread = false }: { entry: Entry; sta
   );
 }
 
-/** The view options menu's Chrome pane rows while it is on: its state, the last pairing's outcome, and Pair Chrome extension until paired. */
-function PaneRows({ view }: { view: View }) {
-  const status = paneStatus(view.pane);
-
-  if (status === null) {
-    return null;
-  }
-
-  return (
-    <>
-      <div class="menu-separator" role="separator"></div>
-      <p class="pane-note">{status}</p>
-      {view.paneNote === null ? null : (
-        <p class="pane-note" role="status">
-          {view.paneNote}
-        </p>
-      )}
-      {view.pane!.extension === 'paired' ? null : (
-        <button type="button" class="menu-row" role="menuitem" data-action="pane-pair">
-          <span class="menu-gutter" aria-hidden="true">
-            <span class="codicon codicon-plug"></span>
-          </span>
-          <span class="title">Pair Chrome extension</span>
-        </button>
-      )}
-    </>
-  );
-}
 
 /**
  * The view options menu's persona row, which opens the persona dialog, while the session has a persona or can take a pin: always the persona it
@@ -221,7 +193,6 @@ function ViewOptions({ view, briefReplies, session }: { view: View; briefReplies
             <span class="title">Brief replies</span>
           </button>
           <PersonaRow session={session} />
-          <PaneRows view={view} />
         </div>
       ) : null}
     </div>
@@ -415,12 +386,12 @@ function artifactTabs(state: PageState, strip: ArtifactStrip): ComponentChildren
 }
 
 function linkTabs(strip: ArtifactStrip, selected: boolean): ComponentChildren {
-  return strip.links?.map((link) => (
-    <span class={`tab artifact-tab${selected && strip.link === link.url ? ' selected' : ''}`} role="presentation">
+  return strip.links === undefined || strip.links.length === 0 ? null : <span class="link-tabs" role="presentation">{strip.links.map((link) => (
+    <span class={`tab artifact-tab link-tab${selected && strip.link === link.url ? ' selected' : ''}`} role="presentation">
       <button class="tab-open" type="button" role="tab" data-action="iframe-open" data-url={link.url} title={link.url} aria-selected={selected && strip.link === link.url} tabindex={selected && strip.link === link.url ? 0 : -1}><span class="tab-label">{link.label}</span></button>
       <button class="tab-close" type="button" data-action="iframe-close" data-url={link.url} aria-label={`Close ${link.label}`} title="Close"><span class="codicon codicon-close" aria-hidden="true" /></button>
     </span>
-  ));
+  ))}</span>;
 }
 
 /**

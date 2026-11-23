@@ -3,11 +3,11 @@ import { describe, expect, it } from 'vitest';
 import { IframeRules, iframePage, iframeRule, iframeTab, iframeEnabled, IFRAME_LEASE_MS } from '../src/iframe.js';
 import type { IframeLease, IframeRule, IframeSender } from '../src/iframe.js';
 
-const sender: IframeSender = { origin: 'https://pc.tail.ts.net', url: 'https://pc.tail.ts.net/page/', frameId: 0, tab: { id: 7 } };
+const sender: IframeSender = { origin: 'https://pc.tail.ts.net', url: 'https://pc.tail.ts.net/page/', frameId: 1, tab: { id: 7 } };
 function rig(remote: string | null = 'https://pc.tail.ts.net') {
   const state = {
     now: 1000,
-    url: sender.url as string | undefined,
+    url: 'chrome-extension://hlbibnhgkgnjkbfledhgjblacloneije/iframeHost.html?origin=https%3A%2F%2Fpc.tail.ts.net' as string | undefined,
     enabled: true,
     fail: false,
     leases: {} as Record<string, IframeLease>,
@@ -35,6 +35,15 @@ function rig(remote: string | null = 'https://pc.tail.ts.net') {
   return { state, rules, enable: (from = sender) => rules.external({ type: 'iframe-enable' }, from) };
 }
 describe('GitHub iframe header exceptions', () => {
+  it('probes an ordinary page without installing or keeping a header exception', async () => {
+    const r = rig();
+    r.state.url = sender.url;
+    const ordinary = { ...sender, frameId: 0 };
+    expect(await r.rules.external({ type: 'iframe-check' }, ordinary)).toEqual({ ok: true });
+    expect(await r.enable(ordinary)).toEqual({ ok: true });
+    expect(r.state.rules).toEqual([]);
+    expect(r.state.leases).toEqual({});
+  });
   it('restricts exceptions to one tab, the Switchboard top domain and exact HTTPS GitHub subframes', () => {
     expect(iframeRule(7, 'https://pc.tail.ts.net')).toEqual({
       id: 8,
@@ -59,7 +68,7 @@ describe('GitHub iframe header exceptions', () => {
   it('requires a top-level page sender, a matching tab, the setting and the page sign-in before adding a rule', async () => {
     const r = rig();
     for (const invalid of [
-      { ...sender, frameId: 1 },
+      { ...sender, frameId: 0 },
       { ...sender, origin: 'https://evil.test' },
       { ...sender, url: 'https://evil.test/page/' },
       { ...sender, tab: {} },
@@ -75,7 +84,7 @@ describe('GitHub iframe header exceptions', () => {
     r.state.enabled = true;
     r.state.url = 'https://evil.test/';
     expect(await r.enable()).toHaveProperty('error');
-    r.state.url = sender.url;
+    r.state.url = 'chrome-extension://hlbibnhgkgnjkbfledhgjblacloneije/iframeHost.html?origin=https%3A%2F%2Fpc.tail.ts.net';
     expect(await r.enable()).toEqual({ ok: true });
     expect(r.state.rules).toHaveLength(1);
     expect(r.state.leases).toEqual({ '7': { origin: 'https://pc.tail.ts.net', until: 91000 } });
@@ -88,13 +97,13 @@ describe('GitHub iframe header exceptions', () => {
     await r.enable();
     await r.rules.sweep();
     expect(r.state.rules).toHaveLength(1);
-    r.state.url = 'https://pc.tail.ts.net/page/#w=2';
+    r.state.url += '#w=2';
     await r.rules.navigated(7);
     expect(r.state.rules).toHaveLength(1);
     r.state.url = 'https://github.com/';
     await r.rules.navigated(7);
     expect(r.state.rules).toEqual([]);
-    r.state.url = sender.url;
+    r.state.url = 'chrome-extension://hlbibnhgkgnjkbfledhgjblacloneije/iframeHost.html?origin=https%3A%2F%2Fpc.tail.ts.net';
     for (const reason of ['closed', 'expired', 'off', 'offline']) {
       r.state.enabled = true;
       r.state.fail = false;
@@ -107,7 +116,7 @@ describe('GitHub iframe header exceptions', () => {
       await r.rules.sweep();
       expect(r.state.rules).toEqual([]);
       expect(r.state.leases).toEqual({});
-      r.state.url = sender.url;
+      r.state.url = 'chrome-extension://hlbibnhgkgnjkbfledhgjblacloneije/iframeHost.html?origin=https%3A%2F%2Fpc.tail.ts.net';
     }
     await r.rules.remove(7);
     expect(r.state.rules).toEqual([]);
@@ -166,7 +175,7 @@ describe('iframe host authentication', () => {
       expect(iframeTab(url, 'https://pc.tail.ts.net')).toBeNull();
     const r = rig();
     r.state.url = host;
-    expect(await r.enable(sender)).toHaveProperty('error');
+    expect(await r.enable({ ...sender, frameId: 0 })).toHaveProperty('error');
     expect(await r.enable({ ...sender, frameId: 3 })).toEqual({ ok: true });
     expect(r.state.rules[0]?.condition.topDomains).toEqual(['hlbibnhgkgnjkbfledhgjblacloneije']);
     await r.rules.sweep();

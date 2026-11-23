@@ -935,7 +935,7 @@ describe('the web page routes', () => {
     expect(refused.body).not.toContain('private');
   });
 
-  it('gates the iframe status by page sign-in and permits only GitHub frames in the experiment page CSP', async () => {
+  it('gates the iframe status by page sign-in and permits only the extension ancestor in the embedded page CSP', async () => {
     const { url, iframe } = await serve();
     expect((await send(server.port, 'GET', '/v1/browser/iframe', {})).status).toBe(401);
     const exchange = await send(server.port, 'GET', `${url.pathname}${url.search}`, {});
@@ -946,7 +946,7 @@ describe('the web page routes', () => {
     iframe.enabled = true;
     expect(JSON.parse((await send(server.port, 'GET', '/v1/browser/iframe', { Cookie })).body)).toEqual({ enabled: true });
     const on = await send(server.port, 'GET', '/page/', { Cookie });
-    expect(on.headers['content-security-policy']).toContain("frame-src 'self' https://github.com;");
+    expect(on.headers['content-security-policy']).toContain("frame-src 'self';");
     expect(on.headers['content-security-policy']).toContain('frame-ancestors chrome-extension://hlbibnhgkgnjkbfledhgjblacloneije');
     expect(on.headers['x-frame-options']).toBe('DENY');
   });
@@ -1277,7 +1277,7 @@ describe('the web page routes', () => {
       expect((await post(command, { Cookie: localCookie, Origin: here })).status).toBe(200);
     }
 
-    expect([...LOCAL_PAGE_COMMANDS]).toEqual(['held-open', 'page-pair', 'page-devices', 'page-device-revoke', 'page-device-voice', 'pane-pair', 'pane-rect', 'pane-open', 'row-open', 'page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer', 'brief-replies']);
+    expect([...LOCAL_PAGE_COMMANDS]).toEqual(['held-open', 'page-pair', 'page-devices', 'page-device-revoke', 'page-device-voice', 'row-open', 'page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer', 'brief-replies']);
 
     const devices = JSON.parse((await post('page-devices', { Cookie: localCookie, Origin: here })).body) as { devices: Array<{ id: string; label: string; host: string | null; login: string | null; current: boolean }> };
 

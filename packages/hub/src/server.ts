@@ -5,7 +5,7 @@ import { gzipSync } from 'node:zlib';
 import { pipeline } from 'node:stream';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
-import { PANE_EXTENSION_ID } from '@switchboard/core';
+import { BROWSER_EXTENSION_ID } from '@switchboard/core';
 import type { Card, HubIdentity } from '@switchboard/core';
 import { handleSnooze, handleUnsnooze } from './browserSnooze.js';
 import type { SnoozeByUrl, UnsnoozeByUrl } from './browserSnooze.js';
@@ -14,7 +14,7 @@ import type { PageAccess, PageOrigin, RemoteAccess } from './page.js';
 import { MAX_UPLOAD_BYTES } from './uploads.js';
 import { LOCAL_FILES_PAIRED_ONLY, rawMime } from './localFiles.js';
 import type { LocalOpened } from './localFiles.js';
-import { isWebSocketUpgrade } from './paneSocket.js';
+import { isWebSocketUpgrade } from './webSocket.js';
 import { VOICE_SOCKET_PATH } from './voiceSocket.js';
 import { HUB_LOG_LINES, HUB_LOG_MAX_LINES } from './hubLog.js';
 import type { VoiceDevice } from './voiceSocket.js';
@@ -151,14 +151,14 @@ const GZIP_MIN_BYTES = 1024;
  * `held-list`, `held-stop` and `held-open` share the holder routes after the page's origin and key checks.
  * The hub itself answers `page-pair`, `page-devices` and `page-device-revoke` (architecture.md § Remote access).
  */
-export const PAGE_COMMANDS = new Set(['held-list', 'held-stop', 'held-open', 'page-new-session', 'page-voice-state', 'page-device-voice', 'open-file', 'viewed', 'send', 'card-draft', 'card-dismiss', 'history', 'seen', 'select', 'statuses', 'commands', 'answer', 'talk-here', 'stop-speaking', 'speak-replies', 'replay', 'personas', 'persona', 'page-focus', 'row-action', 'row-paste', 'row-open', 'row-command', 'row-move', 'pool-action', 'resume', 'prompt', 'prompt-key', 'mic', 'mic-timing', 'composer', 'providers', 'page-conversation', 'console-input', 'page-source', 'page-tabs', 'page-search', 'page-poll', 'page-history', 'page-holder-restart', 'page-adhoc', 'page-folders', 'pane-pair', 'pane-rect', 'pane-open', 'page-pair', 'page-devices', 'page-device-revoke', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer', 'brief-replies']);
+export const PAGE_COMMANDS = new Set(['held-list', 'held-stop', 'held-open', 'page-new-session', 'page-voice-state', 'page-device-voice', 'open-file', 'viewed', 'send', 'card-draft', 'card-dismiss', 'history', 'seen', 'select', 'statuses', 'commands', 'answer', 'talk-here', 'stop-speaking', 'speak-replies', 'replay', 'personas', 'persona', 'page-focus', 'row-action', 'row-paste', 'row-open', 'row-command', 'row-move', 'pool-action', 'resume', 'prompt', 'prompt-key', 'mic', 'mic-timing', 'composer', 'providers', 'page-conversation', 'console-input', 'page-source', 'page-tabs', 'page-search', 'page-poll', 'page-history', 'page-holder-restart', 'page-adhoc', 'page-folders', 'page-pair', 'page-devices', 'page-device-revoke', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer', 'brief-replies']);
 
 /**
  * The page commands a device that reaches the page through a remote host may not post (architecture.md § Remote access): pairing and the device
- * list, so a paired device cannot pair others or sign this computer out; the Chrome pane's, which works only beside this computer's page;
+ * list, so a paired device cannot pair others or sign this computer out;
  * opening a held session's terminal app and restarting the terminal holder; and Settings' and Brief replies, which change settings.json, which the operator keeps to this computer.
  */
-export const LOCAL_PAGE_COMMANDS = new Set(['held-open', 'page-pair', 'page-devices', 'page-device-revoke', 'page-device-voice', 'pane-pair', 'pane-rect', 'pane-open', 'row-open', 'page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer', 'brief-replies']);
+export const LOCAL_PAGE_COMMANDS = new Set(['held-open', 'page-pair', 'page-devices', 'page-device-revoke', 'page-device-voice', 'row-open', 'page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer', 'brief-replies']);
 
 /**
  * The page commands told whether they came through a remote host (`remote` in the body, which the server sets over any the page sent), since
@@ -767,7 +767,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
         'Content-Type': asset.mime,
         'Cache-Control': asset.immutable === true ? 'private, max-age=31536000, immutable' : 'no-cache',
         'X-Frame-Options': 'DENY',
-        'Content-Security-Policy': page.browser?.iframeEnabled?.() === true ? PAGE_CSP.replace("frame-src 'self'", "frame-src 'self' https://github.com").replace("frame-ancestors 'none'", `frame-ancestors chrome-extension://${PANE_EXTENSION_ID}`) : PAGE_CSP,
+        'Content-Security-Policy': page.browser?.iframeEnabled?.() === true ? PAGE_CSP.replace("frame-ancestors 'none'", `frame-ancestors chrome-extension://${BROWSER_EXTENSION_ID}`) : PAGE_CSP,
         ...(asset.gzip === undefined ? {} : { Vary: 'Accept-Encoding' }),
         ...(gzip ? { 'Content-Encoding': 'gzip' } : {}),
         ...etag,

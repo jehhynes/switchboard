@@ -41,10 +41,6 @@ export interface HubApp {
   snoozeUrl: SnoozeByUrl;
   /** Ends a ticket's snooze by URL for the Chrome extension (PRD R66). */
   unsnoozeUrl: UnsnoozeByUrl;
-  /** The Chrome pane's socket upgrade on the browser endpoint (PRD R113). */
-  paneUpgrade?(request: IncomingMessage, socket: Duplex, head: Buffer): void;
-  /** Whether the Chrome pane is on, `web.chromePane` (PRD R113). */
-  paneEnabled?(): boolean;
   onChange(listener: () => void): void;
   /** Gives the app the way to send an event to the dock's streams, which answers how many it reached. */
   attachDock?(send: (event: string, data: unknown) => number): void;
@@ -268,7 +264,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
 
   if (app !== undefined && browserPort !== null) {
     // A taken port, such as one held by a second hub for another home, costs only the Chrome extension.
-    browser = await listenBrowser(browserPort, () => app.snoozedUrls(), () => app.cards(), (url, until) => app.snoozeUrl(url, until), (url) => app.unsnoozeUrl(url), app.paneUpgrade === undefined ? undefined : (request, socket, head) => app.paneUpgrade!(request, socket, head), () => app.paneEnabled?.() === true, async () => {
+    browser = await listenBrowser(browserPort, () => app.snoozedUrls(), () => app.cards(), (url, until) => app.snoozeUrl(url, until), (url) => app.unsnoozeUrl(url), async () => {
       const origin = new URL(await server.pageUrl()).origin;
       return { enabled: app.page?.browser?.iframeEnabled?.() === true, origins: [origin, origin.replace('127.0.0.1', 'localhost')] };
     }).catch((error: unknown) => {

@@ -30,6 +30,21 @@ import { IframeHostController } from '../src/iframeHostView.js';
 import { vi } from 'vitest';
 
 describe('extension host messages', () => {
+  it('rejects stale or malformed desired state without reconciling it', () => {
+    const app = {};
+    const show = vi.fn(), reconcile = vi.fn();
+    const controller = new IframeHostController({ origin: 'http://localhost:4000', appWindow: () => app, now: () => 0, show, reconcile, title: vi.fn(), leave: vi.fn(), viewport: () => ({ width: 900, height: 700 }) });
+    controller.allow();
+    const data = { ...placement, epoch: 'first', seq: 1, item: 1, tabs: [placement.url] };
+    const send = (value: unknown) => controller.message({ source: app, origin: 'http://localhost:4000', data: value });
+    expect(send(data)).toBe(true);
+    expect(send(data)).toBe(false);
+    for (const invalid of [{ ...data, seq: 0 }, { ...data, seq: NaN }, { ...data, seq: 2, item: 1.5 }, { ...data, seq: 2, tabs: ['https://evil.test'] }, { ...data, seq: 2, tabs: [placement.url, placement.url] }, { ...data, seq: 2, url: 'https://github.com/other' }, { ...data, seq: 2, tabs: Array.from({ length: 11 }, (_, i) => `https://github.com/o/r/${i}`) }]) expect(send(invalid)).toBe(false);
+    expect(reconcile).toHaveBeenCalledTimes(1);
+    expect(send({ ...data, epoch: 'second', seq: 0 })).toBe(true);
+    expect(reconcile).toHaveBeenCalledTimes(2);
+    expect(send({ ...data, seq: 99 })).toBe(false);
+  });
   it('refuses messages before authentication, from GitHub or another origin, and hides on missed heartbeats', () => {
     const app = {};
     let now = 0;
@@ -43,9 +58,10 @@ describe('extension host messages', () => {
       show,
       title,
       leave,
+      reconcile: vi.fn(),
       viewport: () => ({ width: 900, height: 700 }),
     });
-    const event = { source: app, origin: 'https://pc.tail.ts.net', data: { ...placement, title: '(2) Switchboard' } };
+    const event = { source: app, origin: 'https://pc.tail.ts.net', data: { ...placement, epoch: 'first', seq: 1, item: 1, tabs: [placement.url], title: '(2) Switchboard' } };
     expect(controller.message(event)).toBe(false);
     expect(show).not.toHaveBeenCalled();
     controller.allow();
@@ -68,7 +84,7 @@ describe('extension host messages', () => {
     now = 15_001;
     controller.tick();
     expect(show).toHaveBeenLastCalledWith(null);
-    expect(controller.message({ ...event, data: { type: 'switchboard-iframe' } })).toBe(true);
+    expect(controller.message({ ...event, data: { type: 'switchboard-iframe', epoch: 'first', seq: 2, item: 1, tabs: [] } })).toBe(true);
     expect(show).toHaveBeenLastCalledWith(null);
     expect(controller.message({ ...event, data: { type: 'switchboard-iframe-disabled' } })).toBe(true);
     expect(leave).toHaveBeenCalledTimes(1);

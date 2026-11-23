@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, onTestFinished, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyEvent, awaitingReply, EMPTY, inTurn, mentionOf, mentionQuery, commandQuery, timeline, withEarlier } from '../src/model.js';
 import { parseQuestions, resolveAnswers } from '@switchboard/conversation/questions';
-import { artifactUrl, BROWSER_MIN_WIDTH, browserNote, paneLink, paneStatus, collapsedGroups, newView, renderMicButton, renderVoice, markdownBody } from '../src/render.js';
+import { artifactUrl, collapsedGroups, newView, renderMicButton, renderVoice, markdownBody } from '../src/render.js';
 import { renderArtifactView, renderStatus } from '../src/side.js';
 import { backgroundRow, renderTimeline, turnRow } from '../src/timeline.js';
 import { renderHeader, renderSideSwitch, renderTabs } from '../src/header.js';
@@ -13,7 +13,7 @@ import { html } from './html.js';
 import { REPLAY_TIP, SPEAKING_TIP, renderMicButton as viewMicButton } from '@switchboard/conversation/voiceControls';
 import { renderMarkdown } from '../src/markdown.js';
 import { SEND_RETRY_MS } from '../src/main.js';
-import { ADVANCE_MS, LINK_ANSWER_MS, CHAT_MAX, CHAT_MIN, DRAWER_HIDE_MS, OTHER_SETTLE_MS, DRAWER_REVEAL_MS, loadMermaid, PANE_SHOW_DELAY_MS, SENT_NOTE_MS, SHOW_MARKER_MS, SIDE_MAX, SIDE_MIN, startPage, SWIPE_OPEN } from '../src/main.js';
+import { ADVANCE_MS, LINK_ANSWER_MS, CHAT_MAX, CHAT_MIN, DRAWER_HIDE_MS, OTHER_SETTLE_MS, DRAWER_REVEAL_MS, loadMermaid, FRAME_SHOW_DELAY_MS, SENT_NOTE_MS, SHOW_MARKER_MS, SIDE_MAX, SIDE_MIN, startPage, SWIPE_OPEN } from '../src/main.js';
 import { DETAIL_MIN } from '../src/layout.js';
 import { BACKOFF_MS, GRACE_MS, JITTER } from '../src/connection.js';
 import { NAVIGATION_MS } from '../src/request.js';
@@ -3601,33 +3601,6 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it("draws a row's ticket and link pills as labels while the paired browser pane shows the links, a click on one selecting the row and opening nothing", async () => {
-    installed = true;
-    const { page, source, opened } = start();
-    const links = [
-      { label: 'PR #5', url: 'https://github.com/o/r/pull/5', kind: 'pr' as const, badge: '5', glyph: '\u{ea64}', mentioned: false },
-      { label: 'Notes', url: 'https://example.test/a?b=1#top', kind: 'url' as const, badge: 'Notes', glyph: null, mentioned: false },
-    ];
-
-    hello(source, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it' }), listRow(2, { title: 'Other', url: 'https://github.com/o/r/issues/2', links })])] });
-    source.emit('pane', { pane: { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: null } });
-    expect(root.querySelectorAll('#list .pill[data-action]')).toHaveLength(0);
-    // A pane that stops, or turns off, leaves the links to the pills until it runs again.
-    source.emit('pane', { pane: { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: 'Gone.' } });
-    expect(root.querySelectorAll('#list [data-work-item="2"] .pill[data-action="open-link"]')).toHaveLength(3);
-    source.emit('pane', { pane: { enabled: false, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: null } });
-    expect(root.querySelectorAll('#list [data-work-item="2"] .pill[data-action="open-link"]')).toHaveLength(3);
-    source.emit('pane', { pane: { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: null } });
-    expect(root.querySelectorAll('#list .pill[data-action]')).toHaveLength(0);
-    expect(root.querySelector('#list [data-work-item="2"] .pill.link.pr')!.getAttribute('title')).toBe('PR #5\nhttps://github.com/o/r/pull/5');
-    expect(root.querySelector('#list [data-work-item="2"] .pill.ticket')!.getAttribute('title')).toContain('https://github.com/o/r/issues/2');
-    posts = [];
-    click('#list [data-work-item="2"] .pill.link.pr');
-    await flush();
-    expect(opened).toEqual([]);
-    expect(posts.find((post) => post.url.endsWith('/select'))?.body).toMatchObject({ workItemId: 2 });
-    page.close();
-  });
 
   it('says it is the installed app as it opens its stream, and shows the work item a dock click sends with its marker in the title for a while', async () => {
     vi.useFakeTimers();
@@ -3965,254 +3938,9 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it('hides the Chrome pane at once while a menu, the composer list or a sheet is open, and shows it again only once they have stayed closed a moment', async () => {
-    vi.useFakeTimers();
-    window.innerWidth = 1920;
-    onTestFinished(() => {
-      vi.unstubAllGlobals();
-      vi.useRealTimers();
-    });
 
-    const page = startPage(root, { fetch: (async (url: string, init?: { body?: string }) => (posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) }), { status: 200, ok: true, json: async () => ({}), text: async () => '' })) as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, standalone: () => true, toExtension: async () => ({ ok: true }) });
-    const source = FakeSource.last!;
-    const rects = () => posts.filter((post) => post.url.endsWith('/pane-rect')).map((post) => post.body['rect']);
-    const turn = async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    };
 
-    vi.spyOn(root.querySelector('#detail .detail-body')!, 'getBoundingClientRect').mockReturnValue({ left: 1300, top: 85, width: 600, height: 855 } as DOMRect);
-    hello(source, { openOn: 'browser', groups: [listGroup('progress', [listRow(1, { title: 'Fix it', url: 'https://github.com/o/r/issues/1' })])] });
-    source.emit('pane', { pane: { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: true, error: null } });
-    expect(rects().at(-1)).toMatchObject({ width: 600 });
 
-    // The actions menu opens: hidden at once. It closes: still hidden, until the delay has passed with none open.
-    click('button.actions');
-    expect(rects().at(-1)).toBeNull();
-    const hidden = rects().length - 1;
-
-    click('button.actions');
-    await turn();
-    expect(rects().at(-1)).toBeNull();
-    vi.advanceTimersByTime(PANE_SHOW_DELAY_MS - 10);
-    // Opened again within the delay: it stays hidden, and nothing shows it in between.
-    click('button.actions');
-    click('button.actions');
-    await turn();
-    vi.advanceTimersByTime(PANE_SHOW_DELAY_MS - 10);
-    expect(rects().at(-1)).toBeNull();
-    expect(rects().slice(hidden).every((rect) => rect === null)).toBe(true);
-    vi.advanceTimersByTime(20);
-    expect(rects().at(-1)).toMatchObject({ width: 600 });
-
-    // The composer's list opens without a redraw: the page sees it all the same.
-    const list = root.querySelector<HTMLElement>('.composer-menu')!;
-
-    list.hidden = false;
-    await turn();
-    expect(rects().at(-1)).toBeNull();
-    list.hidden = true;
-    await turn();
-    vi.advanceTimersByTime(PANE_SHOW_DELAY_MS);
-    expect(rects().at(-1)).toMatchObject({ width: 600 });
-
-    // The toast is a layer too: the pane hides while it shows, and comes back once it is dismissed.
-    showToast('Not done.');
-    await turn();
-    expect(rects().at(-1)).toBeNull();
-    click('[data-action="toast-dismiss"]');
-    await turn();
-    vi.advanceTimersByTime(PANE_SHOW_DELAY_MS);
-    expect(rects().at(-1)).toMatchObject({ width: 600 });
-    page.close();
-  });
-
-  it('says on the Browser tab that the Chrome pane is hidden while a menu or the composer list is open, and no longer once they close', async () => {
-    vi.useFakeTimers();
-    window.innerWidth = 1920;
-    onTestFinished(() => {
-      vi.unstubAllGlobals();
-      vi.useRealTimers();
-    });
-
-    const page = startPage(root, { fetch: (async (url: string, init?: { body?: string }) => (posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) }), { status: 200, ok: true, json: async () => ({}), text: async () => '' })) as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, standalone: () => true, toExtension: async () => ({ ok: true }) });
-    const source = FakeSource.last!;
-    const note = () => root.querySelector('#detail .detail-body')!.textContent!.trim();
-    const turn = async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    };
-    const pane = { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: null };
-
-    vi.spyOn(root.querySelector('#detail .detail-body')!, 'getBoundingClientRect').mockReturnValue({ left: 1300, top: 85, width: 600, height: 855 } as DOMRect);
-    hello(source, { openOn: 'browser', groups: [listGroup('progress', [listRow(1, { title: 'Fix it', url: 'https://github.com/o/r/issues/1' })])] });
-    source.emit('pane', { pane });
-    expect(note()).toBe('Opening the work item’s links…');
-
-    // The actions menu opens and the hub hides the pane: the tab says why, not that it is opening.
-    click('button.actions');
-    source.emit('pane', { pane });
-    await turn();
-    expect(note()).toBe('The browser is hidden while a menu or dialog is open.');
-    click('button.actions');
-    await turn();
-    vi.advanceTimersByTime(PANE_SHOW_DELAY_MS);
-    await turn();
-    expect(note()).toBe('Opening the work item’s links…');
-
-    // The composer's list opens without a redraw: the tab says so all the same.
-    const list = root.querySelector<HTMLElement>('.composer-menu')!;
-
-    list.hidden = false;
-    await turn();
-    await turn();
-    expect(note()).toBe('The browser is hidden while a menu or dialog is open.');
-    list.hidden = true;
-    await turn();
-    vi.advanceTimersByTime(PANE_SHOW_DELAY_MS);
-    await turn();
-    expect(note()).toBe('Opening the work item’s links…');
-    // Shown: no note. A menu opening says why at once, before the hub reports the pane hidden.
-    source.emit('pane', { pane: { ...pane, shown: true } });
-    expect(note()).toBe('');
-    click('button.actions');
-    await turn();
-    expect(note()).toBe('The browser is hidden while a menu or dialog is open.');
-    page.close();
-  });
-
-  it('shows the Browser tab only for a work item with links and the Console tab only for an active held session, falling back to Status', async () => {
-    window.innerWidth = 1920;
-    onTestFinished(() => {
-      vi.unstubAllGlobals();
-    });
-
-    const page = startPage(root, { fetch: (async (url: string, init?: { body?: string }) => (posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) }), { status: 200, ok: true, json: async () => ({}), text: async () => '' })) as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, standalone: () => true, toExtension: async () => ({ ok: true }) });
-    const source = FakeSource.last!;
-    const tabs = () => [...root.querySelectorAll<HTMLElement>('#detail .side-switch [data-side]')].map((tab) => tab.dataset['side']);
-    const chosen = () => root.querySelector<HTMLElement>('#detail .side-switch .tab.selected')?.dataset['side'];
-    const paired = { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: null };
-    const linked = [listGroup('progress', [listRow(1, { title: 'Fix it', url: 'https://github.com/o/r/issues/1' })])];
-    const unlinked = [listGroup('progress', [listRow(1, { title: 'Fix it', url: '', links: [] })])];
-
-    hello(source, { groups: linked });
-    source.emit('pane', { pane: paired });
-    expect(tabs()).toEqual(['status', 'console', 'browser']);
-
-    // Browser chosen, then the links go: no Browser tab, Status shown; the choice of Browser stays for the next work item with links.
-    click('#detail [data-side="browser"]');
-    source.emit('list', { groups: unlinked });
-    expect(tabs()).toEqual(['status', 'console']);
-    expect(chosen()).toBe('status');
-    source.emit('list', { groups: linked });
-    expect(chosen()).toBe('browser');
-
-    // Console chosen, then the session ends: no Console tab, Status shown.
-    click('#detail [data-side="console"]');
-    source.emit('session', { session: session({ state: 'ended', conversation: 'read-only' }) });
-    expect(tabs()).toEqual(['status', 'browser']);
-    expect(chosen()).toBe('status');
-    // A session the terminal holder does not hold has none either.
-    source.emit('session', { session: session({ state: 'running', conversation: 'none' }) });
-    expect(tabs()).toEqual(['status', 'browser']);
-    source.emit('session', { session: session({ state: 'running' }) });
-    expect(tabs()).toEqual(['status', 'console', 'browser']);
-    page.close();
-  });
-
-  it('opens each work item on Browser when it has no session and links the paired pane can show, else on Status, keeping a choice only within the work item', async () => {
-    window.innerWidth = 1920;
-    onTestFinished(() => {
-      vi.unstubAllGlobals();
-    });
-
-    const page = startPage(root, { fetch: (async (url: string, init?: { body?: string }) => (posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) }), { status: 200, ok: true, json: async () => ({}), text: async () => '' })) as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, standalone: () => true, toExtension: async () => ({ ok: true }) });
-    const source = FakeSource.last!;
-    const chosen = () => root.querySelector<HTMLElement>('#detail .side-switch .tab.selected')?.dataset['side'];
-    const paired = { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: null };
-    const linked = (workItemId: number) => [listGroup('progress', [listRow(workItemId, { title: 'Fix it', url: 'https://github.com/o/r/issues/1' })])];
-    const unlinked = (workItemId: number) => [listGroup('progress', [listRow(workItemId, { title: 'Fix it', url: '', links: [] })])];
-
-    vi.spyOn(root.querySelector('#detail .detail-body')!, 'getBoundingClientRect').mockReturnValue({ left: 1300, top: 85, width: 600, height: 855 } as DOMRect);
-    // An unstarted work item with a link: Browser, once the pane's state is known, and its area is reported.
-    hello(source, { sessions: [], groups: linked(1) });
-    expect(chosen()).toBe('status');
-    source.emit('pane', { pane: paired });
-    expect(chosen()).toBe('browser');
-    expect(posts.filter((post) => post.url.endsWith('/pane-rect')).at(-1)?.body['rect']).not.toBeNull();
-    // Without a session it has no Console tab. A tab chosen there stays while the work item is open.
-    expect(root.querySelector('#detail [data-side="console"]')).toBeNull();
-    click('#detail [data-side="status"]');
-    source.emit('pane', { pane: { ...paired, shown: true } });
-    expect(chosen()).toBe('status');
-
-    // Another work item: one with a session opens on Status, whatever was chosen before.
-    hello(source, { groups: linked(2), scope: { ...scope, workItemId: 2 } });
-    expect(chosen()).toBe('status');
-    // One without a session but no link to show opens on Status too.
-    hello(source, { sessions: [], groups: unlinked(3), scope: { ...scope, workItemId: 3 } });
-    expect(chosen()).toBe('status');
-    // Not paired: Status.
-    source.emit('pane', { pane: { ...paired, extension: 'unpaired' } });
-    hello(source, { sessions: [], groups: linked(4), scope: { ...scope, workItemId: 4 } });
-    expect(chosen()).toBe('status');
-
-    // Narrower, the column folded into the conversation's tabs: the conversation, with Browser among the tabs, and Browser the column's choice.
-    resizeTo(900);
-    source.emit('pane', { pane: paired });
-    hello(source, { sessions: [], groups: linked(5), scope: { ...scope, workItemId: 5 } });
-    expect(root.querySelector<HTMLElement>('#head .tab.selected')!.dataset['tab']).toBe('conversation');
-    expect(root.querySelector('#head [data-tab="browser"]')).not.toBeNull();
-    resizeTo(1920);
-    expect(chosen()).toBe('browser');
-    resizeTo(900);
-    hello(source, { groups: linked(6), scope: { ...scope, workItemId: 6 } });
-    expect(root.querySelector<HTMLElement>('#head .tab.selected')!.dataset['tab']).toBe('conversation');
-
-    // A tab the hub kept for a work item comes back when it opens, while it still applies; otherwise the same rule as a first opening.
-    resizeTo(1920);
-    hello(source, { groups: linked(7), scope: { ...scope, workItemId: 7 }, tabs: { tab: 'console', closed: [] } });
-    expect(chosen()).toBe('console');
-    hello(source, { groups: linked(8), scope: { ...scope, workItemId: 8 }, tabs: { tab: 'artifact:chat/p.html', closed: [] } });
-    expect(root.querySelector('#detail .tab.selected')!.getAttribute('data-path')).toBe('chat/p.html');
-    // Status or Browser is one choice for every work item, kept in the hub: Browser chosen once opens every work item with links on Browser.
-    click('#detail [data-side="browser"]');
-    expect(posts.filter((post) => post.url.endsWith('/page-tabs')).at(-1)?.body).toMatchObject({ workItemId: 8, tab: null, openOn: 'browser' });
-    hello(source, { groups: linked(9), scope: { ...scope, workItemId: 9 }, openOn: 'browser' });
-    expect(chosen()).toBe('browser');
-    // Without links it opens on Status, and the choice stays Browser.
-    hello(source, { groups: unlinked(11), scope: { ...scope, workItemId: 11 }, openOn: 'browser' });
-    expect(chosen()).toBe('status');
-    hello(source, { groups: linked(13), scope: { ...scope, workItemId: 13 }, openOn: 'browser' });
-    expect(chosen()).toBe('browser');
-    // Status chosen: every work item opens on Status, an unstarted one with links too.
-    click('#detail [data-side="status"]');
-    expect(posts.filter((post) => post.url.endsWith('/page-tabs')).at(-1)?.body).toMatchObject({ workItemId: 13, tab: null, openOn: 'status' });
-    hello(source, { sessions: [], groups: linked(14), scope: { ...scope, workItemId: 14 }, openOn: 'status' });
-    expect(chosen()).toBe('status');
-    // A work item with no status report yet, or only its stage, opens on Browser when it has links, whatever was chosen; without links on Status.
-    hello(source, { groups: linked(15), scope: { ...scope, workItemId: 15 }, openOn: 'status', status: null });
-    expect(chosen()).toBe('browser');
-    hello(source, { groups: linked(16), scope: { ...scope, workItemId: 16 }, openOn: 'status', status: { id: 'stage-16', sessionId: 's', at: 5_000, markdown: 'Planning', fallback: true, unread: false } });
-    expect(chosen()).toBe('browser');
-    hello(source, { groups: unlinked(17), scope: { ...scope, workItemId: 17 }, openOn: 'status', status: null });
-    expect(chosen()).toBe('status');
-    // Narrower: the conversation, whatever the column would show.
-    resizeTo(900);
-    hello(source, { groups: linked(18), scope: { ...scope, workItemId: 18 }, openOn: 'status', status: null });
-    expect(root.querySelector<HTMLElement>('#head .tab.selected')!.dataset['tab']).toBe('conversation');
-    resizeTo(1920);
-    // The hub sends scope before hello: the work item opens on its hello's kept tab.
-    source.emit('scope', { scope: { ...scope, workItemId: 12 } });
-    hello(source, { groups: linked(12), scope: { ...scope, workItemId: 12 }, tabs: { tab: 'console', closed: [] } });
-    expect(chosen()).toBe('console');
-    hello(source, { groups: linked(10), scope: { ...scope, workItemId: 10 }, tabs: { tab: 'artifact:chat/p.html', closed: [{ path: 'chat/p.html', updatedAt: 99_999 }] } });
-    expect(chosen()).toBe('status');
-    // The operator's choice is kept for the work item in the hub.
-    click('#detail [data-side="console"]');
-    expect(posts.filter((post) => post.url.endsWith('/page-tabs')).at(-1)?.body).toMatchObject({ workItemId: 10, tab: 'console' });
-    page.close();
-  });
 
   it("opens every work item on the Conversation tab in the phone's layout, whatever tab it kept or the column would show, and keeps a tab chosen until another work item opens", async () => {
     window.innerWidth = 375;
@@ -4280,118 +4008,7 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it('keeps the pane in step with the tab shown: sends its state again on a tab change, focus and visibility, hides it as the page goes, and shows it after a reload only on Browser', async () => {
-    window.innerWidth = 1920;
-    onTestFinished(() => {
-      vi.unstubAllGlobals();
-    });
 
-    const inits: Array<{ url: string; keepalive: boolean | undefined }> = [];
-    const fetch = (async (url: string, init?: { body?: string; keepalive?: boolean }) => {
-      posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) });
-      inits.push({ url, keepalive: init?.keepalive });
-      return { status: 200, ok: true, json: async () => ({}), text: async () => '' };
-    }) as unknown as typeof globalThis.fetch;
-    const open = () => startPage(root, { fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, standalone: () => true, toExtension: async () => ({ ok: true }) });
-    const paired = { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: true, error: null };
-    const rects = () => posts.filter((post) => post.url.endsWith('/pane-rect')).map((post) => post.body['rect']);
-    let page = open();
-    let source = FakeSource.last!;
-
-    vi.spyOn(root.querySelector('#detail .detail-body')!, 'getBoundingClientRect').mockReturnValue({ left: 1300, top: 85, width: 600, height: 855 } as DOMRect);
-    hello(source, { openOn: 'browser', groups: [listGroup('progress', [listRow(1, { title: 'Fix it', url: 'https://github.com/o/r/issues/1' })])] });
-    source.emit('pane', { pane: paired });
-    expect(rects().at(-1)).toMatchObject({ left: 1300, width: 600 });
-
-    // Status: null, and again on choosing Status once more, although nothing changed.
-    click('#detail [data-side="status"]');
-    expect(rects().at(-1)).toBeNull();
-    const sent = rects().length;
-
-    click('#detail [data-side="status"]');
-    expect(rects()).toHaveLength(sent + 1);
-    window.dispatchEvent(new Event('focus'));
-    document.dispatchEvent(new Event('visibilitychange'));
-    expect(rects()).toHaveLength(sent + 3);
-    expect(rects().slice(sent)).toEqual([null, null, null]);
-
-    // Browser again, then the page goes: null, sent to outlive the page.
-    click('#detail [data-side="browser"]');
-    expect(rects().at(-1)).toMatchObject({ width: 600 });
-    window.dispatchEvent(new Event('pagehide'));
-    expect(rects().at(-1)).toBeNull();
-    expect(inits.filter((init) => init.url.endsWith('/pane-rect')).at(-1)!.keepalive).toBe(true);
-    // Back from the back/forward cache, it sends its column again; each report carries a later number than the one before.
-    window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
-    expect(rects().at(-1)).toMatchObject({ width: 600 });
-    const seqs = posts.filter((post) => post.url.endsWith('/pane-rect')).map((post) => post.body['seq'] as number);
-    expect(seqs.every((seq, index) => index === 0 || seq > seqs[index - 1]!)).toBe(true);
-    page.close();
-
-    // After the reload, the kept choice, Browser, shows again with the pane over it.
-    page = open();
-    source = FakeSource.last!;
-    vi.spyOn(root.querySelector('#detail .detail-body')!, 'getBoundingClientRect').mockReturnValue({ left: 1300, top: 85, width: 600, height: 855 } as DOMRect);
-    hello(source, { openOn: 'browser', groups: [listGroup('progress', [listRow(1, { title: 'Fix it', url: 'https://github.com/o/r/issues/1' })])] });
-    source.emit('pane', { pane: paired });
-    expect(root.querySelector<HTMLElement>('#detail .side-switch .tab.selected')!.dataset['side']).toBe('browser');
-    expect(rects().at(-1)).toMatchObject({ width: 600 });
-    page.close();
-
-    // A page on another device cannot drive the pane, so it has no Browser tab.
-    page = startPage(root, { fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, standalone: () => true, local: false, toExtension: async () => ({ ok: true }) });
-    source = FakeSource.last!;
-    hello(source, { openOn: 'browser', groups: [listGroup('progress', [listRow(1, { title: 'Fix it', url: 'https://github.com/o/r/issues/1' })])] });
-    source.emit('pane', { pane: paired });
-    expect(root.querySelector('#detail [data-side="browser"]')).toBeNull();
-    expect(root.querySelector<HTMLElement>('#detail .side-switch .tab.selected')!.dataset['side']).toBe('status');
-    // Nor does its view options menu speak of the computer's pane, and its title carries no marker.
-    click('[data-action="view-menu"]');
-    expect(root.querySelector('.view-options-menu .pane-note')).toBeNull();
-    expect(root.querySelector('.view-options-menu [data-action="pane-pair"]')).toBeNull();
-    source.emit('pane', { pane: { ...paired, marker: '0123456789ab', extension: 'unpaired' } });
-    expect(root.querySelector('.view-options-menu .pane-note')).toBeNull();
-    expect(document.title).not.toContain('[sb-pane');
-    click('[data-action="view-menu"]');
-    const remote = rects().length;
-
-    window.dispatchEvent(new Event('focus'));
-    expect(rects()).toHaveLength(remote);
-    page.close();
-    posts.length = 0;
-  });
-
-  it('says in the Browser tab why the Chrome pane does not cover it, and nothing while it does', () => {
-    const pane = { enabled: true, extension: 'paired' as const, marker: null, shown: false, error: null };
-
-    expect(browserNote({ ...pane, shown: true }, 600, true)).toBeNull();
-    expect(browserNote(null, 600, true)).toBeNull();
-    expect(browserNote({ ...pane, enabled: false }, 600, true)).toBeNull();
-    expect(browserNote({ ...pane, error: 'Gone.' }, 600, true)).toBe('The browser stopped: Gone.');
-    expect(browserNote({ ...pane, extension: 'none' }, 600, true)).toContain('not connected');
-    expect(browserNote({ ...pane, extension: 'unpaired' }, 600, true)).toContain('Pair the Chrome extension');
-    expect(browserNote(pane, 600, false)).toBe('This work item has no web links to show.');
-    expect(browserNote(pane, BROWSER_MIN_WIDTH - 1, true)).toBe('Widen this area to at least 515 pixels to show the browser here.');
-    expect(browserNote(pane, BROWSER_MIN_WIDTH, true)).toBe('Opening the work item’s links…');
-    // Hidden for a menu or dialog: says so, unless something else keeps it from showing anyway.
-    expect(browserNote(pane, BROWSER_MIN_WIDTH, true, true)).toBe('The browser is hidden while a menu or dialog is open.');
-    // Before the hub reports the pane hidden, too.
-    expect(browserNote({ ...pane, shown: true }, BROWSER_MIN_WIDTH, true, true)).toBe('The browser is hidden while a menu or dialog is open.');
-    expect(browserNote({ ...pane, extension: 'unpaired' }, BROWSER_MIN_WIDTH, true, true)).toContain('Pair the Chrome extension');
-    expect(browserNote(pane, BROWSER_MIN_WIDTH, false, true)).toBe('This work item has no web links to show.');
-    expect(browserNote(pane, BROWSER_MIN_WIDTH - 1, true, true)).toContain('Widen this area');
-    // The view options menu names the browser pane and the extension it is paired with.
-    expect(paneStatus(null)).toBeNull();
-    expect(paneStatus({ ...pane, enabled: false })).toBeNull();
-    expect(paneStatus(pane)).toBe('Browser pane: paired with the Chrome extension.');
-    expect(paneStatus({ ...pane, shown: true })).toBe('Browser pane: showing, paired with the Chrome extension.');
-    expect(paneStatus({ ...pane, extension: 'unpaired' })).toBe('Browser pane: the Chrome extension is not paired.');
-    // Only links the hub opens tabs for count.
-    expect(paneLink('https://github.com/o/r/issues/1')).toBe(true);
-    expect(paneLink('https://%')).toBe(false);
-    expect(paneLink('file:///C:/x')).toBe(false);
-    expect(paneLink(`https://a.test/${'x'.repeat(2048)}`)).toBe(false);
-  });
 
   it('shows the experimental GitHub frame on a remote page only after extension confirmation and removes it when disabled', async () => {
     window.innerWidth = 1920;
@@ -4400,20 +4017,20 @@ describe('the page in use', () => {
     const page = startPage(root, {
       fetch: (async (url: string, init?: { body?: string }) => { posts.push({ url, body: init?.body ? JSON.parse(init.body) : {} }); return { status: 200, ok: true, json: async () => ({}) } as Response; }) as typeof globalThis.fetch,
       EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, local: false, standalone: () => false,
-      toExtension: async (_id, message) => { sent.push(message); return message['type'] === 'iframe-enable' ? new Promise((done) => { resolve = done; }) : { ok: true }; },
+      toExtension: async (_id, message) => { sent.push(message); return message['type'] === 'iframe-check' ? new Promise((done) => { resolve = done; }) : { ok: true }; },
     });
     const source = FakeSource.last!;
     hello(source, { settings: { iframeBrowser: true }, groups: [listGroup('progress', [listRow(1, { url: 'https://github.com/o/r/issues/1' })])] });
-    expect(root.querySelector('[data-side="browser"]')).not.toBeNull();
-    click('#detail [data-side="browser"]');
+    expect(root.querySelector('[data-action="iframe-open"]')).not.toBeNull();
+    click('#detail [data-action="iframe-open"]');
     expect(root.querySelector('iframe[title="GitHub browser experiment"]')).toBeNull();
     resolve({ ok: true }); await flush();
     const frame = root.querySelector<HTMLIFrameElement>('iframe[title="GitHub browser experiment"]')!;
-    expect(frame.src).toBe('https://github.com/o/r/issues/1');
+    expect(root.textContent).toContain('Open with sign-in support');
     source.emit('reply', { reply: reply('r9', 9) }); expect(root.querySelector('iframe[title="GitHub browser experiment"]')).toBe(frame);
     click('[data-action="artifact"][data-path="chat/p.html"]');
     expect(root.querySelector('#detail .detail-body')!.classList.contains('framed')).toBe(true);
-    click('#detail [data-side="browser"]');
+    click('#detail [data-action="iframe-open"]');
     expect(root.querySelector('#detail .detail-body')!.classList.contains('framed')).toBe(false);
     expect(posts.filter((post) => post.url.endsWith('/pane-pair') || post.url.endsWith('/pane-rect'))).toEqual([]);
     source.emit('settings', { settings: { iframeBrowser: false } });
@@ -4421,131 +4038,38 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it('adds a Browser tab for the Chrome pane, reports its area under the tab strip only while it is chosen, marks the title, and wakes and pairs the extension (PRD R113)', async () => {
+
+  it('accepts a host link handoff only from its extension parent and opens the requested link tab', async () => {
+    const postMessage = vi.fn();
+    const parentWindow = { postMessage } as unknown as Window;
+    vi.spyOn(window, 'parent', 'get').mockReturnValue(parentWindow);
+    onTestFinished(() => { vi.restoreAllMocks(); });
     window.innerWidth = 1920;
-
-    const sent: Array<[string, Record<string, unknown>]> = [];
-    const fetch = vi.fn(async (url: string, init?: { body?: string }) => {
-      posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) });
-
-      const body = url.endsWith('/pane-pair') ? { token: 'tok', extensionId: 'ext' } : {};
-
-      return { status: 200, ok: true, json: async () => body, text: async () => '' } as unknown as Response;
-    });
+    const focusPosts: Array<{ url: string; body: Record<string, unknown> }> = [];
     const page = startPage(root, {
-      fetch: fetch as unknown as typeof globalThis.fetch,
-      EventSource: FakeSource as unknown as typeof EventSource,
-      frame: drawAtOnce,
-      now: () => 10_000,
-      standalone: () => true,
-      // The page's question whether the extension opens its links is left out: this test is the pane's.
-      toExtension: async (id, message) => (message['type'] === 'links' || sent.push([id, message]), { ok: true }),
+      fetch: (async (url: string, init?: { body?: string }) => { focusPosts.push({ url, body: init?.body === undefined ? {} : JSON.parse(init.body) }); return { status: 200, ok: true, json: async () => ({}) }; }) as unknown as typeof globalThis.fetch,
+      EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000,
+      toExtension: async () => ({ ok: true }),
     });
-    const source = FakeSource.last!;
-    const rects = () => posts.filter((post) => post.url.endsWith('/pane-rect')).map((post) => post.body['rect']);
-
-    vi.spyOn(root.querySelector('#detail .detail-body')!, 'getBoundingClientRect').mockReturnValue({ left: 1300, top: 85, width: 600, height: 855 } as DOMRect);
-    vi.spyOn(root.querySelector('#panel')!, 'getBoundingClientRect').mockReturnValue({ left: 300, top: 120, width: 700, height: 700 } as DOMRect);
-    hello(source, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', url: 'https://github.com/o/r/issues/1' })])] });
+    hello(FakeSource.last!, { settings: { iframeBrowser: true }, groups: [listGroup('progress', [listRow(1, { url: 'https://github.com/o/r/issues/1' })])] });
     await flush();
-    // Off: no Browser tab and nothing reported.
-    expect(root.querySelector('[data-side="browser"]')).toBeNull();
-    expect(rects()).toEqual([]);
-
-    source.emit('pane', { pane: { enabled: true, extension: 'none', extensionId: 'ext', marker: '0123456789ab', shown: false, error: null } });
-    await flush();
-    expect(sent).toEqual([['ext', { type: 'wake' }]]);
-    expect(document.title).toMatch(/ \[sb-pane 0123456789ab\]$/);
-    expect([...root.querySelectorAll<HTMLElement>('#detail [data-side]')].map((tab) => tab.dataset['side'])).toEqual(['status', 'console', 'browser']);
-    // Status is shown, so the pane has no area yet: the page reports none.
-    expect(rects()).toEqual([null]);
-    expect(root.querySelector('#detail .status-tab')).not.toBeNull();
-
-    click('#detail [data-side="browser"]');
-    expect(rects().at(-1)).toMatchObject({ left: 1300, top: 85, width: 600, height: 855, dpr: expect.any(Number) });
-    expect(root.querySelector('#detail .detail-body')!.textContent).toContain('The Switchboard Chrome extension is not connected.');
-
-    click('[data-action="view-menu"]');
-    expect(root.querySelector('.view-options-menu .pane-note')!.textContent).toBe('Browser pane: the Switchboard Chrome extension is not connected.');
-    click('[data-action="pane-pair"]');
-    await flush();
-    await flush();
-    expect(sent.at(-1)).toEqual(['ext', { type: 'pair', token: 'tok' }]);
-    expect(root.querySelector('.view-options-menu [role="status"]')!.textContent).toBe('Sent to the Chrome extension.');
-
-    // Shown: the tab strip stays, the area under it is empty for the pane window, and Status, Artifacts and Console stay in the column.
-    source.emit('pane', { pane: { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: true, error: null } });
-    await flush();
-    expect(document.title).not.toContain('sb-pane');
-    expect(root.classList.contains('wide')).toBe(true);
-    expect(root.querySelector('#head .tabs')).toBeNull();
-    expect(root.querySelector('#detail .side-switch [aria-selected="true"]')!.textContent).toBe('Browser');
-    expect(root.querySelector('[data-action="pane-pair"]')).toBeNull();
-    // The view options menu is still open, so the pane stays hidden, and the area says so, until a moment after it closes.
-    expect(root.querySelector('.view-options-menu')).not.toBeNull();
-    expect(root.querySelector('#detail .detail-body')!.textContent).toBe('The browser is hidden while a menu or dialog is open.');
-    click('[data-action="view-menu"]');
-    await new Promise((resolve) => setTimeout(resolve, PANE_SHOW_DELAY_MS + 20));
-    expect(root.querySelector('#detail .detail-body')!.textContent).toBe('');
-
-    // Another tab hides the pane; Browser again shows it.
-    click('#detail [data-side="status"]');
-    expect(rects().at(-1)).toBeNull();
-    expect(root.querySelector('#detail .status-tab')).not.toBeNull();
-    click('#detail [data-side="browser"]');
-    expect(rects().at(-1)).toMatchObject({ left: 1300, width: 600 });
-
-    source.emit('pane', { pane: { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: 'The pane would not fit the column.' } });
-    expect(root.querySelector('#detail .detail-body')!.textContent).toBe('The browser stopped: The pane would not fit the column.');
-    click('[data-action="view-menu"]');
-    expect(root.querySelector('.view-options-menu .pane-note')!.textContent).toBe('Browser pane stopped: The pane would not fit the column.');
-    click('[data-action="view-menu"]');
-    await new Promise((resolve) => setTimeout(resolve, PANE_SHOW_DELAY_MS + 20));
-
-    // Narrow: the tabs are the conversation's, Browser among them and still chosen, and its area is the conversation's pane.
-    resizeTo(900);
-    source.emit('pane', { pane: { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: null } });
-    expect([...root.querySelectorAll<HTMLElement>('#head [data-tab]')].map((tab) => tab.dataset['tab'])).toEqual(['conversation', 'status', 'console', 'browser']);
-    expect(root.querySelector('#head [aria-selected="true"]')!.textContent).toBe('Browser');
-    expect(rects().at(-1)).toMatchObject({ left: 300, top: 120, width: 700, height: 700 });
-    click('#head [data-tab="status"]');
-    expect(rects().at(-1)).toBeNull();
-    // Status chosen while narrow is the column's choice when wide again.
-    resizeTo(1920);
-    source.emit('pane', { pane: { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: null } });
-    expect(root.querySelector<HTMLElement>('#detail .side-switch [aria-selected="true"]')!.dataset['side']).toBe('status');
-    expect(rects().at(-1)).toBeNull();
-    click('#detail [data-side="browser"]');
-    expect(rects().at(-1)).toMatchObject({ left: 1300, width: 600 });
-    // A list header's sheet covers the page too: the area goes while it shows and comes back when it closes.
-    click('.more-actions');
-    click('[data-action="list-log"]');
-    await flush();
-    expect(root.querySelector('#list-sheet .sheet-backdrop')).not.toBeNull();
-    expect(rects().at(-1)).toBeNull();
-    click('#list-sheet [data-action="list-sheet-cancel"].sheet-button');
-    await flush();
-    expect(root.querySelector('#list-sheet .sheet-backdrop')).toBeNull();
-    // Shown again a moment after the last layer closed.
-    expect(rects().at(-1)).toBeNull();
-    await new Promise((resolve) => setTimeout(resolve, PANE_SHOW_DELAY_MS + 20));
-    expect(rects().at(-1)).toMatchObject({ left: 1300, width: 600 });
-    // Settings covers the page, and the pane window would stay above it: the area goes while Settings shows.
-    click('.more-actions');
-    click('[data-action="list-settings"]');
-    await flush();
-    expect(rects().at(-1)).toBeNull();
-    resizeTo(900);
-    source.emit('pane', { pane: { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: null } });
-
-    // Turned off: the Browser tab goes, and the conversation shows in its place.
-    source.emit('pane', { pane: { enabled: false, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: null } });
-    await flush();
-    expect(rects().at(-1)).toBeNull();
-    expect(root.querySelector('#head [data-tab="browser"]')).toBeNull();
-    expect(root.querySelector('#head [aria-selected="true"]')!.textContent).toBe('Conversation');
-    expect(root.querySelector('#panel .timeline')).not.toBeNull();
-    vi.unstubAllGlobals();
+    const url = 'https://github.com/o/r/pull/99';
+    const data = { type: 'switchboard-iframe-select', workItemId: 1, url };
+    window.dispatchEvent(new MessageEvent('message', { source: parentWindow, origin: 'https://evil.test', data }));
+    expect(root.querySelector(`[data-action="iframe-open"][data-url="${url}"]`)).toBeNull();
+    window.dispatchEvent(new MessageEvent('message', { source: parentWindow, origin: 'chrome-extension://hlbibnhgkgnjkbfledhgjblacloneije', data }));
+    expect(root.querySelector(`[data-action="iframe-open"][data-url="${url}"]`)?.getAttribute('aria-selected')).toBe('true');
+    expect(postMessage.mock.calls.some(([message]) => message.url === url)).toBe(true);
+    vi.spyOn(document, 'hasFocus').mockReturnValue(false);
+    window.dispatchEvent(new Event('blur'));
+    const focus = () => focusPosts.filter((post) => post.url.endsWith('/page-focus')).at(-1)?.body['focused'];
+    expect(focus()).toBe(false);
+    window.dispatchEvent(new MessageEvent('message', { source: parentWindow, origin: 'https://github.com', data: { type: 'switchboard-iframe-focus', focused: true } }));
+    expect(focus()).toBe(false);
+    window.dispatchEvent(new MessageEvent('message', { source: parentWindow, origin: 'chrome-extension://hlbibnhgkgnjkbfledhgjblacloneije', data: { type: 'switchboard-iframe-focus', focused: true } }));
+    expect(focus()).toBe(true);
+    window.dispatchEvent(new MessageEvent('message', { source: parentWindow, origin: 'chrome-extension://hlbibnhgkgnjkbfledhgjblacloneije', data: { type: 'switchboard-iframe-focus', focused: false } }));
+    expect(focus()).toBe(false);
     page.close();
   });
 

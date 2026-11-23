@@ -23,9 +23,8 @@ const workspaces = rootPackage.workspaces.map((dir) => {
 });
 const byName = new Map(workspaces.map((w) => [w.name, w]));
 // Dependencies the manifests do not declare: the extension bundles apps/hub's
-// entry point directly, publishes the pane helper into its dist and carries
-// the browser extension's build (extensions/switchboard/esbuild.js).
-const undeclared = { switchboard: ['@switchboard/hub-app', '@switchboard/pane-helper', '@switchboard/chrome'] };
+// entry point directly and carries the browser extension's build (extensions/switchboard/esbuild.js).
+const undeclared = { switchboard: ['@switchboard/hub-app', '@switchboard/chrome'] };
 for (const w of workspaces) w.deps = [...w.deps, ...(undeclared[w.name] ?? [])].filter((d) => byName.has(d));
 
 // Files another workspace's tests read: the hub's dock contract test compares

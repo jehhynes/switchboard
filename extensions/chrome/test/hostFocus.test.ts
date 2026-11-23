@@ -1,0 +1,30 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { HostFocus } from '../src/hostFocus.js';
+afterEach(() => vi.useRealTimers());
+describe('host focus with child frames', () => {
+  it('detects focus lost or regained without outer events and sends only changes', () => {
+    vi.useFakeTimers();
+    let focused = true, visible = true;
+    const send = vi.fn();
+    const focus = new HostFocus(() => visible && focused, send);
+    const timer = setInterval(() => focus.report(), 250);
+    focus.report();
+    vi.advanceTimersByTime(1000);
+    expect(send.mock.calls).toEqual([[true]]);
+    focused = false;
+    vi.advanceTimersByTime(250);
+    expect(send.mock.calls).toEqual([[true], [false]]);
+    focused = true;
+    vi.advanceTimersByTime(250);
+    expect(send).toHaveBeenLastCalledWith(true);
+    visible = false;
+    focus.report();
+    vi.advanceTimersByTime(500);
+    expect(send.mock.calls).toEqual([[true], [false], [true], [false]]);
+    visible = true;
+    focus.report();
+    focus.report(true);
+    expect(send.mock.calls.slice(-2)).toEqual([[true], [true]]);
+    clearInterval(timer);
+  });
+});

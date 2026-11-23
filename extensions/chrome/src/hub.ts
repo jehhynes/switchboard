@@ -20,7 +20,6 @@ export const LOCAL_ROUTES: HubRoutes = {
   unsnooze: `http://127.0.0.1:${BROWSER_PORT}/unsnooze`,
 };
 
-export const PANE_STATE_URL = `http://127.0.0.1:${BROWSER_PORT}/pane`;
 
 /** The file the hub adds to a copy it gives another device, naming its web page's origin (architecture.md § Browser extension). */
 export const REMOTE_FILE = 'remote.json';
@@ -43,24 +42,6 @@ export async function readRoutes(fetchUrl: (url: string) => Promise<Response>, u
     return typeof origin === 'string' && /^https:\/\/[a-z0-9.-]+$/i.test(origin) ? remoteRoutes(origin.toLowerCase()) : LOCAL_ROUTES;
   } catch {
     return LOCAL_ROUTES;
-  }
-}
-
-/** Whether the hub has the Chrome pane on (PRD R113), or null when the hub does not answer or answers with something else. */
-export async function readPaneEnabled(fetchUrl: (url: string) => Promise<Response>): Promise<boolean | null> {
-  try {
-    const response = await fetchUrl(PANE_STATE_URL);
-
-    if (!response.ok) {
-      return null;
-    }
-
-    const body: unknown = await response.json();
-    const enabled = typeof body === 'object' && body !== null ? (body as { enabled?: unknown }).enabled : undefined;
-
-    return typeof enabled === 'boolean' ? enabled : null;
-  } catch {
-    return null;
   }
 }
 

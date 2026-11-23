@@ -2,24 +2,24 @@ import { createHash } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 
-/** The largest message either side sends on the pane socket; a bigger frame closes it. */
-export const PANE_FRAME_LIMIT = 65_535;
+/** The largest message either side sends on a hub socket; a bigger frame closes it. */
+export const WEBSOCKET_FRAME_LIMIT = 65_535;
 
 const ACCEPT_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 
-/** One open WebSocket with the browser extension: JSON text messages only. */
-export interface PaneSocket {
+/** One open WebSocket carrying JSON text messages. */
+export interface Socket {
   send(message: unknown): void;
   close(code?: number): void;
 }
 
-export interface PaneSocketHandlers {
+export interface SocketHandlers {
   message(data: unknown): void;
   closed(): void;
 }
 
-/** One open WebSocket of the hub's own (architecture.md § Pane socket, § Remote access): JSON text messages and, where taken, binary ones. */
-export interface HubSocket extends PaneSocket {
+/** One open WebSocket of the hub's own (architecture.md § Remote access): JSON text messages and, where taken, binary ones. */
+export interface HubSocket extends Socket {
   /** Sends one binary message; dropped when the socket is closed or the message is over the frame limit. */
   sendBinary(data: Buffer): void;
   /** Closes with a code and a reason the peer reads, at most 123 bytes of it. */
@@ -28,7 +28,7 @@ export interface HubSocket extends PaneSocket {
   queued(): number;
 }
 
-export interface HubSocketHandlers extends PaneSocketHandlers {
+export interface HubSocketHandlers extends SocketHandlers {
   /** A binary message; without it a binary frame closes the socket with 1003. */
   binary?(data: Buffer): void;
 }
@@ -41,22 +41,8 @@ export function isWebSocketUpgrade(request: IncomingMessage): boolean {
 }
 
 /**
- * Accepts a WebSocket upgrade on the browser endpoint (RFC 6455, version 13) when its `Origin` is exactly `origin`, or refuses it with 403 and
- * closes the connection. Only what the pane needs: unfragmented text frames of JSON up to {@link PANE_FRAME_LIMIT}, masked as the standard
- * requires of a client, ping, pong and close; anything else closes the socket.
- */
-export function acceptPaneSocket(request: IncomingMessage, socket: Duplex, head: Buffer, origin: string, handlers: PaneSocketHandlers): PaneSocket | null {
-  if (!isWebSocketUpgrade(request) || request.headers.origin !== origin) {
-    socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
-    return null;
-  }
-
-  return acceptWebSocket(request, socket, head, handlers);
-}
-
-/**
  * Accepts a WebSocket upgrade whose checks the caller made, with {@link isWebSocketUpgrade} among them: unfragmented text frames of JSON and,
- * with `handlers.binary`, binary frames, each up to {@link PANE_FRAME_LIMIT} and masked as the standard requires of a client, ping, pong and
+ * with `handlers.binary`, binary frames, each up to {@link WEBSOCKET_FRAME_LIMIT} and masked as the standard requires of a client, ping, pong and
  * close; anything else closes the socket.
  */
 export function acceptWebSocket(request: IncomingMessage, socket: Duplex, head: Buffer, handlers: HubSocketHandlers): HubSocket {
@@ -118,7 +104,7 @@ export function acceptWebSocket(request: IncomingMessage, socket: Duplex, head: 
         return;
       }
 
-      if (length > PANE_FRAME_LIMIT) {
+      if (length > WEBSOCKET_FRAME_LIMIT) {
         end(1009);
         return;
       }
@@ -183,7 +169,7 @@ export function acceptWebSocket(request: IncomingMessage, socket: Duplex, head: 
     read();
 
     // What is left is part of one frame, which with its header and mask is never longer than this.
-    if (buffered.length > PANE_FRAME_LIMIT + 8) {
+    if (buffered.length > WEBSOCKET_FRAME_LIMIT + 8) {
       end(1009);
     }
   });
@@ -209,12 +195,12 @@ export function acceptWebSocket(request: IncomingMessage, socket: Duplex, head: 
     send: (message) => {
       const payload = Buffer.from(JSON.stringify(message), 'utf8');
 
-      if (open && payload.length <= PANE_FRAME_LIMIT) {
+      if (open && payload.length <= WEBSOCKET_FRAME_LIMIT) {
         socket.write(frame(0x1, payload));
       }
     },
     sendBinary: (data) => {
-      if (open && data.length <= PANE_FRAME_LIMIT) {
+      if (open && data.length <= WEBSOCKET_FRAME_LIMIT) {
         socket.write(frame(0x2, data));
       }
     },

@@ -1,4 +1,4 @@
-import { LOOPBACK_PAGE } from './pane.js';
+const LOOPBACK_PAGE = /^http:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?$/;
 
 /** The name of the tab group that holds Switchboard's links in a window. */
 export const GROUP_TITLE = 'Switchboard';

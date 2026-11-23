@@ -116,51 +116,6 @@ export function artifactBar(artifacts: readonly ArtifactView[], open: string | n
   return { ordered, tabs };
 }
 
-/** The narrowest Browser tab the Chrome pane covers, in CSS pixels: the hub's `PANE_MIN_WIDTH` (architecture.md § Pane state). */
-export const BROWSER_MIN_WIDTH = 515;
-
-/** Whether the Chrome pane opens a tab for a link: the hub's rule (`paneTabs`), an http or https URL of at most 2,048 characters. */
-export function paneLink(url: string): boolean {
-  try {
-    return ['http:', 'https:'].includes(new URL(url).protocol) && url.length <= 2048;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * What the Browser tab says while the Chrome pane does not cover it (PRD R113), or null while it does: the pane window then lies over the tab's
- * area, under its tab strip. `covered` is whether the pane is hidden for a menu, dropdown, sheet or dialog of the page.
- */
-export function browserNote(pane: PaneView | null, width: number, hasLinks: boolean, covered = false): string | null {
-  // A layer hides the pane at once, before the hub reports it hidden.
-  if (pane === null || !pane.enabled || (pane.shown && !covered)) {
-    return null;
-  }
-
-  if (pane.error !== null) {
-    return `The browser stopped: ${pane.error}`;
-  }
-
-  if (pane.extension === 'none') {
-    return 'The Switchboard Chrome extension is not connected. Install or reload it in Chrome to show the work item’s links here.';
-  }
-
-  if (pane.extension === 'unpaired') {
-    return 'Pair the Chrome extension from the view options to show the work item’s links here.';
-  }
-
-  if (!hasLinks) {
-    return 'This work item has no web links to show.';
-  }
-
-  if (width < BROWSER_MIN_WIDTH) {
-    return `Widen this area to at least ${BROWSER_MIN_WIDTH} pixels to show the browser here.`;
-  }
-
-  return covered ? 'The browser is hidden while a menu or dialog is open.' : 'Opening the work item’s links…';
-}
-
 /**
  * Why the Console tab shows no console for the session (architecture.md § Web page), or null when the terminal holder may hold it: a session the
  * page cannot talk to runs outside the holder. A Code Mode session and a Codex app-server session have one; the hub says why when it cannot open.
@@ -245,37 +200,11 @@ export interface View {
   providers: { items: Array<{ provider: string; name: string; default: boolean }> | null; error: string | null } | null;
   /** The prompt the session waits on in its terminal, as last read, for the session it was read for; a key being sent waits. */
   prompt: { sessionId: string; prompt: ScreenPrompt | null; sending: boolean } | null;
-  /** The Chrome pane as the hub last described it (architecture.md § Pane state), and the outcome of a pairing from this page. */
-  pane: PaneView | null;
-  paneNote: string | null;
   /** How many artifact tabs the shown strip fits, measured after each draw, and whether its Artifacts menu is open. */
   artifactFit: number;
   artifactMenu: boolean;
   /** The connection's dot in the conversation's head (connectionView.tsx); none before the page first connected. */
   connection?: DotView | null;
-}
-
-/** The hub's `pane` event (architecture.md § Pane state). */
-export interface PaneView {
-  enabled: boolean;
-  extension: 'none' | 'unpaired' | 'paired';
-  extensionId?: string;
-  marker: string | null;
-  shown: boolean;
-  error: string | null;
-}
-
-/** What the view options menu says of the browser pane, or null while it is off. */
-export function paneStatus(pane: PaneView | null): string | null {
-  if (pane === null || !pane.enabled) {
-    return null;
-  }
-
-  if (pane.error !== null) {
-    return `Browser pane stopped: ${pane.error}`;
-  }
-
-  return pane.extension === 'none' ? 'Browser pane: the Switchboard Chrome extension is not connected.' : pane.extension === 'unpaired' ? 'Browser pane: the Chrome extension is not paired.' : pane.shown ? 'Browser pane: showing, paired with the Chrome extension.' : 'Browser pane: paired with the Chrome extension.';
 }
 
 /** A sheet: Delete's or Stop session's question, Snooze…'s choices, a control's text (and choice) as the dock's input dialog asks for it, or a drafted text the clipboard refused. */
@@ -285,7 +214,7 @@ export type Sheet =
   | { kind: 'snooze'; row: string; label: string; title: string; choices: SnoozeChoice[]; picked: string; date: string; comment: string }
   | { kind: 'text'; title: string; text: string };
 
-export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), bands: new Map(), list: false, drawer: null, actions: false, linkMenu: false, copyMenu: false, rowMenu: null, sheet: null, acting: false, prompt: null, providers: null, side: 'status', viewMenu: false, details: false, briefReplies: null, pane: null, paneNote: null, artifactFit: ARTIFACT_TABS_MAX, artifactMenu: false });
+export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), bands: new Map(), list: false, drawer: null, actions: false, linkMenu: false, copyMenu: false, rowMenu: null, sheet: null, acting: false, prompt: null, providers: null, side: 'status', viewMenu: false, details: false, briefReplies: null, artifactFit: ARTIFACT_TABS_MAX, artifactMenu: false });
 
 /** The longest menu label for a link, as the dock's `LinkLabelMax`; a longer one is cut with an ellipsis and shown whole in its tooltip. */
 export const LINK_LABEL_MAX = 48;

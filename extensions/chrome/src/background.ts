@@ -1,10 +1,9 @@
-import { REMOTE_FILE, readPaneEnabled, readRoutes, readSnoozed } from './hub.js';
-import { PaneConnection, PaneWindow, paneMarkerUrl } from './pane.js';
-import type { KeyValue, PaneSocketLike } from './pane.js';
+import { REMOTE_FILE, readRoutes, readSnoozed } from './hub.js';
 import { readCards } from './pills.js';
 import { postSnooze, postUnsnooze, snoozeMessage, unsnoozeMessage } from './snooze.js';
 import { GROUP_TITLE, answerLink, linkOpener, linkRequest, placedKinds } from './tabs.js';
 import type { Tabs } from './tabs.js';
+import { IframeLauncher } from './iframeLaunch.js';
 import { IframeRules, iframeEnabled } from './iframe.js';
 import type { IframeLease } from './iframe.js';
 
@@ -67,9 +66,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return true;
 });
 
-// The Chrome pane and the Switchboard tab group (architecture.md § Browser extension): Chrome only, as Firefox has neither the fixed extension ID
-// nor externally_connectable. The pane works only with the hub on this computer, since it keeps a window there; the tab group takes the links of
-// the page this copy reaches. The listeners are added at once, as a service worker that an event wakes gets only the listeners its first run adds.
+// Embedded tabs and external tab groups require Chrome's fixed extension ID and externally_connectable. The listeners are added at once, as a service worker that an event wakes gets only the listeners its first run adds.
 if (!FIREFOX) {
   const iframe = routes.then((hub) => new IframeRules({
     origin: hub.origin,
@@ -81,12 +78,20 @@ if (!FIREFOX) {
     rules: () => chrome.declarativeNetRequest.getSessionRules(),
     update: (removeRuleIds, addRules) => chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds, addRules }),
   }));
+  const launcher = routes.then((hub) => new IframeLauncher({
+    remote: hub.origin,
+    host: chrome.runtime.getURL('iframeHost.html'),
+    tabs: () => chrome.tabs.query({}),
+    create: (url) => chrome.tabs.create({ url, active: true }),
+    update: (id, url) => chrome.tabs.update(id, { active: true, ...(url === undefined ? {} : { url }) }),
+    focus: (window) => chrome.windows.update(window, { focused: true }),
+  }));
   const cleanup = (run: Promise<unknown>): void => { void run.catch((error: unknown) => console.error('Switchboard could not clear iframe rules', error)); };
   chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
     const type = (message as { type?: unknown } | null)?.type;
-    if (type !== 'iframe-enable' && type !== 'iframe-disable' && type !== 'iframe-launch') return false;
+    if (type !== 'iframe-enable' && type !== 'iframe-disable' && type !== 'iframe-launch' && type !== 'iframe-check') return false;
     void iframe.then((rules) => rules.external(message, sender)).then(async (answer) => {
-      if (type === 'iframe-launch' && answer.ok === true) await chrome.tabs.create({ url: `${chrome.runtime.getURL('iframeHost.html')}?origin=${encodeURIComponent(sender.origin!)}`, active: true });
+      if (type === 'iframe-launch' && answer.ok === true) await launcher.then((host) => host.open(sender.origin!, (message as { workItemId?: unknown }).workItemId, (message as { url?: unknown }).url));
       sendResponse(answer);
     }).catch(() => sendResponse({ error: 'Could not open the iframe browser.' }));
     return true;
@@ -96,36 +101,6 @@ if (!FIREFOX) {
   chrome.alarms.onAlarm.addListener((alarm) => { if (alarm.name === 'iframe-cleanup') cleanup(iframe.then((rules) => rules.sweep())); });
   cleanup(chrome.alarms.create('iframe-cleanup', { periodInMinutes: 0.5 }));
   cleanup(iframe.then((rules) => rules.sweep()));
-  const store = (area: chrome.storage.StorageArea): KeyValue => ({ get: (key) => area.get(key), set: (items) => area.set(items), remove: (key) => area.remove(key) });
-  const markerPage = chrome.runtime.getURL('pane.html');
-  const pane = new PaneConnection({
-    socket: (url) => new WebSocket(url) as unknown as PaneSocketLike,
-    enabled: () => readPaneEnabled((url) => fetch(url, { cache: 'no-store' })),
-    window: new PaneWindow(
-      {
-        markerUrl: (marker) => paneMarkerUrl(markerPage, marker),
-        isMarker: (url) => url.startsWith(markerPage),
-        // Chrome takes the foreground for a new window even with focused false (mechanics M103); the dock places it.
-        createWindow: async (url) => (await chrome.windows.create({ type: 'normal', url, focused: false })).id!,
-        windowExists: (windowId) => chrome.windows.get(windowId).then(() => true, () => false),
-        tabs: async (windowId) => (await chrome.tabs.query({ windowId })).flatMap((tab) => (tab.id === undefined ? [] : [{ id: tab.id, url: tab.pendingUrl ?? tab.url ?? '' }])),
-        openTab: async (windowId, url, active) => (await chrome.tabs.create({ windowId, url, active })).id!,
-        loadTab: async (tabId, url) => void (await chrome.tabs.update(tabId, { url })),
-        activateTab: async (tabId) => void (await chrome.tabs.update(tabId, { active: true })),
-        closeTab: (tabId) => chrome.tabs.remove(tabId),
-      },
-      store(chrome.storage.session),
-    ),
-    local: store(chrome.storage.local),
-    session: store(chrome.storage.session),
-    now: () => Date.now(),
-    setTimeout: (run, ms) => setTimeout(run, ms),
-    clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
-    setInterval: (run, ms) => setInterval(run, ms),
-    clearInterval: (timer) => clearInterval(timer as ReturnType<typeof setInterval>),
-    log: (message, error) => console.error(message, error),
-  });
-
   const kinds = placedKinds(chrome.storage.session);
   const tabs: Tabs = {
     window: () => chrome.windows.getLastFocused({ windowTypes: ['normal'] }).then((window) => window.id ?? null, () => null),
@@ -176,7 +151,7 @@ if (!FIREFOX) {
     if (String((message as { type?: unknown } | null)?.type).startsWith('iframe-')) return false;
     const link = linkRequest(message);
 
-    void routes.then(async (hub) => sendResponse(link !== null ? await answerLink(link, sender.origin, hub.origin, open) : hub.origin === null ? pane.external(message, sender.origin) : null));
+    void routes.then(async (hub) => sendResponse(link !== null ? await answerLink(link, sender.origin, hub.origin, open) : null));
     return true;
   });
   chrome.tabs.onRemoved.addListener((tabId) => {
@@ -194,10 +169,5 @@ if (!FIREFOX) {
       .then((left) => (left ? kinds.forget(tabId) : undefined))
       .catch((error: unknown) => console.error('Switchboard could not forget a tab that left its group', error));
   });
-  chrome.windows.onRemoved.addListener((windowId) => void pane.windowRemoved(windowId).catch((error: unknown) => console.error('Switchboard could not forget its pane', error)));
-  void routes.then((hub) => {
-    if (hub.origin === null) {
-      pane.connect();
-    }
-  });
+
 }

@@ -131,7 +131,7 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('General');
     expect(host.querySelector('.settings-file')?.textContent).toBe('C:/home/.switchboard/settings.json');
     expect(texts('.settings-section-heading')).toEqual(['Sessions', 'Claude sessions', 'Codex sessions', 'Triage', 'Dock', 'Alerts', 'Web page', 'Diff viewer', 'Remote access', 'Advanced']);
-    expect(texts('.settings-section:not(.advanced) .settings-caption label')).toEqual(['Default agent', 'Concurrency', 'Code Mode (experimental)', 'Friction debriefs', 'Model', 'Permission mode', 'Model', 'Permission mode', 'Concurrency', 'Model', 'Timeout (seconds)', 'Rows open in', 'Row click opens', 'Terminal for "Open in terminal"', 'Needs-you alerts from', 'Chrome pane (experimental)', 'GitHub iframe (experiment)', 'Layout', 'Wrap long lines', 'Tailscale', 'Allowed hosts', 'Allowed logins']);
+    expect(texts('.settings-section:not(.advanced) .settings-caption label')).toEqual(['Default agent', 'Concurrency', 'Code Mode (experimental)', 'Friction debriefs', 'Model', 'Permission mode', 'Model', 'Permission mode', 'Concurrency', 'Model', 'Timeout (seconds)', 'Rows open in', 'Row click opens', 'Terminal for "Open in terminal"', 'Needs-you alerts from', 'Embedded GitHub tabs', 'Layout', 'Wrap long lines', 'Tailscale', 'Allowed hosts', 'Allowed logins']);
     expect(host.querySelector('[data-path="sessions.installHooks"]')).toBeNull();
     // The diff viewer's layout and wrapping, set once for every page.
     expect([...field<HTMLSelectElement>('web.diffLayout').options].map((one) => one.value)).toEqual(['auto', 'split', 'stacked']);

@@ -60,15 +60,7 @@ describe('installCarried', () => {
     expect(readFileSync(hubBundlePath(home), 'utf8')).toBe('hub two');
   });
 
-  it('installs the pane helper only on Windows, and returns a program that cannot be installed as its error', async () => {
-    program('pane-helper', HELPER, 'Switchboard.PaneHelper.exe');
-
-    expect(await installCarried(dist, home, 'linux').programs).toEqual([]);
-    expect(existsSync(join(switchboardHome(home), 'pane-helper'))).toBe(false);
-
-    expect(await installCarried(dist, home, 'win32').programs).toEqual([]);
-    expect(JSON.parse(readFileSync(join(switchboardHome(home), 'pane-helper', 'current.json'), 'utf8'))).toEqual({ build: HELPER });
-
+  it('reports a program that cannot be installed', async () => {
     writeFileSync(join(dist, 'voice', 'manifest.json'), '{}');
     expect(await installCarried(dist, home, 'linux').programs).toEqual([`${join(dist, 'voice', 'manifest.json')} is missing or invalid.`]);
   });

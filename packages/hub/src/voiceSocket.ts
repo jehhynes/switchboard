@@ -1,7 +1,7 @@
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
-import { acceptWebSocket } from './paneSocket.js';
-import type { HubSocket } from './paneSocket.js';
+import { acceptWebSocket } from './webSocket.js';
+import type { HubSocket } from './webSocket.js';
 
 /** The path of the voice socket on the page's origin (architecture.md § Remote access, Voice on a phone). */
 export const VOICE_SOCKET_PATH = '/v1/voice/socket';

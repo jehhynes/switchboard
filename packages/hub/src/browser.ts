@@ -1,6 +1,5 @@
 import { createServer } from 'node:http';
-import type { IncomingMessage, Server } from 'node:http';
-import type { Duplex } from 'node:stream';
+import type { Server } from 'node:http';
 import type { Card } from '@switchboard/core';
 import { handleSnooze, handleUnsnooze } from './browserSnooze.js';
 import type { SnoozeByUrl, UnsnoozeByUrl } from './browserSnooze.js';
@@ -14,10 +13,9 @@ export interface BrowserServer {
  * Loopback endpoint for the Chrome extension: `GET /snoozed` lists the URLs of snoozed tickets (PRD R56),
  * `GET /cards` each ticket's playbook and group (PRD R67), `POST /snooze` snoozes one and `POST /unsnooze` ends its snooze (PRD R66). A browser extension
  * cannot read `hub.json`, so the port is fixed. It sends no CORS headers, so web pages cannot read it, and it refuses a
- * Host other than the loopback address, against DNS rebinding. `/pane` upgrades to the Chrome pane's paired socket (PRD R113); a plain
- * `GET /pane` answers whether the pane is on, so the extension opens no socket the hub would refuse.
+ * Host other than the loopback address, against DNS rebinding. `GET /iframe` vouches for configured page origins and the embedding setting.
  */
-export function listenBrowser(port: number, snoozed: () => string[], cards: () => Card[], snooze?: SnoozeByUrl, unsnooze?: UnsnoozeByUrl, pane?: (request: IncomingMessage, socket: Duplex, head: Buffer) => void, paneEnabled?: () => boolean, iframe?: () => Promise<{ enabled: boolean; origins: string[] }>): Promise<BrowserServer> {
+export function listenBrowser(port: number, snoozed: () => string[], cards: () => Card[], snooze?: SnoozeByUrl, unsnooze?: UnsnoozeByUrl, iframe?: () => Promise<{ enabled: boolean; origins: string[] }>): Promise<BrowserServer> {
   const server: Server = createServer((request, response) => {
     const listening = (server.address() as { port: number }).port;
     const hosts = new Set([`127.0.0.1:${listening}`, `localhost:${listening}`]);
@@ -34,8 +32,7 @@ export function listenBrowser(port: number, snoozed: () => string[], cards: () =
       reply(200, { urls: snoozed() });
     } else if (request.method === 'GET' && path === '/cards') {
       reply(200, { cards: cards() });
-    } else if (request.method === 'GET' && path === '/pane') {
-      reply(200, { enabled: pane !== undefined && paneEnabled?.() === true });
+
     } else if (request.method === 'GET' && path === '/iframe') {
       void (iframe?.() ?? Promise.resolve({ enabled: false, origins: [] })).then((state) => reply(200, state), () => reply(503, { enabled: false, origins: [] }));
     } else if (request.method === 'POST' && path === '/snooze' && snooze !== undefined) {
@@ -47,25 +44,7 @@ export function listenBrowser(port: number, snoozed: () => string[], cards: () =
     }
   });
 
-  // The Chrome pane's socket (architecture.md § Pane socket), behind the same Host check; every other upgrade is refused. An upgraded socket
-  // leaves the server's own connection list, so closing the endpoint ends it here.
-  const upgraded = new Set<Duplex>();
-
-  server.on('upgrade', (request: IncomingMessage, socket: Duplex, head: Buffer) => {
-    upgraded.add(socket);
-    socket.on('close', () => upgraded.delete(socket));
-    const listening = (server.address() as { port: number }).port;
-    const hosts = new Set([`127.0.0.1:${listening}`, `localhost:${listening}`]);
-    const path = (request.url ?? '').split('?')[0];
-
-    socket.on('error', () => undefined);
-
-    if (pane !== undefined && path === '/pane' && hosts.has(request.headers.host ?? '')) {
-      pane(request, socket, head);
-    } else {
-      socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
-    }
-  });
+  server.on('upgrade', (_request, socket) => socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n'));
 
   return new Promise((resolve, reject) => {
     server.once('error', reject);
@@ -76,7 +55,6 @@ export function listenBrowser(port: number, snoozed: () => string[], cards: () =
           new Promise<void>((done) => {
             server.close(() => done());
             server.closeAllConnections();
-            upgraded.forEach((socket) => socket.destroy());
           }),
       });
     });

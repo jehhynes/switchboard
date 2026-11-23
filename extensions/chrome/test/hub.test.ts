@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BROWSER_PORT as HUB_BROWSER_PORT } from '@switchboard/core';
 import { describe, expect, it, vi } from 'vitest';
-import { BROWSER_PORT, LOCAL_ROUTES, readPaneEnabled, readRoutes, readSnoozed, remoteRoutes } from '../src/hub.js';
+import { BROWSER_PORT, LOCAL_ROUTES, readRoutes, readSnoozed, remoteRoutes } from '../src/hub.js';
 
 const reply = (status: number, body: string) => async () => new Response(body, { status });
 
@@ -23,18 +23,6 @@ describe('readSnoozed', () => {
     expect(await readSnoozed(reply(200, '{}'))).toBeNull();
   });
 
-  it('reads whether the Chrome pane is on, and null for anything else', async () => {
-    const fetchUrl = vi.fn(reply(200, '{"enabled":true}'));
-
-    expect(await readPaneEnabled(fetchUrl)).toBe(true);
-    expect(fetchUrl).toHaveBeenCalledExactlyOnceWith('http://127.0.0.1:47615/pane');
-    expect(await readPaneEnabled(reply(200, '{"enabled":false}'))).toBe(false);
-    expect(await readPaneEnabled(async () => Promise.reject(new TypeError('Failed to fetch')))).toBeNull();
-    expect(await readPaneEnabled(reply(404, '{"enabled":true}'))).toBeNull();
-    expect(await readPaneEnabled(reply(200, 'not json'))).toBeNull();
-    expect(await readPaneEnabled(reply(200, 'null'))).toBeNull();
-    expect(await readPaneEnabled(reply(200, '{"enabled":"yes"}'))).toBeNull();
-  });
 
   it('reads the hub through the page\'s origin for a copy another computer\'s hub gave (PRD R121)', async () => {
     const fetchUrl = vi.fn(reply(200, '{"urls":[]}'));

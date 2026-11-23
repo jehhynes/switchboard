@@ -37,6 +37,7 @@ export interface HostControllerDeps {
   now(): number;
   show(view: HostPlacement | null): void;
   title(value: string): void;
+  reconcile(item: number | null, urls: string[]): void;
   leave(): void;
   viewport(): { width: number; height: number };
 }
@@ -44,6 +45,9 @@ export interface HostControllerDeps {
 export class IframeHostController {
   #allowed = false;
   #reported = 0;
+  #seq = -1;
+  #epoch = '';
+  #oldEpochs = new Set<string>();
   constructor(private readonly deps: HostControllerDeps) {}
   allow(): void {
     this.#allowed = true;
@@ -66,10 +70,24 @@ export class IframeHostController {
       return true;
     }
     if (data['type'] !== 'switchboard-iframe') return false;
+    const seq = data['seq'], epoch = data['epoch'];
+    if (typeof epoch !== 'string' || epoch.length < 1 || epoch.length > 100 || this.#oldEpochs.has(epoch) || !Number.isSafeInteger(seq) || (epoch === this.#epoch && (seq as number) <= this.#seq)) return false;
+    const item = data['item'];
+    const tabs = data['tabs'];
+    if (!(item === null || (Number.isSafeInteger(item) && (item as number) > 0)) || !Array.isArray(tabs) || tabs.length > 10 || new Set(tabs).size !== tabs.length || !tabs.every((url) => {
+      if (typeof url !== 'string' || url.length > 2048) return false;
+      try { const value = new URL(url); return value.origin === 'https://github.com' && value.username === '' && value.password === ''; } catch { return false; }
+    })) { this.deps.show(null); return false; }
+    if (data['url'] !== undefined && !tabs.includes(data['url'])) { this.deps.show(null); return false; }
+    const { width, height } = this.deps.viewport();
+    const placement = hostPlacement(data, width, height);
+    if (data['url'] !== undefined && placement === null) { this.deps.show(null); return false; }
+    if (epoch !== this.#epoch) { if (this.#epoch !== '') this.#oldEpochs.add(this.#epoch); this.#epoch = epoch; }
+    this.#seq = seq as number;
+    this.deps.reconcile(item as number | null, tabs as string[]);
     this.#reported = this.deps.now();
     if (typeof data['title'] === 'string' && data['title'].length <= 160) this.deps.title(data['title']);
-    const { width, height } = this.deps.viewport();
-    this.deps.show(hostPlacement(data, width, height));
+    this.deps.show(placement);
     return true;
   }
   tick(): void {

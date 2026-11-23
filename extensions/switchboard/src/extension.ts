@@ -131,8 +131,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
 
   reportConfigError();
 
-  // A holder that cannot be installed fails only Code Mode starts, a voice process only speech, and the pane helper, which only Windows builds
-  // carry, only the Chrome pane; the cause goes to the hub log, which every window shows (PRD R94, architecture.md § Voice, § Pane helper).
+  // A failed holder install affects Code Mode starts, and a failed voice install affects speech; errors go to the hub log.
   void installCarried(context.asAbsolutePath('dist'), home).programs.then((errors) => {
     for (const error of errors) {
       try {

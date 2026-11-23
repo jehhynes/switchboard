@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { hubBundlePath, switchboardHome } from '@switchboard/core';
 import { installBundle } from './bundle.js';
-import { installHolder, installPaneHelper, installVoice, MANIFEST_FILE } from './holderInstall.js';
+import { installHolder, installVoice, MANIFEST_FILE } from './holderInstall.js';
 import { installBrowserExtension } from './browserExtension.js';
 import { installDiffViewer } from './pageAssets.js';
 
@@ -15,7 +15,7 @@ export interface CarriedInstall {
 /**
  * Installs what the extension carries in its `dist` folder into the home, as activation does and `hub.js install` does without VS Code
  * (architecture.md § Hub lifecycle): the hub bundle, which a running hub then restarts onto, and the web page's Mermaid, diff viewer and browser extension at once, then the
- * terminal holder's, the voice process's and, on Windows, the Chrome pane helper's builds. A hub bundle that cannot be copied throws; a program
+ * terminal holder's and the voice process's builds. A hub bundle that cannot be copied throws; a program
  * that cannot be installed fails only what it runs, so its error is returned.
  */
 export function installCarried(dist: string, home: string, platform: NodeJS.Platform = process.platform): CarriedInstall {
@@ -43,12 +43,7 @@ export function installCarried(dist: string, home: string, platform: NodeJS.Plat
   }
 
   const target = switchboardHome(home);
-  const paneHelper = join(dist, 'pane-helper');
   const installs = [installHolder(join(dist, 'holder'), target), installVoice(join(dist, 'voice'), target)];
-
-  if (platform === 'win32' && existsSync(paneHelper)) {
-    installs.push(installPaneHelper(paneHelper, target));
-  }
 
   return { hub, programs: Promise.all(installs).then((results) => results.flatMap((result) => ('error' in result ? [result.error] : []))) };
 }

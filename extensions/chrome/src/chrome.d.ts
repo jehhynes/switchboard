@@ -18,11 +18,12 @@ declare namespace chrome.runtime {
 declare namespace chrome.tabs {
   interface Tab {
     id?: number;
+    windowId?: number;
     url?: string;
     pendingUrl?: string;
   }
 
-  function query(query: { windowId: number } | { groupId: number }): Promise<Tab[]>;
+  function query(query: { windowId?: number; groupId?: number }): Promise<Tab[]>;
   function update(tabId: number, properties: { url: string } | { active: true }): Promise<Tab | undefined>;
   function create(properties: { windowId?: number; url: string; active: boolean }): Promise<Tab>;
   function remove(tabId: number): Promise<void>;

@@ -11,7 +11,7 @@ const BUILD_EPOCH = Date.UTC(2026, 0, 1);
 const VERSION_PART = /^(0|[1-9]\d{0,8})$/;
 
 /**
- * The permissions only the Chrome pane and the Switchboard tab group use, which take messages from the web page that Firefox does not deliver:
+ * The permissions only embedded tabs and the Switchboard tab group use, which take messages from the web page that Firefox does not deliver:
  * `storage` for their state and pairing, `tabs` to read tab URLs, `tabGroups` to find and name the group.
  */
 const CHROME_PERMISSIONS = ['storage', 'tabs', 'tabGroups', 'alarms', 'declarativeNetRequestWithHostAccess'];

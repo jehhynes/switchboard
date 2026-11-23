@@ -375,7 +375,7 @@ button.icon, a.icon { display: inline-flex; align-items: center; border: none; b
 .header button.icon { justify-content: center; min-width: 26px; height: 26px; }
 /* Floating layers that overlap content (menus, the @ and / lists, the New messages pill) share one glass, as VS Code's own context menu: the
    menu colour mostly opaque over a blur of what is behind, a hairline border and a soft shadow; fully opaque where backdrop-filter is missing. */
-/* The questions-waiting chip shares the glass without its class, since an open .glass layer hides the Chrome pane. */
+/* The questions-waiting chip shares the glass without its class, since an open .glass layer hides embedded website frames. */
 .glass, .question-waiting { --glass-fill: var(--vscode-menu-background, var(--vscode-editorWidget-background, var(--vscode-sideBar-background))); background: color-mix(in srgb, var(--glass-fill) 88%, transparent); color: var(--vscode-menu-foreground, var(--vscode-foreground)); -webkit-backdrop-filter: blur(8px) saturate(1.2); backdrop-filter: blur(8px) saturate(1.2); border: 1px solid var(--vscode-menu-border, var(--vscode-widget-border, rgba(127, 127, 127, 0.35))); box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36)); }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) { .glass, .question-waiting { background: var(--glass-fill); } }
 /* Menus (architecture.md § Conversation view), drawn as VS Code's context menus from its menu colours: a panel as wide as its content, at least
@@ -412,8 +412,6 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 .sheet-select { width: 100%; font: inherit; color: var(--vscode-dropdown-foreground); background: var(--vscode-dropdown-background); border: 1px solid var(--vscode-dropdown-border, transparent); padding: 2px 4px; }
 .sheet-note { margin: 4px 0 0; font-size: 12px; color: var(--vscode-descriptionForeground); }
 .menu-row[aria-haspopup] > .codicon { margin-left: auto; }
-/* The view options menu's Chrome pane state and pairing outcome (architecture.md § Pane state): wrapped text, not a row. */
-.pane-note { max-width: 300px; margin: 4px 16px 4px 24px; color: var(--vscode-descriptionForeground); white-space: normal; }
 .menu-separator { height: 1px; margin: 4px 10px; background: var(--vscode-menu-separatorBackground, var(--vscode-widget-border, rgba(127, 127, 127, 0.35))); }
 .menu-message { max-width: 320px; padding: 5px 16px 5px 34px; color: var(--vscode-descriptionForeground); white-space: normal; }
 /* The tabs drawn as VS Code's editor tabs (style A): a cell each on a strip one shade darker than the surface under it, the chosen one filled with
@@ -1163,3 +1161,7 @@ button.toast-open:hover { color: var(--vscode-textLink-activeForeground); text-d
 .iframe-warning { flex-basis: 100%; margin: 0; font-size: 12px; color: var(--vscode-descriptionForeground); }
 .iframe-browser iframe { flex: 1; width: 100%; min-height: 0; border: 0; background: white; }
 .iframe-browser .iframe-slot { flex: 1; min-height: 0; width: 100%; }
+
+/* Link tabs scroll inside the strip, leaving fixed tabs and artifact menus accessible. */
+.link-tabs { display: flex; flex: 0 1 auto; min-width: 0; max-width: 50%; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+.link-tabs .link-tab { width: 120px; }

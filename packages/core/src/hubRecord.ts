@@ -2,11 +2,8 @@ export const HUB_NAME = 'switchboard';
 export const PROTOCOL = 1;
 /** The fixed loopback port of the hub's browser endpoint, which the Chrome extension reads (PRD R56). */
 export const BROWSER_PORT = 47615;
-/**
- * The Chrome extension's fixed ID, from the public key in its manifest; the browser endpoint's pane socket accepts only this extension's Origin
- * (architecture.md § Pane socket). `extensions/chrome/test/manifest.test.ts` checks it against the key.
- */
-export const PANE_EXTENSION_ID = 'hlbibnhgkgnjkbfledhgjblacloneije';
+/** The browser extension's key-derived ID, checked by extensions/chrome/test/manifest.test.ts. */
+export const BROWSER_EXTENSION_ID = 'hlbibnhgkgnjkbfledhgjblacloneije';
 
 /** Contents of `hub.json`: how a client reaches the running hub. */
 export interface HubRecord {

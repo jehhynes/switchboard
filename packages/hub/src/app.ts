@@ -4,7 +4,7 @@ import type { FSWatcher } from 'node:fs';
 import { dirname, join, posix, win32 } from 'node:path';
 import { homedir } from 'node:os';
 import { claudeSettingsPath, readRoster, spawnExec } from '@switchboard/claude';
-import { hostKey, hubBundlePath, SCHEDULE_SOURCE, NEW_CONVERSATION_TITLE, PANE_EXTENSION_ID, personaById, Store, switchboardHome, ticketRoot } from '@switchboard/core';
+import { hostKey, hubBundlePath, SCHEDULE_SOURCE, NEW_CONVERSATION_TITLE, personaById, Store, switchboardHome, ticketRoot } from '@switchboard/core';
 import { CODEX_PERMISSION_MODES, PERMISSION_MODES, PROVIDERS, resumesHeld, TEMPLATE_VARIABLES } from '@switchboard/core';
 import type { FlowEvent, SourceSettings, ViewSettings } from '@switchboard/core';
 import { githubSource } from '@switchboard/github';
@@ -49,12 +49,7 @@ import { installedProviders } from './installed.js';
 import { importDockFolders } from './folders.js';
 import { claudeModelChoices, CODEX_MODELS_MS, codexModelChoices, withConfigured } from './models.js';
 import type { ModelChoice } from './models.js';
-import { PaneLink } from './paneLink.js';
-import { PaneState, paneRect, paneTabs } from './pane.js';
 import { localRoots, mainCheckout, openLocalFile } from './localFiles.js';
-import { PaneHelper, spawnPaneHelper } from './paneHelper.js';
-import type { PaneHelperDeps } from './paneHelper.js';
-import { currentHolderBuild, PANE_HELPER_INSTALL, paneHelperRecordPath, reserveHolderBuild } from './holderInstall.js';
 import { spawnEnvironment } from './spawn.js';
 import { PageTargets } from './pageTargets.js';
 import { VOICE_CLOSE, VoiceSockets } from './voiceSocket.js';
@@ -220,8 +215,6 @@ export interface AppOptions {
   snapshotWorker?: string;
   /** What the hub starts for the web page, such as the browser for a link; tests replace it. */
   launch?: Launcher;
-  /** Starts the Chrome pane helper (architecture.md § Pane helper); tests replace it. */
-  startPaneHelper?: PaneHelperDeps['start'];
   /** What the hub this one took over from carried to it (`HubApp.handover`), such as the voice's state; null or left out for a hub that started anew. */
   handover?: Record<string, unknown> | null;
 }
@@ -423,80 +416,16 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         voiceSockets.close(() => true, VOICE_OFF);
       }
 
-      if (!config.settings.web.chromePane) {
-        paneLink.closeAll();
-      }
-
-      pane.update();
-
       // The dock's Settings window reads the file again (PRD R54).
       configChanged();
     }, RELOAD_DEBOUNCE_MS);
   };
   const watchers: FSWatcher[] = [watch(configDir, (_event, file) => file === 'settings.json' && reload())];
 
-  // The Chrome pane's paired socket with the extension (architecture.md § Pane socket).
-  const paneLink = new PaneLink({
-    origin: `chrome-extension://${PANE_EXTENSION_ID}`,
-    file: join(home, 'chrome-pane.json'),
-    enabled: () => config.settings.web.chromePane,
-    now: deps.now,
-    log: deps.log,
-    message: (message) => pane.extensionMessage(message),
-    changed: () => pane.update(),
-  });
-  // The Chrome pane helper, started while a page needs the pane (architecture.md § Pane helper).
-  const paneHelper = new PaneHelper({
-    start: options.startPaneHelper ?? (() => startPaneHelper(home)),
-    report: (report) => {
-      if (!pane.helperReport(report)) {
-        deps.log(`pane helper: a report for an old marker: ${report.state}`);
-      }
-    },
-    stopped: (error) => pane.helperStopped(error),
-    log: deps.log,
-    now: deps.now,
-    setTimeout: (run, ms) => setTimeout(run, ms),
-    clearTimeout: (timer) => clearTimeout(timer as NodeJS.Timeout),
-  });
-  // Pages whose own focus is on, and the page whose pane window has the focus, which counts as the page's (architecture.md § Pane state).
+  // Focused pages participate in voice routing.
   const focusedPages = new Set<string>();
   // The installed page a dock click opens a work item in, and the page that raises needs-you alerts (architecture.md § Web page).
   const pageTargets = new PageTargets();
-  let paneFocusedFor: string | null = null;
-  const pane: PaneState = new PaneState({
-    enabled: () => config.settings.web.chromePane,
-    extension: () => paneLink.state(),
-    toExtension: (message) => paneLink.send(message),
-    toHelper: (order) => paneHelper.send(order),
-    want: (on) => paneHelper.want(on),
-    toPage: (key, view) => conversation.notify(key, 'pane', { pane: view }),
-    pages: () => conversation.pages(),
-    selected: (key) => scopes.scope(key)?.workItemId ?? null,
-    tabsOf: (key) => {
-      const workItemId = scopes.scope(key)?.workItemId ?? null;
-      const dock = views().dock;
-      const row = workItemId === null ? null : dockRowOf(dock, workItemId);
-
-      const tabs = row === null ? null : paneTabs(row, dock.groups.find((group) => group.rows.includes(row))?.key ?? null);
-
-      return tabs === null ? null : { workItemId: workItemId!, ...tabs };
-    },
-    focused: (key, focused) => {
-      paneFocusedFor = focused ? key : paneFocusedFor === key ? null : paneFocusedFor;
-
-      if (focused) {
-        focusedWindow = key;
-        voice.windowGained(deps.now());
-      } else if (focusedWindow === key && !focusedPages.has(key)) {
-        focusedWindow = null;
-      }
-
-      voice.update();
-    },
-    log: deps.log,
-  });
-
   // Each window sees only its own work item (architecture.md § Window scope); views are built off the main thread and published whole.
   const scopes = new WindowScopes({ store, windows, now: deps.now });
   const doneSearch = new DoneSearch();
@@ -893,14 +822,12 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       if (focused) {
         focusedPages.add(key);
         pageTargets.focused(key);
-        pane.pageFocused(key);
         focusedWindow = key;
         voice.windowGained(deps.now());
       } else {
         focusedPages.delete(key);
 
-        // Focus in the page's pane window is the page's own (architecture.md § Pane state).
-        if (focusedWindow === key && paneFocusedFor !== key) {
+        if (focusedWindow === key) {
           focusedWindow = null;
         }
       }
@@ -925,7 +852,6 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   const published = (built: Built): void => {
     conversation.scopesChanged(scopes.update(built.snapshot));
     conversation.sessionsChanged();
-    pane.update();
 
     // The dock or a web page says when a work item starts needing the operator, which the windows no longer see (PRD R65).
     const newly = newlyNeeding(announced, built.snapshot);
@@ -1443,55 +1369,6 @@ const dockWithRuns = () => {
       // The page's tabs for its work item, kept for every device (architecture.md § Web page).
       '/v1/conversation/page-tabs': async (body) => (isRecord(body) ? conversation.pageTabs(body) : { status: 400, body: { error: 'Expected {window, workItemId, tab?, close?, reopen?, openOn?}.' } }),
       '/v1/conversation/page-source': async (body) => (isRecord(body) ? conversation.pageSource(body) : { status: 400, body: { error: 'Expected {window, name, enabled}.' } }),
-      // A one-time token the page hands the Chrome extension to pair it (architecture.md § Pane socket).
-      '/v1/conversation/pane-pair': async (body) => {
-        if (!isRecord(body) || typeof body['window'] !== 'string') {
-          return { status: 400, body: { error: 'Expected {window}.' } };
-        }
-
-        if (!scopes.isPage(body['window'])) {
-          return { status: 403, body: { error: 'Not in this window.' } };
-        }
-
-        if (!config.settings.web.chromePane) {
-          return { status: 409, body: { error: 'The Chrome pane is off. Turn on Chrome pane in the dock’s Settings, General page.' } };
-        }
-
-        return { status: 200, body: { token: paneLink.pairingToken(), extensionId: PANE_EXTENSION_ID } };
-      },
-      // A web link the page's conversation shows, opened in the Chrome pane's window rather than a new browser tab (architecture.md § Pane state).
-      '/v1/conversation/pane-open': async (body) => {
-        const url = isRecord(body) ? body['url'] : undefined;
-
-        if (!isRecord(body) || typeof body['window'] !== 'string' || typeof url !== 'string' || url.length > 2048 || !/^https?:\/\//i.test(url) || !URL.canParse(url)) {
-          return { status: 400, body: { error: 'Expected {window, url} with an http or https URL.' } };
-        }
-
-        const workItemId = scopes.isPage(body['window']) ? (scopes.scope(body['window'])?.workItemId ?? null) : null;
-
-        if (workItemId === null) {
-          return { status: 403, body: { error: 'Not in this window.' } };
-        }
-
-        if (!config.settings.web.chromePane || paneLink.state() !== 'paired') {
-          return { status: 409, body: { error: 'The Chrome pane is not connected.' } };
-        }
-
-        return pane.open(body['window'], workItemId, url) ? { status: 200, body: { opened: true } } : { status: 409, body: { error: 'The Chrome pane cannot show the link.' } };
-      },
-      // The page's right column for the Chrome pane, or null (architecture.md § Pane state).
-      '/v1/conversation/pane-rect': async (body) => {
-        if (!isRecord(body) || typeof body['window'] !== 'string' || !(body['rect'] === null || isRecord(body['rect']))) {
-          return { status: 400, body: { error: 'Expected {window, rect}.' } };
-        }
-
-        if (!scopes.isPage(body['window'])) {
-          return { status: 403, body: { error: 'Not in this window.' } };
-        }
-
-        pane.pageRect(body['window'], paneRect(body['rect']), typeof body['seq'] === 'number' ? body['seq'] : undefined);
-        return { status: 200, body: { done: true } };
-      },
       '/v1/conversation/page-focus': async (body) => (isRecord(body) ? conversation.pageFocus(body) : { status: 400, body: { error: 'Expected {window, focused}.' } }),
       '/v1/conversation/persona': async (body) => (isRecord(body) ? conversation.personaCommand('persona', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, personaId}.' } }),
       '/v1/conversation/mic': async (body) => (isRecord(body) ? conversation.voiceCommand('mic', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, on}.' } }),
@@ -1765,8 +1642,6 @@ const dockWithRuns = () => {
       focusedPages.delete(key);
       remotePages.delete(key);
       pageTargets.closed(key);
-      paneFocusedFor = paneFocusedFor === key ? null : paneFocusedFor;
-      pane.pageClosed(key);
       scopes.close(key);
       conversation.windowClosed();
       voice.windowClosed(key);
@@ -1789,7 +1664,6 @@ const dockWithRuns = () => {
 
         setImmediate(() => {
           voice.update();
-          pane.update();
         });
         return key;
       },
@@ -1850,8 +1724,6 @@ const dockWithRuns = () => {
     snoozedUrls: () => browser.snoozed(),
     cards: () => browser.cards(),
     snoozeUrl: (url, until) => browser.snooze(url, until),
-    paneUpgrade: (request, socket, head) => paneLink.upgrade(request, socket, head),
-    paneEnabled: () => config.settings.web.chromePane,
     unsnoozeUrl: (url) => browser.unsnooze(url),
     onChange: (listener) => void builtListeners.push(listener),
     busy: () => runtime.hasActiveSessions() || debriefs.running(),
@@ -1866,8 +1738,6 @@ const dockWithRuns = () => {
       clearTimeout(pending);
       clearInterval(debriefTimer);
       voice.close();
-      paneHelper.close();
-      paneLink.closeAll();
       pageConsole.close();
       conversation.stop();
       builder.close();
@@ -1880,32 +1750,6 @@ const dockWithRuns = () => {
       store.close();
     },
   };
-}
-
-/**
- * Starts the installed Chrome pane helper's current build (architecture.md § Pane helper), reserving its folder and naming it in
- * `pane-helper.json` so an install keeps it, or says why it cannot.
- */
-async function startPaneHelper(home: string): Promise<Awaited<ReturnType<PaneHelperDeps['start']>>> {
-  if (process.platform !== 'win32') {
-    return { error: 'The Chrome pane works on Windows only.' };
-  }
-
-  const build = currentHolderBuild(home, PANE_HELPER_INSTALL);
-
-  if (build === null || !(await reserveHolderBuild(home, build, PANE_HELPER_INSTALL))) {
-    return { error: 'The Chrome pane helper is not installed. Open a VS Code window with the Switchboard extension, which installs it, then reload this page.' };
-  }
-
-  const helper = spawnPaneHelper(join(home, PANE_HELPER_INSTALL.name, build, PANE_HELPER_INSTALL.entry), ['--home', home], spawnEnvironment(process.env));
-
-  try {
-    writeFileSync(paneHelperRecordPath(home), JSON.stringify({ build, pid: helper.pid ?? 0 }));
-  } catch {
-    // Without the record an install may remove the build's other files; the running helper has loaded what it needs.
-  }
-
-  return { process: helper };
 }
 
 /** Open work items per playbook, so deleting a playbook can say what still uses it. */

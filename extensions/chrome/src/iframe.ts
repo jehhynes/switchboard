@@ -1,7 +1,7 @@
 import { BROWSER_PORT } from './hub.js';
-import { PANE_EXTENSION_ID } from '@switchboard/core/hubRecord';
+import { BROWSER_EXTENSION_ID } from '@switchboard/core/hubRecord';
 export const IFRAME_HOST_PATH = '/iframeHost.html';
-export const IFRAME_EXTENSION_ORIGIN = `chrome-extension://${PANE_EXTENSION_ID}`;
+export const IFRAME_EXTENSION_ORIGIN = `chrome-extension://${BROWSER_EXTENSION_ID}`;
 
 /** A host page is fixed extension code, and names only the Switchboard origin it contains. */
 export function iframeTab(url: string | undefined, remote: string | null): { origin: string; hosted: boolean } | null {
@@ -112,7 +112,7 @@ export class IframeRules {
       const type = (message as { type?: unknown } | null)?.type;
       const id = sender.tab?.id;
       const origin = iframePage(sender.url, this.deps.origin);
-      if ((type !== 'iframe-enable' && type !== 'iframe-disable' && type !== 'iframe-launch') || !Number.isInteger(id) || id! < 0 || origin === null || origin !== sender.origin) {
+      if ((type !== 'iframe-enable' && type !== 'iframe-disable' && type !== 'iframe-launch' && type !== 'iframe-check') || !Number.isInteger(id) || id! < 0 || origin === null || origin !== sender.origin) {
         return { error: 'Only the Switchboard page can enable the iframe experiment.' };
       }
       const tab = iframeTab(await this.deps.tab(id!), this.deps.origin);
@@ -132,7 +132,8 @@ export class IframeRules {
         return { error: 'The Switchboard tab navigated away.' };
       }
       const leases = await this.deps.leases();
-      if (type === 'iframe-launch') return { ok: true as const };
+      if (type === 'iframe-launch' || type === 'iframe-check') return { ok: true as const };
+      if (!tab.hosted) { await this.#remove(id!); return { ok: true as const }; }
       await this.deps.update([id! + 1], [iframeRule(id!, tab.hosted ? IFRAME_EXTENSION_ORIGIN : origin)]);
       leases[String(id)] = { origin, until: this.deps.now() + IFRAME_LEASE_MS };
       try {
@@ -172,6 +173,7 @@ export class IframeRules {
           keep =
             lease !== undefined &&
             lease.until > this.deps.now() &&
+            iframeTab(await this.deps.tab(id), this.deps.origin)?.hosted === true &&
             iframeTab(await this.deps.tab(id), this.deps.origin)?.origin === lease.origin &&
             (await this.deps.enabled(lease.origin));
         } catch {
