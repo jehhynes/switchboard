@@ -800,6 +800,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const micSlot = composerHost.querySelector<HTMLElement>('.composer-mic')!;
   const contextSlot = composerHost.querySelector<HTMLElement>('.context-meter')!;
   const liveWords = composerHost.querySelector<HTMLElement>('.live-words')!;
+  const hint = composerHost.querySelector<HTMLElement>('.composer-hint')!;
   const mirror = composerHost.querySelector<HTMLElement>('.live-mirror')!;
   const mirrorText = composerHost.querySelector<HTMLElement>('.mirror-text')!;
   const attachButton = composerHost.querySelector<HTMLButtonElement>('button.attach')!;
@@ -832,7 +833,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   // while a message was being sent, which fills the box once the send answered.
   const hubDrafts = new Map<string, string>();
   let heldDraft: { sessionId: string; text: string } | null = null;
-  const takeHubDraft = (sessionId: string, text: string): void => {
+  const takeHubDraft = (sessionId: string, text: string, added: string | null = null): void => {
     const before = hubDrafts.get(sessionId) ?? '';
 
     hubDrafts.set(sessionId, text);
@@ -846,6 +847,27 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
+    // Each piece the hub names joins the end of what the box holds now, so the operator's edits since stay, as while the box has the focus
+    // and dictation keeps listening, and the caret and selection stay where they were (architecture.md § Dictation). A box that differs
+    // from the hub's draft then is told to the hub, whose draft it becomes.
+    if (added !== null) {
+      const { selectionStart, selectionEnd, selectionDirection } = input;
+
+      input.value = input.value === '' || /\s$/.test(input.value) ? `${input.value}${added.trimStart()}` : `${input.value} ${added.trimStart()}`;
+      input.setSelectionRange(selectionStart, selectionEnd, selectionDirection ?? undefined);
+      keepDraft();
+      grow();
+      refresh();
+
+      if (input.value !== text) {
+        hubDrafts.set(sessionId, input.value);
+        tellHub();
+      }
+
+      return;
+    }
+
+    // Any other draft, as the hub's emptied one once a turn sent, replaces the box only while it holds nothing typed since.
     if (input.value === '' || input.value === before) {
       input.value = text;
       keepDraft();
@@ -1118,7 +1140,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     toEnd();
 
-    // Sending hands the box back to the voice, so dictation resumes, as in the Conversation view (architecture.md § Dictation).
+    // Sending leaves the box, as in the Conversation view, so later spoken turns send on their own again (architecture.md § Dictation).
     if (state.voice?.here === true && !['off', 'idle-off', 'unavailable'].includes(state.voice.mic) && document.activeElement === input) {
       input.blur();
     }
@@ -1566,18 +1588,29 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     { signal: listening.signal },
   );
 
-  // The box's focus and draft, for the focus rule of dictation, as the Conversation view tells the hub (architecture.md § Dictation).
+  // The box's focus and draft, for the focus rule of dictation (architecture.md § Dictation). Unlike the Conversation view's, the box keeps
+  // dictation listening while it has the focus (`listen`): spoken turns join its draft and wait for Send.
   let composerTimer: ReturnType<typeof setTimeout> | undefined;
   const tellHub = (): void => {
     clearTimeout(composerTimer);
 
     if (state.scope !== null && state.voice?.enabled === true) {
-      void command('composer', { focused: document.activeElement === input, draft: sending ? '' : input.value });
+      void command('composer', { focused: document.activeElement === input, draft: sending ? '' : input.value, listen: true });
     }
   };
+  /** The hint that dictation joins the draft and waits for Send, while the box has the focus and the mic is on here. */
+  const syncHint = (): void => {
+    hint.hidden = !(document.activeElement === input && state.voice?.here === true && !['off', 'idle-off', 'unavailable'].includes(state.voice.mic));
+  };
 
-  input.addEventListener('focus', tellHub);
-  input.addEventListener('blur', tellHub);
+  input.addEventListener('focus', () => {
+    tellHub();
+    syncHint();
+  });
+  input.addEventListener('blur', () => {
+    tellHub();
+    syncHint();
+  });
   input.addEventListener('input', () => {
     clearTimeout(composerTimer);
     composerTimer = setTimeout(tellHub, COMPOSER_DRAFT_MS);
@@ -1618,6 +1651,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         : (state.session?.reason ?? (state.connected ? 'No session has started yet.' : connection.state === 'offline' ? "Can't send while offline." : connection.state === 'signedOut' ? 'Signed out.' : 'Connecting to Switchboard…'));
     // The same controls as the Conversation view's, acting on this computer's voice process (architecture.md § Web page).
     mount(voiceControls, renderShared(renderVoice(state.voice, full)));
+    syncHint();
     // On a paired device the mic shows while the voice is elsewhere too, off: its tap takes the voice to this phone (PRD R119).
     const micView = phoneVoice !== null && state.voice?.enabled === true && !state.voice.here ? { ...state.voice, here: true, mic: 'off' as const, error: null } : state.voice;
 
@@ -4863,7 +4897,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         liveWords.hidden = liveWords.textContent === '';
         showLive();
       } else if (type === 'draft' && typeof data['sessionId'] === 'string') {
-        takeHubDraft(data['sessionId'], String(data['text'] ?? ''));
+        takeHubDraft(data['sessionId'], String(data['text'] ?? ''), typeof data['added'] === 'string' ? data['added'] : null);
       }
 
       // A message this page sent that was not sent: a card's answer goes back to its card, any other text to its own work item's draft.

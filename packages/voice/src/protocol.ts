@@ -105,8 +105,11 @@ export type HubMessage =
    * connected to, which turns the mic on only if the process has not turned it off on its own since the operator last set it.
    */
   | { type: 'mic'; on: boolean; restore?: boolean }
-  /** The here window's composer has the focus: recognition in flight is finished, nothing is sent, and listening pauses until it is off. */
-  | { type: 'typing'; on: boolean }
+  /**
+   * The here window's composer has the focus: recognition in flight is finished, nothing is sent, and listening pauses until it is off. With
+   * `listen`, as the web page's composer asks, listening goes on and only spoken alerts' answers wait.
+   */
+  | { type: 'typing'; on: boolean; listen?: boolean }
   /** The target's latest reply, which the turn model reads with the operator's words. */
   | { type: 'context'; sessionId: string; lastReply: string }
   /** A reply's heard tag, for the glossary. */
@@ -309,7 +312,7 @@ export function parseHubMessage(line: string): HubMessage | { error: string } {
     case 'mic':
       return typeof m.on === 'boolean' && (m.restore === undefined || typeof m.restore === 'boolean') ? { type: 'mic', on: m.on, ...(m.restore === true ? { restore: true } : {}) } : invalid;
     case 'typing':
-      return typeof m.on === 'boolean' ? { type: 'typing', on: m.on } : invalid;
+      return typeof m.on === 'boolean' && (m.listen === undefined || typeof m.listen === 'boolean') ? { type: 'typing', on: m.on, ...(m.listen === true ? { listen: true } : {}) } : invalid;
     case 'context':
       return isId(m.sessionId) && isText(m.lastReply) ? { type: 'context', sessionId: m.sessionId, lastReply: m.lastReply } : invalid;
     case 'enroll':

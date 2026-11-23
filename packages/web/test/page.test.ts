@@ -2006,6 +2006,84 @@ it("turns the mic off through Back's path when a phone's conversation is left by
     page.close();
   });
 
+  it('keeps dictation listening while the box has the focus: says so, joins each piece to the end of what was typed, keeps the caret, and tells the hub (architecture.md § Dictation)', async () => {
+    const { page, source } = start();
+
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    source.emit('voice', { voice: { enabled: true, here: true, mic: 'listening', speaking: null, speakReplies: true, error: null } });
+
+    const input = root.querySelector('textarea')!;
+    const hint = root.querySelector<HTMLElement>('.composer-hint')!;
+    const told = () => posts.filter((post) => post.url.endsWith('/composer')).map((post) => post.body);
+
+    // Unfocused, spoken turns send on their own, so there is no hint.
+    expect(hint.hidden).toBe(true);
+    input.focus();
+    await flush();
+    expect(hint.hidden).toBe(false);
+    expect(hint.textContent).toContain('press Send');
+    expect(told().at(-1)).toMatchObject({ focused: true, draft: '', listen: true });
+
+    // The first piece fills the empty box.
+    source.emit('draft', { text: 'fix the', sessionId: 's', added: 'fix the' });
+    expect(input.value).toBe('fix the');
+    // Typed before the hub heard it, with the caret inside the text: the next piece joins the end, and the caret stays.
+    input.value = 'fix the sign-in';
+    input.setSelectionRange(3, 3);
+    source.emit('draft', { text: 'fix the flow', sessionId: 's', added: 'flow' });
+    expect(input.value).toBe('fix the sign-in flow');
+    expect([input.selectionStart, input.selectionEnd]).toEqual([3, 3]);
+    await flush();
+    expect(told().at(-1)).toMatchObject({ focused: true, draft: 'fix the sign-in flow', listen: true });
+    // Typed again, and two pieces the hub joined to drafts that crossed the page's: each joins once, and nothing typed is lost.
+    input.value = 'fix the sign-in flow, please';
+    input.setSelectionRange(input.value.length, input.value.length);
+    source.emit('draft', { text: 'fix the sign-in flow now', sessionId: 's', added: 'now' });
+    source.emit('draft', { text: 'fix the sign-in flow then', sessionId: 's', added: 'then' });
+    expect(input.value).toBe('fix the sign-in flow, please now then');
+    // A caret at the end stays where it was too, before the words dictated after it.
+    expect([input.selectionStart, input.selectionEnd]).toEqual([28, 28]);
+    // A draft the hub set otherwise replaces the box only while it holds nothing typed since, as the hub's emptied draft after a turn sent,
+    // even once the page told the hub the typing, since the draft may predate it.
+    input.value = 'my own words';
+    source.emit('draft', { text: 'something else', sessionId: 's' });
+    expect(input.value).toBe('my own words');
+    input.dispatchEvent(new Event('input'));
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    expect(told().at(-1)).toMatchObject({ draft: 'my own words' });
+    source.emit('draft', { text: '', sessionId: 's' });
+    expect(input.value).toBe('my own words');
+    input.value = '';
+    source.emit('draft', { text: 'from the hub', sessionId: 's' });
+    expect(input.value).toBe('from the hub');
+    source.emit('draft', { text: '', sessionId: 's' });
+    expect(input.value).toBe('');
+
+    // Leaving the box hides the hint; with the mic off it shows on no focus.
+    input.blur();
+    await flush();
+    expect(hint.hidden).toBe(true);
+    expect(told().at(-1)).toMatchObject({ focused: false, listen: true });
+    // Unfocused, a piece joins an edited box too, and the hub's emptied draft once the turn sent it clears it.
+    input.value = 'one edited';
+    source.emit('draft', { text: 'one edited two', sessionId: 's', added: 'two' });
+    expect(input.value).toBe('one edited two');
+    source.emit('draft', { text: '', sessionId: 's' });
+    expect(input.value).toBe('');
+    // A piece joined to a draft the hub had before the edit reached it: the box keeps the edit, and the hub is told the box.
+    input.value = 'mine';
+    source.emit('draft', { text: 'three', sessionId: 's', added: 'three' });
+    expect(input.value).toBe('mine three');
+    await flush();
+    expect(told().at(-1)).toMatchObject({ focused: false, draft: 'mine three' });
+    source.emit('draft', { text: '', sessionId: 's' });
+    expect(input.value).toBe('');
+    source.emit('voice', { voice: { enabled: true, here: true, mic: 'off', speaking: null, speakReplies: true, error: null } });
+    input.focus();
+    expect(hint.hidden).toBe(true);
+    page.close();
+  });
+
   it("fills the box with a draft that came while a message was being sent once the send answered, keeps each conversation's draft baseline, and clears live words on a switch", async () => {
     const { page, source } = start();
     const helloOn = (workItemId: number, sessionId: string) =>

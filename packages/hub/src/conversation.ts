@@ -349,7 +349,7 @@ export interface ConversationVoice {
   mic?(key: string, on: boolean): string | null;
   micTiming?(key: string, steps: Array<{ step: string; ms: number }>, outcome: string): void;
   /** The composer command: the window's composer gained or lost the focus, or its draft changed. */
-  composer?(key: string, focused: boolean, draft: string): void;
+  composer?(key: string, focused: boolean, draft: string, listen?: boolean): void;
 }
 
 /** The most IDs one `seen` command marks. */
@@ -2589,7 +2589,7 @@ export class ConversationService {
    * window's scope, 409 for a stale `scopeGen` and with the voice's refusal, and 404 while voice is not part of this hub.
    */
   voiceCommand(name: 'talk-here' | 'stop-speaking' | 'speak-replies' | 'replay' | 'mic' | 'mic-timing' | 'composer', body: Record<string, unknown>): { status: number; body: unknown } {
-    const { window, scopeGen, opId, on, replyId, focused, draft, steps, outcome } = body;
+    const { window, scopeGen, opId, on, replyId, focused, draft, listen, steps, outcome } = body;
 
     // A page's Mic on tap timed, for the hub log (architecture.md § Dictation): any window or page key the hub knows, at any scope.
     if (name === 'mic-timing') {
@@ -2616,7 +2616,7 @@ export class ConversationService {
       typeof opId !== 'string' ||
       ((name === 'speak-replies' || name === 'mic') && typeof on !== 'boolean') ||
       (name === 'replay' && typeof replyId !== 'string') ||
-      (name === 'composer' && (typeof focused !== 'boolean' || typeof draft !== 'string' || draft.length > MAX_MESSAGE_CHARS))
+      (name === 'composer' && (typeof focused !== 'boolean' || typeof draft !== 'string' || draft.length > MAX_MESSAGE_CHARS || (listen !== undefined && typeof listen !== 'boolean')))
     ) {
       const fields = name === 'speak-replies' || name === 'mic' ? ', on' : name === 'replay' ? ', replyId' : name === 'composer' ? ', focused, draft' : '';
 
@@ -2641,7 +2641,7 @@ export class ConversationService {
     }
 
     if (name === 'composer') {
-      voice.composer?.(window, focused as boolean, draft as string);
+      voice.composer?.(window, focused as boolean, draft as string, listen === true);
       return { status: 200, body: { done: true } };
     }
 

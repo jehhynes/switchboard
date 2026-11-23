@@ -279,7 +279,7 @@ export class VoiceService {
         this.#dictation?.mic(message.on);
         return;
       case 'typing':
-        this.#dictation?.typing(message.on);
+        this.#dictation?.typing(message.on, message.listen === true);
         return;
       case 'context':
         this.#dictation?.context(message.sessionId, message.lastReply);

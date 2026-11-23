@@ -271,6 +271,27 @@ describe('Dictation', () => {
     expect(sent).toEqual([]);
   });
 
+  it('cuts an alert answer waited for or being said when a composer that keeps listening takes the focus, and keeps capture for the draft', async () => {
+    const { dictation, say, sent, listening, capture } = setup();
+    const answers: Array<[string | null, boolean]> = [];
+
+    await listening();
+    dictation.listen((text, cut) => answers.push([text, cut]));
+    dictation.typing(true, true);
+    expect(answers).toEqual([[null, true]]);
+    dictation.listen(null);
+    dictation.typing(false);
+
+    dictation.listen((text, cut) => answers.push([text, cut]));
+    say('yes go', 200);
+    dictation.typing(true, true);
+    expect(answers).toEqual([[null, true], [null, true]]);
+    dictation.listen(null);
+    expect(sent).toEqual([]);
+    expect(dictation.state).toBe('listening');
+    expect(capture.opens).toBe(1);
+  });
+
   it('can hear no answer with the mic off, paused by voice, the composer focused or during an enrolment', async () => {
     const { dictation, listening, say, quiet } = setup({ voiceprint: fakeVoiceprint() });
 
@@ -281,6 +302,12 @@ describe('Dictation', () => {
     expect(dictation.answerable).toBe(false);
     dictation.typing(false);
     await settle();
+    // A composer that keeps listening, as the web page's, still keeps answers out of its draft.
+    dictation.typing(true, true);
+    expect(dictation.state).toBe('listening');
+    expect(dictation.answerable).toBe(false);
+    dictation.typing(false);
+    expect(dictation.answerable).toBe(true);
     say('stop listening', 200);
     quiet(PHRASE_SILENCE_MS + 3_000);
     expect(dictation.state).toBe('paused-by-voice');
@@ -621,6 +648,15 @@ describe('Dictation', () => {
     await settle();
     expect(capture.opens).toBe(2);
     expect(dictation.state).toBe('listening');
+
+    // A composer that asks to listen on leaves the utterance and capture alone.
+    say('and the tests', 200);
+    const before = sent.length;
+
+    dictation.typing(true, true);
+    expect(kinds(sent.slice(before))).toEqual([]);
+    expect(dictation.state).toBe('hearing');
+    expect(capture.opens).toBe(2);
   });
 
   it('drops what it was hearing when another app records, sends no end, and resumes only when that app stops', async () => {

@@ -675,6 +675,8 @@ body.artifact-window > .artifact-view { height: 100%; }
 .composer .live-mirror { position: absolute; inset: 0; box-sizing: border-box; padding: 10px 14px; overflow: hidden; scrollbar-gutter: stable; font: inherit; line-height: 1.5; white-space: pre-wrap; overflow-wrap: break-word; pointer-events: none; }
 .composer .mirror-text { color: transparent; }
 .composer .live-words { color: var(--vscode-descriptionForeground); font-style: italic; }
+.composer-hint { padding: 0 10px 2px; color: var(--vscode-descriptionForeground); font-size: 0.85em; }
+.composer-hint[hidden] { display: none; }
 .composer .live-words[hidden] { display: none; }
 .composer .live-words::before { content: attr(data-lead); }
 .live-showing .composer textarea::placeholder { color: transparent; }

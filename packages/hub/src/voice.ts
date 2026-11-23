@@ -60,6 +60,8 @@ const FLUSH_CHECK_MS = 1_000;
 /** A window's composer as the hub keeps it for the focus rule (architecture.md § Dictation): its text, its focus, and the dictation in it. */
 interface Composer {
   focused: boolean;
+  /** A focused composer that keeps dictation listening, as the web page's: its turns join the draft and wait for Send. */
+  listen: boolean;
   draft: string;
   /** The pieces dictated into the draft since it was last sent or emptied; empty while it holds no dictation. */
   pieces: Piece[];
@@ -415,7 +417,7 @@ export class VoiceControl {
   readonly #timings = new Map<string, UtteranceTiming & { receivedAt: number }>();
   /** The window the voice last moved to by its own command, which hears dictation when no focused window shows the target. */
   #talkedFrom: string | null = null;
-  #typingSent: boolean | null = null;
+  #typingSent: string | null = null;
   readonly #contextSent = new Map<string, string>();
   readonly #repos = new Map<string, string | null | 'pending'>();
   #flushTimer: { stop(): void } | null = null;
@@ -1228,13 +1230,14 @@ export class VoiceControl {
 
   /**
    * The composer's focus and draft (architecture.md § Dictation, the focus rule): the hub keeps each window's draft as the one text dictation
-   * joins, and while the here window's composer has the focus the voice process holds every send and stops listening. A draft emptied by the
-   * operator no longer holds dictation.
+   * joins, and while the here window's composer has the focus no spoken turn sends it; the voice process stops listening too, unless the
+   * composer asks to keep `listen`ing, as the web page's does. A draft emptied by the operator no longer holds dictation.
    */
-  composer(key: string, focused: boolean, draft: string): void {
+  composer(key: string, focused: boolean, draft: string, listen = false): void {
     const composer = this.#composer(key, this.deps.windows.scope(key)?.sessionId ?? '');
 
     composer.focused = focused;
+    composer.listen = listen;
     composer.draft = draft;
 
     if (draft.trim() === '') {
@@ -1368,7 +1371,7 @@ export class VoiceControl {
     let composer = this.#composers.get(composerKey(key, sessionId));
 
     if (composer === undefined) {
-      composer = { focused: false, draft: '', pieces: [], interrupted: null, held: false };
+      composer = { focused: false, listen: false, draft: '', pieces: [], interrupted: null, held: false };
       this.#composers.set(composerKey(key, sessionId), composer);
     }
 
@@ -1400,14 +1403,16 @@ export class VoiceControl {
     return this.#talkedFrom !== null && showing.includes(this.#talkedFrom) ? this.#talkedFrom : (showing[0] ?? (this.#terminals.has(session) ? TERMINAL : null));
   }
 
-  /** Tells the process whether the here window's composer has the focus, when that changed. */
+  /** Tells the process whether the here window's composer has the focus and stops listening, when that changed. */
   #syncTyping(): void {
     const key = this.#hereKey();
-    const typing = key !== null && this.#composers.get(composerKey(key, this.#target.sessionId ?? ''))?.focused === true;
+    const composer = key === null ? undefined : this.#composers.get(composerKey(key, this.#target.sessionId ?? ''));
+    const on = composer?.focused === true;
+    const listen = on && composer?.listen === true;
 
-    if (this.#client !== null && typing !== this.#typingSent) {
-      this.#typingSent = typing;
-      this.#client.send({ type: 'typing', on: typing });
+    if (this.#client !== null && `${on} ${listen}` !== this.#typingSent) {
+      this.#typingSent = `${on} ${listen}`;
+      this.#client.send({ type: 'typing', on, ...(listen ? { listen: true } : {}) });
     }
   }
 
@@ -1453,7 +1458,8 @@ export class VoiceControl {
 
     composer.draft = composer.draft === '' || /\s$/.test(composer.draft) ? `${composer.draft}${message.text}` : `${composer.draft} ${message.text}`;
     composer.pieces.push(piece);
-    this.#notify(heard.key, 'draft', { text: composer.draft, sessionId: heard.sessionId });
+    // `added` names the piece, so a page whose box has the focus joins it to what the operator has typed since.
+    this.#notify(heard.key, 'draft', { text: composer.draft, sessionId: heard.sessionId, added: message.text });
   }
 
   /**
@@ -1495,12 +1501,17 @@ export class VoiceControl {
       composer.interrupted = message.interrupted;
     }
 
-    if (!message.final || composer.focused) {
+    if (!message.final) {
       return;
     }
 
+    // A turn held while the composer has the focus stays held, so leaving the box does not send it with the next turn.
     if (this.#roomHeld() || composer.held) {
       this.#hold(heard, composer);
+      return;
+    }
+
+    if (composer.focused) {
       return;
     }
 

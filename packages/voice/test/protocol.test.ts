@@ -19,6 +19,9 @@ describe('voice protocol', () => {
     expect(parseHubMessage('{"type":"mic","on":true,"restore":false}')).toEqual({ type: 'mic', on: true });
     expect(parseHubMessage('{"type":"mic","on":true,"restore":1}')).toEqual({ error: 'Invalid mic message.' });
     expect(parseHubMessage('{"type":"typing","on":false}')).toEqual({ type: 'typing', on: false });
+    expect(parseHubMessage('{"type":"typing","on":true,"listen":true}')).toEqual({ type: 'typing', on: true, listen: true });
+    expect(parseHubMessage('{"type":"typing","on":true,"listen":false}')).toEqual({ type: 'typing', on: true });
+    expect(parseHubMessage('{"type":"typing","on":true,"listen":1}')).toEqual({ error: 'Invalid typing message.' });
     expect(parseHubMessage('{"type":"mic","on":"yes"}')).toEqual({ error: 'Invalid mic message.' });
     expect(parseHubMessage('{"type":"context","sessionId":"s1","lastReply":"Done."}')).toEqual({ type: 'context', sessionId: 's1', lastReply: 'Done.' });
     expect(parseHubMessage('{"type":"context","sessionId":"","lastReply":"Done."}')).toEqual({ error: 'Invalid context message.' });

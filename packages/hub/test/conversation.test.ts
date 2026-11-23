@@ -1377,12 +1377,16 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     // The mic and the composer reach the voice; a hub with no mic says so.
     expect(command('mic', { on: true })).toEqual({ status: 409, body: { error: 'This hub has no voice.' } });
     voice.mic = (key, on) => (key === mine.key ? (calls.push(`mic ${on}`), null) : 'Voice is off (voice.enabled).');
-    voice.composer = (key, focused, draft) => void calls.push(`composer ${focused} ${draft}`);
+    voice.composer = (key, focused, draft, listen) => void calls.push(`composer ${focused} ${draft}${listen === true ? ' listen' : ''}`);
     expect(command('mic', { on: true })).toEqual({ status: 200, body: { on: true } });
     expect(command('mic', { on: true }, theirs.key)).toEqual({ status: 409, body: { error: 'Voice is off (voice.enabled).' } });
     expect(command('mic')).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, on}.' } });
     expect(command('composer', { focused: true, draft: 'fix' })).toEqual({ status: 200, body: { done: true } });
     expect(calls.slice(-2)).toEqual(['mic true', 'composer true fix']);
+    // The web page's composer keeps dictation listening while it has the focus; anything but a boolean is refused.
+    expect(command('composer', { focused: true, draft: 'fix', listen: true })).toEqual({ status: 200, body: { done: true } });
+    expect(calls.at(-1)).toBe('composer true fix listen');
+    expect(command('composer', { focused: true, draft: 'fix', listen: 'yes' })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, focused, draft}.' } });
     expect(command('replay', { replyId: 'r-x' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
     expect(command('replay')).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, replyId}.' } });
     expect(service.voiceCommand('talk-here', { window: mine.key, scopeGen: 1 })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId}.' } });

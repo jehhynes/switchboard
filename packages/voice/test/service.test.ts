@@ -50,7 +50,7 @@ describe('VoiceService', () => {
           },
           error: null,
           mic: (on: boolean) => calls.push(`mic ${on}`),
-          typing: (on: boolean) => calls.push(`typing ${on}`),
+          typing: (on: boolean, listen: boolean) => calls.push(`typing ${on}${listen ? ' listen' : ''}`),
           context: (sessionId: string, lastReply: string) => calls.push(`context ${sessionId} ${lastReply}`),
           target: (gen: number, sessionId: string | null, repo: string | null) => calls.push(`target ${gen} ${sessionId} ${repo}`),
           reference: (pcm: Buffer) => calls.push(`reference ${pcm.length}`),
@@ -68,11 +68,12 @@ describe('VoiceService', () => {
     service.receive({ type: 'settings', settings: { ...DEFAULT_SETTINGS.voice, enabled: true, inputDevice: 'Headset' } });
     service.receive({ type: 'mic', on: true });
     service.receive({ type: 'typing', on: true });
+    service.receive({ type: 'typing', on: true, listen: true });
     service.receive({ type: 'context', sessionId: 's1', lastReply: 'Done.' });
     service.receive({ type: 'heard', heard: 'a llama', meant: 'Ollama' });
     service.receive({ type: 'targets', targets: [{ sessionId: 's1', workItemId: 1, repo: 'acme/app' }], focus: null });
     service.receive({ type: 'talk-here', sessionId: 's1' });
-    expect(calls).toEqual(['settings', 'mic true', 'typing true', 'context s1 Done.', 'heard a llama=Ollama', 'target 1 s1 acme/app']);
+    expect(calls).toEqual(['settings', 'mic true', 'typing true', 'typing true listen', 'context s1 Done.', 'heard a llama=Ollama', 'target 1 s1 acme/app']);
 
     // Turning voice off in the settings stops capture, whatever the mic was set to.
     service.receive({ type: 'settings', settings: { ...DEFAULT_SETTINGS.voice, enabled: false } });

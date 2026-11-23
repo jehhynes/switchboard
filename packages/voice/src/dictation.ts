@@ -151,7 +151,10 @@ interface Playback {
  */
 export class Dictation {
   #micOn = false;
+  /** The here window's composer has the focus and listening pauses. */
   #typing = false;
+  /** The here window's composer has the focus, listening or not, so no spoken alert's answer is heard. */
+  #composing = false;
   /** Whether another app records; null until the watcher first says. */
   #otherApp: boolean | null = null;
   #idleOff = false;
@@ -323,7 +326,7 @@ export class Dictation {
    * app recording, the composer not focused and no enrolment. The away and idle timeouts do not count: an answer window listens through them.
    */
   get answerable(): boolean {
-    return this.#micOn && this.#error === null && !this.#pausedByVoice && this.#otherApp !== true && !this.#typing && this.#enrollment === null;
+    return this.#micOn && this.#error === null && !this.#pausedByVoice && this.#otherApp !== true && !this.#composing && this.#enrollment === null;
   }
 
   /**
@@ -410,15 +413,31 @@ export class Dictation {
     this.#sync();
   }
 
-  /** The here window's composer gained or lost the focus: recognition in flight is finished into the draft and listening pauses. */
-  typing(on: boolean): void {
-    if (on === this.#typing) {
+  /**
+   * The here window's composer gained or lost the focus: recognition in flight is finished into the draft and listening pauses, unless it
+   * asks to `listen` on, as the web page's composer does.
+   */
+  typing(on: boolean, listen = false): void {
+    const typing = on && !listen;
+
+    // A spoken alert's answer being waited for ends cut, as when listening pauses, so the words said next go to the draft.
+    if (on && !this.#composing && !typing && this.#answer !== null) {
+      if (this.#utterance?.answer === true) {
+        this.#cut(true);
+      } else {
+        this.#answer(null, true);
+      }
+    }
+
+    this.#composing = on;
+
+    if (typing === this.#typing) {
       return;
     }
 
-    this.#typing = on;
+    this.#typing = typing;
 
-    if (on) {
+    if (typing) {
       this.#cut(true);
     }
 

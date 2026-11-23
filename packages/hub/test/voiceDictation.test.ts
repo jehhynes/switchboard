@@ -150,7 +150,9 @@ async function setup(patch: Partial<VoiceSettings> = {}) {
   return { control, connection, windows, notified, dictated, busy, advance, settle, piece, end, fragments, logs, cardHeard, setCard: (run: typeof card) => (card = run), refuse: (why: string | null) => (refuse = why), focus: (key: string | null) => (focused = key), setLastReply: (text: string) => (lastReply = text) };
 }
 
-const events = (notified: Array<{ key: string; type: string; payload: Record<string, unknown> }>, type: string) => notified.filter((one) => one.type === type).map((one) => [one.key, one.payload]);
+// A draft's `added` piece is left out here; the tests of a focused page's composer read it.
+const events = (notified: Array<{ key: string; type: string; payload: Record<string, unknown> }>, type: string) =>
+  notified.filter((one) => one.type === type).map((one) => [one.key, Object.fromEntries(Object.entries(one.payload).filter(([name]) => name !== 'added'))]);
 
 describe('VoiceControl dictation', () => {
   it('applies a whole utterance that is a card command to the open card instead of sending it, and says the reply (PRD R103)', async () => {
@@ -325,6 +327,38 @@ describe('VoiceControl dictation', () => {
     expect(control.dictated('k1', 's1')).toBeNull();
     connection.receive({ type: 'words', gen: 0, utteranceId: 'u9', sessionId: 's1', text: 'old' });
     expect(events(notified, 'words')).toEqual([]);
+  });
+
+  it("keeps listening while a page's composer that asks to listen has the focus: each piece joins its draft, no turn or [partial] sends it, and Send does (architecture.md § Dictation)", async () => {
+    const { control, connection, dictated, piece, end, notified, busy, advance } = await setup();
+    const typing = () => connection.sent.filter((one) => one.type === 'typing').at(-1);
+
+    control.composer('k1', true, 'Also,', true);
+    // Capture keeps running; the process is told only that no spoken alert's answer may take a turn meanwhile.
+    expect(typing()).toEqual({ type: 'typing', on: true, listen: true });
+    busy.add('s1');
+    piece('rename it');
+    advance(FRAGMENT_FLUSH_MS + 1_000);
+    piece('and the tests');
+    end();
+    expect(dictated).toEqual([]);
+    expect(notified.filter((one) => one.type === 'draft').map((one) => one.payload)).toEqual([
+      { text: 'Also, rename it', sessionId: 's1', added: 'rename it' },
+      { text: 'Also, rename it and the tests', sessionId: 's1', added: 'and the tests' },
+    ]);
+    expect(control.dictated('k1', 's1')).toMatchObject([{ text: 'rename it' }, { text: 'and the tests' }]);
+
+    // A composer that does not ask to listen stops the voice process listening while it has the focus, as the Conversation view's does.
+    control.composer('k1', true, '');
+    expect(typing()).toEqual({ type: 'typing', on: true });
+    control.composer('k1', true, '', true);
+    expect(typing()).toEqual({ type: 'typing', on: true, listen: true });
+
+    // Unfocused, a turn's end sends the draft on its own again.
+    control.composer('k1', false, '', true);
+    piece('ship it', 'u2');
+    end(true, 'u2');
+    expect(dictated).toMatchObject([{ key: 'k1', text: 'ship it', partial: false }]);
   });
 
   it('sends a long message as [partial] parts every 10 seconds while its session works, and the rest at the end', async () => {
@@ -649,6 +683,21 @@ describe('VoiceControl enrolment', () => {
     piece('and lint', 'u3');
     end(true, 'u3');
     expect(dictated.map((one) => one.text)).toEqual(['and lint']);
+  });
+
+  it("holds a turn that ends during a room hold while a listening composer has the focus, so leaving the box does not send it with the next turn", async () => {
+    const { control, connection, notified, dictated, piece, end } = await setup();
+
+    control.composer('k1', true, '', true);
+    connection.receive({ type: 'audio', mic: 'hearing', engine: 'decibri', device: null, recognizer: null, error: null, roomHold: Date.UTC(2026, 10, 20, 12, 1) });
+    piece('not for you');
+    end();
+    expect(events(notified, 'held')).toEqual([['k1', { sessionId: 's1', note: HELD_NOTE }]]);
+    connection.receive({ type: 'audio', mic: 'hearing', engine: 'decibri', device: null, recognizer: null, error: null });
+    control.composer('k1', false, 'not for you', true);
+    piece('fix it', 'u2');
+    end(true, 'u2');
+    expect(dictated).toEqual([]);
   });
 
   it('logs a spoken command in the hub log and the fragments log, and sends it nowhere', async () => {
