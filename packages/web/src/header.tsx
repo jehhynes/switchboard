@@ -5,7 +5,7 @@ import { providerMark } from '@switchboard/conversation/providerIcons';
 import { FileIcon } from './fileIcons.js';
 import { selectedEntry, selectedRow, stateIcon } from './model.js';
 import type { PageState } from './model.js';
-import { ago, artifactBar, LINK_LABEL_MAX, paneStatus, rowKey, TABS } from './render.js';
+import { ago, artifactBar, LINK_LABEL_MAX, paneStatus, rowKey, tabIcon, TABS } from './render.js';
 import type { SideTab, Tab, View } from './render.js';
 import { trusted } from './trusted.js';
 import { ConnectionDot } from './connectionView.js';
@@ -316,11 +316,15 @@ export function renderHeader(state: PageState, view: View): VNode {
   );
 }
 
-/** A tab, drawn alike in the strip and in the side column's switch, with the unread dot ([Unread](architecture.md § Unread)) while `unread`. */
-function TabButton({ selected, label, unread = false, attrs }: { selected: boolean; label: string; unread?: boolean; attrs: Record<string, string> }) {
+/**
+ * A tab, drawn alike in the strip and in the side column's switch: its codicon and its label, which a narrow strip hides (page.css), so the
+ * tab keeps its name as its tooltip and accessible name; with the unread dot ([Unread](architecture.md § Unread)) while `unread`.
+ */
+function TabButton({ selected, label, icon, unread = false, attrs }: { selected: boolean; label: string; icon: string; unread?: boolean; attrs: Record<string, string> }) {
   return (
-    <button class={`tab${selected ? ' selected' : ''}`} type="button" role="tab" {...attrs} aria-selected={selected} tabindex={selected ? 0 : -1}>
-      {label}
+    <button class={`tab${selected ? ' selected' : ''}`} type="button" role="tab" {...attrs} aria-selected={selected} tabindex={selected ? 0 : -1} title={label} aria-label={unread ? `${label}, unread` : label}>
+      <span class={`codicon codicon-${icon}`} aria-hidden="true"></span>
+      <span class="tab-label">{label}</span>
       {unread ? <UnreadDot /> : null}
     </button>
   );
@@ -353,6 +357,7 @@ function artifactTabs(state: PageState, strip: ArtifactStrip): ComponentChildren
   const unread = strip.unread ?? new Set<string>();
   const { ordered, tabs } = artifactBar(state.artifacts, strip.open, strip.fit, closed);
   const rest = ordered.length - tabs.length;
+  const unreadCount = ordered.filter((artifact) => unread.has(artifact.path)).length;
 
   return [
     ...tabs.map((artifact) => {
@@ -373,10 +378,11 @@ function artifactTabs(state: PageState, strip: ArtifactStrip): ComponentChildren
     }),
     rest === 0 ? null : (
       <span class="artifact-more">
-        <button class={`tab artifact-menu-button${strip.menu ? ' open' : ''}`} type="button" data-action="artifact-menu" aria-haspopup="menu" aria-expanded={strip.menu} aria-label={`Artifacts, ${rest} more`} title="Every artifact, newest first">
+        <button class={`tab artifact-menu-button${strip.menu ? ' open' : ''}`} type="button" data-action="artifact-menu" aria-haspopup="menu" aria-expanded={strip.menu} aria-label={`Artifacts, ${ordered.length}${unreadCount > 0 ? `, ${unreadCount} unread` : ''}`} title="Every artifact, newest first">
           <span class="codicon codicon-files" aria-hidden="true"></span>
           <span class="tab-label">Artifacts</span>
-          <span class="tab-badge muted">+{rest}</span>
+          <span class="tab-badge muted">{ordered.length}</span>
+          {unreadCount > 0 ? <span class="unread-dot" aria-hidden="true"></span> : null}
           <span class="codicon codicon-chevron-down" aria-hidden="true"></span>
         </button>
         {strip.menu ? (
@@ -422,7 +428,7 @@ export function renderSideSwitch(side: SideTab, state: PageState, browser = fals
   return (
     <nav class="tabs side-switch" role="tablist" aria-label={['Status', ...(console ? ['console'] : []), ...(browser ? ['browser'] : []), ...(history ? ['history'] : [])].join(', ') + ' and artifacts'}>
       {tabs.map(([tab, label, unread]) => (
-        <TabButton selected={tab === side} label={label} unread={unread} attrs={{ 'data-side': tab }} />
+        <TabButton selected={tab === side} label={label} icon={tabIcon(tab)} unread={unread} attrs={{ 'data-side': tab }} />
       ))}
       {artifactTabs(state, { ...strip, open: side === 'artifacts' ? strip.open : null, fit: strip.fit })}
       {extra}
@@ -448,8 +454,8 @@ export function renderTabs(view: View, state: PageState, browser = false, strip:
 
   return (
     <nav class="tabs" role="tablist">
-      {TABS.filter(({ tab }) => tab !== 'artifacts' && (browser || tab !== 'browser') && (console || tab !== 'console') && (history || tab !== 'history')).map(({ tab, label }) => (
-        <TabButton selected={tab === view.tab} label={label} unread={tab === 'status' && fresh} attrs={{ 'data-tab': tab }} />
+      {TABS.filter(({ tab }) => tab !== 'artifacts' && (browser || tab !== 'browser') && (console || tab !== 'console') && (history || tab !== 'history')).map(({ tab, label, icon }) => (
+        <TabButton selected={tab === view.tab} label={label} icon={icon} unread={tab === 'status' && fresh} attrs={{ 'data-tab': tab }} />
       ))}
       {artifactTabs(state, { ...strip, open: view.tab === 'artifacts' ? strip.open : null })}
       {extra}

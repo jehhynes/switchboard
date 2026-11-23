@@ -2666,7 +2666,7 @@ describe('the page in use', () => {
     const paths = () => [...root.querySelectorAll<HTMLElement>('#detail .artifact-tab')].map((tab) => tab.dataset['path']);
 
     expect(paths()).toEqual(['chat/a7.md', 'chat/a6.md', 'chat/a5.md', 'chat/a4.md', 'chat/a3.md']);
-    expect(root.querySelector('#detail .artifact-menu-button .tab-badge')!.textContent).toBe('+5');
+    expect(root.querySelector('#detail .artifact-menu-button .tab-badge')!.textContent).toBe('10');
 
     // A 700 px strip whose Status and Console take 200 px fits (700 - 200 - 132) / 168, two tabs beside the menu.
     vi.spyOn(root.querySelector('#detail .tabs')!, 'getBoundingClientRect').mockReturnValue({ width: 700 } as DOMRect);
@@ -2686,7 +2686,7 @@ describe('the page in use', () => {
     expect(root.querySelector('#detail .artifact-menu')).toBeNull();
     expect(paths()).toEqual(['chat/a7.md', 'chat/a1.md']);
     expect(root.querySelector('#detail .tab.selected')!.getAttribute('data-path')).toBe('chat/a1.md');
-    expect(root.querySelector('#detail .artifact-menu-button .tab-badge')!.textContent).toBe('+8');
+    expect(root.querySelector('#detail .artifact-menu-button .tab-badge')!.textContent).toBe('10');
 
     // The menu closes on a press elsewhere and on Escape.
     click('#detail [data-action="artifact-menu"]');

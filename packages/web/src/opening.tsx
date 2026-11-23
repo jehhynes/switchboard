@@ -49,7 +49,8 @@ export function renderOpening(opening: Opening): VNode {
   return (
     <div class="opening" role="status" aria-busy="true">
       <p class="opening-note">
-        <span class="codicon codicon-loading codicon-modifier-spin" aria-hidden="true"></span> Opening…
+        <span class="codicon codicon-loading codicon-modifier-spin" aria-hidden="true"></span>
+        <span>Opening…</span>
       </p>
       <div class="opening-skeleton mine"></div>
       <div class="opening-skeleton"></div>

@@ -59,6 +59,13 @@ body { color: var(--vscode-foreground); background: var(--vscode-editor-backgrou
 :root { --sb-end: env(safe-area-inset-bottom); }
 .main:has(#composer:not([hidden])) { --sb-end: 0px; }
 .codicon { font: normal normal normal 14px/1 codicon; display: inline-block; text-decoration: none; text-rendering: auto; -webkit-font-smoothing: antialiased; user-select: none; }
+/* The texts of a row of an icon and its label (menu rows, the conversation picker, tabs, group heads, pills, Changes' file rows and Files
+   button, the list's title, the New session form's provider switch, the Opening… note, the Status pane's head, History's filter chips): each text's box runs from its cap height to its baseline (text-box), so a row that centres its items centres
+   the capitals on the icon, as on every text beside it. A line box centres the font's ascent and descent instead, which in Segoe UI sit
+   0.06 em above its capitals, so text drew about 1 px low beside every icon. Padding above and below makes the box its line's height again,
+   so descenders and accents stay inside a text that clips its overflow and the row lays out as before, at the same pixel positions, which
+   keeps Chrome's text snapping at 125% scale from undoing the shift. A browser without text-box draws the texts as before. */
+@supports (text-box: trim-both cap alphabetic) { :where(.menu-row, button.picker, .tab, .tab-open, .group-head, .row .pill, .change-row, .changes-files, .list-header .list-title, .artifact-menu .title, .provider-option, .opening-note, .status-head, .hist-chip) > :where(:not(.codicon, .file-icon, .menu-gutter, .unread-dot, .tab-badge, .count, .group-count, .tab-open, .tab-close, .provider, .provider-option-mark, .source-logo, .change-counts, svg, img)), :where(.change-counts) > * { text-box: trim-both cap alphabetic; padding-block: calc((1lh - 1cap) / 2); } }
 .codicon-modifier-spin { animation: codicon-spin 1.5s steps(30) infinite; }
 @keyframes codicon-spin { 100% { transform: rotate(360deg); } }
 /* A spinner spins under reduced motion too: a still loading glyph reads as a half circle, not as work in progress (the operator's decision). */
@@ -355,6 +362,12 @@ button.icon:hover, a.icon:hover { background: var(--vscode-toolbar-hoverBackgrou
 button.picker .title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 button.picker > .codicon, button.picker > .provider, button.picker > .count, .header > button.icon { flex: none; }
 .provider { flex: none; display: inline-flex; align-items: center; color: var(--vscode-foreground); font-size: 16px; }
+/* Claude's mark in its brand colour, #D97757, in both schemes: 5.7:1 on Dark Modern's side bar (#181818) and 5.3:1 on its menus (#1F1F1F). Where it would be under 3:1, on a
+   highlighted menu row's blue and on Light Modern's greys, it stands on a white disc (3.1:1). Codex keeps the text colour. */
+:is(.provider, .provider-option-mark)[aria-label="Claude"] { box-sizing: border-box; align-items: center; justify-content: center; width: 1.25em; height: 1.25em; border-radius: 50%; color: #D97757; }
+:is(.provider, .provider-option-mark)[aria-label="Claude"] > svg { width: 0.875em; height: 0.875em; }
+:is(.menu-row:hover, .menu-row:focus, .menu-row[aria-checked="true"], [aria-pressed="true"]) :is(.provider, .provider-option-mark)[aria-label="Claude"] { background: #fff; }
+@media (prefers-color-scheme: light) { :is(.provider, .provider-option-mark)[aria-label="Claude"] { background: #fff; } }
 /* The view options menu's Persona… row dims its icon while the persona's tone waits for a resume. */
 .persona-row.pending .menu-gutter .codicon { opacity: 0.6; }
 button.icon, a.icon { display: inline-flex; align-items: center; border: none; background: transparent; color: var(--vscode-icon-foreground); padding: 3px; border-radius: 4px; cursor: pointer; }
@@ -381,7 +394,7 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 .menu-row:disabled { cursor: default; opacity: 0.5; }
 .menu-gutter { display: flex; flex: none; align-items: center; justify-content: center; width: 28px; }
 .menu-gutter .codicon { font-size: 14px; }
-.menu-row .title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; padding: 0; font-size: inherit; font-weight: normal; }
+.menu-row .title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: inherit; font-weight: normal; }
 .menu-row > .codicon, .menu-row > .provider, .menu-row > .count { flex: none; }
 .menu-row .count { box-sizing: border-box; min-width: 16px; height: 16px; padding: 0 5px; border-radius: 8px; text-align: center; font-size: 11px; line-height: 16px; color: var(--vscode-activityBarBadge-foreground); background: var(--vscode-activityBarBadge-background); }
 .menu-note { flex: none; margin-left: 24px; color: var(--vscode-descriptionForeground); }
@@ -414,8 +427,7 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 .detail { --sb-tab-surface: var(--vscode-sideBar-background); }
 .main, .detail { --sb-tab-strip: color-mix(in srgb, var(--sb-tab-surface), #000 var(--sb-tab-shade)); }
 /* An artifact's tab has a fixed width (ARTIFACT_TAB_WIDTH in render.ts), its kind's icon, its title cut with an ellipsis, and, while open, a close mark. */
-.tab.artifact-tab { box-sizing: border-box; width: 168px; padding: 0 6px 0 0; }
-.tab-open { display: flex; flex: 1 1 auto; align-items: center; gap: 6px; min-width: 0; height: 100%; padding: 0 0 0 12px; border: none; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.tab.artifact-tab { box-sizing: border-box; width: 168px; padding: 0 6px 0 0; }.tab-open { display: flex; flex: 1 1 auto; align-items: center; gap: 6px; min-width: 0; height: 100%; padding: 0 0 0 12px; border: none; background: transparent; color: inherit; font: inherit; cursor: pointer; }
 .tab .tab-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tab-open .tab-label { flex: 1 1 auto; }
 .tab .codicon { flex: none; font-size: 14px; }
@@ -434,6 +446,10 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 /* The strip never wraps. Narrower than 600 px it keeps its own tabs whole, shows Artifacts as its icon with its count, still opening its list,
    the Changes tab as its icon with how many files are viewed of all, and a file tab only while chosen. Under 360 px its tabs' padding shrinks. */
 @container (max-width: 600px) {
+  /* Conversation, Status, Console and Browser show their icons alone, named by their tooltips: with their labels, the four and the icons of
+     Artifacts and Changes take over 500 px. */
+  .tab:is([data-tab], [data-side]) .tab-label { display: none; }
+  .tab:is([data-tab], [data-side]) { justify-content: center; min-width: 44px; padding: 0 12px; }
   .tab.artifact-menu-button .tab-label, .tab.artifact-menu-button .codicon-chevron-down, .tab.changes-tab .tab-label, .tab.diff-tab .tab-label, .tab.diff-tab .tab-badge { display: none; }
   .tab.artifact-menu-button, .tab.changes-tab { padding: 0 10px; }
   .tab.diff-tab:not(.selected) { display: none; }
@@ -445,6 +461,12 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
   .tab.local-tab.selected { flex: 0 1 auto; min-width: 0; }
 }
 @media (hover: none), (pointer: coarse) { .tab.artifact-menu-button, .tab.changes-tab { min-width: 44px; justify-content: center; } }
+/* With Browser or History too, the fixed tabs' labels need about 740 px beside Artifacts and Changes, so they show their icons alone under
+   760 px. */
+@container (max-width: 760px) {
+  .tab:is([data-tab], [data-side]):is([data-tab="browser"], [data-tab="history"], [data-side="browser"], [data-side="history"], :has(~ :is([data-tab="browser"], [data-tab="history"], [data-side="browser"], [data-side="history"]))) .tab-label { display: none; }
+  .tab:is([data-tab], [data-side]):is([data-tab="browser"], [data-tab="history"], [data-side="browser"], [data-side="history"], :has(~ :is([data-tab="browser"], [data-tab="history"], [data-side="browser"], [data-side="history"]))) { justify-content: center; min-width: 44px; padding: 0 12px; }
+}
 @container (max-width: 360px) {
   .tab { padding: 0 9px; }
   .tab > .unread-dot { top: 8px; right: 0; }
@@ -457,7 +479,7 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 .artifact-menu .menu-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; column-gap: 0; }
 .artifact-menu .menu-row.in-bar .title { color: var(--vscode-descriptionForeground); }
 /* A title cut with an ellipsis, then the unread dot of an artifact this device has not opened, as a conversation's row has it. */
-.artifact-menu .title { display: flex; align-items: center; gap: 6px; }
+.artifact-menu .title { display: flex; align-items: center; gap: 6px; padding-block: 0; }
 .artifact-menu .title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .artifact-menu .menu-gutter { margin-right: 6px; }
 .artifact-menu .menu-kind { max-width: 14ch; overflow: hidden; text-overflow: ellipsis; margin-left: 24px; color: var(--vscode-descriptionForeground); }
@@ -1088,7 +1110,7 @@ button.toast-open:hover { color: var(--vscode-textLink-activeForeground); text-d
 /* A work item being opened (opening.tsx): its head, a placeholder, or why it could not be opened, in place of the conversation shown before. */
 .opening-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; padding: 0 6px; }
 .opening { display: flex; flex-direction: column; gap: 10px; padding: 12px 16px; }
-.opening-note { margin: 0; color: var(--vscode-descriptionForeground); }
+.opening-note { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--vscode-descriptionForeground); }
 .opening-skeleton { height: 46px; width: 85%; border-radius: 8px; background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent); }
 .opening-skeleton.mine { height: 34px; width: 60%; align-self: flex-end; }
 .opening-failed { margin: auto; max-width: 28rem; padding: 32px 20px; text-align: center; }

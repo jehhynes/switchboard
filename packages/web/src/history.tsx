@@ -279,7 +279,7 @@ export function renderHistory(open: HistoryOpen): VNode {
                 return (
                   <button type="button" class={`hist-chip${on ? ' on' : ''}`} data-action="history-chip" data-category={key} aria-pressed={on}>
                     <span class={`codicon codicon-${icon}`} aria-hidden="true"></span>
-                    {label}
+                    <span>{label}</span>
                   </button>
                 );
               })}

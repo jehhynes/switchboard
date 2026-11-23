@@ -85,7 +85,9 @@ describe('the artifact tabs', () => {
     expect(markup.match(/<button class="tab-close" type="button" data-action="close-artifact"/g)).toHaveLength(3);
     expect(markup).toContain('data-path="chat/a2.md" aria-label="Close Note 2" title="Close" tabindex="0"');
     expect(markup.match(/role="tab"/g)).toHaveLength(6);
-    expect(markup).toContain('+5');
+    // Artifacts counts every artifact, open in a tab or not, with no plus sign.
+    expect(markup).toContain('<span class="tab-badge muted">8</span>');
+    expect(markup).not.toContain('+5');
     expect(markup).not.toContain('artifact-menu" role="menu"');
   });
 
@@ -134,8 +136,13 @@ describe('the artifact tabs', () => {
     expect([...row.querySelector('.title')!.children].map((cell) => cell.className)).toEqual(['title-text', 'unread-dot']);
     expect(row.getAttribute('aria-label')).toBe('Note 0, unread, note, 3 min ago');
     expect(menu.querySelector('[data-path="chat/a1.md"]')!.getAttribute('aria-label')).toBe('Note 1, note, 3 min ago');
-    // The tabs carry no dot.
-    expect(markup.slice(0, markup.indexOf('artifact-menu" role="menu"'))).not.toContain('unread-dot');
+    // The artifact tabs carry no dot; the Artifacts button carries one, and names the unread count.
+    const strip = new DOMParser().parseFromString(markup, 'text/html');
+
+    expect(strip.querySelectorAll('.artifact-tab .unread-dot')).toHaveLength(0);
+    expect(strip.querySelectorAll('.artifact-menu-button > .unread-dot')).toHaveLength(1);
+    expect(strip.querySelector('.artifact-menu-button')!.getAttribute('aria-label')).toBe('Artifacts, 8, 2 unread');
+    expect(strip.querySelector('.artifact-menu-button .tab-badge')!.textContent).toBe('8');
   });
 
   it('show no menu when every artifact has a tab, and none at all without artifacts', () => {
@@ -148,7 +155,7 @@ describe('the artifact tabs', () => {
 
     expect(paths(markup, 'data-tab')).toEqual(['conversation', 'status', 'console']);
     expect(tabPaths(markup)).toEqual(['chat/a7.md']);
-    expect(markup).toContain('+7');
+    expect(markup).toContain('<span class="tab-badge muted">8</span>');
   });
 });
 
@@ -210,7 +217,8 @@ describe('the tab strip on a narrow screen', () => {
   it('names the Artifacts button and the Changes tab with their counts, as their labels may be hidden', () => {
     const state = { ...EMPTY, artifacts: eight };
 
-    expect(html(renderTabs(newView(), state, false, { open: null, fit: 1, menu: false, now: 0 }))).toContain('aria-label="Artifacts, 7 more"');
+    expect(html(renderTabs(newView(), state, false, { open: null, fit: 1, menu: false, now: 0 }))).toContain('aria-label="Artifacts, 8"');
+    expect(html(renderTabs(newView(), state, false, { open: null, fit: 1, menu: false, now: 0 }))).not.toContain('unread-dot');
     expect(html(changesTab(newChanges(), false))).toContain('aria-label="Changes"');
     expect(html(changesTab({ ...newChanges(), list: { total: 3, rows: [{ viewed: true }] } as never }, true))).toContain('aria-label="Changes, 1 of 3 files viewed"');
   });

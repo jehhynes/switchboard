@@ -11,14 +11,19 @@ import type { DotView } from './connectionView.js';
 
 /** `diff` shows the open file's diff tab (`changes.tsx`), which has no fixed tab of its own. */
 export type Tab = 'conversation' | 'status' | 'artifacts' | 'console' | 'browser' | 'history' | 'diff' | 'file';
-export const TABS: Array<{ tab: Tab; label: string }> = [
-  { tab: 'conversation', label: 'Conversation' },
-  { tab: 'status', label: 'Status' },
-  { tab: 'artifacts', label: 'Artifacts' },
-  { tab: 'console', label: 'Console' },
-  { tab: 'browser', label: 'Browser' },
-  { tab: 'history', label: 'History' },
+export const TABS: Array<{ tab: Tab; label: string; icon: string }> = [
+  { tab: 'conversation', label: 'Conversation', icon: 'comment-discussion' },
+  { tab: 'status', label: 'Status', icon: 'pulse' },
+  { tab: 'artifacts', label: 'Artifacts', icon: 'files' },
+  { tab: 'console', label: 'Console', icon: 'terminal' },
+  { tab: 'browser', label: 'Browser', icon: 'globe' },
+  { tab: 'history', label: 'History', icon: 'history' },
 ];
+
+/** A fixed tab's codicon, by its tab. */
+export function tabIcon(tab: Tab | SideTab): string {
+  return TABS.find((one) => one.tab === tab)?.icon ?? 'file';
+}
 
 /** What the column right of the conversation shows on a wide screen. */
 export type SideTab = 'status' | 'artifacts' | 'console' | 'browser' | 'history' | 'diff' | 'file';
