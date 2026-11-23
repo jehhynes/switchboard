@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { appServerDebriefRange, runAppServerDebrief } from '../src/appServerDebrief.js';
-import { AppServerRunner, codexInput } from '../src/appServerRunner.js';
+import { AppServerRunner, codexInput, notMaterialized } from '../src/appServerRunner.js';
 import { AppServerError } from '../src/appServer.js';
 import type { AppServer, Json } from '../src/appServer.js';
 
@@ -70,6 +70,16 @@ describe('whether a thread has a turn (mechanics M108)', () => {
     expect(await runner(() => ({ data: [] })).runner.hasTurns('thread-1')).toBe(false);
     expect(await runner(() => { throw new AppServerError('thread thread-1 is not materialized yet; thread/turns/list is unavailable before first user message', true); }).runner.hasTurns('thread-1')).toBe(false);
     await expect(runner(() => { throw new AppServerError('The connection to Codex closed.'); }).runner.hasTurns('thread-1')).rejects.toThrow('The connection to Codex closed.');
+  });
+
+  it("reads no history for a thread Codex has not materialized, as before its first user message, and still fails for any other error", async () => {
+    expect(await runner(() => { throw new AppServerError('thread thread-1 is not materialized yet; thread/turns/list is unavailable before first user message', true); }).runner.history('thread-1')).toEqual([]);
+    expect(await runner(() => ({ data: [{ id: 't1' }] })).runner.history('thread-1')).toEqual([{ id: 't1' }]);
+    await expect(runner(() => { throw new AppServerError('Codex refused the request.', true); }).runner.history('thread-1')).rejects.toThrow('Codex refused the request.');
+    // A refusal names it; the same words from anything but Codex's answer do not.
+    expect(notMaterialized(new AppServerError('thread/resume failed: no rollout found for thread id thread-1', true))).toBe(true);
+    expect(notMaterialized(new AppServerError('thread thread-1 is not materialized yet'))).toBe(false);
+    expect(notMaterialized(new Error('thread thread-1 is not materialized yet'))).toBe(false);
   });
 });
 

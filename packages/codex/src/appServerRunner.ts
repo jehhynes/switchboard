@@ -31,6 +31,15 @@ export interface AppServerRunnerDeps {
 }
 
 /** Persistent threads in Codex's built-in daemon; no hook markers and no process kill per thread. */
+/**
+ * Whether Codex refused to read or resume a thread because it has no turn yet (mechanics M108): "thread … is not materialized yet;
+ * thread/turns/list is unavailable before first user message", or a resume's "no rollout found for thread id …". Such a thread has an empty
+ * conversation, not a broken one.
+ */
+export function notMaterialized(error: unknown): boolean {
+  return error instanceof AppServerError && error.refused && /not materialized|no rollout found/i.test(error.message);
+}
+
 export class AppServerRunner implements SessionRunner {
   readonly #joined = new Map<string, number>();
   readonly #states = new Map<string, { state: LiveState; detail: string | null }>();
@@ -310,17 +319,23 @@ export class AppServerRunner implements SessionRunner {
       const page = await this.deps.server.request('thread/turns/list', { threadId, limit: 1, itemsView: 'notLoaded' });
       return Array.isArray(page['data']) && page['data'].length > 0;
     } catch (error) {
-      // "thread … is not materialized yet; thread/turns/list is unavailable before first user message"
-      if (error instanceof AppServerError && error.refused && /not materialized/i.test(error.message)) return false;
+      if (notMaterialized(error)) return false;
       throw error;
     }
   }
 
+  /** The thread's turns, oldest first; none for a thread Codex has not materialized yet, before its first user message (mechanics M108). */
   async history(threadId: string): Promise<Json[]> {
     const turns: Json[] = [];
     let cursor: string | undefined;
     do {
-      const page = await this.deps.server.request('thread/turns/list', { threadId, sortDirection: 'asc', itemsView: 'full', limit: 100, ...(cursor === undefined ? {} : { cursor }) });
+      let page: Json;
+      try {
+        page = await this.deps.server.request('thread/turns/list', { threadId, sortDirection: 'asc', itemsView: 'full', limit: 100, ...(cursor === undefined ? {} : { cursor }) });
+      } catch (error) {
+        if (turns.length === 0 && notMaterialized(error)) return [];
+        throw error;
+      }
       if (!Array.isArray(page['data'])) throw new Error('Codex returned no history.');
       turns.push(...page['data'].map(object));
       cursor = typeof page['nextCursor'] === 'string' ? page['nextCursor'] : undefined;

@@ -76,6 +76,23 @@ describe('Codex conversation adapter and shared service',()=>{
     await vi.waitFor(()=>expect(p.runner.send).toHaveBeenCalledTimes(1));
     expect(resume).toHaveBeenCalledWith('s1');
   });
+  it('reads a thread before its first user message as an empty conversation, never as unavailable, and shows its messages once Codex has them',async()=>{
+    const p=setup();
+    // A thread started elsewhere cannot be resumed before its first turn (mechanics M108).
+    p.runner.follow.mockRejectedValueOnce(new AppServerError('thread/resume failed: no rollout found for thread id thread-1',true));
+    await p.service.poll();
+    expect(p.adapter().cannotSend(p.store.session('s1')!)).toBeNull();
+    expect(p.store.conversation('s1',null,10).items).toEqual([]);
+    expect(JSON.stringify(p.frames)).not.toContain('Codex conversation unavailable');
+    // Polling goes on, and the thread's first turn shows once it is there.
+    p.turns([{items:[(recorded.user['params'] as Json)['item'],(recorded.reply['params'] as Json)['item']]}]);
+    p.advance();await p.service.poll();
+    expect(p.store.conversation('s1',null,10).items.map(i=>i.type)).toEqual(['message','reply']);
+    // Any other failure still says the conversation is unavailable.
+    p.runner.follow.mockRejectedValueOnce(new AppServerError('Codex refused the request.',true));
+    ++p.server.generation;p.advance();await p.service.poll();
+    expect(p.adapter().cannotSend(p.store.session('s1')!)).toContain('Codex conversation unavailable');
+  });
   it('refuses a message to an ended thread when the hub cannot resume it',async()=>{
     const p=setup();await p.service.poll();
     p.store.updateSession('s1',{state:'ended',endedAt:1_000,released:true});

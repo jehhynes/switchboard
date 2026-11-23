@@ -1,5 +1,5 @@
 import type { ConversationMessage, Session, Store } from '@switchboard/core';
-import { AppServer, AppServerError, AppServerRunner, items, object, settingsDifferences, threadSettings } from '@switchboard/codex';
+import { AppServer, AppServerError, AppServerRunner, items, notMaterialized, object, settingsDifferences, threadSettings } from '@switchboard/codex';
 import type { Json, ThreadSettings } from '@switchboard/codex';
 import { ConversationLog } from '@switchboard/conversation';
 import { codexContext } from '@switchboard/conversation';
@@ -99,6 +99,14 @@ export class CodexConversationAdapter implements ConversationAdapter {
         await this.#skills(session).catch(error => this.deps.log(`Codex skill list unavailable: ${String(error)}`));
         this.#errors.delete(session.id);
       } catch (error) {
+        // A thread with no turn yet, as one started elsewhere before its first message, cannot be joined or read: its conversation is empty, not
+        // broken, and the next poll tries again until Codex has materialized it (mechanics M108).
+        if (notMaterialized(error)) {
+          this.#errors.delete(session.id);
+          this.#retryAt.set(session.id, this.deps.now() + 5_000);
+          if (!this.#closed) this.deps.requestsChanged();
+          continue;
+        }
         const message = `Codex conversation unavailable: ${String(error)}`;
         if (this.#errors.get(session.id) !== message) this.deps.log(message);
         this.#errors.set(session.id, message);
