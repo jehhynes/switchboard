@@ -953,7 +953,7 @@ describe('speech in the view (architecture.md § Voice)', () => {
     expect(root.querySelector('li[data-id="r2"] .stamp')).toBeNull();
   });
 
-  it('shows a reply with a passage as the passage first, the whole reply behind Show more, and whole with voice.expandReplies', () => {
+  it('shows a reply with a passage as the passage first, the whole reply behind Show more, which opens it for good, and whole with voice.expandReplies', () => {
     const passage = reply('r1', T0, { opening: 'Fixed the **badge**.\n\n- one\n- two', speak: 'Fixed the **badge**.', tone: 'calm' });
     const { root, show } = page();
 
@@ -971,22 +971,29 @@ describe('speech in the view (architecture.md § Voice)', () => {
     expect(root.querySelector('li[data-id="r3"] .show-more')).toBeNull();
     expect(root.querySelector<HTMLElement>('li[data-id="r3"]')!.dataset['speak']).toBeUndefined();
 
-    // Enter on the focused reply flips it, as the button does.
+    // Enter on the focused reply opens it, as the button does, and the open reply has no Show less: a second Enter leaves it open.
+    expect(first.querySelector('.show-more')!.outerHTML).toBe('<button class="show-more" type="button" data-action="more" data-reply="r1" aria-expanded="false">Show more</button>');
     first.focus();
     first.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
     expect(root.querySelector('li[data-id="r1"] .body ul')).not.toBeNull();
-    root.querySelector<HTMLButtonElement>('li[data-id="r1"] .show-more')!.click();
-    expect(root.querySelector('li[data-id="r1"] .body ul')).toBeNull();
-    root.querySelector<HTMLButtonElement>('li[data-id="r1"] .show-more')!.click();
+    expect(root.querySelector('li[data-id="r1"] .show-more')).toBeNull();
+    expect(root.textContent).not.toContain('Show less');
+    root.querySelector<HTMLElement>('li[data-id="r1"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
     expect(root.querySelector('li[data-id="r1"] .body ul')).not.toBeNull();
-    expect(root.querySelector('li[data-id="r1"] .show-more')!.textContent).toBe('Show less');
-    root.querySelector<HTMLButtonElement>('li[data-id="r1"] .show-more')!.click();
-    expect(root.querySelector('li[data-id="r1"] .body ul')).toBeNull();
+
+    // A click on Show more opens a reply the same way.
+    show(state([reply('r6', T0 + 5, { opening: 'Done.\n\n- six', speak: 'Done.' })]));
+    root.querySelector<HTMLButtonElement>('li[data-id="r6"] .show-more')!.focus();
+    root.querySelector<HTMLButtonElement>('li[data-id="r6"] .show-more')!.click();
+    expect(root.querySelector('li[data-id="r6"] .body ul')).not.toBeNull();
+    // The button goes, and the reply takes its focus rather than leaving it to the page.
+    expect(document.activeElement).toBe(root.querySelector('li[data-id="r6"]'));
+    expect(root.querySelector('li[data-id="r6"] .show-more')).toBeNull();
 
     const expanded = renderConversation(state([passage], { settings: { expandReplies: true } }));
 
     expect(expanded).toContain('<li>one</li>');
-    expect(expanded).toContain('aria-expanded="true">Show less</button>');
+    expect(expanded).not.toContain('show-more');
 
     // Nor does a reply whose only other text is the questions its card draws; questions mid-message stay in the text, so that one has.
     show(state([reply('r4', T0 + 3, { opening: 'Fixed it.\n\n1. Ship it?\n   - A) Yes\n   - B) No', speak: 'Fixed it.' }), reply('r5', T0 + 4, { opening: 'Fixed it.\n\n1. Ship it?\n   - A) Yes\n   - B) No\n\nMore after.', speak: 'Fixed it.' })]));
@@ -1007,7 +1014,7 @@ describe('speech in the view (architecture.md § Voice)', () => {
     expect(bodyOf('r3').querySelector('.reply-primary')).toBeNull();
     root.querySelector<HTMLButtonElement>('li[data-id="r1"] .show-more')!.click();
     // The text around the passage shows as details, and the passage is not shown a second time.
-    expect(kinds('r1')).toEqual(['div', 'primary:Fixed it.', 'div', 'button']);
+    expect(kinds('r1')).toEqual(['div', 'primary:Fixed it.', 'div']);
     expect([...bodyOf('r1').querySelectorAll(':scope > .reply-details')].map((details) => details.firstElementChild!.tagName.toLowerCase())).toEqual(['p', 'ul']);
     expect(bodyOf('r1').textContent!.match(/Fixed it\./g)).toHaveLength(1);
     // The metadata line stays one line under the whole reply.

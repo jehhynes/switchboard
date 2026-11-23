@@ -1260,14 +1260,13 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     } else if (action === 'goto-message') {
       showLinked('conversation', `.timeline li.message[data-id="${CSS.escape(button!.dataset['target'] ?? '')}"]`);
     } else if (action === 'more') {
-      // Show more and Show less flip the reply from where it starts (architecture.md § Voice).
-      const key = moreKey(button!.dataset['reply'] ?? '');
+      // Show more opens the reply for good (architecture.md § Conversation view, Speech), and the reply takes the focus the button had.
+      const replyId = button!.dataset['reply'] ?? '';
 
-      if (!open.delete(key)) {
-        open.add(key);
-      }
+      open.add(moreKey(replyId));
 
       draw();
+      root.querySelector<HTMLElement>(`li[data-id="${CSS.escape(replyId)}"]`)?.focus();
       save();
     } else if (action === 'artifact') {
       vscode.postMessage({ type: 'artifact', path: button!.dataset['path'] ?? '' });
@@ -1508,7 +1507,7 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
         return;
       }
 
-      // A reply in focused mode flips its Show more first.
+      // A reply folded to its primary response opens first.
       const more = current.querySelector<HTMLButtonElement>(':scope > .body > .show-more');
 
       if (more !== null) {

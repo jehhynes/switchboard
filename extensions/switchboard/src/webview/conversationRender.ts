@@ -159,7 +159,7 @@ function message(item: MessageView, stamped: boolean, details: boolean, answered
 // The voice controls are drawn by one renderer with the web page's (architecture.md § Voice).
 export { renderMicButton, renderVoiceControls } from '@switchboard/conversation/voiceControls';
 
-/** The fold key of a reply's Show more, which flips its start, collapsed in focused mode or expanded with `voice.expandReplies`. */
+/** The fold key of a reply that Show more opened; a reply starts expanded with `voice.expandReplies`, and once open stays open. */
 export const moreKey = (id: string): string => `more:${id}`;
 
 function reply(item: ReplyView, earlier: ReplyView | null, open: ReadonlySet<string>, stamped: boolean, card = '', expandReplies = false, details = false): string {
@@ -174,14 +174,13 @@ function reply(item: ReplyView, earlier: ReplyView | null, open: ReadonlySet<str
   const opening = stripQuestionMarkup(item.opening);
   // The questions that end a reply show in its card, so they alone give Show more nothing to show.
   const folded = passage !== null && hasUnspokenText(card === '' ? opening : withoutEndingQuestions(opening), passage);
-  const expanded = !folded || expandReplies !== open.has(moreKey(item.id));
+  // Show more opens a reply for good: an open reply has nothing to fold it again.
+  const expanded = !folded || expandReplies || open.has(moreKey(item.id));
   // Only the text that ends the reply can end in the card's questions, which it leaves out; questions before a passage fold into one line.
   const markdownPart = (text: string, last: boolean): string => (card === '' ? renderMarkdown(text) : withoutQuestions(text, last ? `reply:${item.id}` : `reply:${item.id}:before`, open, last));
   const said = item.spoken.state === 'interrupted' ? item.spoken.saidChars : null;
   const shown = passage === null ? markdownPart(opening, true) : replyBody(opening, passage, said, !expanded, { markdown: markdownPart, escape });
-  const more = folded
-    ? `<button class="show-more" type="button" data-action="more" data-reply="${escape(item.id)}" aria-expanded="${expanded}">${expanded ? 'Show less' : 'Show more'}</button>`
-    : '';
+  const more = expanded ? '' : `<button class="show-more" type="button" data-action="more" data-reply="${escape(item.id)}" aria-expanded="false">Show more</button>`;
   const tone = toneMark(item.tone, details);
 
   const rewritten =

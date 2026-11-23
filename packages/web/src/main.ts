@@ -3217,16 +3217,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       case 'earlier':
         void earlier();
         break;
-      case 'more': {
-        const key = `more:${button!.dataset['reply']}`;
-
-        if (!view.open.delete(key)) {
-          view.open.add(key);
-        }
-
+      case 'more':
+        // Show more opens the reply for good, and the reply takes the focus the button had.
+        view.open.add(`more:${button!.dataset['reply']}`);
         draw();
+        [...root.querySelectorAll<HTMLElement>('li.reply')].find((reply) => reply.dataset['id'] === button!.dataset['reply'])?.focus();
         break;
-      }
       case 'artifact':
         // A link to another artifact in a Markdown artifact opens it in place, unless asked for a new tab.
         if (button!.tagName === 'A') {

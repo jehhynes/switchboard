@@ -74,7 +74,8 @@ function Reply({ item, earlier, view, stamped: shown, card, expandReplies }: { i
   const opening = stripQuestionMarkup(item.opening);
   // The questions that end a reply show in its card, so they alone give Show more nothing to show.
   const folded = passage !== null && hasUnspokenText(card === null ? opening : withoutEndingQuestions(opening), passage);
-  const expanded = !folded || expandReplies !== view.open.has(`more:${item.id}`);
+  // Show more opens a reply for good: an open reply has nothing to fold it again.
+  const expanded = !folded || expandReplies || view.open.has(`more:${item.id}`);
   // Only the text that ends the reply can end in the card's questions, which it leaves out; questions before a passage fold into one line.
   const markdownPart = (text: string, last: boolean): string => (card === null ? renderMarkdown(text) : withoutQuestions(text, last ? `reply:${item.id}` : `reply:${item.id}:before`, view.open, last));
   const said = item.spoken.state === 'interrupted' ? item.spoken.saidChars : null;
@@ -84,13 +85,13 @@ function Reply({ item, earlier, view, stamped: shown, card, expandReplies }: { i
   const meta = metaLine([item.provisional ? '' : copyButton('copy-reply', 'Copy response'), tone, spokenMark(item.spoken.state, view.details)], item.at, shown);
 
   return (
-    <li class={`reply ${item.kind}${item.unread ? ' unread' : ''}`} data-unread={item.unread ? item.id : undefined} data-id={item.id} data-speak={item.speak === null ? undefined : '1'}>
+    <li class={`reply ${item.kind}${item.unread ? ' unread' : ''}`} data-unread={item.unread ? item.id : undefined} data-id={item.id} data-speak={item.speak === null ? undefined : '1'} tabIndex={-1}>
       <span class="dot" title={item.unread ? 'Unread' : undefined}></span>
       <div class="body">
         {trusted(body)}
-        {!folded ? null : (
-          <button class="show-more" type="button" data-action="more" data-reply={item.id} aria-expanded={expanded}>
-            {expanded ? 'Show less' : 'Show more'}
+        {expanded ? null : (
+          <button class="show-more" type="button" data-action="more" data-reply={item.id} aria-expanded="false">
+            Show more
           </button>
         )}
         {earlier === null ? null : (

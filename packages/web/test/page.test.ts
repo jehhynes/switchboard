@@ -283,7 +283,8 @@ describe('drawing', () => {
     view.open.add('more:r1');
     host.innerHTML = html(renderTimeline(pageState(items), view));
     // The text around the passage shows as details.
-    expect(kinds('r1')).toEqual(['div', 'primary:Fixed it.', 'div', 'button']);
+    // Show more opened it for good: there is no Show less.
+    expect(kinds('r1')).toEqual(['div', 'primary:Fixed it.', 'div']);
     expect([...host.querySelectorAll('li[data-id="r1"] > .body > .reply-details')].map((details) => details.firstElementChild!.tagName.toLowerCase())).toEqual(['p', 'ul']);
     expect(host.querySelector('li[data-id="r1"] > .body')!.textContent!.match(/Fixed it\./g)).toHaveLength(1);
     expect([...host.querySelector('li[data-id="r1"]')!.children].map((child) => child.className)).toEqual(['dot', 'body', 'meta']);
@@ -4904,6 +4905,24 @@ describe('the page in use', () => {
     key('Enter', root.querySelector('textarea.qc-other')!);
     await flush();
     expect(posts.find((post) => post.url.endsWith('/send'))?.body).toMatchObject({ answers: [{ slug: 'port-choice', letters: ['B'] }, { slug: 'keep-route', letters: [], other: 'later' }] });
+    page.close();
+  });
+
+  it('opens a folded reply for good on a click on Show more, with no Show less', () => {
+    const { page, source } = start();
+
+    hello(source, { items: [reply('r1', 2, { opening: 'Short.\n\nWhole reply.', speak: 'Short.' })] });
+    expect(root.querySelector('li[data-id="r1"] .show-more')!.outerHTML).toBe('<button class="show-more" type="button" data-action="more" data-reply="r1" aria-expanded="false">Show more</button>');
+    root.querySelector<HTMLElement>('li[data-id="r1"] .show-more')!.focus();
+    click('li[data-id="r1"] .show-more');
+    expect(root.querySelector('#panel')!.textContent).toContain('Whole reply.');
+    expect(root.querySelector('li[data-id="r1"] .show-more')).toBeNull();
+    // The button goes, and the reply takes its focus rather than leaving it to the page.
+    expect(document.activeElement).toBe(root.querySelector('li.reply[data-id="r1"]'));
+    expect(root.querySelector('#panel')!.textContent).not.toContain('Show less');
+    // The reply stays open as the state changes.
+    source.emit('reply', { reply: reply('r2', 3, { opening: 'Next.', speak: 'Next.' }) });
+    expect(root.querySelector('#panel')!.textContent).toContain('Whole reply.');
     page.close();
   });
 
