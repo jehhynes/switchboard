@@ -63,7 +63,6 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
     bool olderMore;
     DockGroup? doneGroup;
     bool searchOpen;
-    string? adhocRepo;
     JsonNode? groupContent;
     bool viewHeld;
     DockView? pendingView;
@@ -146,7 +145,7 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
     /// <summary>The repos an ad-hoc prompt can run in, the first being the default (PRD R6).</summary>
     public ObservableCollection<string> RepoRoots { get; } = [];
 
-    /// <summary>The schedules the New ad-hoc session window can run now (PRD R82).</summary>
+    /// <summary>The schedules the New session dialog can run now (PRD R82).</summary>
     public IReadOnlyList<ScheduleEntry> Schedules { get; private set; } = [];
 
     IReadOnlyList<DockHeld> held = [];
@@ -470,18 +469,11 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
         }
     }
 
-    /// <summary>Keeps a folder New ad-hoc session's Choose a folder… picked, newest first, so its list offers it again.</summary>
-    public void RememberFolder(string folder)
+    /// <summary>Keeps the Run as the New session dialog sent with a first message, which it offers next time (PRD R122).</summary>
+    public void RememberRun(string run)
     {
-        settings.RecentFolders = [folder, .. settings.RecentFolders.Where((kept) => !string.Equals(kept, folder, StringComparison.OrdinalIgnoreCase)).Take(DockSettings.RecentFolderCount - 1)];
+        settings.NewSessionRun = run;
         SaveSettings();
-    }
-
-    /// <summary>The repo the New ad-hoc session window offers first: the last one used, else the first repo root.</summary>
-    public string? AdhocRepo
-    {
-        get => adhocRepo;
-        set => Set(ref adhocRepo, value);
     }
 
     /// <summary>
@@ -630,7 +622,6 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
                 RepoRoots.Add(repo);
             }
 
-            AdhocRepo = RepoRoots.Contains(AdhocRepo ?? "") || settings.RecentFolders.Contains(AdhocRepo ?? "") ? AdhocRepo : RepoRoots.FirstOrDefault();
         }
 
         if (!Notes.SequenceEqual(view.Notes))

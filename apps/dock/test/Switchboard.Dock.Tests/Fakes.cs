@@ -121,26 +121,35 @@ sealed class FakeHub : IHub
     }
 
     /// <summary>The answers to New session, in order; a request with none left fails, as a hub that is not running.</summary>
-    public Queue<NewConversationReply> NewConversationReplies { get; } = new();
+    public Queue<NewSessionReply> NewSessionReplies { get; } = new();
 
     /// <summary>When set, New session waits for it and answers with it.</summary>
-    public TaskCompletionSource<NewConversationReply>? HoldNewConversation { get; set; }
+    public TaskCompletionSource<NewSessionReply>? HoldNewSession { get; set; }
 
     public string DefaultProvider { get; set; } = "claude";
     public string? ProviderError { get; set; }
     public IReadOnlyList<string>? Installed { get; set; }
-    public Task<SessionProviderReply> SessionProvider() => Task.FromResult(new SessionProviderReply(ProviderError, ProviderError is null ? DefaultProvider : null, Installed));
-
-    public Task<NewConversationReply> NewConversation(string folder, string opId, string? provider = null)
+    public string? ClaudeModel { get; set; } = "sonnet";
+    public string? CodexModel { get; set; } = "";
+    public IReadOnlyDictionary<string, IReadOnlyList<ModelChoice>> ModelChoices { get; set; } = new Dictionary<string, IReadOnlyList<ModelChoice>>
     {
-        Calls.Add($"new-conversation {folder} {opId}{(provider is null ? "" : $" {provider}")}");
+        ["claude"] = [new("opus", "opus"), new("sonnet", "sonnet")],
+        ["codex"] = [new("gpt-6.2-sol", "GPT-6.2 Sol")],
+    };
 
-        return HoldNewConversation is { } held ? held.Task : Task.FromResult(NewConversationReplies.Count > 0 ? NewConversationReplies.Dequeue() : new NewConversationReply("Switchboard is not running.", null, null));
-    }
-    public Task<NewConversationReply> NewStandalone(string folder, string opId, string provider, string? model)
+    public Task<SessionProviderReply> SessionProvider() =>
+        Task.FromResult(new SessionProviderReply(ProviderError, ProviderError is null ? DefaultProvider : null, Installed, ClaudeModel, CodexModel, ProviderError is null ? ModelChoices : null));
+
+    /// <summary>The New session dialog's folders, as the hub lists them.</summary>
+    public FolderPlaces FolderPlaces { get; set; } = new(null, ["D:/scratch/tool"], ["D:/git/widgets", "D:/git/support"], ["D:/git/widgets.worktrees/i19139"]);
+
+    public Task<FolderPlaces> Folders() => Task.FromResult(FolderPlaces);
+
+    public Task<NewSessionReply> NewSession(string folder, string opId, string provider, string? model, string? prompt, string run)
     {
-        Calls.Add($"new-standalone {folder} {opId} {provider} {model}");
-        return Task.FromResult(NewConversationReplies.Count > 0 ? NewConversationReplies.Dequeue() : new NewConversationReply("Switchboard is not running.", null, null));
+        Calls.Add($"new-session {folder} {opId} {provider} {model ?? "default"} {run}{(prompt is null ? "" : $" {prompt}")}");
+
+        return HoldNewSession is { } held ? held.Task : Task.FromResult(NewSessionReplies.Count > 0 ? NewSessionReplies.Dequeue() : new NewSessionReply("Switchboard is not running.", null, null));
     }
 
     /// <summary>When each focus report said it happened.</summary>
@@ -448,20 +457,6 @@ sealed class FakeActions : IDockActions
         Terminals.Add(terminal);
 
         return Task.FromResult(TerminalReply);
-    }
-
-    public List<string> Folders { get; } = [];
-
-    public string? FolderReply { get; set; }
-
-    /// <summary>When set, opening a folder waits for it.</summary>
-    public TaskCompletionSource<string?>? HoldFolder { get; set; }
-
-    public Task<string?> OpenFolder(string folder, CancellationToken cancel)
-    {
-        Folders.Add(folder);
-
-        return HoldFolder?.Task ?? Task.FromResult(FolderReply);
     }
 
     public List<DockRow> InTerminal { get; } = [];

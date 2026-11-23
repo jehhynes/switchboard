@@ -35,13 +35,16 @@ public interface IHub
     Task<string?> Select(string rowKey);
 
     /// <summary>
-    /// More Actions' New conversation in a folder: makes a conversation hosted by <paramref name="folder"/> and stored as its folder window's selection, with no window
-    /// open (architecture.md § Hosted conversations). A retry with the same <paramref name="opId"/> answers the first conversation.
+    /// The New session dialog (PRD R122): a conversation in &lt;paramref name="folder"/&gt;, empty or with &lt;paramref name="prompt"/&gt; as its first message, when
+    /// &lt;paramref name="run"/&gt; is `now`; else a task started when a slot is free (`queue`) or waiting for Start (`wait`). A null &lt;paramref name="model"/&gt;
+    /// is the provider's default. A retry with the same &lt;paramref name="opId"/&gt; answers the first work item.
     /// </summary>
-    Task<NewConversationReply> NewConversation(string folder, string opId, string? provider = null);
-    Task<NewConversationReply> NewStandalone(string folder, string opId, string provider, string? model);
+    Task<NewSessionReply> NewSession(string folder, string opId, string provider, string? model, string? prompt, string run);
 
-    /// <summary>The configured default for a new session's provider choice.</summary>
+    /// <summary>The New session dialog's folders: the recent folders, which the hub keeps for the dock and every page, repo roots and worktrees.</summary>
+    Task<FolderPlaces> Folders();
+
+    /// <summary>The configured default for a new session's provider choice, and each provider's models.</summary>
     Task<SessionProviderReply> SessionProvider();
 
     /// <summary>
@@ -75,14 +78,20 @@ public interface IHub
     Task<DockView?> Until(Func<DockView, bool> test, TimeSpan within);
 }
 
-/// <summary>The hub's answer to New conversation in a folder: the refusal or failure, or the new work item and the canonical folder that hosts it.</summary>
-public sealed record NewConversationReply(string? Error, int? WorkItemId, string? Folder);
+/// <summary>The hub's answer to New session: the refusal or failure, or the new work item and the canonical folder it runs in.</summary>
+public sealed record NewSessionReply(string? Error, int? WorkItemId, string? Folder);
+
+/// <summary>The New session dialog's folders, or why the hub did not list them.</summary>
+public sealed record FolderPlaces(string? Error, IReadOnlyList<string> Recent, IReadOnlyList<string> RepoRoots, IReadOnlyList<string> Worktrees);
+
+/// <summary>A model the New session dialog offers: what is sent, and what it shows.</summary>
+public sealed record ModelChoice(string Id, string Label);
 
 /// <summary>
 /// The configured default provider, or why the hub did not name one; &lt;paramref name="Installed"/&gt; lists the providers whose CLI the hub finds,
 /// null from a hub that does not say.
 /// </summary>
-public sealed record SessionProviderReply(string? Error, string? DefaultProvider, IReadOnlyList<string>? Installed = null, string? ClaudeModel = null, string? CodexModel = null);
+public sealed record SessionProviderReply(string? Error, string? DefaultProvider, IReadOnlyList<string>? Installed = null, string? ClaudeModel = null, string? CodexModel = null, IReadOnlyDictionary<string, IReadOnlyList<ModelChoice>>? ModelChoices = null);
 
 /// <summary>The hub's answer to a click in the web page: the refusal or failure, the marker of the page that shows it, or the page's address at it.</summary>
 public sealed record PageReply(string? Error, string? Marker, string? Url);

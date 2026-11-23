@@ -154,23 +154,6 @@ public sealed class SwitcherTests
     }
 
     [Fact]
-    public async Task OpenFolder_NewSession_OpensTheFolderAndWaitsForAFolderWindowLeavingNothing()
-    {
-        // The hub stored New session's conversation as the folder's selection, so nothing is selected or left for the window; an item window
-        // named like the folder is never the destination.
-        windows.Open["support"] = (42, 0);
-        hub.Ended = Fixtures.View with { Windows = new OpenWindows([], null, 1, [HubSpelling("D:/git/support")]) };
-
-        Assert.Null(await Switcher().OpenFolder("D:/git/support", TestContext.Current.CancellationToken));
-        Assert.Equal(["until 20s"], hub.Calls);
-        Assert.Equal(["open support"], vsCode.Calls);
-        Assert.Empty(windows.Calls);
-
-        hub.Ended = Fixtures.View with { Windows = new OpenWindows(["D:/sb/windows/gh-1-support-abc123.code-workspace"], null, 1, []) };
-        Assert.Equal("VS Code did not open a window on D:/git/support within 20 seconds.", await Switcher().OpenFolder("D:/git/support", TestContext.Current.CancellationToken));
-    }
-
-    [Fact]
     public async Task Click_FolderRowCancelledWhileWaitingOrNeverReached_WithdrawsTheSessionItLeft()
     {
         var row = Fixtures.Row("item:7") with { Window = new DockWindow("support", "New session", ["D:/git/support"], null, true, "D:/git/support") };

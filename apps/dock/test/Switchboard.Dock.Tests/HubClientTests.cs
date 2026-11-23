@@ -229,35 +229,58 @@ public sealed class HubClientTests
         Assert.Equal(new SessionProviderReply(null, "codex"), await client.SessionProvider());
         body = "{\"defaultProvider\":\"codex\",\"installed\":[\"codex\",7,\"other\"]}";
         Assert.Equal(["codex"], (await client.SessionProvider()).Installed);
+        body = "{\"defaultProvider\":\"claude\",\"models\":{\"claude\":\"sonnet\",\"codex\":7},\"modelChoices\":{\"claude\":[{\"id\":\"opus\",\"label\":\"opus\"},{\"id\":\"\"},{\"id\":\"claude-x\"}],\"codex\":7}}";
+        var withModels = await client.SessionProvider();
+        Assert.Equal("sonnet", withModels.ClaudeModel);
+        Assert.Null(withModels.CodexModel);
+        Assert.Equal([new ModelChoice("opus", "opus"), new ModelChoice("claude-x", "claude-x")], withModels.ModelChoices!["claude"]);
+        Assert.Empty(withModels.ModelChoices["codex"]);
         body = "{\"defaultProvider\":7}";
         Assert.NotNull((await client.SessionProvider()).Error);
         Assert.Contains("POST /v1/conversation/providers HTTP/1.1 {}", server.Requests);
     }
 
     [Fact]
-    public async Task NewConversation_ResponseLost_SendsTheSameOpIdOnceMoreAndReturnsTheFirstConversation()
+    public async Task NewSession_ResponseLost_SendsTheSameOpIdOnceMoreAndReturnsTheFirstWorkItem()
     {
         var answered = 0;
-        // The first request is read and its connection closed with no answer, as a response lost after the hub made the conversation.
-        using var server = new LoopbackHub((_, _, stream) => Interlocked.Increment(ref answered) == 1 ? Task.CompletedTask : LoopbackHub.Reply(stream, 200, "{\"workItemId\":3,\"folder\":\"D:\\\\git\\\\support\"}"));
+        // The first request is read and its connection closed with no answer, as a response lost after the hub made the work item.
+        using var server = new LoopbackHub((_, _, stream) => Interlocked.Increment(ref answered) == 1 ? Task.CompletedTask : LoopbackHub.Reply(stream, 200, "{\"workItemId\":3,\"folder\":\"D:\\\\git\\\\support\",\"run\":\"wait\"}"));
         using var client = new HubClient(HomeFor(server));
 
-        Assert.Equal(new NewConversationReply(null, 3, "D:\\git\\support"), await client.NewConversation("d:/git/support", "op-1", "codex"));
+        Assert.Equal(new NewSessionReply(null, 3, "D:\\git\\support"), await client.NewSession("d:/git/support", "op-1", "codex", "gpt-6.2-sol", "Check the log", "wait"));
 
         var posts = server.Requests.Where((line) => line.StartsWith("POST ", StringComparison.Ordinal)).ToList();
+        var body = "{\"folder\":\"d:/git/support\",\"opId\":\"op-1\",\"provider\":\"codex\",\"model\":\"gpt-6.2-sol\",\"run\":\"wait\",\"prompt\":\"Check the log\"}";
 
-        Assert.Equal(["POST /dock/new-conversation HTTP/1.1 {\"folder\":\"d:/git/support\",\"opId\":\"op-1\",\"provider\":\"codex\"}", "POST /dock/new-conversation HTTP/1.1 {\"folder\":\"d:/git/support\",\"opId\":\"op-1\",\"provider\":\"codex\"}"], posts);
+        Assert.Equal([$"POST /dock/new-session HTTP/1.1 {body}", $"POST /dock/new-session HTTP/1.1 {body}"], posts);
     }
 
     [Fact]
-    public async Task NewConversation_HubRefuses_ReturnsTheRefusalWithoutAskingAgain()
+    public async Task NewSession_HubRefuses_ReturnsTheRefusalWithoutAskingAgain()
     {
         using var server = new LoopbackHub((_, _, stream) => LoopbackHub.Reply(stream, 409, "{\"error\":\"New sessions need Code Mode (sessions.codeMode).\"}"));
         using var client = new HubClient(HomeFor(server));
 
-        Assert.Equal(new NewConversationReply("New sessions need Code Mode (sessions.codeMode).", null, null), await client.NewConversation("D:/git/support", "op-1"));
+        Assert.Equal(new NewSessionReply("New sessions need Code Mode (sessions.codeMode).", null, null), await client.NewSession("D:/git/support", "op-1", "claude", null, null, "now"));
         Assert.Single(server.Requests, (line) => line.StartsWith("POST ", StringComparison.Ordinal));
-        Assert.Equal("Switchboard is not running.", (await new HubClient(Fixtures.TempFolder()).NewConversation("D:/git/support", "op-2")).Error);
+        Assert.Contains("\"model\":null,\"run\":\"now\"}", server.Requests.Single((line) => line.StartsWith("POST ", StringComparison.Ordinal)));
+        Assert.Equal("Switchboard is not running.", (await new HubClient(Fixtures.TempFolder()).NewSession("D:/git/support", "op-2", "claude", null, null, "now")).Error);
+    }
+
+    [Fact]
+    public async Task Folders_HubAnswers_ReadsTheRecentFoldersRepoRootsAndWorktrees()
+    {
+        using var server = new LoopbackHub((_, _, stream) => LoopbackHub.Reply(stream, 200, "{\"recent\":[\"D:/a\",7],\"repoRoots\":[\"D:/b\"],\"worktrees\":[],\"computer\":[]}"));
+        using var client = new HubClient(HomeFor(server));
+        var places = await client.Folders();
+
+        Assert.Null(places.Error);
+        Assert.Equal(["D:/a"], places.Recent);
+        Assert.Equal(["D:/b"], places.RepoRoots);
+        Assert.Empty(places.Worktrees);
+        Assert.Contains("POST /dock/folders HTTP/1.1 {}", server.Requests);
+        Assert.NotNull((await new HubClient(Fixtures.TempFolder()).Folders()).Error);
     }
 
     [Fact]

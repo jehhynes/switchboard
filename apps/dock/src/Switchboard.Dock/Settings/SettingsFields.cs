@@ -608,7 +608,7 @@ public static partial class SettingsFields
             new Field($"{path}.playbook", "Playbook", FieldKind.Select, "The task playbook each run starts. It cannot need a worktree.",
                 Options: WithCurrent([new FieldOption("", "None"), .. tasks], GetAt(state.SettingsValue, $"{path}.playbook"))),
             new Field($"{path}.repoRoot", "Repo root", FieldKind.Text, "The directory its sessions run in."),
-            new Field($"{path}.every", "Runs", FieldKind.Select, "Off, it runs only when you choose it in New ad-hoc session.",
+            new Field($"{path}.every", "Runs", FieldKind.Select, "Off, it runs only when you run it from New session's More options.",
                 Options: [new FieldOption("", "Only by hand"), new FieldOption("day", "Every day"), new FieldOption("week", "Every week"), new FieldOption("month", "Every month")]),
         ];
 

@@ -30,8 +30,14 @@ public sealed class DockSettings
     [System.Text.Json.Serialization.JsonIgnore]
     public Platform.DockEdge DockEdge => Edge == "right" ? Platform.DockEdge.Right : Platform.DockEdge.Left;
 
-    /// <summary>The folders, newest first, that New ad-hoc session's Choose a folder… picked outside the repo roots, which its list offers again.</summary>
+    /// <summary>
+    /// The folders, newest first, that the dock's old New ad-hoc session picked outside the repo roots. The dock no longer adds to them: the hub
+    /// keeps the recent folders for the dock and every page, and imports these once (PRD R122). Kept so an older file keeps them for that import.
+    /// </summary>
     public List<string> RecentFolders { get; set; } = [];
+
+    /// <summary>The Run as the New session dialog sent with a first message last, which it offers next time: `now`, `queue` or `wait` (PRD R122).</summary>
+    public string NewSessionRun { get; set; } = "now";
 
     /// <summary>How many chosen folders <see cref="RecentFolders"/> keeps.</summary>
     public const int RecentFolderCount = 5;
@@ -60,6 +66,7 @@ public sealed class DockSettings
         settings.Groups = (settings.Groups ?? []).Where((entry) => !entry.Key.Contains(':', StringComparison.Ordinal)).ToDictionary();
         settings.Edge = settings.Edge == "right" ? "right" : "left";
         settings.Theme = settings.Theme is "light" or "dark" or "vscode" ? settings.Theme : "system";
+        settings.NewSessionRun = settings.NewSessionRun is "queue" or "wait" ? settings.NewSessionRun : "now";
         settings.RecentFolders = (settings.RecentFolders ?? []).Where((folder) => !string.IsNullOrWhiteSpace(folder)).Distinct(StringComparer.OrdinalIgnoreCase).Take(RecentFolderCount).ToList();
 
         return settings;

@@ -156,9 +156,6 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
         }
     }
 
-    /// <summary>A folder window for New conversation in a folder, which leaves it nothing to open: the hub stored the conversation as its selection.</summary>
-    public Task<string?> OpenFolder(string folder, CancellationToken cancel = default) => FolderWindow(folder, null, cancel);
-
     /// <summary>The row's window: a folder window for a folder-hosted conversation, else its item window.</summary>
     Task<string?> Destination(DockWindow window, DockOpen? open, CancellationToken cancel) =>
         FolderOf(window) is { } folder ? FolderWindow(folder, open, cancel) : ItemWindow(window, open, cancel);

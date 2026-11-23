@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
@@ -22,7 +23,6 @@ public sealed class ControlsTests
     {
         var model = new DockViewModel(new DockSettings(), (_) => { }, time);
         var window = new MainWindow(model, null, hub, actions, docked: false, config) { Height = 1200 };
-        window.PickProvider = (_, preferred, _) => Task.FromResult<string?>(preferred);
 
         model.Show(view ?? Fixtures.View);
         window.Show();
@@ -65,197 +65,6 @@ public sealed class ControlsTests
 
     static List<string> VisibleTitles(Window window) =>
         window.GetVisualDescendants().OfType<Border>().Where((border) => border.Classes.Contains("row") && border.IsEffectivelyVisible).Select((border) => ((RowViewModel)border.DataContext!).Title).ToList();
-
-    [AvaloniaFact]
-    public void NewStandalone_ChoosesProviderAndModelThenOpensItsRow()
-    {
-        var (window, model) = Open();
-        window.PickFolder = (_) => Task.FromResult<string?>("D:/git/support");
-        window.PickStandalone = (_, folder, preferred, _, _, _, _) =>
-        {
-            Assert.Equal("D:/git/support", folder);
-            Assert.Equal("claude", preferred);
-            return Task.FromResult<NewSessionDialog.Choice?>(new("codex", "gpt-6.2-sol"));
-        };
-        hub.NewConversationReplies.Enqueue(new NewConversationReply(null, 9, "D:/git/support"));
-        hub.Ended = Fixtures.View;
-
-        Click(window.FindControl<Button>("NewSessionButton")!);
-
-        Assert.Contains(hub.Calls, call => System.Text.RegularExpressions.Regex.IsMatch(call, "^new-standalone D:/git/support [0-9a-f-]{36} codex gpt-6.2-sol$"));
-        Assert.Equal("item:9", Assert.Single(actions.Clicked).Key);
-        Assert.Null(model.Status);
-    }
-
-    [AvaloniaFact]
-    public void NewStandalone_CancelOrRefusalOpensNothing()
-    {
-        var (window, model) = Open();
-        window.PickFolder = (_) => Task.FromResult<string?>(null);
-        window.NewStandalone().GetAwaiter().GetResult();
-        Assert.Empty(hub.Calls);
-        window.PickFolder = (_) => Task.FromResult<string?>("D:/git/support");
-        window.PickStandalone = (_, _, _, _, _, _, _) => Task.FromResult<NewSessionDialog.Choice?>(null);
-        window.NewStandalone().GetAwaiter().GetResult();
-        Assert.Empty(hub.Calls);
-        window.PickStandalone = (_, _, _, _, _, _, _) => Task.FromResult<NewSessionDialog.Choice?>(new("claude", null));
-        hub.NewConversationReplies.Enqueue(new NewConversationReply("Code Mode is off.", null, null));
-        window.NewStandalone().GetAwaiter().GetResult();
-        Assert.Equal("Code Mode is off.", model.Status);
-        Assert.Empty(actions.Clicked);
-    }
-
-    [AvaloniaFact]
-    public void NewStandalone_ShowsInstalledProvidersAndLookupFailure()
-    {
-        var (window, _) = Open();
-        window.PickFolder = (_) => Task.FromResult<string?>("D:/git/support");
-        hub.Installed = ["codex"];
-        hub.ProviderError = "Provider lookup failed.";
-        window.PickStandalone = (_, _, _, _, _, installed, note) =>
-        {
-            Assert.Equal(["codex"], installed);
-            Assert.Equal("Provider lookup failed. Using the selected provider and its default model.", note);
-            return Task.FromResult<NewSessionDialog.Choice?>(null);
-        };
-        window.NewStandalone().GetAwaiter().GetResult();
-        Assert.Empty(hub.Calls);
-    }
-
-    [AvaloniaFact]
-    public void NewSessionInAFolder_FolderChosen_MakesTheConversationThenOpensTheHubsFolder()
-    {
-        var (window, model) = Open();
-        var picked = new TaskCompletionSource<string?>();
-        var asked = 0;
-
-        window.PickFolder = (_) =>
-        {
-            asked++;
-            return picked.Task;
-        };
-        hub.NewConversationReplies.Enqueue(new NewConversationReply(null, 3, "D:\\git\\support"));
-        model.Status = "Earlier.";
-
-        // A second click while the picker is open asks nothing more.
-        Choose(window, "New conversation in a folder…");
-        Choose(window, "New conversation in a folder…");
-        picked.SetResult("d:/git/support");
-        Dispatcher.UIThread.RunJobs();
-
-        Assert.Equal(1, asked);
-        Assert.Matches("^new-conversation d:/git/support [0-9a-f-]{36} claude$", Assert.Single(hub.Calls));
-        Assert.Equal(["D:\\git\\support"], actions.Folders);
-        Assert.Null(model.Status);
-    }
-
-    [AvaloniaFact]
-    public void NewSessionInAFolder_ProviderChosenOrCancelled_PostsOnlyTheExplicitChoice()
-    {
-        hub.DefaultProvider = "codex";
-        var (window, _) = Open();
-        window.PickFolder = (_) => Task.FromResult<string?>("D:/git/support");
-        window.PickProvider = (_, preferred, _) => { Assert.Equal("codex", preferred); return Task.FromResult<string?>(null); };
-        Choose(window, "New conversation in a folder…");
-        Assert.Empty(hub.Calls);
-        window.PickProvider = (_, _, _) => Task.FromResult<string?>("claude");
-        hub.NewConversationReplies.Enqueue(new NewConversationReply(null, 3, "D:/git/support"));
-        Choose(window, "New conversation in a folder…");
-        Assert.Matches("^new-conversation D:/git/support [0-9a-f-]{36} claude$", Assert.Single(hub.Calls));
-        Assert.Equal("codex", hub.DefaultProvider);
-    }
-
-    [AvaloniaFact]
-    public void NewSessionInAFolder_OneProviderInstalled_StartsInItWithoutAsking()
-    {
-        hub.DefaultProvider = "claude";
-        hub.Installed = ["codex"];
-        var (window, _) = Open();
-        var asked = 0;
-        window.PickFolder = (_) => Task.FromResult<string?>("D:/git/support");
-        window.PickProvider = (_, preferred, _) => { asked++; return Task.FromResult<string?>(preferred); };
-        hub.NewConversationReplies.Enqueue(new NewConversationReply(null, 3, "D:/git/support"));
-        Choose(window, "New conversation in a folder…");
-        Assert.Equal(0, asked);
-        Assert.Matches("^new-conversation D:/git/support [0-9a-f-]{36} codex$", Assert.Single(hub.Calls));
-
-        // With both installed it asks.
-        hub.Installed = ["claude", "codex"];
-        hub.NewConversationReplies.Enqueue(new NewConversationReply(null, 4, "D:/git/support"));
-        Choose(window, "New conversation in a folder…");
-        Assert.Equal(1, asked);
-    }
-
-    [AvaloniaFact]
-    public void NewSessionInAFolder_RowClickedWhileTheHubAnswers_LeavesThatClickAndOpensNoFolder()
-    {
-        var (window, model) = Open();
-        var answer = new TaskCompletionSource<NewConversationReply>();
-
-        window.PickFolder = (_) => Task.FromResult<string?>("D:/git/support");
-        hub.HoldNewConversation = answer;
-        Choose(window, "New conversation in a folder…");
-
-        // A row clicked meanwhile replaces New conversation in a folder, which then opens nothing over that row's window and shows nothing.
-        var pending = new TaskCompletionSource<string?>();
-
-        actions.Pending = pending;
-        Tap(window, RowOf(window, "item:10"));
-        answer.SetResult(new NewConversationReply(null, 3, "D:/git/support"));
-        Dispatcher.UIThread.RunJobs();
-
-        Assert.Empty(actions.Folders);
-        Assert.Single(actions.Clicked);
-        Assert.False(actions.Cancels[0].IsCancellationRequested);
-        Assert.Null(model.Status);
-        pending.SetResult(null);
-        Dispatcher.UIThread.RunJobs();
-    }
-
-    [AvaloniaFact]
-    public void NewSessionInAFolder_EarlierAttemptEndsWhileANewerOneWaits_KeepsTheNewerOnesHold()
-    {
-        var (window, _) = Open();
-        var opening = new TaskCompletionSource<string?>();
-        var answer = new TaskCompletionSource<NewConversationReply>();
-
-        window.PickFolder = (_) => Task.FromResult<string?>("D:/git/support");
-        hub.NewConversationReplies.Enqueue(new NewConversationReply(null, 3, "D:/git/support"));
-        actions.HoldFolder = opening;
-        // The first attempt has its conversation and waits for the folder window.
-        Choose(window, "New conversation in a folder…");
-        Assert.Equal(["D:/git/support"], actions.Folders);
-
-        // A second replaces it and waits for the hub; the first then ends, and a third, chosen meanwhile, makes nothing.
-        hub.HoldNewConversation = answer;
-        Choose(window, "New conversation in a folder…");
-        opening.SetResult(null);
-        Dispatcher.UIThread.RunJobs();
-        Choose(window, "New conversation in a folder…");
-
-        Assert.Equal(2, hub.Calls.Count((call) => call.StartsWith("new-conversation ", StringComparison.Ordinal)));
-        answer.SetResult(new NewConversationReply("Refused.", null, null));
-        Dispatcher.UIThread.RunJobs();
-    }
-
-    [AvaloniaFact]
-    public void NewSessionInAFolder_PickerCancelledOrHubRefuses_OpensNoWindow()
-    {
-        var (window, model) = Open();
-        string? folder = null;
-
-        window.PickFolder = (_) => Task.FromResult(folder);
-        Choose(window, "New conversation in a folder…");
-        Assert.Empty(hub.Calls);
-
-        folder = "D:/git/support";
-        hub.NewConversationReplies.Enqueue(new NewConversationReply("New sessions need Code Mode (sessions.codeMode).", null, null));
-        Choose(window, "New conversation in a folder…");
-
-        Assert.Single(hub.Calls);
-        Assert.Equal("New sessions need Code Mode (sessions.codeMode).", model.Status);
-        Assert.Empty(actions.Folders);
-    }
 
     [AvaloniaFact]
     public void MainButton_ApproveRow_PostsApproveWithoutTheRowClick()
@@ -877,308 +686,292 @@ public sealed class ControlsTests
 
     static T Named<T>(Window dialog, string name) where T : Control => dialog.GetVisualDescendants().OfType<T>().Single((control) => control.Name == name);
 
+    /// <summary>Clicks the header's + button and returns the New session dialog it opens.</summary>
+    static Window OpenNewSession(Window window)
+    {
+        Click(window.FindControl<Button>("NewSessionButton")!);
+
+        return DialogOf(window);
+    }
+
+    static string? ItemText(object? item) => item?.ToString();
+
+    /// <summary>The hub requests the dock made, without its waits for a view.</summary>
+    List<string> Made() => hub.Calls.Where((call) => !call.StartsWith("until ", StringComparison.Ordinal)).ToList();
+
     [AvaloniaFact]
-    public void Adhoc_PromptCreated_PostsItUnstartedAndClosesTheDialog()
+    public void NewSession_PlusButton_OffersTheHubsFoldersDefaultsAndStartsAnEmptyConversationThenOpensItsRow()
     {
         var (window, model) = Open();
+        hub.NewSessionReplies.Enqueue(new NewSessionReply(null, 9, "D:/scratch/tool"));
+        hub.Ended = Fixtures.View;
+        var dialog = OpenNewSession(window);
 
-        Choose(window, "New task from prompt…");
-        var dialog = DialogOf(window);
+        Assert.Equal("New session", dialog.Title);
+        Assert.Equal(["D:/scratch/tool", "D:/git/widgets", "D:/git/support", "D:/git/widgets.worktrees/i19139", NewSessionDialog.ChooseFolder], Named<ComboBox>(dialog, "SessionFolder").ItemsSource!.Cast<string>());
+        Assert.Equal("D:/scratch/tool", Named<ComboBox>(dialog, "SessionFolder").SelectedItem);
+        Assert.True(Named<ToggleButton>(dialog, "SessionProvider_claude").IsChecked);
+        Assert.False(Named<ToggleButton>(dialog, "SessionProvider_codex").IsChecked);
+        Assert.Equal(["Default (sonnet)", "opus", "sonnet", NewSessionDialog.OtherModel], Named<ComboBox>(dialog, "SessionModel").ItemsSource!.Cast<object>().Select(ItemText));
+        Assert.False(Named<StackPanel>(dialog, "SessionRunField").IsVisible);
+        Assert.True(Named<Expander>(dialog, "SessionMore").IsVisible);
+        Assert.Same(Named<TextBox>(dialog, "SessionPrompt"), dialog.FocusManager!.GetFocusedElement());
+        Assert.Equal("Start", Named<Button>(dialog, "SessionStart").Content);
 
-        Assert.True(Named<ComboBox>(dialog, "AdhocRepoBox").IsVisible);
-        Assert.False(Named<CheckBox>(dialog, "AdhocStartAutomatically").IsChecked);
-        Assert.False(Named<Button>(dialog, "AdhocCreate").IsEnabled);
+        Click(Named<Button>(dialog, "SessionStart"));
 
-        Named<ComboBox>(dialog, "AdhocRepoBox").SelectedItem = "D:/git/support";
-        Named<TextBox>(dialog, "AdhocPromptBox").Text = "Check the log";
-        hub.ActReplies.Enqueue(null);
-        Click(Named<Button>(dialog, "AdhocCreate"));
-
-        Assert.Equal(["act {\"type\":\"adhoc\",\"prompt\":\"Check the log\",\"repoRoot\":\"D:/git/support\",\"start\":false,\"provider\":\"claude\"}"], hub.Calls);
+        Assert.Matches("^new-session D:/scratch/tool [0-9a-f-]{36} claude default now$", Assert.Single(Made()));
         Assert.Empty(window.OwnedWindows);
-        Assert.Equal("D:/git/support", model.AdhocRepo);
+        Assert.Equal("item:9", Assert.Single(actions.Clicked).Key);
+        Assert.Null(model.Status);
     }
 
     [AvaloniaFact]
-    public void Adhoc_StartAutomaticallyChecked_PostsStart()
+    public void NewSession_MoreActions_NoLongerMakesWork()
     {
         var (window, _) = Open();
+        var more = window.FindControl<Button>("MoreButton")!;
 
-        Choose(window, "New task from prompt…");
-        var dialog = DialogOf(window);
-
-        Named<TextBox>(dialog, "AdhocPromptBox").Text = "Check the log";
-        Named<CheckBox>(dialog, "AdhocStartAutomatically").IsChecked = true;
-        hub.ActReplies.Enqueue(null);
-        Click(Named<Button>(dialog, "AdhocCreate"));
-
-        Assert.Equal(["act {\"type\":\"adhoc\",\"prompt\":\"Check the log\",\"repoRoot\":\"D:/git/widgets\",\"start\":true,\"provider\":\"claude\"}"], hub.Calls);
-        Assert.Empty(window.OwnedWindows);
+        Click(more);
+        Assert.DoesNotContain(more.ContextMenu!.Items.OfType<MenuItem>(), (item) => item.Header is "New session…" or "New task from prompt…" or "New conversation in a folder…");
+        more.ContextMenu.Close();
     }
 
     [AvaloniaFact]
-    public void Adhoc_ProviderChanged_PostsTheChoiceWithoutChangingTheDefault()
+    public void NewSession_ProviderAndModelChanged_SendsTheChoiceAndOtherModelNeedsAName()
     {
         hub.DefaultProvider = "codex";
         var (window, _) = Open();
-        Choose(window, "New task from prompt…");
-        var dialog = DialogOf(window);
-        var provider = Named<ComboBox>(dialog, "AdhocProvider");
-        Assert.Equal("codex", ((ProviderDialog.Option)provider.SelectedItem!).Id);
-        provider.SelectedIndex = 0;
-        Named<TextBox>(dialog, "AdhocPromptBox").Text = "Check";
-        hub.ActReplies.Enqueue(null);
-        Click(Named<Button>(dialog, "AdhocCreate"));
-        Assert.Contains("\"provider\":\"claude\"", Assert.Single(hub.Calls));
+        hub.NewSessionReplies.Enqueue(new NewSessionReply(null, 9, "D:/git/widgets"));
+        hub.Ended = Fixtures.View;
+        var dialog = OpenNewSession(window);
+        var models = Named<ComboBox>(dialog, "SessionModel");
+
+        Assert.True(Named<ToggleButton>(dialog, "SessionProvider_codex").IsChecked);
+        Assert.Equal(["Default (Codex's default)", "GPT-6.2 Sol", NewSessionDialog.OtherModel], models.ItemsSource!.Cast<object>().Select(ItemText));
+        // Each provider's mark shows beside its name.
+        Assert.Equal(["ProviderMark_claude", "ProviderMark_codex"], Named<StackPanel>(dialog, "SessionProvider").GetVisualDescendants().OfType<PathIcon>().Select((icon) => icon.Name));
+        Click(Named<ToggleButton>(dialog, "SessionProvider_claude"));
+        Assert.False(Named<ToggleButton>(dialog, "SessionProvider_codex").IsChecked);
+        Assert.Equal("Default (sonnet)", ItemText(models.SelectedItem));
+        models.SelectedIndex = models.ItemCount - 1;
+        Dispatcher.UIThread.RunJobs();
+        Assert.True(Named<TextBox>(dialog, "SessionOtherModel").IsVisible);
+        Assert.False(Named<Button>(dialog, "SessionStart").IsEnabled);
+        Named<TextBox>(dialog, "SessionOtherModel").Text = " claude-opus-4-1 ";
+        // Pressing the chosen provider again keeps it, and the model with it.
+        Click(Named<ToggleButton>(dialog, "SessionProvider_claude"));
+        Assert.True(Named<ToggleButton>(dialog, "SessionProvider_claude").IsChecked);
+        Assert.Equal(NewSessionDialog.OtherModel, ItemText(models.SelectedItem));
+        Named<ComboBox>(dialog, "SessionFolder").SelectedItem = "D:/git/widgets";
+        Dispatcher.UIThread.RunJobs();
+        Click(Named<Button>(dialog, "SessionStart"));
+
+        Assert.Matches("^new-session D:/git/widgets [0-9a-f-]{36} claude claude-opus-4-1 now$", Assert.Single(Made()));
         Assert.Equal("codex", hub.DefaultProvider);
     }
 
     [AvaloniaFact]
-    public void Adhoc_ProviderLookupFails_FallsBackToTheDefaultWithTheReasonBesideTheProvider()
-    {
-        hub.ProviderError = "Provider lookup failed.";
-        var (window, _) = Open();
-        Choose(window, "New task from prompt…");
-        var dialog = DialogOf(window);
-        var reason = Named<TextBlock>(dialog, "AdhocProviderError");
-
-        Assert.True(Named<ComboBox>(dialog, "AdhocProvider").IsEnabled);
-        Assert.True(reason.IsVisible);
-        Assert.Equal("Provider lookup failed. Using Claude.", reason.Text);
-        Assert.Contains(reason, Named<StackPanel>(dialog, "AdhocProviderField").Children);
-        Assert.False(Named<TextBlock>(dialog, "AdhocError").IsVisible);
-
-        Named<TextBox>(dialog, "AdhocPromptBox").Text = "Work";
-        Assert.True(Named<Button>(dialog, "AdhocCreate").IsEnabled);
-        hub.ActReplies.Enqueue(null);
-        Click(Named<Button>(dialog, "AdhocCreate"));
-        Assert.Equal(["act {\"type\":\"adhoc\",\"prompt\":\"Work\",\"repoRoot\":\"D:/git/widgets\",\"start\":false,\"provider\":\"claude\"}"], hub.Calls);
-    }
-
-    [AvaloniaFact]
-    public void Adhoc_ProviderLookupFailsAfterItNamedCodex_FallsBackToCodexAsTheDefault()
-    {
-        hub.DefaultProvider = "codex";
-        var (window, _) = Open();
-        Choose(window, "New task from prompt…");
-        Click(Named<Button>(DialogOf(window), "AdhocCancel"));
-
-        hub.ProviderError = "Provider lookup failed.";
-        Choose(window, "New task from prompt…");
-        var dialog = DialogOf(window);
-
-        Assert.Equal("codex", ((ProviderDialog.Option)Named<ComboBox>(dialog, "AdhocProvider").SelectedItem!).Id);
-        Assert.Equal("Provider lookup failed. Using Codex, the default.", Named<TextBlock>(dialog, "AdhocProviderError").Text);
-        Click(Named<Button>(dialog, "AdhocCancel"));
-    }
-
-    [AvaloniaFact]
-    public void Adhoc_ProviderLookupFailsAfterNewSessionNamedCodex_FallsBackToCodex()
-    {
-        hub.DefaultProvider = "codex";
-        var (window, _) = Open();
-        window.PickFolder = (_) => Task.FromResult<string?>("D:/scratch");
-        window.PickProvider = (_, _, _) => Task.FromResult<string?>(null);
-        window.NewSession().GetAwaiter().GetResult();
-
-        hub.ProviderError = "Provider lookup failed.";
-        Choose(window, "New task from prompt…");
-        var dialog = DialogOf(window);
-
-        Assert.Equal("Provider lookup failed. Using Codex, the default.", Named<TextBlock>(dialog, "AdhocProviderError").Text);
-        Click(Named<Button>(dialog, "AdhocCancel"));
-    }
-
-    [AvaloniaFact]
-    public void Adhoc_Opened_FocusesTheFirstFieldThatShows()
-    {
-        var (window, _) = Open();
-        Choose(window, "New task from prompt…");
-        var dialog = DialogOf(window);
-
-        Assert.Same(Named<ComboBox>(dialog, "AdhocRunBox"), dialog.FocusManager!.GetFocusedElement());
-        Click(Named<Button>(dialog, "AdhocCancel"));
-
-        var (other, _) = Open(Fixtures.View with { Schedules = [] });
-        Choose(other, "New task from prompt…");
-        var plain = DialogOf(other);
-
-        Assert.Same(Named<ComboBox>(plain, "AdhocRepoBox"), plain.FocusManager!.GetFocusedElement());
-        Click(Named<Button>(plain, "AdhocCancel"));
-    }
-
-    [AvaloniaFact]
-    public void Adhoc_Fields_AreLabelledRunRepositoryProviderAndPrompt()
-    {
-        var (window, _) = Open();
-        Choose(window, "New task from prompt…");
-        var dialog = DialogOf(window);
-        string? LabelOf(string field) => Named<StackPanel>(dialog, field).Children.OfType<TextBlock>().First().Text;
-
-        Assert.Equal(["Run", "Repository", "Provider", "Prompt"], new[] { "AdhocRunField", "AdhocRepoField", "AdhocProviderField", "AdhocPromptField" }.Select(LabelOf));
-        Click(Named<Button>(dialog, "AdhocCancel"));
-    }
-
-    [AvaloniaFact]
-    public void Adhoc_ChooseAFolder_PicksAnyFolderPostsItAndOffersItAgain()
+    public void NewSession_FirstMessage_ShowsRunAsSendsATaskSelectsItsRowAndRemembersTheChoice()
     {
         var (window, model) = Open();
-        string? picked = "D:/scratch/tool";
-        window.PickFolder = (_) => Task.FromResult<string?>(picked);
+        hub.Installed = ["codex"];
+        hub.NewSessionReplies.Enqueue(new NewSessionReply(null, 9, "D:/scratch/tool"));
+        hub.Ended = Fixtures.View;
+        var dialog = OpenNewSession(window);
 
-        Choose(window, "New task from prompt…");
-        var dialog = DialogOf(window);
-        var repos = Named<ComboBox>(dialog, "AdhocRepoBox");
-
-        Assert.Equal(["D:/git/widgets", "D:/git/support", AdhocDialog.ChooseFolder], repos.ItemsSource!.Cast<string>());
-
-        // A cancelled picker keeps the folder that was selected.
-        picked = null;
-        repos.SelectedItem = AdhocDialog.ChooseFolder;
+        // One provider installed: nothing to choose.
+        Assert.False(Named<StackPanel>(dialog, "SessionProviderField").IsVisible);
+        Named<TextBox>(dialog, "SessionPrompt").Text = "  Check the log  ";
         Dispatcher.UIThread.RunJobs();
-        Assert.Equal("D:/git/widgets", repos.SelectedItem);
-
-        picked = "D:/scratch/tool";
-        repos.SelectedItem = AdhocDialog.ChooseFolder;
+        Assert.True(Named<StackPanel>(dialog, "SessionRunField").IsVisible);
+        Assert.Equal(["Conversation, start now", "Task, start when a slot is free", "Task, wait for Start"], Named<StackPanel>(dialog, "SessionRunField").GetVisualDescendants().OfType<RadioButton>().Select((radio) => (string)radio.Content!));
+        Assert.True(Named<RadioButton>(dialog, "SessionRun_now").IsChecked);
+        Named<RadioButton>(dialog, "SessionRun_wait").IsChecked = true;
         Dispatcher.UIThread.RunJobs();
-        Assert.Equal("D:/scratch/tool", repos.SelectedItem);
-        Assert.Equal(["D:/scratch/tool"], model.Settings.RecentFolders);
+        Assert.Equal("Create", Named<Button>(dialog, "SessionStart").Content);
+        Click(Named<Button>(dialog, "SessionStart"));
 
-        Named<TextBox>(dialog, "AdhocPromptBox").Text = "Check the tool";
-        hub.ActReplies.Enqueue(null);
-        Click(Named<Button>(dialog, "AdhocCreate"));
-        Assert.Contains("\"repoRoot\":\"D:/scratch/tool\"", Assert.Single(hub.Calls));
+        Assert.Matches("^new-session D:/scratch/tool [0-9a-f-]{36} codex default wait Check the log$", Assert.Single(Made()));
+        Assert.Empty(actions.Clicked);
+        Assert.Equal("item:9", model.Selected);
+        Assert.Equal("wait", model.Settings.NewSessionRun);
 
-        Choose(window, "New task from prompt…");
-        var again = DialogOf(window);
-
-        Assert.Equal(["D:/git/widgets", "D:/git/support", "D:/scratch/tool", AdhocDialog.ChooseFolder], Named<ComboBox>(again, "AdhocRepoBox").ItemsSource!.Cast<string>());
-        Assert.Equal("D:/scratch/tool", Named<ComboBox>(again, "AdhocRepoBox").SelectedItem);
-        Click(Named<Button>(again, "AdhocCancel"));
+        // The next dialog offers it.
+        var again = OpenNewSession(window);
+        Named<TextBox>(again, "SessionPrompt").Text = "x";
+        Dispatcher.UIThread.RunJobs();
+        Assert.True(Named<RadioButton>(again, "SessionRun_wait").IsChecked);
+        Click(Named<Button>(again, "SessionCancel"));
     }
 
     [AvaloniaFact]
-    public void Adhoc_ScheduleChosen_RunsItNowWithoutAPrompt()
+    public void NewSession_Refused_KeepsTheDialogAndRetriesWithTheSameOpId()
     {
         var (window, model) = Open();
+        hub.NewSessionReplies.Enqueue(new NewSessionReply("Code Mode sessions need sessions.installHooks.", null, null));
+        var dialog = OpenNewSession(window);
 
-        Choose(window, "New task from prompt…");
-        var dialog = DialogOf(window);
-        var run = Named<ComboBox>(dialog, "AdhocRunBox");
+        Named<TextBox>(dialog, "SessionPrompt").Text = "Check the log";
+        Click(Named<Button>(dialog, "SessionStart"));
 
-        Assert.True(run.IsVisible);
-        Assert.Equal(["A prompt", "Run self-review now · ops:performance-review"], run.ItemsSource!.Cast<string>());
+        Assert.Same(dialog, DialogOf(window));
+        Assert.Equal("Code Mode sessions need sessions.installHooks.", Named<TextBlock>(dialog, "SessionError").Text);
+        Assert.True(Named<TextBlock>(dialog, "SessionError").IsVisible);
+        Assert.Equal("Check the log", Named<TextBox>(dialog, "SessionPrompt").Text);
 
-        run.SelectedIndex = 1;
+        hub.NewSessionReplies.Enqueue(new NewSessionReply(null, 9, "D:/scratch/tool"));
+        hub.Ended = Fixtures.View;
+        Click(Named<Button>(dialog, "SessionStart"));
+
+        Assert.Equal(2, Made().Count);
+        Assert.Equal(Made()[0].Split(' ')[2], Made()[1].Split(' ')[2]);
+        Assert.Empty(window.OwnedWindows);
+        Assert.Null(model.Status);
+    }
+
+    [AvaloniaFact]
+    public void NewSession_ChooseAFolder_PicksAnyFolderAndACancelledPickerKeepsTheChoice()
+    {
+        var (window, _) = Open();
+        string? picked = null;
+        window.PickFolder = (_) => Task.FromResult(picked);
+        hub.NewSessionReplies.Enqueue(new NewSessionReply(null, 9, "D:/elsewhere"));
+        hub.Ended = Fixtures.View;
+        var dialog = OpenNewSession(window);
+        var folders = Named<ComboBox>(dialog, "SessionFolder");
+
+        folders.SelectedItem = NewSessionDialog.ChooseFolder;
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("D:/scratch/tool", folders.SelectedItem);
+
+        picked = "D:/elsewhere";
+        folders.SelectedItem = NewSessionDialog.ChooseFolder;
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("D:/elsewhere", folders.SelectedItem);
+        Assert.Contains("D:/elsewhere", folders.ItemsSource!.Cast<string>());
+        Click(Named<Button>(dialog, "SessionStart"));
+        Assert.Matches("^new-session D:/elsewhere ", Assert.Single(Made()));
+    }
+
+    [AvaloniaFact]
+    public void NewSession_FolderTyped_SendsThePathAndTheHubsRefusalStaysInTheDialog()
+    {
+        var (window, _) = Open();
+        hub.NewSessionReplies.Enqueue(new NewSessionReply("D:/nowhere is not a folder a session can run in.", null, null));
+        var dialog = OpenNewSession(window);
+        var folders = Named<ComboBox>(dialog, "SessionFolder");
+
+        folders.Text = "   ";
+        Dispatcher.UIThread.RunJobs();
+        Assert.False(Named<Button>(dialog, "SessionStart").IsEnabled);
+        folders.Text = " D:/nowhere ";
+        Dispatcher.UIThread.RunJobs();
+        Click(Named<Button>(dialog, "SessionStart"));
+
+        Assert.Matches("^new-session D:/nowhere [0-9a-f-]{36} claude default now$", Assert.Single(Made()));
+        Assert.Equal("D:/nowhere is not a folder a session can run in.", Named<TextBlock>(dialog, "SessionError").Text);
+        Click(Named<Button>(dialog, "SessionCancel"));
+    }
+
+    [AvaloniaFact]
+    public void NewSession_ScheduleChosen_RunsItNowAndHidesTheOtherFields()
+    {
+        var (window, _) = Open();
+        var dialog = OpenNewSession(window);
+
+        Named<Expander>(dialog, "SessionMore").IsExpanded = true;
+        Dispatcher.UIThread.RunJobs();
+        var schedule = Named<ComboBox>(dialog, "SessionSchedule");
+
+        Assert.Equal(["None", "Run self-review now · ops:performance-review"], schedule.ItemsSource!.Cast<string>());
+        schedule.SelectedIndex = 1;
         Dispatcher.UIThread.RunJobs();
 
-        Assert.False(Named<StackPanel>(dialog, "AdhocPromptField").IsVisible);
-        Assert.False(Named<StackPanel>(dialog, "AdhocRepoField").IsVisible);
-        Assert.False(Named<CheckBox>(dialog, "AdhocStartAutomatically").IsVisible);
-        Assert.True(Named<Button>(dialog, "AdhocCreate").IsEnabled);
-        Assert.Equal("Run", Named<Button>(dialog, "AdhocCreate").Content);
+        Assert.False(Named<StackPanel>(dialog, "SessionFolderField").IsVisible);
+        Assert.False(Named<StackPanel>(dialog, "SessionPromptField").IsVisible);
+        Assert.Equal("Run", Named<Button>(dialog, "SessionStart").Content);
 
         hub.ActReplies.Enqueue("self-review already has an open work item.");
-        Click(Named<Button>(dialog, "AdhocCreate"));
-
-        Assert.Equal("self-review already has an open work item.", Named<TextBlock>(dialog, "AdhocError").Text);
-
+        Click(Named<Button>(dialog, "SessionStart"));
+        Assert.Equal("self-review already has an open work item.", Named<TextBlock>(dialog, "SessionError").Text);
         hub.ActReplies.Enqueue(null);
-        Click(Named<Button>(dialog, "AdhocCreate"));
+        Click(Named<Button>(dialog, "SessionStart"));
 
         Assert.Equal(["act {\"type\":\"run-schedule\",\"name\":\"self-review\"}", "act {\"type\":\"run-schedule\",\"name\":\"self-review\"}"], hub.Calls);
         Assert.Empty(window.OwnedWindows);
-        Assert.Equal("D:/git/widgets", model.AdhocRepo);
+        Assert.Empty(actions.Clicked);
     }
 
     [AvaloniaFact]
-    public void Adhoc_NoRepoRoots_OpensOnAScheduleAndCreatesNoPrompt()
+    public void NewSession_NoSchedulesOrFolders_HidesMoreOptionsAndWaitsForAFolder()
     {
-        var (window, model) = Open(Fixtures.View with { RepoRoots = [] });
-
-        Choose(window, "New task from prompt…");
-        var dialog = DialogOf(window);
-
-        Assert.Equal(1, Named<ComboBox>(dialog, "AdhocRunBox").SelectedIndex);
-        Assert.True(Named<Button>(dialog, "AdhocCreate").IsEnabled);
-
-        Named<ComboBox>(dialog, "AdhocRunBox").SelectedIndex = 0;
-        Named<TextBox>(dialog, "AdhocPromptBox").Text = "Check the log";
-        Dispatcher.UIThread.RunJobs();
-        Assert.False(Named<Button>(dialog, "AdhocCreate").IsEnabled);
-
-        Named<ComboBox>(dialog, "AdhocRunBox").SelectedIndex = 1;
-        hub.ActReplies.Enqueue(null);
-        Click(Named<Button>(dialog, "AdhocCreate"));
-
-        Assert.Equal(["act {\"type\":\"run-schedule\",\"name\":\"self-review\"}"], hub.Calls);
-        Assert.Empty(window.OwnedWindows);
-        Assert.Null(model.AdhocRepo);
-    }
-
-    [AvaloniaFact]
-    public void Adhoc_NoRepoRootsOrSchedules_OffersOnlyChooseAFolder()
-    {
+        hub.FolderPlaces = new FolderPlaces(null, [], [], []);
         var (window, _) = Open(Fixtures.View with { RepoRoots = [], Schedules = [] });
+        var dialog = OpenNewSession(window);
 
-        Choose(window, "New task from prompt…");
-        var dialog = DialogOf(window);
-
-        Assert.Equal([AdhocDialog.ChooseFolder], Named<ComboBox>(dialog, "AdhocRepoBox").ItemsSource!.Cast<string>());
-        Named<TextBox>(dialog, "AdhocPromptBox").Text = "Check the log";
-        Assert.False(Named<Button>(dialog, "AdhocCreate").IsEnabled);
-        Click(Named<Button>(dialog, "AdhocCancel"));
-    }
-
-    [AvaloniaFact]
-    public void Adhoc_Refused_KeepsTheDialogAndShowsTheReason()
-    {
-        var (window, model) = Open();
-
-        Choose(window, "New task from prompt…");
-        var dialog = DialogOf(window);
-
-        Named<TextBox>(dialog, "AdhocPromptBox").Text = "Check the log";
-        hub.ActReplies.Enqueue("D:/elsewhere is not a configured repo root.");
-        Click(Named<Button>(dialog, "AdhocCreate"));
-
-        Assert.Same(dialog, DialogOf(window));
-        Assert.True(Named<TextBlock>(dialog, "AdhocError").IsVisible);
-        Assert.Equal("D:/elsewhere is not a configured repo root.", Named<TextBlock>(dialog, "AdhocError").Text);
-        Assert.Equal("Check the log", Named<TextBox>(dialog, "AdhocPromptBox").Text);
-        Assert.True(Named<Button>(dialog, "AdhocCreate").IsEnabled);
-        Assert.Equal("D:/git/widgets", model.AdhocRepo);
-    }
-
-    [AvaloniaFact]
-    public void Adhoc_EmptyPromptOrCancel_PostsNothing()
-    {
-        var (window, _) = Open();
-
-        Choose(window, "New task from prompt…");
-        var dialog = DialogOf(window);
-
-        Named<TextBox>(dialog, "AdhocPromptBox").Text = "   ";
-        Assert.False(Named<Button>(dialog, "AdhocCreate").IsEnabled);
-        Click(Named<Button>(dialog, "AdhocCreate"));
-        Click(Named<Button>(dialog, "AdhocCancel"));
-
-        Assert.Empty(window.OwnedWindows);
+        Assert.False(Named<Expander>(dialog, "SessionMore").IsVisible);
+        Assert.Equal([NewSessionDialog.ChooseFolder], Named<ComboBox>(dialog, "SessionFolder").ItemsSource!.Cast<string>());
+        Assert.False(Named<Button>(dialog, "SessionStart").IsEnabled);
+        Click(Named<Button>(dialog, "SessionCancel"));
         Assert.Empty(hub.Calls);
     }
 
     [AvaloniaFact]
-    public void Adhoc_OneRepoRoot_SelectsItAndStillOffersChooseAFolder()
+    public void NewSession_ProviderLookupFailsOrNoneInstalled_SaysSo()
     {
-        var (window, _) = Open(Fixtures.View with { RepoRoots = ["D:/git/widgets"] });
+        hub.DefaultProvider = "codex";
+        var (window, model) = Open();
+        Click(Named<Button>(OpenNewSession(window), "SessionCancel"));
 
-        Choose(window, "New task from prompt…");
-        var dialog = DialogOf(window);
+        // A failed lookup falls back to the default the hub named last, and says so.
+        hub.ProviderError = "Provider lookup failed.";
+        var dialog = OpenNewSession(window);
+        Assert.True(Named<ToggleButton>(dialog, "SessionProvider_codex").IsChecked);
+        Assert.Equal("Provider lookup failed. Using Codex and its default model.", Named<TextBlock>(dialog, "SessionProviderNote").Text);
+        Click(Named<Button>(dialog, "SessionCancel"));
 
-        Assert.True(Named<ComboBox>(dialog, "AdhocRepoBox").IsEffectivelyVisible);
-        Assert.Equal("D:/git/widgets", Named<ComboBox>(dialog, "AdhocRepoBox").SelectedItem);
-        Assert.Equal(["D:/git/widgets", AdhocDialog.ChooseFolder], Named<ComboBox>(dialog, "AdhocRepoBox").ItemsSource!.Cast<string>());
-        Click(Named<Button>(dialog, "AdhocCancel"));
+        hub.ProviderError = null;
+        hub.Installed = [];
+        Click(window.FindControl<Button>("NewSessionButton")!);
+        Assert.Empty(window.OwnedWindows);
+        Assert.Equal("Neither Claude nor Codex is installed.", model.Status);
+    }
+
+    [AvaloniaFact]
+    public void NewSession_StartClickedTwiceWhileTheHubAnswers_PostsOnceAndStaysOpenToShowTheRefusal()
+    {
+        var (window, _) = Open();
+        var dialog = OpenNewSession(window);
+        var start = Named<Button>(dialog, "SessionStart");
+
+        hub.HoldNewSession = new TaskCompletionSource<NewSessionReply>();
+        Click(start);
+        Assert.False(start.IsEnabled);
+        Assert.False(Named<Button>(dialog, "SessionCancel").IsEnabled);
+        Click(start);
+        dialog.Close();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Same(dialog, DialogOf(window));
+
+        hub.HoldNewSession.SetResult(new NewSessionReply("D:/scratch/tool is not a folder a session can run in.", null, null));
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Single(Made());
+        Assert.Equal("D:/scratch/tool is not a folder a session can run in.", Named<TextBlock>(dialog, "SessionError").Text);
+        Click(Named<Button>(dialog, "SessionCancel"));
+        Assert.Empty(window.OwnedWindows);
+    }
+
+    [AvaloniaFact]
+    public void NewSession_SecondClickWhileTheDialogIsOpen_OpensNoOther()
+    {
+        var (window, _) = Open();
+        var dialog = OpenNewSession(window);
+
+        Click(window.FindControl<Button>("NewSessionButton")!);
+        Assert.Same(dialog, DialogOf(window));
+        Click(Named<Button>(dialog, "SessionCancel"));
     }
 
     [AvaloniaFact]
@@ -1190,7 +983,7 @@ public sealed class ControlsTests
         Click(more);
 
         Assert.True(more.ContextMenu!.IsOpen);
-        Assert.Equal(["New session…", "New task from prompt…", "New conversation in a folder…", "", "Held sessions", "", "Refresh sources", "Show hub log", "", "Open Settings"], more.ContextMenu.Items.OfType<Control>().Select((item) => item is MenuItem named ? (string)named.Header! : Assert.IsType<Separator>(item) is not null ? "" : "?"));
+        Assert.Equal(["Held sessions", "", "Refresh sources", "Show hub log", "", "Open Settings"], more.ContextMenu.Items.OfType<Control>().Select((item) => item is MenuItem named ? (string)named.Header! : Assert.IsType<Separator>(item) is not null ? "" : "?"));
         Assert.All(more.ContextMenu.Items.OfType<MenuItem>(), (item) => Assert.NotNull(item.Icon));
     }
 
@@ -1539,56 +1332,6 @@ public sealed class ControlsTests
         var (window, _) = Open();
 
         Assert.Equal("Approve: runs /support-release #4521", ToolTip.GetTip(ButtonIn(RowOf(window, "item:10"), "main")));
-    }
-
-    [AvaloniaFact]
-    public void Adhoc_CreateClickedTwiceWhileTheHubAnswers_PostsOnce()
-    {
-        var (window, _) = Open();
-
-        Choose(window, "New task from prompt…");
-        var dialog = DialogOf(window);
-        var create = Named<Button>(dialog, "AdhocCreate");
-
-        Named<TextBox>(dialog, "AdhocPromptBox").Text = "Check the log";
-        hub.ActReplies.Enqueue(null);
-        hub.HoldAct = new TaskCompletionSource();
-        Click(create);
-
-        Assert.False(create.IsEnabled);
-        Click(create);
-        hub.HoldAct.SetResult();
-        Dispatcher.UIThread.RunJobs();
-
-        Assert.Single(hub.Calls);
-        Assert.Empty(window.OwnedWindows);
-    }
-
-    [AvaloniaFact]
-    public void Adhoc_ClosedWhileTheHubAnswers_StaysOpenToShowTheRefusal()
-    {
-        var (window, _) = Open();
-
-        Choose(window, "New task from prompt…");
-        var dialog = DialogOf(window);
-
-        Named<TextBox>(dialog, "AdhocPromptBox").Text = "Check the log";
-        hub.ActReplies.Enqueue("D:/elsewhere is not a configured repo root.");
-        hub.HoldAct = new TaskCompletionSource();
-        Click(Named<Button>(dialog, "AdhocCreate"));
-
-        Assert.False(Named<Button>(dialog, "AdhocCancel").IsEnabled);
-        dialog.Close();
-        Dispatcher.UIThread.RunJobs();
-        Assert.Same(dialog, DialogOf(window));
-
-        hub.HoldAct.SetResult();
-        Dispatcher.UIThread.RunJobs();
-
-        Assert.Equal("D:/elsewhere is not a configured repo root.", Named<TextBlock>(dialog, "AdhocError").Text);
-        Assert.True(Named<Button>(dialog, "AdhocCancel").IsEnabled);
-        Click(Named<Button>(dialog, "AdhocCancel"));
-        Assert.Empty(window.OwnedWindows);
     }
 
     [AvaloniaFact]

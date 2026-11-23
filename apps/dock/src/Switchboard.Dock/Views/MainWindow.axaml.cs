@@ -1634,8 +1634,6 @@ public sealed partial class MainWindow : Window
     // Codicons the dock draws itself: copy, link-external, add, settings-gear and output.
     const string CopyGlyph = "\uEBCC";
     const string LinkGlyph = "\uEB14";
-    const string AddGlyph = "\uEA60";
-    const string FolderGlyph = "\uEAF7";
     const string SettingsGlyph = "\uEB51";
     const string OutputGlyph = "\uEB9D";
     const string RefreshGlyph = "\uEB37";
@@ -1963,16 +1961,11 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// The header's More Actions menu in groups with a separator between each: New ad-hoc session and New conversation in a folder; Held sessions
-    /// (PRD R94); Refresh sources, which polls each source that is on now, and Show hub log, which shows the hub log in the VS Code window used
+    /// The header's More Actions menu in groups with a separator between each: Held sessions (PRD R94); Refresh sources, which polls each source that is on now, and Show hub log, which shows the hub log in the VS Code window used
     /// last; then Open Settings, last.
     /// </summary>
     internal List<Control> HeaderMenu() =>
     [
-        Item("New session…", NewStandalone, AddGlyph),
-        Item("New task from prompt…", NewAdhoc, AddGlyph),
-        Item("New conversation in a folder…", NewSession, FolderGlyph),
-        new Separator(),
         Item("Held sessions", OpenHeld, TerminalGlyph),
         new Separator(),
         Item("Refresh sources", async () => model.Status = await hub.Poll(), RefreshGlyph),
@@ -2036,101 +2029,92 @@ public sealed partial class MainWindow : Window
         };
     }
 
+    async void OnNewStandaloneClicked(object? sender, RoutedEventArgs e) => await NewSession();
+
     /// <summary>
-    /// More Actions' New conversation in a folder (PRD R104): asks for a folder, has the hub make a conversation hosted by it and stored as its folder
-    /// window's selection, then opens that window, which shows it. A second click while the picker is open or the hub answers does nothing; a row
-    /// clicked meanwhile replaces it, so the conversation is made but its window not opened.
+    /// The header's + button (PRD R122): the New session dialog, with the hub's folders, providers and models. A conversation's row opens once it
+    /// shows; a task's row is selected, since a task that waits or queues has nothing to show yet; Run a schedule now opens nothing. A second
+    /// click while the dialog is open does nothing.
     /// </summary>
     internal async Task NewSession()
-    {
-        if (creating is not null)
-        {
-            return;
-        }
-
-        // Each attempt releases only its own hold, so an earlier attempt that ends late never frees a newer one's.
-        var mine = new object();
-
-        creating = mine;
-
-        void Release()
-        {
-            if (creating == mine)
-            {
-                creating = null;
-            }
-        }
-
-        try
-        {
-            if (await PickFolder(ShownForDialog()) is not { } folder)
-            {
-                return;
-            }
-
-            var settings = await hub.SessionProvider();
-            if (settings.Error is not null) { model.Status = settings.Error; return; }
-            knownProvider = settings.DefaultProvider;
-            // With one provider installed there is nothing to choose.
-            var provider = settings.Installed is [var only] ? only : await PickProvider(ShownForDialog(), settings.DefaultProvider!, folder);
-            if (provider is null) return;
-
-            // Run as a click is, so a row clicked while the hub answers replaces it and its window is not opened over that row's.
-            await Running(async (cancel) =>
-            {
-                NewConversationReply reply;
-
-                try
-                {
-                    reply = await hub.NewConversation(folder, Guid.NewGuid().ToString(), provider);
-                }
-                finally
-                {
-                    Release();
-                }
-
-                if (cancel.IsCancellationRequested)
-                {
-                    return null;
-                }
-
-                return reply.Error ?? await actions.OpenFolder(reply.Folder ?? folder, cancel);
-            }, "The session did not start");
-        }
-        finally
-        {
-            Release();
-        }
-    }
-
-    async void OnNewStandaloneClicked(object? sender, RoutedEventArgs e) => await NewStandalone();
-
-    internal async Task NewStandalone()
     {
         if (creating is not null) return;
         var mine = new object();
         creating = mine;
+
         try
         {
-            if (await PickFolder(ShownForDialog()) is not { } folder) return;
+            model.Status = null;
             var settings = await hub.SessionProvider();
-            if (settings.Installed is { Count: 0 }) { ShowFailure("Neither Claude nor Codex is installed."); return; }
-            var choice = await PickStandalone(ShownForDialog(), folder, settings.DefaultProvider ?? knownProvider ?? "claude", settings.ClaudeModel, settings.CodexModel, settings.Installed, settings.Error is null ? null : $"{settings.Error} Using the selected provider and its default model.");
-            if (choice is null) return;
-            var reply = await hub.NewStandalone(folder, Guid.NewGuid().ToString(), choice.Provider, choice.Model);
-            if (reply.Error is not null) { ShowFailure(reply.Error); return; }
-            var id = reply.WorkItemId;
-            if (id is null) { ShowFailure("Switchboard did not return a work item."); return; }
+
+            if (settings.Installed is { Count: 0 })
+            {
+                ShowFailure("Neither Claude nor Codex is installed.");
+                return;
+            }
+
+            // A failed lookup falls back to the default the hub named last, or Claude when it never named one.
+            if (settings.DefaultProvider is { } named)
+            {
+                knownProvider = named;
+            }
+
+            var folders = await hub.Folders();
+            var places = folders.Error is null ? folders : folders with { RepoRoots = [.. model.RepoRoots] };
+            var options = new NewSessionOptions(
+                places,
+                model.Schedules,
+                settings.DefaultProvider ?? knownProvider ?? "claude",
+                settings.Installed,
+                new Dictionary<string, string?> { ["claude"] = settings.ClaudeModel, ["codex"] = settings.CodexModel },
+                settings.ModelChoices ?? new Dictionary<string, IReadOnlyList<ModelChoice>>(),
+                model.Settings.NewSessionRun,
+                settings.Error is null ? null : $"{settings.Error} Using {((settings.DefaultProvider ?? knownProvider) == "codex" ? "Codex" : "Claude")} and its default model.");
+            // One operation for the dialog, so a retry after a lost answer or a refusal makes one work item.
+            var opId = Guid.NewGuid().ToString();
+            var outcome = await PickNewSession(
+                ShownForDialog(),
+                options,
+                (choice) => hub.NewSession(choice.Folder, opId, choice.Provider, choice.Model, choice.Prompt, choice.Run),
+                (name) => hub.Act(new JsonObject { ["type"] = "run-schedule", ["name"] = name }),
+                PickFolder);
+
+            if (outcome?.Choice is not { } chosen || outcome.Reply is not { } reply)
+            {
+                return;
+            }
+
+            if (chosen.Prompt is not null)
+            {
+                model.RememberRun(chosen.Run);
+            }
+
+            if (reply.WorkItemId is not { } id)
+            {
+                ShowFailure("Switchboard did not return a work item.");
+                return;
+            }
+
+            var key = $"item:{id}";
             var ready = await hub.Until(view => view.Groups.Any(group => group.Rows.Any(row => row.WorkItemId == id)), TimeSpan.FromSeconds(10));
-            if (ready is null) { ShowFailure("The new session did not appear."); return; }
+            if (ready is null) { ShowFailure("The new work item did not appear."); return; }
             var row = model.Groups.SelectMany(group => group.AllRows).FirstOrDefault(row => row.Row.WorkItemId == id);
             if (row is null)
             {
                 model.Show(ready);
                 row = model.Groups.SelectMany(group => group.AllRows).FirstOrDefault(row => row.Row.WorkItemId == id);
             }
-            if (row is null) { ShowFailure("The new session did not appear in the dock."); return; }
-            await Open(row);
+            if (row is null) { ShowFailure("The new work item did not appear in the dock."); return; }
+
+            if (chosen.Run == "now")
+            {
+                await Open(row);
+            }
+            else
+            {
+                model.Selected = key;
+                ScrollTo(key);
+            }
         }
         catch (Exception error)
         {
@@ -2142,51 +2126,23 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>The New conversation in a folder attempt that holds the picker or waits for the hub, or null.</summary>
+    /// <summary>The New session attempt whose dialog is open or waits for the hub, or null.</summary>
     object? creating;
 
     /// <summary>Asks for a folder to start a session in, or null when the operator cancels; tests replace it, as the headless platform has no picker.</summary>
     internal Func<Window, Task<string?>> PickFolder { get; set; } = AskFolder;
-    internal Func<Window, string, string, Task<string?>> PickProvider { get; set; } = (owner, preferred, folder) => ProviderDialog.Ask(owner, preferred, folder);
-    internal Func<Window, string, string, string?, string?, IReadOnlyList<string>?, string?, Task<NewSessionDialog.Choice?>> PickStandalone { get; set; } = NewSessionDialog.Ask;
+
+    /// <summary>Shows the New session dialog; tests may replace it.</summary>
+    internal Func<Window, NewSessionOptions, Func<NewSessionChoice, Task<NewSessionReply>>, Func<string, Task<string?>>, Func<Window, Task<string?>>?, Task<NewSessionOutcome?>> PickNewSession { get; set; } = NewSessionDialog.Ask;
 
     static async Task<string?> AskFolder(Window owner)
     {
-        var picked = await owner.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "New conversation in a folder", AllowMultiple = false });
+        var picked = await owner.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Choose a folder", AllowMultiple = false });
 
         return picked.Count == 0 ? null : picked[0].TryGetLocalPath();
     }
 
-    /// <summary>
-    /// Opens the New ad-hoc session window (PRD R6); the work item starts only when Start automatically is checked. Its Repository list offers the
-    /// repo roots, the folders chosen before and Choose a folder…, which picks any folder and keeps it among the recent ones.
-    /// </summary>
-    async Task NewAdhoc()
-    {
-        var repo = model.AdhocRepo;
-
-        model.Status = null;
-
-        var settings = await hub.SessionProvider();
-
-        // A failed lookup falls back to the default the hub named last, or Claude when it never named one.
-        if (settings.DefaultProvider is { } named)
-        {
-            knownProvider = named;
-        }
-
-        var created = await AdhocDialog.Ask(ShownForDialog(), [.. model.RepoRoots], repo, (prompt, repoRoot, start, provider) =>
-            hub.Act(new JsonObject { ["type"] = "adhoc", ["prompt"] = prompt, ["repoRoot"] = repoRoot, ["start"] = start, ["provider"] = provider }),
-            model.Schedules, (name) => hub.Act(new JsonObject { ["type"] = "run-schedule", ["name"] = name }), settings.DefaultProvider ?? knownProvider ?? "claude", settings.Error,
-            model.Settings.RecentFolders, PickFolder, model.RememberFolder, defaultKnown: settings.DefaultProvider is not null || knownProvider is not null);
-
-        if (created is not null)
-        {
-            model.AdhocRepo = created;
-        }
-    }
-
-    /// <summary>The default provider the hub named last, which New ad-hoc session falls back to when the hub cannot list the providers.</summary>
+    /// <summary>The default provider the hub named last, which New session falls back to when the hub cannot list the providers.</summary>
     string? knownProvider;
 
     /// <summary>Opens the Settings window (PRD R54), or brings the open one forward.</summary>
@@ -2388,7 +2344,6 @@ public sealed partial class MainWindow : Window
 
         public string? OpenUrl(string url) => null;
 
-        public Task<string?> OpenFolder(string folder, CancellationToken cancel) => Task.FromResult<string?>(null);
     }
 
     sealed class NoHub : IHub
@@ -2419,8 +2374,9 @@ public sealed partial class MainWindow : Window
 
         public Task<string?> Focus(string? sessionId, long at) => Task.FromResult<string?>(null);
 
-        public Task<NewConversationReply> NewConversation(string folder, string opId, string? provider = null) => Task.FromResult(new NewConversationReply(null, null, folder));
-        public Task<NewConversationReply> NewStandalone(string folder, string opId, string provider, string? model) => Task.FromResult(new NewConversationReply(null, null, folder));
+        public Task<NewSessionReply> NewSession(string folder, string opId, string provider, string? model, string? prompt, string run) => Task.FromResult(new NewSessionReply(null, null, folder));
+
+        public Task<FolderPlaces> Folders() => Task.FromResult(new FolderPlaces(null, [], [], []));
         public Task<SessionProviderReply> SessionProvider() => Task.FromResult(new SessionProviderReply(null, "claude"));
 
         public Task<DockView?> Until(Func<DockView, bool> test, TimeSpan within) => Task.FromResult<DockView?>(null);

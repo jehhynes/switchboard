@@ -40,6 +40,23 @@ public sealed class DockSettingsTests
     }
 
     [Theory]
+    [InlineData("{\"newSessionRun\": \"wait\", \"recentFolders\": [\"D:/kept\"]}", "wait")]
+    [InlineData("{\"newSessionRun\": \"later\"}", "now")]
+    [InlineData("{}", "now")]
+    public void Load_NewSessionRun_KeepsAKnownChoiceAndTheRecentFoldersForTheHubsImport(string json, string run)
+    {
+        var home = Fixtures.TempFolder();
+
+        File.WriteAllText(Path.Combine(home, "dock.json"), json);
+
+        var settings = DockSettings.Load(home);
+
+        Assert.Equal(run, settings.NewSessionRun);
+        settings.Save(home);
+        Assert.Equal(json.Contains("D:/kept", StringComparison.Ordinal), File.ReadAllText(Path.Combine(home, "dock.json")).Contains("D:/kept", StringComparison.Ordinal));
+    }
+
+    [Theory]
     [InlineData("{\"edge\": \"top\"}")]
     [InlineData("{\"edge\": null}")]
     public void Load_EdgeTheDockDoesNotOffer_DocksOnTheLeft(string json)

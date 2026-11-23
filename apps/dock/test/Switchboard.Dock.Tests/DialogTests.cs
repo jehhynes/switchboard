@@ -50,47 +50,38 @@ public sealed class DialogTests
         owner.Close();
     }
 
-    [AvaloniaFact]
-    public void Provider_Enter_CreatesWithTheSelectedProviderAndNamesTheFolder()
-    {
-        string? answer = "unset";
-        var (owner, dialog) = Show(async (owner) => answer = await ProviderDialog.Ask(owner, "codex", "D:/git/widgets"));
-
-        Assert.Equal("New conversation in a folder", Named<TextBlock>(dialog, "DialogTitle").Text);
-        Assert.Equal("D:/git/widgets", Named<TextBlock>(dialog, "DialogSubtitle").Text);
-        Assert.Same(Named<ComboBox>(dialog, "SessionProvider"), dialog.FocusManager!.GetFocusedElement());
-
-        Press(dialog, Key.Enter);
-
-        Assert.Equal("codex", answer);
-        owner.Close();
-    }
+    static NewSessionOptions Options(string provider = "codex") => new(
+        new Hub.FolderPlaces(null, ["D:/git/widgets"], [], []),
+        [],
+        provider,
+        ["claude", "codex"],
+        new Dictionary<string, string?> { ["claude"] = "sonnet", ["codex"] = "gpt-6.2-sol" },
+        new Dictionary<string, IReadOnlyList<Hub.ModelChoice>>(),
+        "now",
+        null);
 
     [AvaloniaFact]
-    public void Provider_Escape_ReturnsNothing()
+    public void NewSession_Enter_StartsWithTheChosenFieldsAndEscapeCancels()
     {
-        string? answer = "unset";
-        var (owner, dialog) = Show(async (owner) => answer = await ProviderDialog.Ask(owner, "claude"));
+        NewSessionChoice? sent = null;
+        NewSessionOutcome? answer = null;
+        var (owner, dialog) = Show(async (owner) => answer = await NewSessionDialog.Ask(owner, Options(), (choice) => { sent = choice; return Task.FromResult(new Hub.NewSessionReply(null, 3, choice.Folder)); }, (_) => Task.FromResult<string?>(null), null));
 
-        Press(dialog, Key.Escape);
+        Assert.Equal("Default (gpt-6.2-sol)", Named<ComboBox>(dialog, "SessionModel").SelectedItem?.ToString());
+        Named<Avalonia.Controls.Primitives.ToggleButton>(dialog, "SessionProvider_claude").RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("Default (sonnet)", Named<ComboBox>(dialog, "SessionModel").SelectedItem?.ToString());
+        // The focus is in First message, where Enter starts a line, so Ctrl+Enter starts.
+        Press(dialog, Key.Enter, RawInputModifiers.Control);
 
-        Assert.Null(answer);
-        owner.Close();
-    }
+        Assert.Equal(new NewSessionChoice("D:/git/widgets", "claude", null, null, "now"), sent);
+        Assert.Equal(3, answer?.Reply?.WorkItemId);
 
-    [AvaloniaFact]
-    public void NewSession_ModelFollowsProviderAndCanBeChanged()
-    {
-        NewSessionDialog.Choice? answer = null;
-        var (owner, dialog) = Show(async owner => answer = await NewSessionDialog.Ask(owner, "D:/git/widgets", "codex", "sonnet", "gpt-6.2-sol", ["claude", "codex"]));
-        var provider = Named<ComboBox>(dialog, "SessionProvider");
-        var model = Named<TextBox>(dialog, "SessionModel");
-        Assert.Equal("gpt-6.2-sol", model.Text);
-        provider.SelectedIndex = 0;
-        Assert.Equal("sonnet", model.Text);
-        model.Text = "opus";
-        Press(dialog, Key.Enter);
-        Assert.Equal(new NewSessionDialog.Choice("claude", "opus"), answer);
+        NewSessionOutcome? cancelled = new(null, null, null);
+        var (_, second) = Show(async (other) => cancelled = await NewSessionDialog.Ask(other, Options(), (_) => throw new InvalidOperationException(), (_) => Task.FromResult<string?>(null), null));
+
+        Press(second, Key.Escape);
+        Assert.Null(cancelled);
         owner.Close();
     }
 
@@ -116,10 +107,10 @@ public sealed class DialogTests
     [AvaloniaFact]
     public void Dialogs_ShareOneLayout_TitleBodyAndFooterWithCancelBeforeTheMainAction()
     {
-        var (owner, dialog) = Show((owner) => ProviderDialog.Ask(owner, "claude", "D:/git/widgets"));
+        var (owner, dialog) = Show((owner) => NewSessionDialog.Ask(owner, Options(), (_) => Task.FromResult(new Hub.NewSessionReply(null, null, null)), (_) => Task.FromResult<string?>(null), null));
         var buttons = dialog.GetVisualDescendants().OfType<Button>().Where((button) => button.Classes.Contains("dialog")).ToList();
 
-        Assert.Equal(["SessionCancel", "SessionCreate"], buttons.Select((button) => button.Name));
+        Assert.Equal(["SessionCancel", "SessionStart"], buttons.Select((button) => button.Name));
         Assert.True(buttons[0].IsCancel);
         Assert.True(buttons[1].IsDefault);
         Assert.Contains("accent", buttons[1].Classes);

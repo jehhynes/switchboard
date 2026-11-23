@@ -291,47 +291,55 @@ public sealed class HubClient(string switchboardHome, HubStarter? starter = null
         var provider = body?["defaultProvider"] is JsonValue value && value.TryGetValue<string>(out var named) ? named : null;
         var installed = body?["installed"] is JsonArray list ? list.Select((item) => item is JsonValue named && named.TryGetValue<string>(out var id) ? id : null).OfType<string>().Where((id) => id is "claude" or "codex").ToList() : null;
         var models = body?["models"] as JsonObject;
-        return error is not null ? new(error, null) : provider is "claude" or "codex" ? new(null, provider, installed, models?["claude"]?.GetValue<string>(), models?["codex"]?.GetValue<string>()) : new("The hub did not provide the session providers. Reload VS Code to update it.", null);
+        var choices = body?["modelChoices"] is JsonObject listed
+            ? listed.ToDictionary((entry) => entry.Key, (entry) => (IReadOnlyList<ModelChoice>)(entry.Value is JsonArray list
+                ? list.OfType<JsonObject>().Select((one) => one["id"] is JsonValue id && id.TryGetValue<string>(out var text) && text != "" ? new ModelChoice(text, one["label"] is JsonValue label && label.TryGetValue<string>(out var shown) && shown != "" ? shown : text) : null).OfType<ModelChoice>().ToList()
+                : []))
+            : null;
+        string? Model(string name) => models?[name] is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
+
+        return error is not null ? new(error, null) : provider is "claude" or "codex" ? new(null, provider, installed, Model("claude"), Model("codex"), choices) : new("The hub did not provide the session providers. Reload VS Code to update it.", null);
     }
 
-    public async Task<NewConversationReply> NewConversation(string folder, string opId, string? provider = null)
+    public async Task<NewSessionReply> NewSession(string folder, string opId, string provider, string? model, string? prompt, string run)
     {
-        var body = new JsonObject { ["folder"] = folder, ["opId"] = opId };
-        if (provider is not null) body["provider"] = provider;
-        var (status, reply, failure) = await Send("/dock/new-conversation", body);
+        var body = new JsonObject { ["folder"] = folder, ["opId"] = opId, ["provider"] = provider, ["model"] = model, ["run"] = run };
 
-        // A request whose answer was lost is sent once more with the same opId, which the hub answers with the conversation it made, not a second.
+        if (prompt is not null)
+        {
+            body["prompt"] = prompt;
+        }
+
+        var (status, reply, failure) = await Send("/dock/new-session", body);
+
+        // A request whose answer was lost is sent once more with the same opId, which the hub answers with the work item it made, not a second.
         if (status is null)
         {
-            (status, reply, failure) = await Send("/dock/new-conversation", body);
+            (status, reply, failure) = await Send("/dock/new-session", body);
         }
 
         if (failure is not null)
         {
-            return new NewConversationReply(failure, null, null);
+            return new NewSessionReply(failure, null, null);
         }
 
         if (status != HttpStatusCode.OK)
         {
-            return new NewConversationReply(RefusalOf(reply?.ToJsonString() ?? "") ?? $"The hub answered {(int?)status}.", null, null);
+            return new NewSessionReply(RefusalOf(reply?.ToJsonString() ?? "") ?? $"The hub answered {(int?)status}.", null, null);
         }
 
         var workItemId = reply?["workItemId"] is JsonValue id && id.TryGetValue<int>(out var number) ? number : (int?)null;
-        var hosted = reply?["folder"] is JsonValue path && path.TryGetValue<string>(out var text) ? text : null;
+        var chosen = reply?["folder"] is JsonValue path && path.TryGetValue<string>(out var text) ? text : null;
 
-        return new NewConversationReply(null, workItemId, hosted);
+        return new NewSessionReply(null, workItemId, chosen);
     }
 
-    public async Task<NewConversationReply> NewStandalone(string folder, string opId, string provider, string? model)
+    public async Task<FolderPlaces> Folders()
     {
-        var body = new JsonObject { ["folder"] = folder, ["opId"] = opId, ["provider"] = provider, ["model"] = model };
-        var (status, reply, failure) = await Send("/dock/new-session", body);
-        if (status is null) (status, reply, failure) = await Send("/dock/new-session", body);
-        if (failure is not null) return new NewConversationReply(failure, null, null);
-        if (status != HttpStatusCode.OK) return new NewConversationReply(RefusalOf(reply?.ToJsonString() ?? "") ?? $"The hub answered {(int?)status}.", null, null);
-        var workItemId = reply?["workItemId"] is JsonValue id && id.TryGetValue<int>(out var number) ? number : (int?)null;
-        var chosen = reply?["folder"] is JsonValue path && path.TryGetValue<string>(out var text) ? text : null;
-        return new NewConversationReply(null, workItemId, chosen);
+        var (error, body) = await PostFor("/dock/folders", new JsonObject());
+        IReadOnlyList<string> List(string name) => body?[name] is JsonArray list ? list.Select((item) => item is JsonValue value && value.TryGetValue<string>(out var text) ? text : null).OfType<string>().ToList() : [];
+
+        return error is not null ? new FolderPlaces(error, [], [], []) : new FolderPlaces(null, List("recent"), List("repoRoots"), List("worktrees"));
     }
 
     public Task<string?> Focus(string? sessionId, long at) => Post("/dock/focus", new JsonObject { ["sessionId"] = sessionId, ["at"] = at });
