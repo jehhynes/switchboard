@@ -28,7 +28,7 @@ export function claudeModelChoices(settings: Settings, playbooks: Iterable<Playb
   return ids.map((id) => ({ id, label: id }));
 }
 
-/** Codex's choices from the app-server's `model/list` (mechanics.md M133), without hidden models; throws when it fails. */
+/** Codex's choices from the app-server's `model/list` (mechanics.md M136), without hidden models; throws when it fails. */
 export async function codexModelChoices(server: Pick<AppServer, 'request'>): Promise<ModelChoice[]> {
   const choices: ModelChoice[] = [];
   let cursor: string | null = null;
