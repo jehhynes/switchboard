@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { parseRoute, parseScrolls, routeHash, SCROLLS_KEPT, startRoute, withScroll } from '../src/route.js';
+import { parseRoute, parseScrolls, parseTabSets, routeHash, SCROLLS_KEPT, startRoute, TAB_SETS_KEPT, withScroll, withTabSet } from '../src/route.js';
+import type { TabSet } from '../src/route.js';
 
 describe('the route', () => {
   it('reads and writes the work item, its tab, what the tab shows and History in the hash, and nothing for anything else', () => {
@@ -55,5 +56,25 @@ describe('the route', () => {
     expect(Object.keys(places)).toHaveLength(SCROLLS_KEPT);
     expect(Object.keys(places).at(-1)).toBe('10 status');
     expect(Object.keys(places)[0]).toBe('5 status');
+  });
+
+  it('keeps each work item\'s tabs, the latest last and at most TAB_SETS_KEPT, and drops a malformed set', () => {
+    const set: TabSet = { side: 'diff', tab: 'conversation', artifact: null, changes: true, changesFile: 'src/a.ts', files: [{ target: 'src/a.ts', line: 3 }, { target: 'src/b.ts', line: null }], file: 1 };
+    let sets: Record<string, TabSet> = {};
+
+    for (let at = 1; at <= TAB_SETS_KEPT + 5; at++) {
+      sets = withTabSet(sets, at, { ...set, file: at % 2 });
+    }
+
+    // A work item opened again is the latest, not in its number's place.
+    sets = withTabSet(sets, 10, set);
+    expect(Object.keys(sets)).toHaveLength(TAB_SETS_KEPT);
+    expect(Object.keys(sets).at(-1)).toBe('w10');
+    expect(Object.keys(sets)[0]).toBe('w6');
+    expect(parseTabSets(JSON.stringify(sets))).toEqual(sets);
+    expect(parseTabSets(JSON.stringify({ w1: set, w2: { ...set, file: 2 }, w3: { ...set, files: [{ target: 1, line: null }] }, w4: { ...set, changes: 'yes' }, '5': set, w6: null }))).toEqual({ w1: set });
+    expect(parseTabSets('not json')).toEqual({});
+    expect(parseTabSets('[]')).toEqual({});
+    expect(parseTabSets(null)).toEqual({});
   });
 });

@@ -113,3 +113,68 @@ export function withScroll(places: Record<string, ScrollPlace>, key: string, pla
 
   return Object.fromEntries([...rest, [key, place] as const].slice(-SCROLLS_KEPT));
 }
+
+/**
+ * A work item's tabs as this device left them: the column's and the conversation pane's tab (`side`, `tab`) and the artifact shown, whether
+ * the Changes tab was open and the file it was at, and the file tabs in their order with the one shown, so another work item and back, or a
+ * reload, brings them back. The artifact tabs follow the work item's artifacts and the closed ones the hub keeps (architecture.md § Web page).
+ */
+export interface TabSet {
+  side: string;
+  tab: string;
+  artifact: string | null;
+  changes: boolean;
+  changesFile: string | null;
+  files: Array<{ target: string; line: number | null }>;
+  /** The index in `files` of the file tab shown, or null. */
+  file: number | null;
+}
+
+/** Where this device keeps each work item's tabs. */
+export const TABS_KEY = 'switchboard.tabs';
+/** How many work items' tabs it keeps, the latest. */
+export const TAB_SETS_KEPT = 30;
+
+const text = (value: unknown): value is string => typeof value === 'string';
+const textOrNull = (value: unknown): value is string | null => value === null || typeof value === 'string';
+const lineOrNull = (value: unknown): value is number | null => value === null || (typeof value === 'number' && Number.isSafeInteger(value) && value > 0);
+
+/** A work item's key in the kept tab sets: not a bare number, so the sets keep their order, the latest last. */
+export const tabSetKey = (workItemId: number): string => `w${workItemId}`;
+
+/** The tab sets kept, by {@link tabSetKey}; any malformed one is left out. */
+export function parseTabSets(raw: string | null): Record<string, TabSet> {
+  try {
+    const kept = JSON.parse(raw ?? '{}') as unknown;
+
+    if (kept === null || typeof kept !== 'object' || Array.isArray(kept)) {
+      return {};
+    }
+
+    return Object.fromEntries(
+      Object.entries(kept as Record<string, Partial<TabSet>>).filter(
+        ([key, set]) =>
+          /^w[1-9][0-9]*$/.test(key) &&
+          set !== null &&
+          typeof set === 'object' &&
+          text(set.side) &&
+          text(set.tab) &&
+          textOrNull(set.artifact) &&
+          typeof set.changes === 'boolean' &&
+          textOrNull(set.changesFile) &&
+          Array.isArray(set.files) &&
+          set.files.every((one) => one !== null && typeof one === 'object' && text(one.target) && lineOrNull(one.line)) &&
+          (set.file === null || (typeof set.file === 'number' && Number.isSafeInteger(set.file) && set.file >= 0 && set.file < set.files.length)),
+      ),
+    ) as Record<string, TabSet>;
+  } catch {
+    return {};
+  }
+}
+
+/** The tab sets with a work item's set as the latest, the latest {@link TAB_SETS_KEPT}. */
+export function withTabSet(sets: Record<string, TabSet>, workItemId: number, set: TabSet): Record<string, TabSet> {
+  const key = tabSetKey(workItemId);
+
+  return Object.fromEntries([...Object.entries(sets).filter(([one]) => one !== key), [key, set] as const].slice(-TAB_SETS_KEPT));
+}

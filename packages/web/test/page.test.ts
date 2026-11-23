@@ -5762,6 +5762,144 @@ describe('the page in use', () => {
     page.close();
   });
 
+  it("brings back a work item's file tabs in order, its Changes tab and the tab shown after another work item and after a reload, and forgets a closed tab", async () => {
+    window.innerWidth = 1440;
+    history.replaceState(null, '', '#w=1');
+
+    const groups = [listGroup('progress', [listRow(1, { title: 'Fix it' }), listRow(2, { title: 'Other' })])];
+    const scopeOf = (workItemId: number) => ({ ...scope, workItemId, scopeGen: 3 + workItemId, title: `Item ${workItemId}`, conversations: [{ ...scope.conversations[0]!, workItemId, title: `Item ${workItemId}` }] });
+    const helloFor = (source: FakeSource, workItemId: number) => source.emit('hello', { key: 'pk', groups, scope: scopeOf(workItemId), sessions: [session()], items: [reply('r1', 2, { opening: 'See [a](src/a.ts#L3) and [b](src/b.ts).' })], more: false, status: null, artifacts: [artifact('chat/plan.md', 'markdown', 'md')] });
+    const fileTabs = () => [...root.querySelectorAll<HTMLElement>('#detail .detail-head [data-action="local-tab"]')].map((one) => `${one.title}${one.getAttribute('aria-selected') === 'true' ? ' *' : ''}`);
+    const shown = () => root.querySelector<HTMLElement>('#detail .detail-head [aria-selected="true"]');
+    // Read or not, a file tab is named by its link's target.
+    answers['local-file'] = { status: 404, body: { error: 'Not found.' } };
+    answers['changes'] = { status: 404, body: { error: 'No changes here.' } };
+    let { page, source } = start();
+
+    helloFor(source, 1);
+    click('#panel a.path-link');
+    click('#panel a.path-link:nth-of-type(2)');
+    click('#detail .changes-tab');
+    click('#detail [data-action="local-tab"]');
+    await flush();
+    expect(fileTabs()).toEqual(['src/a.ts:3 *', 'src/b.ts']);
+    expect(root.querySelector('#detail .changes-tab')).not.toBeNull();
+
+    // Another work item opens on its own tabs.
+    click('[data-work-item="2"]');
+    helloFor(source, 2);
+    await flush();
+    expect(fileTabs()).toEqual([]);
+    expect(shown()?.dataset['side']).toBe('status');
+    click('#detail [data-side="console"]');
+    expect(shown()?.dataset['side']).toBe('console');
+
+    // Back: the same file tabs in their order, a.ts shown, and the Changes tab.
+    click('[data-work-item="1"]');
+    helloFor(source, 1);
+    await flush();
+    expect(fileTabs()).toEqual(['src/a.ts:3 *', 'src/b.ts']);
+    expect(root.querySelector('#detail .changes-tab')).not.toBeNull();
+    // And work item 2 again on Console.
+    click('[data-work-item="2"]');
+    helloFor(source, 2);
+    expect(shown()?.dataset['side']).toBe('console');
+
+    // A reload, with only the work item in the address, brings them back from this device's storage.
+    click('[data-work-item="1"]');
+    helloFor(source, 1);
+    click('#detail .changes-tab');
+    page.close();
+    history.replaceState(null, '', '#w=1');
+    ({ page, source } = start());
+    helloFor(source, 1);
+    await flush();
+    expect(fileTabs()).toEqual(['src/a.ts:3', 'src/b.ts']);
+    expect(root.querySelector('#detail .changes-tab')?.classList.contains('selected')).toBe(true);
+
+    // A closed tab stays closed.
+    click('#detail [data-action="local-close"]');
+    await flush();
+    click('[data-work-item="2"]');
+    helloFor(source, 2);
+    click('[data-work-item="1"]');
+    helloFor(source, 1);
+    await flush();
+    expect(fileTabs()).toEqual(['src/b.ts']);
+    expect(JSON.parse(localStorage.getItem('switchboard.tabs')!)).toMatchObject({ w1: { files: [{ target: 'src/b.ts', line: null }], changes: true } });
+    page.close();
+  });
+
+  it("brings a file tab back to where it was scrolled, keeps the artifact shown before a dropdown conversation, and keeps another page's tab sets", async () => {
+    window.innerWidth = 1440;
+    history.replaceState(null, '', '#w=1');
+
+    const groups = [listGroup('progress', [listRow(1, { title: 'Fix it' }), listRow(2, { title: 'Other' })])];
+    const both = [1, 2].map((id) => ({ ...scope.conversations[0]!, workItemId: id, title: `Item ${id}`, primary: id === 1 }));
+    const helloFor = (source: FakeSource, workItemId: number) => source.emit('hello', { key: 'pk', groups, scope: { ...scope, workItemId, scopeGen: 3 + workItemId, conversations: both }, sessions: [session()], items: [reply('r1', 2, { opening: 'See [notes](notes.md).' })], more: false, status: null, artifacts: [artifact('chat/plan.md', 'markdown', 'md'), artifact('chat/p.html', 'html', 'html')] });
+    const doc = () => root.querySelector<HTMLElement>('#detail .detail-body .local-view > .artifact-doc')!;
+
+    answers['local-file'] = { status: 200, body: { path: 'D:/w/notes.md', name: 'notes.md', kind: 'markdown', contents: '# Notes', tooLarge: false, size: 7, entries: null, more: false } };
+    answers['artifact'] = { status: 200, body: {}, text: '# Plan' };
+    let { page, source } = start();
+
+    helloFor(source, 1);
+    click('#panel a.path-link');
+    await flush();
+    await flush();
+    doc().scrollTop = 380;
+    doc().dispatchEvent(new Event('scroll'));
+    click('#detail [data-side="status"]');
+    expect(root.querySelector('#detail .local-view')).toBeNull();
+    // Back on the file tab, and after another work item and back, it is where it was left.
+    click('#detail [data-action="local-tab"]');
+    expect(doc().scrollTop).toBe(380);
+    click('[data-work-item="2"]');
+    helloFor(source, 2);
+    click('[data-work-item="1"]');
+    helloFor(source, 1);
+    await flush();
+    await flush();
+    expect(doc().scrollTop).toBe(380);
+    // The column folded into tabs and back draws the file anew, at the same place.
+    resizeTo(1000);
+    resizeTo(1440);
+    expect(doc().scrollTop).toBe(380);
+
+    // A folder's list scrolls in its own element, and comes back the same way.
+    answers['local-file'] = { status: 200, body: { path: 'D:/w/src', name: 'src', kind: 'dir', contents: null, tooLarge: false, size: null, entries: [{ name: 'a.ts', dir: false }], more: false } };
+    const entries = () => root.querySelector<HTMLElement>('#detail .detail-body .local-view > .local-entries')!;
+
+    source.emit('reply', { reply: reply('r2', 3, { opening: 'And [src](src/).' }) });
+    click('#panel a.path-link[data-target="src/"]');
+    await flush();
+    await flush();
+    entries().scrollTop = 120;
+    entries().dispatchEvent(new Event('scroll'));
+    resizeTo(1000);
+    resizeTo(1440);
+    expect(entries().scrollTop).toBe(120);
+
+    // An artifact shown on work item 1 stays its tab after a conversation of its dropdown and back.
+    click('#detail .artifact-tab[data-path="chat/p.html"] .tab-open');
+    expect(root.querySelector('#detail .artifact-tab.selected')?.getAttribute('data-path')).toBe('chat/p.html');
+    click('#head [data-action="picker"]');
+    click('#head [data-action="select"][data-work-item="2"]');
+    helloFor(source, 2);
+    click('#head [data-action="picker"]');
+    click('#head [data-action="select"][data-work-item="1"]');
+    helloFor(source, 1);
+    expect(root.querySelector('#detail .artifact-tab.selected')?.getAttribute('data-path')).toBe('chat/p.html');
+
+    // Another page of this device keeps work item 2's tabs meanwhile; this page's next change keeps them.
+    const other = JSON.parse(localStorage.getItem('switchboard.tabs')!) as Record<string, unknown>;
+
+    localStorage.setItem('switchboard.tabs', JSON.stringify({ ...other, w2: { side: 'console', tab: 'conversation', artifact: null, changes: false, changesFile: null, files: [], file: null } }));
+    click('#detail [data-side="status"]');
+    expect(JSON.parse(localStorage.getItem('switchboard.tabs')!)).toMatchObject({ w2: { side: 'console' }, w1: { side: 'status' } });
+    page.close();
+  });
+
   it("opens another work item under its own head with a placeholder at once, never the one shown before, until its hello", async () => {
     const { page, source } = start();
 

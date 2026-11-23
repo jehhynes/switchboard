@@ -39,8 +39,8 @@ import { dotView, renderBanner, renderScreen, renderUpdate } from './connectionV
 import type { ConnectionView } from './connectionView.js';
 import { renderOpening, renderOpeningHead, renderOpeningSide, renderOpeningTabs } from './opening.js';
 import type { Opening } from './opening.js';
-import { parseScrolls, ROUTE_KEY, routeHash, SCROLL_KEY, startRoute, withScroll } from './route.js';
-import type { Route, ScrollPlace } from './route.js';
+import { parseScrolls, parseTabSets, ROUTE_KEY, routeHash, SCROLL_KEY, startRoute, tabSetKey, TABS_KEY, withScroll, withTabSet } from './route.js';
+import type { Route, ScrollPlace, TabSet } from './route.js';
 import { renderContextMeter } from '@switchboard/conversation/contextMeter';
 import type { ContextMenuState } from '@switchboard/conversation/contextMeter';
 import { EMPTY_HISTORY_UI, renderHistory } from './history.js';
@@ -590,6 +590,17 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return {};
     }
   };
+  /** Each work item's tabs as this device left them (route.ts), kept in local storage for a reload. */
+  const readTabSets = (): Record<string, TabSet> | null => {
+    try {
+      return parseTabSets(localStorage.getItem(TABS_KEY));
+    } catch {
+      return null;
+    }
+  };
+  let tabSets: Record<string, TabSet> = readTabSets() ?? {};
+  /** While a work item's kept tabs or the route's tab are put back, before its panes are drawn: no scroll place or tab set is kept meanwhile. */
+  let restoringTabs = false;
   /** The work items whose conversation took its kept place in this page's life; later the page's own memory of it (`left`) serves. */
   const placedConversations = new Set<number>();
 
@@ -1863,6 +1874,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   let left: { conversation: string; pinned: boolean; top: number } | null = null;
   /** Keeps where the conversation is when the page moves from it to another tab, by a tab or an artifact's row. */
   const leaving = (next: Tab): void => {
+    if (restoringTabs) {
+      return;
+    }
+
     if (mainTab() === 'conversation' && next !== 'conversation' && state.scope !== null && !wide()) {
       left = { conversation: `${state.scope.workItemId ?? ''} ${state.session?.id ?? ''}`, pinned, top: panel.scrollTop };
     }
@@ -2327,6 +2342,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       pane.classList.toggle('history-pane', tab === 'history');
       pane.classList.toggle('diff-pane', tab === 'diff' || (tab === 'file' && localFiles.codeShown()));
 
+      if (tab !== 'file') {
+        filePlaced.delete(pane);
+      }
+
       if (tab === 'browser') {
         takePane(pane);
         iframe.draw(pane, selectedRow(state), state.groups.some((group) => group.key === 'review' && group.rows.includes(selectedRow(state)!)));
@@ -2338,6 +2357,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         changes.drawDiff(pane);
       } else if (tab === 'file') {
         localFiles.draw(pane);
+        placeFile(pane);
       } else if (tab === 'artifacts' && artifact !== undefined && state.key !== null) {
         const kept = artifactDocs.get(docKey(artifact.path));
 
@@ -2436,6 +2456,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
 
     followEnd();
+    rememberTabs();
     checkSeen();
     showWaiting();
     dropConsoles();
@@ -2595,7 +2616,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const keepScroll = (): void => {
     const w = state.scope?.workItemId;
 
-    if (w == null || openingShown() !== null) {
+    if (w == null || openingShown() !== null || restoringTabs) {
       return;
     }
 
@@ -2620,8 +2641,13 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       places = withScroll(places, `${w} ${sideTab() === 'artifacts' ? `artifact:${openArtifact() ?? ''}` : sideTab()}`, { id: null, offset: 0, pinned: false, top: detailBody.scrollTop });
     }
 
+    for (const [key, top] of fileTops) {
+      places = withScroll(places, key, { id: null, offset: 0, pinned: false, top });
+    }
+
     try {
       sessionStorage.setItem(SCROLL_KEY, JSON.stringify(places));
+      fileTops.clear();
     } catch {
       // Not kept without session storage.
     }
@@ -2633,7 +2659,116 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     return w == null || ownScroller(tab) ? null : (scrollPlaces()[`${w} ${tab === 'artifacts' ? `artifact:${openArtifact() ?? ''}` : tab}`]?.top ?? null);
   };
 
-  window.addEventListener('pagehide', keepScroll, { signal: listening.signal });
+  /**
+   * Each file tab's scroll top as the operator left it, by `<work item> file:<target>`, kept with the scroll places; a file in the code view
+   * keeps its line instead. The pane that last brought a file tab back to its place, so a scroll there is that tab's.
+   */
+  const fileTops = new Map<string, number>();
+  const filePlaced = new WeakMap<HTMLElement, { key: string; node: HTMLElement }>();
+  const fileKey = (): string | null => {
+    const w = state.scope?.workItemId;
+    const shown = localFiles.shown();
+
+    return w == null || shown === null ? null : `${w} file:${shown.target}`;
+  };
+  const fileScroller = (pane: HTMLElement): HTMLElement => pane.querySelector<HTMLElement>(':scope > .local-view > .artifact-doc, :scope > .local-view > .local-entries') ?? pane;
+  /** Brings a file tab drawn anew in a pane, once read, back to where it was left. */
+  const placeFile = (pane: HTMLElement): void => {
+    const key = fileKey();
+    const shown = localFiles.shown();
+
+    if (key === null || shown === null || shown.entry.state === 'loading' || localFiles.codeShown()) {
+      filePlaced.delete(pane);
+      return;
+    }
+
+    // By its scroller too: a placeholder or a change of layout draws the same file anew.
+    const node = fileScroller(pane);
+    const placed = filePlaced.get(pane);
+
+    if (placed?.key === key && placed.node === node) {
+      return;
+    }
+
+    filePlaced.set(pane, { key, node });
+
+    const top = fileTops.get(key) ?? scrollPlaces()[key]?.top;
+
+    if (top !== undefined) {
+      node.scrollTop = top;
+    }
+  };
+
+  for (const pane of [panel, detailBody]) {
+    pane.addEventListener(
+      'scroll',
+      (event) => {
+        const key = fileKey();
+
+        if (key !== null && !restoringTabs && openingShown() === null && filePlaced.get(pane)?.key === key && event.target === fileScroller(pane)) {
+          fileTops.set(key, fileScroller(pane).scrollTop);
+        }
+      },
+      { capture: true, passive: true, signal: listening.signal },
+    );
+  }
+
+  /** Keeps the shown work item's tabs (`TabSet`) once its own are drawn, on this device, the latest `TAB_SETS_KEPT`. */
+  const rememberTabs = (): void => {
+    const w = state.scope?.workItemId;
+
+    // Between a select and its work item's `hello`, the tabs drawn are still the work item's before, or already cleared for the next one.
+    if (w == null || restoringTabs || openingShown() !== null || openedItem !== w || wanted !== w) {
+      return;
+    }
+
+    const files = localFiles.view.tabs;
+    const shownFile = files.findIndex((one) => one.id === localFiles.view.open);
+    const set: TabSet = { side: view.side, tab: view.tab, artifact: view.artifact, changes: changes.view.tab, changesFile: changes.view.tab ? changes.focusPath : null, files: files.map((one) => ({ target: one.target, line: one.line })), file: shownFile === -1 ? null : shownFile };
+    const key = tabSetKey(w);
+
+    if (Object.keys(tabSets).at(-1) === key && JSON.stringify(tabSets[key]) === JSON.stringify(set)) {
+      return;
+    }
+
+    // Added to what this device's other pages kept since, so a page showing another work item does not drop theirs.
+    tabSets = withTabSet(readTabSets() ?? tabSets, w, set);
+
+    try {
+      localStorage.setItem(TABS_KEY, JSON.stringify(tabSets));
+    } catch {
+      // Kept for this page only.
+    }
+  };
+  /** Puts back a work item's kept tabs: its Changes tab and file tabs, in their order, then the tabs it showed. */
+  const restoreTabs = (set: TabSet): void => {
+    // The Changes and file tabs follow the work item from now on, as the next draw would make them.
+    changes.follow(followed(), false);
+    localFiles.follow(followed());
+
+    if (set.changes) {
+      changes.openChanges(set.changesFile);
+    }
+
+    for (const one of set.files) {
+      localFiles.open(one.target, one.line);
+    }
+
+    localFiles.view.open = (set.file === null ? undefined : localFiles.view.tabs[set.file])?.id ?? localFiles.view.tabs.at(-1)?.id ?? null;
+
+    if ([...SIDE_TABS, 'diff', 'file'].includes(set.side)) {
+      view.side = set.side as SideTab;
+    }
+
+    // Where the column folds into the conversation's strip, every opening shows the Conversation tab (PRD R109); the column's tab waits in `side`.
+    view.tab = wide() && TABS.some((one) => one.tab === set.tab) ? (set.tab as Tab) : 'conversation';
+
+    // An artifact gone or closed since leaves its tab to Status (`sideTab`, `mainTab`).
+    view.artifact = set.artifact !== null && state.artifacts.some((one) => one.path === set.artifact) && !closedNow().has(set.artifact) ? set.artifact : null;
+    tabChosen = true;
+  };
+
+  window.addEventListener('pagehide', () => (keepScroll(), rememberTabs()), { signal: listening.signal });
   document.addEventListener('visibilitychange', () => document.visibilityState === 'hidden' && keepScroll(), { signal: listening.signal });
 
 
@@ -2987,8 +3122,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     if (pendingRowControl?.key !== listSelection) pendingRowControl = null;
     closeMenus();
 
-    // Where the work item left is kept, for when it is opened again.
+    // Where the work item left is kept, and its tabs, for when it is opened again.
     keepScroll();
+    rememberTabs();
 
     // Choosing a work item hides the drawer, as a row's click hides the auto-hidden dock.
     closeDrawer();
@@ -5004,6 +5140,22 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         openedItem = opened;
         tabChosen = false;
         openTabs();
+
+        if (type === 'hello') {
+          tabSets = readTabSets() ?? tabSets;
+        }
+
+        const kept = type === 'hello' && opened !== null ? tabSets[tabSetKey(opened)] : undefined;
+
+        if (kept !== undefined) {
+          restoringTabs = true;
+
+          try {
+            restoreTabs(kept);
+          } finally {
+            restoringTabs = false;
+          }
+        }
       }
 
       // The tab the route named for the work item the page started on, once it has come and still has that tab, with what it showed.
@@ -5012,6 +5164,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         const path = tab.startsWith('artifact:') ? tab.slice('artifact:'.length) : null;
 
         restoreTab = null;
+        restoringTabs = true;
         // The Changes and file tabs follow the work item from now on, as the next draw would make them.
         changes.follow(followed(), false);
         localFiles.follow(followed());
@@ -5026,6 +5179,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         } else if (tab === 'file' && firstRoute.p != null) {
           localFiles.open(firstRoute.p, firstRoute.l ?? null);
         }
+
+        restoringTabs = false;
       }
 
       if (type === 'hello' && opened !== null && opened !== firstRoute.w) {
