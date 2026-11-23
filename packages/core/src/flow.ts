@@ -232,8 +232,9 @@ export type FlowEvent =
   | { type: 'stop-failed'; sessionId: string; reason: StopReason; message: string; shortId?: string | null; leftovers?: true }
   | { type: 'worktree-found'; source: string; sourceKey: string; path: string; branch: string }
   /** `start` queues the work item to run now; otherwise it waits `unstarted` for Start (PRD R6). */
-  | { type: 'adhoc'; prompt: string; repoRoot: string; start?: boolean; provider?: Provider }
-  | { type: 'new-session'; repoRoot: string; provider?: Provider; model?: string | null }
+  | { type: 'adhoc'; prompt: string; repoRoot: string; start?: boolean; provider?: Provider; model?: string | null }
+  /** A standalone conversation (PRD R122), empty or with `prompt` as its first message. */
+  | { type: 'new-session'; repoRoot: string; provider?: Provider; model?: string | null; prompt?: string }
   /**
    * A hosted conversation (architecture.md § Hosted conversations): an ad hoc work item hosted by the window binding `hostWindow`, run in
    * `folder`, whose session starts at once with no prompt.
@@ -391,6 +392,16 @@ function firstLine(prompt: string): string {
   return prompt.trim().split(/\r?\n/, 1)[0]?.trim() ?? '';
 }
 
+/** Whether a session ended at its start, refused before its first message was taken, rather than after it ran (`sessionStartFailed`). */
+function startFailed(session: Session): boolean {
+  return session.outcome === 'failed' && session.outcomeDetail !== MESSAGES.holderStopped;
+}
+
+/** Refuses a model name that is blank or 200 characters or longer. */
+function checkModel(model: string | null | undefined): void {
+  if (model != null && (model.trim() === '' || model.length > 200)) throw new Refusal('Choose a model name under 200 characters.');
+}
+
 /** A short label while the provider has not named the conversation. */
 function summarizeMessage(message: string): string {
   const plain = message.replace(/^(?:\[(?:voice|spoken|expressive)\]\s*)+/i, '').replace(/\s+/g, ' ').trim();
@@ -530,7 +541,7 @@ function detailOf(store: Store, event: FlowEvent): Record<string, unknown> | nul
     case 'worktree-found':
       return { path: event.path, branch: event.branch };
     case 'adhoc':
-      return { repoRoot: event.repoRoot, start: event.start === true };
+      return { repoRoot: event.repoRoot, start: event.start === true, model: event.model ?? null };
     case 'new-session':
       return { repoRoot: event.repoRoot, provider: event.provider ?? null, model: event.model ?? null };
     case 'new-conversation':
@@ -740,9 +751,9 @@ class Flow {
       case 'worktree-found':
         return this.worktreeFound(event.source, event.sourceKey, event.path, event.branch);
       case 'adhoc':
-        return this.adhoc(event.prompt, event.repoRoot, event.start === true, event.provider);
+        return this.adhoc(event.prompt, event.repoRoot, event.start === true, event.provider, event.model);
       case 'new-session':
-        return this.newSession(event.repoRoot, event.provider, event.model);
+        return this.newSession(event.repoRoot, event.provider, event.model, event.prompt);
       case 'new-conversation':
         return this.newConversation(event.hostWindow, event.folder, event.provider);
       case 'conversation-title':
@@ -1035,8 +1046,9 @@ class Flow {
     }
   }
 
-  private adhoc(prompt: string, repoRoot: string, start: boolean, provider?: Provider): void {
+  private adhoc(prompt: string, repoRoot: string, start: boolean, provider?: Provider, model?: string | null): void {
     this.checkProvider(provider);
+    checkModel(model);
     const title = firstLine(prompt);
 
     if (title === '') {
@@ -1047,16 +1059,22 @@ class Flow {
       throw new Refusal('Choose a repo for the prompt.');
     }
 
-    this.insertAdhoc(prompt, title, repoRoot, null, start ? 'queued' : 'unstarted', null, provider);
+    const item = this.insertAdhoc(prompt, title, repoRoot, null, start ? 'queued' : 'unstarted', null, provider);
+    if (model != null) this.store.updateWorkItem(item.id, { model: model.trim() });
   }
 
-  /** Starts an independent, empty conversation in its own work item. */
-  private newSession(repoRoot: string, provider?: Provider, model?: string | null): void {
+  /**
+   * Starts an independent conversation in its own work item (PRD R122): empty, or with `prompt` as its first message, which titles it until the
+   * provider names it.
+   */
+  private newSession(repoRoot: string, provider?: Provider, model?: string | null, prompt?: string): void {
     this.checkInteractiveProvider(provider);
     if (repoRoot === '') throw new Refusal('Choose a folder for the session.');
-    if (model !== undefined && model !== null && (model.trim() === '' || model.length > 200)) throw new Refusal('Choose a model name under 200 characters.');
-    const item = this.insertAdhoc(null, NEW_CONVERSATION_TITLE, repoRoot, null, 'running', null, provider, true);
-    if (model != null) this.store.updateWorkItem(item.id, { model: model.trim() });
+    checkModel(model);
+    const message = prompt?.trim() ?? '';
+    const title = message === '' ? NEW_CONVERSATION_TITLE : summarizeMessage(message) || NEW_CONVERSATION_TITLE;
+    const item = this.insertAdhoc(message === '' ? null : message, title, repoRoot, null, 'running', null, provider, true);
+    this.store.updateWorkItem(item.id, { ...(model != null ? { model: model.trim() } : {}), ...(title === NEW_CONVERSATION_TITLE ? {} : { titleOrigin: 'generated' as const }) });
     this.startSession(this.store.workItem(item.id)!);
   }
 
@@ -3091,7 +3109,9 @@ class Flow {
     } else if (approved) {
       prompt = item.approvalPrompt!;
     } else if (playbook === null) {
-      prompt = item.taskPrompt ?? '';
+      // A conversation's first message starts only its first session that takes it: a retry after a failed start sends it again, one after a
+      // session ran opens an empty conversation.
+      prompt = this.interactive(item) && this.store.sessionsFor(item.id).some((one) => !startFailed(one)) ? '' : (item.taskPrompt ?? '');
     } else {
       const rendered = renderTaskPrompt(playbook.template, values);
 
@@ -3151,7 +3171,7 @@ class Flow {
       codeMode: held !== null,
       ...(appServer ? { execution: 'app-server' as const } : {}),
       launchId: held?.launchId ?? (appServer ? this.context.newUuid() : null),
-      promptless: hosted,
+      promptless: hosted && prompt === '',
       personaId: persona?.id ?? null,
       personaVersion: toneVersion(tone),
       personaPinned: false,
