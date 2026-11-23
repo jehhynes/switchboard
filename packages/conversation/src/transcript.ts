@@ -25,6 +25,12 @@ const NOT_TYPED = /^\s*(<local-command-|<bash-(input|stdout|stderr)>|<system-rem
  */
 const AGENTS_STOPPED = /^\s*(Background agent ".*" was stopped by the user\.|\d+ background agents were stopped by the user: )/;
 
+/**
+ * What Claude Code queues itself at a usage limit (mechanics M140): `/rate-limit-options` when the limit is reached, which it receives as no user
+ * line, and its continue text when the limit resets or usage comes back before the reset, which it receives as a meta line. Their queue lines name no origin, so the text decides.
+ */
+const AT_LIMIT = /^\s*(\/rate-limit-options|Your claude\.ai usage (limit has reset|is available again before the usage-limit reset)\. Continue the task you were working on when the limit was reached; do not repeat work that is already complete\.)\s*$/;
+
 /** Text in a queue line that Claude Code put there, such as a task notification, a poll event or a message from another session. */
 const NOT_SENT = /^\s*(<|\[Cross-session delivery notice\])/;
 
@@ -132,7 +138,7 @@ export function parseLine(line: string): { entry: TranscriptEntry | null; assist
     const content = raw['content'];
 
     // A paste of several lines starts with its `pasted_content` tag, which is the operator's text, not Claude Code's.
-    if (raw['operation'] === 'enqueue' && typeof content === 'string' && content.trim() !== '' && !NOT_TYPED.test(unwrapPasted(content)) && !NOT_SENT.test(unwrapPasted(content)) && !AGENTS_STOPPED.test(content)) {
+    if (raw['operation'] === 'enqueue' && typeof content === 'string' && content.trim() !== '' && !NOT_TYPED.test(unwrapPasted(content)) && !NOT_SENT.test(unwrapPasted(content)) && !AGENTS_STOPPED.test(content) && !AT_LIMIT.test(content)) {
       return { entry: { kind: 'sent', uuid: null, at: at ?? 0, text: typedText(content) }, assistantAt: null, uuid: null, parent: null, at, received: null };
     }
 

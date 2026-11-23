@@ -52,6 +52,22 @@ describe('parseLine on messages', () => {
     expect(parseLine(JSON.stringify({ type: 'queue-operation', operation: 'enqueue', timestamp: at, content: '<event nonce="x">' }))).toMatchObject({ entry: null });
   });
 
+  it('reads the command and the continue text Claude Code queues at a usage limit as no message, but not the operator writing about them', () => {
+    const enqueue = (content: string) => parseLine(JSON.stringify({ type: 'queue-operation', operation: 'enqueue', timestamp: at, content }));
+    const resumed = 'Your claude.ai usage limit has reset. Continue the task you were working on when the limit was reached; do not repeat work that is already complete.';
+
+    expect(enqueue('/rate-limit-options')).toMatchObject({ entry: null, at: Date.parse(at) });
+    expect(enqueue(resumed)).toMatchObject({ entry: null });
+    // Its continue text when usage comes back before the reset, from the 2.1.330 binary.
+    expect(enqueue('Your claude.ai usage is available again before the usage-limit reset. Continue the task you were working on when the limit was reached; do not repeat work that is already complete.')).toMatchObject({ entry: null });
+    expect(enqueue('/rate-limit-options please')).toMatchObject({ entry: { kind: 'sent', text: '/rate-limit-options please' } });
+    expect(enqueue(`${resumed} Then push.`)).toMatchObject({ entry: { kind: 'sent' } });
+    // Switchboard's own continue text, which it types as a message of its own (architecture.md § Rate limits).
+    expect(enqueue('Your usage limit has reset. Continue the task you were working on when the limit was reached; do not repeat work that is already complete.')).toMatchObject({ entry: { kind: 'sent' } });
+    // Received as a slash command from the operator, it is theirs.
+    expect(parseLine(JSON.stringify({ type: 'user', uuid: 'u', timestamp: at, origin: { kind: 'human' }, message: { content: '<command-name>/rate-limit-options</command-name>\n<command-args></command-args>' } }))).toMatchObject({ entry: { kind: 'message', text: '/rate-limit-options' } });
+  });
+
   it("reads Claude Code's notice of stopped background agents as no message, queued or in a line without an origin, but not the operator quoting it", () => {
     const enqueue = (content: string) => parseLine(JSON.stringify({ type: 'queue-operation', operation: 'enqueue', timestamp: at, content }));
     const several = '2 background agents were stopped by the user: "One", "Two".';

@@ -514,6 +514,22 @@ describe('SessionConversation', () => {
     expect(changes.filter((change) => change.type === 'message')).toHaveLength(2);
   });
 
+  it('leaves out the command and the continue text Claude Code queues itself at a usage limit', () => {
+    const { conversation, path, items, changes } = setup();
+
+    // Scrubbed lines of a real transcript (mechanics M140): at the limit Claude Code queues `/rate-limit-options` and receives it as no user
+    // line; at the reset it queues its continue text and receives it as a meta line. The two limits were days apart and are retimed here.
+    copyFileSync(join(import.meta.dirname, 'fixtures', 'transcripts', 'usage-limit.jsonl'), path);
+    conversation.readTranscript(path);
+
+    expect(items().map((item) => [item.type, item.type === 'message' ? item.text : item.opening, item.type === 'message' && item.provisional, item.withdrawn])).toEqual([
+      ['message', 'Run the checks.', false, false],
+      ['reply', "You've hit your usage limit, which resets at 11:20 am Eastern.", false, false],
+      ['reply', 'The checks pass.', false, false],
+    ]);
+    expect(changes.filter((change) => change.type === 'message')).toHaveLength(1);
+  });
+
   it('withdraws a message queued before one Claude received and never received itself, and keeps one queued after it', () => {
     const { store, conversation, path, append, items } = setup();
     const shown = () => items().map((item) => `${item.type === 'message' ? `${item.text}${item.provisional ? ' (sent)' : ''}` : item.opening}${item.withdrawn ? ' (withdrawn)' : ''}`);
