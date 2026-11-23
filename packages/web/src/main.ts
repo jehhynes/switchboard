@@ -1868,7 +1868,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /** Keeps where the conversation is when the page moves from it to another tab, by a tab or an artifact's row. */
   const leaving = (next: Tab): void => {
     if (mainTab() === 'conversation' && next !== 'conversation' && state.scope !== null && !wide()) {
-      left = { conversation: `${state.scope.scopeGen} ${state.session?.id ?? ''}`, pinned, top: panel.scrollTop };
+      left = { conversation: `${state.scope.workItemId ?? ''} ${state.session?.id ?? ''}`, pinned, top: panel.scrollTop };
     }
   };
   const atEnd = (): boolean => panel.scrollHeight - panel.scrollTop - panel.clientHeight < 24;
@@ -2379,7 +2379,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // The composer first, so the conversation is scrolled against its final height.
     updateComposer();
 
-    const conversation = `${state.scope.scopeGen} ${state.session?.id ?? ''}`;
+    // By work item and session, not scope generation, so a reconnect's new generation keeps the operator's place.
+    const conversation = `${state.scope.workItemId ?? ''} ${state.session?.id ?? ''}`;
     const showing = `${mainTab()} ${conversation}`;
 
     if (showing !== shown) {
@@ -4708,6 +4709,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const onEvent = (type: string, raw: string): void => {
       const data = JSON.parse(raw) as { type: string } & Record<string, unknown>;
       const keyBefore = state.key;
+      // A new stream's hello, before the page has selected its work item again on it, keeps what the page shows, so a reconnect within the grace
+      // period changes nothing the operator sees.
+      const keep = type === 'hello' && typeof data['key'] === 'string' && data['key'] !== keyBefore && data['scope'] == null && wanted !== null && state.scope?.workItemId === wanted;
+      const before = state;
 
       state = applyEvent(state, data);
       if (state.key !== keyBefore) pendingRowControl = null;
@@ -4719,8 +4724,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         });
       }
 
+      if (keep) {
+        state = { ...state, scope: before.scope, session: before.session, items: before.items, more: before.more, status: before.status, artifacts: before.artifacts, unread: before.unread, questions: before.questions };
+      }
+
       // The Changes tab kept through a reconnect reads its list again once the new stream shows the work item, as a new stream reads anew.
-      if (type === 'hello' && rebound && wanted !== null && state.scope?.workItemId === wanted) {
+      if (type === 'hello' && rebound && wanted !== null && state.scope?.workItemId === wanted && !keep) {
         rebound = false;
 
         if (changes.view.tab) {
@@ -4864,7 +4873,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       }
 
       // The hub's tabs for the work item: in each `hello`, and from another device in `tabs`.
-      if (type === 'hello' && state.scope?.workItemId != null) {
+      if (type === 'hello' && state.scope?.workItemId != null && !keep) {
         const tabs = data['tabs'] as { tab: string | null; closed: Array<{ path: string; updatedAt: number }> } | null | undefined;
 
         savedTabs = tabs == null ? null : { workItemId: state.scope.workItemId, tab: tabs.tab, closed: tabs.closed };
@@ -4925,7 +4934,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
         restoreHistory = null;
         openHistory(shown.ticketId, shown.key, () => null);
-      } else if (type === 'hello' && opened !== firstRoute.w) {
+      } else if (type === 'hello' && opened !== null && opened !== firstRoute.w) {
         // Another work item came first: the route's tab was for the one asked for.
         restoreTab = null;
       }

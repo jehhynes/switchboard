@@ -5323,6 +5323,9 @@ describe('the page in use', () => {
 
     // At once: the work item, before its hello.
     expect(location.hash).toBe('#w=1&t=status');
+    // The stream's first hello, before the page selected the work item on it.
+    source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1, { title: 'Fix it' })])], scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    expect(location.hash).toBe('#w=1&t=status');
     hello(source);
     expect(root.classList.contains('listing')).toBe(false);
     expect(root.querySelector<HTMLElement>('#head .tab.selected')?.dataset['tab']).toBe('status');
@@ -5710,6 +5713,29 @@ describe('the page in use', () => {
     expect(root.querySelector('.conn-banner')).toBeNull();
     expect(root.classList.contains('stale')).toBe(false);
     expect(input.disabled).toBe(false);
+    page.close();
+  });
+
+  it("keeps the conversation shown through a reconnect, until the new stream's hello for the work item replaces it", async () => {
+    vi.useFakeTimers();
+    history.replaceState(null, '', '#w=1');
+
+    const { page, source } = start();
+
+    hello(source);
+    source.emit('error', {});
+    await vi.advanceTimersByTimeAsync(BACKOFF_MS[0]! * (1 + JITTER));
+
+    const next = FakeSource.last!;
+
+    // The new stream's key is not bound yet: its hello has no work item, and the page selects it again.
+    next.emit('hello', { key: 'pk2', groups: [listGroup('progress', [listRow(1, { title: 'Fix it' })])], scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    expect(root.querySelectorAll('#panel .timeline > li').length).toBeGreaterThan(0);
+    expect(root.querySelector<HTMLElement>('#composer')!.hidden).toBe(false);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(posts.filter((post) => post.url.endsWith('/select')).at(-1)?.body).toMatchObject({ window: 'pk2', workItemId: 1 });
+    hello(next, { key: 'pk2', items: [message('m7', 7)] });
+    expect([...root.querySelectorAll('#panel .timeline > li[data-id]')].map((item) => item.getAttribute('data-id'))).toEqual(['m7']);
     page.close();
   });
 
