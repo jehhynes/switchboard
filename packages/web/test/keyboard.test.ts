@@ -2,6 +2,9 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { PageGroup, PageRow } from '@switchboard/protocol';
 import { startPage } from '../src/main.js';
 import { drawAtOnce } from './frame.js';
+import { PAGE_ASSETS } from '../dist/index.js';
+
+const css = PAGE_ASSETS['page.css']!.body;
 
 const row = (id: number, patch: Partial<PageRow> = {}): PageRow => ({ workItemId: id, ticketId: id, title: `Item ${id}`, priority: null, time: null, ticket: `gh ${id}`, sourceKind: 'github', url: '', playbook: 'dev:build', links: [], returned: 0, comment: null, mark: null, details: [], stripe: null, dim: false, host: null, actions: [], main: null, pastes: [], search: '', opens: [], band: null, voice: null, history: null, ...patch });
 const group = (key: string, rows: PageRow[]): PageGroup => ({ key, title: key, glyph: '', empty: null, rows });
@@ -112,6 +115,33 @@ it('anchors right-click menus at the pointer and does not open an empty menu', (
   key(el('.row-menu .menu-row'), 'Escape');
   key(el('.row[data-row="item:2"]'), 'ContextMenu');
   expect(root.querySelector('.row-menu')).toBeNull();
+});
+
+it('fixes a row menu to the viewport at its row, inside it near its right edge, and raises the list above the conversation while it is open', () => {
+  start([group('review', [row(1, { url: 'https://example.test/1' })])]);
+  vi.spyOn(document.documentElement, 'clientWidth', 'get').mockReturnValue(1000);
+  vi.spyOn(document.documentElement, 'clientHeight', 'get').mockReturnValue(800);
+  // The list's right edge is at 340 px; the right click lands near it.
+  const entry = el('.list-row');
+  vi.spyOn(entry, 'getBoundingClientRect').mockReturnValue({ left: 0, right: 340, top: 200, bottom: 250, width: 340, height: 50 } as DOMRect);
+  el('.row').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 330, clientY: 220 }));
+  const anchor = el('.row-menu-anchor');
+  expect([anchor.style.left, anchor.style.top]).toEqual(['330px', '220px']);
+  // The list scrolls the row up 100 px: the menu follows it.
+  vi.spyOn(entry, 'getBoundingClientRect').mockReturnValue({ left: 0, right: 340, top: 100, bottom: 150, width: 340, height: 50 } as DOMRect);
+  el('#list').dispatchEvent(new Event('scroll'));
+  expect([anchor.style.left, anchor.style.top]).toEqual(['330px', '120px']);
+  // Opened from the keyboard, it sits under the row's start; a point past the viewport is held inside it.
+  key(el('.row-menu .menu-row'), 'Escape');
+  key(el('.row'), 'ContextMenu');
+  expect([el('.row-menu-anchor').style.left, el('.row-menu-anchor').style.top]).toEqual(['8px', '146px']);
+  key(el('.row-menu .menu-row'), 'Escape');
+  vi.spyOn(entry, 'getBoundingClientRect').mockReturnValue({ left: 900, right: 1240, top: 780, bottom: 830, width: 340, height: 50 } as DOMRect);
+  el('.row').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 1200, clientY: 820 }));
+  expect([el('.row-menu-anchor').style.left, el('.row-menu-anchor').style.top]).toEqual(['1000px', '800px']);
+  // page.css: the anchor is fixed, so the list's scroll box does not clip it, and the list rises to the header menus' layer while one is open.
+  expect(css).toMatch(/\.row-menu-anchor \{ position: fixed;/);
+  expect(css).toContain('#list:has(.row-menu) { position: relative; z-index: var(--sb-z-bar-menu); }');
 });
 
 it('walks headings, rows and Done bands, selecting locally and revealing each row, with no wrap or modified arrows', () => {

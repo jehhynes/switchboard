@@ -2476,10 +2476,29 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     changes.drop();
     localFiles.drop();
   };
+  /**
+   * Places a row's open menu at its row in the viewport: where the right click was, kept as its offset from the row, or under the row's start;
+   * its row's place is read again on each draw and scroll, so the menu stays with it. Kept inside the viewport.
+   */
+  const placeRowMenus = (): void => {
+    const width = document.documentElement.clientWidth;
+    const height = document.documentElement.clientHeight;
+
+    for (const anchor of list.querySelectorAll<HTMLElement>('.row-menu-anchor')) {
+      const box = anchor.parentElement!.getBoundingClientRect();
+      const x = box.left + (anchor.dataset['x'] === undefined ? 8 : Number(anchor.dataset['x']));
+      const y = box.top + (anchor.dataset['y'] === undefined ? box.height - 4 : Number(anchor.dataset['y']));
+
+      anchor.style.left = `${Math.round(width === 0 ? x : Math.min(Math.max(0, x), width))}px`;
+      anchor.style.top = `${Math.round(height === 0 ? y : Math.min(Math.max(0, y), height))}px`;
+    }
+  };
   /** Opens each open menu down and to the right of its button, or the other way where the page has no room (`placeMenus`, architecture.md § Conversation view, Menus). */
   // A menu may set a wider max-width of its own, as the Artifacts menu does for its kind column.
-  const fitMenus = (): void =>
+  const fitMenus = (): void => {
+    placeRowMenus();
     placeMenus(root, { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight }, (menu) => parseFloat(getComputedStyle(menu as unknown as Element).maxWidth) || MENU_MAX_WIDTH);
+  };
   /**
    * How many artifact tabs the shown strip fits (`artifactTabsFit`), measured after a draw: its other tabs and the Artifacts button as drawn, and a
    * fixed width per artifact tab. True when that changes which tabs show, so the strip is drawn once more; a change of the strip's width draws again
@@ -3962,9 +3981,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         const key = button!.dataset['row'] ?? '';
         const open = view.rowMenu === key;
 
+        // The menu is fixed to the viewport and flips up where the row has no room under it (`fitMenus`), so the list does not scroll for it.
         if (open) { closeMenus(); draw(); } else { openRowMenu(key); }
-        // A row near the list's end keeps its menu in view.
-        list.querySelector<HTMLElement>('.row-menu')?.scrollIntoView?.({ block: 'nearest' });
         break;
       }
       case 'link-menu':

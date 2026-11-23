@@ -3615,8 +3615,8 @@ describe('the page in use', () => {
 
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { value: shown, configurable: true });
     row().click();
-    expect(shown).toHaveBeenCalledWith({ block: 'nearest' });
-    expect(shown.mock.contexts[0]).toBe(root.querySelector('#list .row-menu'));
+    // The menu is fixed to the viewport and flips where it has no room, so the list does not scroll for it.
+    expect(shown.mock.contexts).not.toContain(root.querySelector('#list .row-menu'));
     delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
     expect(root.querySelector('#list .row-actions')?.getAttribute('aria-expanded')).toBe('true');
     expect([...root.querySelectorAll('#list .row-menu .menu-row')].map((one) => one.textContent)).toEqual(['Start', 'Start with guidance…', 'Snooze…', 'Open ticket']);
