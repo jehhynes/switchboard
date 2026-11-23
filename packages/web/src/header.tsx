@@ -34,7 +34,7 @@ const Separator = () => <li class="menu-separator" role="separator"></li>;
 
 /**
  * A row's menu, as rows of a `menu` list (architecture.md § Web page), grouped as the dock's row menu is: the main control, the work controls, the
- * state controls, Add comment…, the order controls, what the row opens (Copy, several drafts in a Copy submenu, Open in VS Code and Open report, History, Open ticket and its
+ * state controls, Add comment…, the order controls, what the row opens (Copy, several drafts in a Copy submenu, Open in VS Code and Open report, History for a work item, Open ticket and its
  * links, more than two of them in an Open link submenu), then the controls that ask first; empty when the row offers none. Each item names its
  * row, so a pool ticket's menu in the list runs as the header's does.
  */
@@ -74,8 +74,8 @@ export function menuRows(row: PageRow, view: Pick<View, 'acting' | 'linkMenu' | 
   const opens = [
     ...copy,
     ...commands.map((one) => item({ 'data-action': 'row-command', 'data-label': one.label }, one.icon, one.label)),
-    // The dock's History, which the page shows in the conversation's place.
-    ...(row.history === null ? [] : [item({ 'data-action': 'row-history' }, 'history', 'History')]),
+    // The dock's History, which selects the work item's History tab; a pool ticket has no work item open, so no tab to show it in.
+    ...(row.history === null || row.workItemId === null ? [] : [item({ 'data-action': 'row-history' }, 'history', 'History')]),
     ...(row.url === '' ? [] : [link('ticket', 'Open ticket', 'link-external')]),
     ...(row.links.length > MENU_LINKS ? submenu : row.links.map((one, index) => link(String(index), `Open ${one.label}`, 'link-external'))),
   ];
@@ -399,19 +399,20 @@ function artifactTabs(state: PageState, strip: ArtifactStrip): ComponentChildren
 }
 
 /**
- * The tab strip atop the column right of the conversation on a wide screen: Status, Console and Browser, each while it has something to show, then a tab per artifact (`artifactTabs`);
- * the conversation keeps its own pane beside it. `extra` follows them, as the Changes button does.
+ * The tab strip atop the column right of the conversation on a wide screen: Status, Console, Browser and History, each while it has something to show, then a tab per
+ * artifact (`artifactTabs`); the conversation keeps its own pane beside it. `extra` follows them, as the Changes button does.
  */
-export function renderSideSwitch(side: SideTab, state: PageState, browser = false, strip: ArtifactStrip = { open: null, fit: 0, menu: false, now: 0 }, extra: ComponentChildren = null, console = true): VNode {
+export function renderSideSwitch(side: SideTab, state: PageState, browser = false, strip: ArtifactStrip = { open: null, fit: 0, menu: false, now: 0 }, extra: ComponentChildren = null, console = true, history = false): VNode {
   const fresh = state.status?.unread === true;
   const tabs: Array<[SideTab, string, boolean]> = [
     ['status', 'Status', fresh],
     ...(console ? [['console', 'Console', false] as [SideTab, string, boolean]] : []),
     ...(browser ? [['browser', 'Browser', false] as [SideTab, string, boolean]] : []),
+    ...(history ? [['history', 'History', false] as [SideTab, string, boolean]] : []),
   ];
 
   return (
-    <nav class="tabs side-switch" role="tablist" aria-label={['Status', ...(console ? ['console'] : []), ...(browser ? ['browser'] : [])].join(', ') + ' and artifacts'}>
+    <nav class="tabs side-switch" role="tablist" aria-label={['Status', ...(console ? ['console'] : []), ...(browser ? ['browser'] : []), ...(history ? ['history'] : [])].join(', ') + ' and artifacts'}>
       {tabs.map(([tab, label, unread]) => (
         <TabButton selected={tab === side} label={label} unread={unread} attrs={{ 'data-side': tab }} />
       ))}
@@ -432,14 +433,14 @@ export function renderMaximize(maximized: boolean): VNode {
   );
 }
 
-/** The conversation's tab strip on a narrower screen: Conversation, Status, Console and Browser, each while it has something to show, then a tab per artifact as in the column, and `extra`, as the Changes button. */
-export function renderTabs(view: View, state: PageState, browser = false, strip: ArtifactStrip = { open: null, fit: 0, menu: false, now: 0 }, extra: ComponentChildren = null, console = true): VNode {
+/** The conversation's tab strip on a narrower screen: Conversation, Status, Console, Browser and History, each while it has something to show, then a tab per artifact as in the column, and `extra`, as the Changes button. */
+export function renderTabs(view: View, state: PageState, browser = false, strip: ArtifactStrip = { open: null, fit: 0, menu: false, now: 0 }, extra: ComponentChildren = null, console = true, history = false): VNode {
   const fresh = state.status?.unread === true;
   // As in the VS Code view, Status has the unread dot while its status is unread; the page shows no unread counts.
 
   return (
     <nav class="tabs" role="tablist">
-      {TABS.filter(({ tab }) => tab !== 'artifacts' && (browser || tab !== 'browser') && (console || tab !== 'console')).map(({ tab, label }) => (
+      {TABS.filter(({ tab }) => tab !== 'artifacts' && (browser || tab !== 'browser') && (console || tab !== 'console') && (history || tab !== 'history')).map(({ tab, label }) => (
         <TabButton selected={tab === view.tab} label={label} unread={tab === 'status' && fresh} attrs={{ 'data-tab': tab }} />
       ))}
       {artifactTabs(state, { ...strip, open: view.tab === 'artifacts' ? strip.open : null })}

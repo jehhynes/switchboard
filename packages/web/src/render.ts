@@ -10,18 +10,19 @@ import type { ArtifactView, MessageView, NativeRequest, PageAction, PageGroup, P
 import type { SnoozeChoice } from '@switchboard/core/snooze';
 
 /** `diff` shows the open file's diff tab (`changes.tsx`), which has no fixed tab of its own. */
-export type Tab = 'conversation' | 'status' | 'artifacts' | 'console' | 'browser' | 'diff' | 'file';
+export type Tab = 'conversation' | 'status' | 'artifacts' | 'console' | 'browser' | 'history' | 'diff' | 'file';
 export const TABS: Array<{ tab: Tab; label: string }> = [
   { tab: 'conversation', label: 'Conversation' },
   { tab: 'status', label: 'Status' },
   { tab: 'artifacts', label: 'Artifacts' },
   { tab: 'console', label: 'Console' },
   { tab: 'browser', label: 'Browser' },
+  { tab: 'history', label: 'History' },
 ];
 
 /** What the column right of the conversation shows on a wide screen. */
-export type SideTab = 'status' | 'artifacts' | 'console' | 'browser' | 'diff' | 'file';
-export const SIDE_TABS: readonly SideTab[] = ['status', 'artifacts', 'console', 'browser'];
+export type SideTab = 'status' | 'artifacts' | 'console' | 'browser' | 'history' | 'diff' | 'file';
+export const SIDE_TABS: readonly SideTab[] = ['status', 'artifacts', 'console', 'browser', 'history'];
 
 /** The most artifact tabs a strip shows, whatever its width (PRD R109): the rest are in the Artifacts menu at its end. */
 export const ARTIFACT_TABS_MAX = 5;

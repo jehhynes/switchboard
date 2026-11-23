@@ -69,7 +69,7 @@ describe("the page's History (architecture.md § Web page)", () => {
     const root = document.createElement('div');
 
     root.innerHTML = html(renderHistory(open()));
-    expect(root.querySelector('.hist-bar-title')?.textContent).toBe('gh 77 History');
+    expect(root.querySelector('.history-view')?.getAttribute('aria-label')).toBe('gh 77 History');
     expect(root.querySelector('.hist-headline h1')?.textContent).toBe('Inbox <badge>');
     expect(root.querySelector('.hist-key')?.textContent).toBe('gh 77');
     expect([...root.querySelectorAll('.hist-facts dt')].map((fact) => fact.textContent)).toEqual(['Status']);
@@ -125,37 +125,7 @@ describe("the page's History (architecture.md § Web page)", () => {
   });
 });
 
-describe("the page's History in use", () => {
-  it('drops an answer that a later read overtook', async () => {
-    const releases: Array<(body: unknown) => void> = [];
-    const fetch = vi.fn((url: string) =>
-      url.endsWith('/page-history')
-        ? new Promise<Response>((resolve) => releases.push((body) => resolve({ status: 200, ok: true, json: async () => body } as unknown as Response)))
-        : Promise.resolve({ status: 200, ok: true, json: async () => ({}) } as unknown as Response),
-    );
-    const root = document.createElement('div');
-
-    document.body.replaceChildren(root);
-    history.replaceState(null, '', '#');
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => T0 });
-    const source = FakeSource.last!;
-    const row: PageRow = { workItemId: null, ticketId: 77, title: 'Inbox badge', priority: null, time: null, ticket: 'gh 77', sourceKind: 'github', url: '', playbook: '', links: [], returned: 0, comment: null, mark: null, details: [], stripe: null, dim: false, host: null, actions: [], main: null, pastes: [], search: '', opens: [], band: null, voice: null, history: { ticketId: 77, key: 'gh 77' } };
-
-    vi.useFakeTimers();
-    source.emit('hello', { key: 'pk', groups: [{ key: 'unstarted', title: 'Unstarted', glyph: 'u', empty: null, rows: [row] }], scope: null });
-    root.querySelector<HTMLElement>('[data-action="pool-menu"]')!.click();
-    root.querySelector<HTMLElement>('[data-action="row-history"]')!.click();
-    source.emit('list', { groups: [{ key: 'unstarted', title: 'Unstarted', glyph: 'u', empty: null, rows: [row] }] });
-    await vi.advanceTimersByTimeAsync(1_000);
-    expect(releases).toHaveLength(2);
-    releases[1]!({ view: view({ title: 'Newer' }), categories: CATEGORIES });
-    await vi.advanceTimersByTimeAsync(0);
-    releases[0]!({ view: view({ title: 'Older' }), categories: CATEGORIES });
-    await vi.advanceTimersByTimeAsync(0);
-    expect(root.querySelector('#history h1')?.textContent).toBe('Newer');
-    page.close();
-  });
-
+describe("the page's History tab in use", () => {
   let posts: Array<{ url: string; body: Record<string, unknown> }>;
   let answers: Record<string, { status: number; body: unknown }>;
   let opened: string[];
@@ -168,12 +138,13 @@ describe("the page's History in use", () => {
     root = document.createElement('div');
     document.body.replaceChildren(root);
     localStorage.clear();
-    history.replaceState(null, '', '#');
+    history.replaceState(null, '', '#w=1');
   });
 
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   const start = () => {
@@ -192,25 +163,64 @@ describe("the page's History in use", () => {
     await vi.advanceTimersByTimeAsync(0);
     await vi.advanceTimersByTimeAsync(0);
   };
-  const row = (patch: Partial<PageRow> = {}): PageRow => ({ workItemId: null, ticketId: 77, title: 'Inbox badge', priority: null, time: null, ticket: 'gh 77', sourceKind: 'github', url: '', playbook: 'dev:build', links: [], returned: 0, comment: null, mark: null, details: [], stripe: null, dim: false, host: null, actions: [], main: null, pastes: [], search: '', opens: [], band: null, voice: null, history: { ticketId: 77, key: 'gh 77' }, ...patch });
-  const groups = (rows: PageRow[]): PageGroup[] => [{ key: 'unstarted', title: 'Unstarted', glyph: 'u', empty: null, rows }];
+  const row = (patch: Partial<PageRow> = {}): PageRow => ({ workItemId: 1, ticketId: null, title: 'Inbox badge', priority: null, time: null, ticket: 'gh 77', sourceKind: 'github', url: '', playbook: 'dev:build', links: [], returned: 0, comment: null, mark: null, details: [], stripe: null, dim: false, host: null, actions: [], main: null, pastes: [], search: '', opens: [], band: null, voice: null, history: { ticketId: 77, key: 'gh 77' }, ...patch });
+  const groups = (rows: PageRow[]): PageGroup[] => [{ key: 'progress', title: 'In progress', glyph: 'p', empty: null, rows }];
+  const conversation = (workItemId: number) => ({ workItemId, title: `Item ${workItemId}`, primary: true, sessionId: `s${workItemId}`, state: 'idle', conversation: 'full', unread: 0 });
+  const scopeOf = (workItemId: number) => ({ kind: 'page', key: 'pk', folder: 'D:/w', title: `Item ${workItemId}`, scopeGen: workItemId, conversations: [conversation(workItemId)], workItemId, cwd: 'D:/w', sessionId: `s${workItemId}` });
+  const rows = [row(), row({ workItemId: 2, ticket: 'gh 78', history: { ticketId: 78, key: 'gh 78' } }), row({ workItemId: 3, history: null }), row({ workItemId: null, ticketId: 79, url: 'https://github.com/o/r/issues/79', history: { ticketId: 79, key: 'gh 79' } })];
+  const hello = (source: FakeSource, workItemId = 1) => source.emit('hello', { key: 'pk', groups: groups(rows), scope: scopeOf(workItemId), sessions: [], items: [], more: false, status: null, artifacts: [] });
   const histories = () => posts.filter((one) => one.url === '/v1/conversation/page-history').map((one) => one.body['ticketId']);
+  const historyTab = () => root.querySelector<HTMLElement>('[data-side="history"], [data-tab="history"]');
+  const openFromMenu = () => {
+    root.querySelector<HTMLElement>('.header [data-action="actions"]')!.click();
+    root.querySelector<HTMLElement>('.actions-menu [data-action="row-history"]')!.click();
+  };
 
-  it("opens a row's History from its menu in the conversation's place, follows its chips and filter, reads it again, and closes", async () => {
+  it('drops an answer that a later read overtook', async () => {
+    const releases: Array<(body: unknown) => void> = [];
+    const fetch = vi.fn((url: string) =>
+      url.endsWith('/page-history')
+        ? new Promise<Response>((resolve) => releases.push((body) => resolve({ status: 200, ok: true, json: async () => body } as unknown as Response)))
+        : Promise.resolve({ status: 200, ok: true, json: async () => ({}) } as unknown as Response),
+    );
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => T0 });
+    const source = FakeSource.last!;
+
+    vi.useFakeTimers();
+    hello(source);
+    openFromMenu();
+    source.emit('list', { groups: groups(rows) });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(releases).toHaveLength(2);
+    releases[1]!({ view: view({ title: 'Newer' }), categories: CATEGORIES });
+    await vi.advanceTimersByTimeAsync(0);
+    releases[0]!({ view: view({ title: 'Older' }), categories: CATEGORIES });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(root.querySelector('.history-view h1')?.textContent).toBe('Newer');
+    page.close();
+  });
+
+  it("selects the open work item's History tab from the header's actions menu, follows its chips and filter, and reads it again only while it shows", async () => {
     vi.useFakeTimers();
     answers['/page-history'] = { status: 200, body: { view: view(), categories: CATEGORIES } };
     const { page, source } = start();
 
-    source.emit('hello', { key: 'pk', groups: groups([row()]), scope: null });
-    root.querySelector<HTMLElement>('[data-action="pool-menu"]')!.click();
-    root.querySelector<HTMLElement>('.row-menu [data-action="row-history"]')!.click();
-    expect(root.classList.contains('history')).toBe(true);
-    expect(root.classList.contains('listing')).toBe(false);
-    expect(root.querySelector('#history .hist-body .empty')?.textContent).toBe('Loading…');
-    expect(document.activeElement).toBe(root.querySelector('.hist-close'));
+    hello(source);
+    // The tab shows while the row offers History, and reads nothing until it is chosen.
+    expect(historyTab()?.textContent).toBe('History');
+    expect(historyTab()?.getAttribute('aria-selected')).toBe('false');
+    await flush();
+    expect(histories()).toEqual([]);
+    openFromMenu();
+    expect(root.querySelector('.actions-menu')).toBeNull();
+    expect(historyTab()?.getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(historyTab());
+    expect(root.querySelector('.history-pane .history-view .empty')?.textContent).toBe('Loading…');
+    // No bar of its own: the tab names it, and nothing closes it but another tab.
+    expect(root.querySelector('.hist-bar, .hist-close')).toBeNull();
     await flush();
     expect(histories()).toEqual([77]);
-    expect(root.querySelector('#history h1')?.textContent).toBe('Inbox <badge>');
+    expect(root.querySelector('.history-view h1')?.textContent).toBe('Inbox <badge>');
 
     // A chip, the filter and a section the operator closed stay through the next read.
     root.querySelector<HTMLElement>('.hist-chip[data-category="session"]')!.click();
@@ -229,61 +239,94 @@ describe("the page's History in use", () => {
     expect([...root.querySelectorAll<HTMLDetailsElement>('details.hist-section')].map((one) => one.open)).toEqual([true, true]);
 
     // A list change reads it again a second later, and so does the 30-second tick; a failed read keeps the view and says why.
-    source.emit('list', { groups: groups([row({ title: 'Inbox badge, renamed' })]) });
-    source.emit('list', { groups: groups([row()]) });
+    source.emit('list', { groups: groups(rows) });
+    source.emit('list', { groups: groups(rows) });
     await vi.advanceTimersByTimeAsync(1_000);
     expect(histories()).toEqual([77, 77]);
     answers['/page-history'] = { status: 409, body: { error: 'Unknown ticket 77.' } };
     await vi.advanceTimersByTimeAsync(30_000);
     expect(histories()).toEqual([77, 77, 77]);
     expect(root.querySelector('.hist-error')?.textContent).toBe('Unknown ticket 77.');
-    expect(root.querySelector('#history h1')).not.toBeNull();
-    expect(root.querySelector<HTMLElement>('.hist-filter')!.getAttribute('value') ?? root.querySelector<HTMLInputElement>('.hist-filter')!.value).toBe('first saw');
+    expect(root.querySelector('.history-view h1')).not.toBeNull();
+    expect(root.querySelector<HTMLInputElement>('.hist-filter')!.value).toBe('first saw');
 
     // An http link opens in a tab.
     root.querySelector<HTMLElement>('.hist-hero-links .hist-link')!.click();
     expect(opened).toEqual(['https://github.com/o/r/issues/77']);
 
-    // Escape closes it, and no read follows.
-    root.querySelector<HTMLElement>('.hist-close')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    expect(root.classList.contains('history')).toBe(false);
-    expect(root.querySelector('#history')?.children).toHaveLength(0);
-    // The focus goes back to the row whose menu opened it.
-    expect(document.activeElement).toBe(root.querySelector('[data-action="pool-menu"]'));
+    // Another tab stops the reads, a list change included.
+    root.querySelector<HTMLElement>('[data-side="status"], [data-tab="conversation"]')!.click();
+    expect(root.querySelector('.history-view')).toBeNull();
+    source.emit('list', { groups: groups(rows) });
     await vi.advanceTimersByTimeAsync(60_000);
     expect(histories()).toEqual([77, 77, 77]);
+
+    // Chosen again, it shows what it showed with the operator's settings, and reads again.
+    answers['/page-history'] = { status: 200, body: { view: view({ title: 'Renamed' }), categories: CATEGORIES } };
+    historyTab()!.click();
+    expect(root.querySelector('.history-view h1')?.textContent).toBe('Inbox <badge>');
+    expect(root.querySelector('.hist-chip[data-category="session"]')?.getAttribute('aria-pressed')).toBe('false');
+    await flush();
+    expect(histories()).toEqual([77, 77, 77, 77]);
+    expect(root.querySelector('.history-view h1')?.textContent).toBe('Renamed');
     page.close();
   });
 
-  it("opens the selected work item's History from the header's actions menu, keeps its settings for the ticket, and leaves for a row the list opens", async () => {
+  it("follows the open work item's ticket, and offers no History where the row offers none or no work item is open", async () => {
     vi.useFakeTimers();
     answers['/page-history'] = { status: 200, body: { view: view(), categories: CATEGORIES } };
-    answers['/select'] = { status: 200, body: {} };
-    history.replaceState(null, '', '#w=1');
     const { page, source } = start();
-    const scope = { kind: 'page', key: 'pk', folder: 'D:/w', title: 'Inbox badge', scopeGen: 1, conversations: [{ workItemId: 1, title: 'Inbox badge', primary: true, sessionId: 's', state: 'idle', conversation: 'full', unread: 0 }], workItemId: 1, cwd: 'D:/w', sessionId: 's' };
 
-    source.emit('hello', { key: 'pk', groups: groups([row({ workItemId: 1, ticketId: null }), row({ workItemId: 2, ticketId: null, history: null })]), scope, sessions: [], items: [], more: false, status: null, artifacts: [] });
-    root.querySelector<HTMLElement>('[data-action="actions"]')!.click();
-    expect([...root.querySelectorAll('.actions-menu .menu-row')].map((one) => one.textContent)).toContain('History');
-    root.querySelector<HTMLElement>('.actions-menu [data-action="row-history"]')!.click();
+    hello(source);
+    openFromMenu();
     await flush();
-    expect(histories()).toEqual([77]);
-    expect(root.querySelector('.actions-menu')).toBeNull();
     root.querySelector<HTMLElement>('.hist-chip[data-category="you"]')!.click();
-    root.querySelector<HTMLElement>('.hist-close')!.click();
-    expect(root.classList.contains('history')).toBe(false);
-    expect(document.activeElement).toBe(root.querySelector('.header [data-action="actions"]'));
+    expect(histories()).toEqual([77]);
 
-    // Opened again, it keeps the chips the operator set.
-    root.querySelector<HTMLElement>('[data-action="actions"]')!.click();
-    root.querySelector<HTMLElement>('.actions-menu [data-action="row-history"]')!.click();
+    // Another work item's conversation opens on its own tabs; chosen there, History reads that work item's ticket, at Loading… first.
+    hello(source, 2);
+    expect(historyTab()?.getAttribute('aria-selected')).toBe('false');
+    historyTab()!.click();
+    expect(root.querySelector('.history-view .empty')?.textContent).toBe('Loading…');
     await flush();
+    expect(histories()).toEqual([77, 78]);
+    expect(root.querySelector('.hist-chip[data-category="you"]')?.getAttribute('aria-pressed')).toBe('true');
+
+    // Back on the first, its chips stay as the operator set them.
+    hello(source, 1);
+    historyTab()!.click();
+    await flush();
+    expect(histories()).toEqual([77, 78, 77]);
     expect(root.querySelector('.hist-chip[data-category="you"]')?.getAttribute('aria-pressed')).toBe('false');
 
-    // A row the list opens shows its conversation in History's place; a row with no History has no History item.
-    root.querySelector<HTMLElement>('[data-work-item="2"]')!.click();
-    expect(root.classList.contains('history')).toBe(false);
+    // A work item whose row offers no History has neither the tab nor the menu item.
+    hello(source, 3);
+    expect(historyTab()).toBeNull();
+    root.querySelector<HTMLElement>('.header [data-action="actions"]')?.click();
+    expect(root.querySelector('[data-action="row-history"]')).toBeNull();
+
+    // A pool ticket's menu has no History, since it has no work item whose tab would show it.
+    root.querySelector<HTMLElement>('[data-action="pool-menu"]')!.click();
+    expect(root.querySelector('.row-menu .menu-row')).not.toBeNull();
+    expect(root.querySelector('.row-menu [data-action="row-history"]')).toBeNull();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(histories()).toEqual([77, 78, 77]);
+    page.close();
+  });
+
+  it("puts History in a phone's one tab strip, after the conversation's fixed tabs", async () => {
+    vi.stubGlobal('innerWidth', 390);
+    vi.useFakeTimers();
+    answers['/page-history'] = { status: 200, body: { view: view(), categories: CATEGORIES } };
+    const { page, source } = start();
+
+    hello(source);
+    expect(document.documentElement.classList.contains('phone')).toBe(true);
+    expect([...root.querySelectorAll('#head .tabs > .tab')].map((one) => one.textContent)).toEqual(['Conversation', 'Status', 'History', 'Changes']);
+    openFromMenu();
+    expect(historyTab()?.getAttribute('aria-selected')).toBe('true');
+    await flush();
+    expect(root.querySelector('#panel.history-pane .history-view h1')?.textContent).toBe('Inbox <badge>');
     page.close();
   });
 });

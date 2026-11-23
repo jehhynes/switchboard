@@ -166,7 +166,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   let personaAsks = 0;
   const detailHead = root.querySelector<HTMLElement>('#detail .detail-head')!;
   const detailBody = root.querySelector<HTMLElement>('#detail .detail-body')!;
-  const historyHost = root.querySelector<HTMLElement>('#history')!;
   // The open work item takes the room first (layout.ts): the list is a column while the operator keeps it pinned, and a drawer otherwise;
   // Status and Artifacts are a column only while they and the conversation fit, and tabs otherwise. A layout choice an earlier page kept is
   // dropped.
@@ -289,8 +288,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const showBrowser = (): boolean => browserTab() && itemLinks();
   /** Whether the Console tab shows: an active session, not ended, that the terminal holder may hold; otherwise its console would be blank, so there is no tab. */
   const showConsole = (): boolean => hasConsole(state.session);
+  /** Whether the History tab shows: the open work item's row offers History, as the dock's does. */
+  const showHistory = (): boolean => (selectedRow(state)?.history ?? null) !== null;
   /** The tab the conversation's pane shows: always the conversation while Status and Artifacts have their own column, and never a Browser tab that is gone. */
-  const mainTab = (): Tab => (wide() || (view.tab === 'browser' && !showBrowser()) || (view.tab === 'artifacts' && openArtifact() === null) || (view.tab === 'diff' && !changes.view.tab) || (view.tab === 'file' && localFiles.shown() === null) ? 'conversation' : view.tab === 'console' && !showConsole() ? 'status' : view.tab);
+  const mainTab = (): Tab => (wide() || (view.tab === 'browser' && !showBrowser()) || (view.tab === 'history' && !showHistory()) || (view.tab === 'artifacts' && openArtifact() === null) || (view.tab === 'diff' && !changes.view.tab) || (view.tab === 'file' && localFiles.shown() === null) ? 'conversation' : view.tab === 'console' && !showConsole() ? 'status' : view.tab);
   /** The work item whose tabs were last chosen on its opening, and whether the operator has chosen a tab since. */
   let openedItem: number | null = null;
   let tabChosen = false;
@@ -377,8 +378,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const workItemId = state.scope?.workItemId ?? null;
     const shown = wide() ? sideTab() : mainTab();
 
-    // The Changes tab or a file tab lasts as long as the page shows the work item, so it is not kept.
-    if (workItemId === null || shown === 'conversation' || shown === 'diff' || shown === 'file') {
+    // The Changes tab, a file tab or History lasts as long as the page shows the work item, so it is not kept.
+    if (workItemId === null || shown === 'conversation' || shown === 'diff' || shown === 'file' || shown === 'history') {
       return;
     }
 
@@ -411,7 +412,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     void post('page-tabs', closed ? { workItemId, close: { path, updatedAt: artifact.updatedAt } } : { workItemId, reopen: path });
   };
   /** What the column right of the conversation shows: Status in place of a Browser tab that is gone. */
-  const sideTab = (): SideTab => ((view.side === 'browser' && !showBrowser()) || (view.side === 'console' && !showConsole()) || (view.side === 'artifacts' && openArtifact() === null) || (view.side === 'diff' && !changes.view.tab) || (view.side === 'file' && localFiles.shown() === null) ? 'status' : view.side);
+  const sideTab = (): SideTab => ((view.side === 'browser' && !showBrowser()) || (view.side === 'history' && !showHistory()) || (view.side === 'console' && !showConsole()) || (view.side === 'artifacts' && openArtifact() === null) || (view.side === 'diff' && !changes.view.tab) || (view.side === 'file' && localFiles.shown() === null) ? 'status' : view.side);
   /** The artifact whose tab is chosen, while the work item still has it; artifacts have no list of their own, only a tab each and a menu. */
   function openArtifact(): string | null {
     return view.artifact !== null && state.artifacts.some((one) => one.path === view.artifact) ? view.artifact : null;
@@ -651,7 +652,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     openSettings: () => settingsPane.open(),
     reload: () => (deps.reload ?? (() => location.reload()))(),
     refused: (text) => (text === null ? toastBox.clear('warning') : toastBox.show(text, 'warning')),
-    // The pin shows only where it changes the list: with no work item open, or while History shows, the list is a column either way.
+    // The pin shows only where it changes the list: with no work item open the list is a column either way.
     pinned: () => (pinWorks() ? listPinned : undefined),
     ...(phoneVoice === null ? {} : { phoneVoice: { state: () => phoneVoice.state, error: () => phoneVoice.error, toggle: () => (phoneVoice.state === 'off' ? phoneVoice.start() : phoneVoice.stop()) } }),
   });
@@ -1779,8 +1780,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const sliver = root.querySelector<HTMLElement>('.sliver')!;
   // Under a drawer opened by its button or a key, a backdrop takes the press outside it, so the press closes the drawer and does nothing else.
   const backdrop = root.querySelector<HTMLElement>('.drawer-backdrop')!;
-  /** Whether the list's pin changes it: only while a work item's conversation shows; with none open, or while History, opened from the list, shows, it is a column either way. */
-  const pinWorks = (): boolean => !(view.list || wanted === null) && shownHistory === null;
+  /** Whether the list's pin changes it: only while a work item's conversation shows; with none open it is a column either way. */
+  const pinWorks = (): boolean => !(view.list || wanted === null);
   /** Whether the list is a drawer: outside the phone's layout, unpinned, while a work item's conversation is open. */
   const drawerMode = (): boolean => root.classList.contains('drawers') && pinWorks();
   let revealTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1974,7 +1975,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /** Draws the state; Preact changes only what differs, so the focus, a selection, the scroll position and open menus stay. */
   const drawRegions = (): void => {
     // On a narrow screen the list and the conversation are each a full-width view (page.css); the list shows until a work item is opened.
-    const listing = shownHistory === null && (view.list || wanted === null);
+    const listing = view.list || wanted === null;
 
     // Leaving the conversation for the list in the phone's layout (Back, a swipe right or the browser's back, all through back(), or a refused
     // open) leaves the work item, so a mic on for it turns off and a phone's microphone is released; what plays goes on (PRD R119).
@@ -1995,9 +1996,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
 
     root.classList.toggle('listing', listing);
-    // A ticket's History shows in the conversation's place, over its column and the side column (architecture.md § Web page).
-    root.classList.toggle('history', shownHistory !== null);
-    mount(historyHost, shownHistory === null ? null : renderHistory(shownHistory));
 
     // The drawer is only outside the phone's layout while the list does not fit, with a work item open; the focus leaves a list that the phone's layout now
     // hides for Back.
@@ -2056,6 +2054,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     localFiles.follow(state.scope === null || state.key === null ? null : `${state.key} ${state.scope.scopeGen} ${state.scope.workItemId ?? ''}`);
 
     if (state.scope === null) {
+      followHistory(false);
       mount(head, null);
       drawPane(panel, renderEmpty(state.connected ? 'Choose a work item on the left.' : 'Connecting to Switchboard…'));
       shown = null;
@@ -2065,8 +2064,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     const shownArtifact = openArtifact();
 
-    // Opened only while it shows: not under the phone's list or a History.
-    if (shownArtifact !== null && (side ? sideTab() : mainTab()) === 'artifacts' && !(isPhone() && root.classList.contains('listing')) && !root.classList.contains('history')) {
+    // Opened only while it shows: not under the phone's list.
+    if (shownArtifact !== null && (side ? sideTab() : mainTab()) === 'artifacts' && !(isPhone() && root.classList.contains('listing'))) {
       artifactsOpened([shownArtifact]);
     }
 
@@ -2075,7 +2074,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // The file tabs, then the one Changes tab, last so it keeps its place as file tabs come and go.
     const changeTabs = (shown: Tab): ComponentChild[] => [localTabs(localFiles.view, shown === 'file', true), changesTab(changes.view, shown === 'diff', localFiles.view.tabs.length === 0)];
 
-    mount(head, [renderHeader(state, view), side ? null : renderTabs({ ...view, tab: mainTab() }, state, showBrowser(), strip, changeTabs(mainTab()), showConsole())]);
+    // The History tab reads the hub only while it shows.
+    followHistory((side ? sideTab() : mainTab()) === 'history' && !(isPhone() && listing));
+    mount(head, [renderHeader(state, view), side ? null : renderTabs({ ...view, tab: mainTab() }, state, showBrowser(), strip, changeTabs(mainTab()), showConsole(), showHistory())]);
 
     const artifact = view.artifact === null ? undefined : state.artifacts.find((one) => one.path === view.artifact);
     const now = deps.now();
@@ -2083,6 +2084,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const drawTab = (pane: HTMLElement, tab: Tab): void => {
       pane.classList.toggle('console-pane', tab === 'console');
       pane.classList.toggle('browser-pane', tab === 'browser');
+      pane.classList.toggle('history-pane', tab === 'history');
       pane.classList.toggle('diff-pane', tab === 'diff' || (tab === 'file' && localFiles.codeShown()));
 
       if (tab === 'browser') {
@@ -2093,6 +2095,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         drawPane(pane, note === null ? null : renderEmpty(note));
       } else if (tab === 'console') {
         drawConsole(pane);
+      } else if (tab === 'history') {
+        drawPane(pane, shownHistory === null ? null : renderHistory(shownHistory));
       } else if (tab === 'diff') {
         changes.drawDiff(pane);
       } else if (tab === 'file') {
@@ -2133,7 +2137,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     drawTab(panel, mainTab());
 
     if (side) {
-      mount(detailHead, renderSideSwitch(sideTab(), state, showBrowser(), strip, [...changeTabs(sideTab()), renderMaximize(panelMaximized)], showConsole()));
+      mount(detailHead, renderSideSwitch(sideTab(), state, showBrowser(), strip, [...changeTabs(sideTab()), renderMaximize(panelMaximized)], showConsole(), showHistory()));
       drawTab(detailBody, sideTab());
     }
     // The composer first, so the conversation is scrolled against its final height.
@@ -2442,20 +2446,20 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   };
 
   // ---- History ----
-  /** The History shown in the conversation's place, or null; each ticket's settings last while the page is open. */
+  /** The History the History tab shows, the open work item's ticket's, or null before it first shows; each ticket's settings last while the page is open. */
   let shownHistory: HistoryOpen | null = null;
+  /** Whether the History tab shows, so the page reads the hub for it. */
+  let historyLive = false;
   const historyUis = new Map<number, HistoryUi>();
   let historyTick: ReturnType<typeof setInterval> | null = null;
   let historyChange: ReturnType<typeof setTimeout> | null = null;
   // Each read of the hub, so an answer that a later read overtook is dropped.
   let historyRead = 0;
-  // What had the focus before History opened, given it back when History closes.
-  let historyReturn: (() => HTMLElement | null) | null = null;
-  /** Reads the open History from the hub; a failed read keeps what it shows and says why. */
+  /** Reads the shown History from the hub; a failed read keeps what it shows and says why. */
   const readHistory = async (): Promise<void> => {
     const asked = shownHistory;
 
-    if (asked === null) {
+    if (asked === null || !historyLive) {
       return;
     }
 
@@ -2466,45 +2470,47 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
-    if (answer.status === 200) {
+    if (answer.status === 200 && typeof answer.body['view'] === 'object' && answer.body['view'] !== null) {
       asked.view = answer.body['view'] as HistoryView;
       asked.categories = (answer.body['categories'] as HistoryCategory[] | undefined) ?? [];
       asked.error = null;
     } else {
-      asked.error = String(answer.body['error'] ?? `Switchboard did not answer (status ${answer.status}).`);
+      asked.error = String(answer.body['error'] ?? (answer.status === 200 ? 'Switchboard sent no History.' : `Switchboard did not answer (status ${answer.status}).`));
     }
 
     draw();
   };
-  const openHistory = (ticketId: number, key: string, returnTo: () => HTMLElement | null): void => {
-    historyReturn = returnTo;
-    closeMenus();
-    shownHistory = { ticketId, key, view: null, categories: [], error: null, ui: historyUis.get(ticketId) ?? { ...EMPTY_HISTORY_UI } };
-    historyTick ??= setInterval(() => void readHistory(), HISTORY_REFRESH_MS);
-    draw();
-    historyHost.querySelector<HTMLElement>('.hist-close')?.focus();
-    void readHistory();
-  };
-  /** Closes History; with `focusBack`, as from Close or Escape, the control that opened it takes the focus again. */
-  const closeHistory = (focusBack = false): void => {
-    if (shownHistory === null) {
+  /**
+   * Follows whether the History tab shows, on each draw: while it does, the open work item's ticket's History is read at once, every
+   * `HISTORY_REFRESH_MS` and soon after a list change; another ticket's starts at Loading…, and the same ticket's keeps what it showed until
+   * the read answers. Hidden, it reads nothing, and an answer on its way is dropped.
+   */
+  const followHistory = (shows: boolean): void => {
+    const ticket = shows ? (selectedRow(state)?.history ?? null) : null;
+
+    if (ticket === null) {
+      if (historyLive) {
+        historyLive = false;
+        historyRead++;
+        clearInterval(historyTick ?? undefined);
+        clearTimeout(historyChange ?? undefined);
+        historyTick = null;
+        historyChange = null;
+      }
+
       return;
     }
 
-    const back = historyReturn;
-
-    shownHistory = null;
-    historyReturn = null;
-    historyRead++;
-    clearInterval(historyTick ?? undefined);
-    clearTimeout(historyChange ?? undefined);
-    historyTick = null;
-    historyChange = null;
-    draw();
-
-    if (focusBack) {
-      back?.()?.focus();
+    if (shownHistory?.ticketId !== ticket.ticketId) {
+      shownHistory = { ticketId: ticket.ticketId, key: ticket.key, view: null, categories: [], error: null, ui: historyUis.get(ticket.ticketId) ?? { ...EMPTY_HISTORY_UI } };
+      historyRead++;
+    } else if (historyLive) {
+      return;
     }
+
+    historyLive = true;
+    historyTick ??= setInterval(() => void readHistory(), HISTORY_REFRESH_MS);
+    void readHistory();
   };
   /** The operator changed the open History's chips, filter, sections or runs: kept for the ticket while the page is open. */
   const setHistoryUi = (ui: HistoryUi): void => {
@@ -2514,23 +2520,23 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
   };
 
-  historyHost.addEventListener('input', (event) => {
+  root.addEventListener('input', (event) => {
     const field = event.target as HTMLInputElement;
 
-    if (shownHistory !== null && field.classList.contains('hist-filter')) {
+    if (shownHistory !== null && field.classList?.contains('hist-filter')) {
       setHistoryUi({ ...shownHistory.ui, query: field.value });
       draw();
     }
   });
   // A section or run the operator opened or closed stays so across redraws.
-  historyHost.addEventListener(
+  root.addEventListener(
     'toggle',
     (event) => {
       const details = event.target as HTMLDetailsElement;
       const section = details.dataset?.['section'];
       const run = details.dataset?.['run'];
 
-      if (shownHistory === null) {
+      if (shownHistory === null || !(details instanceof HTMLDetailsElement) || details.closest('.history-view') === null) {
         return;
       }
 
@@ -2545,19 +2551,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     },
     true,
   );
-  historyHost.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && shownHistory !== null) {
-      event.stopPropagation();
-      closeHistory(true);
-    }
-  });
 
   // ---- Selecting ----
   const select = async (workItemId: number): Promise<void> => {
     const listing = view.list || wanted === null;
 
-    // A work item opened from the list shows its conversation in History's place.
-    closeHistory();
     // Choosing a work item hides the drawer, as a row's click hides the auto-hidden dock.
     closeDrawer();
     wanted = workItemId;
@@ -2702,12 +2700,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     },
     { signal: listening.signal },
   );
-  // A swipe right over a phone's conversation goes back, while no menu, sheet, Settings or History lies over it.
+  // A swipe right over a phone's conversation goes back, while no menu, sheet or Settings lies over it.
   const stopSwipe = swipeBack({
     root,
     host: root.querySelector<HTMLElement>('.main')!,
     under: drawer,
-    enabled: () => isPhone() && !root.classList.contains('listing') && shownHistory === null && document.querySelector('.menu, [role="menu"], [role="listbox"]:not([hidden]), .sheet-backdrop, .settings-backdrop, .persona-backdrop') === null,
+    enabled: () => isPhone() && !root.classList.contains('listing') && document.querySelector('.menu, [role="menu"], [role="listbox"]:not([hidden]), .sheet-backdrop, .settings-backdrop, .persona-backdrop') === null,
     back,
     reducedMotion: () => typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
     nativeEdgeBack: () => browserBackPreview(navigator.userAgent, navigator.platform, navigator.maxTouchPoints, history.length),
@@ -2984,20 +2982,20 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         // A pill's link, without the browser pane, opens without selecting its row; an Open item of the header's or a pool row's menu closes the menu.
         openLink(button!.dataset['row'] ?? '', button!.dataset['link'] ?? '');
         break;
-      case 'row-history': {
-        const key = button!.dataset['row'] ?? '';
-        const shown = rowByKey(key)?.history ?? null;
-        // Back to the menu's opener: the header's actions button, or the pool ticket's row in the list.
-        const opener = button!.closest('.row-menu') === null ? (): HTMLElement | null => root.querySelector<HTMLElement>('.header [data-action="actions"]') : (): HTMLElement | null => [...list.querySelectorAll<HTMLElement>('[data-action="pool-menu"]')].find((one) => one.dataset['row'] === key) ?? null;
+      case 'row-history':
+        // The header's menu names the open work item, whose History tab it selects.
+        closeMenus();
 
-        if (shown !== null) {
-          openHistory(shown.ticketId, shown.key, opener);
+        if (showHistory()) {
+          leaving('history');
+          chooseTab('history');
+          view.artifact = null;
+          draw();
+          (wide() ? detailHead : head).querySelector<HTMLElement>('[data-side="history"], [data-tab="history"]')?.focus();
+        } else {
+          draw();
         }
 
-        break;
-      }
-      case 'history-close':
-        closeHistory(true);
         break;
       case 'history-chip':
         if (shownHistory !== null) {
@@ -3950,10 +3948,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   let paneSent = 'null';
   /** The Browser tab's area under its tab strip, while it is the tab shown; the Chrome pane covers it (architecture.md § Web page). */
   const browserArea = (): HTMLElement | null => {
-    // The pane window stays above the page, so it hides while Settings, a sheet (the page's or the list header's) or History covers the page.
+    // The pane window stays above the page, so it hides while Settings or a sheet (the page's or the list header's) covers the page.
     const listSheet = root.querySelector('#list-sheet .sheet-backdrop') !== null;
 
-    if (!showBrowser() || state.key === null || state.scope === null || view.sheet !== null || view.personas !== null || listSheet || settingsPane.isOpen() || shownHistory !== null) {
+    if (!showBrowser() || state.key === null || state.scope === null || view.sheet !== null || view.personas !== null || listSheet || settingsPane.isOpen()) {
       return null;
     }
 
@@ -4199,7 +4197,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
       // Dictation (architecture.md § Dictation): live words show dimmed after the box's text; the hub's draft fills the box unless the operator typed over it.
       // An open History reads again soon after the list changed, as the History tab does after a stream state.
-      if (type === 'list' && shownHistory !== null && historyChange === null) {
+      if (type === 'list' && historyLive && historyChange === null) {
         historyChange = setTimeout(() => {
           historyChange = null;
           void readHistory();

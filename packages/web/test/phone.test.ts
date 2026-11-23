@@ -23,7 +23,7 @@ describe('the page on a phone', () => {
 
   it('runs every scroller to the bottom edge, padding the end of its content by the home indicator\'s inset unless a composer is below it', () => {
     // No column keeps a strip at its bottom.
-    expect(css).not.toMatch(/\.side, \.main, \.detail, #history \{ padding-bottom/);
+    expect(css).not.toMatch(/\.side, \.main, \.detail \{ padding-bottom/);
     expect(css).toContain(':root { --sb-end: env(safe-area-inset-bottom); }\n.main:has(#composer:not([hidden])) { --sb-end: 0px; }');
     expect(css).toMatch(/#list \{[^}]*padding-bottom: calc\(12px \+ var\(--sb-end\)\);/);
     expect(css).toMatch(/(^|\n)\.scroll \{[^}]*padding: 20px 20px calc\(16px \+ var\(--sb-end\)\);/);

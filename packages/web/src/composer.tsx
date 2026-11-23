@@ -4,7 +4,7 @@ import type { VNode } from 'preact';
 import type { PageState } from './model.js';
 import { trusted } from './trusted.js';
 
-/** The page's hosts: the list and its sheet and the drawer's sash, the sashes, the hidden list's sliver and the open drawer's backdrop, the conversation's header, pane, note and composer, the side column, History and the sheet. */
+/** The page's hosts: the list and its sheet and the drawer's sash, the sashes, the hidden list's sliver and the open drawer's backdrop, the conversation's header, pane, note and composer, the side column and the sheet. */
 export function renderFrame(side: { min: number; max: number }, chat: { min: number; max: number }): VNode {
   return (
     <>
@@ -28,7 +28,6 @@ export function renderFrame(side: { min: number; max: number }, chat: { min: num
         <div class="detail-head"></div>
         <div class="detail-body scroll"></div>
       </aside>
-      <section id="history" class="history-view" aria-label="History"></section>
       <div id="sheet"></div>
       <div class="live" aria-live="polite"></div>
     </>

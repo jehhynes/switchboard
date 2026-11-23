@@ -31,7 +31,7 @@ body { color: var(--vscode-foreground); background: var(--vscode-editor-backgrou
    bars' colour and the screen's width in portrait, so WebKit finds it (it hit-tests 4 px down at the top's middle, takes a fixed or sticky box
    at least 90% of the width and reads the colour of one over 10 px tall), paints the status bar in its colour and drops the blur it draws over
    the page's top otherwise. Sticky makes each a stacking context, at --sb-z-bar (below). */
-.header, .list-header, .hist-bar, .settings-head, .persona-head { position: sticky; top: 0; z-index: var(--sb-z-bar); }
+.header, .list-header, .settings-head, .persona-head { position: sticky; top: 0; z-index: var(--sb-z-bar); }
 /*
  * The page's layers, lowest first; a layer's own parts (a list's pinned group headings, a menu inside its bar) stack inside it.
  * - bar: the top bars, the tab strips' menus and the composer's menu, over the conversation, the list and the tabs (3).
@@ -44,7 +44,7 @@ body { color: var(--vscode-foreground); background: var(--vscode-editor-backgrou
  * - top-line, top-band: the installed app's title bar line and the status bar's band, over everything.
  */
 :root { --sb-z-bar: 10; --sb-z-sash: 15; --sb-z-bar-menu: 20; --sb-z-sliver: 30; --sb-z-drawer-backdrop: 35; --sb-z-drawer: 40; --sb-z-maximized: 45; --sb-z-sheet: 50; --sb-z-persona: 55; --sb-z-settings: 60; --sb-z-settings-sheet: 70; --sb-z-toast: 75; --sb-z-top-line: 1000; --sb-z-top-band: 1001; }
-:is(.header, .list-header, .hist-bar, .tabs):has([role="menu"]) { z-index: var(--sb-z-bar-menu); }
+:is(.header, .list-header, .tabs):has([role="menu"]) { z-index: var(--sb-z-bar-menu); }
 /* The installed app's title bar takes the page's colour, so a line along the band's bottom edge marks where the title bar ends. */
 @media (display-mode: standalone) { body::before { content: ''; position: fixed; inset: var(--sb-top) 0 auto 0; z-index: var(--sb-z-top-line); height: 1px; background: var(--vscode-titleBar-border, var(--vscode-widget-border)); pointer-events: none; } }
 /* Safe areas (viewport-fit=cover): on a phone the page keeps out of the notch, the rounded corners and the home indicator. The bars' colour
@@ -259,7 +259,7 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
  * either orientation) the list and the conversation are each a full-width view, the list until a work item is opened, the conversation with a
  * Back button at the start of its header; touch targets are at least 44 px tall. Outside it the list is the side column while pinned at its
  * header's pin, and unpinned (main.ts, which sets #root.drawers) a drawer over the conversation's left edge (below), shown by the header's
- * Work items button in Back's place. With no work item open, or while History shows, it is the side column either way, and the pin is left out. Every other switch is by the page's width and the kept widths alone, so a desktop window narrowed to a phone's width gets the
+ * Work items button in Back's place. With no work item open it is the side column either way, and the pin is left out. Every other switch is by the page's width and the kept widths alone, so a desktop window narrowed to a phone's width gets the
  * phone's layout.
  */
 #root.listing > .main, #root:not(.listing) > .side { display: none; }
@@ -286,7 +286,7 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
  * The drawer, the unpinned list, as the dock's auto-hide (architecture.md § Web page): hidden, the list keeps its layout off the page's left
  * edge, and a 3 px sliver there shows each row's stripe at its height (fitSliver in main.ts). Shown, it lies over the conversation and its
  * header at the list's width and slides in; it hides at once, as the dock does. Opened by its button, a key or a swipe (#root.drawer-held),
- * a backdrop dims the page under it and takes the press that closes it. While History shows, opened from the list, the list stays a column.
+ * a backdrop dims the page under it and takes the press that closes it.
  */
 .header > .list-toggle, .sliver { display: none; }
 .sliver { position: fixed; top: 0; bottom: 0; left: env(safe-area-inset-left); z-index: var(--sb-z-sliver); width: 3px; background: var(--vscode-sideBar-background); }
@@ -297,20 +297,20 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 /* On a touch screen the sliver takes touches 16 px in from the edge, so a swipe right from the edge shows the drawer (main.ts). */
 .sliver { touch-action: pan-y; }
 @media (pointer: coarse) { .sliver::after { content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 16px; } }
-:where(html:not(.phone)) #root.drawers:not(.listing):not(.history) > .side { box-sizing: border-box; position: fixed; top: 0; bottom: 0; left: 0; z-index: var(--sb-z-drawer); padding-top: var(--sb-top); padding-left: env(safe-area-inset-left); visibility: hidden; transform: translateX(-100%); }
-:where(html:not(.phone)) #root.drawers:not(.listing):not(.history) > .side-sash { display: none; }
-:where(html:not(.phone)) #root.drawers.drawer-open:not(.listing):not(.history) > .side { visibility: visible; transform: none; transition: transform 0.15s ease-out; box-shadow: 0 0 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36)); }
-:where(html:not(.phone)) #root.drawers:not(.listing):not(.history):not(.drawer-open) > .sliver { display: block; }
-:where(html:not(.phone)) #root.drawers:not(.listing):not(.history) .header > .list-toggle { display: inline-flex; }
+:where(html:not(.phone)) #root.drawers:not(.listing) > .side { box-sizing: border-box; position: fixed; top: 0; bottom: 0; left: 0; z-index: var(--sb-z-drawer); padding-top: var(--sb-top); padding-left: env(safe-area-inset-left); visibility: hidden; transform: translateX(-100%); }
+:where(html:not(.phone)) #root.drawers:not(.listing) > .side-sash { display: none; }
+:where(html:not(.phone)) #root.drawers.drawer-open:not(.listing) > .side { visibility: visible; transform: none; transition: transform 0.15s ease-out; box-shadow: 0 0 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36)); }
+:where(html:not(.phone)) #root.drawers:not(.listing):not(.drawer-open) > .sliver { display: block; }
+:where(html:not(.phone)) #root.drawers:not(.listing) .header > .list-toggle { display: inline-flex; }
 .drawer-backdrop { display: none; position: fixed; inset: 0; z-index: var(--sb-z-drawer-backdrop); background: rgba(0, 0, 0, 0.25); }
-:where(html:not(.phone)) #root.drawers.drawer-held:not(.listing):not(.history) > .drawer-backdrop { display: block; }
+:where(html:not(.phone)) #root.drawers.drawer-held:not(.listing) > .drawer-backdrop { display: block; }
 /* The open drawer's own sash, on its right edge, sets the list's width as the column's does; over the drawer's own header. */
-:where(html:not(.phone)) #root.drawers.drawer-open:not(.listing):not(.history) > .side > .drawer-sash { display: block; }
+:where(html:not(.phone)) #root.drawers.drawer-open:not(.listing) > .side > .drawer-sash { display: block; }
 .side { position: relative; }
 .side > .drawer-sash { position: absolute; top: 0; bottom: 0; right: 0; margin: 0; }
 /* The pin at the list header's end, outside the phone's layout, where the list is its own view. */
 :where(html.phone) .list-header > .list-pin { display: none; }
-@media (prefers-reduced-motion: reduce) { #root.drawers.drawer-open:not(.listing):not(.history) > .side { transition: none; } }
+@media (prefers-reduced-motion: reduce) { #root.drawers.drawer-open:not(.listing) > .side { transition: none; } }
 /* With a mouse, the group headers can be as compact as the dock's. */
 @media (pointer: fine) {
   :where(html:not(.phone)) .work-list { --group-head-height: 32px; }
@@ -697,8 +697,8 @@ body.artifact-window > .artifact-view { height: 100%; }
 }
 /* On a touch screen every icon button in the bars, inside a menu's anchor or not, is at least 44 px square, with its glyph at 20 px, centred. */
 @media (hover: none), (pointer: coarse) {
-  :is(.header, .list-header, .hist-bar, .settings-head, .persona-head, .changes-bar) :is(button.icon, a.icon, button.actions) { min-width: 44px; min-height: 44px; align-items: center; justify-content: center; }
-  :is(.header, .list-header, .hist-bar, .settings-head, .persona-head, .changes-bar) :is(button.icon, a.icon, button.actions) > .codicon { font-size: 20px; line-height: 1; }
+  :is(.header, .list-header, .settings-head, .persona-head, .changes-bar) :is(button.icon, a.icon, button.actions) { min-width: 44px; min-height: 44px; align-items: center; justify-content: center; }
+  :is(.header, .list-header, .settings-head, .persona-head, .changes-bar) :is(button.icon, a.icon, button.actions) > .codicon { font-size: 20px; line-height: 1; }
 }
 /* A narrow screen gives the conversation its width: less padding round the timeline and the composer. */
 @media (max-width: 600px) {
@@ -896,15 +896,9 @@ a.sheet-button { display: inline-flex; align-items: center; text-decoration: non
 .console-foot[hidden] { display: none; }
 .console-note { flex: 1; min-width: 0; margin: 0; color: var(--vscode-errorForeground, #f85149); }
 
-/* A ticket's History in the conversation's place (architecture.md § Web page), drawn as the VS Code History tab, its classes prefixed with
-   hist- so the conversation's rules do not reach it. It covers the conversation's and the side column. */
-#history { display: none; }
-#root.history > .main, #root.history > .chat-sash, #root.history > .detail { display: none; }
-#root.history > #history { display: flex; flex: 1; min-width: 0; flex-direction: column; background: var(--vscode-editor-background); }
-.hist-bar { flex: none; display: flex; align-items: center; gap: 6px; min-height: 35px; padding: 0 8px; border-bottom: 1px solid var(--vscode-panel-border); background: var(--vscode-sideBar-background); }
-.hist-bar-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-.hist-bar button.icon { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 26px; padding: 0; border: none; border-radius: 4px; background: transparent; color: var(--vscode-foreground); cursor: pointer; }
-.hist-bar button.icon:hover { background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)); }
+/* A ticket's History tab (architecture.md § Web page), drawn as the VS Code History tab, its classes prefixed with hist- so the conversation's
+   rules do not reach it. Its body scrolls in the tab's pane, so the toolbar can stick at its top. */
+.scroll.history-pane { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
 .hist-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 16px 24px calc(48px + var(--sb-end)); }
 .hist-body > * { max-width: 1100px; margin-left: auto; margin-right: auto; }
 .history-view button:not(.icon) { display: inline-flex; align-items: center; gap: 5px; font: inherit; cursor: pointer; border: 1px solid var(--vscode-button-border, transparent); border-radius: 4px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); padding: 2px 8px; line-height: 18px; }
@@ -988,7 +982,7 @@ ol.hist-timeline { list-style: none; margin: 0; padding: 4px 12px 10px; }
   .hist-entry { grid-template-columns: 62px 24px minmax(0, 1fr); }
   .hist-gap { display: none; }
 }
-@media (hover: none), (pointer: coarse) { .hist-bar button.icon, .hist-toolbar button.icon, .history-view button.hist-chip, .history-view button.hist-link { min-height: 44px; } .hist-bar button.icon { min-width: 44px; } }
+@media (hover: none), (pointer: coarse) { .hist-toolbar button.icon, .history-view button.hist-chip, .history-view button.hist-link { min-height: 44px; } }
 
 /* A question card on a phone (design § 6): the full width of the timeline at 14 px. */
 :where(html.phone) .question-card.qc { max-width: none; font-size: 14px; }

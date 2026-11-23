@@ -1,5 +1,5 @@
-// The web page's History (architecture.md § Web page): a ticket's activity as the VS Code History tab shows it (PRD R59), from the view the hub
-// builds, drawn by the page's own code in the conversation's place.
+// The web page's History tab (architecture.md § Web page): a ticket's activity as the VS Code History tab shows it (PRD R59), from the view the
+// hub builds, drawn by the page's own code.
 import type { VNode } from 'preact';
 import type { HistoryCategory, HistoryEntry, HistoryLink, HistorySection, HistoryView } from '@switchboard/protocol';
 
@@ -228,9 +228,9 @@ function Section({ section, ui, open }: { section: HistorySection; ui: HistoryUi
 }
 
 /**
- * The page's History (PRD R59), in the conversation's place: a bar with Close and the ticket's key, then what the VS Code History tab shows: the
- * ticket's key, title, facts and links; the category chips, the filter, Expand all and Collapse all; the note on reconstructed entries; and a
- * section per work item, newest first, then the ticket's, the first open. Loading… until the hub answers, and why when it cannot.
+ * The page's History tab (PRD R59), what the VS Code History tab shows: the ticket's key, title, facts and links; the category chips, the filter,
+ * Expand all and Collapse all; the note on reconstructed entries; and a section per work item, newest first, then the ticket's, the first open.
+ * Loading… until the hub answers, and why when it cannot.
  */
 export function renderHistory(open: HistoryOpen): VNode {
   const { view, ui } = open;
@@ -238,79 +238,71 @@ export function renderHistory(open: HistoryOpen): VNode {
   const opened = (section: HistorySection, index: number): boolean => ui.sections[section.key] ?? index === 0;
 
   return (
-    <>
-      <header class="hist-bar">
-        <button type="button" class="icon hist-close" data-action="history-close" title="Close History (Escape)" aria-label="Close History">
-          <span class="codicon codicon-arrow-left" aria-hidden="true"></span>
-        </button>
-        <span class="hist-bar-title">{`${open.key} History`}</span>
-      </header>
-      <div class="hist-body scroll">
-        {open.error === null ? null : (
-          <p class="hist-error" role="alert">
-            <span class="codicon codicon-error" aria-hidden="true"></span>
-            {open.error}
-          </p>
-        )}
-        {view === null ? (
-          open.error === null ? <p class="empty">Loading…</p> : null
-        ) : (
-          <>
-            <div class="hist-hero">
-              <div class="hist-headline">
-                <span class="hist-key">{view.key}</span>
-                <h1>{view.title}</h1>
-              </div>
-              <dl class="hist-facts">
-                {view.facts.map((fact) => (
-                  <div>
-                    <dt>{fact.label}</dt>
-                    <dd>{fact.value}</dd>
-                  </div>
-                ))}
-              </dl>
-              {view.links.length === 0 ? null : (
-                <div class="hist-hero-links">
-                  {view.links.map((link) => (
-                    <Link link={link} />
-                  ))}
+    <section class="history-view hist-body" aria-label={`${open.key} History`}>
+      {open.error === null ? null : (
+        <p class="hist-error" role="alert">
+          <span class="codicon codicon-error" aria-hidden="true"></span>
+          {open.error}
+        </p>
+      )}
+      {view === null ? (
+        open.error === null ? <p class="empty">Loading…</p> : null
+      ) : (
+        <>
+          <div class="hist-hero">
+            <div class="hist-headline">
+              <span class="hist-key">{view.key}</span>
+              <h1>{view.title}</h1>
+            </div>
+            <dl class="hist-facts">
+              {view.facts.map((fact) => (
+                <div>
+                  <dt>{fact.label}</dt>
+                  <dd>{fact.value}</dd>
                 </div>
-              )}
-            </div>
-            <div class="hist-toolbar">
-              <div class="hist-chips">
-                {/* Chips are filters without counts: a category's entries spread over the sections, whose own counts the page shows. */}
-                {open.categories.map(({ key, label, icon }) => {
-                  const on = !ui.hidden.includes(key);
-
-                  return (
-                    <button type="button" class={`hist-chip${on ? ' on' : ''}`} data-action="history-chip" data-category={key} aria-pressed={on}>
-                      <span class={`codicon codicon-${icon}`} aria-hidden="true"></span>
-                      {label}
-                    </button>
-                  );
-                })}
+              ))}
+            </dl>
+            {view.links.length === 0 ? null : (
+              <div class="hist-hero-links">
+                {view.links.map((link) => (
+                  <Link link={link} />
+                ))}
               </div>
-              <input type="search" class="hist-filter" placeholder="Filter entries" aria-label="Filter entries" value={ui.query} autocomplete="off" spellcheck={false} />
-              <button type="button" class="icon" data-action="history-all" data-all="open" title="Expand all" aria-label="Expand all">
-                <span class="codicon codicon-expand-all" aria-hidden="true"></span>
-              </button>
-              <button type="button" class="icon" data-action="history-all" data-all="close" title="Collapse all" aria-label="Collapse all">
-                <span class="codicon codicon-collapse-all" aria-hidden="true"></span>
-              </button>
+            )}
+          </div>
+          <div class="hist-toolbar">
+            <div class="hist-chips">
+              {/* Chips are filters without counts: a category's entries spread over the sections, whose own counts the page shows. */}
+              {open.categories.map(({ key, label, icon }) => {
+                const on = !ui.hidden.includes(key);
+
+                return (
+                  <button type="button" class={`hist-chip${on ? ' on' : ''}`} data-action="history-chip" data-category={key} aria-pressed={on}>
+                    <span class={`codicon codicon-${icon}`} aria-hidden="true"></span>
+                    {label}
+                  </button>
+                );
+              })}
             </div>
-            {view.reconstructed && view.recordedSince !== null ? (
-              <p class="hist-banner">
-                <span class="codicon codicon-info" aria-hidden="true"></span>
-                {`Switchboard began logging on ${stamp(view.recordedSince).slice(0, 16)}. Entries marked ≈ reconstructed were rebuilt from the times stored before then; anything else that happened earlier was not recorded.`}
-              </p>
-            ) : null}
-            {view.sections.map((section, index) => (
-              <Section key={section.key} section={section} ui={ui} open={opened(section, index)} />
-            ))}
-          </>
-        )}
-      </div>
-    </>
+            <input type="search" class="hist-filter" placeholder="Filter entries" aria-label="Filter entries" value={ui.query} autocomplete="off" spellcheck={false} />
+            <button type="button" class="icon" data-action="history-all" data-all="open" title="Expand all" aria-label="Expand all">
+              <span class="codicon codicon-expand-all" aria-hidden="true"></span>
+            </button>
+            <button type="button" class="icon" data-action="history-all" data-all="close" title="Collapse all" aria-label="Collapse all">
+              <span class="codicon codicon-collapse-all" aria-hidden="true"></span>
+            </button>
+          </div>
+          {view.reconstructed && view.recordedSince !== null ? (
+            <p class="hist-banner">
+              <span class="codicon codicon-info" aria-hidden="true"></span>
+              {`Switchboard began logging on ${stamp(view.recordedSince).slice(0, 16)}. Entries marked ≈ reconstructed were rebuilt from the times stored before then; anything else that happened earlier was not recorded.`}
+            </p>
+          ) : null}
+          {view.sections.map((section, index) => (
+            <Section key={section.key} section={section} ui={ui} open={opened(section, index)} />
+          ))}
+        </>
+      )}
+    </section>
   );
 }

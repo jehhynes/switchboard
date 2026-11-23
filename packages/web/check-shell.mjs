@@ -89,7 +89,9 @@ if (listing) {
   };
   requestAnimationFrame(sample);
 }
-window.fetch = async (url) => ({ status: 200, ok: true, headers: new Headers(), json: async () => (String(url).endsWith('/personas') ? { personas } : {}), text: async () => '' });
+// History's tab reads a ticket with one entry per day over a week, so its pane scrolls.
+const historyView = { key: 'gh 1', title: 'Fix it', url: '', facts: [{ label: 'Status', value: 'Running' }], links: [], reconstructed: false, recordedSince: null, sections: [{ key: 'w1', workItemId: 1, title: 'dev:build', status: 'Running', tone: 'accent', facts: [], prompt: null, entries: Array.from({ length: 40 }, (_, i) => ({ key: 'e' + i, at: now - (40 - i) * 3600000, category: 'session', icon: 'play', text: 'Entry ' + i, lines: [], detail: null, shortId: null, links: [], tone: null, reconstructed: false, refused: null, stateChange: false })) }] };
+window.fetch = async (url) => ({ status: 200, ok: true, headers: new Headers(), json: async () => (String(url).endsWith('/personas') ? { personas } : String(url).endsWith('/page-history') ? { view: historyView, categories: [{ key: 'session', label: 'Sessions', icon: 'terminal' }] } : {}), text: async () => '' });
 const matchMedia = window.matchMedia.bind(window);
 window.matchMedia = (query) => (query.includes('display-mode: standalone') ? { matches: true, media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} } : matchMedia(query));
 </script>`;
@@ -156,7 +158,7 @@ const measure = `(() => {
         return { text: pill.textContent, ticket: pill.classList.contains('ticket'), state: inside ? 'whole' : outside ? 'out' : 'cut' };
       });
     }),
-    tops: { header: top('.header'), listHeader: top('.list-header'), historyBar: top('.hist-bar'), settingsHead: top('.settings-head'), personaHead: top('.persona-head'), tabs: top('.tabs'), panel: top('#panel'), list: top('#list') },
+    tops: { header: top('.header'), listHeader: top('.list-header'), settingsHead: top('.settings-head'), personaHead: top('.persona-head'), tabs: top('.tabs'), panel: top('#panel'), list: top('#list') },
   };
 })()`;
 
@@ -197,7 +199,7 @@ function failures(view, size, m) {
   }
   for (const [bar, top] of Object.entries(m.tops)) {
     // The dialogs, Settings and the persona dialog, outside the phone's layout sit inside the dimmed page's margin.
-    if ((['header', 'listHeader', 'historyBar'].includes(bar) || (['settingsHead', 'personaHead'].includes(bar) && size.phone)) && top !== null && top !== 0) out.push('the ' + bar + ' starts ' + top + ' px down');
+    if ((['header', 'listHeader'].includes(bar) || (['settingsHead', 'personaHead'].includes(bar) && size.phone)) && top !== null && top !== 0) out.push('the ' + bar + ' starts ' + top + ' px down');
   }
   // In portrait, under the status bar, WebKit finds the view's own solid top bar at the top edge, in the bars' colour, and paints the status bar in
   // it instead of blurring the page's top. An open sheet's dimmed backdrop is viewport-sized, which keeps the colour WebKit had. Landscape has no

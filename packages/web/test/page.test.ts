@@ -2457,7 +2457,7 @@ describe('the page in use', () => {
     again.page.close();
   });
 
-  it('keeps an artifact unread while History covers its tab, and counts it opened once History closes', () => {
+  it("shows History as a tab of the column after Status while the row offers it, which the Actions menu selects and an artifact's tab replaces", () => {
     window.innerWidth = 1920;
     history.replaceState(null, '', '#w=1');
     onTestFinished(() => {
@@ -2465,18 +2465,35 @@ describe('the page in use', () => {
     });
 
     const { page, source } = start();
+    const tabs = () => [...root.querySelectorAll('#detail .side-switch > .tab:not(.artifact-tab):not(.panel-max)')].map((one) => one.textContent);
 
+    hello(source, { artifacts: [], groups: [listGroup('progress', [listRow(1, { title: 'Fix it' })])] });
+    expect(tabs()).not.toContain('History');
     hello(source, { artifacts: [], groups: [listGroup('progress', [listRow(1, { title: 'Fix it', history: { ticketId: 1, key: 'gh 1' } })])] });
     source.emit('artifact', { artifact: { path: 'chat/new.md', owner: 'chat', kind: 'note', title: 'New', ext: 'md', type: 'markdown', updatedAt: 1 } });
+    expect(tabs().slice(0, 2)).toEqual(['Status', 'Console']);
+    expect(tabs()).toContain('History');
+    expect(root.querySelector('#detail .artifact-tab[data-path="chat/new.md"]')).not.toBeNull();
     click('[data-action="actions"]');
     click('.actions-menu [data-action="row-history"]');
-    expect(root.classList.contains('history')).toBe(true);
+    expect(root.querySelector('.actions-menu')).toBeNull();
+    expect(root.querySelector('#detail [data-side="history"]')?.getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(root.querySelector('#detail [data-side="history"]'));
+    expect(root.querySelector('#detail .detail-body .history-view')).not.toBeNull();
+    // History lies in its tab, not over the conversation: the conversation and its column stay.
+    expect(root.classList.contains('history')).toBe(false);
+    expect(root.querySelector('#panel .history-view')).toBeNull();
+    expect(JSON.parse(localStorage.getItem('switchboard.artifactsSeen')!)).toEqual({ '1': [] });
     click('#detail .artifact-tab[data-path="chat/new.md"] .tab-open');
     expect(root.querySelector('#detail .tab.selected')!.getAttribute('data-path')).toBe('chat/new.md');
-    expect(JSON.parse(localStorage.getItem('switchboard.artifactsSeen')!)).toEqual({ '1': [] });
-    root.querySelector<HTMLElement>('.hist-close')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    expect(root.classList.contains('history')).toBe(false);
+    expect(root.querySelector('.history-view')).toBeNull();
     expect(JSON.parse(localStorage.getItem('switchboard.artifactsSeen')!)).toEqual({ '1': ['chat/new.md'] });
+
+    // A row that stops offering History takes the tab with it, and the column shows Status in its place.
+    click('#detail [data-side="history"]');
+    hello(source, { artifacts: [], groups: [listGroup('progress', [listRow(1, { title: 'Fix it' })])] });
+    expect(tabs()).not.toContain('History');
+    expect(root.querySelector('#detail [data-side="status"]')?.getAttribute('aria-selected')).toBe('true');
     page.close();
   });
 
@@ -4505,7 +4522,7 @@ describe('the page in use', () => {
     again.page.close();
   });
 
-  it('leaves the pin out where the list is a column either way: with no work item open, and while History shows', () => {
+  it('leaves the pin out where the list is a column either way, with no work item open, and keeps it on the History tab', () => {
     window.innerWidth = 1180;
     localStorage.setItem('switchboard.listCollapsed', '1');
     history.replaceState(null, '', '#');
@@ -4525,13 +4542,11 @@ describe('the page in use', () => {
     hello(source, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', history: { ticketId: 1, key: 'gh 1' } })])] });
     expect(root.classList.contains('drawers')).toBe(true);
     expect(root.querySelector('.side-head .list-pin')?.getAttribute('aria-label')).toBe('Pin sidebar');
-    // History, opened from the work item's Actions menu, keeps the list a column, and leaves out the pin until it closes.
+    // History is a tab of the open work item, so the list stays the drawer and keeps its pin.
     click('[data-action="actions"]');
     click('.actions-menu [data-action="row-history"]');
-    expect(root.classList.contains('history')).toBe(true);
-    expect(root.querySelector('.list-pin')).toBeNull();
-    root.querySelector<HTMLElement>('.hist-close')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    expect(root.classList.contains('history')).toBe(false);
+    expect(root.querySelector('[data-tab="history"], [data-side="history"]')?.getAttribute('aria-selected')).toBe('true');
+    expect(root.classList.contains('drawers')).toBe(true);
     expect(root.querySelector('.side-head .list-pin')?.getAttribute('aria-label')).toBe('Pin sidebar');
     page.close();
   });
@@ -5374,11 +5389,11 @@ describe("the list's CSS", () => {
     expect(new Set(Object.values(scale)).size).toBe(order.length);
     expect(declarationsOf((selector) => selector === '.header')).toContainEqual(expect.stringContaining('z-index: var(--sb-z-bar)'));
     expect(declarationsOf((selector) => selector === '.sash')).toEqual([expect.stringContaining('z-index: var(--sb-z-sash)')]);
-    expect(css).toContain(':is(.header, .list-header, .hist-bar, .tabs):has([role="menu"]) { z-index: var(--sb-z-bar-menu); }');
-    expect(declarationsOf((selector) => selector === ':where(html:not(.phone)) #root.drawers:not(.listing):not(.history) > .side')).toEqual([expect.stringContaining('z-index: var(--sb-z-drawer)')]);
+    expect(css).toContain(':is(.header, .list-header, .tabs):has([role="menu"]) { z-index: var(--sb-z-bar-menu); }');
+    expect(declarationsOf((selector) => selector === ':where(html:not(.phone)) #root.drawers:not(.listing) > .side')).toEqual([expect.stringContaining('z-index: var(--sb-z-drawer)')]);
     expect(declarationsOf((selector) => selector === '.drawer-backdrop')).toEqual([expect.stringContaining('z-index: var(--sb-z-drawer-backdrop)')]);
     // The backdrop shows only under a drawer opened by its button, a key or a swipe, not one a resting pointer showed.
-    expect(declarationsOf((selector) => selector === ':where(html:not(.phone)) #root.drawers.drawer-held:not(.listing):not(.history) > .drawer-backdrop')).toEqual(['display: block;']);
+    expect(declarationsOf((selector) => selector === ':where(html:not(.phone)) #root.drawers.drawer-held:not(.listing) > .drawer-backdrop')).toEqual(['display: block;']);
     // No page-level layer keeps a number of its own outside the scale.
     expect(css).not.toMatch(/\.(sash|sliver|sheet-backdrop|persona-backdrop|composer-menu)\b[^{]*\{[^}]*z-index: \d/);
   });
@@ -5466,16 +5481,16 @@ describe("the list's CSS", () => {
     // No fixed width decides it: a phone never gets the drawer, and outside the phone's layout only the class the layout sets does.
     expect(css).not.toMatch(/@media \(\d+px <= width < /);
 
-    for (const rule of ['#root.drawers:not(.listing):not(.history) > .side-sash { display: none; }', '#root.drawers:not(.listing):not(.history):not(.drawer-open) > .sliver { display: block; }', '#root.drawers:not(.listing):not(.history) .header > .list-toggle { display: inline-flex; }']) {
+    for (const rule of ['#root.drawers:not(.listing) > .side-sash { display: none; }', '#root.drawers:not(.listing):not(.drawer-open) > .sliver { display: block; }', '#root.drawers:not(.listing) .header > .list-toggle { display: inline-flex; }']) {
       expect(css).toContain(`\n:where(html:not(.phone)) ${rule}`);
     }
 
     expect(css).not.toMatch(/(^|\n)#root\.drawers/);
     // Hidden, the list keeps its layout off the left edge, so its rows can be measured for the sliver.
-    expect(css).toMatch(/:where\(html:not\(\.phone\)\) #root\.drawers:not\(\.listing\):not\(\.history\) > \.side \{[^}]*position: fixed;[^}]*visibility: hidden; transform: translateX\(-100%\);/);
+    expect(css).toMatch(/:where\(html:not\(\.phone\)\) #root\.drawers:not\(\.listing\) > \.side \{[^}]*position: fixed;[^}]*visibility: hidden; transform: translateX\(-100%\);/);
     // Only the shown drawer has a transition, so it slides in and hides at once, as the dock does.
-    expect(declarationsOf((selector) => selector === ':where(html:not(.phone)) #root.drawers:not(.listing):not(.history) > .side').join(' ')).not.toContain('transition');
-    expect(declarationsOf((selector) => selector === ':where(html:not(.phone)) #root.drawers.drawer-open:not(.listing):not(.history) > .side').join(' ')).toContain('transition: transform 0.15s ease-out');
+    expect(declarationsOf((selector) => selector === ':where(html:not(.phone)) #root.drawers:not(.listing) > .side').join(' ')).not.toContain('transition');
+    expect(declarationsOf((selector) => selector === ':where(html:not(.phone)) #root.drawers.drawer-open:not(.listing) > .side').join(' ')).toContain('transition: transform 0.15s ease-out');
     expect(declarationsOf((selector) => selector === '.sliver').join(' ')).toMatch(/position: fixed;.*left: env\(safe-area-inset-left\);.*width: 3px;/);
   });
 
