@@ -35,7 +35,7 @@ export function renderFrame(side: { min: number; max: number }, chat: { min: num
   );
 }
 
-/** The composer: its Sent line and error over the box; in the box the lists, the chips, the text and live words, and the footer's controls. */
+/** The composer: its Sent line over the box; in the box the lists, the chips, the text and live words, and the footer's controls. */
 export function renderComposer(): VNode {
   return (
     <>
@@ -44,12 +44,6 @@ export function renderComposer(): VNode {
       <div class="composer-sent" role="status" hidden>
         <span class="codicon codicon-check" aria-hidden="true"></span>
         <span>Sent. Its reply shows on the Conversation tab.</span>
-      </div>
-      <div class="composer-error" role="alert" hidden>
-        <span class="composer-error-text"></span>
-        <button class="dismiss" type="button" aria-label="Dismiss">
-          <span class="codicon codicon-close"></span>
-        </button>
       </div>
       <div class="composer">
         <div class="glass composer-menu" role="listbox" hidden></div>

@@ -22,6 +22,7 @@ import { cardKeyAction, isAnswerMessage, questionsWaiting } from '@switchboard/c
 import { renderArtifacts, renderArtifactView, renderEmpty, renderStatus } from './side.js';
 import { renderPersonaDialog } from './personas.js';
 import { renderSheet } from './sheet.js';
+import { toast } from './toast.js';
 import { renderComposer, renderComposerMenu, renderEndedNote, renderFrame, renderShared } from './composer.js';
 import { listHeader } from './listHeader.js';
 import { PhoneVoice } from './phoneVoice.js';
@@ -153,6 +154,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const sheetHost = root.querySelector<HTMLElement>('#sheet')!;
   // The persona dialog over the whole page, as Settings is.
   const personaHost = root.appendChild(document.createElement('div'));
+  // The toast over the page (toast.tsx): every refusal and failure, a copy that worked and the needs-you message, as the dock's status toast.
+  const toastHost = root.appendChild(document.createElement('div'));
+
+  toastHost.id = 'toast';
+
+  const toastBox = toast(toastHost, { open: (workItemId) => void select(workItemId) });
   let personaCovers = false;
   // The scope generation the persona dialog opened for, and each opening's number, so a late roster answer fills only the dialog that asked.
   let personaScope: number | null = null;
@@ -534,8 +541,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // Off without local storage.
   }
 
-  /** A select refused while no conversation was shown, or a refused drag of a row, which the list shows until the next select. */
-  let listError: string | null = null;
   /** A drag of a Ready for review row under way (reorder.ts), which the list draws. */
   let dragView: DragView | null = null;
   let wanted: number | null = Number(/^#w=(\d+)$/.exec(location.hash)?.[1] ?? NaN) || null;
@@ -645,6 +650,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     local,
     openSettings: () => settingsPane.open(),
     reload: () => (deps.reload ?? (() => location.reload()))(),
+    refused: (text) => (text === null ? toastBox.clear('warning') : toastBox.show(text, 'warning')),
     // The pin shows only where it changes the list: with no work item open, or while History shows, the list is a column either way.
     pinned: () => (pinWorks() ? listPinned : undefined),
     ...(phoneVoice === null ? {} : { phoneVoice: { state: () => phoneVoice.state, error: () => phoneVoice.error, toggle: () => (phoneVoice.state === 'off' ? phoneVoice.start() : phoneVoice.stop()) } }),
@@ -657,7 +663,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
   const input = composerHost.querySelector('textarea')!;
   const send = composerHost.querySelector<HTMLButtonElement>('button.send')!;
-  const errorBox = composerHost.querySelector<HTMLElement>('.composer-error')!;
   const menu = composerHost.querySelector<HTMLElement>('.composer-menu')!;
   const voiceControls = composerHost.querySelector<HTMLElement>('.voice-controls')!;
   const micSlot = composerHost.querySelector<HTMLElement>('.composer-mic')!;
@@ -806,10 +811,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       sentTimer = setTimeout(() => void (sentNote.hidden = true), SENT_NOTE_MS);
     }
   };
-  const showError = (text: string | null): void => {
-    errorBox.querySelector('.composer-error-text')!.textContent = text ?? '';
-    errorBox.hidden = text === null;
-  };
+  /** Shows why something was refused or failed in the toast, or hides a refusal shown there with null. */
+  const showError = (text: string | null): void => (text === null ? toastBox.clear('warning') : toastBox.show(text, 'warning'));
   /** Live words show dimmed right after the box's text, on its line, from a copy of the text laid out under the box (architecture.md § Web page). */
   const syncLive = (): void => {
     const shown = !liveWords.hidden;
@@ -1104,7 +1107,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
   });
   send.addEventListener('click', () => void submit());
-  errorBox.querySelector('button.dismiss')!.addEventListener('click', () => showError(null));
   // The + button opens the browser's file picker, which a phone offers its camera and photos in too.
   attachButton.addEventListener('click', () => {
     if (canAttach()) {
@@ -2027,7 +2029,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     mount(personaHost, renderPersonaDialog(state.session?.persona, view.personas));
     coverForPersonas(view.personas !== null);
-    mount(list, renderListPane(expired, listError, renderList(listed.groups, state.scope?.workItemId ?? null, view.collapsed, listed.filtering, poolMenu(), view.bands, !paneWorks(), dragView), header.end(listed.groups)));
+    mount(list, renderListPane(expired, renderList(listed.groups, state.scope?.workItemId ?? null, view.collapsed, listed.filtering, poolMenu(), view.bands, !paneWorks(), dragView), header.end(listed.groups)));
     // The rows may have moved under a still pointer.
     reorder.refresh();
 
@@ -2202,7 +2204,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     personaCovers = on;
 
     for (const child of root.children) {
-      if (child !== personaHost) {
+      // The toast stays live over the dialog, so its Dismiss works and it is still read out.
+      if (child !== personaHost && child !== toastHost) {
         child.toggleAttribute('inert', on);
       }
     }
@@ -2558,7 +2561,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // Choosing a work item hides the drawer, as a row's click hides the auto-hidden dock.
     closeDrawer();
     wanted = workItemId;
-    listError = null;
+    showError(null);
     view.list = false;
     view.picker = false;
     view.actions = false;
@@ -2627,13 +2630,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
           history.replaceState(conversationEntry(history.state) ? history.state : null, '', '#');
         }
 
-        // With no conversation shown, the composer that holds errors is hidden, so the refusal shows over the list, which a phone shows again.
+        // With no conversation shown, a phone shows the list again.
         if (wanted === null) {
-          listError = error;
           view.list = true;
-        } else {
-          showError(error);
         }
+
+        showError(error);
 
         draw();
       }
@@ -2963,6 +2965,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       case 'actions':
         view.actions = !view.actions;
         view.linkMenu = false;
+        view.copyMenu = false;
         view.rowMenu = null;
         view.picker = false;
         view.viewMenu = false;
@@ -3038,6 +3041,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       }
       case 'link-menu':
         view.linkMenu = !view.linkMenu;
+        draw();
+        break;
+      case 'copy-menu':
+        view.copyMenu = !view.copyMenu;
         draw();
         break;
       case 'sheet-cancel':
@@ -3315,6 +3322,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     if (view.rowMenu !== null && !(event.target instanceof Element && event.target.closest('.pool-row') !== null)) {
       view.rowMenu = null;
       view.linkMenu = false;
+      view.copyMenu = false;
       draw();
     }
 
@@ -3422,6 +3430,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
       view.rowMenu = null;
       view.linkMenu = false;
+      view.copyMenu = false;
       draw();
       list.querySelector<HTMLElement>(`[data-action="pool-menu"][data-row="${opener}"]`)?.focus();
       event.stopImmediatePropagation();
@@ -3631,22 +3640,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const rowByKey = (key: string): PageRow | null => state.groups.flatMap((group) => group.rows).find((one) => rowKey(one) === key) ?? null;
   /** The hub's request fields that name a row: a work item's ID, or a pool ticket's. */
   const rowTarget = (row: PageRow): Record<string, number> => (row.workItemId !== null ? { workItemId: row.workItemId } : { ticketId: row.ticketId ?? -1 });
-  /** Why a row's control did not run: over the composer for the open work item, over the list for a pool ticket, which has no conversation. */
-  const refusedFor = (row: PageRow | null, why: string | null): void => {
-    if (row !== null && row.workItemId === null) {
-      listError = why;
-      draw();
-    } else {
-      showError(why);
-    }
-  };
   /** Places a dragged Ready for review row after `after`, or first (PRD R73); the hub's list then shows the new order, or the list why not. */
   const moveRow = async (workItemId: number, after: number | null): Promise<void> => {
     const answer = await post('row-move', { workItemId, after });
 
     if (answer.status !== 200) {
-      listError = String(answer.body['error'] ?? `Not moved (status ${answer.status}).`);
-      draw();
+      showError(String(answer.body['error'] ?? `Not moved (status ${answer.status}).`));
     }
   };
   // Alt+Up and Alt+Down move the selected Ready for review row, as the dock's (PRD R73), with its Move up and Move down; not while typing.
@@ -3676,6 +3675,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     view.actions = false;
     view.rowMenu = null;
     view.linkMenu = false;
+    view.copyMenu = false;
   };
   /**
    * Opens a row's ticket or link, an http or https URL from the hub's row, in a new tab; the installed app on this computer asks the
@@ -3697,7 +3697,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
 
     if (standalone() && paneLocal()) {
-      void post('row-open', { ...rowTarget(row), url }).then((answer) => answer.status === 200 || refusedFor(row, String(answer.body['error'] ?? `The link did not open (status ${answer.status}).`)));
+      void post('row-open', { ...rowTarget(row), url }).then((answer) => answer.status === 200 || showError(String(answer.body['error'] ?? `The link did not open (status ${answer.status}).`)));
       return;
     }
 
@@ -3730,6 +3730,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       view.sheet = { kind: 'snooze', row: key, label: action.label, title: row.title, choices: snoozeChoices(new Date(deps.now())), picked: '0', date: '', comment: '' };
     } else if (action.confirm !== null) {
       view.sheet = { kind: 'confirm', row: key, action };
+      draw();
+      // A control that asks first starts on Cancel, so Enter cancels it, as the dock's dialog does.
+      sheetHost.querySelector<HTMLElement>('.sheet [data-action="sheet-cancel"]')?.focus();
+      return;
     } else {
       void runAction(key, action.label, {});
     }
@@ -3770,7 +3774,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     view.acting = false;
     view.sheet = null;
-    refusedFor(row, answer.status === 200 ? null : String(answer.body['error'] ?? `Not done (status ${answer.status}).`));
+    showError(answer.status === 200 ? null : String(answer.body['error'] ?? `Not done (status ${answer.status}).`));
     draw();
   };
   const sheetGo = async (): Promise<void> => {
@@ -3814,6 +3818,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const row = selectedRow(state);
 
     view.actions = false;
+    view.copyMenu = false;
     draw();
 
     if (row === null) {
@@ -3831,10 +3836,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const copied = await (navigator.clipboard?.writeText(text).then(() => true, () => false) ?? Promise.resolve(false));
 
     if (!copied) {
+      showError(null);
       view.sheet = { kind: 'text', title: `Copy ${label}`, text };
       draw();
     } else {
-      showError(null);
+      toastBox.show(`Copied ${label}.`, 'info');
     }
   };
 
@@ -3960,10 +3966,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   // Numbers each report, so the hub drops one that a later one overtook.
   let paneSeq = 0;
   /**
-   * Whether a floating layer of the page is open: a menu, a dropdown, the composer's list, a sheet, a dialog, Settings or the work items'
-   * drawer. The pane's window lies above the page, so it would cover the part of the layer over the Browser tab.
+   * Whether a floating layer of the page is open: a menu, a dropdown, the composer's list, a sheet, a dialog, Settings, the toast or the work
+   * items' drawer. The pane's window lies above the page, so it would cover the part of the layer over the Browser tab.
    */
-  const floating = (): boolean => view.drawer !== null || contextMenu !== 'closed' || root.querySelector('.glass:not([hidden]), [role="menu"], [role="dialog"], [role="alertdialog"]') !== null;
+  const floating = (): boolean => view.drawer !== null || contextMenu !== 'closed' || root.querySelector('.glass:not([hidden]), [role="menu"], [role="dialog"], [role="alertdialog"], #toast .toast') !== null;
   let floatingShown = false;
   let paneHold: ReturnType<typeof setTimeout> | null = null;
   /** Whether the pane stays hidden for a floating layer: at once while one is open, and until PANE_SHOW_DELAY_MS after the last closes, so a quick close and open again does not flicker it. */
@@ -4236,10 +4242,15 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         void select(data['workItemId']);
       }
 
-      // The hub chose this page to raise needs-you alerts (alerts.surface, PRD R65): the message under the list's header, as in the dock's toast,
-      // a notification per work item, and the chime when nothing else sounds.
+      // The hub chose this page to raise needs-you alerts (alerts.surface, PRD R65): the last message in the toast, as in the dock's, a
+      // notification per work item, and the chime when nothing else sounds.
       if (type === 'needs' && Array.isArray(data['items'])) {
-        header.needs(data['items'] as NeedsItem[]);
+        const last = (data['items'] as NeedsItem[]).at(-1);
+
+        if (last !== undefined) {
+          toastBox.show(last.message, 'info', last.workItemId);
+        }
+
         notifyNeeds(data['items'] as NeedsItem[], (workItemId) => void select(workItemId));
 
         if (data['sound'] === true) {
@@ -4377,6 +4388,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       dropDrawer();
       dropFileIcons();
       header.close();
+      toastBox.close();
       source.close();
 
       for (const mounted of consoles.values()) {

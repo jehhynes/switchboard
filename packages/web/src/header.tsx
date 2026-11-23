@@ -34,11 +34,11 @@ const Separator = () => <li class="menu-separator" role="separator"></li>;
 
 /**
  * A row's menu, as rows of a `menu` list (architecture.md § Web page), grouped as the dock's row menu is: the main control, the work controls, the
- * state controls, Add comment…, the order controls, what the row opens (Copy, Open in VS Code and Open report, History, Open ticket and its
+ * state controls, Add comment…, the order controls, what the row opens (Copy, several drafts in a Copy submenu, Open in VS Code and Open report, History, Open ticket and its
  * links, more than two of them in an Open link submenu), then the controls that ask first; empty when the row offers none. Each item names its
  * row, so a pool ticket's menu in the list runs as the header's does.
  */
-export function menuRows(row: PageRow, view: Pick<View, 'acting' | 'linkMenu'>): VNode[] {
+export function menuRows(row: PageRow, view: Pick<View, 'acting' | 'linkMenu' | 'copyMenu'>): VNode[] {
   const actions = row.actions;
   const pastes = row.pastes;
   const commands = row.opens;
@@ -61,8 +61,18 @@ export function menuRows(row: PageRow, view: Pick<View, 'acting' | 'linkMenu'>):
     item({ 'data-action': 'link-menu', 'aria-haspopup': 'true', 'aria-expanded': String(view.linkMenu) }, 'link-external', 'Open link', <span class={`codicon codicon-chevron-${view.linkMenu ? 'down' : 'right'}`} aria-hidden="true"></span>),
     ...(view.linkMenu ? row.links.map((one, index) => link(String(index), one.label, null, 'submenu-row')) : []),
   ];
+  // One draft copies at once; several open a Copy submenu of their labels, as in the dock's menu.
+  const copy =
+    pastes.length === 1
+      ? [item({ 'data-action': 'row-paste', 'data-label': pastes[0]! }, 'copy', `Copy ${pastes[0]!}`)]
+      : pastes.length === 0
+        ? []
+        : [
+            item({ 'data-action': 'copy-menu', 'aria-haspopup': 'true', 'aria-expanded': String(view.copyMenu) }, 'copy', 'Copy', <span class={`codicon codicon-chevron-${view.copyMenu ? 'down' : 'right'}`} aria-hidden="true"></span>),
+            ...(view.copyMenu ? pastes.map((label) => item({ 'data-action': 'row-paste', 'data-label': label }, null, label, null, 'submenu-row')) : []),
+          ];
   const opens = [
-    ...pastes.map((label) => item({ 'data-action': 'row-paste', 'data-label': label }, 'copy', `Copy ${label}`)),
+    ...copy,
     ...commands.map((one) => item({ 'data-action': 'row-command', 'data-label': one.label }, one.icon, one.label)),
     // The dock's History, which the page shows in the conversation's place.
     ...(row.history === null ? [] : [item({ 'data-action': 'row-history' }, 'history', 'History')]),

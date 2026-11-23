@@ -198,7 +198,8 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
   /** Makes the page under Settings inert while Settings shows, so Tab and clicks reach only Settings. */
   const cover = (on: boolean): void => {
     for (const sibling of host.parentElement?.children ?? []) {
-      if (sibling !== host) {
+      // The page's toast (toast.tsx) stays live over Settings, so its Dismiss works and it is still read out.
+      if (sibling !== host && sibling.id !== 'toast') {
         sibling.toggleAttribute('inert', on);
       }
     }

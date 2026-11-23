@@ -27,6 +27,8 @@ export interface ListHeaderDeps {
    * undefined where the pin would change nothing, which leaves the pin out.
    */
   pinned?(): boolean | undefined;
+  /** Shows why the header's action failed in the page's toast (toast.tsx), or hides a refusal shown there with null. */
+  refused(text: string | null): void;
 }
 
 /** A pairing link the hub gave out (architecture.md § Remote access): its URL, its code and when both stop working. */
@@ -208,39 +210,14 @@ export interface HeaderView {
   menu: string | null;
   search: SearchView;
   sheet: HeaderSheet | null;
-  /** A refusal the header's last action got, shown under it until dismissed or the next action. */
-  notice: string | null;
   /** The `at` of the holder restart result dismissed last, which stays hidden. */
   holderDismissed?: number | null;
   /** Whether the page is this computer's, which offers Pair a device, Open Settings and Restart and resume; false on a paired device. */
   local?: boolean;
   /** Voice on this phone in More Actions, on a paired device's page; null or left out where it is not offered. */
   phoneVoice?: PhoneVoiceState | null;
-  /** The last work item that started needing the operator, with the dock's message, shown until it times out or is dismissed (PRD R65). */
-  needs?: { workItemId: number; message: string } | null;
   /** Whether the list is pinned, for the pin button at the header's end; left out, the header has no pin. */
   pinned?: boolean;
-}
-
-/** How long the needs-you message shows on a visible page with the pointer off it, as the dock's status toast. */
-export const NEEDS_SHOWN_MS = 10_000;
-/** How often the page counts that time. */
-const NEEDS_TICK_MS = 1_000;
-
-/** The needs-you message under the header, as the dock's status toast shows it: a click on the message opens its work item. */
-function NeedsYou({ view }: { view: HeaderView }) {
-  const needs = view.needs ?? null;
-
-  return needs === null ? null : (
-    <p class="needs-toast" role="status">
-      <button type="button" class="needs-message" data-action="list-needs" title="Open this work item">
-        {needs.message}
-      </button>
-      <button type="button" class="icon dismiss" data-action="list-needs-dismiss" title="Dismiss" aria-label="Dismiss">
-        <span class="codicon codicon-close" aria-hidden="true"></span>
-      </button>
-    </p>
-  );
 }
 
 /**
@@ -407,15 +384,6 @@ export function renderListHeader(header: PageHeader | null, view: HeaderView): V
           </div>
         </div>
       ) : null}
-      <NeedsYou view={view} />
-      {view.notice === null ? null : (
-        <p class="list-notice" role="alert">
-          <span class="list-notice-text">{view.notice}</span>
-          <button type="button" class="icon dismiss" data-action="list-dismiss" title="Dismiss" aria-label="Dismiss">
-            <span class="codicon codicon-close" aria-hidden="true"></span>
-          </button>
-        </p>
-      )}
       <HeaderNotes header={header} />
       <HolderNotices header={header} view={view} />
     </>
@@ -884,8 +852,6 @@ export function renderSearchEnd(search: SearchView, empty: boolean): VNode | nul
 export interface ListHeader {
   /** Draws the header for the hub's latest header and list. */
   draw(header: PageHeader | null, groups: readonly PageGroup[]): void;
-  /** Shows the hub's `needs` event: the last of its work items, as the dock's toast does. */
-  needs(items: ReadonlyArray<{ workItemId: number; message: string }>): void;
   /** The list to draw: filtered while a search applies, with the rows the hub found before the Done list. */
   list(groups: readonly PageGroup[]): { groups: PageGroup[]; filtering: boolean };
   /** The end of the search's results, drawn after the list; nothing without a search. */
@@ -899,7 +865,7 @@ export interface ListHeader {
  */
 export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTMLElement, deps: ListHeaderDeps): ListHeader {
   const search: SearchView = { open: false, query: '', filter: '', range: 0, older: [], more: false, pending: false, error: null };
-  const view: HeaderView = { menu: null, search, sheet: null, notice: null, local: deps.local === true };
+  const view: HeaderView = { menu: null, search, sheet: null, local: deps.local === true };
   // The repository New ad-hoc session used last, offered first next time while the page is open.
   let lastRepo: string | null = null;
   let ops = 0;
@@ -910,27 +876,6 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
   let timer: ReturnType<typeof setTimeout> | null = null;
   // Each search asked of the hub, so a newer search or range drops an older answer (F7).
   let searchRun = 0;
-  // How long the needs-you message has shown on a visible page with the pointer off it; a hidden page or the pointer on it starts it again.
-  let needsShown = 0;
-  let needsTimer: ReturnType<typeof setInterval> | null = null;
-  let needsHovered = false;
-  const clearNeeds = (): void => {
-    view.needs = null;
-
-    if (needsTimer !== null) {
-      clearInterval(needsTimer);
-      needsTimer = null;
-    }
-  };
-  const needsTick = (): void => {
-    needsShown = needsHovered || document.hidden ? 0 : needsShown + NEEDS_TICK_MS;
-
-    if (needsShown >= NEEDS_SHOWN_MS) {
-      clearNeeds();
-      redraw();
-    }
-  };
-
   const redraw = (): void => deps.redraw();
   const closeMenu = (focusOpener: boolean): void => {
     const menu = view.menu;
@@ -944,16 +889,15 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
       opener?.focus();
     }
   };
-  /** Turns one source on or off; the hub's next list shows the change, and a refusal shows under the header. */
+  /** Turns one source on or off; the hub's next list shows the change, and a refusal shows in the toast. */
   const setSource = async (name: string, enabled: boolean): Promise<void> => {
-    view.notice = null;
+    deps.refused(null);
     redraw();
 
     const answer = await deps.post('page-source', { name, enabled });
 
     if (answer.status !== 200) {
-      view.notice = String(answer.body['error'] ?? 'The source was not changed.');
-      redraw();
+      deps.refused(String(answer.body['error'] ?? 'The source was not changed.'));
     }
   };
 
@@ -1069,14 +1013,13 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
 
   // ---- More Actions ----
   const refresh = async (): Promise<void> => {
-    view.notice = null;
+    deps.refused(null);
     redraw();
 
     const answer = await deps.post('page-poll', {});
 
     if (answer.status !== 200) {
-      view.notice = String(answer.body['error'] ?? 'The sources were not polled.');
-      redraw();
+      deps.refused(String(answer.body['error'] ?? 'The sources were not polled.'));
     }
   };
   const focusSheet = (): void => sheetHost.querySelector<HTMLElement>('textarea, select')?.focus();
@@ -1332,26 +1275,6 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
 
         break;
       }
-      case 'list-dismiss':
-        view.notice = null;
-        redraw();
-        break;
-      case 'list-needs': {
-        const workItemId = view.needs?.workItemId;
-
-        clearNeeds();
-        redraw();
-
-        if (workItemId !== undefined) {
-          deps.select(workItemId);
-        }
-
-        break;
-      }
-      case 'list-needs-dismiss':
-        clearNeeds();
-        redraw();
-        break;
       case 'list-holder-restart':
         view.sheet = { kind: 'holder', busy: false, error: null };
         redraw();
@@ -1425,12 +1348,11 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
         break;
       case 'list-voice-computer':
         view.menu = null;
-        view.notice = null;
+        deps.refused(null);
         redraw();
         void deps.post('page-voice-computer', {}).then((answer) => {
           if (answer.status !== 200) {
-            view.notice = String(answer.body['error'] ?? 'The voice did not move to this computer.');
-            redraw();
+            deps.refused(String(answer.body['error'] ?? 'The voice did not move to this computer.'));
           }
         });
         break;
@@ -1494,26 +1416,8 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
   };
 
   document.addEventListener('pointerdown', outside);
-  host.addEventListener('pointerover', (event) => {
-    needsHovered = (event.target as HTMLElement).closest?.('.needs-toast') != null;
-  });
-  host.addEventListener('pointerleave', () => {
-    needsHovered = false;
-  });
 
   return {
-    needs: (items) => {
-      const last = items.at(-1);
-
-      if (last === undefined) {
-        return;
-      }
-
-      view.needs = { workItemId: last.workItemId, message: last.message };
-      needsShown = 0;
-      needsTimer ??= setInterval(needsTick, NEEDS_TICK_MS);
-      redraw();
-    },
     draw: (header, listed) => {
       shown = header;
       groups = listed;
@@ -1535,9 +1439,9 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
 
       const voiceError = view.local === true ? null : (deps.phoneVoice?.error() ?? null);
 
-      // Why the voice left this phone shows as the header's notice once, until dismissed or the next action.
+      // Why the voice left this phone shows in the toast once.
       if (voiceError !== null && voiceError !== shownVoiceError) {
-        view.notice = voiceError;
+        deps.refused(voiceError);
       }
 
       shownVoiceError = voiceError;
@@ -1548,7 +1452,6 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
     end: (filtered) => renderSearchEnd(search, filtered.every((group) => group.rows.length === 0)),
     close: () => {
       cancelTimer();
-      clearNeeds();
       document.removeEventListener('pointerdown', outside);
     },
   };

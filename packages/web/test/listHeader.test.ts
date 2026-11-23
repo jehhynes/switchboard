@@ -76,7 +76,7 @@ describe('the list header (architecture.md § Web page)', () => {
   it("draws each source kind's logo as the dock does, grey while off, with the hub's tooltip, and a tag for a kind without a logo", () => {
     const host = document.createElement('div');
 
-    host.innerHTML = html(renderListHeader(header({ sources: [github, { ...zoho, enabled: false }, { kind: 'jira', enabled: true, title: 'jira: polled', sources: [{ name: 'jira', enabled: true }] }] }), { menu: null, notice: null, sheet: null, search: closed() }));
+    host.innerHTML = html(renderListHeader(header({ sources: [github, { ...zoho, enabled: false }, { kind: 'jira', enabled: true, title: 'jira: polled', sources: [{ name: 'jira', enabled: true }] }] }), { menu: null, sheet: null, search: closed() }));
 
     const buttons = [...host.querySelectorAll<HTMLElement>('.source-toggle')];
 
@@ -94,11 +94,11 @@ describe('the list header (architecture.md § Web page)', () => {
     expect(buttons[1]!.querySelector('svg.source-logo.zoho.off')).not.toBeNull();
     expect(buttons[2]!.querySelector('.codicon-tag.source-logo')).not.toBeNull();
     // No sources, no icons.
-    host.innerHTML = html(renderListHeader(header({ sources: [] }), { menu: null, notice: null, sheet: null, search: closed() }));
+    host.innerHTML = html(renderListHeader(header({ sources: [] }), { menu: null, sheet: null, search: closed() }));
     expect(host.querySelector('.header-sources')).toBeNull();
   });
 
-  it("turns a kind's one source on or off with a click, opens a check menu for several that stays open, and shows a refusal under the header", async () => {
+  it("turns a kind's one source on or off with a click, opens a check menu for several that stays open, and shows a refusal in the toast", async () => {
     const { page, source } = start();
 
     hello(source);
@@ -120,9 +120,9 @@ describe('the list header (architecture.md § Web page)', () => {
     click('.source-menu [data-source="help"]');
     await flush();
     await flush();
-    expect(root.querySelector('.list-notice')?.textContent).toBe('No source is named help.');
-    click('[data-action="list-dismiss"]');
-    expect(root.querySelector('.list-notice')).toBeNull();
+    expect(root.querySelector('.toast.warning .toast-text')?.textContent).toBe('No source is named help.');
+    click('[data-action="toast-dismiss"]');
+    expect(root.querySelector('.toast')).toBeNull();
 
     // Escape closes the menu and gives the focus back to its icon; a press outside closes it too.
     root.querySelector<HTMLElement>('.source-menu .menu-row')!.focus();
@@ -323,14 +323,14 @@ describe('the list header (architecture.md § Web page)', () => {
     source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ sources: [] }) });
     expect(menuRows()[0]).toBe('New session…');
 
-    // Refresh sources polls; the hub's refusal shows under the header.
+    // Refresh sources polls; the hub's refusal shows in the toast.
     answers['/page-poll'] = { status: 409, body: { error: 'Every source is off.' } };
     click('.more-menu [data-action="list-poll"]');
     await flush();
     await flush();
     expect(posts.at(-1)?.url).toBe('/v1/conversation/page-poll');
     expect(root.querySelector('.more-menu')).toBeNull();
-    expect(root.querySelector('.list-notice')?.textContent).toBe('Every source is off.');
+    expect(root.querySelector('.toast.warning .toast-text')?.textContent).toBe('Every source is off.');
 
     // Reload reloads the page, for an installed app with no browser reload, and closes the menu.
     const before = reloads;
@@ -376,6 +376,8 @@ describe('the list header (architecture.md § Web page)', () => {
     expect(posts.map((one) => one.url)).toContain('/v1/conversation/page-settings-read');
     // The page under Settings takes no focus or clicks until Settings closes.
     expect(root.querySelector<HTMLElement>('.side')?.closest<HTMLElement>('[inert]')).not.toBeNull();
+    // The toast stays live over it: a failure is read out and Dismiss works.
+    expect(root.querySelector('#toast')?.closest('[inert]')).toBeNull();
     root.querySelector<HTMLButtonElement>('.settings-close')!.click();
     expect(root.querySelector('.settings')).toBeNull();
     expect(root.querySelector('[inert]')).toBeNull();
@@ -422,33 +424,34 @@ describe('the list header (architecture.md § Web page)', () => {
     page.close();
   });
 
-  it("shows the last work item that started needing the operator under the header, opens it on a click, and hides it after 10 s off the pointer (PRD R65)", async () => {
+  it("shows the last work item that started needing the operator in the toast, neutral, opens it on a click, and hides it after 10 s off the pointer (PRD R65)", async () => {
     vi.useFakeTimers();
     const { source } = start();
 
     hello(source, { groups: [listGroup('blocked', [listRow(1), listRow(2)])] });
     source.emit('needs', { items: [{ workItemId: 1, message: 'gh 1 is waiting for your answer.' }, { workItemId: 2, message: 'gh 2 asks for permission.' }] });
-    expect(root.querySelector('.needs-message')?.textContent).toBe('gh 2 asks for permission.');
+    expect(root.querySelector('.toast.info .toast-open')?.textContent).toBe('gh 2 asks for permission.');
+    expect(root.querySelector('.toast')?.getAttribute('role')).toBe('status');
     // The pointer on it keeps it; off it, 10 s hide it.
-    root.querySelector('.needs-message')!.dispatchEvent(new Event('pointerover', { bubbles: true }));
+    root.querySelector('.toast-open')!.dispatchEvent(new Event('pointerover', { bubbles: true }));
     vi.advanceTimersByTime(15_000);
-    expect(root.querySelector('.needs-toast')).not.toBeNull();
-    root.querySelector('.side-head')!.dispatchEvent(new Event('pointerleave'));
+    expect(root.querySelector('.toast')).not.toBeNull();
+    root.querySelector('#toast')!.dispatchEvent(new Event('pointerleave'));
     vi.advanceTimersByTime(9_000);
-    expect(root.querySelector('.needs-toast')).not.toBeNull();
+    expect(root.querySelector('.toast')).not.toBeNull();
     vi.advanceTimersByTime(1_000);
-    expect(root.querySelector('.needs-toast')).toBeNull();
+    expect(root.querySelector('.toast')).toBeNull();
 
     // A click on the message opens its work item and clears it; Dismiss only clears.
     source.emit('needs', { items: [{ workItemId: 1, message: 'gh 1 is waiting for your answer.' }] });
-    click('.needs-message');
-    expect(root.querySelector('.needs-toast')).toBeNull();
+    click('.toast-open');
+    expect(root.querySelector('.toast')).toBeNull();
     expect(location.hash).toBe('#w=1');
     await vi.advanceTimersByTimeAsync(0);
     expect(posts.filter((one) => one.url.endsWith('/select')).map((one) => one.body['workItemId'])).toEqual([1]);
     source.emit('needs', { items: [{ workItemId: 2, message: 'gh 2 asks for permission.' }] });
-    click('[data-action="list-needs-dismiss"]');
-    expect(root.querySelector('.needs-toast')).toBeNull();
+    click('[data-action="toast-dismiss"]');
+    expect(root.querySelector('.toast')).toBeNull();
     expect(location.hash).toBe('#w=1');
   });
 

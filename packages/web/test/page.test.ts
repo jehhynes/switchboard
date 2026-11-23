@@ -17,6 +17,7 @@ import { DETAIL_MIN } from '../src/layout.js';
 import { RECONNECT_MS } from '../src/reconnect.js';
 import type { ArtifactView, MessageView, PageGroup, PageRow, ReplyView, SessionView } from '@switchboard/protocol';
 import { drawAtOnce } from './frame.js';
+import { showToast } from '../src/toast.js';
 
 const message = (id: string, ord: number, patch: Partial<MessageView> = {}): MessageView => ({ type: 'message', id, sessionId: 's', workItemId: 1, at: 1_000 + ord, ord, provisional: false, withdrawn: false, origin: 'typed', text: `text ${id}`, delivery: 'sent', error: null, ...patch });
 const reply = (id: string, ord: number, patch: Partial<ReplyView> = {}): ReplyView => ({ type: 'reply', id, sessionId: 's', at: 1_000 + ord, ord, provisional: false, kind: 'reply', answers: null, opening: `reply ${id}`, rewrittenBy: null, withdrawn: false, unread: false, speak: null, tone: null, spoken: { state: 'none', atMs: null, saidChars: null }, ...patch });
@@ -900,6 +901,8 @@ describe('the page', () => {
     expect(root.querySelector('#head')?.closest('[inert]')).not.toBeNull();
     expect(root.querySelector('#panel')?.closest('[inert]')).not.toBeNull();
     expect(dialog.closest('[inert]')).toBeNull();
+    // The toast stays live over it: a failure is read out and Dismiss works.
+    expect(root.querySelector('#toast')?.closest('[inert]')).toBeNull();
     await flush();
     await flush();
     source.emit('reply', { reply: reply('r1', 1) });
@@ -1820,10 +1823,11 @@ it("turns the mic off through Back's path when a phone's conversation is left by
     await flush();
     await flush();
     expect(root.classList.contains('listing')).toBe(true);
-    expect(root.querySelector('#list .list-error')?.textContent).toBe('That work item is gone.');
+    expect(root.querySelector('.toast.warning .toast-text')?.textContent).toBe('That work item is gone.');
     expect(location.hash).toBe('');
+    // The next select hides it.
     root.querySelector<HTMLElement>('[data-work-item="2"]')!.click();
-    expect(root.querySelector('#list .list-error')).toBeNull();
+    expect(root.querySelector('.toast')).toBeNull();
     page.close();
   });
 
@@ -2151,7 +2155,7 @@ describe('attaching files from the composer', () => {
   it("removes a chip and ends its upload, refuses a file too large or empty without sending it, says the hub's refusal, and keeps chips per work item over a reload", async () => {
     const first = start();
     const composer = root.querySelector<HTMLElement>('#composer')!;
-    const error = () => (composer.querySelector<HTMLElement>('.composer-error')!.hidden ? null : composer.querySelector('.composer-error-text')!.textContent);
+    const error = () => root.querySelector('.toast.warning .toast-text')?.textContent ?? null;
 
     pick([new File(['a'], 'a.txt')]);
     expect(uploads()[0]!.type).toBe('application/octet-stream');
@@ -3089,11 +3093,21 @@ describe('the page in use', () => {
 
     click('button.actions');
     click('.actions-menu [data-label="Delete"]');
+    // The question starts on Cancel, and neither Enter nor Ctrl+Enter deletes, as in the dock's dialog.
+    expect(document.activeElement).toBe(root.querySelector('.sheet [data-action="sheet-cancel"]'));
+    root.querySelector('.sheet')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    root.querySelector('.sheet')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }));
+    await flush();
+    expect(posts).toEqual([]);
+    expect(root.querySelector('.sheet-title')!.textContent).toBe('Delete gh 1?');
     answers['/row-action'] = { status: 409, body: { error: 'The work item no longer offers this.' } };
     click('.sheet [data-action="sheet-go"]');
     await flush();
     expect(posts.find((post) => post.url.endsWith('/row-action'))?.body).toMatchObject({ label: 'Delete', workItemId: 1 });
-    expect(root.querySelector('.composer-error-text')!.textContent).toBe('The work item no longer offers this.');
+    // A refusal shows in the toast, in the warning colours, rather than over the composer.
+    expect(root.querySelector('.toast.warning .toast-text')!.textContent).toBe('The work item no longer offers this.');
+    expect(root.querySelector('.toast')!.getAttribute('role')).toBe('alert');
+    expect(root.querySelector('#composer .toast, #composer [role="alert"]')).toBeNull();
     expect(root.querySelector('.sheet')).toBeNull();
 
     answers['/row-action'] = { status: 200, body: { done: true } };
@@ -3123,11 +3137,62 @@ describe('the page in use', () => {
     await flush();
     expect(posts.find((post) => post.url.endsWith('/row-paste'))?.body).toMatchObject({ workItemId: 1, label: 'Reply' });
     expect(clipboard).toHaveBeenCalledWith('Dear Ana');
+    // A copy that worked says so in the neutral toast, as the dock's does.
+    expect(root.querySelector('.toast.info .toast-text')?.textContent).toBe('Copied Reply.');
+
+    // A draft the hub could not read says why, in the warning colours.
+    answers['/row-paste'] = { status: 409, body: { error: 'Reply could not be read: the file is gone.' } };
+    click('button.actions');
+    click('.actions-menu [data-action="row-paste"]');
+    await flush();
+    await flush();
+    expect(root.querySelector('.toast.warning .toast-text')?.textContent).toBe('Reply could not be read: the file is gone.');
+    expect(clipboard).toHaveBeenCalledTimes(1);
 
     // The menu belongs to the work item it was opened on.
     click('button.actions');
     click('#list [data-work-item="1"]');
     expect(root.querySelector('.actions-menu')).toBeNull();
+    page.close();
+  });
+
+  it('opens a Copy submenu of the labels for several drafts, copies the one chosen with "Copied <label>.", and shows a draft the clipboard refused to copy by hand', async () => {
+    const { page, source } = start();
+    let allowed = true;
+    const clipboard = vi.fn(async () => (allowed ? undefined : Promise.reject(new Error('NotAllowedError'))));
+
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText: clipboard }, configurable: true });
+    hello(source, { groups: [listGroup('review', [listRow(1, { pastes: ['Reply', 'Summary'] })])] });
+    click('button.actions');
+    // One Copy item, closed, in place of an item per draft.
+    expect([...root.querySelectorAll('.actions-menu .menu-row')].map((row) => row.textContent)).toEqual(['Copy']);
+    expect(root.querySelector('.actions-menu [data-action="copy-menu"]')!.getAttribute('aria-expanded')).toBe('false');
+    click('.actions-menu [data-action="copy-menu"]');
+    expect(root.querySelector('.actions-menu [data-action="copy-menu"]')!.getAttribute('aria-expanded')).toBe('true');
+    expect([...root.querySelectorAll('.actions-menu .submenu-row')].map((row) => row.textContent)).toEqual(['Reply', 'Summary']);
+
+    answers['/row-paste'] = { status: 200, body: { text: 'Done: the fix.' } };
+    click('.actions-menu .submenu-row[data-label="Summary"]');
+    await flush();
+    await flush();
+    expect(posts.find((post) => post.url.endsWith('/row-paste'))?.body).toMatchObject({ workItemId: 1, label: 'Summary' });
+    expect(clipboard).toHaveBeenCalledWith('Done: the fix.');
+    expect(root.querySelector('.toast.info .toast-text')?.textContent).toBe('Copied Summary.');
+    // The menu closed with its submenu, which opens closed next time.
+    expect(root.querySelector('.actions-menu')).toBeNull();
+    click('button.actions');
+    expect(root.querySelector('.actions-menu .submenu-row')).toBeNull();
+
+    // A refused clipboard confirms nothing: the sheet shows the text to copy.
+    allowed = false;
+    click('.actions-menu [data-action="copy-menu"]');
+    click('.actions-menu .submenu-row[data-label="Reply"]');
+    await flush();
+    await flush();
+    await flush();
+    expect(root.querySelector('.sheet-title')?.textContent).toBe('Copy Reply');
+    expect(root.querySelector<HTMLTextAreaElement>('.sheet-text')?.value).toBe('Done: the fix.');
+    expect(root.querySelector('.toast-text')?.textContent).not.toBe('Copied Reply.');
     page.close();
   });
 
@@ -3214,7 +3279,7 @@ describe('the page in use', () => {
     click('.actions-menu [data-label="Open in VS Code"]');
     await flush();
     await flush();
-    expect(root.querySelector('.composer-error-text')!.textContent).toBe('VS Code did not start: Code.exe was not found beside code on PATH.');
+    expect(root.querySelector('.toast.warning .toast-text')!.textContent).toBe('VS Code did not start: Code.exe was not found beside code on PATH.');
     page.close();
   });
 
@@ -3260,8 +3325,8 @@ describe('the page in use', () => {
     click('.sheet [data-action="sheet-go"]');
     await flush();
     expect(posts.find((post) => post.url.endsWith('/pool-action'))?.body).toMatchObject({ ticketId: 9, label: 'Start with guidance…', text: 'Use staging' });
-    // With no conversation, the refusal shows over the list.
-    expect(root.querySelector('#list .list-error')!.textContent).toBe('The ticket is no longer in the pool.');
+    // A pool ticket's refusal shows in the toast too.
+    expect(root.querySelector('.toast.warning .toast-text')!.textContent).toBe('The ticket is no longer in the pool.');
 
     row().click();
     click('#list .row-menu [data-label="Snooze…"]');
@@ -3406,10 +3471,10 @@ describe('the page in use', () => {
     await flush();
     expect(posts.filter((post) => post.url.endsWith('/page-focus')).at(-1)?.body).toMatchObject({ notify: true });
     FakeNotice.permission = 'denied';
-    // Not allowed yet: no notification, but the message shows under the list header as the dock's toast.
+    // Not allowed yet: no notification, but the message shows in the toast, neutral, as in the dock's.
     source.emit('needs', { items: [{ workItemId: 2, message: 'Switchboard: Side — Review, then approve' }], sound: false });
     expect(notices).toEqual([]);
-    expect(root.querySelector('.needs-toast .needs-message')?.textContent).toBe('Switchboard: Side — Review, then approve');
+    expect(root.querySelector('.toast.info .toast-open')?.textContent).toBe('Switchboard: Side — Review, then approve');
 
     FakeNotice.permission = 'granted';
     source.emit('needs', { items: [{ workItemId: 2, message: 'Switchboard: Side — Review, then approve' }], sound: false });
@@ -3463,7 +3528,7 @@ describe('the page in use', () => {
     click('.actions-menu [data-link="0"]');
     await flush();
     await flush();
-    expect(root.querySelector('.composer-error-text')!.textContent).toBe('The work item no longer links to this.');
+    expect(root.querySelector('.toast.warning .toast-text')!.textContent).toBe('The work item no longer links to this.');
     page.close();
   });
 
@@ -3608,7 +3673,7 @@ describe('the page in use', () => {
     await flush();
     await flush();
     expect(posts.find((post) => post.url.endsWith('/page-conversation'))?.body).toMatchObject({ provider: 'codex' });
-    expect(root.querySelector('.composer-error-text')!.textContent).toBe('New sessions need Code Mode (sessions.codeMode).');
+    expect(root.querySelector('.toast.warning .toast-text')!.textContent).toBe('New sessions need Code Mode (sessions.codeMode).');
     page.close();
   });
 
@@ -3659,6 +3724,15 @@ describe('the page in use', () => {
     await turn();
     expect(rects().at(-1)).toBeNull();
     list.hidden = true;
+    await turn();
+    vi.advanceTimersByTime(PANE_SHOW_DELAY_MS);
+    expect(rects().at(-1)).toMatchObject({ width: 600 });
+
+    // The toast is a layer too: the pane hides while it shows, and comes back once it is dismissed.
+    showToast('Not done.');
+    await turn();
+    expect(rects().at(-1)).toBeNull();
+    click('[data-action="toast-dismiss"]');
     await turn();
     vi.advanceTimersByTime(PANE_SHOW_DELAY_MS);
     expect(rects().at(-1)).toMatchObject({ width: 600 });
@@ -4860,7 +4934,7 @@ describe('the page in use', () => {
     await flush();
     await flush();
     expect(posts.filter((post) => post.url.endsWith('/expand-replies')).at(-1)!.body).toMatchObject({ on: false });
-    expect(root.querySelector('.composer-error-text')!.textContent).toBe('settings.json is not valid JSON: Unexpected token.');
+    expect(root.querySelector('.toast.warning .toast-text')!.textContent).toBe('settings.json is not valid JSON: Unexpected token.');
     expect(expandRow()!.getAttribute('aria-checked')).toBe('true');
     page.close();
 
@@ -4972,7 +5046,7 @@ describe('the page in use', () => {
     // One this page did not send stays out of its composer.
     source.emit('message', { message: message('m8', 8, { delivery: 'not-sent', error: 'x', text: 'not mine' }) });
     expect(root.querySelector('textarea')!.value).toBe('lost words');
-    expect(root.querySelector('.composer-error-text')!.textContent).toBe('The holder did not answer.');
+    expect(root.querySelector('.toast.warning .toast-text')!.textContent).toBe('The holder did not answer.');
     // While the voice is elsewhere, one Talk here takes the cluster's place; here, Speak replies, with no Stop beside it while a reply plays.
     expect(root.querySelector('[data-voice="speak-replies"]')).toBeNull();
     click('[data-voice="talk-here"]');
@@ -5125,7 +5199,7 @@ describe('the page against late answers', () => {
     pending.shift()!.resolve({ status: 200, body: { message: { id: 'm1' } } });
     await flush();
     expect(root.querySelector('textarea')!.value).toBe('first words');
-    expect(root.querySelector('.composer-error-text')!.textContent).toBe('The holder did not answer.');
+    expect(root.querySelector('.toast.warning .toast-text')!.textContent).toBe('The holder did not answer.');
 
     type('second words');
     pending.shift()!.resolve({ status: 200, body: { message: { id: 'm2' } } });
@@ -5136,7 +5210,7 @@ describe('the page against late answers', () => {
     expect(root.querySelector('textarea')!.value).toBe('');
     helloFor(source, 1, 5);
     expect(root.querySelector('textarea')!.value).toBe('second words');
-    expect(root.querySelector('.composer-error-text')!.textContent).toBe('The session ended.');
+    expect(root.querySelector('.toast.warning .toast-text')!.textContent).toBe('The session ended.');
     page.close();
   });
 
@@ -5204,7 +5278,7 @@ describe('the page against late answers', () => {
     root.querySelector<HTMLElement>('[data-action="request-option"][data-value="8799"]')!.click();
     root.querySelector<HTMLElement>('[data-action="request-answer"]')!.click();
     await flush();
-    expect(root.querySelector('.composer-error-text')!.textContent).toBe('Answer "Key?" first.');
+    expect(root.querySelector('.toast.warning .toast-text')!.textContent).toBe('Answer "Key?" first.');
 
     const secret = root.querySelector<HTMLInputElement>('.request-field[data-field="q1:key"]')!;
 
@@ -5291,9 +5365,9 @@ describe("the list's CSS", () => {
     expect(declarationsOf((selector) => selector === '.header > .back-toggle' || selector === '.side-sash')).toEqual([]);
   });
 
-  it('stacks the page\'s layers by one scale: the sashes over the top bars, a bar\'s open menu over the sashes, and the drawer and its backdrop over all of them', () => {
+  it('stacks the page\'s layers by one scale: the sashes over the top bars, a bar\'s open menu over the sashes, the drawer and its backdrop over all of them, and the toast over every sheet', () => {
     const scale = Object.fromEntries([...css.matchAll(/--sb-z-([a-z-]+): (\d+);/g)].map(([, name, value]) => [name, Number(value)]));
-    const order = ['bar', 'sash', 'bar-menu', 'sliver', 'drawer-backdrop', 'drawer', 'maximized', 'sheet', 'persona', 'settings', 'settings-sheet', 'top-line', 'top-band'];
+    const order = ['bar', 'sash', 'bar-menu', 'sliver', 'drawer-backdrop', 'drawer', 'maximized', 'sheet', 'persona', 'settings', 'settings-sheet', 'toast', 'top-line', 'top-band'];
 
     expect(Object.keys(scale).sort()).toEqual([...order].sort());
     expect(order.map((name) => scale[name])).toEqual(order.map((name) => scale[name]).sort((a, b) => a! - b!));
@@ -5341,7 +5415,6 @@ describe("the list's CSS", () => {
     expect(declarationsOf((selector) => selector === '.session-note').join(' ')).toMatch(/margin: 0 0 8px;.*border-radius: 8px;/);
     // The composer's own corners come from the composer.css the Conversation view shares.
     expect(readFileSync(createRequire(import.meta.url).resolve('@switchboard/conversation/composer.css'), 'utf8')).toMatch(/\n\.composer \{[^}]*border-radius: 8px;/);
-    expect(declarationsOf((selector) => selector === '.composer-error').join(' ')).toMatch(/margin: 0 0 8px;.*border-radius: 8px;/);
   });
 
   it("pins each group's header at the list's top on an opaque bar, with the gap inside the group so the next header pushes it up", () => {
@@ -5406,9 +5479,9 @@ describe("the list's CSS", () => {
     expect(declarationsOf((selector) => selector === '.sliver').join(' ')).toMatch(/position: fixed;.*left: env\(safe-area-inset-left\);.*width: 3px;/);
   });
 
-  it('shows the composer and the note above it only on the Conversation tab under 800 px of height, unless the composer has the focus or an error', () => {
-    // Kept while focused, for the on-screen keyboard, and while it shows an error, such as a refused header action from another tab.
-    const rule = '#root.off-conversation:not(:has(#composer:focus-within, #composer .composer-error:not([hidden])))';
+  it('shows the composer and the note above it only on the Conversation tab under 800 px of height, unless the composer has the focus', () => {
+    // Kept while focused, for the on-screen keyboard; a refusal shows in the toast, on every tab.
+    const rule = '#root.off-conversation:not(:has(#composer:focus-within))';
 
     // Every height under 800 px, a zoomed 799.5 px included, and no width condition.
     expect(css).toContain(`@media (height < 800px) {\n  ${rule} #note, ${rule} #composer { display: none; }\n}`);

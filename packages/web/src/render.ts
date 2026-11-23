@@ -210,6 +210,8 @@ export interface View {
   /** Whether the header's actions menu is open, and in it the Open link submenu. */
   actions: boolean;
   linkMenu: boolean;
+  /** Whether the actions menu's Copy submenu, for a row with several drafts, is open. */
+  copyMenu: boolean;
   /** The pool ticket row whose menu is open in the list, by its key, or null. */
   rowMenu: string | null;
   /** The sheet over the page that asks before an action, picks a snooze, or shows a draft to copy by hand. */
@@ -269,7 +271,7 @@ export type Sheet =
   | { kind: 'snooze'; row: string; label: string; title: string; choices: SnoozeChoice[]; picked: string; date: string; comment: string }
   | { kind: 'text'; title: string; text: string };
 
-export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), bands: new Map(), list: false, drawer: null, actions: false, linkMenu: false, rowMenu: null, sheet: null, acting: false, prompt: null, providers: null, side: 'status', viewMenu: false, details: false, expandReplies: null, pane: null, paneNote: null, artifactFit: ARTIFACT_TABS_MAX, artifactMenu: false });
+export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), bands: new Map(), list: false, drawer: null, actions: false, linkMenu: false, copyMenu: false, rowMenu: null, sheet: null, acting: false, prompt: null, providers: null, side: 'status', viewMenu: false, details: false, expandReplies: null, pane: null, paneNote: null, artifactFit: ARTIFACT_TABS_MAX, artifactMenu: false });
 
 /** The longest menu label for a link, as the dock's `LinkLabelMax`; a longer one is cut with an ellipsis and shown whole in its tooltip. */
 export const LINK_LABEL_MAX = 48;

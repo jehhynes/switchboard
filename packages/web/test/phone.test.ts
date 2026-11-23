@@ -17,7 +17,7 @@ describe('the page on a phone', () => {
     expect(phone).toContain('#composer .composer { border-width: 1px 0 0; border-radius: 0; box-shadow: none; }');
     expect(css).not.toMatch(/#composer[^{]*\{[^}]*padding-bottom: env\(safe-area-inset-bottom\)/);
     expect(phone).toContain('#composer .composer-footer { padding-left: max(5px, calc(env(safe-area-inset-bottom) - env(safe-area-inset-left))); padding-right: max(5px, calc(env(safe-area-inset-bottom) - env(safe-area-inset-right))); padding-bottom: max(5px, min(14px, env(safe-area-inset-bottom))); }');
-    expect(phone).toContain('.session-note, .composer-error { border-left: none; border-right: none; border-radius: 0; }');
+    expect(phone).toContain('.session-note { border-left: none; border-right: none; border-radius: 0; }');
     expect(phone).not.toContain('off-conversation');
   });
 
@@ -36,8 +36,8 @@ describe('the page on a phone', () => {
     // A framed HTML or PDF artifact scrolls inside its frame, so the frame ends above the inset.
     expect(css).toContain('.scroll.framed { display: flex; flex-direction: column; padding: 0 0 var(--sb-end); }');
     // Where a short screen hides the composer off the Conversation tab, by the same condition, the other tabs keep the inset.
-    expect(css).toContain('#root.off-conversation:not(:has(#composer:focus-within, #composer .composer-error:not([hidden]))) #composer { display: none; }');
-    expect(css).toContain('@media (height < 800px) {\n  #root.off-conversation:not(:has(#composer:focus-within, #composer .composer-error:not([hidden]))) > .main { --sb-end: env(safe-area-inset-bottom); }\n}');
+    expect(css).toContain('#root.off-conversation:not(:has(#composer:focus-within)) #composer { display: none; }');
+    expect(css).toContain('@media (height < 800px) {\n  #root.off-conversation:not(:has(#composer:focus-within)) > .main { --sb-end: env(safe-area-inset-bottom); }\n}');
     // Full-screen Settings runs to the edge too, its bar holding the inset.
     expect(css).toContain('.settings-backdrop { padding: var(--sb-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);');
     expect(css).toContain('.settings-bar { flex-wrap: wrap; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); }');
@@ -152,7 +152,7 @@ describe('the page on a phone', () => {
       const row = { workItemId: 1, ticketId: null, ticket: 'gh 1', url: '', links: [], actions: [{ label: 'Stop session', icon: 'debug-stop', group: 'state' } as PageAction, main], pastes: [], opens: [], history: null } as unknown as PageRow;
       const host = document.createElement('ul');
 
-      host.innerHTML = html(menuRows(row, { acting: false, linkMenu: false }));
+      host.innerHTML = html(menuRows(row, { acting: false, linkMenu: false, copyMenu: false }));
       expect(host.querySelector('[data-action="row-action"]')?.getAttribute('data-label')).toBe(label);
     }
   });
