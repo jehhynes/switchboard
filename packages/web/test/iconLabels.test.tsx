@@ -98,6 +98,19 @@ describe('the tab strips', () => {
     expect(css).not.toMatch(/\.provider(?![-\w])[^{,]*\{[^}]*background/);
   });
 
+  it('ConversationDropdown_Icons_CentredInBoxesOnWholePixels', () => {
+    // Each icon in a 16 px box that centres its glyph, the codicons at their own 16 px grid; no baseline alignment or offset.
+    expect(css).toContain(':is(.conversation-menu .menu-row, button.picker) > :is(.codicon, .provider), .conversation-menu .menu-gutter > .codicon { display: flex; flex: none; align-items: center; justify-content: center; height: 16px; line-height: 1; }');
+    expect(css).toContain(':is(.conversation-menu .menu-row, button.picker) > .codicon { font-size: 16px; }');
+    expect(css).not.toMatch(/conversation-(?:menu|row)[^{]*\{[^}]*(?:vertical-align|margin-top|top:)/);
+    // The rows and the button centre their items; no rule aligns them otherwise.
+    expect(css).toMatch(/\n\.menu-row \{[^}]*align-items: center;/);
+    expect(css).toMatch(/\nbutton\.picker \{[^}]*align-items: center;/);
+    expect(css).not.toMatch(/(?:\.menu-row|\.conversation-row|\.conversation-menu|button\.picker)[^{,]*\{[^}]*align-(?:items|self): (?!center)/);
+    // The button is a whole number of pixels tall, so the menu under it, and its rows, start on a whole pixel.
+    expect(css).toMatch(/\nbutton\.picker \{[^}]*min-height: 32px; box-sizing: border-box;/);
+  });
+
   it('TabStrip_EveryTabButTheChosen_DrawsTheBottomBorder', () => {
     const tab = /\n\.tab \{([^}]*)\}/.exec(css)?.[1] ?? '';
     const chosen = /\n\.tab\.selected \{([^}]*)\}/.exec(css)?.[1] ?? '';

@@ -361,7 +361,9 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; container: conversation / inline-size; background: var(--sb-chat-background); }
 .header { display: flex; align-items: center; gap: 4px; padding: 6px 6px 6px 12px; border-bottom: 1px solid var(--vscode-panel-border); background: var(--sb-bar-background); user-select: none; }
 .picker-anchor { flex: 1 1 0; min-width: 6em; }
-button.picker { flex: 1 1 auto; min-width: 0; overflow: hidden; display: flex; align-items: center; gap: 6px; border: none; color: inherit; padding: 6px 6px; cursor: pointer; text-align: left; font-weight: 500; }
+/* A whole number of pixels tall, which its label's text-box alone does not make it, so the dropdown under it and each of its rows start on a whole
+   pixel and Chrome does not snap their icons half a pixel off their centre. */
+button.picker { flex: 1 1 auto; min-width: 0; min-height: 32px; box-sizing: border-box; overflow: hidden; display: flex; align-items: center; gap: 6px; border: none; color: inherit; padding: 6px 6px; cursor: pointer; text-align: left; font-weight: 500; }
 button.icon:hover, a.icon:hover { background: var(--vscode-toolbar-hoverBackground); }
 button.picker .title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 button.picker > .codicon, button.picker > .provider, button.picker > .count, .header > button.icon { flex: none; }
@@ -407,6 +409,12 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 /* Each session's provider mark stands in one column after its state codicon, on the button and every row, an unknown provider's as an empty mark, so
    the titles start at one edge; the mark has no background of its own, on any row. */
 :is(.conversation-row, button.picker) > .provider { width: 16px; justify-content: center; }
+/* The session dropdown's icons, on its button and rows (the state codicon, the provider's mark, the chevron, New conversation's +): each in a box 16 px
+   tall that centres its glyph, centred on its row by the row's align-items: center as the label's text-box is, so icon and label share one centre
+   with no baseline alignment or offsets. The codicons are drawn at 16 px, their own grid, as the provider's marks are; the gutter's + stays at a
+   gutter's 14 px, at which its glyph, drawn half a unit above its own centre, is nearer the label's. */
+:is(.conversation-menu .menu-row, button.picker) > :is(.codicon, .provider), .conversation-menu .menu-gutter > .codicon { display: flex; flex: none; align-items: center; justify-content: center; height: 16px; line-height: 1; }
+:is(.conversation-menu .menu-row, button.picker) > .codicon { font-size: 16px; }
 /* The dropdown grows to show its titles whole, up to 720 px, and as placed (`placeMenus`) no wider than the room to the viewport's edge. */
 .menu.conversation-menu { max-width: 720px; }
 .menu-row.submenu-row { padding-left: 16px; }
