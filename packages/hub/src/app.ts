@@ -730,7 +730,9 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       const built = views();
       const row = voiceRow();
 
-      return pageList(built.dock, built.snapshot, row === null ? null : { row, ...voiceMark(voice.micLive, voice.device === 'phone') });
+      const mark = row === null ? null : voiceMark(voice.micLive, voice.speakReplies, voice.device === 'phone');
+
+      return pageList(built.dock, built.snapshot, row === null || mark === null ? null : { row, ...mark });
     },
     pageHeader: () => {
       const built = views();
@@ -956,7 +958,7 @@ const dockWithRuns = () => {
 
     const executable = (terminal: DockTerminal): DockTerminal => ({ ...terminal, ...terminalRun(terminal) });
 
-    // The voice target's row has the mic mark, and a voice problem is a note: no window shows another's or a global one (architecture.md § Voice).
+    // The voice target's row has the mic or speaker mark, and a voice problem is a note: no window shows another's or a global one (architecture.md § Voice).
     const activeRow = voiceRow();
 
     return {
@@ -970,7 +972,7 @@ const dockWithRuns = () => {
           ...row,
           open: row.open?.type === 'terminal' ? { ...executable(row.open), type: 'terminal' as const } : row.open,
           terminal: row.terminal === null ? null : executable(row.terminal),
-          voice: row.key === activeRow ? voiceMark(voice.micLive, voice.device === 'phone') : null,
+          voice: row.key === activeRow ? voiceMark(voice.micLive, voice.speakReplies, voice.device === 'phone') : null,
           controls: [...row.controls, ...personaControls(row.key)],
         })),
       })),

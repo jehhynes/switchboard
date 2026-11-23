@@ -113,7 +113,7 @@ export const VOICE_RESTART_MS = 60_000;
 export const OPEN_ITS_WINDOW = 'Open a window for this session to use voice.';
 /** The mic codicon in codicon.ttf, which marks the voice target's dock row while the mic is on (architecture.md § Voice). */
 export const VOICE_GLYPH = '\u{ec12}';
-/** The speaker codicon (`unmute`), which marks the voice target's row while the mic is off: the voice speaks there, but nothing listens. */
+/** The speaker codicon (`unmute`), which marks the voice target's row while the mic is off and Speak replies on: the voice speaks there, but nothing listens. */
 export const SPEAKER_GLYPH = '\u{eb75}';
 
 /**
@@ -124,11 +124,18 @@ export function speechOf(speak: string): string {
   return speechPart(stripQuestionMarkup(speak));
 }
 
-/** The voice target's row mark: the mic while the mic is on, else the speaker, with where the voice is in its tooltip. */
-export function voiceMark(micLive: boolean, onPhone: boolean): { glyph: string; title: string } {
+/**
+ * The voice target's row mark, with where the voice is in its tooltip: the mic while the mic is on, else the speaker while Speak replies is on,
+ * else none, since the voice neither listens nor speaks there.
+ */
+export function voiceMark(micLive: boolean, speakReplies: boolean, onPhone: boolean): { glyph: string; title: string } | null {
   const where = onPhone ? 'Voice is on a paired device for this session' : 'Voice is set to this session';
 
-  return micLive ? { glyph: VOICE_GLYPH, title: `${where}. Mic on.` } : { glyph: SPEAKER_GLYPH, title: `${where}. Mic off.` };
+  if (micLive) {
+    return { glyph: VOICE_GLYPH, title: `${where}. Mic on. Speak replies ${speakReplies ? 'on' : 'off'}.` };
+  }
+
+  return speakReplies ? { glyph: SPEAKER_GLYPH, title: `${where}. Mic off. Speak replies on.` } : null;
 }
 /** Why a dock click leaves the voice where it is while the phone has it. */
 export const PHONE_HAS_VOICE = 'Voice is on a paired device. Select Talk here in the session\'s window to use it on this computer.';
@@ -438,8 +445,9 @@ export class VoiceControl {
    * that greets it with another device keeps the voice off; after, the hub's own device wins.
    */
   #deviceChosen = false;
-  /** The mic state the rows' mark last showed (`micLive`). */
+  /** The mic state and Speak replies the rows' mark last showed (`micLive`, `speakReplies`). */
   #micLiveShown = false;
+  #speakRepliesShown = true;
   /** Whether the voice process has the phone's capture open, so the phone's audio is relayed. */
   #phoneCapture = false;
   /** Whether the phone's microphone cannot be heard, as its page last said, for a voice process started again. */
@@ -854,16 +862,20 @@ export class VoiceControl {
 
   /**
    * Whether the mic is on where the voice is: turned on, and capture neither off, stopped by the idle timeout nor unavailable. The voice
-   * target's row shows the mic mark only then, else the speaker mark (architecture.md § Dock, PRD R109).
+   * target's row shows the mic mark only then, else the speaker mark while Speak replies is on (architecture.md § Dock, PRD R109).
    */
   get micLive(): boolean {
     return this.#micOn && this.#mic !== 'off' && this.#mic !== 'idle-off' && this.#mic !== 'unavailable';
   }
 
-  /** Sends each window its voice state when it changed, and the dock and the page's list their row mark when the mic came on or went off. */
+  /**
+   * Sends each window its voice state when it changed, and the dock and the page's list their row mark when the mic came on or went off or
+   * Speak replies was turned on or off.
+   */
   viewsChanged(): void {
-    if (this.micLive !== this.#micLiveShown) {
+    if (this.micLive !== this.#micLiveShown || this.speakReplies !== this.#speakRepliesShown) {
       this.#micLiveShown = this.micLive;
+      this.#speakRepliesShown = this.speakReplies;
       this.deps.dockChanged();
     }
 

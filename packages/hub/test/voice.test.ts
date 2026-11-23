@@ -895,6 +895,14 @@ describe('spoken alerts in the hub', () => {
     expect(control.mic('k1', false)).toBeNull();
     expect(control.micLive).toBe(false);
     expect(dockChanges()).toBe(before + 4);
+
+    // Speak replies turned off and on again changes the mark between none and the speaker, so each rebuilds the rows; setting it again does not.
+    control.setSpeakReplies(false);
+    expect(dockChanges()).toBe(before + 5);
+    control.setSpeakReplies(false);
+    expect(dockChanges()).toBe(before + 5);
+    control.setSpeakReplies(true);
+    expect(dockChanges()).toBe(before + 6);
   });
 });
 
@@ -910,11 +918,15 @@ describe('speechOf', () => {
 });
 
 describe('voiceMark', () => {
-  it('marks the voice target\'s row with the mic while the mic is on, else the speaker, saying where the voice is', () => {
-    expect(voiceMark(true, false)).toEqual({ glyph: VOICE_GLYPH, title: 'Voice is set to this session. Mic on.' });
-    expect(voiceMark(false, false)).toEqual({ glyph: SPEAKER_GLYPH, title: 'Voice is set to this session. Mic off.' });
-    expect(voiceMark(true, true)).toEqual({ glyph: VOICE_GLYPH, title: 'Voice is on a paired device for this session. Mic on.' });
-    expect(voiceMark(false, true).glyph).toBe(SPEAKER_GLYPH);
+  it("marks the voice target's row with the mic while the mic is on, else the speaker only while Speak replies is on, saying where the voice is", () => {
+    expect(voiceMark(true, true, false)).toEqual({ glyph: VOICE_GLYPH, title: 'Voice is set to this session. Mic on. Speak replies on.' });
+    expect(voiceMark(true, false, false)).toEqual({ glyph: VOICE_GLYPH, title: 'Voice is set to this session. Mic on. Speak replies off.' });
+    expect(voiceMark(false, true, false)).toEqual({ glyph: SPEAKER_GLYPH, title: 'Voice is set to this session. Mic off. Speak replies on.' });
+    // Neither listening nor speaking: no mark, rather than a speaker that says replies are read.
+    expect(voiceMark(false, false, false)).toBeNull();
+    expect(voiceMark(false, false, true)).toBeNull();
+    expect(voiceMark(true, false, true)).toEqual({ glyph: VOICE_GLYPH, title: 'Voice is on a paired device for this session. Mic on. Speak replies off.' });
+    expect(voiceMark(false, true, true)?.glyph).toBe(SPEAKER_GLYPH);
     expect(SPEAKER_GLYPH).not.toBe(VOICE_GLYPH);
   });
 });

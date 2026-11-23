@@ -56,7 +56,7 @@ The dock's list is in `apps/dock/src/Switchboard.Dock/Views/`, the page's in `pa
 |---|---|---|---|
 | R1 | Line 1: priority dot (with immediacy and severity tooltip) only on a priority ticket | Present | |
 | R2 | Line 1: title in semibold, cut with an ellipsis, whole title in its tooltip | Present | The page's tooltip is on the whole row |
-| R3 | Line 1: the voice target's mark before the time, the mic while the mic is on, else the speaker | Present | Both take the glyph and tooltip from the hub |
+| R3 | Line 1: the voice target's mark before the time, the mic while the mic is on, else the speaker while Speak replies is on, else none | Present | Both take the glyph and tooltip from the hub |
 | R4 | Line 1: time at the end, muted, with what it counts and since when in its tooltip; Done rows show the done time | Present | |
 | R5 | Times refresh at least every minute | Present | Both redraw from the hub's rebuilt rows |
 | R6 | Line 2: comment icon first, muted, with every comment and its time in the tooltip | Present | |
