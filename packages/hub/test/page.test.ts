@@ -13,7 +13,7 @@ import type { RemoteAccess } from '../src/page.js';
 import { createHash } from 'node:crypto';
 import { runInNewContext } from 'node:vm';
 import { Store } from '@switchboard/core';
-import { artifactFile, cookieValue, deviceLabel, pairHtml, SIGNED_OUT_HTML, PAIR_CODE_TRIES, PAIR_MS, PAIR_SCRIPT, pageOrigin, dockRowOf, findFiles, knownFolder, pageHeader, loopbackHost, PageAccess, pageCookie, PUBLIC_PAGE_FILES, PAGE_LINK_MS, PAGE_SESSION_MS, PAGE_SESSIONS_KEPT, pageActionEvent, pageActions, pageCommandOf, pageGroups, pageList, pageOpens, pasteText, poolRowOf, rowOpenUrl, tabUrl } from '../src/page.js';
+import { artifactFile, cookieValue, deviceLabel, pairHtml, SIGNED_OUT_HTML, PAIR_CODE_TRIES, PAIR_MS, PAIR_SCRIPT, pageOrigin, dockRowOf, findFiles, pageHeader, loopbackHost, PageAccess, pageCookie, PUBLIC_PAGE_FILES, PAGE_LINK_MS, PAGE_SESSION_MS, PAGE_SESSIONS_KEPT, pageActionEvent, pageActions, pageCommandOf, pageGroups, pageList, pageOpens, pasteText, poolRowOf, rowOpenUrl, tabUrl } from '../src/page.js';
 import { dockView } from '../src/dock.js';
 import type { DockView } from '../src/dock.js';
 import { PAGE_ASSETS } from '@switchboard/web';
@@ -378,42 +378,35 @@ describe('pageList', () => {
 });
 
 describe('pageHeader', () => {
-  it("offers the dock's sources and schedules, and as folders the repo roots, then each folder that hosts a conversation, once", () => {
-    const byFolder = item(4, { ticket: { ...item(4).ticket, hostWindow: 'D:/git/support' } });
-    const again = item(5, { ticket: { ...item(5).ticket, hostWindow: 'd:/git/Support' } });
-    const byWindow = item(6, { ticket: { ...item(6).ticket, hostWindow: 'C:/sb/windows/x.code-workspace' } });
-    const root = item(7, { ticket: { ...item(7).ticket, hostWindow: 'D:/w1' } });
+  it("offers the dock's sources, repo roots and schedules", () => {
     const sources = [{ kind: 'github', enabled: true, title: 'gh: polled', sources: [{ name: 'gh', enabled: true }] }];
-    const header = pageHeader({ notes: [], sources, repoRoots: ['D:/w1'], schedules: [{ name: 'nightly', playbook: 'dev:sweep' }] }, snapshot([byFolder, again, byWindow, root]));
 
-    expect(header).toEqual({ notes: [], sources, repoRoots: ['D:/w1'], folders: ['D:/w1', 'D:/git/support'], schedules: [{ name: 'nightly', playbook: 'dev:sweep' }] });
-    expect(knownFolder(header.folders, 'd:/git/support')).toBe('D:/git/support');
-    expect(knownFolder(header.folders, 'D:/git')).toBeNull();
+    expect(pageHeader({ notes: [], sources, repoRoots: ['D:/w1'], schedules: [{ name: 'nightly', playbook: 'dev:sweep' }] })).toEqual({ notes: [], sources, repoRoots: ['D:/w1'], schedules: [{ name: 'nightly', playbook: 'dev:sweep' }] });
   });
 
   it("carries the dock's holder notice and restart result", () => {
     const holderNotice = { text: 'The terminal holder is from an older build. Restart it to update.', confirm: { question: 'Restart the terminal holder?', detail: 'd', action: 'Restart and resume' } };
     const holderResult = { at: 5, text: 'The terminal holder restarted.', failed: false };
-    const header = pageHeader({ notes: [], sources: [], repoRoots: [], schedules: [], holderNotice, holderResult }, snapshot([]));
+    const header = pageHeader({ notes: [], sources: [], repoRoots: [], schedules: [], holderNotice, holderResult });
 
     expect(header).toMatchObject({ holderNotice, holderResult });
-    expect(pageHeader({ notes: [], sources: [], repoRoots: [], schedules: [] }, snapshot([]))).not.toHaveProperty('holderNotice');
+    expect(pageHeader({ notes: [], sources: [], repoRoots: [], schedules: [] })).not.toHaveProperty('holderNotice');
   });
 
   it("carries the dock's notes and its held-session note, which is absent while every held session has a work item", () => {
     const notes = ['Settings: settings.json is not valid JSON.', 'Voice: the voice process stopped.'];
-    const header = pageHeader({ notes, heldNote: '2 held sessions without a work item', sources: [], repoRoots: [], schedules: [] }, snapshot([]));
+    const header = pageHeader({ notes, heldNote: '2 held sessions without a work item', sources: [], repoRoots: [], schedules: [] });
 
     expect(header).toMatchObject({ notes, heldNote: '2 held sessions without a work item' });
-    expect(pageHeader({ notes: [], sources: [], repoRoots: [], schedules: [] }, snapshot([]))).not.toHaveProperty('heldNote');
+    expect(pageHeader({ notes: [], sources: [], repoRoots: [], schedules: [] })).not.toHaveProperty('heldNote');
     // The lost phone's note goes apart from the warning notes, untoned (PRD R119).
-    expect(pageHeader({ notes: [], voiceNote: 'Voice stopped unexpectedly.', sources: [], repoRoots: [], schedules: [] }, snapshot([]))).toMatchObject({ notes: [], voiceNote: 'Voice stopped unexpectedly.' });
-    expect(pageHeader({ notes: [], sources: [], repoRoots: [], schedules: [] }, snapshot([]))).not.toHaveProperty('voiceNote');
+    expect(pageHeader({ notes: [], voiceNote: 'Voice stopped unexpectedly.', sources: [], repoRoots: [], schedules: [] })).toMatchObject({ notes: [], voiceNote: 'Voice stopped unexpectedly.' });
+    expect(pageHeader({ notes: [], sources: [], repoRoots: [], schedules: [] })).not.toHaveProperty('voiceNote');
     // From the dock view itself: a settings error is the dock's note, and the page's.
     const view = snapshot([]);
     const broken = { ...view, errors: { ...view.errors, settings: 'settings.json is not valid JSON.' } };
 
-    expect(pageHeader(dockView(broken, NOW, 'C:/sb/windows'), broken).notes).toContain('Settings: settings.json is not valid JSON.');
+    expect(pageHeader(dockView(broken, NOW, 'C:/sb/windows')).notes).toContain('Settings: settings.json is not valid JSON.');
   });
 });
 
@@ -829,7 +822,7 @@ describe('the web page routes', () => {
           return { status: 200, body: { started: true } };
         },
         ...Object.fromEntries(
-          ['row-open', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer', 'brief-replies'].map((command) => [
+          ['row-open', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer', 'brief-replies', 'page-new-session', 'page-folders'].map((command) => [
             `/v1/conversation/${command}`,
             async (body: unknown) => {
               posted.push(body);
@@ -1124,7 +1117,7 @@ describe('the web page routes', () => {
   });
 
   it('pairs a device only from this computer, by link or code once, with a Secure cookie bound to its host and login, and lists and revokes devices', async () => {
-    const { url } = await serve();
+    const { url, posted } = await serve();
     const localCookie = String((await send(server.port, 'GET', `${url.pathname}${url.search}`, {})).headers['set-cookie']).split(';')[0]!;
     const stream = request({ host: '127.0.0.1', port: server.port, path: '/v1/conversation/events?page=1', headers: { Host: `127.0.0.1:${server.port}`, Cookie: localCookie } }, (response) => response.resume());
 
@@ -1185,6 +1178,14 @@ describe('the web page routes', () => {
 
     for (const command of ['held-list', 'held-stop']) {
       expect((await post(command, { ...ts, Cookie: phone, Origin: 'https://pc.tail.ts.net' })).status).toBe(200);
+    }
+
+    // The New session form's commands learn whether they came through a remote host, whatever the page sent (PRD R122).
+    for (const command of ['page-new-session', 'page-folders']) {
+      posted.length = 0;
+      expect((await post(command, { ...ts, Cookie: phone, Origin: 'https://pc.tail.ts.net' }, { remote: false })).status).toBe(200);
+      expect((await post(command, { Cookie: localCookie, Origin: here }, { remote: true })).status).toBe(200);
+      expect(posted).toEqual([{ window: 'page-1', remote: true }, { window: 'page-1', remote: false }]);
     }
 
     // This computer's page still opens links, restarts the holder and uses Settings.

@@ -283,9 +283,9 @@ export interface PageHeader {
   sources: SourceGroup[];
   /** The repos an ad-hoc prompt can run in, the first being the default. */
   repoRoots: string[];
-  /** The folders New ad-hoc session and New conversation in a folder offer. */
-  folders: string[];
-  /** The schedules New ad-hoc session can run now. */
+  /** No longer sent: the New session form asks `page-folders`. */
+  folders?: string[];
+  /** The schedules the New session form can run now. */
   schedules: Array<{ name: string; playbook: string }>;
   /** The notice while the terminal holder is from an older build or restarting, and what Restart and resume asks; `confirm` is null while it runs. */
   holderNotice?: { text: string; confirm: { question: string; detail: string; action: string } | null };

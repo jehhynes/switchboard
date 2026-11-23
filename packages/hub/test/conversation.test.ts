@@ -1,5 +1,5 @@
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { backgroundDetail, PERMISSION_PROMPT, Store, toneSection, toneVersion, windowFileKey } from '@switchboard/core';
@@ -605,11 +605,11 @@ describe('folder-hosted conversations (architecture.md § Window scope)', () => 
     const calls: unknown[][] = [];
     const context = setup((host, folder, provider) => { calls.push([host, folder, provider]); return { workItemId: context.host(host, 'dock-provider', folder) }; });
     const { service, support, link } = context;
-    for (const provider of [null, 'other', 7]) expect(service.dockConversation({ folder: support, opId: 'invalid', provider }).status).toBe(400);
-    const result = service.dockConversation({ folder: link, opId: 'chosen', provider: 'codex' });
+    for (const provider of [null, 'other', 7]) expect(service.folderConversation({ folder: support, opId: 'invalid', provider }).status).toBe(400);
+    const result = service.folderConversation({ folder: link, opId: 'chosen', provider: 'codex' });
     expect(result.status).toBe(200);
     expect(calls).toEqual([[support, support, 'codex']]);
-    expect(service.dockConversation({ folder: support, opId: 'chosen', provider: 'claude' })).toEqual(result);
+    expect(service.folderConversation({ folder: support, opId: 'chosen', provider: 'claude' })).toEqual(result);
     expect(calls).toHaveLength(1);
   });
 
@@ -625,12 +625,12 @@ describe('folder-hosted conversations (architecture.md § Window scope)', () => 
     const seen = frames(item1);
 
     // Asked by a link to the folder: hosted by and run in its canonical folder, and stored as that folder's selection before any window opens.
-    expect(service.dockConversation({ folder: link, opId: 'dock-1' })).toEqual({ status: 200, body: { workItemId: 3, folder: support } });
+    expect(service.folderConversation({ folder: link, opId: 'dock-1' })).toEqual({ status: 200, body: { workItemId: 3, folder: support } });
     expect(calls).toEqual([[support, support]]);
     expect(store.windowBinding(process.platform === 'linux' ? support : support.replaceAll('\\', '/').toLowerCase())).toMatchObject({ workItemId: null, selectedWorkItemId: 3, selectedSessionId: 'd1', title: 'Support' });
 
     // The response was lost: the retry, by another spelling, answers the same work item and makes none.
-    expect(service.dockConversation({ folder: `${support}${sep}`, opId: 'dock-1' })).toEqual({ status: 200, body: { workItemId: 3, folder: support } });
+    expect(service.folderConversation({ folder: `${support}${sep}`, opId: 'dock-1' })).toEqual({ status: 200, body: { workItemId: 3, folder: support } });
     expect(calls).toHaveLength(1);
 
     const folder = scopes.open(null, view, support);
@@ -642,7 +642,7 @@ describe('folder-hosted conversations (architecture.md § Window scope)', () => 
     // A second one moves the open folder window to it.
     const moved = frames(folder);
 
-    expect(service.dockConversation({ folder: support, opId: 'dock-2' })).toEqual({ status: 200, body: { workItemId: 4, folder: support } });
+    expect(service.folderConversation({ folder: support, opId: 'dock-2' })).toEqual({ status: 200, body: { workItemId: 4, folder: support } });
     expect(scopes.scope(folder)).toMatchObject({ workItemId: 4, conversations: [{ workItemId: 4, primary: false }, { workItemId: 3, primary: false }] });
     expect(moved.slice(-2)).toMatchObject([{ type: 'scope', scope: { workItemId: 4 } }, { type: 'hello', sessions: [{ id: 'd2' }] }]);
     expect(scopes.scope(item1)).toMatchObject({ workItemId: 1 });
@@ -654,14 +654,14 @@ describe('folder-hosted conversations (architecture.md § Window scope)', () => 
     writeFileSync(join(dir, 'a.txt'), '');
 
     for (const body of [{}, { folder: support }, { folder: support, opId: '' }, { folder: 7, opId: 'x' }, { folder: '', opId: 'x' }, { folder: support, opId: 'x'.repeat(201) }]) {
-      expect(service.dockConversation(body)).toEqual({ status: 400, body: { error: 'Expected {folder, opId}.' } });
+      expect(service.folderConversation(body)).toEqual({ status: 400, body: { error: 'Expected {folder, opId}.' } });
     }
 
     for (const path of [join(dir, 'missing'), join(dir, 'a.txt')]) {
-      expect(service.dockConversation({ folder: path, opId: 'x' })).toEqual({ status: 400, body: { error: `${path} is not a folder a session can run in.` } });
+      expect(service.folderConversation({ folder: path, opId: 'x' })).toEqual({ status: 400, body: { error: `${path} is not a folder a session can run in.` } });
     }
 
-    expect(service.dockConversation({ folder: support, opId: 'x' })).toEqual({ status: 409, body: { error: 'New sessions need Code Mode (sessions.codeMode).' } });
+    expect(service.folderConversation({ folder: support, opId: 'x' })).toEqual({ status: 409, body: { error: 'New sessions need Code Mode (sessions.codeMode).' } });
     expect(store.windowBinding(process.platform === 'linux' ? support : support.replaceAll('\\', '/').toLowerCase())).toBeNull();
   });
 });
@@ -2036,14 +2036,24 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
         restarts.push(detail);
         return pollRefusal;
       },
-      operatorEvent: (event) => {
-        events.push(event);
-        return event['prompt'] === 'refuse' ? 'Code Mode sessions need hooks.' : null;
+      runSchedule: (name) => {
+        events.push({ type: 'run-schedule', name });
+        return name === 'refused' ? { refused: 'nightly already has an open work item.' } : { workItemId: 70 + events.length };
       },
       newConversation: (hostWindow, folder, provider) => {
         made.push([hostWindow, folder, provider]);
         return { workItemId: 41 };
       },
+      newStandalone: (folder, provider, model, prompt) => {
+        created.push({ kind: 'session', folder, provider, model, prompt });
+        return prompt === 'refuse' ? { refused: 'Code Mode sessions need hooks.' } : { workItemId: 50 + created.length };
+      },
+      newTask: (folder, provider, model, prompt, start) => {
+        created.push({ kind: 'task', folder, provider, model, prompt, start });
+        return { workItemId: 50 + created.length };
+      },
+      folderRoots: () => roots,
+      rememberFolder: (folder) => remembered.push(folder),
       rowAction: (workItemId, label, snooze) => {
         actions.push([workItemId, label, snooze]);
         return label === 'Approve' ? 'The work item no longer offers this.' : null;
@@ -2076,10 +2086,13 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     const sourceCalls: Array<[string, boolean]> = [];
     const events: Array<Record<string, unknown>> = [];
     const made: Array<[string, string, string | undefined]> = [];
+    const created: Array<Record<string, unknown>> = [];
+    const remembered: string[] = [];
+    const roots = { recent: [] as string[], repoRoots: [] as string[], worktrees: [] as string[] };
     let pollRefusal: string | null = null;
     const refusePoll = (why: string | null) => void (pollRefusal = why);
     const restarts: Array<string | undefined> = [];
-    let header: PageHeader = { notes: [], sources: [{ kind: 'github', enabled: true, title: 'gh: polled\nClick to stop polling gh', sources: [{ name: 'gh', enabled: true }] }], repoRoots: ['D:/w1'], folders: ['D:/w1', dir], schedules: [{ name: 'nightly', playbook: 'dev:sweep' }] };
+    let header: PageHeader = { notes: [], sources: [{ kind: 'github', enabled: true, title: 'gh: polled\nClick to stop polling gh', sources: [{ name: 'gh', enabled: true }] }], repoRoots: ['D:/w1'], schedules: [{ name: 'nightly', playbook: 'dev:sweep' }] };
     const setHeader = (next: typeof header) => void (header = next);
     const opens: Array<[string, string]> = [];
     const pools: Array<[number, string, unknown]> = [];
@@ -2101,7 +2114,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
       return { key, frames };
     };
 
-    return { store, view, scopes, service, openPage, focus, actions, opens, commands, pools, moves, resumed, refuseResume, held, sourceCalls, setHeader, events, made, refusePoll, restarts };
+    return { store, view, scopes, service, openPage, focus, actions, opens, commands, pools, moves, resumed, refuseResume, held, sourceCalls, setHeader, events, made, refusePoll, restarts, created, remembered, roots };
   }
 
   it("runs the list header's Restart and resume for a page key only, answering the hub's refusal (architecture.md § Restarting the holder)", () => {
@@ -2117,8 +2130,8 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     expect(restarts).toEqual(['Restarting stops the held session.', undefined]);
   });
 
-  it("runs More Actions' Refresh sources, New ad-hoc session and New conversation in a folder for a page key, in folders and schedules the header offers only", () => {
-    const { service, openPage, events, made, refusePoll, scopes, view } = setup();
+  it("runs More Actions' Refresh sources and Run a schedule now for a page key, in schedules the header offers only", () => {
+    const { service, openPage, events, refusePoll, scopes, view } = setup();
     const page = openPage();
     const window = scopes.open(view.file, view.view);
 
@@ -2127,35 +2140,89 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     expect(service.pagePoll({ window: page.key })).toEqual({ status: 409, body: { error: 'Every source is off.' } });
     expect(service.pagePoll({ window }).status).toBe(403);
 
-    // New ad-hoc session: the dock's adhoc event, in a folder the header offers, in any spelling of it.
-    expect(service.pageAdhoc({ window: page.key, opId: 'a1', prompt: 'Look around', repoRoot: 'd:/w1', start: true, provider: 'codex' })).toEqual({ status: 200, body: { done: true } });
-    expect(events).toEqual([{ type: 'adhoc', prompt: 'Look around', repoRoot: 'D:/w1', start: true, provider: 'codex' }]);
-    // A retry creates nothing more.
-    expect(service.pageAdhoc({ window: page.key, opId: 'a1', prompt: 'Look around', repoRoot: 'D:/w1', start: true, provider: 'codex' })).toEqual({ status: 200, body: { done: true } });
-    expect(events).toHaveLength(1);
-    expect(service.pageAdhoc({ window: page.key, opId: 'a2', prompt: 'Look around', repoRoot: 'C:/Windows', start: true, provider: 'claude' })).toEqual({ status: 400, body: { error: 'C:/Windows is not a folder the page offers.' } });
-    expect(service.pageAdhoc({ window: page.key, opId: 'a3', prompt: ' ', repoRoot: 'D:/w1', start: true, provider: 'claude' }).status).toBe(400);
-    expect(service.pageAdhoc({ window: page.key, opId: 'a4', prompt: 'x', repoRoot: 'D:/w1', start: true, provider: 'gpt' }).status).toBe(400);
-    expect(service.pageAdhoc({ window: page.key, opId: 'a5', prompt: 'refuse', repoRoot: 'D:/w1', start: false, provider: 'claude' })).toEqual({ status: 409, body: { error: 'Code Mode sessions need hooks.' } });
-    // A retry after a refusal, with the cause fixed, runs again.
-    expect(service.pageAdhoc({ window: page.key, opId: 'a5', prompt: 'Fixed now', repoRoot: 'D:/w1', start: false, provider: 'claude' })).toEqual({ status: 200, body: { done: true } });
-    expect(events.at(-1)).toMatchObject({ prompt: 'Fixed now' });
-    expect(service.pageAdhoc({ window, opId: 'a6', prompt: 'x', repoRoot: 'D:/w1', start: false, provider: 'claude' }).status).toBe(403);
-    // Or a schedule the header lists, run now.
-    expect(service.pageAdhoc({ window: page.key, opId: 'a7', schedule: 'nightly' })).toEqual({ status: 200, body: { done: true } });
+    expect(service.pageAdhoc({ window: page.key, opId: 'a7', schedule: 'nightly' })).toEqual({ status: 200, body: { done: true, workItemId: 71 } });
     expect(events.at(-1)).toEqual({ type: 'run-schedule', name: 'nightly' });
+    // A retry runs nothing more.
+    expect(service.pageAdhoc({ window: page.key, opId: 'a7', schedule: 'nightly' })).toEqual({ status: 200, body: { done: true, workItemId: 71 } });
     expect(service.pageAdhoc({ window: page.key, opId: 'a8', schedule: 'weekly' })).toEqual({ status: 400, body: { error: 'No schedule is named weekly.' } });
-    expect(events).toHaveLength(4);
+    // A prompt is the New session form's, no longer page-adhoc's.
+    expect(service.pageAdhoc({ window: page.key, opId: 'a9', prompt: 'Look around', repoRoot: 'D:/w1', start: true, provider: 'codex' }).status).toBe(400);
+    expect(service.pageAdhoc({ window, opId: 'a10', schedule: 'nightly' }).status).toBe(403);
+    expect(events).toHaveLength(1);
+  });
 
-    // New conversation in a folder: as the dock's, in a folder the header offers.
-    expect(service.pageFolderConversation({ window: page.key, opId: 'c1', folder: dir, provider: 'claude' })).toMatchObject({ status: 200, body: { workItemId: 41 } });
-    expect(made).toHaveLength(1);
-    expect(made[0]![2]).toBe('claude');
-    expect(service.pageFolderConversation({ window: page.key, opId: 'c1', folder: dir })).toMatchObject({ status: 200, body: { workItemId: 41 } });
-    expect(made).toHaveLength(1);
-    expect(service.pageFolderConversation({ window: page.key, opId: 'c2', folder: join(dir, 'projects') })).toEqual({ status: 400, body: { error: `${join(dir, 'projects')} is not a folder the page offers.` } });
-    expect(service.pageFolderConversation({ window, opId: 'c3', folder: dir }).status).toBe(403);
-    expect(made).toHaveLength(1);
+  it('makes the New session form\'s conversation or task in a folder the hub checks, once per opId, and remembers the folder (PRD R122)', () => {
+    const { service, openPage, created, remembered, scopes, view } = setup();
+    const page = openPage();
+    const window = scopes.open(view.file, view.view);
+    const folder = join(dir, 'work');
+
+    mkdirSync(folder, { recursive: true });
+
+    // Empty: a conversation now; the page selects it.
+    expect(service.newSession({ window: page.key, opId: 's1', folder, provider: 'codex', model: ' gpt-6.2-sol ' }, true)).toEqual({ status: 200, body: { workItemId: 51, folder: realpathSync.native(folder), run: 'now' } });
+    expect(created.at(-1)).toEqual({ kind: 'session', folder: realpathSync.native(folder), provider: 'codex', model: 'gpt-6.2-sol', prompt: null });
+    expect(remembered).toEqual([realpathSync.native(folder)]);
+    expect(service.newSession({ window: page.key, opId: 's1', folder, provider: 'claude' }, true).status).toBe(200);
+    expect(created).toHaveLength(1);
+    // A first message as the conversation's first turn, or a task queued or waiting.
+    expect(service.newSession({ window: page.key, opId: 's2', folder, provider: 'claude', prompt: '  Find the bug  ', run: 'now' }, true)).toMatchObject({ status: 200, body: { run: 'now' } });
+    expect(created.at(-1)).toMatchObject({ kind: 'session', prompt: 'Find the bug' });
+    expect(service.newSession({ window: page.key, opId: 's3', folder, provider: 'claude', prompt: 'Sweep', run: 'queue' }, true)).toMatchObject({ status: 200, body: { run: 'queue' } });
+    expect(created.at(-1)).toMatchObject({ kind: 'task', prompt: 'Sweep', start: true, model: null });
+    expect(service.newSession({ opId: 's4', folder, provider: 'claude', prompt: 'Later', run: 'wait', model: 'opus' }, false)).toMatchObject({ status: 200, body: { run: 'wait' } });
+    expect(created.at(-1)).toMatchObject({ kind: 'task', prompt: 'Later', start: false, model: 'opus' });
+    // A task needs a message; bad fields, a key that is not a page's, a missing or relative folder and the flow's refusal create nothing.
+    expect(service.newSession({ window: page.key, opId: 's5', folder, provider: 'claude', prompt: ' ', run: 'wait' }, true)).toEqual({ status: 400, body: { error: 'A task needs a first message.' } });
+    for (const bad of [{ provider: 'gpt' }, { run: 'later' }, { model: ' ' }, { prompt: 7 }, { opId: '' }]) {
+      expect(service.newSession({ window: page.key, opId: 's6', folder, provider: 'claude', ...bad }, true).status).toBe(400);
+    }
+    expect(service.newSession({ window, opId: 's7', folder, provider: 'claude' }, true).status).toBe(403);
+    expect(service.newSession({ window: page.key, opId: 's8', folder: join(dir, 'gone'), provider: 'claude' }, true)).toEqual({ status: 400, body: { error: `${join(dir, 'gone')} is not a folder a session can run in.` } });
+    expect(service.newSession({ window: page.key, opId: 's9', folder: 'work', provider: 'claude' }, true).status).toBe(400);
+    expect(service.newSession({ window: page.key, opId: 's10', folder, provider: 'claude', prompt: 'refuse' }, true)).toEqual({ status: 409, body: { error: 'Code Mode sessions need hooks.' } });
+    expect(created).toHaveLength(5);
+  });
+
+  it('keeps a paired device to folders in the recent folders, repo roots and worktrees, and lists folders without dot folders, build output or links out (PRD R122)', async () => {
+    const { service, openPage, created, roots } = setup();
+    const page = openPage();
+    const root = join(dir, 'repo');
+    const outside = join(dir, 'outside');
+
+    for (const one of [join(root, 'src'), join(root, 'Docs'), join(root, '.git'), join(root, 'node_modules'), join(root, 'inner'), outside]) {
+      mkdirSync(one, { recursive: true });
+    }
+
+    writeFileSync(join(root, 'README.md'), '');
+    symlinkSync(outside, join(root, 'away'), 'junction');
+    symlinkSync(join(root, 'inner'), join(root, 'near'), 'junction');
+    roots.repoRoots = [root, join(dir, 'missing')];
+
+    // This computer's page may use any folder; a paired device's only those under the roots, and no link out of them.
+    expect(service.newSession({ window: page.key, opId: 'r1', folder: outside, provider: 'claude' }, true).status).toBe(200);
+    expect(service.newSession({ window: page.key, opId: 'r2', folder: outside, provider: 'claude', remote: true }, true)).toMatchObject({ status: 400, body: { error: expect.stringContaining('is not in a recent folder, a repo root or a worktree') } });
+    expect(service.newSession({ window: page.key, opId: 'r3', folder: join(root, 'away'), provider: 'claude', remote: true }, true).status).toBe(400);
+    expect(service.newSession({ window: page.key, opId: 'r4', folder: join(root, 'src'), provider: 'claude', remote: true }, true).status).toBe(200);
+    expect(created).toHaveLength(2);
+
+    // The starting places: folders that exist, and the home folder and drives on this computer's page only.
+    const local = (await service.pageFolders({ window: page.key })).body as { repoRoots: string[]; computer: string[] };
+    expect(local.repoRoots).toEqual([root]);
+    expect(local.computer[0]).toBe(homedir());
+    expect(((await service.pageFolders({ window: page.key, remote: true })).body as { computer: string[] }).computer).toEqual([]);
+
+    // A listing: subfolders by name, links in only where they stay inside on a paired device, and no parent above a root there.
+    const listed = (await service.pageFolders({ window: page.key, path: root })).body as { path: string; parent: string | null; folders: { name: string }[] };
+    expect(listed.folders.map((one) => one.name)).toEqual(['away', 'Docs', 'inner', 'near', 'src']);
+    expect(listed.parent).toBe(realpathSync.native(dir));
+    const remote = (await service.pageFolders({ window: page.key, path: root, remote: true })).body as { parent: string | null; folders: { name: string }[] };
+    expect(remote.folders.map((one) => one.name)).toEqual(['Docs', 'inner', 'near', 'src']);
+    expect(remote.parent).toBeNull();
+    expect(((await service.pageFolders({ window: page.key, path: join(root, 'src'), remote: true })).body as { parent: string }).parent).toBe(realpathSync.native(root));
+    expect(await service.pageFolders({ window: page.key, path: outside, remote: true })).toMatchObject({ status: 400 });
+    expect(await service.pageFolders({ window: page.key, path: join(root, 'README.md') })).toMatchObject({ status: 400, body: { error: expect.stringContaining('is not a folder') } });
+    expect((await service.pageFolders({ window: 'nobody' })).status).toBe(403);
   });
 
   it("sends the list's header with the list, again when only the header changes, and turns a source on or off for a page key only", () => {
@@ -2167,13 +2234,13 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     expect(page.frames.filter((frame) => frame.type === 'list')).toEqual([]);
 
     // A source turned off changes only the header, which still reaches the page.
-    setHeader({ notes: [], sources: [{ kind: 'github', enabled: false, title: 'gh: not polled', sources: [{ name: 'gh', enabled: false }] }], repoRoots: [], folders: [], schedules: [] });
+    setHeader({ notes: [], sources: [{ kind: 'github', enabled: false, title: 'gh: not polled', sources: [{ name: 'gh', enabled: false }] }], repoRoots: [], schedules: [] });
     service.conversationsChanged();
     expect(page.frames.at(-1)).toMatchObject({ type: 'list', header: { sources: [{ enabled: false }] } });
     expect(page.frames.at(-1)!['groups']).toBeInstanceOf(Array);
 
     // A voice problem changes the dock's notes outside a build; `pageListChanged` sends it, and nothing when nothing changed.
-    setHeader({ notes: ['Voice: the voice process stopped.'], heldNote: '1 held session without a work item', sources: [], repoRoots: [], folders: [], schedules: [] });
+    setHeader({ notes: ['Voice: the voice process stopped.'], heldNote: '1 held session without a work item', sources: [], repoRoots: [], schedules: [] });
     service.pageListChanged();
     expect(page.frames.at(-1)).toMatchObject({ type: 'list', header: { notes: ['Voice: the voice process stopped.'], heldNote: '1 held session without a work item' } });
     const sent = page.frames.length;

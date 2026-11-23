@@ -4,7 +4,7 @@ import type { FSWatcher } from 'node:fs';
 import { dirname, join, posix, win32 } from 'node:path';
 import { homedir } from 'node:os';
 import { claudeSettingsPath, readRoster, spawnExec } from '@switchboard/claude';
-import { hostKey, hubBundlePath, NEW_CONVERSATION_TITLE, PANE_EXTENSION_ID, personaById, Store, switchboardHome, ticketRoot } from '@switchboard/core';
+import { hostKey, hubBundlePath, SCHEDULE_SOURCE, NEW_CONVERSATION_TITLE, PANE_EXTENSION_ID, personaById, Store, switchboardHome, ticketRoot } from '@switchboard/core';
 import { CODEX_PERMISSION_MODES, PERMISSION_MODES, PROVIDERS, resumesHeld, TEMPLATE_VARIABLES } from '@switchboard/core';
 import type { FlowEvent, SourceSettings, ViewSettings } from '@switchboard/core';
 import { githubSource } from '@switchboard/github';
@@ -46,6 +46,9 @@ import { pageAsset } from './pageAssets.js';
 import { PageChanges, VIEWED_REFUSED } from './changes.js';
 import { needsMessage, newlyNeeding, rowFor, targetForUrl } from './needs.js';
 import { installedProviders } from './installed.js';
+import { importDockFolders } from './folders.js';
+import { claudeModelChoices, CODEX_MODELS_MS, codexModelChoices, withConfigured } from './models.js';
+import type { ModelChoice } from './models.js';
 import { PaneLink } from './paneLink.js';
 import { PaneState, paneRect, paneTabs } from './pane.js';
 import { localRoots, mainCheckout, openLocalFile } from './localFiles.js';
@@ -532,6 +535,38 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   };
   // The page keys of paired devices' pages, which cannot take the voice back to this computer (architecture.md § Remote access).
   const remotePages = new Set<string>();
+  // The ad-hoc work item an operator event made, found as the one new ad-hoc ticket's.
+  const madeAdhoc = (event: FlowEvent, failed: string): { workItemId: number } | { refused: string } => {
+    const before = new Set(store.adhocKeys());
+    const { refused } = runtime.send(event);
+
+    if (refused !== null) {
+      return { refused };
+    }
+
+    const key = store.adhocKeys().find((one) => !before.has(one));
+    const ticket = key === undefined ? null : store.findTicket('adhoc', key);
+    const item = ticket === null ? undefined : store.workItemsForTicket(ticket.id)[0];
+
+    return item === undefined ? { refused: failed } : { workItemId: item.id };
+  };
+  const sameFolder = (one: string, other: string): boolean => hostKey(one) === hostKey(other);
+
+  // The dock's recent folders join the hub's once, since the dock and every page now share them (PRD R122).
+  importDockFolders(store, home, sameFolder);
+  // Codex's model list, asked of its app-server once per hub start; a failed or slow answer is asked again next time (PRD R122).
+  let codexListed: Promise<ModelChoice[]> | null = null;
+  const codexModels = async (): Promise<ModelChoice[]> => {
+    codexListed ??= codexModelChoices(runtime.codexServer);
+    const listed = codexListed;
+    const answer = await Promise.race([listed.then((choices) => choices, () => null), new Promise<null>((done) => setTimeout(() => done(null), CODEX_MODELS_MS).unref())]);
+
+    if (answer === null) {
+      listed.then(() => {}, () => { if (codexListed === listed) codexListed = null; });
+    }
+
+    return answer ?? [];
+  };
   // The voice socket of a paired device (architecture.md § Remote access).
   const voiceSockets = new VoiceSockets({
     now: deps.now,
@@ -717,15 +752,14 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
       return made === undefined ? { refused: refused ?? 'The conversation was not made.' } : { workItemId: made.id };
     },
-    newStandalone: (folder, provider, model) => {
-      const before = new Set(store.adhocKeys());
-      const { refused } = runtime.send({ type: 'new-session', repoRoot: folder, provider, model });
-      if (refused !== null) return { refused };
-      const key = store.adhocKeys().find((one) => !before.has(one));
-      const ticket = key === undefined ? null : store.findTicket('adhoc', key);
-      const item = ticket === null ? null : store.workItemsForTicket(ticket.id)[0];
-      return item === undefined || item === null ? { refused: 'The session was not made.' } : { workItemId: item.id };
-    },
+    newStandalone: (folder, provider, model, prompt) => madeAdhoc({ type: 'new-session', repoRoot: folder, provider, model, ...(prompt === null ? {} : { prompt }) }, 'The session was not made.'),
+    newTask: (folder, provider, model, prompt, start) => madeAdhoc({ type: 'adhoc', prompt, repoRoot: folder, start, provider, model }, 'The task was not made.'),
+    folderRoots: () => ({
+      recent: store.recentFolders(),
+      repoRoots: views().snapshot.repoRoots,
+      worktrees: views().snapshot.workItems.flatMap((item) => (item.status !== 'done' && item.worktree != null ? [item.worktree.path] : [])),
+    }),
+    rememberFolder: (folder) => store.rememberFolders([folder], sameFolder),
     pageList: () => {
       const built = views();
       const row = voiceRow();
@@ -737,15 +771,22 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     pageHeader: () => {
       const built = views();
 
-      return { ...pageHeader({ ...built.dock, ...withVoiceNotes(built.dock.notes) }, built.snapshot), ...(config.settings.voice.enabled && voice.device !== 'computer' ? { voiceDevice: voice.device } : {}) };
+      return { ...pageHeader({ ...built.dock, ...withVoiceNotes(built.dock.notes) }), ...(config.settings.voice.enabled && voice.device !== 'computer' ? { voiceDevice: voice.device } : {}) };
     },
     pollSources: () => runtime.pollNow(),
     restartHolder: (detail) => restartHolder(detail),
-    // The page's New ad-hoc session runs the dock's `adhoc` and `run-schedule` events.
-    operatorEvent: (event) => {
-      const parsed = parseAction(event);
+    // The page's Run a schedule now runs the dock's `run-schedule` event; the run is its ticket's newest work item.
+    runSchedule: (name) => {
+      const { refused } = runtime.send({ type: 'run-schedule', name });
 
-      return parsed === null ? 'Unknown action.' : runtime.send(parsed).refused;
+      if (refused !== null) {
+        return { refused };
+      }
+
+      const ticket = store.findTicket(SCHEDULE_SOURCE, name);
+      const newest = ticket === null ? undefined : store.workItemsForTicket(ticket.id).reduce<{ id: number } | undefined>((latest, item) => (latest === undefined || item.id > latest.id ? item : latest), undefined);
+
+      return newest === undefined ? { refused: 'The run was not made.' } : { workItemId: newest.id };
     },
     // The list's search further back, as the dock's (PRD R63); a row whose work item is gone meanwhile is left out.
     searchDone: (text, since) => {
@@ -1334,13 +1375,29 @@ const dockWithRuns = () => {
       '/v1/conversation/card-draft': async (body) => (isRecord(body) ? conversation.cardCommand('card-draft', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, card, draft}.' } }),
       '/v1/conversation/card-dismiss': async (body) => (isRecord(body) ? conversation.cardCommand('card-dismiss', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, card, slug}.' } }),
       // `installed` lets the dock skip its provider choice when only one CLI is found (PRD R104).
-      '/v1/conversation/providers': async () => ({ status: 200, body: { defaultProvider: config.settings.sessions.provider, installed: await installedProviders(config.settings.sessions), models: { claude: config.settings.sessions.model, codex: config.settings.sessions.codex.model } } }),
+      // The providers a new session can start in and their models (PRD R122): the configured default first, then the form's choices.
+      '/v1/conversation/providers': async () => {
+        const sessions = config.settings.sessions;
+        const installed = await installedProviders(sessions);
+        const codex = installed.includes('codex') ? await codexModels() : [];
+
+        return {
+          status: 200,
+          body: {
+            defaultProvider: sessions.provider,
+            installed,
+            models: { claude: sessions.model, codex: sessions.codex.model },
+            modelChoices: { claude: claudeModelChoices(config.settings, config.playbooks.values()), codex: withConfigured(codex, sessions.codex.model) },
+          },
+        };
+      },
         '/v1/conversation/answer': async (body) => isRecord(body) ? conversation.answer(body) : { status: 400, body: { error: 'Expected a request answer.' } },
       '/v1/conversation/history': async (body) => (isRecord(body) ? conversation.history(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, before, limit?}.' } }),
       '/v1/conversation/seen': async (body) => (isRecord(body) ? conversation.seen(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, ids}.' } }),
       '/v1/conversation/select': async (body) => (isRecord(body) ? conversation.select(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId}.' } }),
       '/v1/conversation/new-conversation': async (body) => (isRecord(body) ? conversation.newConversation(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId}.' } }),
-      '/v1/conversation/page-new-session': async (body) => (isRecord(body) ? conversation.standalone(body, true) : { status: 400, body: { error: 'Expected {window, opId, folder, provider, model?}.' } }),
+      '/v1/conversation/page-new-session': async (body) => (isRecord(body) ? conversation.newSession(body, true) : { status: 400, body: { error: 'Expected {window, opId, folder, provider, model?, prompt?, run?}.' } }),
+      '/v1/conversation/page-folders': async (body) => (isRecord(body) ? conversation.pageFolders(body) : { status: 400, body: { error: 'Expected {window, path?}.' } }),
       '/v1/conversation/statuses': async (body) => (isRecord(body) ? conversation.statuses(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, before, limit?}.' } }),
       '/v1/conversation/commands': async (body) => (isRecord(body) ? conversation.commands(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } }),
       '/v1/conversation/talk-here': async (body) => (isRecord(body) ? conversation.voiceCommand('talk-here', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId}.' } }),
@@ -1376,8 +1433,7 @@ const dockWithRuns = () => {
         return refused === null ? { status: 200, body: { device: 'computer' } } : { status: 409, body: { error: refused } };
       },
       '/v1/conversation/page-holder-restart': async (body) => (isRecord(body) ? conversation.pageHolderRestart(body) : { status: 400, body: { error: 'Expected {window}.' } }),
-      '/v1/conversation/page-adhoc': async (body) => (isRecord(body) ? conversation.pageAdhoc(body) : { status: 400, body: { error: 'Expected {window, opId, prompt, repoRoot, start, provider}.' } }),
-      '/v1/conversation/page-folder-conversation': async (body) => (isRecord(body) ? conversation.pageFolderConversation(body) : { status: 400, body: { error: 'Expected {window, opId, folder, provider?}.' } }),
+      '/v1/conversation/page-adhoc': async (body) => (isRecord(body) ? conversation.pageAdhoc(body) : { status: 400, body: { error: 'Expected {window, opId, schedule}.' } }),
       // A changed file opened at a line in the work item's VS Code window (architecture.md § Web page).
       // A changed file ticked viewed, or its tick cleared, for every device (architecture.md § Web page).
       '/v1/conversation/viewed': async (body) => (isRecord(body) ? pageChanges.viewedCommand(body) : { status: 400, body: { error: VIEWED_REFUSED } }),
@@ -1644,9 +1700,9 @@ const dockWithRuns = () => {
         voice.terminalFocused(sessionId, at);
         return { status: 200, body: { focus: sessionId } };
       },
-      // The dock's New conversation in a folder (architecture.md § Hosted conversations): a conversation hosted by a folder, selected there before its window opens.
-      '/dock/new-conversation': async (body) => (isRecord(body) ? conversation.dockConversation(body) : { status: 400, body: { error: 'Expected {folder, opId}.' } }),
-      '/dock/new-session': async (body) => (isRecord(body) ? conversation.standalone(body, false) : { status: 400, body: { error: 'Expected {opId, folder, provider, model?}.' } }),
+      // The dock's New session form (PRD R122): its folders, then the conversation or task it makes.
+      '/dock/folders': async () => conversation.dockFolders(),
+      '/dock/new-session': async (body) => (isRecord(body) ? conversation.newSession(body, false) : { status: 400, body: { error: 'Expected {opId, folder, provider, model?, prompt?, run?}.' } }),
       '/dock/show': async () =>
         sendDock('show', {}) > 0 ? { status: 200, body: { shown: true } } : { status: 409, body: { error: 'The dock is not running.' } },
       // The dock's Settings window (PRD R54).

@@ -964,8 +964,8 @@ describe('createHubApp', () => {
     expect(await app.post['/v1/conversation/page-search']!({ window: page, text: 'signing KEY', since: 0 })).toMatchObject({ status: 200, body: { more: false, rows: [{ workItemId: 1, title: 'Rotate the signing key', host: null, search: expect.stringContaining('Rotate the signing key') }] } });
     expect((await app.post['/v1/conversation/page-search']!({ window: 'nobody', text: 'signing', since: 0 })).status).toBe(403);
     expect((await app.post['/v1/conversation/page-search']!({ window: page, text: 'signing' })).status).toBe(400);
-    // The page's New ad-hoc session creates a work item in a repo root, as the dock's does.
-    expect(await app.post['/v1/conversation/page-adhoc']!({ window: page, opId: 'p1', prompt: 'From the page', repoRoot: 'D:/scratch', start: false, provider: 'claude' })).toEqual({ status: 200, body: { done: true } });
+    // The page's New session form makes a task that waits for Start, as the dock's does.
+    expect(await app.post['/v1/conversation/page-new-session']!({ window: page, opId: 'p1', folder: temp.home, provider: 'claude', prompt: 'From the page', run: 'wait' })).toMatchObject({ status: 200, body: { run: 'wait' } });
     await app.runtime.settled();
     expect((app.snapshot() as { workItems: { ticket: { title: string } }[] }).workItems.map((one) => one.ticket.title)).toContain('From the page');
 
@@ -974,19 +974,29 @@ describe('createHubApp', () => {
     }
   });
 
-  it('creates one standalone session from the dock and checks the page folder', async () => {
+  it('creates one standalone session or task from the dock and the page, shares their recent folders and imports the dock\'s once (PRD R122)', async () => {
     writeSettings({ sessions: { provider: 'codex' }, sources: { adhoc: { repoRoot: temp.home } } });
+    const dockKept = join(temp.home, 'kept');
+    mkdirSync(dockKept, { recursive: true });
+    mkdirSync(join(temp.home, '.switchboard'), { recursive: true });
+    writeFileSync(join(temp.home, '.switchboard', 'dock.json'), JSON.stringify({ width: 320, recentFolders: [dockKept, 7] }));
     const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli } });
     closers.push(() => app.close());
     const page = app.page!.opened();
     const first = await app.post['/dock/new-session']!({ opId: 'one', folder: temp.home, provider: 'codex', model: 'gpt-6.2-sol' });
-    expect(first).toMatchObject({ status: 200, body: { workItemId: 1 } });
+    expect(first).toMatchObject({ status: 200, body: { workItemId: 1, run: 'now' } });
     expect(await app.post['/dock/new-session']!({ opId: 'one', folder: temp.home, provider: 'claude' })).toEqual(first);
-    expect((await app.post['/v1/conversation/page-new-session']!({ window: page, opId: 'two', folder: temp.home, provider: 'codex', model: null })).status).toBe(200);
-    expect((await app.post['/v1/conversation/page-new-session']!({ window: page, opId: 'bad', folder: 'C:/Windows', provider: 'codex' })).status).toBe(400);
+    expect((await app.post['/v1/conversation/page-new-session']!({ window: page, opId: 'two', folder: temp.home, provider: 'codex', model: null, prompt: 'Find the bug' })).status).toBe(200);
+    expect((await app.post['/v1/conversation/page-new-session']!({ window: page, opId: 'three', folder: dockKept, provider: 'codex', prompt: 'Sweep the logs', run: 'queue', model: 'gpt-6.2-sol' })).status).toBe(200);
+    expect((await app.post['/v1/conversation/page-new-session']!({ window: page, opId: 'bad', folder: join(temp.home, 'gone'), provider: 'codex' })).status).toBe(400);
+    // The dock and the page see the same recent folders: the newest first, then the one the dock kept.
+    const places = (await app.post['/dock/folders']!({})).body as { recent: string[]; repoRoots: string[] };
+    expect(places.recent).toEqual([realpathSync.native(dockKept), realpathSync.native(temp.home)]);
+    expect(((await app.post['/v1/conversation/page-folders']!({ window: page })).body as { recent: string[] }).recent).toEqual(places.recent);
     const writer = Store.open(join(temp.home, '.switchboard', 'switchboard.db'));
     expect(writer.workItem(1)).toMatchObject({ interactive: true, model: 'gpt-6.2-sol' });
-    expect(writer.workItemsWithStatus('running')).toHaveLength(2);
+    expect(writer.workItem(2)).toMatchObject({ interactive: true, taskPrompt: 'Find the bug' });
+    expect(writer.workItem(3)).toMatchObject({ interactive: false, model: 'gpt-6.2-sol', taskPrompt: 'Sweep the logs' });
     writer.close();
   });
 
@@ -1187,9 +1197,9 @@ describe('createHubApp', () => {
     expect(await app.post['/dock/select']!({})).toEqual({ status: 400, body: { error: 'Expected {rowKey}.' } });
     expect(await app.post['/dock/select']!({ rowKey: 'nope' })).toEqual({ status: 404, body: { error: 'No work item has that row.' } });
 
-    // The dock's New session takes a folder with no window open, and gets the flow's refusal the same way.
-    expect(await app.post['/dock/new-conversation']!({ folder: temp.home, opId: 'd1' })).toEqual({ status: 409, body: { error: 'Code Mode sessions need sessions.installHooks.' } });
-    expect(await app.post['/dock/new-conversation']!([])).toEqual({ status: 400, body: { error: 'Expected {folder, opId}.' } });
+    // The dock's New session gets the flow's refusal the same way, and no longer makes a folder-hosted conversation.
+    expect(await app.post['/dock/new-session']!({ folder: temp.home, opId: 'd1', provider: 'claude' })).toEqual({ status: 409, body: { error: 'Code Mode sessions need sessions.installHooks.' } });
+    expect(app.post['/dock/new-conversation']).toBeUndefined();
     expect(app.runtime.snapshot().workItems).toHaveLength(1);
   });
 

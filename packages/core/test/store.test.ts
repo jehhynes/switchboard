@@ -3,7 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { MIGRATIONS, Store } from '../src/store.js';
+import { MIGRATIONS, RECENT_FOLDER_COUNT, Store } from '../src/store.js';
 
 describe('Store', () => {
   let dir: string;
@@ -784,6 +784,22 @@ describe('Store', () => {
     expect(store.viewedFiles(7)).toEqual(new Map([['src/a.ts', 'h1']]));
     expect(store.viewedFiles(8)).toEqual(new Map([['b.md', 'h2']]));
     expect(store.viewedFiles(7, 'b..c')).toEqual(new Map());
+    store.close();
+  });
+
+  it('keeps the recent folders newest first, each once, up to RECENT_FOLDER_COUNT', () => {
+    const store = Store.open(':memory:');
+    const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+
+    expect(store.recentFolders()).toEqual([]);
+    store.rememberFolders(['D:/a', 'D:/b'], same);
+    store.rememberFolders(['d:/B'], same);
+    expect(store.recentFolders()).toEqual(['d:/B', 'D:/a']);
+    store.rememberFolders(Array.from({ length: 12 }, (_, i) => `D:/f${i}`), same);
+    expect(store.recentFolders()).toHaveLength(RECENT_FOLDER_COUNT);
+    expect(store.recentFolders()[0]).toBe('D:/f0');
+    store.setPagePref('recentFolders', '{broken');
+    expect(store.recentFolders()).toEqual([]);
     store.close();
   });
 

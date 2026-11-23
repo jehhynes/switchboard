@@ -149,7 +149,7 @@ const GZIP_MIN_BYTES = 1024;
  * `held-list`, `held-stop` and `held-open` share the holder routes after the page's origin and key checks.
  * The hub itself answers `page-pair`, `page-devices` and `page-device-revoke` (architecture.md § Remote access).
  */
-export const PAGE_COMMANDS = new Set(['held-list', 'held-stop', 'held-open', 'page-new-session', 'page-voice-state', 'page-device-voice', 'open-file', 'viewed', 'send', 'card-draft', 'card-dismiss', 'history', 'seen', 'select', 'statuses', 'commands', 'answer', 'talk-here', 'stop-speaking', 'speak-replies', 'replay', 'personas', 'persona', 'page-focus', 'row-action', 'row-paste', 'row-open', 'row-command', 'row-move', 'pool-action', 'resume', 'prompt', 'prompt-key', 'mic', 'mic-timing', 'composer', 'providers', 'page-conversation', 'console-input', 'page-source', 'page-tabs', 'page-search', 'page-poll', 'page-history', 'page-holder-restart', 'page-adhoc', 'page-folder-conversation', 'pane-pair', 'pane-rect', 'pane-open', 'page-pair', 'page-devices', 'page-device-revoke', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer', 'brief-replies']);
+export const PAGE_COMMANDS = new Set(['held-list', 'held-stop', 'held-open', 'page-new-session', 'page-voice-state', 'page-device-voice', 'open-file', 'viewed', 'send', 'card-draft', 'card-dismiss', 'history', 'seen', 'select', 'statuses', 'commands', 'answer', 'talk-here', 'stop-speaking', 'speak-replies', 'replay', 'personas', 'persona', 'page-focus', 'row-action', 'row-paste', 'row-open', 'row-command', 'row-move', 'pool-action', 'resume', 'prompt', 'prompt-key', 'mic', 'mic-timing', 'composer', 'providers', 'page-conversation', 'console-input', 'page-source', 'page-tabs', 'page-search', 'page-poll', 'page-history', 'page-holder-restart', 'page-adhoc', 'page-folders', 'pane-pair', 'pane-rect', 'pane-open', 'page-pair', 'page-devices', 'page-device-revoke', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer', 'brief-replies']);
 
 /**
  * The page commands a device that reaches the page through a remote host may not post (architecture.md § Remote access): pairing and the device
@@ -157,6 +157,12 @@ export const PAGE_COMMANDS = new Set(['held-list', 'held-stop', 'held-open', 'pa
  * opening a held session's terminal app and restarting the terminal holder; and Settings' and Brief replies, which change settings.json, which the operator keeps to this computer.
  */
 export const LOCAL_PAGE_COMMANDS = new Set(['held-open', 'page-pair', 'page-devices', 'page-device-revoke', 'page-device-voice', 'pane-pair', 'pane-rect', 'pane-open', 'row-open', 'page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer', 'brief-replies']);
+
+/**
+ * The page commands told whether they came through a remote host (`remote` in the body, which the server sets over any the page sent), since
+ * a paired device's page reaches fewer folders (PRD R122).
+ */
+const REMOTE_AWARE_COMMANDS = new Set(['page-new-session', 'page-folders']);
 
 /** The page routes only the hub token reaches, which the page's own routes never answer. */
 const HUB_PAGE_ROUTES = new Set(['/page/link', '/page/revoke', '/page/pair', '/page/devices', '/page/voice']);
@@ -1108,7 +1114,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
           return;
         }
 
-        handler!(body).then(
+        handler!(REMOTE_AWARE_COMMANDS.has(command) && body !== null && typeof body === 'object' ? { ...(body as Record<string, unknown>), remote } : body).then(
           (reply) => json(response, reply.status, reply.body),
           (error: unknown) => json(response, 500, { error: String(error) }),
         );

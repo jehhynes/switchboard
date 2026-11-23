@@ -271,7 +271,7 @@ export interface DockView {
   sources: DockSourceGroup[];
   /** The repos an ad-hoc prompt can run in, the first being the default (PRD R6). */
   repoRoots: string[];
-  /** The schedules the New ad-hoc session window can run now (PRD R82). */
+  /** The schedules the New session form can run now (PRD R82). */
   schedules: { name: string; playbook: string }[];
   /** The snapshot's held sessions, orphans first (PRD R94); absent when the holder holds none. */
   held?: DockHeld[];

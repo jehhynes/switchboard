@@ -664,6 +664,11 @@ export type NewWorkItem = Omit<WorkItem, 'id'>;
 export type NewTriage = Omit<Triage, 'id'>;
 export type NewWorktree = Omit<Worktree, 'id'>;
 
+/** The `pagePrefs` entry that keeps the recent folders. */
+const RECENT_FOLDERS = 'recentFolders';
+/** How many folders `Store.recentFolders` keeps. */
+export const RECENT_FOLDER_COUNT = 10;
+
 /** A done work item as the dock's search reads it (PRD R63). */
 export interface DoneSearchEntry {
   id: number;
@@ -1797,6 +1802,30 @@ export class Store {
   /** A choice of the web page that holds for every work item, or null when none was made. */
   pagePref(name: string): string | null {
     return (this.#db.prepare('SELECT value FROM pagePrefs WHERE name = ?').get(name) as { value: string } | undefined)?.value ?? null;
+  }
+
+  /** The folders new work was last created in, newest first, which the New session form offers on the dock and every page (PRD R122). */
+  recentFolders(): string[] {
+    try {
+      const kept = JSON.parse(this.pagePref(RECENT_FOLDERS) ?? '[]') as unknown;
+
+      return Array.isArray(kept) ? kept.filter((one): one is string => typeof one === 'string' && one !== '') : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /** Puts `folders` first in the recent folders, in order, each once by `same`, keeping `RECENT_FOLDER_COUNT`. */
+  rememberFolders(folders: readonly string[], same: (a: string, b: string) => boolean): void {
+    const kept: string[] = [];
+
+    for (const folder of [...folders, ...this.recentFolders()]) {
+      if (folder !== '' && !kept.some((one) => same(one, folder))) {
+        kept.push(folder);
+      }
+    }
+
+    this.setPagePref(RECENT_FOLDERS, JSON.stringify(kept.slice(0, RECENT_FOLDER_COUNT)));
   }
 
   setPagePref(name: string, value: string): void {

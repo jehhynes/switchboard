@@ -11,7 +11,9 @@ import type { QuestionsView } from '@switchboard/protocol';
 import type { Artifact, ContextView, ConversationChange, HeardTag, InputOutcome, InputSteps, PromptKey, ScreenPrompt, SlashCommand } from '@switchboard/conversation';
 import { SESSION_ENDED, SESSION_RELAUNCHED } from './runtime.js';
 import { canonicalFolder } from './windows.js';
-import { artifactFile, findFiles, knownFolder, MAX_INPUT_CHARS } from './page.js';
+import { artifactFile, findFiles, MAX_INPUT_CHARS } from './page.js';
+import { allowedFolder, folderPlaces, listFolder, rootList } from './folders.js';
+import type { FolderRoots } from './folders.js';
 import { writeUpload } from './uploads.js';
 import { CATEGORIES, historyView } from './history.js';
 import type { PageActionExtra, PageFile, PageHeader, PageListGroup, PageRow } from './page.js';
@@ -22,6 +24,9 @@ import type { ConversationAdapter, ConversationChanged, DeliveryOutcome, NativeR
 export { ansiTheme, claudePaths } from './claudeConversation.js';
 
 export type { CardDraftView, QuestionsView } from '@switchboard/protocol';
+
+/** How the New session form runs its first message (PRD R122): a conversation now, a task when a slot is free, or a task that waits for Start. */
+export type NewSessionRun = 'now' | 'queue' | 'wait';
 
 /** Conversation API version (architecture.md § Conversation API). */
 export const CONVERSATION_PROTOCOL = 1;
@@ -264,10 +269,16 @@ export interface ConversationServiceDeps {
   pollSources?(): string | null;
   /** Restarts a terminal holder from an older build and resumes its sessions, as the dock's Restart and resume does: why not, or null once it started. */
   restartHolder?(detail?: string): string | null;
-  /** Runs an operator event the page's New ad-hoc session sends, `adhoc` or `run-schedule`, as the dock's `/action` does: why not, or null. */
-  operatorEvent?(event: Record<string, unknown>): string | null;
-  /** Creates a standalone promptless work item and returns its ID. */
-  newStandalone?(folder: string, provider: Provider, model: string | null): { workItemId: number } | { refused: string };
+  /** Runs a schedule now (PRD R82), as the dock's `run-schedule` does: the run's work item, or why not. */
+  runSchedule?(name: string): { workItemId: number } | { refused: string };
+  /** Makes a standalone conversation (PRD R122), empty or with `prompt` as its first message, and starts it: its work item, or why not. */
+  newStandalone?(folder: string, provider: Provider, model: string | null, prompt: string | null): { workItemId: number } | { refused: string };
+  /** Makes an ad-hoc task (PRD R6), queued when `start` is true, else waiting for Start: its work item, or why not. */
+  newTask?(folder: string, provider: Provider, model: string | null, prompt: string, start: boolean): { workItemId: number } | { refused: string };
+  /** The recent folders, repo roots and worktrees the New session form offers (PRD R122). */
+  folderRoots?(): FolderRoots;
+  /** Puts a folder new work was created in first among the recent folders. */
+  rememberFolder?(folder: string): void;
   /** The Done rows from `since` up to the Done list whose search text holds every word of `text`, as the dock's search further back (PRD R63). */
   searchDone?(text: string, since: number): { rows: PageRow[]; more: boolean };
   /** A page's focus changed: a focused, visible page counts as a focused window for the voice; `notify`, when sent, whether it may show notifications. */
@@ -1828,53 +1839,134 @@ export class ConversationService {
   /** Each `page-adhoc` that created, by page key and `opId`, so a retried one creates once; the last 100. A refusal is not kept, so a retry after it runs again. */
   readonly #pageAdhocs = new Map<string, { status: number; body: unknown }>();
 
-  readonly #standalone = new Map<string, { status: number; body: { workItemId: number; folder: string } }>();
+  readonly #standalone = new Map<string, { status: number; body: { workItemId: number; folder: string; run: NewSessionRun } }>();
 
-  /** A new standalone session from the dock or a page, retried safely with the same operation ID. */
-  standalone(body: Record<string, unknown>, page: boolean): { status: number; body: unknown } {
-    const { window, opId, folder, provider, model } = body;
-    if (typeof opId !== 'string' || opId === '' || opId.length > 200 || typeof folder !== 'string' || (provider !== 'claude' && provider !== 'codex') || !(model === null || model === undefined || (typeof model === 'string' && model.trim() !== '' && model.length <= 200))) {
-      return { status: 400, body: { error: 'Expected {opId, folder, provider, model?}.' } };
+  /**
+   * `page-new-session {window, opId, folder, provider, model?, prompt?, run?}` and `POST /dock/new-session` without `window` (PRD R122): the New
+   * session form. Without a first message, or with `run` `now`, a standalone conversation that starts at once; with `queue` or `wait`, an ad-hoc
+   * task (PRD R6) started when a slot is free or waiting for Start. The folder passes the hub's folder check (`allowedFolder`), which keeps a
+   * paired device's page (`remote`, which the server sets) to the recent folders, repo roots and worktrees. Answers `{workItemId, folder, run}`,
+   * puts the folder first among the recent folders, and selects the work item on the page; a repeated `opId` answers the first success.
+   */
+  newSession(body: Record<string, unknown>, page: boolean): { status: number; body: unknown } {
+    const { window, opId, folder, provider, model, prompt, run } = body;
+    const mode: NewSessionRun | null = run === undefined || run === null ? 'now' : run === 'now' || run === 'queue' || run === 'wait' ? run : null;
+
+    if (
+      typeof opId !== 'string' ||
+      opId === '' ||
+      opId.length > 200 ||
+      typeof folder !== 'string' ||
+      (provider !== 'claude' && provider !== 'codex') ||
+      !(model === null || model === undefined || (typeof model === 'string' && model.trim() !== '' && model.length <= 200)) ||
+      !(prompt === null || prompt === undefined || (typeof prompt === 'string' && prompt.length <= MAX_MESSAGE_CHARS)) ||
+      mode === null
+    ) {
+      return { status: 400, body: { error: 'Expected {opId, folder, provider, model?, prompt?, run?}.' } };
     }
-    if (page && (typeof window !== 'string' || !this.deps.windows.isPage(window))) return { status: 403, body: { error: 'Not in this window.' } };
-    const canonical = page ? knownFolder(this.deps.pageHeader?.().folders ?? [], folder) : canonicalFolder(folder);
-    if (canonical === null) return { status: 400, body: { error: `${folder} is not a folder a session can run in.` } };
+
+    if (page && (typeof window !== 'string' || !this.deps.windows.isPage(window))) {
+      return { status: 403, body: { error: 'Not in this window.' } };
+    }
+
+    const message = typeof prompt === 'string' ? prompt.trim() : '';
+
+    if (mode !== 'now' && message === '') {
+      return { status: 400, body: { error: 'A task needs a first message.' } };
+    }
+
     const key = `${page ? window : 'dock'} ${opId}`;
     const earlier = this.#standalone.get(key);
-    if (earlier !== undefined) return earlier;
-    const made = this.deps.newStandalone?.(canonical, provider, typeof model === 'string' ? model.trim() : null) ?? { refused: 'The session was not made.' };
-    if ('refused' in made) return { status: 409, body: { error: made.refused } };
-    const answer = { status: 200, body: { workItemId: made.workItemId, folder: canonical } };
+
+    if (earlier !== undefined) {
+      return earlier;
+    }
+
+    const allowed = allowedFolder(folder, page && body['remote'] === true ? rootList(this.#folderRoots()) : null);
+
+    if ('error' in allowed) {
+      return { status: 400, body: { error: allowed.error } };
+    }
+
+    const chosen = typeof model === 'string' ? model.trim() : null;
+    const made =
+      mode === 'now'
+        ? (this.deps.newStandalone?.(allowed.folder, provider, chosen, message === '' ? null : message) ?? { refused: 'The session was not made.' })
+        : (this.deps.newTask?.(allowed.folder, provider, chosen, message, mode === 'queue') ?? { refused: 'The task was not made.' });
+
+    if ('refused' in made) {
+      return { status: 409, body: { error: made.refused } };
+    }
+
+    const answer = { status: 200, body: { workItemId: made.workItemId, folder: allowed.folder, run: mode } };
+
     this.#standalone.set(key, answer);
-    for (const old of [...this.#standalone.keys()].slice(0, -100)) this.#standalone.delete(old);
+
+    for (const old of [...this.#standalone.keys()].slice(0, -100)) {
+      this.#standalone.delete(old);
+    }
+
+    this.deps.rememberFolder?.(allowed.folder);
+
     if (page) {
       this.deps.windows.select(window as string, made.workItemId);
       this.scopesChanged([window as string]);
     }
+
     this.conversationsChanged();
     return answer;
   }
 
+  /** The New session form's folders, or none without the hub's. */
+  #folderRoots(): FolderRoots {
+    return this.deps.folderRoots?.() ?? { recent: [], repoRoots: [], worktrees: [] };
+  }
+
   /**
-   * `page-adhoc {window, opId, prompt, repoRoot, start, provider}` or `{window, opId, schedule}` (architecture.md § Web page): More Actions' New
-   * ad-hoc session, which creates an ad-hoc work item (PRD R6), started when `start` is true, or runs a schedule now (PRD R82), as the dock's
-   * window does. Only a folder and a schedule the list header offers are taken (400 otherwise); 403 for a key that is not a page's, 409 with the
-   * flow's refusal. A repeated `opId` answers the first success; one after a refusal runs again.
+   * `page-folders {window, path?}` (PRD R122): the New session form's folders. Without `path`, its starting places (`folderPlaces`), the home
+   * folder and drives only on this computer's page; with one, its subfolders (`listFolder`), or 400 with why the folder cannot be used. A paired
+   * device's page (`remote`, which the server sets) reaches only folders in the recent folders, repo roots and worktrees.
+   */
+  async pageFolders(body: Record<string, unknown>): Promise<{ status: number; body: unknown }> {
+    const { window, path } = body;
+
+    if (typeof window !== 'string' || !(path === undefined || path === null || typeof path === 'string')) {
+      return { status: 400, body: { error: 'Expected {window, path?}.' } };
+    }
+
+    if (!this.deps.windows.isPage(window)) {
+      return { status: 403, body: { error: 'Not in this window.' } };
+    }
+
+    const remote = body['remote'] === true;
+    const roots = this.#folderRoots();
+
+    if (typeof path !== 'string' || path.trim() === '') {
+      return { status: 200, body: await folderPlaces(roots, !remote) };
+    }
+
+    const listed = await listFolder(path, remote ? rootList(roots) : null);
+
+    return 'error' in listed ? { status: 400, body: listed } : { status: 200, body: listed };
+  }
+
+  /** `POST /dock/folders`: the New session form's starting places for the dock, without the home folder and drives, which its picker reaches. */
+  async dockFolders(): Promise<{ status: number; body: unknown }> {
+    const places = await folderPlaces(this.#folderRoots(), false);
+
+    return { status: 200, body: places };
+  }
+
+  /**
+   * `page-adhoc {window, opId, schedule}` (architecture.md § Web page): the New session form's Run a schedule now (PRD R82), as the dock's
+   * does, answering `{done, workItemId}` and selecting the run on the page. Only a schedule the list header offers is run (400 otherwise); 403
+   * for a key that is not a page's, 409 with the flow's refusal. A repeated `opId` answers the first success; one after a refusal runs again.
    */
   pageAdhoc(body: Record<string, unknown>): { status: number; body: unknown } {
-    const { window, opId, prompt, repoRoot, start, provider, schedule } = body;
-    const scheduled = schedule !== undefined;
+    const { window, opId, schedule } = body;
 
-    if (
-      typeof window !== 'string' ||
-      typeof opId !== 'string' ||
-      opId === '' ||
-      opId.length > 200 ||
-      (scheduled
-        ? typeof schedule !== 'string'
-        : typeof prompt !== 'string' || prompt.trim() === '' || prompt.length > MAX_MESSAGE_CHARS || typeof repoRoot !== 'string' || typeof start !== 'boolean' || (provider !== 'claude' && provider !== 'codex'))
-    ) {
-      return { status: 400, body: { error: 'Expected {window, opId, prompt, repoRoot, start, provider} or {window, opId, schedule}.' } };
+    if (typeof window !== 'string' || typeof opId !== 'string' || opId === '' || opId.length > 200 || typeof schedule !== 'string') {
+      return { status: 400, body: { error: 'Expected {window, opId, schedule}.' } };
     }
 
     if (!this.deps.windows.isPage(window)) {
@@ -1887,20 +1979,20 @@ export class ConversationService {
       return done;
     }
 
-    const header = this.deps.pageHeader?.();
-    const folder = scheduled ? null : knownFolder(header?.folders ?? [], repoRoot as string);
-
-    if (scheduled ? !(header?.schedules ?? []).some((one) => one.name === schedule) : folder === null) {
-      return { status: 400, body: { error: scheduled ? `No schedule is named ${String(schedule)}.` : `${String(repoRoot)} is not a folder the page offers.` } };
+    if (!(this.deps.pageHeader?.().schedules ?? []).some((one) => one.name === schedule)) {
+      return { status: 400, body: { error: `No schedule is named ${schedule}.` } };
     }
 
-    const event = scheduled ? { type: 'run-schedule', name: schedule } : { type: 'adhoc', prompt, repoRoot: folder, start, provider };
-    const why = this.deps.operatorEvent === undefined ? 'This hub creates no work items from the page.' : this.deps.operatorEvent(event);
-    if (why !== null) {
-      return { status: 409, body: { error: why } };
+    const made = this.deps.runSchedule?.(schedule) ?? { refused: 'This hub creates no work items from the page.' };
+
+    if ('refused' in made) {
+      return { status: 409, body: { error: made.refused } };
     }
 
-    const answer = { status: 200, body: { done: true } };
+    const answer = { status: 200, body: { done: true, workItemId: made.workItemId } };
+
+    this.deps.windows.select(window, made.workItemId);
+    this.scopesChanged([window]);
 
     this.#pageAdhocs.set(`${window} ${opId}`, answer);
 
@@ -1909,31 +2001,6 @@ export class ConversationService {
     }
 
     return answer;
-  }
-
-  /**
-   * `page-folder-conversation {window, opId, folder, provider?}` (architecture.md § Web page): More Actions' New conversation in a folder, which
-   * makes a folder-hosted conversation as the dock's does (`dockConversation`), in a folder the list header offers (400 for any other); answers
-   * `{workItemId, folder}`. 403 for a key that is not a page's.
-   */
-  pageFolderConversation(body: Record<string, unknown>): { status: number; body: unknown } {
-    const { window, opId, folder, provider } = body;
-
-    if (typeof window !== 'string' || typeof folder !== 'string') {
-      return { status: 400, body: { error: 'Expected {window, opId, folder, provider?}.' } };
-    }
-
-    if (!this.deps.windows.isPage(window)) {
-      return { status: 403, body: { error: 'Not in this window.' } };
-    }
-
-    const known = knownFolder(this.deps.pageHeader?.().folders ?? [], folder);
-
-    if (known === null) {
-      return { status: 400, body: { error: `${folder} is not a folder the page offers.` } };
-    }
-
-    return this.dockConversation({ folder: known, opId, ...(provider === undefined ? {} : { provider }) });
   }
 
   #pageHello(key: string): Record<string, unknown> {
@@ -2718,11 +2785,11 @@ export class ConversationService {
   }
 
   /**
-   * `POST /dock/new-conversation` (architecture.md § Hosted conversations): makes a conversation hosted by the folder's canonical folder and run
-   * in it, with or without a window on it, stores it as that folder binding's selection, and answers `{workItemId, folder}`, the canonical folder
-   * the dock opens. A repeated `opId` answers the first work item and makes none. 400 for a path that is not a folder, 409 with the refusal.
+   * The conversation header's New conversation… on the page (architecture.md § Hosted conversations): makes a conversation hosted by the
+   * folder's canonical folder and run in it, with or without a window on it, stores it as that folder binding's selection, and answers
+   * `{workItemId, folder}`. A repeated `opId` answers the first work item and makes none. 400 for a path that is not a folder, 409 with the refusal.
    */
-  dockConversation(body: Record<string, unknown>): { status: number; body: unknown } {
+  folderConversation(body: Record<string, unknown>): { status: number; body: unknown } {
     const { folder, opId, provider } = body;
 
     if (typeof folder !== 'string' || folder === '' || typeof opId !== 'string' || opId === '' || opId.length > 200) {
@@ -2763,7 +2830,7 @@ export class ConversationService {
 
   /**
    * `page-conversation {window, scopeGen, opId, provider?}` (architecture.md § Web page): the dropdown's New conversation… on the page, which
-   * makes a folder-hosted conversation as the dock's New conversation in a folder does, in the folder of the conversation the page shows, never
+   * makes a folder-hosted conversation, as a VS Code folder window's New conversation… does, in the folder of the conversation the page shows, never
    * one the page names; answers `{workItemId, folder}`. 403 for a key that is not a page's or a page with no selection, 409 for a stale
    * `scopeGen` and with the flow's refusal.
    */
@@ -2785,7 +2852,7 @@ export class ConversationService {
       return { status: 409, body: { error: 'This conversation has no folder to start another in.' } };
     }
 
-    return this.dockConversation({ folder: scope!.folder, opId, ...(provider === undefined ? {} : { provider }) });
+    return this.folderConversation({ folder: scope!.folder, opId, ...(provider === undefined ? {} : { provider }) });
   }
 
   /** Remembers the work item a `new-conversation` made, keeping the last `UNSENT_KEPT`. */

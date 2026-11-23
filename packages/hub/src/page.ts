@@ -774,9 +774,7 @@ export interface PageHeader {
   sources: DockSourceGroup[];
   /** The repos an ad-hoc prompt can run in, the first being the default (PRD R6). */
   repoRoots: string[];
-  /** The folders New ad-hoc session and New conversation in a folder offer: the repo roots, then the folders that host conversations. */
-  folders: string[];
-  /** The schedules New ad-hoc session can run now (PRD R82). */
+  /** The schedules the New session form can run now (PRD R82). */
   schedules: { name: string; playbook: string }[];
   /** The dock's holder notice and restart result (architecture.md § Restarting the holder); absent when the dock shows none. */
   holderNotice?: DockHolderNotice;
@@ -785,35 +783,18 @@ export interface PageHeader {
   voiceDevice?: 'phone' | 'none';
 }
 
-/**
- * The page's list header, from the built dock view, so the page and the dock show the same sources. A page cannot browse this computer's
- * folders, so its folder choices are the ones the hub knows: the repo roots, then each folder a conversation is hosted by, once each.
- */
-export function pageHeader(dock: Pick<DockView, 'notes' | 'heldNote' | 'voiceNote' | 'sources' | 'repoRoots' | 'schedules' | 'holderNotice' | 'holderResult'>, snapshot: Pick<Snapshot, 'workItems'>): PageHeader {
-  const folders = new Map<string, string>();
-
-  for (const folder of [...dock.repoRoots, ...snapshot.workItems.flatMap((item) => (item.ticket.hostWindow != null && isFolderHost(item.ticket.hostWindow) ? [item.ticket.hostWindow] : []))]) {
-    if (!folders.has(hostKey(folder))) {
-      folders.set(hostKey(folder), folder);
-    }
-  }
-
+/** The page's list header, from the built dock view, so the page and the dock show the same sources; the New session form asks `page-folders` for its folders. */
+export function pageHeader(dock: Pick<DockView, 'notes' | 'heldNote' | 'voiceNote' | 'sources' | 'repoRoots' | 'schedules' | 'holderNotice' | 'holderResult'>): PageHeader {
   return {
     notes: dock.notes,
     ...(dock.heldNote === undefined ? {} : { heldNote: dock.heldNote }),
     ...(dock.voiceNote === undefined ? {} : { voiceNote: dock.voiceNote }),
     sources: dock.sources,
     repoRoots: dock.repoRoots,
-    folders: [...folders.values()],
     schedules: dock.schedules,
     ...(dock.holderNotice === undefined ? {} : { holderNotice: dock.holderNotice }),
     ...(dock.holderResult === undefined ? {} : { holderResult: dock.holderResult }),
   };
-}
-
-/** The folder of `folders` that names the same folder as `folder`, in any spelling `hostKey` treats as one, or null. */
-export function knownFolder(folders: readonly string[], folder: string): string | null {
-  return folders.find((one) => hostKey(one) === hostKey(folder)) ?? null;
 }
 
 /** A pool ticket's row in the dock's view, or null when no group lists it. */
@@ -898,7 +879,7 @@ export interface PageFile {
 }
 
 /** Folders the page's file picker never walks into. */
-const SKIPPED = new Set(['node_modules', '.git', 'dist', 'build', '.next', '.nuxt', 'bin', 'obj']);
+export const SKIPPED = new Set(['node_modules', '.git', 'dist', 'build', '.next', '.nuxt', 'bin', 'obj']);
 /** The most entries one picker search reads. */
 const WALK_LIMIT = 20_000;
 /** The most files and folders the picker shows. */

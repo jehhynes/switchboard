@@ -1654,3 +1654,11 @@ Current use: the console's resync after each fit ([architecture.md](architecture
   - On the loopback page with the copy from `dist`, the two pull requests' pills made the group and then reused its one pull request tab.
 - **Not verified:** branded Chrome and Edge, which ignore `--load-extension` from Chrome 137; a real `tailscale serve`; the installed app's window, whose links would go to the last focused normal window; the late fallback tab after an extension that does not answer, which the unit tests cover with a fake; a web link in the conversation and a History link, which take the same path in the page's code.
 - **Current use:** the web page's links in the Switchboard tab group on this computer and on another device (PRD R123; architecture.md § Browser extension).
+
+## M136. Codex's model list in the app-server, 2026-11-22
+
+- **Versions:** Codex CLI 0.171.0 on Windows.
+- **Method:** generated the installed app-server's TypeScript bindings with `codex app-server generate-ts --out <scratch>` and read `ClientRequest`, `v2/ModelListParams`, `v2/ModelListResponse` and `v2/Model`. No live request was sent.
+- **Result:** `model/list` takes optional `modelProvider`, `cursor`, `limit` and `includeHidden`, and answers `{data: Model[], nextCursor: string | null}`. A `Model` carries `id`, `model`, `displayName`, `description`, `hidden` (models left out of the default picker), `isDefault`, and its reasoning efforts and service tiers.
+- **Not verified:** a live answer's contents for the operator's account, and which of `id` and `model` `thread/start` takes when they differ; the hub sends `model`.
+- **Current use:** the New session form's Model list for Codex, asked once per hub start, without hidden models, falling back to `sessions.codex.model` alone when the request fails (PRD R122).
