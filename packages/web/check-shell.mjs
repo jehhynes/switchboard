@@ -47,6 +47,10 @@ const fake = `<script>
 const view = new URLSearchParams(location.search).get('view');
 // The drawer view unpins the list, which is otherwise pinned as a column outside the phone's layout.
 if (view === 'drawer') localStorage.setItem('switchboard.listCollapsed', '1'); else localStorage.removeItem('switchboard.listCollapsed');
+// Every view starts as a first start: all views share one browser profile, and a start with no work item in its hash (the list's, Settings')
+// would otherwise come back to the work item an earlier view kept, and a conversation to the place an earlier drag left it (route.ts).
+localStorage.removeItem('switchboard.route');
+sessionStorage.removeItem('switchboard.scroll');
 const now = Date.now();
 const row = (id, title, patch = {}) => ({ workItemId: id, ticketId: id, title, priority: null, time: null, ticket: 'gh ' + id, sourceKind: 'github', url: '', playbook: 'dev:build', links: [], returned: 0, comment: null, mark: null, details: [], stripe: null, dim: false, host: null, actions: [], main: null, pastes: [], search: '', opens: [], band: null, voice: null, history: null, ...patch });
 const remove = { label: 'Delete', action: 'delete', icon: 'trash', group: 'state', confirm: { question: 'Delete Fix it?', detail: 'It goes for good.', action: 'delete' }, input: null };
