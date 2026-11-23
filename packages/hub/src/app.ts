@@ -520,7 +520,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   // The window in front, which the voice follows (architecture.md § Voice).
   let focusedWindow: string | null = null;
   // What a window's view and the web page read of the settings, in each `hello` and again when settings.json is reloaded.
-  const viewSettings = (): ViewSettings => ({ expandReplies: config.settings.voice.expandReplies, diffLayout: config.settings.web.diffLayout, diffWrap: config.settings.web.diffWrap });
+  const viewSettings = (): ViewSettings => ({ briefReplies: config.settings.voice.briefReplies, expandReplies: !config.settings.voice.briefReplies, diffLayout: config.settings.web.diffLayout, diffWrap: config.settings.web.diffWrap });
   // The page's list and header, sent again when the voice changes the dock's view; set once the conversation service exists.
   let pageListChanged = (): void => {};
   const builtNow = (): void => {
@@ -1081,9 +1081,10 @@ const dockWithRuns = () => {
 
       return result.errors.length === 0 ? { status: 200, body: { saved: true, version: result.version } } : { status: 409, body: { errors: result.errors } };
     },
-    // The view options menu's Expand replies (architecture.md § Conversation view): sets `voice.expandReplies` in settings.json as a
-    // Settings save would, leaving the rest of the file as it is; the reload sends every window and page the new value.
-    expandReplies: async (body: unknown) => {
+    // The view options menu's Brief replies (architecture.md § Conversation view): sets `voice.briefReplies` in settings.json as a
+    // Settings save would, leaving the rest of the file as it is but the `voice.expandReplies` it replaced; the reload sends every window and
+    // page the new value.
+    briefReplies: async (body: unknown) => {
       const on = isRecord(body) ? body['on'] : undefined;
 
       if (typeof on !== 'boolean') {
@@ -1104,10 +1105,10 @@ const dockWithRuns = () => {
       }
 
       const voiceIn = file.value['voice'];
-      const value = { ...file.value, voice: { ...(isRecord(voiceIn) ? voiceIn : {}), expandReplies: on } };
+      const value = { ...file.value, voice: { ...(isRecord(voiceIn) ? voiceIn : {}), briefReplies: on } };
       const result = saveSettings(configDir, value, file.version, runtime.enabledSources(), store.homeRepos());
 
-      return result.errors.length === 0 ? { status: 200, body: { expandReplies: on } } : { status: 409, body: { error: result.errors.join(' ') } };
+      return result.errors.length === 0 ? { status: 200, body: { briefReplies: on } } : { status: 409, body: { error: result.errors.join(' ') } };
     },
   };
 
@@ -1640,8 +1641,10 @@ const dockWithRuns = () => {
       '/v1/conversation/page-voice-enroll': settingsRoutes.enroll,
       '/v1/conversation/page-settings-check': settingsRoutes.check,
       '/v1/conversation/page-settings-save': settingsRoutes.save,
-      // Expand replies, from a window's view title menu (hub token) or this computer's page's view options menu (page command).
-      '/v1/conversation/expand-replies': settingsRoutes.expandReplies,
+      // Brief replies, from a window's view title menu (hub token) or this computer's page's view options menu (page command).
+      '/v1/conversation/brief-replies': settingsRoutes.briefReplies,
+      // Expand replies, its inverse, from the title menu of a VS Code window that still runs an extension build from before Brief replies.
+      '/v1/conversation/expand-replies': async (body) => settingsRoutes.briefReplies(isRecord(body) && typeof body['on'] === 'boolean' ? { ...body, on: !body['on'] } : body),
       '/action': async (body) => {
         const event = parseAction(body);
 

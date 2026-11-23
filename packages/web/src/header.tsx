@@ -194,10 +194,10 @@ function PersonaRow({ session }: { session: PageState['session'] }) {
 }
 
 /**
- * The header's view options button and its menu: Show message details, Expand replies, the persona, and the Chrome
+ * The header's view options button and its menu: Show message details, Brief replies, the persona, and the Chrome
  * pane's state and pairing while it is on.
  */
-function ViewOptions({ view, expandReplies, session }: { view: View; expandReplies: boolean; session: PageState['session'] }) {
+function ViewOptions({ view, briefReplies, session }: { view: View; briefReplies: boolean; session: PageState['session'] }) {
   return (
     <div class="menu-anchor view-options-anchor">
       <button type="button" class="icon view-options" data-action="view-menu" aria-haspopup="menu" aria-expanded={view.viewMenu} title="View options" aria-label="View options">
@@ -209,9 +209,9 @@ function ViewOptions({ view, expandReplies, session }: { view: View; expandRepli
             <Gutter checked={view.details} />
             <span class="title">Show message details</span>
           </button>
-          <button type="button" class="menu-row" role="menuitemcheckbox" aria-checked={expandReplies} data-action="toggle-expand-replies">
-            <Gutter checked={expandReplies} />
-            <span class="title">Expand replies</span>
+          <button type="button" class="menu-row" role="menuitemcheckbox" aria-checked={briefReplies} data-action="toggle-brief-replies">
+            <Gutter checked={briefReplies} />
+            <span class="title">Brief replies</span>
           </button>
           <PersonaRow session={session} />
           <PaneRows view={view} />
@@ -303,7 +303,7 @@ export function renderHeader(state: PageState, view: View): VNode {
         {pickerMenu}
       </div>
       <Actions row={selectedRow(state)} view={view} />
-      <ViewOptions view={view} expandReplies={view.expandReplies ?? state.expandReplies} session={state.session} />
+      <ViewOptions view={view} briefReplies={view.briefReplies ?? state.briefReplies} session={state.session} />
     </header>
   );
 }

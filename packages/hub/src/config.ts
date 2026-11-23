@@ -216,6 +216,24 @@ export interface SettingsFile {
   error: string | null;
 }
 
+/**
+ * settings.json's value with `voice.expandReplies`, which Brief replies replaced, moved to its inverse `voice.briefReplies` unless that is set, so
+ * the editors show Brief replies as the hub reads it and their next save writes only the new key; a value that is not true or false, old or new,
+ * is left for the editors to show as an error.
+ */
+export function withBriefReplies(value: unknown): unknown {
+  const isRecord = (one: unknown): one is Record<string, unknown> => typeof one === 'object' && one !== null && !Array.isArray(one);
+  const voice = isRecord(value) ? value['voice'] : undefined;
+
+  if (!isRecord(voice) || typeof voice['expandReplies'] !== 'boolean') {
+    return value;
+  }
+
+  const { expandReplies, ...rest } = voice;
+
+  return { ...(value as Record<string, unknown>), voice: 'briefReplies' in rest ? rest : { ...rest, briefReplies: !expandReplies } };
+}
+
 /** Reads settings.json for the settings editor, valid or not. */
 export function readConfigFile(configDir: string): SettingsFile {
   const path = settingsPath(configDir);
@@ -227,7 +245,7 @@ export function readConfigFile(configDir: string): SettingsFile {
   }
 
   try {
-    return { ...file, value: JSON.parse(text) };
+    return { ...file, value: withBriefReplies(JSON.parse(text)) };
   } catch (error) {
     return { ...file, value: null, error: `settings.json is not valid JSON: ${(error as Error).message}` };
   }

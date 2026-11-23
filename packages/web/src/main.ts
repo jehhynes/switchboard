@@ -79,7 +79,9 @@ const SIDE_WIDTH = 'switchboard.sideWidth';
 const LIST_UNPINNED = 'switchboard.listCollapsed';
 /** Where the page keeps Show message details. */
 const DETAILS = 'switchboard.messageDetails';
-/** A paired device's own Expand replies, '1' or '0'; this computer's page keeps it in settings.json instead. */
+/** A paired device's own Brief replies, '1' or '0'; this computer's page keeps it in settings.json instead. */
+const BRIEF = 'switchboard.briefReplies';
+/** The Expand replies a paired device kept before Brief replies replaced it, read as its inverse until Brief replies is first toggled there. */
 const EXPAND = 'switchboard.expandReplies';
 /** Where an earlier page kept the conversation's text size, which is now fixed; removed on load. */
 const OLD_TEXT_SCALE = 'switchboard.textScale';
@@ -577,42 +579,43 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const local = deps.local ?? ['127.0.0.1', 'localhost'].includes(location.hostname);
 
 
-  // A paired device may not change settings.json (architecture.md § Remote access), so its Expand replies is its own, following
-  // voice.expandReplies until it is first toggled there.
+  // A paired device may not change settings.json (architecture.md § Remote access), so its Brief replies is its own, following
+  // voice.briefReplies until it is first toggled there.
   if (!local) {
     try {
-      const kept = localStorage.getItem(EXPAND);
+      const kept = localStorage.getItem(BRIEF);
+      const expand = localStorage.getItem(EXPAND);
 
-      view.expandReplies = kept === '1' ? true : kept === '0' ? false : null;
+      view.briefReplies = kept === '1' ? true : kept === '0' ? false : expand === '1' ? false : expand === '0' ? true : null;
     } catch {
-      // Follows voice.expandReplies without local storage.
+      // Follows voice.briefReplies without local storage.
     }
   }
   /**
-   * The value Expand replies was last clicked to, until the hub's `settings` event or a refusal, so a quick second click reverses the
+   * The value Brief replies was last clicked to, until the hub's `settings` event or a refusal, so a quick second click reverses the
    * first, and the value of the save in flight; saves go one at a time, so a later click's value is the one the file keeps.
    */
-  let expandAsked: boolean | null = null;
-  let expandSending: boolean | null = null;
-  const sendExpand = async (): Promise<void> => {
-    let on = expandAsked!;
+  let briefAsked: boolean | null = null;
+  let briefSending: boolean | null = null;
+  const sendBrief = async (): Promise<void> => {
+    let on = briefAsked!;
 
     for (;;) {
-      expandSending = on;
-      const answer = await post('expand-replies', { on });
+      briefSending = on;
+      const answer = await post('brief-replies', { on });
 
-      expandSending = null;
+      briefSending = null;
 
       if (answer.status !== 200) {
-        expandAsked = expandAsked === on ? null : expandAsked;
-        showError(String(answer.body['error'] ?? `Expand replies did not change (status ${answer.status}).`));
+        briefAsked = briefAsked === on ? null : briefAsked;
+        showError(String(answer.body['error'] ?? `Brief replies did not change (status ${answer.status}).`));
       }
 
-      if (expandAsked === null || expandAsked === on) {
+      if (briefAsked === null || briefAsked === on) {
         return;
       }
 
-      on = expandAsked;
+      on = briefAsked;
     }
   };
   // Each Mic on tap on a paired device and each leaving of the conversation is counted, so a mic still opening when the page left is not turned
@@ -3308,12 +3311,13 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
         draw();
         break;
-      case 'toggle-expand-replies':
+      case 'toggle-brief-replies':
         if (!local) {
-          view.expandReplies = !(view.expandReplies ?? state.expandReplies);
+          view.briefReplies = !(view.briefReplies ?? state.briefReplies);
 
           try {
-            localStorage.setItem(EXPAND, view.expandReplies ? '1' : '0');
+            localStorage.setItem(BRIEF, view.briefReplies ? '1' : '0');
+            localStorage.removeItem(EXPAND);
           } catch {
             // A page without local storage keeps the choice until it reloads.
           }
@@ -3322,11 +3326,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
           break;
         }
 
-        // On this computer's page, voice.expandReplies in settings.json; the checkbox and the replies follow the hub's `settings` event once the file is reloaded.
-        expandAsked = !(expandAsked ?? state.expandReplies);
+        // On this computer's page, voice.briefReplies in settings.json; the checkbox and the replies follow the hub's `settings` event once the file is reloaded.
+        briefAsked = !(briefAsked ?? state.briefReplies);
 
-        if (expandSending === null) {
-          void sendExpand();
+        if (briefSending === null) {
+          void sendBrief();
         }
 
         break;
@@ -4357,9 +4361,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       }
 
       // settings.json changed on disk: Settings reads it again, keeping unsaved edits under the dock's changed-on-disk warning (PRD R54).
-      // With no save in flight, the hub's settings hold what Expand replies asked for, or a newer change.
-      if ((type === 'settings' || type === 'hello') && expandSending === null) {
-        expandAsked = null;
+      // With no save in flight, the hub's settings hold what Brief replies asked for, or a newer change.
+      if ((type === 'settings' || type === 'hello') && briefSending === null) {
+        briefAsked = null;
       }
 
       if (type === 'config') {

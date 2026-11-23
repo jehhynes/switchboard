@@ -20,8 +20,8 @@ import { warnHub } from './hubNotice.js';
 export const CONVERSATION_VIEWS = ['switchboard.conversation', 'switchboard.conversationActivity'] as const;
 /** The context key that says message details are shown, for the view's title menu. */
 const DETAILS_CONTEXT = 'switchboard.messageDetails';
-/** The context key that says `voice.expandReplies` is on, for the view's title menu. */
-const EXPAND_CONTEXT = 'switchboard.expandReplies';
+/** The context key that says `voice.briefReplies` is on, for the view's title menu. */
+const BRIEF_CONTEXT = 'switchboard.briefReplies';
 export const NO_SECONDARY_SIDEBAR = 'switchboard.noSecondarySidebar';
 /** The scheme of a status opened in the Markdown preview (architecture.md § Statuses). */
 export const STATUS_SCHEME = 'switchboard-status';
@@ -122,14 +122,14 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
   register(): vscode.Disposable {
     void vscode.commands.executeCommand('setContext', NO_SECONDARY_SIDEBAR, !supportsSecondarySidebar(vscode.version));
     void vscode.commands.executeCommand('setContext', DETAILS_CONTEXT, this.deps.details?.get() === true);
-    void vscode.commands.executeCommand('setContext', EXPAND_CONTEXT, this.#state.settings.expandReplies);
+    void vscode.commands.executeCommand('setContext', BRIEF_CONTEXT, this.#state.settings.briefReplies);
 
     return vscode.Disposable.from(
       ...CONVERSATION_VIEWS.map((id) => vscode.window.registerWebviewViewProvider(id, this)),
       vscode.commands.registerCommand('switchboard.showMessageDetails', () => this.setDetails(true)),
       vscode.commands.registerCommand('switchboard.hideMessageDetails', () => this.setDetails(false)),
-      vscode.commands.registerCommand('switchboard.expandSpokenReplies', () => this.setExpandReplies(true)),
-      vscode.commands.registerCommand('switchboard.collapseSpokenReplies', () => this.setExpandReplies(false)),
+      vscode.commands.registerCommand('switchboard.briefRepliesOn', () => this.setBriefReplies(true)),
+      vscode.commands.registerCommand('switchboard.briefRepliesOff', () => this.setBriefReplies(false)),
       vscode.workspace.registerTextDocumentContentProvider(STATUS_SCHEME, this),
       // The page counts an unread item as seen only while this window has the focus (architecture.md § Unread).
       vscode.window.onDidChangeWindowState((state) => this.#post({ type: 'focus', focused: state.focused })),
@@ -409,8 +409,8 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
   }
 
   #set(state: ConversationState): void {
-    if (state.settings.expandReplies !== this.#state.settings.expandReplies) {
-      void vscode.commands.executeCommand('setContext', EXPAND_CONTEXT, state.settings.expandReplies);
+    if (state.settings.briefReplies !== this.#state.settings.briefReplies) {
+      void vscode.commands.executeCommand('setContext', BRIEF_CONTEXT, state.settings.briefReplies);
     }
 
     this.#state = state;
@@ -435,10 +435,10 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
   }
 
   /**
-   * Sets `voice.expandReplies` in settings.json (architecture.md § Conversation view); the hub's `settings` event then redraws every window and
+   * Sets `voice.briefReplies` in settings.json (architecture.md § Conversation view); the hub's `settings` event then redraws every window and
    * page. A refusal shows as a warning.
    */
-  async setExpandReplies(on: boolean): Promise<void> {
+  async setBriefReplies(on: boolean): Promise<void> {
     const target = this.#target;
 
     if (target === null) {
@@ -446,7 +446,7 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
       return;
     }
 
-    const reply = await postToHub(target.record, '/v1/conversation/expand-replies', { window: target.key, on }, HISTORY_TIMEOUT_MS);
+    const reply = await postToHub(target.record, '/v1/conversation/brief-replies', { window: target.key, on }, HISTORY_TIMEOUT_MS);
 
     if (reply?.status !== 200) {
       warnHub(reply);

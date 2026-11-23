@@ -67,7 +67,7 @@ public sealed class VoiceSettingsTests
 
         Assert.Equal(["Speech", "Spoken alerts", "Dictation", "Voice check", "Playbook personas"], sections.Select((section) => section.Heading));
         Assert.Equal(
-            ["voice.enabled", "voice.voice", "voice.style", "voice.speed", "voice.expressive", "voice.expandReplies", "voice.awayMinutes", "voice.needsYouSound", "voice.outputDevice"],
+            ["voice.enabled", "voice.voice", "voice.style", "voice.speed", "voice.expressive", "voice.briefReplies", "voice.awayMinutes", "voice.needsYouSound", "voice.outputDevice"],
             sections[0].Fields.Select((field) => field.Path));
         Assert.Equal(["voice.micIdleMinutes", "voice.endPauseMs", "voice.inputDevice", "voice.halfDuplexTailMs", "voice.duplex.local", "voice.duplex.remote"], sections[2].Fields.Select((field) => field.Path));
         Assert.Empty(sections[4].Fields);

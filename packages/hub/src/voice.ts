@@ -195,7 +195,7 @@ function alertText(cause: AlertCause, inTerminal: boolean, reply: { speak: strin
 export interface VoiceControlDeps {
   link: { find(): Promise<VoiceConnection | { error: string }>; connected(): VoiceConnection | null; stop(): void };
   settings(): VoiceSettings;
-  /** The settings windows and pages read, sent to each when the settings are reloaded; `expandReplies` alone when left out. */
+  /** The settings windows and pages read, sent to each when the settings are reloaded; `briefReplies` alone when left out. */
   viewSettings?(): ViewSettings;
   store: {
     reply(id: string): ConversationReply | null;
@@ -1042,7 +1042,7 @@ export class VoiceControl {
     }
 
     for (const key of this.deps.windows.keys()) {
-      this.deps.notify(key, 'settings', { settings: this.deps.viewSettings?.() ?? { expandReplies: this.deps.settings().expandReplies } });
+      this.deps.notify(key, 'settings', { settings: this.deps.viewSettings?.() ?? { briefReplies: this.deps.settings().briefReplies } });
     }
 
     this.update();

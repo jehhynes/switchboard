@@ -854,17 +854,28 @@ describe('createHubApp', () => {
     expect(await app.post['/v1/conversation/page-voice-computer']!({ window: 'page-unknown' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
   });
 
-  it('sets voice.expandReplies in settings.json for Expand replies, keeping the rest of the file, and refuses a file it cannot save', async () => {
+  it('sets voice.briefReplies in settings.json for Brief replies, keeping the rest of the file but the old voice.expandReplies, and refuses a file it cannot save', async () => {
     writeSettings({ sessions: { installHooks: false }, voice: { voice: 'cedar' } });
     const app = await start();
     const path = join(temp.home, '.switchboard', 'settings.json');
     const file = () => JSON.parse(readFileSync(path, 'utf8'));
-    const expand = app.post['/v1/conversation/expand-replies']!;
+    const expand = app.post['/v1/conversation/brief-replies']!;
 
-    expect(await expand({ window: 'page-1', on: true })).toEqual({ status: 200, body: { expandReplies: true } });
-    expect(file()).toEqual({ sessions: { installHooks: false }, voice: { voice: 'cedar', expandReplies: true } });
-    expect(await expand({ on: false })).toEqual({ status: 200, body: { expandReplies: false } });
-    expect(file()).toEqual({ sessions: { installHooks: false }, voice: { voice: 'cedar', expandReplies: false } });
+    expect(await expand({ window: 'page-1', on: true })).toEqual({ status: 200, body: { briefReplies: true } });
+    expect(file()).toEqual({ sessions: { installHooks: false }, voice: { voice: 'cedar', briefReplies: true } });
+    expect(await expand({ on: false })).toEqual({ status: 200, body: { briefReplies: false } });
+    expect(file()).toEqual({ sessions: { installHooks: false }, voice: { voice: 'cedar', briefReplies: false } });
+    // A file that still has the key Brief replies replaced loses it.
+    writeSettings({ sessions: { installHooks: false }, voice: { voice: 'cedar', expandReplies: true } });
+    expect(await expand({ on: true })).toEqual({ status: 200, body: { briefReplies: true } });
+    expect(file()).toEqual({ sessions: { installHooks: false }, voice: { voice: 'cedar', briefReplies: true } });
+    // A VS Code window still on an extension from before Brief replies posts Expand replies, its inverse.
+    const legacy = app.post['/v1/conversation/expand-replies']!;
+
+    expect(await legacy({ window: 'w', on: true })).toEqual({ status: 200, body: { briefReplies: false } });
+    expect(file()).toEqual({ sessions: { installHooks: false }, voice: { voice: 'cedar', briefReplies: false } });
+    expect(await legacy({ on: 'yes' })).toEqual({ status: 400, body: { error: 'Expected {on}.' } });
+    expect(await expand({ on: true })).toEqual({ status: 200, body: { briefReplies: true } });
 
     expect(await expand({ on: 'yes' })).toEqual({ status: 400, body: { error: 'Expected {on}.' } });
     expect(await expand(null)).toEqual({ status: 400, body: { error: 'Expected {on}.' } });

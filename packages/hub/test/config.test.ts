@@ -145,6 +145,28 @@ describe('readConfigFile', () => {
     expect(file.error).toMatch(/^settings\.json is not valid JSON: /);
   });
 
+  it("gives voice.expandReplies as its inverse voice.briefReplies, which the editors save in its place, and leaves the file's text and version as they are", () => {
+    const value = (voice: unknown) => {
+      const text = JSON.stringify({ sessions: { installHooks: false }, voice });
+
+      write(settingsFile(), text);
+      const file = readConfigFile(configDir());
+
+      expect(file.version).toBe(fileVersion(text));
+      expect(readFileSync(settingsFile(), 'utf8')).toBe(text);
+      return (file.value as { voice: unknown }).voice;
+    };
+
+    expect(value({ voice: 'cedar', expandReplies: false })).toEqual({ voice: 'cedar', briefReplies: true });
+    expect(value({ expandReplies: true })).toEqual({ briefReplies: false });
+    // A file that has both keeps briefReplies; one with neither, or an invalid old value, is left for the editors to show.
+    expect(value({ expandReplies: true, briefReplies: true })).toEqual({ briefReplies: true });
+    expect(value({ voice: 'cedar' })).toEqual({ voice: 'cedar' });
+    expect(value({ expandReplies: 'yes' })).toEqual({ expandReplies: 'yes' });
+    expect(value({ expandReplies: true, briefReplies: 'yes' })).toEqual({ briefReplies: 'yes' });
+    expect(value([])).toEqual([]);
+  });
+
   it('returns the playbooks inside the value, valid or not', () => {
     const text = JSON.stringify({ playbooks: { 'dev:develop': TASK, 'dev:bad': { description: 'x' } } });
 

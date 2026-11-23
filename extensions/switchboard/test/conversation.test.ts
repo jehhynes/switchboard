@@ -23,7 +23,7 @@ const reply = (id: string, at: number, patch: Partial<ReplyView> = {}): ReplyVie
 const message = (id: string, at: number, text: string, patch: Partial<MessageView> = {}): MessageView => ({ type: 'message', id, sessionId: 's2', workItemId: 2, at, ord: at, origin: 'terminal', text, provisional: false, withdrawn: false, delivery: null, error: null, ...patch });
 const typed = (id: string, delivery: 'open' | 'sent' | 'not-sent', error: string | null = null): ItemView => ({ type: 'message', id, sessionId: 's2', workItemId: 2, at: T0, ord: T0, origin: 'typed', text: `Typed ${id}`, provisional: delivery === 'open' || delivery === 'sent', withdrawn: false, delivery, error });
 
-const hello = (items: ItemView[] = [], patch: Partial<{ scope: ScopeView | null; sessions: SessionView[]; more: boolean; status: StatusView | null; artifactsDir: string | null; artifacts: ArtifactView[]; unread: number; voice: VoiceView; settings: { expandReplies: boolean } }> = {}) => ({ type: 'hello', scope: SCOPE, sessions: [SESSION], items, more: false, status: null, artifactsDir: null, artifacts: [], unread: 0, ...patch });
+const hello = (items: ItemView[] = [], patch: Partial<{ scope: ScopeView | null; sessions: SessionView[]; more: boolean; status: StatusView | null; artifactsDir: string | null; artifacts: ArtifactView[]; unread: number; voice: VoiceView; settings: { briefReplies: boolean } }> = {}) => ({ type: 'hello', scope: SCOPE, sessions: [SESSION], items, more: false, status: null, artifactsDir: null, artifacts: [], unread: 0, ...patch });
 /** A timeline entry's ID: an item's, or an artifact's path. */
 const idOf = (entry: Entry): string => (entry.type === 'artifact' ? entry.artifact.path : entry.item.id);
 
@@ -130,7 +130,7 @@ describe('the conversation state', () => {
 
     const moved = applyEvent(applyEvent(state, { type: 'scope', scope: { ...SCOPE, workItemId: 3, sessionId: null } }), hello([], { scope: { ...SCOPE, workItemId: 3, sessionId: null }, sessions: [] }));
 
-    expect(moved).toEqual({ scope: { ...SCOPE, workItemId: 3, sessionId: null }, session: null, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, voice: null, settings: { expandReplies: false }, questions: null });
+    expect(moved).toEqual({ scope: { ...SCOPE, workItemId: 3, sessionId: null }, session: null, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, voice: null, settings: { briefReplies: false }, questions: null });
 
     // A session's questions, from hello and its own questions events only (PRD R103).
     const questions = { sessionId: 's2', since: 1, open: 2, oldest: 'reply:r1', drafts: {}, dismissed: [] };
@@ -142,19 +142,19 @@ describe('the conversation state', () => {
 
   it('keeps the voice state and the setting from hello and their events, and shows a playing reply\'s progress (architecture.md § Voice)', () => {
     const voice = { enabled: true, here: true, mic: 'off' as const, speaking: null, speakReplies: true, error: null, recognizer: null };
-    let state = applyEvent(EMPTY_CONVERSATION, hello([reply('r1', T0, { speak: 'Done.' })], { voice, settings: { expandReplies: true } }));
+    let state = applyEvent(EMPTY_CONVERSATION, hello([reply('r1', T0, { speak: 'Done.' })], { voice, settings: { briefReplies: false } }));
 
     expect(state.voice).toEqual(voice);
-    expect(state.settings).toEqual({ expandReplies: true });
+    expect(state.settings).toEqual({ briefReplies: false });
     state = applyEvent(state, { type: 'voice', voice: { ...voice, here: false } });
     expect(state.voice?.here).toBe(false);
-    state = applyEvent(state, { type: 'settings', settings: { expandReplies: false } });
-    expect(state.settings.expandReplies).toBe(false);
+    state = applyEvent(state, { type: 'settings', settings: { briefReplies: true } });
+    expect(state.settings.briefReplies).toBe(true);
     state = applyEvent(state, { type: 'progress', replyId: 'r1', chars: 3, atMs: 450 });
     expect(state.items[0]).toMatchObject({ spoken: { state: 'playing', atMs: 450, saidChars: 3 } });
     expect(applyEvent(state, { type: 'progress', replyId: 'gone', chars: 1, atMs: 1 }).items).toEqual(state.items);
     // A hub without voice sends none, and a new hello keeps the setting it had.
-    expect(applyEvent(state, hello([]))).toMatchObject({ voice: null, settings: { expandReplies: false } });
+    expect(applyEvent(state, hello([]))).toMatchObject({ voice: null, settings: { briefReplies: true } });
   });
 
   it('shows the voice in the status bar only as this window sees it, and finds the reply Replay speaks again', () => {
@@ -325,7 +325,7 @@ describe('the conversation state', () => {
 });
 
 describe('the Conversation view page', () => {
-  const state = (items: ItemView[], patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items, more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, voice: null, settings: { expandReplies: false }, ...patch });
+  const state = (items: ItemView[], patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items, more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, voice: null, settings: { briefReplies: true }, ...patch });
 
   it('draws the header, messages as boxes, replies whole, asides, notes and rewrites, escaping every text', () => {
     const html = renderConversation(
@@ -756,7 +756,7 @@ describe('the Conversation view page', () => {
 });
 
 describe('unread replies and statuses', () => {
-  const state = (items: ItemView[], patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items, more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, voice: null, settings: { expandReplies: false }, ...patch });
+  const state = (items: ItemView[], patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items, more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, voice: null, settings: { briefReplies: true }, ...patch });
   const status = (id: string, patch: Partial<StatusView> = {}): StatusView => ({ id, sessionId: 's2', at: T0, markdown: 'Done.', fallback: false, unread: true, ...patch });
 
   it("marks an unread reply's dot on the Conversation tab and the unread status on the Status tab, and never a seen one, a note or the stage", () => {
@@ -919,7 +919,7 @@ describe('unread replies and statuses', () => {
 
 describe('speech in the view (architecture.md § Voice)', () => {
   const VOICE = { enabled: true, here: true, mic: 'off' as const, speaking: null, speakReplies: true, error: null, recognizer: null };
-  const state = (items: ItemView[], patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items, more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, voice: VOICE, settings: { expandReplies: false }, ...patch });
+  const state = (items: ItemView[], patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items, more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, voice: VOICE, settings: { briefReplies: true }, ...patch });
 
   function page() {
     if (typeof CSS === 'undefined') {
@@ -953,7 +953,7 @@ describe('speech in the view (architecture.md § Voice)', () => {
     expect(root.querySelector('li[data-id="r2"] .stamp')).toBeNull();
   });
 
-  it('shows a reply with a passage as the passage first, the whole reply behind Show more, which opens it for good, and whole with voice.expandReplies', () => {
+  it('shows a reply with a passage as the passage first, the whole reply behind Show more, which opens it for good, and whole with voice.briefReplies off', () => {
     const passage = reply('r1', T0, { opening: 'Fixed the **badge**.\n\n- one\n- two', speak: 'Fixed the **badge**.', tone: 'calm' });
     const { root, show } = page();
 
@@ -990,7 +990,7 @@ describe('speech in the view (architecture.md § Voice)', () => {
     expect(document.activeElement).toBe(root.querySelector('li[data-id="r6"]'));
     expect(root.querySelector('li[data-id="r6"] .show-more')).toBeNull();
 
-    const expanded = renderConversation(state([passage], { settings: { expandReplies: true } }));
+    const expanded = renderConversation(state([passage], { settings: { briefReplies: false } }));
 
     expect(expanded).toContain('<li>one</li>');
     expect(expanded).not.toContain('show-more');
@@ -1331,7 +1331,7 @@ describe('the mic start', () => {
 });
 
 describe('the composer', () => {
-  const state = (patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, voice: null, settings: { expandReplies: false }, ...patch });
+  const state = (patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, voice: null, settings: { briefReplies: true }, ...patch });
 
   function page() {
     // Pages of earlier tests still listen on the window, and jsdom has no CSS.escape for the one that kept a focused item.
@@ -1735,7 +1735,7 @@ describe('reply links and the secondary side bar', () => {
 });
 
 describe('the Status tab', () => {
-  const state = (patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, voice: null, settings: { expandReplies: false }, ...patch });
+  const state = (patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, voice: null, settings: { briefReplies: true }, ...patch });
   const status = (id: string, markdown: string, patch: Partial<StatusView> = {}): StatusView => ({ id, sessionId: 's2', at: T0, markdown, fallback: false, unread: false, ...patch });
 
   it("takes the hello's status and each status of the window's session or work item, and drops another session's", () => {
@@ -1933,7 +1933,7 @@ describe('the Status tab', () => {
 });
 
 describe('the tab strip', () => {
-  const state = (patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items: [reply('r1', T0)], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, voice: null, settings: { expandReplies: false }, ...patch });
+  const state = (patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items: [reply('r1', T0)], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, voice: null, settings: { briefReplies: true }, ...patch });
 
   it('draws Conversation, Status and Artifacts under the header as tabs, the selected one alone in the panel, and none for a window with no work item', () => {
     const root = document.createElement('div');

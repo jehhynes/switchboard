@@ -159,15 +159,15 @@ function message(item: MessageView, stamped: boolean, details: boolean, answered
 // The voice controls are drawn by one renderer with the web page's (architecture.md § Voice).
 export { renderMicButton, renderVoiceControls } from '@switchboard/conversation/voiceControls';
 
-/** The fold key of a reply that Show more opened; a reply starts expanded with `voice.expandReplies`, and once open stays open. */
+/** The fold key of a reply that Show more opened; a reply starts folded only with `voice.briefReplies`, and once open stays open. */
 export const moreKey = (id: string): string => `more:${id}`;
 
-function reply(item: ReplyView, earlier: ReplyView | null, open: ReadonlySet<string>, stamped: boolean, card = '', expandReplies = false, details = false): string {
+function reply(item: ReplyView, earlier: ReplyView | null, open: ReadonlySet<string>, stamped: boolean, card = '', briefReplies = false, details = false): string {
   if (item.kind === 'note') {
     return `<li class="note" data-id="${escape(item.id)}" tabindex="-1">${escape(item.opening)}</li>`;
   }
 
-  // Focused mode (voice-design decision 21): a reply shows its primary response first, spoken or not, its details behind Show more. The
+  // Focused mode (voice-design decision 21), with Brief replies on: a reply shows its primary response first, spoken or not, its details behind Show more. The
   // primary response keeps its place when the whole reply shows; after the operator spoke over it, the part not heard is dimmed.
   const passage = item.kind === 'reply' && item.speak !== null && item.speak.trim() !== '' ? item.speak : null;
   // Question ids and withdraw lines are for the view and the session, not the operator.
@@ -175,7 +175,7 @@ function reply(item: ReplyView, earlier: ReplyView | null, open: ReadonlySet<str
   // The questions that end a reply show in its card, so they alone give Show more nothing to show.
   const folded = passage !== null && hasUnspokenText(card === '' ? opening : withoutEndingQuestions(opening), passage);
   // Show more opens a reply for good: an open reply has nothing to fold it again.
-  const expanded = !folded || expandReplies || open.has(moreKey(item.id));
+  const expanded = !folded || !briefReplies || open.has(moreKey(item.id));
   // Only the text that ends the reply can end in the card's questions, which it leaves out; questions before a passage fold into one line.
   const markdownPart = (text: string, last: boolean): string => (card === '' ? renderMarkdown(text) : withoutQuestions(text, last ? `reply:${item.id}` : `reply:${item.id}:before`, open, last));
   const said = item.spoken.state === 'interrupted' ? item.spoken.saidChars : null;
@@ -727,7 +727,7 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
 
     const card = entry.type === 'reply' && entry.item.kind === 'reply' ? cardOf(cardKey('reply', entry.item.id)) : '';
 
-    return divider + (entry.type === 'message' ? message(entry.item, shownTime, page.details === true, links.answers.get(entry.item.id)) : reply(entry.item, entry.earlier, open, shownTime, card, state.settings.expandReplies, page.details === true));
+    return divider + (entry.type === 'message' ? message(entry.item, shownTime, page.details === true, links.answers.get(entry.item.id)) : reply(entry.item, entry.earlier, open, shownTime, card, state.settings.briefReplies, page.details === true));
   });
   // A Codex session's pending questions and approvals, answered in cards at the end of the conversation.
   const requests = (state.session?.requests ?? []).map((request) => requestCard(request, page.requests ?? NO_REQUESTS)).join('');

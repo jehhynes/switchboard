@@ -1071,12 +1071,12 @@ describe('the Changes list', () => {
   it('lays the diffs out as the settings say, and again when they change', async () => {
     const { source } = start();
 
-    source.emit('settings', { settings: { expandReplies: false, diffLayout: 'split', diffWrap: 'on' } });
+    source.emit('settings', { settings: { briefReplies: false, diffLayout: 'split', diffWrap: 'on' } });
     await openRow(0);
     expect(root.querySelector('[data-action="diff-layout"], [data-action="diff-wrap"]')).toBeNull();
     expect(changesMounts[0]).toMatchObject({ layout: 'split', wrap: true });
 
-    source.emit('settings', { settings: { expandReplies: false, diffLayout: 'stacked', diffWrap: 'off' } });
+    source.emit('settings', { settings: { briefReplies: false, diffLayout: 'stacked', diffWrap: 'off' } });
     expect(changesMounts[0]!.layouts.at(-1)).toBe('stacked false');
   });
 

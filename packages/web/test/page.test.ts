@@ -91,7 +91,7 @@ describe('question cards', () => {
 
 describe('question cards in replies', () => {
   const ending = 'Before I go on:\n\n1. Port?\n   - A) 1\n   - B) 2';
-  const pageState = (items: Array<MessageView | ReplyView>) => applyEvent(EMPTY, { type: 'hello', key: 'k', groups: [], scope, sessions: [session()], items, more: false, status: null, artifacts: [] });
+  const pageState = (items: Array<MessageView | ReplyView>) => applyEvent(EMPTY, { type: 'hello', key: 'k', groups: [], scope, sessions: [session()], items, more: false, status: null, artifacts: [], settings: { briefReplies: true } });
 
   it('leaves questions that end a reply out of its text, folds ones written mid-message, and keeps a card open under a message that answers nothing', () => {
     const host = document.createElement('div');
@@ -197,7 +197,7 @@ describe('question cards in replies', () => {
 
 describe('drawing', () => {
   // The page's state with these items, as a hello brings them.
-  const pageState = (items: Array<MessageView | ReplyView>) => applyEvent(EMPTY, { type: 'hello', key: 'k', groups: [], scope, sessions: [session()], items, more: false, status: null, artifacts: [] });
+  const pageState = (items: Array<MessageView | ReplyView>) => applyEvent(EMPTY, { type: 'hello', key: 'k', groups: [], scope, sessions: [session()], items, more: false, status: null, artifacts: [], settings: { briefReplies: true } });
 
   it('puts a Today, Yesterday or dated divider before the first item and each turn on another day', () => {
     const at = (day: number, hour: number): number => new Date(2026, 10, day, hour).getTime();
@@ -2770,7 +2770,7 @@ describe('the page in use', () => {
     expect(root.querySelector('.view-options-menu')).toBeNull();
     click('.header button.view-options');
     expect(root.querySelector('.header button.view-options')!.getAttribute('title')).toBe('View options');
-    expect([...root.querySelectorAll('.view-options-menu .menu-row')].map((row) => row.textContent!.trim())).toEqual(['Show message details', 'Expand replies']);
+    expect([...root.querySelectorAll('.view-options-menu .menu-row')].map((row) => row.textContent!.trim())).toEqual(['Show message details', 'Brief replies']);
     expect(root.querySelector('.view-options-menu .menu-separator')).toBeNull();
     root.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     expect(root.querySelector('.view-options-menu')).toBeNull();
@@ -4911,7 +4911,7 @@ describe('the page in use', () => {
   it('opens a folded reply for good on a click on Show more, with no Show less', () => {
     const { page, source } = start();
 
-    hello(source, { items: [reply('r1', 2, { opening: 'Short.\n\nWhole reply.', speak: 'Short.' })] });
+    hello(source, { items: [reply('r1', 2, { opening: 'Short.\n\nWhole reply.', speak: 'Short.' })], settings: { briefReplies: true } });
     expect(root.querySelector('li[data-id="r1"] .show-more')!.outerHTML).toBe('<button class="show-more" type="button" data-action="more" data-reply="r1" aria-expanded="false">Show more</button>');
     root.querySelector<HTMLElement>('li[data-id="r1"] .show-more')!.focus();
     click('li[data-id="r1"] .show-more');
@@ -4926,94 +4926,121 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it("sets voice.expandReplies from View options' Expand replies on this computer's page, follows the hub's settings, and keeps a paired device's choice on that device", async () => {
+  it("sets voice.briefReplies from View options' Brief replies on this computer's page, follows the hub's settings, and keeps a paired device's choice on that device", async () => {
     const { page, source } = start();
-    const expandRow = () => root.querySelector('[data-action="toggle-expand-replies"]');
+    const briefRow = () => root.querySelector('[data-action="toggle-brief-replies"]');
 
+    // Brief replies is off by default: a reply shows whole.
     hello(source, { items: [reply('r1', 2, { opening: 'Whole reply.', speak: 'Short.' })] });
-    expect(root.querySelector('#panel')!.textContent).not.toContain('Whole reply.');
-    click('.header button.view-options');
-    expect(expandRow()!.getAttribute('aria-checked')).toBe('false');
-    expect(expandRow()!.getAttribute('role')).toBe('menuitemcheckbox');
-    click('[data-action="toggle-expand-replies"]');
-    await flush();
-    expect(posts.filter((post) => post.url.endsWith('/expand-replies')).map((post) => post.body)).toEqual([expect.objectContaining({ window: 'pk', on: true })]);
-    // The checkbox and the replies follow settings.json as the hub reloads it, not the click.
-    expect(expandRow()!.getAttribute('aria-checked')).toBe('false');
-    source.emit('settings', { settings: { expandReplies: true, diffLayout: 'auto', diffWrap: 'auto' } });
-    expect(expandRow()!.getAttribute('aria-checked')).toBe('true');
     expect(root.querySelector('#panel')!.textContent).toContain('Whole reply.');
+    click('.header button.view-options');
+    expect(briefRow()!.getAttribute('aria-checked')).toBe('false');
+    expect(briefRow()!.getAttribute('role')).toBe('menuitemcheckbox');
+    click('[data-action="toggle-brief-replies"]');
+    await flush();
+    expect(posts.filter((post) => post.url.endsWith('/brief-replies')).map((post) => post.body)).toEqual([expect.objectContaining({ window: 'pk', on: true })]);
+    // The checkbox and the replies follow settings.json as the hub reloads it, not the click.
+    expect(briefRow()!.getAttribute('aria-checked')).toBe('false');
+    source.emit('settings', { settings: { briefReplies: true, diffLayout: 'auto', diffWrap: 'auto' } });
+    expect(briefRow()!.getAttribute('aria-checked')).toBe('true');
+    expect(root.querySelector('#panel')!.textContent).not.toContain('Whole reply.');
 
     // A second click before the hub's settings event reverses the first; the saves go one at a time, so the last click's value is the one kept.
     let answer = () => {};
-    const sent = () => posts.filter((post) => post.url.endsWith('/expand-replies')).map((post) => post.body['on']);
+    const sent = () => posts.filter((post) => post.url.endsWith('/brief-replies')).map((post) => post.body['on']);
 
-    answers['/expand-replies'] = { status: 200, body: {}, wait: new Promise<void>((done) => (answer = done)) };
-    click('[data-action="toggle-expand-replies"]');
-    click('[data-action="toggle-expand-replies"]');
-    click('[data-action="toggle-expand-replies"]');
-    click('[data-action="toggle-expand-replies"]');
+    answers['/brief-replies'] = { status: 200, body: {}, wait: new Promise<void>((done) => (answer = done)) };
+    click('[data-action="toggle-brief-replies"]');
+    click('[data-action="toggle-brief-replies"]');
+    click('[data-action="toggle-brief-replies"]');
+    click('[data-action="toggle-brief-replies"]');
     await flush();
     expect(sent()).toEqual([true, false]);
-    delete answers['/expand-replies'];
+    delete answers['/brief-replies'];
     answer();
     await flush();
     await flush();
     expect(sent()).toEqual([true, false, true]);
-    source.emit('settings', { settings: { expandReplies: true, diffLayout: 'auto', diffWrap: 'auto' } });
+    source.emit('settings', { settings: { briefReplies: true, diffLayout: 'auto', diffWrap: 'auto' } });
 
     // A refusal shows why, and the setting stays as it was.
-    answers['/expand-replies'] = { status: 409, body: { error: 'settings.json is not valid JSON: Unexpected token.' } };
-    click('[data-action="toggle-expand-replies"]');
+    answers['/brief-replies'] = { status: 409, body: { error: 'settings.json is not valid JSON: Unexpected token.' } };
+    click('[data-action="toggle-brief-replies"]');
     await flush();
     await flush();
-    expect(posts.filter((post) => post.url.endsWith('/expand-replies')).at(-1)!.body).toMatchObject({ on: false });
+    expect(posts.filter((post) => post.url.endsWith('/brief-replies')).at(-1)!.body).toMatchObject({ on: false });
     expect(root.querySelector('.toast.warning .toast-text')!.textContent).toBe('settings.json is not valid JSON: Unexpected token.');
-    expect(expandRow()!.getAttribute('aria-checked')).toBe('true');
+    expect(briefRow()!.getAttribute('aria-checked')).toBe('true');
     page.close();
 
     // This computer's page never reads a paired device's choice.
-    expect(localStorage.getItem('switchboard.expandReplies')).toBeNull();
+    expect(localStorage.getItem('switchboard.briefReplies')).toBeNull();
 
-    // A paired device may not change settings.json (architecture.md § Remote access), so its Expand replies starts from voice.expandReplies
+    // A paired device may not change settings.json (architecture.md § Remote access), so its Brief replies starts from voice.briefReplies
     // and, once toggled, is kept on the device and posts nothing.
     const fetch = vi.fn(async () => ({ status: 200, ok: true, json: async () => ({}), text: async () => '' }) as unknown as Response);
     const pairedPage = () => startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, local: false });
-    const expandPosts = () => fetch.mock.calls.filter((call) => String((call as unknown[])[0]).endsWith('/expand-replies'));
+    const briefPosts = () => fetch.mock.calls.filter((call) => String((call as unknown[])[0]).endsWith('/brief-replies'));
     let paired = pairedPage();
 
-    hello(FakeSource.last!, { items: [reply('r1', 2, { opening: 'Whole reply.', speak: 'Short.' })], settings: { expandReplies: true } });
+    hello(FakeSource.last!, { items: [reply('r1', 2, { opening: 'Whole reply.', speak: 'Short.' })], settings: { briefReplies: false } });
     click('.header button.view-options');
-    expect([...root.querySelectorAll('.view-options-menu .menu-row')].map((row) => row.textContent!.trim()).slice(0, 2)).toEqual(['Show message details', 'Expand replies']);
-    expect(expandRow()!.getAttribute('aria-checked')).toBe('true');
+    expect([...root.querySelectorAll('.view-options-menu .menu-row')].map((row) => row.textContent!.trim()).slice(0, 2)).toEqual(['Show message details', 'Brief replies']);
+    expect(briefRow()!.getAttribute('aria-checked')).toBe('false');
     expect(root.querySelector('#panel')!.textContent).toContain('Whole reply.');
-    click('[data-action="toggle-expand-replies"]');
+    click('[data-action="toggle-brief-replies"]');
     await flush();
-    expect(expandPosts()).toEqual([]);
-    expect(localStorage.getItem('switchboard.expandReplies')).toBe('0');
-    expect(expandRow()!.getAttribute('aria-checked')).toBe('false');
+    expect(briefPosts()).toEqual([]);
+    expect(localStorage.getItem('switchboard.briefReplies')).toBe('1');
+    expect(briefRow()!.getAttribute('aria-checked')).toBe('true');
     expect(root.querySelector('#panel')!.textContent).not.toContain('Whole reply.');
 
     // The device's choice outlasts the hub's settings and a reload.
-    FakeSource.last!.emit('settings', { settings: { expandReplies: true, diffLayout: 'auto', diffWrap: 'auto' } });
-    expect(expandRow()!.getAttribute('aria-checked')).toBe('false');
+    FakeSource.last!.emit('settings', { settings: { briefReplies: false, diffLayout: 'auto', diffWrap: 'auto' } });
+    expect(briefRow()!.getAttribute('aria-checked')).toBe('true');
     paired.close();
     paired = pairedPage();
-    hello(FakeSource.last!, { items: [reply('r1', 2, { opening: 'Whole reply.', speak: 'Short.' })], settings: { expandReplies: true } });
+    hello(FakeSource.last!, { items: [reply('r1', 2, { opening: 'Whole reply.', speak: 'Short.' })], settings: { briefReplies: false } });
     expect(root.querySelector('#panel')!.textContent).not.toContain('Whole reply.');
     click('.header button.view-options');
-    click('[data-action="toggle-expand-replies"]');
-    expect(localStorage.getItem('switchboard.expandReplies')).toBe('1');
-    expect(expandRow()!.getAttribute('aria-checked')).toBe('true');
+    click('[data-action="toggle-brief-replies"]');
+    expect(localStorage.getItem('switchboard.briefReplies')).toBe('0');
+    expect(briefRow()!.getAttribute('aria-checked')).toBe('false');
     expect(root.querySelector('#panel')!.textContent).toContain('Whole reply.');
-    expect(expandPosts()).toEqual([]);
+    expect(briefPosts()).toEqual([]);
     paired.close();
+  });
+
+  it("starts a paired device's Brief replies from the Expand replies it kept before, inverted, and drops the old key once toggled", async () => {
+    const fetch = vi.fn(async () => ({ status: 200, ok: true, json: async () => ({}), text: async () => '' }) as unknown as Response);
+    const pairedPage = () => startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, local: false });
+    const briefRow = () => root.querySelector('[data-action="toggle-brief-replies"]');
+
+    localStorage.setItem('switchboard.expandReplies', '0');
+    let paired = pairedPage();
+
+    hello(FakeSource.last!, { items: [reply('r1', 2, { opening: 'Whole reply.', speak: 'Short.' })], settings: { briefReplies: false } });
+    expect(root.querySelector('#panel')!.textContent).not.toContain('Whole reply.');
+    click('.header button.view-options');
+    expect(briefRow()!.getAttribute('aria-checked')).toBe('true');
+    click('[data-action="toggle-brief-replies"]');
+    expect(localStorage.getItem('switchboard.briefReplies')).toBe('0');
+    expect(localStorage.getItem('switchboard.expandReplies')).toBeNull();
+    paired.close();
+
+    localStorage.removeItem('switchboard.briefReplies');
+    localStorage.setItem('switchboard.expandReplies', '1');
+    paired = pairedPage();
+    hello(FakeSource.last!, { items: [reply('r1', 2, { opening: 'Whole reply.', speak: 'Short.' })], settings: { briefReplies: true } });
+    expect(root.querySelector('#panel')!.textContent).toContain('Whole reply.');
+    paired.close();
+    localStorage.clear();
   });
 
   it('opens the dropdown, selects another conversation, pages back, and folds a focused reply', async () => {
     const { page, source } = start();
 
-    hello(source, { items: [reply('r1', 2, { opening: 'Whole reply.', speak: 'Short.' })] });
+    hello(source, { items: [reply('r1', 2, { opening: 'Whole reply.', speak: 'Short.' })], settings: { briefReplies: true } });
     expect(root.querySelector('#panel')!.textContent).toContain('Short.');
     click('[data-action="more"]');
     expect(root.querySelector('#panel')!.textContent).toContain('Whole reply.');

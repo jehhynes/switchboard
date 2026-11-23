@@ -138,6 +138,8 @@ export type DiffWrapSetting = (typeof DIFF_WRAPS)[number];
 
 /** The settings a VS Code window's view and the web page read, in a stream's `hello` and its `settings` event. */
 export interface ViewSettings {
+  briefReplies: boolean;
+  /** The inverse of `briefReplies`, for a VS Code window that still runs an extension build from before Brief replies, until it reloads. */
   expandReplies: boolean;
   diffLayout: DiffLayoutSetting;
   diffWrap: DiffWrapSetting;
@@ -217,8 +219,8 @@ export interface VoiceSettings {
   speed: number;
   /** Tag spoken messages `[expressive]`, so Claude writes a tone line, and read with it. */
   expressive: boolean;
-  /** Start a reply with details expanded instead of showing its primary response first (focused mode). */
-  expandReplies: boolean;
+  /** Show a reply's primary response first, its details behind Show more (focused mode); off, every reply shows whole. */
+  briefReplies: boolean;
   /** Minutes with the focus outside every scoped window after which the voice drops its target. */
   awayMinutes: number;
   /** Play a short sound when a work item other than the voice target's starts needing the operator. */
@@ -281,7 +283,7 @@ export const DEFAULT_SETTINGS: Settings = {
   schedules: {},
   dock: { openVSCode: 'always', openTerminal: 'vscode', openIn: 'vscode' },
   alerts: { surface: 'auto' },
-  voice: { enabled: false, voice: 'marin', style: 'none', speed: 1, expressive: false, expandReplies: false, awayMinutes: 2, needsYouSound: true, outputDevice: null, micIdleMinutes: 10, endPauseMs: 3000, inputDevice: null, halfDuplexTailMs: 800, duplex: { local: 'auto', remote: 'auto' }, matchThreshold: 0.6, pitchLowFactor: 1.22, pitchMinLowShare: 0.2, roomHold: true, roomHoldSeconds: 60, personas: [], playbookPersonas: {}, spokenAlerts: true, alertOn: { finished: true, question: true, permission: true }, alertAnswerSeconds: 10, operatorName: '' },
+  voice: { enabled: false, voice: 'marin', style: 'none', speed: 1, expressive: false, briefReplies: false, awayMinutes: 2, needsYouSound: true, outputDevice: null, micIdleMinutes: 10, endPauseMs: 3000, inputDevice: null, halfDuplexTailMs: 800, duplex: { local: 'auto', remote: 'auto' }, matchThreshold: 0.6, pitchLowFactor: 1.22, pitchMinLowShare: 0.2, roomHold: true, roomHoldSeconds: 60, personas: [], playbookPersonas: {}, spokenAlerts: true, alertOn: { finished: true, question: true, permission: true }, alertAnswerSeconds: 10, operatorName: '' },
   web: { port: 47616, chromePane: false, remoteHosts: [], remoteLogins: [], tailscale: false, diffLayout: 'auto', diffWrap: 'auto' },
 };
 
@@ -580,7 +582,7 @@ export function parseSettings(text: string): SettingsResult {
   const alerts: AlertSettings = { surface: read.choice(alertsIn, 'surface', 'alerts', ALERT_SURFACES, defaults.alerts.surface) };
 
   const voiceIn = read.section(root, 'voice', 'voice');
-  read.unknown(voiceIn, ['enabled', 'voice', 'style', 'speed', 'expressive', 'expandReplies', 'awayMinutes', 'needsYouSound', 'outputDevice', 'micIdleMinutes', 'endPauseMs', 'inputDevice', 'halfDuplexTailMs', 'duplex', 'matchThreshold', 'pitchLowFactor', 'pitchMinLowShare', 'roomHold', 'roomHoldSeconds', 'personas', 'playbookPersonas', 'spokenAlerts', 'alertOn', 'alertAnswerSeconds', 'operatorName'], 'voice');
+  read.unknown(voiceIn, ['enabled', 'voice', 'style', 'speed', 'expressive', 'briefReplies', 'expandReplies', 'awayMinutes', 'needsYouSound', 'outputDevice', 'micIdleMinutes', 'endPauseMs', 'inputDevice', 'halfDuplexTailMs', 'duplex', 'matchThreshold', 'pitchLowFactor', 'pitchMinLowShare', 'roomHold', 'roomHoldSeconds', 'personas', 'playbookPersonas', 'spokenAlerts', 'alertOn', 'alertAnswerSeconds', 'operatorName'], 'voice');
   const duplexIn = read.section(voiceIn, 'duplex', 'voice.duplex');
   read.unknown(duplexIn, ['local', 'remote'], 'voice.duplex');
   const alertOnIn = read.section(voiceIn, 'alertOn', 'voice.alertOn');
@@ -597,7 +599,8 @@ export function parseSettings(text: string): SettingsResult {
     style: read.choice(voiceIn, 'style', 'voice', SPEECH_STYLES, defaults.voice.style),
     speed: read.number(voiceIn, 'speed', 'voice', defaults.voice.speed, SPEECH_SPEED.min, SPEECH_SPEED.max),
     expressive: read.boolean(voiceIn, 'expressive', 'voice', defaults.voice.expressive),
-    expandReplies: read.boolean(voiceIn, 'expandReplies', 'voice', defaults.voice.expandReplies),
+    // voice.expandReplies, which Brief replies replaced, still counts as its inverse in a file with no voice.briefReplies.
+    briefReplies: read.boolean(voiceIn, 'briefReplies', 'voice', !read.boolean(voiceIn, 'expandReplies', 'voice', !defaults.voice.briefReplies)),
     awayMinutes: read.integer(voiceIn, 'awayMinutes', 'voice', defaults.voice.awayMinutes, 1, 1440),
     needsYouSound: read.boolean(voiceIn, 'needsYouSound', 'voice', defaults.voice.needsYouSound),
     outputDevice: read.optionalName(voiceIn, 'outputDevice', 'voice'),

@@ -115,13 +115,13 @@
         "category": "Switchboard"
       },
       {
-        "command": "switchboard.expandSpokenReplies",
-        "title": "Expand Replies",
+        "command": "switchboard.briefRepliesOn",
+        "title": "Turn On Brief Replies",
         "category": "Switchboard"
       },
       {
-        "command": "switchboard.collapseSpokenReplies",
-        "title": "Collapse Replies",
+        "command": "switchboard.briefRepliesOff",
+        "title": "Turn Off Brief Replies",
         "category": "Switchboard"
       },
       {
@@ -220,11 +220,11 @@
           "when": "false"
         },
         {
-          "command": "switchboard.expandSpokenReplies",
+          "command": "switchboard.briefRepliesOn",
           "when": "false"
         },
         {
-          "command": "switchboard.collapseSpokenReplies",
+          "command": "switchboard.briefRepliesOff",
           "when": "false"
         },
         {
@@ -294,13 +294,13 @@
           "group": "1_view"
         },
         {
-          "command": "switchboard.expandSpokenReplies",
-          "when": "(view == switchboard.conversation || view == switchboard.conversationActivity) && !switchboard.expandReplies",
+          "command": "switchboard.briefRepliesOn",
+          "when": "(view == switchboard.conversation || view == switchboard.conversationActivity) && !switchboard.briefReplies",
           "group": "1_view"
         },
         {
-          "command": "switchboard.collapseSpokenReplies",
-          "when": "(view == switchboard.conversation || view == switchboard.conversationActivity) && switchboard.expandReplies",
+          "command": "switchboard.briefRepliesOff",
+          "when": "(view == switchboard.conversation || view == switchboard.conversationActivity) && switchboard.briefReplies",
           "group": "1_view"
         }
       ]

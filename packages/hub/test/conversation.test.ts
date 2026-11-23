@@ -1089,7 +1089,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     const calls: string[] = [];
     const voice: ConversationVoice = {
       shown: (key) => ({ enabled: true, here: key === 'k1', mic: 'off', speaking: null, speakReplies: true, error: null, recognizer: null }),
-      settings: () => ({ expandReplies: true, diffLayout: 'auto', diffWrap: 'auto' }),
+      settings: () => ({ briefReplies: true, expandReplies: false, diffLayout: 'auto', diffWrap: 'auto' }),
       spokenFor: (sessionId, command, key) => {
         calls.push(`spokenFor ${sessionId} ${command} ${key ?? 'none'}`);
         return command ? { spoken: false, expressive: false } : spoken;
@@ -1112,7 +1112,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     const { service, held, open, body, view, store } = setupSend(new FakeHeld(), undefined, voice);
     const mine = open(view.file);
 
-    expect(mine.frames[0]).toMatchObject({ type: 'hello', voice: { enabled: true, here: true, mic: 'off' }, settings: { expandReplies: true } });
+    expect(mine.frames[0]).toMatchObject({ type: 'hello', voice: { enabled: true, here: true, mic: 'off' }, settings: { briefReplies: true } });
     expect(service.send(body(mine.key, { text: '/x why' }))).toMatchObject({ status: 200, body: { message: { id: 'm-1', text: '/x why', spokenRequested: true } } });
     await settled(() => expect(store.message('m-1')?.delivery).toBe('sent'));
     expect(held.writes[0]).toBe('\u001b[200~[spoken] [expressive] \\/x why\u001b[201~');

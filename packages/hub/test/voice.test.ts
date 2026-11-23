@@ -74,7 +74,7 @@ function setup(patch: Partial<VoiceSettings> = { enabled: true }) {
       stop: () => void stops++,
     },
     settings: () => settings,
-    viewSettings: () => ({ expandReplies: settings.expandReplies, diffLayout: 'stacked', diffWrap: 'on' }),
+    viewSettings: () => ({ briefReplies: settings.briefReplies, expandReplies: !settings.briefReplies, diffLayout: 'stacked', diffWrap: 'on' }),
     store: {
       reply: (id) => replies.get(id) ?? null,
       updateReply: (id, patch) => void replies.set(id, { ...replies.get(id)!, ...patch }),
@@ -662,12 +662,12 @@ describe('VoiceControl', () => {
     expect([control.view('k1').recognizer, control.view('k2').recognizer]).toEqual(['gpu', null]);
     expect(notified.filter((one) => one.type === 'voice' && one.key === 'k1').at(-1)).toMatchObject({ payload: { voice: { recognizer: 'gpu' } } });
 
-    setSettings({ expandReplies: true, voice: 'cedar' });
+    setSettings({ briefReplies: true, voice: 'cedar' });
     control.settingsChanged();
     expect(connections[0]!.sent.filter((one) => one.type === 'settings').at(-1)).toMatchObject({ settings: { voice: 'cedar' } });
     expect(notified.filter((one) => one.type === 'settings').map((one) => one.key)).toEqual(['k1', 'k2']);
     // Each window and page gets every setting it reads, the diff viewer's too.
-    expect(notified.filter((one) => one.type === 'settings').at(-1)).toMatchObject({ payload: { settings: { expandReplies: true, diffLayout: 'stacked', diffWrap: 'on' } } });
+    expect(notified.filter((one) => one.type === 'settings').at(-1)).toMatchObject({ payload: { settings: { briefReplies: true, diffLayout: 'stacked', diffWrap: 'on' } } });
     expect(connections[0]!.sent.filter((one) => one.type === 'stop')).toEqual([]);
 
     // Turning voice off stops what plays.

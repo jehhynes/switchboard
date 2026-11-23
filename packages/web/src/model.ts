@@ -21,13 +21,13 @@ export interface PageState {
   voice: VoiceView | null;
   /** The session's questions as the hub keeps them (PRD R103): the open count, the oldest open card and the card drafts; null before the hub sent them. */
   questions: QuestionsView | null;
-  expandReplies: boolean;
+  briefReplies: boolean;
   /** The diff viewer's settings (`web.diffLayout`, `web.diffWrap`), from the `hello` and each `settings` event. */
   diffLayout: 'auto' | 'split' | 'stacked';
   diffWrap: 'auto' | 'on' | 'off';
 }
 
-export const EMPTY: PageState = { key: null, connected: false, groups: [], header: null, scope: null, session: null, items: [], more: false, status: null, artifacts: [], unread: 0, voice: null, questions: null, expandReplies: false, diffLayout: 'auto', diffWrap: 'auto' };
+export const EMPTY: PageState = { key: null, connected: false, groups: [], header: null, scope: null, session: null, items: [], more: false, status: null, artifacts: [], unread: 0, voice: null, questions: null, briefReplies: false, diffLayout: 'auto', diffWrap: 'auto' };
 
 /** The diff viewer's settings an event carries, each kept as it was when the event lacks it or names a value the page does not know. */
 function diffSettings(settings: Record<string, unknown> | undefined, state: PageState): Pick<PageState, 'diffLayout' | 'diffWrap'> {
@@ -83,7 +83,7 @@ export function applyEvent(state: PageState, event: Event): PageState {
         unread: event['unread'] ?? 0,
         voice: event['voice'] ?? null,
         questions: event['questions'] ?? null,
-        expandReplies: event['settings']?.expandReplies ?? state.expandReplies,
+        briefReplies: event['settings']?.briefReplies ?? state.briefReplies,
         ...diffSettings(event['settings'], state),
       };
     case 'list':
@@ -118,7 +118,7 @@ export function applyEvent(state: PageState, event: Event): PageState {
     case 'questions':
       return event['questions']?.sessionId === state.scope?.sessionId ? { ...state, questions: event['questions'] } : state;
     case 'settings':
-      return { ...state, expandReplies: event['settings']?.expandReplies === true, ...diffSettings(event['settings'], state) };
+      return { ...state, briefReplies: event['settings']?.briefReplies === true, ...diffSettings(event['settings'], state) };
     case 'progress':
       return { ...state, items: state.items.map((item) => (item.id === event['replyId'] && item.type === 'reply' ? { ...item, spoken: { state: 'playing', atMs: event['atMs'], saidChars: event['chars'] } } : item)) };
     default:

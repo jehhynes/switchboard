@@ -25,20 +25,20 @@ export interface ConversationState {
   unread: number;
   /** This window's voice state (architecture.md § Voice); null from a hub without voice. */
   voice: VoiceView | null;
-  /** The one setting the view reads: whether a reply with details after its primary response starts expanded. */
-  settings: { expandReplies: boolean };
+  /** The one setting the view reads: whether a reply with details after its primary response starts folded to it (Brief replies). */
+  settings: { briefReplies: boolean };
   /** The session's questions as the hub keeps them (PRD R103): the open count, the oldest open card and the card drafts; null from an older hub. */
   questions?: QuestionsView | null;
 }
 
-export const EMPTY_CONVERSATION: ConversationState = { scope: null, session: null, items: [], more: false, connected: false, status: null, artifactsDir: null, artifacts: [], unread: 0, voice: null, settings: { expandReplies: false }, questions: null };
+export const EMPTY_CONVERSATION: ConversationState = { scope: null, session: null, items: [], more: false, connected: false, status: null, artifactsDir: null, artifacts: [], unread: 0, voice: null, settings: { briefReplies: false }, questions: null };
 
 /** An event of the conversation stream, as parsed from its data line. */
 export type ConversationEvent =
-  | { type: 'hello'; scope: ScopeView | null; sessions: SessionView[]; items: ItemView[]; more: boolean; status: StatusView | null; artifactsDir: string | null; artifacts: ArtifactView[]; unread?: number; voice?: VoiceView; settings?: { expandReplies: boolean }; questions?: QuestionsView | null }
+  | { type: 'hello'; scope: ScopeView | null; sessions: SessionView[]; items: ItemView[]; more: boolean; status: StatusView | null; artifactsDir: string | null; artifacts: ArtifactView[]; unread?: number; voice?: VoiceView; settings?: { briefReplies: boolean }; questions?: QuestionsView | null }
   | { type: 'voice'; voice: VoiceView }
   | { type: 'questions'; questions: QuestionsView }
-  | { type: 'settings'; settings: { expandReplies: boolean } }
+  | { type: 'settings'; settings: { briefReplies: boolean } }
   | { type: 'progress'; replyId: string; chars: number; atMs: number }
   | { type: 'scope'; scope: ScopeView | null }
   | { type: 'conversations'; conversations: ConversationEntry[] }

@@ -11,7 +11,7 @@ describe('parseSettings', () => {
         schedules: {},
         dock: { openVSCode: 'always', openTerminal: 'vscode', openIn: 'vscode' },
         alerts: { surface: 'auto' },
-        voice: { enabled: false, voice: 'marin', style: 'none', speed: 1, expressive: false, expandReplies: false, awayMinutes: 2, needsYouSound: true, outputDevice: null, micIdleMinutes: 10, endPauseMs: 3000, inputDevice: null, halfDuplexTailMs: 800, duplex: { local: 'auto', remote: 'auto' }, matchThreshold: 0.6, pitchLowFactor: 1.22, pitchMinLowShare: 0.2, roomHold: true, roomHoldSeconds: 60, personas: [], playbookPersonas: {}, spokenAlerts: true, alertOn: { finished: true, question: true, permission: true }, alertAnswerSeconds: 10, operatorName: '' },
+        voice: { enabled: false, voice: 'marin', style: 'none', speed: 1, expressive: false, briefReplies: false, awayMinutes: 2, needsYouSound: true, outputDevice: null, micIdleMinutes: 10, endPauseMs: 3000, inputDevice: null, halfDuplexTailMs: 800, duplex: { local: 'auto', remote: 'auto' }, matchThreshold: 0.6, pitchLowFactor: 1.22, pitchMinLowShare: 0.2, roomHold: true, roomHoldSeconds: 60, personas: [], playbookPersonas: {}, spokenAlerts: true, alertOn: { finished: true, question: true, permission: true }, alertAnswerSeconds: 10, operatorName: '' },
         web: { port: 47616, chromePane: false, remoteHosts: [], remoteLogins: [], tailscale: false, diffLayout: 'auto', diffWrap: 'auto' },
       },
     });
@@ -27,7 +27,7 @@ describe('parseSettings', () => {
         },
         dock: { openVSCode: 'review', openTerminal: 'auto', openIn: 'web' },
         alerts: { surface: 'dock' },
-        voice: { enabled: true, voice: 'cedar', style: 'pair', speed: 1.25, expressive: true, expandReplies: true, awayMinutes: 5, needsYouSound: false, outputDevice: 'Speakers', micIdleMinutes: 0, endPauseMs: 2500, inputDevice: 'Headset', halfDuplexTailMs: 450, duplex: { local: 'full', remote: 'half' }, matchThreshold: 0.7, pitchLowFactor: 1.5, pitchMinLowShare: 0, roomHold: false, roomHoldSeconds: 120, spokenAlerts: false, alertOn: { finished: false, question: true, permission: false }, alertAnswerSeconds: 20, operatorName: ' Alex ' },
+        voice: { enabled: true, voice: 'cedar', style: 'pair', speed: 1.25, expressive: true, briefReplies: true, awayMinutes: 5, needsYouSound: false, outputDevice: 'Speakers', micIdleMinutes: 0, endPauseMs: 2500, inputDevice: 'Headset', halfDuplexTailMs: 450, duplex: { local: 'full', remote: 'half' }, matchThreshold: 0.7, pitchLowFactor: 1.5, pitchMinLowShare: 0, roomHold: false, roomHoldSeconds: 120, spokenAlerts: false, alertOn: { finished: false, question: true, permission: false }, alertAnswerSeconds: 20, operatorName: ' Alex ' },
         web: { port: 0, chromePane: true, remoteHosts: ['PC.tailnet.ts.net', 'pc.tailnet.ts.net '], remoteLogins: ['alex@example.com'], tailscale: true, diffLayout: 'stacked', diffWrap: 'off' },
       }),
     );
@@ -50,10 +50,27 @@ describe('parseSettings', () => {
         schedules: {},
         dock: { openVSCode: 'review', openTerminal: 'auto', openIn: 'web' },
         alerts: { surface: 'dock' },
-        voice: { enabled: true, voice: 'cedar', style: 'pair', speed: 1.25, expressive: true, expandReplies: true, awayMinutes: 5, needsYouSound: false, outputDevice: 'Speakers', micIdleMinutes: 0, endPauseMs: 2500, inputDevice: 'Headset', halfDuplexTailMs: 450, duplex: { local: 'full', remote: 'half' }, matchThreshold: 0.7, pitchLowFactor: 1.5, pitchMinLowShare: 0, roomHold: false, roomHoldSeconds: 120, personas: [], playbookPersonas: {}, spokenAlerts: false, alertOn: { finished: false, question: true, permission: false }, alertAnswerSeconds: 20, operatorName: 'Alex' },
+        voice: { enabled: true, voice: 'cedar', style: 'pair', speed: 1.25, expressive: true, briefReplies: true, awayMinutes: 5, needsYouSound: false, outputDevice: 'Speakers', micIdleMinutes: 0, endPauseMs: 2500, inputDevice: 'Headset', halfDuplexTailMs: 450, duplex: { local: 'full', remote: 'half' }, matchThreshold: 0.7, pitchLowFactor: 1.5, pitchMinLowShare: 0, roomHold: false, roomHoldSeconds: 120, personas: [], playbookPersonas: {}, spokenAlerts: false, alertOn: { finished: false, question: true, permission: false }, alertAnswerSeconds: 20, operatorName: 'Alex' },
         web: { port: 0, chromePane: true, remoteHosts: ['pc.tailnet.ts.net'], remoteLogins: ['alex@example.com'], tailscale: true, diffLayout: 'stacked', diffWrap: 'off' },
       },
     });
+  });
+
+  it('reads voice.briefReplies, off by default, and the voice.expandReplies it replaced as its inverse while briefReplies is absent', () => {
+    const brief = (voice: Record<string, unknown>) => {
+      const result = parseSettings(JSON.stringify({ voice }));
+
+      return 'settings' in result ? result.settings.voice.briefReplies : result.errors;
+    };
+
+    expect(brief({})).toBe(false);
+    expect(brief({ briefReplies: true })).toBe(true);
+    expect(brief({ expandReplies: false })).toBe(true);
+    expect(brief({ expandReplies: true })).toBe(false);
+    // briefReplies wins over the old key once it is written.
+    expect(brief({ expandReplies: false, briefReplies: false })).toBe(false);
+    expect(brief({ briefReplies: 'yes' })).toEqual(['voice.briefReplies must be true or false.']);
+    expect(brief({ expandReplies: 1 })).toEqual(['voice.expandReplies must be true or false.']);
   });
 
   it('refuses a web port outside 0 to 65535 and other web keys', () => {

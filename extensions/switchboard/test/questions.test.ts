@@ -11,7 +11,7 @@ const SCOPE: ScopeView = { kind: 'item', workItemId: 2, key: 'k1', folder: 'D:/w
 const SESSION: SessionView = { id: 's2', kind: 'task', title: 'Task session aaaa', state: 'idle', waitingFor: null, launch: 'l', current: true, conversation: 'full', reason: null, persona: null };
 const reply = (id: string, at: number, opening: string, patch: Partial<ReplyView> = {}): ReplyView => ({ type: 'reply', id, sessionId: 's2', at, ord: at, provisional: false, kind: 'reply', answers: null, opening, source: 'transcript', replaces: null, rewrittenBy: null, withdrawn: false, unread: false, speak: null, tone: null, spoken: { state: 'none', atMs: null, saidChars: null }, ...patch });
 const message = (id: string, at: number, text: string, patch: Partial<MessageView> = {}): MessageView => ({ type: 'message', id, sessionId: 's2', workItemId: 2, at, ord: at, origin: 'typed', text, provisional: false, withdrawn: false, delivery: 'sent', error: null, ...patch });
-const state = (items: ItemView[], patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items, more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, voice: null, settings: { expandReplies: false }, ...patch });
+const state = (items: ItemView[], patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items, more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, voice: null, settings: { briefReplies: true }, ...patch });
 
 /** The shape the conversation rules show, with a second question. */
 const ASKED = 'Two things before I start:\n\n1. Which port?\n   - A) 8765 (recommended)\n   - B) 8799\n2. **Keep the old route?**\n   - A) Yes\n   - B) No, remove it\n   - C) Keep it behind a flag\n\nSay if neither fits.';
@@ -186,7 +186,7 @@ describe('question cards in the Conversation view', () => {
     // The copy button still copies the reply whole.
     expect(root.querySelector('li[data-id="r1"] [data-action="copy-reply"]')).not.toBeNull();
     // Questions before a spoken passage fold too, with the whole reply shown, rather than leaving the text.
-    show(state([reply('r1', T0, `${ending}\n\nThen I start.`, { speak: 'Then I start.' })], { settings: { expandReplies: true } }));
+    show(state([reply('r1', T0, `${ending}\n\nThen I start.`, { speak: 'Then I start.' })], { settings: { briefReplies: false } }));
     expect(root.querySelector('li[data-id="r1"] details.questions-fold summary')?.textContent).toBe('1 question — answer below');
     expect(root.querySelector('li[data-id="r1"] .reply-primary')?.textContent?.trim()).toBe('Then I start.');
   });

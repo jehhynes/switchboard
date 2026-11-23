@@ -442,7 +442,7 @@ public static partial class SettingsFields
                 new Field("voice.style", "Style", FieldKind.Select, "How replies are read when no persona applies, unless Expressive delivery is on.", "none", WithCurrent(Choices(SpeechStyles), GetAt(value, "voice.style"))),
                 new Field("voice.speed", "Speed", FieldKind.Number, "0.25 to 1.5; 1 is the voice’s own pace.", "1"),
                 new Field("voice.expressive", "Expressive delivery", FieldKind.Boolean, "Ask Claude for a tone line with each spoken reply, and read the reply in that tone instead of the style.", Fallback: false),
-                new Field("voice.expandReplies", "Expand replies", FieldKind.Boolean, "Show a reply whole instead of its spoken passage first, with the rest behind Show more.", Fallback: false),
+                new Field("voice.briefReplies", "Brief replies", FieldKind.Boolean, "Show only the primary response of a reply that has details, with the details behind Show more. Off, replies show in full.", Fallback: false),
                 new Field("voice.awayMinutes", "Away timeout (minutes)", FieldKind.Integer, "1 to 1440. With the focus outside every Switchboard window for this long, the voice stops speaking for its session.", "2"),
                 new Field("voice.needsYouSound", "Needs-you sound", FieldKind.Boolean, "Play a short sound between spoken replies when another work item starts needing you.", Fallback: true),
                 new Field("voice.outputDevice", "Output device", FieldKind.Text, "Part of the playback device’s name, such as Speakers. Empty uses the system default.", "System default"),

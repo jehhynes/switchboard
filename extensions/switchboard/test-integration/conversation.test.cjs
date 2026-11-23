@@ -52,7 +52,7 @@ describe('the Conversation view', () => {
     const own = extension.conversation().scope;
     const folder = require('node:fs').realpathSync.native(vscode.workspace.workspaceFolders[0].uri.fsPath);
 
-    assert.deepStrictEqual({ ...extension.conversation(), scope: null }, { scope: null, session: null, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, voice: { enabled: false, here: false, mic: 'off', recognizer: null, speaking: null, speakReplies: true, error: null }, settings: { expandReplies: false, diffLayout: 'auto', diffWrap: 'auto' }, questions: null });
+    assert.deepStrictEqual({ ...extension.conversation(), scope: null }, { scope: null, session: null, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, voice: { enabled: false, here: false, mic: 'off', recognizer: null, speaking: null, speakReplies: true, error: null }, settings: { briefReplies: false, expandReplies: true, diffLayout: 'auto', diffWrap: 'auto' }, questions: null });
     assert.deepStrictEqual({ ...own, key: 'k' }, { kind: 'folder', key: 'k', folder, title: require('node:path').basename(folder), scopeGen: 0, conversations: [], workItemId: null, cwd: null, sessionId: null });
     assert.strictEqual(extension.conversationBadge(), undefined);
 
@@ -75,27 +75,27 @@ describe('the Conversation view', () => {
     await vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
   });
 
-  it("sets voice.expandReplies in the config folder's settings.json from the view's Expand and Collapse Replies, and follows the hub's reload", async () => {
+  it("sets voice.briefReplies in the config folder's settings.json from the view's Turn On and Turn Off Brief Replies, and follows the hub's reload", async () => {
     const extension = await vscode.extensions.getExtension('switchboard.switchboard').activate();
     const { readFileSync } = require('node:fs');
     const { join } = require('node:path');
     const file = join(process.env.SWITCHBOARD_TEST_HOME, 'repo', 'switchboard', 'settings.json');
-    const expandReplies = () => {
+    const briefReplies = () => {
       try {
-        return JSON.parse(readFileSync(file, 'utf8')).voice?.expandReplies;
+        return JSON.parse(readFileSync(file, 'utf8')).voice?.briefReplies;
       } catch {
         return undefined;
       }
     };
 
     await until(() => extension.conversation().connected, 'the view never connected');
-    assert.strictEqual(extension.conversation().settings.expandReplies, false);
-    await vscode.commands.executeCommand('switchboard.expandSpokenReplies');
-    assert.strictEqual(expandReplies(), true);
-    await until(() => extension.conversation().settings.expandReplies === true, 'the window never took voice.expandReplies on');
-    await vscode.commands.executeCommand('switchboard.collapseSpokenReplies');
-    assert.strictEqual(expandReplies(), false);
-    await until(() => extension.conversation().settings.expandReplies === false, 'the window never took voice.expandReplies off');
+    assert.strictEqual(extension.conversation().settings.briefReplies, false);
+    await vscode.commands.executeCommand('switchboard.briefRepliesOn');
+    assert.strictEqual(briefReplies(), true);
+    await until(() => extension.conversation().settings.briefReplies === true, 'the window never took voice.briefReplies on');
+    await vscode.commands.executeCommand('switchboard.briefRepliesOff');
+    assert.strictEqual(briefReplies(), false);
+    await until(() => extension.conversation().settings.briefReplies === false, 'the window never took voice.briefReplies off');
   });
 
   it("lists the composer's files under the window's folder without case, leaving out excluded folders, with the folders above them", async () => {
