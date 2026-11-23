@@ -5632,6 +5632,46 @@ describe('the page in use', () => {
     window.innerWidth = 1024;
   });
 
+  it('keeps the Changes tab and a tab\'s scroll place through a new session of the work item, as Approve starts, reading the tab again, and drops them for another work item', async () => {
+    window.innerWidth = 375;
+    answers['/v1/conversation/changes'] = { status: 403, body: { error: 'Not in this window.' } };
+
+    const { page, source } = start();
+    const reads = () => posts.filter((post) => post.url.startsWith('/v1/conversation/changes?')).length;
+
+    hello(source);
+    click('#head [data-action="diff-tab"]');
+    await flush();
+    expect(root.querySelector('#panel')!.classList.contains('diff-pane')).toBe(true);
+    const before = reads();
+
+    // Approve runs the approval prompt in a new session of the same work item: the hub sends `scope`, then its `hello`.
+    source.emit('scope', { scope: { ...scope, scopeGen: 4, sessionId: 's2' } });
+    hello(source, { scope: { ...scope, scopeGen: 4, sessionId: 's2' }, sessions: [session({ id: 's2', title: 'Task session s2', state: 'running' })], items: [] });
+    await flush();
+    expect(root.querySelector('#panel')!.classList.contains('diff-pane')).toBe(true);
+    // The new session can change the worktree, so the open tab reads its list again.
+    expect(reads()).toBe(before + 1);
+
+    // A tab's scroll place stays too.
+    click('#head [data-tab="status"]');
+    const panel = root.querySelector<HTMLElement>('#panel')!;
+
+    panel.scrollTop = 237;
+    source.emit('scope', { scope: { ...scope, scopeGen: 5, sessionId: 's4' } });
+    hello(source, { scope: { ...scope, scopeGen: 5, sessionId: 's4' }, sessions: [session({ id: 's4' })], items: [] });
+    await flush();
+    expect(root.querySelector('#head [data-tab="status"]')!.getAttribute('aria-selected')).toBe('true');
+    expect(panel.scrollTop).toBe(237);
+
+    // Another work item starts from its own tabs.
+    hello(source, { scope: { ...scope, workItemId: 2, scopeGen: 6, sessionId: 's3' }, sessions: [session({ id: 's3' })] });
+    await flush();
+    expect(root.querySelector('#panel')!.classList.contains('diff-pane')).toBe(false);
+    page.close();
+    window.innerWidth = 1024;
+  });
+
   it("keeps a conversation's kept place through a reload onto another tab, gives it back on A to B to A, and reads the Changes tab again after a reconnect", async () => {
     window.innerWidth = 375;
     sessionStorage.setItem('switchboard.scroll', JSON.stringify({ '1 conversation': { id: 'm1', offset: -20, pinned: false, top: 0 } }));

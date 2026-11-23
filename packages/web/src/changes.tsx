@@ -643,8 +643,8 @@ export class ChangesController {
   }
 
   /**
-   * Follows the page's conversation: `id` names it (page key, scope generation, work item), so another one drops the list, its diffs and the
-   * Changes tab; `turnEnded` reads the list again when the session's turn ends once the tab was opened.
+   * Follows the page's work item: `id` names it (`followed` in main.ts), so another one drops the list, its diffs and the Changes tab;
+   * `turnEnded` reads the list again, once the tab was opened, when the session's turn ends or another session of the work item starts.
    */
   follow(id: string | null, turnEnded: boolean): void {
     if (id !== this.view.for) {

@@ -542,6 +542,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     diffSettings: () => ({ layout: state.diffLayout, wrap: state.diffWrap }),
   });
   let changesSession: string | null = null;
+  /** The session the Changes tab last followed, so a new session of the work item reads an open tab's list again. */
+  let changesSessionId: string | null = null;
   // Local file links' tabs (architecture.md § Web page); the hub decides what a paired device may read (architecture.md § Remote access).
   const localFiles = new LocalFilesController({
     fetch: (...args) => readFetch(...args),
@@ -2293,9 +2295,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
 
     const turnEnded = changesSession === 'running' && state.session?.state !== 'running';
+    // Another session of the work item can have changed the worktree, so an open Changes tab reads its list again.
+    const sessionMoved = changesSessionId !== null && changesSessionId !== (state.session?.id ?? null);
 
     changesSession = state.session?.state ?? null;
-    changes.follow(followed(), turnEnded);
+    changesSessionId = state.session?.id ?? null;
+    changes.follow(followed(), turnEnded || sessionMoved);
     localFiles.follow(followed());
 
     if (state.scope === null || pending !== null) {
@@ -2414,9 +2419,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // The composer first, so the conversation is scrolled against its final height.
     updateComposer();
 
-    // By work item and session, not scope generation, so a reconnect's new generation keeps the operator's place.
+    // By work item and session, not scope generation, so a reconnect's new generation keeps the operator's place; a tab other than the
+    // conversation by work item alone, so a new session of the work item keeps its place too.
     const conversation = `${state.scope.workItemId ?? ''} ${state.session?.id ?? ''}`;
-    const showing = `${mainTab()} ${conversation}`;
+    const showing = mainTab() === 'conversation' ? `conversation ${conversation}` : `${mainTab()} ${state.scope.workItemId ?? ''}`;
 
     if (showing !== shown) {
       shown = showing;
@@ -3082,9 +3088,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   );
 
   // ---- Selecting ----
-  /** What the Changes and file tabs follow: the work item shown and its session, so a reconnect's new page key or scope generation keeps them; null with none. */
+  /**
+   * What the Changes and file tabs follow: the work item shown, so a reconnect's new page key or scope generation keeps them, and so does a new
+   * session of the same work item, as an approval, a retry or a reopen starts; null with none.
+   */
   function followed(): string | null {
-    return state.scope === null || state.key === null ? null : `${state.scope.workItemId ?? ''} ${state.scope.sessionId ?? ''}`;
+    return state.scope === null || state.key === null ? null : String(state.scope.workItemId ?? '');
   }
 
   /** The newest `select`, and the Other text it waits to send first. */

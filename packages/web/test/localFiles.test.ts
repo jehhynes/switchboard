@@ -380,7 +380,7 @@ describe('local file tabs', () => {
     expect(tabs()).toEqual([['a b.ts', true]]);
   });
 
-  it('opens a focused link with Enter, leaves web links to the browser, and closes the tabs when the conversation changes', async () => {
+  it('opens a focused link with Enter, leaves web links to the browser, and closes the tabs only when the work item changes', async () => {
     const { source, scope } = start();
 
     expect(root.querySelector('a[href="https://example.com/a"]')!.getAttribute('target')).toBe('_blank');
@@ -388,11 +388,14 @@ describe('local file tabs', () => {
     await flush();
     expect(tabs()).toEqual([['review.md', true]]);
 
-    // A reconnect's new scope generation for the same conversation keeps them; another session closes them.
+    // A reconnect's new scope generation, or a new session of the work item as Approve starts, keeps them; another work item closes them.
     source.emit('scope', { scope: scope(4) });
     await flush();
     expect(tabs()).toHaveLength(1);
     source.emit('scope', { scope: { ...scope(5), sessionId: 's2' } });
+    await flush();
+    expect(tabs()).toHaveLength(1);
+    source.emit('scope', { scope: { ...scope(6), workItemId: 2, sessionId: 's3' } });
     await flush();
     expect(tabs()).toEqual([]);
   });
