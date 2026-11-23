@@ -8,6 +8,7 @@ import type { PageState } from './model.js';
 import { ago, artifactBar, LINK_LABEL_MAX, paneStatus, rowKey, TABS } from './render.js';
 import type { SideTab, Tab, View } from './render.js';
 import { trusted } from './trusted.js';
+import { ConnectionDot } from './connectionView.js';
 import type { PageAction, PageRow } from '@switchboard/protocol';
 
 /** The most links the menu lists by themselves; more go in its Open link submenu, as the dock's `MenuLinks`. */
@@ -38,14 +39,20 @@ const Separator = () => <li class="menu-separator" role="separator"></li>;
  * links, more than two of them in an Open link submenu), then the controls that ask first; empty when the row offers none. Each item names its
  * row, so a pool ticket's menu in the list runs as the header's does.
  */
-export function menuRows(row: PageRow, view: Pick<View, 'acting' | 'linkMenu' | 'copyMenu'>): VNode[] {
+/** Whether a row's actions wait: one is running, or the page is offline and could not send it (the operator's decision: no queue). */
+const waiting = (view: Pick<View, 'acting' | 'connection'>): boolean => view.acting || (view.connection != null && view.connection.tone !== 'live');
+
+/** Why a row's action waits while offline, as its tooltip. */
+const offlineTitle = (view: Pick<View, 'connection'>): string | undefined => (view.connection != null && view.connection.tone !== 'live' ? "Can't do this while offline." : undefined);
+
+export function menuRows(row: PageRow, view: Pick<View, 'acting' | 'linkMenu' | 'copyMenu' | 'connection'>): VNode[] {
   const actions = row.actions;
   const pastes = row.pastes;
   const commands = row.opens;
   const key = rowKey(row);
   const item = (attrs: Record<string, string>, icon: string | null, label: string, after: ComponentChildren = null, classes = ''): VNode => (
     <li role="none">
-      <button type="button" class={`menu-row${classes === '' ? '' : ` ${classes}`}`} role="menuitem" data-row={key} {...attrs} disabled={view.acting}>
+      <button type="button" class={`menu-row${classes === '' ? '' : ` ${classes}`}`} role="menuitem" data-row={key} {...attrs} disabled={waiting(view)} title={offlineTitle(view) ?? attrs['title']}>
         <span class="menu-gutter" aria-hidden="true">{icon === null ? null : <span class={`codicon codicon-${icon}`}></span>}</span>
         <span class="title">{label}</span>
         {after}
@@ -100,7 +107,7 @@ function Actions({ row, view }: { row: PageRow | null; view: View }) {
   return (
     <>
       {main === undefined ? null : (
-        <button type="button" class="row-main" data-action="row-action" data-row={rowKey(row)} data-label={main.label} disabled={view.acting}>
+        <button type="button" class="row-main" data-action="row-action" data-row={rowKey(row)} data-label={main.label} disabled={waiting(view)} title={offlineTitle(view)}>
           <span class={`codicon codicon-${main.icon}`} aria-hidden="true"></span>
           <span>{main.label}</span>
         </button>
@@ -304,6 +311,7 @@ export function renderHeader(state: PageState, view: View): VNode {
       </div>
       <Actions row={selectedRow(state)} view={view} />
       <ViewOptions view={view} briefReplies={view.briefReplies ?? state.briefReplies} session={state.session} />
+      <ConnectionDot dot={view.connection} />
     </header>
   );
 }

@@ -32,7 +32,9 @@ import { browserBackPreview, swipeBack } from './swipeBack.js';
 import { settings } from './settings.js';
 import { attachments, drawChips } from './attachments.js';
 import type { Attached } from './attachments.js';
-import { reconnector } from './reconnect.js';
+import { Connection } from './connection.js';
+import { dotView, renderBanner, renderScreen, renderUpdate } from './connectionView.js';
+import type { ConnectionView } from './connectionView.js';
 import { renderContextMeter } from '@switchboard/conversation/contextMeter';
 import type { ContextMenuState } from '@switchboard/conversation/contextMeter';
 import { EMPTY_HISTORY_UI, renderHistory } from './history.js';
@@ -599,7 +601,25 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /** The marker of the dock's latest `show`, in the title until the dock has found this window. */
   let showMarker: string | null = null;
   let showTimer: ReturnType<typeof setTimeout> | undefined;
-  let expired = false;
+  // The page's connection (architecture.md § Web page, Connection): it owns the stream and says whether the page is live, offline or signed out.
+  const connection = new Connection({
+    open: () => new deps.EventSource(installedApp ? '/v1/conversation/events?page=1&installed=1' : '/v1/conversation/events?page=1'),
+    events: EVENTS,
+    event: (type, raw) => onEvent(type, raw),
+    fetch: (url, init) => deps.fetch(url, init),
+    now: () => deps.now(),
+    setTimeout: (run, ms) => setTimeout(run, ms),
+    clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+    build: deps.build ?? null,
+    changed: () => {
+      // Commands may go through the grace period, so the composer stays as it was until the page is offline.
+      if (state.connected !== connection.usable) {
+        state = { ...state, connected: connection.usable };
+      }
+
+      drawSoon();
+    },
+  });
   let opId = 0;
   const newOp = (): string => `${deps.now().toString(36)}-${(++opId).toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -607,7 +627,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     try {
       const response = await deps.fetch(`/v1/conversation/${name}`, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ window: state.key, opId: newOp(), ...body }), ...(keepalive ? { keepalive } : {}) });
 
-      expired ||= response.status === 401;
+      // The sign-in may have gone with the stream still open: the connection asks the hub.
+      if (response.status === 401) {
+        connection.check();
+      }
+
       return { status: response.status, body: (await response.json().catch(() => ({}))) as Record<string, unknown> };
     } catch (error) {
       return { status: 0, body: { error: `Switchboard did not answer: ${String(error)}` } };
@@ -700,6 +724,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     openSettings: () => settingsPane.open(),
     reload: () => (deps.reload ?? (() => location.reload()))(),
     refused: (text) => (text === null ? toastBox.clear('warning') : toastBox.show(text, 'warning')),
+    connection: () => dotView(connectionView(), deps.now()),
     // The pin shows only where it changes the list: with no work item open the list is a column either way.
     pinned: () => (pinWorks() ? listPinned : undefined),
     ...(phoneVoice === null ? {} : { phoneVoice: { state: () => phoneVoice.state, error: () => phoneVoice.error, toggle: () => (phoneVoice.state === 'off' ? phoneVoice.start() : phoneVoice.stop()) } }),
@@ -817,7 +842,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       drawAttachments();
       refresh();
     },
-    expired: () => void (expired = true),
+    expired: () => connection.check(),
   });
   const shownAttachments = (): Attached[] => (draftOf === null ? [] : attachedFiles.of(draftOf));
   const uploading = (): boolean => shownAttachments().some((one) => one.path === null);
@@ -1482,7 +1507,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       ? 'Message…'
       : state.session?.state === 'ended' && state.session.conversation !== 'none'
         ? 'Resume the session to send a message.'
-        : (state.session?.reason ?? (state.connected ? 'No session has started yet.' : 'Connecting to Switchboard…'));
+        : (state.session?.reason ?? (state.connected ? 'No session has started yet.' : connection.state === 'offline' ? "Can't send while offline." : connection.state === 'signedOut' ? 'Signed out.' : 'Connecting to Switchboard…'));
     // The same controls as the Conversation view's, acting on this computer's voice process (architecture.md § Web page).
     mount(voiceControls, renderShared(renderVoice(state.voice, full)));
     // On a paired device the mic shows while the voice is elsewhere too, off: its tap takes the voice to this phone (PRD R119).
@@ -2042,6 +2067,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   let wasListing = true;
   /** Draws the state; Preact changes only what differs, so the focus, a selection, the scroll position and open menus stay. */
   const drawRegions = (): void => {
+    view.connection = dotView(connectionView(), deps.now());
     // On a narrow screen the list and the conversation are each a full-width view (page.css); the list shows until a work item is opened.
     const listing = view.list || wanted === null;
 
@@ -2100,7 +2126,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const focusLink = focused?.matches('.pill') ? focused.dataset['link'] : undefined;
     const focusActions = focused?.matches('.row-actions') === true;
     if (listSelection !== null && !state.groups.some((group) => group.rows.some((row) => rowKey(row) === listSelection))) listSelection = null;
-    mount(list, renderListPane(expired, renderList(listed.groups, state.scope?.workItemId ?? null, view.collapsed, listed.filtering, rowMenu(), view.bands, !paneWorks(), listSelection, dragView), header.end(listed.groups)));
+    mount(list, renderListPane(renderList(listed.groups, state.scope?.workItemId ?? null, view.collapsed, listed.filtering, rowMenu(), view.bands, !paneWorks(), listSelection, dragView), header.end(listed.groups)));
     // The rows may have moved under a still pointer.
     reorder.refresh();
     if (focusedRow !== undefined && document.activeElement !== focused) {
@@ -2304,6 +2330,33 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     draw();
     head.querySelector<HTMLElement>('button.view-options')?.focus();
   };
+  /** The connection as the page draws it. */
+  const connectionView = (): ConnectionView => ({ state: connection.state, since: connection.since, lastLiveAt: connection.lastLiveAt, nextAt: connection.nextAt, update: connection.update });
+  const bannerHosts = [...root.querySelectorAll<HTMLElement>('.conn-banner-host')];
+  const connectionHost = root.querySelector<HTMLElement>('#connection')!;
+  /** Redraws the countdown of the next attempt each second while offline. */
+  let connectionTick: ReturnType<typeof setInterval> | undefined;
+  /** Draws the banner, the screen in the page's place and the Update ready chip; what the page shows dims while it is stale. */
+  const drawConnection = (): void => {
+    const shown = connectionView();
+    const now = deps.now();
+    const screen = renderScreen(shown, local, now);
+
+    for (const host of bannerHosts) {
+      mount(host, renderBanner(shown, now));
+    }
+
+    mount(connectionHost, [screen, renderUpdate(shown)]);
+    root.classList.toggle('stale', shown.state === 'offline' && shown.lastLiveAt !== null);
+    root.classList.toggle('unreachable', screen !== null);
+
+    if (shown.state === 'offline' && connectionTick === undefined) {
+      connectionTick = setInterval(drawConnection, 1_000);
+    } else if (shown.state !== 'offline' && connectionTick !== undefined) {
+      clearInterval(connectionTick);
+      connectionTick = undefined;
+    }
+  };
   // A draw asked for before the next repaint (`drawSoon`), which a draw meanwhile makes unneeded.
   let frame: { cancelled: boolean } | null = null;
   const draw = (): void => {
@@ -2326,6 +2379,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     fitMenus();
     fitListLinks();
     reportBrowser();
+    drawConnection();
   };
 
 
@@ -4373,11 +4427,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   // The hub routes needs-you alerts to a page only once it may show notifications, so the page says when that changes.
   askForNotifications(document, () => reportFocus(true));
   const installedApp = deps.standalone?.() ?? (typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches);
-  const source = new deps.EventSource(installedApp ? '/v1/conversation/events?page=1&installed=1' : '/v1/conversation/events?page=1');
-
-  for (const type of EVENTS) {
-    source.addEventListener(type, (event) => {
-      const data = JSON.parse((event as MessageEvent<string>).data) as { type: string } & Record<string, unknown>;
+  // Every event of the page's stream, which the connection opens and opens again (connection.ts).
+  const onEvent = (type: string, raw: string): void => {
+      const data = JSON.parse(raw) as { type: string } & Record<string, unknown>;
       const keyBefore = state.key;
 
       state = applyEvent(state, data);
@@ -4391,8 +4443,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       }
 
       if (type === 'hello') {
-        expired = false;
-
         // The artifacts a work item has when this device first sees it count as opened; only later ones are new.
         if (state.scope?.workItemId != null && (readArtifactsSeen() ?? artifactsSeen)[String(state.scope.workItemId)] === undefined) {
           artifactsOpened(state.artifacts.map((artifact) => artifact.path));
@@ -4556,28 +4606,28 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       if (type === 'session' || type === 'hello') {
         void readPrompt();
       }
-    });
+  };
+
+  // Brought back to the front, online again or out of the back-forward cache, the page checks its stream at once rather than wait for the watchdog.
+  for (const type of ['online', 'focus', 'pageshow'] as const) {
+    window.addEventListener(type, () => connection.wake(), { signal: listening.signal });
   }
 
-  const lost = reconnector({
-    fetch: (url, init) => deps.fetch(url, init),
-    setTimeout: (run, ms) => setTimeout(run, ms),
-    reload: deps.reload ?? (() => location.reload()),
-    build: deps.build ?? null,
-    // A reload would end the phone's audio until its next tap, so it waits while the voice is on this phone or coming back to it.
-    hold: () => phoneVoice !== null && phoneVoice.state !== 'off',
-  });
+  document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && connection.wake(), { signal: listening.signal });
+  root.addEventListener(
+    'click',
+    (event) => {
+      const action = (event.target as HTMLElement).closest<HTMLElement>('[data-action="conn-retry"], [data-action="conn-reload"]')?.dataset['action'];
 
-  source.addEventListener('error', () => {
-    state = { ...state, connected: false };
-    lost(source);
-    // A stream refused for its cookie does not come back: the page needs a new link.
-    void deps.fetch('/v1/page/list', { credentials: 'same-origin' }).then((response) => {
-      expired = response.status === 401;
-      draw();
-    }, () => draw());
-  });
-
+      if (action === 'conn-retry') {
+        connection.retryNow();
+      } else if (action === 'conn-reload') {
+        (deps.reload ?? (() => location.reload()))();
+      }
+    },
+    { signal: listening.signal },
+  );
+  connection.start();
   draw();
 
   return {
@@ -4606,7 +4656,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       dropFileIcons();
       header.close();
       toastBox.close();
-      source.close();
+      connection.close();
+      clearInterval(connectionTick);
 
       for (const mounted of consoles.values()) {
         mounted.dispose();

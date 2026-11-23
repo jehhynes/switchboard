@@ -10,6 +10,7 @@ export function renderFrame(side: { min: number; max: number }, chat: { min: num
     <>
       <aside class="side">
         <div class="side-head"></div>
+        <div class="conn-banner-host"></div>
         <div id="list"></div>
         <div id="list-sheet"></div>
         <div class="sash drawer-sash" role="separator" aria-orientation="vertical" aria-label="Work items width" aria-controls="list" tabindex={0} aria-valuemin={side.min} aria-valuemax={side.max} title="Drag to resize; double-click to reset"></div>
@@ -19,6 +20,7 @@ export function renderFrame(side: { min: number; max: number }, chat: { min: num
       <div class="drawer-backdrop" aria-hidden="true"></div>
       <main class="main">
         <div id="head"></div>
+        <div class="conn-banner-host"></div>
         <div id="panel" class="scroll"></div>
         <div id="note"></div>
         <div id="composer" hidden></div>
@@ -29,6 +31,7 @@ export function renderFrame(side: { min: number; max: number }, chat: { min: num
         <div class="detail-body scroll"></div>
       </aside>
       <div id="sheet"></div>
+      <div id="connection"></div>
       <div class="live" aria-live="polite"></div>
     </>
   );

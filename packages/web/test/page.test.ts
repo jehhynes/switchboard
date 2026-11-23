@@ -14,7 +14,7 @@ import { REPLAY_TIP, SPEAKING_TIP, renderMicButton as viewMicButton } from '@swi
 import { renderMarkdown } from '../src/markdown.js';
 import { ADVANCE_MS, LINK_ANSWER_MS, CHAT_MAX, CHAT_MIN, DRAWER_HIDE_MS, OTHER_SETTLE_MS, DRAWER_REVEAL_MS, loadMermaid, PANE_SHOW_DELAY_MS, SENT_NOTE_MS, SHOW_MARKER_MS, SIDE_MAX, SIDE_MIN, startPage, SWIPE_OPEN } from '../src/main.js';
 import { DETAIL_MIN } from '../src/layout.js';
-import { RECONNECT_MS } from '../src/reconnect.js';
+import { BACKOFF_MS, GRACE_MS, JITTER } from '../src/connection.js';
 import type { ArtifactView, MessageView, PageGroup, PageRow, ReplyView, SessionView } from '@switchboard/protocol';
 import { drawAtOnce } from './frame.js';
 import { showToast } from '../src/toast.js';
@@ -1377,7 +1377,7 @@ describe('the page', () => {
     paired.close();
   });
 
-  it('takes the voice back over the new stream after a hub restart with no tap, and puts off the reload for the new build while the voice is on the phone', async () => {
+  it('takes the voice back over the new stream after a hub restart with no tap, and offers the new build without ever reloading by itself', async () => {
     vi.useFakeTimers();
     onTestFinished(() => void vi.useRealTimers());
     history.replaceState(null, '', '#');
@@ -1434,7 +1434,7 @@ describe('the page', () => {
 
     const paired = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, local: false, build: 'b1', reload });
     const phone = FakeSource.last!;
-    const hello = (key: string) => phone.emit('hello', { key, groups: [listGroup('progress', [listRow(1)])], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    const hello = (key: string) => FakeSource.last!.emit('hello', { key, groups: [listGroup('progress', [listRow(1)])], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
 
     hello('pk');
     phone.emit('voice', { voice: { enabled: true, here: false, mic: 'off', speaking: null, speakReplies: true, error: null } });
@@ -1449,23 +1449,29 @@ describe('the page', () => {
     // The hub restarts onto build b2: it closes the voice for the restart, and the page's stream fails until the new hub answers.
     sockets[0]!.onclose?.({ code: 4002, reason: 'Switchboard is restarting.' });
     phone.emit('error', {});
-    await vi.advanceTimersByTimeAsync(RECONNECT_MS);
+    expect(phone.closed).toBe(true);
+    await vi.advanceTimersByTimeAsync(BACKOFF_MS[0]! * (1 + JITTER));
     expect(contexts.map((one) => one.closed)).toEqual([false]);
+    // The page opens its stream again itself, after asking the hub's build.
+    expect(FakeSource.last).not.toBe(phone);
 
-    // The browser's own reconnect gives the stream a new key: the voice socket opens with it and takes the voice back.
+    // The new stream has a new key: the voice socket opens with it and takes the voice back.
     hello('pk2');
     expect(sockets.map((one) => one.url)).toEqual([expect.stringMatching(/window=pk$/), expect.stringMatching(/window=pk2$/)]);
     sockets[1]!.onopen?.();
     expect(sockets[1]!.sent).toEqual([{ type: 'hello', resume: true }]);
     sockets[1]!.onmessage?.({ data: JSON.stringify({ type: 'welcome', at: 0 }) });
-    await vi.advanceTimersByTimeAsync(RECONNECT_MS * 3);
-    // No reload for the new build while the voice is on this phone: a reload would end its audio until the next tap.
+    await vi.advanceTimersByTimeAsync(6_000);
+    // No reload for the new build: the page offers one, since a reload would end the phone's audio until the next tap.
     expect(reload).not.toHaveBeenCalled();
     expect(contexts).toHaveLength(1);
+    expect(root.querySelector('.conn-update')?.textContent).toBe('Update readyReload');
 
-    // Once the voice is off on this phone, the page reloads into the new build.
+    // Not once the voice is off on this phone either; only the chip's Reload reloads.
     sockets[1]!.onclose?.({ code: 4003, reason: 'Voice is no longer allowed on this device.' });
-    await vi.advanceTimersByTimeAsync(RECONNECT_MS);
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(reload).not.toHaveBeenCalled();
+    root.querySelector<HTMLElement>('[data-action="conn-reload"]')!.click();
     expect(reload).toHaveBeenCalledTimes(1);
     window.innerWidth = width;
     paired.close();
@@ -5284,14 +5290,85 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it('says the link is no longer valid when the hub refuses its cookie', async () => {
+  it('changes nothing for a drop shorter than the grace period, then shows the offline banner, dims the page and turns off the composer until a hello', async () => {
+    vi.useFakeTimers();
+
     const { page, source } = start();
 
-    answers['/v1/page/list'] = { status: 401, body: {} };
+    hello(source);
+
+    const input = root.querySelector('textarea')!;
+
+    expect(root.querySelector('.header .conn-dot')?.getAttribute('aria-label')).toBe('Connected');
     source.emit('error', {});
-    await flush();
-    await flush();
-    expect(root.querySelector('#list')!.textContent).toContain('no longer valid');
+    await vi.advanceTimersByTimeAsync(GRACE_MS - 100);
+    expect(root.querySelector('.conn-banner')).toBeNull();
+    expect(root.classList.contains('stale')).toBe(false);
+    expect(input.disabled).toBe(false);
+    expect(root.querySelector('.header .conn-dot')?.className).toBe('conn-dot live');
+    // The page asked the hub and opened a new stream, which brings no hello.
+    expect(FakeSource.last).not.toBe(source);
+    expect(posts.some((post) => post.url === '/page/ping')).toBe(true);
+    await vi.advanceTimersByTimeAsync(100);
+    expect([...root.querySelectorAll('.conn-banner')].map((one) => one.textContent)).toEqual(Array(2).fill('Offline. Showing what was here at ' + new Date(10_000).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) + '.Retry'));
+    expect(root.classList.contains('stale')).toBe(true);
+    expect(input.disabled).toBe(true);
+    expect(input.placeholder).toBe("Can't send while offline.");
+    expect(root.querySelector('.header .conn-dot')?.className).toBe('conn-dot waiting');
+    hello(FakeSource.last!);
+    expect(root.querySelector('.conn-banner')).toBeNull();
+    expect(root.classList.contains('stale')).toBe(false);
+    expect(input.disabled).toBe(false);
+    page.close();
+  });
+
+  it("shows Can't reach Switchboard in the page's place when it never connected, tries at once on Try now, and goes once a hello comes", async () => {
+    vi.useFakeTimers();
+    answers['/page/ping'] = { status: 503, body: {} };
+
+    const { page, source } = start();
+
+    source.emit('error', {});
+    await vi.advanceTimersByTimeAsync(GRACE_MS);
+
+    const screen = root.querySelector('.conn-screen')!;
+
+    expect(screen.querySelector('h2')?.textContent).toBe("Can't reach Switchboard");
+    expect(screen.querySelector('.conn-screen-status')?.textContent).toMatch(/^Trying again in \d+ s\.$/);
+    // Only this computer can start the hub.
+    expect(screen.querySelector('a[href="switchboard:start"]')?.textContent).toBe('Start Switchboard');
+    expect(root.classList.contains('unreachable')).toBe(true);
+
+    const pings = posts.filter((post) => post.url === '/page/ping').length;
+
+    root.querySelector<HTMLElement>('.conn-screen [data-action="conn-retry"]')!.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(posts.filter((post) => post.url === '/page/ping')).toHaveLength(pings + 1);
+    delete answers['/page/ping'];
+    await vi.advanceTimersByTimeAsync(5_000);
+    hello(FakeSource.last!);
+    expect(root.querySelector('.conn-screen')).toBeNull();
+    expect(root.classList.contains('unreachable')).toBe(false);
+    page.close();
+  });
+
+  it('shows the Signed out screen in place of the page once the hub says the sign-in is gone, and stops trying', async () => {
+    vi.useFakeTimers();
+
+    const { page, source } = start();
+
+    hello(source);
+    answers['/page/ping'] = { status: 200, body: { build: '', signedIn: false } };
+    source.emit('error', {});
+    await vi.advanceTimersByTimeAsync(BACKOFF_MS[0]! * (1 + JITTER));
+    expect(root.querySelector('.conn-screen h2')?.textContent).toBe('Signed out');
+    expect(root.querySelector('.conn-screen')?.textContent).toContain('This browser is signed out. Open it again from VS Code.');
+    expect(root.querySelector('.header .conn-dot')?.getAttribute('aria-label')).toBe('Signed out');
+
+    const pings = posts.filter((post) => post.url === '/page/ping').length;
+
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(posts.filter((post) => post.url === '/page/ping')).toHaveLength(pings);
     page.close();
   });
 });

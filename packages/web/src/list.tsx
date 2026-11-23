@@ -196,12 +196,8 @@ export function renderList(groups: readonly PageGroup[], selected: number | null
   );
 }
 
-/** What the list's host shows: why the page's link no longer works, or the list and the search's end. */
-export function renderListPane(expired: boolean, list: VNode | null, end: VNode | null): VNode {
-  if (expired) {
-    return <p class="empty">This page's link is no longer valid. Open a new one with Switchboard: Open Web Page in VS Code, or hub.js web.</p>;
-  }
-
+/** What the list's host shows: the list and the search's end. */
+export function renderListPane(list: VNode | null, end: VNode | null): VNode {
   return (
     <>
       {list}

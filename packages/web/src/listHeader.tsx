@@ -6,6 +6,8 @@ import { HubLog } from './hubLog.js';
 import { trusted } from './trusted.js';
 import type { PageGroup, PageHeader, PageRow, SourceGroup } from '@switchboard/protocol';
 import type { PhoneVoiceState } from './phoneVoice.js';
+import { ConnectionDot } from './connectionView.js';
+import type { DotView } from './connectionView.js';
 
 type Answer = { status: number; body: Record<string, unknown> };
 
@@ -40,6 +42,8 @@ export interface ListHeaderDeps {
   pinned?(): boolean | undefined;
   /** Shows why the header's action failed in the page's toast (toast.tsx), or hides a refusal shown there with null. */
   refused(text: string | null): void;
+  /** The connection's dot beside the title (connectionView.tsx). */
+  connection?(): DotView | null;
 }
 
 /** A pairing link the hub gave out (architecture.md § Remote access): its URL, its code and when both stop working. */
@@ -290,6 +294,8 @@ export interface HeaderView {
   local?: boolean;
   /** Voice on this phone in More Actions, on a paired device's page; null or left out where it is not offered. */
   phoneVoice?: PhoneVoiceState | null;
+  /** The connection's dot beside the title; none before the page first connected. */
+  connection?: DotView | null;
   /** Whether the list is pinned, for the pin button at the header's end; left out, the header has no pin. */
   pinned?: boolean;
 }
@@ -399,6 +405,7 @@ export function renderListHeader(header: PageHeader | null, view: HeaderView): V
         <span class="list-title">
           <img class="list-title-icon" src="icon-192.png" alt="" width="16" height="16" />
           <span class="list-title-text">Switchboard</span>
+          <ConnectionDot dot={view.connection} />
         </span>
         {sources.length === 0 ? null : (
           <>
@@ -1937,6 +1944,7 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
       }
 
       shownVoiceError = voiceError;
+      view.connection = deps.connection?.() ?? null;
       mount(host, renderListHeader(header, view));
       mount(sheetHost, renderHeaderSheet(view.sheet, header, deps.now(), deps.fetch, view.local === true));
     },

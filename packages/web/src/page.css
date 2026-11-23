@@ -1049,3 +1049,27 @@ button.toast-open:hover { color: var(--vscode-textLink-activeForeground); text-d
 .toast .dismiss { flex: none; justify-content: center; min-width: 26px; height: 26px; color: inherit; }
 /* A touch screen's bars are 44 px tall. */
 @media (hover: none), (pointer: coarse) { #toast { top: calc(var(--sb-top) + 96px); } }
+/* The connection (architecture.md § Web page, Connection; connectionView.tsx): the dot in the heads, the offline banner over the list and the
+   conversation, the dimmed content it explains, the screen in the page's place, and the Update ready chip. */
+.conn-dot { flex: none; display: inline-block; width: 8px; height: 8px; margin: 0 8px 0 4px; border-radius: 50%; align-self: center; }
+.conn-dot.live { background: var(--vscode-testing-iconPassed, #73c991); }
+.conn-dot.waiting { background: var(--vscode-editorWarning-foreground, #cca700); }
+.conn-dot.off { background: var(--vscode-descriptionForeground, #9d9d9d); }
+.header > .conn-dot { margin-left: 2px; }
+.conn-banner-host:empty { display: none; }
+.conn-banner { display: flex; align-items: center; gap: 8px; padding: 6px 12px; font-size: 12px; color: var(--vscode-editorWarning-foreground, #cca700); background: color-mix(in srgb, var(--vscode-editorWarning-foreground, #cca700) 14%, var(--vscode-editor-background)); border-bottom: 1px solid var(--vscode-panel-border, transparent); }
+.conn-banner-text { flex: 1; min-width: 0; }
+.conn-banner button, .conn-update button, .conn-primary { font: inherit; border: 0; border-radius: 2px; padding: 3px 10px; color: var(--vscode-button-foreground); background: var(--vscode-button-background); cursor: pointer; text-decoration: none; }
+.conn-banner button:hover, .conn-update button:hover, .conn-primary:hover { background: var(--vscode-button-hoverBackground); }
+/* Outside the phone's layout the conversation's banner says it for both, since the list and the conversation show side by side. */
+:where(html:not(.phone)) .side > .conn-banner-host { display: none; }
+#root.stale #list, #root.stale #panel, #root.stale .detail-body { opacity: 0.6; }
+.conn-screen { position: fixed; inset: 0; z-index: var(--sb-z-settings); display: grid; place-items: center; padding: var(--sb-top) 24px env(safe-area-inset-bottom); background: var(--vscode-editor-background); color: var(--vscode-foreground); text-align: center; }
+.conn-screen-body { max-width: 28rem; }
+.conn-screen-icon { display: block; width: 48px; height: 48px; margin: 0 auto; }
+.conn-screen h2 { margin: 14px 0 6px; font-size: 17px; font-weight: 600; }
+.conn-screen p { margin: 0 0 14px; color: var(--vscode-descriptionForeground); }
+.conn-primary { display: inline-block; padding: 6px 14px; }
+.conn-screen-start { margin-top: 14px; }
+.conn-screen-start a { color: var(--vscode-textLink-foreground); }
+.conn-update { position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom)); z-index: var(--sb-z-sheet); transform: translateX(-50%); display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 14px; border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); border-radius: 16px; background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background)); box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36)); white-space: nowrap; }

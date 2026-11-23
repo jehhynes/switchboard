@@ -7,6 +7,7 @@ import { questionSegments, stripQuestionMarkup } from '@switchboard/conversation
 import type { CardDraft as SharedDraft } from '@switchboard/conversation/questions';
 import type { ArtifactView, MessageView, NativeRequest, PageAction, PageGroup, PageRow, ReplyView, ScreenPrompt, StatusView, VoiceView } from '@switchboard/protocol';
 import type { SnoozeChoice } from '@switchboard/core/snooze';
+import type { DotView } from './connectionView.js';
 
 /** `diff` shows the open file's diff tab (`changes.tsx`), which has no fixed tab of its own. */
 export type Tab = 'conversation' | 'status' | 'artifacts' | 'console' | 'browser' | 'history' | 'diff' | 'file';
@@ -239,6 +240,8 @@ export interface View {
   /** How many artifact tabs the shown strip fits, measured after each draw, and whether its Artifacts menu is open. */
   artifactFit: number;
   artifactMenu: boolean;
+  /** The connection's dot in the conversation's head (connectionView.tsx); none before the page first connected. */
+  connection?: DotView | null;
 }
 
 /** The hub's `pane` event (architecture.md § Pane state). */
