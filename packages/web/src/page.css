@@ -404,11 +404,13 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 .menu-row:hover .menu-note, .menu-row:focus .menu-note { color: inherit; opacity: 0.8; }
 /* A conversation's row: its state codicon stands in the gutter, and the selected one is marked by a highlight, not a check mark. */
 .conversation-row > .codicon:first-child { width: 28px; text-align: center; }
+/* Each session's provider mark stands in one column after its state codicon, on the button and every row, an unknown provider's as an empty mark, so
+   the titles start at one edge; the mark has no background of its own, on any row. */
+:is(.conversation-row, button.picker) > .provider { width: 16px; justify-content: center; }
 /* The dropdown grows to show its titles whole, up to 720 px, and as placed (`placeMenus`) no wider than the room to the viewport's edge. */
 .menu.conversation-menu { max-width: 720px; }
 .menu-row.submenu-row { padding-left: 16px; }
-/* A conversation's earlier sessions sit under its row, with their state codicon in the same column and their titles at the same edge. */
-button.picker .picker-session { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--vscode-descriptionForeground); font-weight: normal; }
+/* A conversation's earlier sessions sit under its row, with their state codicon and provider mark in the same columns and their titles at the same edge. */
 .list-row { position: relative; }
 /* A row's menu is fixed to the viewport, placed at its row (`placeRowMenus`, main.ts), so the list's scroll box does not clip it; the list rises
    above the conversation and its column while one is open, as a header with an open menu does. */

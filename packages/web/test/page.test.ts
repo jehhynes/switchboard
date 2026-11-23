@@ -659,14 +659,25 @@ describe('drawing', () => {
     const root = document.createElement('div');
 
     root.innerHTML = html(renderHeader({ ...EMPTY, connected: true, scope, session: session({ state: 'running' }) }, newView()));
-    expect([...root.querySelector('button.picker')!.children].map((child) => child.className)).toEqual(['codicon codicon-loading codicon-modifier-spin state-icon tone-muted', 'title', 'codicon codicon-chevron-down']);
+    expect([...root.querySelector('button.picker')!.children].map((child) => child.className)).toEqual(['codicon codicon-loading codicon-modifier-spin state-icon tone-muted', 'provider', 'title', 'codicon codicon-chevron-down']);
     expect(root.querySelector('.header > .codicon')).toBeNull();
-    // No provider's mark, in the button or the menu, though the session and the conversation name one; the button is drawn as its row is.
-    root.innerHTML = html(renderHeader({ ...EMPTY, connected: true, scope: { ...scope, conversations: [{ ...scope.conversations[0]!, provider: 'codex', sessions: [{ sessionId: 'e1', title: 'Fix the badge', state: 'ended', startedAt: 0, provider: 'codex' }] }] }, session: session({ provider: 'codex' }) }, { ...newView(), picker: true }));
-    expect(root.querySelector('.provider, [aria-label="Codex"]')).toBeNull();
+    // The provider's mark after the state codicon on the button and every row, the current session's and the earlier ones', each named as its CLI
+    // names it; the button is drawn as its row is, with the work item's title in its tooltip.
+    const conversations = [{ ...scope.conversations[0]!, provider: 'codex', sessionTitle: 'Review PR 21576', sessions: [{ sessionId: 'e1', title: 'Fix the badge', state: 'ended' as const, startedAt: 0, provider: 'claude' }, { sessionId: 'e0', title: 'Setup session', state: 'ended' as const, startedAt: 0 }] }];
+    root.innerHTML = html(renderHeader({ ...EMPTY, connected: true, scope: { ...scope, conversations }, session: session({ provider: 'codex' }) }, { ...newView(), picker: true }));
+    expect([...root.querySelectorAll('.conversation-menu .conversation-row')].map((row) => [[...row.children].map((child) => child.classList[0]).slice(0, 3), row.querySelector('.provider')!.getAttribute('aria-label'), row.querySelector('.title')!.textContent])).toEqual([
+      [['codicon', 'provider', 'title'], 'Codex', 'Review PR 21576'],
+      [['codicon', 'provider', 'title'], 'Claude', 'Fix the badge'],
+      [['codicon', 'provider', 'title'], null, 'Setup session'],
+    ]);
+    // A provider's mark is never on a background of its own, and an unknown provider's empty mark is hidden from a reader.
+    expect(root.querySelector('.session-row[data-session="e0"] .provider')!.getAttribute('aria-hidden')).toBe('true');
     expect(root.querySelector('button.picker')!.innerHTML).toBe(`${root.querySelector('.conversation-menu [aria-checked="true"]')!.innerHTML}<span class="codicon codicon-chevron-down" aria-hidden="true"></span>`);
+    expect(root.querySelector('button.picker')!.getAttribute('title')).toBe('Review PR 21576 · Fix it');
+    // From a hub that sends no session name, the work item's title.
     root.innerHTML = html(renderHeader({ ...EMPTY, connected: true, scope, session: session() }, newView()));
-    expect(root.querySelector('.provider')).toBeNull();
+    expect(root.querySelector('button.picker .title')!.textContent).toBe('Fix it');
+    expect(root.querySelector('button.picker')!.getAttribute('title')).toBe('Fix it');
   });
 
   it("shows only the page's own voice state, with Talk here when the voice is elsewhere", () => {
@@ -5899,7 +5910,7 @@ describe('the page in use', () => {
       { sessionId: 's1', title: 'Task session s1', state: 'ended' as const, startedAt: 10_000 - 3 * 3_600_000, provider: 'claude' },
       { sessionId: 's0', title: 'Setup session s0', state: 'ended' as const, startedAt: 10_000 - 2 * 86_400_000, provider: 'claude' },
     ];
-    const listed = { ...scope, sessionId: 's2', conversations: [{ ...scope.conversations[0]!, sessionId: 's2', sessions: earlier }] };
+    const listed = { ...scope, sessionId: 's2', conversations: [{ ...scope.conversations[0]!, sessionId: 's2', sessionTitle: 'Fix the badge count', sessions: earlier }] };
     const { page, source } = start();
     const selects = () => posts.filter((post) => post.url.endsWith('/select')).map((post) => ({ workItemId: post.body['workItemId'], sessionId: post.body['sessionId'] }));
 
@@ -5908,7 +5919,7 @@ describe('the page in use', () => {
     hello(source, { scope: listed, sessions: [session({ id: 's2', title: 'Task session s2' })] });
     openPicker();
     expect([...root.querySelectorAll('.conversation-menu .conversation-row')].map((row) => [row.querySelector('.title')!.textContent, row.getAttribute('aria-checked'), row.querySelector('.menu-note')?.textContent ?? null])).toEqual([
-      ['Fix it', 'true', null],
+      ['Fix the badge count', 'true', null],
       ['Task session s1', 'false', '3 h ago'],
       ['Setup session s0', 'false', '2 d ago'],
     ]);
@@ -5941,7 +5952,10 @@ describe('the page in use', () => {
     expect(root.querySelector('.session-note-text')!.textContent).toBe('An earlier session of this work item, shown read-only.');
     expect(root.querySelector('[data-action="resume"]')).toBeNull();
     expect(root.querySelector<HTMLTextAreaElement>('#composer textarea, textarea')!.disabled).toBe(true);
-    expect(root.querySelector('button.picker .picker-session')!.textContent).toBe('Task session s1');
+    // The button is drawn as the earlier session's row: its provider's mark and name, the work item's title in its tooltip.
+    expect(root.querySelector('button.picker .title')!.textContent).toBe('Task session s1');
+    expect(root.querySelector('button.picker .provider')!.getAttribute('aria-label')).toBe('Claude');
+    expect(root.querySelector('button.picker')!.getAttribute('title')).toBe('Task session s1 · Fix it');
     openPicker();
     expect([...root.querySelectorAll('.conversation-menu .conversation-row')].map((row) => row.getAttribute('aria-checked'))).toEqual(['false', 'true', 'false']);
 

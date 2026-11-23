@@ -687,6 +687,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     personas: () => config.settings.voice,
     pinPersona: (sessionId, personaId) => runtime.send({ type: 'persona', sessionId, personaId }).refused,
     ...claudePaths(claudeRoot, homedir(), Boolean(process.env['CLAUDE_CONFIG_DIR'])),
+    codexHome: runtime.codexHome,
     screen: (session, scrollback) => runtime.heldScreen(session, scrollback),
     input: { reserve: (sessionId, launch) => runtime.reserveInput(sessionId, launch), write: (session, data) => runtime.writeHeld(session, data), cannotType: () => runtime.heldCannotType() },
     hooks: () => config.settings.sessions.installHooks,

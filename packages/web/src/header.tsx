@@ -1,12 +1,14 @@
 // The conversation's header (architecture.md § Web page): the dropdown of the selected work item's conversations, the row's actions, the
 // view options with the persona, and the tabs under it or the switch atop the side column.
 import type { ComponentChildren, VNode } from 'preact';
+import { providerMark } from '@switchboard/conversation/providerIcons';
 import { FileIcon } from './fileIcons.js';
 import { selectedEntry, selectedRow, stateIcon } from './model.js';
 import type { PageState } from './model.js';
 import { ago, artifactBar, LINK_LABEL_MAX, rowKey, tabIcon, TABS } from './render.js';
 import type { SideTab, Tab, View } from './render.js';
 import { ConnectionDot } from './connectionView.js';
+import { trusted } from './trusted.js';
 import type { PageAction, PageRow } from '@switchboard/protocol';
 
 /** The most links the menu lists by themselves; more go in its Open link submenu, as the dock's `MenuLinks`. */
@@ -129,8 +131,16 @@ type Entry = NonNullable<PageState['scope']>['conversations'][number];
 type SessionRow = NonNullable<Entry['sessions']>[number];
 
 /**
- * An earlier session's row under its conversation's in the dropdown: its state codicon, title and age, checked while the page shows it; choosing
- * it opens it read-only.
+ * A session's provider as its mark, the one the New session form shows, in the column after the state codicon on the dropdown's button and every
+ * row, so the titles start at one edge; an empty mark of the same width when the provider is unknown.
+ */
+function ProviderMark({ provider }: { provider: string | undefined }) {
+  return provider === undefined || provider === '' ? <span class="provider" aria-hidden="true"></span> : trusted(providerMark(provider));
+}
+
+/**
+ * An earlier session's row under its conversation's in the dropdown: its state codicon, provider's mark, CLI name and age, checked while the page
+ * shows it; choosing it opens it read-only. `SessionLabel` draws it, as it draws the dropdown's button while the page shows it.
  */
 function SessionRowButton({ entry, one, state, now }: { entry: Entry; one: SessionRow; state: PageState; now: number }) {
   const shown = state.scope?.earlier === true && state.scope.sessionId === one.sessionId;
@@ -139,17 +149,28 @@ function SessionRowButton({ entry, one, state, now }: { entry: Entry; one: Sessi
   return (
     <li role="none" key={one.sessionId}>
       <button type="button" class="menu-row conversation-row session-row" role="menuitemradio" aria-checked={shown} data-action="select-session" data-work-item={String(entry.workItemId)} data-session={one.sessionId} title={`${one.title}, started ${ago(one.startedAt, now)}`}>
-        <Codicon {...icon} />
-        <span class="title">{one.title}</span>
+        <SessionLabel icon={icon} provider={one.provider} title={one.title} />
         <span class="menu-note">{ago(one.startedAt, now)}</span>
       </button>
     </li>
   );
 }
 
+/** A session's state codicon, provider's mark and name, alike on every row of the dropdown and on its button. */
+function SessionLabel({ icon, provider, title }: { icon: { icon: string; text: string; tone?: string }; provider: string | undefined; title: string }) {
+  return (
+    <>
+      <Codicon {...icon} />
+      <ProviderMark provider={provider} />
+      <span class="title">{title}</span>
+    </>
+  );
+}
+
 /**
- * A conversation as the dropdown's button and each of its rows draw it, from this one renderer so they never differ: its session's state
- * codicon, title and the unread dot when `unread` (architecture.md § Unread); no provider's mark, which the operator does not need to tell them apart.
+ * A conversation as the dropdown's button and each of its rows draw it, from this one renderer so they never differ: its current session's state
+ * codicon, provider's mark and name as its CLI gives it (`sessionTitle`, the work item's title from a hub that sends none), and the unread dot when
+ * `unread` (architecture.md § Unread).
  */
 function ConversationLabel({ entry, state, unread = false }: { entry: Entry; state: PageState; unread?: boolean }) {
   // The page's session is this entry's only while it shows the current one, not an earlier one.
@@ -158,8 +179,7 @@ function ConversationLabel({ entry, state, unread = false }: { entry: Entry; sta
 
   return (
     <>
-      <Codicon {...icon} />
-      <span class="title">{entry.title}</span>
+      <SessionLabel icon={icon} provider={selected ? (state.session?.provider ?? entry.provider) : entry.provider} title={entry.sessionTitle ?? entry.title} />
       {unread ? <UnreadDot label="Unread replies or status" /> : null}
     </>
   );
@@ -232,7 +252,10 @@ export function renderHeader(state: PageState, view: View, now = Date.now()): VN
   const scope = state.scope!;
   const earlier = scope.earlier === true ? (selectedEntry(state)?.sessions?.find((one) => one.sessionId === scope.sessionId) ?? null) : null;
   const selected = selectedEntry(state);
+  // The button shows the session its row names; its tooltip adds the work item's title, which the session's name may not carry.
+  const shownName = earlier?.title ?? selected?.sessionTitle;
   const title = selected?.title ?? scope.title;
+  const tooltip = shownName === undefined || shownName === title ? title : `${shownName} · ${title}`;
   // The button carries the dot while a conversation the operator is not looking at has unseen items.
   const othersUnread = scope.conversations.some((entry) => entry.workItemId !== scope.workItemId && entry.unread > 0);
   // After a separator, New conversation… as in the Conversation view; it opens the providers under the same button when there is a choice.
@@ -289,12 +312,13 @@ export function renderHeader(state: PageState, view: View, now = Date.now()): VN
         <span class="codicon codicon-layout-sidebar-left" aria-hidden="true"></span>
       </button>
       <div class="menu-anchor picker-anchor">
-        <button type="button" class="picker" data-action="picker" aria-haspopup="menu" aria-expanded={view.picker || providers !== null} title={title}>
-          {selected === null || earlier !== null ? (
+        <button type="button" class="picker" data-action="picker" aria-haspopup="menu" aria-expanded={view.picker || providers !== null} title={tooltip}>
+          {earlier !== null ? (
+            <SessionLabel icon={stateIcon(state.session?.state, state.session?.waitingFor, state.session?.limit)} provider={state.session?.provider ?? earlier.provider} title={earlier.title} />
+          ) : selected === null ? (
             <>
               <Codicon {...stateIcon(state.session?.state, state.session?.waitingFor, state.session?.limit)} />
               <span class="title">{title}</span>
-              {earlier === null ? null : <span class="picker-session">{earlier.title}</span>}
             </>
           ) : (
             <ConversationLabel entry={selected} state={state} unread={othersUnread} />

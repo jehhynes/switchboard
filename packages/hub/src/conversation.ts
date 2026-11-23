@@ -23,6 +23,7 @@ import type { PageActionExtra, PageFile, PageHeader, PageListGroup, PageRow } fr
 import type { ConversationRef, WindowScope, WindowScopes } from './windows.js';
 import type { VoiceView } from './voice.js';
 import { ClaudeConversationAdapter } from './claudeConversation.js';
+import { SessionTitles } from './sessionTitles.js';
 import type { ConversationAdapter, ConversationChanged, DeliveryOutcome, NativeRequest } from './conversationAdapter.js';
 export { ansiTheme, claudePaths } from './claudeConversation.js';
 
@@ -223,6 +224,7 @@ export interface HeldInput {
 /** An earlier session of a page's dropdown entry (architecture.md § Web page), which the page can open read-only. */
 export interface SessionEntry {
   sessionId: string;
+  /** Its name as its CLI gives it, else its first message, else Setup or Task session. */
   title: string;
   state: SessionView['state'];
   startedAt: number;
@@ -240,6 +242,8 @@ export interface ConversationEntry {
   unread: number;
   /** The current session's provider; left out with no session or from an older session record. */
   provider?: 'claude' | 'codex';
+  /** On the web page, the current session's name as its CLI gives it, else its first message, else Setup or Task session; left out with no session and for a VS Code window. */
+  sessionTitle?: string;
   /** On the web page, the work item's earlier sessions, newest first; left out when it has none and for a VS Code window. */
   sessions?: SessionEntry[];
 }
@@ -258,6 +262,8 @@ export interface ConversationServiceDeps {
   windows: WindowScopes;
   /** Claude's `projects` folder, under `CLAUDE_CONFIG_DIR` or `~/.claude`. */
   projectsDir: string;
+  /** Codex's home, `CODEX_HOME` or `~/.codex`, whose `session_index.jsonl` names its threads; without it a Codex session has no CLI name. */
+  codexHome?: string;
   /** Claude's global config, whose theme says whether inline code is palette blue. */
   claudeConfig: string;
   screen: ReadHeldScreen;
@@ -401,12 +407,17 @@ export class ConversationService {
   readonly #external = new Map<number, ExternalArtifacts>();
   #timer: NodeJS.Timeout | null = null;
   readonly #polling = new Set<ConversationAdapter>();
+  /** The name each CLI gives a session, which the page's dropdown shows (architecture.md § Web page, Earlier sessions). */
+  readonly #titles: SessionTitles;
+  /** `SessionTitles.version` as the page's dropdowns were last sent it. */
+  #titlesSent = 0;
   #seq = 0;
   #closed = false;
 
   constructor(private readonly deps: ConversationServiceDeps) {
     // Shared with the runtime; made now, so retention carries unresolved questions from the first item it deletes.
     questionIndex(deps.store, deps.now);
+    this.#titles = new SessionTitles({ projectsDir: deps.projectsDir, ...(deps.codexHome === undefined ? {} : { codexHome: deps.codexHome }), now: deps.now });
     this.#adapters = [new ClaudeConversationAdapter(deps, (id, change) => this.#changed(id, change)), ...(deps.adapters?.((id, change) => this.#changed(id, change)) ?? [])];
 
     for (const message of deps.store.openMessages()) {
@@ -483,6 +494,35 @@ export class ConversationService {
       finally { this.#polling.delete(adapter); }
     }));
     this.#contextChanged();
+    this.#titlesChanged();
+  }
+
+  /**
+   * Sends each page its dropdown again when a CLI renamed a session it lists, as Claude Code's /rename or its own title, or Codex's thread name,
+   * since the page was last sent it.
+   */
+  #titlesChanged(): void {
+    if (this.#closed) return;
+    const pages = [...this.#streams.keys()].filter((key) => this.deps.windows.isPage(key));
+
+    for (const key of pages) {
+      for (const ref of this.deps.windows.scope(key)?.conversations ?? []) {
+        for (const session of this.deps.store.sessionsFor(ref.workItemId)) this.#titles.title(session);
+      }
+    }
+
+    if (this.#titles.version !== this.#titlesSent) {
+      this.#titlesSent = this.#titles.version;
+      this.conversationsChanged();
+    }
+  }
+
+  /**
+   * A session's name on the page's dropdown: the one its CLI gives it (`SessionTitles`), else, until it has one, its first message that stands,
+   * cut to its first sentence as a new conversation's title is, else Setup or Task session; never its ID, which for a Codex thread is a long UUID.
+   */
+  #sessionName(session: Session): string {
+    return this.#titles.title(session) ?? (summarizeMessage(this.deps.store.firstMessageText(session.id) ?? '') || `${session.kind === 'setup' ? 'Setup' : 'Task'} session`);
   }
 
   /** The context size each window was last sent with its session, by window key, so a size read since sends it again (architecture.md § Context meter). */
@@ -1018,7 +1058,7 @@ export class ConversationService {
 
   /**
    * The dropdown's entries of a window's conversations: each one's title, current session's state and provider, and unread count, and on a
-   * `page` each one's earlier sessions, newest first.
+   * `page` its current session's name (`#sessionName`) and each one's earlier sessions, newest first.
    */
   entries(refs: ConversationRef[], page = false): ConversationEntry[] {
     return refs.flatMap((ref) => {
@@ -1032,7 +1072,7 @@ export class ConversationService {
       const all = this.deps.store.sessionsFor(item.id);
       const session = all.at(-1) ?? null;
       const view = session === null ? null : this.#view(session, true, this.deps.hooks(), this.deps.personas?.() ?? null);
-      const earlier = page ? all.slice(0, -1).reverse().map((one) => sessionEntry(one, this.deps.store)) : [];
+      const earlier = page ? all.slice(0, -1).reverse().map((one) => sessionEntry(one, this.#sessionName(one))) : [];
 
       return [
         {
@@ -1044,6 +1084,7 @@ export class ConversationService {
           conversation: view?.conversation ?? null,
           unread: session === null ? 0 : this.deps.store.unreadCount(session.id),
           ...(view?.provider === undefined ? {} : { provider: view.provider }),
+          ...(page && session !== null ? { sessionTitle: this.#sessionName(session) } : {}),
           ...(earlier.length === 0 ? {} : { sessions: earlier }),
         },
       ];
@@ -3169,13 +3210,9 @@ export function refusal(scope: WindowScope | null, scopeGen: number, sessionId: 
   return sessionId !== null && !reads && scope.earlier === true ? { status: 409, body: { error: EARLIER_SESSION } } : null;
 }
 
-/**
- * An earlier session as a page's dropdown lists it. A session has no title of its own, so it is named by its first message, as a new
- * conversation is before its provider names it, else Setup or Task session: never by its ID, which for a Codex thread is a long UUID.
- */
-function sessionEntry(session: Session, store: Pick<Store, 'firstMessageText'>): SessionEntry {
+/** An earlier session as a page's dropdown lists it, under the name `#sessionName` gives it. */
+function sessionEntry(session: Session, title: string): SessionEntry {
   const view = sessionView(session, false, true);
-  const title = summarizeMessage(store.firstMessageText(session.id) ?? '') || `${session.kind === 'setup' ? 'Setup' : 'Task'} session`;
 
   return { sessionId: session.id, title, state: view.state, startedAt: session.startedAt, provider: session.provider };
 }

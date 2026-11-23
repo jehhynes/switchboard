@@ -91,6 +91,13 @@ describe('the tab strips', () => {
     expect(css).toContain('.menu.conversation-menu { max-width: 720px; }');
   });
 
+  it('ConversationDropdown_ProviderMark_StandsInOneColumnWithNoBackground', () => {
+    // After the state codicon, on the button and every row, an unknown provider's empty mark as wide as a mark.
+    expect(css).toContain(':is(.conversation-row, button.picker) > .provider { width: 16px; justify-content: center; }');
+    // No rule gives the mark a background of its own.
+    expect(css).not.toMatch(/\.provider(?![-\w])[^{,]*\{[^}]*background/);
+  });
+
   it('TabStrip_EveryTabButTheChosen_DrawsTheBottomBorder', () => {
     const tab = /\n\.tab \{([^}]*)\}/.exec(css)?.[1] ?? '';
     const chosen = /\n\.tab\.selected \{([^}]*)\}/.exec(css)?.[1] ?? '';

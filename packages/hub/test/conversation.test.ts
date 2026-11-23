@@ -2244,6 +2244,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
       store,
       windows: scopes,
       projectsDir: join(dir, 'projects'),
+      codexHome: join(dir, 'codex'),
       claudeConfig: join(dir, '.claude.json'),
       screen: async (session) => held.screen(session),
       input: held,
@@ -2786,6 +2787,11 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     store.updateSession('s3', { kind: 'setup', shortId: 's3', state: 'ended', startedAt: NOW - 3_000, cwd: 'D:/repo' });
     later('s4', 'task', NOW - 2_000);
     later('s5', 'task', NOW - 1_000);
+    // s5's transcript has names: Claude Code's latest /rename (custom-title) wins over its latest ai-title, earlier or later.
+    const transcript = join(dir, 'projects', 'D--w3', 'n-s5.jsonl');
+
+    mkdirSync(join(dir, 'projects', 'D--w3'), { recursive: true });
+    writeFileSync(transcript, [{ type: 'ai-title', aiTitle: 'Badge count work' }, { type: 'custom-title', customTitle: 'Badge fix' }, { type: 'ai-title', aiTitle: 'Later automatic title' }].map((line) => JSON.stringify(line) + '\n').join(''));
     // A session is named by its first message that stands, cut to a sentence, never by its ID; one with none by its kind.
     const message = (id: string, sessionId: string, text: string, withdrawn = false) => store.addMessage({ id, sessionId, workItemId: 3, at: NOW, origin: 'typed', text, transcriptUuid: null, provisional: false, withdrawn, delivery: 'sent', error: null, opId: id, pastedAt: NOW });
     message('m4a', 's4', 'Dropped draft', true);
@@ -2799,8 +2805,31 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
       { sessionId: 's4', title: 'fix the badge count', state: 'idle', startedAt: NOW - 2_000, provider: 'claude' },
       { sessionId: 's3', title: 'Setup session', state: 'ended', startedAt: NOW - 3_000, provider: 'claude' },
     ]);
-    // A VS Code window's dropdown does not list them.
-    expect(service.scopeView(scopes.scope(window))!.conversations.every((one) => one.sessions === undefined)).toBe(true);
+    // A VS Code window's dropdown does not list them, nor names the current session.
+    expect(service.scopeView(scopes.scope(window))!.conversations.every((one) => one.sessions === undefined && one.sessionTitle === undefined)).toBe(true);
+    // The current session is named as the earlier ones are, by its CLI's name for it.
+    expect(entry().sessionTitle).toBe('Badge fix');
+
+    // A Codex thread by its latest name in Codex's session index, once it has one; a rename reaches the page's dropdown on the next poll.
+    const codexIndex = join(dir, 'codex', 'session_index.jsonl');
+    const named = () => page.frames.filter((frame) => frame.type === 'conversations').length;
+
+    mkdirSync(join(dir, 'codex'), { recursive: true });
+    store.updateSession('s4', { provider: 'codex' });
+    writeFileSync(codexIndex, JSON.stringify({ id: 'n-s4', thread_name: 'Fix the badge', updated_at: '' }) + '\n');
+    const before = named();
+
+    await service.poll();
+    expect(named()).toBe(before + 1);
+    expect(entry()).toMatchObject({ sessionTitle: 'Badge fix', sessions: [{ sessionId: 's4', title: 'Fix the badge', provider: 'codex' }, { sessionId: 's3', title: 'Setup session' }] });
+    appendFileSync(transcript, JSON.stringify({ type: 'custom-title', customTitle: 'Badge count, renamed' }) + '\n');
+    appendFileSync(codexIndex, JSON.stringify({ id: 'n-s4', thread_name: 'Badge, take two', updated_at: '' }) + '\n');
+    await service.poll();
+    expect(named()).toBe(before + 2);
+    expect(page.frames.at(-1)).toMatchObject({ type: 'conversations', conversations: [{ sessionTitle: 'Badge count, renamed', sessions: [{ title: 'Badge, take two' }, { title: 'Setup session' }] }] });
+    // Nothing renamed, nothing sent.
+    await service.poll();
+    expect(named()).toBe(before + 2);
 
     // The page opens the ended setup session read-only.
     expect(service.select({ window: page.key, opId: 'o', workItemId: 3, sessionId: 's3' }).status).toBe(200);

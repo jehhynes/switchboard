@@ -48,6 +48,7 @@ export interface NativeRequest {
 /** An earlier session of a conversation, as the web page's dropdown lists it. */
 export interface SessionEntry {
   sessionId: string;
+  /** Its name as its CLI gives it, else its first message, else Setup or Task session. */
   title: string;
   state: SessionState;
   startedAt: number;
@@ -63,6 +64,8 @@ export interface ConversationEntry {
   conversation: SessionView['conversation'] | null;
   unread: number;
   provider?: string;
+  /** On the web page, the current session's name as its CLI gives it, else its first message, else Setup or Task session; left out with no session and for a VS Code window. */
+  sessionTitle?: string;
   /** On the web page, the work item's earlier sessions, newest first; left out with none. */
   sessions?: SessionEntry[];
 }
