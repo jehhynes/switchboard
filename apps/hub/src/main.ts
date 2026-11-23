@@ -3,7 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { hubBundlePath, hubLogPath, switchboardHome } from '@switchboard/core';
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { ATTACH_TIMEOUT_MS, buildOf, carriesBuilds, installCarried, reportReady, startSuccessor, bundleHome, killProcessTree, connectHolder, currentHolderBuild, createHubApp, findHub, gitBashRoot, handledBody, isSnapshotWorker, postToHub, recordedHubPid, registerTitle, reportBody, runAttach, runHolder, runAutostart, runSnapshotWorker, serveHub, START_FLAGS, START_WAIT_MS, startDetached, stopHub, ticketBody } from '@switchboard/hub';
+import { ATTACH_TIMEOUT_MS, buildOf, carriesBuilds, installCarried, loadConfigFolder, reportReady, runConfig, startSuccessor, bundleHome, killProcessTree, connectHolder, currentHolderBuild, createHubApp, findHub, gitBashRoot, handledBody, isSnapshotWorker, postToHub, recordedHubPid, registerTitle, reportBody, runAttach, runHolder, runAutostart, runSnapshotWorker, serveHub, START_FLAGS, START_WAIT_MS, startDetached, stopHub, ticketBody } from '@switchboard/hub';
 
 declare const __SWITCHBOARD_VERSION__: string | undefined;
 
@@ -348,7 +348,21 @@ async function install(home: string, rest: readonly string[], bundle: string | u
     process.stderr.write(`${error}\n`);
   }
 
-  const failed = errors.length > 0 ? 3 : 0;
+  // The installed hub starts on config.json's folder, so import it now (architecture.md § Config folder).
+  // A running hub's folder is what a window, the dock or a login entry chose, and its restart onto this build reads config.json.
+  const loaded = loadConfigFolder(configDeps(home), null, { running: running?.configDir ?? null });
+
+  if ('error' in loaded) {
+    process.stderr.write(`${loaded.error}.\n`);
+  } else {
+    for (const notice of loaded.notices) {
+      process.stderr.write(`${notice}\n`);
+    }
+
+    process.stdout.write(`Config folder: ${loaded.dir}.\n`);
+  }
+
+  const failed = errors.length > 0 || 'error' in loaded ? 3 : 0;
 
   if (running === null || running.build === build) {
     return failed;
@@ -466,7 +480,18 @@ async function start(home: string, rest: readonly string[]): Promise<number> {
     return 1;
   }
 
-  const configDir = resolve(flag(passed, 'config') || switchboardHome(home));
+  const loaded = loadConfigFolder(configDeps(home), flag(passed, 'config'));
+
+  if ('error' in loaded) {
+    process.stderr.write(`Not starting: ${loaded.error}.\n`);
+    return 1;
+  }
+
+  for (const notice of loaded.notices) {
+    process.stderr.write(`${notice}\n`);
+  }
+
+  const configDir = loaded.dir;
   const child = startDetached(process.execPath, bundle, home, [`--home=${home}`, `--config=${configDir}`, ...passed.filter((argument) => !argument.startsWith('--config='))]);
 
   if (rest.includes('--no-wait')) {
@@ -515,8 +540,27 @@ async function autostart(home: string, rest: readonly string[]): Promise<number>
     runtime: process.execPath,
     electron: process.versions['electron'] !== undefined,
     bundle: hubBundlePath(home),
-    defaultConfigDir: async () => (await findHub(home))?.configDir || switchboardHome(home),
+    configDir: async (persist) => {
+      const loaded = loadConfigFolder(configDeps(home), null, { persist, running: (await findHub(home))?.configDir ?? null });
+
+      return 'error' in loaded ? loaded : loaded.dir;
+    },
     exists: existsSync,
+    out: (text) => process.stdout.write(text),
+    err: (text) => process.stderr.write(text),
+  });
+}
+
+function configDeps(home: string): { home: string; osHome: string; platform: NodeJS.Platform; env: NodeJS.ProcessEnv } {
+  return { home: resolve(home), osHome: homedir(), platform: process.platform, env: process.env };
+}
+
+/** Shows or sets the config folder in config.json (architecture.md § Config folder). Exit codes as `runConfig`'s. */
+function config(home: string, rest: readonly string[]): Promise<number> {
+  return runConfig(rest, {
+    ...configDeps(home),
+    running: async () => (await findHub(home))?.configDir ?? null,
+    restart: () => restart(home, []),
     out: (text) => process.stdout.write(text),
     err: (text) => process.stderr.write(text),
   });
@@ -526,12 +570,12 @@ async function autostart(home: string, rest: readonly string[]): Promise<number>
 async function main(argv: readonly string[]): Promise<number> {
   const bundle = process.argv[1];
 
-  if (argv[0] === 'report' || argv[0] === 'register' || argv[0] === 'attach' || argv[0] === 'holder' || argv[0] === 'web' || argv[0] === 'restart' || argv[0] === 'install' || argv[0] === 'start' || argv[0] === 'autostart') {
+  if (argv[0] === 'report' || argv[0] === 'register' || argv[0] === 'attach' || argv[0] === 'holder' || argv[0] === 'web' || argv[0] === 'restart' || argv[0] === 'install' || argv[0] === 'start' || argv[0] === 'autostart' || argv[0] === 'config') {
     // A session runs `<home>/.switchboard/hub.js report …`, so the bundle's location names its home; the extension's own bundle names none.
     const home = flag(argv, 'home') || bundleHome(bundle, homedir());
     const rest = argv.slice(1).filter((argument) => !argument.startsWith('--home'));
 
-    const commands = { report, register, attach, holder, web, restart, start, autostart, install: (home: string, rest: readonly string[]) => install(home, rest, bundle) };
+    const commands = { report, register, attach, holder, web, restart, start, autostart, config, install: (home: string, rest: readonly string[]) => install(home, rest, bundle) };
 
     return commands[argv[0] as keyof typeof commands](home, rest);
   }
@@ -581,7 +625,19 @@ async function main(argv: readonly string[]): Promise<number> {
 
   const build = bundle === undefined ? 'unknown' : buildOf(bundle);
   const log = (line: string) => process.stdout.write(`${new Date().toISOString()} ${line}\n`);
-  const configDir = resolve(flag(argv, 'config') || switchboardHome(home));
+  const loaded = loadConfigFolder(configDeps(home), flag(argv, 'config'));
+
+  if ('error' in loaded) {
+    process.stderr.write(`Not starting: ${loaded.error}; pid ${process.pid} exiting.\n`);
+
+    return 1;
+  }
+
+  for (const notice of loaded.notices) {
+    log(notice);
+  }
+
+  const configDir = loaded.dir;
   const result = await serveHub({ home, version: VERSION, build, configDir, log, app: (carried) => createHubApp({ home, configDir, log, handover: carried, ...(codeModeIdle === null ? {} : { codeModeIdleMs: Number(codeModeIdle) }), ...(bundle === undefined ? {} : { snapshotWorker: resolve(bundle) }) }), ...(idle > 0 ? { idleMs: idle } : {}), ...(takeover === null ? {} : { takeover: Number(takeover) }), restart: { bundle: hubBundlePath(home), successor: () => startSuccessor({ execPath: process.execPath, bundle: hubBundlePath(home), args: argv, env: process.env, logPath: hubLogPath(home) }) }, ...(browserPort === null ? {} : { browserPort: Number(browserPort) || null }), ...(pagePort === null ? {} : { pagePort: Number(pagePort) }) });
 
   if ('existing' in result) {

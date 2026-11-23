@@ -4,11 +4,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { createServer, request } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 import type { AddressInfo } from 'node:net';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { hubBundlePath, hubLogPath, hubRecordPath, parseHubRecord, switchboardHome } from '@switchboard/core';
-import { buildOf, findHub, holdLock, installLockAddress, keepHub, makeEnsure, openEvents, releaseLock, serveHub, stopHub } from '@switchboard/hub';
+import { buildOf, findHub, holdLock, installLockAddress, keepHub, makeEnsure, openEvents, releaseLock, serveHub, stopHub, vscodeSettingsPath } from '@switchboard/hub';
 import type { HubRecord } from '@switchboard/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -48,7 +48,7 @@ function launch(entry: string, extra: Record<string, string | undefined>, args: 
     delete env[key];
   }
 
-  const child = spawn(process.execPath, [entry, ...args, `--home=${home}`, ...(['report', 'register', 'attach', 'holder', 'restart', 'install', 'autostart'].includes(args[0] ?? '') ? [] : ['--browser-port=0', '--page-port=0'])], { windowsHide: true, env });
+  const child = spawn(process.execPath, [entry, ...args, `--home=${home}`, ...(['report', 'register', 'attach', 'holder', 'restart', 'install', 'autostart', 'config'].includes(args[0] ?? '') ? [] : ['--browser-port=0', '--page-port=0'])], { windowsHide: true, env });
   let stdout = '';
   let stderr = '';
 
@@ -175,6 +175,38 @@ describe('hub entry point', () => {
     await start('--stop').exited;
     expect((await first.exited).code).toBe(0);
   });
+
+  it('imports --config into config.json once, then serves the folder config.json names, and refuses a config.json it cannot use', async () => {
+    const imported = join(home, 'imported');
+    const first = start('--idle-ms=60000', `--config=${imported}`);
+
+    expect((await recorded()).configDir).toBe(resolve(imported));
+    expect(JSON.parse(readFileSync(join(switchboardHome(home), 'config.json'), 'utf8'))).toEqual({ configDir: resolve(imported) });
+    await start('--stop').exited;
+    expect((await first.exited).code).toBe(0);
+
+    const chosen = join(home, 'chosen');
+
+    mkdirSync(chosen);
+    expect(await start('config', 'set', 'configDir', chosen).exited).toMatchObject({ code: 0, stdout: `The config folder is now ${resolve(chosen)}.\nThe hub reads it when it starts.\n` });
+    expect(await start('config', 'get', 'configDir').exited).toMatchObject({ code: 0, stdout: `${resolve(chosen)}\n` });
+
+    // A stale --config, such as an older login entry's, does not move the hub off the folder config.json names.
+    const second = start('--idle-ms=60000', `--config=${imported}`);
+
+    expect((await recorded()).configDir).toBe(resolve(chosen));
+    await start('--stop').exited;
+    expect((await second.exited).code).toBe(0);
+    await until(() => (record() === null ? true : null));
+
+    writeFileSync(join(switchboardHome(home), 'config.json'), '{');
+
+    const refused = await start('--idle-ms=60000').exited;
+
+    expect(refused.code).toBe(1);
+    expect(refused.stderr).toBe(`Not starting: ${join(switchboardHome(home), 'config.json')} is not valid JSON; fix it, or run hub.js config set configDir <folder>; pid ${refused.pid} exiting.\n`);
+    expect(record()).toBeNull();
+  }, 60_000);
 
   it('sends handled registration and release through the CLI and prints the returned key', async () => {
     expect((await start('report', 'handled', 's1').exited).code).toBe(1);
@@ -764,7 +796,8 @@ describe('hub entry point', () => {
     try {
       expect(quick.code).toBe(0);
       expect(quick.stdout).toMatch(/^Starting the hub \(pid \d+\); its output goes to /);
-      expect((await recorded()).configDir).toBe(resolve(home, '.switchboard'));
+      // The first start imported its --config into config.json, which every later start reads.
+      expect((await recorded()).configDir).toBe(resolve(configDir));
     } finally {
       await until(() => (record() !== null ? true : null));
       await start('--stop').exited;
@@ -772,7 +805,7 @@ describe('hub entry point', () => {
   }, 60_000);
   it('refuses hub.js autostart usage errors before reading or changing any login start', async () => {
     for (const args of [['autostart', 'maybe'], ['autostart', 'on', 'off'], ['autostart', 'on', '--force']]) {
-      expect(await start(...args).exited).toMatchObject({ code: 1, stdout: '', stderr: 'Usage: hub.js autostart [on | off] [--config=<dir>] [--dry-run]\n' });
+      expect(await start(...args).exited).toMatchObject({ code: 1, stdout: '', stderr: 'Usage: hub.js autostart [on | off] [--dry-run]\n' });
     }
   });
   it("installs the builds a build folder carries on hub.js install, and refuses to run from another folder", async () => {
@@ -793,17 +826,38 @@ describe('hub entry point', () => {
     writeFileSync(join(dist, 'voice', 'voice.js'), '');
     writeFileSync(join(dist, 'voice', 'manifest.json'), JSON.stringify({ build: 'fedcba9876543210', files: ['voice.js'] }));
 
-    const installed = await launch(join(dist, 'hub.js'), {}, ['install']).exited;
+    // A scratch VS Code setting under the test home, and a running hub on another folder: the install imports the running hub's folder, which
+    // its restart onto the new build then reads, rather than the setting.
+    const vscode = vscodeSettingsPath({ home: resolve(home), osHome: homedir(), platform: process.platform, env: process.env });
+
+    mkdirSync(dirname(vscode), { recursive: true });
+    writeFileSync(vscode, JSON.stringify({ 'switchboard.configDir': '~/cfg' }));
+
+    const server = createServer((_req, res) => res.end(JSON.stringify({ hub: 'switchboard', protocol: 1, version: '0.0.0', pid: process.pid })));
+
+    await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+    mkdirSync(switchboardHome(home), { recursive: true });
+    writeFileSync(hubRecordPath(home), JSON.stringify({ protocol: 1, version: '0.0.0', build: 'old', configDir: resolve(home, 'running'), execPath: process.execPath, port: (server.address() as AddressInfo).port, token: 't', pid: process.pid, startedAt: 'now' }));
+
+    let installed: Awaited<ReturnType<typeof launch>['exited']>;
+
+    try {
+      installed = await launch(join(dist, 'hub.js'), {}, ['install']).exited;
+    } finally {
+      server.close();
+      rmSync(hubRecordPath(home));
+    }
 
     expect(installed.stderr).toBe('');
     expect(installed.code).toBe(0);
-    expect(installed.stdout).toBe(`Installed hub build ${buildOf(join(dist, 'hub.js'))} in ${hubBundlePath(home)}.\n`);
+    expect(installed.stdout).toBe(`Installed hub build ${buildOf(join(dist, 'hub.js'))} in ${hubBundlePath(home)}.\nConfig folder: ${resolve(home, 'running')}.\nThe running hub (pid ${process.pid}, build old) restarts onto it once it is quiet; hub.js restart waits for that.\n`);
+    expect(JSON.parse(readFileSync(join(switchboardHome(home), 'config.json'), 'utf8'))).toEqual({ configDir: resolve(home, 'running') });
     expect(readFileSync(hubBundlePath(home), 'utf8')).toBe(readFileSync(join(dist, 'hub.js'), 'utf8'));
     expect(JSON.parse(readFileSync(join(switchboardHome(home), 'holder', 'current.json'), 'utf8'))).toEqual({ build: holderBuild });
 
     const again = await launch(join(dist, 'hub.js'), {}, ['install']).exited;
 
-    expect(again.stdout).toBe(`Already installed: hub build ${buildOf(join(dist, 'hub.js'))} in ${hubBundlePath(home)}.\n`);
+    expect(again.stdout).toBe(`Already installed: hub build ${buildOf(join(dist, 'hub.js'))} in ${hubBundlePath(home)}.\nConfig folder: ${resolve(home, 'running')}.\n`);
     // The installed copy is not a build folder.
     expect((await launch(hubBundlePath(home), {}, ['install']).exited).code).toBe(1);
   });
@@ -822,7 +876,7 @@ describe('hub entry point', () => {
     const first = await launch(join(dist, 'hub.js'), {}, ['install', '--wait']).exited;
 
     // No hub runs, so there is nothing to wait for.
-    expect(first).toMatchObject({ code: 0, stderr: '', stdout: `Installed hub build ${buildOf(join(dist, 'hub.js'))} in ${hubBundlePath(home)}.\n` });
+    expect(first).toMatchObject({ code: 0, stderr: '', stdout: `Installed hub build ${buildOf(join(dist, 'hub.js'))} in ${hubBundlePath(home)}.\nConfig folder: ${switchboardHome(home)}.\n` });
 
     launch(hubBundlePath(home), {}, ['--idle-ms=60000']);
 
@@ -831,7 +885,7 @@ describe('hub entry point', () => {
     try {
       const same = await launch(join(dist, 'hub.js'), {}, ['install', '--wait']).exited;
 
-      expect(same).toMatchObject({ code: 0, stdout: `Already installed: hub build ${before.build} in ${hubBundlePath(home)}.\n` });
+      expect(same).toMatchObject({ code: 0, stdout: `Already installed: hub build ${before.build} in ${hubBundlePath(home)}.\nConfig folder: ${switchboardHome(home)}.\n` });
       expect(record()?.pid).toBe(before.pid);
 
       writeFileSync(join(dist, 'hub.js'), `${shim}// another build\n`);
@@ -844,7 +898,7 @@ describe('hub entry point', () => {
       expect(waited.code).toBe(0);
       expect(after.pid).not.toBe(before.pid);
       expect(after.build).toBe(next);
-      expect(waited.stdout).toMatch(new RegExp(`^Installed hub build ${next} in .*\\.\\nThe running hub \\(pid ${before.pid}, build ${before.build}\\) restarts onto it once it is quiet; waiting for that\\.\\n(It waits until it is quiet: .*\\.\\n)?Restarted: pid ${after.pid}, build ${next}\\.\\n$`));
+      expect(waited.stdout).toMatch(new RegExp(`^Installed hub build ${next} in .*\\.\\nConfig folder: .*\\.\\nThe running hub \\(pid ${before.pid}, build ${before.build}\\) restarts onto it once it is quiet; waiting for that\\.\\n(It waits until it is quiet: .*\\.\\n)?Restarted: pid ${after.pid}, build ${next}\\.\\n$`));
     } finally {
       await start('--stop').exited;
     }

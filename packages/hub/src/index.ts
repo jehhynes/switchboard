@@ -11,6 +11,7 @@ export * from './server.js';
 export * from './spawn.js';
 export * from './start.js';
 export * from './autostart.js';
+export * from './configFolder.js';
 export * from './app.js';
 export * from './config.js';
 export * from './git.js';

@@ -8,7 +8,7 @@ import type { AutostartCli } from '../src/autostart.js';
 const REG = 'C:\\Windows\\System32\\reg.exe';
 const NODE = 'C:\\Program Files\\nodejs\\node.exe';
 const BUNDLE = 'C:\\Users\\me\\.switchboard\\hub.js';
-const COMMAND = `"${NODE}" "${BUNDLE}" "start" "--no-wait" "--home=C:\\Users\\me" "--config=C:\\Users\\me\\.claude\\switchboard"`;
+const COMMAND = `"${NODE}" "${BUNDLE}" "start" "--no-wait" "--home=C:\\Users\\me"`;
 
 /** A `reg query` answer as reg.exe prints it. */
 const answer = (key: string, name: string, data: string): string => `\r\n${key}\r\n    ${name}    REG_SZ    ${data}\r\n\r\n`;
@@ -55,7 +55,7 @@ function fake(overrides: Partial<AutostartCli> = {}): Fake {
     runtime: NODE,
     electron: false,
     bundle: BUNDLE,
-    defaultConfigDir: async () => 'C:\\Users\\me\\.claude\\switchboard',
+    configDir: async (persist) => (persisted.push(persist), 'C:\\Users\\me\\.claude\\switchboard'),
     exists: () => true,
     out: (text) => out.push(text),
     err: (text) => err.push(text),
@@ -64,6 +64,9 @@ function fake(overrides: Partial<AutostartCli> = {}): Fake {
 
   return { cli, runs, out, err, registry };
 }
+
+/** Each persist argument runAutostart passed to configDir. */
+const persisted: boolean[] = [];
 
 const changes = (runs: string[][]): string[][] => runs.filter((run) => run[1] !== 'query');
 
@@ -92,7 +95,8 @@ describe('hub.js autostart on Windows', () => {
       [REG, 'add', `${LINK_KEY}\\shell\\open\\command`, '/ve', '/t', 'REG_SZ', '/d', COMMAND, '/f'],
     ]);
     expect(COMMAND).not.toContain('%');
-    expect(out.join('')).toBe('The hub now starts at login, and switchboard:start links start it, for C:\\Users\\me with config folder C:\\Users\\me\\.claude\\switchboard.\n');
+    expect(out.join('')).toBe('The hub now starts at login, and switchboard:start links start it, for C:\\Users\\me, with the config folder config.json names, now C:\\Users\\me\\.claude\\switchboard.\n');
+    expect(COMMAND).not.toContain('--config');
 
     out.length = 0;
     expect(await runAutostart([], cli)).toBe(0);
@@ -100,20 +104,23 @@ describe('hub.js autostart on Windows', () => {
     expect(registry.size).toBe(4);
   });
 
-  it('names the Run value by hash for another home, so a test home never replaces the real one, and takes --config', async () => {
+  it('names the Run value by hash for another home, so a test home never replaces the real one, ', async () => {
     const { cli, runs } = fake({ home: 'D:\\scratch', bundle: 'D:\\scratch\\.switchboard\\hub.js' });
-    const name = runValueName({ runtime: NODE, bundle: cli.bundle, home: cli.home, configDir: 'D:\\cfg' }, cli.osHome);
+    const name = runValueName({ runtime: NODE, bundle: cli.bundle, home: cli.home }, cli.osHome);
 
     expect(name).toMatch(/^Switchboard [0-9a-f]{8}$/);
-    expect(await runAutostart(['on', '--config=D:\\cfg'], cli)).toBe(0);
-    expect(changes(runs)[0]).toEqual([REG, 'add', RUN_KEY, '/v', name, '/t', 'REG_SZ', '/d', `"${NODE}" "D:\\scratch\\.switchboard\\hub.js" "start" "--no-wait" "--home=D:\\scratch" "--config=D:\\cfg"`, '/f']);
+    expect(await runAutostart(['on'], cli)).toBe(0);
+    expect(changes(runs)[0]).toEqual([REG, 'add', RUN_KEY, '/v', name, '/t', 'REG_SZ', '/d', `"${NODE}" "D:\\scratch\\.switchboard\\hub.js" "start" "--no-wait" "--home=D:\\scratch"`, '/f']);
   });
 
   it('prints the changes on --dry-run and makes none', async () => {
     const { cli, runs, out } = fake();
 
+    persisted.length = 0;
     expect(await runAutostart(['on', '--dry-run'], cli)).toBe(0);
     expect(changes(runs)).toEqual([]);
+    // A dry run reads the config folder without importing it into config.json.
+    expect(persisted).toEqual([false]);
     expect(out.join('')).toContain(`Would run "${REG}" "add" "${RUN_KEY}" "/v" "Switchboard" "/t" "REG_SZ" "/d"`);
     expect(out.join('').split('\n').filter((line) => line.startsWith('Would run'))).toHaveLength(4);
   });
@@ -163,7 +170,7 @@ describe('hub.js autostart on Windows', () => {
   });
 
   it('refuses usage errors, VS Code\'s runtime, other platforms, unquotable paths and a missing hub, changing nothing', async () => {
-    for (const rest of [['maybe'], ['on', 'off'], ['on', '--force'], ['--dry-run'], ['on', '--config=']]) {
+    for (const rest of [['maybe'], ['on', 'off'], ['on', '--force'], ['--dry-run'], ['on', '--config=D:\\cfg']]) {
       const { cli, runs, err } = fake();
 
       expect(await runAutostart(rest, cli)).toBe(1);
@@ -176,6 +183,7 @@ describe('hub.js autostart on Windows', () => {
       [{ platform: 'darwin' }, 'hub.js autostart works on Windows and Linux, not darwin.\n'],
       [{ home: 'C:\\Users\\100%', bundle: 'C:\\Users\\100%\\.switchboard\\hub.js' }, 'Refused: C:\\Users\\100%\\.switchboard\\hub.js holds a character the login start cannot quote safely (" % or a line break).\n'],
       [{ exists: () => false }, `No hub is installed in ${BUNDLE}; run <extension folder>/dist/hub.js install first.\n`],
+      [{ configDir: async () => ({ error: 'C:\\Users\\me\\.switchboard\\config.json is not valid JSON; fix it, or run hub.js config set configDir <folder>' }) }, 'Refused: C:\\Users\\me\\.switchboard\\config.json is not valid JSON; fix it, or run hub.js config set configDir <folder>.\n'],
     ];
 
     for (const [overrides, message] of cases) {
@@ -210,8 +218,8 @@ describe('hub.js autostart on Linux', () => {
   });
 
   const linux = (overrides: Partial<AutostartCli> = {}): Fake =>
-    fake({ platform: 'linux', osHome: '/home/me', env: { XDG_CONFIG_HOME: join(xdg, 'config'), XDG_DATA_HOME: join(xdg, 'data') }, home: '/home/me', runtime: '/usr/bin/node', bundle: '/home/me/.switchboard/hub.js', defaultConfigDir: async () => '/home/me/.switchboard', run: async (command, args) => ({ code: 0, stdout: [command, ...args].join(' ') }), ...overrides });
-  const EXEC = 'Exec="/usr/bin/node" "/home/me/.switchboard/hub.js" "start" "--no-wait" "--home=/home/me" "--config=/home/me/.switchboard"';
+    fake({ platform: 'linux', osHome: '/home/me', env: { XDG_CONFIG_HOME: join(xdg, 'config'), XDG_DATA_HOME: join(xdg, 'data') }, home: '/home/me', runtime: '/usr/bin/node', bundle: '/home/me/.switchboard/hub.js', configDir: async () => '/home/me/.switchboard', run: async (command, args) => ({ code: 0, stdout: [command, ...args].join(' ') }), ...overrides });
+  const EXEC = 'Exec="/usr/bin/node" "/home/me/.switchboard/hub.js" "start" "--no-wait" "--home=/home/me"';
 
   it('writes an XDG autostart entry and a switchboard: handler, makes it the default with xdg-mime, and removes both', async () => {
     const runs: string[][] = [];

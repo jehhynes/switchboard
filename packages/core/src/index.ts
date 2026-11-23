@@ -5,6 +5,7 @@ export * from './hookHomes.js';
 export * from './hubRecord.js';
 export * from './model.js';
 export * from './paths.js';
+export * from './hubConfig.js';
 export * from './playbook.js';
 export * from './repo.js';
 export * from './settings.js';

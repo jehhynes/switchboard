@@ -1860,7 +1860,7 @@ export function pageView(state: EditorState): PageView {
     return { title: name, filePath: path, buttons, notes: [], errors: loose, message: null, sections };
   }
 
-  return settingsPage(state, 'General', generalFields(state), [], []);
+  return settingsPage(state, 'General', generalFields(state), [], [configFolderNote(state.config.configDir)]);
 }
 
 const FIX_ENTRY = 'Fix this entry in settings.json in an editor, or delete it.';
@@ -1925,6 +1925,11 @@ function namespacePage(state: EditorState, space: string): PageView {
   });
 
   return { ...base, message: null, table: { columns, rows } };
+}
+
+/** Where the config folder is and how to change it, since the hub keeps it outside settings.json (architecture.md § Config folder). */
+export function configFolderNote(configDir: string): string {
+  return `Config folder: ${configDir}. Change it with hub.js config set configDir <folder>.`;
 }
 
 export function settingsPage(state: EditorState, title: string, sections: readonly Section[], buttons: PageButton[], notes: string[]): PageView {

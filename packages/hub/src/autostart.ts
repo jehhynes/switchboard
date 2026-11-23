@@ -2,12 +2,14 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, posix, win32 } from 'node:path';
 
-/** What the login start and the `switchboard:` link run: `<runtime> <bundle> start --no-wait --home=<home> --config=<configDir>`. */
+/**
+ * What the login start and the `switchboard:` link run: `<runtime> <bundle> start --no-wait --home=<home>`. They name no config folder, so `hub.js start`
+ * reads config.json and `hub.js config set` needs no new entries (architecture.md § Config folder).
+ */
 export interface StartEntry {
   runtime: string;
   bundle: string;
   home: string;
-  configDir: string;
 }
 
 export interface AutostartDeps {
@@ -49,7 +51,7 @@ export function runValueName(entry: StartEntry, osHome: string): string {
 }
 
 export function startArguments(entry: StartEntry): string[] {
-  return [entry.runtime, entry.bundle, 'start', '--no-wait', `--home=${entry.home}`, `--config=${entry.configDir}`];
+  return [entry.runtime, entry.bundle, 'start', '--no-wait', `--home=${entry.home}`];
 }
 
 /**
@@ -58,7 +60,7 @@ export function startArguments(entry: StartEntry): string[] {
  */
 export function unsafe(entry: StartEntry, platform: NodeJS.Platform): string | null {
   const refused = platform === 'win32' ? /["%\r\n]/ : /["%\r\n\\$`]/;
-  const path = [entry.runtime, entry.bundle, entry.home, entry.configDir].find((one) => refused.test(one));
+  const path = [entry.runtime, entry.bundle, entry.home].find((one) => refused.test(one));
 
   return path === undefined ? null : `${path} holds a character the login start cannot quote safely (${platform === 'win32' ? '" % or a line break' : '" % \\ $ ` or a line break'})`;
 }
@@ -221,14 +223,14 @@ export interface AutostartCli extends AutostartDeps {
   electron: boolean;
   /** The installed hub, `<home>/.switchboard/hub.js`. */
   bundle: string;
-  /** The running hub's config folder, else the Switchboard home. */
-  defaultConfigDir(): Promise<string>;
+  /** The config folder `hub.js start` reads from config.json, imported first when there is none, or why config.json cannot be used. */
+  configDir(persist: boolean): Promise<string | { error: string }>;
   exists(path: string): boolean;
   out(text: string): void;
   err(text: string): void;
 }
 
-export const AUTOSTART_USAGE = 'Usage: hub.js autostart [on | off] [--config=<dir>] [--dry-run]\n';
+export const AUTOSTART_USAGE = 'Usage: hub.js autostart [on | off] [--dry-run]\n';
 
 /**
  * `hub.js autostart`: shows, turns on or turns off the login-time start and the `switchboard:` link, which both run `hub.js start` for this home with
@@ -239,9 +241,7 @@ export async function runAutostart(rest: readonly string[], cli: AutostartCli): 
   const words = rest.filter((argument) => !argument.startsWith('--'));
   const flags = rest.filter((argument) => argument.startsWith('--'));
   const verb = words[0] ?? 'status';
-  const config = flags.find((argument) => argument.startsWith('--config='))?.slice('--config='.length);
-
-  if (words.length > 1 || !['status', 'on', 'off'].includes(verb) || flags.some((argument) => argument !== '--dry-run' && !argument.startsWith('--config=')) || (verb === 'status' && flags.length > 0) || config === '') {
+  if (words.length > 1 || !['status', 'on', 'off'].includes(verb) || flags.some((argument) => argument !== '--dry-run') || (verb === 'status' && flags.length > 0)) {
     cli.err(AUTOSTART_USAGE);
     return 1;
   }
@@ -256,9 +256,9 @@ export async function runAutostart(rest: readonly string[], cli: AutostartCli): 
     return 1;
   }
 
-  // The running hub's config folder by default, so a VS Code window with switchboard.configDir set accepts the hub the login start starts.
-  const entry: StartEntry = { runtime: cli.runtime, bundle: cli.bundle, home: cli.home, configDir: (cli.platform === 'win32' ? win32 : posix).resolve(config ?? (await cli.defaultConfigDir())) };
+  const entry: StartEntry = { runtime: cli.runtime, bundle: cli.bundle, home: cli.home };
   const state = await autostartState(entry, cli);
+  let folder = '';
   const ours = state.link !== null && namesBundle(state.link, entry, cli.platform);
 
   if (verb === 'status') {
@@ -278,6 +278,16 @@ export async function runAutostart(rest: readonly string[], cli: AutostartCli): 
       cli.err(`No hub is installed in ${entry.bundle}; run <extension folder>/dist/hub.js install first.\n`);
       return 1;
     }
+
+    // The entries start a hub on config.json's folder, so one that cannot be used would leave every login start refused.
+    const configDir = await cli.configDir(!flags.includes('--dry-run'));
+
+    if (typeof configDir !== 'string') {
+      cli.err(`Refused: ${configDir.error}.\n`);
+      return 1;
+    }
+
+    folder = configDir;
   }
 
   const steps = verb === 'on' ? onSteps(entry, cli) : offSteps(entry, state, cli);
@@ -295,7 +305,7 @@ export async function runAutostart(rest: readonly string[], cli: AutostartCli): 
   }
 
   if (verb === 'on') {
-    cli.out(`The hub now starts at login, and ${LINK_URL} links start it, for ${entry.home} with config folder ${entry.configDir}.${state.link !== null && !ours ? ` This replaced the link that ran ${state.link}.` : ''}\n`);
+    cli.out(`The hub now starts at login, and ${LINK_URL} links start it, for ${entry.home}, with the config folder config.json names, now ${folder}.${state.link !== null && !ours ? ` This replaced the link that ran ${state.link}.` : ''}\n`);
   } else {
     const kept = [state.login !== null && !namesBundle(state.login, entry, cli.platform) ? 'login entry' : null, state.link !== null && !ours ? 'switchboard: link' : null].filter((one) => one !== null);
 

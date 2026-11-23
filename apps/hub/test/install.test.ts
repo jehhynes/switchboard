@@ -54,7 +54,7 @@ describe('the standalone build (npm run install-local)', () => {
 
     expect(installed.stderr).toBe('');
     expect(installed.code).toBe(0);
-    expect(installed.stdout).toBe(`Installed hub build ${buildOf(join(BUILD, 'hub.js'))} in ${hubBundlePath(home)}.\n`);
+    expect(installed.stdout).toBe(`Installed hub build ${buildOf(join(BUILD, 'hub.js'))} in ${hubBundlePath(home)}.\nConfig folder: ${switchboardHome(home)}.\n`);
     expect(readFileSync(hubBundlePath(home)).equals(readFileSync(join(BUILD, 'hub.js')))).toBe(true);
 
     for (const program of ['holder', 'voice']) {

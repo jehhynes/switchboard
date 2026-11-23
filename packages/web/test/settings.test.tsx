@@ -129,6 +129,8 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     expect(texts('.settings-nav-entry .settings-nav-label').slice(0, 5)).toEqual(['General', '+ New GitHub source', '+ New Zoho Desk source', '+ New Forum source', '+ New source']);
     expect(host.querySelector('.settings-nav-entry.current')?.textContent).toContain('General');
     expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('General');
+    // The hub keeps the config folder outside settings.json, so General names it and the command that changes it.
+    expect(texts('.settings-note')).toContain('Config folder: C:/home/.switchboard. Change it with hub.js config set configDir <folder>.');
     expect(host.querySelector('.settings-file')?.textContent).toBe('C:/home/.switchboard/settings.json');
     expect(texts('.settings-section-heading')).toEqual(['Sessions', 'Claude sessions', 'Codex sessions', 'Triage', 'Dock', 'Alerts', 'Web page', 'Diff viewer', 'Remote access', 'Advanced']);
     expect(texts('.settings-section:not(.advanced) .settings-caption label')).toEqual(['Default agent', 'Concurrency', 'Code Mode (experimental)', 'Friction debriefs', 'Model', 'Permission mode', 'Model', 'Permission mode', 'Concurrency', 'Model', 'Timeout (seconds)', 'Rows open in', 'Row click opens', 'Terminal for "Open in terminal"', 'Needs-you alerts from', 'Embedded browser tabs', 'Layout', 'Wrap long lines', 'Tailscale', 'Allowed hosts', 'Allowed logins']);

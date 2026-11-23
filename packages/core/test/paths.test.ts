@@ -23,5 +23,6 @@ describe('paths', () => {
     expect(resolveConfigDir(resolve('D:/git/cfg/'), home, profile)).toEqual({ dir: resolve('D:/git/cfg') });
     expect(resolveConfigDir('cfg', home, profile)).toEqual({ error: 'switchboard.configDir must be an absolute path or start with ~: cfg' });
     expect(resolveConfigDir('~other/cfg', home, profile)).toEqual({ error: 'switchboard.configDir must be an absolute path or start with ~: ~other/cfg' });
+    expect(resolveConfigDir('cfg', home, profile, 'configDir')).toEqual({ error: 'configDir must be an absolute path or start with ~: cfg' });
   });
 });

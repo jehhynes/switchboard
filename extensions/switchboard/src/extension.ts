@@ -2,7 +2,8 @@ import { appendFileSync, unwatchFile, watchFile } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import * as vscode from 'vscode';
-import { hubBundlePath, hubLogPath, resolveConfigDir, switchboardHome } from '@switchboard/core';
+import { hubBundlePath, hubLogPath, readHubConfig, resolveConfigDir, switchboardHome, writeHubConfig } from '@switchboard/core';
+import { windowConfigDir } from './configDir.js';
 import type { HubRecord } from '@switchboard/core';
 import { buildOf, dockView, findHub, installCarried, keepHub, makeEnsure, openEvents, postToHub, stopHub, windowItems, windowsDir, pendingHandover } from '@switchboard/hub';
 import { continueInBackground } from './background.js';
@@ -113,18 +114,18 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
   // SWITCHBOARD_HOME points a window at another home, such as live acceptance's; the hub gets it as --home.
   const home = process.env['SWITCHBOARD_HOME'] || homedir();
   const bundle = hubBundlePath(home);
-  // Read on every use, so all windows follow the current setting and never replace each other's hub.
-  const configDir = (): string => {
-    // An overridden home is for isolation, so it ignores a config folder that would hold the operator's own settings.
-    const setting = process.env['SWITCHBOARD_HOME'] ? '' : vscode.workspace.getConfiguration('switchboard').get<string>('configDir', '');
-    const resolved = resolveConfigDir(setting, home, homedir());
-
-    return 'dir' in resolved ? resolved.dir : resolve(switchboardHome(home));
-  };
+  // The hub owns the config folder in config.json; the setting counts only until config.json exists, and a change to it writes config.json
+  // (architecture.md § Config folder). Read on every use, so all windows follow the current file and never replace each other's hub.
+  const settingDir = (): { dir: string } | { error: string } => resolveConfigDir(vscode.workspace.getConfiguration('switchboard').get<string>('configDir', ''), home, homedir());
+  // An overridden home is for isolation, so it ignores a config folder that would hold the operator's own settings.
+  const configDir = (): string => windowConfigDir(home, homedir(), vscode.workspace.getConfiguration('switchboard').get<string>('configDir', ''), Boolean(process.env['SWITCHBOARD_HOME']));
   const reportConfigError = (): void => {
-    const resolved = resolveConfigDir(vscode.workspace.getConfiguration('switchboard').get<string>('configDir', ''), home, homedir());
+    const file = readHubConfig(home);
+    const resolved = settingDir();
 
-    if ('error' in resolved && !process.env['SWITCHBOARD_HOME']) {
+    if (file !== null && 'error' in file) {
+      void vscode.window.showErrorMessage(`Switchboard: ${file.error}; the hub does not start until it is fixed, or hub.js config set configDir <folder> replaces it.`);
+    } else if (file === null && 'error' in resolved && !process.env['SWITCHBOARD_HOME']) {
       void vscode.window.showErrorMessage(`Switchboard: ${resolved.error}. Using ${configDir()}.`);
     }
   };
@@ -540,6 +541,19 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
       }
 
       reportConfigError();
+
+      const resolved = process.env['SWITCHBOARD_HOME'] ? null : settingDir();
+
+      if (resolved !== null && 'error' in resolved) {
+        // Before config.json exists, reportConfigError has said so.
+        if (readHubConfig(home) !== null) void vscode.window.showErrorMessage(`Switchboard: ${resolved.error}. The config folder stays ${configDir()}.`);
+      } else if (resolved !== null) {
+        try {
+          writeHubConfig(home, resolved.dir);
+        } catch (error) {
+          void vscode.window.showErrorMessage(`Switchboard: the config folder could not be saved: ${String(error)}`);
+        }
+      }
 
       // Stopping the hub ends every window's stream; each reconnects to one hub started on the new folder.
       const record = keeper.current();
