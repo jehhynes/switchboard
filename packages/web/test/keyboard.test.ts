@@ -186,7 +186,7 @@ it('keeps a phone list and its menu shown without opening a conversation, and re
   expect(posts.filter((post) => post.url.endsWith('/select'))).toEqual([]);
   el('.row-menu [data-label="Mark done"]').click();
   await flush();
-  expect(el('.list-error').textContent).toContain('No longer available.');
+  expect(el('#toast .toast-text').textContent).toContain('No longer available.');
 });
 
 it('restores focus when keyed rows reorder inside the same group and closes the menu when its work-item row is clicked', () => {
