@@ -7,6 +7,7 @@ import { DIFF_BUDGET, evictions, largeReason, MAX_IN_FLIGHT, rowKey, wantedIndex
 import { FileIcon } from './fileIcons.js';
 import { mount } from './island.js';
 import { ago } from './render.js';
+import { readVersion } from './readVersion.js';
 import type { ChangeRow, ChangesList, ChangeStage, ChangeStatus, CommitInfo, DiffData, FileData } from '@switchboard/protocol';
 import type { ChangesMount, DiffModule, DiffMount, RowContent } from './diff/types.js';
 
@@ -1162,7 +1163,7 @@ export class ChangesController {
         return;
       }
 
-      open.entry = response.ok ? { state: 'ok', data: body as unknown as FileData, version: response.headers?.get?.('ETag') ?? String(Date.now()) } : { state: 'error', error: String(body['error'] ?? `Switchboard answered ${response.status}.`) };
+      open.entry = response.ok ? { state: 'ok', data: body as unknown as FileData, version: response.headers?.get?.('ETag') ?? readVersion() } : { state: 'error', error: String(body['error'] ?? `Switchboard answered ${response.status}.`) };
     } catch (failure) {
       open.entry = { state: 'error', error: `Switchboard did not answer: ${String(failure)}` };
     }

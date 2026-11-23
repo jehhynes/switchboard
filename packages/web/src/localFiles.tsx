@@ -10,6 +10,7 @@ import { mount } from './island.js';
 import { linkTarget, localFileUrl, localMarkdown } from './localLinks.js';
 import type { LocalFileData } from './localLinks.js';
 import { trusted } from './trusted.js';
+import { readVersion } from './readVersion.js';
 import type { DiffModule, DiffMount } from './diff/types.js';
 
 type LocalEntry = { state: 'loading' } | { state: 'ok'; data: LocalFileData; version: string } | { state: 'error'; error: string };
@@ -192,7 +193,7 @@ export class LocalFilesController {
       const response = await this.deps.fetch(localFileUrl(key, tab.target), { credentials: 'same-origin', cache: 'no-store' });
       const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
 
-      entry = response.ok ? { state: 'ok', data: body as unknown as LocalFileData, version: String(Date.now()) } : { state: 'error', error: String(body['error'] ?? `Switchboard answered ${response.status}.`) };
+      entry = response.ok ? { state: 'ok', data: body as unknown as LocalFileData, version: readVersion() } : { state: 'error', error: String(body['error'] ?? `Switchboard answered ${response.status}.`) };
     } catch (failure) {
       entry = { state: 'error', error: `Switchboard did not answer: ${String(failure)}` };
     }
