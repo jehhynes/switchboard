@@ -118,3 +118,16 @@ describe('the label beside an icon', () => {
     expect(css).not.toMatch(/\.menu-row \.title \{[^}]*padding: 0;/);
   });
 });
+
+describe("Claude's provider mark", () => {
+  const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, selector]) => selector!.includes('[aria-label="Claude"]')).map(([, selector, body]) => [selector!.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^.*@media[^{]*\{/s, '').trim(), body!.trim()]);
+
+  it('ClaudeMark_AnyContext_HasNoBackgroundAndTakesTheTextColourWhereOrangeLacksContrast', () => {
+    expect(rules).toEqual([
+      [':is(.provider, .provider-option-mark)[aria-label="Claude"]', 'color: #D97757;'],
+      [':is(.menu-row:hover, .menu-row:focus, [aria-pressed="true"]) :is(.provider, .provider-option-mark)[aria-label="Claude"]', 'color: inherit;'],
+      [':is(.provider, .provider-option-mark)[aria-label="Claude"]', 'color: inherit;'],
+    ]);
+    expect(css).toMatch(/@media \(prefers-color-scheme: light\) \{ :is\(\.provider, \.provider-option-mark\)\[aria-label="Claude"\] \{ color: inherit; \} \}/);
+  });
+});

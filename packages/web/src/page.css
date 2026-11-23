@@ -368,12 +368,11 @@ button.icon:hover, a.icon:hover { background: var(--vscode-toolbar-hoverBackgrou
 button.picker .title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 button.picker > .codicon, button.picker > .provider, button.picker > .count, .header > button.icon { flex: none; }
 .provider { flex: none; display: inline-flex; align-items: center; color: var(--vscode-foreground); font-size: 16px; }
-/* Claude's mark in its brand colour, #D97757, in both schemes: 5.7:1 on Dark Modern's side bar (#181818) and 5.3:1 on its menus (#1F1F1F). Where it would be under 3:1, on a
-   highlighted menu row's blue and on Light Modern's greys, it stands on a white disc (3.1:1). Codex keeps the text colour. */
-:is(.provider, .provider-option-mark)[aria-label="Claude"] { box-sizing: border-box; align-items: center; justify-content: center; width: 1.25em; height: 1.25em; border-radius: 50%; color: #D97757; }
-:is(.provider, .provider-option-mark)[aria-label="Claude"] > svg { width: 0.875em; height: 0.875em; }
-:is(.menu-row:hover, .menu-row:focus, .menu-row[aria-checked="true"], [aria-pressed="true"]) :is(.provider, .provider-option-mark)[aria-label="Claude"] { background: #fff; }
-@media (prefers-color-scheme: light) { :is(.provider, .provider-option-mark)[aria-label="Claude"] { background: #fff; } }
+/* Claude's mark in its brand colour, #D97757, on no background of its own: 5.7:1 on Dark Modern's side bar (#181818) and 5.3:1 on its menus (#1F1F1F). Where it would be under
+   3:1, on a highlighted menu row's or pressed button's blue and on Light Modern's greys, it takes the text colour around it. */
+:is(.provider, .provider-option-mark)[aria-label="Claude"] { color: #D97757; }
+:is(.menu-row:hover, .menu-row:focus, [aria-pressed="true"]) :is(.provider, .provider-option-mark)[aria-label="Claude"] { color: inherit; }
+@media (prefers-color-scheme: light) { :is(.provider, .provider-option-mark)[aria-label="Claude"] { color: inherit; } }
 /* The view options menu's Persona… row dims its icon while the persona's tone waits for a resume. */
 .persona-row.pending .menu-gutter .codicon { opacity: 0.6; }
 button.icon, a.icon { display: inline-flex; align-items: center; border: none; background: transparent; color: var(--vscode-icon-foreground); padding: 3px; border-radius: 4px; cursor: pointer; }
