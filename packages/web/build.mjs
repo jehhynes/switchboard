@@ -96,26 +96,47 @@ const manifest = {
     { src: 'icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
   ],
 };
+const hashOf = (body) => createHash('sha256').update(body).digest('hex').slice(0, 16);
+/** A shell file's name with its content's hash, as `page-<hash>.js`: the hub serves it gzipped for good under that name (architecture.md § Web page). */
+const hashedName = (name, body) => name.replace(/(\.[a-z]+)$/, `-${hashOf(body)}$1`);
+const ttf = readFileSync(join(codicons, 'codicon.ttf'));
+const shell = { 'codicon.ttf': hashedName('codicon.ttf', ttf) };
+const codiconCss = readFileSync(join(codicons, 'codicon.css'), 'utf8').replace(/url\("\.\/codicon\.ttf(\?[^"]*)?"\)/, `url("./${shell['codicon.ttf']}")`);
+// The page imports the diff viewer from the build it was built with (`__DIFF_BUILD__`), and the audio worklet by its name (`__VOICE_WORKLET__`).
+const pageJs = await bundle('src/entry.ts', { __DIFF_BUILD__: JSON.stringify(diffBuild), __VOICE_WORKLET__: JSON.stringify(workletName) });
+// The bubbles' and the composer's styles the Conversation view shares come first, so the page's own rules can build on them.
+const pageCss = ['@switchboard/conversation/bubbles.css', '@switchboard/conversation/composer.css', '@switchboard/conversation/picker.css', '@switchboard/conversation/menu.css', '@switchboard/conversation/questionCard.css'].map((name) => readFileSync(require.resolve(name), 'utf8')).join('') + readFileSync('src/page.css', 'utf8') + readFileSync('src/settings.css', 'utf8') + readFileSync('src/changes.css', 'utf8');
+
+shell['codicon.css'] = hashedName('codicon.css', codiconCss);
+shell['theme.css'] = hashedName('theme.css', theme);
+shell['page.css'] = hashedName('page.css', pageCss);
+shell['page.js'] = hashedName('page.js', pageJs);
+
+// The boot script, inline in index.html so it runs before any file loads, which the page's CSP allows by its hash: it shows Can't reach
+// Switchboard when page.js or a stylesheet fails to load, or the page has not started within 8 s.
+const boot = readFileSync('src/boot.js', 'utf8').trim();
+const indexHtml = Object.entries(shell).reduce((page, [name, hashed]) => page.replaceAll(`{{${name}}}`, hashed), html('src/index.html').replace('{{boot}}', () => boot));
+// What the service worker keeps for each build (src/sw.ts): the page and its shell's files, the icons and the manifest.
+const precache = ['/page/', ...Object.values(shell).map((name) => `/page/${name}`), '/page/manifest.webmanifest', '/page/icon-192.png', '/page/icon-512.png', '/page/icon-maskable-512.png', '/page/apple-touch-icon.png'];
+const shellVersion = hashOf(indexHtml + JSON.stringify(shell));
+/** A shell file under its plain name, and the hashed name the page loads it by. */
+const shellText = (name, mime, body) => ({ ...text(mime, body), hashed: shell[name] });
 const assets = {
-  'index.html': text('text/html; charset=utf-8', html('src/index.html')),
-  // The page imports the diff viewer from the build it was built with (`__DIFF_BUILD__`), and the audio worklet by its name (`__VOICE_WORKLET__`).
-  'page.js': text('text/javascript; charset=utf-8', await bundle('src/entry.ts', { __DIFF_BUILD__: JSON.stringify(diffBuild), __VOICE_WORKLET__: JSON.stringify(workletName) })),
+  'index.html': text('text/html; charset=utf-8', indexHtml),
+  'page.js': shellText('page.js', 'text/javascript; charset=utf-8', pageJs),
   [workletName]: { ...text('text/javascript; charset=utf-8', worklet), immutable: true },
   // The console's script and xterm.js's styles, loaded only when a console first shows.
   'console.js': text('text/javascript; charset=utf-8', await bundle('src/consoleEntry.ts')),
   'xterm.css': text('text/css; charset=utf-8', readFileSync(require.resolve('@xterm/xterm/css/xterm.css'), 'utf8')),
-  // The bubbles' and the composer's styles the Conversation view shares come first, so the page's own rules can build on them.
-  'page.css': text('text/css; charset=utf-8', ['@switchboard/conversation/bubbles.css', '@switchboard/conversation/composer.css', '@switchboard/conversation/picker.css', '@switchboard/conversation/menu.css', '@switchboard/conversation/questionCard.css'].map((name) => readFileSync(require.resolve(name), 'utf8')).join('') + readFileSync('src/page.css', 'utf8') + readFileSync('src/settings.css', 'utf8') + readFileSync('src/changes.css', 'utf8')),
-  'theme.css': text('text/css; charset=utf-8', theme),
-  'codicon.css': text('text/css; charset=utf-8', readFileSync(join(codicons, 'codicon.css'), 'utf8')),
-  'codicon.ttf': binary('font/ttf', join(codicons, 'codicon.ttf')),
+  'page.css': shellText('page.css', 'text/css; charset=utf-8', pageCss),
+  'theme.css': shellText('theme.css', 'text/css; charset=utf-8', theme),
+  'codicon.css': shellText('codicon.css', 'text/css; charset=utf-8', codiconCss),
+  'codicon.ttf': { ...binary('font/ttf', join(codicons, 'codicon.ttf')), hashed: shell['codicon.ttf'] },
   // VS Code's Seti file icons (src/seti/LICENSE.txt), which the page loads the first time it draws a file's icon (src/fileIcons.tsx).
   'file-icons.json': text('application/json', JSON.stringify({ ...JSON.parse(readFileSync('src/seti/file-icons.json', 'utf8')), license: readFileSync('src/seti/LICENSE.txt', 'utf8') })),
   'seti.woff': binary('font/woff', 'src/seti/seti.woff'),
   'manifest.webmanifest': text('application/manifest+json', JSON.stringify(manifest)),
-  'sw.js': text('text/javascript; charset=utf-8', await bundle('src/swEntry.ts')),
-  'offline.html': text('text/html; charset=utf-8', html('src/offline.html')),
-  'offline.js': text('text/javascript; charset=utf-8', await bundle('src/offlineEntry.ts')),
+  'sw.js': text('text/javascript; charset=utf-8', await bundle('src/swEntry.ts', { __SHELL__: JSON.stringify(precache), __SHELL_VERSION__: JSON.stringify(shellVersion) })),
   'icon-192.png': binary('image/png', 'src/icon-192.png'),
   'icon-512.png': binary('image/png', 'src/icon-512.png'),
   'icon-maskable-512.png': binary('image/png', 'src/icon-maskable-512.png'),
@@ -125,8 +146,11 @@ const assets = {
 };
 
 mkdirSync('dist', { recursive: true });
-writeFileSync('dist/index.js', `/** The web page's files, by their name under /page/. Written by build.mjs. */\nexport const PAGE_ASSETS = ${JSON.stringify(assets)};\n`);
+writeFileSync(
+  'dist/index.js',
+  `/** The web page's files, by their name under /page/. Written by build.mjs. */\nexport const PAGE_ASSETS = ${JSON.stringify(assets)};\n/** The CSP sources of the page's inline scripts. */\nexport const PAGE_SCRIPT_HASHES = ${JSON.stringify([`'sha256-${createHash('sha256').update(boot).digest('base64')}'`])};\n`,
+);
 writeFileSync(
   'dist/index.d.ts',
-  '/** The web page\'s files, by their name under /page/; a binary file\'s body is base64, and an immutable one never changes under its name. */\nexport declare const PAGE_ASSETS: Record<string, { mime: string; body: string; base64: boolean; immutable?: boolean }>;\n',
+  "/** The web page's files, by their name under /page/; a binary file's body is base64, an immutable one never changes under its name, and a shell file is also served for good under its `hashed` name. */\nexport declare const PAGE_ASSETS: Record<string, { mime: string; body: string; base64: boolean; immutable?: boolean; hashed?: string }>;\n/** The CSP sources of the page's inline scripts. */\nexport declare const PAGE_SCRIPT_HASHES: string[];\n",
 );

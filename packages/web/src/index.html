@@ -6,19 +6,38 @@
 <meta name="referrer" content="no-referrer">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="{{themeColorLight}}">
 <meta name="theme-color" content="{{themeColor}}">
+<meta name="color-scheme" content="dark light">
 <meta name="switchboard-build" content="{{build}}">
 <title>Switchboard</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="apple-mobile-web-app-title" content="Switchboard">
-<link rel="stylesheet" href="codicon.css">
-<link rel="stylesheet" href="theme.css">
-<link rel="stylesheet" href="page.css">
+<style>
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; color-scheme: dark; background: {{themeColor}}; }
+html, body { height: 100%; margin: 0; }
+#boot { position: fixed; inset: 0; z-index: 2000; display: grid; place-items: center; padding: 24px; background: {{themeColor}}; color: #9d9d9d; font: 14px system-ui, -apple-system, "Segoe UI", sans-serif; text-align: center; }
+#boot img { display: block; width: 48px; height: 48px; margin: 0 auto 14px; }
+#boot h2 { margin: 0 0 14px; color: #cccccc; font-size: 17px; font-weight: 600; }
+#boot button { font: inherit; border: 0; border-radius: 2px; padding: 6px 14px; color: #ffffff; background: #0078d4; }
+#boot .boot-failed, #boot.failed .boot-wait { display: none; }
+#boot.failed .boot-failed { display: block; }
+@media (prefers-color-scheme: light) {
+  html { color-scheme: light; background: {{themeColorLight}}; }
+  #boot { background: {{themeColorLight}}; color: #616161; }
+  #boot h2 { color: #3b3b3b; }
+  #boot button { background: #005fb8; }
+}
+</style>
 </head>
 <body>
+<div id="boot" role="status"><div><img src="icon-192.png" alt=""><p class="boot-wait">Connecting…</p><div class="boot-failed"><h2>Can't reach Switchboard</h2><button type="button">Try now</button></div></div></div>
+<script>{{boot}}</script>
 <div id="safe-top" aria-hidden="true"></div>
 <div id="root"></div>
-<script src="page.js"></script>
+<link rel="stylesheet" href="{{codicon.css}}">
+<link rel="stylesheet" href="{{theme.css}}">
+<link rel="stylesheet" href="{{page.css}}">
+<script src="{{page.js}}"></script>
 </body>
 </html>

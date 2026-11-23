@@ -5,8 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { PAGE_ASSETS } from '../dist/index.js';
-import { OFFLINE_RETRY_MS, waitForHub } from '../src/offline.js';
-import { OFFLINE_PAGE, SHELL, SHELL_CACHE, shellResponse, startWorker } from '../src/sw.js';
+import { NAVIGATION_RACE_MS, SHELL, SHELL_CACHE, shellResponse, startWorker } from '../src/sw.js';
 import type { ShellDeps } from '../src/sw.js';
 
 const ORIGIN = 'http://127.0.0.1:47616';
@@ -17,34 +16,42 @@ const get = (path: string, mode: RequestMode = 'cors', method = 'GET'): Request 
   return request;
 };
 
-/** A cache and a network: `down` makes every fetch fail, as with no hub. */
-function fakes(down: boolean) {
-  const kept = new Map<string, string>([[OFFLINE_PAGE, 'offline page'], ['/page/icon-192.png', 'old icon']]);
+/** A cache and a network: `hub` answers each fetch, as with a stopped hub (`down`), one behind `tailscale serve` (502), or one that never answers (`hang`). */
+function fakes(hub: 'up' | 'down' | 'hang' | number, kept = new Map<string, string>([['/page/', 'kept page'], ['/page/page-0123456789abcdef.js', 'kept script']])) {
   const fetched: string[] = [];
+  const timers: Array<() => void> = [];
   const deps: ShellDeps = {
+    shell: ['/page/', '/page/page-0123456789abcdef.js', '/page/icon-192.png'],
     fetch: async (request) => {
       fetched.push(new URL(request.url).pathname);
 
-      if (down) {
+      if (hub === 'down') {
         throw new TypeError('Failed to fetch');
       }
 
-      return new Response(`hub ${new URL(request.url).pathname}`, { status: 200 });
+      if (hub === 'hang') {
+        return new Promise<Response>(() => {});
+      }
+
+      return new Response(hub === 'up' ? `hub ${new URL(request.url).pathname}` : '', { status: hub === 'up' ? 200 : hub });
     },
     cached: async (path) => (kept.has(path) ? new Response(kept.get(path)) : undefined),
-    keep: async (path, response) => void kept.set(path, await response.text()),
+    setTimeout: (run, ms) => {
+      expect(ms).toBe(NAVIGATION_RACE_MS);
+      timers.push(run);
+    },
   };
 
-  return { deps, kept, fetched };
+  return { deps, fetched, timers };
 }
 
 describe('the service worker', () => {
-  it('leaves the API, the event stream, the page\'s own files, posts and other origins to the browser', () => {
-    const { deps, fetched } = fakes(false);
+  it("leaves the API, the event stream, the page's other files, posts and other origins to the browser", () => {
+    const { deps, fetched } = fakes('up');
 
     expect(shellResponse(get('/v1/conversation/events?page=1'), ORIGIN, deps)).toBeNull();
     expect(shellResponse(get('/v1/page/list'), ORIGIN, deps)).toBeNull();
-    expect(shellResponse(get('/page/page.js'), ORIGIN, deps)).toBeNull();
+    expect(shellResponse(get('/page/console.js'), ORIGIN, deps)).toBeNull();
     expect(shellResponse(get('/page/ping'), ORIGIN, deps)).toBeNull();
     expect(shellResponse(get('/v1/conversation/send', 'cors', 'POST'), ORIGIN, deps)).toBeNull();
     expect(shellResponse(get('/page/icon-192.png'), 'http://localhost:47616', deps)).toBeNull();
@@ -52,75 +59,89 @@ describe('the service worker', () => {
     expect(fetched).toEqual([]);
   });
 
-  it("loads the page from the hub, and shows the offline page when the hub does not answer", async () => {
-    const up = fakes(false);
+  it("loads the page from the hub when it answers in time, a sign-in page included, and the kept page when it does not, or answers 502, 503 or 504", async () => {
+    const page = async (hub: Parameters<typeof fakes>[0], late = false) => {
+      const { deps, timers } = fakes(hub);
+      const answer = shellResponse(get('/page/#w=3', 'navigate'), ORIGIN, deps)!;
 
-    expect(await (await shellResponse(get('/page/', 'navigate'), ORIGIN, up.deps))!.text()).toBe('hub /page/');
+      if (late) {
+        await new Promise((done) => setTimeout(done, 0));
+        timers.forEach((run) => run());
+      }
 
-    const down = fakes(true);
+      const response = await answer;
 
-    expect(await (await shellResponse(get('/page/', 'navigate'), ORIGIN, down.deps))!.text()).toBe('offline page');
+      return [response.status, await response.text()];
+    };
+
+    expect(await page('up')).toEqual([200, 'hub /page/']);
+    expect(await page(401)).toEqual([401, '']);
+    expect(await page('down')).toEqual([200, 'kept page']);
+    expect(await page(502)).toEqual([200, 'kept page']);
+    expect(await page(503)).toEqual([200, 'kept page']);
+    expect(await page(504)).toEqual([200, 'kept page']);
+    // A hub that hangs, as a sleeping PC behind Tailscale: the kept page after the race's time.
+    expect(await page('hang', true)).toEqual([200, 'kept page']);
   });
 
-  it('serves its files from the hub and keeps the copy, and from the cache only when the hub does not answer', async () => {
-    const up = fakes(false);
+  it("gives the browser's own answer when no page is kept yet", async () => {
+    const down = fakes('down', new Map());
 
-    expect(await (await shellResponse(get('/page/icon-192.png'), ORIGIN, up.deps))!.text()).toBe('hub /page/icon-192.png');
-    expect(up.kept.get('/page/icon-192.png')).toBe('hub /page/icon-192.png');
+    expect((await shellResponse(get('/page/', 'navigate'), ORIGIN, down.deps)!).type).toBe('error');
 
-    const down = fakes(true);
+    const proxy = fakes(502, new Map());
 
-    expect(await (await shellResponse(get('/page/icon-192.png'), ORIGIN, down.deps))!.text()).toBe('old icon');
-    expect((await shellResponse(get('/page/offline.js'), ORIGIN, down.deps))!.type).toBe('error');
+    expect((await shellResponse(get('/page/', 'navigate'), ORIGIN, proxy.deps)!).status).toBe(502);
   });
 
-  it('caches its files on install, drops older caches of its own on activate, and answers only what shellResponse takes', async () => {
+  it('serves a shell file from its kept copy, which never changes under its name, and from the hub when none is kept', async () => {
+    const { deps, fetched } = fakes('up');
+
+    expect(await (await shellResponse(get('/page/page-0123456789abcdef.js'), ORIGIN, deps))!.text()).toBe('kept script');
+    expect(fetched).toEqual([]);
+    expect(await (await shellResponse(get('/page/icon-192.png'), ORIGIN, deps))!.text()).toBe('hub /page/icon-192.png');
+  });
+
+  it("keeps the whole shell on install or fails it, so the worker before stays, and keeps this build's cache and the one before on activate", async () => {
     const listeners = new Map<string, (event: never) => void>();
-    const added: string[][] = [];
+    const put: string[] = [];
     const deleted: string[] = [];
     const worker = { location: { origin: ORIGIN }, skipWaiting: vi.fn(async () => {}), clients: { claim: vi.fn(async () => {}) }, addEventListener: (type: string, listener: (event: never) => void) => void listeners.set(type, listener) };
-    const cache = { addAll: async (paths: string[]) => void added.push(paths), match: async () => undefined, put: async () => {} };
-    const store = { open: async () => cache, keys: async () => [SHELL_CACHE, 'switchboard-shell-v0', 'other-app'], delete: async (name: string) => (deleted.push(name), true) } as unknown as CacheStorage;
+    const staged = new Map<string, Response>();
+    const cache = { match: async (path: string) => staged.get(path), put: async (path: string, response: Response) => void (put.push(path), staged.set(path, response)) };
+    const store = { open: async () => cache, keys: async () => ['switchboard-shell-a', 'switchboard-shell-b', 'switchboard-shell-c-staging', SHELL_CACHE, 'other-app'], delete: async (name: string) => (deleted.push(name), true) } as unknown as CacheStorage;
     const waits: Array<Promise<unknown>> = [];
+    const install = async (answer: (path: string) => Response): Promise<unknown> => {
+      waits.length = 0;
+      startWorker(worker as never, store, async (request) => answer(new URL(request.url).pathname));
+      listeners.get('install')!({ waitUntil: (work: Promise<unknown>) => waits.push(work) } as never);
+      return Promise.all(waits).then(() => null, (error: Error) => error.message);
+    };
 
-    startWorker(worker as never, store, async () => new Response('net'));
-    listeners.get('install')!({ waitUntil: (work: Promise<unknown>) => waits.push(work) } as never);
+    // Not signed in, or one file cut off: nothing kept, the install fails and the worker before stays.
+    expect(await install(() => new Response('net', { status: 401 }))).toMatch(/^The shell could not be kept: /);
+    expect(await install(() => {
+      throw new TypeError('Failed to fetch');
+    })).toMatch(/^The shell could not be kept: /);
+    expect(put).toEqual([]);
+    // Only the staging cache goes: a complete cache of the same build that a worker before kept stays.
+    expect(deleted).toEqual([`${SHELL_CACHE}-staging`, `${SHELL_CACHE}-staging`]);
+    expect(worker.skipWaiting).not.toHaveBeenCalled();
+
+    expect(await install(() => new Response('net'))).toBeNull();
+    // Staged, then kept.
+    expect(put).toEqual([...SHELL, ...SHELL]);
+    expect(worker.skipWaiting).toHaveBeenCalled();
+
+    deleted.length = 0;
+    waits.length = 0;
     listeners.get('activate')!({ waitUntil: (work: Promise<unknown>) => waits.push(work) } as never);
     await Promise.all(waits);
-    expect(added).toEqual([SHELL]);
-    expect(worker.skipWaiting).toHaveBeenCalled();
-    expect(deleted).toEqual(['switchboard-shell-v0']);
+    // A staging cache an install left is never kept as the build before.
+    expect(deleted).toEqual(['switchboard-shell-c-staging', 'switchboard-shell-a']);
     expect(worker.clients.claim).toHaveBeenCalled();
-
-    const answered: Array<Promise<Response>> = [];
-
-    listeners.get('fetch')!({ request: get('/v1/page/list'), respondWith: (response: Promise<Response>) => answered.push(response) } as never);
-    expect(answered).toHaveLength(0);
-    listeners.get('fetch')!({ request: get('/page/', 'navigate'), respondWith: (response: Promise<Response>) => answered.push(response) } as never);
-    expect(await (await answered[0]!).text()).toBe('net');
   });
-});
 
-describe('the offline page', () => {
-  it('asks the hub until it answers, then reloads', async () => {
-    const answers = [Promise.reject(new TypeError('down')), Promise.resolve({ ok: false }), Promise.resolve({ ok: true })];
-    const waits: number[] = [];
-    let reloads = 0;
-    let next: (() => void) | null = null;
-
-    waitForHub({ fetch: () => answers.shift()!, reload: () => void reloads++, setTimeout: (run, ms) => ((next = run), waits.push(ms)) });
-
-    for (let i = 0; i < 2; i++) {
-      await vi.waitFor(() => expect(next).not.toBeNull());
-      const run = next!;
-
-      next = null;
-      run();
-    }
-
-    await vi.waitFor(() => expect(reloads).toBe(1));
-    expect(waits).toEqual([OFFLINE_RETRY_MS, OFFLINE_RETRY_MS]);
-  });
 });
 
 describe('the installable page', () => {
@@ -224,9 +245,7 @@ describe('the installable page', () => {
 
     expect(touch).toMatch(/^@media \(hover: none\), \(pointer: coarse\) \{\n  \.composer-input \{ font-size: 16px; \}\n  input:not\(\[type="checkbox"\], \[type="radio"\], \[type="file"\]\), textarea, select \{ font-size: 16px !important; \}/);
 
-    for (const name of ['index.html', 'offline.html']) {
-      expect(PAGE_ASSETS[name]!.body).toContain('<link rel="apple-touch-icon" href="apple-touch-icon.png">\n<meta name="apple-mobile-web-app-title" content="Switchboard">');
-    }
+    expect(page).toContain('<link rel="apple-touch-icon" href="apple-touch-icon.png">\n<meta name="apple-mobile-web-app-title" content="Switchboard">');
 
     expect(size('apple-touch-icon.png')).toEqual([180, 180]);
     // Colour type 2 is RGB with no alpha: iOS fills a transparent icon's corners with black.
@@ -243,23 +262,37 @@ describe('the installable page', () => {
     expect(css).not.toMatch(/\.meta \.copy::after/);
   });
 
-  it('links the manifest from the page and the offline page, with the theme colour, light first while the system is light, and serves every file the worker keeps', () => {
-    for (const name of ['index.html', 'offline.html']) {
-      const html = PAGE_ASSETS[name]!.body;
+  it('links the manifest from the page, with the theme colour, light first while the system is light, and has the worker keep every shell file the page loads', () => {
+    const html = PAGE_ASSETS['index.html']!.body;
 
-      expect(html).toContain('<link rel="manifest" href="manifest.webmanifest">');
-      // A browser takes the first theme-color whose media matches, so the light one comes first and Dark Modern's is the fallback.
-      expect(html).toContain(`<meta name="theme-color" media="(prefers-color-scheme: light)" content="${lightSideBar}">\n<meta name="theme-color" content="${sideBar}">`);
-      expect(html).not.toMatch(/\{\{themeColor(Light)?\}\}/);
+    expect(html).toContain('<link rel="manifest" href="manifest.webmanifest">');
+    // A browser takes the first theme-color whose media matches, so the light one comes first and Dark Modern's is the fallback.
+    expect(html).toContain(`<meta name="theme-color" media="(prefers-color-scheme: light)" content="${lightSideBar}">\n<meta name="theme-color" content="${sideBar}">`);
+    expect(html).not.toMatch(/\{\{(?!build)[^}]*\}\}/);
+    expect(lightSideBar).not.toBe(sideBar);
+
+    const worker = PAGE_ASSETS['sw.js']!.body;
+
+    for (const name of ['page.js', 'page.css', 'theme.css', 'codicon.css', 'codicon.ttf']) {
+      expect(worker).toContain(`"/page/${PAGE_ASSETS[name]!.hashed}"`);
     }
 
-    expect(PAGE_ASSETS['offline.html']!.body).toContain('Switchboard is not running');
-    // The Start button opens the link hub.js autostart registers, which starts the hub and passes nothing of the link on (PRD R117).
-    expect(PAGE_ASSETS['offline.html']!.body).toContain('<a class="start" href="switchboard:start">Start Switchboard</a>');
-    expect(PAGE_ASSETS['offline.html']!.body).toContain('<code>node ~/.switchboard/hub.js start</code>');
-    expect(PAGE_ASSETS['offline.html']!.body).toMatch(new RegExp(`@media \\(prefers-color-scheme: light\\) \\{[^@]*background: ${lightSideBar}; color: #3b3b3b;`));
-    expect(lightSideBar).not.toBe(sideBar);
-    expect(SHELL.map((path) => path.slice('/page/'.length)).filter((name) => PAGE_ASSETS[name] === undefined)).toEqual([]);
+    expect(worker).toContain('"/page/"');
     expect(PAGE_ASSETS['sw.js']!.mime).toBe('text/javascript; charset=utf-8');
+    expect(PAGE_ASSETS['offline.html']).toBeUndefined();
+  });
+
+  it("paints the boot screen in the system's scheme before any file loads, then the page's stylesheets and script by their hashed names", () => {
+    const html = PAGE_ASSETS['index.html']!.body;
+    const style = /<style>([\s\S]*?)<\/style>/.exec(html)![1]!;
+
+    // Inline, so the first paint has the right background in dark and light, with nothing loaded.
+    expect(style).toContain(`html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; color-scheme: dark; background: ${sideBar}; }`);
+    expect(style).toMatch(new RegExp(`@media \\(prefers-color-scheme: light\\) \\{\\n  html \\{ color-scheme: light; background: ${lightSideBar}; \\}`));
+    expect(html.indexOf('<div id="boot"')).toBeLessThan(html.indexOf('<link rel="stylesheet"'));
+    expect(html).toContain("<h2>Can't reach Switchboard</h2>");
+    // The boot script comes first, so it sees page.js or a stylesheet fail.
+    expect(html.indexOf('<script>')).toBeLessThan(html.indexOf('<link rel="stylesheet"'));
+    expect(html).toMatch(/<link rel="stylesheet" href="codicon-[0-9a-f]{16}\.css">\n<link rel="stylesheet" href="theme-[0-9a-f]{16}\.css">\n<link rel="stylesheet" href="page-[0-9a-f]{16}\.css">\n<script src="page-[0-9a-f]{16}\.js"><\/script>/);
   });
 });

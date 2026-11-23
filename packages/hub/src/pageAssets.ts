@@ -140,10 +140,27 @@ export function pageAsset(name: string, home: string): PageFileAsset | null {
     return diffAsset(name, home);
   }
 
+  // A shell file by its hashed name never changes under it, so the browser keeps it for good, gzipped when it takes gzip.
+  const plain = HASHED.get(name);
+
+  if (plain !== undefined) {
+    const shell = PAGE_ASSETS[plain]!;
+    const body = shell.base64 ? Buffer.from(shell.body, 'base64') : shell.body;
+    const gzip = shellGzipped.get(name) ?? gzipSync(body, { level: 9 });
+
+    shellGzipped.set(name, gzip);
+    return { mime: shell.mime, body, immutable: true, gzip };
+  }
+
   const asset = Object.hasOwn(PAGE_ASSETS, name) ? PAGE_ASSETS[name] : VOICE_WORKLET.test(name) ? currentWorklet() : undefined;
 
   return asset === undefined ? null : { mime: asset.mime, body: asset.base64 ? Buffer.from(asset.body, 'base64') : asset.body, ...(asset.immutable === true && Object.hasOwn(PAGE_ASSETS, name) ? { immutable: true } : {}) };
 }
+
+/** Each shell file's hashed name (`page-<hash>.js`, packages/web/build.mjs), by which the page loads it, and the plain name it is kept under. */
+const HASHED = new Map(Object.entries(PAGE_ASSETS).flatMap(([name, asset]): Array<[string, string]> => (asset.hashed === undefined ? [] : [[asset.hashed, name]])));
+/** The shell files gzipped once, by hashed name. */
+const shellGzipped = new Map<string, Buffer>();
 
 /** The audio worklet's names: the build's, a hash of its content, and another build's or none, which a page from another build asks for. */
 const VOICE_WORKLET = /^voice-worklet(-[0-9a-f]{16})?\.js$/;

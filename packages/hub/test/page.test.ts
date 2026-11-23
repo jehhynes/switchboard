@@ -1,4 +1,4 @@
-import { gzipSync } from 'node:zlib';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import { request } from 'node:http';
 import { createServer } from 'node:net';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -13,6 +13,7 @@ import type { RemoteAccess } from '../src/page.js';
 import { createHash } from 'node:crypto';
 import { runInNewContext } from 'node:vm';
 import { Store } from '@switchboard/core';
+import { PAGE_CSP } from '../src/page.js';
 import { artifactFile, cookieValue, deviceLabel, pairHtml, SIGNED_OUT_HTML, PAIR_CODE_TRIES, PAIR_MS, PAIR_SCRIPT, pageOrigin, dockRowOf, findFiles, pageHeader, loopbackHost, PageAccess, pageCookie, PUBLIC_PAGE_FILES, PAGE_LINK_MS, PAGE_SESSION_MS, PAGE_SESSIONS_KEPT, pageActionEvent, pageActions, pageCommandOf, pageGroups, pageList, pageOpens, pasteText, poolRowOf, rowOpenUrl, tabUrl } from '../src/page.js';
 import { dockView } from '../src/dock.js';
 import type { DockView } from '../src/dock.js';
@@ -637,6 +638,32 @@ describe('pageAsset', () => {
     expect(pageAsset('../hub.json', dir)).toBeNull();
   });
 
+  it('serves each shell file for good, gzipped, under the hashed name the page loads it by, which the page names with its boot script allowed by its hash', () => {
+    const page = String(pageAsset('index.html', dir)?.body);
+
+    for (const name of ['page.js', 'page.css', 'theme.css', 'codicon.css', 'codicon.ttf']) {
+      const hashed = PAGE_ASSETS[name]!.hashed!;
+      const shell = pageAsset(hashed, dir)!;
+
+      expect(hashed).toMatch(new RegExp(`^${name.replace(/\.(\w+)$/, '')}-[0-9a-f]{16}\\.${name.split('.').pop()}$`));
+      expect(shell.immutable).toBe(true);
+      expect(gunzipSync(shell.gzip!).equals(Buffer.from(shell.body as string | Buffer))).toBe(true);
+      // Its plain name stays, served as any page file, never kept for good.
+      expect(pageAsset(name, dir)?.immutable).toBeUndefined();
+
+      if (name !== 'codicon.ttf') {
+        expect(page).toContain(`"${hashed}"`);
+      }
+    }
+
+    expect(String(pageAsset(PAGE_ASSETS['codicon.css']!.hashed!, dir)?.body)).toContain(`url("./${PAGE_ASSETS['codicon.ttf']!.hashed!}")`);
+
+    const boot = /<script>([\s\S]*?)<\/script>/.exec(page)![1]!;
+
+    expect(PAGE_CSP).toContain(`script-src 'self' 'sha256-${createHash('sha256').update(boot).digest('base64')}'`);
+    expect(pageAsset('page-0123456789abcdef.js', dir)).toBeNull();
+  });
+
   it("serves the audio worklet for good under its content's hash, and under another build's name or none without keeping it", () => {
     const name = Object.keys(PAGE_ASSETS).find((one) => /^voice-worklet-[0-9a-f]{16}\.js$/.test(one))!;
     const worklet = pageAsset(name, dir);
@@ -1033,6 +1060,12 @@ describe('the web page routes', () => {
 
     expect(JSON.parse(ping.body)).toEqual({ build: 'b7', signedIn: true });
     expect(ping.headers['cache-control']).toBe('no-store');
+
+    // The page carries an ETag the browser asks with.
+    const shown = await send(server.port, 'GET', '/page/', { Cookie: cookie });
+
+    expect(shown.headers['etag']).toMatch(/^"[\w-]{22}"$/);
+    expect((await send(server.port, 'GET', '/page/', { Cookie: cookie, 'If-None-Match': String(shown.headers['etag']) })).status).toBe(304);
     expect(JSON.parse((await send(server.port, 'GET', '/page/ping', { Cookie: 'sb_page=' + '0'.repeat(64) })).body)).toEqual({ build: 'b7', signedIn: false });
 
     // The page's watchdog sees a named event; a comment never reaches its script.
@@ -1100,7 +1133,7 @@ describe('the web page routes', () => {
     expect(manifest.headers['content-security-policy']).toContain("frame-ancestors 'none'");
     expect((await send(server.port, 'GET', '/page/sw.js', {})).body).toBe('sw.js');
     // A public name the page lacks is not found.
-    expect((await send(server.port, 'GET', '/page/offline.js', {})).status).toBe(404);
+    expect((await send(server.port, 'GET', '/page/icon-512.png', {})).status).toBe(404);
     expect((await send(server.port, 'GET', '/page/page.js', {})).status).toBe(401);
     expect(JSON.parse((await send(server.port, 'GET', '/page/ping', {})).body)).toEqual({ build: 'b7', signedIn: false });
     expect((await send(server.port, 'GET', '/page/ping', { Host: `evil.example:${server.port}` })).status).toBe(403);

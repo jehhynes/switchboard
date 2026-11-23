@@ -141,7 +141,7 @@ describe('the page on a phone', () => {
     expect(css).toMatch(/(^|\n)html \{ -webkit-text-size-adjust: 100%; text-size-adjust: 100%; \}/);
     expect(css).not.toMatch(/text-size-adjust: (?!100%)/);
     expect(PAGE_ASSETS['index.html']!.body).toContain('<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">');
-    expect(PAGE_ASSETS['offline.html']!.body).toContain('html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }');
+    expect(PAGE_ASSETS['index.html']!.body).toContain('html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%;');
   });
 
   it("hides the header's main control in the phone's layout, and the Actions menu starts with it whatever it is", () => {

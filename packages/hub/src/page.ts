@@ -6,6 +6,7 @@ import { hostKey, isFolderHost } from '@switchboard/core';
 import type { PageDevice, Store } from '@switchboard/core';
 import type { IncomingHttpHeaders } from 'node:http';
 import { artifactType } from '@switchboard/conversation';
+import { PAGE_SCRIPT_HASHES } from '@switchboard/web';
 import { windowOf } from './dock.js';
 import type { DockHolderNotice, DockHolderResult, DockRow, DockSourceGroup, DockView } from './dock.js';
 import { CONTROL_GLYPHS } from './rows.js';
@@ -350,7 +351,7 @@ export function deviceId(hash: string): string {
 }
 
 /** The page's files a browser fetches without its cookie, for installing the page and for the offline page; none holds anything private. */
-export const PUBLIC_PAGE_FILES = new Set(['manifest.webmanifest', 'sw.js', 'offline.html', 'offline.js', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png']);
+export const PUBLIC_PAGE_FILES = new Set(['manifest.webmanifest', 'sw.js', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png']);
 
 /** What `/page/` answers a browser that is not signed in. */
 export const SIGNED_OUT_HTML = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Switchboard</title><style>html{-webkit-text-size-adjust:100%;text-size-adjust:100%}body{margin:0;display:grid;place-items:center;min-height:100vh;background:#1f1f1f;color:#cccccc;font:14px system-ui,sans-serif}main{max-width:28rem;padding:24px}h1{font-size:18px;font-weight:600;margin:0 0 8px}</style></head><body><main><h1>Not signed in</h1><p>This browser is not signed in to Switchboard. Open the page with Switchboard: Open Web Page in VS Code, or <code>hub.js web</code>.</p></main></body></html>';
@@ -845,8 +846,8 @@ const MIME: Record<string, string> = {
  */
 export const ARTIFACT_CSP = "sandbox allow-scripts; default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data:; form-action 'none'; base-uri 'none'";
 
-/** The page's own CSP: its own scripts, styles and fonts, its artifact frames from this origin, and no network beyond the hub. */
-export const PAGE_CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self'; font-src 'self' data:; frame-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+/** The page's own CSP: its own scripts and its inline boot script by hash, styles and fonts, its artifact frames from this origin, and no network beyond the hub. */
+export const PAGE_CSP = "default-src 'self'; script-src 'self' " + PAGE_SCRIPT_HASHES.join(' ') + "; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self'; font-src 'self' data:; frame-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 /** A file in an artifact folder: its real path, its media type, and whether it is served in the sandbox; null for a name or file outside it. */
 export function artifactFile(dir: string, name: string): { path: string; mime: string; sandboxed: boolean } | null {

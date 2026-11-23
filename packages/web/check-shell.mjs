@@ -216,7 +216,9 @@ function failures(view, size, m) {
 
 const server = createServer((request, response) => {
   const path = new URL(request.url, 'http://x').pathname;
-  const name = path === '/page/' ? 'index.html' : path.replace(/^\/page\//, '');
+  const asked = path === '/page/' ? 'index.html' : path.replace(/^\/page\//, '');
+  // A shell file by its hashed name (build.mjs) is the plain one's.
+  const name = Object.keys(PAGE_ASSETS).find((one) => PAGE_ASSETS[one].hashed === asked) ?? asked;
   const asset = PAGE_ASSETS[name];
 
   if (asset === undefined) {
@@ -225,7 +227,7 @@ const server = createServer((request, response) => {
   }
 
   // The installed app's rules, everywhere: Chrome cannot emulate display-mode.
-  const body = name === 'index.html' ? asset.body.replace('<script src="page.js">', fake + '<script src="page.js">') : name === 'page.css' ? asset.body.replaceAll('(display-mode: standalone)', 'all') : asset.base64 ? Buffer.from(asset.body, 'base64') : asset.body;
+  const body = name === 'index.html' ? asset.body.replace(/<script src="page-[0-9a-f]+\.js">/, (tag) => fake + tag) : name === 'page.css' ? asset.body.replaceAll('(display-mode: standalone)', 'all') : asset.base64 ? Buffer.from(asset.body, 'base64') : asset.body;
 
   response.writeHead(200, { 'content-type': name === 'index.html' ? 'text/html; charset=utf-8' : asset.mime }).end(body);
 });

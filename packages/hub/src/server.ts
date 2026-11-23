@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { createServer, STATUS_CODES } from 'node:http';
 import { gzipSync } from 'node:zlib';
@@ -749,6 +749,16 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
 
       // A file that never changes under its name, as the diff viewer's under its build, is kept by the browser and goes gzipped when taken.
       const gzip = asset.gzip !== undefined && /\bgzip\b/.test(String(request.headers['accept-encoding'] ?? ''));
+      // The page learns the build of the hub that served it, so it can tell when a restarted hub serves another page; its ETag lets the browser
+      // ask whether it changed.
+      const body = name === 'index.html' ? String(asset.body).replaceAll('{{build}}', options.build ?? '') : asset.body;
+      const etag = name === 'index.html' ? { ETag: `"${createHash('sha256').update(body).digest('base64url').slice(0, 22)}"` } : {};
+
+      if (etag.ETag !== undefined && request.headers['if-none-match'] === etag.ETag) {
+        response.writeHead(304, { ...etag, 'Cache-Control': 'no-cache' });
+        response.end();
+        return;
+      }
 
       response.writeHead(200, {
         'Content-Type': asset.mime,
@@ -757,15 +767,9 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
         'Content-Security-Policy': PAGE_CSP,
         ...(asset.gzip === undefined ? {} : { Vary: 'Accept-Encoding' }),
         ...(gzip ? { 'Content-Encoding': 'gzip' } : {}),
+        ...etag,
       });
-
-      if (gzip) {
-        response.end(asset.gzip);
-        return;
-      }
-
-      // The page learns the build of the hub that served it, so it can tell when a restarted hub serves another page.
-      response.end(name === 'index.html' ? String(asset.body).replaceAll('{{build}}', options.build ?? '') : asset.body);
+      response.end(gzip ? asset.gzip : body);
     };
 
     // The installed page's manifest, icons, service worker and offline page, which a browser fetches without the cookie.
