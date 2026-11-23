@@ -27,7 +27,7 @@ public sealed class SettingsFieldsTests
             ],
             sections.SelectMany((section) => section.Fields).Select((field) => field.Path));
         Assert.Equal(
-            ["Default agent", "Concurrency", "Code Mode (experimental)", "Friction debriefs", "Model", "Permission mode", "Model", "Permission mode", "Concurrency", "Model", "Timeout (seconds)", "Rows open in", "Row click opens", "Terminal for \"Open in terminal\"", "Needs-you alerts from", "Embedded GitHub tabs", "Tailscale", "Allowed hosts", "Allowed logins", "Install hooks", "Claude Code path", "Codex path", "Node.js path"],
+            ["Default agent", "Concurrency", "Code Mode (experimental)", "Friction debriefs", "Model", "Permission mode", "Model", "Permission mode", "Concurrency", "Model", "Timeout (seconds)", "Rows open in", "Row click opens", "Terminal for \"Open in terminal\"", "Needs-you alerts from", "Embedded browser tabs", "Tailscale", "Allowed hosts", "Allowed logins", "Install hooks", "Claude Code path", "Codex path", "Node.js path"],
             sections.SelectMany((section) => section.Fields).Select((field) => field.Label));
         Assert.Equal(["claude", "codex"], fields["sessions.provider"].Options!.Select((option) => option.Value));
         Assert.Equal(["Claude", "Codex"], fields["sessions.provider"].Options!.Select((option) => option.Label));

@@ -55,7 +55,7 @@ void (async () => {
     iframePage(`${origin}/page/`, routes.origin) !== origin ||
     !(await iframeEnabled((url) => fetch(url, { credentials: 'include', cache: 'no-store' }), origin, routes.origin))
   ) {
-    note.textContent = 'Sign in to the Switchboard page and enable the GitHub iframe experiment, then reopen it from that page.';
+    note.textContent = 'Sign in to the Switchboard page and enable the embedded browser experiment, then reopen it from that page.';
     return;
   }
   controller.allow();

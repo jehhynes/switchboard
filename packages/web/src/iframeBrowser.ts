@@ -1,23 +1,26 @@
 import type { PageRow } from '@switchboard/protocol';
-import { BROWSER_EXTENSION_ID } from '@switchboard/core/hubRecord';
+import { BROWSER_EXTENSION_ID, BROWSER_PORT } from '@switchboard/core/hubRecord';
 
 /** Must match the key-derived ID verified by extensions/chrome/test/manifest.test.ts. */
 export const IFRAME_EXTENSION_ID = BROWSER_EXTENSION_ID;
 export const IFRAME_RENEW_MS = 30_000;
 
-/** GitHub only: no credentials, other schemes, lookalike hosts or unbounded URLs. */
-export function githubFrameUrl(url: string): boolean {
+/** Only bounded web URLs without embedded credentials may enter a website frame. */
+export function frameUrl(url: string): boolean {
   try {
     const value = new URL(url);
-    return url.length <= 2048 && value.origin === 'https://github.com' && value.username === '' && value.password === '';
+    const loopback = (host: string): boolean => host === '127.0.0.1' || host === 'localhost';
+    const hub = new URL(location.href);
+    if (value.origin === hub.origin || (loopback(value.hostname) && (value.port === String(BROWSER_PORT) || (loopback(hub.hostname) && value.protocol === hub.protocol && value.port === hub.port)))) return false;
+    return url.length <= 2048 && (value.protocol === 'http:' || value.protocol === 'https:') && value.username === '' && value.password === '';
   } catch {
     return false;
   }
 }
-export function githubLinks(row: PageRow | null): Array<{ url: string; label: string }> {
+export function frameLinks(row: PageRow | null): Array<{ url: string; label: string }> {
   if (row === null) return [];
   const links = [{ url: row.url, label: 'Ticket' }, ...row.links];
-  return links.filter((link, i) => githubFrameUrl(link.url) && links.findIndex((one) => one.url === link.url) === i).map(({ url, label }) => ({ url, label }));
+  return links.filter((link, i) => frameUrl(link.url) && links.findIndex((one) => one.url === link.url) === i).map(({ url, label }) => ({ url, label }));
 }
 
 export interface IframeBrowserDeps {
@@ -31,12 +34,19 @@ export class IframeBrowser {
   #enabled = false;
   #generation = 0;
   #ready = false;
+  #available = false;
   #note = 'Connecting to the experimental extension…';
   #root: HTMLElement | null = null;
   #item: number | null = null;
   #url = '';
   #links: Array<{ url: string; label: string }> = [];
   #checking = false;
+  #requestedSites = '';
+  #sites(): string { return JSON.stringify([...new Set(this.tabs.map((link) => new URL(link.url).host))].sort()); }
+  #sync(): void {
+    const sites = this.#sites();
+    if (this.#hosted && this.#enabled && sites !== this.#requestedSites) { this.#requestedSites = sites; this.#ready = false; void this.renew(); }
+  }
   #pending: { item: number | null; url: string } | null = null;
   #closed = new Set<string>();
   #slot: HTMLElement | null = null;
@@ -50,6 +60,7 @@ export class IframeBrowser {
   get ready(): boolean {
     return this.#ready;
   }
+  get available(): boolean { return this.#available; }
   get tabs(): Array<{ url: string; label: string }> { return this.#links.filter((link) => !this.#closed.has(link.url)); }
   get selected(): string { return this.#url; }
   follow(row: PageRow | null, review = false): void {
@@ -57,16 +68,18 @@ export class IframeBrowser {
     if (item !== this.#item) {
       this.#discard();
       this.#closed.clear();
-      this.#links = githubLinks(row).slice(0, 10);
+      this.#links = frameLinks(row);
       this.#item = item;
-      this.#url = (review ? row?.links.find((link) => link.kind === 'pr' && githubFrameUrl(link.url))?.url : undefined) ?? this.#links[0]?.url ?? '';
+      this.#url = (review ? row?.links.find((link) => link.kind === 'pr' && frameUrl(link.url))?.url : undefined) ?? this.#links[0]?.url ?? '';
     } else {
-      for (const link of githubLinks(row)) if (this.tabs.length < 10 && !this.#links.some((one) => one.url === link.url)) this.#links.push(link);
+      for (const link of frameLinks(row)) if (!this.#links.some((one) => one.url === link.url)) this.#links.push(link);
     }
+    this.#sync();
   }
   close(url: string): void {
     this.#closed.add(url);
     if (url === this.#url) this.#url = this.tabs[0]?.url ?? '';
+    this.#sync();
     this.place(false);
     this.deps.changed();
   }
@@ -74,7 +87,9 @@ export class IframeBrowser {
     if (this.#enabled === enabled) return;
     this.#enabled = enabled;
     this.#generation++;
+    this.#requestedSites = '';
     this.#ready = false;
+    this.#available = false;
     this.#note = 'Connecting to the experimental extension…';
     this.#reloadPage = false;
     this.#discard();
@@ -85,9 +100,11 @@ export class IframeBrowser {
     if (!this.#enabled || this.#checking) return;
     this.#checking = true;
     const generation = this.#generation;
+    const sites = this.#sites();
+    const urls = this.tabs.map((link) => link.url);
     let reply: { ok?: unknown; error?: unknown } | null = null;
     try {
-      reply = (await this.deps.send({ type: this.#hosted ? 'iframe-enable' : 'iframe-check' })) as { ok?: unknown; error?: unknown } | null;
+      reply = (await this.deps.send(this.#hosted ? { type: 'iframe-enable', urls } : { type: 'iframe-check' })) as { ok?: unknown; error?: unknown } | null;
     } catch {
       /* Extension absent or reloading. */
     }
@@ -96,8 +113,11 @@ export class IframeBrowser {
       if (this.#enabled) void this.renew();
       return;
     }
+    if (this.#hosted && sites !== this.#sites()) { void this.renew(); return; }
+    this.#requestedSites = sites;
     const wasReady = this.#ready;
     this.#ready = reply?.ok === true;
+    this.#available = this.#ready;
     this.#note = this.#ready ? '' : String(reply?.error ?? 'Load the experimental Switchboard Chrome/Edge extension in this browser, then select Retry.');
     this.deps.changed(this.#ready && !wasReady);
   }
@@ -112,7 +132,7 @@ export class IframeBrowser {
   requireReload(): void {
     this.configure(false);
     this.#reloadPage = true;
-    this.#note = 'Reload Switchboard to apply the GitHub iframe setting.';
+    this.#note = 'Reload Switchboard to apply the embedded browser setting.';
   }
   async #launch(item: number | null, url: string): Promise<void> {
     this.#launchError = null;
@@ -123,9 +143,10 @@ export class IframeBrowser {
     if (this.#launchError !== null) this.deps.changed();
   }
   open(url: string, item: number | null = this.#item): boolean {
-    if (!this.#ready || !githubFrameUrl(url) || (!this.tabs.some((link) => link.url === url) && this.tabs.length >= 10)) return false;
+    if (!this.#available || !frameUrl(url)) return false;
     if (!this.#links.some((link) => link.url === url)) this.#links.push({ url, label: 'Link' });
     this.#closed.delete(url);
+    this.#sync();
     this.#url = url;
     this.#pending = { item, url };
     if (!this.#hosted) void this.#launch(item, url);
@@ -193,7 +214,7 @@ export class IframeBrowser {
     }
     if (this.#launchError !== null) this.#root.querySelector<HTMLElement>('.iframe-warning')!.textContent = this.#launchError;
   }
-  /** The extension owns a sibling frame so GitHub has an extension top-level page for its cookie exemptions. */
+  /** The extension owns a sibling frame so websites have an extension top-level page for its cookie exemptions. */
   place(visible: boolean): void {
     if (!this.#hosted) return;
     const rect = visible && this.#ready && this.#slot?.isConnected === true ? this.#slot.getBoundingClientRect() : null;

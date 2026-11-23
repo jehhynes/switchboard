@@ -4010,6 +4010,123 @@ describe('the page in use', () => {
 
 
 
+  it('creates tabs for every attached web link on selection and opens a pill only after its row is selected', async () => {
+    window.innerWidth = 1920;
+    const sent: Record<string, unknown>[] = [];
+    const page = startPage(root, {
+      fetch: (async (url: string, init?: { body?: string }) => { posts.push({ url, body: init?.body ? JSON.parse(init.body) : {} }); return { status: 200, ok: true, json: async () => ({}) }; }) as typeof globalThis.fetch,
+      EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000,
+      toExtension: async (_id, message) => { sent.push(message); return { ok: true }; },
+    });
+    const source = FakeSource.last!;
+    const links = Array.from({ length: 14 }, (_, i) => ({ label: `Site ${i}`, url: `http://site${i}.test:8080/path?q=1#part`, kind: 'url' as const, badge: `Site ${i}`, glyph: null, mentioned: false }));
+    links[0]!.url = 'https://desk.zoho.com/agent/ticket/1';
+    links[1]!.url = 'https://forum.example.com/t/2';
+    const groups = [listGroup('progress', [listRow(1, { url: 'https://github.com/o/r/issues/1', links }), listRow(2, { url: 'https://desk.zoho.com/agent/ticket/2', links: [links[1]!] })])];
+    hello(source, { settings: { iframeBrowser: true }, groups }); await flush();
+    expect(root.querySelectorAll('#detail [data-action="iframe-open"]')).toHaveLength(15);
+    expect(root.querySelector('#detail iframe.browser')).toBeNull();
+    posts = []; sent.length = 0;
+    click('#list [data-work-item="2"] .pill.link'); await flush();
+    expect(posts.filter((post) => post.url.endsWith('/select')).map((post) => post.body['workItemId'])).toEqual([2]);
+    expect(sent.filter((message) => message['type'] === 'iframe-launch')).toEqual([]);
+    hello(source, { settings: { iframeBrowser: true }, groups, scope: { ...scope, workItemId: 2 } }); await flush();
+    expect(sent.filter((message) => message['type'] === 'iframe-launch')).toEqual([{ type: 'iframe-launch', workItemId: 2, url: 'https://forum.example.com/t/2' }]);
+    expect(root.querySelector('#detail [data-action="iframe-open"][aria-selected="true"]')?.getAttribute('data-url')).toBe('https://forum.example.com/t/2');
+    click('#list [data-work-item="2"] .pill.link'); await flush();
+    expect(root.querySelectorAll('#detail [data-action="iframe-open"]')).toHaveLength(2);
+    page.close();
+  });
+
+  it('honors the last pill after an acknowledged selection whose hello is late, and drops refused pill requests', async () => {
+    const sent: Record<string, unknown>[] = [];
+    let refuse = false;
+    const page = startPage(root, {
+      fetch: (async (url: string, init?: { body?: string }) => { posts.push({ url, body: init?.body ? JSON.parse(init.body) : {} }); const denied = refuse && url.endsWith('/select'); return { status: denied ? 409 : 200, ok: !denied, json: async () => denied ? { error: 'That work item is gone.' } : {} }; }) as typeof globalThis.fetch,
+      EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000,
+      toExtension: async (_id, message) => { sent.push(message); return { ok: true }; },
+    });
+    const source = FakeSource.last!;
+    const groups = [listGroup('progress', [listRow(1, { url: 'https://forum.example.com/t/forum/one' }), listRow(2, { url: 'https://desk.zoho.com/agent/ticket/2' })])];
+    hello(source, { settings: { iframeBrowser: true }, groups }); await flush(); posts = []; sent.length = 0;
+    click('#list [data-work-item="2"] .pill.ticket'); await flush();
+    // The hub acknowledged 2, but its hello has not arrived. A click on 1 must still ask the hub to return to 1.
+    click('#list [data-work-item="1"] .pill.ticket'); await flush();
+    expect(posts.filter((post) => post.url.endsWith('/select')).map((post) => post.body['workItemId'])).toEqual([2, 1]);
+    hello(source, { settings: { iframeBrowser: true }, groups, scope: { ...scope, workItemId: 2 } }); await flush();
+    expect(sent.filter((message) => message['type'] === 'iframe-launch')).toEqual([]);
+    hello(source, { settings: { iframeBrowser: true }, groups }); await flush();
+    expect(sent.filter((message) => message['type'] === 'iframe-launch')).toEqual([{ type: 'iframe-launch', workItemId: 1, url: 'https://forum.example.com/t/forum/one' }]);
+    sent.length = 0; refuse = true;
+    click('#list [data-work-item="2"] .pill.ticket'); await flush();
+    expect(root.textContent).toContain('That work item is gone.');
+    hello(source, { settings: { iframeBrowser: true }, groups, scope: { ...scope, workItemId: 2 } }); await flush();
+    expect(sent.filter((message) => message['type'] === 'iframe-launch')).toEqual([]);
+    page.close();
+  });
+
+  it('keeps rapid pill and tab clicks embedded while the new work item waits for site rules', async () => {
+    const postMessage = vi.fn();
+    vi.spyOn(window, 'parent', 'get').mockReturnValue({ postMessage } as unknown as Window);
+    onTestFinished(() => { vi.restoreAllMocks(); });
+    const sent: Record<string, unknown>[] = [];
+    const opened = vi.fn();
+    let hold = false;
+    let resolve!: (value: unknown) => void;
+    const page = startPage(root, {
+      fetch: (async (url: string, init?: { body?: string }) => { posts.push({ url, body: init?.body ? JSON.parse(init.body) : {} }); return { status: 200, ok: true, json: async () => ({}) }; }) as typeof globalThis.fetch,
+      EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, openUrl: opened,
+      toExtension: async (_id, message) => { sent.push(message); return hold && message['type'] === 'iframe-enable' ? new Promise((done) => { resolve = done; }) : { ok: true }; },
+    });
+    const source = FakeSource.last!;
+    const link = { label: 'Forum', url: 'https://forum.example.com/t/forum/topic', kind: 'url' as const, badge: 'Forum', glyph: null, mentioned: false };
+    const groups = [listGroup('progress', [listRow(1, { url: 'https://github.com/o/r/issues/1' }), listRow(2, { url: 'https://desk.zoho.com/agent/ticket/2', links: [link] })])];
+    hello(source, { settings: { iframeBrowser: true }, groups }); await flush(); sent.length = 0;
+    hold = true;
+    click('#list [data-work-item="2"] .pill.ticket'); await flush();
+    hello(source, { settings: { iframeBrowser: true }, groups, scope: { ...scope, workItemId: 2 } }); await flush();
+    click('#list [data-work-item="2"] .pill.link'); await flush();
+    expect(sent.filter((message) => !String(message['type']).startsWith('iframe-'))).toEqual([]);
+    expect(opened).not.toHaveBeenCalled();
+    click('[data-action="iframe-open"][data-url="https://desk.zoho.com/agent/ticket/2"]');
+    hold = false; resolve({ ok: true }); await flush();
+    expect(root.querySelector('[data-action="iframe-open"][aria-selected="true"]')?.getAttribute('data-url')).toBe('https://desk.zoho.com/agent/ticket/2');
+    page.close();
+  });
+
+  it('uses the local default browser for Ctrl or Meta pill clicks without selecting or calling the extension, and shows refusals', async () => {
+    const sent = vi.fn(async () => ({ ok: true }));
+    const page = startPage(root, {
+      fetch: (async (url: string, init?: { body?: string }) => { posts.push({ url, body: init?.body ? JSON.parse(init.body) : {} }); return { status: 409, ok: false, json: async () => ({ error: 'The work item no longer links to this.' }) }; }) as typeof globalThis.fetch,
+      EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, local: true, standalone: () => false, toExtension: sent,
+    });
+    hello(FakeSource.last!, { settings: { iframeBrowser: true }, groups: [listGroup('progress', [listRow(1), listRow(2, { url: 'https://desk.zoho.com/agent/ticket/2' })])] }); await flush();
+    posts = []; sent.mockClear();
+    for (const modifier of [{ ctrlKey: true }, { metaKey: true }]) {
+      root.querySelector('#list [data-work-item="2"] .pill.ticket')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ...modifier })); await flush();
+    }
+    expect(posts.map((post) => post.url)).toEqual(['/v1/conversation/row-open', '/v1/conversation/row-open']);
+    expect(posts[0]!.body).toMatchObject({ workItemId: 2, url: 'https://desk.zoho.com/agent/ticket/2' });
+    expect(sent).not.toHaveBeenCalled();
+    expect(root.querySelector('#list .row.selected')?.getAttribute('data-work-item')).toBe('1');
+    expect(root.querySelector('.toast.warning .toast-text')?.textContent).toBe('The work item no longer links to this.');
+    page.close();
+  });
+
+  it('opens a Ctrl-clicked pill on the remote device without asking the hub or the extension', async () => {
+    const opened = vi.fn(), sent = vi.fn(async () => ({ ok: true }));
+    const page = startPage(root, {
+      fetch: (async (url: string, init?: { body?: string }) => { posts.push({ url, body: init?.body ? JSON.parse(init.body) : {} }); return { status: 200, ok: true, json: async () => ({}) }; }) as typeof globalThis.fetch,
+      EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, local: false, openUrl: opened, toExtension: sent,
+    });
+    hello(FakeSource.last!, { settings: { iframeBrowser: true }, groups: [listGroup('progress', [listRow(1), listRow(2, { url: 'https://forum.example.com/t/2' })])] }); await flush();
+    posts = []; sent.mockClear();
+    root.querySelector('#list [data-work-item="2"] .pill.ticket')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true })); await flush();
+    expect(opened).toHaveBeenCalledExactlyOnceWith('https://forum.example.com/t/2');
+    expect(posts).toEqual([]); expect(sent).not.toHaveBeenCalled();
+    page.close();
+  });
+
   it('shows the experimental GitHub frame on a remote page only after extension confirmation and removes it when disabled', async () => {
     window.innerWidth = 1920;
     const sent: unknown[] = [];

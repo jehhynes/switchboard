@@ -1,3 +1,4 @@
+import { frameUrl } from './iframeUrl.js';
 export interface HostPlacement {
   url: string;
   left: number;
@@ -6,17 +7,11 @@ export interface HostPlacement {
   height: number;
   reload: boolean;
 }
-/** Only the verified Switchboard child may send a placement; validate its payload before navigating the sibling GitHub frame. */
-export function hostPlacement(value: unknown, width: number, height: number): HostPlacement | null {
+/** Only the verified Switchboard child may send a placement; validate its payload before navigating the sibling website frame. */
+export function hostPlacement(value: unknown, width: number, height: number, origin?: string): HostPlacement | null {
   if (typeof value !== 'object' || value === null) return null;
   const data = value as Record<string, unknown>;
-  if (data['type'] !== 'switchboard-iframe' || typeof data['url'] !== 'string' || data['url'].length > 2048) return null;
-  try {
-    const url = new URL(data['url']);
-    if (url.origin !== 'https://github.com' || url.username !== '' || url.password !== '') return null;
-  } catch {
-    return null;
-  }
+  if (data['type'] !== 'switchboard-iframe' || !frameUrl(data['url'], origin)) return null;
   const { left, top, width: w, height: h } = data;
   if (
     ![left, top, w, h].every((n) => typeof n === 'number' && Number.isFinite(n)) ||
@@ -74,13 +69,10 @@ export class IframeHostController {
     if (typeof epoch !== 'string' || epoch.length < 1 || epoch.length > 100 || this.#oldEpochs.has(epoch) || !Number.isSafeInteger(seq) || (epoch === this.#epoch && (seq as number) <= this.#seq)) return false;
     const item = data['item'];
     const tabs = data['tabs'];
-    if (!(item === null || (Number.isSafeInteger(item) && (item as number) > 0)) || !Array.isArray(tabs) || tabs.length > 10 || new Set(tabs).size !== tabs.length || !tabs.every((url) => {
-      if (typeof url !== 'string' || url.length > 2048) return false;
-      try { const value = new URL(url); return value.origin === 'https://github.com' && value.username === '' && value.password === ''; } catch { return false; }
-    })) { this.deps.show(null); return false; }
-    if (data['url'] !== undefined && !tabs.includes(data['url'])) { this.deps.show(null); return false; }
+    if (!(item === null || (Number.isSafeInteger(item) && (item as number) > 0)) || !Array.isArray(tabs) || new Set(tabs).size !== tabs.length || !tabs.every((url) => frameUrl(url, this.deps.origin))) { this.deps.show(null); return false; }
+    if (data['url'] !== undefined && (!frameUrl(data['url'], this.deps.origin) || !tabs.includes(data['url']))) { this.deps.show(null); return false; }
     const { width, height } = this.deps.viewport();
-    const placement = hostPlacement(data, width, height);
+    const placement = hostPlacement(data, width, height, this.deps.origin);
     if (data['url'] !== undefined && placement === null) { this.deps.show(null); return false; }
     if (epoch !== this.#epoch) { if (this.#epoch !== '') this.#oldEpochs.add(this.#epoch); this.#epoch = epoch; }
     this.#seq = seq as number;

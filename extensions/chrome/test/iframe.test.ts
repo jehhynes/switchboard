@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { IframeRules, iframePage, iframeRule, iframeTab, iframeEnabled, IFRAME_LEASE_MS } from '../src/iframe.js';
+import { IframeRules, iframePage, iframeRule, iframePageRule, iframeTab, iframeEnabled, IFRAME_LEASE_MS } from '../src/iframe.js';
 import type { IframeLease, IframeRule, IframeSender } from '../src/iframe.js';
 
 const sender: IframeSender = { origin: 'https://pc.tail.ts.net', url: 'https://pc.tail.ts.net/page/', frameId: 1, tab: { id: 7 } };
@@ -10,6 +10,7 @@ function rig(remote: string | null = 'https://pc.tail.ts.net') {
     url: 'chrome-extension://hlbibnhgkgnjkbfledhgjblacloneije/iframeHost.html?origin=https%3A%2F%2Fpc.tail.ts.net' as string | undefined,
     enabled: true,
     fail: false,
+    saveFail: false,
     leases: {} as Record<string, IframeLease>,
     rules: [] as IframeRule[],
     checks: [] as string[],
@@ -25,6 +26,7 @@ function rig(remote: string | null = 'https://pc.tail.ts.net') {
     },
     leases: async () => structuredClone(state.leases),
     save: async (leases) => {
+      if (state.saveFail) throw new Error('storage failed');
       state.leases = structuredClone(leases);
     },
     rules: async () => state.rules,
@@ -32,9 +34,9 @@ function rig(remote: string | null = 'https://pc.tail.ts.net') {
       state.rules = [...state.rules.filter((rule) => !remove.includes(rule.id)), ...add];
     },
   });
-  return { state, rules, enable: (from = sender) => rules.external({ type: 'iframe-enable' }, from) };
+  return { state, rules, enable: (from = sender) => rules.external({ type: 'iframe-enable', urls: ['https://github.com/o/r'] }, from) };
 }
-describe('GitHub iframe header exceptions', () => {
+describe('iframe header exceptions', () => {
   it('probes an ordinary page without installing or keeping a header exception', async () => {
     const r = rig();
     r.state.url = sender.url;
@@ -44,9 +46,9 @@ describe('GitHub iframe header exceptions', () => {
     expect(r.state.rules).toEqual([]);
     expect(r.state.leases).toEqual({});
   });
-  it('restricts exceptions to one tab, the Switchboard top domain and exact HTTPS GitHub subframes', () => {
-    expect(iframeRule(7, 'https://pc.tail.ts.net')).toEqual({
-      id: 8,
+  it('restricts HTTP and HTTPS exceptions to one extension host tab and protects the exact hub origin', () => {
+    expect(iframeRule(7, 'github.com', 1)).toEqual({
+      id: 1,
       priority: 1,
       action: {
         type: 'modifyHeaders',
@@ -55,8 +57,26 @@ describe('GitHub iframe header exceptions', () => {
           { header: 'content-security-policy', operation: 'remove' },
         ],
       },
-      condition: { tabIds: [7], topDomains: ['pc.tail.ts.net'], regexFilter: '^https://github\\.com/', resourceTypes: ['sub_frame'] },
+      condition: { tabIds: [7], topDomains: ['hlbibnhgkgnjkbfledhgjblacloneije'], initiatorDomains: ['hlbibnhgkgnjkbfledhgjblacloneije', 'github.com'], regexFilter: '^https?://github\\.com/', resourceTypes: ['sub_frame'] },
     });
+  });
+  it('matches exact request hosts and ports, including broad domain names and IPv6', () => {
+    for (const [host, allowed, refused] of [
+      ['com', 'https://com/', 'https://bank.com/'],
+      ['github.io', 'https://github.io/', 'https://evil.github.io/'],
+      ['localhost:5000', 'http://localhost:5000/path', 'http://localhost:5001/path'],
+      ['[::1]:8080', 'http://[::1]:8080/path', 'http://[::1]:8081/path'],
+      ['xn--bcher-kva.test', 'https://xn--bcher-kva.test/', 'https://child.xn--bcher-kva.test/'],
+    ]) {
+      const rule = iframeRule(7, host!, 1);
+      const match = new RegExp(rule.condition.regexFilter!);
+      expect(match.test(allowed!)).toBe(true); expect(match.test(refused!)).toBe(false);
+      expect(rule.condition).not.toHaveProperty('requestDomains');
+    }
+    expect(iframeRule(7, '[::1]:8080', 1).condition.initiatorDomains).toEqual(['hlbibnhgkgnjkbfledhgjblacloneije', '[::1]']);
+  });
+  it('keeps the hub CSP with a higher priority rule bound to its exact origin and port', () => {
+    expect(iframePageRule(7, 'http://localhost:4000', 2)).toEqual({ id: 2, priority: 2, action: { type: 'allow' }, condition: { tabIds: [7], topDomains: ['hlbibnhgkgnjkbfledhgjblacloneije'], regexFilter: '^http://(localhost|127\\.0\\.0\\.1):4000/', resourceTypes: ['sub_frame'] } });
   });
   it('accepts the exact remote origin and loopback page, refusing other origins and paths', () => {
     expect(iframePage('http://127.0.0.1:4000/page/#w=1', null)).toBe('http://127.0.0.1:4000');
@@ -86,8 +106,8 @@ describe('GitHub iframe header exceptions', () => {
     expect(await r.enable()).toHaveProperty('error');
     r.state.url = 'chrome-extension://hlbibnhgkgnjkbfledhgjblacloneije/iframeHost.html?origin=https%3A%2F%2Fpc.tail.ts.net';
     expect(await r.enable()).toEqual({ ok: true });
-    expect(r.state.rules).toHaveLength(1);
-    expect(r.state.leases).toEqual({ '7': { origin: 'https://pc.tail.ts.net', until: 91000 } });
+    expect(r.state.rules).toHaveLength(2);
+    expect(r.state.leases).toEqual({ '7': { origin: 'https://pc.tail.ts.net', until: 91000, rules: [1, 2] } });
     expect(await r.rules.external({ type: 'iframe-disable' }, sender)).toEqual({ ok: true });
     expect(r.state.rules).toEqual([]);
     expect(r.state.leases).toEqual({});
@@ -96,10 +116,10 @@ describe('GitHub iframe header exceptions', () => {
     const r = rig();
     await r.enable();
     await r.rules.sweep();
-    expect(r.state.rules).toHaveLength(1);
+    expect(r.state.rules).toHaveLength(2);
     r.state.url += '#w=2';
     await r.rules.navigated(7);
-    expect(r.state.rules).toHaveLength(1);
+    expect(r.state.rules).toHaveLength(2);
     r.state.url = 'https://github.com/';
     await r.rules.navigated(7);
     expect(r.state.rules).toEqual([]);
@@ -108,7 +128,7 @@ describe('GitHub iframe header exceptions', () => {
       r.state.enabled = true;
       r.state.fail = false;
       await r.enable();
-      expect(r.state.rules).toHaveLength(1);
+      expect(r.state.rules).toHaveLength(2);
       if (reason === 'closed') r.state.url = undefined;
       if (reason === 'expired') r.state.now += IFRAME_LEASE_MS;
       if (reason === 'off') r.state.enabled = false;
@@ -120,6 +140,34 @@ describe('GitHub iframe header exceptions', () => {
     }
     await r.rules.remove(7);
     expect(r.state.rules).toEqual([]);
+  });
+  it('allocates bounded rule IDs for large tab IDs, replaces site rules, and removes orphaned or incomplete leases', async () => {
+    const r = rig();
+    const sender = { origin: 'https://pc.tail.ts.net', url: 'https://pc.tail.ts.net/page/', frameId: 1, tab: { id: 2147483640 } };
+    expect(await r.rules.external({ type: 'iframe-enable', urls: ['https://desk.zoho.com/one', 'https://desk.zoho.com/two', 'http://localhost:5000/'] }, sender)).toEqual({ ok: true });
+    expect(r.state.rules.map((rule) => rule.id)).toEqual([1, 2, 3]);
+    expect(r.state.rules[0]?.condition.regexFilter).toBe('^https?://desk\\.zoho\\.com/');
+    expect(r.state.rules[1]?.condition.regexFilter).toBe('^https?://localhost:5000/');
+    expect(await r.rules.external({ type: 'iframe-enable', urls: ['https://forum.example.com/'] }, sender)).toEqual({ ok: true });
+    expect(r.state.rules.map((rule) => rule.id)).toEqual([1, 2]);
+    expect(r.state.rules[0]?.condition.regexFilter).toBe('^https?://forum\\.acme\\.com/');
+    for (const urls of [undefined, ['javascript:alert(1)'], ['https://pc.tail.ts.net/page/'], ['http://localhost:47615/']]) expect(await r.rules.external({ type: 'iframe-enable', urls }, sender)).toHaveProperty('error');
+    r.state.rules.pop(); await r.rules.sweep();
+    expect(r.state.rules).toEqual([]); expect(r.state.leases).toEqual({});
+  });
+  it('allocates rules without collisions across hosts and removes every rule if saving its lease fails', async () => {
+    const r = rig();
+    await r.enable();
+    await r.enable({ ...sender, tab: { id: 8 } });
+    expect(r.state.rules.map((rule) => rule.id)).toEqual([1, 2, 3, 4]);
+    await r.enable();
+    expect(r.state.rules.map((rule) => rule.id)).toEqual([3, 4, 1, 2]);
+    await r.rules.remove(7);
+    expect(r.state.rules.map((rule) => rule.id)).toEqual([3, 4]);
+    r.state.saveFail = true;
+    expect(await r.enable()).toHaveProperty('error');
+    expect(r.state.rules.map((rule) => rule.id)).toEqual([3, 4]);
+    expect(r.state.leases['7']).toBeUndefined();
   });
   it('serializes enable and close, so a late enable cannot restore a removed exception', async () => {
     const r = rig();
@@ -179,7 +227,7 @@ describe('iframe host authentication', () => {
     expect(await r.enable({ ...sender, frameId: 3 })).toEqual({ ok: true });
     expect(r.state.rules[0]?.condition.topDomains).toEqual(['hlbibnhgkgnjkbfledhgjblacloneije']);
     await r.rules.sweep();
-    expect(r.state.rules).toHaveLength(1);
+    expect(r.state.rules).toHaveLength(2);
     expect(await r.rules.external({ type: 'iframe-launch' }, { ...sender, frameId: 3 })).toEqual({ ok: true });
     await r.rules.remove(7);
     expect(r.state.rules).toEqual([]);

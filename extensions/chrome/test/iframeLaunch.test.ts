@@ -27,6 +27,10 @@ describe('iframe host launch', () => {
     await launcher.open('https://pc.tail.ts.net', 3, 'https://github.com/o/r/pull/8');
     const target = new URL(create.mock.lastCall![0]!);
     expect(new URLSearchParams(target.hash.slice(1)).get('url')).toBe('https://github.com/o/r/pull/8');
-    for (const url of ['https://evil.test/', 'https://u:p@github.com/', 'javascript:alert(1)', 12]) await expect(launcher.open('https://pc.tail.ts.net', 3, url)).rejects.toThrow();
+    for (const url of ['https://desk.zoho.com/agent/ticket/1', 'https://forum.example.com/t/2', 'http://localhost:5000/path?q=1#part']) {
+      await launcher.open('https://pc.tail.ts.net', 3, url);
+      expect(new URLSearchParams(new URL(create.mock.lastCall![0]!).hash.slice(1)).get('url')).toBe(url);
+    }
+    for (const url of ['https://pc.tail.ts.net/page/', 'http://127.0.0.1:47615/', 'file:///secret', 'https://u:p@github.com/', 'javascript:alert(1)', 12]) await expect(launcher.open('https://pc.tail.ts.net', 3, url)).rejects.toThrow();
   });
 });

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { hostPlacement } from '../src/iframeHostView.js';
 const placement = { type: 'switchboard-iframe', url: 'https://github.com/o/r', left: 100, top: 50, width: 600, height: 400 };
 describe('extension host frame placement', () => {
-  it('accepts only bounded GitHub rectangles and explicit reload', () => {
+  it('accepts only bounded web rectangles and explicit reload', () => {
     expect(hostPlacement(placement, 900, 700)).toEqual({ url: 'https://github.com/o/r', left: 100, top: 50, width: 600, height: 400, reload: false });
     expect(hostPlacement({ ...placement, reload: true }, 900, 700)?.reload).toBe(true);
     expect(hostPlacement({ ...placement, left: -0.5, top: -0.5 }, 900, 700)).toMatchObject({ left: -0.5, top: -0.5 });
@@ -13,7 +13,7 @@ describe('extension host frame placement', () => {
       {},
       { ...placement, type: 'other' },
       { ...placement, url: 'bad' },
-      { ...placement, url: 'https://github.com.evil.test/' },
+      { ...placement, url: 'file:///secret' },
       { ...placement, url: 'https://u:p@github.com/' },
       { ...placement, url: `https://github.com/${'x'.repeat(2048)}` },
       { ...placement, left: -2 },
@@ -39,11 +39,15 @@ describe('extension host messages', () => {
     const send = (value: unknown) => controller.message({ source: app, origin: 'http://localhost:4000', data: value });
     expect(send(data)).toBe(true);
     expect(send(data)).toBe(false);
-    for (const invalid of [{ ...data, seq: 0 }, { ...data, seq: NaN }, { ...data, seq: 2, item: 1.5 }, { ...data, seq: 2, tabs: ['https://evil.test'] }, { ...data, seq: 2, tabs: [placement.url, placement.url] }, { ...data, seq: 2, url: 'https://github.com/other' }, { ...data, seq: 2, tabs: Array.from({ length: 11 }, (_, i) => `https://github.com/o/r/${i}`) }]) expect(send(invalid)).toBe(false);
+    for (const invalid of [{ ...data, seq: 0 }, { ...data, seq: NaN }, { ...data, seq: 2, item: 1.5 }, { ...data, seq: 2, tabs: ['javascript:alert(1)'] }, { ...data, seq: 2, tabs: [placement.url, placement.url] }, { ...data, seq: 2, url: 'https://github.com/other' }, { ...data, seq: 2, tabs: [12] }, { ...data, seq: 2, url: undefined, tabs: ['http://localhost:4000/page/'] }, { ...data, seq: 2, url: undefined, tabs: ['http://127.0.0.1:4000/page/'] }, { ...data, seq: 2, url: undefined, tabs: ['http://localhost:47615/'] }]) expect(send(invalid)).toBe(false);
     expect(reconcile).toHaveBeenCalledTimes(1);
     expect(send({ ...data, epoch: 'second', seq: 0 })).toBe(true);
     expect(reconcile).toHaveBeenCalledTimes(2);
     expect(send({ ...data, seq: 99 })).toBe(false);
+    const tabs = Array.from({ length: 15 }, (_, i) => `http://site${i}.test:8080/path?q=1#part`);
+    expect(send({ ...data, epoch: 'second', seq: 1, url: undefined, tabs })).toBe(true);
+    expect(reconcile).toHaveBeenLastCalledWith(1, tabs);
+    for (const url of ['https://desk.zoho.com/agent/ticket/1', 'https://forum.example.com/t/1', 'http://localhost:5000/']) expect(hostPlacement({ ...placement, url }, 900, 700)?.url).toBe(url);
   });
   it('refuses messages before authentication, from GitHub or another origin, and hides on missed heartbeats', () => {
     const app = {};

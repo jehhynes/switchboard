@@ -1,3 +1,4 @@
+import { frameUrl } from './iframeUrl.js';
 import { BROWSER_PORT } from './hub.js';
 import { BROWSER_EXTENSION_ID } from '@switchboard/core/hubRecord';
 export const IFRAME_HOST_PATH = '/iframeHost.html';
@@ -39,12 +40,12 @@ export async function iframeEnabled(fetchUrl: (url: string) => Promise<Response>
   }
 }
 
-/** The iframe experiment changes only GitHub document responses in a verified Switchboard tab. */
+/** Header changes stay inside a verified extension host; its Switchboard child keeps its CSP. */
 export interface IframeRule {
   id: number;
   priority: number;
-  action: { type: 'modifyHeaders'; responseHeaders: Array<{ header: string; operation: 'remove' }> };
-  condition: { tabIds: number[]; topDomains: string[]; regexFilter: string; resourceTypes: ['sub_frame'] };
+  action: { type: 'modifyHeaders'; responseHeaders: Array<{ header: string; operation: 'remove' }> } | { type: 'allow' };
+  condition: { tabIds: number[]; topDomains: string[]; regexFilter?: string; urlFilter?: string; initiatorDomains?: string[]; resourceTypes: ['sub_frame'] };
 }
 export interface IframeSender {
   origin?: string;
@@ -55,6 +56,7 @@ export interface IframeSender {
 export interface IframeLease {
   origin: string;
   until: number;
+  rules?: number[];
 }
 export interface IframeRulesDeps {
   origin: string | null;
@@ -68,9 +70,11 @@ export interface IframeRulesDeps {
 }
 export const IFRAME_LEASE_MS = 90_000;
 
-export function iframeRule(tabId: number, origin: string): IframeRule {
+export function iframeRule(tabId: number, host: string, id: number): IframeRule {
+  const hostname = new URL(`http://${host}`).hostname;
+  const escaped = host.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return {
-    id: tabId + 1,
+    id,
     priority: 1,
     action: {
       type: 'modifyHeaders',
@@ -80,7 +84,20 @@ export function iframeRule(tabId: number, origin: string): IframeRule {
       ],
     },
     // topDomains (Chrome 145+) keeps the rule from applying after the tab navigates away, before onUpdated runs.
-    condition: { tabIds: [tabId], topDomains: [new URL(origin).hostname], regexFilter: '^https://github\\.com/', resourceTypes: ['sub_frame'] },
+    condition: { tabIds: [tabId], topDomains: [BROWSER_EXTENSION_ID], initiatorDomains: [BROWSER_EXTENSION_ID, hostname], regexFilter: `^https?://${escaped}/`, resourceTypes: ['sub_frame'] },
+  };
+}
+
+export function iframePageRule(tabId: number, origin: string, id: number): IframeRule {
+  const page = new URL(origin);
+  const filter = page.hostname === 'localhost' || page.hostname === '127.0.0.1'
+    ? { regexFilter: `^${page.protocol}//(localhost|127\\.0\\.0\\.1):${page.port}/` }
+    : { urlFilter: `|${origin}/` };
+  return {
+    id,
+    priority: 2,
+    action: { type: 'allow' },
+    condition: { tabIds: [tabId], topDomains: [new URL(IFRAME_EXTENSION_ORIGIN).hostname], ...filter, resourceTypes: ['sub_frame'] },
   };
 }
 
@@ -134,12 +151,20 @@ export class IframeRules {
       const leases = await this.deps.leases();
       if (type === 'iframe-launch' || type === 'iframe-check') return { ok: true as const };
       if (!tab.hosted) { await this.#remove(id!); return { ok: true as const }; }
-      await this.deps.update([id! + 1], [iframeRule(id!, tab.hosted ? IFRAME_EXTENSION_ORIGIN : origin)]);
-      leases[String(id)] = { origin, until: this.deps.now() + IFRAME_LEASE_MS };
+      const urls = (message as { urls?: unknown }).urls;
+      if (!Array.isArray(urls) || !urls.every((url) => frameUrl(url, origin))) return { error: 'Invalid website tabs.' };
+      const hosts = [...new Set((urls as string[]).map((url) => new URL(url).host))];
+      // Browser tab IDs can approach the signed 32-bit limit; allocate independent rule IDs.
+      const previous: number[] = leases[String(id)]?.rules ?? [];
+      const used = new Set((await this.deps.rules()).map((rule) => rule.id).filter((ruleId) => !previous.includes(ruleId)));
+      const ids: number[] = [];
+      for (let i = 0, next = 1; i <= hosts.length; i++) { while (used.has(next)) next++; ids.push(next); used.add(next++); }
+      await this.deps.update(previous, [...hosts.map((host, i) => iframeRule(id!, host, ids[i]!)), iframePageRule(id!, origin, ids[hosts.length]!)]);
+      leases[String(id)] = { origin, until: this.deps.now() + IFRAME_LEASE_MS, rules: ids };
       try {
         await this.deps.save(leases);
       } catch (error) {
-        await this.deps.update([id! + 1], []);
+        await this.deps.update(ids, []);
         throw error;
       }
       return { ok: true as const };
@@ -156,7 +181,7 @@ export class IframeRules {
   }
   async #remove(id: number): Promise<void> {
     const leases = await this.deps.leases();
-    await this.deps.update([id + 1], []);
+    await this.deps.update(leases[String(id)]?.rules ?? [], []);
     delete leases[String(id)];
     await this.deps.save(leases);
   }
@@ -164,27 +189,25 @@ export class IframeRules {
   sweep(): Promise<void> {
     return this.#run(async () => {
       const leases = await this.deps.leases();
-      const remove: number[] = [];
-      for (const rule of await this.deps.rules()) {
-        const id = rule.id - 1;
-        const lease = leases[String(id)];
+      const keepIds = new Set<number>();
+      const rules = await this.deps.rules();
+      for (const [key, lease] of Object.entries(leases)) {
+        const id = Number(key);
         let keep = false;
         try {
+          const tab = iframeTab(await this.deps.tab(id), this.deps.origin);
           keep =
-            lease !== undefined &&
+            Number.isSafeInteger(id) && id >= 0 && lease.rules !== undefined && lease.rules.length > 0 && lease.rules.every((ruleId) => rules.some((rule) => rule.id === ruleId)) &&
             lease.until > this.deps.now() &&
-            iframeTab(await this.deps.tab(id), this.deps.origin)?.hosted === true &&
-            iframeTab(await this.deps.tab(id), this.deps.origin)?.origin === lease.origin &&
+            tab?.hosted === true && tab.origin === lease.origin &&
             (await this.deps.enabled(lease.origin));
         } catch {
           /* A failed check removes the exception. */
         }
-        if (!keep) {
-          remove.push(rule.id);
-          delete leases[String(id)];
-        }
+        if (keep) for (const ruleId of lease.rules!) keepIds.add(ruleId);
+        else delete leases[key];
       }
-      await this.deps.update(remove, []);
+      await this.deps.update(rules.filter((rule) => !keepIds.has(rule.id)).map((rule) => rule.id), []);
       await this.deps.save(leases);
     });
   }

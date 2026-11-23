@@ -23,7 +23,7 @@ export class IframeFrames {
     if (frame === undefined) {
       frame = document.createElement('iframe');
       frame.className = 'browser';
-      frame.title = 'GitHub';
+      frame.title = new URL(view.url).hostname;
       frame.referrerPolicy = 'no-referrer';
       frame.allow = 'clipboard-write; fullscreen';
       frame.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads');

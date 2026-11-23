@@ -150,7 +150,7 @@ export interface ViewSettings {
 export interface WebSettings {
   /** The port the hub serves the page on, read at hub start, so an installed page keeps its address; 0 serves it only on the hub's own port. */
   port: number;
-  /** GitHub iframe proof of concept; off by default. */
+  /** Embedded browser experiment; off by default. */
   iframeBrowser: boolean;
   /**
    * Names the page also answers as when a request comes through a local HTTPS proxy, `tailscale serve` (architecture.md § Remote access), such as

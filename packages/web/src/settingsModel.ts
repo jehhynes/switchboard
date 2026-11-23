@@ -1251,9 +1251,9 @@ export function generalFields(state: EditorState): Section[] {
       fields: [
         {
           path: 'web.iframeBrowser',
-          label: 'Embedded GitHub tabs',
+          label: 'Embedded browser tabs',
           kind: 'boolean',
-          help: "Experimental GitHub embedding on local and paired devices. Needs this branch's Chrome/Edge extension and Chromium 145+. Open with sign-in support keeps the existing page inside an extension tab beside GitHub. Allows that extension to frame Switchboard and removes GitHub framing headers and CSP in verified experiment tabs. Reload the page after changing this setting.",
+          help: "Experimental web embedding on local and paired devices. Needs this branch's Chrome/Edge extension, access to HTTP and HTTPS sites, and Chromium 145+. Open with sign-in support keeps Switchboard and website frames inside an extension tab. Removes website framing headers and CSP only in verified experiment tabs, preserving Switchboard's CSP. Reload the page after changing this setting.",
           fallback: false,
         },
       ],

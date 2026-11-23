@@ -54,6 +54,6 @@ describe('readSnoozed', () => {
     const manifest = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'src', 'manifest.json'), 'utf8'));
 
     expect(BROWSER_PORT).toBe(HUB_BROWSER_PORT);
-    expect(manifest.host_permissions).toEqual(['http://127.0.0.1/*', 'http://localhost/*', 'https://github.com/*']);
+    expect(manifest.host_permissions).toEqual(['http://*/*', 'https://*/*']);
   });
 });

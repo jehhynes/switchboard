@@ -52,7 +52,7 @@ import { LocalFilesController, localTabs } from './localFiles.js';
 import type { DiffModule } from './diff/types.js';
 import { useFileIcons } from './fileIcons.js';
 import type { NeedsItem } from './alerts.js';
-import { IframeBrowser, githubFrameUrl, githubLinks, IFRAME_EXTENSION_ID, IFRAME_RENEW_MS } from './iframeBrowser.js';
+import { IframeBrowser, frameUrl, frameLinks, IFRAME_EXTENSION_ID, IFRAME_RENEW_MS } from './iframeBrowser.js';
 
 /** The stream's event types the page reads. */
 /** How long after a single-choice pick the card moves to the next question (design open choice 4). */
@@ -344,7 +344,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     });
   };
   let linkItem: number | null = null;
-  const itemLinks = (): boolean => githubLinks(selectedRow(state)).length > 0 || (linkItem !== null && linkItem === state.scope?.workItemId);
+  const itemLinks = (): boolean => frameLinks(selectedRow(state)).length > 0 || (linkItem !== null && linkItem === state.scope?.workItemId);
   /** Whether the Browser tab shows: embedded tabs enabled for this page, and links of the open work item to show; the operator's Status or Browser choice stays. */
   const showBrowser = (): boolean => browserTab() && itemLinks();
   /** Whether the Console tab shows: an active session, not ended, that the terminal holder may hold; otherwise its console would be blank, so there is no tab. */
@@ -510,7 +510,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       flash(target);
     }
   };
-    const browserReady = (): boolean => iframe.ready && state.scope !== null;
+    const browserReady = (): boolean => iframe.available && state.scope !== null;
   const openBrowserLink = (url: string): void => {
     iframe.follow(selectedRow(state));
     if (iframe.open(url, state.scope?.workItemId ?? null)) {
@@ -3002,7 +3002,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       view.tab = 'conversation';
     }
 
-    if (state.scope?.workItemId === workItemId && !selectInFlight) {
+    if (state.scope?.workItemId === workItemId && !selectInFlight && (acked === null || acked === workItemId)) {
       acked = workItemId;
       draw();
       return;
@@ -3066,6 +3066,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
       selectInFlight = false;
       if (answer.status !== 200 && hostSelection?.item === asked) hostSelection = null;
+      if (answer.status !== 200 && pendingRowControl?.key === `item:${asked}`) pendingRowControl = null;
 
       if (answer.status === 200) {
         acked = asked;
@@ -3373,7 +3374,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const forRow = (key: string, run: () => void): void => {
     const row = rowByKey(key);
     if (row === null) return;
-    if (row.workItemId === null || row.workItemId === state.scope?.workItemId) { run(); return; }
+    if (row.workItemId === null || (row.workItemId === state.scope?.workItemId && (wanted === null || wanted === row.workItemId))) { run(); return; }
     pendingRowControl = { key, run };
     void select(row.workItemId);
   };
@@ -3607,8 +3608,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         forRow(button!.dataset['row'] ?? '', () => void runCommand(button!.dataset['label'] ?? ''));
         break;
       case 'open-link':
-        // A pill's link opens without selecting its row; an Open item in a row's menu closes the menu.
-        openLink(button!.dataset['row'] ?? '', button!.dataset['link'] ?? '');
+        event.preventDefault();
+        openLink(button!.dataset['row'] ?? '', button!.dataset['link'] ?? '', event.ctrlKey || event.metaKey);
         break;
       case 'row-history':
         // The menu's work item's History tab: the header's menu names the open work item; a row's menu in the list selects its row first (forRow).
@@ -3772,7 +3773,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         draw();
         break;
       case 'iframe-open':
-        if (!iframe.ready) { chooseTab('browser'); draw(); }
+        if (!iframe.available) { chooseTab('browser'); draw(); }
         else openBrowserLink(button?.dataset['url'] ?? '');
         break;
       case 'iframe-close':
@@ -4355,12 +4356,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     view.copyMenu = false;
   };
   /**
-   * Opens a row's ticket or link, an http or https URL from the hub's row, in the extension's tab group when the extension answers and no Chrome
-   * pane works, else in a new tab; the installed app on this computer asks the hub, which opens it in the default browser, since a link it opened
-   * itself would stay in the browser that installed it. A page on another device opens it in its own browser, as the hub's browser is on the
-   * computer.
+   * Opens a web link in its work item's embedded tab when enabled. Modified clicks use the default browser locally or an outside tab remotely.
+   * Without embedding, ordinary clicks use the extension's tab group, then the installed app's default browser or a new tab.
    */
-  const openLink = (key: string, which: string): void => {
+  const openLink = (key: string, which: string, external = false): void => {
     const row = rowByKey(key);
     const url = row === null ? null : rowLink(row, which);
     const target = url === null ? null : tabUrl(url);
@@ -4374,7 +4373,13 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
-    if (state.iframeBrowser === true && iframe.ready && row.workItemId !== null && row.workItemId === state.scope?.workItemId && githubFrameUrl(target)) { openBrowserLink(target); return; }
+    if (external) {
+      if (localPage()) {
+        void post('row-open', { ...rowTarget(row), url }).then((answer) => answer.status === 200 || showError(String(answer.body['error'] ?? `The link did not open (status ${answer.status}).`)));
+      } else openNewTab(target);
+      return;
+    }
+    if (state.iframeBrowser === true && iframe.available && row.workItemId !== null && frameUrl(target)) { forRow(key, () => openBrowserLink(target)); return; }
     openTab(target, () => {
       if (standalone() && localPage()) {
         void post('row-open', { ...rowTarget(row), url }).then((answer) => answer.status === 200 || showError(String(answer.body['error'] ?? `The link did not open (status ${answer.status}).`)));
@@ -4640,7 +4645,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const iframe = new IframeBrowser({
     send: (message) => toExtension(IFRAME_EXTENSION_ID, message),
     changed: (becameReady) => { if (becameReady && !tabChosen) openTabs(); applyHostSelection(); draw(); },
-    external: (url) => { if (githubFrameUrl(url)) (deps.openUrl ?? ((one: string) => void window.open(one, '_blank', 'noopener,noreferrer')))(url); },
+    external: (url) => { if (frameUrl(url)) (deps.openUrl ?? ((one: string) => void window.open(one, '_blank', 'noopener,noreferrer')))(url); },
   });
   const iframeRenew = setInterval(() => void iframe.renew(), IFRAME_RENEW_MS);
   const resumeIframe = (): void => {
@@ -4654,7 +4659,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     if (event.data?.type === 'switchboard-iframe-focus' && typeof event.data.focused === 'boolean') { hostFocused = event.data.focused; reportFocus(true); }
     if (event.data?.type === 'switchboard-iframe-select') {
       const { workItemId, url } = event.data;
-      if (!Number.isSafeInteger(workItemId) || workItemId <= 0 || !(url === null || typeof url === 'string' && githubFrameUrl(url))) return;
+      if (!Number.isSafeInteger(workItemId) || workItemId <= 0 || !(url === null || typeof url === 'string' && frameUrl(url))) return;
       hostSelection = { item: workItemId, url };
       if (state.scope?.workItemId !== workItemId || wanted !== workItemId) void select(workItemId);
       applyHostSelection();

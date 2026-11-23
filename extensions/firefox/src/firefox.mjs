@@ -59,8 +59,8 @@ export function firefoxManifest(chrome, build) {
     ...(firefoxPermissions.length === 0 ? {} : { permissions: firefoxPermissions }),
     version: `${chrome.version}.${build}`,
     background: { scripts: [background.service_worker] },
-    // These two exact hosts were added for the Chrome-only iframe experiment.
-    host_permissions: hosts.filter((host) => host !== 'https://github.com/*' && host !== 'http://localhost/*').map((host) => host.replace(/^([a-z]+:\/\/[^/:]+):\d+\//, '$1/')),
+    // Broad website access is only needed by Chrome's embedded tabs.
+    host_permissions: [...new Set([...(hosts.some((host) => host === 'http://*/*' || host === 'https://*/*') ? ['http://127.0.0.1/*'] : []), ...hosts.filter((host) => !['http://*/*', 'https://*/*', 'https://github.com/*', 'http://localhost/*'].includes(host)).map((host) => host.replace(/^([a-z]+:\/\/[^/:]+):\d+\//, '$1/'))])],
     browser_specific_settings: {
       gecko: { id: GECKO_ID, strict_min_version: MIN_VERSION, data_collection_permissions: { required: ['none'] } },
     },

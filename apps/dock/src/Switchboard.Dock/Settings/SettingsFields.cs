@@ -385,7 +385,7 @@ public static partial class SettingsFields
             ]),
             new Section("Web page",
             [
-                new Field("web.iframeBrowser", "Embedded GitHub tabs", FieldKind.Boolean, "Experimental GitHub embedding on local and paired devices. Needs this branch's Chrome/Edge extension and Chromium 145+. Open with sign-in support keeps the existing page inside an extension tab beside GitHub. Allows that extension to frame Switchboard and removes GitHub framing headers and CSP in verified experiment tabs. Reload the page after changing this setting.", Fallback: false),
+                new Field("web.iframeBrowser", "Embedded browser tabs", FieldKind.Boolean, "Experimental web embedding on local and paired devices. Needs this branch's Chrome/Edge extension, access to HTTP and HTTPS sites, and Chromium 145+. Open with sign-in support keeps Switchboard and website frames inside an extension tab. Removes website framing headers and CSP only in verified experiment tabs, preserving Switchboard's CSP. Reload the page after changing this setting.", Fallback: false),
             ]),
             // The Settings window draws the paired devices and Pair a device after this section (architecture.md § Remote access).
             new Section("Remote access",

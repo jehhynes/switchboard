@@ -1,3 +1,4 @@
+import { frameUrl } from './iframeUrl.js';
 import { iframeTab } from './iframe.js';
 
 export interface HostTab { id?: number; windowId?: number; url?: string; pendingUrl?: string }
@@ -21,9 +22,7 @@ export class IframeLauncher {
       const selection = new URLSearchParams();
       if (typeof item === 'number') selection.set('workItemId', String(item));
       if (link !== undefined) {
-        if (typeof link !== 'string' || link.length > 2048) throw new Error('Invalid GitHub link.');
-        const url = new URL(link);
-        if (url.origin !== 'https://github.com' || url.username !== '' || url.password !== '') throw new Error('Invalid GitHub link.');
+        if (!frameUrl(link, origin)) throw new Error('Invalid web link.');
         selection.set('url', link);
       }
       selection.set('request', crypto.randomUUID());

@@ -12,7 +12,7 @@ describe('firefoxManifest', () => {
 
     expect([chromeVersion, version]).toEqual(['0.0.1', '0.0.1.446400']);
 
-    expect(chromeHosts).toEqual(['http://127.0.0.1/*', 'http://localhost/*', 'https://github.com/*']);
+    expect(chromeHosts).toEqual(['http://*/*', 'https://*/*']);
     expect(host_permissions).toEqual(['http://127.0.0.1/*']);
     expect(background).toEqual({ scripts: ['background.js'] });
     expect(browser_specific_settings).toEqual({ gecko: { id: 'switchboard@switchboard', strict_min_version: '140.0', data_collection_permissions: { required: ['none'] } } });
