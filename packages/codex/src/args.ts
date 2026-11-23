@@ -33,32 +33,6 @@ export function codexPrompt(prompt: string): string {
   return prompt.replace(/^\/([A-Za-z0-9][\w:-]*)(?=\s|$)/, '$$$1');
 }
 
-export interface RunOptions {
-  mode: CodexPermissionMode;
-  /** Null for Codex's own default. */
-  model: string | null;
-  /** The report contract, in the developer instructions. */
-  contract: string;
-  /** Marks the process's command line, so a restarted hub can find it (mechanics M31). */
-  tag: string;
-}
-
-function sharedArgs(options: RunOptions): string[] {
-  return [
-    ...modeArgs(options.mode),
-    '-c',
-    `developer_instructions=${tomlString(options.contract)}`,
-    '-c',
-    `switchboard_run=${tomlString(options.tag)}`,
-    ...(options.model === null ? [] : ['-m', options.model]),
-  ];
-}
-
-/** A new background session. `--` keeps a prompt that starts with a subcommand's name from being read as one. */
-export function startArgs(cwd: string, prompt: string, options: RunOptions): string[] {
-  return ['exec', '--json', ...sharedArgs(options), '-C', cwd, '--', codexPrompt(prompt)];
-}
-
 /** An ephemeral, read-only fork for a friction debrief, with its prompt on stdin: it writes no rollout and leaves the thread unchanged (mechanics M31). */
 export function forkArgs(threadId: string): string[] {
   return ['exec', 'fork', '--json', '--ephemeral', ...modeArgs('plan'), threadId, '-'];

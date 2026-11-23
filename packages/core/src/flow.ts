@@ -47,6 +47,7 @@ export const MESSAGES = {
   nothingNew: 'Nothing is newer than the earlier work item',
   holderStopped: 'The terminal holder stopped.',
   legacyEnded: 'Switchboard no longer runs Claude background sessions (claude --bg), so it ended this one. Open it in a terminal to resume it in the terminal holder.',
+  legacyCodexEnded: 'Switchboard no longer runs codex exec, so it ended this Codex session. Open it in a terminal to resume it with codex resume.',
 } as const;
 
 /** Starts a task session's `outcomeDetail` while its done report waits for the hub's second read of the ticket (PRD R10). */
@@ -256,7 +257,10 @@ export type FlowEvent =
   /** `guidance` is added to the task session's prompt (PRD R77); `playbook` replaces triage's choice (PRD R35); `prompt` replaces an ad-hoc one (PRD R77). */
   | { type: 'start'; workItemId: number; guidance?: string | null; playbook?: string | null; prompt?: string | null }
   | { type: 'pick'; ticketId: number; guidance?: string | null; playbook?: string | null }
-  /** The hub started: Claude sessions a hub before held sessions ran in Claude's background service end, since nothing observes them now (PRD R93). */
+  /**
+   * The hub started: Claude sessions an earlier hub ran in Claude's background service, and Codex sessions it ran as `codex exec`, end, since nothing
+   * observes them now (PRD R93, R107).
+   */
   | { type: 'end-legacy' }
   | { type: 'retriage-pool' | 'restore'; ticketId: number }
   /** Snoozes the ticket until `until`, or indefinitely when null, with the operator's comment (PRD R49). */
@@ -1674,8 +1678,7 @@ class Flow {
       }
 
       if (session !== null && session.state !== 'starting') {
-        // An interactive session is the operator's, such as a registered one or a Codex thread resumed in its panel; Switchboard never stops it
-        // (PRD R39), and a reported question is no longer waited on.
+        // An interactive session is the operator's, such as a registered one; Switchboard never stops it (PRD R39).
         if (entry.interactive === true && (!session.released || session.releasing || session.question !== null)) {
           this.store.updateSession(session.id, { released: true, releasing: false, question: null });
         }
@@ -1751,11 +1754,9 @@ class Flow {
     // A new turn after the last one ended, as one the operator typed in the session's terminal.
     const resumed = (state === 'running' || state === 'waiting') && (session.state === 'ended' || TURN_ENDED.includes(session.state));
 
+    // A registered session in the operator's window is theirs, so only a held session or an app-server thread ends here (PRD R39, R95).
     if (TURN_ENDED.includes(state)) {
-      // A Codex exec run ends with its turn; a registered session is already released, as the operator's.
-      if (!persistent(current)) {
-        this.release(current);
-      } else if (!atLimit) {
+      if (persistent(current) && !atLimit) {
         this.endHeld(current);
       }
     } else if (current.codeMode === true && current.releasing && !current.released) {
@@ -1887,7 +1888,7 @@ class Flow {
   private setupState(item: WorkItem, session: Session, state: LiveState, resumed: boolean): void {
     if (resumed && ((item.status === 'failed' && (item.error === MESSAGES.setupWithoutWorktree || item.error === MESSAGES.setupAtLimit)) || item.status === 'blocked')) {
       this.setStatus(item.id, { status: 'setup', error: null });
-    } else if (TURN_ENDED.includes(state) && (persistent(session) || (session.released && !session.releasing)) && item.status === 'setup' && (item.unassignedAt !== null || this.store.worktreeFor(item.ticketId) !== null)) {
+    } else if (TURN_ENDED.includes(state) && persistent(session) && item.status === 'setup' && (item.unassignedAt !== null || this.store.worktreeFor(item.ticketId) !== null)) {
       this.finishSetup(item, session);
     }
   }
@@ -1915,12 +1916,11 @@ class Flow {
    * confirms the end, so no observation takes a pending end for an ended session.
    */
   private release(session: Session): void {
-    if (session.released || (persistent(session) && session.releasing)) {
+    if (session.released || session.releasing) {
       return;
     }
 
-    // A Codex exec run lets its process go at once (architecture.md § Legacy exec sessions).
-    this.store.updateSession(session.id, persistent(session) ? { releasing: true } : { released: true, releasing: true });
+    this.store.updateSession(session.id, { releasing: true });
     this.actions.push({ type: 'stop-session', sessionId: session.id, provider: session.provider, shortId: session.shortId, reason: 'release', ...codeModeOf(session) });
   }
 
@@ -2411,18 +2411,22 @@ class Flow {
   }
 
   /**
-   * The hub started (PRD R93): a Claude session that ran in Claude's background service under an earlier hub is ended, since nothing observes or
-   * releases it now. Its work item waits on the operator with why, as when the holder stops; opening the session resumes it in the terminal holder.
-   * A registered session in the operator's own window is still followed through Claude's roster (PRD R81).
+   * The hub started (PRD R93, R107): a Claude session that ran in Claude's background service under an earlier hub, or a Codex session it ran as
+   * `codex exec`, is ended, since nothing observes or releases it now. Its work item waits on the operator with why, as when the holder stops;
+   * opening a Claude one resumes it in the terminal holder. A registered session in the operator's own window is still followed through Claude's
+   * roster (PRD R81).
    */
   private endLegacy(): void {
     for (const session of this.store.activeSessions()) {
-      if (session.provider !== 'claude' || session.codeMode === true || session.external) {
+      // A registered session is the operator's, followed through Claude's roster, also once resumed in their window after it ended (PRD R81).
+      if (persistent(session) || session.external || session.registered === true) {
         continue;
       }
 
+      const cause = session.provider === 'codex' ? MESSAGES.legacyCodexEnded : MESSAGES.legacyEnded;
+
       if (session.state === 'starting') {
-        this.sessionStartFailed(session.id, MESSAGES.legacyEnded);
+        this.sessionStartFailed(session.id, cause);
         continue;
       }
 
@@ -2439,10 +2443,16 @@ class Flow {
         question: null,
         move: null,
         pendingFork: null,
-        ...(turnEnded || session.outcome !== null ? {} : { outcome: 'stopped' as const, outcomeDetail: MESSAGES.legacyEnded }),
+        ...(turnEnded || session.outcome !== null ? {} : { outcome: 'stopped' as const, outcomeDetail: cause }),
       });
 
-      if (session.outcome === 'done' || card) {
+      // Its background process may still run and change files, so it is stopped with `claude stop`; a Codex exec run ends with its turn.
+      if (session.provider === 'claude' && session.shortId !== null && (!session.released || session.releasing)) {
+        this.actions.push({ type: 'stop-session', sessionId: session.id, provider: 'claude', shortId: session.shortId, reason: 'operator' });
+      }
+
+      // A setup session whose turn had ended waited for its release to settle setup, so its end settles it now.
+      if (session.outcome === 'done' || card || (turnEnded && session.kind === 'setup')) {
         this.ended({ ...session, state: 'ended' });
         continue;
       }
@@ -2456,9 +2466,9 @@ class Flow {
       if (item.unassignedAt !== null) {
         this.done(item, 'unassigned', null);
       } else if (item.approvalHeld || item.status === 'awaiting-approval') {
-        this.restoreApproval(item, MESSAGES.legacyEnded);
+        this.restoreApproval(item, cause);
       } else if (item.status === 'running' || item.status === 'setup') {
-        this.block(item, MESSAGES.legacyEnded);
+        this.block(item, cause);
       }
     }
   }

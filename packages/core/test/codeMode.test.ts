@@ -531,8 +531,11 @@ describe('sessions an earlier hub ran in the background (PRD R93)', () => {
     const h = new Harness();
     const id = task(h);
 
-    expect(h.act({ type: 'end-legacy' })).toEqual([]);
+    // Its background process may still run, so it is stopped.
+    expect(h.act({ type: 'end-legacy' })).toEqual([{ type: 'stop-session', sessionId: id, provider: 'claude', shortId: 'abc12345', reason: 'operator' }]);
     expect(h.store.session(id)).toMatchObject({ state: 'ended', released: true, releasing: false, outcome: 'stopped', outcomeDetail: MESSAGES.legacyEnded });
+    h.act({ type: 'stop-succeeded', sessionId: id, reason: 'operator', shortId: 'abc12345' });
+    expect(h.store.session(id)).toMatchObject({ outcome: 'stopped', outcomeDetail: MESSAGES.legacyEnded });
     expect(h.item(1)).toMatchObject({ status: 'blocked', error: MESSAGES.legacyEnded });
     expect(resumesHeld(h.store.session(id)!)).toBe(true);
 
@@ -567,11 +570,51 @@ describe('sessions an earlier hub ran in the background (PRD R93)', () => {
     expect(h.item(3)).toMatchObject({ status: 'awaiting-approval', error: null });
   });
 
+  it('settles setup for a background setup session whose turn had ended before its release finished', () => {
+    const h = new Harness();
+    const [triage] = h.poll(issue('15619'));
+    const setup = h.legacy(h.started(h.triaged(triage, 'dev:develop')[0]));
+
+    h.report(setup, { kind: 'worktree', path: 'D:/git/widgets-wt/15619', branch: '15619-fix' });
+    h.act({ type: 'marker', sessionId: setup, state: 'idle', detail: null });
+    h.store.updateSession(setup, { released: false, releasing: true });
+    const actions = h.act({ type: 'end-legacy' });
+
+    expect(actions.map((action) => action.type)).toEqual(['stop-session', 'start-session']);
+    expect(h.item(1).status).toBe('running');
+
+    const failed = new Harness();
+    const [other] = failed.poll(issue('15619'));
+    const lone = failed.legacy(failed.started(failed.triaged(other, 'dev:develop')[0]));
+
+    failed.act({ type: 'marker', sessionId: lone, state: 'idle', detail: null });
+    failed.store.updateSession(lone, { released: false, releasing: true });
+    failed.act({ type: 'end-legacy' });
+    expect(failed.item(1)).toMatchObject({ status: 'failed', error: MESSAGES.setupWithoutWorktree });
+  });
+
+  it('ends a Codex session an earlier hub ran as codex exec, saying to resume it with codex resume (PRD R107)', () => {
+    const h = new Harness({ settings: settings({ sessions: { provider: 'codex' } }) });
+    const [triage] = h.poll(issue('7'));
+
+    h.triaged(triage, 'dev:question');
+    const run = h.started(h.act({ type: 'start', workItemId: 1 })[0], 'thread-1');
+
+    h.store.updateSession(run, { execution: null });
+    h.act({ type: 'end-legacy' });
+    expect(h.store.session(run)).toMatchObject({ state: 'ended', outcome: 'stopped', outcomeDetail: MESSAGES.legacyCodexEnded });
+    expect(h.item(1)).toMatchObject({ status: 'blocked', error: MESSAGES.legacyCodexEnded });
+  });
+
   it('leaves held sessions, Codex sessions and a registered session in the operator\'s window alone', () => {
     const h = new Harness();
     const id = heldTask(h);
 
     h.act({ type: 'register', nativeSessionId: 'operator-native', shortId: 'operator', cwd: 'D:/git/widgets', title: 'Mine' });
+    // A registered session that ended and runs again in the operator's window, which no longer counts as external.
+    h.act({ type: 'register', nativeSessionId: 'again-native', shortId: 'again', cwd: 'D:/git/widgets', title: 'Again' });
+    const again = h.store.sessionByNativeId('again-native')!.id;
+    h.store.updateSession(again, { external: false });
 
     const codex = new Harness({ settings: settings({ sessions: { provider: 'codex' } }) });
     const [triage] = codex.poll(issue('7'));
@@ -582,6 +625,7 @@ describe('sessions an earlier hub ran in the background (PRD R93)', () => {
     codex.act({ type: 'end-legacy' });
     expect(h.store.session(id)).toMatchObject({ state: 'running' });
     expect(h.store.sessionByNativeId('operator-native')).toMatchObject({ state: 'running', external: true });
+    expect(h.store.session(again)).toMatchObject({ state: 'running', outcome: null });
     expect(codex.store.session(thread)).toMatchObject({ state: 'running' });
   });
 });

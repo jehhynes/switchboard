@@ -285,8 +285,8 @@ export class Runtime {
         new ClaudeRunner({ claudePath, nodePath, exec: deps.exec, now: deps.now, home: this.home, claudeSettings: deps.claudeSettings, hooks }),
       codex:
         deps.runners?.codex ??
-        new CodexRunner({ codexPath, nodePath, exec: deps.exec, sleep: deps.sleep, now: deps.now, home: this.home, codexHome: codex.home, env: codex.env, hooks }),
-      codexAppServer: deps.runners?.codexAppServer ?? deps.runners?.codex ?? this.codexAppServer,
+        new CodexRunner({ codexPath, nodePath, home: this.home, codexHome: codex.home, env: codex.env }),
+      codexAppServer: deps.runners?.codexAppServer ?? this.codexAppServer,
       codeMode:
         deps.runners?.codeMode ??
         new CodeModeRunner({
@@ -2813,8 +2813,6 @@ export class Runtime {
         return;
       }
       case 'stop-session': {
-        const runner = this.runners[runnerKey(action)];
-
         if (action.codeMode === true && action.reason === 'release') {
           if (this.ending.has(action.sessionId)) {
             return;
@@ -2835,12 +2833,6 @@ export class Runtime {
           return this.trackEnd(action.sessionId, async () => {
             await Promise.all([earlier, this.stopSession(action)]);
           });
-        }
-
-        if (action.codeMode !== true && action.reason === 'release' && action.shortId !== null && !(await runner.isBackground(action))) {
-          // The operator resumed it, such as in a VS Code tab; a release never stops their session (PRD R39).
-          this.deps.log(`release skipped: session ${action.sessionId} is not a background process`);
-          return;
         }
 
         return this.stopSession(action);

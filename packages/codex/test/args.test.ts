@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { isCodexPermissionMode } from '@switchboard/core';
-import { codexPrompt, forkArgs, modeArgs, startArgs, tomlString } from '../src/args.js';
+import { codexPrompt, forkArgs, modeArgs, tomlString } from '../src/args.js';
 
-const OPTIONS = { mode: 'auto' as const, model: null, contract: 'Report to Switchboard with these commands:', tag: 's1' };
 
 describe('modeArgs', () => {
   it('gives each mode as config overrides, which exec resume also takes', () => {
@@ -39,26 +38,7 @@ describe('codexPrompt', () => {
   });
 });
 
-describe('startArgs and forkArgs', () => {
-  it('starts with the mode, contract, tag and model, then the work directory and the prompt after --', () => {
-    expect(startArgs('D:/git/widgets', '/sb-plan 1', { ...OPTIONS, model: 'gpt-6' })).toEqual([
-      'exec',
-      '--json',
-      ...modeArgs('auto'),
-      '-c',
-      'developer_instructions="Report to Switchboard with these commands:"',
-      '-c',
-      'switchboard_run="s1"',
-      '-m',
-      'gpt-6',
-      '-C',
-      'D:/git/widgets',
-      '--',
-      '$sb-plan 1',
-    ]);
-    expect(startArgs('D:/git/widgets', 'x', OPTIONS)).not.toContain('-m');
-  });
-
+describe('forkArgs', () => {
   it('forks read-only without persisting, with the prompt on stdin', () => {
     expect(forkArgs('thread-1')).toEqual(['exec', 'fork', '--json', '--ephemeral', '-c', 'approval_policy="never"', '-c', 'sandbox_mode="read-only"', 'thread-1', '-']);
   });

@@ -117,15 +117,20 @@ describe('ClaudeRunner', () => {
     expect(runner(vi.fn<Exec>(), { hooks: () => false }).markers([session()]).size).toBe(0);
   });
 
-  it('starts, stops and releases no session, since every Claude session Switchboard starts is held (PRD R93)', async () => {
+  it('starts and releases no session, since every Claude session Switchboard starts is held, and stops an earlier hub\'s with claude stop (PRD R93)', async () => {
     const exec = vi.fn<Exec>();
     const claude = runner(exec);
 
     expect(await claude.start({ type: 'start-session', sessionId: 's1', workItemId: 1, kind: 'task', provider: 'claude', cwd: 'D:/git/widgets', prompt: 'p', contract: 'c', name: 'n', permissionMode: 'auto', model: null })).toEqual({ error: NOT_HELD });
-    expect(await claude.stop({ sessionId: 's1', shortId: '1a2b3c4d' }, 'operator')).toEqual({ error: NOT_HELD });
     expect(await claude.isBackground({ sessionId: 's1', shortId: '1a2b3c4d' })).toBe(false);
     expect(await claude.reconcile([session({ state: 'starting', shortId: null, nativeSessionId: null })])).toEqual([{ sessionId: 's1', failed: 'The hub stopped while the session was starting.' }]);
     expect(exec).not.toHaveBeenCalled();
+
+    exec.mockResolvedValueOnce(ran({})).mockResolvedValueOnce(ran({ code: 1, stderr: 'No such agent' }));
+    expect(await claude.stop({ sessionId: 's1', shortId: '1a2b3c4d' }, 'operator')).toBeNull();
+    expect(exec).toHaveBeenCalledWith('claude', ['stop', '1a2b3c4d'], expect.anything());
+    expect(await claude.stop({ sessionId: 's1', shortId: '1a2b3c4d' }, 'operator')).toEqual({ error: 'No such agent' });
+    expect(await claude.stop({ sessionId: 's1', shortId: null }, 'operator')).toEqual({ error: 'The session has no short ID to stop.' });
   });
 
   it('installs the hooks into the settings file, and reports a settings file it must not change', async () => {

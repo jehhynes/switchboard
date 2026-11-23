@@ -143,7 +143,7 @@ export function sessionView(session: Session, current: boolean, hooks: boolean, 
   const reason =
     conversation === 'none'
       ? session.provider === 'codex'
-        ? 'This session is a Codex exec run, which has no conversation here.'
+        ? 'This session ran as a codex exec run, which Switchboard no longer runs; Open in terminal resumes it with codex resume.'
         : 'This session runs in your own Claude window; talk to it there.'
       : session.state === 'ended' && !resumable
         ? 'The session has ended. Open it in the terminal to resume it.'

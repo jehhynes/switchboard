@@ -186,65 +186,20 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
   return { promise, resolve };
 }
 
-/**
- * A fake Codex: a process table, a spawner whose runs write `onSpawn`'s log, and a trust call, so no test starts a real Codex process. Its
- * runs live until a test ends them.
- */
+/** A fake Codex trust call for the Codex runner, which installs the Codex hooks, so no test starts a real Codex process. */
 class FakeCodex {
-  alive = new Set<number>();
-  nextPid = 500;
-  spawned: string[][] = [];
-  commandLines = new Map<number, string>();
-  kills: number[] = [];
   trustError: string | null = null;
   trustCalls = 0;
   /** When set, each trust call waits here for its answer instead of answering `trustError`. */
   heldTrust: ((answer: string | null) => void)[] | null = null;
-  queryError: string | null = null;
-  onSpawn: (stdout: string, pid: number, args: string[]) => string = () => '{"type":"thread.started","thread_id":"thread-1"}\n{"type":"turn.started"}\n';
-  /** Holds the next process query until released. */
-  queryGate: Promise<void> | null = null;
-  queryEntered: (() => void) | null = null;
 
   runner(): CodexRunner {
     return new CodexRunner({
       codexPath: () => 'codex',
-      exec: async () => {
-        throw new Error('unexpected exec');
-      },
-      sleep: async () => {},
-      now: () => T0,
       home: join(home, '.switchboard'),
       codexHome: join(home, '.codex'),
       env: {},
-      hooks: () => true,
       nodePath: () => 'node',
-      spawn: async (_file, args, options) => {
-        const pid = this.nextPid++;
-
-        this.spawned.push(args);
-        this.commandLines.set(pid, args.join(' '));
-        this.alive.add(pid);
-        writeFileSync(options.stdout, this.onSpawn(options.stdout, pid, args));
-        writeFileSync(options.stderr, '');
-        return { pid, error: null };
-      },
-      processes: async (pids) => {
-        const gate = this.queryGate;
-
-        this.queryGate = null;
-        this.queryEntered?.();
-        await gate;
-
-        return this.queryError !== null ? { error: this.queryError } : new Map(pids.filter((pid) => this.alive.has(pid)).map((pid) => [pid, { pid, created: `c${pid}`, name: 'codex.exe', commandLine: this.commandLines.get(pid) ?? '' }]));
-      },
-      tagged: async () => null,
-      alive: (pid) => this.alive.has(pid),
-      kill: async (pid) => {
-        this.kills.push(pid);
-        this.alive.delete(pid);
-        return null;
-      },
       trust: async () => {
         this.trustCalls += 1;
         return this.heldTrust === null ? this.trustError : new Promise((answer) => this.heldTrust!.push(answer));
@@ -316,6 +271,19 @@ function heldRunner(cli: FakeCli, hooks: () => boolean): SessionRunner {
   };
 }
 
+/** A stand-in for the Codex app-server runner, whose starts give the session a thread at once, so no test starts a Codex daemon (PRD R107). */
+function appServerRunner(): SessionRunner {
+  return {
+    start: async (action) => ({ shortId: `${action.sessionId}-thread`, nativeSessionId: `${action.sessionId}-thread` }),
+    observe: async (sessions) => ({ sessions: sessions.filter((session) => session.state !== 'ended').map((session) => ({ sessionId: session.id, state: 'running' as const, detail: null })) }),
+    markers: () => new Map(),
+    isBackground: async () => true,
+    stop: async () => null,
+    reconcile: async () => [],
+    installHooks: async () => null,
+  };
+}
+
 /** A null `codex` leaves the runtime to build its own Codex runner. */
 function setup(cfg = config(), now = () => T0, runners?: RuntimeDeps['runners'], codex: FakeCodex | null = new FakeCodex(), named: Record<string, FakeSource> = {}, extra: Partial<RuntimeDeps> = {}) {
   const store = Store.open(':memory:');
@@ -344,7 +312,7 @@ function setup(cfg = config(), now = () => T0, runners?: RuntimeDeps['runners'],
       claudeSettings: join(home, '.claude', 'settings.json'),
       configDir: join(home, 'cfg'),
       log: (line) => logs.push(line),
-      runners: { codeMode: heldRunner(cli, () => cfg.settings.sessions.installHooks), ...(codex === null ? {} : { codex: codex.runner() }), ...runners },
+      runners: { codeMode: heldRunner(cli, () => cfg.settings.sessions.installHooks), codexAppServer: appServerRunner(), ...(codex === null ? {} : { codex: codex.runner() }), ...runners },
       ...extra,
     },
     cfg,
@@ -1611,162 +1579,6 @@ describe('Runtime', () => {
     expect(existsSync(join(home, '.codex', 'hooks.json'))).toBe(false);
   });
 
-  it('runs a Codex session through the Codex runner: started, running, released when its turn ends, then ended', async () => {
-    const codex = new FakeCodex();
-    const cfg = config({ provider: 'codex' });
-    const { store, runtime } = setup(cfg, () => T0, undefined, codex);
-
-    runtime.send({ type: 'adhoc', prompt: '/sb-plan 1', repoRoot: 'D:/git/widgets', start: true });
-    await runtime.settled();
-
-    expect(codex.spawned[0]!.slice(0, 2)).toEqual(['exec', '--json']);
-    expect(codex.spawned[0]!.at(-1)).toBe('$sb-plan 1');
-    // Existing exec sessions keep their release behavior after upgrading.
-    store.updateSession('s1', { execution: null });
-    expect(store.session('s1')).toMatchObject({ provider: 'codex', nativeSessionId: 'thread-1', shortId: 'thread-1', state: 'running' });
-
-    await runtime.readRoster();
-    expect(store.session('s1')).toMatchObject({ state: 'running', released: false, releasing: false, question: null });
-
-    // The turn ends and its process exits; the next read delivers the end, the release lets the process go, and the session ends.
-    writeFileSync(join(home, '.switchboard', 'codex', 's1.jsonl'), '{"type":"thread.started","thread_id":"thread-1"}\n{"type":"turn.started"}\n{"type":"turn.completed"}\n');
-    codex.alive.clear();
-    await runtime.readRoster();
-    await runtime.settled();
-    expect(store.session('s1')).toMatchObject({ state: 'ended', released: true });
-    expect(store.workItem(1)).toMatchObject({ status: 'blocked', error: 'The turn ended without a done report.' });
-    expect(codex.kills).toEqual([]);
-  });
-
-  it('asks again at each roster read about a Codex start it could not settle at startup', async () => {
-    const codex = new FakeCodex();
-    const { store, runtime, logs } = setup(config({ provider: 'codex' }), () => T0, undefined, codex);
-
-    runtime.send({ type: 'adhoc', prompt: 'Work', repoRoot: 'D:/git/widgets', start: true });
-    await runtime.settled();
-
-    // As a hub that stopped before the thread appeared would leave it.
-    const recordFile = join(home, '.switchboard', 'codex', 's1.json');
-    writeFileSync(recordFile, JSON.stringify({ ...JSON.parse(readFileSync(recordFile, 'utf8')), threadId: null }));
-    writeFileSync(join(home, '.switchboard', 'codex', 's1.jsonl'), '');
-    store.updateSession('s1', { state: 'starting', shortId: null, nativeSessionId: null });
-    codex.queryError = 'WMI is down';
-
-    await runtime.startup();
-    expect(store.session('s1')).toMatchObject({ state: 'starting' });
-    expect(logs).toContain('session s1 left starting by the hub that stopped is not settled yet: The Codex process query failed: WMI is down');
-
-    codex.queryError = null;
-    writeFileSync(join(home, '.switchboard', 'codex', 's1.jsonl'), '{"type":"thread.started","thread_id":"thread-1"}\n');
-    await runtime.readRoster();
-    expect(store.session('s1')).toMatchObject({ state: 'running', nativeSessionId: 'thread-1' });
-  });
-
-  it("keeps one agent's sessions as they were when its read fails, while the other agent's read applies", async () => {
-    const codex = new FakeCodex();
-    const { store, cli, source, runtime, logs } = setup(config(), () => T0, undefined, codex);
-
-    source.result = { tickets: [issue('8')] };
-    await runtime.pollSource('github');
-    await runtime.settled();
-    runtime.reload({ ...config({ provider: 'codex' }), playbooks: PLAYBOOKS });
-    runtime.send({ type: 'adhoc', prompt: 'Work', repoRoot: 'D:/git/widgets', start: true });
-    await runtime.settled();
-    expect(store.session('s2')).toMatchObject({ provider: 'codex', state: 'running' });
-
-    cli.roster = 'not a list' as unknown as object[];
-    codex.alive.clear();
-    await runtime.readRoster();
-
-    expect(store.session('s1')).toMatchObject({ provider: 'claude', state: 'running' });
-    expect(store.session('s2')).toMatchObject({ state: 'ended' });
-    expect(logs).toContain('codeMode roster read failed: claude agents returned an unexpected response.');
-  });
-
-  it('counts Claude and Codex sessions against one concurrency limit (PRD R38)', async () => {
-    const codex = new FakeCodex();
-    const { store, source, runtime } = setup(config({ concurrency: 1 }), () => T0, undefined, codex);
-
-    source.result = { tickets: [issue('8')] };
-    await runtime.pollSource('github');
-    await runtime.settled();
-    runtime.reload({ ...config({ concurrency: 1, provider: 'codex' }), playbooks: PLAYBOOKS });
-    runtime.send({ type: 'adhoc', prompt: 'Work', repoRoot: 'D:/git/widgets', start: true });
-    await runtime.settled();
-
-    expect(store.workItem(2)).toMatchObject({ status: 'queued' });
-    expect(codex.spawned).toHaveLength(0);
-  });
-
-  describe('Codex question races and recovery (PRD R70)', () => {
-    const START = '{"type":"thread.started","thread_id":"thread-1"}\n{"type":"turn.started"}\n';
-    const DONE = START + '{"type":"turn.completed"}\n';
-    const log = () => join(home, '.switchboard', 'codex', 's1.jsonl');
-
-    it('keeps a question reported while a roster read ran, and decides it at the next read', async () => {
-      const codex = new FakeCodex();
-      const { store, runtime } = setup(config({ provider: 'codex' }), () => T0, undefined, codex);
-
-      runtime.send({ type: 'adhoc', prompt: 'Work', repoRoot: 'D:/git/widgets', start: true });
-      await runtime.settled();
-
-      const entered = deferred();
-      const gate = deferred();
-
-      codex.queryEntered = entered.resolve;
-      codex.queryGate = gate.promise;
-      const read = runtime.readRoster();
-
-      await entered.promise;
-      codex.queryEntered = null;
-      await runtime.report({ sessionId: 's1', kind: 'question', text: 'Which tree?' });
-      writeFileSync(log(), DONE);
-      codex.alive.clear();
-      gate.resolve();
-      await read;
-      await runtime.settled();
-
-      expect(store.session('s1')).toMatchObject({ state: 'waiting', released: false });
-      expect(store.session('s1')!.question).toMatchObject({ text: 'Which tree?' });
-    });
-
-    it('keeps an approval through a question, and holds no slot while it waits (PRD R34, R38)', async () => {
-      const codex = new FakeCodex();
-      const cfg = config({ provider: 'codex', concurrency: 1 });
-      const { store, runtime } = setup(cfg, () => T0, undefined, codex);
-
-      runtime.send({ type: 'adhoc', prompt: 'Work', repoRoot: 'D:/git/widgets', start: true });
-      await runtime.settled();
-      await runtime.report({ sessionId: 's1', kind: 'approval', prompt: '/sb-ship 1', summary: 'Ship it', report: null });
-      await runtime.report({ sessionId: 's1', kind: 'question', text: 'Ship now?' });
-      writeFileSync(log(), DONE);
-      codex.alive.clear();
-      await runtime.readRoster();
-      await runtime.settled();
-
-      expect(store.workItem(1)).toMatchObject({ status: 'awaiting-approval', approvalPrompt: '/sb-ship 1' });
-      expect(store.session('s1')).toMatchObject({ state: 'waiting' });
-
-      runtime.send({ type: 'adhoc', prompt: 'Other work', repoRoot: 'D:/git/widgets', start: true });
-      await runtime.settled();
-      expect(store.workItem(2)).toMatchObject({ status: 'running' });
-    });
-  });
-
-  it('stops a running Codex session for the operator by ending its process', async () => {
-    const codex = new FakeCodex();
-    const { store, runtime } = setup(config({ provider: 'codex' }), () => T0, undefined, codex);
-
-    runtime.send({ type: 'adhoc', prompt: 'Work', repoRoot: 'D:/git/widgets', start: true });
-    await runtime.settled();
-    await runtime.readRoster();
-
-    expect(runtime.send({ type: 'stop', workItemId: 1 }).refused).toBeNull();
-    await runtime.settled();
-    expect(codex.kills).toEqual([500]);
-    expect(store.workItem(1)).toMatchObject({ status: 'blocked', error: 'Stopped by you.' });
-  });
-
   it('shows a failed hook install instead of failing startup', async () => {
     const { runtime } = setup(config({ installHooks: true }));
     mkdirSync(join(home, '.claude', 'settings.json'), { recursive: true });
@@ -2324,8 +2136,9 @@ describe('forks (PRD R78)', () => {
 
     setUp.runtime.send({ type: 'adhoc', prompt: 'test', repoRoot: 'D:/git/widgets', start: true });
     await setUp.runtime.settled();
-    setUp.store.updateSession('s1', { codeMode: false, launchId: null });
-    // The turn ends, and the session is released.
+    // Registered, so its process is the operator's and already released (PRD R81).
+    setUp.store.updateSession('s1', { codeMode: false, launchId: null, released: true });
+    // The turn ends.
     await setUp.runtime.readRoster();
     await setUp.runtime.settled();
     fake.state.listed = false;
@@ -3042,16 +2855,16 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
     runtime.stop();
   });
 
-  it('applies the background runner\'s observation when the holder read fails, and changes no held session', async () => {
+  it('applies the Claude roster\'s observation when the holder read fails, and changes no held session', async () => {
     const codeMode = fakeRunner({ observe: async () => ({ error: 'The terminal holder did not answer.' }) });
     const { runtime, store, claude, logs } = await twoSessions(codeMode);
 
     claude.observe = async (sessions) => ({ sessions: sessions.map((session) => ({ sessionId: session.id, state: 'idle' as const, detail: null })) });
     await runtime.readRoster();
 
-    // The background session's turn end applied, so it was released.
-    expect(claude.stops).toEqual(['s1']);
-    expect(store.session('s1')).toMatchObject({ released: true });
+    // The roster's turn end applied; a session Switchboard does not hold is never stopped.
+    expect(claude.stops).toEqual([]);
+    expect(store.session('s1')).toMatchObject({ state: 'idle' });
     expect(store.session('s2')).toMatchObject({ state: 'running', released: false });
     expect(logs).toContain('codeMode roster read failed: The terminal holder did not answer.');
     runtime.stop();

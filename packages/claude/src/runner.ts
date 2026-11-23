@@ -39,6 +39,15 @@ export async function readRoster(claudePath: string, exec: Exec, all = false): P
   }
 }
 
+const STOP_TIMEOUT_MS = 15_000;
+
+/** `claude stop`, never `claude rm`, which can delete the session's worktree (GC M33); only an earlier hub's background session is stopped so. */
+export async function stopSession(claudePath: string, shortId: string, exec: Exec): Promise<{ error: string } | null> {
+  const result = await exec(claudePath, ['stop', shortId], { timeoutMs: STOP_TIMEOUT_MS, env: claudeEnvironment(claudePath) });
+
+  return result.code === 0 ? null : { error: failureOf(claudePath, result, STOP_TIMEOUT_MS) };
+}
+
 /** The roster entry of a session, matched by short ID. */
 export function entryFor(entries: RosterEntry[], shortId: string): RosterEntry | undefined {
   return entries.find((entry) => entry.id === shortId || entry.sessionId.startsWith(shortId));
