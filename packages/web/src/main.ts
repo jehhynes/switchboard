@@ -37,6 +37,8 @@ import { COMMAND_MS, FAILURE_TEXT, NAVIGATION_MS, READ_MS, request, timedFetch, 
 import type { Answer } from './request.js';
 import { dotView, renderBanner, renderScreen, renderUpdate } from './connectionView.js';
 import type { ConnectionView } from './connectionView.js';
+import { renderOpening, renderOpeningHead } from './opening.js';
+import type { Opening } from './opening.js';
 import { renderContextMeter } from '@switchboard/conversation/contextMeter';
 import type { ContextMenuState } from '@switchboard/conversation/contextMeter';
 import { EMPTY_HISTORY_UI, renderHistory } from './history.js';
@@ -1573,7 +1575,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const full = state.connected && state.session?.conversation === 'full';
 
     // On every tab, so the operator can type and dictate from the status or the artifacts too, but on a short screen (page.css).
-    composerHost.hidden = state.scope === null;
+    composerHost.hidden = state.scope === null || openingShown() !== null;
     input.disabled = !full;
     attachButton.disabled = !full;
     input.placeholder = full
@@ -2199,7 +2201,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const focusLink = focused?.matches('.pill') ? focused.dataset['link'] : undefined;
     const focusActions = focused?.matches('.row-actions') === true;
     if (listSelection !== null && !state.groups.some((group) => group.rows.some((row) => rowKey(row) === listSelection))) listSelection = null;
-    mount(list, renderListPane(renderList(listed.groups, state.scope?.workItemId ?? null, view.collapsed, listed.filtering, rowMenu(), view.bands, !paneWorks(), listSelection, dragView), header.end(listed.groups)));
+    mount(list, renderListPane(renderList(listed.groups, openingShown()?.workItemId ?? state.scope?.workItemId ?? null, view.collapsed, listed.filtering, rowMenu(), view.bands, !paneWorks(), listSelection, dragView), header.end(listed.groups)));
     // The rows may have moved under a still pointer.
     reorder.refresh();
     if (focusedRow !== undefined && document.activeElement !== focused) {
@@ -2219,7 +2221,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     mount(note, renderEndedNote(state.session, resuming));
 
     // From the wide layout Status, Artifacts, Console and Browser are a column of their own; the Chrome pane covers the Browser tab's area.
-    const side = wide() && state.scope !== null;
+    const pending = openingShown();
+    const side = wide() && state.scope !== null && pending === null;
 
     root.classList.toggle('wide', side);
     // Under 800 px of height the composer shows only on the Conversation tab (page.css).
@@ -2236,10 +2239,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     changes.follow(state.scope === null || state.key === null ? null : `${state.key} ${state.scope.scopeGen} ${state.scope.workItemId ?? ''}`, turnEnded);
     localFiles.follow(state.scope === null || state.key === null ? null : `${state.key} ${state.scope.scopeGen} ${state.scope.workItemId ?? ''}`);
 
-    if (state.scope === null) {
+    if (state.scope === null || pending !== null) {
       followHistory(false);
-      mount(head, null);
-      drawPane(panel, renderEmpty(state.connected ? 'Choose a work item on the left.' : 'Connecting to Switchboard…'));
+      mount(head, pending === null ? null : renderOpeningHead(pending, view.connection));
+      drawPane(panel, pending === null ? renderEmpty(state.connected ? 'Choose a work item on the left.' : 'Connecting to Switchboard…') : renderOpening(pending));
       shown = null;
       updateComposer();
       return;
@@ -2765,7 +2768,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   );
 
   // ---- Selecting ----
-  const select = async (workItemId: number): Promise<void> => {
+  /** Opens a work item; `sameHead` for a conversation the shown work item's dropdown made, which opens under its head. */
+  const select = async (workItemId: number, sameHead = false): Promise<void> => {
     const listing = view.list || wanted === null;
     listSelection = `item:${workItemId}`;
     if (pendingRowControl?.key !== listSelection) pendingRowControl = null;
@@ -2775,6 +2779,15 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     closeDrawer();
     wanted = workItemId;
     showError(null);
+    // Another work item shows its own head and a placeholder at once, not the one shown before (opening.tsx).
+    // A conversation of the shown work item's dropdown opens under the same head, as before.
+    opening = !sameHead && (state.scope === null || !state.scope.conversations.some((entry) => entry.workItemId === workItemId)) ? { workItemId, title: rowTitle(workItemId), error: null } : null;
+
+    // Asked again after its open failed.
+    if (acked === workItemId && state.scope?.workItemId !== workItemId) {
+      acked = null;
+    }
+
     view.list = false;
     view.picker = false;
     view.actions = false;
@@ -2805,6 +2818,37 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // A narrow screen leaves the list at once; the conversation follows with the select's scope.
     draw();
   };
+  /** The work item being opened, until its `hello` brings it, or why it could not be opened. */
+  // A work item the route asked for at the start opens as a row click does.
+  let opening: Opening | null = wanted === null ? null : { workItemId: wanted, title: '', error: null };
+  /** The opening to draw: one whose work item is not the one the page shows yet. */
+  // Until the work item's own hello clears it: a `scope` event alone brings none of its conversation.
+  const openingShown = (): Opening | null => (opening === null ? null : { ...opening, title: rowTitle(opening.workItemId) });
+  const rowTitle = (workItemId: number): string => state.groups.flatMap((group) => group.rows).find((row) => row.workItemId === workItemId)?.title ?? 'Work item';
+  /** Try again: the open is asked once more. */
+  const retryOpening = (): void => {
+    if (opening?.error == null) {
+      return;
+    }
+
+    opening = { ...opening, error: null };
+    acked = null;
+    reconcile();
+    draw();
+  };
+  /** Back to the list from an open that failed: the work item the hub still shows is the page's again, and a phone shows the list. */
+  const leaveOpening = (): void => {
+    opening = null;
+    wanted = state.scope?.workItemId ?? null;
+    acked = wanted;
+    history.replaceState(history.state, '', wanted === null ? '#' : `#w=${wanted}`);
+
+    if (isPhone() || wanted === null) {
+      back();
+    } else {
+      draw();
+    }
+  };
   // One select at a time; the latest work item asked for wins, whatever order the answers and scope events come in.
   let selectInFlight = false;
   let acked: number | null = null;
@@ -2827,33 +2871,20 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
       if (answer.status === 200) {
         acked = asked;
+      } else if (wanted === asked && opening?.workItemId === asked) {
+        // The refusal replaces the view, for the work item asked for, until Try again or Back to the list; it is not asked again meanwhile.
+        acked = asked;
+        opening = { workItemId: asked, title: rowTitle(asked), error: String(answer.body['error'] ?? FAILURE_TEXT.bad) };
+        draw();
       } else if (wanted === asked) {
-        const error = String(answer.body['error'] ?? 'The work item could not be opened.');
-
+        // Another conversation of the shown work item's dropdown: the shown one stays, with why above its box.
         wanted = state.scope?.workItemId ?? null;
         acked = wanted;
         listSelection = wanted === null ? null : `item:${wanted}`;
         pendingRowControl = null;
         if (view.rowMenu === `item:${asked}`) closeMenus();
-
-        // A conversation still shown keeps its history entry; with none, the entry the refused row added goes, as Back's does.
-        if (wanted !== null) {
-          history.replaceState(history.state, '', `#w=${wanted}`);
-        } else if (conversationEntry(history.state) && !backPending) {
-          history.replaceState(history.state, '', '#');
-          backPending = true;
-          history.back();
-        } else {
-          history.replaceState(conversationEntry(history.state) ? history.state : null, '', '#');
-        }
-
-        // With no conversation shown, a phone shows the list again.
-        if (wanted === null) {
-          view.list = true;
-        }
-
-        showError(error);
-
+        history.replaceState(history.state, '', wanted === null ? '#' : `#w=${wanted}`);
+        showError(String(answer.body['error'] ?? FAILURE_TEXT.bad));
         draw();
       }
 
@@ -3884,7 +3915,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
       // Opened only while the operator is still on the conversation it was made from; the list shows it either way.
       if (wanted === from.workItemId && state.key === from.key) {
-        void select(answer.body['workItemId']);
+        void select(answer.body['workItemId'], true);
       }
     } else {
       showError(String(answer.body['error'] ?? 'The conversation was not made.'));
@@ -4516,6 +4547,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         });
       }
 
+      // The work item being opened has come: its conversation replaces the placeholder.
+      if (type === 'hello' && opening !== null && opening.error === null && state.scope?.workItemId === opening.workItemId) {
+        opening = null;
+      }
+
       if (type === 'hello') {
         // The artifacts a work item has when this device first sees it count as opened; only later ones are new.
         if (state.scope?.workItemId != null && (readArtifactsSeen() ?? artifactsSeen)[String(state.scope.workItemId)] === undefined) {
@@ -4691,9 +4727,13 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   root.addEventListener(
     'click',
     (event) => {
-      const action = (event.target as HTMLElement).closest<HTMLElement>('[data-action="conn-retry"], [data-action="conn-reload"]')?.dataset['action'];
+      const action = (event.target as HTMLElement).closest<HTMLElement>('[data-action="conn-retry"], [data-action="conn-reload"], [data-action="open-retry"], [data-action="open-back"]')?.dataset['action'];
 
-      if (action === 'conn-retry') {
+      if (action === 'open-retry') {
+        retryOpening();
+      } else if (action === 'open-back') {
+        leaveOpening();
+      } else if (action === 'conn-retry') {
         connection.retryNow();
       } else if (action === 'conn-reload') {
         (deps.reload ?? (() => location.reload()))();

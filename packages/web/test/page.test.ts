@@ -1708,6 +1708,7 @@ it("makes a phone's conversation a history entry, which the browser's back leave
 
     // Another conversation chosen from the header's dropdown replaces the entry rather than adding one.
     root.querySelector<HTMLElement>('[data-work-item="2"]')!.click();
+    source.emit('hello', { key: 'pk', groups, scope: { ...scope, workItemId: 2, conversations: [...scope.conversations, { ...scope.conversations[0]!, workItemId: 2, title: 'Item 2', primary: false }] }, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
     const after = history.length;
 
     root.querySelector<HTMLElement>('.header .picker')!.click();
@@ -1757,12 +1758,16 @@ it('steps back through history once for Back, select and Back in quick successio
     expect(root.classList.contains('listing')).toBe(true);
     expect(history.state).toBeNull();
 
-    // A refused first open from the list takes its entry back with it.
+    // A refused first open from the list shows why in its place; Back to the list takes its entry back with it.
     source.emit('hello', { key: 'pk2', groups, scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
     refuse = true;
-    pop = popped();
     root.querySelector<HTMLElement>('[data-work-item="2"]')!.click();
     expect(history.state).toEqual({ switchboardConversation: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(root.querySelector('#panel .opening-why')?.textContent).toBe('That work item is gone.');
+    pop = popped();
+    root.querySelector<HTMLElement>('[data-action="open-back"]')!.click();
     await pop;
     expect(back).toHaveBeenCalledTimes(2);
     expect(root.classList.contains('listing')).toBe(true);
@@ -1832,7 +1837,7 @@ it("turns the mic off through Back's path when a phone's conversation is left by
     page.close();
   });
 
-  it('shows a refused first select over the list, which a phone shows again, and clears it on the next select', async () => {
+  it("shows a refused open in the work item's place under its own title, with Try again and Back to the list", async () => {
     history.replaceState(null, '', '#');
 
     const fetch = vi.fn(async (url: string) => ({ status: url.endsWith('/select') ? 404 : 200, ok: !url.endsWith('/select'), json: async () => (url.endsWith('/select') ? { error: 'That work item is gone.' } : {}), text: async () => '' }) as unknown as Response);
@@ -1841,14 +1846,32 @@ it("turns the mic off through Back's path when a phone's conversation is left by
     FakeSource.last!.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1), listRow(2)])], scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
     root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
     expect(root.classList.contains('listing')).toBe(false);
+    // At once: its title and a placeholder.
+    expect(root.querySelector('#head .opening-title')?.textContent).toBe('Item 1');
+    expect(root.querySelector('#panel .opening-note')?.textContent).toContain('Opening…');
     await flush();
     await flush();
+    expect(root.classList.contains('listing')).toBe(false);
+    expect(root.querySelector('#head .opening-title')?.textContent).toBe('Item 1');
+    expect(root.querySelector('#panel .opening-failed h3')?.textContent).toBe("Couldn't open this work item");
+    expect(root.querySelector('#panel .opening-why')?.textContent).toBe('That work item is gone.');
+    expect(location.hash).toBe('#w=1');
+
+    const selects = () => fetch.mock.calls.filter(([url]) => String(url).endsWith('/select')).length;
+
+    // Not asked again until Try again.
+    expect(selects()).toBe(1);
+    root.querySelector<HTMLElement>('[data-action="open-retry"]')!.click();
+    expect(selects()).toBe(2);
+    expect(root.querySelector('#panel .opening-note')).not.toBeNull();
+    await flush();
+    await flush();
+    root.querySelector<HTMLElement>('[data-action="open-back"]')!.click();
     expect(root.classList.contains('listing')).toBe(true);
-    expect(root.querySelector('.toast.warning .toast-text')?.textContent).toBe('That work item is gone.');
     expect(location.hash).toBe('');
     // The next select hides it.
     root.querySelector<HTMLElement>('[data-work-item="2"]')!.click();
-    expect(root.querySelector('.toast')).toBeNull();
+    expect(root.querySelector('#head .opening-title')?.textContent).toBe('Item 2');
     page.close();
   });
 
@@ -4084,7 +4107,7 @@ describe('the page in use', () => {
     hello(source, { ...kept, scope: { ...scope, workItemId: 2 }, tabs: { tab: 'console', closed: [] } });
     expect(shown()).toBe('conversation');
 
-    // A work item the hub refuses to open leaves the open one's tab as it was.
+    // A conversation of its dropdown the hub refuses to open leaves the open one's tab as it was.
     click('#head [data-tab="status"]');
     click('.header > button.back-toggle');
     refuse = true;
@@ -5327,6 +5350,117 @@ describe('the page in use', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(sends().at(-1)!.body['opId']).not.toBe(first);
     page.close();
+  });
+
+  it("opens another work item under its own head with a placeholder at once, never the one shown before, until its hello", async () => {
+    const { page, source } = start();
+
+    hello(source, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it' }), listRow(3, { title: 'Other work' })])] });
+    expect(root.querySelector('#panel .timeline')).not.toBeNull();
+    answers['/select'] = { status: 200, body: {}, wait: new Promise(() => {}) };
+    root.querySelector<HTMLElement>('[data-work-item="3"]')!.click();
+    expect(root.querySelector('#head .opening-title')?.textContent).toBe('Other work');
+    expect(root.querySelector('#panel .timeline')).toBeNull();
+    expect(root.querySelector('#panel .opening-note')?.textContent).toContain('Opening…');
+    expect(root.querySelector<HTMLElement>('#composer')!.hidden).toBe(true);
+    // The row it opens is the one marked.
+    expect(root.querySelector('[data-work-item="3"]')!.classList.contains('selected')).toBe(true);
+    // An event for the work item shown before changes nothing.
+    source.emit('reply', { reply: reply('r9', 9) });
+    expect(root.querySelector('#panel .timeline')).toBeNull();
+    hello(source, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it' }), listRow(3, { title: 'Other work' })])], scope: { ...scope, workItemId: 3, title: 'Other work', conversations: [{ ...scope.conversations[0]!, workItemId: 3, title: 'Other work' }] } });
+    expect(root.querySelector('#head .opening-title')).toBeNull();
+    expect(root.querySelector('#panel .timeline')).not.toBeNull();
+    page.close();
+  });
+
+  it("keeps the placeholder through the opened work item's scope event until its own hello, so the previous conversation never shows under it", async () => {
+    const { page, source } = start();
+
+    hello(source, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it' }), listRow(3, { title: 'Other work' })])] });
+    answers['/select'] = { status: 200, body: {}, wait: new Promise(() => {}) };
+    root.querySelector<HTMLElement>('[data-work-item="3"]')!.click();
+    source.emit('scope', { scope: { ...scope, workItemId: 3, title: 'Other work', scopeGen: 4, conversations: [{ ...scope.conversations[0]!, workItemId: 3, title: 'Other work' }] } });
+    expect(root.querySelector('#panel .opening-note')).not.toBeNull();
+    expect(root.querySelector('#panel .timeline')).toBeNull();
+    page.close();
+  });
+
+  it('opens the work item the route asked for at the start as a row click does, its refusal in its place', async () => {
+    history.replaceState(null, '', '#w=3');
+    answers['/select'] = { status: 409, body: { error: 'Its worktree is missing.' } };
+
+    const { page, source } = start();
+
+    source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1, { title: 'Fix it' }), listRow(3, { title: 'Other work' })])], scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    await flush();
+    await flush();
+    expect(root.querySelector('#head .opening-title')?.textContent).toBe('Other work');
+    expect(root.querySelector('#panel .opening-why')?.textContent).toBe('Its worktree is missing.');
+    expect(location.hash).toBe('#w=3');
+    page.close();
+  });
+
+  it("keeps a send's opId over a refusal for an unbound key and a reload, and drops it once the hub took the message", async () => {
+    const { page, source } = start();
+
+    hello(source);
+
+    const box = () => root.querySelector('textarea')!;
+    const sends = () => posts.filter((post) => post.url.endsWith('/send'));
+    const type = (text: string) => {
+      box().value = text;
+      box().dispatchEvent(new Event('input'));
+    };
+
+    type('Ship it');
+    answers['/send'] = { status: 403, body: { error: 'Not in this window.' } };
+    click('button.send');
+    await flush();
+    await flush();
+    page.close();
+
+    // The reload: the same message sent again is the same operation.
+    const again = start();
+
+    hello(again.source);
+    type('Ship it');
+    answers['/send'] = { status: 200, body: { message: { id: 'm9' } } };
+    click('button.send');
+    await flush();
+    await flush();
+    expect(sends().map((post) => post.body['opId'])).toEqual([sends()[0]!.body['opId'], sends()[0]!.body['opId']]);
+    expect(localStorage.getItem('switchboard.sendOps')).toBe('{}');
+
+    // A refusal for a scope generation the page had not caught up with leaves it unsettled; another message replaces it.
+    await vi.waitFor(() => expect(box().value).toBe(''));
+    type('Next');
+    answers['/send'] = { status: 409, body: { error: "The window's conversation changed." } };
+    click('button.send');
+    await vi.waitFor(() => expect(sends().at(-1)!.body['text']).toBe('Next'));
+    await vi.waitFor(() => expect(root.querySelector('.composer-error-text')?.textContent).not.toBe(''));
+    const stale = sends().at(-1)!.body['opId'];
+
+    expect(JSON.parse(localStorage.getItem('switchboard.sendOps')!)).toEqual({ '1': { key: expect.stringContaining('Next'), opId: stale } });
+    type('Something else');
+    answers['/send'] = { status: 200, body: { message: { id: 'm10' } } };
+    click('button.send');
+    await vi.waitFor(() => expect(sends().at(-1)!.body['text']).toBe('Something else'));
+    expect(sends().at(-1)!.body['opId']).not.toBe(stale);
+
+    // Another page of this device kept a newer unsettled send meanwhile: this page's answer leaves it.
+    let release: () => void = () => {};
+
+    await vi.waitFor(() => expect(box().value).toBe(''));
+    type('Third');
+    answers['/send'] = { status: 200, body: { message: { id: 'm11' } }, wait: new Promise<void>((resolve) => void (release = resolve)) };
+    click('button.send');
+    await vi.waitFor(() => expect(sends().at(-1)!.body['text']).toBe('Third'));
+    localStorage.setItem('switchboard.sendOps', JSON.stringify({ '1': { key: 'other', opId: 'newer' } }));
+    release();
+    await vi.waitFor(() => expect(box().value).toBe(''));
+    expect(JSON.parse(localStorage.getItem('switchboard.sendOps')!)).toEqual({ '1': { key: 'other', opId: 'newer' } });
+    again.page.close();
   });
 
   it('lets a later tap open a work item after an open that hung, once the open times out', async () => {

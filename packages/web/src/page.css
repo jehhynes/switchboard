@@ -1073,3 +1073,16 @@ button.toast-open:hover { color: var(--vscode-textLink-activeForeground); text-d
 .conn-screen-start { margin-top: 14px; }
 .conn-screen-start a { color: var(--vscode-textLink-foreground); }
 .conn-update { position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom)); z-index: var(--sb-z-sheet); transform: translateX(-50%); display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 14px; border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); border-radius: 16px; background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background)); box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36)); white-space: nowrap; }
+
+/* A work item being opened (opening.tsx): its head, a placeholder, or why it could not be opened, in place of the conversation shown before. */
+.opening-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; padding: 0 6px; }
+.opening { display: flex; flex-direction: column; gap: 10px; padding: 12px 16px; }
+.opening-note { margin: 0; color: var(--vscode-descriptionForeground); }
+.opening-skeleton { height: 46px; width: 85%; border-radius: 8px; background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent); }
+.opening-skeleton.mine { height: 34px; width: 60%; align-self: flex-end; }
+.opening-failed { margin: auto; max-width: 28rem; padding: 32px 20px; text-align: center; }
+.opening-failed h3 { margin: 0 0 8px; font-size: 15px; font-weight: 600; }
+.opening-why { margin: 0 0 14px; padding: 8px; border-radius: 4px; color: var(--vscode-errorForeground); background: color-mix(in srgb, var(--vscode-errorForeground) 12%, transparent); }
+.opening-actions { display: flex; justify-content: center; gap: 8px; }
+.opening-back { font: inherit; border: 0; padding: 6px 10px; background: transparent; color: var(--vscode-textLink-foreground); cursor: pointer; }
+.conn-primary { padding: 6px 14px; }
