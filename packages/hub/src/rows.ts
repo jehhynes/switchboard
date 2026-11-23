@@ -541,7 +541,7 @@ export function priorityTitle(triage: Rating): string | null {
 /** The playbook a row names: `<namespace>:triage` while triage runs, else the chosen playbook, an ad-hoc work item's origin, or empty before triage. */
 export function playbookText(entry: WorkItemView | PoolView, namespaces: Record<string, string>): string {
   if ('status' in entry) {
-    return entry.status === 'triaging' ? triageLabel(entry.ticket.source, namespaces) : (entry.playbook ?? (entry.ticket.source === 'adhoc' || entry.moved ? adhocLabel({ parentId: entry.parentId, prompted: entry.taskPrompt !== null }, entry.ticket) : ''));
+    return entry.status === 'triaging' ? triageLabel(entry.ticket.source, namespaces) : (entry.playbook ?? (entry.ticket.source === 'adhoc' || entry.moved ? adhocLabel({ parentId: entry.parentId, prompted: entry.taskPrompt !== null, interactive: entry.interactive }, entry.ticket) : ''));
   }
 
   // A snoozed ticket is never triaged, so a missing triage is not shown as running.

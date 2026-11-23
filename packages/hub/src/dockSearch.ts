@@ -78,6 +78,7 @@ export class DoneSearch {
         playbook: entry.playbook,
         parentId: entry.parentId,
         taskPrompt: entry.prompted ? '' : null,
+        interactive: entry.interactive,
         moved: entry.ticket.adhocKey !== null && entry.first,
         ticket: entry.ticket as Ticket,
         links: entry.links.map((target) => ({ target }) as Link),

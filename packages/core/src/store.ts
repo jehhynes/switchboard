@@ -671,6 +671,8 @@ export interface DoneSearchEntry {
   parentId: number | null;
   /** Whether it has a task prompt. */
   prompted: boolean;
+  /** Whether it is a conversation, hosted or standalone. */
+  interactive: boolean;
   /** Whether it is its ticket's first work item. */
   first: boolean;
   ticket: Pick<Ticket, 'title' | 'source' | 'sourceKey' | 'sourceId' | 'hostWindow' | 'adhocKey'>;
@@ -1237,20 +1239,21 @@ export class Store {
   doneSearchEntries(since: number, until: number): DoneSearchEntry[] {
     const rows = this.#db
       .prepare(
-        `SELECT w.id, w.playbook, w.parentId, w.taskPrompt IS NOT NULL AS prompted,
+        `SELECT w.id, w.playbook, w.parentId, w.taskPrompt IS NOT NULL AS prompted, w.interactive,
           w.id = (SELECT MIN(f.id) FROM workItems f WHERE f.ticketId = w.ticketId) AS first,
           t.title, t.source, t.sourceKey, t.sourceId, t.hostWindow, t.adhocKey, wt.branch,
           (SELECT json_group_array(l.target) FROM links l WHERE l.ticketId = w.ticketId) AS links
         FROM workItems w JOIN tickets t ON t.id = w.ticketId LEFT JOIN worktrees wt ON wt.ticketId = w.ticketId
         WHERE w.status = 'done' AND w.doneAt >= ? AND w.doneAt < ? AND t.snoozed = 0 ORDER BY w.doneAt DESC, w.id DESC`,
       )
-      .all(since, until) as Array<{ id: number; playbook: string | null; parentId: number | null; prompted: number; first: number; title: string; source: string; sourceKey: string; sourceId: string | null; hostWindow: string | null; adhocKey: string | null; branch: string | null; links: string }>;
+      .all(since, until) as Array<{ id: number; playbook: string | null; parentId: number | null; prompted: number; interactive: number | null; first: number; title: string; source: string; sourceKey: string; sourceId: string | null; hostWindow: string | null; adhocKey: string | null; branch: string | null; links: string }>;
 
     return rows.map((row) => ({
       id: row.id,
       playbook: row.playbook,
       parentId: row.parentId,
       prompted: row.prompted === 1,
+      interactive: row.interactive === 1,
       first: row.first === 1,
       ticket: { title: row.title, source: row.source, sourceKey: row.sourceKey, sourceId: row.sourceId, hostWindow: row.hostWindow, adhocKey: row.adhocKey },
       branch: row.branch,

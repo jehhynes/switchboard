@@ -264,6 +264,10 @@ describe('adhocLabel', () => {
     expect(adhocLabel({ parentId: 4, prompted: true }, none)).toBe('task');
     expect(adhocLabel({ parentId: null, prompted: true }, { sourceId: 'task' })).toBe('task');
     expect(adhocLabel({ parentId: null, prompted: false }, none)).toBe('registered');
+    // A standalone session (PRD R122), with or without a first message, is not a registered session or an ad-hoc prompt.
+    expect(adhocLabel({ parentId: null, prompted: false, interactive: true }, none)).toBe('session');
+    expect(adhocLabel({ parentId: null, prompted: true, interactive: true }, none)).toBe('session');
+    expect(adhocLabel({ parentId: null, prompted: false, interactive: true }, { sourceId: null, hostWindow: 'D:/git/support' })).toBe('conversation');
   });
 });
 

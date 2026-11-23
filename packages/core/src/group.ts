@@ -402,11 +402,12 @@ export function triageLabel(source: string, namespaces: Record<string, string>):
 }
 
 /**
- * The playbook slot of an ad-hoc work item, by how it was made: `task` from a session's task report, whose ticket's `sourceId` keeps it after
- * Delete clears the parent, `registered` for a registered session, else `ad-hoc`.
+ * The playbook slot of an ad-hoc work item, by how it was made: `conversation` for a hosted conversation, `task` from a session's task report,
+ * whose ticket's `sourceId` keeps it after Delete clears the parent, `session` for a standalone session (PRD R122), `registered` for a
+ * registered session, else `ad-hoc`.
  */
-export function adhocLabel(item: { parentId: number | null; prompted: boolean }, ticket: { sourceId: string | null; hostWindow?: string | null }): 'ad-hoc' | 'task' | 'registered' | 'conversation' {
-  return ticket.hostWindow != null ? 'conversation' : item.parentId !== null || ticket.sourceId === 'task' ? 'task' : item.prompted ? 'ad-hoc' : 'registered';
+export function adhocLabel(item: { parentId: number | null; prompted: boolean; interactive?: boolean | undefined }, ticket: { sourceId: string | null; hostWindow?: string | null }): 'ad-hoc' | 'task' | 'registered' | 'conversation' | 'session' {
+  return ticket.hostWindow != null ? 'conversation' : item.parentId !== null || ticket.sourceId === 'task' ? 'task' : item.interactive === true ? 'session' : item.prompted ? 'ad-hoc' : 'registered';
 }
 
 /** The prompt a work item without a playbook runs, an ad-hoc or task one's (PRD R6, R68), which Start with prompt… edits and History shows; else null. */

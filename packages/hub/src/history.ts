@@ -83,7 +83,7 @@ export const STATUS_WORDS: Record<WorkItemStatus, string> = {
 };
 
 /** An ad-hoc work item's section title, by how it was made. */
-const ADHOC_SECTIONS: Record<ReturnType<typeof adhocLabel>, string> = { 'ad-hoc': 'Ad-hoc prompt', task: 'Follow-up task', registered: 'Registered session', conversation: 'Conversation' };
+const ADHOC_SECTIONS: Record<ReturnType<typeof adhocLabel>, string> = { 'ad-hoc': 'Ad-hoc prompt', task: 'Follow-up task', registered: 'Registered session', conversation: 'Conversation', session: 'Session' };
 
 /** Statuses that wait for the operator. */
 const NEEDS_YOU: ReadonlySet<string> = new Set(['unstarted', 'awaiting-approval', 'finished', 'blocked', 'failed']);
