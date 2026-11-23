@@ -141,7 +141,7 @@ describe('parseSettings', () => {
 
   it('refuses a dock.openIn or alerts.surface outside its choices, and other alerts keys', () => {
     expect(parseSettings('{"dock":{"openIn":"browser"}}')).toEqual({ errors: ['dock.openIn must be one of vscode, web.'] });
-    expect(parseSettings('{"alerts":{"surface":"both","sound":true}}')).toEqual({ errors: ['alerts.sound is not a setting.', 'alerts.surface must be one of auto, web, dock.'] });
+    expect(parseSettings('{"alerts":{"surface":"both","sound":true}}')).toEqual({ errors: ['alerts.sound is not a setting.', 'alerts.surface must be one of auto, web, dock, system.'] });
     expect(parseSettings('{"alerts":"web"}')).toMatchObject({ errors: [expect.stringContaining('alerts')] });
   });
 

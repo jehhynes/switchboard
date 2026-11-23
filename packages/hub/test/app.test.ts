@@ -11,11 +11,17 @@ import type { Snapshot } from '../src/snapshot.js';
 import { gitBashRoot, handledBody, isPastePath, registerTitle, reportBody, ticketBody } from '../src/report.js';
 import { tempHome, until } from './helpers.js';
 
+/** The needs-you alerts the hub shows as system notifications; no test shows a real one. */
+const systemAlerts = vi.hoisted(() => [] as Array<{ alerts: unknown[]; sound: boolean }>);
+
+vi.mock('../src/systemAlerts.js', () => ({ systemNotifier: () => ({ notify: (alerts: unknown[], sound: boolean) => systemAlerts.push({ alerts: [...alerts], sound }) }) }));
+
 let temp: ReturnType<typeof tempHome>;
 let closers: (() => void | Promise<void>)[] = [];
 
 beforeEach(() => {
   temp = tempHome();
+  systemAlerts.length = 0;
 });
 
 afterEach(async () => {
@@ -275,6 +281,25 @@ describe('createHubApp', () => {
 
     return app;
   }
+
+  /** Makes a new work item start needing the operator: built once, then moved to the operator's turn and built again; resolves its ID. */
+  const needingIn = (app: Awaited<ReturnType<typeof start>>) => async (title: string): Promise<number> => {
+    const tick = () => new Promise((done) => setTimeout(done, 50));
+
+    app.runtime.send({ type: 'adhoc', prompt: title, repoRoot: 'D:/scratch', start: false });
+    await app.runtime.settled();
+    await tick();
+
+    const id = (app.snapshot() as { workItems: { id: number; ticket: { title: string } }[] }).workItems.find((one) => one.ticket.title === title)!.id;
+    const writer = Store.open(join(temp.home, '.switchboard', 'switchboard.db'));
+
+    writer.updateWorkItem(id, { status: 'awaiting-approval' });
+    writer.close();
+    app.runtime.send({ type: 'adhoc', prompt: `${title} (rebuild)`, repoRoot: 'D:/scratch', start: false });
+    await app.runtime.settled();
+    await tick();
+    return id;
+  };
 
   it('serves actions and reports, refusing what does not apply', async () => {
     writeSettings({ sessions: { installHooks: false }, sources: { adhoc: { repoRoot: 'D:/scratch' } } });
@@ -1039,37 +1064,23 @@ describe('createHubApp', () => {
     expect(clicks).toHaveLength(1);
   });
 
-  it('shows each needs-you message on one surface: the installed page used last, else the dock, sounding there only without the voice (PRD R65)', async () => {
+  it('shows each needs-you message on one surface: the installed page used last, else a system notification, sounding there only without the voice (PRD R65)', async () => {
     writeSettings({ sessions: { installHooks: false }, sources: { adhoc: { repoRoot: 'D:/scratch' } } });
     const app = await start();
     const dock: Array<[string, unknown]> = [];
     const frames: string[] = [];
-    const tick = () => new Promise((done) => setTimeout(done, 50));
-    // A new work item, built once, then moved to the operator's turn and built again, so the hub sees it start needing the operator.
-    const needing = async (title: string): Promise<number> => {
-      app.runtime.send({ type: 'adhoc', prompt: title, repoRoot: 'D:/scratch', start: false });
-      await app.runtime.settled();
-      await tick();
-
-      const id = (app.snapshot() as { workItems: { id: number; ticket: { title: string } }[] }).workItems.find((one) => one.ticket.title === title)!.id;
-      const writer = Store.open(join(temp.home, '.switchboard', 'switchboard.db'));
-
-      writer.updateWorkItem(id, { status: 'awaiting-approval' });
-      writer.close();
-      app.runtime.send({ type: 'adhoc', prompt: `${title} (rebuild)`, repoRoot: 'D:/scratch', start: false });
-      await app.runtime.settled();
-      await tick();
-      return id;
-    };
+    const needing = needingIn(app);
     const pageNeeds = () => frames.filter((frame) => frame.includes('event: needs\n')).map((frame) => JSON.parse(frame.slice(frame.indexOf('data: ') + 6)) as Record<string, unknown>);
 
     app.attachDock!((event, data) => (dock.push([event, data]), 1));
-    // A browser tab is not the installed app, so with alerts.surface auto the dock says it.
+    // A browser tab is not the installed app, so with alerts.surface auto a system notification says it, opening the page at the work item.
     app.conversation!(app.page!.opened(false), (frame) => frames.push(frame));
 
     const first = await needing('Fix the badge');
 
-    expect(dock.filter(([event]) => event === 'needs')).toEqual([['needs', { items: [{ rowKey: `item:${first}`, message: 'Switchboard: Fix the badge — Review, then approve' }] }]]);
+    await until(() => (systemAlerts.length === 1 ? true : null));
+    expect(systemAlerts).toEqual([{ alerts: [{ workItemId: first, title: 'Fix the badge', reason: 'Review, then approve', url: `http://127.0.0.1:47616/page/#w=${first}` }], sound: true }]);
+    expect(dock.filter(([event]) => event === 'needs')).toEqual([]);
     expect(pageNeeds()).toEqual([]);
 
     // The installed app that may not show notifications cannot alert either.
@@ -1077,7 +1088,7 @@ describe('createHubApp', () => {
 
     app.conversation!(installed, (frame) => frames.push(frame));
     await needing('Add a test');
-    expect(dock.filter(([event]) => event === 'needs')).toHaveLength(2);
+    await until(() => (systemAlerts.length === 2 ? true : null));
     expect(pageNeeds()).toEqual([]);
 
     // Once it may, it says it instead, with the sound, since the voice is off.
@@ -1087,7 +1098,39 @@ describe('createHubApp', () => {
     const second = await needing('Rename the field');
 
     expect(pageNeeds()).toEqual([expect.objectContaining({ type: 'needs', items: [{ workItemId: second, message: 'Switchboard: Rename the field — Review, then approve' }], sound: true })]);
-    expect(dock.filter(([event]) => event === 'needs')).toHaveLength(2);
+    expect(systemAlerts).toHaveLength(2);
+    expect(dock.filter(([event]) => event === 'needs')).toEqual([]);
+  });
+
+  it('shows needs-you messages on the dock for alerts.surface dock, and as system notifications for system even with a page that may notify (PRD R65)', async () => {
+    writeSettings({ sessions: { installHooks: false }, sources: { adhoc: { repoRoot: 'D:/scratch' } }, alerts: { surface: 'dock' } });
+    const dockApp = await start();
+    const dock: Array<[string, unknown]> = [];
+
+    dockApp.attachDock!((event, data) => (dock.push([event, data]), 1));
+
+    const first = await needingIn(dockApp)('Fix the badge');
+
+    expect(dock.filter(([event]) => event === 'needs')).toEqual([['needs', { items: [{ rowKey: `item:${first}`, message: 'Switchboard: Fix the badge — Review, then approve' }] }]]);
+    expect(systemAlerts).toEqual([]);
+    closers.pop();
+    await dockApp.close();
+
+    writeSettings({ sessions: { installHooks: false }, sources: { adhoc: { repoRoot: 'D:/scratch' } }, alerts: { surface: 'system' } });
+    const app = await start();
+    const frames: string[] = [];
+    const installed = app.page!.opened(true);
+
+    app.conversation!(installed, (frame) => frames.push(frame));
+    expect(await app.post['/v1/conversation/page-focus']!({ window: installed, focused: false, notify: true })).toEqual({ status: 200, body: { focused: false } });
+    // The server's page URL, once attached, is the one a click opens.
+    app.attachPageUrl!(async () => 'http://127.0.0.1:5555/page/');
+
+    const second = await needingIn(app)('Add a test');
+
+    await until(() => (systemAlerts.length === 1 ? true : null));
+    expect(systemAlerts[0]).toEqual({ alerts: [expect.objectContaining({ workItemId: second, url: `http://127.0.0.1:5555/page/#w=${second}` })], sound: true });
+    expect(frames.some((frame) => frame.includes('event: needs\n'))).toBe(false);
   });
 
   it('shows a dock row in the installed page used last, or answers the page at its work item with none open (architecture.md § Dock)', async () => {

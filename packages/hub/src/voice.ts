@@ -1922,6 +1922,11 @@ export class VoiceControl {
     return this.#device === 'computer' || (this.#device === 'phone' && key === this.#phoneKey && this.deps.pageFocused?.(key) === true);
   }
 
+  /** Whether a system notification on this computer may play its sound: only while the voice is here, not on the phone or gone with it (PRD R119). */
+  systemMaySound(): boolean {
+    return this.#device === 'computer';
+  }
+
   /**
    * Whether a spoken alert or the needs-you sound can be heard where the voice is: on this computer, or on the phone while its page is in front
    * (PRD R119); never with no device. A hidden phone page plays and hears nothing.

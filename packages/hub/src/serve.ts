@@ -50,6 +50,8 @@ export interface HubApp {
   attachWindows?(send: (event: string, data: unknown, keys?: readonly string[]) => number): void;
   /** Gives the app the way to end the remote page streams that a change of remote access no longer allows. */
   attachRemote?(changed: () => void): void;
+  /** Gives the app the local web page's URL once it is served, which a needs-you system notification opens (PRD R65). */
+  attachPageUrl?(url: () => Promise<string>): void;
   /** While true, the hub does not exit for lack of clients (PRD R43). */
   busy(): boolean;
   /** Why the hub cannot restart onto a new build now, or null when it is quiet (architecture.md § Hub lifecycle). */
@@ -249,6 +251,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
   app?.attachDockClick?.((data) => server.clickDock(data));
   app?.attachWindows?.((event, data, keys) => server.notifyWindows(event, data, keys));
   app?.attachRemote?.(() => server.remoteChanged());
+  app?.attachPageUrl?.(() => server.pageUrl());
 
   const pagePort = options.pagePort ?? app?.pagePort?.() ?? 0;
 

@@ -148,7 +148,7 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     expect([...field<HTMLSelectElement>('sessions.provider').options].map((option) => option.textContent)).toEqual(['Claude', 'Codex']);
     expect(field<HTMLSelectElement>('sessions.codex.permissionMode').value).toBe('bypassPermissions');
     expect(field<HTMLSelectElement>('dock.openIn').value).toBe('vscode');
-    expect([...field<HTMLSelectElement>('alerts.surface').options].map((option) => option.textContent)).toEqual(['Web app when open', 'Web page when open', 'Dock']);
+    expect([...field<HTMLSelectElement>('alerts.surface').options].map((option) => option.textContent)).toEqual(['Web app when open', 'Web page when open', 'Dock', 'System notification']);
 
     // Advanced opens to show the executable paths, and Install hooks shows the file's false over its default true.
     host.querySelector<HTMLButtonElement>('.settings-toggle')!.click();

@@ -20,7 +20,7 @@ export class PageTargets {
     }
   }
 
-  /** Whether the browser lets the page show notifications, as the page reports it; a page that cannot alerts nobody, so the dock does. */
+  /** Whether the browser lets the page show notifications, as the page reports it; a page that cannot is never chosen to alert. */
   notifies(key: string, notifies: boolean): void {
     const page = this.#pages.get(key);
 
@@ -39,11 +39,11 @@ export class PageTargets {
   }
 
   /**
-   * The page that raises needs-you alerts for `alerts.surface`, or null for the dock, among the pages that may show notifications: `auto` the
-   * installed page used last; `web` that, else any page used last; `dock` none.
+   * The page that raises needs-you alerts for `alerts.surface`, among the pages that may show notifications: `auto` the installed page used
+   * last; `web` that, else any page used last; `dock` and `system` none. Null leaves the alert to the dock or a system notification.
    */
   alerting(surface: AlertSurface): string | null {
-    return surface === 'dock' ? null : (this.#latest((page) => page.notifies && page.installed) ?? (surface === 'web' ? this.#latest((page) => page.notifies) : null));
+    return surface === 'dock' || surface === 'system' ? null : (this.#latest((page) => page.notifies && page.installed) ?? (surface === 'web' ? this.#latest((page) => page.notifies) : null));
   }
 
   #latest(test: (page: { installed: boolean; at: number; notifies: boolean }) => boolean): string | null {

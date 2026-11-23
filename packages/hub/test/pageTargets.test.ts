@@ -22,14 +22,14 @@ describe('PageTargets', () => {
     expect(pages.installed()).toBeNull();
   });
 
-  it('alerts on the installed page for auto, on any page for web, and never for dock, only from pages that may show notifications', () => {
+  it('alerts on the installed page for auto, on any page for web, and never for dock or system, only from pages that may show notifications', () => {
     const pages = new PageTargets();
 
     expect(pages.alerting('auto')).toBeNull();
     expect(pages.alerting('web')).toBeNull();
     pages.opened('tab1', false);
     pages.opened('tab2', false);
-    // Without notifications a page cannot alert, so the dock does.
+    // Without notifications a page cannot alert.
     expect(pages.alerting('web')).toBeNull();
     pages.notifies('tab1', true);
     pages.notifies('tab2', true);
@@ -44,5 +44,6 @@ describe('PageTargets', () => {
     expect(pages.alerting('auto')).toBe('app');
     expect(pages.alerting('web')).toBe('app');
     expect(pages.alerting('dock')).toBeNull();
+    expect(pages.alerting('system')).toBeNull();
   });
 });

@@ -43,7 +43,7 @@ public sealed class SettingsFieldsTests
         Assert.Equal([("vscode", "VS Code"), ("web", "Web app")], fields["dock.openIn"].Options!.Select((option) => (option.Value, option.Label)));
         Assert.Equal("vscode", fields["dock.openIn"].Placeholder);
         Assert.Contains("Alt-click opens the other", fields["dock.openIn"].Help);
-        Assert.Equal([("auto", "Web app when open"), ("web", "Web page when open"), ("dock", "Dock")], fields["alerts.surface"].Options!.Select((option) => (option.Value, option.Label)));
+        Assert.Equal([("auto", "Web app when open"), ("web", "Web page when open"), ("dock", "Dock"), ("system", "System notification")], fields["alerts.surface"].Options!.Select((option) => (option.Value, option.Label)));
         Assert.Equal("auto", fields["alerts.surface"].Placeholder);
         Assert.Equal([("vscode", "VS Code"), ("app", "Terminal app"), ("auto", "VS Code when open")], fields["dock.openTerminal"].Options!.Select((option) => (option.Value, option.Label)));
         Assert.Equal("vscode", fields["dock.openTerminal"].Placeholder);

@@ -22,10 +22,15 @@ export function newlyNeeding(previous: Snapshot | null, next: Snapshot): WorkIte
   });
 }
 
+/** Why a work item that started needing the operator needs them: its mark's tooltip, such as `Approve to send`. */
+export function needsReason(item: WorkItemView): string {
+  // A work item on the operator's turn always has a mark; only Unstarted rows can have none.
+  return MARK_TITLES[markOf(item) as Mark];
+}
+
 /** The dock's message for a work item that started needing the operator, such as `Switchboard: Fix the inbox badge — Approve to send`. */
 export function needsMessage(item: WorkItemView): string {
-  // A work item on the operator's turn always has a mark; only Unstarted rows can have none.
-  return `Switchboard: ${item.ticket.title} — ${MARK_TITLES[markOf(item) as Mark]}`;
+  return `Switchboard: ${item.ticket.title} — ${needsReason(item)}`;
 }
 
 /** A row by its work item, or by its pool ticket. */

@@ -115,10 +115,10 @@ export interface DockSettings {
 }
 
 /**
- * Which surface raises needs-you alerts (PRD R65), so one event alerts once: `auto` the installed web page while one is open, else the dock;
- * `web` any open web page, the installed one first, else the dock; `dock` the dock.
+ * Which surface raises needs-you alerts (PRD R65), so one event alerts once: `auto` the installed web page while one is open, else a system
+ * notification; `web` any open web page, the installed one first, else a system notification; `dock` the dock; `system` a system notification.
  */
-export const ALERT_SURFACES = ['auto', 'web', 'dock'] as const;
+export const ALERT_SURFACES = ['auto', 'web', 'dock', 'system'] as const;
 
 export type AlertSurface = (typeof ALERT_SURFACES)[number];
 

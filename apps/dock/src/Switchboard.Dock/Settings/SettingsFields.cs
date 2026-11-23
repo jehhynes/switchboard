@@ -381,7 +381,7 @@ public static partial class SettingsFields
             ]),
             new Section("Alerts",
             [
-                new Field("alerts.surface", "Needs-you alerts from", FieldKind.Select, "Where a work item that starts needing you is announced, so one event alerts once. Web app when open uses the installed Switchboard web app while it is open, else the dock. Web page when open uses any open Switchboard web page, the installed app first, else the dock. A web page announces only once you allowed its notifications, which it asks for at your first click in it, and plays the needs-you sound when the voice does not.", "auto", [new FieldOption("auto", "Web app when open"), new FieldOption("web", "Web page when open"), new FieldOption("dock", "Dock")]),
+                new Field("alerts.surface", "Needs-you alerts from", FieldKind.Select, "Where a work item that starts needing you is announced, so one event alerts once. Web app when open uses the installed Switchboard web app while it is open, else a system notification. Web page when open uses any open Switchboard web page, the installed app first, else a system notification. System notification always uses the notifications of this computer; a click on one opens the web page at its work item, except on macOS. A web page announces only once you allowed its notifications, which it asks for at your first click in it. A web page or system notification plays the needs-you sound when the voice does not.", "auto", [new FieldOption("auto", "Web app when open"), new FieldOption("web", "Web page when open"), new FieldOption("dock", "Dock"), new FieldOption("system", "System notification")]),
             ]),
             new Section("Web page",
             [

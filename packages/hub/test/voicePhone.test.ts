@@ -456,6 +456,7 @@ describe('VoiceControl with the voice on a phone (PRD R119)', () => {
     // Taken back by Talk here on this computer: the mic is off there until turned on.
     expect(control.talkHere('pc')).toBeNull();
     expect(control.device).toBe('computer');
+    expect(control.systemMaySound()).toBe(true);
     control.phoneAudio('phone', Buffer.from([PHONE_MIC_FRAME, 1, 2]));
     expect(sentOf('phone-mic')).toEqual([]);
   });
@@ -499,6 +500,8 @@ describe('VoiceControl with the voice on a phone (PRD R119)', () => {
     expect(control.pageMaySound('pc')).toBe(false);
     focusedPages.add('phone');
     expect(control.pageMaySound('phone')).toBe(true);
+    // A system notification sounds on this computer, so not while the voice is on the phone, even in front.
+    expect(control.systemMaySound()).toBe(false);
     focusedPages.delete('phone');
 
     // With no device after the phone left, nothing is alerted.
@@ -508,6 +511,7 @@ describe('VoiceControl with the voice on a phone (PRD R119)', () => {
     expect(control.pageMaySound('pc')).toBe(false);
     focusedPages.delete('phone');
     expect(control.pageMaySound('phone')).toBe(false);
+    expect(control.systemMaySound()).toBe(false);
   });
 
   it('shows the voice off only on this computer after the phone left, and lets no message typed on a paired page take it back', async () => {

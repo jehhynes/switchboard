@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { needsMessage, newlyNeeding } from '../src/needs.js';
+import { needsMessage, needsReason, newlyNeeding } from '../src/needs.js';
 import type { Snapshot, WorkItemView } from '../src/snapshot.js';
 
 const NOW = Date.UTC(2026, 9, 7, 12);
@@ -163,5 +163,7 @@ describe('needsMessage', () => {
     expect(needsMessage(item(3, 'blocked', { sessions: [ended] }))).toBe('Switchboard: Issue 3 — Blocked');
     // A held turn that ended on an unanswered question card (PRD R103).
     expect(needsMessage(item(4, 'running', { sessions: [session({ state: 'idle', stateDetail: 'question-card', codeMode: true })] }))).toBe('Switchboard: Issue 4 — Answer a question');
+    // A system notification shows the title and the reason apart.
+    expect(needsReason(item(1, 'awaiting-approval', { sessions: [ended] }))).toBe('Review, then approve');
   });
 });

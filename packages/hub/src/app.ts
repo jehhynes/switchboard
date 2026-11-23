@@ -44,7 +44,8 @@ import { launcher } from './launch.js';
 import type { Launcher } from './launch.js';
 import { pageAsset } from './pageAssets.js';
 import { PageChanges, VIEWED_REFUSED } from './changes.js';
-import { needsMessage, newlyNeeding, rowFor, targetForUrl } from './needs.js';
+import { needsMessage, needsReason, newlyNeeding, rowFor, targetForUrl } from './needs.js';
+import { systemNotifier } from './systemAlerts.js';
 import { installedProviders } from './installed.js';
 import { importDockFolders } from './folders.js';
 import { claudeModelChoices, CODEX_MODELS_MS, codexModelChoices, withConfigured } from './models.js';
@@ -214,8 +215,7 @@ export interface AppOptions {
    */
   snapshotWorker?: string;
   /** What the hub starts for the web page, such as the browser for a link; tests replace it. */
-  launch?: Launcher;
-  /** What the hub this one took over from carried to it (`HubApp.handover`), such as the voice's state; null or left out for a hub that started anew. */
+  launch?: Launcher;  /** What the hub this one took over from carried to it (`HubApp.handover`), such as the voice's state; null or left out for a hub that started anew. */
   handover?: Record<string, unknown> | null;
 }
 
@@ -305,6 +305,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
   const runtime = new Runtime(deps, config);
   const launch = options.launch ?? launcher();
+  const notifier = systemNotifier(deps.log);
   // Kept in a file, because the window the dock is opening may replace this hub before it claims (architecture.md § Claude Code runner).
   const windowQueue = WindowQueue.load(join(home, 'window-queue.json'), deps.now, deps.log);
   const claudeRoot = dirname(deps.claudeSettings).replaceAll('\\', '/');
@@ -329,6 +330,8 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   });
 
   let sendDock: (event: string, data: unknown) => number = () => 0;
+  /** The local web page's URL, which a system notification's click opens; the server's, once it attaches it. */
+  let pageUrl = (): Promise<string> => Promise.resolve(`http://127.0.0.1:${config.settings.web.port}/page/`);
   /** settings.json or a source's state changed: the dock's Settings window and every page's Settings read the file again (PRD R54). */
   const configChanged = (): void => {
     sendDock('config', {});
@@ -855,13 +858,13 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     conversation.scopesChanged(scopes.update(built.snapshot));
     conversation.sessionsChanged();
 
-    // The dock or a web page says when a work item starts needing the operator, which the windows no longer see (PRD R65).
+    // The dock, a web page or a system notification says when a work item starts needing the operator, which the windows no longer see (PRD R65).
     const newly = newlyNeeding(announced, built.snapshot);
     const newlyNeedingIds = newly.map((item) => item.id);
     const needing = newly.flatMap((item) => {
       const rowKey = rowFor(built.snapshot, { workItemId: item.id });
 
-      return rowKey === null ? [] : [{ rowKey, workItemId: item.id, message: needsMessage(item) }];
+      return rowKey === null ? [] : [{ rowKey, workItemId: item.id, message: needsMessage(item), title: item.ticket.title, reason: needsReason(item) }];
     });
 
     announced = built.snapshot;
@@ -879,17 +882,24 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     const unalerted = newlyNeedingIds.filter((id) => !alerted.includes(id));
     const chimed = voice.needsYou(unalerted, targetSession?.workItemId ?? null);
 
-    // One surface, `alerts.surface`, shows each needs-you message: a web page or the dock (architecture.md § Dock, Needs you).
+    // One surface, `alerts.surface`, shows each needs-you message: a web page, the dock or a system notification (architecture.md § Dock, Needs you).
     if (needing.length > 0) {
-      const page = pageTargets.alerting(config.settings.alerts.surface);
+      const surface = config.settings.alerts.surface;
+      const page = pageTargets.alerting(surface);
+      // A page or notification sounds only where neither the voice's chime nor a spoken alert does, so one event makes one sound.
+      const sound = config.settings.voice.needsYouSound && !chimed && unalerted.some((id) => id !== targetSession?.workItemId);
 
-      if (page === null) {
+      if (page !== null) {
+        conversation.pageNeeds(page, needing.map(({ workItemId, message }) => ({ workItemId, message })), sound && voice.pageMaySound(page));
+      } else if (surface === 'dock') {
         sendDock('needs', { items: needing.map(({ rowKey, message }) => ({ rowKey, message })) });
       } else {
-        // The page sounds only where neither the voice's chime nor a spoken alert does, so one event makes one sound.
-        const sound = config.settings.voice.needsYouSound && !chimed && voice.pageMaySound(page) && unalerted.some((id) => id !== targetSession?.workItemId);
+        const here = sound && voice.systemMaySound();
 
-        conversation.pageNeeds(page, needing.map(({ workItemId, message }) => ({ workItemId, message })), sound);
+        void pageUrl().then(
+          (base) => notifier.notify(needing.map(({ workItemId, title, reason }) => ({ workItemId, title, reason, url: `${base}#w=${workItemId}` })), here),
+          (error: unknown) => deps.log(`system notification not shown: ${String(error)}`),
+        );
       }
     }
 
@@ -1713,6 +1723,9 @@ const dockWithRuns = () => {
     dock: () => dockWithRuns(),
     attachDock: (send) => {
       sendDock = send;
+    },
+    attachPageUrl: (url) => {
+      pageUrl = url;
     },
     attachDockClick: (click) => {
       clickDock = click;
