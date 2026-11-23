@@ -10,6 +10,9 @@ import { isolateGit, makeRepo } from './gitFixture.js';
 
 beforeAll(() => isolateGit());
 
+// Git-backed suites create commits and run several reads; Windows process startup can exceed Vitest's five-second default.
+const gitTimeout = { timeout: process.platform === 'win32' ? 15_000 : 5_000 };
+
 const lines = (count: number, word = 'line'): string => Array.from({ length: count }, (_, index) => `${word} ${index + 1}\n`).join('');
 
 /** A worktree with a commit after the base, a staged rename, an unstaged edit and deletion, an untracked text and binary file. */
@@ -31,7 +34,7 @@ function busyRepo() {
   return repo;
 }
 
-describe('readChanges', () => {
+describe('readChanges', gitTimeout, () => {
   it('lists every change from the merge base to disk once, with its status, stages and counts', async () => {
     const repo = busyRepo();
     const read = (await readChanges(repo.root)) as WorktreeChanges;
@@ -252,7 +255,7 @@ describe('paths the page names', () => {
   });
 });
 
-describe('PageChanges', () => {
+describe('PageChanges', gitTimeout, () => {
   const scope = (cwd: string | null, scopeGen = 1): WindowScope => ({ kind: 'page', key: 'p1', folder: cwd, title: 'T', scopeGen, conversations: [], workItemId: 7, cwd, sessionId: 's1' });
 
   it("answers the page's selected conversation's changes with the scope generation it read them for", async () => {
@@ -288,7 +291,7 @@ describe('PageChanges', () => {
   });
 });
 
-describe('readDiff', () => {
+describe('readDiff', gitTimeout, () => {
   const read = async (root: string) => (await readChanges(root)) as WorktreeChanges;
 
   it("answers git's patch and both whole sides for an edit, a rename, a deletion and an untracked file", async () => {
@@ -356,7 +359,7 @@ describe('readDiff', () => {
   });
 });
 
-describe('readDiff without sides', () => {
+describe('readDiff without sides', gitTimeout, () => {
   const read = async (root: string) => (await readChanges(root, nodeGit, false)) as WorktreeChanges;
   /** nodeGit, recording each git command's arguments. */
   const recording = () => {
@@ -418,7 +421,7 @@ describe('readDiff without sides', () => {
   });
 });
 
-describe('PageChanges.diff', () => {
+describe('PageChanges.diff', gitTimeout, () => {
   const scope = (cwd: string): WindowScope => ({ kind: 'page', key: 'p1', folder: cwd, title: 'T', scopeGen: 1, conversations: [], workItemId: 7, cwd, sessionId: 's1' });
 
   it('answers a change row with an ETag, and refuses a path that is not plain or not a change', async () => {
@@ -460,7 +463,7 @@ function twoCommits() {
   return { repo, base: repo.git('rev-parse', 'origin/main').trim(), first: repo.git('rev-parse', 'HEAD~1').trim(), second: repo.git('rev-parse', 'HEAD').trim() };
 }
 
-describe('readChanges with a range', () => {
+describe('readChanges with a range', gitTimeout, () => {
   it('ReadChanges_CommitsSinceTheBase_ListsThemNewestFirstWithParentSubjectAndTime', async () => {
     const { repo, base, first, second } = twoCommits();
     const view = ((await readChanges(repo.root)) as WorktreeChanges).view;
@@ -584,7 +587,7 @@ describe('readChanges with a range', () => {
   });
 });
 
-describe('PageChanges with a range', () => {
+describe('PageChanges with a range', gitTimeout, () => {
   const scope = (cwd: string): WindowScope => ({ kind: 'page', key: 'p1', folder: cwd, title: 'T', scopeGen: 1, conversations: [], workItemId: 7, cwd, sessionId: 's1' });
 
   it('PageChanges_Uncommitted_AnswersTheListDiffsAndFilesAgainstHead', { timeout: 30_000 }, async () => {
@@ -660,7 +663,7 @@ describe('PageChanges with a range', () => {
   });
 });
 
-describe('the file view', () => {
+describe('the file view', gitTimeout, () => {
   const scope = (cwd: string, scopeGen = 1): WindowScope => ({ kind: 'page', key: 'p1', folder: cwd, title: 'T', scopeGen, conversations: [], workItemId: 7, cwd, sessionId: 's1' });
 
   it("reads a file git tracks or would track on disk, and a change row's file at the base, and nothing else", async () => {
@@ -708,7 +711,7 @@ describe('the file view', () => {
   });
 });
 
-describe('viewed ticks', () => {
+describe('viewed ticks', gitTimeout, () => {
   const scope = (cwd: string, scopeGen = 1): WindowScope => ({ kind: 'page', key: 'p1', folder: cwd, title: 'T', scopeGen, conversations: [], workItemId: 7, cwd, sessionId: 's1' });
 
   it("gives each row its content's blob ID, or deleted, and marks a row viewed only at the hash it was ticked at", { timeout: 30_000 }, async () => {
