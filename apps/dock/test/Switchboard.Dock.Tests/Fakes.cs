@@ -137,6 +137,11 @@ sealed class FakeHub : IHub
 
         return HoldNewConversation is { } held ? held.Task : Task.FromResult(NewConversationReplies.Count > 0 ? NewConversationReplies.Dequeue() : new NewConversationReply("Switchboard is not running.", null, null));
     }
+    public Task<NewConversationReply> NewStandalone(string folder, string opId, string provider, string? model)
+    {
+        Calls.Add($"new-standalone {folder} {opId} {provider} {model}");
+        return Task.FromResult(NewConversationReplies.Count > 0 ? NewConversationReplies.Dequeue() : new NewConversationReply("Switchboard is not running.", null, null));
+    }
 
     /// <summary>When each focus report said it happened.</summary>
     public List<long> FocusTimes { get; } = [];

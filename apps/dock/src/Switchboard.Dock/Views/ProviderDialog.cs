@@ -12,13 +12,11 @@ static class ProviderDialog
         public override string ToString() => Label;
     }
 
-    public static ComboBox Box(string preferred, string name) => new()
+    public static ComboBox Box(string preferred, string name, IReadOnlyList<string>? installed = null)
     {
-        Name = name,
-        ItemsSource = new Option[] { new("claude", "Claude"), new("codex", "Codex") },
-        SelectedIndex = preferred == "codex" ? 1 : 0,
-        HorizontalAlignment = HorizontalAlignment.Stretch,
-    };
+        var options = new Option[] { new("claude", "Claude"), new("codex", "Codex") }.Where(one => installed is null || installed.Contains(one.Id)).ToArray();
+        return new ComboBox { Name = name, ItemsSource = options, SelectedIndex = Math.Max(0, Array.FindIndex(options, one => one.Id == preferred)), HorizontalAlignment = HorizontalAlignment.Stretch };
+    }
 
     /// <summary>
     /// Asks which provider a new conversation starts in, with &lt;paramref name="preferred"/&gt; selected, naming &lt;paramref name="folder"/&gt; when given, as

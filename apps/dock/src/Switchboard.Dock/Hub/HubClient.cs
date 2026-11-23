@@ -290,7 +290,8 @@ public sealed class HubClient(string switchboardHome, HubStarter? starter = null
         var (error, body) = await PostFor("/v1/conversation/providers", new JsonObject());
         var provider = body?["defaultProvider"] is JsonValue value && value.TryGetValue<string>(out var named) ? named : null;
         var installed = body?["installed"] is JsonArray list ? list.Select((item) => item is JsonValue named && named.TryGetValue<string>(out var id) ? id : null).OfType<string>().Where((id) => id is "claude" or "codex").ToList() : null;
-        return error is not null ? new(error, null) : provider is "claude" or "codex" ? new(null, provider, installed) : new("The hub did not provide the session providers. Reload VS Code to update it.", null);
+        var models = body?["models"] as JsonObject;
+        return error is not null ? new(error, null) : provider is "claude" or "codex" ? new(null, provider, installed, models?["claude"]?.GetValue<string>(), models?["codex"]?.GetValue<string>()) : new("The hub did not provide the session providers. Reload VS Code to update it.", null);
     }
 
     public async Task<NewConversationReply> NewConversation(string folder, string opId, string? provider = null)
@@ -319,6 +320,18 @@ public sealed class HubClient(string switchboardHome, HubStarter? starter = null
         var hosted = reply?["folder"] is JsonValue path && path.TryGetValue<string>(out var text) ? text : null;
 
         return new NewConversationReply(null, workItemId, hosted);
+    }
+
+    public async Task<NewConversationReply> NewStandalone(string folder, string opId, string provider, string? model)
+    {
+        var body = new JsonObject { ["folder"] = folder, ["opId"] = opId, ["provider"] = provider, ["model"] = model };
+        var (status, reply, failure) = await Send("/dock/new-session", body);
+        if (status is null) (status, reply, failure) = await Send("/dock/new-session", body);
+        if (failure is not null) return new NewConversationReply(failure, null, null);
+        if (status != HttpStatusCode.OK) return new NewConversationReply(RefusalOf(reply?.ToJsonString() ?? "") ?? $"The hub answered {(int?)status}.", null, null);
+        var workItemId = reply?["workItemId"] is JsonValue id && id.TryGetValue<int>(out var number) ? number : (int?)null;
+        var chosen = reply?["folder"] is JsonValue path && path.TryGetValue<string>(out var text) ? text : null;
+        return new NewConversationReply(null, workItemId, chosen);
     }
 
     public Task<string?> Focus(string? sessionId, long at) => Post("/dock/focus", new JsonObject { ["sessionId"] = sessionId, ["at"] = at });

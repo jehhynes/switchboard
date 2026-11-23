@@ -241,7 +241,7 @@ describe('session provider metadata', () => {
     writeSettings({ sessions: { provider: 'codex', installHooks: false, claudePath: claude, codexPath: join(temp.home, 'missing', 'codex.exe') } });
     const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli } });
     closers.push(() => app.close());
-    expect(await app.post['/v1/conversation/providers']!({})).toEqual({ status: 200, body: { defaultProvider: 'codex', installed: ['claude'] } });
+    expect(await app.post['/v1/conversation/providers']!({})).toMatchObject({ status: 200, body: { defaultProvider: 'codex', installed: ['claude'], models: { claude: expect.any(String), codex: expect.any(String) } } });
     const before = readFileSync(join(temp.home, '.switchboard', 'settings.json'), 'utf8');
     expect(await app.post['/v1/conversation/providers']!({})).toMatchObject({ body: { defaultProvider: 'codex' } });
     expect(readFileSync(join(temp.home, '.switchboard', 'settings.json'), 'utf8')).toBe(before);
@@ -961,6 +961,22 @@ describe('createHubApp', () => {
     for (const body of [{}, { text: 'x' }, { text: 3, since: 0 }, { text: 'x', since: 'now' }, { text: 'x', since: Number.NaN }]) {
       expect(await app.post['/dock/search']!(body)).toEqual({ status: 400, body: { error: 'Expected {text, since}, the search text and the epoch milliseconds to search from.' } });
     }
+  });
+
+  it('creates one standalone session from the dock and checks the page folder', async () => {
+    writeSettings({ sessions: { provider: 'codex' }, sources: { adhoc: { repoRoot: temp.home } } });
+    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli } });
+    closers.push(() => app.close());
+    const page = app.page!.opened();
+    const first = await app.post['/dock/new-session']!({ opId: 'one', folder: temp.home, provider: 'codex', model: 'gpt-6.2-sol' });
+    expect(first).toMatchObject({ status: 200, body: { workItemId: 1 } });
+    expect(await app.post['/dock/new-session']!({ opId: 'one', folder: temp.home, provider: 'claude' })).toEqual(first);
+    expect((await app.post['/v1/conversation/page-new-session']!({ window: page, opId: 'two', folder: temp.home, provider: 'codex', model: null })).status).toBe(200);
+    expect((await app.post['/v1/conversation/page-new-session']!({ window: page, opId: 'bad', folder: 'C:/Windows', provider: 'codex' })).status).toBe(400);
+    const writer = Store.open(join(temp.home, '.switchboard', 'switchboard.db'));
+    expect(writer.workItem(1)).toMatchObject({ interactive: true, model: 'gpt-6.2-sol' });
+    expect(writer.workItemsWithStatus('running')).toHaveLength(2);
+    writer.close();
   });
 
   it("opens a listed row's link, runs a pool ticket's control and a VS Code control for the page only as each row offers it now (architecture.md § Web page)", async () => {

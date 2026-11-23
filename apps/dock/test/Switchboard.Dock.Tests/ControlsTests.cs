@@ -67,6 +67,62 @@ public sealed class ControlsTests
         window.GetVisualDescendants().OfType<Border>().Where((border) => border.Classes.Contains("row") && border.IsEffectivelyVisible).Select((border) => ((RowViewModel)border.DataContext!).Title).ToList();
 
     [AvaloniaFact]
+    public void NewStandalone_ChoosesProviderAndModelThenOpensItsRow()
+    {
+        var (window, model) = Open();
+        window.PickFolder = (_) => Task.FromResult<string?>("D:/git/support");
+        window.PickStandalone = (_, folder, preferred, _, _, _, _) =>
+        {
+            Assert.Equal("D:/git/support", folder);
+            Assert.Equal("claude", preferred);
+            return Task.FromResult<NewSessionDialog.Choice?>(new("codex", "gpt-6.2-sol"));
+        };
+        hub.NewConversationReplies.Enqueue(new NewConversationReply(null, 9, "D:/git/support"));
+        hub.Ended = Fixtures.View;
+
+        Click(window.FindControl<Button>("NewSessionButton")!);
+
+        Assert.Contains(hub.Calls, call => System.Text.RegularExpressions.Regex.IsMatch(call, "^new-standalone D:/git/support [0-9a-f-]{36} codex gpt-6.2-sol$"));
+        Assert.Equal("item:9", Assert.Single(actions.Clicked).Key);
+        Assert.Null(model.Status);
+    }
+
+    [AvaloniaFact]
+    public void NewStandalone_CancelOrRefusalOpensNothing()
+    {
+        var (window, model) = Open();
+        window.PickFolder = (_) => Task.FromResult<string?>(null);
+        window.NewStandalone().GetAwaiter().GetResult();
+        Assert.Empty(hub.Calls);
+        window.PickFolder = (_) => Task.FromResult<string?>("D:/git/support");
+        window.PickStandalone = (_, _, _, _, _, _, _) => Task.FromResult<NewSessionDialog.Choice?>(null);
+        window.NewStandalone().GetAwaiter().GetResult();
+        Assert.Empty(hub.Calls);
+        window.PickStandalone = (_, _, _, _, _, _, _) => Task.FromResult<NewSessionDialog.Choice?>(new("claude", null));
+        hub.NewConversationReplies.Enqueue(new NewConversationReply("Code Mode is off.", null, null));
+        window.NewStandalone().GetAwaiter().GetResult();
+        Assert.Equal("Code Mode is off.", model.Status);
+        Assert.Empty(actions.Clicked);
+    }
+
+    [AvaloniaFact]
+    public void NewStandalone_ShowsInstalledProvidersAndLookupFailure()
+    {
+        var (window, _) = Open();
+        window.PickFolder = (_) => Task.FromResult<string?>("D:/git/support");
+        hub.Installed = ["codex"];
+        hub.ProviderError = "Provider lookup failed.";
+        window.PickStandalone = (_, _, _, _, _, installed, note) =>
+        {
+            Assert.Equal(["codex"], installed);
+            Assert.Equal("Provider lookup failed. Using the selected provider and its default model.", note);
+            return Task.FromResult<NewSessionDialog.Choice?>(null);
+        };
+        window.NewStandalone().GetAwaiter().GetResult();
+        Assert.Empty(hub.Calls);
+    }
+
+    [AvaloniaFact]
     public void NewSessionInAFolder_FolderChosen_MakesTheConversationThenOpensTheHubsFolder()
     {
         var (window, model) = Open();
@@ -826,7 +882,7 @@ public sealed class ControlsTests
     {
         var (window, model) = Open();
 
-        Choose(window, "New ad-hoc session…");
+        Choose(window, "New task from prompt…");
         var dialog = DialogOf(window);
 
         Assert.True(Named<ComboBox>(dialog, "AdhocRepoBox").IsVisible);
@@ -848,7 +904,7 @@ public sealed class ControlsTests
     {
         var (window, _) = Open();
 
-        Choose(window, "New ad-hoc session…");
+        Choose(window, "New task from prompt…");
         var dialog = DialogOf(window);
 
         Named<TextBox>(dialog, "AdhocPromptBox").Text = "Check the log";
@@ -865,7 +921,7 @@ public sealed class ControlsTests
     {
         hub.DefaultProvider = "codex";
         var (window, _) = Open();
-        Choose(window, "New ad-hoc session…");
+        Choose(window, "New task from prompt…");
         var dialog = DialogOf(window);
         var provider = Named<ComboBox>(dialog, "AdhocProvider");
         Assert.Equal("codex", ((ProviderDialog.Option)provider.SelectedItem!).Id);
@@ -882,7 +938,7 @@ public sealed class ControlsTests
     {
         hub.ProviderError = "Provider lookup failed.";
         var (window, _) = Open();
-        Choose(window, "New ad-hoc session…");
+        Choose(window, "New task from prompt…");
         var dialog = DialogOf(window);
         var reason = Named<TextBlock>(dialog, "AdhocProviderError");
 
@@ -904,11 +960,11 @@ public sealed class ControlsTests
     {
         hub.DefaultProvider = "codex";
         var (window, _) = Open();
-        Choose(window, "New ad-hoc session…");
+        Choose(window, "New task from prompt…");
         Click(Named<Button>(DialogOf(window), "AdhocCancel"));
 
         hub.ProviderError = "Provider lookup failed.";
-        Choose(window, "New ad-hoc session…");
+        Choose(window, "New task from prompt…");
         var dialog = DialogOf(window);
 
         Assert.Equal("codex", ((ProviderDialog.Option)Named<ComboBox>(dialog, "AdhocProvider").SelectedItem!).Id);
@@ -926,7 +982,7 @@ public sealed class ControlsTests
         window.NewSession().GetAwaiter().GetResult();
 
         hub.ProviderError = "Provider lookup failed.";
-        Choose(window, "New ad-hoc session…");
+        Choose(window, "New task from prompt…");
         var dialog = DialogOf(window);
 
         Assert.Equal("Provider lookup failed. Using Codex, the default.", Named<TextBlock>(dialog, "AdhocProviderError").Text);
@@ -937,14 +993,14 @@ public sealed class ControlsTests
     public void Adhoc_Opened_FocusesTheFirstFieldThatShows()
     {
         var (window, _) = Open();
-        Choose(window, "New ad-hoc session…");
+        Choose(window, "New task from prompt…");
         var dialog = DialogOf(window);
 
         Assert.Same(Named<ComboBox>(dialog, "AdhocRunBox"), dialog.FocusManager!.GetFocusedElement());
         Click(Named<Button>(dialog, "AdhocCancel"));
 
         var (other, _) = Open(Fixtures.View with { Schedules = [] });
-        Choose(other, "New ad-hoc session…");
+        Choose(other, "New task from prompt…");
         var plain = DialogOf(other);
 
         Assert.Same(Named<ComboBox>(plain, "AdhocRepoBox"), plain.FocusManager!.GetFocusedElement());
@@ -955,7 +1011,7 @@ public sealed class ControlsTests
     public void Adhoc_Fields_AreLabelledRunRepositoryProviderAndPrompt()
     {
         var (window, _) = Open();
-        Choose(window, "New ad-hoc session…");
+        Choose(window, "New task from prompt…");
         var dialog = DialogOf(window);
         string? LabelOf(string field) => Named<StackPanel>(dialog, field).Children.OfType<TextBlock>().First().Text;
 
@@ -970,7 +1026,7 @@ public sealed class ControlsTests
         string? picked = "D:/scratch/tool";
         window.PickFolder = (_) => Task.FromResult<string?>(picked);
 
-        Choose(window, "New ad-hoc session…");
+        Choose(window, "New task from prompt…");
         var dialog = DialogOf(window);
         var repos = Named<ComboBox>(dialog, "AdhocRepoBox");
 
@@ -993,7 +1049,7 @@ public sealed class ControlsTests
         Click(Named<Button>(dialog, "AdhocCreate"));
         Assert.Contains("\"repoRoot\":\"D:/scratch/tool\"", Assert.Single(hub.Calls));
 
-        Choose(window, "New ad-hoc session…");
+        Choose(window, "New task from prompt…");
         var again = DialogOf(window);
 
         Assert.Equal(["D:/git/widgets", "D:/git/support", "D:/scratch/tool", AdhocDialog.ChooseFolder], Named<ComboBox>(again, "AdhocRepoBox").ItemsSource!.Cast<string>());
@@ -1006,7 +1062,7 @@ public sealed class ControlsTests
     {
         var (window, model) = Open();
 
-        Choose(window, "New ad-hoc session…");
+        Choose(window, "New task from prompt…");
         var dialog = DialogOf(window);
         var run = Named<ComboBox>(dialog, "AdhocRunBox");
 
@@ -1040,7 +1096,7 @@ public sealed class ControlsTests
     {
         var (window, model) = Open(Fixtures.View with { RepoRoots = [] });
 
-        Choose(window, "New ad-hoc session…");
+        Choose(window, "New task from prompt…");
         var dialog = DialogOf(window);
 
         Assert.Equal(1, Named<ComboBox>(dialog, "AdhocRunBox").SelectedIndex);
@@ -1065,7 +1121,7 @@ public sealed class ControlsTests
     {
         var (window, _) = Open(Fixtures.View with { RepoRoots = [], Schedules = [] });
 
-        Choose(window, "New ad-hoc session…");
+        Choose(window, "New task from prompt…");
         var dialog = DialogOf(window);
 
         Assert.Equal([AdhocDialog.ChooseFolder], Named<ComboBox>(dialog, "AdhocRepoBox").ItemsSource!.Cast<string>());
@@ -1079,7 +1135,7 @@ public sealed class ControlsTests
     {
         var (window, model) = Open();
 
-        Choose(window, "New ad-hoc session…");
+        Choose(window, "New task from prompt…");
         var dialog = DialogOf(window);
 
         Named<TextBox>(dialog, "AdhocPromptBox").Text = "Check the log";
@@ -1099,7 +1155,7 @@ public sealed class ControlsTests
     {
         var (window, _) = Open();
 
-        Choose(window, "New ad-hoc session…");
+        Choose(window, "New task from prompt…");
         var dialog = DialogOf(window);
 
         Named<TextBox>(dialog, "AdhocPromptBox").Text = "   ";
@@ -1116,7 +1172,7 @@ public sealed class ControlsTests
     {
         var (window, _) = Open(Fixtures.View with { RepoRoots = ["D:/git/widgets"] });
 
-        Choose(window, "New ad-hoc session…");
+        Choose(window, "New task from prompt…");
         var dialog = DialogOf(window);
 
         Assert.True(Named<ComboBox>(dialog, "AdhocRepoBox").IsEffectivelyVisible);
@@ -1134,7 +1190,7 @@ public sealed class ControlsTests
         Click(more);
 
         Assert.True(more.ContextMenu!.IsOpen);
-        Assert.Equal(["New ad-hoc session…", "New conversation in a folder…", "", "Held sessions", "", "Refresh sources", "Show hub log", "", "Open Settings"], more.ContextMenu.Items.OfType<Control>().Select((item) => item is MenuItem named ? (string)named.Header! : Assert.IsType<Separator>(item) is not null ? "" : "?"));
+        Assert.Equal(["New session…", "New task from prompt…", "New conversation in a folder…", "", "Held sessions", "", "Refresh sources", "Show hub log", "", "Open Settings"], more.ContextMenu.Items.OfType<Control>().Select((item) => item is MenuItem named ? (string)named.Header! : Assert.IsType<Separator>(item) is not null ? "" : "?"));
         Assert.All(more.ContextMenu.Items.OfType<MenuItem>(), (item) => Assert.NotNull(item.Icon));
     }
 
@@ -1490,7 +1546,7 @@ public sealed class ControlsTests
     {
         var (window, _) = Open();
 
-        Choose(window, "New ad-hoc session…");
+        Choose(window, "New task from prompt…");
         var dialog = DialogOf(window);
         var create = Named<Button>(dialog, "AdhocCreate");
 
@@ -1513,7 +1569,7 @@ public sealed class ControlsTests
     {
         var (window, _) = Open();
 
-        Choose(window, "New ad-hoc session…");
+        Choose(window, "New task from prompt…");
         var dialog = DialogOf(window);
 
         Named<TextBox>(dialog, "AdhocPromptBox").Text = "Check the log";

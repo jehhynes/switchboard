@@ -456,7 +456,7 @@ function itemRow(item: WorkItemView, now: number, namespaces: Record<string, str
     priority: priorityTitle(item.triage),
     time: rowTime(item, now),
     playbook: playbookText(item, namespaces),
-    ticket: ticketKey(item.ticket),
+    ticket: shownKey(item.ticket, keys),
     source: item.ticket.source,
     url: item.ticket.url,
     mark: kind === null ? null : { kind, glyph: MARK_GLYPHS[kind], title: MARK_TITLES[kind] },
@@ -500,7 +500,7 @@ function poolRow(entry: PoolView, now: number, namespaces: Record<string, string
     priority: priorityTitle(triage),
     time: queuedTime(ticket.scopeAt === null ? null : { since: ticket.scopeAt, label: 'In scope since' }, null, now),
     playbook: playbookText(entry, namespaces),
-    ticket: ticketKey(ticket),
+    ticket: shownKey(ticket, undefined),
     source: ticket.source,
     url: ticket.url,
     mark: triaging ? { kind: 'triaging', glyph: MARK_GLYPHS.triaging, title: MARK_TITLES.triaging } : null,
@@ -641,7 +641,7 @@ export function windowOf(item: WorkItemView, windows: string): DockWindow | null
   // The hash names the first folder, so a window's first folder never changes: another folder, or a moved worktree, gets another window.
   const hash = createHash('sha256').update(normalPath(first)).digest('hex').slice(0, 6);
   // A ticket a ticket report moved keeps its ad-hoc name, so its open window is still found (PRD R83).
-  const named = item.ticket.adhocKey === null ? ticketKey(item.ticket) : `adhoc ${item.ticket.adhocKey}`;
+  const named = item.ticket.adhocKey === null ? ticketKey(item.ticket) : ticketKey({ source: 'adhoc', sourceKey: item.ticket.adhocKey });
   const key = `${named.replace(' ', '-')}${inWorktree ? '' : `-${folderName(first)}`}-${hash}`;
   const name = key.replace(/[^A-Za-z0-9._-]+/g, '-');
 

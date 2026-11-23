@@ -1969,7 +1969,8 @@ public sealed partial class MainWindow : Window
     /// </summary>
     internal List<Control> HeaderMenu() =>
     [
-        Item("New ad-hoc session…", NewAdhoc, AddGlyph),
+        Item("New session…", NewStandalone, AddGlyph),
+        Item("New task from prompt…", NewAdhoc, AddGlyph),
         Item("New conversation in a folder…", NewSession, FolderGlyph),
         new Separator(),
         Item("Held sessions", OpenHeld, TerminalGlyph),
@@ -2102,12 +2103,52 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    async void OnNewStandaloneClicked(object? sender, RoutedEventArgs e) => await NewStandalone();
+
+    internal async Task NewStandalone()
+    {
+        if (creating is not null) return;
+        var mine = new object();
+        creating = mine;
+        try
+        {
+            if (await PickFolder(ShownForDialog()) is not { } folder) return;
+            var settings = await hub.SessionProvider();
+            if (settings.Installed is { Count: 0 }) { ShowFailure("Neither Claude nor Codex is installed."); return; }
+            var choice = await PickStandalone(ShownForDialog(), folder, settings.DefaultProvider ?? knownProvider ?? "claude", settings.ClaudeModel, settings.CodexModel, settings.Installed, settings.Error is null ? null : $"{settings.Error} Using the selected provider and its default model.");
+            if (choice is null) return;
+            var reply = await hub.NewStandalone(folder, Guid.NewGuid().ToString(), choice.Provider, choice.Model);
+            if (reply.Error is not null) { ShowFailure(reply.Error); return; }
+            var id = reply.WorkItemId;
+            if (id is null) { ShowFailure("Switchboard did not return a work item."); return; }
+            var ready = await hub.Until(view => view.Groups.Any(group => group.Rows.Any(row => row.WorkItemId == id)), TimeSpan.FromSeconds(10));
+            if (ready is null) { ShowFailure("The new session did not appear."); return; }
+            var row = model.Groups.SelectMany(group => group.AllRows).FirstOrDefault(row => row.Row.WorkItemId == id);
+            if (row is null)
+            {
+                model.Show(ready);
+                row = model.Groups.SelectMany(group => group.AllRows).FirstOrDefault(row => row.Row.WorkItemId == id);
+            }
+            if (row is null) { ShowFailure("The new session did not appear in the dock."); return; }
+            await Open(row);
+        }
+        catch (Exception error)
+        {
+            ShowFailure($"The session did not start: {error.Message}");
+        }
+        finally
+        {
+            if (creating == mine) creating = null;
+        }
+    }
+
     /// <summary>The New conversation in a folder attempt that holds the picker or waits for the hub, or null.</summary>
     object? creating;
 
     /// <summary>Asks for a folder to start a session in, or null when the operator cancels; tests replace it, as the headless platform has no picker.</summary>
     internal Func<Window, Task<string?>> PickFolder { get; set; } = AskFolder;
     internal Func<Window, string, string, Task<string?>> PickProvider { get; set; } = (owner, preferred, folder) => ProviderDialog.Ask(owner, preferred, folder);
+    internal Func<Window, string, string, string?, string?, IReadOnlyList<string>?, string?, Task<NewSessionDialog.Choice?>> PickStandalone { get; set; } = NewSessionDialog.Ask;
 
     static async Task<string?> AskFolder(Window owner)
     {
@@ -2379,6 +2420,7 @@ public sealed partial class MainWindow : Window
         public Task<string?> Focus(string? sessionId, long at) => Task.FromResult<string?>(null);
 
         public Task<NewConversationReply> NewConversation(string folder, string opId, string? provider = null) => Task.FromResult(new NewConversationReply(null, null, folder));
+        public Task<NewConversationReply> NewStandalone(string folder, string opId, string provider, string? model) => Task.FromResult(new NewConversationReply(null, null, folder));
         public Task<SessionProviderReply> SessionProvider() => Task.FromResult(new SessionProviderReply(null, "claude"));
 
         public Task<DockView?> Until(Func<DockView, bool> test, TimeSpan within) => Task.FromResult<DockView?>(null);

@@ -233,13 +233,13 @@ export type FlowEvent =
   | { type: 'worktree-found'; source: string; sourceKey: string; path: string; branch: string }
   /** `start` queues the work item to run now; otherwise it waits `unstarted` for Start (PRD R6). */
   | { type: 'adhoc'; prompt: string; repoRoot: string; start?: boolean; provider?: Provider }
+  | { type: 'new-session'; repoRoot: string; provider?: Provider; model?: string | null }
   /**
    * A hosted conversation (architecture.md § Hosted conversations): an ad hoc work item hosted by the window binding `hostWindow`, run in
    * `folder`, whose session starts at once with no prompt.
    */
   | { type: 'new-conversation'; hostWindow: string; folder: string; provider?: Provider }
-  /** A hosted conversation's first message, whose first line titles it while it is still titled `NEW_CONVERSATION_TITLE`. */
-  | { type: 'conversation-title'; workItemId: number; text: string }
+  | { type: 'conversation-title'; workItemId: number; text: string; origin?: 'provider-manual' | 'provider-auto' }
   /** The operator pins a persona to a Code Mode session, or clears its pin with null (architecture.md § Personas). */
   | { type: 'persona'; sessionId: string; personaId: string | null }
   /** The contract hook gave a Code Mode session's prompt its tone section as the settings have it now (architecture.md § Personas). */
@@ -391,6 +391,16 @@ function firstLine(prompt: string): string {
   return prompt.trim().split(/\r?\n/, 1)[0]?.trim() ?? '';
 }
 
+/** A short label while the provider has not named the conversation. */
+function summarizeMessage(message: string): string {
+  const plain = message.replace(/^(?:\[(?:voice|spoken|expressive)\]\s*)+/i, '').replace(/\s+/g, ' ').trim();
+  const sentence = plain.split(/(?<=[.!?])\s/, 1)[0] ?? '';
+  const subject = sentence.replace(/^(?:please\s+|i(?:'d| would) like (?:you )?to\s+|can you\s+|could you\s+)/i, '').replace(/[.!]+$/, '').trim();
+  if (subject.length <= 72) return subject;
+  const short = subject.slice(0, 73).replace(/\s+\S*$/, '').trim();
+  return short === '' ? subject.slice(0, 72) : short.slice(0, 72);
+}
+
 /** Start with prompt…'s trimmed prompt when it differs from the work item's stored one, else null (PRD R77). */
 function editedPrompt(store: Store, workItemId: number, prompt: string | null | undefined): string | null {
   const text = textOf(prompt);
@@ -404,7 +414,7 @@ function textOf(text: string | null | undefined): string | null {
   return text?.trim() || null;
 }
 
-const OPERATOR_EVENTS: ReadonlySet<FlowEvent['type']> = new Set(['adhoc', 'new-conversation', 'register', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retry', 'stop', 'delete', 'open-question', 'background','pick', 'retriage-pool', 'restore', 'snooze', 'comment', 'move', 'reset-position', 'persona']);
+const OPERATOR_EVENTS: ReadonlySet<FlowEvent['type']> = new Set(['adhoc', 'new-session', 'new-conversation', 'register', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retry', 'stop', 'delete', 'open-question', 'background','pick', 'retriage-pool', 'restore', 'snooze', 'comment', 'move', 'reset-position', 'persona']);
 
 /**
  * Events logged even when they change nothing, because they record a request or a report (PRD R59). The rest, such as polls and
@@ -521,6 +531,8 @@ function detailOf(store: Store, event: FlowEvent): Record<string, unknown> | nul
       return { path: event.path, branch: event.branch };
     case 'adhoc':
       return { repoRoot: event.repoRoot, start: event.start === true };
+    case 'new-session':
+      return { repoRoot: event.repoRoot, provider: event.provider ?? null, model: event.model ?? null };
     case 'new-conversation':
       return { folder: event.folder };
     case 'persona':
@@ -729,10 +741,12 @@ class Flow {
         return this.worktreeFound(event.source, event.sourceKey, event.path, event.branch);
       case 'adhoc':
         return this.adhoc(event.prompt, event.repoRoot, event.start === true, event.provider);
+      case 'new-session':
+        return this.newSession(event.repoRoot, event.provider, event.model);
       case 'new-conversation':
         return this.newConversation(event.hostWindow, event.folder, event.provider);
       case 'conversation-title':
-        return this.conversationTitle(event.workItemId, event.text);
+        return this.conversationTitle(event.workItemId, event.text, event.origin);
       case 'persona':
         return this.pinPersona(event.sessionId, event.personaId);
       case 'persona-delivered':
@@ -1036,22 +1050,22 @@ class Flow {
     this.insertAdhoc(prompt, title, repoRoot, null, start ? 'queued' : 'unstarted', null, provider);
   }
 
+  /** Starts an independent, empty conversation in its own work item. */
+  private newSession(repoRoot: string, provider?: Provider, model?: string | null): void {
+    this.checkInteractiveProvider(provider);
+    if (repoRoot === '') throw new Refusal('Choose a folder for the session.');
+    if (model !== undefined && model !== null && (model.trim() === '' || model.length > 200)) throw new Refusal('Choose a model name under 200 characters.');
+    const item = this.insertAdhoc(null, NEW_CONVERSATION_TITLE, repoRoot, null, 'running', null, provider, true);
+    if (model != null) this.store.updateWorkItem(item.id, { model: model.trim() });
+    this.startSession(this.store.workItem(item.id)!);
+  }
+
   /**
    * A hosted conversation (architecture.md § Hosted conversations): an ad hoc work item in the window's folder, hosted by its window binding,
    * whose session starts at once at an empty prompt, without waiting for a free slot, since the operator is there to use it.
    */
   private newConversation(hostWindow: string, folder: string, provider?: Provider): void {
-    this.checkProvider(provider);
-    const sessions = this.context.settings.sessions;
-    const chosen = provider ?? sessions.provider;
-
-    if (chosen !== 'codex' && !sessions.codeMode) {
-      throw new Refusal(NEEDS_CODE_MODE);
-    }
-
-    if (chosen !== 'codex' && !sessions.installHooks) {
-      throw new Refusal('Code Mode sessions need sessions.installHooks.');
-    }
+    this.checkInteractiveProvider(provider);
 
     if (folder === '' || hostWindow === '') {
       throw new Refusal('The window has no folder.');
@@ -1060,19 +1074,29 @@ class Flow {
     this.startSession(this.insertAdhoc(null, NEW_CONVERSATION_TITLE, folder, null, 'running', hostWindow, provider));
   }
 
+  private checkInteractiveProvider(provider?: Provider): void {
+    this.checkProvider(provider);
+    const sessions = this.context.settings.sessions;
+    const chosen = provider ?? sessions.provider;
+    if (chosen !== 'codex' && !sessions.codeMode) throw new Refusal(NEEDS_CODE_MODE);
+    if (chosen !== 'codex' && !sessions.installHooks) throw new Refusal('Code Mode sessions need sessions.installHooks.');
+  }
+
   private checkProvider(provider: Provider | undefined): void {
     if (provider !== undefined && provider !== 'claude' && provider !== 'codex') throw new Refusal('Choose Claude or Codex.');
   }
 
-  /** Titles a hosted conversation by its first message's first line, as an ad-hoc work item is by its prompt's (PRD R6). */
-  private conversationTitle(workItemId: number, text: string): void {
+  /** Keeps an interactive work item's label current with the provider, preferring a manually chosen provider name. */
+  private conversationTitle(workItemId: number, text: string, origin?: 'provider-manual' | 'provider-auto'): void {
     const item = this.store.workItem(workItemId);
     const ticket = item === null ? null : this.store.ticket(item.ticketId);
-    const title = firstLine(text);
-
-    if (ticket?.hostWindow != null && ticket.title === NEW_CONVERSATION_TITLE && title !== '') {
-      this.store.updateTicket(ticket.id, { title });
-    }
+    if (item === null || ticket?.source !== 'adhoc' || !this.interactive(item)) return;
+    const title = origin === undefined ? summarizeMessage(text) : text.trim();
+    if (title === '' || (title === item.lastProviderName && origin === item.titleOrigin) || (origin !== undefined && title === sessionName('task', item, ticket)) || (origin === undefined && ticket.title !== NEW_CONVERSATION_TITLE)) return;
+    if (origin === 'provider-auto' && item.titleOrigin === 'provider-manual') return;
+    if (origin === undefined && item.titleOrigin?.startsWith('provider')) return;
+    this.store.updateTicket(ticket.id, { title });
+    this.store.updateWorkItem(item.id, { titleOrigin: origin ?? 'generated', ...(origin === undefined ? {} : { lastProviderName: title }) });
   }
 
   /**
@@ -1224,7 +1248,7 @@ class Flow {
    * An ad-hoc ticket and work item: queued when the operator chose Start automatically, otherwise unstarted, and running, with no
    * prompt, for a registered session (PRD R6, R68, R81).
    */
-  private insertAdhoc(prompt: string | null, title: string, repoRoot: string, parentId: number | null, status: 'queued' | 'unstarted' | 'running', hostWindow: string | null = null, provider?: Provider): WorkItem {
+  private insertAdhoc(prompt: string | null, title: string, repoRoot: string, parentId: number | null, status: 'queued' | 'unstarted' | 'running', hostWindow: string | null = null, provider?: Provider, interactive = false): WorkItem {
     const keys = this.store.adhocKeys().map(Number);
     const sourceKey = String(Math.max(0, ...keys) + 1);
     // A follow-up keeps its origin when Delete clears its parentId (PRD R27, R120).
@@ -1237,6 +1261,8 @@ class Flow {
 
     return this.store.insertWorkItem({
       ticketId: ticket.id,
+      interactive: interactive || hostWindow !== null,
+      model: null,
       playbook: null,
       ...(provider === undefined ? {} : { provider }),
       status,
@@ -1809,7 +1835,7 @@ class Flow {
 
       // A hosted conversation offers no done report, so a turn that ends leaves it open (architecture.md § Hosted conversations).
       // A turn that asked in a question card leaves the work item running, waiting on the answer (PRD R103).
-      if (cause === null && (this.hosted(item) || detail === QUESTION_CARD)) {
+      if (cause === null && (this.interactive(item) || detail === QUESTION_CARD)) {
         return;
       }
 
@@ -1880,7 +1906,7 @@ class Flow {
     // A done report with its ticket still assigned leaves the work item open until the recheck or the ticket leaving settles it.
     if (item.unassignedAt !== null) {
       this.done(item, 'unassigned', null);
-    } else if (session.outcome === 'done' || this.hosted(item)) {
+    } else if (session.outcome === 'done' || this.interactive(item)) {
       return;
     } else if (item.status === 'running') {
       if (item.approvalHeld) {
@@ -2811,6 +2837,11 @@ class Flow {
 
     this.requireNoSession(item);
 
+    if (this.interactive(item)) {
+      this.startSession(item);
+      return;
+    }
+
     if (failedAtTriage({ ...item, triage: this.store.triagesFor(item.id).at(-1) ?? null })) {
       this.setStatus(item.id, { status: 'triaging', error: null });
     } else {
@@ -2838,7 +2869,7 @@ class Flow {
 
     const turnEnded = latest !== undefined && (TURN_ENDED.includes(latest.state) || latest.state === 'ended');
     const approval = latest?.kind === 'task' && item.approvalHeld;
-    const status: WorkItemStatus = latest?.kind !== 'task'
+    const status: WorkItemStatus = this.interactive(item) ? 'running' : latest?.kind !== 'task'
       ? item.playbook !== null || item.taskPrompt !== null ? 'unstarted' : 'triaging'
       : turnEnded ? (approval ? 'awaiting-approval' : 'finished') : 'running';
 
@@ -2925,14 +2956,14 @@ class Flow {
       item.status === 'running' &&
       item.unassignedAt === null &&
       !item.approvalHeld &&
-      !this.hosted(item) &&
+      !this.interactive(item) &&
       this.context.questionCard?.(session.id) === true
     );
   }
 
   /** Whether the work item is a hosted conversation, which offers no done report and stays open when a turn or its session ends. */
-  private hosted(item: WorkItem): boolean {
-    return this.store.ticket(item.ticketId)?.hostWindow != null;
+  private interactive(item: WorkItem): boolean {
+    return item.interactive === true || this.store.ticket(item.ticketId)?.hostWindow != null;
   }
 
   private activeSession(item: WorkItem): Session | null {
@@ -3074,7 +3105,7 @@ class Flow {
 
     // A playbook runs its sessions in its own provider, else sessions.provider, the one its permission mode and model were checked against
     // (playbook.ts); an explicit choice applies only while the work item has no playbook, through queued starts and retries.
-    const hosted = ticket.hostWindow != null;
+    const hosted = this.interactive(item);
     const provider = playbook === null ? (item.provider ?? sessions.provider) : (playbook.provider ?? sessions.provider);
     const reports = sessionReports(kind, approved, playbook, provider).filter((report) => !hosted || (report !== 'done' && report !== 'approval'));
     // The setting applies at the start; resumes keep the session's mode (PRD R93). The Claude session ID and launch are stored before the
@@ -3138,8 +3169,9 @@ class Flow {
       ...(ticket.repoRoot === '' && cwd === repoRoot && isRootPattern(source?.repoRoot ?? '') ? { clone: repoOf(this.context.settings, ticket) } : {}),
       prompt: full,
       contract: sessionContract(id, this.context.report, reports, provider),
-      name: sessionName(kind, item, ticket),
+      name: this.interactive(item) ? '' : sessionName(kind, item, ticket),
       ...launchOptions(this.context.settings, playbook, kind, provider),
+      ...(playbook === null && item.model != null ? { model: item.model } : {}),
       ...(held ?? {}),
       ...(appServer ? { execution: 'app-server' as const } : {}),
       ...(tone === null ? {} : { tone }),

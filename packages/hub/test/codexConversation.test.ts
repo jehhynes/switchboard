@@ -29,16 +29,21 @@ function setup(resume?: (sessionId: string) => Promise<string | null>) {
   let turns:Json[]=[];
   let start:Json|null={model:null,approvalPolicy:'never',approvalsReviewer:'user',sandbox:'danger-full-access',mode:'default'};
   const runner={startSettings:()=>start,subscription:()=>0,configure:vi.fn(async()=>{}),restoreInstructions:vi.fn(async()=>{}),follow:vi.fn(async()=>({status:{type:'idle'}})),history:vi.fn(async(threadId:string)=>threadId==='thread-1'?turns:[]),send:vi.fn(async()=>{})};
-  const frames:Json[]=[];const others:Json[]=[];let adapter:CodexConversationAdapter;
-  const service=new ConversationService({store,windows:scopes,projectsDir:'/unused',claudeConfig:'/unused',screen:async()=>{throw new Error('Codex must not read a screen');},input:{reserve:async()=>{throw new Error('Codex must not reserve terminal input');},write:async()=>{throw new Error('Codex must not type');},cannotType:()=> 'holder unavailable'},hooks:()=>false,now:()=>now,newId:()=>String(++id),log:()=>{},...(resume===undefined?{}:{resume}),adapters:changed=>[adapter=new CodexConversationAdapter({store,server:server as unknown as AppServer,runner:runner as unknown as AppServerRunner,now:()=>now,newId:()=>String(++id),log:()=>{},requestsChanged:()=>service.sessionsChanged()},changed)]});
+  const frames:Json[]=[];const others:Json[]=[];const titles:string[]=[];let adapter:CodexConversationAdapter;
+  const service=new ConversationService({store,windows:scopes,projectsDir:'/unused',claudeConfig:'/unused',screen:async()=>{throw new Error('Codex must not read a screen');},input:{reserve:async()=>{throw new Error('Codex must not reserve terminal input');},write:async()=>{throw new Error('Codex must not type');},cannotType:()=> 'holder unavailable'},hooks:()=>false,now:()=>now,newId:()=>String(++id),log:()=>{},...(resume===undefined?{}:{resume}),adapters:changed=>[adapter=new CodexConversationAdapter({store,server:server as unknown as AppServer,runner:runner as unknown as AppServerRunner,now:()=>now,newId:()=>String(++id),log:()=>{},requestsChanged:()=>service.sessionsChanged(),providerTitle:(_id,title)=>titles.push(title)},changed)]});
   service.open(key,frame=>frames.push(JSON.parse(/^data: (.*)$/m.exec(frame)![1]!)));
   service.open(other,frame=>others.push(JSON.parse(/^data: (.*)$/m.exec(frame)![1]!)));
   closes.push(()=>{service.stop();store.close();});
   const body={window:key,scopeGen:scopes.scope(key)!.scopeGen,sessionId:'s1',launch:'launch-1',opId:'op-1',text:'hello'};
-  return {store,service,adapter:()=>adapter,server,runner,key,other,body,frames,others,emit:(event:Json)=>receive(event),turns:(value:Json[])=>{turns=value;},advance:()=>{now+=6_000;},start:(value:Json|null)=>{start=value;}};
+  return {store,service,adapter:()=>adapter,server,runner,key,other,body,frames,others,titles,emit:(event:Json)=>receive(event),turns:(value:Json[])=>{turns=value;},advance:()=>{now+=6_000;},start:(value:Json|null)=>{start=value;}};
 }
 
 describe('Codex conversation adapter and shared service',()=>{
+  it('forwards a native thread name update',()=>{
+    const p=setup();
+    p.emit({method:'thread/name/updated',params:{threadId:'thread-1',threadName:'Investigate startup failure'}});
+    expect(p.titles).toEqual(['Investigate startup failure']);
+  });
   it('resumes an ended thread before sending a message typed to it, under its new launch, and gives the message back when it cannot',async()=>{
     let refuse:string|null=null;
     const resume=vi.fn(async(sessionId:string)=>{if(refuse===null)p.store.updateSession(sessionId,{state:'idle',endedAt:null,released:false,launchId:'launch-2'});return refuse;});

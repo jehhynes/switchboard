@@ -39,6 +39,7 @@ public interface IHub
     /// open (architecture.md § Hosted conversations). A retry with the same <paramref name="opId"/> answers the first conversation.
     /// </summary>
     Task<NewConversationReply> NewConversation(string folder, string opId, string? provider = null);
+    Task<NewConversationReply> NewStandalone(string folder, string opId, string provider, string? model);
 
     /// <summary>The configured default for a new session's provider choice.</summary>
     Task<SessionProviderReply> SessionProvider();
@@ -81,7 +82,7 @@ public sealed record NewConversationReply(string? Error, int? WorkItemId, string
 /// The configured default provider, or why the hub did not name one; &lt;paramref name="Installed"/&gt; lists the providers whose CLI the hub finds,
 /// null from a hub that does not say.
 /// </summary>
-public sealed record SessionProviderReply(string? Error, string? DefaultProvider, IReadOnlyList<string>? Installed = null);
+public sealed record SessionProviderReply(string? Error, string? DefaultProvider, IReadOnlyList<string>? Installed = null, string? ClaudeModel = null, string? CodexModel = null);
 
 /// <summary>The hub's answer to a click in the web page: the refusal or failure, the marker of the page that shows it, or the page's address at it.</summary>
 public sealed record PageReply(string? Error, string? Marker, string? Url);

@@ -1,5 +1,6 @@
-import { readFileSync } from 'node:fs';
+import { closeSync, openSync, readFileSync, readSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { sessionName } from '@switchboard/core';
 import type { ConversationMessage, Session } from '@switchboard/core';
 import { findTranscript } from '@switchboard/claude';
 import { SessionCommands, SessionConversation, SessionInput, SNAPSHOT_SCROLLBACK, TranscriptContext, readSnapshot } from '@switchboard/conversation';
@@ -19,6 +20,10 @@ interface Reader {
   rev: number | null;
   /** The transcript file found for a Claude session ID. */
   path: { nativeSessionId: string; path: string } | null;
+  titleVersion?: string;
+  titleOffset?: number;
+  lastTitle?: string;
+  lastTitleOrigin?: 'provider-manual' | 'provider-auto';
 }
 
 
@@ -124,9 +129,53 @@ export class ClaudeConversationAdapter implements ConversationAdapter {
       const found = findTranscript(this.deps.projectsDir, session.cwd, native);
 
       reader.path = found === null ? null : { nativeSessionId: native, path: found.path };
+      reader.titleOffset = 0;
+      delete reader.lastTitle;
+      delete reader.lastTitleOrigin;
+      delete reader.titleVersion;
     }
 
     reader.conversation.readTranscript(reader.path?.path ?? null);
+    const path = reader.path?.path;
+    if (path === undefined || this.deps.providerTitle === undefined) return;
+    const item = this.deps.store.workItem(session.workItemId);
+    const ticket = item === null ? null : this.deps.store.ticket(item.ticketId);
+    if (item === null || ticket?.source !== 'adhoc' || !(item.interactive || ticket.hostWindow != null)) return;
+    try {
+      const stat = statSync(path);
+      const version = `${stat.mtimeMs}:${stat.size}`;
+      if (reader.titleVersion === version) return;
+      reader.titleVersion = version;
+      if (stat.size < (reader.titleOffset ?? 0)) reader.titleOffset = 0;
+      const offset = reader.titleOffset ?? 0;
+      const buffer = Buffer.alloc(stat.size - offset);
+      const handle = openSync(path, 'r');
+      try {
+        let read = 0;
+        while (read < buffer.length) {
+          const count = readSync(handle, buffer, read, buffer.length - read, offset + read);
+          if (count === 0) break;
+          read += count;
+        }
+        const complete = buffer.lastIndexOf(10, read - 1);
+        reader.titleOffset = complete < 0 ? offset : offset + complete + 1;
+      } finally { closeSync(handle); }
+      const lines = buffer.toString('utf8', 0, (reader.titleOffset ?? offset) - offset).split('\n');
+      let latest: { title: string; origin: 'provider-manual' | 'provider-auto' } | null = null;
+      for (const line of lines) {
+        if (!line.includes('ai-title') && !line.includes('custom-title')) continue;
+        let entry: Record<string, unknown>;
+        try { entry = JSON.parse(line) as Record<string, unknown>; } catch { continue; }
+        const origin = entry['type'] === 'custom-title' ? 'provider-manual' : entry['type'] === 'ai-title' ? 'provider-auto' : null;
+        const title = entry['customTitle'] ?? entry['aiTitle'] ?? entry['title'];
+        if (origin !== null && typeof title === 'string' && title.trim() !== '' && title !== sessionName(session.kind, item, ticket)) latest = { title: title.trim(), origin };
+      }
+      if (latest !== null && (latest.title !== reader.lastTitle || latest.origin !== reader.lastTitleOrigin)) {
+        reader.lastTitle = latest.title;
+        reader.lastTitleOrigin = latest.origin;
+        this.deps.providerTitle(session.workItemId, latest.title, latest.origin);
+      }
+    } catch { /* The transcript may be replaced while it is read. */ }
   }
 
   async #read(session: Session): Promise<void> {

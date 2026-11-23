@@ -1625,3 +1625,11 @@ Current use: the console's resync after each fit ([architecture.md](architecture
 - **Inference:** the left copy was iOS's native history preview, and the middle copy was the page's own list. The screenshot establishes the overlapping layers, but no WebKit trace was captured to identify either compositor layer directly.
 - **Current use:** when browser history has more than one entry, the page leaves an iOS left-edge swipe to browser history, which returns through the same `popstate` path as Back; a swipe begun farther in still uses the page's animation (architecture.md § Web page).
 - **Not verified:** the fix on the iPhone, the width of iOS's native edge zone, a Safari or Chrome tab, a direct link with no earlier history entry, or whether the native preview's list is up to date.
+
+## M132. Provider conversation title records, 2026-11-22
+
+- **Versions:** Claude Code 2.1.330 and Codex CLI 0.171.0 on Windows.
+- **Method:** inspected the repository's recorded Claude transcript fixtures (`packages/claude/test/fixtures/fork-plain-copy.jsonl` and `packages/claude/test/debrief.test.ts`), and generated Codex's installed app-server v2 schema with `codex app-server generate-json-schema` in a scratch directory. Compared the schema's `Thread`, `ThreadNameUpdatedNotification` and `thread/name/set` definitions with the hub adapters.
+- **Result:** Claude transcript `custom-title` entries have `customTitle`; recorded `ai-title` entries have `aiTitle`. An existing Switchboard session launched with `-n` has a `custom-title` equal to Switchboard's launch name, which must be ignored when adopting provider titles. Codex's `thread/name/updated` notification carries `threadId` and nullable `threadName`; a `Thread` returned by `thread/read` or `thread/resume` carries nullable `name`. `thread/name/set` takes a name that would otherwise be set by Switchboard itself.
+- **Not verified:** a live promptless Claude session without `-n` producing `ai-title`; which Codex client sets a thread name automatically rather than manually. The app-server notification does not say which did it.
+- **Current use:** interactive work items start without Switchboard setting a native title; the hub follows provider titles and keeps a short initial label until one appears (architecture.md § Hosted conversations and § Standalone sessions).

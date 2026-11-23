@@ -16,7 +16,7 @@ export function heldSlots(store: Store): number {
     const ticket = store.ticket(item.ticketId)!;
 
     // A hosted conversation stays open between turns, so it holds a slot only while its session is in a turn (architecture.md § Hosted conversations).
-    return activeSession({ sessions })?.id === session.id && !ticket.snoozed && holdsSlot({ status: item.status, sessions }) && (ticket.hostWindow == null || TURN_IN_PROGRESS.includes(session.state));
+    return activeSession({ sessions })?.id === session.id && !ticket.snoozed && holdsSlot({ status: item.status, sessions }) && (!(item.interactive === true || ticket.hostWindow != null) || TURN_IN_PROGRESS.includes(session.state));
   }).length;
 }
 

@@ -311,7 +311,7 @@ describe('the list header (architecture.md § Web page)', () => {
     hello(source);
     click('.more-actions');
     expect(root.querySelector('.more-actions')?.getAttribute('aria-expanded')).toBe('true');
-    expect(menuRows()).toEqual(['gh', 'desk', 'help', '-', 'New ad-hoc session…', 'New conversation in a folder…', '-', 'Held sessions', '-', 'Refresh sources', 'Reload', 'Show hub log', 'Get the browser extension…', '-', 'Pair a device…', 'Open Settings']);
+    expect(menuRows()).toEqual(['gh', 'desk', 'help', '-', 'New session…', 'New task from prompt…', 'New conversation in a folder…', '-', 'Held sessions', '-', 'Refresh sources', 'Reload', 'Show hub log', 'Get the browser extension…', '-', 'Pair a device…', 'Open Settings']);
     // The source rows are the phone's: page.css hides them outside the phone's layout, where the icons are in the header.
     expect([...root.querySelectorAll('.more-menu .more-source')]).toHaveLength(4);
     expect(root.querySelector('.more-menu [data-source="help"]')?.getAttribute('aria-checked')).toBe('false');
@@ -321,7 +321,7 @@ describe('the list header (architecture.md § Web page)', () => {
     expect(root.querySelector('.more-menu')).not.toBeNull();
 
     source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ sources: [] }) });
-    expect(menuRows()[0]).toBe('New ad-hoc session…');
+    expect(menuRows()[0]).toBe('New session…');
 
     // Refresh sources polls; the hub's refusal shows under the header.
     answers['/page-poll'] = { status: 409, body: { error: 'Every source is off.' } };
@@ -772,6 +772,28 @@ describe('the list header (architecture.md § Web page)', () => {
     expect(root.querySelector('#list-sheet .sheet')).not.toBeNull();
     root.querySelector<HTMLElement>('#list-sheet .sheet-backdrop')!.click();
     expect(root.querySelector('#list-sheet .sheet')).toBeNull();
+    page.close();
+  });
+
+  it('starts an empty session with a chosen folder, provider and model from the visible header control', async () => {
+    const { page, source } = start();
+    answers['/providers'] = { status: 200, body: { defaultProvider: 'codex', installed: ['claude', 'codex'], models: { claude: 'sonnet', codex: 'gpt-6.2-sol' } } };
+    answers['/page-new-session'] = { status: 200, body: { workItemId: 11, folder: 'D:/git/support' } };
+    hello(source);
+    click('[data-action="list-new-session"]');
+    await flush();
+    await flush();
+    expect(root.querySelector('#list-sheet .sheet-title')?.textContent).toBe('New session');
+    expect(root.querySelector<HTMLInputElement>('[data-field="model"]')?.value).toBe('gpt-6.2-sol');
+    change('[data-field="folder"]', 'D:/git/support');
+    change('[data-field="provider"]', 'claude');
+    expect(root.querySelector<HTMLInputElement>('[data-field="model"]')?.value).toBe('sonnet');
+    change('[data-field="model"]', 'opus');
+    click('[data-action="list-sheet-go"]');
+    await flush();
+    await flush();
+    expect(posts.find((post) => post.url.endsWith('/page-new-session'))?.body).toMatchObject({ folder: 'D:/git/support', provider: 'claude', model: 'opus' });
+    expect(posts.filter((post) => post.url.endsWith('/select')).at(-1)?.body['workItemId']).toBe(11);
     page.close();
   });
 });
