@@ -10,7 +10,6 @@ import { promptKeyData, readPrompt, screenRows, stepsText, TYPING_PAUSE_MS } fro
 import type { QuestionsView } from '@switchboard/protocol';
 import type { Artifact, ArtifactTag, ContextView, ConversationChange, HeardTag, InputOutcome, InputSteps, PromptKey, ScreenPrompt, SlashCommand } from '@switchboard/conversation';
 import { SESSION_ENDED, SESSION_RELAUNCHED } from './runtime.js';
-import { canonicalFolder } from './windows.js';
 import { artifactFile, artifactMime, findFiles, MAX_INPUT_CHARS } from './page.js';
 import { LOCAL_RAW_MAX_BYTES, localTarget } from './localFiles.js';
 import { closeSync, fstatSync, lstatSync, openSync, realpathSync, statSync } from 'node:fs';
@@ -3024,50 +3023,6 @@ export class ConversationService {
     this.conversationsChanged();
 
     return { status: 200, body: { workItemId: made.workItemId } };
-  }
-
-  /**
-   * The conversation header's New conversation… on the page (architecture.md § Hosted conversations): makes a conversation hosted by the
-   * folder's canonical folder and run in it, with or without a window on it, stores it as that folder binding's selection, and answers
-   * `{workItemId, folder}`. A repeated `opId` answers the first work item and makes none. 400 for a path that is not a folder, 409 with the refusal.
-   */
-  folderConversation(body: Record<string, unknown>): { status: number; body: unknown } {
-    const { folder, opId, provider } = body;
-
-    if (typeof folder !== 'string' || folder === '' || typeof opId !== 'string' || opId === '' || opId.length > 200) {
-      return { status: 400, body: { error: 'Expected {folder, opId}.' } };
-    }
-    if (provider !== undefined && provider !== 'claude' && provider !== 'codex') return { status: 400, body: { error: 'Choose Claude or Codex.' } };
-
-    const host = canonicalFolder(folder);
-
-    if (host === null) {
-      return { status: 400, body: { error: `${folder} is not a folder a session can run in.` } };
-    }
-
-    if (this.deps.newConversation === undefined) {
-      return { status: 409, body: { error: 'The conversation was not made.' } };
-    }
-
-    // Keyed as a folder window's command is, by the canonical folder, so a retry by another spelling still answers the first.
-    const done = `${hostKey(host)} ${opId}`;
-    const earlier = this.#created.get(done);
-
-    if (earlier !== undefined) {
-      return { status: 200, body: { workItemId: earlier, folder: host } };
-    }
-
-    const made = provider === undefined ? this.deps.newConversation(host, host) : this.deps.newConversation(host, host, provider);
-
-    if ('refused' in made) {
-      return { status: 409, body: { error: made.refused } };
-    }
-
-    this.#remember(done, made.workItemId);
-    this.scopesChanged(this.deps.windows.selectMade(host, made.workItemId));
-    this.conversationsChanged();
-
-    return { status: 200, body: { workItemId: made.workItemId, folder: host } };
   }
 
   /**
