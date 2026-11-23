@@ -127,13 +127,34 @@ function Actions({ row, view }: { row: PageRow | null; view: View }) {
 }
 
 type Entry = NonNullable<PageState['scope']>['conversations'][number];
+type SessionRow = NonNullable<Entry['sessions']>[number];
+
+/**
+ * An earlier session's row under its conversation's in the dropdown: its state codicon, title and age, checked while the page shows it; choosing
+ * it opens it read-only.
+ */
+function SessionRowButton({ entry, one, state, now }: { entry: Entry; one: SessionRow; state: PageState; now: number }) {
+  const shown = state.scope?.earlier === true && state.scope.sessionId === one.sessionId;
+  const icon = shown ? stateIcon(state.session?.state, state.session?.waitingFor, state.session?.limit) : stateIcon(one.state);
+
+  return (
+    <li role="none" key={one.sessionId}>
+      <button type="button" class="menu-row conversation-row session-row" role="menuitemradio" aria-checked={shown} data-action="select-session" data-work-item={String(entry.workItemId)} data-session={one.sessionId} title={`${one.title}, started ${ago(one.startedAt, now)}`}>
+        <Codicon {...icon} />
+        <span class="title">{one.title}</span>
+        <span class="menu-note">{ago(one.startedAt, now)}</span>
+      </button>
+    </li>
+  );
+}
 
 /**
  * A conversation as the dropdown's button and each of its rows draw it, from this one renderer so they never differ: its session's state
  * codicon, title, the unread dot when `unread` (architecture.md § Unread), and provider's mark.
  */
 function ConversationLabel({ entry, state, unread = false }: { entry: Entry; state: PageState; unread?: boolean }) {
-  const selected = entry.workItemId === state.scope?.workItemId;
+  // The page's session is this entry's only while it shows the current one, not an earlier one.
+  const selected = entry.workItemId === state.scope?.workItemId && state.scope.earlier !== true;
   const icon = selected ? stateIcon(state.session?.state, state.session?.waitingFor, state.session?.limit) : stateIcon(entry.state);
 
   return (
@@ -209,8 +230,9 @@ function Message({ text }: { text: string }) {
 }
 
 /** The header: the dropdown of the selected work item's conversations, its button drawn as its rows are, the row's actions and the view options. */
-export function renderHeader(state: PageState, view: View): VNode {
+export function renderHeader(state: PageState, view: View, now = Date.now()): VNode {
   const scope = state.scope!;
+  const earlier = scope.earlier === true ? (selectedEntry(state)?.sessions?.find((one) => one.sessionId === scope.sessionId) ?? null) : null;
   const selected = selectedEntry(state);
   const title = selected?.title ?? scope.title;
   // The button carries the dot while a conversation the operator is not looking at has unseen items.
@@ -240,13 +262,15 @@ export function renderHeader(state: PageState, view: View): VNode {
       </ul>
     ) : view.picker ? (
       <ul class="glass menu conversation-menu" role="menu" aria-label="Conversations">
-        {scope.conversations.map((entry) => (
+        {scope.conversations.flatMap((entry) => [
           <li role="none" key={entry.workItemId}>
-            <button type="button" class="menu-row conversation-row" role="menuitemradio" aria-checked={entry.workItemId === scope.workItemId} data-action="select" data-work-item={String(entry.workItemId)}>
+            <button type="button" class="menu-row conversation-row" role="menuitemradio" aria-checked={entry.workItemId === scope.workItemId && scope.earlier !== true} data-action="select" data-work-item={String(entry.workItemId)}>
               <ConversationLabel entry={entry} state={state} unread={entry.workItemId !== scope.workItemId && entry.unread > 0} />
             </button>
-          </li>
-        ))}
+          </li>,
+          // The shown conversation's earlier sessions, newest first, as an approval, a retry or a setup session left them.
+          ...(entry.workItemId === scope.workItemId ? (entry.sessions ?? []) : []).map((one) => <SessionRowButton entry={entry} one={one} state={state} now={now} />),
+        ])}
         <Separator />
         <li role="none">
           <button type="button" class="menu-row new-row" role="menuitem" data-action="new-conversation">
@@ -268,10 +292,11 @@ export function renderHeader(state: PageState, view: View): VNode {
       </button>
       <div class="menu-anchor picker-anchor">
         <button type="button" class="picker" data-action="picker" aria-haspopup="menu" aria-expanded={view.picker || providers !== null} title={title}>
-          {selected === null ? (
+          {selected === null || earlier !== null ? (
             <>
               <Codicon {...stateIcon(state.session?.state, state.session?.waitingFor, state.session?.limit)} />
               <span class="title">{title}</span>
+              {earlier === null ? null : <span class="picker-session">{earlier.title}</span>}
             </>
           ) : (
             <ConversationLabel entry={selected} state={state} unread={othersUnread} />

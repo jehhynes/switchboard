@@ -45,6 +45,8 @@ export interface ConsoleOptions {
   type(data: string, size: { cols: number; rows: number }): Promise<string | null>;
   /** Puts the selected text on the clipboard. */
   copy?(text: string): void;
+  /** Only watches, never typing or resizing, as for an earlier session of the work item the page shows read-only. */
+  readOnly?: boolean;
 }
 
 export interface MountedConsole {
@@ -350,6 +352,10 @@ export function mountConsole(host: HTMLElement, createTerm: (options: TermOption
   }
 
   const onFocus = (): void => {
+    if (options.readOnly === true) {
+      return;
+    }
+
     typing = true;
     sizeWanted = true;
     // The focus border is drawn over the console's box by a pseudo-element, which takes no room, so focusing never changes the pane's size and the session is resized once.

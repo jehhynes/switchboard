@@ -129,7 +129,7 @@ class FakeTerm implements ConsoleTerm {
 
 const tick = (ms = 0): Promise<void> => new Promise((done) => setTimeout(done, ms));
 
-function mounted(type: ConsoleOptions['type'] = async () => null) {
+function mounted(type: ConsoleOptions['type'] = async () => null, readOnly = false) {
   const host = document.createElement('div');
   const terms: FakeTerm[] = [];
   const typed: Array<{ data: string; size: { cols: number; rows: number } }> = [];
@@ -154,6 +154,7 @@ function mounted(type: ConsoleOptions['type'] = async () => null) {
         return type(data, size);
       },
       copy: (text) => copied.push(text),
+      readOnly,
     },
   );
 
@@ -341,6 +342,17 @@ describe('the console', () => {
     term.press('y');
     await tick();
     expect(typed).toHaveLength(sent);
+    expect(host.classList.contains('typing')).toBe(false);
+  });
+
+  it('only watches a read-only console, as an earlier session shows: focus neither types nor resizes the session', async () => {
+    const { host, term, typed } = mounted(async () => null, true);
+
+    term.textarea!.dispatchEvent(new Event('focus'));
+    await tick();
+    term.press('y');
+    await tick();
+    expect(typed).toEqual([]);
     expect(host.classList.contains('typing')).toBe(false);
   });
 

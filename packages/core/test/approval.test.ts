@@ -436,3 +436,35 @@ describe('Snoozed (PRD R49)', () => {
     expect(only(h.act({ type: 'restore', ticketId: 1 }), 'start-session').workItemId).toBe(1);
   });
 });
+
+describe("a work item's earlier sessions (architecture.md § Web page)", () => {
+  it('keeps every session that Approve and Retry replace, oldest first, through Mark done and Reopen, so the page can still list them', () => {
+    const h = new Harness();
+    const { item, session } = running(h);
+
+    h.report(session, { kind: 'approval', prompt: '/publish', summary: 'Ready.', report: null });
+    h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
+    h.act({ type: 'stop-succeeded', sessionId: session, reason: 'release' });
+
+    // Approve starts the approval prompt in a new session; its start fails, and Retry starts another.
+    h.now += HOUR;
+    const approved = only(h.act({ type: 'approve', workItemId: item }), 'start-session');
+
+    h.act({ type: 'session-start-failed', sessionId: approved.sessionId, message: 'Workspace not trusted' });
+    h.now += HOUR;
+    const retried = h.started(only(h.act({ type: 'retry', workItemId: item }), 'start-session'));
+
+    // Marked done and reopened, the work item keeps them all.
+    h.act({ type: 'stop', workItemId: item });
+    h.act({ type: 'stop-succeeded', sessionId: retried, reason: 'operator' });
+    h.act({ type: 'mark-done', workItemId: item });
+    h.act({ type: 'reopen', workItemId: item });
+    expect(h.item(item).status).not.toBe('done');
+
+    expect(h.store.sessionsFor(item).map((one) => [one.id, one.kind, one.state])).toEqual([
+      [session, 'task', 'ended'],
+      [approved.sessionId, 'task', 'ended'],
+      [retried, 'task', 'ended'],
+    ]);
+  });
+});

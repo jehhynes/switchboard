@@ -2270,7 +2270,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     // An ended session's note sits just above the composer on every tab, with Resume, as in the Conversation view; the page resumes it in the
     // terminal holder, or a Codex thread in its daemon, without a terminal.
-    mount(note, renderEndedNote(state.session, resuming));
+    mount(note, renderEndedNote(state.session, resuming, state.scope?.earlier === true ? (state.scope.workItemId ?? null) : null));
 
     // From the wide layout Status, Artifacts, Console and Browser are a column of their own; embedded tabs covers the Browser tab's area.
     // While another work item opens, the columns keep their widths and the conversation's composer its place (page.css), so nothing moves when it comes.
@@ -2336,7 +2336,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     // The History tab reads the hub only while it shows.
     followHistory((side ? sideTab() : mainTab()) === 'history' && !(isPhone() && root.classList.contains('listing')));
-    mount(head, [renderHeader(state, view), side ? null : renderTabs({ ...view, tab: mainTab() }, state, showBrowser(), strip, changeTabs(mainTab()), showConsole(), showHistory())]);
+    mount(head, [renderHeader(state, view, deps.now()), side ? null : renderTabs({ ...view, tab: mainTab() }, state, showBrowser(), strip, changeTabs(mainTab()), showConsole(), showHistory())]);
 
     const artifact = view.artifact === null ? undefined : state.artifacts.find((one) => one.path === view.artifact);
     const now = deps.now();
@@ -2870,6 +2870,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
             return answer.status === 200 ? null : String(answer.body['error'] ?? `Switchboard answered ${answer.status}.`);
           },
           copy: (text) => void navigator.clipboard?.writeText(text).catch(() => undefined),
+          readOnly: state.scope?.earlier === true,
         }),
       );
     });
@@ -3088,6 +3089,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   );
 
   // ---- Selecting ----
+  /** The earlier session the page shows, or null for the current one. */
+  const shownSession = (): string | null => (state.scope?.earlier === true ? state.scope.sessionId : null);
   /**
    * What the Changes and file tabs follow: the work item shown, so a reconnect's new page key or scope generation keeps them, and so does a new
    * session of the same work item, as an approval, a retry or a reopen starts; null with none.
@@ -3099,8 +3102,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /** The newest `select`, and the Other text it waits to send first. */
   let selecting = 0;
   let flushing: Promise<unknown> | null = null;
-  /** Opens a work item; `sameHead` for a conversation the shown work item's dropdown made, which opens under its head. */
-  const select = async (workItemId: number, sameHead = false): Promise<void> => {
+  /**
+   * Opens a work item; `sameHead` for a conversation the shown work item's dropdown made, which opens under its head. `sessionId` names an earlier
+   * session of it to show read-only; null shows its current session.
+   */
+  const select = async (workItemId: number, sameHead = false, sessionId: string | null = null): Promise<void> => {
     const mine = ++selecting;
 
     // Other text still waiting goes to its conversation before the page moves on, while the hub still takes it from this page; a later choice
@@ -3138,13 +3144,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // Choosing a work item hides the drawer, as a row's click hides the auto-hidden dock.
     closeDrawer();
     wanted = workItemId;
+    wantedSession = sessionId;
     showError(null);
     // Another work item shows its own head and a placeholder at once, not the one shown before (opening.tsx).
     // A conversation of the shown work item's dropdown opens under the same head, as before.
     opening = !sameHead && (state.scope === null || !state.scope.conversations.some((entry) => entry.workItemId === workItemId)) ? { workItemId, title: rowTitle(workItemId), error: null } : null;
 
     // Asked again after its open failed.
-    if (acked === workItemId && state.scope?.workItemId !== workItemId) {
+    if (acked === workItemId && (state.scope?.workItemId !== workItemId || shownSession() !== sessionId)) {
       acked = null;
     }
 
@@ -3168,14 +3175,30 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       view.tab = 'conversation';
     }
 
-    if (state.scope?.workItemId === workItemId && !selectInFlight && (acked === null || acked === workItemId)) {
+    // Nothing to ask while the page shows what the hub last took, or what it shows with nothing taken since; an answer whose scope has not
+    // come yet is corrected by asking again.
+    if (state.scope?.workItemId === workItemId && shownSession() === sessionId && !selectInFlight && (acked === null || (acked === workItemId && ackedSession === sessionId))) {
       acked = workItemId;
+      ackedSession = sessionId;
       draw();
       return;
     }
 
     reconcile();
     // A narrow screen leaves the list at once; the conversation follows with the select's scope.
+    draw();
+  };
+  /**
+   * Shows one session of the shown work item from its dropdown or the earlier session's note: an earlier one read-only, or with null its current
+   * one, through the same requests as `select`, keeping the tab, the artifact and the places shown.
+   */
+  const selectSession = (workItemId: number, sessionId: string | null): void => {
+    closeMenus();
+    view.picker = false;
+    showError(null);
+    wanted = workItemId;
+    wantedSession = sessionId;
+    reconcile();
     draw();
   };
   /** The work item being opened, until its `hello` brings it, or why it could not be opened. */
@@ -3200,7 +3223,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const leaveOpening = (): void => {
     opening = null;
     wanted = state.scope?.workItemId ?? null;
+    wantedSession = shownSession();
     acked = wanted;
+    ackedSession = wantedSession;
     // The list's keyboard selection follows back to the work item shown, as after a refused select of the shown one's dropdown.
     listSelection = wanted === null ? null : `item:${wanted}`;
     pendingRowControl = null;
@@ -3215,16 +3240,20 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   // One select at a time; the latest work item asked for wins, whatever order the answers and scope events come in.
   let selectInFlight = false;
   let acked: number | null = null;
+  /** The earlier session of `wanted` the page asks to show, null for its current one, and the one the hub last took with `acked`. */
+  let wantedSession: string | null = null;
+  let ackedSession: string | null = null;
   const reconcile = (): void => {
-    if (wanted === null || selectInFlight || state.key === null || acked === wanted) {
+    if (wanted === null || selectInFlight || state.key === null || (acked === wanted && ackedSession === wantedSession)) {
       return;
     }
 
     const asked = wanted;
+    const askedSession = wantedSession;
     const key = state.key;
 
     selectInFlight = true;
-    void post('select', { workItemId: asked }, false, { timeout: NAVIGATION_MS }).then((answer) => {
+    void post('select', { workItemId: asked, ...(askedSession === null ? {} : { sessionId: askedSession }) }, false, { timeout: NAVIGATION_MS }).then((answer) => {
       // An answer for a stream that has gone leaves the new stream's select alone.
       if (key !== state.key) {
         return;
@@ -3236,15 +3265,19 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
       if (answer.status === 200) {
         acked = asked;
-      } else if (wanted === asked && opening?.workItemId === asked) {
+        ackedSession = askedSession;
+      } else if (wanted === asked && wantedSession === askedSession && opening?.workItemId === asked) {
         // The refusal replaces the view, for the work item asked for, until Try again or Back to the list; it is not asked again meanwhile.
         acked = asked;
+        ackedSession = askedSession;
         opening = { workItemId: asked, title: rowTitle(asked), error: String(answer.body['error'] ?? FAILURE_TEXT.bad) };
         draw();
-      } else if (wanted === asked) {
-        // Another conversation of the shown work item's dropdown: the shown one stays, with why above its box.
+      } else if (wanted === asked && wantedSession === askedSession) {
+        // Another conversation or session of the shown work item's dropdown: the shown one stays, with why above its box.
         wanted = state.scope?.workItemId ?? null;
+        wantedSession = shownSession();
         acked = wanted;
+        ackedSession = wantedSession;
         listSelection = wanted === null ? null : `item:${wanted}`;
         pendingRowControl = null;
         if (view.rowMenu === `item:${asked}`) closeMenus();
@@ -3691,9 +3724,22 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const action = button?.dataset['action'];
 
     switch (action) {
-      case 'select':
+      case 'select': {
+        const workItemId = Number(button!.dataset['workItem']);
+
         listSelection = button!.dataset['row'] ?? null;
-        void select(Number(button!.dataset['workItem']));
+        // The dropdown's row or the note's button of the shown work item shows its current session in place; a list row opens the work item.
+        if (button!.dataset['row'] === undefined && state.scope?.workItemId === workItemId && state.scope.earlier === true) {
+          selectSession(workItemId, null);
+        } else {
+          void select(workItemId);
+        }
+
+        break;
+      }
+      case 'select-session':
+        // An earlier session of the shown work item, read-only.
+        selectSession(Number(button!.dataset['workItem']), button!.dataset['session'] ?? null);
         break;
       case 'list-pin':
         pinList(!listPinned);

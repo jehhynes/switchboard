@@ -44,6 +44,15 @@ export interface NativeRequest {
   decisions: string[];
 }
 
+/** An earlier session of a conversation, as the web page's dropdown lists it. */
+export interface SessionEntry {
+  sessionId: string;
+  title: string;
+  state: SessionState;
+  startedAt: number;
+  provider?: string;
+}
+
 export interface ConversationEntry {
   workItemId: number;
   title: string;
@@ -53,6 +62,8 @@ export interface ConversationEntry {
   conversation: SessionView['conversation'] | null;
   unread: number;
   provider?: string;
+  /** On the web page, the work item's earlier sessions, newest first; left out with none. */
+  sessions?: SessionEntry[];
 }
 
 export interface ScopeView {
@@ -65,6 +76,8 @@ export interface ScopeView {
   workItemId: number | null;
   cwd: string | null;
   sessionId: string | null;
+  /** The page shows `sessionId`, an earlier session of its work item, read-only; left out for the current session. */
+  earlier?: true;
 }
 
 export interface MessageView {

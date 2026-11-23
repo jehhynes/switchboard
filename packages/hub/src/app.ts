@@ -35,7 +35,7 @@ import { buildSnapshot } from './snapshot.js';
 import type { Snapshot, WorkItemView } from './snapshot.js';
 import { SnapshotBuilder } from './snapshotBuilder.js';
 import type { Built } from './snapshotBuilder.js';
-import { WindowScopes } from './windows.js';
+import { liveScope, WindowScopes } from './windows.js';
 import { tailscaleIdentity } from './tailscale.js';
 import { readHubLog } from './hubLog.js';
 import type { RemoteAccess } from './page.js';
@@ -511,7 +511,8 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     settings: () => config.settings.voice,
     viewSettings: () => viewSettings(),
     store,
-    windows: { keys: () => scopes.keys(), scope: (key) => scopes.scope(key) },
+    // An earlier session a page shows read-only is never the voice's to speak for or dictate into.
+    windows: { keys: () => scopes.keys(), scope: (key) => liveScope(scopes.scope(key)) },
     focusedWindow: () => focusedWindow,
     // Voice on a phone (architecture.md § Remote access): its voice socket, and whether its page has the focus.
     phone: {

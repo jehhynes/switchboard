@@ -205,6 +205,15 @@ export interface HeldInput {
   cannotType(): string | null;
 }
 
+/** An earlier session of a page's dropdown entry (architecture.md § Web page), which the page can open read-only. */
+export interface SessionEntry {
+  sessionId: string;
+  title: string;
+  state: SessionView['state'];
+  startedAt: number;
+  provider?: 'claude' | 'codex';
+}
+
 /** One entry of the view's dropdown (architecture.md § Window scope): a conversation of the window, by its current session. */
 export interface ConversationEntry {
   workItemId: number;
@@ -216,6 +225,8 @@ export interface ConversationEntry {
   unread: number;
   /** The current session's provider; left out with no session or from an older session record. */
   provider?: 'claude' | 'codex';
+  /** On the web page, the work item's earlier sessions, newest first; left out when it has none and for a VS Code window. */
+  sessions?: SessionEntry[];
 }
 
 /** The scope a window is sent: its conversations as dropdown entries. */
@@ -976,8 +987,11 @@ export class ConversationService {
     }
   }
 
-  /** The dropdown's entries of a window's conversations: each one's title, current session's state and provider, and unread count. */
-  entries(refs: ConversationRef[]): ConversationEntry[] {
+  /**
+   * The dropdown's entries of a window's conversations: each one's title, current session's state and provider, and unread count, and on a
+   * `page` each one's earlier sessions, newest first.
+   */
+  entries(refs: ConversationRef[], page = false): ConversationEntry[] {
     return refs.flatMap((ref) => {
       const item = this.deps.store.workItem(ref.workItemId);
       const ticket = item === null ? null : this.deps.store.ticket(item.ticketId);
@@ -986,16 +1000,30 @@ export class ConversationService {
         return [];
       }
 
-      const session = this.deps.store.sessionsFor(item.id).at(-1) ?? null;
+      const all = this.deps.store.sessionsFor(item.id);
+      const session = all.at(-1) ?? null;
       const view = session === null ? null : this.#view(session, true, this.deps.hooks(), this.deps.personas?.() ?? null);
+      const earlier = page ? all.slice(0, -1).reverse().map((one) => sessionEntry(one)) : [];
 
-      return [{ workItemId: item.id, title: ticket.title, primary: ref.primary, sessionId: session?.id ?? null, state: view?.state ?? null, conversation: view?.conversation ?? null, unread: session === null ? 0 : this.deps.store.unreadCount(session.id), ...(view?.provider === undefined ? {} : { provider: view.provider }) }];
+      return [
+        {
+          workItemId: item.id,
+          title: ticket.title,
+          primary: ref.primary,
+          sessionId: session?.id ?? null,
+          state: view?.state ?? null,
+          conversation: view?.conversation ?? null,
+          unread: session === null ? 0 : this.deps.store.unreadCount(session.id),
+          ...(view?.provider === undefined ? {} : { provider: view.provider }),
+          ...(earlier.length === 0 ? {} : { sessions: earlier }),
+        },
+      ];
     });
   }
 
   /** The scope as the window is sent it, with its conversations as dropdown entries. */
   scopeView(scope: WindowScope | null): ScopeView | null {
-    return scope === null ? null : { ...scope, conversations: this.entries(scope.conversations) };
+    return scope === null ? null : { ...scope, conversations: this.entries(scope.conversations, scope.kind === 'page') };
   }
 
   /** The dropdown each window was last sent. */
@@ -1570,6 +1598,10 @@ export class ConversationService {
       return { status: 409, body: { error: 'No session has started yet.' } };
     }
 
+    if (scope!.earlier === true) {
+      return { status: 409, body: { error: EARLIER_SESSION } };
+    }
+
     const view = this.#view(session, true, this.deps.hooks(), this.deps.personas?.() ?? null);
 
     if (view.conversation !== 'full') {
@@ -1594,7 +1626,7 @@ export class ConversationService {
         continue;
       }
 
-      const conversations = this.entries(scope.conversations);
+      const conversations = this.entries(scope.conversations, scope.kind === 'page');
       const text = JSON.stringify(conversations);
 
       if (this.#conversationsShown.get(key) !== text) {
@@ -1739,7 +1771,7 @@ export class ConversationService {
     }
 
     const folder = this.#artifactFolder(scope, key);
-    const session = current === null ? null : this.#view(current, true, this.deps.hooks(), this.deps.personas?.() ?? null);
+    const session = current === null ? null : this.#shownView(scope, current);
 
     this.#contexts.set(key, JSON.stringify(session?.context ?? null));
 
@@ -2158,6 +2190,17 @@ export class ConversationService {
     this.deps.voice?.update();
   }
 
+  /** The session a window shows, as it is sent: an earlier session the page chose is read-only, with no persona pin or request to answer. */
+  #shownView(scope: WindowScope, session: Session): SessionView {
+    const view = this.#view(session, true, this.deps.hooks(), this.deps.personas?.() ?? null);
+
+    if (scope.earlier !== true) {
+      return view;
+    }
+
+    return { ...view, conversation: view.conversation === 'none' ? 'none' : 'read-only', reason: view.conversation === 'none' ? view.reason : EARLIER_SESSION, canPin: false, ...(view.requests === undefined ? {} : { requests: [] }) };
+  }
+
   /** Sends each window its current session when its view differs from the one it was last sent. */
   #sendSessions(): void {
     for (const key of this.#streams.keys()) {
@@ -2168,7 +2211,7 @@ export class ConversationService {
         continue;
       }
 
-      const view = this.#view(session, true, this.deps.hooks(), this.deps.personas?.() ?? null);
+      const view = this.#shownView(scope!, session);
       const text = JSON.stringify(view);
 
       this.#contexts.set(key, JSON.stringify(view.context ?? null));
@@ -2408,7 +2451,9 @@ export class ConversationService {
         ? key === null
           ? SESSION_ENDED
           : "The voice's session is no longer this window's."
-        : view.conversation !== 'full'
+        : key !== null && scope!.earlier === true
+          ? EARLIER_SESSION
+          : view.conversation !== 'full'
           ? (view.reason ?? SESSION_ENDED)
           : text.length > MAX_MESSAGE_CHARS
             ? `The message is longer than ${MAX_MESSAGE_CHARS.toLocaleString('en-US')} characters.`
@@ -2560,7 +2605,7 @@ export class ConversationService {
       return { status: 400, body: { error: `Expected {window, scopeGen, opId, sessionId, ids}, with at most ${SEEN_MAX_IDS} IDs.` } };
     }
 
-    const refused = refusal(this.deps.windows.scope(window), scopeGen, sessionId);
+    const refused = refusal(this.deps.windows.scope(window), scopeGen, sessionId, true);
 
     if (refused !== null) {
       return refused;
@@ -2723,16 +2768,18 @@ export class ConversationService {
 
   /**
    * `select` (architecture.md § Window scope): selects one of the window's conversations, raising its `scopeGen`; the window gets `scope` and a
-   * fresh `hello`. 403 for a work item that is not one of them. Not refused for a stale `scopeGen`, since it names its whole target.
+   * fresh `hello`. A page's `sessionId` names one of the work item's sessions, an earlier one to show read-only (architecture.md § Web page).
+   * 403 for a work item that is not one of them, a session that is not the work item's, or a `sessionId` from a VS Code window. Not refused
+   * for a stale `scopeGen`, since it names its whole target.
    */
   select(body: Record<string, unknown>): { status: number; body: unknown } {
-    const { window, opId, workItemId } = body;
+    const { window, opId, workItemId, sessionId } = body;
 
-    if (typeof window !== 'string' || typeof opId !== 'string' || !Number.isInteger(workItemId)) {
-      return { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId}.' } };
+    if (typeof window !== 'string' || typeof opId !== 'string' || !Number.isInteger(workItemId) || !(sessionId === undefined || sessionId === null || typeof sessionId === 'string')) {
+      return { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId, sessionId?}.' } };
     }
 
-    if (!this.deps.windows.select(window, workItemId as number)) {
+    if (!this.deps.windows.select(window, workItemId as number, (sessionId as string | null | undefined) ?? null)) {
       return { status: 403, body: { error: 'Not in this window.' } };
     }
 
@@ -2878,7 +2925,7 @@ export class ConversationService {
     }
 
     const scope = this.deps.windows.scope(window);
-    const refused = refusal(scope, scopeGen, sessionId);
+    const refused = refusal(scope, scopeGen, sessionId, true);
 
     if (refused !== null) {
       return refused;
@@ -2900,7 +2947,7 @@ export class ConversationService {
       return { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, before, limit?}.' } };
     }
 
-    const refused = refusal(this.deps.windows.scope(window), scopeGen, sessionId);
+    const refused = refusal(this.deps.windows.scope(window), scopeGen, sessionId, true);
 
     if (refused !== null) {
       return refused;
@@ -2922,7 +2969,7 @@ export class ConversationService {
       return { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } };
     }
 
-    const refused = refusal(this.deps.windows.scope(window), scopeGen, sessionId);
+    const refused = refusal(this.deps.windows.scope(window), scopeGen, sessionId, true);
 
     if (refused !== null) {
       return refused;
@@ -2956,13 +3003,30 @@ const SLASH_COMMAND = /^\/[\w:.-]+(?: [^\n]*)?$/;
 /** How long a typed message waits for the holder to answer a screen read or a write. */
 export const HOLDER_ANSWER_MS = 5_000;
 
-/** Why a command is refused: a session outside the window's scope, or a scope generation that is no longer the window's. */
-export function refusal(scope: WindowScope | null, scopeGen: number, sessionId: string | null): { status: number; body: { error: string } } | null {
+/** Why the page cannot talk to or change an earlier session of its work item, which it shows read-only (architecture.md § Web page). */
+export const EARLIER_SESSION = 'This is an earlier session of the work item, shown read-only.';
+
+/**
+ * Why a command is refused: a session outside the window's scope, a scope generation that is no longer the window's, or, unless it only `reads`,
+ * a command for an earlier session the page shows.
+ */
+export function refusal(scope: WindowScope | null, scopeGen: number, sessionId: string | null, reads = false): { status: number; body: { error: string } } | null {
   if (scope === null || (sessionId !== null && scope.sessionId !== sessionId)) {
     return { status: 403, body: { error: 'Not in this window.' } };
   }
 
-  return scope.scopeGen === scopeGen ? null : { status: 409, body: { error: CONVERSATION_CHANGED } };
+  if (scope.scopeGen !== scopeGen) {
+    return { status: 409, body: { error: CONVERSATION_CHANGED } };
+  }
+
+  return sessionId !== null && !reads && scope.earlier === true ? { status: 409, body: { error: EARLIER_SESSION } } : null;
+}
+
+/** An earlier session as a page's dropdown lists it. */
+function sessionEntry(session: Session): SessionEntry {
+  const view = sessionView(session, false, true);
+
+  return { sessionId: session.id, title: view.title, state: view.state, startedAt: session.startedAt, provider: session.provider };
 }
 
 /** Why a question cannot be answered or dismissed now, by its state. */

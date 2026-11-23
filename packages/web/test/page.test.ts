@@ -5672,6 +5672,78 @@ describe('the page in use', () => {
     window.innerWidth = 1024;
   });
 
+  it("lists the work item's earlier sessions newest first in the dropdown, opens one read-only and goes back to the current one", async () => {
+    const earlier = [
+      { sessionId: 's1', title: 'Task session s1', state: 'ended' as const, startedAt: 10_000 - 3 * 3_600_000, provider: 'claude' },
+      { sessionId: 's0', title: 'Setup session s0', state: 'ended' as const, startedAt: 10_000 - 2 * 86_400_000, provider: 'claude' },
+    ];
+    const listed = { ...scope, sessionId: 's2', conversations: [{ ...scope.conversations[0]!, sessionId: 's2', sessions: earlier }] };
+    const { page, source } = start();
+    const selects = () => posts.filter((post) => post.url.endsWith('/select')).map((post) => ({ workItemId: post.body['workItemId'], sessionId: post.body['sessionId'] }));
+
+    const openPicker = () => root.querySelector('.conversation-menu') !== null || click('button.picker');
+
+    hello(source, { scope: listed, sessions: [session({ id: 's2', title: 'Task session s2' })] });
+    openPicker();
+    expect([...root.querySelectorAll('.conversation-menu .conversation-row')].map((row) => [row.querySelector('.title')!.textContent, row.getAttribute('aria-checked'), row.querySelector('.menu-note')?.textContent ?? null])).toEqual([
+      ['Fix it', 'true', null],
+      ['Task session s1', 'false', '3 h ago'],
+      ['Setup session s0', 'false', '2 d ago'],
+    ]);
+    expect(root.querySelector('.session-row .codicon')!.getAttribute('aria-label')).toBe('Ended');
+
+    // The artifact open stays open through choosing a session.
+    click('[data-action="artifact"][data-path="chat/plan.md"] .tab-open, [data-action="artifact"][data-path="chat/plan.md"]');
+    expect(root.querySelector('.artifact-tab.selected')?.getAttribute('data-path')).toBe('chat/plan.md');
+    openPicker();
+    click('.session-row[data-session="s1"]');
+    await flush();
+    expect(selects()).toEqual([{ workItemId: 1, sessionId: 's1' }]);
+    expect(root.querySelector('.artifact-tab.selected')?.getAttribute('data-path')).toBe('chat/plan.md');
+
+    // Choosing the current session again before the hub's scope for s1 came asks for it, so the late scope cannot win.
+    openPicker();
+    click('.conversation-menu [data-action="select"][data-work-item="1"]');
+    await flush();
+    expect(selects()).toEqual([{ workItemId: 1, sessionId: 's1' }, { workItemId: 1, sessionId: undefined }]);
+    openPicker();
+    click('.session-row[data-session="s1"]');
+    await flush();
+    expect(selects()).toHaveLength(3);
+
+    // The hub shows it read-only: the composer is off, the note says why and offers the current session, and the button names the session.
+    const shown = { ...listed, scopeGen: 4, sessionId: 's1', earlier: true };
+
+    source.emit('scope', { scope: shown });
+    hello(source, { scope: shown, sessions: [session({ id: 's1', title: 'Task session s1', state: 'ended', conversation: 'read-only', reason: 'This is an earlier session of the work item, shown read-only.' })], items: [reply('old', 1)] });
+    expect(root.querySelector('.session-note-text')!.textContent).toBe('An earlier session of this work item, shown read-only.');
+    expect(root.querySelector('[data-action="resume"]')).toBeNull();
+    expect(root.querySelector<HTMLTextAreaElement>('#composer textarea, textarea')!.disabled).toBe(true);
+    expect(root.querySelector('button.picker .picker-session')!.textContent).toBe('Task session s1');
+    openPicker();
+    expect([...root.querySelectorAll('.conversation-menu .conversation-row')].map((row) => row.getAttribute('aria-checked'))).toEqual(['false', 'true', 'false']);
+
+    // A new stream, as after a hub restart, asks for the same earlier session again.
+    hello(source, { key: 'pk2', scope: null, sessions: [], items: [] });
+    await flush();
+    expect(selects().slice(3)).toEqual([{ workItemId: 1, sessionId: 's1' }]);
+    source.emit('scope', { scope: { ...shown, key: 'pk2', scopeGen: 5 } });
+    hello(source, { key: 'pk2', scope: { ...shown, key: 'pk2', scopeGen: 5 }, sessions: [session({ id: 's1', state: 'ended', conversation: 'read-only' })], items: [reply('old', 1)] });
+    await flush();
+    expect(selects()).toHaveLength(4);
+
+    // The conversation's own row, or the note's button, goes back to the current session.
+    openPicker();
+    click('.conversation-menu [data-action="select"][data-work-item="1"]');
+    await flush();
+    expect(selects().at(-1)).toEqual({ workItemId: 1, sessionId: undefined });
+    // The note's button asks for the same, so it is not asked twice while the hub's scope is on its way.
+    click('.session-note [data-action="select"]');
+    await flush();
+    expect(selects()).toHaveLength(5);
+    page.close();
+  });
+
   it("keeps a conversation's kept place through a reload onto another tab, gives it back on A to B to A, and reads the Changes tab again after a reconnect", async () => {
     window.innerWidth = 375;
     sessionStorage.setItem('switchboard.scroll', JSON.stringify({ '1 conversation': { id: 'm1', offset: -20, pinned: false, top: 0 } }));

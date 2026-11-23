@@ -35,8 +35,13 @@ export interface WindowScope {
   workItemId: number | null;
   /** The selected conversation's current session's folder, or the checkout before its first. */
   cwd: string | null;
-  /** The selected conversation's current session, the one started last; null before its first. */
+  /**
+   * The session the window shows: the selected conversation's current session, the one started last, or on the web page an earlier session of
+   * it that the page chose (`earlier`); null before its first.
+   */
   sessionId: string | null;
+  /** The page shows an earlier session of its work item, read-only (architecture.md § Web page); left out for the current session. */
+  earlier?: true;
 }
 
 export interface WindowScopesDeps {
@@ -73,6 +78,8 @@ interface Window {
   scopeGen: number;
   selected: number | null;
   sessionId: string | null;
+  /** On a page, an earlier session of the selected work item it shows instead of the current one; null shows the current one. */
+  pinned: string | null;
   cwd: string | null;
   /** Tickets this window may read the History of beyond its own, from History commands the dock left for it. */
   granted: Set<number>;
@@ -118,6 +125,7 @@ export class WindowScopes {
       scopeGen: stored?.scopeGen ?? 0,
       selected: stored?.selectedWorkItemId ?? null,
       sessionId: stored?.selectedSessionId ?? null,
+      pinned: null,
       cwd: null,
       granted: new Set(),
       page: false,
@@ -141,7 +149,7 @@ export class WindowScopes {
   openPage(): string {
     const key = this.deps.newKey?.() ?? randomBytes(24).toString('hex');
 
-    this.#windows.set(key, { key, file: null, host: null, workItemId: null, ticketId: null, title: '', folder: null, scopeGen: 0, selected: null, sessionId: null, cwd: null, granted: new Set(), page: true, group: { ids: [], head: false } });
+    this.#windows.set(key, { key, file: null, host: null, workItemId: null, ticketId: null, title: '', folder: null, scopeGen: 0, selected: null, sessionId: null, pinned: null, cwd: null, granted: new Set(), page: true, group: { ids: [], head: false } });
     return key;
   }
 
@@ -254,13 +262,21 @@ export class WindowScopes {
     return changed;
   }
 
-  /** The selected conversation's current session and its folder, else the checkout. */
+  /**
+   * The selected conversation's current session and its folder, else the checkout; on a page, the earlier session it pinned while that is still
+   * an earlier session of the selected work item. The folder stays the current session's, so the work item's artifacts and changes stay its own
+   * while an earlier session shows, such as a setup session that ran in the repository's root.
+   */
   #follow(window: Window): void {
-    const latest = window.selected === null ? undefined : this.deps.store.sessionsFor(window.selected).at(-1);
+    const sessions = window.selected === null ? [] : this.deps.store.sessionsFor(window.selected);
+    const latest = sessions.at(-1);
+    const pinned = window.pinned === null ? undefined : sessions.find((one) => one.id === window.pinned && one !== latest);
+    const shown = pinned ?? latest;
     const item = window.selected === null ? null : this.deps.store.workItem(window.selected);
     const ticket = item === null ? null : this.deps.store.ticket(item.ticketId);
 
-    window.sessionId = latest?.id ?? null;
+    window.pinned = pinned?.id ?? null;
+    window.sessionId = shown?.id ?? null;
     window.cwd = window.selected === null ? null : (latest?.cwd ?? (window.selected === window.workItemId ? window.folder : ticket?.repoRoot || window.folder));
   }
 
@@ -309,7 +325,9 @@ export class WindowScopes {
     const window = this.#windows.get(key);
 
     if (window?.page === true) {
-      return window.selected === null ? null : { kind: 'page', key, folder: window.folder, title: window.title, scopeGen: window.scopeGen, conversations: this.#listed(window), workItemId: window.selected, cwd: window.cwd, sessionId: window.sessionId };
+      return window.selected === null
+        ? null
+        : { kind: 'page', key, folder: window.folder, title: window.title, scopeGen: window.scopeGen, conversations: this.#listed(window), workItemId: window.selected, cwd: window.cwd, sessionId: window.sessionId, ...(window.pinned === null ? {} : { earlier: true as const }) };
     }
 
     if (window === undefined || window.host === null || (window.file !== null && window.selected === null)) {
@@ -353,25 +371,26 @@ export class WindowScopes {
 
   /**
    * Selects one of the window's conversations, raising its `scopeGen` and keeping the selection in its binding; false for a work item that is not
-   * one of them.
+   * one of them. A page can name one of the work item's sessions, an earlier one to show it read-only or the current one; a window cannot.
    */
-  select(key: string, workItemId: number): boolean {
+  select(key: string, workItemId: number, sessionId: string | null = null): boolean {
     const window = this.#windows.get(key);
 
     // A page selects any work item the store knows (architecture.md § Web page); the scope rule then holds it to that work item's group.
     if (window?.page === true) {
-      if (this.deps.store.workItem(workItemId) === null) {
+      if (this.deps.store.workItem(workItemId) === null || (sessionId !== null && !this.deps.store.sessionsFor(workItemId).some((one) => one.id === sessionId))) {
         return false;
       }
 
       window.selected = workItemId;
+      window.pinned = sessionId;
       this.#placePage(window);
       this.#follow(window);
       window.scopeGen++;
       return true;
     }
 
-    if (window === undefined || !this.holds(key, workItemId)) {
+    if (window === undefined || sessionId !== null || !this.holds(key, workItemId)) {
       return false;
     }
 
@@ -485,6 +504,11 @@ export class WindowScopes {
 
     return window.ticketId === ticketId || window.granted.has(ticketId) || this.#listed(window).some((ref) => this.deps.store.workItem(ref.workItemId)?.ticketId === ticketId);
   }
+}
+
+/** The scope with no session while it shows an earlier session read-only, for what acts only on a current session, as the voice does. */
+export function liveScope(scope: WindowScope | null): WindowScope | null {
+  return scope?.earlier === true ? { ...scope, sessionId: null } : scope;
 }
 
 /**

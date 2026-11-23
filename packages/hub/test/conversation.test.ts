@@ -2633,6 +2633,68 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     expect(resumed).toEqual(['s3', 's3']);
   });
 
+  it("lists a work item's earlier sessions on the page's dropdown, newest first, and shows one read-only on request (architecture.md § Web page)", async () => {
+    const { store, scopes, service, openPage, view } = setup();
+    const page = openPage();
+    const window = scopes.open(view.file, view.view);
+    const later = (id: string, kind: 'setup' | 'task', at: number) => store.insertSession(session({ id, workItemId: 3, kind, shortId: id, cwd: 'D:/w3', codeMode: true, nativeSessionId: `n-${id}`, state: 'idle', startedAt: at }) as StoredSession);
+    const entry = () => service.scopeView(scopes.scope(page.key))!.conversations[0]!;
+
+    // s3 was the setup run, in the repository's root; Approve, a retry or a reopen starts another session of the same work item.
+    store.updateSession('s3', { kind: 'setup', shortId: 's3', state: 'ended', startedAt: NOW - 3_000, cwd: 'D:/repo' });
+    later('s4', 'task', NOW - 2_000);
+    later('s5', 'task', NOW - 1_000);
+    service.select({ window: page.key, opId: 'o', workItemId: 3 });
+    expect(scopes.scope(page.key)).toMatchObject({ workItemId: 3, sessionId: 's5' });
+    expect(scopes.scope(page.key)!.earlier).toBeUndefined();
+    expect(entry()).toMatchObject({ workItemId: 3, sessionId: 's5' });
+    expect(entry().sessions).toEqual([
+      { sessionId: 's4', title: 'Task session s4', state: 'idle', startedAt: NOW - 2_000, provider: 'claude' },
+      { sessionId: 's3', title: 'Setup session s3', state: 'ended', startedAt: NOW - 3_000, provider: 'claude' },
+    ]);
+    // A VS Code window's dropdown does not list them.
+    expect(service.scopeView(scopes.scope(window))!.conversations.every((one) => one.sessions === undefined)).toBe(true);
+
+    // The page opens the ended setup session read-only.
+    expect(service.select({ window: page.key, opId: 'o', workItemId: 3, sessionId: 's3' }).status).toBe(200);
+    const shown = scopes.scope(page.key)!;
+    const hello = service.hello(page.key) as { scope: { earlier?: boolean; sessionId: string }; sessions: Array<{ id: string; conversation: string; reason: string | null }> };
+
+    // The work item's folder stays the current session's, so its artifacts and changes stay its own.
+    expect(shown).toMatchObject({ workItemId: 3, sessionId: 's3', earlier: true, cwd: 'D:/w3' });
+    expect(hello.scope).toMatchObject({ sessionId: 's3', earlier: true });
+    expect(hello.sessions).toMatchObject([{ id: 's3', conversation: 'read-only', reason: 'This is an earlier session of the work item, shown read-only.' }]);
+    // An earlier session that still runs, as an older held one can, is read-only too: nothing types into it, resumes it or pins it.
+    expect(service.select({ window: page.key, opId: 'o', workItemId: 3, sessionId: 's4' }).status).toBe(200);
+    const gen = scopes.scope(page.key)!.scopeGen;
+
+    expect((service.hello(page.key) as { sessions: Array<{ conversation: string }> }).sessions[0]!.conversation).toBe('read-only');
+    expect(service.send({ window: page.key, scopeGen: gen, opId: 'm', sessionId: 's4', launch: null, text: 'hi' })).toEqual({ status: 409, body: { error: 'This is an earlier session of the work item, shown read-only.' } });
+    expect((await service.resume({ window: page.key, scopeGen: gen, opId: 'r', sessionId: 's4' })).body).toEqual({ error: 'This is an earlier session of the work item, shown read-only.' });
+    expect(service.pageUpload(page.key, gen, 'a.txt', Buffer.from('a')).body).toEqual({ error: 'This is an earlier session of the work item, shown read-only.' });
+    expect(service.dictate(page.key, 's4', 'hi', [], false)).toEqual({ refused: 'This is an earlier session of the work item, shown read-only.' });
+    // Reading it is allowed.
+    expect(service.history({ window: page.key, scopeGen: gen, sessionId: 's4', before: null }).status).toBe(200);
+    expect(service.statuses({ window: page.key, scopeGen: gen, sessionId: 's4', before: null }).status).toBe(200);
+
+    // A newer session keeps the page on the one it chose; the dropdown lists the session that was current.
+    later('s6', 'task', NOW);
+    scopes.update(view.view);
+    expect(scopes.scope(page.key)).toMatchObject({ sessionId: 's4', earlier: true });
+    expect(entry().sessions!.map((one) => one.sessionId)).toEqual(['s5', 's4', 's3']);
+
+    // The current session again, by naming it or none; another work item's session, or a session from a VS Code window, is refused.
+    expect(service.select({ window: page.key, opId: 'o', workItemId: 3, sessionId: 's6' }).status).toBe(200);
+    expect(scopes.scope(page.key)).toMatchObject({ sessionId: 's6' });
+    expect(scopes.scope(page.key)!.earlier).toBeUndefined();
+    expect(service.select({ window: page.key, opId: 'o', workItemId: 3, sessionId: 's2' }).status).toBe(403);
+    expect(service.select({ window: page.key, opId: 'o', workItemId: 3, sessionId: 5 }).status).toBe(400);
+    expect(service.select({ window, opId: 'o', workItemId: 2, sessionId: 's2' }).status).toBe(403);
+    expect(service.select({ window: page.key, opId: 'o', workItemId: 3, sessionId: 's5' }).status).toBe(200);
+    expect(service.select({ window: page.key, opId: 'o', workItemId: 3 }).status).toBe(200);
+    expect(scopes.scope(page.key)).toMatchObject({ sessionId: 's6' });
+  });
+
   it("shows the page its session's permission prompt from the screen and presses only that prompt's keys, under the input reservation", async () => {
     const { store, service, openPage, held } = setup();
     const page = openPage();

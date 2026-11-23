@@ -402,6 +402,9 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 /* A conversation's row: its state codicon stands in the gutter, and the selected one is marked by a highlight, not a check mark. */
 .conversation-row > .codicon:first-child { width: 28px; text-align: center; }
 .menu-row.submenu-row { padding-left: 16px; }
+/* A conversation's earlier sessions sit under its row, indented, with a muted state icon. */
+.conversation-row.session-row { padding-left: 16px; font-size: 0.95em; }
+button.picker .picker-session { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--vscode-descriptionForeground); font-weight: normal; }
 .list-row { position: relative; }
 .row-menu-anchor { position: absolute; top: calc(100% - 4px); left: 8px; }
 .row-menu-anchor > .row-menu { top: 0; left: 0; }

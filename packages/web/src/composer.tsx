@@ -122,7 +122,20 @@ export function renderShared(html: string): VNode {
  * The note above the composer while the session has ended, with Resume, as the Conversation view's; a session the page cannot talk to at all
  * (`none`) gets only its reason.
  */
-export function renderEndedNote(session: PageState['session'], resuming: boolean): VNode | null {
+export function renderEndedNote(session: PageState['session'], resuming: boolean, earlierOf: number | null = null): VNode | null {
+  // An earlier session of work item `earlierOf` is only read, so it offers no Resume, ended or not, but a way back to the current one.
+  if (earlierOf !== null && session !== null) {
+    return (
+      <div class="session-note" role="status">
+        <span class="codicon codicon-history state-icon tone-muted" aria-hidden="true"></span>
+        <span class="session-note-text">An earlier session of this work item, shown read-only.</span>
+        <button type="button" class="session-resume" data-action="select" data-work-item={String(earlierOf)}>
+          Show current session
+        </button>
+      </div>
+    );
+  }
+
   if (session?.state !== 'ended') {
     return null;
   }

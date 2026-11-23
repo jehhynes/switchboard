@@ -113,7 +113,8 @@ export function applyEvent(state: PageState, event: Event): PageState {
     case 'unread': {
       const scope = state.scope === null ? null : { ...state.scope, conversations: state.scope.conversations.map((entry) => (entry.workItemId === event['workItemId'] ? { ...entry, unread: event['count'] } : entry)) };
 
-      return { ...state, scope, unread: event['workItemId'] === state.scope?.workItemId ? event['count'] : state.unread };
+      // The count is the current session's, so it does not change the shown count of an earlier session.
+      return { ...state, scope, unread: event['workItemId'] === state.scope?.workItemId && state.scope?.earlier !== true ? event['count'] : state.unread };
     }
     case 'voice':
       return { ...state, voice: event['voice'] };
