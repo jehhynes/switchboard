@@ -17,6 +17,7 @@ import type { DragView } from './reorder.js';
 import { menuRows, renderHeader, renderMaximize, renderSideSwitch, renderTabs } from './header.js';
 import { CHAT_MIN, chatNeed, fitLayout, isPhone, sideLimit, sideWidth, type Layout } from './layout.js';
 import { pageLedger, renderTimeline } from './timeline.js';
+import { fitFade } from './replyFade.js';
 import { cardSteps, currentStep, draftAnswers, moveStep, pickLetter, setOther } from '@switchboard/conversation/questions';
 import type { CardDraft as SharedDraft, LedgerCard } from '@switchboard/conversation/questions';
 import { cardKeyAction, isAnswerMessage, questionsWaiting } from '@switchboard/conversation/questionCard';
@@ -2544,6 +2545,52 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   };
   // A draw asked for before the next repaint (`drawSoon`), which a draw meanwhile makes unneeded.
   let frame: { cancelled: boolean } | null = null;
+  // Brief replies' fades, fitted to the lines their details draw, before the page paints them, and again as their width changes. Each observes
+  // its details' box, which the fade's own height does not resize, so fitting one never asks for another. Details that would hide less than 1.5
+  // lines open for good instead, with no fade and nothing to click.
+  const fadesObserved = new Set<Element>();
+  const fades =
+    typeof ResizeObserver === 'function'
+      ? new ResizeObserver((entries) => {
+          const short = entries.map((entry) => entry.target.parentElement).filter((fade): fade is HTMLElement => fade?.classList.contains('reply-fade') === true && !fitFade(fade));
+
+          if (short.length > 0) {
+            // A fade with the focus gives it to its reply, as a click on it does, rather than leaving it to the page.
+            const focused = short.find((fade) => fade === document.activeElement)?.dataset['reply'];
+
+            short.forEach((fade) => view.open.add(`more:${fade.dataset['reply']}`));
+            draw();
+            if (focused !== undefined) {
+              [...root.querySelectorAll<HTMLElement>('li.reply')].find((reply) => reply.dataset['id'] === focused)?.focus();
+            }
+          }
+        })
+      : null;
+
+  listening.signal.addEventListener('abort', () => {
+    fades?.disconnect();
+    fadesObserved.clear();
+  });
+  /** Observes the fades the draw made and lets go of those it opened or removed. */
+  const watchFades = (): void => {
+    if (fades === null) {
+      return;
+    }
+
+    for (const text of fadesObserved) {
+      if (!text.isConnected || text.parentElement?.classList.contains('reply-fade') !== true) {
+        fades.unobserve(text);
+        fadesObserved.delete(text);
+      }
+    }
+
+    for (const text of root.querySelectorAll('.reply-fade > .reply-more-text')) {
+      if (!fadesObserved.has(text)) {
+        fades.observe(text);
+        fadesObserved.add(text);
+      }
+    }
+  };
   const draw = (): void => {
     if (frame !== null) {
       frame.cancelled = true;
@@ -2563,6 +2610,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     fitMenus();
     fitListLinks();
+    watchFades();
     reportBrowser();
     drawConnection();
     keepRoute();

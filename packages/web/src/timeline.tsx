@@ -82,8 +82,12 @@ function Reply({ item, earlier, view, stamped: shown, card, briefReplies }: { it
   // Only the text that ends the reply can end in the card's questions, which it leaves out; questions before a passage fold into one line.
   const markdownPart = (text: string, last: boolean): string => (card === null ? renderMarkdown(text) : withoutQuestions(text, last ? `reply:${item.id}` : `reply:${item.id}:before`, view.open, last));
   const said = item.spoken.state === 'interrupted' ? item.spoken.saidChars : null;
-  const body = passage === null ? markdownPart(opening, true) : replyBody(opening, passage, said, !expanded, replyRender(markdownPart));
-  const preview = expanded || passage === null ? '' : detailsPreview(opening, passage, markdownPart);
+  // With Brief replies on, details that follow the whole primary response draw in the fade's box, opened or not, so opening the reply moves none
+  // of its lines; only the box's height and mask change. Details around or before a passage show in their places once opened.
+  const parts = folded && briefReplies ? spokenParts(opening, passage) : null;
+  const trailing = parts !== null && parts.length === 2 && parts[0]!.spoken && !parts[1]!.spoken;
+  const body = passage === null ? markdownPart(opening, true) : replyBody(opening, passage, said, !expanded || trailing, replyRender(markdownPart));
+  const more = (expanded && !trailing) || passage === null ? '' : detailsPreview(opening, passage, markdownPart);
   const tone = toneMark(item.tone, view.details);
   // The copy button comes first on the line under the reply, then the tone and a speech failure with message details on, and the time at the right.
   const meta = metaLine([item.provisional ? '' : copyButton('copy-reply', 'Copy response'), tone, spokenMark(item.spoken.state, view.details)], item.at, shown);
@@ -93,11 +97,15 @@ function Reply({ item, earlier, view, stamped: shown, card, briefReplies }: { it
       <span class="dot" title={item.unread ? 'Unread' : undefined}></span>
       <div class="body">
         {trusted(body)}
-        {expanded ? null : (
+        {more === '' ? null : expanded ? (
+          <div class="reply-more">
+            <div class="reply-more-text">{trusted(more)}</div>
+          </div>
+        ) : (
           // The fade is the reply's control; its text is only a glimpse, which neither a screen reader nor a click reaches.
-          <div class="reply-fade" role="button" tabIndex={0} aria-expanded="false" aria-label="Show more" data-action="more" data-reply={item.id}>
-            <div class="reply-fade-text" aria-hidden="true" inert>
-              {trusted(preview)}
+          <div class="reply-more reply-fade" role="button" tabIndex={0} aria-expanded="false" aria-label="Show more" data-action="more" data-reply={item.id}>
+            <div class="reply-more-text reply-fade-text" aria-hidden="true" inert>
+              {trusted(more)}
             </div>
           </div>
         )}

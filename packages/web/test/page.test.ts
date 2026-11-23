@@ -315,6 +315,36 @@ describe('drawing', () => {
     expect(li.querySelector('.show-more')).toBeNull();
   });
 
+  it("draws details that follow the primary response in one box, folded or opened, which only the fade's classes and attributes tell apart", () => {
+    const host = document.createElement('div');
+    const items = [reply('r1', 1, { opening: 'Fixed it.\n\n**The three:**\n\n- one\n- two', speak: 'Fixed it.' }), reply('r2', 2, { opening: 'Before.\n\nFixed it.\n\nAfter.', speak: 'Fixed it.' })];
+    const view = newView();
+    const shape = (id: string) => [...host.querySelector(`li[data-id="${id}"] > .body`)!.children].map((child) => child.className);
+
+    host.innerHTML = html(renderTimeline(pageState(items), view));
+    const folded = host.querySelector('li[data-id="r1"] .reply-more')!;
+
+    expect(shape('r1')).toEqual(['reply-primary', 'reply-more reply-fade']);
+    expect(folded.querySelector(':scope > .reply-more-text.reply-fade-text > .reply-details')).not.toBeNull();
+    const details = folded.querySelector('.reply-details')!.outerHTML;
+
+    view.open.add('more:r1');
+    view.open.add('more:r2');
+    host.innerHTML = html(renderTimeline(pageState(items), view));
+    const opened = host.querySelector('li[data-id="r1"] .reply-more')!;
+
+    // Opened, the same box holds the same details, a plain box with no control, glimpse or fade.
+    expect(shape('r1')).toEqual(['reply-primary', 'reply-more']);
+    expect(opened.querySelector(':scope > .reply-more-text > .reply-details')!.outerHTML).toBe(details);
+    expect(['role', 'tabindex', 'aria-expanded', 'aria-label', 'data-action'].filter((name) => opened.hasAttribute(name))).toEqual([]);
+    expect(['aria-hidden', 'inert'].filter((name) => opened.firstElementChild!.hasAttribute(name))).toEqual([]);
+    expect(opened.firstElementChild!.className).toBe('reply-more-text');
+    // Text before the passage shows in its place once opened, as with Brief replies off.
+    expect(shape('r2')).toEqual(['reply-details', 'reply-primary', 'reply-details']);
+    host.innerHTML = html(renderTimeline({ ...pageState(items), briefReplies: false }, newView()));
+    expect(shape('r1')).toEqual(['reply-primary', 'reply-details']);
+  });
+
   it('shows a reply with no [details] line whole, with no fade, its ending questions and their markup left to its card', () => {
     const host = document.createElement('div');
     const whole = 'Fixed it.\n\n- one\n\n1. Ship it? {#ship}\n   - A) Yes\n   - B) No';
@@ -5277,6 +5307,96 @@ describe('the page in use', () => {
       page.close();
       vi.useRealTimers();
     }
+  });
+
+  it("fits each fade to its details' lines when drawn, and opens for good, with no fade, details too short to fade", () => {
+    // The page's other observers are left out: only the one that observes the fades' details.
+    const observed: Element[] = [];
+    let fit: ((entries: Array<{ target: Element }>) => void) | null = null;
+    const had = Object.getOwnPropertyDescriptor(Range.prototype, 'getClientRects');
+
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(readonly callback: (entries: Array<{ target: Element }>) => void) {}
+
+      observe(target: Element): void {
+        if (target.classList.contains('reply-more-text')) {
+          observed.push(target);
+          fit = this.callback;
+        }
+      }
+
+      unobserve(target: Element): void {
+        if (observed.includes(target)) {
+          observed.splice(observed.indexOf(target), 1);
+        }
+      }
+
+      disconnect(): void {
+        if (fit === this.callback) {
+          observed.length = 0;
+          disconnected = true;
+        }
+      }
+    });
+    let disconnected = false;
+    // Each paragraph of details is one line, 20 px below the one before.
+    Object.defineProperty(Range.prototype, 'getClientRects', {
+      configurable: true,
+      value(this: Range) {
+        const text = this.startContainer;
+        const box = text.parentElement!.closest('.reply-more-text')!;
+        const index = [...box.querySelectorAll('p')].indexOf(text.parentElement as HTMLParagraphElement);
+
+        return [{ top: index * 20, bottom: index * 20 + 16, height: 16, width: 100 }];
+      },
+    });
+    onTestFinished(() => {
+      vi.unstubAllGlobals();
+      if (had === undefined) {
+        delete (Range.prototype as { getClientRects?: unknown }).getClientRects;
+      } else {
+        Object.defineProperty(Range.prototype, 'getClientRects', had);
+      }
+    });
+    const { page, source } = start();
+    const paragraphs = (count: number) => Array.from({ length: count }, (_, index) => `Line ${index + 1}.`).join('\n\n');
+
+    hello(source, { items: [reply('r1', 2, { opening: `Short.\n\n${paragraphs(3)}`, speak: 'Short.' }), reply('r2', 3, { opening: `Long.\n\n${paragraphs(6)}`, speak: 'Long.' })], settings: { briefReplies: true } });
+    expect(observed.map((text) => text.closest<HTMLElement>('li.reply')!.dataset['id'])).toEqual(['r1', 'r2']);
+    fit!(observed.map((target) => ({ target })));
+
+    // Three lines hide nothing worth a click: the reply opens, with no fade and nothing to click, and is no longer observed.
+    const short = root.querySelector('li[data-id="r1"]')!;
+    expect(short.classList.contains('folded')).toBe(false);
+    expect(short.querySelector('.reply-fade')).toBeNull();
+    expect(short.querySelector('.reply-more .reply-details')!.textContent).toContain('Line 3.');
+    // Six lines fold after two whole lines and a third fading out.
+    const fade = root.querySelector<HTMLElement>('li[data-id="r2"] .reply-fade')!;
+    expect(root.querySelector('li[data-id="r2"]')!.classList.contains('folded')).toBe(true);
+    expect([fade.style.getPropertyValue('--sb-fade-height'), fade.style.getPropertyValue('--sb-fade-solid')]).toEqual(['56px', '36px']);
+    expect(observed.map((text) => text.closest<HTMLElement>('li.reply')!.dataset['id'])).toEqual(['r2']);
+    // Opened, it is no longer observed either.
+    click('li[data-id="r2"] .reply-fade');
+    expect(observed).toEqual([]);
+
+    // A focused fade that a wider page makes too short to fade gives the focus to its reply as it opens.
+    source.emit('reply', { reply: reply('r3', 4, { opening: `Wide.\n\n${paragraphs(5)}`, speak: 'Wide.' }) });
+    const wide = root.querySelector<HTMLElement>('li[data-id="r3"] .reply-fade')!;
+    fit!(observed.map((target) => ({ target })));
+    expect(root.querySelector('li[data-id="r3"]')!.classList.contains('folded')).toBe(true);
+    wide.focus();
+    wide.querySelectorAll('p')[4]!.remove();
+    wide.querySelectorAll('p')[3]!.remove();
+    fit!(observed.map((target) => ({ target })));
+    expect(root.querySelector('li[data-id="r3"]')!.classList.contains('folded')).toBe(false);
+    expect(document.activeElement).toBe(root.querySelector('li.reply[data-id="r3"]'));
+
+    // Closing the page lets go of the fades still folded.
+    source.emit('reply', { reply: reply('r4', 5, { opening: `Last.\n\n${paragraphs(6)}`, speak: 'Last.' }) });
+    expect(observed).toHaveLength(1);
+    page.close();
+    expect(disconnected).toBe(true);
+    expect(observed).toEqual([]);
   });
 
   it('opens a folded reply for good on a click on its fade, with no Show less', () => {
