@@ -311,6 +311,16 @@ public sealed class TerminalTests
     }
 
     [Fact]
+    public void WindowsTerminal_Semicolons_EscapesEveryArgument()
+    {
+        var shown = Attach().Open!.Terminal! with { Title = "Title; new-tab cmd", Cwd = "D:/work;folder", Executable = "D:/node;folder/node.exe", Args = ["hub;file.js", "attach", "id;7", "already\\;escaped"] };
+        var start = Terminals.WindowsTerminal(shown, new Hashtable());
+
+        Assert.Equal(["-w", "new", "--title", "Title\\; new-tab cmd", "--suppressApplicationTitle", "-d", "D:/work\\;folder", "--", "D:/node\\;folder/node.exe", "hub\\;file.js", "attach", "id\\;7", "already\\\\;escaped"], start.ArgumentList);
+        Assert.Equal(["--new-window", "-T", "Title; new-tab cmd", "-d", "D:/work;folder", "--", "D:/node;folder/node.exe", "hub;file.js", "attach", "id;7", "already\\;escaped"], Terminals.Ptyxis(shown, new Hashtable()).ArgumentList);
+    }
+
+    [Fact]
     public void WindowsTerminal_KeepsTheTitleTheDockFindsTheWindowBy()
     {
         var start = Terminals.WindowsTerminal(Attach().Open!.Terminal! with { Executable = null }, new Hashtable());

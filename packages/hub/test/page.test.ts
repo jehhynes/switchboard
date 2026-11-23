@@ -837,6 +837,9 @@ describe('the web page routes', () => {
             },
           ]),
         ),
+        '/holder/open': async (body) => { posted.push(body); return { status: 200, body: { done: true } }; },
+        '/holder/list': async (body) => { posted.push(body); return { status: 200, body: { held: [] } }; },
+        '/holder/stop': async (body) => { posted.push(body); return { status: 200, body: { stopped: 's' } }; },
         '/dock/page': async (_body, context) => ({ status: 200, body: { url: await context!.pageUrl() } }),
         '/v1/conversation/page-settings-save': async (body) => {
           posted.push(body);
@@ -966,7 +969,15 @@ describe('the web page routes', () => {
     expect((await post('/v1/conversation/resume', `http://127.0.0.1:${server.port}`)).status).toBe(403);
     expect((await post('/v1/conversation/resume', `http://127.0.0.1:${port}`, {})).status).toBe(404);
     expect((await post('/v1/conversation/resume', `http://127.0.0.1:${port}`, { Cookie: 'sb_page=forged' })).status).toBe(401);
-    expect(posted).toHaveLength(6);
+    for (const command of ['held-list', 'held-stop', 'held-open']) {
+      const answer = await post(`/v1/conversation/${command}`, `http://127.0.0.1:${port}`);
+      expect(answer.status).toBe(200);
+      expect(JSON.parse(answer.body)).toEqual(command === 'held-list' ? { held: [] } : command === 'held-stop' ? { stopped: 's' } : { done: true });
+      expect(posted.at(-1)).toEqual({ window: 'page-1', workItemId: 4 });
+      expect((await post(`/v1/conversation/${command}`, `http://127.0.0.1:${server.port}`)).status).toBe(403);
+      expect((await post(`/v1/conversation/${command}`, `http://127.0.0.1:${port}`, { Cookie: 'sb_page=forged' })).status).toBe(401);
+    }
+    expect(posted).toHaveLength(9);
     stream.destroy();
   });
 
@@ -1162,22 +1173,26 @@ describe('the web page routes', () => {
     // A code typed on this computer is not a link.
     expect((await send(server.port, 'GET', `/page?code=${code}`, {})).status).toBe(403);
 
-    // A paired device posts from its own origin and may not pair, list devices, drive the browser pane, open a link on this computer, restart the holder, use Settings or set Brief replies.
+    // A paired device posts from its own origin and may not pair, list devices, drive the browser pane, open a link or a held terminal on this computer, restart the holder, use Settings or set Brief replies.
     expect((await post('page-source', { ...ts, Cookie: phone, Origin: here })).status).toBe(403);
     expect((await post('page-source', { ...ts, Cookie: phone, Origin: 'https://pc.tail.ts.net' })).status).toBe(200);
-    for (const command of ['page-pair', 'page-devices', 'page-device-revoke', 'row-open', 'page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer', 'brief-replies']) {
+    for (const command of ['page-pair', 'page-devices', 'page-device-revoke', 'held-open', 'row-open', 'page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer', 'brief-replies']) {
       const refused = await post(command, { ...ts, Cookie: phone, Origin: 'https://pc.tail.ts.net' });
 
       expect(refused.status).toBe(403);
       expect(JSON.parse(refused.body)).toEqual({ error: 'Do this from the page on the computer that runs Switchboard.' });
     }
 
+    for (const command of ['held-list', 'held-stop']) {
+      expect((await post(command, { ...ts, Cookie: phone, Origin: 'https://pc.tail.ts.net' })).status).toBe(200);
+    }
+
     // This computer's page still opens links, restarts the holder and uses Settings.
-    for (const command of ['row-open', 'page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer', 'brief-replies']) {
+    for (const command of ['held-open', 'row-open', 'page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer', 'brief-replies']) {
       expect((await post(command, { Cookie: localCookie, Origin: here })).status).toBe(200);
     }
 
-    expect([...LOCAL_PAGE_COMMANDS]).toEqual(['page-pair', 'page-devices', 'page-device-revoke', 'page-device-voice', 'pane-pair', 'pane-rect', 'pane-open', 'row-open', 'page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer', 'brief-replies']);
+    expect([...LOCAL_PAGE_COMMANDS]).toEqual(['held-open', 'page-pair', 'page-devices', 'page-device-revoke', 'page-device-voice', 'pane-pair', 'pane-rect', 'pane-open', 'row-open', 'page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer', 'brief-replies']);
 
     const devices = JSON.parse((await post('page-devices', { Cookie: localCookie, Origin: here })).body) as { devices: Array<{ id: string; label: string; host: string | null; login: string | null; current: boolean }> };
 

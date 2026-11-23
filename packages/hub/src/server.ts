@@ -146,16 +146,17 @@ const GZIP_MIN_BYTES = 1024;
 /**
  * The conversation commands a page may post with its cookie; never `new-conversation`, since a page hosts none: its New conversation… is
  * `page-conversation`, hosted by the shown conversation's folder. `row-action`, `row-move`, `row-paste`, `resume`, `prompt`, `prompt-key` and `console-input` take only a page key.
+ * `held-list`, `held-stop` and `held-open` share the holder routes after the page's origin and key checks.
  * The hub itself answers `page-pair`, `page-devices` and `page-device-revoke` (architecture.md § Remote access).
  */
-export const PAGE_COMMANDS = new Set(['page-new-session', 'page-voice-state', 'page-device-voice', 'open-file', 'viewed', 'send', 'card-draft', 'card-dismiss', 'history', 'seen', 'select', 'statuses', 'commands', 'answer', 'talk-here', 'stop-speaking', 'speak-replies', 'replay', 'personas', 'persona', 'page-focus', 'row-action', 'row-paste', 'row-open', 'row-command', 'row-move', 'pool-action', 'resume', 'prompt', 'prompt-key', 'mic', 'mic-timing', 'composer', 'providers', 'page-conversation', 'console-input', 'page-source', 'page-tabs', 'page-search', 'page-poll', 'page-history', 'page-holder-restart', 'page-adhoc', 'page-folder-conversation', 'pane-pair', 'pane-rect', 'pane-open', 'page-pair', 'page-devices', 'page-device-revoke', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer', 'brief-replies']);
+export const PAGE_COMMANDS = new Set(['held-list', 'held-stop', 'held-open', 'page-new-session', 'page-voice-state', 'page-device-voice', 'open-file', 'viewed', 'send', 'card-draft', 'card-dismiss', 'history', 'seen', 'select', 'statuses', 'commands', 'answer', 'talk-here', 'stop-speaking', 'speak-replies', 'replay', 'personas', 'persona', 'page-focus', 'row-action', 'row-paste', 'row-open', 'row-command', 'row-move', 'pool-action', 'resume', 'prompt', 'prompt-key', 'mic', 'mic-timing', 'composer', 'providers', 'page-conversation', 'console-input', 'page-source', 'page-tabs', 'page-search', 'page-poll', 'page-history', 'page-holder-restart', 'page-adhoc', 'page-folder-conversation', 'pane-pair', 'pane-rect', 'pane-open', 'page-pair', 'page-devices', 'page-device-revoke', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer', 'brief-replies']);
 
 /**
  * The page commands a device that reaches the page through a remote host may not post (architecture.md § Remote access): pairing and the device
  * list, so a paired device cannot pair others or sign this computer out; the Chrome pane's, which works only beside this computer's page;
- * restarting the terminal holder; and Settings' and Brief replies, which change settings.json, which the operator keeps to this computer.
+ * opening a held session's terminal app and restarting the terminal holder; and Settings' and Brief replies, which change settings.json, which the operator keeps to this computer.
  */
-export const LOCAL_PAGE_COMMANDS = new Set(['page-pair', 'page-devices', 'page-device-revoke', 'page-device-voice', 'pane-pair', 'pane-rect', 'pane-open', 'row-open', 'page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer', 'brief-replies']);
+export const LOCAL_PAGE_COMMANDS = new Set(['held-open', 'page-pair', 'page-devices', 'page-device-revoke', 'page-device-voice', 'pane-pair', 'pane-rect', 'pane-open', 'row-open', 'page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer', 'brief-replies']);
 
 /** The page routes only the hub token reaches, which the page's own routes never answer. */
 const HUB_PAGE_ROUTES = new Set(['/page/link', '/page/revoke', '/page/pair', '/page/devices', '/page/voice']);
@@ -1067,7 +1068,9 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
 
     // A command a page posts: from the page's own origin, naming a page key, and only a conversation command.
     const command = path.slice('/v1/conversation/'.length);
-    const handler = options.post?.[path];
+    // Held-session controls share the dock's handlers, behind the page's origin and key checks.
+    const heldRoute = ({ 'held-list': '/holder/list', 'held-stop': '/holder/stop', 'held-open': '/holder/open' } as Record<string, string>)[command];
+    const handler = options.post?.[heldRoute ?? path];
 
     if (request.method !== 'POST' || !PAGE_COMMANDS.has(command) || (handler === undefined && !DEVICE_COMMANDS.has(command))) {
       json(response, 404, { error: 'not found' });

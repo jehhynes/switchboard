@@ -340,16 +340,6 @@ describe('the list header (architecture.md § Web page)', () => {
     expect(reloads).toBe(before + 1);
     expect(root.querySelector('.more-menu')).toBeNull();
 
-    // A dock window the page does not have yet says to use the dock.
-    for (const [action, title] of [['list-later-held', 'Held sessions']]) {
-      click('.more-actions');
-      click(`.more-menu [data-action="${action}"]`);
-      expect(root.querySelector('#list-sheet .sheet-title')?.textContent).toBe(title);
-      expect(root.querySelector('#list-sheet .sheet-detail')?.textContent).toBe(`${title} is not on the web page yet. Use it from the dock.`);
-      click('#list-sheet .sheet-button');
-      expect(root.querySelector('#list-sheet .sheet')).toBeNull();
-    }
-
     click('.more-actions');
     click('.more-menu [data-action="list-log"]');
     expect(root.querySelector('#list-sheet .sheet-title')?.textContent).toBe('Hub log');
@@ -474,6 +464,142 @@ describe('the list header (architecture.md § Web page)', () => {
     // The notes leave with the hub's next list that has none.
     source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header() });
     expect(root.querySelector('.list-note')).toBeNull();
+  });
+
+  it('lists held sessions from both entry points, confirms Stop, refreshes, and shows hub refusals verbatim', async () => {
+    const { page, source } = start(false);
+    const orphan = { session: 'orphan', item: 'No work item', nativeSessionId: '-', cwd: 'D:/scratch/<folder>', state: 'live', idle: '2h 5m', memory: '128 MB', clients: 0, orphan: true, exited: false, terminal: null };
+    const owned = { ...orphan, session: 'owned', item: 'gh 8', nativeSessionId: 'native-8', state: 'idle', clients: 2, orphan: false, terminal: {} };
+    answers['/held-list'] = { status: 200, body: { held: [orphan, owned, { ...owned, session: 'exited', state: 'exited', exited: true }] } };
+    hello(source, { header: header({ heldNote: '1 held session without a work item' }) });
+    click('.more-actions');
+    click('[data-action="list-later-held"]');
+    expect(root.querySelector('.held-sheet')?.textContent).toContain('Loading…');
+    await flush();
+    expect(root.querySelectorAll('.held-row')).toHaveLength(3);
+    expect([...root.querySelectorAll('.held-row dd')].slice(0, 8).map((cell) => cell.textContent)).toEqual(['No work item', 'orphan', '-', 'D:/scratch/<folder>', 'live', '2h 5m', '128 MB', '0']);
+    expect(root.querySelector('.held-row dd[title="D:/scratch/<folder>"]')?.children).toHaveLength(0);
+    expect(root.querySelector<HTMLButtonElement>('[data-action="list-held-open"][data-id="orphan"]')!.disabled).toBe(true);
+    expect(root.querySelector<HTMLButtonElement>('[data-action="list-held-stop"][data-id="exited"]')!.disabled).toBe(true);
+    const open = root.querySelector('[data-action="list-held-open"][data-id="owned"]');
+    answers['/held-open'] = { status: 403, body: { error: 'Do this from the page on the computer that runs Switchboard.' } };
+    click('[data-action="list-held-open"][data-id="owned"]');
+    await flush(); await flush();
+    expect(root.querySelector('.sheet-error')?.textContent).toBe('Do this from the page on the computer that runs Switchboard.');
+    expect(root.querySelector('[data-action="list-held-open"][data-id="owned"]')).toBe(open);
+    expect(posts.find((post) => post.url.endsWith('/held-open'))?.body).toMatchObject({ window: 'pk', id: 'owned' });
+    click('[data-action="list-held-stop"][data-id="orphan"]');
+    expect(root.querySelector('.held-confirm .sheet-title')?.textContent).toBe('Stop held session orphan?');
+    expect(root.querySelector('.held-confirm .sheet-detail')?.textContent).toBe("Session orphan in D:/scratch/<folder>. Its process ends and anything it is doing stops.");
+    expect(document.activeElement?.textContent).toBe('Cancel');
+    click('[data-action="list-held-cancel"]');
+    await flush();
+    expect(posts.some((post) => post.url.endsWith('/held-stop'))).toBe(false);
+    click('[data-action="list-held-stop"][data-id="owned"]');
+    expect(root.querySelector('.held-confirm .sheet-title')?.textContent).toBe('Stop the held session of gh 8?');
+    answers['/held-stop'] = { status: 404, body: { error: 'No held session owned.' } };
+    click('[data-action="list-held-confirm"]');
+    await flush(); await flush();
+    expect(root.querySelector('.sheet-error')?.textContent).toBe('No held session owned.');
+    click('[data-action="list-held-stop"][data-id="orphan"]');
+    answers['/held-stop'] = { status: 200, body: { stopped: 'orphan' } };
+    answers['/held-list'] = { status: 200, body: { held: [] } };
+    click('[data-action="list-held-confirm"]');
+    await flush(); await flush();
+    expect(posts.filter((post) => post.url.endsWith('/held-stop')).map((post) => post.body['id'])).toEqual(['owned', 'orphan']);
+    expect(root.querySelector('.held-sheet')?.textContent).toContain('Stopped held session orphan.');
+    expect(root.querySelector('.held-sheet')?.textContent).toContain('No held sessions. Code Mode sessions appear here while the terminal holder keeps them.');
+    click('#list-sheet .sheet-button.primary');
+    click('.held-note');
+    await flush();
+    expect(root.querySelector('.held-sheet')).not.toBeNull();
+    page.close();
+  });
+
+  it('refreshes held state while open, preserves focus, and ignores answers after closing', async () => {
+    vi.useFakeTimers();
+    const { page, source } = start();
+    const row = { session: 's', item: 'gh 8', nativeSessionId: 'native', cwd: 'D:/w', state: 'running', idle: '0m', memory: '-', clients: 1, orphan: false, exited: false, terminal: {} };
+    answers['/held-list'] = { status: 200, body: { held: [row] } };
+    hello(source);
+    click('.more-actions'); click('[data-action="list-later-held"]');
+    await vi.advanceTimersByTimeAsync(0);
+    const button = root.querySelector<HTMLElement>('[data-action="list-held-stop"]')!;
+    button.focus();
+    answers['/held-list'] = { status: 200, body: { held: [{ ...row, state: 'idle', clients: 0 }] } };
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(root.querySelector('.held-row')?.textContent).toContain('idle');
+    expect(document.activeElement).toBe(button);
+    let refreshDone: () => void = () => {};
+    answers['/held-list'] = { status: 200, body: { held: [row] }, wait: new Promise<void>((resolve) => { refreshDone = resolve; }) };
+    await vi.advanceTimersByTimeAsync(5000);
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+    expect(document.activeElement).toBe(button);
+    refreshDone();
+    await vi.advanceTimersByTimeAsync(0);
+    click('[data-action="list-held-stop"]');
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(root.querySelector('.held-confirm')).not.toBeNull();
+    click('[data-action="list-held-cancel"]');
+    await vi.advanceTimersByTimeAsync(0);
+    let release: () => void = () => {};
+    answers['/held-list'] = { status: 200, body: { held: [] }, wait: new Promise<void>((resolve) => { release = resolve; }) };
+    click('[data-action="list-held-refresh"]');
+    click('#list-sheet .sheet-button.primary');
+    release();
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(root.querySelector('.held-sheet')).toBeNull();
+    page.close();
+  });
+
+  it('drops a list started before Stop and refreshes after that action', async () => {
+    vi.useFakeTimers();
+    const { page, source } = start();
+    const row = { session: 's', item: 'No work item', nativeSessionId: '-', cwd: 'D:/w', state: 'live', idle: '0m', memory: '-', clients: 0, orphan: true, exited: false, terminal: null };
+    answers['/held-list'] = { status: 200, body: { held: [row] } };
+    hello(source, { header: header({ heldNote: '1 held session without a work item' }) });
+    click('.held-note');
+    await vi.advanceTimersByTimeAsync(0);
+    let release: () => void = () => {};
+    answers['/held-list'] = { status: 200, body: { held: [row] }, wait: new Promise<void>((resolve) => { release = resolve; }) };
+    await vi.advanceTimersByTimeAsync(5000);
+    click('[data-action="list-held-stop"]');
+    answers['/held-stop'] = { status: 200, body: { stopped: 's' } };
+    click('[data-action="list-held-confirm"]');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(root.querySelector('.held-sheet')?.textContent).toContain('Stopped held session s.');
+    expect(root.querySelector<HTMLButtonElement>('[data-action="list-held-stop"]')!.disabled).toBe(false);
+    answers['/held-list'] = { status: 200, body: { held: [] } };
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(root.querySelector('.held-row')).toBeNull();
+    expect(root.querySelector('.held-sheet')?.textContent).toContain('No held sessions.');
+    page.close();
+  });
+
+  it('recovers from a list refusal and ignores a closed sheet while a new one loads', async () => {
+    const { page, source } = start();
+    hello(source, { header: header({ heldNote: '1 held session without a work item' }) });
+    answers['/held-list'] = { status: 500, body: { error: 'The holder did not answer.' } };
+    click('.held-note');
+    await flush();
+    expect(root.querySelector('.sheet-error')?.textContent).toBe('The holder did not answer.');
+    answers['/held-list'] = { status: 200, body: { held: [] } };
+    click('[data-action="list-held-refresh"]');
+    await flush();
+    expect(root.querySelector('.sheet-error')).toBeNull();
+    let release: () => void = () => {};
+    answers['/held-list'] = { status: 200, body: { held: [] }, wait: new Promise<void>((resolve) => { release = resolve; }) };
+    click('[data-action="list-held-refresh"]');
+    click('#list-sheet .sheet-button.primary');
+    answers['/held-list'] = { status: 403, body: { error: 'Remote access no longer allows this device.' } };
+    click('.held-note');
+    await flush();
+    expect(root.querySelector('.sheet-error')?.textContent).toBe('Remote access no longer allows this device.');
+    release();
+    await flush();
+    expect(root.querySelector('.sheet-error')?.textContent).toBe('Remote access no longer allows this device.');
+    page.close();
   });
 
   it('shows the note for a lost phone after the warning notes, as an untoned voice note, and nothing while the voice is off by choice (PRD R119)', () => {

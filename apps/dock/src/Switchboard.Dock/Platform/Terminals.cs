@@ -32,7 +32,8 @@ public static class Terminals
 
         foreach (var argument in options.Append(executable).Concat(terminal.Args))
         {
-            start.ArgumentList.Add(argument);
+            // wt splits every argument at unescaped semicolons, even without a shell.
+            start.ArgumentList.Add(app == "wt.exe" ? argument.Replace(";", "\\;", StringComparison.Ordinal) : argument);
         }
 
         start.Environment.Clear();

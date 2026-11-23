@@ -1414,14 +1414,17 @@ describe('createHubApp', () => {
     const record = { protocol: 1, version: 't', build: 'b', configDir: 'C:/cfg', execPath: '', port: server.port, token: server.token, pid: 1, startedAt: '' };
 
     expect(await postToHub({ ...record, token: 'wrong' }, '/holder/list', {}, 5000)).toMatchObject({ status: 401 });
-    expect(await postToHub(record, '/holder/list', {}, 5000)).toEqual({ status: 200, error: null, body: { sessions: [expect.objectContaining({ session: 'orphan-1', key: 'adhoc 9', nativeSessionId: '9273f594-1111', state: 'live', orphan: true })], holder: connection.welcome, installed: 'cccccccccccccccc' } });
+    expect(await postToHub(record, '/holder/list', {}, 5000)).toEqual({ status: 200, error: null, body: { held: [expect.objectContaining({ item: 'No work item', session: 'orphan-1', state: 'live', terminal: null, exited: false })], sessions: [expect.objectContaining({ session: 'orphan-1', key: 'adhoc 9', nativeSessionId: '9273f594-1111', state: 'live', orphan: true })], holder: connection.welcome, installed: 'cccccccccccccccc' } });
     expect(await postToHub({ ...record, token: 'wrong' }, '/holder/stop', { id: 'orphan-1' }, 5000)).toMatchObject({ status: 401 });
     expect(await postToHub(record, '/holder/stop', { id: '' }, 5000)).toMatchObject({ status: 400, error: 'Expected {id}.' });
     expect(await postToHub(record, '/holder/stop', { id: 'nope' }, 5000)).toMatchObject({ status: 404, error: 'No held session nope.' });
+    expect(await postToHub(record, '/holder/open', {}, 5000)).toMatchObject({ status: 400, error: 'Expected {id}.' });
+    expect(await postToHub(record, '/holder/open', { id: 'missing' }, 5000)).toMatchObject({ status: 404, error: 'No held session missing.' });
+    expect(await postToHub(record, '/holder/open', { id: 'orphan-1' }, 5000)).toMatchObject({ status: 409, error: 'This held session has no terminal to open.' });
     expect(kills).toEqual([]);
     expect(await postToHub(record, '/holder/stop', { id: '9273f594' }, 5000)).toEqual({ status: 200, error: null, body: { stopped: 'orphan-1' } });
     expect(kills).toEqual(['orphan-1']);
-    expect(await postToHub(record, '/holder/list', {}, 5000)).toEqual({ status: 200, error: null, body: { sessions: [], holder: connection.welcome, installed: 'cccccccccccccccc' } });
+    expect(await postToHub(record, '/holder/list', {}, 5000)).toEqual({ status: 200, error: null, body: { held: [], sessions: [], holder: connection.welcome, installed: 'cccccccccccccccc' } });
     // The holder's build b is not the installed one, so a restart starts; it ends the holder, whose installed build is incomplete here.
     expect(await postToHub({ ...record, token: 'wrong' }, '/holder/restart', {}, 5000)).toMatchObject({ status: 401 });
     // A confirmation the view no longer asks is refused, so no session is interrupted unnamed.
@@ -1451,7 +1454,9 @@ describe('createHubApp', () => {
 
     writeFileSync(join(temp.home, '.switchboard', 'holder.json'), JSON.stringify({ protocol: 1, build: 'b', port: 4100, token: 'holder-token', pid: 4243, startedAt: '2026-11-18T00:00:00.000Z' }));
     const node: Exec = async (file, args, options) => noCli(file === '/opt/node/bin/node' ? 'node' : file, args, options);
-    const app = await createHubApp({ home: temp.home, log: (line) => logs.push(line), deps: { exec: node, holder: { connect: async () => connection, lockHeld: async () => true } } });
+    const terminals: unknown[] = [];
+    let terminalError: string | null = null;
+    const app = await createHubApp({ home: temp.home, log: (line) => logs.push(line), launch: { openCode: () => { throw new Error('must not open VS Code'); }, openUrl: () => { throw new Error('must not open a URL'); }, openTerminal: (terminal) => { if (terminalError !== null) throw new Error(terminalError); terminals.push(terminal); } }, deps: { exec: node, holder: { connect: async () => connection, lockHeld: async () => true } } });
     closers.push(() => app.close());
     app.runtime.send({ type: 'adhoc', prompt: 'held', repoRoot: 'D:/scratch', start: false });
     app.runtime['deps'].store.insertSession({
@@ -1488,6 +1493,12 @@ describe('createHubApp', () => {
 
     expect(view.groups.flatMap((group) => group.rows)[0]?.terminal).toMatchObject(run);
     expect(view.held?.[0]?.terminal).toMatchObject(run);
+    expect(await app.post['/holder/open']!({ id: 'held-1', cwd: 'D:/forged', args: ['forged'] })).toEqual({ status: 200, body: { opening: true } });
+    expect(terminals).toEqual([expect.objectContaining({ sessionId: 'held-1', cwd: 'D:/scratch', codeMode: true, ...run })]);
+    expect((await app.post['/claim']!({ folder: 'D:/scratch', window })).body).toMatchObject({ commands: [] });
+    terminalError = 'Windows Terminal is unavailable.';
+    expect(await app.post['/holder/open']!({ id: 'held-1' })).toEqual({ status: 409, body: { error: 'The terminal did not start: Windows Terminal is unavailable.' } });
+    expect(terminals).toHaveLength(1);
   });
 
   it('turns a claimed open of an ended registered session into its attach terminal, which resumes it in the holder (PRD R81)', async () => {

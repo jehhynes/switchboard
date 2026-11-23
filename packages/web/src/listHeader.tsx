@@ -7,6 +7,13 @@ import type { PhoneVoiceState } from './phoneVoice.js';
 
 type Answer = { status: number; body: Record<string, unknown> };
 
+/** A session in the hub's dock view (PRD R94). */
+export interface HeldRow {
+  session: string; item: string; nativeSessionId: string; cwd: string; state: string;
+  idle: string; memory: string; clients: number; orphan: boolean; exited: boolean;
+  terminal: object | null;
+}
+
 export interface ListHeaderDeps {
   fetch?: typeof fetch;
   /** Posts a page command with the page key, as the page's other commands do. */
@@ -201,6 +208,7 @@ export type HeaderSheet =
   | { kind: 'folder'; opId: string; folder: string; provider: string; providerChosen: boolean; installed: string[] | null; busy: boolean; error: string | null }
   | { kind: 'later'; title: string }
   | { kind: 'log' }
+  | { kind: 'held'; rows: HeldRow[] | null; busy: boolean; refreshing: boolean; listError: string | null; error: string | null; result: string | null; stopping: HeldRow | null }
   | { kind: 'extension'; remote: boolean }
   | { kind: 'holder'; busy: boolean; error: string | null }
   | { kind: 'devices'; pairing: Pairing | null; devices: Device[] | null; busy: boolean; error: string | null };
@@ -472,7 +480,7 @@ export function renderMoreMenu(header: PageHeader | null, local = false, phoneVo
 }
 
 /** The dock windows More Actions opens that the page does not have yet, by their row's action. */
-export const LATER: Record<string, string> = { 'list-later-held': 'Held sessions' };
+export const LATER: Record<string, string> = {};
 
 /** A QR code of `text` as an SVG of dark modules on a light square with a quiet zone of 4 modules, which phone cameras read in either theme. */
 export function QrCode({ text }: { text: string }) {
@@ -602,11 +610,11 @@ function Select({ label, field, items, chosen, after }: { label: string; field: 
   );
 }
 
-/** The frame every sheet of the header has: its title, its body and its buttons, over a backdrop that cancels it. */
-function Frame({ title, children, buttons, wide = false }: { title: string; children: ComponentChildren; buttons: ComponentChildren; wide?: boolean }) {
+/** The frame every sheet of the header has: its title, its body and its buttons, over a backdrop that cancels it; `wide` names a wide sheet's class. */
+function Frame({ title, children, buttons, wide }: { title: string; children: ComponentChildren; buttons: ComponentChildren; wide?: 'hub-log-sheet' | 'held-sheet' }) {
   return (
     <div class="sheet-backdrop" data-action="list-sheet-cancel">
-      <div class={`sheet glass${wide ? ' hub-log-sheet' : ''}`} role="dialog" aria-modal="true" aria-labelledby="list-sheet-title">
+      <div class={`sheet glass${wide === undefined ? '' : ` ${wide}`}`} role="dialog" aria-modal="true" aria-labelledby="list-sheet-title">
         <h2 id="list-sheet-title" class="sheet-title">
           {title}
         </h2>
@@ -615,6 +623,30 @@ function Frame({ title, children, buttons, wide = false }: { title: string; chil
       </div>
     </div>
   );
+}
+
+function HeldSheet({ sheet }: { sheet: Extract<HeaderSheet, { kind: 'held' }> }) {
+  const stopping = sheet.stopping;
+  return <Frame title="Held sessions" wide="held-sheet" buttons={<>
+    <button type="button" class="sheet-button secondary" data-action="list-held-refresh" disabled={sheet.busy}>Refresh</button>
+    <button type="button" class="sheet-button primary" data-action="list-sheet-cancel">Close</button>
+  </>}>
+    <p class="sheet-detail">Code Mode sessions the terminal holder keeps alive, with or without a work item. Stop ends a session's process.</p>
+    {sheet.error === null ? null : <p class="sheet-error" role="alert">{sheet.error}</p>}
+    {sheet.listError === null ? null : <p class="sheet-error" role="alert">{sheet.listError}</p>}
+    {sheet.result === null ? null : <p role="status">{sheet.result}</p>}
+    {stopping === null ? null : <div class="held-confirm" role="group" aria-label="Confirm Stop">
+      <h3 class="sheet-title">{stopping.orphan ? `Stop held session ${stopping.session}?` : `Stop the held session of ${stopping.item}?`}</h3>
+      <p class="sheet-detail">{`Session ${stopping.session} in ${stopping.cwd}. Its process ends and anything it is doing stops.`}</p>
+      <div class="sheet-buttons"><button type="button" class="sheet-button secondary" data-action="list-held-cancel" disabled={sheet.busy}>Cancel</button><button type="button" class="sheet-button primary" data-action="list-held-confirm" disabled={sheet.busy}>Stop</button></div>
+    </div>}
+    {sheet.rows === null ? (sheet.listError === null ? <p class="sheet-detail" role="status">Loading…</p> : null) : sheet.rows.length === 0 ? <p class="sheet-detail">No held sessions. Code Mode sessions appear here while the terminal holder keeps them.</p> : <div class="held-rows">
+      {sheet.rows.map((row) => <section class="held-row" key={row.session} aria-label={`${row.item}: ${row.session}`}>
+        <dl>{[['Work item', row.item], ['Switchboard ID', row.session], ['Claude ID', row.nativeSessionId], ['Folder', row.cwd], ['State', row.state], ['Idle', row.idle], ['Memory', row.memory], ['Terminals', String(row.clients)]].map(([label, value]) => <div key={label}><dt>{label}</dt><dd title={value}>{value}</dd></div>)}</dl>
+        <div class="sheet-buttons"><button type="button" class="sheet-button secondary" data-action="list-held-open" data-id={row.session} disabled={sheet.busy || row.terminal === null}>Open in terminal</button><button type="button" class="sheet-button secondary" data-action="list-held-stop" data-id={row.session} disabled={sheet.busy || row.exited}>Stop</button></div>
+      </section>)}
+    </div>}
+  </Frame>;
 }
 
 /** Where the page downloads the browser extension (PRD R121); the hub's `EXTENSION_DOWNLOAD`. */
@@ -672,8 +704,9 @@ export function renderHeaderSheet(sheet: HeaderSheet | null, header: PageHeader 
   }
 
   if (sheet.kind === 'log') {
-    return <Frame title="Hub log" wide buttons={<button type="button" class="sheet-button primary" data-action="list-sheet-cancel">Close</button>}><HubLog fetch={read} /></Frame>;
+    return <Frame title="Hub log" wide="hub-log-sheet" buttons={<button type="button" class="sheet-button primary" data-action="list-sheet-cancel">Close</button>}><HubLog fetch={read} /></Frame>;
   }
+  if (sheet.kind === 'held') return <HeldSheet sheet={sheet} />;
 
   if (sheet.kind === 'extension') {
     return <ExtensionSheet remote={sheet.remote} />;
@@ -1148,11 +1181,50 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
     redraw();
   };
   const revokeDevice = (id: string): Promise<void> => changeDevice('page-device-revoke', { id }, 'The device was not signed out.');
+  let heldTimer: ReturnType<typeof setTimeout> | null = null;
+  let heldRead = 0;
+  const refreshHeld = async (sheet: Extract<HeaderSheet, { kind: 'held' }>): Promise<void> => {
+    if (sheet.busy || sheet.refreshing || view.sheet !== sheet) return;
+    if (heldTimer !== null) clearTimeout(heldTimer);
+    sheet.refreshing = true;
+    const read = ++heldRead;
+    const answer = await deps.post('held-list', {});
+    sheet.refreshing = false;
+    if (view.sheet !== sheet) return;
+    if (read !== heldRead) {
+      void refreshHeld(sheet);
+      return;
+    }
+    if (answer.status === 200) {
+      sheet.rows = (answer.body['held'] as HeldRow[] | undefined) ?? [];
+      sheet.listError = null;
+    } else sheet.listError = String(answer.body['error'] ?? 'Held sessions could not be listed.');
+    redraw();
+    heldTimer = setTimeout(() => { if (sheet.stopping === null) void refreshHeld(sheet); }, 5000);
+  };
+  const heldAction = async (command: 'held-stop' | 'held-open', id: string): Promise<void> => {
+    const sheet = view.sheet;
+    if (sheet?.kind !== 'held' || sheet.busy) return;
+    heldRead++;
+    sheet.busy = true;
+    sheet.error = null;
+    sheet.result = null;
+    redraw();
+    const answer = await deps.post(command, { id });
+    if (view.sheet !== sheet) return;
+    sheet.busy = false;
+    if (answer.status !== 200) sheet.error = String(answer.body['error'] ?? 'Switchboard did not answer.');
+    else sheet.result = command === 'held-stop' ? `Stopped held session ${id}.` : 'Opening terminal…';
+    sheet.stopping = null;
+    redraw();
+    await refreshHeld(sheet);
+  };
   const closeSheet = (): void => {
-    if (view.sheet !== null && view.sheet.kind !== 'log' && view.sheet.kind !== 'later' && view.sheet.kind !== 'extension' && view.sheet.kind !== 'devices' && view.sheet.busy) {
+    if (view.sheet !== null && view.sheet.kind !== 'log' && view.sheet.kind !== 'later' && view.sheet.kind !== 'extension' && view.sheet.kind !== 'devices' && view.sheet.kind !== 'held' && view.sheet.busy) {
       return;
     }
 
+    if (heldTimer !== null) clearTimeout(heldTimer);
     view.sheet = null;
     redraw();
     host.querySelector<HTMLElement>('.more-actions')?.focus();
@@ -1161,7 +1233,7 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
   const sheetGo = async (): Promise<void> => {
     const sheet = view.sheet;
 
-    if (sheet === null || sheet.kind === 'log' || sheet.kind === 'later' || sheet.kind === 'extension' || sheet.busy) {
+    if (sheet === null || sheet.kind === 'log' || sheet.kind === 'later' || sheet.kind === 'extension' || sheet.kind === 'held' || sheet.busy) {
       return;
     }
 
@@ -1213,7 +1285,7 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
     const name = field.dataset?.['field'];
     const sheet = view.sheet;
 
-    if (name === undefined || sheet === null || sheet.kind === 'log' || sheet.kind === 'later' || sheet.kind === 'extension' || sheet.kind === 'holder' || sheet.kind === 'devices') {
+    if (name === undefined || sheet === null || sheet.kind === 'log' || sheet.kind === 'later' || sheet.kind === 'extension' || sheet.kind === 'holder' || sheet.kind === 'devices' || sheet.kind === 'held') {
       return;
     }
 
@@ -1234,7 +1306,19 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
     const target = event.target as HTMLElement;
     const button = target.closest<HTMLElement>('[data-action]');
 
-    if (button?.dataset['action'] === 'list-sheet-go') {
+    const action = button?.dataset['action'];
+    const held = view.sheet?.kind === 'held' ? view.sheet : null;
+    if (held !== null && action?.startsWith('list-held-')) {
+      if (action === 'list-held-refresh') { held.error = null; void refreshHeld(held); }
+      else if (action === 'list-held-open') void heldAction('held-open', button!.dataset['id'] ?? '');
+      else if (action === 'list-held-confirm' && held.stopping !== null) void heldAction('held-stop', held.stopping.session);
+      else if (action === 'list-held-cancel') { held.stopping = null; void refreshHeld(held); }
+      else if (action === 'list-held-stop' && !held.busy) {
+        held.stopping = held.rows?.find((row) => row.session === button!.dataset['id'] && !row.exited) ?? null;
+        redraw();
+        sheetHost.querySelector<HTMLElement>('[data-action="list-held-cancel"]')?.focus();
+      }
+    } else if (button?.dataset['action'] === 'list-sheet-go') {
       void sheetGo();
     } else if (button?.dataset['action'] === 'list-device-revoke') {
       void revokeDevice(button.dataset['id'] ?? '');
@@ -1355,6 +1439,15 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
         redraw();
         sheetHost.querySelector<HTMLElement>('input')?.focus();
         break;
+      case 'list-later-held': {
+        view.menu = null;
+        const sheet: Extract<HeaderSheet, { kind: 'held' }> = { kind: 'held', rows: null, busy: false, refreshing: false, listError: null, error: null, result: null, stopping: null };
+        view.sheet = sheet;
+        redraw();
+        void refreshHeld(sheet);
+        sheetHost.querySelector<HTMLElement>('[data-action="list-sheet-cancel"].sheet-button')?.focus();
+        break;
+      }
       case 'list-settings':
         view.menu = null;
         redraw();
@@ -1468,6 +1561,8 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
     close: () => {
       mount(sheetHost, null);
       cancelTimer();
+      if (heldTimer !== null) clearTimeout(heldTimer);
+      view.sheet = null;
       document.removeEventListener('pointerdown', outside);
     },
   };

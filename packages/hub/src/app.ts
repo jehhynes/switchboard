@@ -1193,7 +1193,23 @@ const dockWithRuns = () => {
         return 'refused' in result ? { status: result.status, body: { error: result.refused } } : { status: 200, body: result };
       },
       // hub.js holder list and stop (PRD R94).
-      '/holder/list': async () => ({ status: 200, body: { sessions: await runtime.listHeld(), holder: runtime.heldHolder(), installed: runtime.holderInstalled() } }),
+      '/holder/list': async () => ({ status: 200, body: { sessions: await runtime.listHeld(), holder: runtime.heldHolder(), installed: runtime.holderInstalled(), held: builder.buildNow().dock.held ?? [] } }),
+      '/holder/open': async (body) => {
+        if (!isRecord(body) || typeof body['id'] !== 'string' || body['id'] === '') {
+          return { status: 400, body: { error: 'Expected {id}.' } };
+        }
+        await runtime.listHeld();
+        const held = builder.buildNow().dock.held?.find((one) => one.session === body['id']);
+        if (held === undefined) return { status: 404, body: { error: `No held session ${body['id']}.` } };
+        if (held.terminal === null) return { status: 409, body: { error: 'This held session has no terminal to open.' } };
+        if (launch.openTerminal === undefined) return { status: 409, body: { error: 'This hub cannot open the terminal app.' } };
+        try {
+          await launch.openTerminal({ ...held.terminal, ...terminalRun(held.terminal) });
+          return { status: 200, body: { opening: true } };
+        } catch (error) {
+          return { status: 409, body: { error: `The terminal did not start: ${(error as Error).message}` } };
+        }
+      },
       '/holder/stop': async (body) => {
         if (!isRecord(body) || typeof body['id'] !== 'string' || body['id'] === '') {
           return { status: 400, body: { error: 'Expected {id}.' } };
