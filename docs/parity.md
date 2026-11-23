@@ -189,8 +189,8 @@ The dock's Settings window (PRD R54, [architecture.md § Settings window](archit
 | # | Behaviour | Web | Note |
 |---|---|---|---|
 | N1 | "Connecting to Switchboard…" until the first view | Partly | Shown in the conversation pane, not over the list |
-| N2 | Without the hub the last rows stay, dimmed to half and disabled; a row menu closes | Partly | The last rows stay but are not dimmed; the page reconnects and reloads by itself, and shows an offline page when the hub is down at load |
-| N3 | "Switchboard is not running…" with Start hub | Partly | The hub serves the page (decision 20), so the offline page's Start Switchboard opens the `switchboard:` link that `hub.js autostart on` registers, which starts the hub (PRD R117); with no link registered it does nothing, and the page names the command |
+| N2 | Without the hub the last rows stay, dimmed to half and disabled; a row menu closes | Partly | After a 4 s grace period the last rows and the conversation dim under an Offline banner and sending is off, but a row menu stays; the page reconnects in place without reloading, and shows Can't reach Switchboard in its own shell when the hub is down at load (PRD R123) |
+| N3 | "Switchboard is not running…" with Start hub | Partly | The hub serves the page (decision 20), so the Can't reach Switchboard screen's Start Switchboard, on this computer's page only, opens the `switchboard:` link that `hub.js autostart on` registers, which starts the hub (PRD R117); with no link registered it does nothing, and the page no longer names the command |
 | N4 | An expired sign-in says how to get a new link | Web only | |
 
 ## Keyboard, focus and tooltips

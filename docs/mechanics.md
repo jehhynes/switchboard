@@ -1662,3 +1662,15 @@ Current use: the console's resync after each fit ([architecture.md](architecture
 - **Result:** `model/list` takes optional `modelProvider`, `cursor`, `limit` and `includeHidden`, and answers `{data: Model[], nextCursor: string | null}`. A `Model` carries `id`, `model`, `displayName`, `description`, `hidden` (models left out of the default picker), `isDefault`, and its reasoning efforts and service tiers.
 - **Not verified:** a live answer's contents for the operator's account, and which of `id` and `model` `thread/start` takes when they differ; the hub sends `model`.
 - **Current use:** the New session form's Model list for Codex, asked once per hub start, without hidden models, falling back to `sessions.codex.model` alone when the request fails (PRD R122).
+
+## M137. Chrome and the web page offline: a 502 page load, hung requests and a resent POST, 2026-11-22
+
+- **Versions:** Google Chrome 158.0.8127.36, headless (`--headless=new`), on Windows 11 Pro 10.0.26300; the web page on the offline-p1 branch and at 2c0fc675 before it; Node.js v24.14.0.
+- **Method:** `packages/web/check-offline.mjs` against its own fake hub on a loopback port, which answers 502 with an empty body as `tailscale serve` does for a stopped hub (the plan's reproduction of that answer, not re-run against `tailscale serve` here), never answers, or destroys a connection after reading a request; the page at iPhone size through the DevTools protocol.
+- **Result:**
+  - A page load the network answers 502 shows Chrome's own "HTTP ERROR 502" page when the service worker passes the answer through (2c0fc675), and the page when the worker answers from Cache Storage instead; the page then runs from its kept script and stylesheets.
+  - Requests a server never answers each keep one of Chrome's connections to the host open; after a hanging hub, the page's next requests to the same host stalled until the fake hub closed those sockets, so a page whose requests have no time limit can stop itself with its own hung requests.
+  - When the server read a `POST` and destroyed the connection without answering, Chrome sent the same `POST` again by itself, with the same body, before the page's script saw an error: at 2c0fc675, whose page never retries a send, the fake hub got the send twice with one `opId`.
+  - An `EventSource` whose connection is refused reconnects by itself and keeps the page; through a 502 it does not (the plan's finding), which is why the page owns its reconnect.
+- **Not verified:** Safari and iOS, whose service worker and connection limits may differ; a real `tailscale serve` and cellular network.
+- **Current use:** the app shell's 3 s navigation race that treats 502, 503 and 504 as no answer, the time limit on every page request, and the `opId` a send keeps across tries (architecture.md § Web page, App shell, Requests in time).

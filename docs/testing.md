@@ -13,6 +13,7 @@ Use automated checks for behavior and integration, and visual inspection for pre
 | Runner, source fetch or report path | Also [live acceptance](#live-acceptance) |
 | The web page console's layout: `console.ts`, its rules in `page.css`, or an xterm.js upgrade | Also `npm run build`, then `npm run check:console --workspace @switchboard/web` |
 | The web page's shell on a phone: the page's height, safe areas, top bars, scrollers, overscroll or touch-action in `page.css` or `settings.css`, or the layout of a list row's line 2 | Also `npm run build`, then `npm run check:shell --workspace @switchboard/web` |
+| The web page's connection, requests, opening a work item, service worker, boot screen or route: `connection.ts`, `request.ts`, `opening.tsx`, `sw.ts`, `boot.js`, `index.html` or `route.ts` | Also `npm run build`, then `npm run check:offline --workspace @switchboard/web`, which drives the page in a headless Chrome or Edge against its own fake hub on a loopback port, with faults, latency and restarts, never a running hub; `--shots <dir>` saves a screenshot of each scenario and `--assets` runs another build |
 | A behaviour listed in [parity.md](parity.md) | The same change on the dock and the web page, or a Differs row the operator approved or decided, and parity.md updated in the same commit ([AGENTS.md](../AGENTS.md#dock-and-web-parity)) |
 | Markdown only | Accuracy, links, and consistency across documents |
 
