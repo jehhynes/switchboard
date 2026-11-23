@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, realpathSync, statSync, watch } from 'node:fs';
-import type { FSWatcher } from 'node:fs';
-import { extname, isAbsolute, join, relative, sep } from 'node:path';
+import type { Dirent, FSWatcher } from 'node:fs';
+import { basename, dirname, extname, isAbsolute, join, relative, sep } from 'node:path';
 
 /** How the extension opens an artifact (architecture.md § Artifacts): by its file's extension. */
 export type ArtifactType = 'markdown' | 'html' | 'image' | 'audio' | 'video' | 'file';
@@ -17,6 +17,8 @@ export interface Artifact {
   ext: string;
   type: ArtifactType;
   updatedAt: number;
+  /** For a file outside the artifact folder that an artifact tag named (`ExternalArtifacts`), its real path with forward slashes. */
+  file?: string;
 }
 
 /** A folder segment or file name: no segment starts with a dot, so neither `..` nor a dotfile such as `.gitignore` is an artifact. */
@@ -360,6 +362,294 @@ export class ArtifactFolder {
     if (!this.#quiet) {
       this.deps.log(`artifact changed: ${artifact.path}`);
       this.deps.onChange({ artifact });
+    }
+  }
+}
+
+
+/** A file outside the artifact folder that a reply's artifact tag named (architecture.md § Artifacts), as the store keeps it: `path` is its real path. */
+export interface ExternalEntry {
+  id: number;
+  path: string;
+  title: string | null;
+  kind: string | null;
+}
+
+/** The owner an external artifact shows. */
+export const EXTERNAL_OWNER = 'external';
+
+/**
+ * An external artifact's name, `@<id>/<file name>`, which a file it uses extends, as `@<id>/<stem>/a.png`. No owner folder starts with `@`,
+ * so it never names an artifact of the folder.
+ */
+export const externalName = (entry: ExternalEntry): string => `@${entry.id}/${basename(entry.path)}`;
+
+/** An external artifact's name or the name of a file it uses: the store's ID, and the rest. */
+export const EXTERNAL_NAME = /^@(\d{1,15})\/(.+)$/;
+
+/** Whether a real path lies in or is a `.git` folder, which is never read. */
+export const inGit = (real: string): boolean => real.split(/[\\/]/).some((part) => part.toLowerCase() === '.git');
+
+/**
+ * The real path of a file an external artifact uses: `rest` is the artifact's own file name, or a path under the folder beside it named
+ * after its stem (`<stem>/...`), as in the artifact folder. Null for any other path, a dot segment, a link out of that folder, or a `.git` path.
+ */
+export function externalFile(entry: ExternalEntry, rest: string): string | null {
+  const parts = rest.split('/');
+  const name = basename(entry.path);
+
+  if (parts.some((part) => part === '' || part.startsWith('.') || part.includes('\\'))) {
+    return null;
+  }
+
+  if (parts.length === 1) {
+    return parts[0] === name ? entry.path : null;
+  }
+
+  const stem = name.replace(/\.[^.]+$/, '');
+
+  if (parts[0] !== stem) {
+    return null;
+  }
+
+  // Resolved inside the file's own folder, so a link or junction at `<stem>` leads nowhere else.
+  const real = realInside(dirname(entry.path), parts.join('/'));
+
+  return real === null || inGit(real) || relative(join(dirname(entry.path), stem), real).startsWith('..') ? null : real;
+}
+
+/** The most files and folders of an external artifact's `<stem>/` folder read for its version; a change past them shows only with the artifact's own. */
+const USES_MAX = 500;
+
+/** The names, times and sizes of the files an external artifact uses, in its `<stem>/` folder, so a change to one is a new version. */
+function usesStamp(entry: ExternalEntry): string {
+  // Only a folder in the file's own folder by real path, never one a link or junction leads elsewhere.
+  const root = realInside(dirname(entry.path), basename(entry.path).replace(/\.[^.]+$/, ''));
+  const seen: string[] = [];
+  let visited = 0;
+
+  if (root === null) {
+    return '';
+  }
+
+  const walk = (dir: string): void => {
+    let names: Dirent[];
+
+    try {
+      names = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const one of names) {
+      if (++visited > USES_MAX || one.name.startsWith('.')) {
+        continue;
+      }
+
+      const path = join(dir, one.name);
+
+      if (one.isDirectory()) {
+        walk(path);
+      } else if (one.isFile()) {
+        try {
+          const stat = statSync(path);
+
+          seen.push(`${relative(root, path)}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}`);
+        } catch {
+          // A file gone since its folder was read counts for nothing.
+        }
+      }
+    }
+  };
+
+  walk(root);
+
+  return seen.join('|');
+}
+
+export interface ExternalArtifactsDeps {
+  onChange(change: { artifact: Artifact } | { path: string; removed: true }): void;
+  now(): number;
+  log(line: string): void;
+  /** How often every file is read again, for a change its folder's watch missed; two seconds by default. */
+  pollMs?: number;
+  /** How long a file's changes settle before it is read; 150 ms by default. */
+  settleMs?: number;
+}
+
+/**
+ * A work item's external artifacts (architecture.md § Artifacts): the files its sessions' artifact tags named, each listed while it is a file
+ * at the real path it was named by, with its type by extension, its kind and title from the tag, else as an artifact of the folder, and its
+ * time from the file's. Each file's folder is watched, and every file read again every `pollMs`, so a folder that cannot be watched or
+ * comes back still updates.
+ */
+export class ExternalArtifacts {
+  readonly #items = new Map<number, Artifact & { stamp: string }>();
+  #entries = new Map<number, ExternalEntry>();
+  readonly #watchers = new Map<string, FSWatcher>();
+  readonly #timers = new Map<number, NodeJS.Timeout>();
+  readonly #poll: NodeJS.Timeout;
+  #closed = false;
+  #quiet = true;
+
+  constructor(entries: ExternalEntry[], private readonly deps: ExternalArtifactsDeps) {
+    this.set(entries);
+    this.#quiet = false;
+    this.#poll = setInterval(() => this.#entries.forEach((entry) => this.#scan(entry)), deps.pollMs ?? 2_000);
+    this.#poll.unref();
+  }
+
+  /** The work item's entries now, as the store lists them: new ones are read, and ones no longer listed removed. */
+  set(entries: ExternalEntry[]): void {
+    const next = new Map(entries.map((entry) => [entry.id, entry]));
+
+    for (const id of [...this.#entries.keys()].filter((one) => !next.has(one))) {
+      this.#remove(id);
+    }
+
+    this.#entries = next;
+    next.forEach((entry) => this.#scan(entry));
+    this.#follow();
+  }
+
+  /** The external artifacts, newest first. */
+  list(): Artifact[] {
+    return [...this.#items.values()].map(({ stamp: _stamp, ...artifact }) => artifact).sort((a, b) => b.updatedAt - a.updatedAt || a.path.localeCompare(b.path));
+  }
+
+  /** An entry by its ID, while it is listed. */
+  entry(id: number): ExternalEntry | null {
+    return this.#items.has(id) ? (this.#entries.get(id) ?? null) : null;
+  }
+
+  close(): void {
+    this.#closed = true;
+    clearInterval(this.#poll);
+    this.#watchers.forEach((watcher) => watcher.close());
+    this.#watchers.clear();
+    this.#timers.forEach((timer) => clearTimeout(timer));
+    this.#timers.clear();
+  }
+
+  /** Watches the folder of each entry's file, and stops watching folders no entry is in. */
+  #follow(): void {
+    const dirs = new Set([...this.#entries.values()].map((entry) => dirname(entry.path)));
+
+    for (const [dir, watcher] of this.#watchers) {
+      if (!dirs.has(dir)) {
+        watcher.close();
+        this.#watchers.delete(dir);
+      }
+    }
+
+    for (const dir of dirs) {
+      if (this.#watchers.has(dir)) {
+        continue;
+      }
+
+      try {
+        const watcher = watch(dir, (_event, name) => this.#event(dir, name?.toString() ?? null));
+
+        watcher.on('error', () => {
+          watcher.close();
+          this.#watchers.delete(dir);
+        });
+        watcher.unref();
+        this.#watchers.set(dir, watcher);
+      } catch {
+        // A folder that cannot be watched is still read every `pollMs`.
+      }
+    }
+  }
+
+  #event(dir: string, name: string | null): void {
+    for (const entry of this.#entries.values()) {
+      const file = basename(entry.path);
+
+      if (dirname(entry.path) === dir && (name === null || name === file || name === file.replace(/\.[^.]+$/, ''))) {
+        clearTimeout(this.#timers.get(entry.id));
+        this.#timers.set(
+          entry.id,
+          setTimeout(() => {
+            this.#timers.delete(entry.id);
+
+            if (!this.#closed && this.#entries.get(entry.id) === entry) {
+              this.#scan(entry);
+            }
+          }, this.deps.settleMs ?? 150),
+        );
+      }
+    }
+  }
+
+  #remove(id: number): void {
+    const known = this.#items.get(id);
+
+    if (known !== undefined) {
+      this.#items.delete(id);
+      this.deps.onChange({ path: known.path, removed: true });
+    }
+  }
+
+  /** Reads one entry: listed while it is a file at the real path it was named by, outside any `.git` folder; removed otherwise. */
+  #scan(entry: ExternalEntry): void {
+    let stat;
+
+    try {
+      stat = !inGit(entry.path) && realpathSync.native(entry.path) === entry.path ? statSync(entry.path) : null;
+    } catch {
+      stat = null;
+    }
+
+    if (stat === null || !stat.isFile()) {
+      this.#remove(entry.id);
+      return;
+    }
+
+    const known = this.#items.get(entry.id);
+    const stamp = `${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}:${entry.title}:${entry.kind}:${usesStamp(entry)}`;
+
+    if (known?.stamp === stamp) {
+      return;
+    }
+
+    const name = basename(entry.path);
+    const type = artifactType(name);
+    let text = '';
+
+    if ((type === 'markdown' || type === 'html') && stat.size < TITLE_READ_BYTES) {
+      try {
+        text = readFileSync(entry.path, 'utf8');
+      } catch {
+        return;
+      }
+    }
+
+    const read = parseArtifact(text, `${EXTERNAL_OWNER}/${name}`);
+    const artifact = {
+      path: externalName(entry),
+      owner: EXTERNAL_OWNER,
+      kind: entry.kind ?? read.kind,
+      title: entry.title ?? read.title,
+      ext: extname(name).slice(1).toLowerCase(),
+      type,
+      updatedAt: Math.max(stat.mtimeMs, known?.updatedAt ?? 0),
+      file: entry.path.split(sep).join('/'),
+      stamp,
+    };
+
+    // A rewrite that kept the file's time, or a change to a file it uses, is still a newer version.
+    if (known !== undefined && artifact.updatedAt === known.updatedAt) {
+      artifact.updatedAt = Math.max(this.deps.now(), known.updatedAt + 1);
+    }
+
+    this.#items.set(entry.id, artifact);
+
+    if (!this.#quiet) {
+      const { stamp: _stamp, ...view } = artifact;
+
+      this.deps.log(`artifact changed: ${entry.path}`);
+      this.deps.onChange({ artifact: view });
     }
   }
 }

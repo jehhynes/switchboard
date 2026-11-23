@@ -646,6 +646,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     adapters: changed => [new CodexConversationAdapter({ server: runtime.codexServer, runner: runtime.codexAppServer, store, now: deps.now, newId: randomUUID, log: deps.log, requestsChanged: () => conversation.sessionsChanged(), providerTitle: (workItemId, title, origin) => runtime.send({ type: 'conversation-title', workItemId, text: title, origin }) }, changed)],
     store,
     windows: scopes,
+    switchboardHome: home,
     voice: {
       shown: (key) => voice.shown(key),
       settings: () => viewSettings(),

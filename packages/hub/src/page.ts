@@ -864,13 +864,18 @@ export function artifactFile(dir: string, name: string): { path: string; mime: s
       return null;
     }
 
-    const ext = name.slice(name.lastIndexOf('.') + 1).toLowerCase();
-    const mime = MIME[ext] ?? 'application/octet-stream';
-
-    return { path: real, mime, sandboxed: artifactType(name) === 'html' || ext === 'svg' || mime === 'application/octet-stream' };
+    return { path: real, ...artifactMime(name) };
   } catch {
     return null;
   }
+}
+
+/** An artifact file's media type by its name, and whether it is served in the sandbox: an HTML page, an SVG, or a type with no known media type. */
+export function artifactMime(name: string): { mime: string; sandboxed: boolean } {
+  const ext = name.slice(name.lastIndexOf('.') + 1).toLowerCase();
+  const mime = MIME[ext] ?? 'application/octet-stream';
+
+  return { mime, sandboxed: artifactType(name) === 'html' || ext === 'svg' || mime === 'application/octet-stream' };
 }
 
 /** A file or folder the composer's picker offers, relative to the session's folder with forward slashes; a folder ends with a slash. */

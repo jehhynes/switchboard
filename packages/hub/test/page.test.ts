@@ -1,7 +1,7 @@
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { request } from 'node:http';
 import { createServer } from 'node:net';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, openSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -792,7 +792,17 @@ describe('the web page routes', () => {
       list: () => [{ kind: 'item', title: 'T', conversations: [] }],
       files: async (key) => (key === 'page-1' ? [{ path: 'a.ts', dir: false }] : null),
       changes: async (route, key, query) => (route === 'changes' && key === 'page-1' ? { status: 200, body: { rows: 'x'.repeat(2000), q: query.get('q') }, etag: 'e1' } : { status: 403, body: { error: 'Not in this window.' } }),
-      artifact: (key, name) => (key === 'page-1' ? artifactFile(folder, name) : null),
+      artifact: (key, name) => {
+        const external = join(folder, 'report.md');
+
+        // An external artifact's file comes open with its checked size, as the hub's service hands it over.
+        if (key === 'page-1' && (name === '@1/report.md' || name === '@1/empty.md')) {
+          writeFileSync(external, '# Report grown later');
+          return { path: external, mime: 'text/markdown; charset=utf-8', sandboxed: false, fd: openSync(external, 'r'), size: name === '@1/empty.md' ? 0 : 8 };
+        }
+
+        return key === 'page-1' ? artifactFile(folder, name) : null;
+      },
       localFile: async (key, target, paired) => (pages.has(key) ? openLocalFile(localRoots({ folder, cwd: folder }, [], null, paired), target) : null),
       upload: (key, scopeGen, name, bytes) => {
         uploaded.push({ key, scopeGen, name, bytes: Buffer.from(bytes).toString('utf8') });
@@ -1617,6 +1627,9 @@ describe('the web page routes', () => {
     expect(served.headers['referrer-policy']).toBe('no-referrer');
     expect((await send(server.port, 'GET', '/v1/conversation/artifact/page-2/chat/page.html', {})).status).toBe(404);
     expect((await send(server.port, 'GET', '/v1/conversation/artifact/page-1/..%2F..%2Fw1%2Fchat%2Fpage.html', {})).status).toBe(404);
+    // An external artifact is read from the handle it came with, no further than its checked size.
+    expect(await send(server.port, 'GET', '/v1/conversation/artifact/page-1/%401/report.md', {})).toMatchObject({ status: 200, body: '# Report' });
+    expect(await send(server.port, 'GET', '/v1/conversation/artifact/page-1/%401/empty.md', {})).toMatchObject({ status: 200, body: '' });
     stream.destroy();
     await until(() => (server.clients() === 0 ? true : null));
     expect((await send(server.port, 'GET', '/v1/conversation/artifact/page-1/chat/page.html', {})).status).toBe(404);

@@ -159,6 +159,8 @@ export interface ArtifactView {
   ext: string;
   type: 'markdown' | 'html' | 'image' | 'audio' | 'video' | 'file';
   updatedAt: number;
+  /** For a file outside the artifact folder that an artifact tag named, its real path. */
+  file?: string;
 }
 
 /** The page's voice state, as a window's (`VoiceView` in the hub), which the shared voice controls draw. */

@@ -390,7 +390,7 @@ function artifactTabs(state: PageState, strip: ArtifactStrip): ComponentChildren
               const fresh = unread.has(artifact.path);
 
               return (
-                <button class={`menu-row${tabs.includes(artifact) ? ' in-bar' : ''}`} type="button" role="menuitem" data-action="artifact" data-path={artifact.path} title={artifact.path} aria-label={`${artifact.title}, ${fresh ? 'unread, ' : ''}${artifact.kind}, ${note}`}>
+                <button class={`menu-row${tabs.includes(artifact) ? ' in-bar' : ''}`} type="button" role="menuitem" data-action="artifact" data-path={artifact.path} title={artifact.file ?? artifact.path} aria-label={`${artifact.title}, ${fresh ? 'unread, ' : ''}${artifact.kind}, ${note}`}>
                   <span class="menu-gutter">
                     <FileIcon path={artifact.path} />
                   </span>

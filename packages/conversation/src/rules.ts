@@ -80,5 +80,6 @@ An artifact is a document the operator opens from the conversation view in VS Co
   \`\`\`
 
 - To update an artifact, rewrite the same file; the view marks it as changed, and an open preview follows the file.
+- A file written elsewhere, such as a report a skill keeps in its own folder or a plan file, becomes an artifact without a copy: put \`[artifact: <path>]\` on a line of its own in a reply, with the file's absolute path or a path relative to your working folder, and optionally \` | title: <title>\` and \` | kind: <kind>\` before the \`]\`, as in \`[artifact: D:/research/speech/report.md | title: Speech engines | kind: research]\`. Give each file its own tag. The Switchboard web page then lists it with this folder's artifacts and follows its changes; the line is not shown, and a file that does not exist when the reply is written is not listed. Don't copy such a file into the artifact folder to list it.
 - The Markdown preview draws a \`\`\`mermaid code block as a diagram.`;
 }

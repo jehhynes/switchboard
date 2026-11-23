@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { renderSideSwitch, renderTabs } from '../src/header.js';
-import { ARTIFACT_MENU_WIDTH, ARTIFACT_TAB_WIDTH, ARTIFACT_TABS_MAX, artifactBar, artifactTabsFit, closedArtifacts, newView, openArtifactsSeen, parseArtifactsSeen, unreadArtifacts } from '../src/render.js';
+import { ARTIFACT_MENU_WIDTH, ARTIFACT_TAB_WIDTH, ARTIFACT_TABS_MAX, artifactBar, artifactUrl, artifactTabsFit, closedArtifacts, newView, openArtifactsSeen, parseArtifactsSeen, unreadArtifacts } from '../src/render.js';
 import { EMPTY } from '../src/model.js';
 import type { ArtifactView } from '@switchboard/protocol';
 import { html } from './html.js';
@@ -113,6 +113,17 @@ describe('the artifact tabs', () => {
     expect(row.getAttribute('aria-label')).toBe('Rollout plan, plan, 3 min ago');
     expect(menu.querySelector('[data-path="chat/a2.md"] .menu-kind')!.textContent).toBe('report');
     expect(markup).toContain('title="Note 7 · note"');
+  });
+
+  it("list an external artifact as any other, its menu row's tooltip its real path, and fetch it by its name", () => {
+    const outside = { ...artifact(9), path: '@3/summary.md', owner: 'external', kind: 'research', title: 'Speech engines', file: 'D:/git/research/topic/summary.md' };
+    const markup = html(renderSideSwitch('status', { ...state, artifacts: [outside, ...eight] }, false, { open: null, fit: 1, menu: true, now: 2_000 }));
+    const menu = new DOMParser().parseFromString(markup, 'text/html').querySelector('.artifact-menu')!;
+
+    expect(tabPaths(markup)).toEqual(['@3/summary.md']);
+    expect(menu.querySelector('[data-path="@3/summary.md"]')!.getAttribute('title')).toBe('D:/git/research/topic/summary.md');
+    expect(menu.querySelector('[data-path="chat/a7.md"]')!.getAttribute('title')).toBe('chat/a7.md');
+    expect(artifactUrl('k', outside.path)).toBe('/v1/conversation/artifact/k/%403/summary.md');
   });
 
   it('leave out the closed artifacts but the open one, and list them in the menu as any other', () => {

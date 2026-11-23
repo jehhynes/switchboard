@@ -46,7 +46,7 @@ export function renderArtifacts(state: PageState, now: number): VNode {
     <ul class="artifact-list">
       {state.artifacts.map((artifact) => (
         <li key={artifact.path}>
-          <button class="artifact-open" type="button" data-action="artifact" data-path={artifact.path} title={artifact.path}>
+          <button class="artifact-open" type="button" data-action="artifact" data-path={artifact.path} title={artifact.file ?? artifact.path}>
             <span class={`codicon codicon-${artifactIcon(artifact.type)}`} aria-hidden="true"></span>
             <span class="artifact-title">{artifact.title}</span>
             <span class="artifact-kind">
@@ -95,7 +95,7 @@ export function renderArtifactView(key: string, artifact: ArtifactView, doc?: st
     <div class="artifact-view" data-artifact={artifact.path} data-version={String(artifact.updatedAt)} key={`${artifact.path}@${artifact.updatedAt}`}>
       <div class="artifact-head">
         <span class="artifact-badge">{artifact.kind}</span>
-        <span class="artifact-title">{artifact.title}</span>
+        <span class="artifact-title" title={artifact.file}>{artifact.title}</span>
         {artifact.type === 'markdown' ? (
           <button class="icon" type="button" data-action="artifact-window" title="Open in new window" aria-label="Open in new window">
             <span class="codicon codicon-link-external"></span>

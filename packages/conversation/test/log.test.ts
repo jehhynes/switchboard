@@ -37,4 +37,22 @@ describe('ConversationLog native entries', () => {
     expect(store.statuses('s1',null,100).statuses.map(s=>s.markdown)).toEqual(['Done.']);
     store.close();
   });
+
+  it('passes on the artifact tags of a transcript copy once per reply and tag, never those of a screen copy', () => {
+    const store = Store.open(':memory:'); let id = 0; const changes: ConversationChange[] = [];
+    class Screen extends ConversationLog { screen(text: string): string { return this.publish(text, 5, false, 'screen', undefined); } }
+    const log = new Screen('s1', 1, { store, now: () => 1000, newId: () => String(++id), log: () => {}, onChange: (change: ConversationChange) => changes.push(change) });
+    const tagged = () => changes.filter((change) => change.type === 'artifacts');
+
+    log.screen('Done.\n[artifact: D:/r/report.md]');
+    expect(tagged()).toEqual([]);
+    log.reply('reply-1', 'Done.\n[artifact: D:/r/report.md]', 4);
+    log.reply('reply-1', 'Done.\n[artifact: D:/r/report.md]\n[artifact: D:/r/other.md | title: Other]', 4);
+    expect(tagged()).toEqual([
+      { type: 'artifacts', replyId: expect.any(String), artifacts: [{ path: 'D:/r/report.md', title: null, kind: null }] },
+      { type: 'artifacts', replyId: expect.any(String), artifacts: [{ path: 'D:/r/other.md', title: 'Other', kind: null }] },
+    ]);
+    expect(store.latestReplies('s1', 10).find((reply) => reply.transcriptUuid === 'reply-1')?.opening).toBe('Done.');
+    store.close();
+  });
 });

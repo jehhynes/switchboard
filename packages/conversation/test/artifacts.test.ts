@@ -1,8 +1,8 @@
-import { mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ArtifactFolder, artifactType, parseArtifact, realInside } from '../src/artifacts.js';
+import { ArtifactFolder, artifactType, EXTERNAL_NAME, ExternalArtifacts, externalFile, parseArtifact, realInside } from '../src/artifacts.js';
 import type { Artifact } from '../src/artifacts.js';
 
 let root: string;
@@ -152,5 +152,129 @@ describe('ArtifactFolder', () => {
     put('chat/plan.md', '# Plan');
     await new Promise((done) => setTimeout(done, 100));
     expect(changes).toEqual([]);
+  });
+});
+
+describe('ExternalArtifacts', () => {
+  function external(entries: Array<{ id: number; path: string; title?: string | null; kind?: string | null }>) {
+    const changes: Change[] = [];
+    const list = new ExternalArtifacts(entries.map((one) => ({ title: null, kind: null, ...one })), { onChange: (change) => changes.push(change), now: () => 9_000_000, log: () => {}, pollMs: 40, settleMs: 20 });
+
+    folders.push(list as unknown as ArtifactFolder);
+
+    return { list, changes };
+  }
+
+  it("lists each named file with its type, the tag's title and kind or the file's own, and its time, by a name no folder artifact has", () => {
+    const real = realpathSync.native(root);
+    const report = join(real, 'research', 'report', 'summary.md');
+
+    mkdirSync(join(report, '..'), { recursive: true });
+    writeFileSync(report, '---\nkind: research\ntitle: Speech engines\n---\n# Other');
+    utimesSync(report, 2_000, 2_000);
+    writeFileSync(join(real, 'page.html'), '<title>A page</title>');
+    utimesSync(join(real, 'page.html'), 3_000, 3_000);
+
+    const { list } = external([{ id: 4, path: report }, { id: 5, path: join(real, 'page.html'), title: 'Tagged', kind: 'demo' }, { id: 6, path: join(real, 'missing.md') }]);
+
+    expect(list.list()).toEqual([
+      { path: '@5/page.html', owner: 'external', kind: 'demo', title: 'Tagged', ext: 'html', type: 'html', updatedAt: 3_000_000, file: join(real, 'page.html').replaceAll('\\', '/') },
+      { path: '@4/summary.md', owner: 'external', kind: 'research', title: 'Speech engines', ext: 'md', type: 'markdown', updatedAt: 2_000_000, file: report.replaceAll('\\', '/') },
+    ]);
+    expect(list.entry(4)?.path).toBe(report);
+    expect(list.entry(6)).toBeNull();
+    expect(EXTERNAL_NAME.test('chat/plan.md')).toBe(false);
+  });
+
+  it('publishes a change, a removal when the file goes and its return, and a file named later', async () => {
+    const real = realpathSync.native(root);
+    const file = join(real, 'notes.md');
+
+    writeFileSync(file, '# First');
+    utimesSync(file, 2_000, 2_000);
+
+    const { list, changes } = external([{ id: 1, path: file }]);
+
+    writeFileSync(file, '# Second');
+    utimesSync(file, 2_500, 2_500);
+    await vi.waitFor(() => expect(changes.at(-1)).toEqual({ artifact: expect.objectContaining({ path: '@1/notes.md', title: 'Second', updatedAt: 2_500_000 }) }));
+    rmSync(file);
+    await vi.waitFor(() => expect(changes.at(-1)).toEqual({ path: '@1/notes.md', removed: true }));
+    expect(list.list()).toEqual([]);
+    writeFileSync(file, '# Back');
+    await vi.waitFor(() => expect(changes.at(-1)).toEqual({ artifact: expect.objectContaining({ title: 'Back' }) }));
+
+    const later = join(real, 'later.png');
+
+    writeFileSync(later, '');
+    list.set([{ id: 1, path: file, title: null, kind: null }, { id: 2, path: later, title: null, kind: null }]);
+    expect(changes.at(-1)).toEqual({ artifact: expect.objectContaining({ path: '@2/later.png', type: 'image', kind: 'later' }) });
+    list.set([{ id: 2, path: later, title: null, kind: null }]);
+    expect(changes.at(-1)).toEqual({ path: '@1/notes.md', removed: true });
+  });
+
+  it('lists no file whose path became a link, or that lies in a .git folder', () => {
+    const real = realpathSync.native(root);
+
+    mkdirSync(join(real, '.git'));
+    writeFileSync(join(real, '.git', 'config'), '');
+    writeFileSync(join(real, 'target.md'), '');
+    symlinkSync(join(real, 'target.md'), join(real, 'link.md'), 'file');
+
+    expect(external([{ id: 1, path: join(real, '.git', 'config') }, { id: 2, path: join(real, 'link.md') }]).list.list()).toEqual([]);
+  });
+
+  it("reads only the artifact's own file and the files under the folder named after its stem", async () => {
+    const real = realpathSync.native(root);
+    const entry = { id: 1, path: join(real, 'report.html'), title: null, kind: null };
+
+    mkdirSync(join(real, 'report', 'img'), { recursive: true });
+    writeFileSync(entry.path, '');
+    writeFileSync(join(real, 'report', 'img', 'a.png'), '');
+    writeFileSync(join(real, 'secret.txt'), '');
+
+    expect(externalFile(entry, 'report.html')).toBe(entry.path);
+    expect(externalFile(entry, 'report/img/a.png')).toBe(join(real, 'report', 'img', 'a.png'));
+    expect(externalFile(entry, 'secret.txt')).toBeNull();
+    expect(externalFile(entry, 'report/../secret.txt')).toBeNull();
+    expect(externalFile(entry, 'report/.hidden')).toBeNull();
+    expect(externalFile(entry, 'other/a.png')).toBeNull();
+
+    // A stem folder that is a junction out of the file's own folder serves nothing of where it leads.
+    const away = mkdtempSync(join(tmpdir(), 'artifacts-away-'));
+
+    try {
+      writeFileSync(join(away, 'keys.json'), '{}');
+      rmSync(join(real, 'report'), { recursive: true });
+      symlinkSync(away, join(real, 'report'), 'junction');
+      expect(externalFile(entry, 'report/keys.json')).toBeNull();
+
+      // Nor does its version read where the junction leads.
+      const { list, changes } = external([entry]);
+
+      writeFileSync(join(away, 'keys.json'), '{"changed": true}');
+      await new Promise((done) => setTimeout(done, 150));
+      expect(changes).toEqual([]);
+      expect(list.list()).toHaveLength(1);
+    } finally {
+      rmSync(join(real, 'report'), { force: true, recursive: false });
+      rmSync(away, { recursive: true, force: true });
+    }
+  });
+
+  it('marks an artifact changed when a file in the folder named after its stem changes, its own file unchanged', async () => {
+    const real = realpathSync.native(root);
+    const page = join(real, 'page.html');
+
+    mkdirSync(join(real, 'page', 'img'), { recursive: true });
+    writeFileSync(page, '<title>Page</title>');
+    writeFileSync(join(real, 'page', 'img', 'a.png'), 'one');
+
+    const { list, changes } = external([{ id: 1, path: page }]);
+    const before = list.list()[0]!.updatedAt;
+
+    writeFileSync(join(real, 'page', 'img', 'a.png'), 'two, longer');
+    await vi.waitFor(() => expect(changes.at(-1)).toEqual({ artifact: expect.objectContaining({ path: '@1/page.html' }) }));
+    expect(list.list()[0]!.updatedAt).toBeGreaterThan(before);
   });
 });

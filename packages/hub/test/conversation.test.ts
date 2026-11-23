@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -7,6 +7,7 @@ import type { Interruption, Session as StoredSession } from '@switchboard/core';
 import { BACKGROUND_DETAIL, projectSlug } from '@switchboard/claude';
 import { ConversationService, MIC_TIMING_MAX_MS, MIC_TIMING_STEPS, sessionView, typedText } from '../src/conversation.js';
 import type { ConversationServiceDeps, ConversationVoice, PersonaView } from '../src/conversation.js';
+import type { ConversationChanged } from '../src/conversationAdapter.js';
 import { dockView, windowOf } from '../src/dock.js';
 import { canonicalFolder, WindowScopes } from '../src/windows.js';
 import { pageList } from '../src/page.js';
@@ -2017,9 +2018,39 @@ describe('ConversationService artifacts', () => {
     let keys = 0;
     const scopes = new WindowScopes({ store, windows: WINDOWS, now: () => NOW, newKey: () => `k${++keys}` });
     const held = new FakeHeld();
-    const service = new ConversationService({ store, windows: scopes, projectsDir: join(dir, 'projects'), claudeConfig: join(dir, '.claude.json'), screen: async (one) => held.screen(one), input: held, hooks: () => true, now: () => NOW, newId: () => 'id', log: () => {} });
+    const logged: string[] = [];
+    let changed: ConversationChanged | null = null;
+    const service = new ConversationService({
+      adapters: (one) => {
+        changed = one;
+        return [];
+      },
+      store,
+      windows: scopes,
+      projectsDir: join(dir, 'projects'),
+      claudeConfig: join(dir, '.claude.json'),
+      screen: async (one) => held.screen(one),
+      input: held,
+      hooks: () => true,
+      now: () => NOW,
+      newId: () => 'id',
+      switchboardHome: join(dir, 'home'),
+      log: (line) => logged.push(line),
+    });
 
     stored(store, view);
+    scopes.update(view.view);
+
+    const openPage = (workItemId: number) => {
+      const key = scopes.openPage();
+      const frames: Array<{ type: string; [field: string]: unknown }> = [];
+
+      service.open(key, (frame) => frames.push(JSON.parse(/^data: (.*)$/m.exec(frame)![1]!) as { type: string }));
+      service.select({ window: key, opId: 'o', workItemId });
+
+      return { key, frames };
+    };
+    const tag = (sessionId: string, artifacts: Array<{ path: string; title?: string; kind?: string }>) => changed!(sessionId, { type: 'artifacts', replyId: 'r1', artifacts: artifacts.map((one) => ({ title: null, kind: null, ...one })) });
 
     const open = (file: string | null) => {
       const key = scopes.open(file, view.view);
@@ -2038,8 +2069,79 @@ describe('ConversationService artifacts', () => {
       return path;
     };
 
-    return { w12, w3, view, service, open, put, scopes };
+    return { w12, w3, view, service, open, put, scopes, store, openPage, tag, logged };
   }
+
+  it("lists the files a reply's artifact tags name on its work item's pages only, follows their changes, and serves only them and the files beside them they use", async () => {
+    const { view, service, open, store, openPage, tag, logged } = setup();
+    const real = realpathSync.native(dir);
+    const report = join(real, 'research', 'report', 'summary.md');
+    const page = join(real, 'w12', 'plans', 'page.html');
+
+    for (const [path, text] of [[report, '---\nkind: research\ntitle: Speech engines\n---\n'], [page, '<title>Page</title>'], [join(real, 'w12', 'plans', 'page', 'a.png'), ''], [join(real, 'w12', 'plans', 'secret.txt'), ''], [join(real, 'w12', '.git', 'config'), ''], [join(real, 'home', 'hub.json'), '{}'], [join(real, 'w12', '.wip', 'artifacts', 'w2', 'chat', 'copy.md'), '']] as const) {
+      mkdirSync(join(path, '..'), { recursive: true });
+      writeFileSync(path, text);
+    }
+
+    utimesSync(report, 2_000, 2_000);
+    utimesSync(page, 3_000, 3_000);
+    utimesSync(join(real, 'w12', '.wip', 'artifacts', 'w2', 'chat', 'copy.md'), 1_000, 1_000);
+
+    const mine = openPage(2);
+    const others = openPage(3);
+    const window = open(view.file);
+
+    tag('s2', [{ path: report.replaceAll('\\', '/') }, { path: 'plans/page.html', title: 'The page', kind: 'demo' }, { path: 'plans/missing.md' }, { path: '.git/config' }, { path: join(real, 'home', 'hub.json') }, { path: '.wip/artifacts/w2/chat/copy.md' }, { path: 'plans' }]);
+
+    expect(store.externalArtifacts(2).map((one) => one.path)).toEqual([report, page]);
+    expect(logged).toEqual(expect.arrayContaining([
+      'session s2: artifact tag "plans/missing.md" ignored: no such file',
+      'session s2: artifact tag ".git/config" ignored: in a .git folder',
+      `session s2: artifact tag ${JSON.stringify(join(real, 'home', 'hub.json'))} ignored: in the Switchboard home`,
+      'session s2: artifact tag ".wip/artifacts/w2/chat/copy.md" ignored: in the artifact folder, which lists it already',
+      'session s2: artifact tag "plans" ignored: not a file',
+    ]));
+    expect(mine.frames.filter((frame) => frame.type === 'artifact').map((frame) => (frame['artifact'] as { path: string }).path)).toEqual(['@1/summary.md', '@2/page.html']);
+    expect(others.frames.filter((frame) => frame.type === 'artifact')).toEqual([]);
+    expect(window.frames.filter((frame) => frame.type === 'artifact')).toEqual([]);
+
+    // A page's hello lists them among the folder's artifacts, newest first; a VS Code window's lists only the folder's.
+    expect(service.hello(mine.key)['artifacts']).toEqual([
+      { path: '@2/page.html', owner: 'external', kind: 'demo', title: 'The page', ext: 'html', type: 'html', updatedAt: 3_000_000, file: page.replaceAll('\\', '/') },
+      { path: '@1/summary.md', owner: 'external', kind: 'research', title: 'Speech engines', ext: 'md', type: 'markdown', updatedAt: 2_000_000, file: report.replaceAll('\\', '/') },
+      expect.objectContaining({ path: 'chat/copy.md' }),
+    ]);
+    expect(service.hello(window.key)['artifacts']).toEqual([expect.objectContaining({ path: 'chat/copy.md' })]);
+
+    // A served file comes open, checked as the file listed; the route's stream closes it.
+    const served = (name: string) => {
+      const file = service.artifactFile(mine.key, name);
+
+      if (file?.fd !== undefined) {
+        closeSync(file.fd);
+      }
+
+      return file;
+    };
+
+    expect(served('@1/summary.md')).toEqual({ path: report, mime: 'text/markdown; charset=utf-8', sandboxed: false, fd: expect.any(Number), size: readFileSync(report).length });
+    expect(served('@2/page.html')).toMatchObject({ path: page, sandboxed: true });
+    expect(served('@2/page/a.png')).toMatchObject({ path: join(real, 'w12', 'plans', 'page', 'a.png'), mime: 'image/png', size: 0 });
+    expect(service.artifactFile(mine.key, '@2/secret.txt')).toBeNull();
+    expect(service.artifactFile(mine.key, '@2/page/../secret.txt')).toBeNull();
+    expect(service.artifactFile(mine.key, '@9/summary.md')).toBeNull();
+    expect(service.artifactFile(others.key, '@1/summary.md')).toBeNull();
+
+    // A tag naming a kept file again changes nothing, and a file that goes is removed.
+    const sent = mine.frames.length;
+
+    tag('s2', [{ path: report }]);
+    expect(mine.frames).toHaveLength(sent);
+    rmSync(report);
+    await vi.waitFor(() => expect(mine.frames.at(-1)).toMatchObject({ type: 'artifact', artifact: { path: '@1/summary.md' }, removed: true }), { timeout: 5_000 });
+    expect(served('@1/summary.md')).toBeNull();
+    service.stop();
+  });
 
   it("lists the window's work item's artifacts in hello, sends its changes to its windows only, and stops watching when its last stream closes", async () => {
     const { w12, w3, view, service, open, put } = setup();

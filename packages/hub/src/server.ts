@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { createReadStream } from 'node:fs';
+import { closeSync, createReadStream } from 'node:fs';
 import { createServer, STATUS_CODES } from 'node:http';
 import { gzipSync } from 'node:zlib';
 import { pipeline } from 'node:stream';
@@ -85,7 +85,7 @@ export interface PageRoutes {
   /** The `@` picker's files for a page key, or null with no selection. */
   files(key: string, query: string): Promise<unknown>;
   /** An artifact's file for a page key, or null outside its scope. */
-  artifact(key: string, name: string): { path: string; mime: string; sandboxed: boolean } | null;
+  artifact(key: string, name: string): { path: string; mime: string; sandboxed: boolean; fd?: number; size?: number } | null;
   /** Writes a file the page's composer attaches, for a page key at the `scopeGen` it showed: `{path, image}`, or why not. */
   upload(key: string, scopeGen: number, name: string, bytes: Uint8Array): Reply;
   /**
@@ -700,7 +700,14 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       }
 
       response.writeHead(200, { 'Content-Type': file.mime, 'Cache-Control': 'no-cache', ...(file.sandboxed ? { 'Content-Security-Policy': ARTIFACT_CSP } : {}) });
-      pipeline(createReadStream(file.path), response, () => {});
+      // An external artifact's file comes open, checked as the file listed, and is read from that handle, at most its checked size.
+      if (file.fd !== undefined && !(file.size! > 0)) {
+        closeSync(file.fd);
+        response.end();
+        return true;
+      }
+
+      pipeline(file.fd === undefined ? createReadStream(file.path) : createReadStream('', { fd: file.fd, start: 0, end: file.size! - 1 }), response, () => {});
       return true;
     }
 

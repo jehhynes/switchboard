@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { CONFIRM_MS, ScreenReader, isReplyCell, screenBlocks, unwrap } from '../src/screenReader.js';
 import type { Cell } from '../src/screenReader.js';
+import { parseReply } from '../src/tags.js';
 
 const all = (): boolean => true;
 /** A screen recorded from Claude Code's Focus view; each "●" at a line's start counts as a reply's. */
@@ -44,6 +45,10 @@ describe('screen blocks', () => {
   it('skips tool calls, their output, menus of numbered options, and a tag still being drawn', () => {
     expect(screenBlocks(['● Bash(echo hi)', '  ⎿  hi', '', '> '], all)).toEqual([]);
     expect(screenBlocks(['● How is Claude doing this session? (optional)', '  1: Bad    2: Fine   3: Good   0: Dismiss', '', '> '], all)).toEqual([]);
+    // An artifact tag keeps a line of its own, its wrapped rest joined to it, so the view never shows it; one still being drawn waits.
+    expect(screenBlocks(['● Report ready.', '  [artifact: D:/git/research/topic/2026-11-23/report/', '  summary.md]', '  Next.', '', '> '], all)).toEqual(['Report ready.\n[artifact: D:/git/research/topic/2026-11-23/report/ summary.md]\nNext.']);
+    expect(parseReply(screenBlocks(['● Report ready.', '  [artifact: D:/r/summary.md]', '  Next.', '', '> '], all)[0]!)).toMatchObject({ opening: 'Report ready.\nNext.', speak: 'Report ready.\nNext.' });
+    expect(screenBlocks(['● Report ready.', '  [artifact: D:/git/research/rep', '', '> '], all)).toEqual([null]);
     expect(screenBlocks(['● Done. [asi', '', '> '], all)).toEqual([null]);
     expect(screenBlocks(['● Answer', '', '> '], () => false)).toEqual([]);
   });

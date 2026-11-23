@@ -1,6 +1,6 @@
 import type { ConversationMessage, ConversationReply, ConversationStatus } from '@switchboard/core';
 import { parseReply } from './tags.js';
-import type { HeardTag } from './tags.js';
+import type { ArtifactTag, HeardTag } from './tags.js';
 import type { ConversationDeps } from './conversation.js';
 import type { Via } from './screenHold.js';
 
@@ -62,6 +62,7 @@ export class ConversationLog {
       this.deps.store.updateReply(existing.id, patch);
       this.status(existing.id, via, parsed.status, patch.at);
       this.heard(existing.id, via, parsed.heard);
+      this.artifacts(existing.id, via, parsed.artifacts);
 
       // A screen copy takes its transcript line's place once that is read.
       if (via === 'transcript' && move) {
@@ -104,6 +105,7 @@ export class ConversationLog {
     this.deps.store.addReply(reply);
     this.status(reply.id, via, parsed.status, at);
     this.heard(reply.id, via, parsed.heard);
+    this.artifacts(reply.id, via, parsed.artifacts);
 
     if (parsed.rewrite) {
       this.rewrite(reply.id);
@@ -126,6 +128,20 @@ export class ConversationLog {
       }
 
       this.deps.onChange({ type: 'heard', replyId, heard: fresh });
+    }
+  }
+
+  /** The artifact tags already passed on, by reply and tag, so a reply read again or a later line of it passes each on once. */
+  readonly #artifactsSent = new Set<string>();
+
+  /** Passes on the artifact tags of a reply's transcript copy that were not passed on before; a screen copy's are not, since it may be withdrawn. */
+  protected artifacts(replyId: string, via: Via, artifacts: ArtifactTag[]): void {
+    const key = (tag: ArtifactTag): string => JSON.stringify([replyId, tag.path, tag.title, tag.kind]);
+    const fresh = via === 'transcript' ? artifacts.filter((tag) => !this.#artifactsSent.has(key(tag))) : [];
+
+    if (fresh.length > 0) {
+      fresh.forEach((tag) => this.#artifactsSent.add(key(tag)));
+      this.deps.onChange({ type: 'artifacts', replyId, artifacts: fresh });
     }
   }
 

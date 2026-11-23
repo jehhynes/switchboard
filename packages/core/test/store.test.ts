@@ -769,8 +769,27 @@ describe('Store', () => {
     again.close();
   });
 
+  it('ExternalArtifacts_NamedAgain_KeepFirstIdAndTimeWithLatestTitleAndGoWithTheWorkItem', () => {
+    const store = Store.open(':memory:');
+
+    expect(store.externalArtifacts(7)).toEqual([]);
+    expect(store.addExternalArtifact(7, 'D:\\r\\report.md', null, null, 10)).toBe(true);
+    expect(store.addExternalArtifact(7, 'D:\\r\\plan.md', 'Plan', 'plan', 11)).toBe(true);
+    expect(store.addExternalArtifact(7, 'D:\\r\\report.md', null, null, 12)).toBe(false);
+    expect(store.addExternalArtifact(7, 'D:\\r\\report.md', 'Report', 'research', 13)).toBe(true);
+    expect(store.addExternalArtifact(8, 'D:\\r\\report.md', null, null, 14)).toBe(true);
+    expect(store.externalArtifacts(7)).toEqual([
+      { id: 1, path: 'D:\\r\\report.md', title: 'Report', kind: 'research', at: 10 },
+      { id: 2, path: 'D:\\r\\plan.md', title: 'Plan', kind: 'plan', at: 11 },
+    ]);
+    store.deleteWorkItem(7);
+    expect(store.externalArtifacts(7)).toEqual([]);
+    expect(store.externalArtifacts(8)).toHaveLength(1);
+    store.close();
+  });
+
   it('ViewedFilesMigration_ExistingTicks_KeepsThemForTheChangesToDisk', () => {
-    const version = MIGRATIONS.length - 1;
+    const version = MIGRATIONS.findIndex((migration) => migration.includes('CREATE TABLE viewedFilesScoped'));
     const path = join(dir, 'viewed-scope.db');
     const raw = new DatabaseSync(path);
 

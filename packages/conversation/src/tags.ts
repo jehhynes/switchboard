@@ -253,6 +253,132 @@ export interface ParsedReply {
   tone: string | null;
   /** The heard tags, which `opening` leaves out, in order (architecture.md § Dictation). */
   heard: HeardTag[];
+  /** The artifact tags, which `opening` and `status` leave out, in order (architecture.md § Artifacts). */
+  artifacts: ArtifactTag[];
+}
+
+/** An artifact tag's file (architecture.md § Artifacts): its path as written, absolute or relative to the session's folder, and the title and kind it gives, null for none. */
+export interface ArtifactTag {
+  path: string;
+  title: string | null;
+  kind: string | null;
+}
+
+/** An artifact tag: `[artifact: <path>]`, optionally with ` | title: <title>` and ` | kind: <kind>`, alone on its line, up to three spaces in. */
+const ARTIFACT_LINE = /^ {0,3}\[artifact:[ \t]*([^\]\n]+?)[ \t]*\][ \t\r]*$/i;
+/** An artifact tag still being drawn on the text's last line. */
+const OPEN_ARTIFACT = /^ {0,3}\[artifact(?::[^\]\n]*)?$/i;
+
+/** A line that is a whole artifact tag, kept apart when the screen's wrapped lines are joined. */
+export const isArtifactLine = (line: string): boolean => ARTIFACT_LINE.test(line);
+/** A line that starts an artifact tag, which the screen may wrap onto the lines after it. */
+export const startsArtifactLine = (line: string): boolean => /^ {0,3}\[artifact:/i.test(line);
+
+/** The parts of an artifact tag's text, or null for a tag that names no path. */
+function artifactTag(inner: string): ArtifactTag | null {
+  const [first = '', ...rest] = inner.split(/[ \t]+\|[ \t]+/);
+  // A path may be wrapped in backticks, quotes or angle brackets, as Markdown writes one with spaces.
+  const bare = first.trim();
+  const wrapped = /^(`+)(.+)\1$/.exec(bare) ?? /^"(.+)"$/.exec(bare) ?? /^'(.+)'$/.exec(bare) ?? /^<(.+)>$/.exec(bare);
+  const path = (wrapped === null ? bare : wrapped[wrapped.length - 1]!).trim();
+  const fields: Record<string, string> = {};
+
+  for (const part of rest) {
+    const field = /^(title|kind):\s*(.*?)\s*$/i.exec(part);
+
+    if (field !== null && field[2] !== '') {
+      fields[field[1]!.toLowerCase()] = field[2]!;
+    }
+  }
+
+  return path === '' || path.length > 4096 ? null : { path, title: fields['title'] ?? null, kind: fields['kind'] ?? null };
+}
+
+/** The lines that lie in a code span running across lines of one paragraph, such as one that quotes a tag on a line of its own. */
+function spannedLines(lines: string[], fenced: boolean[]): Set<number> {
+  const spanned = new Set<number>();
+  let start = 0;
+
+  for (let index = 0; index <= lines.length; index++) {
+    if (index < lines.length && lines[index]!.trim() !== '' && !fenced[index]) {
+      continue;
+    }
+
+    const block = lines.slice(start, index);
+    const offsets: number[] = [];
+    let at = 0;
+
+    for (const line of block) {
+      offsets.push(at);
+      at += line.length + 1;
+    }
+
+    // An escaped backtick opens no code span.
+    for (const span of block.join('\n').replace(/\\`/g, '\\x').matchAll(/(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)/g)) {
+      if (span[0].includes('\n')) {
+        const end = span.index + span[0].length;
+
+        block.forEach((line, offset) => {
+          if (offsets[offset]! < end && offsets[offset]! + line.length > span.index) {
+            spanned.add(start + offset);
+          }
+        });
+      }
+    }
+
+    start = index + 1;
+  }
+
+  return spanned;
+}
+
+/**
+ * The artifact tags of a text (architecture.md § Artifacts), in order, and the text without their lines. Only a tag alone on its line outside
+ * code counts, so a reply that quotes the tag inline or in a code block, as when it explains the rule, keeps it as text. The rest of the text is
+ * kept as written, but for a blank line a removed tag would leave doubled.
+ */
+export function splitArtifacts(text: string): { artifacts: ArtifactTag[]; text: string } {
+  if (!/\[artifact:/i.test(text)) {
+    return { artifacts: [], text };
+  }
+
+  const lines = text.split('\n');
+  const fenced: boolean[] = [];
+  let fence: string | null = null;
+
+  for (const line of lines) {
+    const open = FENCE.exec(line);
+
+    fenced.push(fence !== null || open !== null);
+
+    if (open !== null) {
+      if (fence === null) {
+        fence = open[1]!;
+      } else if (open[1]![0] === fence[0] && open[1]!.length >= fence.length && /^ {0,3}[`~]+\s*$/.test(line)) {
+        fence = null;
+      }
+    }
+  }
+
+  const spanned = spannedLines(lines, fenced);
+  const kept: string[] = [];
+  const artifacts: ArtifactTag[] = [];
+  let removed = false;
+
+  lines.forEach((line, index) => {
+    const tag = fenced[index] || spanned.has(index) ? null : ARTIFACT_LINE.exec(line);
+    const parsed = tag === null ? null : artifactTag(tag[1]!);
+
+    if (parsed !== null) {
+      artifacts.push(parsed);
+      removed = true;
+    } else if (!(removed && line.trim() === '' && (kept.length === 0 || kept.at(-1)!.trim() === ''))) {
+      kept.push(line);
+      removed = false;
+    }
+  });
+
+  return artifacts.length === 0 ? { artifacts, text } : { artifacts, text: kept.join('\n').trim() };
 }
 
 /** A heard tag, `<!--heard:X=Y-->`: the recogniser heard X where the operator meant the term Y. */
@@ -292,7 +418,8 @@ export function splitHeard(text: string): { heard: HeardTag[]; text: string } {
 
 /** Splits a reply's text into its parts. Every session is read as if it carries the current conversation rules. */
 export function parseReply(text: string): ParsedReply {
-  const { reply, status } = splitStatus(text);
+  const { artifacts, text: untagged } = splitArtifacts(text);
+  const { reply, status } = splitStatus(untagged);
   const { aside, text: unaside } = stripAside(reply);
   // The tone line is the reply's first line, before or after a rewrite tag.
   const before = splitTone(unaside);
@@ -303,7 +430,7 @@ export function parseReply(text: string): ParsedReply {
   // An older reply's [speak] passage stands; any other reply's primary response is what comes before its [details] line.
   const { primary, text: body } = marked.speak !== null ? { primary: marked.speak, text: marked.text } : splitPrimary(marked.text);
 
-  return { kind: aside ? 'aside' : 'reply', rewrite: rewrite && !aside, opening: body.trim(), status, speak: aside ? null : primary, tone: before.tone ?? after.tone, heard };
+  return { kind: aside ? 'aside' : 'reply', rewrite: rewrite && !aside, opening: body.trim(), status, speak: aside ? null : primary, tone: before.tone ?? after.tone, heard, artifacts };
 }
 
 /**
@@ -419,7 +546,7 @@ export function drawnKeyOf(text: string): string | null {
   return key === keyOf(text) ? null : key;
 }
 
-const TAG_WORDS = ['aside', 'rewrite', 'status', 'details', 'speak', '/speak', 'tone'];
+const TAG_WORDS = ['aside', 'rewrite', 'status', 'details', 'speak', '/speak', 'tone', 'artifact'];
 
 /**
  * Whether the text's last line ends in a tag or an HTML comment still being drawn, such as "Done. <!--as" or "[asi": read now, it would be
@@ -429,7 +556,7 @@ export function endsInOpenTag(text: string): boolean {
   const last = text.trimEnd().split('\n').at(-1) ?? '';
   const open = /(?:^|\s)\[([a-z]*)$/i.exec(last) ?? /\[(\/[a-z]*)$/i.exec(last);
 
-  if (open !== null && TAG_WORDS.some((word) => word.startsWith(open[1]!.toLowerCase()))) {
+  if ((open !== null && TAG_WORDS.some((word) => word.startsWith(open[1]!.toLowerCase()))) || OPEN_ARTIFACT.test(last)) {
     return true;
   }
 

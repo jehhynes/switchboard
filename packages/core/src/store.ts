@@ -551,6 +551,17 @@ export const MIGRATIONS = [
   ALTER TABLE viewedFilesScoped RENAME TO viewedFiles;`,
   // A session's unresolved questions whose replies retention deleted (PRD R103), as JSON, so they stay open past it.
   `CREATE TABLE questionCarry (sessionId TEXT PRIMARY KEY, records TEXT NOT NULL);`,
+  // External artifacts (architecture.md § Artifacts): the files outside a work item's artifact folder that its sessions' artifact tags named, by
+  // real path, with the title and kind a tag gave.
+  `CREATE TABLE externalArtifacts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    workItemId INTEGER NOT NULL,
+    path TEXT NOT NULL,
+    title TEXT,
+    kind TEXT,
+    at INTEGER NOT NULL,
+    UNIQUE (workItemId, path)
+  );`,
 ];
 
 /**
@@ -560,6 +571,15 @@ export const MIGRATIONS = [
 export interface PageTabs {
   tab: string | null;
   closed: Array<{ path: string; updatedAt: number }>;
+}
+
+/** A file outside a work item's artifact folder that an artifact tag named (architecture.md § Artifacts): `path` is its real path. */
+export interface ExternalArtifact {
+  id: number;
+  path: string;
+  title: string | null;
+  kind: string | null;
+  at: number;
 }
 
 /** The device a web page sign-in belongs to: its name, and the remote host and login a paired device came through, null on this computer. */
@@ -1189,6 +1209,7 @@ export class Store {
     this.#db.prepare('DELETE FROM comments WHERE workItemId = ?').run(id);
     this.#db.prepare('DELETE FROM pageTabs WHERE workItemId = ?').run(id);
     this.#db.prepare('DELETE FROM viewedFiles WHERE workItemId = ?').run(id);
+    this.#db.prepare('DELETE FROM externalArtifacts WHERE workItemId = ?').run(id);
     this.#db.prepare('UPDATE workItems SET parentId = NULL WHERE parentId = ?').run(id);
     this.#db.prepare('DELETE FROM workItems WHERE id = ?').run(id);
   }
@@ -1831,6 +1852,28 @@ export class Store {
     } else {
       this.#db.prepare('INSERT INTO viewedFiles (workItemId, scope, path, hash, at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (workItemId, scope, path) DO UPDATE SET hash = excluded.hash, at = excluded.at').run(workItemId, scope, path, hash, at);
     }
+  }
+
+  /** A work item's external artifacts (architecture.md § Artifacts), in the order they were first named. */
+  externalArtifacts(workItemId: number): ExternalArtifact[] {
+    return this.#db.prepare('SELECT id, path, title, kind, at FROM externalArtifacts WHERE workItemId = ? ORDER BY id').all(workItemId) as unknown as ExternalArtifact[];
+  }
+
+  /**
+   * Keeps a file an artifact tag named for a work item, by its real path: once, with its first ID and time, and the title and kind of the latest
+   * tag. Whether that changed what was kept.
+   */
+  addExternalArtifact(workItemId: number, path: string, title: string | null, kind: string | null, at: number): boolean {
+    const before = this.#db.prepare('SELECT title, kind FROM externalArtifacts WHERE workItemId = ? AND path = ?').get(workItemId, path) as { title: string | null; kind: string | null } | undefined;
+
+    if (before !== undefined && before.title === title && before.kind === kind) {
+      return false;
+    }
+
+    this.#db
+      .prepare('INSERT INTO externalArtifacts (workItemId, path, title, kind, at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (workItemId, path) DO UPDATE SET title = excluded.title, kind = excluded.kind')
+      .run(workItemId, path, title, kind, at);
+    return true;
   }
 
   /** A work item's tabs on the web page, or null before any was chosen (architecture.md § Web page). */

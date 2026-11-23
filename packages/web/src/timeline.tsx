@@ -128,7 +128,7 @@ function detailsPreview(opening: string, passage: string, markdownPart: (text: s
 function ArtifactRow({ artifact }: { artifact: ArtifactView }) {
   return (
     <li class="artifact">
-      <button class="artifact-open" type="button" data-action="artifact" data-path={artifact.path} title={artifact.path}>
+      <button class="artifact-open" type="button" data-action="artifact" data-path={artifact.path} title={artifact.file ?? artifact.path}>
         <span class={`codicon codicon-${artifactIcon(artifact.type)}`} aria-hidden="true"></span>
         <span class="artifact-title">{artifact.title}</span>
         <span class="artifact-kind">{artifact.kind}</span>

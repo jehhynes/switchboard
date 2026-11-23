@@ -5,7 +5,7 @@ import type { HoldOptions, Via } from './screenHold.js';
 import { ScreenReader } from './screenReader.js';
 import { pasteText } from './input.js';
 import { drawnKeyOf, keyOf, parseReply, stripAside } from './tags.js';
-import type { HeardTag } from './tags.js';
+import type { ArtifactTag, HeardTag } from './tags.js';
 import { parseLine, readHead, readLines, readLinesBefore, transcriptEnd } from './transcript.js';
 import type { TranscriptEntry } from './transcript.js';
 import type { ScreenRead } from './screen.js';
@@ -46,7 +46,9 @@ export type ConversationChange =
   | { type: 'reply'; reply: ConversationReply }
   | { type: 'status'; status: ConversationStatus }
   /** A reply's transcript copy carries heard tags, for the voice's glossary (architecture.md § Dictation); sent once per reply. */
-  | { type: 'heard'; replyId: string; heard: HeardTag[] };
+  | { type: 'heard'; replyId: string; heard: HeardTag[] }
+  /** A reply's transcript copy names files outside the artifact folder as artifacts (architecture.md § Artifacts); each tag sent once per reply. */
+  | { type: 'artifacts'; replyId: string; artifacts: ArtifactTag[] };
 
 export interface ConversationDeps {
   store: ConversationStore;

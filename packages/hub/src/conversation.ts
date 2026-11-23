@@ -2,16 +2,19 @@ import { countsUnread, inTranscript } from '@switchboard/core';
 import type { ConversationMessage, ConversationReply, ConversationStatus, Interruption, Piece, Provider, Session, SpokenState, Store } from '@switchboard/core';
 import { artifactsDir, backgroundCounts, hostKey, PERMISSION_PROMPT, personaById, resumesHeld, sessionTone, START_PROMPT, toneVersion, waitsOnLimit } from '@switchboard/core';
 import type { BackgroundCounts, PersonaSettings, ViewSettings } from '@switchboard/core';
-import { ArtifactFolder, MAX_MESSAGE_CHARS, NotWritten, answerMessage, cardSteps, cardUtterance, currentStep, draftAnswers, interruptNote, messageTags, moveStep, pasteText, picked, pickLetter, questionKey, questionSpeech, resolveAnswers, setOther, SLUG } from '@switchboard/conversation';
+import { ArtifactFolder, EXTERNAL_NAME, ExternalArtifacts, externalFile, inGit, MAX_MESSAGE_CHARS, NotWritten, answerMessage, cardSteps, cardUtterance, currentStep, draftAnswers, interruptNote, messageTags, moveStep, pasteText, picked, pickLetter, questionKey, questionSpeech, resolveAnswers, setOther, SLUG } from '@switchboard/conversation';
 import type { CardDraft, LedgerCard, LedgerQuestion, QuestionLedger } from '@switchboard/conversation';
 import type { MessageAnswer } from '@switchboard/core';
 import { dismissedAt, questionIndex, questionsSince } from './questions.js';
 import { promptKeyData, readPrompt, screenRows, stepsText, TYPING_PAUSE_MS } from '@switchboard/conversation';
 import type { QuestionsView } from '@switchboard/protocol';
-import type { Artifact, ContextView, ConversationChange, HeardTag, InputOutcome, InputSteps, PromptKey, ScreenPrompt, SlashCommand } from '@switchboard/conversation';
+import type { Artifact, ArtifactTag, ContextView, ConversationChange, HeardTag, InputOutcome, InputSteps, PromptKey, ScreenPrompt, SlashCommand } from '@switchboard/conversation';
 import { SESSION_ENDED, SESSION_RELAUNCHED } from './runtime.js';
 import { canonicalFolder } from './windows.js';
-import { artifactFile, findFiles, MAX_INPUT_CHARS } from './page.js';
+import { artifactFile, artifactMime, findFiles, MAX_INPUT_CHARS } from './page.js';
+import { LOCAL_RAW_MAX_BYTES, localTarget } from './localFiles.js';
+import { closeSync, fstatSync, lstatSync, openSync, realpathSync, statSync } from 'node:fs';
+import { isAbsolute, relative, sep } from 'node:path';
 import { allowedFolder, folderPlaces, listFolder, rootList } from './folders.js';
 import type { FolderRoots } from './folders.js';
 import { writeUpload } from './uploads.js';
@@ -24,6 +27,15 @@ import type { ConversationAdapter, ConversationChanged, DeliveryOutcome, NativeR
 export { ansiTheme, claudePaths } from './claudeConversation.js';
 
 export type { CardDraftView, QuestionsView } from '@switchboard/protocol';
+
+/** An artifact's file as the route serves it; an external artifact's comes open, as `fd` with its `size`, which the stream closes. */
+export interface ArtifactServed {
+  path: string;
+  mime: string;
+  sandboxed: boolean;
+  fd?: number;
+  size?: number;
+}
 
 /** How the New session form runs its first message (PRD R122): a conversation now, a task when a slot is free, or a task that waits for Start. */
 export type NewSessionRun = 'now' | 'queue' | 'wait';
@@ -321,6 +333,8 @@ export interface ConversationServiceDeps {
   rowMove?(workItemId: number, after: number | null): string | null;
   /** A session's questions were settled outside a turn, as by a dismissal, which can end its wait on them (PRD R103). */
   questionsSettled?(sessionId: string): void;
+  /** The Switchboard home, whose files an artifact tag never makes artifacts, since it holds the hub's keys and sign-ins. */
+  switchboardHome?: string;
   log(line: string): void;
 }
 
@@ -380,6 +394,8 @@ export class ConversationService {
   readonly #streams = new Map<string, Set<Send>>();
   /** The artifact folder each shown work item's windows follow, by work item. */
   readonly #artifacts = new Map<number, ArtifactFolder>();
+  /** The external artifacts each work item shown on a page follows, by work item (architecture.md § Artifacts). */
+  readonly #external = new Map<number, ExternalArtifacts>();
   #timer: NodeJS.Timeout | null = null;
   readonly #polling = new Set<ConversationAdapter>();
   #seq = 0;
@@ -445,11 +461,12 @@ export class ConversationService {
       this.#timer = null;
     }
 
-    for (const folder of this.#artifacts.values()) {
+    for (const folder of [...this.#artifacts.values(), ...this.#external.values()]) {
       folder.close();
     }
 
     this.#artifacts.clear();
+    this.#external.clear();
     for (const adapter of this.#adapters) adapter.close();
   }
 
@@ -538,6 +555,11 @@ export class ConversationService {
 
     if (change.type === 'heard') {
       this.deps.voice?.heard?.(change.heard);
+      return;
+    }
+
+    if (change.type === 'artifacts') {
+      this.#tagged(sessionId, change.artifacts);
       return;
     }
 
@@ -1567,10 +1589,90 @@ export class ConversationService {
    * An artifact's file, or a file an artifact uses, of the page's selected conversation (architecture.md § Web page), resolved by real path
    * inside its artifact folder; null outside it or with no selection.
    */
-  artifactFile(key: string, name: string): ReturnType<typeof artifactFile> {
+  artifactFile(key: string, name: string): ArtifactServed | null {
     const scope = this.deps.windows.scope(key);
+    const external = EXTERNAL_NAME.exec(name);
+
+    if (external !== null) {
+      return scope?.workItemId == null ? null : this.#externalFile(scope.workItemId, Number(external[1]), external[2]!);
+    }
 
     return scope?.cwd == null || scope.workItemId === null ? null : artifactFile(artifactsDir(scope.cwd, scope.workItemId), name);
+  }
+
+  /**
+   * A file of an external artifact of the work item, or one it uses, while it is listed (architecture.md § Artifacts): by real path, never in
+   * a `.git` folder or the Switchboard home, and at most `LOCAL_RAW_MAX_BYTES`. It is opened here and checked to be the file found, so a
+   * file swapped for a link after the check is not served; the caller streams from `fd` and the stream closes it.
+   */
+  #externalFile(workItemId: number, id: number, rest: string): ArtifactServed | null {
+    const entry = this.#external.get(workItemId)?.entry(id) ?? null;
+    const real = entry === null ? null : externalFile(entry, rest);
+
+    if (real === null || 'why' in taggedFile(real, null, [{ dir: this.deps.switchboardHome, why: 'home' }])) {
+      return null;
+    }
+
+    let fd: number | null = null;
+
+    try {
+      // The file the path names before it is opened, not a link, must be the file opened, and still the real path's after.
+      const named = lstatSync(real, { bigint: true });
+
+      fd = openSync(real, 'r');
+
+      const opened = fstatSync(fd, { bigint: true });
+
+      if (!named.isFile() || !opened.isFile() || opened.ino !== named.ino || opened.dev !== named.dev || realpathSync.native(real) !== real || opened.size > BigInt(LOCAL_RAW_MAX_BYTES)) {
+        closeSync(fd);
+        return null;
+      }
+
+      return { path: real, ...artifactMime(real), fd, size: Number(opened.size) };
+    } catch {
+      if (fd !== null) {
+        closeSync(fd);
+      }
+
+      return null;
+    }
+  }
+
+  /**
+   * Keeps the files a reply's artifact tags name as its session's work item's external artifacts (architecture.md § Artifacts): by real path, a
+   * relative path against the session's folder, only an existing file outside any `.git` folder and the Switchboard home. A tag that names
+   * anything else is logged and dropped.
+   */
+  #tagged(sessionId: string, tags: ArtifactTag[]): void {
+    const session = this.deps.store.session(sessionId);
+
+    if (session?.workItemId == null) {
+      return;
+    }
+
+    const workItemId = session.workItemId;
+    const refused = [{ dir: this.deps.switchboardHome, why: 'in the Switchboard home' }, { dir: session.cwd ? artifactsDir(session.cwd, workItemId) : undefined, why: 'in the artifact folder, which lists it already' }];
+    let changed = false;
+
+    for (const tag of tags) {
+      const found = taggedFile(tag.path, session.cwd || null, refused);
+
+      if ('why' in found) {
+        this.deps.log(`session ${sessionId}: artifact tag ${JSON.stringify(tag.path)} ignored: ${found.why}`);
+        continue;
+      }
+
+      const real = found.real;
+
+      if (this.deps.store.addExternalArtifact(workItemId, real, tag.title, tag.kind, this.deps.now())) {
+        this.deps.log(`work item ${workItemId}: external artifact ${real}`);
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      this.#external.get(workItemId)?.set(this.deps.store.externalArtifacts(workItemId));
+    }
   }
 
   /** The `@` picker's files under the selected conversation's folder (architecture.md § Web page); null with no selection. */
@@ -1784,7 +1886,8 @@ export class ConversationService {
       status,
       unread,
       artifactsDir: folder?.dir ?? null,
-      artifacts: folder?.list() ?? [],
+      // External artifacts are the web page's only: a VS Code window opens only its artifact folder's.
+      artifacts: [...(folder?.list() ?? []), ...(this.deps.windows.isPage(key) && scope.workItemId !== null ? (this.#external.get(scope.workItemId)?.list() ?? []) : [])].sort((a, b) => b.updatedAt - a.updatedAt || a.path.localeCompare(b.path)),
       questions: scope.sessionId === null ? null : this.#questionsHello(key, scope.sessionId),
       ...this.#voiceHello(key),
       ...pageHello,
@@ -2061,15 +2164,43 @@ export class ConversationService {
     return scope.workItemId === null ? null : (this.#artifacts.get(scope.workItemId) ?? null);
   }
 
-  /** Watches the artifact folder of each work item a window with a stream shows, and stops watching the others. */
+  /** Watches the artifact folder of each work item a window with a stream shows, and the external artifacts of each a page shows, and stops watching the others. */
   #followArtifacts(opening?: string): void {
     const wanted = new Map<number, string>();
+    const paged = new Set<number>();
 
     for (const key of new Set([...this.#streams.keys(), ...(opening === undefined ? [] : [opening])])) {
       const scope = this.deps.windows.scope(key);
 
       if (scope?.cwd != null && scope.workItemId !== null) {
         wanted.set(scope.workItemId, artifactsDir(scope.cwd, scope.workItemId));
+      }
+
+      if (scope?.workItemId != null && this.deps.windows.isPage(key)) {
+        paged.add(scope.workItemId);
+      }
+    }
+
+    for (const [workItemId, external] of this.#external) {
+      if (!paged.has(workItemId)) {
+        external.close();
+        this.#external.delete(workItemId);
+      }
+    }
+
+    for (const workItemId of paged) {
+      if (!this.#external.has(workItemId)) {
+        const external: ExternalArtifacts = new ExternalArtifacts(this.deps.store.externalArtifacts(workItemId), {
+          onChange: (change) => {
+            if (this.#external.get(workItemId) === external) {
+              this.#externalChanged(workItemId, change);
+            }
+          },
+          now: this.deps.now,
+          log: (line) => this.deps.log(`work item ${workItemId}: ${line}`),
+        });
+
+        this.#external.set(workItemId, external);
       }
     }
 
@@ -2090,6 +2221,15 @@ export class ConversationService {
             log: (line) => this.deps.log(`work item ${workItemId}: ${line}`),
           }),
         );
+      }
+    }
+  }
+
+  /** Sends an external artifact's change to the pages that show its work item. */
+  #externalChanged(workItemId: number, change: { artifact: Artifact } | { path: string; removed: true }): void {
+    for (const key of this.#streams.keys()) {
+      if (this.deps.windows.isPage(key) && this.deps.windows.scope(key)?.workItemId === workItemId) {
+        this.#send(key, 'artifact', 'artifact' in change ? { artifact: change.artifact } : { artifact: { path: change.path }, removed: true });
       }
     }
   }
@@ -3088,4 +3228,46 @@ function parseAnswers(value: unknown): Array<{ card: string; slug: string; lette
   const keys = new Set(parsed.map((one) => (one === null ? '' : `${one.card}#${one.slug}`)));
 
   return parsed.every((one) => one !== null) && keys.size === parsed.length ? (parsed as Array<{ card: string; slug: string; letters: string[]; other: string }>) : null;
+}
+
+/** The real path of the file an artifact tag names (architecture.md § Artifacts), or why it is no artifact: none, not a file, in a `.git` folder, or in one of `refused`. */
+export function taggedFile(path: string, cwd: string | null, refused: ReadonlyArray<{ dir: string | undefined; why: string }>): { real: string } | { why: string } {
+  const wanted = localTarget(path, cwd);
+  let real: string;
+
+  try {
+    real = wanted === null ? '' : realpathSync.native(wanted);
+
+    if (real === '') {
+      return { why: 'not a local path' };
+    }
+
+    if (!statSync(real).isFile()) {
+      return { why: 'not a file' };
+    }
+  } catch {
+    return { why: 'no such file' };
+  }
+
+  if (inGit(real)) {
+    return { why: 'in a .git folder' };
+  }
+
+  for (const { dir, why } of refused) {
+    let top: string | null = null;
+
+    try {
+      top = dir === undefined ? null : realpathSync.native(dir);
+    } catch {
+      // A folder that does not exist holds nothing.
+    }
+
+    const inside = top === null ? null : relative(top, real);
+
+    if (inside !== null && inside !== '..' && !inside.startsWith(`..${sep}`) && !isAbsolute(inside)) {
+      return { why };
+    }
+  }
+
+  return { real };
 }
