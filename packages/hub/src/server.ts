@@ -15,6 +15,7 @@ import { LOCAL_FILES_PAIRED_ONLY, rawMime } from './localFiles.js';
 import type { LocalOpened } from './localFiles.js';
 import { isWebSocketUpgrade } from './paneSocket.js';
 import { VOICE_SOCKET_PATH } from './voiceSocket.js';
+import { HUB_LOG_LINES, HUB_LOG_MAX_LINES } from './hubLog.js';
 import type { VoiceDevice } from './voiceSocket.js';
 
 export interface Reply {
@@ -72,6 +73,8 @@ export interface PageRoutes {
   access: PageAccess;
   /** The remote hosts and logins the page is served to through `tailscale serve` (architecture.md § Remote access); none without it. */
   remote?(): RemoteAccess;
+  /** The fixed hub.log tail, read only from the hub's injected home. */
+  hubLog?(lines: number): Promise<{ text: string; more: boolean; limited: boolean; missing: boolean }>;
   /** A file of the page itself, by its name under `/page/`, `index.html` for the page; null for none. */
   asset(name: string): { mime: string; body: Buffer | string; immutable?: boolean; gzip?: Buffer } | null;
   /** Registers a page's conversation stream, `installed` when it runs as the installed app, `remote` from a paired device, and returns its page key. */
@@ -622,7 +625,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     const path = url.pathname;
     const isUpload = request.method === 'POST' && path === '/v1/conversation/upload';
     const logUpload = (outcome: string, location: string, bytes: number): void => options.log?.(`web upload: ${outcome}, ${location}${url.searchParams.get('retry') === '1' ? ', retry' : ''}, declared ${request.headers['content-length'] ?? 'none'}, transfer ${request.headers['transfer-encoding'] ?? 'none'}, received ${bytes > MAX_UPLOAD_BYTES ? '>10 MB' : bytes}`);
-    const isPageRoute = path === '/' || path === '/page' || path.startsWith('/page/') || path === '/v1/page/list' || path.startsWith('/v1/browser/') || path.startsWith('/v1/conversation/artifact/') || (path === '/v1/conversation/events' && url.searchParams.has('page')) || path === '/v1/conversation/files' || path === '/v1/conversation/console' || (path.startsWith('/v1/conversation/') && (CHANGE_ROUTES.has(path.slice('/v1/conversation/'.length)) || LOCAL_FILE_ROUTES.has(path.slice('/v1/conversation/'.length))));
+    const isPageRoute = path === '/' || path === '/page' || path.startsWith('/page/') || path === '/v1/page/list' || path === '/v1/page/hub-log' || path.startsWith('/v1/browser/') || path.startsWith('/v1/conversation/artifact/') || (path === '/v1/conversation/events' && url.searchParams.has('page')) || path === '/v1/conversation/files' || path === '/v1/conversation/console' || (path.startsWith('/v1/conversation/') && (CHANGE_ROUTES.has(path.slice('/v1/conversation/'.length)) || LOCAL_FILE_ROUTES.has(path.slice('/v1/conversation/'.length))));
     const bearer = request.headers.authorization !== undefined;
     const cookiePost = request.method === 'POST' && !bearer && path.startsWith('/v1/conversation/') && (request.headers.cookie !== undefined || isUpload);
 
@@ -779,6 +782,32 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
 
     // Each signed-in request renews the cookie's Max-Age, as it renews the sign-in, so a computer in use stays signed in.
     response.setHeader('Set-Cookie', pageCookie(cookieValue(request.headers.cookie, PAGE_COOKIE)!, remote));
+
+    if (path === '/v1/page/hub-log') {
+      response.setHeader('Cache-Control', 'no-store');
+      if (request.method !== 'GET') {
+        response.setHeader('Allow', 'GET');
+        json(response, 405, { error: 'The hub log is read only.' });
+      } else if (page.hubLog === undefined) {
+        json(response, 404, { error: 'The hub log is unavailable.' });
+      } else {
+        const value = url.searchParams.get('lines');
+        const lines = value === null ? HUB_LOG_LINES : Number(value);
+        if ((value !== null && !/^[1-9]\d*$/.test(value)) || !Number.isSafeInteger(lines) || lines > HUB_LOG_MAX_LINES) {
+          json(response, 400, { error: `Choose 1 to ${HUB_LOG_MAX_LINES} lines.` });
+        } else {
+          void page.hubLog(lines).then((tail) => {
+            // A revoked sign-in or removed remote login must not receive a pending read.
+            if (!stillAllowed() || !page.access.allows(request.headers.cookie, origin)) {
+              json(response, 403, { error: 'Access to the hub log ended.' });
+            } else {
+              json(response, 200, tail);
+            }
+          }).catch(() => json(response, 500, { error: 'The hub log could not be read.' }));
+        }
+      }
+      return true;
+    }
 
     // The browser extension for this device: for a remote one, a copy that reaches the hub through this origin (architecture.md § Browser extension).
     if (request.method === 'GET' && path === EXTENSION_DOWNLOAD) {

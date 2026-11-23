@@ -725,7 +725,7 @@ describe('the web page routes', () => {
   // The remote hosts and logins the served page reads, none until a test sets them.
   let remoteAccess: RemoteAccess = { hosts: [], logins: [] };
 
-  async function serve() {
+  async function serve(hubLog: PageRoutes['hubLog'] = async (lines) => ({ text: `2026-11-22T12:00:00Z ${lines} lines\n`, more: lines < 1000, limited: false, missing: false })) {
     const uploadLogs: string[] = [];
     remoteAccess = { hosts: [], logins: [] };
     const posted: unknown[] = [];
@@ -744,6 +744,7 @@ describe('the web page routes', () => {
     const page: PageRoutes = {
       access: new PageAccess(store),
       remote: () => remoteAccess,
+      hubLog,
       browser: {
         snoozed: () => ['https://github.com/o/r/issues/1'],
         cards: () => [{ url: 'https://github.com/o/r/issues/2', playbook: 'dev:new-dev', group: 'progress', snoozed: false, workItemId: 7 }],
@@ -849,6 +850,64 @@ describe('the web page routes', () => {
 
     return { posted, uploaded, uploadLogs, closed, consoles, url, folder, installed, browserPosts, access: page.access, open: () => page.opened() };
   }
+
+  it('serves a read-only hub log tail only to a signed-in page with a valid line count', async () => {
+    await serve();
+    const link = new URL(JSON.parse((await send(server.port, 'POST', '/page/link', { Authorization: `Bearer ${server.token}` })).body).url);
+    const exchange = await send(server.port, 'GET', `${link.pathname}${link.search}`, {});
+    const cookie = String(exchange.headers['set-cookie']).split(';')[0]!;
+    const get = (query = '', headers = { Cookie: cookie }) => send(server.port, 'GET', `/v1/page/hub-log${query}`, headers);
+    expect((await get('', { Cookie: 'sb_page=forged' })).status).toBe(401);
+    expect((await send(server.port, 'GET', '/v1/page/hub-log', {})).status).toBe(401);
+    const tail = await get();
+    expect(tail.status).toBe(200);
+    expect(tail.headers['cache-control']).toBe('no-store');
+    expect(JSON.parse(tail.body)).toEqual({ text: '2026-11-22T12:00:00Z 500 lines\n', more: true, limited: false, missing: false });
+    expect(JSON.parse((await get('?lines=1000')).body).more).toBe(false);
+    for (const count of ['0', '-1', '1.5', 'abc', '', '20001', 'Infinity']) expect((await get(`?lines=${count}`)).status).toBe(400);
+    expect((await send(server.port, 'POST', '/v1/page/hub-log', { Cookie: cookie })).status).toBe(405);
+  });
+
+  it('allows the hub log on a paired device only through its allowed host and Tailscale login', async () => {
+    await serve();
+    remoteAccess = { hosts: ['pc.tail.ts.net'], logins: ['alex@example.com'] };
+    const headers = { Host: 'pc.tail.ts.net', 'X-Forwarded-Proto': 'https', 'Tailscale-User-Login': 'alex@example.com' };
+    const pairing = JSON.parse((await send(server.port, 'POST', '/page/pair', { Authorization: `Bearer ${server.token}` })).body);
+    const link = new URL(pairing.url);
+    const exchange = await send(server.port, 'GET', `${link.pathname}${link.search}`, headers);
+    const Cookie = String(exchange.headers['set-cookie']).split(';')[0]!;
+    expect((await send(server.port, 'GET', '/v1/page/hub-log', headers)).status).toBe(401);
+    expect((await send(server.port, 'GET', '/v1/page/hub-log', { ...headers, Cookie })).status).toBe(200);
+    expect((await send(server.port, 'GET', '/v1/page/hub-log', { ...headers, Cookie, 'Tailscale-User-Login': 'someone@example.com' })).status).toBe(403);
+    expect((await send(server.port, 'GET', '/v1/page/hub-log', { Cookie })).status).toBe(401);
+    remoteAccess = { hosts: [], logins: [] };
+    expect((await send(server.port, 'GET', '/v1/page/hub-log', { ...headers, Cookie })).status).toBe(403);
+  });
+
+  it('withholds a pending hub log read when access is revoked and reports read failures without paths', async () => {
+    let release: (() => void) | undefined;
+    let fail = false;
+    await serve(async () => {
+      if (fail) throw new Error('EACCES C:/private/hub.log');
+      await new Promise<void>((done) => { release = done; });
+      return { text: 'private', more: false, limited: false, missing: false };
+    });
+    const link = new URL(JSON.parse((await send(server.port, 'POST', '/page/link', { Authorization: `Bearer ${server.token}` })).body).url);
+    const exchange = await send(server.port, 'GET', `${link.pathname}${link.search}`, {});
+    const cookie = String(exchange.headers['set-cookie']).split(';')[0]!;
+    fail = true;
+    const failure = await send(server.port, 'GET', '/v1/page/hub-log', { Cookie: cookie });
+    expect(failure.status).toBe(500);
+    expect(JSON.parse(failure.body)).toEqual({ error: 'The hub log could not be read.' });
+    fail = false;
+    const pending = send(server.port, 'GET', '/v1/page/hub-log', { Cookie: cookie });
+    await until(() => release ?? null);
+    await send(server.port, 'POST', '/page/revoke', { Authorization: `Bearer ${server.token}` });
+    release!();
+    const refused = await pending;
+    expect(refused.status).toBe(403);
+    expect(refused.body).not.toContain('private');
+  });
 
   it("serves the page on its fixed port, which the link names, by that port's Host only, and nothing but the page there", async () => {
     const { posted, installed } = await serve();

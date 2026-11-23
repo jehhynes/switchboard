@@ -751,6 +751,15 @@ button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }
 .sheet-button.primary:hover { background: var(--vscode-button-hoverBackground); }
 .sheet-button.secondary { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
 .sheet-button:disabled { opacity: 0.5; cursor: default; }
+.sheet.hub-log-sheet { width: min(1100px, 100%); height: min(800px, calc(100% - 32px)); display: flex; flex-direction: column; overflow: hidden; }
+.hub-log { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 10px; margin-bottom: 12px; }
+.hub-log > .sheet-detail, .hub-log-note { margin: 0; color: var(--vscode-descriptionForeground); }
+.hub-log-tools { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; flex: none; }
+.hub-log-tools .sheet-input { flex: 1 1 200px; min-width: 0; width: auto; min-height: 32px; max-height: none; }
+.hub-log-tools label { display: inline-flex; gap: 4px; align-items: center; min-height: 32px; }
+.hub-log-output { flex: 1; min-height: 60px; margin: 0; padding: 10px; overflow: auto; overscroll-behavior: contain; white-space: pre; font: 12px/1.6 var(--vscode-editor-font-family, monospace); background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); border: 1px solid var(--vscode-panel-border); border-radius: 4px; }
+.hub-log-output.wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (hover: none), (pointer: coarse) { .hub-log-tools .sheet-input, .hub-log-tools label { min-height: 44px; } }
 a.sheet-button { display: inline-flex; align-items: center; text-decoration: none; }
 .extension-steps { padding-left: 20px; }
 .extension-steps li { margin-bottom: 4px; }

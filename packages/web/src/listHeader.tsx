@@ -1,12 +1,14 @@
 import type { ComponentChildren, VNode } from 'preact';
 import qrcode from 'qrcode-generator';
 import { mount } from './island.js';
+import { HubLog } from './hubLog.js';
 import type { PageGroup, PageHeader, PageRow, SourceGroup } from '@switchboard/protocol';
 import type { PhoneVoiceState } from './phoneVoice.js';
 
 type Answer = { status: number; body: Record<string, unknown> };
 
 export interface ListHeaderDeps {
+  fetch?: typeof fetch;
   /** Posts a page command with the page key, as the page's other commands do. */
   post(name: string, body: Record<string, unknown>): Promise<Answer>;
   /** Draws the page again after the header changed what it shows. */
@@ -198,6 +200,7 @@ export type HeaderSheet =
   | { kind: 'adhoc'; opId: string; schedule: string; repo: string; provider: string; providerChosen: boolean; prompt: string; start: boolean; providerNote: string | null; busy: boolean; error: string | null }
   | { kind: 'folder'; opId: string; folder: string; provider: string; providerChosen: boolean; installed: string[] | null; busy: boolean; error: string | null }
   | { kind: 'later'; title: string }
+  | { kind: 'log' }
   | { kind: 'extension'; remote: boolean }
   | { kind: 'holder'; busy: boolean; error: string | null }
   | { kind: 'devices'; pairing: Pairing | null; devices: Device[] | null; busy: boolean; error: string | null };
@@ -436,7 +439,7 @@ export function renderMoreMenu(header: PageHeader | null, local = false, phoneVo
       <Separator />
       <MoreRow action="list-poll" icon="refresh" label="Refresh sources" />
       <MoreRow action="list-reload" icon="debug-restart" label="Reload" />
-      <MoreRow action="list-later-log" icon="output" label="Show hub log" />
+      <MoreRow action="list-log" icon="output" label="Show hub log" />
       <MoreRow action="list-extension" icon="extensions" label="Get the browser extension…" />
       {local ? (
         <>
@@ -469,7 +472,7 @@ export function renderMoreMenu(header: PageHeader | null, local = false, phoneVo
 }
 
 /** The dock windows More Actions opens that the page does not have yet, by their row's action. */
-export const LATER: Record<string, string> = { 'list-later-held': 'Held sessions', 'list-later-log': 'Show hub log' };
+export const LATER: Record<string, string> = { 'list-later-held': 'Held sessions' };
 
 /** A QR code of `text` as an SVG of dark modules on a light square with a quiet zone of 4 modules, which phone cameras read in either theme. */
 export function QrCode({ text }: { text: string }) {
@@ -600,10 +603,10 @@ function Select({ label, field, items, chosen, after }: { label: string; field: 
 }
 
 /** The frame every sheet of the header has: its title, its body and its buttons, over a backdrop that cancels it. */
-function Frame({ title, children, buttons }: { title: string; children: ComponentChildren; buttons: ComponentChildren }) {
+function Frame({ title, children, buttons, wide = false }: { title: string; children: ComponentChildren; buttons: ComponentChildren; wide?: boolean }) {
   return (
     <div class="sheet-backdrop" data-action="list-sheet-cancel">
-      <div class="sheet glass" role="dialog" aria-modal="true" aria-labelledby="list-sheet-title">
+      <div class={`sheet glass${wide ? ' hub-log-sheet' : ''}`} role="dialog" aria-modal="true" aria-labelledby="list-sheet-title">
         <h2 id="list-sheet-title" class="sheet-title">
           {title}
         </h2>
@@ -659,13 +662,17 @@ function ExtensionSheet({ remote }: { remote: boolean }) {
  * schedules; Repository; Provider; Prompt; Start automatically), New conversation in a folder with the folder and, when both are installed, the
  * provider, or a dock window the page does not have yet.
  */
-export function renderHeaderSheet(sheet: HeaderSheet | null, header: PageHeader | null, now = Date.now()): VNode | null {
+export function renderHeaderSheet(sheet: HeaderSheet | null, header: PageHeader | null, now = Date.now(), read = globalThis.fetch): VNode | null {
   if (sheet === null) {
     return null;
   }
 
   if (sheet.kind === 'devices') {
     return <DevicesSheet sheet={sheet} now={now} />;
+  }
+
+  if (sheet.kind === 'log') {
+    return <Frame title="Hub log" wide buttons={<button type="button" class="sheet-button primary" data-action="list-sheet-cancel">Close</button>}><HubLog fetch={read} /></Frame>;
   }
 
   if (sheet.kind === 'extension') {
@@ -1141,7 +1148,7 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
   };
   const revokeDevice = (id: string): Promise<void> => changeDevice('page-device-revoke', { id }, 'The device was not signed out.');
   const closeSheet = (): void => {
-    if (view.sheet !== null && view.sheet.kind !== 'later' && view.sheet.kind !== 'extension' && view.sheet.kind !== 'devices' && view.sheet.busy) {
+    if (view.sheet !== null && view.sheet.kind !== 'log' && view.sheet.kind !== 'later' && view.sheet.kind !== 'extension' && view.sheet.kind !== 'devices' && view.sheet.busy) {
       return;
     }
 
@@ -1153,7 +1160,7 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
   const sheetGo = async (): Promise<void> => {
     const sheet = view.sheet;
 
-    if (sheet === null || sheet.kind === 'later' || sheet.kind === 'extension' || sheet.busy) {
+    if (sheet === null || sheet.kind === 'log' || sheet.kind === 'later' || sheet.kind === 'extension' || sheet.busy) {
       return;
     }
 
@@ -1205,7 +1212,7 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
     const name = field.dataset?.['field'];
     const sheet = view.sheet;
 
-    if (name === undefined || sheet === null || sheet.kind === 'later' || sheet.kind === 'extension' || sheet.kind === 'holder' || sheet.kind === 'devices') {
+    if (name === undefined || sheet === null || sheet.kind === 'log' || sheet.kind === 'later' || sheet.kind === 'extension' || sheet.kind === 'holder' || sheet.kind === 'devices') {
       return;
     }
 
@@ -1341,6 +1348,12 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
         redraw();
         sheetHost.querySelector<HTMLElement>('.sheet-button.primary')?.focus();
         break;
+      case 'list-log':
+        view.menu = null;
+        view.sheet = { kind: 'log' };
+        redraw();
+        sheetHost.querySelector<HTMLElement>('input')?.focus();
+        break;
       case 'list-settings':
         view.menu = null;
         redraw();
@@ -1446,11 +1459,12 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
 
       shownVoiceError = voiceError;
       mount(host, renderListHeader(header, view));
-      mount(sheetHost, renderHeaderSheet(view.sheet, header, deps.now()));
+      mount(sheetHost, renderHeaderSheet(view.sheet, header, deps.now(), deps.fetch));
     },
     list: (listed) => ({ groups: filterGroups(listed, search.filter, search.older), filtering: search.filter.trim() !== '' }),
     end: (filtered) => renderSearchEnd(search, filtered.every((group) => group.rows.length === 0)),
     close: () => {
+      mount(sheetHost, null);
       cancelTimer();
       document.removeEventListener('pointerdown', outside);
     },

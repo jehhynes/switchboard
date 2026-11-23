@@ -341,7 +341,7 @@ describe('the list header (architecture.md § Web page)', () => {
     expect(root.querySelector('.more-menu')).toBeNull();
 
     // A dock window the page does not have yet says to use the dock.
-    for (const [action, title] of [['list-later-held', 'Held sessions'], ['list-later-log', 'Show hub log']]) {
+    for (const [action, title] of [['list-later-held', 'Held sessions']]) {
       click('.more-actions');
       click(`.more-menu [data-action="${action}"]`);
       expect(root.querySelector('#list-sheet .sheet-title')?.textContent).toBe(title);
@@ -349,6 +349,12 @@ describe('the list header (architecture.md § Web page)', () => {
       click('#list-sheet .sheet-button');
       expect(root.querySelector('#list-sheet .sheet')).toBeNull();
     }
+
+    click('.more-actions');
+    click('.more-menu [data-action="list-log"]');
+    expect(root.querySelector('#list-sheet .sheet-title')?.textContent).toBe('Hub log');
+    expect(root.querySelector('[aria-label="Filter hub log"]')).not.toBeNull();
+    click('#list-sheet [data-action="list-sheet-cancel"].sheet-button');
 
     // Get the browser extension downloads this computer's copy and says how to load it unpacked (PRD R121).
     click('.more-actions');

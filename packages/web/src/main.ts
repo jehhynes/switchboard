@@ -644,6 +644,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     ? null
     : new PhoneVoice({ key: () => state.key, post: (name, body) => post(name, body), fetch: (url) => deps.fetch(url, { credentials: 'same-origin' }).then((response) => response.arrayBuffer?.()), changed: () => draw(), now: () => deps.now() });
   const header = listHeader(root.querySelector<HTMLElement>('.side-head')!, list, root.querySelector<HTMLElement>('#list-sheet')!, {
+    fetch: (...args) => deps.fetch(...args),
     post: (name, body) => post(name, body),
     redraw: () => draw(),
     select: (workItemId) => void select(workItemId),

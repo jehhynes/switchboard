@@ -37,6 +37,7 @@ import { SnapshotBuilder } from './snapshotBuilder.js';
 import type { Built } from './snapshotBuilder.js';
 import { WindowScopes } from './windows.js';
 import { tailscaleIdentity } from './tailscale.js';
+import { readHubLog } from './hubLog.js';
 import type { RemoteAccess } from './page.js';
 import { dockRowOf, PageAccess, pageActionEvent, OPEN_IN_VSCODE, pageCommandOf, pageHeader, pageList, pageRow, pasteText, poolRowOf, rowOpenUrl } from './page.js';
 import { launcher } from './launch.js';
@@ -1697,6 +1698,7 @@ const dockWithRuns = () => {
     page: {
       access: new PageAccess(store, deps.now),
       remote: () => remote,
+      hubLog: (lines) => readHubLog(home, lines),
       asset: (name) => pageAsset(name, home),
       opened: (installed, remote) => {
         const key = scopes.openPage();
