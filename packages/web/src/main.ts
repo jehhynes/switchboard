@@ -33,6 +33,8 @@ import { settings } from './settings.js';
 import { attachments, drawChips } from './attachments.js';
 import type { Attached } from './attachments.js';
 import { Connection } from './connection.js';
+import { COMMAND_MS, FAILURE_TEXT, NAVIGATION_MS, READ_MS, request, timedFetch, transient, UPLOAD_MS } from './request.js';
+import type { Answer } from './request.js';
 import { dotView, renderBanner, renderScreen, renderUpdate } from './connectionView.js';
 import type { ConnectionView } from './connectionView.js';
 import { renderContextMeter } from '@switchboard/conversation/contextMeter';
@@ -107,6 +109,10 @@ const LINK_MARGIN_MS = 500;
 const HISTORY_CHANGE_MS = 1_000;
 /** The mark on the history entry a phone's conversation adds over the list, so the browser's back returns to the list (architecture.md § Web page). */
 const CONVERSATION_ENTRY = 'switchboardConversation';
+/** Where the page keeps the `opId` of each message sent without a settled answer, over a reload. */
+const SEND_OPS = 'switchboard.sendOps';
+/** The hub's refusal of a command for a scope generation the page has not caught up with (`CONVERSATION_CHANGED` in packages/hub/src/conversation.ts). */
+const CONVERSATION_CHANGED = "The window's conversation changed.";
 /** Where the page keeps each work item's draft, over a reload. */
 const DRAFTS = 'switchboard.drafts';
 
@@ -138,7 +144,9 @@ export interface PageDeps {
   frame?(run: () => void): void;
 }
 
-type Answer = { status: number; body: Record<string, unknown> };
+/** How long a message's send is tried again on a transient failure, with the same `opId`, and how long one try may take. */
+export const SEND_RETRY_MS = 30_000;
+export const SEND_TRY_MS = 10_000;
 
 /** What the console's script, `console.js`, offers once loaded (architecture.md § Web page). */
 export interface ConsoleModule {
@@ -150,6 +158,10 @@ export interface ConsoleModule {
  * the composer on the right. Everything it shows comes from its own conversation stream, bound to the work item it selected.
  */
 export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageState; close(): void } {
+  // Every request ends within its time (request.ts): the page's controllers read through `readFetch`, uploads through `uploadFetch`.
+  const timers = { fetch: deps.fetch, setTimeout: (run: () => void, ms: number) => setTimeout(run, ms), clearTimeout: (timer: unknown) => clearTimeout(timer as ReturnType<typeof setTimeout>) };
+  const readFetch = timedFetch(timers, READ_MS);
+  const uploadFetch = timedFetch(timers, UPLOAD_MS);
   // A root that held a page before starts empty.
   unmount(root);
   root.replaceChildren();
@@ -543,7 +555,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const view: View = newView();
   // The Changes list, its menu and the session state it was last drawn at, so a turn's end reads it again (architecture.md § Web page).
   const changes = new ChangesController({
-    fetch: (...args) => deps.fetch(...args),
+    fetch: (...args) => readFetch(...args),
     key: () => state.key,
     draw: () => draw(),
     showDiff: () => {
@@ -560,7 +572,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   let changesSession: string | null = null;
   // Local file links' tabs (architecture.md § Web page); the hub decides what a paired device may read (architecture.md § Remote access).
   const localFiles = new LocalFilesController({
-    fetch: (...args) => deps.fetch(...args),
+    fetch: (...args) => readFetch(...args),
     key: () => state.key,
     draw: () => draw(),
     show: () => {
@@ -578,7 +590,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     drawDiagrams: (pane) => drawDiagrams(pane),
   });
   // File type icons, whose mapping loads the first time a list draws one (architecture.md § Web page).
-  const dropFileIcons = useFileIcons({ fetch: (...args) => deps.fetch(...args), loaded: () => draw() });
+  const dropFileIcons = useFileIcons({ fetch: (...args) => readFetch(...args), loaded: () => draw() });
 
   // The groups the operator opened or closed on an earlier load, as the dock keeps them across runs.
   view.collapsed = collapsedGroups(localStorage.getItem(GROUPS_KEY));
@@ -623,19 +635,30 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   let opId = 0;
   const newOp = (): string => `${deps.now().toString(36)}-${(++opId).toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
-  const post = async (name: string, body: Record<string, unknown>, keepalive = false): Promise<Answer> => {
-    try {
-      const response = await deps.fetch(`/v1/conversation/${name}`, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ window: state.key, opId: newOp(), ...body }), ...(keepalive ? { keepalive } : {}) });
-
-      // The sign-in may have gone with the stream still open: the connection asks the hub.
-      if (response.status === 401) {
-        connection.check();
-      }
-
-      return { status: response.status, body: (await response.json().catch(() => ({}))) as Record<string, unknown> };
-    } catch (error) {
-      return { status: 0, body: { error: `Switchboard did not answer: ${String(error)}` } };
+  /**
+   * Posts a page command (architecture.md § Web page, Requests), failing at once while the page is offline. Each try is built afresh, so a retry
+   * names the page key and scope generation the page has then; `retryFor` tries a transient failure again for that long with the same `opId`,
+   * for a command the hub runs once per `opId`.
+   */
+  const post = async (name: string, body: Record<string, unknown> | (() => Record<string, unknown>), keepalive = false, options: { timeout?: number; retryFor?: number; opId?: string } = {}): Promise<Answer> => {
+    if (connection.state === 'offline' || connection.state === 'signedOut') {
+      return { status: 0, body: { error: connection.state === 'offline' ? FAILURE_TEXT.network : FAILURE_TEXT.signedOut }, failure: connection.state === 'offline' ? 'network' : 'signedOut' };
     }
+
+    const op = options.opId ?? newOp();
+    const answer = await request(
+      timers,
+      `/v1/conversation/${name}`,
+      () => ({ method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ window: state.key, opId: op, ...(typeof body === 'function' ? body() : body) }), ...(keepalive ? { keepalive } : {}) }),
+      { timeout: options.timeout ?? COMMAND_MS, retryFor: options.retryFor ?? 0, ready: (ms) => connection.whenLive(ms), now: () => Date.now() },
+    );
+
+    // The sign-in may have gone with the stream still open: the connection asks the hub.
+    if (answer.status === 401) {
+      connection.check();
+    }
+
+    return answer;
   };
   // The list's header: the dock header's source icons, search and More Actions (architecture.md § Web page).
   // Settings over the whole page, as the dock's Settings window (architecture.md § Web page); it reads settings.json again when the page comes back.
@@ -713,7 +736,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   // Voice on this phone, on a paired device's page (architecture.md § Remote access).
   const phoneVoice = local
     ? null
-    : new PhoneVoice({ key: () => state.key, post: (name, body) => post(name, body), fetch: (url) => deps.fetch(url, { credentials: 'same-origin' }).then((response) => response.arrayBuffer?.()), changed: () => draw(), now: () => deps.now() });
+    : new PhoneVoice({ key: () => state.key, post: (name, body) => post(name, body), fetch: (url) => readFetch(url, { credentials: 'same-origin' }).then((response) => response.arrayBuffer?.()), changed: () => draw(), now: () => deps.now() });
   const header = listHeader(root.querySelector<HTMLElement>('.side-head')!, list, root.querySelector<HTMLElement>('#list-sheet')!, {
     fetch: (...args) => deps.fetch(...args),
     post: (name, body) => post(name, body),
@@ -730,7 +753,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     ...(phoneVoice === null ? {} : { phoneVoice: { state: () => phoneVoice.state, error: () => phoneVoice.error, toggle: () => (phoneVoice.state === 'off' ? phoneVoice.start() : phoneVoice.stop()) } }),
   });
   /** A command for the conversation the page shows, refused by the hub when the page has moved on since. */
-  const command = (name: string, body: Record<string, unknown> = {}): Promise<Answer> => post(name, { scopeGen: state.scope?.scopeGen ?? -1, ...body });
+  const command = (name: string, body: Record<string, unknown> = {}, options: { timeout?: number; retryFor?: number; opId?: string } = {}): Promise<Answer> => post(name, () => ({ scopeGen: state.scope?.scopeGen ?? -1, ...body }), false, options);
 
   // ---- The composer ----
   mount(composerHost, renderComposer());
@@ -796,6 +819,42 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
   };
   let sending = false;
+  /**
+   * The `opId` of the last message each work item sent without an answer that settled it, with its session, launch and text, kept in local
+   * storage over a reload, so the same message sent again, from here or after a reload, reuses it and the hub types it once; another message
+   * from the same work item replaces it.
+   */
+  const sendOps = (): Record<string, { key: string; opId: string }> => {
+    try {
+      const kept = JSON.parse(localStorage.getItem(SEND_OPS) ?? '{}') as unknown;
+
+      return kept !== null && typeof kept === 'object' && !Array.isArray(kept) ? (kept as Record<string, { key: string; opId: string }>) : {};
+    } catch {
+      return {};
+    }
+  };
+  /** Keeps `op` as the work item's unsettled send, or with null settles `settled`, only while it is still the one kept, as another page of this device may have kept a newer one. */
+  const keepSendOp = (workItemId: number | null, op: { key: string; opId: string } | null, settled?: string): void => {
+    if (workItemId === null) {
+      return;
+    }
+
+    const kept = sendOps();
+
+    if (op === null && kept[String(workItemId)]?.opId !== settled) {
+      return;
+    }
+
+    delete kept[String(workItemId)];
+
+    try {
+      localStorage.setItem(SEND_OPS, JSON.stringify(op === null ? kept : Object.fromEntries([...Object.entries(kept), [String(workItemId), op]].slice(-20))));
+    } catch {
+      // Kept for this page only through the retries.
+    }
+  };
+  /** Why a message was not sent: the hub's reason, or the plain words for no answer. */
+  const notSent = (answer: Answer): string => (transient(answer.failure) ? `Not sent. ${String(answer.body['error'])}` : String(answer.body['error'] ?? 'Not sent. Try again.'));
   let draftOf: number | null = null;
   let chosen: string | null = null;
   let walk: { index: number; draft: string } | null = null;
@@ -835,7 +894,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
   // ---- Attached files (architecture.md § Web page) ----
   const attachedFiles = attachments({
-    fetch: (...args) => deps.fetch(...args),
+    fetch: (...args) => uploadFetch(...args),
     shown: () => draftOf,
     refused: (workItemId, error) => (workItemId === draftOf ? showError(error) : void errors.set(workItemId, error)),
     changed: () => {
@@ -947,7 +1006,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const current = (): boolean => ask === asked && shown === state.scope?.scopeGen;
 
     if (mention !== null && state.key !== null) {
-      const response = await deps.fetch(`/v1/conversation/files?window=${encodeURIComponent(state.key)}&q=${encodeURIComponent(mention.query)}`, { credentials: 'same-origin' }).catch(() => null);
+      const response = await readFetch(`/v1/conversation/files?window=${encodeURIComponent(state.key)}&q=${encodeURIComponent(mention.query)}`, { credentials: 'same-origin' }).catch(() => null);
       const files = response?.ok === true ? (((await response.json()) as { files?: Array<{ path: string; dir: boolean }> }).files ?? []) : [];
 
       if (current()) {
@@ -1012,7 +1071,15 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     composerHost.classList.add('sending');
     refresh();
 
-    const sent = command('send', { ...target, text, ...(asCommand ? { command: true } : {}) });
+    // A send whose answer was lost is tried again with the same opId, by the retries and by the next Send of the same text, so the hub
+    // types it once however often it arrives.
+    const sendKey = JSON.stringify([target.sessionId, target.launch, text, asCommand]);
+    const kept = from === null ? undefined : sendOps()[String(from)];
+    const op = kept?.key === sendKey ? kept.opId : newOp();
+
+    keepSendOp(from, { key: sendKey, opId: op });
+
+    const sent = command('send', { ...target, text, ...(asCommand ? { command: true } : {}) }, { timeout: SEND_TRY_MS, retryFor: SEND_RETRY_MS, opId: op });
 
     toEnd();
 
@@ -1022,6 +1089,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
 
     const answer = await sent;
+
+    // Settled: taken, or refused for good. No answer, or a refusal for a page key or scope generation the page has not caught up with after a
+    // reconnect, which the hub gives before it looks at the opId, leaves it unsettled.
+    if (answer.status === 200 || answer.failure === 'bad' || (answer.status === 409 && answer.body['error'] !== CONVERSATION_CHANGED)) {
+      keepSendOp(from, null, op);
+    }
 
     sending = false;
     const dictated = heldDraft;
@@ -1068,9 +1141,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         giveBack(from, typed, late.error);
       }
     } else if (from === draftOf) {
-      showError(String(answer.body['error'] ?? `Not sent (status ${answer.status}).`));
+      showError(notSent(answer));
     } else {
-      giveBack(from, '', String(answer.body['error'] ?? `Not sent (status ${answer.status}).`));
+      giveBack(from, '', notSent(answer));
     }
 
     for (const one of held.splice(0)) {
@@ -1621,7 +1694,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const entry = { updatedAt: artifact.updatedAt, html: undefined as string | null | undefined, top };
 
     artifactDocs.set(kept, entry);
-    const response = await deps.fetch(artifactUrl(key, path), { credentials: 'same-origin', cache: 'no-store' }).catch(() => null);
+    const response = await readFetch(artifactUrl(key, path), { credentials: 'same-origin', cache: 'no-store' }).catch(() => null);
     const text = response?.ok === true ? await response.text() : null;
     const folder = path.split('/').slice(0, -1);
     /** A relative target's path in the artifact folder, or null for one outside it. */
@@ -2744,12 +2817,13 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const key = state.key;
 
     selectInFlight = true;
-    void post('select', { workItemId: asked }).then((answer) => {
-      selectInFlight = false;
-
+    void post('select', { workItemId: asked }, false, { timeout: NAVIGATION_MS }).then((answer) => {
+      // An answer for a stream that has gone leaves the new stream's select alone.
       if (key !== state.key) {
         return;
       }
+
+      selectInFlight = false;
 
       if (answer.status === 200) {
         acked = asked;
@@ -2916,7 +2990,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     draw();
     toEnd();
 
-    const answer = await command('send', { sessionId: session.id, launch: session.launch, answers: given.map(({ one, pick }) => ({ card: key, slug: one.question.slug, letters: pick.letters, other: pick.other ?? '' })) });
+    const answer = await command('send', { sessionId: session.id, launch: session.launch, answers: given.map(({ one, pick }) => ({ card: key, slug: one.question.slug, letters: pick.letters, other: pick.other ?? '' })) }, { timeout: SEND_TRY_MS, retryFor: SEND_RETRY_MS });
     const id = (answer.body['message'] as { id?: string } | undefined)?.id ?? null;
     const late = id === null ? undefined : unsent.get(id);
 

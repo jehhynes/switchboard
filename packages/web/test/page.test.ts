@@ -12,9 +12,11 @@ import { renderList } from '../src/list.js';
 import { html } from './html.js';
 import { REPLAY_TIP, SPEAKING_TIP, renderMicButton as viewMicButton } from '@switchboard/conversation/voiceControls';
 import { renderMarkdown } from '../src/markdown.js';
+import { SEND_RETRY_MS } from '../src/main.js';
 import { ADVANCE_MS, LINK_ANSWER_MS, CHAT_MAX, CHAT_MIN, DRAWER_HIDE_MS, OTHER_SETTLE_MS, DRAWER_REVEAL_MS, loadMermaid, PANE_SHOW_DELAY_MS, SENT_NOTE_MS, SHOW_MARKER_MS, SIDE_MAX, SIDE_MIN, startPage, SWIPE_OPEN } from '../src/main.js';
 import { DETAIL_MIN } from '../src/layout.js';
 import { BACKOFF_MS, GRACE_MS, JITTER } from '../src/connection.js';
+import { NAVIGATION_MS } from '../src/request.js';
 import type { ArtifactView, MessageView, PageGroup, PageRow, ReplyView, SessionView } from '@switchboard/protocol';
 import { drawAtOnce } from './frame.js';
 import { showToast } from '../src/toast.js';
@@ -5287,6 +5289,61 @@ describe('the page in use', () => {
     now += 1_100;
     await vi.advanceTimersByTimeAsync(300);
     expect(posts.find((post) => post.url.endsWith('/seen'))?.body).toMatchObject({ sessionId: 's', ids: ['r1'], scopeGen: 3 });
+    page.close();
+  });
+
+  it('tries a send whose answer was lost again with the same opId, and the same text sent again after it failed reuses it', async () => {
+    vi.useFakeTimers();
+
+    const { page, source } = start();
+
+    hello(source);
+
+    const input = root.querySelector('textarea')!;
+    const sends = () => posts.filter((post) => post.url.endsWith('/send'));
+
+    input.value = 'Ship it';
+    input.dispatchEvent(new Event('input'));
+    answers['/send'] = { status: 503, body: { error: 'The hub is restarting onto a new build; try again in a few seconds.' } };
+    click('button.send');
+    await vi.advanceTimersByTimeAsync(SEND_RETRY_MS);
+    expect(sends().length).toBeGreaterThan(2);
+    expect(new Set(sends().map((post) => post.body['opId'])).size).toBe(1);
+    expect(root.querySelector('.composer-error-text')?.textContent).toBe('Not sent. Switchboard is restarting. Try again in a moment.');
+    expect(input.value).toBe('Ship it');
+
+    const first = sends()[0]!.body['opId'];
+
+    answers['/send'] = { status: 200, body: { message: { id: 'm9' } } };
+    click('button.send');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sends().at(-1)!.body['opId']).toBe(first);
+    expect(input.value).toBe('');
+
+    // Another message is another operation.
+    input.value = 'And the docs';
+    input.dispatchEvent(new Event('input'));
+    click('button.send');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sends().at(-1)!.body['opId']).not.toBe(first);
+    page.close();
+  });
+
+  it('lets a later tap open a work item after an open that hung, once the open times out', async () => {
+    vi.useFakeTimers();
+
+    const { page, source } = start();
+
+    hello(source);
+    answers['/select'] = { status: 200, body: {}, wait: new Promise(() => {}) };
+    root.querySelector<HTMLElement>('[data-work-item="2"]')!.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(posts.filter((post) => post.url.endsWith('/select'))).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(NAVIGATION_MS);
+    delete answers['/select'];
+    root.querySelector<HTMLElement>('[data-work-item="2"]')!.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(posts.filter((post) => post.url.endsWith('/select')).map((post) => post.body['workItemId'])).toEqual([2, 2]);
     page.close();
   });
 

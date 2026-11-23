@@ -141,8 +141,9 @@ describe('the list header (architecture.md § Web page)', () => {
     box.value = text;
     box.dispatchEvent(new Event('input', { bubbles: true }));
   };
+  // A request's answer takes a few more turns through the page's timeouts (request.ts).
   const settle = async () => {
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 30; i++) {
       await Promise.resolve();
     }
   };
