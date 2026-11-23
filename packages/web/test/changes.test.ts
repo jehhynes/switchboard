@@ -135,7 +135,7 @@ describe('the Changes list', () => {
         files.push({ path: data.path, side: data.side, line: options.line });
         shown.className = 'fake';
         shown.textContent = `file ${data.path} at ${String(options.line)}`;
-        host.replaceChildren(...(options.prefix === undefined ? [] : [options.prefix]), shown, ...(options.suffix === undefined ? [] : [options.suffix]));
+        host.replaceChildren(...(options.prefix === undefined ? [] : [options.prefix]), shown, ...(options.suffix === undefined ? [] : [options.suffix]), ...(options.meta === undefined ? [] : [options.meta]));
         return { set: (layout, wrap) => fileSets.push(`${layout} ${wrap}`), dispose: () => {} };
       },
       mountChanges: (host, rows, options) => {
@@ -577,7 +577,7 @@ describe('the Changes list', () => {
     // The bar, then the diffs; each file's own header carries only its Viewed tick from the page.
     expect([...root.querySelector('.diff-view')!.children].map((one) => one.className)).toEqual(['changes-bar', 'diff-host']);
     expect(root.querySelector('.changes-bar .changes-note')!.textContent).toBe('3 files · +3 −1 · 1 viewed');
-    expect([...root.querySelectorAll<HTMLElement>('.changes-bar [data-action]')].map((one) => one.dataset['action'])).toEqual(['changes-menu', 'changes-scope', 'changes-hide-viewed', 'changes-collapse-all', 'changes-expand-all', 'changes-refresh']);
+    expect([...root.querySelectorAll<HTMLElement>('.changes-bar [data-action]')].map((one) => one.dataset['action'])).toEqual(['changes-menu', 'changes-scope', 'changes-hide-viewed', 'changes-collapse-all', 'changes-expand-all', 'changes-wrap', 'changes-refresh']);
     expect(root.querySelector('.diff-head')).toBeNull();
     expect([...root.querySelectorAll<HTMLInputElement>('.diff-host .diff-viewed input')].map((box) => [box.dataset['path'], box.checked])).toEqual([
       ['docs/a.md', false],
@@ -1295,6 +1295,102 @@ describe('the Changes list', () => {
     observers.forEach((callback) => callback([{ target: pane }]));
     expect(fileSets.at(-1)).toBe('stacked true');
     vi.unstubAllGlobals();
+  });
+
+  const wrapButton = () => root.querySelector<HTMLElement>('[data-action="changes-wrap"]')!;
+
+  it("WrapToggle_NoStoredChoice_ShowsTheSettingsEffectiveWrapAndFollowsAutoOnResize", async () => {
+    const observers: Array<(entries: Array<{ target: Element }>) => void> = [];
+
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(readonly callback: (entries: Array<{ target: Element }>) => void) {
+        observers.push(callback);
+      }
+
+      observe(): void {}
+      disconnect(): void {}
+    });
+    start();
+    await openRow(0);
+    // A phone's width under auto: wrapped, so Wrap shows pressed.
+    expect(wrapButton().getAttribute('aria-pressed')).toBe('true');
+    expect(wrapButton().title).toBe("Don't wrap long lines");
+    expect(wrapButton().querySelector('.codicon-word-wrap')).not.toBeNull();
+
+    const pane = root.querySelector<HTMLElement>('.diff-pane')!;
+
+    Object.defineProperty(pane, 'clientWidth', { configurable: true, value: 1200 });
+    observers.forEach((callback) => callback([{ target: pane }]));
+    expect(changesMounts[0]!.layouts.at(-1)).toBe('split false');
+    expect(wrapButton().getAttribute('aria-pressed')).toBe('false');
+    expect(wrapButton().title).toBe('Wrap long lines');
+    expect(localStorage.getItem('switchboard.diffWrap')).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  it("WrapToggle_Clicked_AppliesAtOnceAndKeepsTheChoiceOnTheDevice", async () => {
+    const { source } = start();
+
+    await openRow(0);
+    wrapButton().click();
+    expect(changesMounts[0]!.layouts.at(-1)).toBe('stacked false');
+    expect(wrapButton().getAttribute('aria-pressed')).toBe('false');
+    expect(localStorage.getItem('switchboard.diffWrap')).toBe('off');
+
+    // The device's choice outlasts a change to web.diffWrap.
+    source.emit('settings', { settings: { briefReplies: false, diffLayout: 'auto', diffWrap: 'on' } });
+    expect(changesMounts[0]!.layouts.at(-1)).toBe('stacked false');
+
+    wrapButton().click();
+    expect(changesMounts[0]!.layouts.at(-1)).toBe('stacked true');
+    expect(wrapButton().getAttribute('aria-pressed')).toBe('true');
+    expect(localStorage.getItem('switchboard.diffWrap')).toBe('on');
+  });
+
+  it("WrapToggle_StoredChoice_StartsTheNextPageWithIt", async () => {
+    localStorage.setItem('switchboard.diffWrap', 'off');
+    start();
+    await openRow(0);
+    // Auto would wrap at a phone's width; the stored choice does not.
+    expect(changesMounts[0]).toMatchObject({ layout: 'stacked', wrap: false });
+    expect(wrapButton().getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it("WrapToggle_StoredChoiceUnknown_FollowsTheSetting", async () => {
+    localStorage.setItem('switchboard.diffWrap', 'sometimes');
+    const { source } = start();
+
+    source.emit('settings', { settings: { briefReplies: false, diffLayout: 'stacked', diffWrap: 'off' } });
+    await openRow(0);
+    expect(changesMounts[0]).toMatchObject({ layout: 'stacked', wrap: false });
+  });
+
+  it("WrapToggle_ClickedInAFileView_WrapsTheFile", async () => {
+    start();
+    await openRow(1);
+    changesMounts[0]!.onLine!('src/new.ts', 'new', 12);
+    await flush();
+    await flush();
+    // The file view covers the bar, so its own header has Wrap, pressed as the file wraps.
+    const fileWrap = () => root.querySelector<HTMLElement>('.file-overlay [data-action="changes-wrap"]')!;
+
+    expect(fileWrap().getAttribute('aria-pressed')).toBe('true');
+    fileWrap().click();
+    expect(fileSets.at(-1)).toBe('stacked false');
+    expect(fileWrap().getAttribute('aria-pressed')).toBe('false');
+    expect(fileWrap().title).toBe('Wrap long lines');
+    expect(localStorage.getItem('switchboard.diffWrap')).toBe('off');
+    fileWrap().click();
+    expect(fileSets.at(-1)).toBe('stacked true');
+    expect(fileWrap().getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it("WrapToggle_EmptyList_IsDisabled", async () => {
+    answers.push({ status: 200, body: { ...structuredClone(LIST), rows: [], shown: 0, total: 0 } });
+    start();
+    button().click();
+    await flush();
+    expect(wrapButton().hasAttribute('disabled')).toBe(true);
   });
 
   it('ticks a file viewed at the hash it was shown with, follows another device, and takes back a refused tick', async () => {

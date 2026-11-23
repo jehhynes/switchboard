@@ -11,6 +11,8 @@ export interface FileMountOptions {
   /** What the file's header shows before its name and after it. */
   prefix?: HTMLElement;
   suffix?: HTMLElement;
+  /** What the file's header shows at its end. */
+  meta?: HTMLElement;
 }
 
 export interface DiffMountOptions {

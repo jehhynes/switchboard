@@ -194,7 +194,9 @@ describe('the tab strip on a narrow screen', () => {
     const changes = PAGE_ASSETS['page.css']!.body;
 
     expect(changes).toMatch(/\.changes-bar \{[^}]*display: flex; flex-wrap: wrap;/);
-    expect(changes).toContain('@media (hover: none), (pointer: coarse) { @container (max-width: 479px) { .changes-scope { flex: 1 1 0; max-width: none; } .changes-note { order: 1; flex-basis: 100%;');
+    expect(changes).toContain('@media (hover: none), (pointer: coarse) { @container (max-width: 479px) { .changes-scope { flex: 1 1 0; max-width: none; } .changes-note { order: 1; box-sizing: border-box; flex-basis: calc(100% - 51px);');
+    // Wrap ends the note's row, so the scope above keeps its room.
+    expect(changes).toContain('.changes-bar button[data-action="changes-wrap"] { order: 1; } } }');
   });
 
   it('MaximizeButton_FocusedOrPressed_KeepsTheStripBackgroundNotTheChosenTabs', () => {

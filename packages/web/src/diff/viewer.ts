@@ -114,7 +114,7 @@ export function mountDiff(host: HTMLElement, data: DiffData, version: string, mo
 
 /** Draws a whole file read-only into `host`, scrolled to `line` and with it selected (PRD R118's file view). */
 export function mountFile(host: HTMLElement, data: FileData, version: string, mount: FileMountOptions): DiffMount {
-  const callbacks = { renderHeaderPrefix: () => mount.prefix ?? null, renderHeaderFilenameSuffix: () => mount.suffix ?? null };
+  const callbacks = { renderHeaderPrefix: () => mount.prefix ?? null, renderHeaderFilenameSuffix: () => mount.suffix ?? null, renderHeaderMetadata: () => mount.meta ?? null };
   const view = new CodeView<undefined, undefined>({ ...options('stacked', mount.wrap), ...callbacks }, workers());
   const item: CodeViewItem<undefined> = { id: data.path, type: 'file', file: { name: data.path, contents: data.contents ?? '', cacheKey: version } };
 

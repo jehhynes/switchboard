@@ -41,8 +41,8 @@
 .scope-go:disabled { cursor: default; opacity: 0.5; }
 @media (hover: none), (pointer: coarse) { .changes-scope { height: 44px; padding: 0 10px; } .scope-item { min-height: 44px; } .scope-field select, .scope-go { height: 44px; } }
 /* On a touch screen, whose 44 px buttons leave a bar under 480 px no room for the note, as on a phone, the note takes a row of its own under
-   Files and the buttons, so it is not cut where no tooltip shows it whole. */
-@media (hover: none), (pointer: coarse) { @container (max-width: 479px) { .changes-scope { flex: 1 1 0; max-width: none; } .changes-note { order: 1; flex-basis: 100%; padding: 0 6px 4px; } } }
+   Files and the buttons, so it is not cut where no tooltip shows it whole; Wrap ends that row, leaving the scope's name its room above. */
+@media (hover: none), (pointer: coarse) { @container (max-width: 479px) { .changes-scope { flex: 1 1 0; max-width: none; } .changes-note { order: 1; box-sizing: border-box; flex-basis: calc(100% - 51px); padding: 0 6px; } .changes-bar button[data-action="changes-wrap"] { order: 1; } } }
 .changes-note.error { color: var(--vscode-errorForeground); }
 .changes-bar button.icon { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: none; border-radius: 4px; background: transparent; color: var(--vscode-foreground); cursor: pointer; }
 .changes-bar button.icon:hover { background: var(--vscode-toolbar-hoverBackground); }
@@ -86,6 +86,10 @@
 .diff-at { font-family: var(--diffs-font-family); }
 .diff-back { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; margin-right: 2px; border: none; border-radius: 4px; background: transparent; color: var(--vscode-foreground); cursor: pointer; vertical-align: middle; }
 .diff-back:hover { background: var(--vscode-toolbar-hoverBackground); }
+/* Wrap at the end of the file view's header, which covers the bar's. */
+.diff-wrap { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: none; border-radius: 4px; background: transparent; color: var(--vscode-foreground); cursor: pointer; vertical-align: middle; }
+.diff-wrap:hover { background: var(--vscode-toolbar-hoverBackground); }
+.diff-wrap[aria-pressed="true"] { background: var(--vscode-toolbar-activeBackground, var(--vscode-toolbar-hoverBackground)); }
 .diff-host > .empty .diff-back { margin-right: 6px; }
 .diff-host { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; container-type: inline-size; padding-bottom: var(--sb-end);
   --diffs-font-family: var(--vscode-editor-font-family);
@@ -99,7 +103,7 @@
 }
 .diff-host > .empty { padding: 12px; color: var(--vscode-descriptionForeground); }
 @media (max-width: 599px) { .diff-host { --diffs-font-size: 12px; --diffs-line-height: 17px; } }
-@media (hover: none), (pointer: coarse) { .diff-back { width: 44px; height: 44px; } }
+@media (hover: none), (pointer: coarse) { .diff-back, .diff-wrap { width: 44px; height: 44px; } }
 /* A row's Viewed tick, after its status letter; a viewed row's name dims, as on a pull request. */
 .change-item { display: flex; align-items: center; }
 .change-item > .change-row { flex: 1 1 auto; min-width: 0; }

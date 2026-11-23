@@ -115,6 +115,19 @@ export type DiffLayout = 'auto' | 'split' | 'stacked';
 export type DiffWrap = 'auto' | 'on' | 'off';
 /** The narrowest pane a diff shows side by side in, as VS Code's diff editor switches to inline at 900 px. */
 export const SPLIT_MIN_WIDTH = 900;
+/** This device's Wrap choice on the Changes tab's bar, `on` or `off`; without one the diffs follow `web.diffWrap`. */
+export const WRAP_KEY = 'switchboard.diffWrap';
+
+/** The Wrap choice this device keeps, or null when it has none or no local storage. */
+function storedWrap(): 'on' | 'off' | null {
+  try {
+    const kept = localStorage.getItem(WRAP_KEY);
+
+    return kept === 'on' || kept === 'off' ? kept : null;
+  } catch {
+    return null;
+  }
+}
 
 /** The layout and wrapping a diff shows with in a pane `width` pixels wide. */
 export function diffLayout(choice: DiffLayout, wrap: DiffWrap, width: number): { layout: 'split' | 'stacked'; wrap: boolean } {
@@ -234,6 +247,17 @@ export function emptyNote(list: ChangesList): string {
         : list.base === null
           ? 'No uncommitted changes, and no merge base was found.'
           : 'No changes since the merge base.';
+}
+
+/** Wrap, pressed while long lines wrap: on the Changes tab's bar, and at the end of the file view's header, which covers the bar. */
+function WrapButton({ wrapped, disabled, className }: { wrapped: boolean; disabled?: boolean; className: string }): VNode {
+  const label = wrapped ? "Don't wrap long lines" : 'Wrap long lines';
+
+  return (
+    <button class={className} type="button" data-action="changes-wrap" title={label} aria-label={label} aria-pressed={wrapped} disabled={disabled}>
+      <span class="codicon codicon-word-wrap" aria-hidden="true"></span>
+    </button>
+  );
 }
 
 /** A button of the Changes tab's bar: a codicon with its name as tooltip. */
@@ -376,9 +400,9 @@ function ScopeMenu({ changes, now }: { changes: ChangesView; now: number }): VNo
 
 /**
  * The Changes tab's bar, above the diffs: Files, which opens the list of files to go to one, the scope menu, the note, then Hide viewed,
- * Collapse all, Expand all and Refresh. Open in VS Code is in the work item's Actions menu, not here.
+ * Collapse all, Expand all, Wrap, pressed while long lines wrap, and Refresh. Open in VS Code is in the work item's Actions menu, not here.
  */
-export function renderChangesBar(changes: ChangesView, now = Date.now()): ComponentChildren {
+export function renderChangesBar(changes: ChangesView, wrapped: boolean, now = Date.now()): ComponentChildren {
   const list = changes.list;
   const empty = list === null || list.rows.length === 0;
   const commits = list?.commits ?? [];
@@ -404,6 +428,7 @@ export function renderChangesBar(changes: ChangesView, now = Date.now()): Compon
     <HeadButton action="changes-hide-viewed" icon={changes.hideViewed ? 'eye-closed' : 'eye'} label={changes.hideViewed ? 'Show viewed files' : 'Hide viewed files'} pressed={changes.hideViewed} disabled={empty} />,
     <HeadButton action="changes-collapse-all" icon="collapse-all" label="Collapse all" disabled={empty} />,
     <HeadButton action="changes-expand-all" icon="expand-all" label="Expand all" disabled={empty} />,
+    <WrapButton className="icon" wrapped={wrapped} disabled={empty} />,
     <button class="icon" type="button" data-action="changes-refresh" title="Refresh" aria-label="Refresh" disabled={changes.loading}>
       <span class={`codicon codicon-refresh${changes.loading ? ' codicon-modifier-spin' : ''}`} aria-hidden="true"></span>
     </button>,
@@ -559,11 +584,14 @@ export class ChangesController {
   /** The pane the Changes tab drew into, watched so Auto follows a pane resized past 900 px without a redraw. */
   #resize: ResizeObserver | null = null;
   readonly #watched = new WeakSet<HTMLElement>();
-  #fileMount: { host: HTMLElement; mount: DiffMount | null } | null = null;
+  /** The file view's viewer, and its header's end, which holds Wrap. */
+  #fileMount: { host: HTMLElement; mount: DiffMount | null; meta: HTMLElement | null } | null = null;
   /** Each file's header element the viewer shows after its counts, by path, drawn again on every draw. */
   readonly #metas = new Map<string, HTMLElement>();
   /** Each file's header element the viewer shows before its name, by path, drawn again on every draw. */
   readonly #prefixes = new Map<string, HTMLElement>();
+  /** This device's Wrap choice, which overrides `web.diffWrap` once the operator has toggled Wrap ({@link WRAP_KEY}). */
+  #wrap = storedWrap();
 
   constructor(private readonly deps: ChangesDeps) {}
 
@@ -825,6 +853,20 @@ export class ChangesController {
     if (action === 'changes-hide-viewed') {
       this.view.hideViewed = !this.view.hideViewed;
       this.#syncRows();
+      this.deps.draw();
+      return true;
+    }
+
+    if (action === 'changes-wrap') {
+      // The opposite of what the pane shows now, kept on this device even where Settings cannot be changed, as on a paired phone.
+      this.#wrap = this.#shownLayout(target.closest<HTMLElement>('.diff-pane')).wrap ? 'off' : 'on';
+
+      try {
+        localStorage.setItem(WRAP_KEY, this.#wrap);
+      } catch {
+        // A page without local storage keeps the choice until it reloads.
+      }
+
       this.deps.draw();
       return true;
     }
@@ -1241,13 +1283,18 @@ export class ChangesController {
   #shownLayout(pane: HTMLElement | null): { layout: 'split' | 'stacked'; wrap: boolean } {
     const settings = this.deps.diffSettings();
 
-    return diffLayout(settings.layout, settings.wrap, pane?.clientWidth || (typeof innerWidth === 'number' ? innerWidth : 0));
+    return diffLayout(settings.layout, this.#wrap ?? settings.wrap, pane?.clientWidth || (typeof innerWidth === 'number' ? innerWidth : 0));
   }
 
-  /** Gives the diffs and the file view shown in `pane` the layout its width calls for now. */
+  /** Gives the diffs and the file view shown in `pane` the layout its width calls for now, and its bar's Wrap the wrapping. */
   #relayout(pane: HTMLElement): void {
     const shown = this.#shownLayout(pane);
     const mounted = this.#mount;
+    const bar = pane.querySelector<HTMLElement>(':scope > .diff-view > .changes-bar');
+
+    if (bar !== null) {
+      mount(bar, renderChangesBar(this.view, shown.wrap));
+    }
 
     if (mounted !== null && pane.contains(mounted.host) && mounted.layout !== `${shown.layout} ${shown.wrap}`) {
       mounted.layout = `${shown.layout} ${shown.wrap}`;
@@ -1256,6 +1303,10 @@ export class ChangesController {
 
     if (this.#fileMount !== null && pane.contains(this.#fileMount.host)) {
       this.#fileMount.mount?.set('stacked', shown.wrap);
+
+      if (this.#fileMount.meta !== null) {
+        mount(this.#fileMount.meta, <WrapButton className="diff-wrap" wrapped={shown.wrap} />);
+      }
     }
   }
 
@@ -1314,8 +1365,6 @@ export class ChangesController {
 
     const host = view.querySelector<HTMLElement>(':scope > .diff-host')!;
     const list = this.view.list;
-
-    mount(view.querySelector<HTMLElement>(':scope > .changes-bar')!, renderChangesBar(this.view));
 
     if (this.#mount === null || this.#mount.host !== host) {
       if (this.view.error !== null && list === null) {
@@ -1504,7 +1553,7 @@ export class ChangesController {
     };
     const note = fileNote(file.entry);
     const entry = file.entry;
-    const kept = { host, mount: null as DiffMount | null };
+    const kept = { host, mount: null as DiffMount | null, meta: null as HTMLElement | null };
 
     this.#fileMount = kept;
 
@@ -1528,11 +1577,15 @@ export class ChangesController {
 
       const prefix = slot();
       const suffix = slot();
+      const meta = slot();
+      const wrap = this.#shownLayout(host.closest<HTMLElement>('.diff-pane') ?? host).wrap;
 
+      kept.meta = meta;
       mount(prefix, <BackButton />);
+      mount(meta, <WrapButton className="diff-wrap" wrapped={wrap} />);
       mount(suffix, <span class="diff-at">:{file.line}{fileAt(this.view.list, file.side) === null ? null : <span class="diff-from">{fileAt(this.view.list, file.side)}</span>}</span>);
       host.replaceChildren();
-      kept.mount = module.mountFile(host, entry.data, entry.version, { wrap: this.#shownLayout(host.closest<HTMLElement>('.diff-pane') ?? host).wrap, line: file.line, prefix, suffix });
+      kept.mount = module.mountFile(host, entry.data, entry.version, { wrap, line: file.line, prefix, suffix, meta });
     });
   }
 

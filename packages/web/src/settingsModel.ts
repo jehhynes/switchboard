@@ -1277,7 +1277,7 @@ export function generalFields(state: EditorState): Section[] {
           path: 'web.diffWrap',
           label: 'Wrap long lines',
           kind: 'select',
-          help: 'Whether a diff wraps lines longer than its pane. Auto wraps them only while Auto layout stacks the sides.',
+          help: 'Whether a diff wraps lines longer than its pane. Auto wraps them only while Auto layout stacks the sides. A device where Wrap was toggled on the Changes tab keeps its own choice.',
           placeholder: 'auto',
           options: [
             { value: 'auto', label: 'Auto' },
