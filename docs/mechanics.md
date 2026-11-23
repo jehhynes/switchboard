@@ -1635,7 +1635,7 @@ Current use: the console's resync after each fit ([architecture.md](architecture
 - **Current use:** when browser history has more than one entry, the page leaves an iOS left-edge swipe to browser history, which returns through the same `popstate` path as Back; a swipe begun farther in still uses the page's animation (architecture.md § Web page).
 - **Not verified:** the fix on the iPhone, the width of iOS's native edge zone, a Safari or Chrome tab, a direct link with no earlier history entry, or whether the native preview's list is up to date.
 
-## M133. Done list windowing, 2026-11-22
+## M134. Done list windowing, 2026-11-22
 
 - **Environment:** Windows, headless Chrome 158.0.0.0, 1280 × 720 viewport, a scratch browser profile and a fake loopback hub on port 18779. The operator's hub and Switchboard home were not used.
 - **Method:** saved the web assets at `2c0fc675` before the change, then served those and the final changed assets from the fake hub with explicit versioned script URLs, no HTTP caching and service worker registration disabled. The final benchmark included selection and resize anchoring (`windowRows.tsx` SHA-256 `06887ae2c70b001bccc57489f5c5ff83617741effafeab1370e9120834c07eff`). The fake stream supplied 1,000 Done rows, 900 in Today and 100 in Yesterday, both bands open, with title, done time, `dev:address-pr-review`, ticket pill and completion detail. Render-to-paint is the time from emitting the list to the second animation frame: seven samples, the initial hello and six draws from an empty list. The scroll run advanced from top to bottom over 180 animation frames and recorded 179 frame intervals. No CPU throttling was applied.
