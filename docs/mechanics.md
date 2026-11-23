@@ -50,7 +50,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
   - The roster lists the new entry at once with `id` (the short ID), `sessionId`, `kind: background`, `state: working` and **no pid**; the pid appeared 1–4 seconds after launch. After the turn, the entry shows the pid with `status: idle` and `state: done`.
   - After `claude stop`, the entry leaves the roster; `--all` still lists it with `state: done` and no pid.
   - A Ground Control session started four days earlier is still listed with `state: blocked` and no pid: an entry without a pid can be a process that is gone.
-- **Current use:** start confirmation and liveness from the roster (architecture.md § Claude Code runner); M41 covers a start that waits on a prompt.
+- **Current use:** start confirmation and liveness from the roster (architecture.md § Claude Code runner); M41 covers a start that waits on a prompt. Superseded 2026-11-23 for starts: every Claude session Switchboard starts is held (M148); the roster now follows only registered sessions.
 
 ## M6. Hooks inside background sessions
 
@@ -288,7 +288,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
   - The tab ran in the operator's default mode (`auto`) both times, not the mode the session started with.
   - 2026-10-14, the operator's hub, Claude Code CLI and extension 2.1.299, VS Code 1.141.1: the tab's process wrote a `SessionStart` marker with `source: resume`, and `claude agents --json` listed it `status: busy` while it loaded and `idle` 24 seconds later, while the tab showed the unanswered question. The answer is saved as a prompt (with a `promptId`), and an earlier answer on 2026-10-09 gave a `running` marker. Source inspection of extension 2.1.299: the tab sends the answer as a prompt, so `UserPromptSubmit` fires.
 - **Limits:** the hooks run asynchronously, so a resume given its prompt at once, such as `claude -p --resume`, can write its `SessionStart` marker after `UserPromptSubmit`; the session then shows `idle` until its next marker. Switchboard starts no such resume.
-- **Current use:** Open in Claude (PRD R70), and the `idle` state of a resumed interactive session with only its `SessionStart` marker (architecture.md § Claude Code runner).
+- **Current use:** Open in Claude (PRD R70), and the `idle` state of a resumed interactive session with only its `SessionStart` marker (architecture.md § Claude Code runner). Superseded 2026-11-23 for Open in Claude, which is removed; the `idle` reading of a resumed tab still applies to registered sessions.
 
 ## M26. Finding, docking beside and switching to VS Code windows
 
@@ -371,7 +371,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Questions.** A background run cannot wait on the operator: `request_user_input` is behind the `default_mode_request_user_input` feature, under development and off.
 - **Not verified:** the panel's hook PID walk; the panel's `PermissionRequest`; a panel thread's markers when its window closes without SessionEnd.
 - **Superseded for new sessions by M92 and M95:** new Codex sessions run on the app-server daemon; this entry still covers existing exec sessions.
-- **Current use:** existing Codex exec sessions (PRD R70; architecture.md § Codex runner, Legacy exec sessions).
+- **Current use:** existing Codex exec sessions (PRD R70; architecture.md § Codex runner, Legacy exec sessions). Superseded 2026-11-23: Switchboard no longer runs `codex exec` sessions; an earlier hub's are ended at startup (PRD R107).
 
 ## M32. Live acceptance of Codex sessions, 2026-10-11
 
@@ -550,7 +550,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Implementation check:** Switchboard's `showSession`, bundled into the scratch probe, opened the two recorded threads in their respective windows with no editor tabs (`production-dom.jsonl`).
 - **Limits:** resolving the open command is not proof that the requested history loaded; a tab-based success check cannot verify a sidebar. Invalid IDs, missing extensions, rejection of the confirmation, and resuming a running thread were not tested live. The isolated sidebar displayed a Windows setup prompt, so this probe proves navigation and history display, not sending a follow-up. The Codex route is implementation-specific and needs rechecking after extension upgrades.
 - **Superseded in part by M92:** new Codex sessions run on the app-server and open in Switchboard's Conversation view; the sidebar route serves only existing Codex exec sessions (PRD R29).
-- **Current use:** opening an existing Codex exec session (PRD R29, R70, architecture.md § Legacy exec sessions).
+- **Current use:** opening an existing Codex exec session (PRD R29, R70, architecture.md § Legacy exec sessions). Superseded 2026-11-23: an earlier hub's exec session resumes with `codex resume` in a terminal (PRD R107).
 
 ## M44. Windows auto-hide timing and native topmost state
 
@@ -679,7 +679,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Live acceptance, same day:** the built VSIX in the isolated VS Code with `SWITCHBOARD_HOME` at a scratch home, whose hub ran with `sessions.installHooks` off and `sessions.model` `haiku`. A released ad-hoc session, opened in its Claude tab and given a 40-second foreground command, showed `running`. Continue in Background closed the tab and the window within 0.2 seconds; the hub resumed the session 3 seconds later under the same short ID as `kind: background`, and the session ran the command again to completion, replied and was released. A second run, after the hub kept only the candidates whose process is a child of the window's extension host, passed the same way.
 - **Live acceptance from the sidebar, same day:** the built VSIX in the isolated VS Code with `claudeCode.preferredLocation: "sidebar"` and the scratch hub: the released ad-hoc session opened in the Claude sidebar and ran a 40-second command; Continue in Background for the sidebar (`label: null`) passed the hub's last check, closed the window, and the session resumed under the same short ID as `kind: background`, completed the command and was released at its turn end.
 - **Not verified:** Windows, including the parent of a tab's process there and the CIM query for it; VS Code quitting with several windows; the command run from the item window's own workspace file; a tab session waiting on a permission prompt or a question at the close; a session that was compacted in its tab; live acceptance steps 3 (controls) and 4 (forks) of testing.md.
-- **Current use:** Continue in Background (PRD R89, architecture.md § Claude Code runner).
+- **Current use:** Continue in Background (PRD R89, architecture.md § Claude Code runner). Superseded 2026-11-23: Continue in Background is removed (PRD R89).
 
 ## M56. GitHub issue dependencies through `gh api graphql`
 
