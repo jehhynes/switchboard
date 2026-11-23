@@ -3,7 +3,7 @@
  * then its details, both as plain text at the size of the operator's messages, whether or not it was spoken (architecture.md § Conversation
  * view, Speech). Imports only the tag reader, which imports nothing, for browser bundles.
  */
-import { spokenText } from './tags.js';
+import { speechPart, spokenText } from './tags.js';
 
 /** One run of a reply's text: a passage read aloud, or text around it. */
 export interface SpokenPart {
@@ -102,14 +102,20 @@ function heardEnd(passage: string, heard: number): number {
 }
 
 /**
- * One passage of the primary response; after the operator spoke over it (`heard`, characters of its spoken text, not null), the part not heard
- * is dimmed, as plain text.
+ * One passage of the primary response, `last` when it ends the reply; after the operator spoke over it (`heard`, characters of its spoken text,
+ * not null), the part of what the voice reads (`speechPart`) not heard is dimmed, as plain text, and the rest, never read, stays Markdown.
  */
-export function primaryResponse(passage: string, heard: number | null, render: ReplyRender): string {
-  const cut = heard === null || heard >= spokenText(passage).length ? null : heardEnd(passage, Math.max(heard, 0));
-  const inner = cut === null ? render.markdown(passage, false) : `<p class="passage">${render.escape(passage.slice(0, cut))}<span class="unheard">${render.escape(passage.slice(cut))}</span></p>`;
+export function primaryResponse(passage: string, heard: number | null, render: ReplyRender, last = false): string {
+  const speech = speechPart(passage);
+  const cut = heard === null || heard >= spokenText(speech).length ? null : heardEnd(speech, Math.max(heard, 0));
 
-  return `<div class="reply-primary">${inner}</div>`;
+  if (cut === null) {
+    return `<div class="reply-primary">${render.markdown(passage, last)}</div>`;
+  }
+
+  const rest = passage.slice(passage.indexOf(speech) + speech.length);
+
+  return `<div class="reply-primary"><p class="passage">${render.escape(speech.slice(0, cut))}<span class="unheard">${render.escape(speech.slice(cut))}</span></p>${rest.trim() === '' ? '' : render.markdown(rest, last)}</div>`;
 }
 
 /**
@@ -133,7 +139,7 @@ export function replyBody(opening: string, speak: string, said: number | null, f
 
   return parts
     .map((part, index) =>
-      part.spoken ? primaryResponse(part.text, said === null ? null : said - spokenAt(part.at), render) : `<div class="reply-details">${render.markdown(part.text, index === parts.length - 1)}</div>`,
+      part.spoken ? primaryResponse(part.text, said === null ? null : said - spokenAt(part.at), render, index === parts.length - 1) : `<div class="reply-details">${render.markdown(part.text, index === parts.length - 1)}</div>`,
     )
     .join('');
 }

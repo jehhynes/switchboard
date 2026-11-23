@@ -2,7 +2,7 @@ import { appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ConversationMessage, ConversationReply, Interruption, Persona, Piece, Session, SpokenState, ViewSettings, VoiceSettings } from '@switchboard/core';
 import { PERMISSION_PROMPT, QUESTION_CARD, START_PROMPT } from '@switchboard/core/group';
-import { spokenText } from '@switchboard/conversation';
+import { speechPart, spokenText, stripQuestionMarkup } from '@switchboard/conversation';
 import type { HeardTag } from '@switchboard/conversation';
 import { ENROLL_SECONDS } from '@switchboard/voice';
 import type { AlertCause, AwayReason, EnrollmentState, HubMessage, MicState, UtteranceTiming, VoiceDevice, VoiceMessage, VoiceTarget } from '@switchboard/voice';
@@ -116,6 +116,14 @@ export const VOICE_GLYPH = '\u{ec12}';
 /** The speaker codicon (`unmute`), which marks the voice target's row while the mic is off: the voice speaks there, but nothing listens. */
 export const SPEAKER_GLYPH = '\u{eb75}';
 
+/**
+ * What the voice reads of a reply's primary response: without its question markup, as the view shows it, up to its first list, table, code block,
+ * heading, quote or rule (`speechPart`).
+ */
+export function speechOf(speak: string): string {
+  return speechPart(stripQuestionMarkup(speak));
+}
+
 /** The voice target's row mark: the mic while the mic is on, else the speaker, with where the voice is in its tooltip. */
 export function voiceMark(micLive: boolean, onPhone: boolean): { glyph: string; title: string } {
   const where = onPhone ? 'Voice is on a paired device for this session' : 'Voice is set to this session';
@@ -174,7 +182,10 @@ function alertText(cause: AlertCause, inTerminal: boolean, reply: { speak: strin
     return 'It is waiting for your answer in its terminal.';
   }
 
-  const text = spokenText(reply?.speak ?? (reply !== null && reply.opening.trim() !== '' ? reply.opening : (status ?? '')))
+  // The part of the primary response the voice would read, else the reply's text, else the status.
+  const primary = reply?.speak == null ? '' : speechOf(reply.speak);
+  const opening = reply === null ? '' : stripQuestionMarkup(reply.opening).trim();
+  const text = spokenText(primary !== '' ? primary : opening !== '' ? opening : (status ?? ''))
     .replace(/\s+/g, ' ')
     .trim();
 
@@ -1065,7 +1076,7 @@ export class VoiceControl {
       return;
     }
 
-    if ((reply.spokenState ?? 'none') !== 'none' || reply.rewrittenBy !== null || reply.withdrawn || reply.source !== 'transcript' || reply.kind !== 'reply' || reply.speak == null) {
+    if ((reply.spokenState ?? 'none') !== 'none' || reply.rewrittenBy !== null || reply.withdrawn || reply.source !== 'transcript' || reply.kind !== 'reply' || reply.speak == null || speechOf(reply.speak) === '') {
       return;
     }
 
@@ -1730,7 +1741,7 @@ export class VoiceControl {
       return 'Voice is not in this window.';
     }
 
-    if (reply.speak == null) {
+    if (reply.speak == null || speechOf(reply.speak) === '') {
       return 'This reply has nothing to read aloud.';
     }
 
@@ -1965,7 +1976,7 @@ export class VoiceControl {
       gen,
       replyId: reply.id,
       sessionId: reply.sessionId,
-      text: spokenText(reply.speak!),
+      text: spokenText(speechOf(reply.speak!)),
       tone: reply.tone ?? null,
       turn,
       voice,
@@ -2075,10 +2086,10 @@ export class VoiceControl {
             this.#playing.delete(message.sessionId);
           }
 
-          // A reply whose whole text was its passage, heard to the end, has been seen (architecture.md § Unread).
+          // A reply whose whole text was read, heard to the end, has been seen (architecture.md § Unread).
           const reply = this.deps.store.reply(message.replyId);
 
-          if (message.state === 'played' && reply !== null && reply.speak != null && reply.speak.trim() === reply.opening.trim()) {
+          if (message.state === 'played' && reply !== null && reply.speak != null && speechOf(reply.speak) === stripQuestionMarkup(reply.opening).trim()) {
             this.deps.store.markSeen(reply.sessionId, [reply.id], this.deps.now());
             this.deps.replyChanged(reply.id);
           }

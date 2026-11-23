@@ -290,6 +290,18 @@ describe('drawing', () => {
     expect([...host.querySelector('li[data-id="r1"]')!.children].map((child) => child.className)).toEqual(['dot', 'body', 'meta']);
   });
 
+  it('shows a reply with no [details] line whole, with no Show more, its ending questions and their markup left to its card', () => {
+    const host = document.createElement('div');
+    const whole = 'Fixed it.\n\n- one\n\n1. Ship it? {#ship}\n   - A) Yes\n   - B) No';
+
+    host.innerHTML = html(renderTimeline(pageState([reply('r1', 1, { opening: whole, speak: whole })]), newView()));
+    expect(host.querySelector('li[data-id="r1"] .show-more')).toBeNull();
+    expect(host.querySelector('li[data-id="r1"] .body ul')).not.toBeNull();
+    expect(host.querySelector('li[data-id="r1"] .question-card')).not.toBeNull();
+    expect(host.querySelector('li[data-id="r1"] .body')!.textContent).not.toContain('Ship it?');
+    expect(host.textContent).not.toContain('{#ship}');
+  });
+
   it('gives a reply whose only text besides its passage is the questions its card draws no Show more', () => {
     const host = document.createElement('div');
     const asked = 'Fixed it.\n\n1. Ship it?\n   - A) Yes\n   - B) No';

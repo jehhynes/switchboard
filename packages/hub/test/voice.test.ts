@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from '@switchboard/core';
 import type { ConversationReply, Persona, VoiceSettings } from '@switchboard/core';
 import type { HubMessage, VoiceMessage } from '@switchboard/voice';
-import { ALERT_DELAY_MS, OPEN_ITS_WINDOW, SPEAKER_GLYPH, VOICE_GLYPH, VOICE_LINGER_MS, VOICE_RESTART_MS, VoiceControl, alertDetail, alertKind, voiceMark } from '../src/voice.js';
+import { ALERT_DELAY_MS, OPEN_ITS_WINDOW, SPEAKER_GLYPH, VOICE_GLYPH, VOICE_LINGER_MS, VOICE_RESTART_MS, VoiceControl, alertDetail, alertKind, speechOf, voiceMark } from '../src/voice.js';
 import type { VoiceConnection } from '../src/voiceLink.js';
 import type { WindowScope } from '../src/windows.js';
 
@@ -749,6 +749,8 @@ describe('spoken alerts in the hub', () => {
     expect(alertDetail('turn-finished', false, { speak: 'The **badge** counts.', opening: 'Long text.' }, 'Status')).toBe('The badge counts.');
     expect(alertDetail('turn-finished', false, { speak: null, opening: 'Fixed `badge.ts`.\n\nAll green.' }, null)).toBe('Fixed badge.ts. All green.');
     expect(alertDetail('question', false, { speak: null, opening: ' ' }, '## Which colour?')).toBe('Which colour?');
+    // A primary response that opens with a list has nothing the voice reads, so the alert reads the reply, without its question markup.
+    expect(alertDetail('turn-finished', false, { speak: '[withdraw: old-one]\n\n- Updated the parser.', opening: '[withdraw: old-one]\n\n- Updated the parser.' }, null)).toBe('Updated the parser.');
     expect(alertDetail('question', false, null, null)).toBe('It is waiting for your answer.');
     expect(alertDetail('turn-finished', false, null, null)).toBe('It has no reply to read.');
     expect(alertDetail('question', true, { speak: 'x', opening: 'x' }, null)).toBe('It is waiting for your answer in its terminal.');
@@ -893,6 +895,17 @@ describe('spoken alerts in the hub', () => {
     expect(control.mic('k1', false)).toBeNull();
     expect(control.micLive).toBe(false);
     expect(dockChanges()).toBe(before + 4);
+  });
+});
+
+describe('speechOf', () => {
+  const spokenTextOf = (text: string): string => text.replace(/\s+/g, ' ').trim();
+
+  it("reads a reply's primary response as the view shows it, without question markup, up to its first list, table or code block", () => {
+    expect(speechOf('Fixed it.\n\n[withdraw: old-one]\n\nMore after.')).not.toContain('withdraw');
+    expect(spokenTextOf(speechOf('Fixed it.\n\n[withdraw: old-one]\n\nMore after.'))).toBe('Fixed it. More after.');
+    expect(speechOf('Fixed it.\n\n1. Ship it? {#ship}\n   - A) Yes')).toBe('Fixed it.');
+    expect(speechOf('1. Ship it? {#ship}\n   - A) Yes')).toBe('');
   });
 });
 

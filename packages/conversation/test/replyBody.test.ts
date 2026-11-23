@@ -40,7 +40,8 @@ describe("a reply's body", () => {
   it('draws each passage once: only the primary response while folded, else the primary response in its place among the details', () => {
     expect(replyBody('Done.\n\nMore.', 'Done.', null, true, render)).toBe('<div class="reply-primary"><md>Done.</md></div>');
     expect(replyBody('Done.\n\nMore.', 'Done.', null, false, render)).toBe('<div class="reply-primary"><md>Done.</md></div><div class="reply-details"><md last>More.</md></div>');
-    expect(replyBody('Done.', 'Done.', null, false, render)).toBe('<div class="reply-primary"><md>Done.</md></div>');
+    // A reply that is all primary response ends with it, so a card's questions at its end leave it.
+    expect(replyBody('Done.', 'Done.', null, false, render)).toBe('<div class="reply-primary"><md last>Done.</md></div>');
     // A passage not found in the text: the text as written, rather than the passage twice.
     expect(replyBody('Something else.', 'Done.', null, false, render)).toBe('<md last>Something else.</md>');
   });
@@ -59,7 +60,10 @@ describe("a reply's body", () => {
     // A link's text is read and its target is not; a list marker is not read.
     expect(replyBody('[go](https://example.com) now', '[go](https://example.com) now', 1, true, render)).toContain('<p class="passage">[g<span class="unheard">o](https://example.com) now</span></p>');
     expect(replyBody('[go](https://example.com) now', '[go](https://example.com) now', 4, true, render)).toContain('<p class="passage">[go](https://example.com) n<span class="unheard">ow</span></p>');
-    expect(replyBody('- Go now', '- Go now', 1, true, render)).toContain('<p class="passage">- G<span class="unheard">o now</span></p>');
+    // A list is never read, so nothing of one is dimmed; text read before it is, and the list stays Markdown after it.
+    expect(replyBody('- Go now', '- Go now', 1, true, render)).toBe('<div class="reply-primary"><md>- Go now</md></div>');
+    expect(replyBody('Two files:\n- a.ts', 'Two files:\n- a.ts', 3, false, render)).toBe('<div class="reply-primary"><p class="passage">Two<span class="unheard"> files:</span></p><md last>- a.ts</md></div>');
+    expect(replyBody('Two files:\n- a.ts', 'Two files:\n- a.ts', 10, false, render)).toBe('<div class="reply-primary"><md last>Two files:\n- a.ts</md></div>');
     expect(replyBody('Fixed it.', 'Fixed it.', 0, true, render)).toContain('<p class="passage"><span class="unheard">Fixed it.</span></p>');
   });
 });

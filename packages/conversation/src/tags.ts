@@ -89,22 +89,15 @@ const DETAILS_LINE = /^ {0,3}\[details\][ \t]*$/i;
 /** A line that is only the details tag, kept apart when the screen's wrapped lines are joined. */
 export const isDetailsLine = (line: string): boolean => DETAILS_LINE.test(line);
 
-/**
- * A reply with no `[details]` line up to this many characters, with no list, table, code, heading, quote or rule, is all primary: about three
- * sentences. A longer one's primary response is its first paragraph.
- */
-export const PRIMARY_SHORT_MAX = 400;
-
-/** A line that starts Markdown structure, where a primary response taken without a `[details]` line stops (claude-collab `tts.js` `STRUCTURE`). */
+/** A line that starts Markdown structure, where the voice stops reading a primary response (claude-collab `tts.js` `STRUCTURE`). */
 const STRUCTURE = /^\s*(?:`{3,}|~{3,}|#{1,6}\s|[-*+•]\s|\d+[.)]\s|\||>|(?:[-*_][ \t]*){3,}$)/;
 /** A line indented as code, which starts an indented code block at the start of a paragraph. */
 const INDENTED = /^(?: {4,}|\t)\S/;
 
 /**
  * A reply's primary response (architecture.md § Conversation), from claude-collab's `[details]` line: the text before its first `[details]`
- * line outside fenced code, with the rest its details. With no such line, a short reply (`PRIMARY_SHORT_MAX`) is all primary, and a longer one's
- * is its first paragraph; either stops at the first list, table, code block, heading, quote or rule. Null when nothing comes before it. `text` is
- * the reply without the `[details]` line.
+ * line outside fenced code, with the rest its details. Only that line splits a reply: with none, the whole reply is primary. Null when nothing
+ * comes before it. `text` is the reply without the `[details]` line.
  */
 export function splitPrimary(text: string): { primary: string | null; text: string } {
   const lines = text.split('\n');
@@ -134,12 +127,19 @@ export function splitPrimary(text: string): { primary: string | null; text: stri
 
   // Only blank lines go from the start, so a first line indented as code stays indented.
   const trimmed = text.replace(/^(?:[ \t]*\n)+/, '').trimEnd();
-  const short = trimmed.length <= PRIMARY_SHORT_MAX && !trimmed.split('\n').some((line) => STRUCTURE.test(line) || INDENTED.test(line));
-  const first = short ? trimmed.split('\n') : trimmed.split(/\n[ \t]*\n/)[0]!.split('\n');
-  const end = first.findIndex((line, index) => STRUCTURE.test(line) || (index === 0 && INDENTED.test(line)));
-  const primary = (end === -1 ? first : first.slice(0, end)).join('\n').trim();
 
-  return { primary: primary === '' ? null : primary, text: trimmed };
+  return { primary: trimmed.trim() === '' ? null : trimmed, text: trimmed };
+}
+
+/**
+ * The part of a primary response the voice reads, as claude-collab's `tts.js` did: its text up to its first list, table, code block, heading,
+ * quote or rule, since a reply with no `[details]` line is all primary however it is written. Empty when it opens with one.
+ */
+export function speechPart(primary: string): string {
+  const lines = primary.split('\n');
+  const end = lines.findIndex((line, index) => STRUCTURE.test(line) || (INDENTED.test(line) && (index === 0 || lines[index - 1]!.trim() === '')));
+
+  return (end === -1 ? lines : lines.slice(0, end)).join('\n').trim();
 }
 
 /** A `[speak]` or `[/speak]` marker, which replies marked their spoken passage with before the `[details]` line; still read in older replies. */
@@ -244,8 +244,9 @@ export interface ParsedReply {
   opening: string;
   status: string | null;
   /**
-   * The primary response (`splitPrimary`), shown as a bubble and read aloud while Speak replies is on, which `opening` holds too, without the
-   * `[details]` line; an older reply's `[speak]` passage, whose markers `opening` leaves out. Null for an aside or a reply with none.
+   * The primary response (`splitPrimary`), shown first and read aloud up to its first Markdown structure (`speechPart`) while Speak replies is
+   * on, which `opening` holds too, without the `[details]` line; an older reply's `[speak]` passage, whose markers `opening` leaves out. Null
+   * for an aside or a reply with none.
    */
   speak: string | null;
   /** The tone line, which `opening` leaves out; null with none. */

@@ -103,7 +103,7 @@ describe('Code Mode command', () => {
     const rest = tagged.replace(primary, '');
 
     expect(primary).toContain('put a `[details]` line of its own after the primary response and the rest after it');
-    expect(primary).toContain('A reply with no `[details]` line is all primary when it is short; otherwise the view takes its first paragraph as primary.');
+    expect(primary).toContain('A reply with no `[details]` line is all primary response, and the view shows it whole.');
     expect(tagged.match(/\[[a-z]+\]/g)?.filter((tag, index, all) => all.indexOf(tag) === index)).toEqual(['[details]', '[aside]', '[rewrite]', '[status]']);
     expect(RULES).toContain('they do not change how you write, except how you open a reply and how you ask the operator a question, below');
     expect(rest).not.toMatch(/\d+ words\b|\bsentences\b|short answer|\blines\b|one line|don't paste/i);
@@ -139,7 +139,7 @@ describe('Code Mode command', () => {
     expect(RULES).not.toContain('[speak]');
     expect(RULES).not.toContain('## Spoken replies');
     expect(voiced).toContain(`${RULES.slice(0, RULES.indexOf('## Artifacts'))}## Spoken replies\n`);
-    expect(voiced).toContain("A message from the operator that starts with `[spoken]` will have its reply's primary response, the part before its `[details]` line, read aloud; the details never are. Write that reply exactly as you would any other.");
+    expect(voiced).toContain("A message from the operator that starts with `[spoken]` will have its reply's primary response, the part before its `[details]` line, read aloud up to its first list, table or code block; the details never are. Write that reply exactly as you would any other.");
     expect(voiced).not.toContain('[speak]');
     expect(voiced).toContain('`[tone: …]` alone on its first line');
     expect(voiced.endsWith(RULES.slice(RULES.indexOf('## Artifacts')))).toBe(true);

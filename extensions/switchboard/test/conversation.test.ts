@@ -995,6 +995,16 @@ describe('speech in the view (architecture.md § Voice)', () => {
     expect(expanded).toContain('<li>one</li>');
     expect(expanded).not.toContain('show-more');
 
+    // A reply with no [details] line is all primary response, questions and their markup included: it shows whole, with no Show more, its
+    // ending questions left to its card.
+    const whole = 'Fixed it.\n\n- one\n\n1. Ship it? {#ship}\n   - A) Yes\n   - B) No';
+
+    show(state([reply('r7', T0 + 6, { opening: whole, speak: whole })]));
+    expect(root.querySelector('li[data-id="r7"] .show-more')).toBeNull();
+    expect(root.querySelector('li[data-id="r7"] .body ul')).not.toBeNull();
+    expect(root.querySelector('li[data-id="r7"] .question-card')).not.toBeNull();
+    expect(root.querySelector('li[data-id="r7"] .body')!.textContent).not.toContain('Ship it?');
+
     // Nor does a reply whose only other text is the questions its card draws; questions mid-message stay in the text, so that one has.
     show(state([reply('r4', T0 + 3, { opening: 'Fixed it.\n\n1. Ship it?\n   - A) Yes\n   - B) No', speak: 'Fixed it.' }), reply('r5', T0 + 4, { opening: 'Fixed it.\n\n1. Ship it?\n   - A) Yes\n   - B) No\n\nMore after.', speak: 'Fixed it.' })]));
     expect(root.querySelector('li[data-id="r4"] .question-card')).not.toBeNull();
