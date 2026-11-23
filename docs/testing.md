@@ -38,7 +38,7 @@ Test behavior that types cannot establish, such as:
 - Ordering and settlement under restarts, reconnects and lost answers: nothing delivered twice or lost, and a pending operation settled once.
 - Settings and playbook loading, with their defaults, refusals and template rendering; hook installation that preserves entries and refuses malformed settings.
 - The required arguments and environment of each agent CLI Switchboard starts, such as `claude --bg`, `claude -p` and `codex exec`.
-- Path and file access limits: real paths, junctions and `..` refused where the design keeps access inside a folder.
+- Path and file access limits: real paths, junctions and `..` refused where the design keeps access inside a folder, such as a paired device's folders in the New session form, tested with junctions the test makes under its temp folder.
 - Cleanup: temporary files, processes and stored data removed with what owns them.
 
 Do not test type declarations, pass-through property bags, or simple settings reads.
