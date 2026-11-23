@@ -1711,6 +1711,8 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
 
       expect(service.send(body(mine.key, { text: undefined, answers: [card({ letters: ['Z'] })] })).status).toBe(400);
       expect(service.send(body(mine.key, { text: undefined, answers: [] })).status).toBe(400);
+      // Two rows for one question are refused, whatever their picks.
+      expect(service.send(body(mine.key, { text: undefined, answers: [card(), card({ letters: ['B'] })] })).status).toBe(400);
       expect(service.send(body(mine.key, { text: undefined, answers: [card()], command: true })).status).toBe(400);
       expect(service.send(body(mine.key, { text: undefined, answers: [card({ letters: [], other: ' ' })] }))).toEqual({ status: 409, body: { error: 'Pick an answer first.' } });
       expect(service.send(body(mine.key, { text: undefined, answers: [card({ slug: 'no-such-question' })] }))).toEqual({ status: 409, body: { error: 'That question is no longer in the conversation.' } });
@@ -1814,7 +1816,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
       ask(store, 'q4', '1. Which colour now? {#colour-choice}\n   - A) Green\n   - B) Grey');
       expect(service.questionsView('s2').drafts['reply:q4']).toBeUndefined();
 
-      expect(service.send(body(mine.key, { opId: 'op-9', text: undefined, answers: Array.from({ length: 2 }, () => card({ card: 'reply:q4', slug: 'colour-choice', letters: [], other: 'x'.repeat(6_000) })) }))).toEqual({ status: 409, body: { error: 'The answers are longer than 10,000 characters.' } });
+      expect(service.send(body(mine.key, { opId: 'op-9', text: undefined, answers: [card({ card: 'reply:q4', slug: 'colour-choice', letters: [], other: 'x'.repeat(9_990) })] }))).toEqual({ status: 409, body: { error: 'The answers are longer than 10,000 characters.' } });
     });
 
     it('keeps a card\'s draft while its answer is being sent, so an answer that comes back not sent keeps its picks', () => {

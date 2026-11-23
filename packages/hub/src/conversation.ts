@@ -3004,7 +3004,7 @@ function parseDraft(value: unknown): CardDraft | null {
   return { step: step as string | null, picks: checked };
 }
 
-/** A card's answers from a `send` body: 1 to 8 of `{card, slug, letters, other}`; null when malformed. */
+/** A card's answers from a `send` body: 1 to 8 of `{card, slug, letters, other}`, one per question; null when malformed. */
 function parseAnswers(value: unknown): Array<{ card: string; slug: string; letters: string[]; other: string }> | null {
   if (!Array.isArray(value) || value.length === 0 || value.length > 8) {
     return null;
@@ -3018,5 +3018,8 @@ function parseAnswers(value: unknown): Array<{ card: string; slug: string; lette
       : null;
   });
 
-  return parsed.every((one) => one !== null) ? (parsed as Array<{ card: string; slug: string; letters: string[]; other: string }>) : null;
+  // Two rows for one question could not both be its answer.
+  const keys = new Set(parsed.map((one) => (one === null ? '' : `${one.card}#${one.slug}`)));
+
+  return parsed.every((one) => one !== null) && keys.size === parsed.length ? (parsed as Array<{ card: string; slug: string; letters: string[]; other: string }>) : null;
 }
