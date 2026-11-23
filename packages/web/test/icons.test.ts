@@ -33,9 +33,45 @@ describe('the spinning codicons', () => {
     // Each reduced-motion block whole, over as many lines as it takes.
     const reduced = page.split(/@media\s*\(prefers-reduced-motion:\s*reduce\)/).slice(1).map((rest) => rest.slice(0, rest.indexOf('}\n') + 1).replace(/\s+/g, ' '));
 
-    expect(page).toMatch(/\.codicon-modifier-spin \{ animation: codicon-spin /);
+    expect(page).toMatch(/:is\(\.codicon-modifier-spin, \.mic-ring\)::before \{[^}]*animation: codicon-spin /);
     expect(reduced.filter((rule) => /spin/.test(rule))).toEqual([]);
     expect(reduced.some((rule) => rule.includes('.composer .mic .codicon { animation: none; }'))).toBe(true);
     expect(reduced.length).toBeGreaterThan(1);
+  });
+
+  /** Every rule in the page's stylesheet, comments removed, as its selector and its declarations by property, the rules inside an @media block included. */
+  const rules = [...page.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{};]+)\{([^{}]*)\}/g)].map((match) => ({
+    selector: match[1]!.trim(),
+    body: Object.fromEntries(match[2]!.split(';').map((one) => one.trim()).filter((one) => one !== '').map((one) => [one.slice(0, one.indexOf(':')).trim(), one.slice(one.indexOf(':') + 1).trim()])),
+  }));
+  const rule = (selector: string): Record<string, string> | undefined => rules.find((one) => one.selector === selector)?.body;
+  const spinner = /codicon-modifier-spin|mic-ring/;
+
+  it('turn only each spinner\'s ::before, on its own layer, in a box that clips its paint and keeps its baseline', () => {
+    expect(rules.filter((one) => one.selector === '.codicon.codicon-modifier-spin, .mic-ring')).toHaveLength(1);
+    expect(rule('.codicon.codicon-modifier-spin, .mic-ring')).toMatchObject({ animation: 'none', contain: 'paint', 'overflow-clip-margin': '1px' });
+    expect(rule(':is(.codicon-modifier-spin, .mic-ring)::before')).toMatchObject({ display: 'block', width: '1em', height: '1em', 'line-height': '1', 'text-align': 'center', 'transform-origin': '50% 50%', 'will-change': 'transform', animation: 'codicon-spin 1s linear infinite' });
+    // Layout containment would take the box's baseline away and move it in a line of text.
+    expect(rules.filter((one) => spinner.test(one.selector) && /layout|strict|content|size/.test(one.body.contain ?? ''))).toEqual([]);
+  });
+
+  it('set no other animation on a spinner or its ::before, so every spinner keeps the shared rule', () => {
+    const animated = rules.filter((one) => spinner.test(one.selector) && ('animation' in one.body || 'animation-name' in one.body)).map((one) => one.selector);
+
+    expect(animated).toEqual(['.codicon.codicon-modifier-spin, .mic-ring', ':is(.codicon-modifier-spin, .mic-ring)::before']);
+    expect(rules.filter((one) => one.selector.includes('state-icon') && 'animation' in one.body)).toEqual([]);
+  });
+
+  it('come after codicon.css, whose own spinning rule the box\'s rule overrides at the same specificity', () => {
+    const shell = PAGE_ASSETS['index.html']!.body;
+
+    expect(css).toMatch(/\.codicon-loading\.codicon-modifier-spin,?[^{]*\{[^}]*animation: codicon-spin/);
+    expect(shell.indexOf(PAGE_ASSETS['codicon.css']!.hashed!)).toBeGreaterThan(-1);
+    expect(shell.indexOf(PAGE_ASSETS['page.css']!.hashed!)).toBeGreaterThan(shell.indexOf(PAGE_ASSETS['codicon.css']!.hashed!));
+  });
+
+  it('draw the mic\'s starting ring as a whole square round the mic\'s middle, its ::before the ring', () => {
+    expect(rule('.mic-ring')).toMatchObject({ position: 'absolute', left: '50%', top: '50%', width: '24px', height: '24px', margin: '-12px 0 0 -12px' });
+    expect(rule('.mic-ring::before')).toMatchObject({ content: "''", 'box-sizing': 'border-box', width: '100%', height: '100%', 'border-radius': '50%' });
   });
 });

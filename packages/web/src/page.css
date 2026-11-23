@@ -66,9 +66,15 @@ body { color: var(--vscode-foreground); background: var(--vscode-editor-backgrou
    so descenders and accents stay inside a text that clips its overflow and the row lays out as before, at the same pixel positions, which
    keeps Chrome's text snapping at 125% scale from undoing the shift. A browser without text-box draws the texts as before. */
 @supports (text-box: trim-both cap alphabetic) { :where(.menu-row, button.picker, .tab, .tab-open, .group-head, .row .pill, .change-row, .changes-files, .list-header .list-title, .artifact-menu .title, .provider-option, .opening-note, .status-head, .hist-chip) > :where(:not(.codicon, .file-icon, .menu-gutter, .unread-dot, .tab-badge, .count, .group-count, .tab-open, .tab-close, .provider, .provider-option-mark, .source-logo, .change-counts, svg, img)), :where(.change-counts) > * { text-box: trim-both cap alphabetic; padding-block: calc((1lh - 1cap) / 2); } }
-.codicon-modifier-spin { animation: codicon-spin 1.5s steps(30) infinite; }
+/* A spinner (a codicon-modifier-spin codicon or the mic's starting ring): its box stands still and clips its paint, and only its ::before turns,
+   smoothly, on its own compositor layer. Chrome takes a turning layer to overlap everything painted after it up to its nearest clip, and moves
+   that content onto layers of its own, where text loses its subpixel antialiasing and may shift as the layers change (mechanics.md M141);
+   the box's clip ends the overlap at the box, 1 px out, so a turning glyph's antialiased corners are not cut. The turning ::before is a whole 1em square with the glyph centred, so it turns about the glyph's
+   centre, and paint containment, not layout containment, keeps the box's baseline.
+   A spinner spins under reduced motion too: a still loading glyph reads as a half circle, not as work in progress (the operator's decision). */
+.codicon.codicon-modifier-spin, .mic-ring { animation: none; contain: paint; overflow-clip-margin: 1px; }
+:is(.codicon-modifier-spin, .mic-ring)::before { display: block; width: 1em; height: 1em; line-height: 1; text-align: center; transform-origin: 50% 50%; will-change: transform; backface-visibility: hidden; animation: codicon-spin 1s linear infinite; }
 @keyframes codicon-spin { 100% { transform: rotate(360deg); } }
-/* A spinner spins under reduced motion too: a still loading glyph reads as a half circle, not as work in progress (the operator's decision). */
 /* Native scrollbars on every scroller, thin and in the theme's slider colours over a clear track, so dragging, track clicks and keys stay the
    browser's own. Chromium draws the ::-webkit-scrollbar parts, which have hover and active colours; a browser without them gets the standard
    properties, which Chromium would let override those parts. */
@@ -947,8 +953,9 @@ a.sheet-button { display: inline-flex; align-items: center; text-decoration: non
 .composer .mic.listening .codicon-mic-filled { animation: mic-pulse 2s ease-in-out infinite; }
 .composer .mic.hearing .codicon-mic-filled { animation: mic-pulse 0.8s ease-in-out infinite; }
 @keyframes mic-pulse { 50% { opacity: 0.45; } }
-.mic-ring { position: absolute; inset: -4px; border: 1.5px solid transparent; border-top-color: currentColor; border-right-color: currentColor; border-radius: 50%; animation: mic-ring 0.9s linear infinite; }
-@keyframes mic-ring { 100% { transform: rotate(360deg); } }
+/* The starting ring, a 24 px circle round the mic's middle, turns as a spinner (above). */
+.mic-ring { position: absolute; left: 50%; top: 50%; width: 24px; height: 24px; margin: -12px 0 0 -12px; }
+.mic-ring::before { content: ''; box-sizing: border-box; width: 100%; height: 100%; border: 1.5px solid transparent; border-top-color: currentColor; border-right-color: currentColor; border-radius: 50%; }
 @media (prefers-reduced-motion: reduce) { .composer .mic .codicon { animation: none; } }
 @media (hover: none), (pointer: coarse) { .composer .mic { min-width: 44px; min-height: 44px; } }
 
@@ -982,11 +989,10 @@ a.sheet-button { display: inline-flex; align-items: center; text-decoration: non
 :where(html:not(.phone)) .detail .status-tab, :where(html:not(.phone)) .detail .artifact-list, :where(html:not(.phone)) .detail .artifact-doc { max-width: none; }
 
 /* Session state icons (architecture.md § Conversation view): one size and weight, a 13 px glyph in a fixed 16 px column centred on the text,
-   muted unless the state needs the operator, a limit holds it, or it failed (IconTone in packages/core/src/group.ts); a smooth small spinner. */
+   muted unless the state needs the operator, a limit holds it, or it failed (IconTone in packages/core/src/group.ts). */
 .codicon.state-icon { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; font-size: 13px; line-height: 1; color: var(--vscode-descriptionForeground); }
 .codicon.state-icon.tone-attention { color: var(--vscode-editorWarning-foreground); }
 .codicon.state-icon.tone-error { color: var(--vscode-errorForeground); }
-.codicon.state-icon.codicon-modifier-spin { animation: codicon-spin 1.1s linear infinite; }
 /* Back to the work items, only on a phone, where the list and the conversation are separate views (architecture.md § Web page). */
 /* .header > raises it over button.icon's display. */
 .back-toggle { flex: none; }
