@@ -17,11 +17,10 @@ The dock's list is in `apps/dock/src/Switchboard.Dock/Views/`, the page's in `pa
 
 ## Open gaps, by value
 
-1. Row controls the page lacks (C8): Open in Claude or Codex and Answer in terminal.
-2. More Actions' dock windows (H2): Held sessions and Show hub log only say to use the dock, and New session, New task from prompt and New conversation in a folder cannot choose a folder the hub does not know.
-3. Held sessions (H4): the held-session note shows, but the page has no Held sessions window to open.
-4. Keyboard (K2, K4, K5, O3, O4): no arrow-key walk, F8, menu key, drag or Alt+arrow reordering.
-5. Web-only behaviours the dock lacks (R8, C13, G10, H7): a hosted conversation's host on line 2, Stop session asking first, the selected row kept in a collapsed group.
+1. More Actions' dock windows (H2): Held sessions and Show hub log only say to use the dock, and New session, New task from prompt and New conversation in a folder cannot choose a folder the hub does not know.
+2. Held sessions (H4): the held-session note shows, but the page has no Held sessions window to open.
+3. Keyboard (K2, K4, K5, O3, O4): no arrow-key walk, F8, menu key, drag or Alt+arrow reordering.
+4. Web-only behaviours the dock lacks (R8, C13, G10, H7): a hosted conversation's host on line 2, Stop session asking first, the selected row kept in a collapsed group.
 
 ## Groups
 
@@ -118,7 +117,7 @@ The dock's list is in `apps/dock/src/Switchboard.Dock/Views/`, the page's in `pa
 | C5 | Start with guidance… and Start with prompt… (text, playbook choice) | Present | The page's input sheet asks as the dock's dialog does |
 | C6 | Add comment… | Present | In the notes group |
 | C7 | Persona submenu with the session's persona checked and Clear pin | Partly | The page's conversation header's view options menu has a persona row naming the session's persona, pinned or resolved at its start, or None; it opens the persona dialog, which lists each persona with its voice, style and personality, marks the current one and has Clear pin while one is pinned. The dock keeps its submenu and the VS Code Conversation view its header's persona button, since neither has the page's dialog to share |
-| C8 | Open in Claude or Codex, Answer in terminal, Open in terminal | Partly | Open in terminal is not in the actions menu (the operator's decision, 2026-11-22), because the page's Console tab shows and types into the same terminal: a held Claude Code Mode session's terminal or the Codex terminal the hub holds for a Codex session ([architecture.md § Web page](architecture.md#web-page), [§ Codex runner](architecture.md#codex-runner)); a terminal prompt card answers some waits; on both, an ended registered Claude session is offered as an ended held session, which the row's click resumes (PRD R81). Open in Claude or Codex and Answer in terminal are not on the page |
+| C8 | Open in Claude or Codex, Answer in terminal, Open in terminal | Differs | The operator's decision, 2026-11-22: the page's Console tab covers both, since it shows the session's terminal and types into it; the actions menu leaves out Open in terminal, Open in Claude or Codex and Answer in terminal |
 | C9 | Open changes, History, Open report (VS Code commands) | Partly | Open report in the actions menu starts VS Code on the row's window. Open changes is not in the actions menu (the operator's decision, 2026-11-22), because the page's Changes list shows the worktree's changes (PRD R118). History, in the actions menu and a pool ticket's menu, opens the page's own History with the VS Code History tab's content; of its links the page opens only http and https URLs, while a session, worktree or file opens only from VS Code or the dock |
 | C10 | Open ticket and an Open item per link, more than two in an Open link submenu, labels cut at 48 characters | Partly | In the actions menu; the submenu opens in place under Open link rather than beside it, which works at a phone's width |
 | C11 | Copy: one draft copies at once, several open a Copy submenu of labels; `Copied <label>.` in the neutral toast; an unreadable draft says why | Partly | Each draft is its own item in the actions menu, nothing confirms the copy, and a refused clipboard shows the text to copy |
