@@ -50,7 +50,6 @@ export class IframeBrowser {
   #pending: { item: number | null; url: string } | null = null;
   #closed = new Set<string>();
   #slot: HTMLElement | null = null;
-  #reload = false;
   #seq = 0;
   readonly #epoch = crypto.randomUUID();
   #reloadPage = false;
@@ -168,7 +167,7 @@ export class IframeBrowser {
     this.follow(row, review);
     if (this.#root === null) {
       this.#root = document.createElement('section');
-      this.#root.className = 'iframe-browser';
+      this.#root.className = this.#hosted ? 'iframe-browser hosted' : 'iframe-browser';
       this.#slot = document.createElement('div');
       this.#slot.className = 'iframe-slot';
       this.#root.append(this.#slot);
@@ -180,36 +179,22 @@ export class IframeBrowser {
     }
     this.#pending = null;
     if (host.firstChild !== this.#root) host.replaceChildren(this.#root);
-    if (this.#root.querySelector('.iframe-toolbar') === null) {
+    if (!this.#hosted && this.#root.querySelector('.iframe-toolbar') === null) {
       const toolbar = document.createElement('div');
       toolbar.className = 'iframe-toolbar';
-      const reload = document.createElement('button');
-      reload.type = 'button';
-      reload.textContent = 'Reload';
-      reload.onclick = () => {
-        if (this.#hosted) {
-          this.#reload = true;
-          this.deps.changed();
-        }
-      };
       const outside = document.createElement('button');
       outside.type = 'button';
       outside.textContent = 'Open outside';
       outside.onclick = () => this.deps.external(this.#url);
       const note = document.createElement('p');
       note.className = 'iframe-warning';
-      note.textContent = this.#hosted
-        ? 'If signed out, use Open outside, then Reload.'
-        : 'Open with sign-in support to use these tabs inside Switchboard.';
-      if (this.#hosted) toolbar.append(reload);
+      note.textContent = 'Open with sign-in support to use these tabs inside Switchboard.';
       toolbar.append(outside, note);
-      if (!this.#hosted) {
-        const hosted = document.createElement('button');
-        hosted.type = 'button';
-        hosted.textContent = 'Open with sign-in support';
-        hosted.onclick = () => void this.#launch(row?.workItemId ?? null, this.#url);
-        toolbar.append(hosted);
-      }
+      const hosted = document.createElement('button');
+      hosted.type = 'button';
+      hosted.textContent = 'Open with sign-in support';
+      hosted.onclick = () => void this.#launch(row?.workItemId ?? null, this.#url);
+      toolbar.append(hosted);
       this.#root.prepend(toolbar);
     }
     if (this.#launchError !== null) this.#root.querySelector<HTMLElement>('.iframe-warning')!.textContent = this.#launchError;
@@ -221,9 +206,8 @@ export class IframeBrowser {
     const message =
       rect === null
         ? { type: 'switchboard-iframe', epoch: this.#epoch, seq: ++this.#seq, title: document.title, item: this.#item, tabs: this.tabs.map((link) => link.url) }
-        : { type: 'switchboard-iframe', epoch: this.#epoch, seq: ++this.#seq, title: document.title, item: this.#item, tabs: this.tabs.map((link) => link.url), url: this.#url, left: rect.left, top: rect.top, width: rect.width, height: rect.height, reload: this.#reload };
+        : { type: 'switchboard-iframe', epoch: this.#epoch, seq: ++this.#seq, title: document.title, item: this.#item, tabs: this.tabs.map((link) => link.url), url: this.#url, left: rect.left, top: rect.top, width: rect.width, height: rect.height };
     window.parent.postMessage(message, `chrome-extension://${IFRAME_EXTENSION_ID}`);
-    this.#reload = false;
   }
   dispose(): void {
     this.configure(false);

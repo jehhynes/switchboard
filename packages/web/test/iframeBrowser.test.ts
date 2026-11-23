@@ -23,6 +23,8 @@ describe('embedded browser tabs', () => {
     r.browser.follow(row(), true); r.browser.draw(r.host, row(), true);
     expect(r.browser.selected).toBe('https://github.com/o/r/pull/3');
     expect(r.host.querySelector('iframe')).toBeNull();
+    expect(r.host.querySelector('.iframe-toolbar')?.textContent).toContain('Open outside');
+    expect(r.host.querySelector('.iframe-browser')?.classList.contains('hosted')).toBe(false);
     Array.from(r.host.querySelectorAll('button')).find((button) => button.textContent === 'Open with sign-in support')!.click();
     expect(r.send).toHaveBeenLastCalledWith({ type: 'iframe-launch', workItemId: 1, url: 'https://github.com/o/r/pull/3' });
     r.browser.dispose(); r.host.remove();
@@ -75,6 +77,9 @@ describe('embedded browser tabs', () => {
     const parent = vi.spyOn(window, 'parent', 'get').mockReturnValue({ postMessage } as unknown as Window);
     try {
       const r = await rig(); r.browser.follow(row()); await r.browser.renew(); await Promise.resolve(); await Promise.resolve(); r.browser.draw(r.host, row(), false);
+      expect(r.host.querySelector('.iframe-toolbar')).toBeNull();
+      expect(r.host.querySelector('.iframe-warning')).toBeNull();
+      expect(r.host.querySelector('.iframe-browser.hosted')?.children).toHaveLength(1);
       const slot = r.host.querySelector<HTMLElement>('.iframe-slot')!;
       vi.spyOn(slot, 'getBoundingClientRect').mockReturnValue({ left: 100, top: 80, width: 600, height: 400 } as DOMRect);
       r.browser.place(true);

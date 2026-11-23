@@ -1186,6 +1186,7 @@ button.picker.opening-title { background: transparent; cursor: default; font-wei
 .conn-primary { padding: 6px 14px; }
 /* The GitHub iframe experiment owns its area; no native window covers the page. */
 .iframe-browser { display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; }
+.scroll:has(> .iframe-browser.hosted) { padding: 0; overflow: hidden; }
 .iframe-toolbar { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px; }
 .iframe-toolbar select { flex: 1; min-width: 100px; max-width: 100%; }
 .iframe-toolbar button { min-height: 30px; }
@@ -1194,7 +1195,7 @@ button.picker.opening-title { background: transparent; cursor: default; font-wei
 .iframe-browser .iframe-slot { flex: 1; min-height: 0; width: 100%; }
 
 /* Link tabs scroll inside the strip, leaving fixed tabs and artifact menus accessible. */
-.link-tabs { display: flex; flex: 0 1 auto; min-width: 0; max-width: 50%; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+.link-tabs { display: flex; flex: 0 1 auto; min-width: 0; max-width: 50%; margin-bottom: -1px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
 .link-tabs .link-tab { width: 120px; }
 
 /* Its tabs, dimmed and inert, and the composer and the note above it kept in their places but hidden, so nothing moves when the work item comes. */

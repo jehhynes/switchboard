@@ -17,21 +17,30 @@ export class IframeFrames {
     this.#item = item;
   }
   show(view: HostPlacement | null): void {
-    for (const frame of this.frames.values()) frame.hidden = true;
-    if (view === null || !this.#urls.has(view.url)) return;
-    let frame = this.frames.get(view.url);
-    if (frame === undefined) {
-      frame = document.createElement('iframe');
-      frame.className = 'browser';
-      frame.title = new URL(view.url).hostname;
-      frame.referrerPolicy = 'no-referrer';
-      frame.allow = 'clipboard-write; fullscreen';
-      frame.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads');
-      this.frames.set(view.url, frame);
-      this.host.append(frame);
-      frame.src = view.url;
-    } else if (view.reload) frame.src = view.url;
-    Object.assign(frame.style, { left: `${view.left}px`, top: `${view.top}px`, width: `${view.width}px`, height: `${view.height}px` });
-    frame.hidden = false;
+    const selected = view !== null && this.#urls.has(view.url) ? view : null;
+    if (selected !== null) {
+      let frame = this.frames.get(selected.url);
+      if (frame === undefined) {
+        frame = document.createElement('iframe');
+        frame.className = 'browser';
+        frame.title = new URL(selected.url).hostname;
+        frame.referrerPolicy = 'no-referrer';
+        frame.allow = 'clipboard-write; fullscreen';
+        frame.style.visibility = 'hidden';
+        frame.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads');
+        this.frames.set(selected.url, frame);
+        frame.src = selected.url;
+        this.host.append(frame);
+      } else if (selected.reload) frame.src = selected.url;
+      Object.assign(frame.style, { left: `${selected.left}px`, top: `${selected.top}px`, width: `${selected.width}px`, height: `${selected.height}px` });
+    }
+    for (const [url, frame] of this.frames) {
+      const visible = url === selected?.url;
+      // display:none resets an iframe's scroll position in Edge; keep its viewport while hidden.
+      frame.style.visibility = visible ? 'visible' : 'hidden';
+      frame.toggleAttribute('inert', !visible);
+      if (visible) frame.removeAttribute('aria-hidden');
+      else frame.setAttribute('aria-hidden', 'true');
+    }
   }
 }

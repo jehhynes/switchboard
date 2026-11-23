@@ -1,6 +1,17 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { IframeFrames } from '../src/iframeFrames.js';
 describe('iframe document lifecycle', () => {
+  it('assigns the website URL before attaching a sandboxed frame', () => {
+    const host = document.createElement('div');
+    const append = vi.spyOn(host, 'append').mockImplementation((frame) => {
+      expect((frame as HTMLIFrameElement).getAttribute('src')).toBe('https://github.com/o/r/issues/1');
+      expect((frame as HTMLIFrameElement).getAttribute('sandbox')).not.toContain('allow-top-navigation');
+    });
+    const pool = new IframeFrames(host);
+    pool.reconcile(1, ['https://github.com/o/r/issues/1']);
+    pool.show({ url: 'https://github.com/o/r/issues/1', left: 0, top: 0, width: 500, height: 400, reload: false });
+    expect(append).toHaveBeenCalledTimes(1);
+  });
   it('creates lazily, hides attached inactive documents, preserves navigation, and disposes closed or old work item frames', () => {
     const host = document.createElement('div'); document.body.append(host);
     const pool = new IframeFrames(host);
@@ -9,9 +20,10 @@ describe('iframe document lifecycle', () => {
     pool.reconcile(1, [a, b]); expect(pool.frames.size).toBe(0);
     pool.show(view(a)); const first = pool.frames.get(a)!;
     first.src = 'https://github.com/o/r/issues/8'; pool.show(view(b)); const second = pool.frames.get(b)!;
-    expect(first.isConnected).toBe(true); expect(first.hidden).toBe(true); expect(second.hidden).toBe(false);
-    pool.show(view(a)); expect(first.src).toBe('https://github.com/o/r/issues/8'); expect(second.hidden).toBe(true);
-    pool.show(null); expect(first.hidden).toBe(true); expect(pool.frames.size).toBe(2);
+    expect(first.isConnected).toBe(true); expect(first.hidden).toBe(false); expect(first.style.visibility).toBe('hidden'); expect(second.style.visibility).toBe('visible');
+    expect(first.hasAttribute('inert')).toBe(true); expect(first.getAttribute('aria-hidden')).toBe('true'); expect(second.hasAttribute('inert')).toBe(false);
+    pool.show(view(a)); expect(first.src).toBe('https://github.com/o/r/issues/8'); expect(second.style.visibility).toBe('hidden'); expect(first.style.visibility).toBe('visible'); expect(first.hasAttribute('inert')).toBe(false); expect(first.hasAttribute('aria-hidden')).toBe(false);
+    pool.show(null); expect(first.hidden).toBe(false); expect(first.style.visibility).toBe('hidden'); expect(first.hasAttribute('inert')).toBe(true); expect(pool.frames.size).toBe(2);
     pool.show(view(a, true)); expect(first.src).toBe(a);
     expect(first.getAttribute('sandbox')).not.toContain('allow-top-navigation');
     pool.reconcile(1, [b]); expect(first.isConnected).toBe(false); expect(second.isConnected).toBe(true);
