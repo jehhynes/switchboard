@@ -1429,7 +1429,7 @@ export function scheduleFields(state: EditorState, name: string): Section[] {
       path: `${path}.every`,
       label: 'Runs',
       kind: 'select',
-      help: 'Off, it runs only when you choose it in New ad-hoc session.',
+      help: "Off, it runs only when you run it from New session's More options.",
       options: [
         { value: '', label: 'Only by hand' },
         { value: 'day', label: 'Every day' },

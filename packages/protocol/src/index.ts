@@ -283,8 +283,6 @@ export interface PageHeader {
   sources: SourceGroup[];
   /** The repos an ad-hoc prompt can run in, the first being the default. */
   repoRoots: string[];
-  /** No longer sent: the New session form asks `page-folders`. */
-  folders?: string[];
   /** The schedules the New session form can run now. */
   schedules: Array<{ name: string; playbook: string }>;
   /** The notice while the terminal holder is from an older build or restarting, and what Restart and resume asks; `confirm` is null while it runs. */

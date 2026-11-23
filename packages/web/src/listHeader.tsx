@@ -1,7 +1,9 @@
 import type { ComponentChildren, VNode } from 'preact';
 import qrcode from 'qrcode-generator';
+import { providerMark } from '@switchboard/conversation/providerIcons';
 import { mount } from './island.js';
 import { HubLog } from './hubLog.js';
+import { trusted } from './trusted.js';
 import type { PageGroup, PageHeader, PageRow, SourceGroup } from '@switchboard/protocol';
 import type { PhoneVoiceState } from './phoneVoice.js';
 
@@ -59,6 +61,8 @@ export interface Device {
   voice?: boolean;
 }
 
+/** How long after the last key the New session form asks the hub about a typed folder. */
+export const FOLDER_CHECK_MS = 300;
 /** The search box searches once it holds this many characters (PRD R63), as the dock's. */
 export const SEARCH_MINIMUM = 3;
 /** And this long after the last key. */
@@ -198,14 +202,73 @@ const PROVIDERS = [
   { provider: 'codex', name: 'Codex' },
 ];
 
+/** How the New session form runs a first message (PRD R122): a conversation now, a task when a slot is free, or a task that waits for Start. */
+export type RunAs = 'now' | 'queue' | 'wait';
+
+/** The Run as choices, in the form's order. */
+export const RUN_AS: ReadonlyArray<{ value: RunAs; label: string }> = [
+  { value: 'now', label: 'Conversation, start now' },
+  { value: 'queue', label: 'Task, start when a slot is free' },
+  { value: 'wait', label: 'Task, wait for Start' },
+];
+
+/** Where this device keeps the Run as chosen last, which the form offers next time. */
+export const RUN_AS_KEY = 'switchboard.newSession.run';
+
+/** The Model list's value for Other…, which shows a text box. */
+export const OTHER_MODEL = ':other';
+
+/** The hub's `page-folders` starting places: recent folders, repo roots, worktrees, and on this computer's page its home folder and drives. */
+export interface FolderPlaces {
+  recent: string[];
+  repoRoots: string[];
+  worktrees: string[];
+  computer: string[];
+}
+
+/** The folder browser over the form: a folder's subfolders, or the starting places while `path` is null. */
+export interface FolderBrowser {
+  path: string | null;
+  parent: string | null;
+  folders: { name: string; path: string }[];
+  more: boolean;
+  busy: boolean;
+  error: string | null;
+}
+
+/** The New session form (PRD R122). `opId` stays the same for the form's retries, so the hub creates once. */
+export interface NewSessionSheet {
+  kind: 'new';
+  opId: string;
+  folder: string;
+  /** Why the hub refuses the typed folder, or null. */
+  folderError: string | null;
+  /** Whether the folder list under the field is open. */
+  folderOpen: boolean;
+  places: FolderPlaces | null;
+  browser: FolderBrowser | null;
+  provider: string;
+  installed: string[] | null;
+  /** Each provider's configured model, which Default names. */
+  models: Record<string, string>;
+  choices: Record<string, Array<{ id: string; label: string }>>;
+  /** The chosen model: '' for Default, `OTHER_MODEL` for Other…, else a choice's id. */
+  model: string;
+  otherModel: string;
+  prompt: string;
+  run: RunAs;
+  more: boolean;
+  /** The schedule Run a schedule now runs, or '' for none. */
+  schedule: string;
+  busy: boolean;
+  error: string | null;
+}
+
 /**
- * A sheet the header opens over the page: More Actions' New ad-hoc session, New conversation in a folder, or a dock window the page does not
- * have yet. `opId` stays the same for the sheet's retries, so the hub creates once.
+ * A sheet the header opens over the page: the New session form, or a dock window the page does not have yet.
  */
 export type HeaderSheet =
-  | { kind: 'session'; opId: string; folder: string; provider: string; model: string; models: Record<string, string>; installed: string[] | null; busy: boolean; error: string | null }
-  | { kind: 'adhoc'; opId: string; schedule: string; repo: string; provider: string; providerChosen: boolean; prompt: string; start: boolean; providerNote: string | null; busy: boolean; error: string | null }
-  | { kind: 'folder'; opId: string; folder: string; provider: string; providerChosen: boolean; installed: string[] | null; busy: boolean; error: string | null }
+  | NewSessionSheet
   | { kind: 'later'; title: string }
   | { kind: 'log' }
   | { kind: 'held'; rows: HeldRow[] | null; busy: boolean; refreshing: boolean; listError: string | null; error: string | null; result: string | null; stopping: HeldRow | null }
@@ -418,7 +481,7 @@ function MoreRow({ action, icon, label }: { action: string; icon: string; label:
 const Separator = ({ classes = 'menu-separator' }: { classes?: string }) => <li class={classes} role="separator"></li>;
 
 /**
- * More Actions (PRD R71), in the dock's groups: New ad-hoc session… and New conversation in a folder…; Held sessions; Refresh sources,
+ * More Actions (PRD R71), in the dock's groups: Held sessions; Refresh sources,
  * Reload, Show hub log and Get the browser extension…; then Pair a device, Open Settings and, while the voice is not on this computer, Voice on the computer, on this computer's
  * page only, or Voice on this phone, on a paired device's.
  * On a phone, where the header has no room for them, the source icons come first as a check row per source.
@@ -439,10 +502,6 @@ export function renderMoreMenu(header: PageHeader | null, local = false, phoneVo
   return (
     <ul class="glass menu more-menu" role="menu" aria-label="More Actions">
       {sources.length === 0 ? null : [...sources, <Separator classes="menu-separator more-source" />]}
-      <MoreRow action="list-new-session" icon="add" label="New session…" />
-      <MoreRow action="list-adhoc" icon="edit" label="New task from prompt…" />
-      <MoreRow action="list-folder" icon="folder" label="New conversation in a folder…" />
-      <Separator />
       <MoreRow action="list-later-held" icon="terminal" label="Held sessions" />
       <Separator />
       <MoreRow action="list-poll" icon="refresh" label="Refresh sources" />
@@ -690,11 +749,11 @@ function ExtensionSheet({ remote }: { remote: boolean }) {
 }
 
 /**
- * A sheet of the header (architecture.md § Web page), drawn as the page's other sheets: New ad-hoc session as the dock's window (Run, with the
- * schedules; Repository; Provider; Prompt; Start automatically), New conversation in a folder with the folder and, when both are installed, the
- * provider, or a dock window the page does not have yet.
+ * A sheet of the header (architecture.md § Web page), drawn as the page's other sheets: the New session form and its folder browser, Pair a
+ * device, Get the browser extension, Restart the terminal holder, or a dock window the page does not have yet. `local`: whether the page is
+ * this computer's.
  */
-export function renderHeaderSheet(sheet: HeaderSheet | null, header: PageHeader | null, now = Date.now(), read = globalThis.fetch): VNode | null {
+export function renderHeaderSheet(sheet: HeaderSheet | null, header: PageHeader | null, now = Date.now(), read = globalThis.fetch, local = true): VNode | null {
   if (sheet === null) {
     return null;
   }
@@ -767,76 +826,232 @@ export function renderHeaderSheet(sheet: HeaderSheet | null, header: PageHeader 
       </Frame>
     );
   }
-  const folders = header?.folders ?? [];
-  const go = (ready: boolean, label: string) => (
-    <>
-      {cancel}
-      <button type="button" class="sheet-button primary" data-action="list-sheet-go" disabled={!ready}>
-        {label}
+  return <NewSession sheet={sheet} header={header} cancel={cancel} error={error} local={local} />;
+}
+
+/** The provider's name as the form shows it. */
+function providerName(provider: string): string {
+  return PROVIDERS.find((one) => one.provider === provider)?.name ?? provider;
+}
+
+/** The folder list's groups, each folder once, filtered by the typed text unless it is a folder of the list. */
+export function folderGroups(places: FolderPlaces | null, typed: string): Array<{ label: string; folders: string[] }> {
+  const all = places === null ? [] : [...places.recent, ...places.repoRoots, ...places.worktrees];
+  const text = typed.trim().toLocaleLowerCase();
+  const filter = text !== '' && !all.some((one) => one.toLocaleLowerCase() === text);
+  const keep = (folders: string[]) => (filter ? folders.filter((one) => one.toLocaleLowerCase().includes(text)) : folders);
+
+  return [
+    { label: 'Recent', folders: keep(places?.recent ?? []) },
+    { label: 'Repo roots', folders: keep(places?.repoRoots ?? []) },
+    { label: 'Worktrees', folders: keep(places?.worktrees ?? []) },
+  ].filter((group) => group.folders.length > 0);
+}
+
+/** A folder path's parts, as the folder browser's breadcrumb shows them. */
+export function pathParts(path: string): string[] {
+  return path.split(/[\\/]+/).filter((part) => part !== '');
+}
+
+/** The folder browser (PRD R122): the starting places, or a folder's subfolders, from `page-folders`. */
+function Browser({ browser, places, local }: { browser: FolderBrowser; places: FolderPlaces | null; local: boolean }) {
+  const row = (path: string, label: string, icon = 'folder') => (
+    <li role="none">
+      <button type="button" class="folder-row" role="option" data-action="list-browse-open" data-path={path} title={path}>
+        <span class={`codicon codicon-${icon}`} aria-hidden="true"></span>
+        <span class="folder-name">{label}</span>
       </button>
-    </>
+    </li>
   );
+  const groups =
+    browser.path === null
+      ? [
+          { label: 'Recent', folders: places?.recent ?? [] },
+          { label: 'Repo roots', folders: places?.repoRoots ?? [] },
+          { label: 'Worktrees', folders: places?.worktrees ?? [] },
+          { label: 'This computer', folders: places?.computer ?? [] },
+        ].filter((group) => group.folders.length > 0)
+      : [];
 
-  if (sheet.kind === 'session') {
-    const installed = sheet.installed;
-    const choices = installed === null ? [] : PROVIDERS.filter((one) => installed.includes(one.provider));
-    const ready = !sheet.busy && sheet.folder !== '' && installed !== null && installed.length > 0;
-    return (
-      <Frame title="New session" buttons={go(ready, 'Start')}>
-        <Select label="Folder" field="folder" items={[{ value: '', label: 'Choose a folder' }, ...folders.map((one) => ({ value: one, label: one }))]} chosen={sheet.folder} />
-        {installed === null ? <p class="sheet-detail">Loading the providers…</p> : <Select label="Provider" field="provider" items={choices.map((one) => ({ value: one.provider, label: one.name }))} chosen={sheet.provider} />}
-        <label class="sheet-field"><span class="sheet-label">Model</span><input class="sheet-select" data-field="model" value={sheet.model} placeholder="Provider default" /></label>
-        {error}
-      </Frame>
-    );
-  }
-  if (sheet.kind === 'folder') {
-    const installed = sheet.installed;
-    const choices = installed === null ? [] : PROVIDERS.filter((one) => installed.length > 1 || installed.includes(one.provider));
-    const provider =
-      installed === null ? (
-        <p class="sheet-detail">Loading the providers…</p>
-      ) : installed.length > 1 ? (
-        <Select label="Provider" field="provider" items={choices.map((one) => ({ value: one.provider, label: one.name }))} chosen={sheet.provider} />
-      ) : null;
-    const ready = !sheet.busy && sheet.folder !== '' && installed !== null && installed.length > 0;
+  return (
+    <Frame
+      title="Choose a folder"
+      buttons={
+        <>
+          <button type="button" class="sheet-button secondary" data-action="list-browse-back">
+            Back
+          </button>
+          <button type="button" class="sheet-button primary" data-action="list-browse-use" disabled={browser.path === null || browser.busy}>
+            Use this folder
+          </button>
+        </>
+      }
+    >
+      {browser.path === null ? null : (
+        <p class="folder-crumbs" title={browser.path}>
+          <button type="button" class="icon folder-places" data-action="list-browse-places" title="Starting places" aria-label="Starting places">
+            <span class="codicon codicon-home" aria-hidden="true"></span>
+          </button>
+          {pathParts(browser.path).map((part, index) => (
+            <>
+              {index === 0 ? null : <span class="folder-crumb-gap" aria-hidden="true">›</span>}
+              <span class="folder-crumb">{part}</span>
+            </>
+          ))}
+        </p>
+      )}
+      <ul class="folder-browser" role="listbox" aria-label="Folders" data-key="folder-browser">
+        {browser.path === null
+          ? groups.map((group) => (
+              <>
+                <li class="folder-group" role="presentation">
+                  {group.label}
+                </li>
+                {group.folders.map((one) => row(one, one))}
+              </>
+            ))
+          : [
+              browser.parent === null ? null : row(browser.parent, '..', 'arrow-up'),
+              ...browser.folders.map((one) => row(one.path, one.name)),
+              browser.folders.length === 0 && !browser.busy ? (
+                <li class="folder-empty" role="presentation">
+                  No folders here.
+                </li>
+              ) : null,
+            ]}
+      </ul>
+      {browser.more ? <p class="sheet-detail">Only the first folders are listed. Type the path to reach the others.</p> : null}
+      {browser.error === null ? null : (
+        <p class="sheet-error" role="alert">
+          {browser.error}
+        </p>
+      )}
+      {local ? null : <p class="sheet-detail">On a paired device: only folders under recent folders, repo roots and worktrees.</p>}
+    </Frame>
+  );
+}
 
-    return (
-      <Frame title="New conversation in a folder" buttons={go(ready, 'Create')}>
-        {folders.length === 0 ? (
-          <p class="sheet-detail">No folders are available. Add a repo root in the dock's Settings.</p>
-        ) : (
-          <>
-            <Select label="Folder" field="folder" items={[{ value: '', label: 'Choose a folder' }, ...folders.map((one) => ({ value: one, label: one }))]} chosen={sheet.folder} />
-            {provider}
-          </>
-        )}
-        {error}
-      </Frame>
-    );
+/**
+ * The New session form (PRD R122): Folder, Provider (hidden with one installed), Model, an optional First message, Run as once there is one, and
+ * More options' Run a schedule now (PRD R82), which hides the other fields.
+ */
+function NewSession({ sheet, header, cancel, error, local }: { sheet: NewSessionSheet; header: PageHeader | null; cancel: ComponentChildren; error: ComponentChildren; local: boolean }) {
+  if (sheet.browser !== null) {
+    return <Browser browser={sheet.browser} places={sheet.places} local={local} />;
   }
 
   const schedules = header?.schedules ?? [];
-  const typed = sheet.schedule === '';
-  const ready = !sheet.busy && (!typed || (sheet.repo !== '' && sheet.prompt.trim() !== ''));
+  const scheduled = sheet.schedule !== '' && schedules.some((one) => one.name === sheet.schedule);
+  const installed = sheet.installed;
+  const message = sheet.prompt.trim() !== '';
+  const configured = sheet.models[sheet.provider] ?? '';
+  const choices = sheet.choices[sheet.provider] ?? [];
+  const ready = !sheet.busy && (scheduled || (sheet.folder.trim() !== '' && sheet.folderError === null && installed !== null && installed.length > 0 && (sheet.model !== OTHER_MODEL || sheet.otherModel.trim() !== '')));
+  const label = scheduled ? 'Run' : message && sheet.run === 'wait' ? 'Create' : 'Start';
+  const groups = folderGroups(sheet.places, sheet.folder);
 
   return (
-    <Frame title="New ad-hoc session" buttons={go(ready, typed ? 'Create' : 'Run')}>
-      {schedules.length === 0 ? null : <Select label="Run" field="schedule" items={[{ value: '', label: 'A prompt' }, ...schedules.map((one) => ({ value: one.name, label: `Run ${one.name} now · ${one.playbook}` }))]} chosen={sheet.schedule} />}
-      {typed ? (
+    <Frame
+      title="New session"
+      buttons={
         <>
-          <Select label="Repository" field="repo" items={[...(sheet.repo === '' ? [{ value: '', label: 'Choose a repository' }] : []), ...folders.map((one) => ({ value: one, label: one }))]} chosen={sheet.repo} />
-          <Select label="Provider" field="provider" items={PROVIDERS.map((one) => ({ value: one.provider, label: one.name }))} chosen={sheet.provider} after={sheet.providerNote === null ? null : <span class="sheet-error">{sheet.providerNote}</span>} />
-          <label class="sheet-field">
-            <span class="sheet-label">Prompt</span>
-            <textarea class="sheet-prompt" data-field="prompt" rows={6} placeholder="What the session should do" value={sheet.prompt}></textarea>
-          </label>
-          <label class="sheet-choice">
-            <input type="checkbox" data-field="start" checked={sheet.start} />
-            <span>Start automatically</span>
-          </label>
+          {cancel}
+          <button type="button" class="sheet-button primary" data-action="list-sheet-go" disabled={!ready}>
+            {label}
+          </button>
         </>
-      ) : null}
+      }
+    >
+      {scheduled ? null : (
+        <>
+          <div class="sheet-field folder-field">
+            <label class="sheet-label" for="new-session-folder">
+              Folder
+            </label>
+            <div class="folder-combo">
+              <input id="new-session-folder" class="sheet-select folder-input" data-field="folder" value={sheet.folder} placeholder="Choose or type a folder" autocomplete="off" spellcheck={false} role="combobox" aria-expanded={sheet.folderOpen} aria-controls="new-session-folders" />
+              <button type="button" class="icon folder-toggle" data-action="list-folder-toggle" title="Show folders" aria-label="Show folders">
+                <span class={`codicon codicon-chevron-${sheet.folderOpen ? 'up' : 'down'}`} aria-hidden="true"></span>
+              </button>
+            </div>
+            {sheet.folderOpen ? (
+              <ul id="new-session-folders" class="folder-menu" role="listbox" aria-label="Folders">
+                {groups.map((group) => (
+                  <>
+                    <li class="folder-group" role="presentation">
+                      {group.label}
+                    </li>
+                    {group.folders.map((one) => (
+                      <li role="none">
+                        <button type="button" class="folder-row" role="option" aria-selected={one === sheet.folder} data-action="list-folder-pick" data-path={one} title={one}>
+                          <span class="folder-name">{one}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </>
+                ))}
+                <li role="none">
+                  <button type="button" class="folder-row browse" role="option" data-action="list-folder-browse">
+                    <span class="folder-name">Browse…</span>
+                  </button>
+                </li>
+              </ul>
+            ) : null}
+            {sheet.folderError === null ? null : <span class="sheet-error">{sheet.folderError}</span>}
+          </div>
+          {installed === null ? (
+            <p class="sheet-detail">Loading the providers…</p>
+          ) : installed.length > 1 ? (
+            <div class="sheet-field">
+              <span class="sheet-label">Provider</span>
+              <div class="provider-switch" role="group" aria-label="Provider">
+                {PROVIDERS.filter((one) => installed.includes(one.provider)).map((one) => (
+                  <button type="button" class="provider-option" data-action="list-provider" data-provider={one.provider} aria-pressed={one.provider === sheet.provider}>
+                    {trusted(providerMark(one.provider, 'provider-option-mark'))}
+                    <span>{one.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          <label class="sheet-field">
+            <span class="sheet-label">Model</span>
+            <select class="sheet-select" data-field="model">
+              <Options
+                items={[{ value: '', label: `Default (${configured === '' ? `${providerName(sheet.provider)}'s default` : configured})` }, ...choices.map((one) => ({ value: one.id, label: one.label })), { value: OTHER_MODEL, label: 'Other…' }]}
+                chosen={sheet.model}
+              />
+            </select>
+            {sheet.model === OTHER_MODEL ? <input class="sheet-select" data-field="otherModel" value={sheet.otherModel} placeholder="Model name" maxLength={200} autocomplete="off" spellcheck={false} aria-label="Model name" /> : null}
+          </label>
+          <label class="sheet-field">
+            <span class="sheet-label">First message</span>
+            <textarea class="sheet-prompt" data-field="prompt" rows={4} placeholder="Optional. Leave empty to open an empty session." value={sheet.prompt}></textarea>
+          </label>
+          {message ? (
+            <fieldset class="sheet-field run-as">
+              <legend>Run as</legend>
+              {RUN_AS.map((one) => (
+                <label class="sheet-choice">
+                  <input type="radio" name="new-session-run" data-field="run" value={one.value} checked={sheet.run === one.value} />
+                  <span>{one.label}</span>
+                </label>
+              ))}
+            </fieldset>
+          ) : null}
+        </>
+      )}
+      {schedules.length === 0 ? null : (
+        <div class="sheet-field more-options">
+          <button type="button" class="more-options-toggle" data-action="list-more-options" aria-expanded={sheet.more}>
+            <span class={`codicon codicon-chevron-${sheet.more ? 'down' : 'right'}`} aria-hidden="true"></span>
+            <span>More options</span>
+          </button>
+          {sheet.more ? (
+            <Select label="Run a schedule now" field="schedule" items={[{ value: '', label: 'None' }, ...schedules.map((one) => ({ value: one.name, label: `Run ${one.name} now · ${one.playbook}` }))]} chosen={sheet.schedule} after={scheduled ? <span class="sheet-note">The schedule's playbook and folder are used; the other fields are hidden.</span> : null} />
+          ) : null}
+        </div>
+      )}
       {error}
     </Frame>
   );
@@ -906,9 +1121,7 @@ export interface ListHeader {
  */
 export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTMLElement, deps: ListHeaderDeps): ListHeader {
   const search: SearchView = { open: false, query: '', filter: '', range: 0, older: [], more: false, pending: false, error: null };
-  const view: HeaderView = { menu: null, search, sheet: null, local: deps.local === true };
-  // The repository New ad-hoc session used last, offered first next time while the page is open.
-  let lastRepo: string | null = null;
+  const view: HeaderView = { menu: null, search, sheet: null, notice: null, local: deps.local === true };
   let ops = 0;
   const newOp = (): string => `header-${deps.now().toString(36)}-${(++ops).toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   let shown: PageHeader | null = null;
@@ -1063,78 +1276,154 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
       deps.refused(String(answer.body['error'] ?? 'The sources were not polled.'));
     }
   };
-  const focusSheet = (): void => sheetHost.querySelector<HTMLElement>('textarea, select')?.focus();
-  const openSession = async (): Promise<void> => {
-    const folders = shown?.folders ?? [];
-    const folder = lastRepo !== null && folders.includes(lastRepo) ? lastRepo : (shown?.repoRoots[0] ?? folders[0] ?? '');
-    const sheet: Extract<HeaderSheet, { kind: 'session' }> = { kind: 'session', opId: newOp(), folder, provider: 'claude', model: '', models: {}, installed: null, busy: false, error: null };
+  /** The Run as this device chose last, Conversation, start now by default. */
+  const lastRun = (): RunAs => {
+    try {
+      const kept = globalThis.localStorage?.getItem(RUN_AS_KEY);
+
+      return kept === 'queue' || kept === 'wait' ? kept : 'now';
+    } catch {
+      return 'now';
+    }
+  };
+  const keepRun = (run: RunAs): void => {
+    try {
+      globalThis.localStorage?.setItem(RUN_AS_KEY, run);
+    } catch {
+      // A browser that keeps nothing offers the default next time.
+    }
+  };
+  // Each folder check asked of the hub while the operator types, so a newer one drops an older answer.
+  let folderCheck = 0;
+  let folderTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Asks the hub whether the typed folder can be used, shortly after the last key; its refusal shows under the field. */
+  const checkFolder = (sheet: NewSessionSheet): void => {
+    if (folderTimer !== null) {
+      clearTimeout(folderTimer);
+    }
+
+    const run = ++folderCheck;
+    const path = sheet.folder.trim();
+
+    folderTimer = setTimeout(() => {
+      folderTimer = null;
+
+      if (path === '') {
+        sheet.folderError = null;
+        redraw();
+        return;
+      }
+
+      void deps.post('page-folders', { path }).then((answer) => {
+        if (run !== folderCheck || view.sheet !== sheet) {
+          return;
+        }
+
+        sheet.folderError = answer.status === 200 ? null : String(answer.body['error'] ?? 'Switchboard did not check the folder.');
+        redraw();
+      });
+    }, FOLDER_CHECK_MS);
+  };
+  /** Opens the folder browser at `path`, or at the starting places with null. */
+  const browse = async (sheet: NewSessionSheet, path: string | null): Promise<void> => {
+    const browser: FolderBrowser = { path: sheet.browser?.path ?? null, parent: sheet.browser?.parent ?? null, folders: sheet.browser?.folders ?? [], more: false, busy: true, error: null };
+
+    sheet.browser = browser;
+    sheet.folderOpen = false;
+
+    if (path === null) {
+      sheet.browser = { path: null, parent: null, folders: [], more: false, busy: false, error: null };
+      redraw();
+      return;
+    }
+
+    redraw();
+
+    const answer = await deps.post('page-folders', { path });
+
+    if (sheet.browser !== browser) {
+      return;
+    }
+
+    browser.busy = false;
+
+    if (answer.status === 200) {
+      browser.path = String(answer.body['path'] ?? path);
+      browser.parent = typeof answer.body['parent'] === 'string' ? answer.body['parent'] : null;
+      browser.folders = Array.isArray(answer.body['folders']) ? (answer.body['folders'] as FolderBrowser['folders']) : [];
+      browser.more = answer.body['more'] === true;
+    } else {
+      browser.error = String(answer.body['error'] ?? 'Switchboard did not list the folder.');
+    }
+
+    redraw();
+  };
+  /**
+   * The + button's New session form (PRD R122): the folder used last, else the first repo root; the default provider and Default model; Run as
+   * as this device chose last.
+   */
+  const openNew = async (): Promise<void> => {
+    const sheet: NewSessionSheet = {
+      kind: 'new',
+      opId: newOp(),
+      folder: '',
+      folderError: null,
+      folderOpen: false,
+      places: null,
+      browser: null,
+      provider: 'claude',
+      installed: null,
+      models: {},
+      choices: {},
+      model: '',
+      otherModel: '',
+      prompt: '',
+      run: lastRun(),
+      more: false,
+      schedule: '',
+      busy: false,
+      error: null,
+    };
+
     view.sheet = sheet;
     redraw();
-    focusSheet();
-    const answer = await deps.post('providers', {});
-    if (view.sheet !== sheet) return;
-    const installed = answer.status === 200 && Array.isArray(answer.body['installed']) ? (answer.body['installed'] as unknown[]).filter((one): one is string => one === 'claude' || one === 'codex') : [];
+    sheetHost.querySelector<HTMLElement>('.sheet-prompt')?.focus();
+
+    const [providers, places] = await Promise.all([deps.post('providers', {}), deps.post('page-folders', {})]);
+
+    if (view.sheet !== sheet) {
+      return;
+    }
+
+    const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((one): one is string => typeof one === 'string') : []);
+
+    if (places.status === 200) {
+      sheet.places = { recent: strings(places.body['recent']), repoRoots: strings(places.body['repoRoots']), worktrees: strings(places.body['worktrees']), computer: strings(places.body['computer']) };
+    }
+
+    // A folder typed while the hub answered stays.
+    if (sheet.folder === '') {
+      sheet.folder = sheet.places?.recent[0] ?? sheet.places?.repoRoots[0] ?? shown?.repoRoots[0] ?? '';
+    }
+
+    const installed: string[] = providers.status === 200 ? strings(providers.body['installed']).filter((one) => one === 'claude' || one === 'codex') : [];
+    const named = String(providers.body['defaultProvider'] ?? '');
+    const models = providers.body['models'];
+    const choices = providers.body['modelChoices'];
+
     sheet.installed = installed;
-    sheet.error = installed.length === 0 ? String(answer.body['error'] ?? 'Neither Claude nor Codex is installed.') : null;
-    const named = String(answer.body['defaultProvider'] ?? '');
+    sheet.error = installed.length === 0 ? String(providers.body['error'] ?? 'Neither Claude nor Codex is installed.') : null;
     sheet.provider = installed.includes(named) ? named : (installed[0] ?? 'claude');
-    const models = answer.body['models'];
     sheet.models = models !== null && typeof models === 'object' ? Object.fromEntries(Object.entries(models).filter((entry): entry is [string, string] => typeof entry[1] === 'string')) : {};
-    sheet.model = sheet.models[sheet.provider] ?? '';
-    redraw();
-  };
-  /** New ad-hoc session…: the repository used last or the first repo root, the default provider, or a schedule when there is no repository. */
-  const openAdhoc = async (): Promise<void> => {
-    const folders = shown?.folders ?? [];
-    const repo = lastRepo !== null && folders.includes(lastRepo) ? lastRepo : (shown?.repoRoots[0] ?? '');
-    const sheet: Extract<HeaderSheet, { kind: 'adhoc' }> = { kind: 'adhoc', opId: newOp(), schedule: repo === '' && (shown?.schedules.length ?? 0) > 0 ? shown!.schedules[0]!.name : '', repo, provider: 'claude', providerChosen: false, prompt: '', start: false, providerNote: null, busy: false, error: null };
-
-    view.sheet = sheet;
-    redraw();
-    focusSheet();
-
-    const answer = await deps.post('providers', {});
-    const named = answer.status === 200 ? String(answer.body['defaultProvider'] ?? '') : '';
-
-    if (view.sheet !== sheet) {
-      return;
-    }
-
-    // A failed lookup leaves Claude selected and usable, and says why beside the box, as the dock's window does. A provider the operator picked
-    // while the hub answered stays.
-    if (named === 'claude' || named === 'codex') {
-      sheet.provider = sheet.providerChosen ? sheet.provider : named;
-    } else {
-      sheet.providerNote = `${String(answer.body['error'] ?? 'The hub did not list the providers.')} Using Claude.`;
-    }
-
-    redraw();
-  };
-  /** New conversation in a folder…: a folder the hub knows, and the provider when both are installed. */
-  const openFolder = async (): Promise<void> => {
-    const sheet: Extract<HeaderSheet, { kind: 'folder' }> = { kind: 'folder', opId: newOp(), folder: '', provider: 'claude', providerChosen: false, installed: null, busy: false, error: null };
-
-    view.sheet = sheet;
-    redraw();
-    focusSheet();
-
-    const answer = await deps.post('providers', {});
-
-    if (view.sheet !== sheet) {
-      return;
-    }
-
-    const installed = answer.status === 200 && Array.isArray(answer.body['installed']) ? (answer.body['installed'] as unknown[]).filter((one): one is string => one === 'claude' || one === 'codex') : null;
-    const named = String(answer.body['defaultProvider'] ?? '');
-
-    if (installed === null || installed.length === 0) {
-      sheet.error = installed === null ? String(answer.body['error'] ?? 'The hub did not list the providers.') : 'Neither Claude nor Codex is installed.';
-      sheet.installed = [];
-    } else {
-      sheet.installed = installed;
-      sheet.provider = installed.length === 1 ? installed[0]! : named === 'codex' ? 'codex' : 'claude';
-    }
-
+    sheet.choices =
+      choices !== null && typeof choices === 'object'
+        ? Object.fromEntries(
+            Object.entries(choices as Record<string, unknown>).map(([provider, list]) => [
+              provider,
+              Array.isArray(list) ? list.filter((one): one is { id: string; label: string } => typeof one?.id === 'string' && one.id !== '' && typeof one?.label === 'string') : [],
+            ]),
+          )
+        : {};
     redraw();
   };
   /** Asks the hub for a new pairing link, or the devices again, into the open Pair a device sheet; a refusal shows in it. */
@@ -1246,14 +1535,27 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
     sheet.error = null;
     redraw();
 
-    const answer =
-      sheet.kind === 'holder'
-        ? await deps.post('page-holder-restart', { detail: shown?.holderNotice?.confirm?.detail ?? '' })
-        : sheet.kind === 'adhoc'
-        ? await deps.post('page-adhoc', sheet.schedule !== '' ? { opId: sheet.opId, schedule: sheet.schedule } : { opId: sheet.opId, prompt: sheet.prompt, repoRoot: sheet.repo, start: sheet.start, provider: sheet.provider })
-        : sheet.kind === 'session'
-        ? await deps.post('page-new-session', { opId: sheet.opId, folder: sheet.folder, provider: sheet.provider, model: sheet.model.trim() || null })
-        : await deps.post('page-folder-conversation', { opId: sheet.opId, folder: sheet.folder, provider: sheet.provider });
+    if (sheet.kind === 'holder') {
+      const answer = await deps.post('page-holder-restart', { detail: shown?.holderNotice?.confirm?.detail ?? '' });
+
+      sheet.busy = false;
+      sheet.error = answer.status === 200 ? null : String(answer.body['error'] ?? 'Switchboard did not answer.');
+
+      if (answer.status === 200 && view.sheet === sheet) {
+        view.sheet = null;
+      }
+
+      redraw();
+      return;
+    }
+
+    const scheduled = sheet.schedule !== '' && (shown?.schedules ?? []).some((one) => one.name === sheet.schedule);
+    const message = sheet.prompt.trim();
+    const run: RunAs = message === '' ? 'now' : sheet.run;
+    const model = sheet.model === '' ? null : sheet.model === OTHER_MODEL ? sheet.otherModel.trim() : sheet.model;
+    const answer = scheduled
+      ? await deps.post('page-adhoc', { opId: sheet.opId, schedule: sheet.schedule })
+      : await deps.post('page-new-session', { opId: sheet.opId, folder: sheet.folder.trim(), provider: sheet.provider, model, ...(message === '' ? {} : { prompt: message }), run });
 
     sheet.busy = false;
 
@@ -1263,10 +1565,8 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
       return;
     }
 
-    if (sheet.kind === 'adhoc' && sheet.schedule === '') {
-      lastRepo = sheet.repo;
-    } else if (sheet.kind === 'session') {
-      lastRepo = sheet.folder;
+    if (!scheduled && message !== '') {
+      keepRun(run);
     }
 
     if (view.sheet === sheet) {
@@ -1275,29 +1575,109 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
 
     redraw();
 
-    if ((sheet.kind === 'folder' || sheet.kind === 'session') && typeof answer.body['workItemId'] === 'number') {
+    // Every outcome's work item opens, a task that waits or queues included.
+    if (typeof answer.body['workItemId'] === 'number') {
       deps.select(answer.body['workItemId']);
     }
   };
-  /** A sheet's field changed: kept, so a redraw shows it as typed. */
+  /** A field of the New session form changed: kept, so a redraw shows it as typed; a typed folder is checked by the hub. */
   const fieldChanged = (event: Event): void => {
     const field = event.target as HTMLInputElement;
     const name = field.dataset?.['field'];
     const sheet = view.sheet;
 
-    if (name === undefined || sheet === null || sheet.kind === 'log' || sheet.kind === 'later' || sheet.kind === 'extension' || sheet.kind === 'holder' || sheet.kind === 'devices' || sheet.kind === 'held') {
+    if (name === undefined || sheet?.kind !== 'new') {
       return;
     }
 
-    const value = name === 'start' ? field.checked : field.value;
+    switch (name) {
+      case 'folder':
+        if (sheet.folder !== field.value) {
+          sheet.folder = field.value;
+          sheet.folderError = null;
+          sheet.folderOpen = event.type === 'input';
+          checkFolder(sheet);
+        }
 
-    (sheet as unknown as Record<string, unknown>)[name] = value;
+        break;
+      case 'model':
+        sheet.model = field.value;
+        break;
+      case 'otherModel':
+        sheet.otherModel = field.value;
+        break;
+      case 'prompt':
+        sheet.prompt = field.value;
+        break;
+      case 'run':
+        if (field.checked && RUN_AS.some((one) => one.value === field.value)) {
+          sheet.run = field.value as RunAs;
+        }
 
-    if (name === 'provider') {
-      if (sheet.kind === 'session') sheet.model = sheet.models[value as string] ?? '';
-      else sheet.providerChosen = true;
+        break;
+      case 'schedule':
+        sheet.schedule = field.value;
+        break;
+      default:
+        return;
     }
+
     redraw();
+  };
+  /** A click on the New session form's own controls: the folder list, the folder browser, the provider switch and More options. */
+  const formClicked = (sheet: NewSessionSheet, action: string, button: HTMLElement): boolean => {
+    switch (action) {
+      case 'list-folder-toggle':
+        sheet.folderOpen = !sheet.folderOpen;
+        break;
+      case 'list-folder-pick':
+        sheet.folder = button.dataset['path'] ?? '';
+        sheet.folderOpen = false;
+        sheet.folderError = null;
+        checkFolder(sheet);
+        break;
+      case 'list-folder-browse':
+        void browse(sheet, sheet.folder.trim() !== '' && sheet.folderError === null ? sheet.folder.trim() : null);
+        return true;
+      case 'list-browse-open':
+        void browse(sheet, button.dataset['path'] ?? null);
+        return true;
+      case 'list-browse-places':
+        void browse(sheet, null);
+        return true;
+      case 'list-browse-back':
+        sheet.browser = null;
+        break;
+      case 'list-browse-use':
+        if (sheet.browser?.path != null) {
+          sheet.folder = sheet.browser.path;
+          sheet.folderError = null;
+          sheet.browser = null;
+        }
+
+        break;
+      case 'list-provider': {
+        const provider = button.dataset['provider'] ?? '';
+
+        if (provider !== sheet.provider && (sheet.installed ?? []).includes(provider)) {
+          sheet.provider = provider;
+          // Each provider has its own models, so the choice goes back to Default.
+          sheet.model = '';
+          sheet.otherModel = '';
+        }
+
+        break;
+      }
+      case 'list-more-options':
+        sheet.more = !sheet.more;
+        sheet.schedule = sheet.more ? sheet.schedule : '';
+        break;
+      default:
+        return false;
+    }
+
+    redraw();
+    return true;
   };
 
   sheetHost.addEventListener('input', fieldChanged);
@@ -1308,6 +1688,10 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
 
     const action = button?.dataset['action'];
     const held = view.sheet?.kind === 'held' ? view.sheet : null;
+    if (view.sheet?.kind === 'new' && button !== null && formClicked(view.sheet, action ?? '', button)) {
+      return;
+    }
+
     if (held !== null && action?.startsWith('list-held-')) {
       if (action === 'list-held-refresh') { held.error = null; void refreshHeld(held); }
       else if (action === 'list-held-open') void heldAction('held-open', button!.dataset['id'] ?? '');
@@ -1330,7 +1714,15 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
     }
   });
   sheetHost.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') {
+    const sheet = view.sheet;
+
+    // Escape closes the folder list, then the folder browser, then the form.
+    if (event.key === 'Escape' && sheet?.kind === 'new' && (sheet.folderOpen || sheet.browser !== null)) {
+      event.stopPropagation();
+      sheet.folderOpen = false;
+      sheet.browser = null;
+      redraw();
+    } else if (event.key === 'Escape') {
       event.stopPropagation();
       closeSheet();
     }
@@ -1402,17 +1794,9 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
         view.menu = view.menu === 'more' ? null : 'more';
         redraw();
         break;
-      case 'list-adhoc':
-        view.menu = null;
-        void openAdhoc();
-        break;
       case 'list-new-session':
         view.menu = null;
-        void openSession();
-        break;
-      case 'list-folder':
-        view.menu = null;
-        void openFolder();
+        void openNew();
         break;
       case 'list-poll':
         view.menu = null;
@@ -1554,7 +1938,7 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
 
       shownVoiceError = voiceError;
       mount(host, renderListHeader(header, view));
-      mount(sheetHost, renderHeaderSheet(view.sheet, header, deps.now(), deps.fetch));
+      mount(sheetHost, renderHeaderSheet(view.sheet, header, deps.now(), deps.fetch, view.local === true));
     },
     list: (listed) => ({ groups: filterGroups(listed, search.filter, search.older), filtering: search.filter.trim() !== '' }),
     end: (filtered) => renderSearchEnd(search, filtered.every((group) => group.rows.length === 0)),
@@ -1563,6 +1947,10 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
       cancelTimer();
       if (heldTimer !== null) clearTimeout(heldTimer);
       view.sheet = null;
+
+      if (folderTimer !== null) {
+        clearTimeout(folderTimer);
+      }
       document.removeEventListener('pointerdown', outside);
     },
   };

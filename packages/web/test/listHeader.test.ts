@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { startPage } from '../src/main.js';
-import { bareKey, filterGroups, isKey, rangeSince, renderListHeader, SEARCH_DELAY_MS } from '../src/listHeader.js';
+import { bareKey, filterGroups, FOLDER_CHECK_MS, isKey, OTHER_MODEL, rangeSince, renderListHeader, RUN_AS_KEY, SEARCH_DELAY_MS } from '../src/listHeader.js';
 import { html } from './html.js';
 import type { SearchView } from '../src/listHeader.js';
 import type { PageGroup, PageHeader, PageRow, SourceGroup } from '@switchboard/protocol';
@@ -31,7 +31,7 @@ const listRow = (workItemId: number, patch: Partial<PageRow> = {}): PageRow => (
 const listGroup = (key: string, rows: PageRow[], patch: Partial<PageGroup> = {}): PageGroup => ({ key, title: key, glyph: '\u{ea70}', empty: null, rows, ...patch });
 const github: SourceGroup = { kind: 'github', enabled: true, title: 'gh: polled\nClick to stop polling gh', sources: [{ name: 'gh', enabled: true }] };
 const zoho: SourceGroup = { kind: 'zoho', enabled: true, title: 'desk: polled\nhelp: not polled\nClick to choose', sources: [{ name: 'desk', enabled: true }, { name: 'help', enabled: false }] };
-const header = (patch: Partial<PageHeader> = {}): PageHeader => ({ notes: [], sources: [github, zoho], repoRoots: ['D:/w1'], folders: ['D:/w1', 'D:/git/support'], schedules: [], ...patch });
+const header = (patch: Partial<PageHeader> = {}): PageHeader => ({ notes: [], sources: [github, zoho], repoRoots: ['D:/w1'], schedules: [], ...patch });
 const closed = (): SearchView => ({ open: false, query: '', filter: '', range: 0, older: [], more: false, pending: false, error: null });
 
 describe('the list header (architecture.md § Web page)', () => {
@@ -311,7 +311,7 @@ describe('the list header (architecture.md § Web page)', () => {
     hello(source);
     click('.more-actions');
     expect(root.querySelector('.more-actions')?.getAttribute('aria-expanded')).toBe('true');
-    expect(menuRows()).toEqual(['gh', 'desk', 'help', '-', 'New session…', 'New task from prompt…', 'New conversation in a folder…', '-', 'Held sessions', '-', 'Refresh sources', 'Reload', 'Show hub log', 'Get the browser extension…', '-', 'Pair a device…', 'Open Settings']);
+    expect(menuRows()).toEqual(['gh', 'desk', 'help', '-', 'Held sessions', '-', 'Refresh sources', 'Reload', 'Show hub log', 'Get the browser extension…', '-', 'Pair a device…', 'Open Settings']);
     // The source rows are the phone's: page.css hides them outside the phone's layout, where the icons are in the header.
     expect([...root.querySelectorAll('.more-menu .more-source')]).toHaveLength(4);
     expect(root.querySelector('.more-menu [data-source="help"]')?.getAttribute('aria-checked')).toBe('false');
@@ -321,7 +321,7 @@ describe('the list header (architecture.md § Web page)', () => {
     expect(root.querySelector('.more-menu')).not.toBeNull();
 
     source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ sources: [] }) });
-    expect(menuRows()[0]).toBe('New session…');
+    expect(menuRows()[0]).toBe('Held sessions');
 
     // Refresh sources polls; the hub's refusal shows in the toast.
     answers['/page-poll'] = { status: 409, body: { error: 'Every source is off.' } };
@@ -785,150 +785,223 @@ describe('the list header (architecture.md § Web page)', () => {
     page.close();
   });
 
-  it("creates an ad-hoc work item from New ad-hoc session as the dock's window does, keeping a refusal in the sheet, or runs a schedule", async () => {
+  const PLACES = { recent: ['D:/git/switchboard'], repoRoots: ['D:/git/widgets', 'D:/git/support'], worktrees: ['D:/git/widgets.worktrees/i19139'], computer: ['C:/Users/me', 'C:/', 'D:/'] };
+  const PROVIDERS_ANSWER = {
+    defaultProvider: 'claude',
+    installed: ['claude', 'codex'],
+    models: { claude: 'sonnet', codex: '' },
+    modelChoices: { claude: [{ id: 'opus', label: 'opus' }, { id: 'sonnet', label: 'sonnet' }], codex: [{ id: 'gpt-6.2-sol', label: 'GPT-6.2 Sol' }] },
+  };
+  const go = () => root.querySelector<HTMLButtonElement>('[data-action="list-sheet-go"]')!;
+  const openForm = async (source: FakeSource, patch: Partial<PageHeader> = {}) => {
+    hello(source, { header: header(patch) });
+    click('[data-action="list-new-session"]');
+    await flush();
+    await flush();
+  };
+  const sent = (command: string) => posts.filter((post) => post.url.endsWith(`/${command}`));
+
+  it('opens one New session form from the + button, on the folder used last, the default provider and Default model (PRD R122)', async () => {
     const { page, source } = start();
 
-    answers['/providers'] = { status: 200, body: { defaultProvider: 'codex', installed: ['claude', 'codex'] } };
-    hello(source, { header: header({ schedules: [{ name: 'nightly', playbook: 'dev:sweep' }] }) });
-    click('.more-actions');
-    click('[data-action="list-adhoc"]');
-    await flush();
-    await flush();
-    expect(root.querySelector('#list-sheet .sheet-title')?.textContent).toBe('New ad-hoc session');
-    expect(root.querySelector<HTMLSelectElement>('[data-field="repo"]')!.value).toBe('D:/w1');
-    expect([...root.querySelectorAll('[data-field="repo"] option')].map((one) => one.textContent)).toEqual(['D:/w1', 'D:/git/support']);
-    expect(root.querySelector<HTMLSelectElement>('[data-field="provider"]')!.value).toBe('codex');
-    expect([...root.querySelectorAll('[data-field="schedule"] option')].map((one) => one.textContent)).toEqual(['A prompt', 'Run nightly now · dev:sweep']);
-    expect(root.querySelector<HTMLButtonElement>('[data-action="list-sheet-go"]')!.disabled).toBe(true);
-    change('[data-field="prompt"]', 'Look around');
-    change('[data-field="repo"]', 'D:/git/support');
-    change('[data-field="start"]', true);
-    expect(root.querySelector<HTMLButtonElement>('[data-action="list-sheet-go"]')!.disabled).toBe(false);
+    answers['/providers'] = { status: 200, body: PROVIDERS_ANSWER };
+    answers['/page-folders'] = { status: 200, body: PLACES };
+    answers['/page-new-session'] = { status: 200, body: { workItemId: 11, folder: 'D:/git/switchboard', run: 'now' } };
+    await openForm(source);
 
-    answers['/page-adhoc'] = { status: 409, body: { error: 'Code Mode sessions need hooks.' } };
+    expect(root.querySelector('#list-sheet .sheet-title')?.textContent).toBe('New session');
+    expect(root.querySelector<HTMLInputElement>('[data-field="folder"]')!.value).toBe('D:/git/switchboard');
+    expect([...root.querySelectorAll('.provider-option')].map((one) => [one.textContent, one.getAttribute('aria-pressed')])).toEqual([['Claude', 'true'], ['Codex', 'false']]);
+    // Each provider's mark, as the conversation dropdown draws it.
+    expect([...root.querySelectorAll('.provider-option .provider-option-mark svg path')]).toHaveLength(2);
+    expect([...root.querySelectorAll('[data-field="model"] option')].map((one) => one.textContent)).toEqual(['Default (sonnet)', 'opus', 'sonnet', 'Other…']);
+    expect(root.querySelector<HTMLTextAreaElement>('[data-field="prompt"]')!.placeholder).toBe('Optional. Leave empty to open an empty session.');
+    // No message, no Run as; no schedules, no More options.
+    expect(root.querySelector('.run-as')).toBeNull();
+    expect(root.querySelector('.more-options')).toBeNull();
+    expect(go().textContent).toBe('Start');
+
+    // Codex has its own models, and its Default names the provider's own.
+    click('[data-provider="codex"]');
+    expect([...root.querySelectorAll('[data-field="model"] option')].map((one) => one.textContent)).toEqual(["Default (Codex's default)", 'GPT-6.2 Sol', 'Other…']);
+    click('[data-provider="claude"]');
+    // Other… shows a box; Start waits for a name in it.
+    change('[data-field="model"]', OTHER_MODEL);
+    expect(go().disabled).toBe(true);
+    change('[data-field="otherModel"]', 'claude-opus-4-1');
+    expect(go().disabled).toBe(false);
     click('[data-action="list-sheet-go"]');
     await flush();
     await flush();
-    const sent = posts.filter((post) => post.url.endsWith('/page-adhoc'));
-
-    expect(sent[0]?.body).toMatchObject({ window: 'pk', prompt: 'Look around', repoRoot: 'D:/git/support', start: true, provider: 'codex' });
-    expect(root.querySelector('#list-sheet .sheet-error')?.textContent).toBe('Code Mode sessions need hooks.');
-    expect(root.querySelector<HTMLTextAreaElement>('[data-field="prompt"]')!.value).toBe('Look around');
-
-    // A retry is the same request, so the hub creates once.
-    answers['/page-adhoc'] = { status: 200, body: { done: true } };
-    click('[data-action="list-sheet-go"]');
-    await flush();
-    await flush();
-    const retried = posts.filter((post) => post.url.endsWith('/page-adhoc'));
-
-    expect(retried[1]?.body['opId']).toBe(sent[0]?.body['opId']);
+    expect(sent('page-new-session')[0]?.body).toEqual({ window: 'pk', opId: expect.any(String), folder: 'D:/git/switchboard', provider: 'claude', model: 'claude-opus-4-1', run: 'now' });
+    expect(sent('select').at(-1)?.body['workItemId']).toBe(11);
     expect(root.querySelector('#list-sheet .sheet')).toBeNull();
-
-    // The next one offers the repository used last, and can run a schedule instead.
+    // More Actions no longer makes work.
     click('.more-actions');
-    click('[data-action="list-adhoc"]');
-    await flush();
-    expect(root.querySelector<HTMLSelectElement>('[data-field="repo"]')!.value).toBe('D:/git/support');
-    change('[data-field="schedule"]', 'nightly');
-    expect(root.querySelector('[data-field="prompt"]')).toBeNull();
-    expect(root.querySelector('[data-action="list-sheet-go"]')?.textContent).toBe('Run');
+    expect(root.querySelector('.more-menu [data-action="list-new-session"]')).toBeNull();
+    page.close();
+  });
+
+  it('shows Run as once there is a message, sends a task for either task choice and remembers the choice on this device, keeping a refusal in the form', async () => {
+    const { page, source } = start();
+
+    answers['/providers'] = { status: 200, body: { ...PROVIDERS_ANSWER, installed: ['codex'], defaultProvider: 'claude' } };
+    answers['/page-folders'] = { status: 200, body: PLACES };
+    answers['/page-new-session'] = { status: 409, body: { error: 'Code Mode sessions need hooks.' } };
+    await openForm(source);
+
+    // One provider installed: no switch, and that provider.
+    expect(root.querySelector('.provider-switch')).toBeNull();
+    change('[data-field="prompt"]', '  Find why the inbox badge counts archived threads.  ');
+    expect([...root.querySelectorAll('.run-as .sheet-choice')].map((one) => one.textContent)).toEqual(['Conversation, start now', 'Task, start when a slot is free', 'Task, wait for Start']);
+    expect(root.querySelector<HTMLInputElement>('[data-field="run"][value="now"]')!.checked).toBe(true);
+    change('[data-field="run"][value="wait"]', true);
+    expect(go().textContent).toBe('Create');
     click('[data-action="list-sheet-go"]');
     await flush();
     await flush();
-    expect(posts.filter((post) => post.url.endsWith('/page-adhoc')).at(-1)?.body).toMatchObject({ schedule: 'nightly' });
-    expect(posts.filter((post) => post.url.endsWith('/page-adhoc')).at(-1)?.body).not.toHaveProperty('prompt');
+    expect(sent('page-new-session')[0]?.body).toMatchObject({ provider: 'codex', model: null, prompt: 'Find why the inbox badge counts archived threads.', run: 'wait' });
+    expect(root.querySelector('#list-sheet .sheet-error')?.textContent).toBe('Code Mode sessions need hooks.');
+    expect(localStorage.getItem(RUN_AS_KEY)).toBeNull();
 
-    // A provider picked while the hub answers stays picked.
-    let release: () => void = () => {};
-    const slow = new Promise<void>((resolve) => void (release = resolve));
-    answers['/providers'] = { status: 200, body: { defaultProvider: 'codex', installed: ['claude', 'codex'] }, wait: slow };
-    click('.more-actions');
-    click('[data-action="list-adhoc"]');
-    change('[data-field="provider"]', 'claude');
-    release();
+    // A retry is the same request, so the hub creates once; the task's row opens too.
+    answers['/page-new-session'] = { status: 200, body: { workItemId: 12, folder: 'D:/git/switchboard', run: 'wait' } };
+    click('[data-action="list-sheet-go"]');
     await flush();
     await flush();
-    expect(root.querySelector<HTMLSelectElement>('[data-field="provider"]')!.value).toBe('claude');
-    click('[data-action="list-sheet-cancel"]');
+    expect(sent('page-new-session')[1]?.body['opId']).toBe(sent('page-new-session')[0]?.body['opId']);
+    expect(sent('select').at(-1)?.body['workItemId']).toBe(12);
+    expect(localStorage.getItem(RUN_AS_KEY)).toBe('wait');
 
-    // Providers the hub could not list leave Claude, and say so.
-    answers['/providers'] = { status: 500, body: { error: 'The hub is busy.' } };
-    click('.more-actions');
-    click('[data-action="list-adhoc"]');
+    // The next form offers it; an empty message still starts an empty conversation.
+    click('[data-action="list-new-session"]');
     await flush();
     await flush();
-    expect(root.querySelector<HTMLSelectElement>('[data-field="provider"]')!.value).toBe('claude');
-    expect(root.querySelector('.sheet-field .sheet-error')?.textContent).toBe('The hub is busy. Using Claude.');
+    change('[data-field="prompt"]', 'x');
+    expect(root.querySelector<HTMLInputElement>('[data-field="run"][value="wait"]')!.checked).toBe(true);
+    change('[data-field="run"][value="queue"]', true);
+    expect(go().textContent).toBe('Start');
+    change('[data-field="prompt"]', ' ');
+    expect(root.querySelector('.run-as')).toBeNull();
+    click('[data-action="list-sheet-go"]');
+    await flush();
+    await flush();
+    expect(sent('page-new-session').at(-1)?.body).toMatchObject({ run: 'now' });
+    expect(sent('page-new-session').at(-1)?.body).not.toHaveProperty('prompt');
+    page.close();
+  });
+
+  it('offers the folders by group, filters them by what is typed and has the hub check a typed path', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const { page, source } = start();
+
+    answers['/providers'] = { status: 200, body: PROVIDERS_ANSWER };
+    answers['/page-folders'] = { status: 200, body: PLACES };
+    hello(source);
+    click('[data-action="list-new-session"]');
+    await vi.runOnlyPendingTimersAsync();
+    await vi.runOnlyPendingTimersAsync();
+
+    click('[data-action="list-folder-toggle"]');
+    const rows = () => [...root.querySelectorAll('.folder-menu > li')].map((li) => li.textContent);
+    expect(rows()).toEqual(['Recent', 'D:/git/switchboard', 'Repo roots', 'D:/git/widgets', 'D:/git/support', 'Worktrees', 'D:/git/widgets.worktrees/i19139', 'Browse…']);
+    change('[data-field="folder"]', 'widgets');
+    expect(rows()).toEqual(['Repo roots', 'D:/git/widgets', 'Worktrees', 'D:/git/widgets.worktrees/i19139', 'Browse…']);
+    click('[data-action="list-folder-pick"][data-path="D:/git/widgets"]');
+    expect(root.querySelector<HTMLInputElement>('[data-field="folder"]')!.value).toBe('D:/git/widgets');
+    expect(root.querySelector('.folder-menu')).toBeNull();
+
+    // A typed path is checked shortly after the last key; the hub's refusal shows under the field and holds Start.
+    answers['/page-folders'] = { status: 400, body: { error: 'D:/nowhere is not a folder a session can run in.' } };
+    change('[data-field="folder"]', 'D:/nowhere');
+    expect(sent('page-folders').filter((post) => post.body['path'] === 'D:/nowhere')).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(FOLDER_CHECK_MS);
+    await vi.runOnlyPendingTimersAsync();
+    expect(sent('page-folders').filter((post) => post.body['path'] === 'D:/nowhere')).toHaveLength(1);
+    expect(root.querySelector('.folder-field .sheet-error')?.textContent).toBe('D:/nowhere is not a folder a session can run in.');
+    expect(go().disabled).toBe(true);
+    page.close();
+  });
+
+  it("browses the hub's folders from Browse… and uses the chosen one, saying a paired device is limited", async () => {
+    const { page, source } = start(false);
+
+    answers['/providers'] = { status: 200, body: PROVIDERS_ANSWER };
+    answers['/page-folders'] = { status: 200, body: { ...PLACES, computer: [] } };
+    await openForm(source);
+    // Typing opens the list; with no folder, Browse… starts at the starting places.
+    change('[data-field="folder"]', '');
+    click('[data-action="list-folder-browse"]');
+    expect(root.querySelector('#list-sheet .sheet-title')?.textContent).toBe('Choose a folder');
+    expect([...root.querySelectorAll('.folder-browser > li')].map((li) => li.textContent)).toEqual(['Recent', 'D:/git/switchboard', 'Repo roots', 'D:/git/widgets', 'D:/git/support', 'Worktrees', 'D:/git/widgets.worktrees/i19139']);
+    expect(root.querySelector('#list-sheet')?.textContent).toContain('On a paired device: only folders under recent folders, repo roots and worktrees.');
+    expect(root.querySelector<HTMLButtonElement>('[data-action="list-browse-use"]')!.disabled).toBe(true);
+
+    answers['/page-folders'] = { status: 200, body: { path: 'D:/git/widgets', parent: null, folders: [{ name: 'apps', path: 'D:/git/widgets/apps' }], more: false } };
+    click('[data-action="list-browse-open"][data-path="D:/git/widgets"]');
+    await flush();
+    await flush();
+    expect(sent('page-folders').at(-1)?.body).toMatchObject({ path: 'D:/git/widgets' });
+    expect([...root.querySelectorAll('.folder-crumb')].map((one) => one.textContent)).toEqual(['D:', 'git', 'widgets']);
+    expect([...root.querySelectorAll('.folder-browser .folder-name')].map((one) => one.textContent)).toEqual(['apps']);
+    // The starting places are one click away from any folder.
+    click('[data-action="list-browse-places"]');
+    expect(root.querySelector('.folder-crumbs')).toBeNull();
+    expect([...root.querySelectorAll('.folder-browser > li')][0]?.textContent).toBe('Recent');
+    click('[data-action="list-browse-open"][data-path="D:/git/widgets"]');
+    await flush();
+    await flush();
+
+    answers['/page-folders'] = { status: 400, body: { error: 'D:/git/widgets/apps cannot be read.' } };
+    click('[data-action="list-browse-open"][data-path="D:/git/widgets/apps"]');
+    await flush();
+    await flush();
+    expect(root.querySelector('#list-sheet .sheet-error')?.textContent).toBe('D:/git/widgets/apps cannot be read.');
+    // The listing it could not replace stays, and its folder is used.
+    click('[data-action="list-browse-use"]');
+    expect(root.querySelector('#list-sheet .sheet-title')?.textContent).toBe('New session');
+    expect(root.querySelector<HTMLInputElement>('[data-field="folder"]')!.value).toBe('D:/git/widgets');
+    // Escape leaves the browser for the form, then closes the form.
+    click('[data-action="list-folder-toggle"]');
+    click('[data-action="list-folder-browse"]');
+    await flush();
+    root.querySelector('#list-sheet .sheet')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(root.querySelector('#list-sheet .sheet-title')?.textContent).toBe('New session');
     root.querySelector('#list-sheet .sheet')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     expect(root.querySelector('#list-sheet .sheet')).toBeNull();
     page.close();
   });
 
-  it('starts a conversation in a folder the hub knows, asking for the provider only when both are installed, and opens it', async () => {
+  it("runs a schedule now from More options, hiding the other fields, and reports a provider lookup that failed", async () => {
     const { page, source } = start();
 
-    answers['/providers'] = { status: 200, body: { defaultProvider: 'codex', installed: ['claude', 'codex'] } };
-    answers['/page-folder-conversation'] = { status: 200, body: { workItemId: 9, folder: 'D:/git/support' } };
-    hello(source);
-    click('.more-actions');
-    click('[data-action="list-folder"]');
-    await flush();
-    await flush();
-    expect(root.querySelector('#list-sheet .sheet-title')?.textContent).toBe('New conversation in a folder');
-    expect([...root.querySelectorAll('[data-field="folder"] option')].map((one) => one.textContent)).toEqual(['Choose a folder', 'D:/w1', 'D:/git/support']);
-    expect(root.querySelector<HTMLSelectElement>('[data-field="provider"]')!.value).toBe('codex');
-    expect(root.querySelector<HTMLButtonElement>('[data-action="list-sheet-go"]')!.disabled).toBe(true);
-    change('[data-field="folder"]', 'D:/git/support');
-    change('[data-field="provider"]', 'claude');
-    click('[data-action="list-sheet-go"]');
-    await flush();
-    await flush();
-    expect(posts.find((post) => post.url.endsWith('/page-folder-conversation'))?.body).toMatchObject({ window: 'pk', folder: 'D:/git/support', provider: 'claude' });
-    expect(posts.filter((post) => post.url.endsWith('/select')).at(-1)?.body['workItemId']).toBe(9);
-    expect(root.querySelector('#list-sheet .sheet')).toBeNull();
+    answers['/providers'] = { status: 500, body: { error: 'The hub is busy.' } };
+    answers['/page-folders'] = { status: 200, body: PLACES };
+    answers['/page-adhoc'] = { status: 200, body: { done: true, workItemId: 21 } };
+    await openForm(source, { schedules: [{ name: 'nightly', playbook: 'dev:sweep' }] });
 
-    // One provider installed: nothing to choose.
-    answers['/providers'] = { status: 200, body: { defaultProvider: 'claude', installed: ['codex'] } };
-    answers['/page-folder-conversation'] = { status: 400, body: { error: 'D:/w1 is not a folder the page offers.' } };
-    click('.more-actions');
-    click('[data-action="list-folder"]');
-    await flush();
-    await flush();
-    expect(root.querySelector('[data-field="provider"]')).toBeNull();
-    change('[data-field="folder"]', 'D:/w1');
+    expect(root.querySelector('#list-sheet .sheet-error')?.textContent).toBe('The hub is busy.');
+    expect(go().disabled).toBe(true);
+    click('[data-action="list-more-options"]');
+    expect([...root.querySelectorAll('[data-field="schedule"] option')].map((one) => one.textContent)).toEqual(['None', 'Run nightly now · dev:sweep']);
+    change('[data-field="schedule"]', 'nightly');
+    expect(root.querySelector('[data-field="folder"]')).toBeNull();
+    expect(root.querySelector('[data-field="prompt"]')).toBeNull();
+    expect(go().textContent).toBe('Run');
+    expect(go().disabled).toBe(false);
     click('[data-action="list-sheet-go"]');
     await flush();
     await flush();
-    expect(posts.filter((post) => post.url.endsWith('/page-folder-conversation')).at(-1)?.body).toMatchObject({ folder: 'D:/w1', provider: 'codex' });
-    expect(root.querySelector('#list-sheet .sheet-error')?.textContent).toBe('D:/w1 is not a folder the page offers.');
-    // A press on the backdrop closes it; one on the sheet does not.
+    expect(sent('page-adhoc').at(-1)?.body).toEqual({ window: 'pk', opId: expect.any(String), schedule: 'nightly' });
+    expect(sent('page-new-session')).toHaveLength(0);
+    expect(sent('select').at(-1)?.body['workItemId']).toBe(21);
+    expect(root.querySelector('#list-sheet .sheet')).toBeNull();
+    // A press on the backdrop closes the form; one on the sheet does not.
+    click('[data-action="list-new-session"]');
     root.querySelector<HTMLElement>('#list-sheet .sheet')!.click();
     expect(root.querySelector('#list-sheet .sheet')).not.toBeNull();
     root.querySelector<HTMLElement>('#list-sheet .sheet-backdrop')!.click();
     expect(root.querySelector('#list-sheet .sheet')).toBeNull();
-    page.close();
-  });
-
-  it('starts an empty session with a chosen folder, provider and model from the visible header control', async () => {
-    const { page, source } = start();
-    answers['/providers'] = { status: 200, body: { defaultProvider: 'codex', installed: ['claude', 'codex'], models: { claude: 'sonnet', codex: 'gpt-6.2-sol' } } };
-    answers['/page-new-session'] = { status: 200, body: { workItemId: 11, folder: 'D:/git/support' } };
-    hello(source);
-    click('[data-action="list-new-session"]');
-    await flush();
-    await flush();
-    expect(root.querySelector('#list-sheet .sheet-title')?.textContent).toBe('New session');
-    expect(root.querySelector<HTMLInputElement>('[data-field="model"]')?.value).toBe('gpt-6.2-sol');
-    change('[data-field="folder"]', 'D:/git/support');
-    change('[data-field="provider"]', 'claude');
-    expect(root.querySelector<HTMLInputElement>('[data-field="model"]')?.value).toBe('sonnet');
-    change('[data-field="model"]', 'opus');
-    click('[data-action="list-sheet-go"]');
-    await flush();
-    await flush();
-    expect(posts.find((post) => post.url.endsWith('/page-new-session'))?.body).toMatchObject({ folder: 'D:/git/support', provider: 'claude', model: 'opus' });
-    expect(posts.filter((post) => post.url.endsWith('/select')).at(-1)?.body['workItemId']).toBe(11);
     page.close();
   });
 });
