@@ -63,6 +63,23 @@ describe('the tab strips', () => {
     expect(TABS.every((one) => one.icon !== '')).toBe(true);
   });
 
+  it('LinkTabs_Drawn_ShowTheBrowserIconBeforeTheirLabel', () => {
+    const links = [{ url: 'https://github.com/o/r/issues/1', label: 'Issue 1' }, { url: 'https://example.com/', label: 'example.com' }];
+
+    for (const strip of [
+      draw(renderTabs({ ...newView(), tab: 'browser' }, state, true, { links, link: links[0]!.url, open: null, fit: 2, menu: false, now: 0 }, changes, true, true)),
+      draw(renderSideSwitch('browser', state, true, { links, link: links[0]!.url, open: null, fit: 2, menu: false, now: 0 }, changes, true, true)),
+    ]) {
+      const tabs = [...strip.querySelectorAll<HTMLElement>('.link-tab .tab-open')];
+
+      expect(tabs.map((tab) => [tab.querySelector('.codicon')?.className, tab.querySelector('.tab-label')!.textContent])).toEqual([
+        ['codicon codicon-globe', 'Issue 1'],
+        ['codicon codicon-globe', 'example.com'],
+      ]);
+      expect(tabs[0]!.querySelector('.tab-label')!.matches(labelSelector())).toBe(true);
+    }
+  });
+
   it('NarrowStrip_Under600px_ShowsTheFixedTabsAsTheirIcons', () => {
     const narrow = /@container \(max-width: 600px\) \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
 
