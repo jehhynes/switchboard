@@ -148,11 +148,13 @@ describe('mountChanges', () => {
     mount.setRow('b.ts', null, 30);
     mount.setRow('gone.ts', null);
 
-    expect(view.updates.map((item) => [item.id, item.version, kinds.get(item.fileDiff)?.kind])).toEqual([
-      ['b.ts', first + 1, 'diff'],
-      ['b.ts', first + 2, 'note'],
-      ['b.ts', first + 3, 'placeholder'],
+    expect(view.updates.map((item) => [item.id, kinds.get(item.fileDiff)?.kind])).toEqual([
+      ['b.ts', 'diff'],
+      ['b.ts', 'note'],
+      ['b.ts', 'placeholder'],
     ]);
+    // Each a later version than the one before, from the count every view shares.
+    expect(view.updates.map((item) => item.version! - first).every((ahead, index, all) => ahead > (all[index - 1] ?? 0))).toBe(true);
     expect(view.updates[0]!.fileDiff.isPartial).toBe(true);
     expect(view.updates[2]!.fileDiff.unifiedLineCount).toBe(30);
   });

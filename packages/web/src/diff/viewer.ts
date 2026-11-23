@@ -275,23 +275,25 @@ function headerSuffix(fileDiff: FileDiffMetadata, collapsed: ReadonlySet<string>
 }
 
 /**
+ * The last version given to an item of a Changes view. Every view counts from this one number, so an item's cache key (its path and version)
+ * is never given to another diff while the page lives: Pierre's worker pool, one for the page, keeps a diff's highlighted lines by its cache
+ * key alone, and draws a diff with another's lines when the key matches, missing every line past the shorter one's end ("deletionLine and
+ * additionLine are null").
+ */
+let lastVersion = 0;
+
+/**
  * Draws every row of the Changes list into `host` as one scrolling view (PRD R118, architecture.md § Web page): each row a CodeView item, a
  * placeholder about its height until the page gives its diff, so the scroll bar covers the whole change from the start and a jump never waits
  * for the rows above. Pierre mounts only the items on screen and keeps the first visible line still when an item above changes height.
  */
 export function mountChanges(host: HTMLElement, rows: ChangesRowInput[], mount: ChangesMountOptions): ChangesMount {
   let order: ChangesRowInput[] = rows;
-  const versions = new Map<string, number>();
   const collapsed = new Set<string>();
   const items = new Map<string, CodeViewDiffItem<undefined>>();
-  const bump = (path: string): number => {
-    const next = (versions.get(path) ?? 0) + 1;
-
-    versions.set(path, next);
-    return next;
-  };
+  const bump = (): number => ++lastVersion;
   // A synthetic patch has fixed names, so it always parses.
-  const placeholder = (row: ChangesRowInput, lines = placeholderLines(row)): CodeViewDiffItem<undefined> => syntheticItem(row, 'placeholder', '', lines, bump(row.path))!;
+  const placeholder = (row: ChangesRowInput, lines = placeholderLines(row)): CodeViewDiffItem<undefined> => syntheticItem(row, 'placeholder', '', lines, bump())!;
   const withCollapse = (item: CodeViewDiffItem<undefined>): CodeViewDiffItem<undefined> => ({ ...item, id: item.id, collapsed: collapsed.has(item.id) });
   const listeners: (() => void)[] = [];
   let frame = 0;
@@ -375,7 +377,6 @@ export function mountChanges(host: HTMLElement, rows: ChangesRowInput[], mount: 
 
       for (const path of [...items.keys()].filter((one) => !kept.has(one))) {
         items.delete(path);
-        versions.delete(path);
         collapsed.delete(path);
       }
 
@@ -402,9 +403,9 @@ export function mountChanges(host: HTMLElement, rows: ChangesRowInput[], mount: 
       if (content === null) {
         item = placeholder(row, lines);
       } else if ('note' in content) {
-        item = syntheticItem(row, 'note', content.note, 1, bump(path));
+        item = syntheticItem(row, 'note', content.note, 1, bump());
       } else {
-        const version = bump(path);
+        const version = bump();
         const read = diffItem(content.data, `${path} ${version}`) as CodeViewDiffItem<undefined> | null;
 
         if (read !== null) {
@@ -430,7 +431,7 @@ export function mountChanges(host: HTMLElement, rows: ChangesRowInput[], mount: 
       }
 
       if (item !== undefined && (item.collapsed === true) !== value) {
-        const next = { ...item, collapsed: value, version: bump(path) };
+        const next = { ...item, collapsed: value, version: bump() };
 
         items.set(path, next);
         view.updateItem(next);
