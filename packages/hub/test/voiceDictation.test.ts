@@ -49,7 +49,7 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-const scope = (key: string, workItemId: number, sessionId: string | null, cwd = 'D:/w'): WindowScope => ({ kind: 'item', key, folder: 'D:/w', title: 't', scopeGen: 1, conversations: [{ workItemId, primary: true }], workItemId, cwd, sessionId });
+const scope = (key: string, workItemId: number, sessionId: string | null, cwd = 'D:/w'): WindowScope => ({ kind: 'page', key, folder: 'D:/w', title: 't', scopeGen: 1, conversations: [{ workItemId, primary: true }], workItemId, cwd, sessionId });
 
 async function setup(patch: Partial<VoiceSettings> = {}) {
   const settings: VoiceSettings = { ...DEFAULT_SETTINGS.voice, enabled: true, ...patch };

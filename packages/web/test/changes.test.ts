@@ -209,11 +209,6 @@ describe('the Changes list', () => {
         return { status: 200, ok: true, json: async () => ({}) } as unknown as Response;
       }
 
-      if (url === '/v1/conversation/open-file') {
-        gets.push(`POST ${String((init as { body?: string } | undefined)?.body)}`);
-        return { status: 409, ok: false, json: async () => ({ error: 'The work item no longer offers this.' }) } as unknown as Response;
-      }
-
       const diffPath = url.startsWith('/v1/conversation/diff') ? decodeURIComponent(/path=([^&]*)/.exec(url)![1]!) : null;
       const answer =
         diffPath !== null

@@ -18,16 +18,10 @@ import type { PageRoutes, PostContext, Reply } from './server.js';
 export interface HubApp {
   post: Record<string, (body: unknown, context?: PostContext) => Promise<Reply>>;
   snapshot(): unknown;
-  /** Registers a window's `/events` stream and returns its window key (architecture.md § Window scope). */
-  windowOpened?(workspace: string | null, folder?: string | null): string;
-  windowFolder?(key: string): string | null;
+  /** A page's conversation stream closed, so its page key dies. */
   windowClosed?(key: string): void;
-  /** The snapshot a window's stream shows: its own work item only. */
-  windowState?(key: string): unknown;
-  /** Opens a window's conversation stream; null for a key no window holds. */
+  /** Opens a page's conversation stream; null for a key no page holds. */
   conversation?(key: string, write: (frame: string) => void): { close(): void } | null;
-  /** The window in front changed: its key, or null, at `at`, the epoch milliseconds of the change as the window reported it. */
-  windowFocused?(key: string | null, at: number): void;
   /** The web page's routes (architecture.md § Web page). */
   page?: PageRoutes;
   /** The web page's fixed port, `web.port` as the hub started; 0 for none. */
@@ -47,8 +41,6 @@ export interface HubApp {
   attachDock?(send: (event: string, data: unknown) => number): void;
   /** Receives the sender of forwarded clicks to the dock (PRD R65, R69). */
   attachDockClick?(click: (data: unknown) => boolean): void;
-  /** Gives the app the way to send an event to the VS Code windows' streams. */
-  attachWindows?(send: (event: string, data: unknown, keys?: readonly string[]) => number): void;
   /** Gives the app the way to end the remote page streams that a change of remote access no longer allows. */
   attachRemote?(changed: () => void): void;
   /** Gives the app the local web page's URL once it is served, which a needs-you system notification opens (PRD R65). */
@@ -231,13 +223,9 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
       ? {}
       : {
           post: app.post,
-          snapshot: ({ key }: { key: string | null }) => (key !== null && app.windowState !== undefined ? app.windowState(key) : app.snapshot()),
           dock: () => app.dock(),
-          ...(app.windowOpened === undefined ? {} : { windowOpened: (workspace: string | null, folder: string | null) => app.windowOpened!(workspace, folder) }),
-          ...(app.windowFolder === undefined ? {} : { windowFolder: (key: string) => app.windowFolder!(key) }),
           ...(app.windowClosed === undefined ? {} : { windowClosed: (key: string) => app.windowClosed!(key) }),
           ...(app.conversation === undefined ? {} : { conversation: (key: string, write: (frame: string) => void) => app.conversation!(key, write) }),
-          ...(app.windowFocused === undefined ? {} : { focusChanged: (key: string | null, at: number) => app.windowFocused!(key, at) }),
           ...(app.page === undefined ? {} : { page: app.page }),
         }),
   });
@@ -253,7 +241,6 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
   });
   app?.attachDock?.((event, data) => server.notifyDock(event, data));
   app?.attachDockClick?.((data) => server.clickDock(data));
-  app?.attachWindows?.((event, data, keys) => server.notifyWindows(event, data, keys));
   app?.attachRemote?.(() => server.remoteChanged());
   app?.attachPageUrl?.(() => server.pageUrl());
 
@@ -346,7 +333,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
 
             const successor = await waitForHub(home, restartOptions.takeoverWaitMs ?? TAKEOVER_WAIT_MS, (found) => found.token !== record.token);
 
-            log(successor === null ? `hub restart: no hub took over within ${(restartOptions.takeoverWaitMs ?? TAKEOVER_WAIT_MS) / 1000} seconds; hub.js start, a VS Code window or the dock starts one` : `hub restart: pid ${successor.pid} took over with build ${successor.build}`);
+            log(successor === null ? `hub restart: no hub took over within ${(restartOptions.takeoverWaitMs ?? TAKEOVER_WAIT_MS) / 1000} seconds; hub.js start or its supervisor starts one` : `hub restart: pid ${successor.pid} took over with build ${successor.build}`);
             exit(0);
           },
           log,

@@ -2045,7 +2045,7 @@ export class Runtime {
     this.changed();
   }
 
-  /** A window came to the front: its pull requests are read again, at most every `PULL_REQUESTS_FOCUS_MS` (PRD R92). */
+  /** A page came to the front: the pull requests are read again, at most every `PULL_REQUESTS_FOCUS_MS` (PRD R92). */
   refreshPullRequests(): void {
     const now = this.deps.now();
 

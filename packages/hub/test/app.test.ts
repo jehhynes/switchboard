@@ -1,9 +1,9 @@
-import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Exec } from '@switchboard/claude';
 import { Store } from '@switchboard/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CONTINUE_IN_BACKGROUND_REMOVED, createHubApp, parseAction, parseReport } from '../src/app.js';
+import { createHubApp, parseAction, parseReport } from '../src/app.js';
 import { windowOf, windowsDir } from '../src/dock.js';
 import { loadConfig } from '../src/config.js';
 import { postToHub } from '../src/client.js';
@@ -394,17 +394,16 @@ describe('createHubApp', () => {
     for (const command of ['pane-pair', 'pane-open', 'pane-rect']) expect(app.post[`/v1/conversation/${command}`]).toBeUndefined();
   });
 
-  it('refuses Continue in Background, whatever the body, since Switchboard no longer runs Claude background sessions (PRD R89, R93)', async () => {
+  it('has no route for VS Code windows, which no longer connect: no claim, open, window command, background session, Open in Switchboard, window History or Expand replies', async () => {
     writeSettings({ sessions: { installHooks: false } });
     const app = await start();
 
-    for (const body of [{ label: 'My tab', hostPid: 1, workItemIds: [1] }, { label: 'My tab' }, null]) {
-      expect(await app.post['/background']!(body)).toEqual({ status: 409, body: { error: CONTINUE_IN_BACKGROUND_REMOVED } });
+    for (const route of ['/claim', '/open', '/open/withdraw', '/window', '/window/withdraw', '/background', '/background/check', '/open-url', '/history', '/v1/conversation/open-file', '/v1/conversation/new-conversation', '/v1/conversation/expand-replies']) {
+      expect(app.post[route], route).toBeUndefined();
     }
 
-    expect(await app.post['/background/check']!({ hostPid: 1, pid: 7 })).toEqual({ status: 409, body: { error: CONTINUE_IN_BACKGROUND_REMOVED } });
+    expect(existsSync(join(temp.home, '.switchboard', 'window-queue.json'))).toBe(false);
   });
-
   it('registers a session the Claude roster lists, answering its key and contract, and refuses a bad body (PRD R81)', async () => {
     writeSettings({ sessions: { installHooks: false } });
     const native = '9273f594-1111-4222-8333-444455556666';
@@ -603,115 +602,6 @@ describe('createHubApp', () => {
     expect(app.snoozedUrls()).toEqual(['https://github.com/O/r/issues/2']);
   });
 
-  it('returns a ticket\'s history to a window the dock sent it to, or that it is unchanged since a revision, and refuses another window with 403, an unknown ticket with 409 and a missing ticketId with 400 (PRD R59)', async () => {
-    writeSettings({ sessions: { installHooks: false } });
-    const store = Store.open(join(temp.home, '.switchboard', 'switchboard.db'));
-
-    store.insertTicket({ source: 'github', sourceKey: '7', ref: '#7', repo: '', sourceId: null, title: 'Seven', url: '', assigned: false, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
-    store.close();
-
-    const app = await start();
-    const window = app.windowOpened!(null);
-    const other = app.windowOpened!(join(temp.home, 'other.code-workspace'));
-
-    // A window reads only its own work item's History, or one whose History command it claimed (architecture.md § Window scope).
-    expect(await app.post['/history']!({ window, ticketId: 1 })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-
-    for (const ticketId of [1, 2]) {
-      expect(await app.post['/window']!({ workspace: null, command: { type: 'history', ticketId, key: '#7' } })).toMatchObject({ status: 200 });
-    }
-
-    expect(await app.post['/claim']!({ folder: '', focused: true, window })).toMatchObject({ body: { commands: [{ type: 'history', ticketId: 1 }, { type: 'history', ticketId: 2 }] } });
-
-    // A claim with no key a window holds leaves History commands for the next claim.
-    expect(await app.post['/window']!({ workspace: null, command: { type: 'history', ticketId: 1, key: '#7' } })).toMatchObject({ status: 200 });
-    expect(await app.post['/claim']!({ folder: '', focused: true, window: 'stale' })).toMatchObject({ body: { commands: [] } });
-    expect(await app.post['/claim']!({ folder: '', focused: true, window })).toMatchObject({ body: { commands: [{ type: 'history', ticketId: 1 }] } });
-
-    // Another folder window that claimed nothing gets nothing.
-    const bystander = app.windowOpened!(null);
-
-    expect(await app.post['/history']!({ window: bystander, ticketId: 1 })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-
-    const reply = await app.post['/history']!({ window, ticketId: 1 });
-
-    expect(reply.status).toBe(200);
-    expect(reply.body).toMatchObject({ ticket: { id: 1, sourceKey: '7', title: 'Seven' }, workItems: [], poolTriages: [], events: [], revision: '0' });
-    expect(await app.post['/history']!({ window, ticketId: 1, revision: '0' })).toEqual({ status: 200, body: { unchanged: true } });
-    expect(await app.post['/history']!({ window: other, ticketId: 1 })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    expect(await app.post['/history']!({ window: 'forged', ticketId: 1 })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-
-    // A snooze is logged, so the revision a reader shows is stale and it gets the full history again.
-    expect(await app.post['/action']!({ type: 'snooze', ticketId: 1, until: null })).toMatchObject({ status: 200 });
-
-    const after = await app.post['/history']!({ window, ticketId: 1, revision: '0' });
-
-    expect(after.body).toMatchObject({ events: [{ type: 'snooze', actor: 'operator', ticketId: 1 }] });
-    expect(after.body).not.toHaveProperty('unchanged');
-    expect(await app.post['/history']!({ window, ticketId: 2 })).toEqual({ status: 409, body: { error: 'Unknown ticket 2.' } });
-    expect(await app.post['/history']!({ window, ticketId: 2, revision: '0' })).toEqual({ status: 409, body: { error: 'Unknown ticket 2.' } });
-    expect(await app.post['/history']!({ window, ticketId: '1' })).toEqual({ status: 400, body: { error: 'Expected {window, ticketId, revision?}.' } });
-    expect(await app.post['/history']!({ ticketId: 1 })).toEqual({ status: 400, body: { error: 'Expected {window, ticketId, revision?}.' } });
-    expect(await app.post['/history']!(null)).toEqual({ status: 400, body: { error: 'Expected {window, ticketId, revision?}.' } });
-  });
-
-  it('leaves a History command a claim with no window key cannot take queued as it was, so the dock can withdraw it, it expires on time and it goes to its own window (PRD R71)', async () => {
-    writeSettings({ sessions: { installHooks: false } });
-
-    let now = Date.UTC(2026, 9, 3, 12);
-    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli, now: () => now } });
-    closers.push(() => app.close());
-
-    const leave = async (workspace: string | null) => {
-      const reply = await app.post['/window']!({ workspace, command: { type: 'history', ticketId: 1, key: '#7' } });
-
-      expect(reply).toMatchObject({ status: 200 });
-      return (reply.body as { id: number }).id;
-    };
-    const elsewhere = join(temp.home, 'elsewhere.code-workspace');
-    const other = join(temp.home, 'other.code-workspace');
-
-    // The dock withdraws the command by the ID it was given after a claim with no key passed it over.
-    const id = await leave(null);
-
-    expect(await app.post['/claim']!({ folder: '', focused: true, window: 'stale' })).toMatchObject({ body: { commands: [] } });
-    expect(await app.post['/window/withdraw']!({ id })).toEqual({ status: 200, body: { withdrawn: true } });
-    expect(await app.post['/claim']!({ folder: '', focused: true, window: app.windowOpened!(null) })).toMatchObject({ body: { commands: [] } });
-
-    // The command expires two minutes after the dock left it, not after the claim that passed it over.
-    await leave(null);
-    now += 2 * 60_000 - 1;
-    expect(await app.post['/claim']!({ folder: '', focused: true, window: 'stale' })).toMatchObject({ body: { commands: [] } });
-    now += 2;
-    expect(await app.post['/claim']!({ folder: '', focused: true, window: app.windowOpened!(null) })).toMatchObject({ body: { commands: [] } });
-
-    // A command left for any focused window still goes to one after an item window with no key passed it over.
-    await leave(null);
-    expect(await app.post['/claim']!({ folder: '', workspace: elsewhere, focused: true })).toMatchObject({ body: { commands: [] } });
-    expect(await app.post['/claim']!({ folder: '', workspace: other, focused: true, window: app.windowOpened!(other) })).toMatchObject({ body: { commands: [{ type: 'history', ticketId: 1 }] } });
-
-    // A command left for one item window does not go to another after a claim with no key passed it over.
-    await leave(elsewhere);
-    expect(await app.post['/claim']!({ folder: '', workspace: elsewhere, focused: true })).toMatchObject({ body: { commands: [] } });
-    expect(await app.post['/claim']!({ folder: '', workspace: other, focused: true, window: app.windowOpened!(other) })).toMatchObject({ body: { commands: [] } });
-    expect(await app.post['/claim']!({ folder: '', workspace: elsewhere, focused: true, window: app.windowOpened!(elsewhere) })).toMatchObject({ body: { commands: [{ type: 'history', ticketId: 1 }] } });
-  });
-
-  it("answers the row of an Open in Switchboard URL, which the window that got it cannot see, and refuses a URL no row has (PRD R69)", async () => {
-    writeSettings({ sessions: { installHooks: false } });
-    const store = Store.open(join(temp.home, '.switchboard', 'switchboard.db'));
-    const ticket = store.insertTicket({ source: 'adhoc', sourceKey: '7', ref: '#7', repo: '', sourceId: null, title: 'Seven', url: 'https://github.com/o/r/issues/7', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
-
-    store.insertWorkItem({ ticketId: ticket.id, playbook: null, status: 'blocked', createdAt: 1 } as never);
-    store.close();
-
-    const app = await start();
-
-    expect(await app.post['/open-url']!({ url: 'https://github.com/O/r/issues/7/' })).toMatchObject({ status: 200, body: { row: { key: 'item:1', title: 'Seven' } } });
-    expect(await app.post['/open-url']!({ url: 'https://github.com/o/r/issues/8' })).toEqual({ status: 404, body: { error: 'Switchboard has no work item for https://github.com/o/r/issues/8' } });
-    expect(await app.post['/open-url']!({ url: '' })).toEqual({ status: 400, body: { error: 'Expected {url}.' } });
-  });
-
   it('shows the dock only while a dock stream is connected, and tells it and every page when the config files change', async () => {
     writeSettings({ sessions: { installHooks: false } });
     const app = await start();
@@ -725,16 +615,13 @@ describe('createHubApp', () => {
     expect(await app.post['/dock/show']!({})).toEqual({ status: 200, body: { shown: true } });
     expect(sent).toEqual(['show']);
 
-    // A page's Settings reads the file again too, and a window that is not a page is not told.
+    // A page's Settings reads the file again too.
     const pageFrames: string[] = [];
-    const windowFrames: string[] = [];
 
     app.conversation!(app.page!.opened(false), (frame) => pageFrames.push(frame));
-    app.conversation!(app.windowOpened!(null), (frame) => windowFrames.push(frame));
     writeSettings({ sessions: { installHooks: false, concurrency: 3 } });
     await until(() => (sent.includes('config') ? true : null));
     await until(() => (pageFrames.some((frame) => frame.includes('\nevent: config\n')) ? true : null));
-    expect(windowFrames.some((frame) => frame.includes('\nevent: config\n'))).toBe(false);
   });
 
   it('answers the Voice page\'s Enroll my voice with how enrolment stands, refusing a start while voice is off (architecture.md § Voice check and barge-in)', async () => {
@@ -833,14 +720,6 @@ describe('createHubApp', () => {
     writeSettings({ sessions: { installHooks: false }, voice: { voice: 'cedar', expandReplies: true } });
     expect(await expand({ on: true })).toEqual({ status: 200, body: { briefReplies: true } });
     expect(file()).toEqual({ sessions: { installHooks: false }, voice: { voice: 'cedar', briefReplies: true } });
-    // A VS Code window still on an extension from before Brief replies posts Expand replies, its inverse.
-    const legacy = app.post['/v1/conversation/expand-replies']!;
-
-    expect(await legacy({ window: 'w', on: true })).toEqual({ status: 200, body: { briefReplies: false } });
-    expect(file()).toEqual({ sessions: { installHooks: false }, voice: { voice: 'cedar', briefReplies: false } });
-    expect(await legacy({ on: 'yes' })).toEqual({ status: 400, body: { error: 'Expected {on}.' } });
-    expect(await expand({ on: true })).toEqual({ status: 200, body: { briefReplies: true } });
-
     expect(await expand({ on: 'yes' })).toEqual({ status: 400, body: { error: 'Expected {on}.' } });
     expect(await expand(null)).toEqual({ status: 400, body: { error: 'Expected {on}.' } });
 
@@ -998,7 +877,7 @@ describe('createHubApp', () => {
     const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli }, launch: { openUrl: () => { throw new Error('must not open a URL'); }, openCode: (target) => { if (fail !== null) throw new Error(fail); opened.push(target); } } });
 
     closers.push(() => app.close());
-    app.runtime.send({ type: 'adhoc', prompt: 'Fix the badge', repoRoot: 'D:/scratch', start: false });
+    app.runtime.send({ type: 'adhoc', prompt: 'Fix the $5 badge', repoRoot: 'D:/scratch', start: false });
     await app.runtime.settled();
 
     const worktree = join(temp.home, 'wt-101');
@@ -1032,9 +911,10 @@ describe('createHubApp', () => {
     const workspace = JSON.parse(readFileSync(opened[0]!, 'utf8')) as { folders: { path: string }[]; settings: Record<string, unknown> };
 
     expect(workspace.folders).toEqual([{ path: worktree }]);
-    expect(String(workspace.settings['window.title'])).toMatch(/sb:[^ ]+$/);
+    // The title ends with the window name, and a $ of the ticket title is the fullwidth ＄, which VS Code does not read as a variable.
+    expect(String(workspace.settings['window.title'])).toMatch(/^Fix the ＄5 badge\$\{separator\}.*sb:[^ ]+$/);
     expect(workspace.settings['extensions.ignoreRecommendations']).toBe(true);
-    expect(await app.post['/claim']!({ folder: '', focused: true, window: app.windowOpened!(opened[0]!) })).toMatchObject({ body: { commands: [] } });
+    expect(existsSync(join(temp.home, '.switchboard', 'window-queue.json'))).toBe(false);
 
     // Open report opens on the page: never VS Code, and the local-file route reads that one draft outside the work item's folders, no other.
     expect(await app.post['/v1/conversation/row-command']!({ window: page, scopeGen, opId: 'c2', workItemId: 1, label: 'Open report' })).toEqual({ status: 409, body: { error: 'Open report opens on the page.' } });
@@ -1279,32 +1159,24 @@ describe('createHubApp', () => {
     expect(await app.post['/dock/page']!({ rowKey: 3 }, context)).toEqual({ status: 400, body: { error: 'Expected {rowKey}.' } });
   });
 
-  it('refuses a conversation from a window with no work item or while the flow refuses it, and selects a dock row (architecture.md § Hosted conversations)', async () => {
+  it("selects a dock row, refusing a body with no row or an unknown one, and passes the flow's refusal of the dock's New session on (architecture.md § Dock)", async () => {
     writeSettings({ sessions: { installHooks: false, codeMode: true }, sources: { adhoc: { repoRoot: 'D:/scratch' } } });
     const app = await start(() => {});
-
-    // A window with no work item has no conversation to host one.
-    expect(await app.post['/v1/conversation/new-conversation']!({ window: app.windowOpened!(join(temp.home, 'w.code-workspace')), scopeGen: 0, opId: 'n0' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
 
     app.runtime.send({ type: 'adhoc', prompt: 'Primary', repoRoot: 'D:/scratch', start: true });
     await app.runtime.settled();
 
-    const row = (app.dock() as { groups: { rows: { key: string; window: { file: string } | null }[] }[] }).groups.flatMap((group) => group.rows)[0]!;
-    const window = app.windowOpened!(row.window!.file);
+    const row = (app.dock() as { groups: { rows: { key: string }[] }[] }).groups.flatMap((group) => group.rows)[0]!;
 
-    // Claude sessions need hooks: the flow's refusal comes back on the command, and nothing is made.
-    expect(await app.post['/v1/conversation/new-conversation']!({ window, scopeGen: 1, opId: 'n1' })).toEqual({ status: 409, body: { error: 'Claude sessions need sessions.installHooks.' } });
-    expect(app.runtime.snapshot().workItems).toHaveLength(1);
-    expect(await app.post['/dock/select']!({ rowKey: row.key })).toEqual({ status: 200, body: { selected: true } });
+    expect(await app.post['/dock/select']!({ rowKey: row.key })).toEqual({ status: 200, body: {} });
     expect(await app.post['/dock/select']!({})).toEqual({ status: 400, body: { error: 'Expected {rowKey}.' } });
     expect(await app.post['/dock/select']!({ rowKey: 'nope' })).toEqual({ status: 404, body: { error: 'No work item has that row.' } });
 
-    // The dock's New session gets the flow's refusal the same way, and no longer makes a folder-hosted conversation.
+    // The dock's New session gets the flow's refusal, and makes no folder-hosted conversation.
     expect(await app.post['/dock/new-session']!({ folder: temp.home, opId: 'd1', provider: 'claude' })).toEqual({ status: 409, body: { error: 'Claude sessions need sessions.installHooks.' } });
     expect(app.post['/dock/new-conversation']).toBeUndefined();
     expect(app.runtime.snapshot().workItems).toHaveLength(1);
   });
-
   it('shows the dock the voice target\'s mic mark and a voice problem as a note, and answers a row click with why the voice did not move (architecture.md § Voice)', async () => {
     writeSettings({ sessions: { installHooks: false }, sources: { adhoc: { repoRoot: 'D:/scratch' } }, voice: { enabled: true } });
     const app = await start(() => {});
@@ -1312,19 +1184,20 @@ describe('createHubApp', () => {
     app.runtime.send({ type: 'adhoc', prompt: 'Primary', repoRoot: 'D:/scratch', start: true });
     await app.runtime.settled();
 
-    const rows = () => (app.dock() as { notes: string[]; groups: { rows: { key: string; window: { file: string } | null; voice: { glyph: string; title: string } | null }[] }[] }).groups.flatMap((group) => group.rows);
+    const rows = () => (app.dock() as { notes: string[]; groups: { rows: { key: string; voice: { glyph: string; title: string } | null }[] }[] }).groups.flatMap((group) => group.rows);
     const row = rows()[0]!;
 
     // No session is the voice target, so no row has the mic mark.
     expect(row.voice).toBeNull();
-    const key = app.windowOpened!(row.window!.file);
+    const key = app.page!.opened();
 
-    // No voice build is installed in this home, so the process cannot start: the dock says so, no window does.
+    expect(await app.post['/v1/conversation/select']!({ window: key, opId: 's', workItemId: 1 })).toMatchObject({ status: 200 });
+    // No voice build is installed in this home, so the process cannot start: the dock says so.
     await until(() => ((app.dock() as { notes: string[] }).notes.some((note) => note.startsWith('Voice: The voice process is not installed')) ? true : null));
-    // Its session is not a live, observed one, since hooks are off; with its window closed there is none to talk to.
-    expect(await app.post['/dock/select']!({ rowKey: row.key })).toEqual({ status: 200, body: { selected: true, voice: 'Voice is not available for this session.' } });
+    // Its session is not a live, observed one, since hooks are off; with its page closed there is none to talk to.
+    expect(await app.post['/dock/select']!({ rowKey: row.key })).toEqual({ status: 200, body: { voice: 'Voice is not available for this session.' } });
     app.windowClosed!(key);
-    expect(await app.post['/dock/select']!({ rowKey: row.key })).toEqual({ status: 200, body: { selected: false, voice: 'Open a window for this session to use voice.' } });
+    expect(await app.post['/dock/select']!({ rowKey: row.key })).toEqual({ status: 200, body: { voice: 'Open a window for this session to use voice.' } });
 
     // The dock reports a session's terminal window in front, or none.
     const sessionId = app.runtime.snapshot().workItems[0]!.sessions[0]!.id;
@@ -1390,74 +1263,6 @@ describe('createHubApp', () => {
     expect(controls.some((control) => control.group !== undefined)).toBe(false);
   });
 
-  it('opens a folder-hosted session only in a folder window on that folder, never in an item window that holds the folder (architecture.md § Window scope)', async () => {
-    writeSettings({ sessions: { installHooks: false } });
-    const app = await start(() => {});
-    const nudged: unknown[] = [];
-
-    app.attachWindows?.((_event, _data, keys) => nudged.push(keys));
-
-    const support = join(temp.home, 'support');
-
-    mkdirSync(support);
-
-    const host = realpathSync.native(support);
-    const store = app.runtime['deps'].store as Store;
-    const ticket = store.insertTicket({ source: 'adhoc', sourceKey: 'f1', ref: '#f1', sourceId: null, title: 'New session', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: 0, lastPolledAt: null, repoRoot: host, hostWindow: host });
-    const workItem = store.insertWorkItem({ ticketId: ticket.id, playbook: null, status: 'running', createdAt: 0 } as never);
-
-    store.insertSession({
-      id: 'f-1', workItemId: workItem.id, kind: 'task', provider: 'claude', cwd: host, state: 'idle', stateAt: 0, stateDetail: null, outcome: null, outcomeDetail: null, startedAt: 0, endedAt: null, released: false, releasing: false,
-      question: null, reports: [], retiredIds: [], pendingFork: null, external: false, move: null, movedAt: null, nativeSessionId: 'f-native', shortId: 'f-native', codeMode: false, launchId: 'l',
-    });
-
-    const itemFile = join(temp.home, 'w.code-workspace');
-    const item = app.windowOpened!(itemFile);
-    const folder = app.windowOpened!(null, process.platform === 'win32' ? support.toUpperCase() : support);
-
-    // Asked from the item window, the open waits for the folder window, and only its streams hear the nudge.
-    expect(await app.post['/open']!({ sessionId: 'f-native', cwd: host, window: item })).toEqual({ status: 200, body: { recorded: true, id: expect.any(Number), workspace: host, here: false } });
-    expect(nudged).toEqual([[folder]]);
-    expect(await app.post['/claim']!({ folder: host, workspace: itemFile, focused: true, window: item })).toMatchObject({ body: { sessionId: null } });
-    expect(await app.post['/claim']!({ folder: host, focused: true, window: folder })).toMatchObject({ body: { sessionId: 'f-native' } });
-
-    // Asked from the folder window, the open is its own, and an item window named as the destination is refused.
-    expect(await app.post['/open']!({ sessionId: 'f-native', cwd: host, window: folder })).toEqual({ status: 200, body: { recorded: true, id: expect.any(Number), workspace: host, here: true } });
-    expect(await app.post['/open']!({ sessionId: 'f-native', cwd: host, workspace: itemFile })).toEqual({ status: 409, body: { error: 'The session opens only in its own window.' } });
-    expect(await app.post['/open']!({ sessionId: 'f-native', cwd: host, workspace: support })).toMatchObject({ status: 200, body: { workspace: host, here: false } });
-
-    // A dock click that did not reach the folder window withdraws its open, so a folder window that connects later opens nothing.
-    const left = (await app.post['/open']!({ sessionId: 'f-native', cwd: host, workspace: support })).body as { id: number };
-
-    expect(await app.post['/open/withdraw']!({ id: left.id })).toEqual({ status: 200, body: { withdrawn: true } });
-    expect(await app.post['/open/withdraw']!({ id: left.id })).toEqual({ status: 200, body: { withdrawn: false } });
-    expect(await app.post['/open/withdraw']!({ id: 'x' })).toEqual({ status: 400, body: { error: 'Expected {id}.' } });
-    expect(await app.post['/claim']!({ folder: host, focused: true, window: folder })).toMatchObject({ body: { sessionId: null } });
-  });
-
-  it('keeps the session and commands the dock left for a window when another hub replaces this one', async () => {
-    writeSettings({ sessions: { installHooks: false } });
-    const logs: string[] = [];
-    const file = 'C:/h/windows/gh-7.code-workspace';
-    const first = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli } });
-
-    expect(await first.post['/open']!({ sessionId: 'w-native', cwd: 'D:/git/widgets-wt/7-fix', workspace: file })).toMatchObject({ status: 200 });
-    expect(await first.post['/window']!({ workspace: file, command: { type: 'openTabs' } })).toMatchObject({ status: 200 });
-    first.close();
-
-    const second = await start((line) => logs.push(line));
-    const window = second.windowOpened!(file);
-
-    expect(await second.post['/claim']!({ folder: 'D:/git/widgets-wt/7-fix', workspace: file, focused: true, window })).toEqual({ status: 200, body: { sessionId: 'w-native', provider: 'claude', commands: [{ type: 'openTabs' }] } });
-    expect(await second.post['/claim']!({ folder: 'D:/git/widgets-wt/7-fix', workspace: file, focused: true, window })).toEqual({ status: 200, body: { sessionId: null, provider: null, commands: [] } });
-    expect(logs.filter((line) => /claimed/.test(line))).toEqual([`session w-native claimed by ${file}`, `window commands claimed by ${file}: openTabs`]);
-
-    // An open or command the hub cannot save is refused, so the dock reports it instead of a window waiting for it.
-    mkdirSync(join(temp.home, '.switchboard', 'window-queue.json.tmp'));
-    expect(await second.post['/open']!({ sessionId: 'x-native', cwd: 'D:/x', workspace: file })).toEqual({ status: 500, body: { error: 'The hub could not save the open; see its log.' } });
-    expect(await second.post['/window']!({ workspace: file, command: { type: 'openTabs' } })).toEqual({ status: 500, body: { error: 'The hub could not save the command; see its log.' } });
-  });
-
   it('attaches to a held session through the server, refusing a request without the token, a bad body and an unknown session (PRD R95)', async () => {
     writeSettings({ sessions: { installHooks: false }, sources: { adhoc: { repoRoot: 'D:/scratch' } } });
     const logs: string[] = [];
@@ -1476,7 +1281,7 @@ describe('createHubApp', () => {
     writeFileSync(join(temp.home, '.switchboard', 'holder.json'), JSON.stringify({ protocol: 1, build: 'b', port: 4100, token: 'holder-token', pid: 4243, startedAt: '2026-11-18T00:00:00.000Z' }));
     const app = await createHubApp({ home: temp.home, log: (line) => logs.push(line), codeModeIdleMs: 60_000, deps: { exec: noCli, holder: { connect: async () => connection, lockHeld: async () => true } } });
     closers.push(() => app.close());
-    const server = await listenHub({ identity: { hub: 'switchboard', protocol: 1, version: 't', pid: 1 }, onShutdown: () => {}, post: app.post, snapshot: () => app.snapshot() });
+    const server = await listenHub({ identity: { hub: 'switchboard', protocol: 1, version: 't', pid: 1 }, onShutdown: () => {}, post: app.post });
     closers.push(() => server.close());
     const record = { protocol: 1, version: 't', build: 'b', configDir: 'C:/cfg', execPath: '', port: server.port, token: server.token, pid: 1, startedAt: '' };
 
@@ -1521,7 +1326,7 @@ describe('createHubApp', () => {
     writeFileSync(join(temp.home, '.switchboard', 'holder', 'current.json'), JSON.stringify({ build: 'cccccccccccccccc' }));
     const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli, holder: { connect: async () => (lock ? connection : Promise.reject(new Error('refused'))), lockHeld: async () => lock, killTree: async () => ({ error: 'not in tests' }), launch: () => {} } } });
     closers.push(() => app.close());
-    const server = await listenHub({ identity: { hub: 'switchboard', protocol: 1, version: 't', pid: 1 }, onShutdown: () => {}, post: app.post, snapshot: () => app.snapshot() });
+    const server = await listenHub({ identity: { hub: 'switchboard', protocol: 1, version: 't', pid: 1 }, onShutdown: () => {}, post: app.post });
     closers.push(() => server.close());
     const record = { protocol: 1, version: 't', build: 'b', configDir: 'C:/cfg', execPath: '', port: server.port, token: server.token, pid: 1, startedAt: '' };
 
@@ -1548,7 +1353,7 @@ describe('createHubApp', () => {
     expect(lock).toBe(false);
   });
 
-  it('turns a claimed open of a Code Mode session into its attach terminal and runs hub.js with sessions.nodePath in the dock view (PRD R95)', async () => {
+  it("runs hub.js with sessions.nodePath as a Code Mode session's terminal in the dock view, and opens a held session's terminal in the terminal app (PRD R95)", async () => {
     writeSettings({ sessions: { installHooks: false, nodePath: '/opt/node/bin/node' }, sources: { adhoc: { repoRoot: 'D:/scratch' } }, dock: { openTerminal: 'app' } });
     const logs: string[] = [];
     const entry = { session: 'held-1', label: 'l', pid: 9, cwd: 'D:/scratch', startedAt: 0, lastInputAt: null, lastOutputAt: null, exitedAt: null, exitCode: null, clients: 0, memoryBytes: null };
@@ -1575,30 +1380,7 @@ describe('createHubApp', () => {
       id: 'held-1', workItemId: 1, kind: 'task', provider: 'claude', cwd: 'D:/scratch', state: 'idle', stateAt: 0, stateDetail: null, outcome: null, outcomeDetail: null, startedAt: 0, endedAt: null, released: false, releasing: false,
       question: null, reports: [], retiredIds: [], pendingFork: null, external: false, move: null, movedAt: null, nativeSessionId: 'n-native', shortId: 'n-native', codeMode: true, launchId: 'l',
     });
-    // The session opens only in its own window, whose file the dock's row names.
-    const file = (app.dock() as { groups: { rows: { window: { file: string } | null }[] }[] }).groups.flatMap((group) => group.rows)[0]!.window!.file;
     const run = { executable: '/opt/node/bin/node', args: [join(temp.home, '.switchboard', 'hub.js'), 'attach', 'held-1'] };
-    const attach = { type: 'terminal', provider: 'claude', sessionId: 'held-1', cwd: 'D:/scratch', shortId: 'n-native', active: false, codeMode: true, ...run };
-
-    // The dock's click names the Switchboard session ID, and a Claude session ID, as History's link would send, finds the same session.
-    const window = app.windowOpened!(file);
-
-    for (const sessionId of ['held-1', 'n-native']) {
-      expect(await app.post['/open']!({ sessionId, cwd: 'D:/scratch', workspace: file })).toMatchObject({ status: 200 });
-      expect(await app.post['/claim']!({ folder: 'D:/scratch', workspace: file, window })).toEqual({ status: 200, body: { sessionId: null, provider: null, commands: [expect.objectContaining(attach)] } });
-    }
-
-    expect(logs).toContain(`session held-1 claimed by ${file} as its attach terminal`);
-    // Another window's file is no destination for this session, and a window holding no conversation of it gets its own window named.
-    expect(await app.post['/open']!({ sessionId: 'held-1', cwd: 'D:/scratch', workspace: 'C:/h/windows/zoho-2.code-workspace' })).toEqual({ status: 409, body: { error: 'The session opens only in its own window.' } });
-    expect(await app.post['/open']!({ sessionId: 'held-1', cwd: 'D:/scratch', window: app.windowOpened!('C:/h/windows/zoho-2.code-workspace') })).toEqual({ status: 200, body: { recorded: true, id: expect.any(Number), workspace: file, here: false } });
-    expect(await app.post['/claim']!({ folder: 'D:/scratch', window: app.windowOpened!('C:/h/windows/zoho-2.code-workspace') })).toMatchObject({ body: { sessionId: null, commands: [] } });
-    expect(await app.post['/claim']!({ folder: 'D:/scratch', window })).toMatchObject({ body: { commands: [expect.objectContaining(attach)] } });
-
-    // A window command the dock left gets the same run.
-    expect(await app.post['/window']!({ workspace: file, command: { type: 'terminal', provider: 'claude', sessionId: 'held-1', cwd: 'D:/scratch', name: 'adhoc 1', shortId: 'n-native', active: false, codeMode: true } })).toMatchObject({ status: 200 });
-    expect(await app.post['/claim']!({ folder: 'D:/elsewhere', workspace: file })).toMatchObject({ body: { commands: [] } });
-    expect(await app.post['/claim']!({ folder: 'D:/elsewhere', workspace: file, window })).toMatchObject({ body: { commands: [expect.objectContaining(run)] } });
 
     await app.post['/holder/list']!({});
     const view = app.dock() as { groups: { rows: { terminal: Record<string, unknown> | null }[] }[]; held?: { terminal: Record<string, unknown> | null }[] };
@@ -1607,142 +1389,20 @@ describe('createHubApp', () => {
     expect(view.held?.[0]?.terminal).toMatchObject(run);
     expect(await app.post['/holder/open']!({ id: 'held-1', cwd: 'D:/forged', args: ['forged'] })).toEqual({ status: 200, body: { opening: true } });
     expect(terminals).toEqual([expect.objectContaining({ sessionId: 'held-1', cwd: 'D:/scratch', codeMode: true, ...run })]);
-    expect((await app.post['/claim']!({ folder: 'D:/scratch', window })).body).toMatchObject({ commands: [] });
     terminalError = 'Windows Terminal is unavailable.';
     expect(await app.post['/holder/open']!({ id: 'held-1' })).toEqual({ status: 409, body: { error: 'The terminal did not start: Windows Terminal is unavailable.' } });
     expect(terminals).toHaveLength(1);
   });
 
-  it('turns a claimed open of an ended registered session into its attach terminal, which resumes it in the holder (PRD R81)', async () => {
-    writeSettings({ sessions: { installHooks: false, nodePath: '/opt/node/bin/node' }, sources: { adhoc: { repoRoot: 'D:/scratch' } }, dock: { openTerminal: 'app' } });
-    const node: Exec = async (file, args, options) => noCli(file === '/opt/node/bin/node' ? 'node' : file, args, options);
-    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: node } });
-    closers.push(() => app.close());
-    app.runtime.send({ type: 'adhoc', prompt: 'registered', repoRoot: 'D:/scratch', start: false });
-    app.runtime['deps'].store.insertSession({
-      id: 'reg-1', workItemId: 1, kind: 'task', provider: 'claude', cwd: 'D:/scratch', state: 'ended', stateAt: 0, stateDetail: null, outcome: null, outcomeDetail: null, startedAt: 0, endedAt: 0, released: true, releasing: false,
-      question: null, reports: [], retiredIds: [], pendingFork: null, external: false, move: null, movedAt: null, nativeSessionId: 'r-native', shortId: 'r-native', codeMode: false, launchId: null, registered: true,
-    });
-    const file = (app.dock() as { groups: { rows: { window: { file: string } | null }[] }[] }).groups.flatMap((group) => group.rows)[0]!.window!.file;
-    const window = app.windowOpened!(file);
-
-    expect(await app.post['/open']!({ sessionId: 'reg-1', cwd: 'D:/scratch', workspace: file })).toMatchObject({ status: 200 });
-    expect(await app.post['/claim']!({ folder: 'D:/scratch', workspace: file, window })).toEqual({
-      status: 200,
-      body: { sessionId: null, provider: null, commands: [expect.objectContaining({ type: 'terminal', sessionId: 'reg-1', codeMode: true, args: [join(temp.home, '.switchboard', 'hub.js'), 'attach', 'reg-1'] })] },
-    });
-  });
-
   it('answers posts through the server', async () => {
-    writeSettings({ sessions: { installHooks: false, claudePath: '/opt/claude/bin/claude', codexPath: '/opt/codex/bin/codex' } });
-    const logs: string[] = [];
-    const app = await start((line) => logs.push(line));
-    const claims: unknown[] = [];
-
-    app.attachWindows?.((event, data, keys) => claims.push({ event, data, keys }));
-    const server = await listenHub({ identity: { hub: 'switchboard', protocol: 1, version: 't', pid: 1 }, onShutdown: () => {}, post: app.post, snapshot: () => app.snapshot() });
+    writeSettings({ sessions: { installHooks: false } });
+    const app = await start();
+    const server = await listenHub({ identity: { hub: 'switchboard', protocol: 1, version: 't', pid: 1 }, onShutdown: () => {}, post: app.post });
     closers.push(() => server.close());
     const record = { protocol: 1, version: 't', build: 'b', configDir: 'C:/cfg', execPath: '', port: server.port, token: server.token, pid: 1, startedAt: '' };
 
     expect(await postToHub(record, '/action', { type: 'mark-done', workItemId: 1 }, 5000)).toMatchObject({ status: 409, error: 'Unknown work item 1.' });
     expect(await postToHub(record, '/report', { sessionId: 's1', kind: 'nope' }, 5000)).toMatchObject({ status: 400, error: 'Expected {sessionId, kind, stage|path|reason|prompt|label and target}.' });
-
-    // An open names its destination window; one the hub cannot place is refused, and a folder or a workspace a claim names is no destination.
-    expect(await postToHub(record, '/open', { sessionId: 'abc-native', cwd: 'D:\\git\\widgets-wt\\7-fix' }, 5000)).toMatchObject({ status: 409, error: 'The session has no window to open it in.' });
-    // The nudge goes only to the keys of the destination window's streams, by any spelling of its file.
-    const gh7 = app.windowOpened!('c:\\h\\windows\\GH-7.code-workspace');
-
-    app.windowOpened!('C:/h/windows/gh-8.code-workspace');
-    expect(await postToHub(record, '/open', { sessionId: 'w-native', cwd: 'D:/git/widgets', workspace: 'C:/h/windows/gh-7.code-workspace' }, 5000)).toMatchObject({ status: 200, body: { recorded: true, workspace: 'C:/h/windows/gh-7.code-workspace', here: false } });
-    expect(claims).toEqual([{ event: 'claim', data: { workspace: 'C:/h/windows/gh-7.code-workspace' }, keys: [gh7] }]);
-    expect(await postToHub(record, '/claim', { folder: 'd:/git/widgets', workspace: 'C:/h/windows/gh-7.code-workspace' }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null, provider: null, commands: [] } });
-    expect(await postToHub(record, '/claim', { folder: 'd:/git/widgets', workspace: 'C:/h/windows/gh-7.code-workspace', window: app.windowOpened!('C:/h/windows/gh-8.code-workspace') }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null, provider: null, commands: [] } });
-    expect(await postToHub(record, '/claim', { folder: 'd:/git/widgets', workspace: null, window: app.windowOpened!('c:\\h\\windows\\GH-7.code-workspace') }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: 'w-native', provider: 'claude', commands: [] } });
-    expect(await postToHub(record, '/open', { sessionId: 1 }, 5000)).toMatchObject({ status: 400, error: 'Expected {sessionId, cwd, workspace?, window?}.' });
-    expect(await postToHub(record, '/open', { sessionId: 'x', cwd: 'D:/x', workspace: 3 }, 5000)).toMatchObject({ status: 400 });
-    expect(await postToHub(record, '/claim', {}, 5000)).toMatchObject({ status: 400, error: 'Expected {folder, workspace?, focused?, window?}.' });
-    expect(await postToHub(record, '/claim', { folder: '', focused: 'yes' }, 5000)).toMatchObject({ status: 400 });
-    const settings = await postToHub(record, '/window', { workspace: null, command: { type: 'openUrl', url: 'D:/drafts/reply.md' } }, 5000);
-
-    expect(settings).toMatchObject({ status: 200, body: { id: expect.any(Number) } });
-    expect(await postToHub(record, '/window/withdraw', { id: (settings!.body as { id: number }).id }, 5000)).toMatchObject({ status: 200, body: { withdrawn: true } });
-    expect(await postToHub(record, '/window/withdraw', { id: 'x' }, 5000)).toMatchObject({ status: 400, error: 'Expected {id}.' });
-    expect(await postToHub(record, '/window', { workspace: null, command: { type: 'history', ticketId: 3, key: 'gh 3' } }, 5000)).toMatchObject({ status: 200 });
-    expect(await postToHub(record, '/window', { workspace: null, command: { type: 'log' } }, 5000)).toMatchObject({ status: 200 });
-    expect(await postToHub(record, '/window', { workspace: 'C:/h/w.code-workspace', command: { type: 'changes', path: 'D:/wt', key: 'gh 7', title: 'T' } }, 5000)).toMatchObject({ status: 200 });
-    expect(await postToHub(record, '/claim', { folder: '', workspace: null }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null, provider: null, commands: [] } });
-    // A History command waits for a claim that names a window key, so the window that takes it can read that History.
-    expect(await postToHub(record, '/claim', { folder: '', workspace: null, focused: true }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null, provider: null, commands: [{ type: 'log' }] } });
-    expect(await postToHub(record, '/claim', { folder: '', workspace: null, focused: true, window: app.windowOpened!(null) }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null, provider: null, commands: [{ type: 'history', ticketId: 3, key: 'gh 3' }] } });
-    expect(await postToHub(record, '/window', { workspace: 'C:/h/w.code-workspace', command: { type: 'openTabs' } }, 5000)).toMatchObject({ status: 200 });
-    // Commands left for a window go only to the window its key binds, never to one that only names the workspace.
-    expect(await postToHub(record, '/claim', { folder: 'D:/wt', workspace: 'C:/h/w.code-workspace' }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null, provider: null, commands: [] } });
-    expect(await postToHub(record, '/claim', { folder: 'D:/wt', workspace: 'C:/h/w.code-workspace', window: app.windowOpened!(null) }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null, provider: null, commands: [] } });
-    expect(await postToHub(record, '/claim', { folder: 'D:/wt', workspace: null, window: app.windowOpened!('C:/h/w.code-workspace') }, 5000)).toEqual({
-      status: 200,
-      error: null,
-      body: { sessionId: null, provider: null, commands: [{ type: 'changes', path: 'D:/wt', key: 'gh 7', title: 'T' }, { type: 'openTabs' }] },
-    });
-    const bound = app.windowOpened!('C:/h/w.code-workspace');
-
-    for (const [shortId, active] of [['abcd0007', false], [null, true]]) {
-      const terminal = { type: 'terminal', sessionId: 'abc-native', cwd: 'D:/wt', name: 'gh 7', shortId, active };
-
-      expect(await postToHub(record, '/window', { workspace: 'C:/h/w.code-workspace', command: terminal }, 5000)).toMatchObject({ status: 200 });
-      // The claim adds the agent's CLI from the settings: Claude's for a command that names no provider.
-      expect(await postToHub(record, '/claim', { folder: 'D:/wt', workspace: 'C:/h/w.code-workspace', window: bound }, 5000)).toMatchObject({ body: { commands: [{ ...terminal, executable: '/opt/claude/bin/claude' }] } });
-    }
-    const codexTerminal = { type: 'terminal', provider: 'codex', sessionId: 'thread-1', cwd: 'D:/wt', name: 'gh 7', shortId: null, active: false };
-    expect(await postToHub(record, '/window', { workspace: 'C:/h/w.code-workspace', command: codexTerminal }, 5000)).toMatchObject({ status: 200 });
-    expect(await postToHub(record, '/claim', { folder: 'D:/wt', workspace: 'C:/h/w.code-workspace', window: bound }, 5000)).toMatchObject({ body: { commands: [{ ...codexTerminal, executable: '/opt/codex/bin/codex' }] } });
-    // Only the item window opens its tabs (PRD R72).
-    expect(await postToHub(record, '/window', { workspace: null, command: { type: 'openTabs' } }, 5000)).toMatchObject({ status: 400, error: 'Expected {workspace, command} with a changes, terminal, history, log or openUrl command, or openTabs for a workspace.' });
-    const terminal = { type: 'terminal', sessionId: 'abc-native', cwd: 'D:/wt', name: 'gh 7', shortId: null, active: false };
-    for (const command of [
-      { type: 'settings' },
-      { type: 'sourceControl', path: 'D:/wt' },
-      { type: 'attach', shortId: 'a' },
-      { ...terminal, sessionId: '' },
-      { ...terminal, cwd: undefined },
-      { ...terminal, name: 7 },
-      { ...terminal, shortId: '' },
-      { ...terminal, shortId: undefined },
-      { ...terminal, active: 'yes' },
-      { ...terminal, active: undefined },
-      { type: 'history', ticketId: 'x', key: 'gh 3' },
-      { type: 'changes', path: 'D:/wt', key: '' },
-      { type: 'openUrl' },
-      null,
-    ]) {
-      expect(await postToHub(record, '/window', { workspace: null, command }, 5000)).toMatchObject({ status: 400 });
-    }
-    expect(await postToHub(record, '/window', { workspace: 7, command: { type: 'openUrl', url: 'D:/x.md' } }, 5000)).toMatchObject({ status: 400 });
     expect(await postToHub({ ...record, port: 1 }, '/action', {}, 1000)).toBeNull();
-    // The log shows each command left, withdrawn and claimed, and no claim that took nothing.
-    expect(logs.filter((line) => line.startsWith('session'))).toEqual([
-      'session w-native left for C:/h/windows/gh-7.code-workspace',
-      'session w-native claimed by c:\\h\\windows\\GH-7.code-workspace',
-    ]);
-    expect(logs.filter((line) => line.startsWith('window')).map((line) => line.replace(/\d+/, 'N'))).toEqual([
-      'window command N openUrl left for any window',
-      'window command N withdrawn',
-      'window command N history left for any window',
-      'window command N log left for any window',
-      'window command N changes left for C:/h/w.code-workspace',
-      'window commands claimed by a window with no folder: log',
-      'window commands claimed by a window with no folder: history',
-      'window command N openTabs left for C:/h/w.code-workspace',
-      'window commands claimed by C:/h/w.code-workspace: changes, openTabs',
-      'window command N terminal left for C:/h/w.code-workspace',
-      'window commands claimed by C:/h/w.code-workspace: terminal',
-      'window command N terminal left for C:/h/w.code-workspace',
-      'window commands claimed by C:/h/w.code-workspace: terminal',
-      'window command N terminal left for C:/h/w.code-workspace',
-      'window commands claimed by C:/h/w.code-workspace: terminal',
-    ]);
-    // A window that is already in front gets no focus change, so each open and command left for a workspace tells that window to claim.
-    // Each nudge goes only to its destination window's streams.
-    expect(claims.map((claim) => (claim as { data: unknown }).data)).toEqual([{ workspace: 'C:/h/windows/gh-7.code-workspace' }, ...Array.from({ length: 5 }, () => ({ workspace: 'C:/h/w.code-workspace' }))]);
-    expect((claims[0] as { keys: string[] }).keys).toEqual([gh7]);
   });
 });

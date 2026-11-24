@@ -6,7 +6,6 @@ import type { AppServer, AppServerRunner, Json } from '@switchboard/codex';
 import { CodexConversationAdapter } from '../src/codexConversation.js';
 import { ConversationService, sessionView } from '../src/conversation.js';
 import { WindowScopes } from '../src/windows.js';
-import { windowOf } from '../src/dock.js';
 import { item, session, snapshot } from './views.js';
 
 const recorded = JSON.parse(readFileSync(new URL('../../codex/test/fixtures/app-server.json', import.meta.url), 'utf8')) as { user: Json; reply: Json; question: Json };
@@ -20,10 +19,12 @@ function setup(resume?: (sessionId: string) => Promise<string | null>) {
   for (const one of [first,second]) {
     store.insertTicket(one.ticket as never); store.insertWorkItem({ticketId:one.ticketId,playbook:null,status:'running',createdAt:1_000} as never); store.insertSession(one.sessions[0]!);
   }
-  const scopes=new WindowScopes({store,windows:'C:/sb/windows',now:()=>now,newKey:()=>`key-${++keys}`});
-  const view=snapshot([first,second]);
-  const key=scopes.open(windowOf(first,'C:/sb/windows')!.file!,view);
-  const other=scopes.open(windowOf(second,'C:/sb/windows')!.file!,view);
+  const scopes=new WindowScopes({store,windows:'C:/sb/windows',newKey:()=>`key-${++keys}`});
+  scopes.update(snapshot([first,second]));
+  const key=scopes.openPage();
+  const other=scopes.openPage();
+  scopes.select(key,1);
+  scopes.select(other,2);
   let receive=(_event:Json):void=>{};
   const server={generation:1,listen:(listener:(event:Json)=>void)=>{receive=listener;return ()=>{};},request:vi.fn(async()=>({data:[]})),respond:vi.fn(async()=>{})};
   let turns:Json[]=[];

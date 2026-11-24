@@ -5,7 +5,6 @@ import { createServer } from 'node:net';
 import { hubRecordPath, parseHubRecord, Store, switchboardHome } from '@switchboard/core';
 import type { Card } from '@switchboard/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { openEvents } from '../src/client.js';
 import { findHub } from '../src/discover.js';
 import { buildOf } from '../src/bundle.js';
 import { call } from '../src/http.js';
@@ -15,7 +14,7 @@ import { handoverPath, writeHandover } from '../src/restart.js';
 import { serveHub } from '../src/serve.js';
 import { readStopped } from '../src/supervise.js';
 import type { HubApp, ServeResult, ServeOptions, Served } from '../src/serve.js';
-import { tempHome, until } from './helpers.js';
+import { openStream, tempHome, until } from './helpers.js';
 
 let home: string;
 let remove: () => void;
@@ -147,7 +146,11 @@ describe('serveHub', () => {
       unsnoozeUrl: () => null,
       onChange: () => {},
       busy: () => false,
-      windowOpened: () => 'key-1',
+      page: { access: new PageAccess(Store.open(':memory:')), asset: () => null, opened: () => 'key-1', isPage: (key) => key === 'key-1', list: () => [], files: async () => null, artifact: () => null, upload: () => ({ status: 403, body: {} }) },
+      conversation: (_key, write) => {
+        write('event: hello\ndata: {}\n\n');
+        return { close: () => {} };
+      },
       windowClosed: (key) => {
         if (closed) {
           throw new Error('database is not open');
@@ -161,7 +164,9 @@ describe('serveHub', () => {
       },
     };
     const hub = served(await serve({ app: async () => app, browserPort: null }));
-    const stream = await openEvents(hub.record, () => undefined, 2000, undefined, { workspace: '', focused: '1' });
+    const link = new URL(JSON.parse((await call(hub.record.port, 'POST', '/page/link', hub.record.token))!.body).url);
+    const signIn = await new Promise<string>((resolve) => request({ host: '127.0.0.1', port: hub.record.port, path: `${link.pathname}${link.search}` }, (response) => (response.resume(), resolve(String(response.headers['set-cookie']).split(';')[0]!))).end());
+    const stream = await openStream(hub.record.port, '/v1/conversation/events?page=1', { Cookie: signIn });
 
     expect(stream).not.toBeNull();
     await hub.stop('test');
@@ -269,7 +274,7 @@ describe('serveHub', () => {
   it('stays up while a client is connected', async () => {
     const exit = vi.fn();
     const hub = served(await serve({ idleMs: 100, exit }));
-    const stream = await openEvents(hub.record, () => {});
+    const stream = await openStream(hub.record.port, '/dock/events', { Authorization: `Bearer ${hub.record.token}` });
 
     expect(stream).not.toBeNull();
     await new Promise((done) => setTimeout(done, 400));
@@ -283,10 +288,10 @@ describe('serveHub', () => {
   it('builds the views once for a burst of changes', async () => {
     let change = () => {};
     let built = 0;
-    const app: HubApp = { post: {}, snapshot: () => ++built, dock: () => ({}), snoozedUrls: () => [], cards: () => [], snoozeUrl: () => null, unsnoozeUrl: () => null, onChange: (listener) => (change = listener), busy: () => false, close: () => {} };
+    const app: HubApp = { post: {}, snapshot: () => ({}), dock: () => ({ built: ++built }), snoozedUrls: () => [], cards: () => [], snoozeUrl: () => null, unsnoozeUrl: () => null, onChange: (listener) => (change = listener), busy: () => false, close: () => {} };
     const hub = served(await serve({ app: async () => app, browserPort: null }));
     const states: string[] = [];
-    const stream = await openEvents(hub.record, () => {}, undefined, (event, data) => event === 'state' && states.push(data));
+    const stream = await openStream(hub.record.port, '/dock/events', { Authorization: `Bearer ${hub.record.token}` }, (event, data) => event === 'dock' && states.push(data));
 
     await until(() => (states.length === 1 ? true : null));
     change();
@@ -295,7 +300,7 @@ describe('serveHub', () => {
     await until(() => (states.length === 2 ? true : null));
     await new Promise((done) => setTimeout(done, 50));
 
-    expect(states).toEqual(['1', '2']);
+    expect(states).toEqual(['{"built":1}', '{"built":2}']);
     stream!.close();
   });
 

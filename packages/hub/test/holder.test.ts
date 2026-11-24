@@ -79,7 +79,7 @@ describe('HolderLink (architecture.md § Terminal holder)', () => {
   it('refuses to start a holder that is not installed', async () => {
     const home = newHome(false);
 
-    expect(await link(home).link.find(true)).toEqual({ error: `The terminal holder is not installed in ${join(home, 'holder')}; reload a VS Code window to install it.` });
+    expect(await link(home).link.find(true)).toEqual({ error: `The terminal holder is not installed in ${join(home, 'holder')}; run hub.js install (npm run install-local) to install it.` });
   });
 
   it('starts the installed build detached, and a later hub finds the same holder with its sessions', async () => {

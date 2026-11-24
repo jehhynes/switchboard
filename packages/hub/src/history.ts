@@ -604,7 +604,7 @@ class Builder {
         }
 
         return detail['reason'] === 'release'
-          ? { category: 'session', icon: 'debug-disconnect', text: `Switchboard released ${session} so it can resume in VS Code` }
+          ? { category: 'session', icon: 'debug-disconnect', text: `Switchboard released ${session}` }
           : detail['reason'] === 'open'
             ? { category: 'session', icon: 'debug-stop', text: `${capital(session)} stopped to open its question` }
             : { category: 'session', icon: 'debug-stop', text: `${capital(session)} stopped` };

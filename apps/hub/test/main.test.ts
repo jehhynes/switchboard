@@ -8,7 +8,7 @@ import { homedir, tmpdir } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { hubBundlePath, hubLogPath, hubRecordPath, parseHubRecord, switchboardHome } from '@switchboard/core';
-import { buildOf, findHub, holdLock, installLockAddress, openEvents, releaseLock, serveHub, stopHub, stopSupervisor, supervisorAddress, supervisorOffPath, vscodeSettingsPath } from '@switchboard/hub';
+import { buildOf, findHub, holdLock, installLockAddress, releaseLock, serveHub, stopHub, stopSupervisor, supervisorAddress, supervisorOffPath, vscodeSettingsPath } from '@switchboard/hub';
 import type { HubRecord } from '@switchboard/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -587,7 +587,7 @@ describe('hub entry point', () => {
     expect((await hub.exited).code).toBe(0);
     expect(record()).toBeNull();
   });
-  it('restarts onto another installed build once quiet, handing its record to the new hub, which clients, the dock and pages reach again', async () => {
+  it('restarts onto another installed build once quiet, handing its record to the new hub, which the dock and pages reach again', async () => {
     // The installed bundle loads the built entry point, so changing the file changes the installed build.
     const bundle = hubBundlePath(home);
     const shim = `import(${JSON.stringify(pathToFileURL(main).href)});\n`;
@@ -600,20 +600,11 @@ describe('hub entry point', () => {
 
     expect(before.build).toBe(buildOf(bundle));
 
-    // A client's /events stream: it ends when the hub hands over, and a new one opens on the new record.
-    const opened: string[] = [];
-    const streams: Array<{ close(): void }> = [];
-    const open = async (found: HubRecord, onEnd: () => void = () => {}): Promise<void> => {
-      const stream = await openEvents(found, onEnd, undefined, (event) => event === 'hello' && opened.push(found.token));
-
-      if (stream !== null) streams.push(stream);
-    };
-    let eventsEnded!: () => void;
-    const ended = new Promise<void>((done) => (eventsEnded = done));
-
-    await open(before, () => eventsEnded());
+    // The dock's stream: it ends when the hub hands over, and a new one opens on the new record.
+    let dockOpened = false;
     const dockEnded = new Promise<void>((done) => {
       const outbound = request({ host: '127.0.0.1', port: before.port, path: '/dock/events', headers: { Authorization: `Bearer ${before.token}` } }, (response) => {
+        dockOpened = response.statusCode === 200;
         response.resume();
         response.on('close', () => done());
       });
@@ -623,7 +614,7 @@ describe('hub entry point', () => {
     });
 
     try {
-      await until(() => (opened.includes(before.token) ? true : null));
+      await until(() => (dockOpened ? true : null));
 
       writeFileSync(bundle, `${shim}// another build\n`);
 
@@ -643,15 +634,11 @@ describe('hub entry point', () => {
       // The successor took the lock: a hub the window started meanwhile waited for it instead.
       expect(readFileSync(hubLogPath(home), 'utf8')).not.toContain('A hub is already running');
 
-      // The old /events stream ended and one opens on the new hub; the dock's stream ended and a new one opens on the new record; a page's ping names the new build.
-      await ended;
-      await open(after);
-      await until(() => (opened.includes(after.token) ? true : null), 10_000);
+      // The dock's stream ended and a new one opens on the new record; a page's ping names the new build.
       await dockEnded;
       expect(await streamStatus(after, '/dock/events')).toBe(200);
       expect(JSON.parse(await get(after.port, '/page/ping'))).toEqual({ build: after.build, signedIn: false });
     } finally {
-      for (const stream of streams) stream.close();
       await start('--stop').exited;
     }
   }, 60_000);

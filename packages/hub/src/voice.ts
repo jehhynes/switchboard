@@ -948,7 +948,7 @@ export class VoiceControl {
     this.update();
   }
 
-  /** A VS Code window or the web page gained the focus at `at`: the terminal reported before it is no longer in front. */
+  /** A web page gained the focus at `at`: the terminal reported before it is no longer in front. */
   windowGained(at: number): void {
     if (at >= this.#focusAt) {
       this.terminalFocused(null, at);

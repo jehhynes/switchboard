@@ -134,7 +134,7 @@ describe('VoiceLink', () => {
     const missing = setup();
 
     missing.state.build = null;
-    expect(await missing.link.find()).toEqual({ error: `The voice process is not installed in ${join(missing.home, 'voice')}; reload a VS Code window to install it.` });
+    expect(await missing.link.find()).toEqual({ error: `The voice process is not installed in ${join(missing.home, 'voice')}; run hub.js install (npm run install-local) to install it.` });
 
     const silent = setup();
 

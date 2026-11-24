@@ -671,8 +671,6 @@ export interface PageChangesDeps {
   isPage(key: string): boolean;
   scope(key: string): WindowScope | null;
   git?: Git;
-  /** Opens a file at a line in the work item's VS Code window, opening the window when it is closed: why not, or null. */
-  openFile?(workItemId: number, path: string, line: number): string | null;
   /** The work items' viewed ticks (the store's `viewedFiles`), by tick scope (`WorktreeChanges.tickScope`); without them no file shows as viewed. */
   viewed?: { list(workItemId: number, scope: string): Map<string, string>; set(workItemId: number, scope: string, path: string, hash: string | null): void };
   /** Tells the other pages showing a work item that a tick changed, as a `viewed` event. */
@@ -744,8 +742,8 @@ function same(deps: PageChangesDeps, key: string, scope: WindowScope): boolean {
 export const CONVERSATION_MOVED = "The window's conversation changed.";
 export const VIEWED_REFUSED = 'Expected {window, scopeGen, opId, path, hash, viewed[, from, to]}.';
 
-/** How many `open-file` answers a page's retried `opId` can find. */
-const OPENED_KEPT = 100;
+/** How many `viewed` answers a page's retried `opId` can find. */
+const TICKED_KEPT = 100;
 
 /** An answer's `ETag`: a hash of its JSON, so an unchanged answer is answered 304. */
 export function etagOf(body: unknown): string {
@@ -862,65 +860,6 @@ export class PageChanges {
   }
 
   /**
-   * `open-file {window, scopeGen, opId, path, line}`: opens a file of the selected conversation's worktree at a line in its work item's VS Code
-   * window, as Open in VS Code does; 403 for a key that is not a page's, 409 for a stale `scopeGen` or a refusal, 404 for a path that is no file
-   * inside the worktree.
-   */
-  async openFileCommand(body: Record<string, unknown>): Promise<ChangesReply> {
-    const { window, scopeGen, opId, path, line } = body;
-
-    if (typeof window !== 'string' || !Number.isInteger(scopeGen) || typeof opId !== 'string' || opId === '' || opId.length > 100 || !relativePath(path) || !Number.isInteger(line) || (line as number) < 1) {
-      return { status: 400, body: { error: 'Expected {window, scopeGen, opId, path, line}.' } };
-    }
-
-    // A retried `opId` answers as the first did, so a lost answer never opens the file twice.
-    const done = this.#opened.get(`${window} ${opId}`);
-
-    if (done !== undefined) {
-      return done;
-    }
-
-    const reply = await this.#openFile(window, scopeGen as number, path, line as number);
-
-    this.#opened.set(`${window} ${opId}`, reply);
-
-    if (this.#opened.size > OPENED_KEPT) {
-      this.#opened.delete(this.#opened.keys().next().value!);
-    }
-
-    return reply;
-  }
-
-  /** Each `open-file`'s answer by page key and `opId`, the last {@link OPENED_KEPT}. */
-  readonly #opened = new Map<string, ChangesReply>();
-
-  async #openFile(window: string, scopeGen: number, path: string, line: number): Promise<ChangesReply> {
-    const scope = unscoped(this.deps, window);
-
-    if ('status' in scope) {
-      return scope;
-    }
-
-    if (scope.scopeGen !== scopeGen || scope.workItemId === null) {
-      return { status: 409, body: { error: CONVERSATION_MOVED } };
-    }
-
-    const real = await fileInside(scope.cwd!, path);
-
-    if (real === null) {
-      return { status: 404, body: { error: `${path} is not a file of this worktree.` } };
-    }
-
-    if (!same(this.deps, window, scope)) {
-      return { status: 409, body: { error: CONVERSATION_MOVED } };
-    }
-
-    const why = this.deps.openFile === undefined ? 'This hub cannot open files in VS Code.' : this.deps.openFile(scope.workItemId, real, line);
-
-    return why === null ? { status: 200, body: { opened: path } } : { status: 409, body: { error: why } };
-  }
-
-  /**
    * `viewed {window, scopeGen, opId, path, hash, viewed[, from, to]}`: ticks a change row viewed at the content hash the page showed, or clears
    * its tick, for the selected conversation's work item, and tells the other pages showing it; `from` and `to` name the range the page listed
    * the row in (`parseRange`), and a range to a commit keeps its ticks apart from those of a range to disk. 409 when the file's content changed
@@ -945,14 +884,14 @@ export class PageChanges {
 
     this.#ticked.set(`${window} ${opId}`, reply);
 
-    if (this.#ticked.size > OPENED_KEPT) {
+    if (this.#ticked.size > TICKED_KEPT) {
       this.#ticked.delete(this.#ticked.keys().next().value!);
     }
 
     return reply;
   }
 
-  /** Each `viewed`'s answer by page key and `opId`, the last {@link OPENED_KEPT}. */
+  /** Each `viewed`'s answer by page key and `opId`, the last {@link TICKED_KEPT}. */
   readonly #ticked = new Map<string, ChangesReply>();
 
   async #tick(window: string, scopeGen: number, path: string, hash: string, viewed: boolean, range: ChangeRange): Promise<ChangesReply> {

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { MESSAGES, PERMISSION_PROMPT, QUESTION_CARD } from '@switchboard/core';
 import { wakeText } from '@switchboard/core/snooze';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { dockView, hostedItems, sourceGroups, windowItems, windowOf, windowsDir, windowTabs, workspaceText, writeWorkspaceFile } from '../src/dock.js';
+import { dockView, sourceGroups, windowOf, windowsDir, workspaceText, writeWorkspaceFile } from '../src/dock.js';
 import type { DockRow } from '../src/dock.js';
 import { CONTROL_GLYPHS } from '../src/rows.js';
 import type { HeldSession } from '../src/held.js';
@@ -788,18 +788,13 @@ describe('windowOf', () => {
     expect(row.window).toEqual({ name: 'switchboard', title: hosted.ticket.title, folders: [host], file: null, hosted: true, folder: host });
     expect(row.open).toMatchObject({ type: 'session', provider: 'codex' });
   });
-  it('opens a hosted conversation in its host window, which is not its own, and leaves it out of the window items (architecture.md § Hosted conversations)', () => {
+  it("opens a hosted conversation in its host's workspace file, which is not its own (architecture.md § Hosted conversations)", () => {
     const host = 'C:/sb/windows/GH-7-widgets-655280.code-workspace';
     const hosted = item(9, { ticket: { ...item(9).ticket, source: 'adhoc', sourceKey: '4', url: '', hostWindow: host }, focus: null, sessions: [session({ cwd: 'D:/git/support' })] });
     const primary = item(7, { sessions: [session({ cwd: 'D:/git/support' })] });
-    const view = snapshot([primary, hosted]);
-    const file = windowOf(primary, W)!.file!;
 
     expect(windowOf(hosted, W)).toEqual({ name: 'GH-7-widgets-655280', title: hosted.ticket.title, folders: ['D:/git/support'], file: host, hosted: true });
-    expect(windowItems(view, file, W).map((one) => one.id)).toEqual([7]);
-    expect(windowItems(view, host, W).map((one) => one.id)).toEqual([]);
-    expect(hostedItems(view, 'c:\\sb\\windows\\gh-7-widgets-655280.code-workspace').map((one) => one.id)).toEqual([9]);
-    expect(hostedItems(view, file)).toEqual([]);
+    expect(windowOf(primary, W)!.file).not.toBe(host);
   });
 
   it("opens a conversation whose host is no path, such as a web page's key, in its own folder, never in a workspace file named after the key", () => {
@@ -813,17 +808,13 @@ describe('windowOf', () => {
     expect(windowOf(item(9, { ticket: { ...ticket, repoRoot: '' }, focus: null }), W)).toBeNull();
   });
 
-  it('opens a folder-hosted conversation in the folder window, with no workspace file, and never in an item window on that folder (architecture.md § Hosted conversations)', () => {
+  it('opens a folder-hosted conversation in its folder, with no workspace file, and never in the workspace file of a work item on that folder (architecture.md § Hosted conversations)', () => {
     const host = 'D:\\git\\support';
     const hosted = item(9, { ticket: { ...item(9).ticket, source: 'adhoc', sourceKey: '4', url: '', hostWindow: host }, focus: null, sessions: [session({ cwd: host })] });
     const primary = item(7, { sessions: [session({ cwd: host })] });
-    const view = snapshot([primary, hosted]);
-    const file = windowOf(primary, W)!.file!;
 
     expect(windowOf(hosted, W)).toEqual({ name: 'support', title: hosted.ticket.title, folders: [host], file: null, hosted: true, folder: host });
-    expect(windowItems(view, file, W).map((one) => one.id)).toEqual([7]);
-    expect(hostedItems(view, file)).toEqual([]);
-    expect(hostedItems(view, 'd:/git/support').map((one) => one.id)).toEqual([9]);
+    expect(windowOf(primary, W)!.file).toMatch(/\.code-workspace$/);
   });
 
   it('opens the latest session folder first, with the worktree second when the session ran elsewhere', () => {
@@ -902,37 +893,6 @@ describe('windowOf', () => {
     expect(names[0]).not.toBe(names[1]);
     expect(moved).toMatch(/^gh-107-[0-9a-f]{6}$/);
     expect(moved).not.toBe('gh-107-58c609');
-  });
-});
-
-describe('windowTabs', () => {
-  const file = `${W}\\gh-107-58c609.code-workspace`;
-  const link = (id: number, target: string) => ({ id, ticketId: 7, label: 'Link', target, reportedAt: NOW, mentioned: false });
-
-  it("lists each window work item's focus, not its links, then an awaiting-approval report, each once (PRD R72, R79)", () => {
-    const links = [link(1, 'https://github.com/o/r/issues/900'), link(2, 'https://github.com/o/r/pull/19002')];
-    const earlier = item(6, { status: 'done', worktree, links, ticket: item(7).ticket, focus: 'https://github.com/o/r/pull/19002#discussion_r4' });
-    const current = item(7, { status: 'awaiting-approval', approvalReport: 'D:/drafts/reply.md', worktree, links });
-    const tabs = {
-      focuses: [
-        { workItemId: 6, url: 'https://github.com/o/r/pull/19002#discussion_r4' },
-        { workItemId: 7, url: 'https://github.com/o/r/issues/107' },
-      ],
-      reports: ['D:/drafts/reply.md'],
-    };
-
-    expect(windowTabs(snapshot([earlier, current]), file, W)).toEqual(tabs);
-    // The path compares as Windows does: case, slashes and a trailing separator do not matter.
-    expect(windowTabs(snapshot([earlier, current]), `${W.toUpperCase().replaceAll('\\', '/')}/GH-107-58c609.code-workspace/`, W)).toEqual(tabs);
-  });
-
-  it('leaves out a report once its work item no longer awaits approval, another window and a work item with no focus', () => {
-    const blocked = item(7, { status: 'blocked', approvalReport: 'D:/drafts/reply.md', worktree });
-    const other = item(8, { worktree: { ...worktree, ticketId: 8, path: 'D:/git/widgets/.worktrees/108-fix' } });
-    const noFocus = item(7, { worktree, focus: null });
-
-    expect(windowTabs(snapshot([blocked, other]), file, W)).toEqual({ focuses: [{ workItemId: 7, url: 'https://github.com/o/r/issues/107' }], reports: [] });
-    expect(windowTabs(snapshot([noFocus]), file, W)).toEqual({ focuses: [], reports: [] });
   });
 });
 

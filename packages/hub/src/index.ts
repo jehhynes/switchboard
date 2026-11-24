@@ -14,7 +14,6 @@ export * from './app.js';
 export * from './config.js';
 export * from './git.js';
 export * from './runtime.js';
-export * from './windowQueue.js';
 export * from './report.js';
 export * from './debriefs.js';
 export * from './dock.js';

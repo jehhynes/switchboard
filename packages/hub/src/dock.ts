@@ -660,34 +660,6 @@ export function hostIsPath(host: string): boolean {
   return win32.isAbsolute(host) || posix.isAbsolute(host);
 }
 
-/** The work items whose window is the one opened from `file` (PRD R72, R76), without the conversations it hosts. */
-export function windowItems(snapshot: Snapshot, file: string, windows: string): WorkItemView[] {
-  return snapshot.workItems.filter((item) => {
-    const window = windowOf(item, windows);
-
-    return window !== null && window.hosted !== true && window.file !== null && samePath(window.file, file);
-  });
-}
-
-/** The hosted conversations of the window opened from `file` (architecture.md § Hosted conversations). */
-export function hostedItems(snapshot: Snapshot, file: string): WorkItemView[] {
-  return snapshot.workItems.filter((item) => item.ticket.hostWindow != null && samePath(item.ticket.hostWindow, file));
-}
-
-/**
- * What the item window opened from `file` shows in editor tabs (PRD R72): `focuses`, each of its work items' focus (PRD R79), and `reports`,
- * the approval reports of its `awaiting-approval` work items, each once.
- */
-export function windowTabs(snapshot: Snapshot, file: string, windows: string): { focuses: { workItemId: number; url: string }[]; reports: string[] } {
-  const items = windowItems(snapshot, file, windows);
-  const reports = items.flatMap((item) => (item.status === 'awaiting-approval' && item.approvalReport !== null ? [item.approvalReport] : []));
-
-  return {
-    focuses: items.flatMap((item) => (item.focus === null ? [] : [{ workItemId: item.id, url: item.focus }])),
-    reports: [...new Set(reports)],
-  };
-}
-
 /** The latest session, when Switchboard does not run it now. */
 export function openOf(item: WorkItemView, windows: string): DockOpen | null {
   // A row with no window opens its focus (PRD R71, R79), and a registered session opens nowhere while it lives in the operator's window (PRD R81).

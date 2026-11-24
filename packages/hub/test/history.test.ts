@@ -183,7 +183,7 @@ describe('History model', () => {
       'You started it',
       'Session abc12345 started',
       'Session abc12345 finished its turn',
-      'Switchboard released session abc12345 so it can resume in VS Code',
+      'Switchboard released session abc12345',
       'The session continues in fork 9e8d7c6b',
       'Session 9e8d7c6b finished its turn',
     ]);
@@ -358,7 +358,7 @@ describe('History model', () => {
       [event('ticket', 'session', { source: 'github', sourceKey: '115', playbook: 'dev:develop' }), { text: 'Asked to move this work to gh 115 as dev:develop' }],
       [event('report', 'session', { kind: 'ticket', url: 'https://github.com/o/r/issues/115' }), { text: 'Asked to move this work to https://github.com/o/r/issues/115' }],
       [event('session-start-failed', 'hub', { message: 'Untrusted folder' }, [change('session', 'update', { state: ['starting', 'ended'], outcome: [null, 'failed'] }, { sessionId: 's1' }), change('workItem', 'update', { status: ['running', 'failed'], error: [null, 'Untrusted folder'] })]), { text: 'The session failed to start', detail: 'Untrusted folder', lines: ['Status: Running → Failed', 'Error: Untrusted folder'], tone: 'error' }],
-      [event('stop-succeeded', 'hub', { reason: 'release' }, [change('session', 'update', { state: ['idle', 'ended'], released: [false, true] }, { sessionId: 's1' })]), { text: 'Switchboard released session abc12345 so it can resume in VS Code', lines: [] }],
+      [event('stop-succeeded', 'hub', { reason: 'release' }, [change('session', 'update', { state: ['idle', 'ended'], released: [false, true] }, { sessionId: 's1' })]), { text: 'Switchboard released session abc12345', lines: [] }],
       [event('stop-succeeded', 'hub', { reason: 'operator' }, [change('session', 'update', { outcome: [null, 'stopped'], outcomeDetail: [null, 'Stopped by you.'] }, { sessionId: 's1' })]), { text: 'Session abc12345 stopped', lines: ['Outcome: stopped, Stopped by you.'] }],
       [event('stop-succeeded', 'hub', { reason: 'open' }, [change('session', 'update', { state: ['waiting', 'ended'], outcome: [null, 'opened'] }, { sessionId: 's1' })]), { text: 'Session abc12345 stopped to open its question', lines: [] }],
       [event('stop-failed', 'hub', { reason: 'open', message: 'exit 1' }, [change('workItem', 'update', { error: [null, 'Stop failed: exit 1'] })]), { text: 'Stopping the session failed', detail: 'exit 1', lines: [], tone: 'error' }],

@@ -354,7 +354,7 @@ export class HolderLink {
     const build = currentHolderBuild(this.deps.home);
 
     if (build === null || !(await reserveHolderBuild(this.deps.home, build))) {
-      return { error: `The terminal holder is not installed in ${join(this.deps.home, 'holder')}; reload a VS Code window to install it.` };
+      return { error: `The terminal holder is not installed in ${join(this.deps.home, 'holder')}; run hub.js install (npm run install-local) to install it.` };
     }
 
     try {

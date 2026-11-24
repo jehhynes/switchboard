@@ -128,7 +128,7 @@ export class VoiceLink {
     }
 
     if (build === null || !(await (this.deps.reserve ?? ((one) => reserveHolderBuild(this.deps.home, one, VOICE_INSTALL)))(build))) {
-      return { error: `The voice process is not installed in ${join(this.deps.home, 'voice')}; reload a VS Code window to install it.` };
+      return { error: `The voice process is not installed in ${join(this.deps.home, 'voice')}; run hub.js install (npm run install-local) to install it.` };
     }
 
     try {

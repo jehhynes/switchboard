@@ -2,14 +2,16 @@ import { appendFileSync, closeSync, mkdirSync, mkdtempSync, readFileSync, realpa
 import { homedir, tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { backgroundDetail, CONVERSATION_RETENTION, PERMISSION_PROMPT, Store, toneSection, toneVersion, windowFileKey } from '@switchboard/core';
+import { backgroundDetail, CONVERSATION_RETENTION, PERMISSION_PROMPT, Store, toneSection, toneVersion } from '@switchboard/core';
 import type { Interruption, Session as StoredSession } from '@switchboard/core';
 import { BACKGROUND_DETAIL, projectSlug } from '@switchboard/claude';
 import { ConversationService, MIC_TIMING_MAX_MS, MIC_TIMING_STEPS, sessionView, typedText } from '../src/conversation.js';
 import type { ConversationServiceDeps, ConversationVoice, PersonaView } from '../src/conversation.js';
 import type { ConversationChanged } from '../src/conversationAdapter.js';
 import { dockView, windowOf } from '../src/dock.js';
-import { canonicalFolder, WindowScopes } from '../src/windows.js';
+import { canonicalFolder } from '../src/folders.js';
+import { WindowScopes } from '../src/windows.js';
+import type { Snapshot, WorkItemView } from '../src/snapshot.js';
 import { pageList } from '../src/page.js';
 import { questionIndex } from '../src/questions.js';
 import { questionCardOpen } from '../src/runtime.js';
@@ -52,109 +54,23 @@ function stored(store: Store, view: ReturnType<typeof world>): void {
   }
 }
 
-describe('WindowScopes', () => {
-  it("binds a window to its file's newest work item that is not done, and shows it alone with an unnamed needs count", () => {
-    const store = Store.open(':memory:');
-    const scopes = new WindowScopes({ store, windows: WINDOWS, now: () => NOW, newKey: () => 'k1' });
-    const all = world();
-    const { file, view } = all;
 
-    stored(store, all);
+/** A page key showing the work item, as a page has once it selected it (architecture.md § Web page). */
+function pageOn(scopes: WindowScopes, view: Snapshot, workItemId: number): string {
+  scopes.update(view);
 
-    const key = scopes.open(file, view);
+  const key = scopes.openPage();
 
-    expect(scopes.scope(key)).toEqual({ kind: 'item', workItemId: 2, key: 'k1', folder: 'D:/w12', title: 'Issue <1>', cwd: 'D:/w12', scopeGen: 1, sessionId: 's2', conversations: [{ workItemId: 2, primary: true }] });
+  scopes.select(key, workItemId);
+  return key;
+}
 
-    const scoped = scopes.scoped(key, { ...view, held: [], holder: { build: 'a', installed: 'b', older: true, restart: null } });
-
-    expect(scoped.workItems.map((one) => one.id)).toEqual([2]);
-    expect(scoped.pool).toEqual([]);
-    expect(scoped).not.toHaveProperty('held');
-    // The holder is machine-wide, so the dock and the page show it, never a window.
-    expect(scoped).not.toHaveProperty('holder');
-    // Item 2 is blocked, so it needs the operator; the count names no work item.
-    expect(scoped.needsCount).toBe(1);
-    // The sources' notes and errors can name other tickets.
-    const noted = scopes.scoped(key, { ...view, notes: ['github: https://github.com/o/r/issues/9 belongs to zoho.'], errors: { ...view.errors, sources: { github: 'issue #9 failed' } } });
-
-    expect(noted).not.toHaveProperty('notes');
-    expect(noted.errors.sources).toEqual({});
-    // Only its own work items' pull requests: another window's are private to it.
-    const mine = 'https://github.com/o/r/pull/12';
-    const theirs = 'https://github.com/o/r/pull/99';
-    const linked = { ...view, workItems: view.workItems.map((one) => (one.id === 2 ? { ...one, links: [{ id: 1, ticketId: one.ticketId, label: 'PR', target: mine, reportedAt: NOW, mentioned: false }] } : one)), pullRequests: { [mine]: { state: 'open' as const, review: null, checks: 'passing' as const }, [theirs]: { state: 'open' as const, review: 'approved' as const, checks: null } } };
-
-    expect(scopes.scoped(key, linked).pullRequests).toEqual({ [mine]: { state: 'open', review: null, checks: 'passing' } });
-    expect(store.windowBinding(windowFileKey(file))).toEqual({ file: windowFileKey(file), workItemId: 2, since: NOW, scopeGen: 1, selectedWorkItemId: 2, selectedSessionId: 's2', ticketId: 1, title: 'Issue <1>' });
-  });
-
-  it("moves a window to a new work item of its ticket, raising its scope generation, and keeps it across a reload", () => {
-    const store = Store.open(':memory:');
-    let keys = 0;
-    const scopes = new WindowScopes({ store, windows: WINDOWS, now: () => NOW, newKey: () => `k${++keys}` });
-    const all = world();
-    const { file, view, current } = all;
-
-    stored(store, all);
-
-    const key = scopes.open(file, view);
-    const next = item(4, { ticketId: 1, ticket: { ...current.ticket }, worktree: worktree('D:/w12'), sessions: [session({ id: 's4', workItemId: 4, cwd: 'D:/w12' })] });
-
-    store.insertWorkItem({ ticketId: 1, playbook: null, status: 'running', createdAt: NOW } as never);
-    store.insertSession(next.sessions[0] as StoredSession);
-
-    expect(scopes.update(view)).toEqual([]);
-    expect(scopes.update(snapshot([...view.workItems, next]))).toEqual([key]);
-    expect(scopes.scope(key)).toMatchObject({ workItemId: 4, scopeGen: 2, sessionId: 's4' });
-    scopes.close(key);
-    expect(scopes.scope(key)).toBeNull();
-    expect(scopes.scope(scopes.open(file, snapshot([...view.workItems, next])))).toMatchObject({ workItemId: 4, scopeGen: 2 });
-  });
-
-  it("gives a folder window no work item, and lets a window read only its own ticket's History or one it was sent", () => {
-    const store = Store.open(':memory:');
-    let keys = 0;
-    const scopes = new WindowScopes({ store, windows: WINDOWS, now: () => NOW, newKey: () => `k${++keys}` });
-    const { file, view } = world();
-    const folder = scopes.open(null, view);
-    const window = scopes.open(file, view);
-
-    expect(scopes.scope(folder)).toBeNull();
-    expect(scopes.scoped(folder, view).workItems).toEqual([]);
-    expect(scopes.allowsTicket(window, 1, view)).toBe(true);
-    expect(scopes.allowsTicket(window, 3, view)).toBe(false);
-    expect(scopes.allowsTicket(folder, 3, view)).toBe(false);
-    scopes.grant(folder, 3);
-    expect(scopes.allowsTicket(folder, 3, view)).toBe(true);
-    expect(scopes.allowsTicket(scopes.open(null, view), 3, view)).toBe(false);
-    expect(scopes.allowsTicket(window, 3, view)).toBe(false);
-    expect(scopes.allowsTicket('forged', 1, view)).toBe(false);
-  });
-});
-
-describe('WindowScopes after a restart', () => {
-  it("keeps a window's History of a bound work item that has left the snapshot", () => {
-    const store = Store.open(':memory:');
-    const { file, current } = world();
-    const ticket = store.insertTicket({ ...current.ticket, adhocKey: null } as never);
-    const workItem = store.insertWorkItem({ ticketId: ticket.id, playbook: null, status: 'done', createdAt: NOW } as never);
-
-    store.setWindowBinding({ file, workItemId: workItem.id, since: NOW, scopeGen: 3, selectedWorkItemId: workItem.id, selectedSessionId: null });
-
-    const scopes = new WindowScopes({ store, windows: WINDOWS, now: () => NOW, newKey: () => 'k1' });
-    const key = scopes.open(file, snapshot([]));
-
-    expect(scopes.allowsTicket(key, ticket.id, snapshot([]))).toBe(true);
-    expect(scopes.scope(key)).toMatchObject({ workItemId: workItem.id, scopeGen: 3 });
-  });
-});
-
-describe('hosted conversations in a window (architecture.md § Window scope)', () => {
-  function setup(made?: (hostWindow: string, folder: string, provider?: 'claude' | 'codex') => { workItemId: number } | { refused: string }) {
+describe('hosted conversations on the page (architecture.md § Window scope)', () => {
+  function setup() {
     const store = Store.open(':memory:');
     const view = world();
     let keys = 0;
-    const scopes = new WindowScopes({ store, windows: WINDOWS, now: () => NOW, newKey: () => `k${++keys}` });
+    const scopes = new WindowScopes({ store, windows: WINDOWS, newKey: () => `k${++keys}` });
     const projects = join(dir, 'projects');
     const held = new FakeHeld();
     let id = 0;
@@ -170,23 +86,25 @@ describe('hosted conversations in a window (architecture.md § Window scope)', (
       now: () => NOW,
       newId: () => String(++id),
       providerTitle: (workItemId, title, origin) => titles.push({ workItemId, title, origin }),
-      ...(made === undefined ? {} : { newConversation: made }),
       log: () => {},
     });
+    const hosted: WorkItemView[] = [];
 
     stored(store, view);
 
-    /** An ad hoc conversation hosted by `file`, as the flow makes one, with its Code Mode session. */
-    const host = (file: string, sessionId: string, status = 'running') => {
-      const ticket = store.insertTicket({ source: 'adhoc', sourceKey: sessionId, ref: `#${sessionId}`, sourceId: null, title: 'New session', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: NOW, lastPolledAt: null, repoRoot: 'D:/w12', hostWindow: file });
+    /** An ad hoc conversation hosted by `host`, a workspace file or a folder, as the flow made one, with its Code Mode session. */
+    const host = (hostWindow: string, sessionId: string, status = 'running') => {
+      const ticket = store.insertTicket({ source: 'adhoc', sourceKey: sessionId, ref: `#${sessionId}`, sourceId: null, title: 'New session', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: NOW, lastPolledAt: null, repoRoot: 'D:/w12', hostWindow });
       const workItem = store.insertWorkItem({ ticketId: ticket.id, playbook: null, status, createdAt: NOW } as never);
+      const one = session({ id: sessionId, workItemId: workItem.id, cwd: 'D:/w12', codeMode: true, nativeSessionId: `n-${sessionId}`, state: 'idle' });
 
-      store.insertSession(session({ id: sessionId, workItemId: workItem.id, cwd: 'D:/w12', codeMode: true, nativeSessionId: `n-${sessionId}`, state: 'idle' }) as StoredSession);
+      store.insertSession(one as StoredSession);
+      hosted.push(item(workItem.id, { ticketId: ticket.id, status: status as WorkItemView['status'], ticket: { ...view.current.ticket, ...ticket }, worktree: null, focus: null, sessions: [one] }));
 
       return workItem.id;
     };
-    const open = (file: string) => {
-      const key = scopes.open(file, view.view);
+    const open = (workItemId: number) => {
+      const key = pageOn(scopes, snapshot([...view.view.workItems, ...hosted]), workItemId);
       const frames: Array<{ type: string; [field: string]: unknown }> = [];
 
       service.open(key, (frame) => frames.push(JSON.parse(/^data: (.*)$/m.exec(frame)![1]!) as { type: string }));
@@ -215,42 +133,51 @@ describe('hosted conversations in a window (architecture.md § Window scope)', (
     expect(context.titles.at(-1)).toEqual({ workItemId: id, title: 'Build regression', origin: 'provider-manual' });
   });
 
-  it("lists only the conversations its binding hosts, even for windows on one folder, and refuses the other window's", () => {
+  it("lists a hosted conversation with its host's work item, and refuses another page's sessions and a stale scope generation", () => {
     const { view, scopes, service, host, open } = setup();
-    // Both windows run in D:/w12, as Support work items share one folder; only the host link decides.
+    // Both work items run in D:/w12, as Support work items share one folder; only the host link decides.
     const mineHosted = host(view.file, 'h1');
     const theirsHosted = host(view.otherFile, 'h2');
-    const mine = open(view.file);
-    const theirs = open(view.otherFile);
+    const mine = open(2);
+    const theirs = open(3);
 
-    expect(mine.frames[0]).toMatchObject({ type: 'hello', scope: { workItemId: 2, sessionId: 's2', conversations: [{ workItemId: 2, primary: true, title: 'Issue <1>' }, { workItemId: mineHosted, primary: false, title: 'New session', sessionId: 'h1', state: 'idle', conversation: 'full', unread: 0, provider: 'claude' }] } });
+    expect(mine.frames[0]).toMatchObject({ type: 'hello', scope: { kind: 'page', workItemId: 2, sessionId: 's2', conversations: [{ workItemId: 2, primary: true, title: 'Issue <1>' }, { workItemId: mineHosted, primary: false, title: 'New session', sessionId: 'h1', state: 'idle', conversation: 'full', unread: 0, provider: 'claude' }] } });
     expect((mine.frames[0]!['scope'] as { conversations: unknown[] }).conversations).toHaveLength(2);
     expect(scopes.scope(theirs.key)?.conversations).toEqual([{ workItemId: 3, primary: true }, { workItemId: theirsHosted, primary: false }]);
-    expect(scopes.scoped(mine.key, view.view).workItems.map((item) => item.id)).toEqual([2]);
 
-    // Selecting another window's conversation is refused and changes nothing.
-    expect(service.select({ window: mine.key, scopeGen: 1, opId: 'o1', workItemId: theirsHosted })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    expect(service.select({ window: mine.key, scopeGen: 1, opId: 'o2', workItemId: 3 })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    expect(scopes.scope(mine.key)).toMatchObject({ workItemId: 2, scopeGen: 1 });
-
-    // Selecting its own raises the scope generation, and the window starts from that conversation's hello.
-    expect(service.select({ window: mine.key, scopeGen: 0, opId: 'o3', workItemId: mineHosted })).toEqual({ status: 200, body: { scopeGen: 2 } });
+    // Selecting its hosted conversation raises the scope generation, and the page starts from that conversation's hello.
+    expect(service.select({ window: mine.key, scopeGen: 1, opId: 'o1', workItemId: mineHosted })).toEqual({ status: 200, body: { scopeGen: 2 } });
     expect(mine.frames.slice(-2)).toMatchObject([{ type: 'scope', scope: { workItemId: mineHosted, sessionId: 'h1', scopeGen: 2 } }, { type: 'hello', sessions: [{ id: 'h1' }], scope: { workItemId: mineHosted } }]);
     expect(theirs.frames.filter((frame) => frame.type === 'scope')).toEqual([]);
 
-    // Commands name the selected conversation's session only; the other window's, or the earlier selection's, are refused.
-    expect(service.history({ window: mine.key, scopeGen: 2, opId: 'o4', sessionId: 'h2', before: null })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    expect(service.history({ window: mine.key, scopeGen: 2, opId: 'o5', sessionId: 's2', before: null })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    expect(service.history({ window: mine.key, scopeGen: 1, opId: 'o6', sessionId: 'h1', before: null })).toEqual({ status: 409, body: { error: "The window's conversation changed." } });
-    expect(service.seen({ window: theirs.key, scopeGen: 1, opId: 'o7', sessionId: 'h1', ids: [] })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    expect(service.send({ window: theirs.key, scopeGen: 1, opId: 'o8', sessionId: 'h1', launch: null, text: 'hi' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    // Commands name the shown session only; the other page's, the earlier selection's, or one sent at an older generation are refused.
+    expect(service.history({ window: mine.key, scopeGen: 2, opId: 'o2', sessionId: 'h2', before: null })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(service.history({ window: mine.key, scopeGen: 2, opId: 'o3', sessionId: 's2', before: null })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(service.history({ window: mine.key, scopeGen: 1, opId: 'o4', sessionId: 'h1', before: null })).toEqual({ status: 409, body: { error: "The window's conversation changed." } });
+    expect(service.seen({ window: theirs.key, scopeGen: 1, opId: 'o5', sessionId: 'h1', ids: [] })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(service.send({ window: theirs.key, scopeGen: 1, opId: 'o6', sessionId: 'h1', launch: null, text: 'hi' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(service.select({ window: 'forged', scopeGen: 1, opId: 'o7', workItemId: 2 })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+  });
+
+  it("gives a folder-hosted conversation's page only that folder's conversations, never the item work in the folder, and refuses each the other's sessions", () => {
+    const { scopes, service, view, host, open } = setup();
+    const inFolder = host('D:/git/support', 'f1');
+    const inItem = host(view.file, 'a1');
+    const folder = open(inFolder);
+    const itemPage = open(2);
+
+    expect(scopes.scope(folder.key)).toMatchObject({ kind: 'page', workItemId: inFolder, sessionId: 'f1', conversations: [{ workItemId: inFolder, primary: false }] });
+    expect(scopes.scope(itemPage.key)?.conversations).toEqual([{ workItemId: 2, primary: true }, { workItemId: inItem, primary: false }]);
+    expect(service.history({ window: folder.key, scopeGen: 1, opId: 'h1', sessionId: 's2', before: null })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(service.history({ window: itemPage.key, scopeGen: 1, opId: 'h2', sessionId: 'f1', before: null })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(service.send({ window: itemPage.key, scopeGen: 1, opId: 'h3', sessionId: 'f1', launch: null, text: 'hi' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
   });
 
   it('counts each conversation unread on its own and sends the dropdown when it changes, without moving the selection', async () => {
     const { view, service, host, open, transcript } = setup();
     const hosted = host(view.file, 'h1');
-    const mine = open(view.file);
-    const theirs = open(view.otherFile);
+    const mine = open(2);
+    const theirs = open(3);
 
     transcript('n-h1', [JSON.stringify({ type: 'assistant', uuid: 'x1', timestamp: new Date(NOW).toISOString(), message: { role: 'assistant', content: [{ type: 'text', text: 'Hosted reply.' }] } })]);
     await service.poll();
@@ -261,103 +188,6 @@ describe('hosted conversations in a window (architecture.md § Window scope)', (
     expect(mine.frames.filter((frame) => frame.type === 'conversations').at(-1)).toMatchObject({ conversations: [{ workItemId: 2, unread: 0 }, { workItemId: hosted, unread: 1 }] });
     expect(mine.frames.filter((frame) => frame.type === 'scope')).toEqual([]);
     expect(theirs.frames.filter((frame) => frame.type === 'unread' || frame.type === 'conversations')).toEqual([]);
-  });
-
-  it('passes a chosen provider once, validates it, and keeps the first choice on retry', () => {
-    const calls: unknown[][] = [];
-    const context = setup((host, folder, provider) => { calls.push([host, folder, provider]); return { workItemId: context.host(host, 'chosen') }; });
-    const mine = context.open(context.view.file);
-    for (const provider of [null, 'other', 7]) expect(context.service.newConversation({ window: mine.key, opId: 'invalid', provider }).status).toBe(400);
-    const result = context.service.newConversation({ window: mine.key, opId: 'chosen', provider: 'codex' });
-    expect(result.status).toBe(200);
-    expect(calls).toEqual([[context.view.file, 'D:/w12', 'codex']]);
-    expect(context.service.newConversation({ window: mine.key, opId: 'chosen', provider: 'claude' })).toEqual(result);
-    expect(calls).toHaveLength(1);
-    expect(context.service.newConversation({ window: 'other', opId: 'forged', provider: 'codex' }).status).toBe(403);
-  });
-
-  it('makes a conversation once per opId, selects it in the window that made it, and passes a refusal on', () => {
-    const calls: Array<[string, string]> = [];
-    let refused: string | null = null;
-    const made = (hostWindow: string, folder: string) => {
-      calls.push([hostWindow, folder]);
-
-      return refused !== null ? { refused } : { workItemId: context.host(hostWindow, `n${calls.length}`) };
-    };
-    const context = setup(made);
-    const mine = context.open(context.view.file);
-    const theirs = context.open(context.view.otherFile);
-    const answer = context.service.newConversation({ window: mine.key, scopeGen: 1, opId: 'new-1' });
-
-    expect(answer).toEqual({ status: 200, body: { workItemId: 4 } });
-    expect(calls).toEqual([[context.view.file, 'D:/w12']]);
-    expect(context.scopes.scope(mine.key)).toMatchObject({ workItemId: 4, sessionId: 'n1', scopeGen: 2 });
-    expect(mine.frames.slice(-2)).toMatchObject([{ type: 'scope', scope: { workItemId: 4 } }, { type: 'hello', sessions: [{ id: 'n1' }] }]);
-    expect(context.service.newConversation({ window: mine.key, scopeGen: 2, opId: 'new-1' })).toEqual({ status: 200, body: { workItemId: 4 } });
-    expect(calls).toHaveLength(1);
-    expect(context.scopes.holds(theirs.key, 4)).toBe(false);
-
-    refused = 'New sessions need Code Mode (sessions.codeMode).';
-    expect(context.service.newConversation({ window: mine.key, scopeGen: 2, opId: 'new-2' })).toEqual({ status: 409, body: { error: refused } });
-    expect(context.service.newConversation({ window: 'forged', scopeGen: 2, opId: 'new-3' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    expect(context.service.newConversation({ window: mine.key, opId: 7 }).status).toBe(400);
-  });
-
-  it("keeps a dock row's selection for a window not open yet, and moves an open window to it", () => {
-    const { view, scopes, store, host } = setup();
-    const hosted = host(view.file, 'h1');
-
-    scopes.open(view.file, view.view);
-    scopes.close(scopes.keys()[0]!);
-    expect(scopes.selectFor(hosted, view.file)).toEqual({ keys: [], selected: true });
-    expect(store.windowBinding(windowFileKey(view.file))).toMatchObject({ selectedWorkItemId: hosted, selectedSessionId: 'h1', scopeGen: 2 });
-
-    const key = scopes.open(view.file, view.view);
-
-    expect(scopes.scope(key)).toMatchObject({ workItemId: hosted, sessionId: 'h1', scopeGen: 2 });
-    expect(scopes.selectFor(2, null)).toEqual({ keys: [key], selected: true });
-    expect(scopes.scope(key)).toMatchObject({ workItemId: 2, scopeGen: 3 });
-    expect(scopes.selectFor(hosted, view.file)).toEqual({ keys: [key], selected: true });
-    expect(scopes.scope(key)).toMatchObject({ workItemId: hosted, scopeGen: 4 });
-
-    // A done conversation's row is selected too, and listed while selected; another window's conversation is not.
-    const done = host(view.file, 'h3', 'done');
-    const theirs = host(view.otherFile, 'h4');
-
-    expect(scopes.selectFor(done, view.file)).toEqual({ keys: [key], selected: true });
-    expect(scopes.scope(key)).toMatchObject({ workItemId: done, sessionId: 'h3' });
-    expect(scopes.scope(key)?.conversations.map((ref) => ref.workItemId)).toContain(done);
-    expect(scopes.selectFor(theirs, view.file)).toEqual({ keys: [], selected: false });
-    expect(scopes.scope(key)).toMatchObject({ workItemId: done });
-  });
-
-  it('keeps a done conversation while it is selected, and the hosted ones when the primary is deleted', () => {
-    const { view, scopes, store, host } = setup();
-    const hosted = host(view.file, 'h1');
-    const done = host(view.file, 'h2', 'done');
-    const key = scopes.open(view.file, view.view);
-
-    expect(scopes.scope(key)?.conversations.map((ref) => ref.workItemId)).toEqual([2, hosted]);
-    expect(scopes.select(key, done)).toBe(false);
-    expect(scopes.select(key, hosted)).toBe(true);
-    store.updateWorkItem(hosted, { status: 'done' });
-    expect(scopes.update(view.view)).toEqual([]);
-    expect(scopes.scope(key)?.conversations.map((ref) => ref.workItemId)).toEqual([2, hosted]);
-    expect(scopes.select(key, 2)).toBe(true);
-    expect(scopes.scope(key)?.conversations.map((ref) => ref.workItemId)).toEqual([2]);
-
-    store.updateWorkItem(hosted, { status: 'running' });
-    store.deleteWorkItem(2);
-    expect(scopes.update(view.view)).toEqual([key]);
-    expect(scopes.scope(key)).toMatchObject({ workItemId: hosted, title: 'Issue <1>', conversations: [{ workItemId: hosted, primary: false }] });
-
-    // With no conversation left the window has no scope, but its binding keeps the ticket for History.
-    store.updateWorkItem(hosted, { status: 'done' });
-    expect(scopes.select(key, hosted)).toBe(true);
-    store.deleteWorkItem(hosted);
-    scopes.update(view.view);
-    expect(scopes.scope(key)).toBeNull();
-    expect(scopes.allowsTicket(key, 1)).toBe(true);
   });
 });
 
@@ -422,186 +252,25 @@ class FakeHeld {
   }
 }
 
-describe('folder-hosted conversations (architecture.md § Window scope)', () => {
-  function setup(made?: (hostWindow: string, folder: string, provider?: 'claude' | 'codex') => { workItemId: number } | { refused: string }) {
-    const store = Store.open(':memory:');
-    let keys = 0;
-    const scopes = new WindowScopes({ store, windows: WINDOWS, now: () => NOW, newKey: () => `k${++keys}` });
-    let id = 0;
-    const service = new ConversationService({
-      store,
-      windows: scopes,
-      projectsDir: join(dir, 'projects'),
-      claudeConfig: join(dir, '.claude.json'),
-      screen: async () => null,
-      input: new FakeHeld(),
-      hooks: () => true,
-      now: () => NOW,
-      newId: () => String(++id),
-      ...(made === undefined ? {} : { newConversation: made }),
-      log: () => {},
-    });
-    // Support runs every work item in one folder with no worktree: two item windows on it, and a link to it.
+describe('canonicalFolder', () => {
+  it('gives every spelling of a folder, by a link or in another case, its one real path, and none to a path that is no folder or is named like a workspace file', () => {
     const support = join(dir, 'Support');
     const link = join(dir, 'support-link');
-    const elsewhere = join(dir, 'elsewhere');
 
     mkdirSync(support);
-    mkdirSync(elsewhere);
     symlinkSync(support, link, 'junction');
 
-    const first = item(1, { sessions: [session({ id: 's1', workItemId: 1, cwd: support, codeMode: true, nativeSessionId: 'n1' })] });
-    const second = item(2, { sessions: [session({ id: 's2', workItemId: 2, cwd: support, codeMode: true, nativeSessionId: 'n2' })] });
-    const view = snapshot([first, second]);
+    const real = canonicalFolder(support)!;
 
-    for (const one of [first, second]) {
-      const ticket = store.insertTicket({ ...one.ticket, adhocKey: null } as never);
-
-      store.insertWorkItem({ ticketId: ticket.id, playbook: null, status: one.status, createdAt: NOW } as never);
-      store.insertSession(one.sessions[0] as StoredSession);
+    for (const spelling of [link, `${support}${sep}`, ...(process.platform === 'win32' ? [support.toUpperCase(), support.toLowerCase()] : [])]) {
+      expect(canonicalFolder(spelling)).toBe(real);
     }
-
-    /** An ad hoc conversation hosted by `host`, run in `folder`, as the flow makes one. */
-    const host = (hostWindow: string, sessionId: string, folder = support) => {
-      const ticket = store.insertTicket({ source: 'adhoc', sourceKey: sessionId, ref: `#${sessionId}`, sourceId: null, title: 'New session', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: NOW, lastPolledAt: null, repoRoot: folder, hostWindow });
-      const workItem = store.insertWorkItem({ ticketId: ticket.id, playbook: null, status: 'running', createdAt: NOW } as never);
-
-      store.insertSession(session({ id: sessionId, workItemId: workItem.id, cwd: folder, codeMode: true, nativeSessionId: `n-${sessionId}`, state: 'idle' }) as StoredSession);
-
-      return workItem.id;
-    };
-    const frames = (key: string) => {
-      const seen: Array<{ type: string; [field: string]: unknown }> = [];
-
-      service.open(key, (frame) => seen.push(JSON.parse(/^data: (.*)$/m.exec(frame)![1]!) as { type: string }));
-
-      return seen;
-    };
-
-    return { store, scopes, service, view, support: canonicalFolder(support)!, link, elsewhere: canonicalFolder(elsewhere)!, files: [windowOf(first, WINDOWS)!.file!, windowOf(second, WINDOWS)!.file!], host, frames };
-  }
-
-  it("lists only the conversations its folder hosts, never the folder's item work, and item windows on that folder list none of them", () => {
-    const { scopes, service, view, support, files, host, frames } = setup();
-    const inFolder = host(support, 'f1');
-    const inItem = host(files[0]!, 'a1');
-    const folder = scopes.open(null, view, support);
-    const item1 = scopes.open(files[0]!, view);
-    const item2 = scopes.open(files[1]!, view);
-
-    expect(scopes.scope(folder)).toEqual({ kind: 'folder', key: folder, folder: support, title: 'Support', scopeGen: 1, conversations: [{ workItemId: inFolder, primary: false }], workItemId: inFolder, cwd: support, sessionId: 'f1' });
-    expect(scopes.scoped(folder, view).workItems).toEqual([]);
-    expect(scopes.scope(item1)?.conversations).toEqual([{ workItemId: 1, primary: true }, { workItemId: inItem, primary: false }]);
-    expect(scopes.scope(item2)?.conversations).toEqual([{ workItemId: 2, primary: true }]);
-    expect(frames(folder)[0]).toMatchObject({ type: 'hello', scope: { kind: 'folder', conversations: [{ workItemId: inFolder, title: 'New session', sessionId: 'f1' }] }, sessions: [{ id: 'f1' }] });
-
-    // Neither side reaches the other's work: select, history and send are refused both ways.
-    for (const [key, workItemId] of [[folder, 1], [folder, inItem], [item1, inFolder], [item2, inFolder]] as const) {
-      expect(service.select({ window: key, scopeGen: 1, opId: `o-${key}-${workItemId}`, workItemId })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    }
-
-    expect(service.history({ window: folder, scopeGen: 1, opId: 'h1', sessionId: 's1', before: null })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    expect(service.history({ window: item1, scopeGen: 1, opId: 'h2', sessionId: 'f1', before: null })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    expect(service.send({ window: item2, scopeGen: 1, opId: 'h3', sessionId: 'f1', launch: null, text: 'hi' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    expect(scopes.allowsTicket(folder, 1, view)).toBe(false);
-  });
-
-  it('reaches one host from every spelling of the folder, by a link or in another case, and none from a path that is no folder', () => {
-    const { scopes, view, support, link, host } = setup();
-    const inFolder = host(support, 'f1');
-    const spellings = [link, `${support}${sep}`, ...(process.platform === 'win32' ? [support.toUpperCase(), support.toLowerCase()] : [])];
-
-    for (const spelling of spellings) {
-      const key = scopes.open(null, view, spelling);
-
-      expect(scopes.hostOf(key)).toBe(support);
-      expect(scopes.scope(key)?.conversations).toEqual([{ workItemId: inFolder, primary: false }]);
-    }
-
-    expect(scopes.keysOf(support)).toHaveLength(spellings.length);
-    expect(scopes.keysOf(support.toLowerCase())).toHaveLength(process.platform === 'linux' ? 0 : spellings.length);
 
     writeFileSync(join(dir, 'a.txt'), '');
-
-    const missing = scopes.open(null, view, join(dir, 'missing'));
-    const file = scopes.open(null, view, join(dir, 'a.txt'));
-
-    expect(scopes.scope(missing)).toBeNull();
-    expect(scopes.hostOf(missing)).toBeNull();
-    expect(scopes.scope(scopes.open(null, view))).toBeNull();
-    expect(scopes.scope(file)).toBeNull();
-  });
-
-  it('lists the conversations of a folder whose name has an uppercase letter outside ASCII', () => {
-    const { scopes, view, host } = setup();
-    const etage = join(dir, 'Étage');
-
-    mkdirSync(etage);
-
-    const canonical = canonicalFolder(etage)!;
-    const hosted = host(canonical, 'e1', canonical);
-
-    expect(scopes.scope(scopes.open(null, view, etage))).toMatchObject({ kind: 'folder', title: 'Étage', workItemId: hosted, conversations: [{ workItemId: hosted, primary: false }] });
-  });
-
-  it('keeps two folders that differ only in case apart where the file system has case, and refuses a folder named like a workspace file', () => {
-    const { scopes, view, support, host } = setup();
-    const shouting = host(support.toUpperCase(), 'f1');
-    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
-
-    try {
-      Object.defineProperty(process, 'platform', { value: 'linux' });
-      expect(scopes.scope(scopes.open(null, view, support))?.conversations).toEqual([]);
-      Object.defineProperty(process, 'platform', { value: 'win32' });
-      expect(scopes.scope(scopes.open(null, view, support))?.conversations).toEqual([{ workItemId: shouting, primary: false }]);
-    } finally {
-      Object.defineProperty(process, 'platform', platform);
-    }
-
     mkdirSync(join(dir, 'odd.code-workspace'));
+    expect(canonicalFolder(join(dir, 'missing'))).toBeNull();
+    expect(canonicalFolder(join(dir, 'a.txt'))).toBeNull();
     expect(canonicalFolder(join(dir, 'odd.code-workspace'))).toBeNull();
-    expect(scopes.scope(scopes.open(null, view, join(dir, 'odd.code-workspace')))).toBeNull();
-  });
-
-  it('gives an empty folder a scope with no selection, and makes a conversation there hosted by the folder and run in it', () => {
-    const calls: Array<[string, string]> = [];
-    const context = setup((hostWindow, folder) => {
-      calls.push([hostWindow, folder]);
-
-      return { workItemId: context.host(hostWindow, `n${calls.length}`, folder) };
-    });
-    const { scopes, service, view, elsewhere, frames } = context;
-    const key = scopes.open(null, view, elsewhere);
-    const seen = frames(key);
-
-    expect(scopes.scope(key)).toEqual({ kind: 'folder', key, folder: elsewhere, title: 'elsewhere', scopeGen: 0, conversations: [], workItemId: null, cwd: null, sessionId: null });
-    expect(seen[0]).toMatchObject({ type: 'hello', scope: { kind: 'folder', conversations: [], workItemId: null }, sessions: [], items: [], status: null, artifacts: [] });
-    expect(service.send({ window: key, scopeGen: 0, opId: 'x', sessionId: 's1', launch: null, text: 'hi' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-
-    expect(service.newConversation({ window: key, scopeGen: 0, opId: 'new-1' })).toEqual({ status: 200, body: { workItemId: 3 } });
-    expect(calls).toEqual([[elsewhere, elsewhere]]);
-    expect(scopes.scope(key)).toMatchObject({ kind: 'folder', workItemId: 3, sessionId: 'n1', cwd: elsewhere, scopeGen: 1, conversations: [{ workItemId: 3, primary: false }] });
-    expect(seen.slice(-2)).toMatchObject([{ type: 'scope', scope: { workItemId: 3 } }, { type: 'hello', sessions: [{ id: 'n1' }] }]);
-    expect(service.newConversation({ window: key, scopeGen: 1, opId: 'new-1' })).toEqual({ status: 200, body: { workItemId: 3 } });
-    expect(calls).toHaveLength(1);
-  });
-
-  it("keeps a dock row's selection for a folder window not open yet, selects it in an open one, and never in an item window on that folder", () => {
-    const { scopes, store, view, support, link, files, host } = setup();
-    const older = host(support, 'f1');
-    const newer = host(support, 'f2');
-    const folder = scopes.open(null, view, support);
-    const item1 = scopes.open(files[0]!, view);
-
-    expect(scopes.scope(folder)).toMatchObject({ workItemId: newer, scopeGen: 1 });
-    expect(scopes.selectFor(older, support)).toEqual({ keys: [folder], selected: true });
-    expect(scopes.scope(folder)).toMatchObject({ workItemId: older, scopeGen: 2 });
-    expect(scopes.scope(item1)).toMatchObject({ workItemId: 1, scopeGen: 1 });
-
-    scopes.close(folder);
-    expect(scopes.selectFor(newer, support)).toEqual({ keys: [], selected: true });
-    expect(store.windowBinding(process.platform === 'linux' ? support : support.replaceAll('\\', '/').toLowerCase())).toMatchObject({ workItemId: null, selectedWorkItemId: newer, selectedSessionId: 'f2', scopeGen: 3 });
-    expect(scopes.scope(scopes.open(null, view, link))).toMatchObject({ kind: 'folder', workItemId: newer, scopeGen: 3 });
   });
 });
 
@@ -610,7 +279,7 @@ describe('ConversationService', () => {
     const store = Store.open(':memory:');
     const view = world();
     let keys = 0;
-    const scopes = new WindowScopes({ store, windows: WINDOWS, now: () => NOW, newKey: () => `k${++keys}` });
+    const scopes = new WindowScopes({ store, windows: WINDOWS, newKey: () => `k${++keys}` });
     const projects = join(dir, 'projects');
     const logs: string[] = [];
     let id = 0;
@@ -640,8 +309,8 @@ describe('ConversationService', () => {
       writeFileSync(join(projects, projectSlug(cwd), `${native}.jsonl`), lines.map((line) => `${line}\n`).join(''));
     };
     const reply = (uuid: string, text: string) => JSON.stringify({ type: 'assistant', uuid, timestamp: new Date(NOW).toISOString(), message: { role: 'assistant', content: [{ type: 'text', text }] } });
-    const open = (file: string) => {
-      const key = scopes.open(file, view.view);
+    const open = (workItemId: number) => {
+      const key = pageOn(scopes, view.view, workItemId);
       const frames: Array<{ type: string; [field: string]: unknown }> = [];
       const stream = service.open(key, (frame) => frames.push(JSON.parse(/^data: (.*)$/m.exec(frame)![1]!) as { type: string }))!;
 
@@ -654,8 +323,8 @@ describe('ConversationService', () => {
   it("counts its session's unread replies and status, marks each seen on its own, and tells its own windows", async () => {
     const { view, service, transcript, reply, open, store } = setup();
 
-    const mine = open(view.file);
-    const theirs = open(view.otherFile);
+    const mine = open(2);
+    const theirs = open(3);
 
     expect(mine.frames[0]).toMatchObject({ type: 'hello', unread: 0 });
     transcript('D:/w12', 'n2', [reply('a1', 'One.'), reply('a2', 'Two.\n[status]\nDone.')]);
@@ -708,7 +377,7 @@ describe('ConversationService', () => {
 
     // A reconnect's hello carries the count and each item's state.
     mine.stream.close();
-    expect(open(view.file).frames[0]).toMatchObject({ type: 'hello', unread: 1, items: [{ id: one, unread: true }, { id: two, unread: false }, { type: 'message', text: 'Next?' }], status: { unread: false } });
+    expect(open(2).frames[0]).toMatchObject({ type: 'hello', unread: 1, items: [{ id: one, unread: true }, { id: two, unread: false }, { type: 'message', text: 'Next?' }], status: { unread: false } });
   });
 
   it('reads a live session\'s transcript at once when the hub asks before a turn end, and nothing for an unknown session (PRD R103)', () => {
@@ -727,8 +396,8 @@ describe('ConversationService', () => {
     transcript('D:/w12', 'n2', [reply('a1', 'Mine.')]);
     transcript('D:/w3', 'n3', [reply('b1', 'Not yours.')]);
 
-    const mine = open(view.file);
-    const theirs = open(view.otherFile);
+    const mine = open(2);
+    const theirs = open(3);
 
     expect(mine.frames).toMatchObject([{ v: 1, seq: 1, type: 'hello', protocol: 1, scope: { workItemId: 2, sessionId: 's2', scopeGen: 1 }, sessions: [{ id: 's2', state: 'running', conversation: 'full' }], items: [], more: false }]);
     await service.poll();
@@ -741,7 +410,7 @@ describe('ConversationService', () => {
 
     // A reconnect starts again from a hello with the items so far.
     mine.stream.close();
-    expect(open(view.file).frames).toMatchObject([{ type: 'hello', items: [{ type: 'reply', opening: 'Mine.' }] }]);
+    expect(open(2).frames).toMatchObject([{ type: 'hello', items: [{ type: 'reply', opening: 'Mine.' }] }]);
   });
 
   it('refuses a stream for a key no window holds, and history for a forged session, another window or a stale scope generation', async () => {
@@ -750,8 +419,8 @@ describe('ConversationService', () => {
     transcript('D:/w12', 'n2', [reply('a1', 'One.'), reply('a2', 'Two.')]);
     await service.poll();
 
-    const { key } = open(view.file);
-    const other = open(view.otherFile).key;
+    const { key } = open(2);
+    const other = open(3).key;
 
     expect(service.open('forged', () => undefined)).toBeNull();
     expect(service.history({ window: key, scopeGen: 1, opId: 'o1', sessionId: 's3', before: null })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
@@ -771,8 +440,8 @@ describe('ConversationService', () => {
 
     store.updateWorkItem(2, { stage: 'Reading the inbox code', stageAt: NOW - 60_000 });
 
-    const mine = open(view.file);
-    const theirs = open(view.otherFile);
+    const mine = open(2);
+    const theirs = open(3);
 
     expect(mine.frames[0]).toMatchObject({ type: 'hello', status: { id: 'stage-2', sessionId: 's2', at: NOW - 60_000, markdown: 'Reading the inbox code', fallback: true } });
     // Item 3 has no stage, so its row is empty.
@@ -802,7 +471,7 @@ describe('ConversationService', () => {
 
     // A reconnect gets the latest status in its hello.
     mine.stream.close();
-    expect(open(view.file).frames[0]).toMatchObject({ status: { markdown: '## Done\n- the badge', fallback: false } });
+    expect(open(2).frames[0]).toMatchObject({ status: { markdown: '## Done\n- the badge', fallback: false } });
   });
 
   it("serves a window's earlier statuses newest first, and refuses another window's session, a forged key or a stale scope generation", async () => {
@@ -812,8 +481,8 @@ describe('ConversationService', () => {
     transcript('D:/w3', 'n3', [reply('b1', '[status]\nTheirs.')]);
     await service.poll();
 
-    const { key, frames } = open(view.file);
-    const other = open(view.otherFile).key;
+    const { key, frames } = open(2);
+    const other = open(3).key;
     const latest = (frames[0]!['status'] as { id: string; markdown: string });
 
     expect(latest.markdown).toBe('Three.');
@@ -839,8 +508,8 @@ describe('ConversationService', () => {
     transcript('D:/w3', 'n3', [listing(true, [['theirs', 'Not yours']])]);
     await service.poll();
 
-    const { key } = open(view.file);
-    const other = open(view.otherFile).key;
+    const { key } = open(2);
+    const other = open(3).key;
 
     expect(service.commands({ window: key, scopeGen: 1, opId: 'o1', sessionId: 's2' })).toEqual({
       status: 200,
@@ -868,7 +537,7 @@ it("sends a window its session's context size from the transcript, again only wh
     const lines = [usage('a1', 100_000)];
 
     transcript('D:/w12', 'n2', lines);
-    const { frames, key } = open(view.file);
+    const { frames, key } = open(2);
 
     expect(frames[0]).toMatchObject({ type: 'hello', sessions: [{ id: 's2', context: { used: 101_100, window: 200_000, compactAt: 167_000, model: 'claude-sonnet-4-6' } }] });
     // The first poll may send the session the hello already carried; a poll that reads nothing new sends nothing.
@@ -904,26 +573,20 @@ it("sends a window its session's context size from the transcript, again only wh
 
   it('marks the context unknown for a session with no transcript yet', () => {
     const { view, open } = setup();
-    const { frames } = open(view.file);
+    const { frames } = open(2);
 
     expect(frames[0]).toMatchObject({ type: 'hello', sessions: [{ id: 's2', context: null }] });
   });
 
-  it("tells a window its session's new state once, and starts a moved window from a fresh hello", () => {
-    const { view, service, open, store, scopes } = setup();
-    const { frames, key } = open(view.file);
+  it("tells a page its session's new state once", () => {
+    const { service, open, store } = setup();
+    const { frames } = open(2);
 
     service.sessionsChanged();
     service.sessionsChanged();
     store.updateSession('s2', { state: 'waiting', stateDetail: PERMISSION_PROMPT });
     service.sessionsChanged();
     expect(frames.filter((frame) => frame.type === 'session')).toMatchObject([{ session: { state: 'running' } }, { session: { state: 'waiting', waitingFor: 'permission' } }]);
-
-    const next = item(4, { ticketId: 1, ticket: { ...view.current.ticket }, worktree: worktree('D:/w12'), sessions: [] });
-
-    store.insertWorkItem({ ticketId: 1, playbook: null, status: 'queued', createdAt: NOW } as never);
-    service.scopesChanged(scopes.update(snapshot([...view.view.workItems, next])));
-    expect(frames.slice(-2)).toMatchObject([{ type: 'scope', scope: { workItemId: 4, scopeGen: 2, sessionId: null } }, { type: 'hello', scope: { key, workItemId: 4 }, sessions: [], items: [] }]);
   });
 });
 
@@ -935,7 +598,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     const store = Store.open(':memory:');
     const view = world();
     let keys = 0;
-    const scopes = new WindowScopes({ store, windows: WINDOWS, now: () => NOW, newKey: () => `k${++keys}` });
+    const scopes = new WindowScopes({ store, windows: WINDOWS, newKey: () => `k${++keys}` });
     const projects = join(dir, 'projects');
     const logs: string[] = [];
     let id = 0;
@@ -969,8 +632,8 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     writeFileSync(join(projects, projectSlug('D:/w12'), 'n2.jsonl'), '');
     held.transcript = (session) => (session === 's2' ? join(projects, projectSlug('D:/w12'), 'n2.jsonl') : null);
 
-    const open = (file: string) => {
-      const key = scopes.open(file, view.view);
+    const open = (workItemId: number) => {
+      const key = pageOn(scopes, view.view, workItemId);
       const frames: Array<{ type: string; [field: string]: unknown }> = [];
 
       service.open(key, (frame) => frames.push(JSON.parse(/^data: (.*)$/m.exec(frame)![1]!) as { type: string }));
@@ -984,8 +647,8 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
 
   it("types a message into the window's session, answers at once with it open, and shows it sent once the transcript has it, in its own window only", async () => {
     const { service, held, open, body, view, store } = setupSend();
-    const mine = open(view.file);
-    const theirs = open(view.otherFile);
+    const mine = open(2);
+    const theirs = open(3);
     const answer = service.send(body(mine.key));
 
     expect(answer).toMatchObject({ status: 200, body: { message: { type: 'message', id: 'm-1', origin: 'typed', text: 'Fix the build', delivery: 'open', error: null } } });
@@ -1049,7 +712,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
   it('types [spoken] before a message whose reply will be heard, keeps the text without it, and confirms it by its tagged line (architecture.md § Voice)', async () => {
     const { voice, calls } = fakeVoice({ spoken: true, expressive: true });
     const { service, held, open, body, view, store } = setupSend(new FakeHeld(), undefined, voice);
-    const mine = open(view.file);
+    const mine = open(2);
 
     expect(mine.frames[0]).toMatchObject({ type: 'hello', voice: { enabled: true, here: true, mic: 'off' }, settings: { briefReplies: true } });
     expect(service.send(body(mine.key, { text: '/x why' }))).toMatchObject({ status: 200, body: { message: { id: 'm-1', text: '/x why', spokenRequested: true } } });
@@ -1086,8 +749,8 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
 
     store = rest.store;
 
-    const mine = open(view.file);
-    const theirs = open(view.otherFile);
+    const mine = open(2);
+    const theirs = open(3);
     let op = 0;
     const command = (name: 'persona' | 'personas', patch: Record<string, unknown> = {}, window = mine.key) => service.personaCommand(name, { window, scopeGen: 1, opId: `o${++op}`, ...patch });
 
@@ -1122,7 +785,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     voice.delivered = (message) => void calls.push(`delivered ${message.id} ${message.delivery}`);
 
     const { service, open, view, store } = setupSend(held, undefined, voice);
-    const mine = open(view.file);
+    const mine = open(2);
     const write = held.write.bind(held);
 
     // The transcript reader confirms the dictated message as its Enter goes in, before its typing ends.
@@ -1152,7 +815,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     voice.timing = (id) => (id === dictatedId ? 'last word → turn model decision 600 ms, decision → voice sent 200 ms, voice → hub 2 ms' : null);
 
     const { service, open, body, view, store, logs } = setupSend(held, undefined, voice);
-    const mine = open(view.file);
+    const mine = open(2);
     const write = held.write.bind(held);
 
     // The transcript reader confirms the dictated message as its Enter goes in, before its typing ends.
@@ -1195,7 +858,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     voice.delivered = (message) => void calls.push(`delivered ${message.id} ${message.delivery}`);
 
     const { service, held: holder, open, body, view, store } = setupSend(new FakeHeld(), undefined, voice);
-    const mine = open(view.file);
+    const mine = open(2);
 
     expect(service.send(body(mine.key, { text: 'Fix the build, please' }))).toMatchObject({ status: 200, body: { message: { id: 'm-1', origin: 'voice', pieces, spokenRequested: true } } });
     await settled(() => expect(store.message('m-1')?.delivery).toBe('sent'));
@@ -1236,7 +899,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     voice.micTiming = (key, steps, outcome) => void timed.push({ key, steps, outcome });
 
     const { service, open, view } = setupSend(new FakeHeld(), undefined, voice);
-    const mine = open(view.file);
+    const mine = open(2);
     const steps = [{ step: 'microphone allowed', ms: 2_400 }, { step: 'hub answered', ms: 2_600 }];
 
     expect(service.voiceCommand('mic-timing', { window: mine.key, steps, outcome: 'listening\nnext\u001b[31m line' })).toEqual({ status: 200, body: { done: true } });
@@ -1271,7 +934,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     };
 
     const { service, held: holder, open, body, view, store } = setupSend(new FakeHeld(), undefined, voice);
-    const mine = open(view.file);
+    const mine = open(2);
 
     expect(service.send(body(mine.key, { text: 'hold on' }))).toMatchObject({ status: 200, body: { message: { id: 'm-1', origin: 'voice', interrupted } } });
     await settled(() => expect(store.message('m-1')?.delivery).toBe('sent'));
@@ -1301,8 +964,8 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
   it('runs the voice commands for the window only: Talk here, Stop speaking, Speak replies and Replay, with their refusals', () => {
     const { voice, calls } = fakeVoice();
     const { service, open, view } = setupSend(new FakeHeld(), undefined, voice);
-    const mine = open(view.file);
-    const theirs = open(view.otherFile);
+    const mine = open(2);
+    const theirs = open(3);
     const command = (name: Parameters<typeof service.voiceCommand>[0], patch: Record<string, unknown> = {}, window = mine.key) => service.voiceCommand(name, { window, scopeGen: 1, opId: 'o', ...patch });
 
     expect(command('talk-here')).toEqual({ status: 200, body: { done: true } });
@@ -1336,7 +999,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
 
     // Without voice, the commands are not part of the hub.
     const plain = setupSend();
-    const key = plain.open(plain.view.file).key;
+    const key = plain.open(2).key;
 
     expect(plain.service.voiceCommand('talk-here', { window: key, scopeGen: plain.scopes.scope(key)!.scopeGen, opId: 'o' })).toEqual({ status: 404, body: { error: 'This hub has no voice.' } });
   });
@@ -1344,8 +1007,8 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
   it('tells the voice of each reply, sends a reply again when its speech changed, and sends voice events to one window', async () => {
     const { voice, calls } = fakeVoice();
     const { service, open, view, store } = setupSend(new FakeHeld(), undefined, voice);
-    const mine = open(view.file);
-    const theirs = open(view.otherFile);
+    const mine = open(2);
+    const theirs = open(3);
 
     writeFileSync(join(dir, 'projects', projectSlug('D:/w12'), 'n2.jsonl'), `${JSON.stringify({ type: 'assistant', uuid: 'a1', timestamp: new Date(NOW).toISOString(), message: { role: 'assistant', content: [{ type: 'text', text: '[speak]Done.[/speak] More.' }] } })}\n`);
     await service.poll();
@@ -1366,8 +1029,8 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
 
   it('refuses a malformed command, another window, a forged session, a stale scope, an empty or long text, and a session that cannot take it', async () => {
     const { service, held, open, body, view, store, setHooks } = setupSend();
-    const { key } = open(view.file);
-    const other = open(view.otherFile).key;
+    const { key } = open(2);
+    const other = open(3).key;
     const refused = (patch: Record<string, unknown>, window = key) => service.send(body(window, patch));
 
     expect(service.send({ window: key, scopeGen: 1, sessionId: 's2', text: 'x' })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, text | answers: [{card, slug, letters, other}], command?}.' } });
@@ -1393,7 +1056,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
 
   it('types a slash command chosen from the list as it is, refuses one that is not a single /name line, and escapes a message that starts with a slash', async () => {
     const { service, held, open, body, view, store } = setupSend();
-    const { key } = open(view.file);
+    const { key } = open(2);
 
     expect(service.send(body(key, { opId: 'op-c0', text: '/compact\nnow', command: true }))).toEqual({ status: 400, body: { error: 'A slash command is one line that starts with /name.' } });
     expect(service.send(body(key, { opId: 'op-c1', text: 'compact now', command: true }))).toEqual({ status: 400, body: { error: 'A slash command is one line that starts with /name.' } });
@@ -1410,7 +1073,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
 
   it('types nothing when the session ends while the message waits on a menu, and says why', async () => {
     const { service, held, open, body, view, store, logs } = setupSend();
-    const { key, frames } = open(view.file);
+    const { key, frames } = open(2);
 
     held.menu = true;
     service.send(body(key));
@@ -1431,7 +1094,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
 
   it('types nothing into a session a newer one replaced, or one the reservation refuses', async () => {
     const { service, held, open, body, view, store, logs, scopes } = setupSend();
-    const { key, frames } = open(view.file);
+    const { key, frames } = open(2);
 
     held.refuse = 'The session has ended. Open it in the terminal to resume it.';
     service.send(body(key));
@@ -1461,7 +1124,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
 
   it("replays an opId only within the window's current session and scope generation", () => {
     const { service, open, body, view, store } = setupSend();
-    const { key } = open(view.file);
+    const { key } = open(2);
 
     // A message an earlier session of the work item got with this opId.
     store.addMessage({ id: 'm-earlier', sessionId: 's1', workItemId: 2, at: NOW, origin: 'typed', text: 'old', transcriptUuid: null, provisional: false, withdrawn: false, delivery: 'sent', error: null, opId: 'op-1', pastedAt: NOW });
@@ -1475,7 +1138,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
   it('fails a message whose screen read or write the holder does not answer, releasing its reservation', async () => {
     const held = new FakeHeld();
     const { service, open, body, view, store, logs } = setupSend(held, 50);
-    const { key } = open(view.file);
+    const { key } = open(2);
     const write = held.write.bind(held);
 
     // The paste is never answered, and the input box does not hold it, so it counts as sent; its transcript line places it if it lands.
@@ -1495,7 +1158,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
 
   it('keeps a queue that holds a message after its session leaves the live list, so a second message waits behind the first', async () => {
     const { service, held, open, body, view, store } = setupSend();
-    const { key } = open(view.file);
+    const { key } = open(2);
 
     held.menu = true;
     service.send(body(key));
@@ -1518,7 +1181,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
 
     const service = make();
 
-    service.open(scopes.open(view.file, view.view), () => undefined);
+    service.open(pageOn(scopes, view.view, 2), () => undefined);
     await settled(() => expect(store.message('m-spoken')).toBeNull());
     service.stop();
     // The box held exactly what was typed, so it was cleared.
@@ -1532,7 +1195,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     const stream = (service: ConversationService) => {
       const frames: Array<{ type: string; [field: string]: unknown }> = [];
 
-      service.open(scopes.open(view.file, view.view), (frame) => frames.push(JSON.parse(/^data: (.*)$/m.exec(frame)![1]!) as { type: string }));
+      service.open(pageOn(scopes, view.view, 2), (frame) => frames.push(JSON.parse(/^data: (.*)$/m.exec(frame)![1]!) as { type: string }));
 
       return frames;
     };
@@ -1594,7 +1257,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
 
     const fourth = make();
     const shortFrames: Array<{ type: string; [field: string]: unknown }> = [];
-    const short = fourth.open(scopes.open(view.file, view.view), (frame) => shortFrames.push(JSON.parse(/^data: (.*)$/m.exec(frame)![1]!) as { type: string }));
+    const short = fourth.open(pageOn(scopes, view.view, 2), (frame) => shortFrames.push(JSON.parse(/^data: (.*)$/m.exec(frame)![1]!) as { type: string }));
 
     short!.close();
     await settled(() => expect(store.message('m-closed')).toBeNull());
@@ -1631,7 +1294,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
 
     it('builds one ledger per conversation change, shared with the runtime, and reads it again only once the conversation changes', () => {
       const { service, store, open, view } = setupCards();
-      const mine = open(view.file);
+      const mine = open(2);
       const reads = vi.spyOn(store, 'conversation');
       const draft = { step: 'port-choice', picks: { 'port-choice': { letters: ['B'], other: null } } };
 
@@ -1658,7 +1321,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
 
     it('sends the cards carried past retention as the ledger has them, while a question is open or an answer is being sent (PRD R103)', () => {
       const { service, store, open, body, view } = setupCards();
-      const mine = open(view.file);
+      const mine = open(2);
       const carried = () => (service.questionsView('s2').carried ?? []).map((one) => [one.key, one.state]);
 
       expect(service.questionsView('s2').carried).toEqual([]);
@@ -1676,7 +1339,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
       ]);
       expect(view2.oldest).toBe('reply:q1');
       // The window's hello carries them too.
-      expect((open(view.file).frames[0] as { questions?: { carried?: unknown[] } }).questions?.carried).toHaveLength(2);
+      expect((open(2).frames[0] as { questions?: { carried?: unknown[] } }).questions?.carried).toHaveLength(2);
 
       // Answered in part, the card keeps both questions as they stand.
       const sent = messageOf(service.send(body(mine.key, { text: undefined, answers: [card()] })));
@@ -1698,7 +1361,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
 
     it('tells the session of a dismissal whose question retention deleted, with the next answer', () => {
       const { service, store, open, body, view } = setupCards();
-      const mine = open(view.file);
+      const mine = open(2);
 
       expect(service.cardCommand('card-dismiss', { window: mine.key, scopeGen: 1, opId: 'x1', sessionId: 's2', card: 'reply:q1', slug: 'keep-route' }).status).toBe(200);
 
@@ -1720,7 +1383,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
 
     it('tells a dismissal again after retention when the answer message that told it comes back not sent', () => {
       const { service, store, open, body, view } = setupCards();
-      const mine = open(view.file);
+      const mine = open(2);
 
       service.cardCommand('card-dismiss', { window: mine.key, scopeGen: 1, opId: 'x1', sessionId: 's2', card: 'reply:q1', slug: 'keep-route' });
       const first = messageOf(service.send(body(mine.key, { text: undefined, answers: [card()] })));
@@ -1747,7 +1410,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
 
     it('writes the [answers] message a Send posts, stores its links, and types it', async () => {
       const { service, store, open, body, held, view } = setupCards();
-      const mine = open(view.file);
+      const mine = open(2);
       const answer = service.send(body(mine.key, { text: undefined, answers: [card(), card({ slug: 'keep-route', letters: [], other: ' keep it,\n for now ' })] }));
 
       expect(answer.status).toBe(200);
@@ -1762,7 +1425,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
 
     it('refuses answers to a question no longer open, a malformed answer, a command with answers, and a Send with nothing picked', () => {
       const { service, store, open, body, view } = setupCards();
-      const mine = open(view.file);
+      const mine = open(2);
 
       expect(service.send(body(mine.key, { text: undefined, answers: [card({ letters: ['Z'] })] })).status).toBe(400);
       expect(service.send(body(mine.key, { text: undefined, answers: [] })).status).toBe(400);
@@ -1784,7 +1447,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
 
     it('resolves a typed message once, when it is stored, and never again after a later reply', () => {
       const { service, store, open, body, view } = setupCards();
-      const mine = open(view.file);
+      const mine = open(2);
       const typed = messageOf(service.send(body(mine.key, { text: 'port-choice A, keep-route: B' })));
 
       expect(store.message(typed.id)?.answers).toEqual([
@@ -1810,7 +1473,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
 
     it('keeps each card\'s draft for every window, sends it in hello and as questions events, and refuses a malformed one', () => {
       const { service, open, view } = setupCards();
-      const mine = open(view.file);
+      const mine = open(2);
       const draft = { step: 'keep-route', picks: { 'port-choice': { letters: ['A'], other: null }, 'keep-route': { letters: [], other: 'later' } } };
 
       expect((mine.frames[0] as { questions?: { open: number; oldest: string } }).questions).toMatchObject({ sessionId: 's2', since: 1, open: 2, oldest: 'reply:q1', drafts: {}, dismissed: [] });
@@ -1835,7 +1498,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
 
       store.setPagePref('questionsLedgerSince', '1');
       ask(store);
-      const mine = open(view.file);
+      const mine = open(2);
       const dismiss = (slug: string) => service.cardCommand('card-dismiss', { window: mine.key, scopeGen: 1, opId: `x-${slug}`, sessionId: 's2', card: 'reply:q1', slug });
 
       expect(dismiss('keep-route')).toEqual({ status: 200, body: { done: true } });
@@ -1855,7 +1518,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
 
     it('falls back to the oldest open card for a lone letter, moves a pick to a question asked again, and refuses answers over the length limit', () => {
       const { service, store, open, body, view } = setupCards();
-      const mine = open(view.file);
+      const mine = open(2);
       const draft = (card: string, value: unknown) => service.cardCommand('card-draft', { window: mine.key, scopeGen: 1, opId: `d-${card}`, sessionId: 's2', card, draft: value });
 
       // The operator worked in q1, whose questions are then all answered; a lone letter goes to the open card q2.
@@ -1876,7 +1539,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
 
     it('keeps a card\'s draft while its answer is being sent, so an answer that comes back not sent keeps its picks', () => {
       const { service, store, open, body, view } = setupCards();
-      const mine = open(view.file);
+      const mine = open(2);
       const draft = { step: 'keep-route', picks: { 'port-choice': { letters: ['B'], other: null }, 'keep-route': { letters: ['A'], other: null } } };
 
       service.cardCommand('card-draft', { window: mine.key, scopeGen: 1, opId: 'd1', sessionId: 's2', card: 'reply:q1', draft });
@@ -1891,7 +1554,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
 
     it('applies the card grammar to the draft by voice, reads the next question, and sends after the last answer', () => {
       const { service, store, open, view } = setupCards();
-      const mine = open(view.file);
+      const mine = open(2);
 
       expect(service.cardSpeech('s2', 'q1')).toEqual({ id: 'card:q1#port-choice', text: 'Question 1 of 2. Port. Which port? A: 8765, recommended: the default. B: 8799: free on this machine. Or say Other.' });
       expect(service.cardUtterance(mine.key, 's2', 'fix the login flow')).toBeNull();
@@ -1992,7 +1655,7 @@ describe('ConversationService artifacts', () => {
     const view = { done, current, other, file: windowOf(current, WINDOWS)!.file!, otherFile: windowOf(other, WINDOWS)!.file!, view: snapshot([done, current, other]) };
     const store = Store.open(':memory:');
     let keys = 0;
-    const scopes = new WindowScopes({ store, windows: WINDOWS, now: () => NOW, newKey: () => `k${++keys}` });
+    const scopes = new WindowScopes({ store, windows: WINDOWS, newKey: () => `k${++keys}` });
     const held = new FakeHeld();
     const logged: string[] = [];
     let changed: ConversationChanged | null = null;
@@ -2028,8 +1691,8 @@ describe('ConversationService artifacts', () => {
     };
     const tag = (sessionId: string, artifacts: Array<{ path: string; title?: string; kind?: string }>) => changed!(sessionId, { type: 'artifacts', replyId: 'r1', artifacts: artifacts.map((one) => ({ title: null, kind: null, ...one })) });
 
-    const open = (file: string | null) => {
-      const key = scopes.open(file, view.view);
+    const open = (workItemId: number | null) => {
+      const key = workItemId === null ? scopes.openPage() : pageOn(scopes, view.view, workItemId);
       const frames: Array<{ type: string; [field: string]: unknown }> = [];
       const stream = service.open(key, (frame) => frames.push(JSON.parse(/^data: (.*)$/m.exec(frame)![1]!) as { type: string }))!;
 
@@ -2049,7 +1712,7 @@ describe('ConversationService artifacts', () => {
   }
 
   it("lists the files a reply's artifact tags name on its work item's pages only, follows their changes, and serves only them and the files beside them they use", async () => {
-    const { view, service, open, store, openPage, tag, logged } = setup();
+    const { service, store, openPage, tag, logged } = setup();
     const real = realpathSync.native(dir);
     const report = join(real, 'research', 'report', 'summary.md');
     const page = join(real, 'w12', 'plans', 'page.html');
@@ -2065,7 +1728,6 @@ describe('ConversationService artifacts', () => {
 
     const mine = openPage(2);
     const others = openPage(3);
-    const window = open(view.file);
 
     tag('s2', [{ path: report.replaceAll('\\', '/') }, { path: 'plans/page.html', title: 'The page', kind: 'demo' }, { path: 'plans/missing.md' }, { path: '.git/config' }, { path: join(real, 'home', 'hub.json') }, { path: '.wip/artifacts/w2/chat/copy.md' }, { path: 'plans' }]);
 
@@ -2079,15 +1741,13 @@ describe('ConversationService artifacts', () => {
     ]));
     expect(mine.frames.filter((frame) => frame.type === 'artifact').map((frame) => (frame['artifact'] as { path: string }).path)).toEqual(['@1/summary.md', '@2/page.html']);
     expect(others.frames.filter((frame) => frame.type === 'artifact')).toEqual([]);
-    expect(window.frames.filter((frame) => frame.type === 'artifact')).toEqual([]);
 
-    // A page's hello lists them among the folder's artifacts, newest first; a VS Code window's lists only the folder's.
+    // A page's hello lists them among the folder's artifacts, newest first.
     expect(service.hello(mine.key)['artifacts']).toEqual([
       { path: '@2/page.html', owner: 'external', kind: 'demo', title: 'The page', ext: 'html', type: 'html', updatedAt: 3_000_000, file: page.replaceAll('\\', '/') },
       { path: '@1/summary.md', owner: 'external', kind: 'research', title: 'Speech engines', ext: 'md', type: 'markdown', updatedAt: 2_000_000, file: report.replaceAll('\\', '/') },
       expect.objectContaining({ path: 'chat/copy.md' }),
     ]);
-    expect(service.hello(window.key)['artifacts']).toEqual([expect.objectContaining({ path: 'chat/copy.md' })]);
 
     // A served file comes open, checked as the file listed; the route's stream closes it.
     const served = (name: string) => {
@@ -2127,8 +1787,8 @@ describe('ConversationService artifacts', () => {
     put(w12, 1, 'chat/old.md', '# Old', 2_000_000);
     put(w3, 3, 'chat/other.md', '# Other', 2_000_000);
 
-    const mine = open(view.file);
-    const other = open(view.otherFile);
+    const mine = open(2);
+    const other = open(3);
     const folder = open(null);
 
     expect(mine.frames[0]).toMatchObject({ type: 'hello', artifactsDir: join(w12, '.wip', 'artifacts', 'w2'), artifacts: [{ path: 'chat/plan.md', owner: 'chat', kind: 'plan', title: 'The plan', ext: 'md', type: 'markdown', updatedAt: 2_000_000 }] });
@@ -2149,7 +1809,7 @@ describe('ConversationService artifacts', () => {
     expect(mine.frames.filter((frame) => frame.type === 'artifact')).toHaveLength(2);
 
     // A window that opens again lists what the folder holds now.
-    expect(open(view.file).frames[0]).toMatchObject({ artifacts: [{ path: 'chat/late.md' }, { path: 'chat/comparison-engines.md' }] });
+    expect(open(2).frames[0]).toMatchObject({ artifacts: [{ path: 'chat/late.md' }, { path: 'chat/comparison-engines.md' }] });
     expect(service.watching().sort()).toEqual([2, 3]);
     service.stop();
     expect(service.watching()).toEqual([]);
@@ -2157,7 +1817,7 @@ describe('ConversationService artifacts', () => {
 
   it("stops watching a work item's folder when its window's key closes, even while its conversation stream stays open", () => {
     const { view, service, open, scopes } = setup();
-    const mine = open(view.file);
+    const mine = open(2);
 
     expect(service.watching()).toEqual([2]);
     scopes.close(mine.key);
@@ -2172,7 +1832,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     const store = Store.open(':memory:');
     const view = world();
     let keys = 0;
-    const scopes = new WindowScopes({ store, windows: WINDOWS, now: () => NOW, newKey: () => `k${++keys}` });
+    const scopes = new WindowScopes({ store, windows: WINDOWS, newKey: () => `k${++keys}` });
     const held = new FakeHeld();
     const focus: Array<[string, boolean]> = [];
     let id = 0;
@@ -2202,10 +1862,6 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
       runSchedule: (name) => {
         events.push({ type: 'run-schedule', name });
         return name === 'refused' ? { refused: 'nightly already has an open work item.' } : { workItemId: 70 + events.length };
-      },
-      newConversation: (hostWindow, folder, provider) => {
-        made.push([hostWindow, folder, provider]);
-        return { workItemId: 41 };
       },
       newStandalone: (folder, provider, model, prompt) => {
         created.push({ kind: 'session', folder, provider, model, prompt });
@@ -2248,7 +1904,6 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     const actions: Array<[number, string, { until: number | null; comment: string | null; text?: string | null; choice?: string | null }]> = [];
     const sourceCalls: Array<[string, boolean]> = [];
     const events: Array<Record<string, unknown>> = [];
-    const made: Array<[string, string, string | undefined]> = [];
     const created: Array<Record<string, unknown>> = [];
     const remembered: string[] = [];
     const roots = { recent: [] as string[], repoRoots: [] as string[], worktrees: [] as string[] };
@@ -2277,13 +1932,13 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
       return { key, frames };
     };
 
-    return { store, view, scopes, service, openPage, focus, actions, opens, commands, pools, moves, resumed, refuseResume, held, sourceCalls, setHeader, events, made, refusePoll, restarts, created, remembered, roots };
+    return { store, view, scopes, service, openPage, focus, actions, opens, commands, pools, moves, resumed, refuseResume, held, sourceCalls, setHeader, events, refusePoll, restarts, created, remembered, roots };
   }
 
   it("runs the list header's Restart and resume for a page key only, answering the hub's refusal (architecture.md § Restarting the holder)", () => {
     const { service, openPage, refusePoll, restarts, scopes, view } = setup();
     const page = openPage();
-    const window = scopes.open(view.file, view.view);
+    const window = 'forged';
 
     expect(service.pageHolderRestart({ window: page.key, detail: 'Restarting stops the held session.' })).toEqual({ status: 200, body: { started: true } });
     refusePoll('The terminal holder is already restarting.');
@@ -2296,7 +1951,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
   it("runs More Actions' Refresh sources and Run a schedule now for a page key, in schedules the header offers only", () => {
     const { service, openPage, events, refusePoll, scopes, view } = setup();
     const page = openPage();
-    const window = scopes.open(view.file, view.view);
+    const window = 'forged';
 
     expect(service.pagePoll({ window: page.key })).toEqual({ status: 200, body: { done: true } });
     refusePoll('Every source is off.');
@@ -2317,7 +1972,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
   it('makes the New session form\'s conversation or task in a folder the hub checks, once per opId, and remembers the folder (PRD R122)', () => {
     const { service, openPage, created, remembered, scopes, view } = setup();
     const page = openPage();
-    const window = scopes.open(view.file, view.view);
+    const window = 'forged';
     const folder = join(dir, 'work');
 
     mkdirSync(folder, { recursive: true });
@@ -2415,7 +2070,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     expect(service.pageSource({ window: page.key, name: 'gone', enabled: true })).toEqual({ status: 409, body: { error: 'No source is named gone.' } });
     expect(service.pageSource({ window: page.key, name: 'gh', enabled: 'yes' }).status).toBe(400);
     // A window's key, or none, cannot turn sources on or off through the page's command.
-    const window = scopes.open(view.file, view.view);
+    const window = 'forged';
 
     expect(service.pageSource({ window, name: 'gh', enabled: false }).status).toBe(403);
     expect(service.pageSource({ window: 'nobody', name: 'gh', enabled: false }).status).toBe(403);
@@ -2447,7 +2102,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     expect(elsewhere.frames.filter((frame) => frame.type === 'tabs')).toEqual([]);
 
     expect(service.pageTabs({ window: elsewhere.key, workItemId, tab: 'console' }).status).toBe(403);
-    expect(service.pageTabs({ window: scopes.open(view.file, view.view), workItemId, tab: 'console' }).status).toBe(403);
+    expect(service.pageTabs({ window: 'forged', workItemId, tab: 'console' }).status).toBe(403);
     // Status or Browser is kept for every work item, and comes in each page's hello.
     expect(service.pageTabs({ window: page.key, workItemId, openOn: 'browser' }).status).toBe(200);
     expect(store.pagePref('openOn')).toBe('browser');
@@ -2464,7 +2119,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
   it("answers a page's History of a ticket the store knows, with the chips' categories, for a page key only", () => {
     const { service, openPage, scopes, view, store } = setup();
     const page = openPage();
-    const window = scopes.open(view.file, view.view);
+    const window = 'forged';
     const ticketId = view.view.workItems[0]!.ticket.id;
     const answer = service.pageHistory({ window: page.key, ticketId });
 
@@ -2479,7 +2134,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     const { service, openPage, scopes, view } = setup();
     const page = openPage();
     const other = openPage();
-    const window = scopes.open(view.file, view.view);
+    const window = 'forged';
     const frames: Array<{ type: string }> = [];
 
     service.open(window, (frame) => frames.push(JSON.parse(/^data: (.*)$/m.exec(frame)![1]!) as { type: string }));
@@ -2516,9 +2171,6 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     expect(service.history({ window: page.key, scopeGen: 1, opId: 'o2', sessionId: 's2', before: null }).status).toBe(403);
     expect(service.history({ window: page.key, scopeGen: 1, opId: 'o2', sessionId: 's3', before: null }).status).toBe(200);
     expect(service.select({ window: page.key, opId: 'o3', workItemId: 99 }).status).toBe(403);
-    // A page hosts nothing, and its binding is never stored.
-    expect(service.newConversation({ window: page.key, opId: 'o4' }).status).toBe(403);
-    expect(scopes.hostOf(page.key)).toBeNull();
     expect(view.view.workItems).toHaveLength(3);
   });
 
@@ -2552,7 +2204,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
   it("reports a page's focus only for a page key, and ends the page's key with its stream", () => {
     const { scopes, service, openPage, view, focus } = setup();
     const page = openPage();
-    const window = scopes.open(view.file, view.view);
+    const window = 'forged';
 
     expect(service.pageFocus({ window: page.key, focused: true })).toEqual({ status: 200, body: { focused: true } });
     expect(service.pageFocus({ window, focused: true }).status).toBe(403);
@@ -2567,13 +2219,13 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
   it("runs a row action only on the page's selected work item, for a page key and its scope generation, once per opId", async () => {
     const { scopes, service, openPage, view, actions } = setup();
     const page = openPage();
-    const window = scopes.open(view.file, view.view);
+    const window = 'forged';
 
     expect(service.rowAction({ window: page.key, scopeGen: 0, opId: 'a', workItemId: 3, label: 'Start' }).status).toBe(403);
     service.select({ window: page.key, opId: 'o', workItemId: 3 });
 
     expect(service.rowAction({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 2, label: 'Start' }).status).toBe(403);
-    expect(service.rowAction({ window, scopeGen: scopes.scope(window)!.scopeGen, opId: 'a', workItemId: 2, label: 'Start' }).status).toBe(403);
+    expect(service.rowAction({ window, scopeGen: 1, opId: 'a', workItemId: 2, label: 'Start' }).status).toBe(403);
     expect(service.rowAction({ window: page.key, scopeGen: 0, opId: 'a', workItemId: 3, label: 'Start' })).toEqual({ status: 409, body: { error: "The window's conversation changed." } });
     expect(service.rowAction({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 3, label: 'Snooze…', until: 'soon' }).status).toBe(400);
     // A control is named by its label, never by its action type.
@@ -2600,12 +2252,12 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
   it("writes a file the page attaches only for its selected conversation's session that can take a message, at its scope generation", () => {
     const { store, scopes, service, openPage, view } = setup();
     const page = openPage();
-    const window = scopes.open(view.file, view.view);
+    const window = 'forged';
     const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2]);
 
     expect(service.pageUpload(page.key, 0, 'a.png', png).status).toBe(403);
     service.select({ window: page.key, opId: 'o', workItemId: 3 });
-    expect(service.pageUpload(window, scopes.scope(window)!.scopeGen, 'a.png', png).status).toBe(403);
+    expect(service.pageUpload(window, 1, 'a.png', png).status).toBe(403);
     expect(service.pageUpload(page.key, 0, 'a.png', png)).toEqual({ status: 409, body: { error: "The window's conversation changed." } });
 
     const written = service.pageUpload(page.key, 1, 'a.png', png);
@@ -2623,12 +2275,12 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
   it("runs a VS Code control only on the page's selected work item, for its scope generation, once per opId", () => {
     const { scopes, service, openPage, view, commands } = setup();
     const page = openPage();
-    const window = scopes.open(view.file, view.view);
+    const window = 'forged';
 
     expect(service.rowCommand({ window: page.key, scopeGen: 0, opId: 'a', workItemId: 3, label: 'Open report' }).status).toBe(403);
     service.select({ window: page.key, opId: 'o', workItemId: 3 });
     expect(service.rowCommand({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 2, label: 'Open report' }).status).toBe(403);
-    expect(service.rowCommand({ window, scopeGen: scopes.scope(window)!.scopeGen, opId: 'a', workItemId: 2, label: 'Open report' }).status).toBe(403);
+    expect(service.rowCommand({ window, scopeGen: 1, opId: 'a', workItemId: 2, label: 'Open report' }).status).toBe(403);
     expect(service.rowCommand({ window: page.key, scopeGen: 0, opId: 'a', workItemId: 3, label: 'Open report' }).status).toBe(409);
     expect(service.rowCommand({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 3 }).status).toBe(400);
     expect(commands).toEqual([]);
@@ -2641,7 +2293,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
   it("opens a listed row's link for a page key on any work item, not only the selected one, once per opId, and says why not", () => {
     const { scopes, service, openPage, view, opens } = setup();
     const page = openPage();
-    const window = scopes.open(view.file, view.view);
+    const window = 'forged';
 
     expect(service.rowOpen({ window, opId: 'a', workItemId: 2, url: 'https://x.test/' }).status).toBe(403);
     expect(service.rowOpen({ window: page.key, opId: 'a', workItemId: 2 }).status).toBe(400);
@@ -2660,7 +2312,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
   it("runs a pool ticket's control for a page key without a selection, once per opId, and says why not", () => {
     const { scopes, service, openPage, view, pools } = setup();
     const page = openPage();
-    const window = scopes.open(view.file, view.view);
+    const window = 'forged';
 
     expect(service.poolAction({ window, opId: 'a', ticketId: 9, label: 'Start' }).status).toBe(403);
     expect(service.poolAction({ window: page.key, opId: 'a', ticketId: '9', label: 'Start' }).status).toBe(400);
@@ -2678,7 +2330,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
   it("moves a dragged Ready for review row for a page key without a selection, once per opId, and says why not (PRD R73)", () => {
     const { scopes, service, openPage, view, moves } = setup();
     const page = openPage();
-    const window = scopes.open(view.file, view.view);
+    const window = 'forged';
 
     expect(service.rowMove({ window, opId: 'a', workItemId: 3, after: null }).status).toBe(403);
     expect(service.rowMove({ window: page.key, opId: 'a', workItemId: '3', after: null }).status).toBe(400);
@@ -2696,14 +2348,14 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
   it("resumes the page's own current session once it has ended, and only that", async () => {
     const { store, scopes, service, openPage, view, resumed, refuseResume } = setup();
     const page = openPage();
-    const window = scopes.open(view.file, view.view);
+    const window = 'forged';
 
     service.select({ window: page.key, opId: 'o', workItemId: 3 });
     expect((await service.resume({ window: page.key, scopeGen: 1, opId: 'r', sessionId: 's3' })).body).toEqual({ error: 'The session has not ended.' });
     store.updateSession('s3', { state: 'ended' });
     expect((await service.resume({ window: page.key, scopeGen: 1, opId: 'r', sessionId: 's2' })).status).toBe(403);
     expect((await service.resume({ window: page.key, scopeGen: 0, opId: 'r', sessionId: 's3' })).status).toBe(409);
-    expect((await service.resume({ window, scopeGen: scopes.scope(window)!.scopeGen, opId: 'r', sessionId: scopes.scope(window)!.sessionId })).status).toBe(403);
+    expect((await service.resume({ window, scopeGen: 1, opId: 'r', sessionId: 's3' })).status).toBe(403);
     expect(resumed).toEqual([]);
 
     expect(await service.resume({ window: page.key, scopeGen: 1, opId: 'r', sessionId: 's3' })).toEqual({ status: 200, body: { resumed: true } });
@@ -2715,7 +2367,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
   it("lists a work item's earlier sessions on the page's dropdown, newest first, and shows one read-only on request (architecture.md § Web page)", async () => {
     const { store, scopes, service, openPage, view } = setup();
     const page = openPage();
-    const window = scopes.open(view.file, view.view);
+    const window = 'forged';
     const later = (id: string, kind: 'setup' | 'task', at: number) => store.insertSession(session({ id, workItemId: 3, kind, shortId: id, cwd: 'D:/w3', codeMode: true, nativeSessionId: `n-${id}`, state: 'idle', startedAt: at }) as StoredSession);
     const entry = () => service.scopeView(scopes.scope(page.key))!.conversations[0]!;
 
@@ -2741,8 +2393,6 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
       { sessionId: 's4', title: 'fix the badge count', state: 'idle', startedAt: NOW - 2_000, provider: 'claude' },
       { sessionId: 's3', title: 'Setup session', state: 'ended', startedAt: NOW - 3_000, provider: 'claude' },
     ]);
-    // A VS Code window's dropdown does not list them, nor names the current session.
-    expect(service.scopeView(scopes.scope(window))!.conversations.every((one) => one.sessions === undefined && one.sessionTitle === undefined)).toBe(true);
     // The current session is named as the earlier ones are, by its CLI's name for it.
     expect(entry().sessionTitle).toBe('Badge fix');
 
@@ -2852,7 +2502,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     let refuse: string | null = null;
     const store = Store.open(':memory:');
     const view = world();
-    const scopes = new WindowScopes({ store, windows: WINDOWS, now: () => NOW, newKey: () => 'pk' });
+    const scopes = new WindowScopes({ store, windows: WINDOWS, newKey: () => 'pk' });
     const service = new ConversationService({
       store,
       windows: scopes,
@@ -2867,9 +2517,6 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
         if (refuse !== null) return { refused: refuse };
         made.push([workItemId, prompt, provider]);
         return { sessionId: `new-${made.length}` };
-      },
-      newConversation: () => {
-        throw new Error('A page makes no new work item.');
       },
       log: () => {},
     });

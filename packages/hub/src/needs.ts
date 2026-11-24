@@ -1,4 +1,4 @@
-import { MARK_TITLES, markOf, needsYou, urlKey } from '@switchboard/core/group';
+import { MARK_TITLES, markOf, needsYou } from '@switchboard/core/group';
 import type { Mark } from '@switchboard/core/group';
 import { listGroups, rowKeyOf } from './rows.js';
 import type { PoolView, Snapshot, WorkItemView } from './snapshot.js';
@@ -38,18 +38,6 @@ export type RowTarget = { workItemId: number } | { ticketId: number };
 
 function shownEntries(snapshot: Snapshot): Array<WorkItemView | PoolView> {
   return Object.values(listGroups(snapshot)).flat();
-}
-
-/**
- * The row Open in Switchboard opens for a URL (PRD R69): the first row in list order whose ticket has the URL, else the first row whose ticket
- * has a link to it, such as its pull request (PRD R52). URLs compare by `urlKey`. Null when no row the dock shows has it.
- */
-export function targetForUrl(snapshot: Snapshot, url: string): RowTarget | null {
-  const key = urlKey(url);
-  const shown = shownEntries(snapshot);
-  const found = shown.find((entry) => entry.ticket.url !== '' && urlKey(entry.ticket.url) === key) ?? shown.find((entry) => entry.links.some((link) => urlKey(link.target) === key));
-
-  return found === undefined ? null : 'status' in found ? { workItemId: (found as WorkItemView).id } : { ticketId: found.ticket.id };
 }
 
 /** The key of the row that shows the target, or null; a work item hidden in Snoozed, where a ticket shows as one row, finds its ticket's row (PRD R49). */

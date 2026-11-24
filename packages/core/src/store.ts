@@ -2,7 +2,7 @@ import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 import type { Comment, Link, Paste, Session, Ticket, Triage, WorkItem, WorkItemStatus, Worktree } from './model.js';
 import { ownPrompt } from './group.js';
 import { CONVERSATION_RETENTION } from './conversation.js';
-import type { ConversationMessage, ConversationReply, ConversationStatus, MessageAnswer, Piece, TranscriptCheckpoint, WindowBinding } from './conversation.js';
+import type { ConversationMessage, ConversationReply, ConversationStatus, MessageAnswer, Piece, TranscriptCheckpoint } from './conversation.js';
 import { windowFileKey } from './conversation.js';
 
 export const MIGRATIONS = [
@@ -562,6 +562,8 @@ export const MIGRATIONS = [
     at INTEGER NOT NULL,
     UNIQUE (workItemId, path)
   );`,
+  // Window bindings served only VS Code windows. A hosted conversation keeps `tickets.hostWindow`, from which Open in VS Code finds its window.
+  `DROP TABLE windowBindings;`,
 ];
 
 /**
@@ -1820,18 +1822,6 @@ export class Store {
     return (this.#db.prepare(sql).all(...params) as unknown as Array<ConversationStatus & { seq: number }>).map(({ seq: _seq, ...status }) => status);
   }
 
-  windowBinding(file: string): WindowBinding | null {
-    return (this.#db.prepare('SELECT * FROM windowBindings WHERE file = ?').get(file) as WindowBinding | undefined) ?? null;
-  }
-
-  setWindowBinding(binding: WindowBinding): void {
-    this.#db
-      .prepare(
-        'INSERT INTO windowBindings (file, workItemId, since, scopeGen, selectedWorkItemId, selectedSessionId, ticketId, title) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (file) DO UPDATE SET workItemId = excluded.workItemId, since = excluded.since, scopeGen = excluded.scopeGen, selectedWorkItemId = excluded.selectedWorkItemId, selectedSessionId = excluded.selectedSessionId, ticketId = excluded.ticketId, title = excluded.title',
-      )
-      .run(binding.file, binding.workItemId, binding.since, binding.scopeGen, binding.selectedWorkItemId ?? null, binding.selectedSessionId ?? null, binding.ticketId ?? null, binding.title ?? null);
-  }
-
   /** A remembered web page sign-in by its cookie's hash (architecture.md § Web page), or null. */
   pageSession(hash: string): PageSession | null {
     const row = this.#db.prepare('SELECT hash, createdAt, usedAt, label, host, login, voice FROM pageSessions WHERE hash = ?').get(hash) as (Omit<PageSession, 'voice'> & { voice: number }) | undefined;
@@ -1972,7 +1962,7 @@ export class Store {
   }
 
   /**
-   * The work items of the ad hoc tickets a window binding hosts (`Ticket.hostWindow`, compared by `windowFileKey`), newest first. Compared in
+   * The work items of the ad hoc tickets a host hosts (`Ticket.hostWindow`, compared by `windowFileKey`), newest first. Compared in
    * JavaScript, because SQLite's `lower()` lowers only ASCII letters, so a folder named "Étage" would match no spelling of itself.
    */
   hostedWorkItems(file: string): WorkItem[] {

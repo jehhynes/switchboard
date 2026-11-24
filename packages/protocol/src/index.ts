@@ -64,14 +64,14 @@ export interface ConversationEntry {
   conversation: SessionView['conversation'] | null;
   unread: number;
   provider?: string;
-  /** On the web page, the current session's name as its CLI gives it, else its first message, else Setup or Task session; left out with no session and for a VS Code window. */
+  /** On the web page, the current session's name as its CLI gives it, else its first message, else Setup or Task session; left out with no session. */
   sessionTitle?: string;
   /** On the web page, the work item's earlier sessions, newest first; left out with none. */
   sessions?: SessionEntry[];
 }
 
 export interface ScopeView {
-  kind: 'item' | 'folder' | 'page';
+  kind: 'page';
   key: string;
   folder: string | null;
   title: string;

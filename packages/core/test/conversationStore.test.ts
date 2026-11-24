@@ -433,17 +433,6 @@ describe('conversation store', () => {
     store.close();
   });
 
-  it('keeps window bindings by file', () => {
-    const store = Store.open(':memory:');
-
-    store.setWindowBinding({ file: 'w.code-workspace', workItemId: 3, since: 1, scopeGen: 1 });
-    store.setWindowBinding({ file: 'w.code-workspace', workItemId: 4, since: 2, scopeGen: 2 });
-    expect(store.windowBinding('w.code-workspace')).toEqual({ file: 'w.code-workspace', workItemId: 4, since: 2, scopeGen: 2, selectedWorkItemId: null, selectedSessionId: null, ticketId: null, title: null });
-    store.setWindowBinding({ file: 'w.code-workspace', workItemId: 4, since: 2, scopeGen: 3, selectedWorkItemId: 9, selectedSessionId: 's9', ticketId: 5, title: 'Fix it' });
-    expect(store.windowBinding('w.code-workspace')).toEqual({ file: 'w.code-workspace', workItemId: 4, since: 2, scopeGen: 3, selectedWorkItemId: 9, selectedSessionId: 's9', ticketId: 5, title: 'Fix it' });
-    expect(store.windowBinding('other')).toBeNull();
-  });
-
   it('opens a migrated database read-only, refuses writes, and refuses one of another schema version', () => {
     const dir = mkdtempSync(join(tmpdir(), 'store-ro-'));
 

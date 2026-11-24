@@ -1,206 +1,133 @@
 import { randomBytes } from 'node:crypto';
-import { readFileSync, realpathSync, statSync } from 'node:fs';
-import { basename } from 'node:path';
-import type { Session, WindowBinding, WorkItem } from '@switchboard/core';
-import { hostKey, isFolderHost } from '@switchboard/core';
-import { needsYou } from '@switchboard/core/group';
-import { windowItems, windowOf } from './dock.js';
+import type { Session, WorkItem } from '@switchboard/core';
+import { windowOf } from './dock.js';
 import { pageGroups } from './page.js';
 import type { Snapshot } from './snapshot.js';
 
-/** One of a window's conversations (architecture.md § Window scope): its primary work item, or an ad hoc conversation it hosts. */
+/** One of a page's conversations (architecture.md § Window scope): a work item of the selected work item's group. */
 export interface ConversationRef {
   workItemId: number;
   primary: boolean;
 }
 
-/** What a window may see: its conversations, and of the selected one its work item and current session (architecture.md § Window scope). */
+/** What a web page may see: its conversations, and of the selected one its work item and current session (architecture.md § Window scope). */
 export interface WindowScope {
-  /**
-   * An item window, opened from a workspace file, a folder window, opened on a plain folder (architecture.md § Window scope), or the web page,
-   * bound to the work item it selected (architecture.md § Web page).
-   */
-  kind: 'item' | 'folder' | 'page';
-  /** The window key, which every conversation route names. */
+  /** The web page, bound to the work item it selected (architecture.md § Web page). */
+  kind: 'page';
+  /** The page key, which every conversation route names. */
   key: string;
-  /** The window's first folder, or a folder window's canonical folder, where a new conversation runs; null before it is known. */
+  /** The folder the selected work item's window works in, where its sessions run; null before it is known. */
   folder: string | null;
-  /** The primary work item's ticket title, never an issue number alone, or a folder window's folder name. */
+  /** The selected work item's ticket title. */
   title: string;
-  /** Rises each time the window's selected conversation or its current session changes, so a command for the earlier one is refused. */
+  /** Rises each time the page's selected conversation or its current session changes, so a command for the earlier one is refused. */
   scopeGen: number;
-  /** The primary work item first, then the hosted conversations, newest first. */
+  /** The selected work item's group in the page's list, the group's own work item first when it has one. */
   conversations: ConversationRef[];
-  /** The selected conversation's work item; null for a folder window with no conversation. */
+  /** The selected conversation's work item. */
   workItemId: number | null;
   /** The selected conversation's current session's folder, or the checkout before its first. */
   cwd: string | null;
-  /**
-   * The session the window shows: the selected conversation's current session, the one started last, or on the web page an earlier session of
-   * it that the page chose (`earlier`); null before its first.
-   */
+  /** The session the page shows: the current session, or an earlier session of the work item that the page chose (`earlier`); null before its first. */
   sessionId: string | null;
   /** The page shows an earlier session of its work item, read-only (architecture.md § Web page); left out for the current session. */
   earlier?: true;
 }
 
 export interface WindowScopesDeps {
-  /** The store's window bindings, kept by workspace file or a folder window's canonical folder, the hosted work items and their sessions. */
   store: {
-    windowBinding(file: string): WindowBinding | null;
-    setWindowBinding(binding: WindowBinding): void;
     workItem(id: number): Pick<WorkItem, 'id' | 'ticketId' | 'status'> | null;
-    ticket(id: number): { title: string; repoRoot: string; hostWindow?: string | null } | null;
-    hostedWorkItems(file: string): Array<Pick<WorkItem, 'id' | 'ticketId' | 'status'>>;
+    ticket(id: number): { title: string; repoRoot: string } | null;
     sessionsFor(workItemId: number): Array<Pick<Session, 'id' | 'cwd'>>;
   };
-  /** The folder of the item windows' workspace files. */
+  /** The folder of the work items' workspace files. */
   windows: string;
-  now(): number;
   newKey?(): string;
 }
 
-interface Window {
+interface Page {
   key: string;
-  /** The workspace file of an item window; null for a folder window. */
-  file: string | null;
-  /**
-   * What binds the window and what its hosted conversations name as `hostWindow`: an item window's workspace file or a folder window's canonical
-   * folder; null for a window bound to nothing, such as one whose folder cannot be read.
-   */
-  host: string | null;
-  /** The primary work item. */
   workItemId: number | null;
-  /** The primary work item's ticket, kept once seen, so its History stays readable after the work item leaves the snapshot. */
   ticketId: number | null;
   title: string;
   folder: string | null;
   scopeGen: number;
   selected: number | null;
   sessionId: string | null;
-  /** On a page, an earlier session of the selected work item it shows instead of the current one; null shows the current one. */
+  /** An earlier session of the selected work item the page shows instead of the current one; null shows the current one. */
   pinned: string | null;
   cwd: string | null;
-  /** Tickets this window may read the History of beyond its own, from History commands the dock left for it. */
-  granted: Set<number>;
-  /** The web page's stream, which no workspace file or folder binds: its one binding is the work item it selected. */
-  page: boolean;
-  /** A page's conversations: its selected work item's group in the page's list, the group's own work item first when it has one. */
+  /** The selected work item's group in the page's list, the group's own work item first when it has one. */
   group: { ids: number[]; head: boolean };
 }
 
 /**
- * The window scope rule (architecture.md § Window scope): each VS Code window gets a key in the `hello` of its `/events` stream, bound to its
- * workspace file, or for a folder window to its canonical folder. An item window's conversations are its primary work item, the newest work
- * item of that file's window that is not done, else the newest, and the ad hoc conversations its binding hosts (`Ticket.hostWindow`); a folder
- * window's are only the ad hoc conversations its folder hosts. Never another work item, even one in the same folder. `windowItems` can name
- * several work items for one file, since successive work items of a ticket reuse its worktree, so it is never authority.
+ * The scope rule (architecture.md § Window scope): each web page's conversation stream gets a page key, bound to nothing until it selects a work
+ * item, and then to that work item's group in the page's list. Never kept in the store, so a reload starts unbound.
  */
 export class WindowScopes {
-  readonly #windows = new Map<string, Window>();
+  readonly #pages = new Map<string, Page>();
   /** The latest snapshot, which a page's `select` reads its work item's window and group from. */
   #snapshot: Snapshot | null = null;
 
   constructor(private readonly deps: WindowScopesDeps) {}
 
-  /**
-   * Registers a window stream and returns its key; the key dies with the stream. A window with no workspace file that names `folder` is a
-   * folder window, bound to that folder's real path, so every spelling of it, by case or through a link, reaches one binding.
-   */
-  open(file: string | null, snapshot: Snapshot | null, folder: string | null = null): string {
-    const key = this.deps.newKey?.() ?? randomBytes(24).toString('hex');
-    const canonical = file === null && folder !== null ? canonicalFolder(folder) : null;
-    const host = file ?? canonical;
-    const stored = host === null ? null : this.#binding(host);
-    const workItemId = stored?.workItemId ?? null;
-    // A bound work item that has left the snapshot, such as one done long ago, still names its ticket and title.
-    const window: Window = {
-      key,
-      file,
-      host,
-      workItemId,
-      ticketId: stored?.ticketId ?? (workItemId === null ? null : (this.deps.store.workItem(workItemId)?.ticketId ?? null)),
-      title: stored?.title ?? (canonical === null ? '' : basename(canonical) || canonical),
-      folder: file === null ? canonical : workspaceFolder(file),
-      scopeGen: stored?.scopeGen ?? 0,
-      selected: stored?.selectedWorkItemId ?? null,
-      sessionId: stored?.selectedSessionId ?? null,
-      pinned: null,
-      cwd: null,
-      granted: new Set(),
-      page: false,
-      group: { ids: [], head: false },
-    };
-
-    this.#snapshot = snapshot ?? this.#snapshot;
-    this.#windows.set(key, window);
-
-    if (host !== null) {
-      this.#bind(window, snapshot);
-    }
-
-    return key;
-  }
-
-  /**
-   * Registers the web page's conversation stream and returns its page key (architecture.md § Web page): bound to nothing until it sends `select`,
-   * and never kept in the store, so a reload starts unbound.
-   */
+  /** Registers a web page's conversation stream and returns its page key (architecture.md § Web page). */
   openPage(): string {
     const key = this.deps.newKey?.() ?? randomBytes(24).toString('hex');
 
-    this.#windows.set(key, { key, file: null, host: null, workItemId: null, ticketId: null, title: '', folder: null, scopeGen: 0, selected: null, sessionId: null, pinned: null, cwd: null, granted: new Set(), page: true, group: { ids: [], head: false } });
+    this.#pages.set(key, { key, workItemId: null, ticketId: null, title: '', folder: null, scopeGen: 0, selected: null, sessionId: null, pinned: null, cwd: null, group: { ids: [], head: false } });
     return key;
   }
 
-  /** Whether the key is a web page's. */
+  /** Whether the key is a connected web page's. */
   isPage(key: string): boolean {
-    return this.#windows.get(key)?.page === true;
+    return this.#pages.has(key);
   }
 
   close(key: string): void {
-    this.#windows.delete(key);
+    this.#pages.delete(key);
   }
 
   keys(): string[] {
-    return [...this.#windows.keys()];
+    return [...this.#pages.keys()];
   }
 
-  /** Binds every window again in a new snapshot; returns the keys whose selected conversation or its current session changed. */
+  /** Binds every page again in a new snapshot; returns the keys whose selected conversation or its current session changed. */
   update(snapshot: Snapshot): string[] {
     this.#snapshot = snapshot;
 
-    return [...this.#windows.values()].filter((window) => (window.page ? this.#bindPage(window) : window.host !== null && this.#bind(window, snapshot))).map((window) => window.key);
+    return [...this.#pages.values()].filter((page) => this.#bind(page)).map((page) => page.key);
   }
 
   /** A page's selected work item again: its title, folder, group and current session; true when its selection or session changed. */
-  #bindPage(window: Window): boolean {
-    const before = { selected: window.selected, sessionId: window.sessionId };
+  #bind(page: Page): boolean {
+    const before = { selected: page.selected, sessionId: page.sessionId };
 
-    if (window.selected !== null && this.deps.store.workItem(window.selected) === null) {
-      window.selected = null;
+    if (page.selected !== null && this.deps.store.workItem(page.selected) === null) {
+      page.selected = null;
     }
 
-    this.#placePage(window);
-    this.#follow(window);
+    this.#place(page);
+    this.#follow(page);
 
-    const changed = window.selected !== before.selected || window.sessionId !== before.sessionId;
+    const changed = page.selected !== before.selected || page.sessionId !== before.sessionId;
 
     if (changed) {
-      window.scopeGen++;
+      page.scopeGen++;
     }
 
     return changed;
   }
 
   /** A page's work item's title, the folder its window works in, and its group in the page's list. */
-  #placePage(window: Window): void {
-    const id = window.selected;
+  #place(page: Page): void {
+    const id = page.selected;
 
-    window.workItemId = id;
+    page.workItemId = id;
 
     if (id === null) {
-      window.group = { ids: [], head: false };
+      page.group = { ids: [], head: false };
       return;
     }
 
@@ -209,319 +136,90 @@ export class WindowScopes {
     const shown = this.#snapshot?.workItems.find((one) => one.id === id);
     const group = this.#snapshot === null ? undefined : pageGroups(this.#snapshot, this.deps.windows, id).find((one) => one.ids.includes(id));
 
-    window.ticketId = item?.ticketId ?? null;
-    window.title = ticket?.title ?? window.title;
-    window.folder = (shown === undefined ? null : (windowOf(shown, this.deps.windows)?.folders[0] ?? null)) ?? ticket?.repoRoot ?? null;
-    window.group = group === undefined ? { ids: [id], head: false } : { ids: group.ids, head: group.kind === 'item' };
-  }
-
-  #binding(host: string): WindowBinding | null {
-    return this.deps.store.windowBinding(hostKey(host)) ?? this.deps.store.windowBinding(host);
-  }
-
-  /** The window's primary work item from the snapshot, its conversations and its selection; true when the selection or its session changed. */
-  #bind(window: Window, snapshot: Snapshot | null): boolean {
-    const before = { primary: window.workItemId, selected: window.selected, sessionId: window.sessionId, ticketId: window.ticketId, title: window.title };
-
-    // A folder window has no primary work item: it never lists the item work of its folder.
-    if (snapshot !== null && window.file !== null) {
-      const items = windowItems(snapshot, window.file, this.deps.windows).sort((a, b) => a.id - b.id);
-      const bound = items.filter((item) => item.status !== 'done').at(-1) ?? items.at(-1) ?? null;
-
-      if (bound !== null) {
-        if (bound.id !== window.workItemId) {
-          window.granted.clear();
-        }
-
-        window.workItemId = bound.id;
-        window.ticketId = bound.ticketId;
-        window.title = bound.ticket.title;
-        window.folder = windowOf(bound, this.deps.windows)?.folders[0] ?? window.folder;
-      }
-    }
-
-    const listed = this.#listed(window).map((ref) => ref.workItemId);
-
-    // A successor work item that replaced the selected primary is selected in its place; a selected conversation that left goes back to the primary.
-    if (window.selected === null || (window.selected === before.primary && window.workItemId !== before.primary) || !listed.includes(window.selected)) {
-      window.selected = window.workItemId !== null && listed.includes(window.workItemId) ? window.workItemId : (listed[0] ?? null);
-    }
-
-    this.#follow(window);
-
-    const changed = window.selected !== before.selected || window.sessionId !== before.sessionId;
-
-    if (changed) {
-      window.scopeGen++;
-    }
-
-    if (changed || window.workItemId !== before.primary || window.ticketId !== before.ticketId || window.title !== before.title) {
-      this.#save(window);
-    }
-
-    return changed;
+    page.ticketId = item?.ticketId ?? null;
+    page.title = ticket?.title ?? page.title;
+    page.folder = (shown === undefined ? null : (windowOf(shown, this.deps.windows)?.folders[0] ?? null)) ?? ticket?.repoRoot ?? null;
+    page.group = group === undefined ? { ids: [id], head: false } : { ids: group.ids, head: group.kind === 'item' };
   }
 
   /**
-   * The selected conversation's current session and its folder, else the checkout; on a page, the earlier session it pinned while that is still
-   * an earlier session of the selected work item. The folder stays the current session's, so the work item's artifacts and changes stay its own
+   * The selected conversation's current session and its folder, else the checkout; the earlier session the page pinned while that is still an
+   * earlier session of the selected work item. The folder stays the current session's, so the work item's artifacts and changes stay its own
    * while an earlier session shows, such as a setup session that ran in the repository's root.
    */
-  #follow(window: Window): void {
-    const sessions = window.selected === null ? [] : this.deps.store.sessionsFor(window.selected);
+  #follow(page: Page): void {
+    const sessions = page.selected === null ? [] : this.deps.store.sessionsFor(page.selected);
     const latest = sessions.at(-1);
-    const pinned = window.pinned === null ? undefined : sessions.find((one) => one.id === window.pinned && one !== latest);
+    const pinned = page.pinned === null ? undefined : sessions.find((one) => one.id === page.pinned && one !== latest);
     const shown = pinned ?? latest;
-    const item = window.selected === null ? null : this.deps.store.workItem(window.selected);
+    const item = page.selected === null ? null : this.deps.store.workItem(page.selected);
     const ticket = item === null ? null : this.deps.store.ticket(item.ticketId);
 
-    window.pinned = pinned?.id ?? null;
-    window.sessionId = shown?.id ?? null;
-    window.cwd = window.selected === null ? null : (latest?.cwd ?? (window.selected === window.workItemId ? window.folder : ticket?.repoRoot || window.folder));
+    page.pinned = pinned?.id ?? null;
+    page.sessionId = shown?.id ?? null;
+    page.cwd = page.selected === null ? null : (latest?.cwd ?? (page.selected === page.workItemId ? page.folder : ticket?.repoRoot || page.folder));
   }
 
-  #save(window: Window): void {
-    this.deps.store.setWindowBinding({
-      file: hostKey(window.host!),
-      workItemId: window.workItemId,
-      since: this.deps.now(),
-      scopeGen: window.scopeGen,
-      selectedWorkItemId: window.selected,
-      selectedSessionId: window.sessionId,
-      ticketId: window.ticketId,
-      title: window.title,
-    });
+  /** A page's conversations: its selected work item's group in the page's list, the group's own work item first when it has one. */
+  #listed(page: Page): ConversationRef[] {
+    const ids = page.selected === null ? [] : page.group.ids.includes(page.selected) ? page.group.ids : [page.selected];
+
+    return ids.filter((id) => this.deps.store.workItem(id) !== null).map((id, index) => ({ workItemId: id, primary: page.group.head && index === 0 && ids === page.group.ids }));
   }
 
-  /**
-   * The window's conversations: its primary work item first, then the ad hoc conversations its binding hosts that are not done, newest first,
-   * and the selected one even when it is done, until another is selected.
-   */
-  #listed(window: Window): ConversationRef[] {
-    if (window.page) {
-      const ids = window.selected === null ? [] : window.group.ids.includes(window.selected) ? window.group.ids : [window.selected];
-
-      return ids.filter((id) => this.deps.store.workItem(id) !== null).map((id, index) => ({ workItemId: id, primary: window.group.head && index === 0 && ids === window.group.ids }));
-    }
-
-    if (window.host === null) {
-      return [];
-    }
-
-    // The store matches hosts without case; a folder host where the file system has case matches only its own spelling.
-    const hosted = this.deps.store.hostedWorkItems(window.host).filter((item) => (item.status !== 'done' || item.id === window.selected) && this.#hosts(window, item.id));
-
-    // A deleted primary stays the binding's, for its ticket and title, but is no conversation.
-    const primary = window.workItemId !== null && this.deps.store.workItem(window.workItemId) !== null;
-
-    return [...(primary ? [{ workItemId: window.workItemId!, primary: true }] : []), ...hosted.filter((item) => item.id !== window.workItemId).map((item) => ({ workItemId: item.id, primary: false }))];
-  }
-
-  /**
-   * The window's scope, or null for an unknown key, a window bound to nothing, or an item window with no conversation; a folder window has one
-   * even with no conversation, so its view offers the plus.
-   */
+  /** The page's scope, or null for an unknown key or a page with no selection. */
   scope(key: string): WindowScope | null {
-    const window = this.#windows.get(key);
+    const page = this.#pages.get(key);
 
-    if (window?.page === true) {
-      return window.selected === null
-        ? null
-        : { kind: 'page', key, folder: window.folder, title: window.title, scopeGen: window.scopeGen, conversations: this.#listed(window), workItemId: window.selected, cwd: window.cwd, sessionId: window.sessionId, ...(window.pinned === null ? {} : { earlier: true as const }) };
-    }
-
-    if (window === undefined || window.host === null || (window.file !== null && window.selected === null)) {
-      return null;
-    }
-
-    return { kind: window.file === null ? 'folder' : 'item', key, folder: window.folder, title: window.title, scopeGen: window.scopeGen, conversations: this.#listed(window), workItemId: window.selected, cwd: window.cwd, sessionId: window.sessionId };
+    return page === undefined || page.selected === null
+      ? null
+      : { kind: 'page', key, folder: page.folder, title: page.title, scopeGen: page.scopeGen, conversations: this.#listed(page), workItemId: page.selected, cwd: page.cwd, sessionId: page.sessionId, ...(page.pinned === null ? {} : { earlier: true as const }) };
   }
 
-  /** Whether the key names a connected window. */
+  /** Whether the key names a connected page. */
   has(key: string): boolean {
-    return this.#windows.has(key);
+    return this.#pages.has(key);
   }
 
-  /**
-   * The binding of the window the key names, the destination an open or a claim nudge for it names: an item window's workspace file or a folder
-   * window's canonical folder; null for an unknown key or a window bound to nothing.
-   */
-  hostOf(key: string): string | null {
-    return this.#windows.get(key)?.host ?? null;
-  }
-
-  /** The keys of the connected windows bound to `host`, a workspace file or a canonical folder, by any spelling of it. */
-  keysOf(host: string): string[] {
-    return [...this.#windows.values()].filter((window) => window.host !== null && hostKey(window.host) === hostKey(host)).map((window) => window.key);
-  }
-
-  /** The canonical folder of the folder window the key names, or null for an item window, an unknown key or a window bound to nothing. */
-  folderOf(key: string): string | null {
-    const window = this.#windows.get(key);
-
-    return window === undefined || window.file !== null ? null : window.host;
-  }
-
-  /** Whether the work item is one of the window's conversations. */
+  /** Whether the work item is one of the page's conversations. */
   holds(key: string, workItemId: number): boolean {
-    const window = this.#windows.get(key);
+    const page = this.#pages.get(key);
 
-    return window !== undefined && this.#listed(window).some((ref) => ref.workItemId === workItemId);
+    return page !== undefined && this.#listed(page).some((ref) => ref.workItemId === workItemId);
   }
 
   /**
-   * Selects one of the window's conversations, raising its `scopeGen` and keeping the selection in its binding; false for a work item that is not
-   * one of them. A page can name one of the work item's sessions, an earlier one to show it read-only or the current one; a window cannot.
+   * Selects any work item the store knows (architecture.md § Web page), raising the page's `scopeGen`; the scope rule then holds it to that work
+   * item's group. `sessionId` names one of the work item's sessions, an earlier one to show it read-only or the current one. False for an unknown
+   * key, work item or session.
    */
   select(key: string, workItemId: number, sessionId: string | null = null): boolean {
-    const window = this.#windows.get(key);
+    const page = this.#pages.get(key);
 
-    // A page selects any work item the store knows (architecture.md § Web page); the scope rule then holds it to that work item's group.
-    if (window?.page === true) {
-      if (this.deps.store.workItem(workItemId) === null || (sessionId !== null && !this.deps.store.sessionsFor(workItemId).some((one) => one.id === sessionId))) {
-        return false;
-      }
-
-      window.selected = workItemId;
-      window.pinned = sessionId;
-      this.#placePage(window);
-      this.#follow(window);
-      window.scopeGen++;
-      return true;
-    }
-
-    if (window === undefined || sessionId !== null || !this.holds(key, workItemId)) {
+    if (page === undefined || this.deps.store.workItem(workItemId) === null || (sessionId !== null && !this.deps.store.sessionsFor(workItemId).some((one) => one.id === sessionId))) {
       return false;
     }
 
-    this.#choose(window, workItemId);
-
+    page.selected = workItemId;
+    page.pinned = sessionId;
+    this.#place(page);
+    this.#follow(page);
+    page.scopeGen++;
     return true;
   }
 
-  #choose(window: Window, workItemId: number): void {
-    window.selected = workItemId;
-    this.#follow(window);
-    window.scopeGen++;
-    this.#save(window);
-  }
-
-  /** Whether the work item is a conversation the window's binding hosts, done or not. */
-  #hosts(window: Window, workItemId: number): boolean {
-    const item = this.deps.store.workItem(workItemId);
-    const host = item === null ? null : (this.deps.store.ticket(item.ticketId)?.hostWindow ?? null);
-
-    return window.host !== null && host !== null && hostKey(host) === hostKey(window.host);
-  }
-
-  /**
-   * A dock row's click (architecture.md § Dock): stores a hosted work item, done or not, as its host binding's selection, so the window the click
-   * opens shows it, and selects it in the connected windows of that binding; a primary row selects its work item in the windows it is primary of.
-   * Returns the keys of the windows it moved and whether anything was selected or stored.
-   */
-  selectFor(workItemId: number, hostWindow: string | null): { keys: string[]; selected: boolean } {
-    const windows = [...this.#windows.values()].filter((window) =>
-      window.host === null ? false : hostWindow !== null ? hostKey(window.host) === hostKey(hostWindow) && this.#hosts(window, workItemId) : window.workItemId === workItemId,
-    );
-    let stored = false;
-
-    if (hostWindow !== null && windows.length === 0) {
-      const binding = this.#binding(hostWindow);
-
-      const item = this.deps.store.workItem(workItemId);
-      const host = item === null ? null : (this.deps.store.ticket(item.ticketId)?.hostWindow ?? null);
-
-      if (binding !== null && host !== null && hostKey(host) === hostKey(hostWindow)) {
-        const latest = this.deps.store.sessionsFor(workItemId).at(-1);
-
-        this.deps.store.setWindowBinding({ ...binding, file: hostKey(hostWindow), scopeGen: binding.scopeGen + 1, selectedWorkItemId: workItemId, selectedSessionId: latest?.id ?? null });
-        stored = true;
-      }
-    }
-
-    const moved = windows.filter((window) => window.selected !== workItemId);
-
-    for (const window of moved) {
-      this.#choose(window, workItemId);
-    }
-
-    return { keys: moved.map((window) => window.key), selected: stored || windows.length > 0 };
-  }
-
-
-  /** The keys of connected windows whose selected conversation's current session is this one. */
+  /** The keys of connected pages whose selected conversation's shown session is this one. */
   showing(sessionId: string): string[] {
-    return [...this.#windows.values()].filter((window) => window.selected !== null && window.sessionId === sessionId).map((window) => window.key);
+    return [...this.#pages.values()].filter((page) => page.selected !== null && page.sessionId === sessionId).map((page) => page.key);
   }
 
-  /** The keys of connected windows that list the work item among their conversations. */
+  /** The keys of connected pages that list the work item among their conversations. */
   listing(workItemId: number): string[] {
-    return [...this.#windows.keys()].filter((key) => this.holds(key, workItemId));
-  }
-
-  /**
-   * What the window's `/events` stream gets in place of the whole snapshot: its conversations' work items alone, the controls its pane needs, and
-   * how many work items need the operator, without naming them. A window that is not an item window gets no work item.
-   */
-  scoped(key: string, snapshot: Snapshot): Snapshot {
-    const window = this.#windows.get(key);
-    const ids = new Set(window === undefined ? [] : this.#listed(window).map((ref) => ref.workItemId));
-    const { held: _held, notes: _notes, holder: _holder, ...rest } = snapshot;
-
-    const workItems = snapshot.workItems.filter((item) => ids.has(item.id));
-    // Only its own work items' pull requests.
-    const linked = new Set(workItems.flatMap((item) => item.links.map((link) => link.target)));
-    const pullRequests = Object.fromEntries(Object.entries(snapshot.pullRequests ?? {}).filter(([url]) => linked.has(url)));
-
-    // The sources' notes and errors can name other tickets, so a window gets neither.
-    return { ...rest, errors: { ...snapshot.errors, sources: {} }, workItems, pool: [], needsCount: snapshot.workItems.filter(needsYou).length, pullRequests };
-  }
-
-  /** Lets the window that claimed a ticket's History command open that ticket's History. */
-  grant(key: string, ticketId: number): void {
-    this.#windows.get(key)?.granted.add(ticketId);
-  }
-
-  /** Whether the window may read the ticket's History: its primary work item's, a conversation's, or one the dock sent it. */
-  allowsTicket(key: string, ticketId: number, _snapshot?: Snapshot): boolean {
-    const window = this.#windows.get(key);
-
-    if (window === undefined) {
-      return false;
-    }
-
-    return window.ticketId === ticketId || window.granted.has(ticketId) || this.#listed(window).some((ref) => this.deps.store.workItem(ref.workItemId)?.ticketId === ticketId);
+    return [...this.#pages.keys()].filter((key) => this.holds(key, workItemId));
   }
 }
 
 /** The scope with no session while it shows an earlier session read-only, for what acts only on a current session, as the voice does. */
 export function liveScope(scope: WindowScope | null): WindowScope | null {
   return scope?.earlier === true ? { ...scope, sessionId: null } : scope;
-}
-
-/**
- * A folder window's folder as the hub binds it: its real path, which resolves links and, on Windows, the case of each name, so every spelling
- * of one folder gives one host; null for a path that is not a readable folder, or one whose name ends in `.code-workspace`, which a host link
- * would read as an item window's file (`isFolderHost`).
- */
-export function canonicalFolder(path: string): string | null {
-  try {
-    const real = realpathSync.native(path);
-
-    return statSync(real).isDirectory() && isFolderHost(real) ? real : null;
-  } catch {
-    return null;
-  }
-}
-
-/** The first folder a workspace file names, or null when it cannot be read. */
-export function workspaceFolder(file: string): string | null {
-  try {
-    const folders = (JSON.parse(readFileSync(file, 'utf8')) as { folders?: Array<{ path?: unknown }> }).folders;
-    const path = folders?.[0]?.path;
-
-    return typeof path === 'string' && path !== '' ? path : null;
-  } catch {
-    return null;
-  }
 }

@@ -165,22 +165,6 @@ export interface TranscriptCheckpoint {
   lastAt: number | null;
 }
 
-/** A window's work item (architecture.md § Window scope), kept by its workspace file so a reload keeps its scope generation. */
-/**
- * A window's binding (architecture.md § Window scope), kept by its workspace file: its primary work item, the ticket and title it showed, so they
- * outlive a deleted primary, its selected conversation and that conversation's current session, and the generation every command echoes.
- */
-export interface WindowBinding {
-  file: string;
-  workItemId: number | null;
-  since: number;
-  scopeGen: number;
-  selectedWorkItemId?: number | null;
-  selectedSessionId?: string | null;
-  ticketId?: number | null;
-  title?: string | null;
-}
-
 /**
  * Whether a host link or a window binding names a folder window's canonical folder rather than an item window's workspace file
  * (architecture.md § Window scope): item windows' files always end in `.code-workspace`.

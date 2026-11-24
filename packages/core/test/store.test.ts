@@ -435,6 +435,27 @@ describe('Store', () => {
     reopened.close();
   });
 
+  it('drops the window bindings and keeps the host of every hosted conversation', () => {
+    const version = MIGRATIONS.indexOf('DROP TABLE windowBindings;');
+    const path = join(dir, 'window-bindings.db');
+    const raw = new DatabaseSync(path);
+    raw.exec(MIGRATIONS.slice(0, version).join(';'));
+    raw.exec(`PRAGMA user_version = ${version}`);
+    raw.exec("INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot, hostWindow) VALUES (1, 'adhoc', '1', 'a', '', 1, 'D:/w', 'C:/sb/windows/gh-7-widgets-655280.code-workspace'), (2, 'adhoc', '2', 'b', '', 1, 'D:/git/support', 'D:/git/support'), (3, 'adhoc', '3', 'c', '', 1, 'D:/w', 'a3f9c0de11b2a3f9c0de11b2')");
+    raw.exec("INSERT INTO windowBindings (file, workItemId, since, scopeGen, selectedWorkItemId) VALUES ('c:/sb/windows/gh-7-widgets-655280.code-workspace', 1, 1, 2, 1)");
+    raw.close();
+
+    const store = Store.open(path);
+
+    expect([1, 2, 3].map((id) => store.ticket(id)?.hostWindow)).toEqual(['C:/sb/windows/gh-7-widgets-655280.code-workspace', 'D:/git/support', 'a3f9c0de11b2a3f9c0de11b2']);
+    store.close();
+
+    const check = new DatabaseSync(path);
+    expect(check.prepare("SELECT name FROM sqlite_master WHERE name = 'windowBindings'").all()).toEqual([]);
+    expect(check.prepare('PRAGMA user_version').get()).toEqual({ user_version: MIGRATIONS.length });
+    check.close();
+  });
+
   it('gives an existing session no Code Mode and no launch, keeps them across a reopen, and leaves them out of the activity log (PRD R93)', () => {
     const version = MIGRATIONS.findIndex((migration) => migration.includes('ADD COLUMN codeMode'));
     const path = join(dir, 'code-mode.db');

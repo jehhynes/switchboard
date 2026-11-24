@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -664,7 +664,7 @@ describe('PageChanges with a range', gitTimeout, () => {
 });
 
 describe('the file view', gitTimeout, () => {
-  const scope = (cwd: string, scopeGen = 1): WindowScope => ({ kind: 'page', key: 'p1', folder: cwd, title: 'T', scopeGen, conversations: [], workItemId: 7, cwd, sessionId: 's1' });
+  const scope = (cwd: string): WindowScope => ({ kind: 'page', key: 'p1', folder: cwd, title: 'T', scopeGen: 1, conversations: [], workItemId: 7, cwd, sessionId: 's1' });
 
   it("reads a file git tracks or would track on disk, and a change row's file at the base, and nothing else", async () => {
     const repo = busyRepo();
@@ -690,24 +690,6 @@ describe('the file view', gitTimeout, () => {
     expect((await changes.file('p1', 'src/kept.ts', 'index')).status).toBe(400);
     expect((await changes.file('p1', '../x', 'disk')).status).toBe(400);
     expect(await changes.file('p1', 'ignored.log', 'disk')).toEqual({ status: 404, body: { error: 'ignored.log is not a file of this worktree.' } });
-  });
-
-  it("opens a file of the worktree at a line in the work item's window, by its real path, only at the page's scope generation", async () => {
-    const repo = busyRepo();
-    const opened: Array<[number, string, number]> = [];
-    const changes = new PageChanges({ isPage: () => true, scope: () => scope(repo.root, 4), openFile: (id, path, line) => (opened.push([id, path, line]), null) });
-
-    expect(await changes.openFileCommand({ window: 'p1', scopeGen: 4, opId: 'o', path: 'src/kept.ts', line: 3 })).toEqual({ status: 200, body: { opened: 'src/kept.ts' } });
-    // A retried opId answers as the first did and opens nothing more; one without an opId is refused.
-    expect(await changes.openFileCommand({ window: 'p1', scopeGen: 4, opId: 'o', path: 'src/kept.ts', line: 3 })).toEqual({ status: 200, body: { opened: 'src/kept.ts' } });
-    expect((await changes.openFileCommand({ window: 'p1', scopeGen: 4, path: 'src/kept.ts', line: 3 })).status).toBe(400);
-    expect(opened).toEqual([[7, realpathSync.native(join(repo.root, 'src', 'kept.ts')), 3]]);
-    expect((await changes.openFileCommand({ window: 'p1', scopeGen: 3, opId: 'o3', path: 'src/kept.ts', line: 3 })).status).toBe(409);
-    expect((await changes.openFileCommand({ window: 'p1', scopeGen: 4, opId: 'o4', path: 'missing.ts', line: 3 })).status).toBe(404);
-    expect((await changes.openFileCommand({ window: 'p1', scopeGen: 4, opId: 'o5', path: '../x', line: 3 })).status).toBe(400);
-    expect((await changes.openFileCommand({ window: 'p1', scopeGen: 4, opId: 'o6', path: 'src/kept.ts', line: 0 })).status).toBe(400);
-    expect(await new PageChanges({ isPage: () => true, scope: () => scope(repo.root, 4), openFile: () => 'The work item is gone.' }).openFileCommand({ window: 'p1', scopeGen: 4, opId: 'o2', path: 'src/kept.ts', line: 1 })).toEqual({ status: 409, body: { error: 'The work item is gone.' } });
-    expect(opened).toHaveLength(1);
   });
 });
 

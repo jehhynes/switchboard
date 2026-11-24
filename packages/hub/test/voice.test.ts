@@ -39,7 +39,7 @@ class FakeConnection implements VoiceConnection {
   }
 }
 
-const scope = (key: string, workItemId: number, sessionId: string | null): WindowScope => ({ kind: 'item', key, folder: 'D:/w', title: 't', scopeGen: 1, conversations: [{ workItemId, primary: true }], workItemId, cwd: 'D:/w', sessionId });
+const scope = (key: string, workItemId: number, sessionId: string | null): WindowScope => ({ kind: 'page', key, folder: 'D:/w', title: 't', scopeGen: 1, conversations: [{ workItemId, primary: true }], workItemId, cwd: 'D:/w', sessionId });
 
 function setup(patch: Partial<VoiceSettings> = { enabled: true }) {
   let settings: VoiceSettings = { ...DEFAULT_SETTINGS.voice, ...patch };

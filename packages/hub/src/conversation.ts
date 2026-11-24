@@ -1,6 +1,6 @@
 import { countsUnread, inTranscript, summarizeMessage } from '@switchboard/core';
 import type { ConversationMessage, ConversationReply, ConversationStatus, Interruption, Piece, Provider, Session, SpokenState, Store } from '@switchboard/core';
-import { artifactsDir, backgroundCounts, hostKey, PERMISSION_PROMPT, personaById, resumesHeld, sessionTone, START_PROMPT, toneVersion, waitsOnLimit } from '@switchboard/core';
+import { artifactsDir, backgroundCounts, PERMISSION_PROMPT, personaById, resumesHeld, sessionTone, START_PROMPT, toneVersion, waitsOnLimit } from '@switchboard/core';
 import type { BackgroundCounts, PersonaSettings, ViewSettings } from '@switchboard/core';
 import { ArtifactFolder, EXTERNAL_NAME, ExternalArtifacts, externalFile, inGit, MAX_MESSAGE_CHARS, NotWritten, answerMessage, cardSteps, cardUtterance, currentStep, draftAnswers, interruptNote, messageTags, moveStep, pasteText, picked, pickLetter, questionKey, questionSpeech, resolveAnswers, setOther, SLUG } from '@switchboard/conversation';
 import type { CardDraft, CarriedQuestion, LedgerCard, LedgerQuestion, QuestionLedger } from '@switchboard/conversation';
@@ -241,9 +241,9 @@ export interface ConversationEntry {
   unread: number;
   /** The current session's provider; left out with no session or from an older session record. */
   provider?: 'claude' | 'codex';
-  /** On the web page, the current session's name as its CLI gives it, else its first message, else Setup or Task session; left out with no session and for a VS Code window. */
+  /** On the web page, the current session's name as its CLI gives it, else its first message, else Setup or Task session; left out with no session. */
   sessionTitle?: string;
-  /** On the web page, the work item's earlier sessions, newest first; left out when it has none and for a VS Code window. */
+  /** On the web page, the work item's earlier sessions, newest first; left out when it has none. */
   sessions?: SessionEntry[];
 }
 
@@ -274,11 +274,6 @@ export interface ConversationServiceDeps {
   /** Waits between screen reads while a message is typed; a timer by default. */
   sleep?(ms: number): Promise<void>;
   newId(): string;
-  /**
-   * Makes a hosted conversation (architecture.md § Hosted conversations) for the window binding `hostWindow` in `folder` and starts its session;
-   * its work item, or why it was refused.
-   */
-  newConversation?(hostWindow: string, folder: string, provider?: Provider): { workItemId: number } | { refused: string };
   /**
    * Starts a new session of the work item with `prompt`, the operator's first message, as New conversation… on the page does (architecture.md
    * § Web page): the session, or why it was refused.
@@ -1061,10 +1056,10 @@ export class ConversationService {
   }
 
   /**
-   * The dropdown's entries of a window's conversations: each one's title, current session's state and provider, and unread count, and on a
-   * `page` its current session's name (`#sessionName`) and each one's earlier sessions, newest first.
+   * The dropdown's entries of a page's conversations: each one's title, current session's state, provider, name (`#sessionName`) and unread
+   * count, and its earlier sessions, newest first.
    */
-  entries(refs: ConversationRef[], page = false): ConversationEntry[] {
+  entries(refs: ConversationRef[]): ConversationEntry[] {
     return refs.flatMap((ref) => {
       const item = this.deps.store.workItem(ref.workItemId);
       const ticket = item === null ? null : this.deps.store.ticket(item.ticketId);
@@ -1076,7 +1071,7 @@ export class ConversationService {
       const all = this.deps.store.sessionsFor(item.id);
       const session = all.at(-1) ?? null;
       const view = session === null ? null : this.#view(session, true, this.deps.hooks(), this.deps.personas?.() ?? null);
-      const earlier = page ? all.slice(0, -1).reverse().map((one) => sessionEntry(one, this.#sessionName(one))) : [];
+      const earlier = all.slice(0, -1).reverse().map((one) => sessionEntry(one, this.#sessionName(one)));
 
       return [
         {
@@ -1088,7 +1083,7 @@ export class ConversationService {
           conversation: view?.conversation ?? null,
           unread: session === null ? 0 : this.deps.store.unreadCount(session.id),
           ...(view?.provider === undefined ? {} : { provider: view.provider }),
-          ...(page && session !== null ? { sessionTitle: this.#sessionName(session) } : {}),
+          ...(session === null ? {} : { sessionTitle: this.#sessionName(session) }),
           ...(earlier.length === 0 ? {} : { sessions: earlier }),
         },
       ];
@@ -1097,7 +1092,7 @@ export class ConversationService {
 
   /** The scope as the window is sent it, with its conversations as dropdown entries. */
   scopeView(scope: WindowScope | null): ScopeView | null {
-    return scope === null ? null : { ...scope, conversations: this.entries(scope.conversations, scope.kind === 'page') };
+    return scope === null ? null : { ...scope, conversations: this.entries(scope.conversations) };
   }
 
   /** The dropdown each window was last sent. */
@@ -1780,7 +1775,7 @@ export class ConversationService {
         continue;
       }
 
-      const conversations = this.entries(scope.conversations, scope.kind === 'page');
+      const conversations = this.entries(scope.conversations);
       const text = JSON.stringify(conversations);
 
       if (this.#conversationsShown.get(key) !== text) {
@@ -1938,7 +1933,7 @@ export class ConversationService {
       status,
       unread,
       artifactsDir: folder?.dir ?? null,
-      // External artifacts are the web page's only: a VS Code window opens only its artifact folder's.
+      // The artifact folder's files, then the work item's external artifacts.
       artifacts: [...(folder?.list() ?? []), ...(this.deps.windows.isPage(key) && scope.workItemId !== null ? (this.#external.get(scope.workItemId)?.list() ?? []) : [])].sort((a, b) => b.updatedAt - a.updatedAt || a.path.localeCompare(b.path)),
       questions: scope.sessionId === null ? null : this.#questionsHello(key, scope.sessionId),
       ...this.#voiceHello(key),
@@ -2343,7 +2338,7 @@ export class ConversationService {
     }
   }
 
-  /** A window's key closed with its `/events` stream: a conversation stream still open under it no longer counts for watching artifacts. */
+  /** A page's key closed with its stream: a conversation stream still open under it no longer counts for watching artifacts. */
   windowClosed(): void {
     this.#followArtifacts();
   }
@@ -2955,14 +2950,10 @@ export class ConversationService {
     return answer;
   }
 
-  /** The conversations made by `new-conversation`, by window file and `opId`, so a repeated command answers the first work item. */
-  readonly #created = new Map<string, number>();
-
   /**
-   * `select` (architecture.md § Window scope): selects one of the window's conversations, raising its `scopeGen`; the window gets `scope` and a
-   * fresh `hello`. A page's `sessionId` names one of the work item's sessions, an earlier one to show read-only (architecture.md § Web page).
-   * 403 for a work item that is not one of them, a session that is not the work item's, or a `sessionId` from a VS Code window. Not refused
-   * for a stale `scopeGen`, since it names its whole target.
+   * `select` (architecture.md § Window scope): selects a work item on the page, raising its `scopeGen`; the page gets `scope` and a fresh
+   * `hello`. `sessionId` names one of the work item's sessions, an earlier one to show read-only (architecture.md § Web page). 403 for an
+   * unknown key or work item, or a session that is not the work item's. Not refused for a stale `scopeGen`, since it names its whole target.
    */
   select(body: Record<string, unknown>): { status: number; body: unknown } {
     const { window, opId, workItemId, sessionId } = body;
@@ -2979,50 +2970,6 @@ export class ConversationService {
     this.deps.voice?.selected(window);
 
     return { status: 200, body: { scopeGen: this.deps.windows.scope(window)?.scopeGen ?? null } };
-  }
-
-  /**
-   * `new-conversation` (architecture.md § Hosted conversations): makes an ad hoc work item hosted by the window in its folder, starts its Code
-   * Mode session at an empty prompt, selects it and answers `{workItemId}`; 409 with the refusal, such as while Code Mode is off. A repeated
-   * `opId` answers the first work item and makes none.
-   */
-  newConversation(body: Record<string, unknown>): { status: number; body: unknown } {
-    const { window, opId, provider } = body;
-
-    if (typeof window !== 'string' || typeof opId !== 'string' || opId === '' || opId.length > 200) {
-      return { status: 400, body: { error: 'Expected {window, scopeGen, opId}.' } };
-    }
-    if (provider !== undefined && provider !== 'claude' && provider !== 'codex') return { status: 400, body: { error: 'Choose Claude or Codex.' } };
-
-    // The window's binding hosts it: an item window's workspace file, or a folder window's canonical folder.
-    const file = this.deps.windows.hostOf(window);
-    const scope = this.deps.windows.scope(window);
-
-    if (file === null || scope === null || this.deps.newConversation === undefined) {
-      return { status: 403, body: { error: 'Not in this window.' } };
-    }
-
-    const done = `${hostKey(file)} ${opId}`;
-    const earlier = this.#created.get(done);
-
-    if (earlier !== undefined) {
-      return { status: 200, body: { workItemId: earlier } };
-    }
-
-    const made = provider === undefined ? this.deps.newConversation(file, scope.folder ?? '') : this.deps.newConversation(file, scope.folder ?? '', provider);
-
-    if ('refused' in made) {
-      return { status: 409, body: { error: made.refused } };
-    }
-
-    this.#remember(done, made.workItemId);
-
-    // Every window of the binding lists it; the one that made it selects it.
-    this.deps.windows.select(window, made.workItemId);
-    this.scopesChanged([window]);
-    this.conversationsChanged();
-
-    return { status: 200, body: { workItemId: made.workItemId } };
   }
 
   /**
@@ -3083,15 +3030,6 @@ export class ConversationService {
   }
   /** The sessions `page-conversation` started, by opId, keeping the last `UNSENT_KEPT`. */
   readonly #itemSessions = new Map<string, { workItemId: number; sessionId: string }>();
-
-  /** Remembers the work item a `new-conversation` made, keeping the last `UNSENT_KEPT`. */
-  #remember(done: string, workItemId: number): void {
-    this.#created.set(done, workItemId);
-
-    for (const key of [...this.#created.keys()].slice(0, -UNSENT_KEPT)) {
-      this.#created.delete(key);
-    }
-  }
 
   /**
    * Older items of the window's current session: refused with 403 for a key no window holds or a session that is not the window's current one,

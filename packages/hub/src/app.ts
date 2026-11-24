@@ -13,16 +13,15 @@ import { forumSource } from '@switchboard/forum';
 import { findBash } from './bash.js';
 import { cardsOf } from './cards.js';
 import { DoneSearch } from './dockSearch.js';
-import { dockView, windowOf, windowsDir, writeWorkspaceFile } from './dock.js';
+import { dockView, windowsDir, writeWorkspaceFile } from './dock.js';
 import type { DockRow, DockTerminal } from './dock.js';
 import { isPastePath } from './report.js';
-import { codeModeTerminal, rowKeyOf } from './rows.js';
+import { rowKeyOf } from './rows.js';
 import { DEBRIEF_SCAN_MS, Debriefs } from './debriefs.js';
 import { SOURCE_KINDS, checkSettings, loadConfig, readConfigFile, saveSettings } from './config.js';
 import type { HubApp } from './serve.js';
 import { Runtime } from './runtime.js';
 import type { ReportBody, RuntimeDeps } from './runtime.js';
-import { WindowQueue } from './windowQueue.js';
 import { ConversationService, claudePaths, sessionView } from './conversation.js';
 import { PageConsole } from './console.js';
 import { CodexConversationAdapter } from './codexConversation.js';
@@ -32,19 +31,19 @@ import { currentStep, questionSpeech } from '@switchboard/conversation';
 import { VoiceLink } from './voiceLink.js';
 import { enrolledAt, parseRemote } from '@switchboard/voice';
 import { buildSnapshot } from './snapshot.js';
-import type { Snapshot, WorkItemView } from './snapshot.js';
+import type { Snapshot } from './snapshot.js';
 import { SnapshotBuilder } from './snapshotBuilder.js';
 import type { Built } from './snapshotBuilder.js';
 import { liveScope, WindowScopes } from './windows.js';
 import { tailscaleIdentity } from './tailscale.js';
 import { readHubLog } from './hubLog.js';
 import type { RemoteAccess } from './page.js';
-import { dockRowOf, PageAccess, pageActionEvent, OPEN_IN_VSCODE, pageCommandOf, pageHeader, pageReportOf, pageList, pageRow, pasteText, poolRowOf, rowOpenUrl } from './page.js';
+import { dockRowOf, PageAccess, pageActionEvent, pageCommandOf, pageHeader, pageReportOf, pageList, pageRow, pasteText, poolRowOf, rowOpenUrl } from './page.js';
 import { launcher } from './launch.js';
 import type { Launcher } from './launch.js';
 import { pageAsset } from './pageAssets.js';
 import { PageChanges, VIEWED_REFUSED } from './changes.js';
-import { needsMessage, needsReason, newlyNeeding, rowFor, targetForUrl } from './needs.js';
+import { needsMessage, needsReason, newlyNeeding, rowFor } from './needs.js';
 import { systemNotifier } from './systemAlerts.js';
 import { installedProviders } from './installed.js';
 import { importDockFolders } from './folders.js';
@@ -63,9 +62,6 @@ const RELOAD_DEBOUNCE_MS = 300;
 export const PHONE_LOST_NOTE = 'Voice stopped unexpectedly on the paired device. Select Voice on this device there, or Talk here on this computer.';
 
 /** Operator events the dock may send (PRD R27). */
-/** Why `/background` refuses: Switchboard no longer runs Claude sessions in Claude's background service (PRD R89, R93). */
-export const CONTINUE_IN_BACKGROUND_REMOVED = "Continue in Background is no longer available: Switchboard runs every Claude session in its terminal holder. Start a new session from the web page.";
-
 const OPERATOR_EVENTS = new Set(['adhoc', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retry', 'stop', 'delete', 'pick', 'retriage-pool', 'snooze', 'restore', 'comment', 'move', 'reset-position', 'persona']);
 
 const REPORT_KINDS = new Set(['stage', 'worktree', 'done', 'approval', 'link', 'playbook', 'paste', 'task', 'question']);
@@ -302,8 +298,6 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   const runtime = new Runtime(deps, config);
   const launch = options.launch ?? launcher();
   const notifier = systemNotifier(deps.log);
-  // Kept in a file, because the window the dock is opening may replace this hub before it claims (architecture.md § Claude Code runner).
-  const windowQueue = WindowQueue.load(join(home, 'window-queue.json'), deps.now, deps.log);
   const claudeRoot = dirname(deps.claudeSettings).replaceAll('\\', '/');
   const debriefs = new Debriefs({
     appServer: { history: id => runtime.codexAppServer.history(id), run: (id, prompt, timeoutMs) => runAppServerDebrief(runtime.codexServer, id, prompt, timeoutMs) },
@@ -337,11 +331,6 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     }
   };
   let clickDock: (data: unknown) => boolean = () => false;
-  let sendWindows: (event: string, data: unknown, keys?: readonly string[]) => number = () => 0;
-  /**
-   * Tells the window opened from `workspace` to claim what was left for it, because VS Code reports no focus change when the dock brings an open
-   * window forward; a window claims on focus too. Nothing left for any window is announced, because only the window brought forward takes it.
-   */
   /**
    * What a terminal runs, from the settings as they are when the window or dock takes it: the agent's CLI from `sessions.claudePath` or
    * `sessions.codexPath` (PRD R28), or for a Code Mode session `hub.js attach <Switchboard session ID>` with `sessions.nodePath` (PRD R95).
@@ -360,40 +349,6 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     return { executable: terminal.provider === 'codex' ? sessions.codexPath : sessions.claudePath };
   };
 
-  /**
-   * The destination of a work item's window: its workspace file, its host's for a hosted conversation, which for a folder-hosted one is the host
-   * folder; from the store when the snapshot no longer lists it, as for a History link to a session done long ago; null for a work item with no window.
-   */
-  const itemWindowFile = (workItemId: number): string | null => {
-    const shown = views().snapshot.workItems.find((one) => one.id === workItemId);
-    const item = store.workItem(workItemId);
-    const ticket = item === null ? null : store.ticket(item.ticketId);
-    const view = shown ?? (item === null || ticket === null ? null : ({ ...item, ticket, sessions: store.sessionsFor(item.id), worktree: store.worktreeFor(ticket.id) } as unknown as WorkItemView));
-
-    const window = view === null ? null : windowOf(view, windows);
-
-    return window === null ? null : (window.file ?? window.folder ?? null);
-  };
-
-  /**
-   * The attach terminal command for a claimed open of a Code Mode session, which the Claude view refuses (PRD R95), or of an ended registered
-   * session, which resumes in the holder (PRD R81); null for any other session.
-   */
-  const codeModeOpen = (sessionId: string): Record<string, unknown> | null => {
-    const session = store.session(sessionId) ?? store.sessionByNativeId(sessionId);
-    if (session?.execution === 'app-server') return { type: 'conversation' };
-    const item = session !== null && (session.codeMode === true || resumesHeld(session)) ? store.workItem(session.workItemId) : null;
-    const ticket = item === null ? null : store.ticket(item.ticketId);
-
-    return session === null || ticket === null ? null : codeModeTerminal(ticket, session);
-  };
-
-  // Only the destination window's streams hear the nudge, by the keys bound to it, an item window's file or a folder window's folder (architecture.md § Window scope).
-  const askToClaim = (workspace: string | null): void => {
-    if (workspace !== null) {
-      sendWindows('claim', { workspace }, scopes.keysOf(workspace));
-    }
-  };
   /** Why a write from a Settings window that read another config folder is refused, or null; a body without `configDir` names none. */
   const movedFrom = (read: unknown): string | null =>
     typeof read === 'string' && read !== configDir ? `The config folder is now ${configDir}, not ${read}. Settings reads it again; make your change there.` : null;
@@ -426,7 +381,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   // The installed page a dock click opens a work item in, and the page that raises needs-you alerts (architecture.md § Web page).
   const pageTargets = new PageTargets();
   // Each window sees only its own work item (architecture.md § Window scope); views are built off the main thread and published whole.
-  const scopes = new WindowScopes({ store, windows, now: deps.now });
+  const scopes = new WindowScopes({ store, windows });
   const doneSearch = new DoneSearch();
   /** A done work item's ID and ticket by its row key, for a row the dock's search found before the Done list (PRD R63). */
   const olderRow = (rowKey: string): { id: number; ticket: { hostWindow?: string | null } } | undefined => {
@@ -586,10 +541,10 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   // The web page's console of a held session (architecture.md § Web page).
   /**
    * Open in VS Code from the page (architecture.md § Web page): writes the row's workspace file and starts VS Code on it, or on a folder-hosted
-   * conversation's folder, at `goto`'s file and line when given, after checking the row offers it now; why not, or null. VS Code runs without the
-   * Switchboard extension, so the hub leaves no command for the window.
+   * conversation's folder, after checking the row offers it now; why not, or null. VS Code runs without the Switchboard extension, so the hub
+   * leaves no command for the window.
    */
-  const commandInWindow = (workItemId: number, label: string, goto?: { path: string; line: number | null }): string | null => {
+  const commandInWindow = (workItemId: number, label: string): string | null => {
     const row = dockRowOf(views().dock, workItemId);
     const built = row === null ? { refused: 'The work item is gone.' } : pageCommandOf(row, label);
 
@@ -626,19 +581,18 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     }
 
     try {
-      launch.openCode(destination, goto);
+      launch.openCode(destination);
     } catch (error) {
       return `VS Code did not start: ${(error as Error).message}`;
     }
 
-    deps.log(`page: ${label}${goto === undefined ? '' : ` at ${goto.path}`} for work item ${workItemId} in ${destination}`);
+    deps.log(`page: ${label} for work item ${workItemId} in ${destination}`);
     return null;
   };
   // The web page's Changes list and diffs, read with git in the page's selected conversation's folder (architecture.md § Web page).
   const pageChanges = new PageChanges({
     isPage: (key) => scopes.isPage(key),
     scope: (key) => scopes.scope(key),
-    openFile: (workItemId, path, line) => commandInWindow(workItemId, OPEN_IN_VSCODE, { path, line }),
     viewed: { list: (workItemId, scope) => store.viewedFiles(workItemId, scope), set: (workItemId, scope, path, hash) => store.setViewedFile(workItemId, path, hash, deps.now(), scope) },
     viewedChanged: (workItemId, from, payload) => {
       for (const key of conversation.pages()) {
@@ -694,12 +648,6 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     now: deps.now,
     newId: randomUUID,
     resume: (sessionId) => runtime.resumeThread(sessionId),
-    newConversation: (hostWindow, folder, provider) => {
-      const { refused } = runtime.send({ type: 'new-conversation', hostWindow, folder, ...(provider === undefined ? {} : { provider }) });
-      const made = refused === null ? store.hostedWorkItems(hostWindow)[0] : undefined;
-
-      return made === undefined ? { refused: refused ?? 'The conversation was not made.' } : { workItemId: made.id };
-    },
     newItemSession: (workItemId, prompt, provider) => {
       const before = store.sessionsFor(workItemId).at(-1)?.id;
       const { refused } = runtime.send({ type: 'item-session', workItemId, prompt, ...(provider === undefined ? {} : { provider }) });
@@ -850,6 +798,8 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         pageTargets.focused(key);
         focusedWindow = key;
         voice.windowGained(deps.now());
+        // A page coming to the front reads the pull requests again (PRD R92).
+        runtime.refreshPullRequests();
       } else {
         focusedPages.delete(key);
 
@@ -978,7 +928,6 @@ const dockWithRuns = () => {
       })),
     };
   };
-  const dockRows = () => dockWithRuns().groups.flatMap((group) => group.rows);
 
   /** The row of the voice target's work item, which has the mic mark in the dock and on the page (architecture.md § Voice), or null. */
   function voiceRow(): string | null {
@@ -1226,9 +1175,6 @@ const dockWithRuns = () => {
 
         return refused === null ? { status: 200, body: { started: true } } : { status: 409, body: { error: refused } };
       },
-      // Continue in Background from an item window's Claude tab is gone with Claude's background sessions (PRD R89, R93); a window that still asks is told.
-      '/background': () => Promise.resolve({ status: 409, body: { error: CONTINUE_IN_BACKGROUND_REMOVED } }),
-      '/background/check': () => Promise.resolve({ status: 409, body: { error: CONTINUE_IN_BACKGROUND_REMOVED } }),
       // The ticket report (PRD R83), which no report contract or usage text lists.
       '/ticket': async (body) => {
         const { sessionId, url, playbook, nativeSessionId } = isRecord(body) ? body : {};
@@ -1248,66 +1194,6 @@ const dockWithRuns = () => {
         }
         const result = await runtime.handled(sessionId, url, releaseKey ?? null, nativeSessionId || null);
         return 'refused' in result ? { status: 409, body: { error: result.refused } } : { status: 200, body: result };
-      },
-      '/open': async (body) => {
-        if (!isRecord(body) || typeof body['sessionId'] !== 'string' || typeof body['cwd'] !== 'string' || !optionalString(body['workspace']) || !optionalString(body['window'])) {
-          return { status: 400, body: { error: 'Expected {sessionId, cwd, workspace?, window?}.' } };
-        }
-
-        const sessionId = body['sessionId'];
-        const session = store.session(sessionId) ?? store.sessionByNativeId(sessionId);
-        const window = typeof body['window'] === 'string' ? body['window'] : null;
-        // The destination window (architecture.md § Window scope): the window that asked, for a session of its own conversations, else the
-        // session's own window, its host's for a hosted conversation. A workspace the caller names must be that window, so no caller can route
-        // another work item's session to a window of its choice; only a session the store does not know goes where the caller names.
-        const asker = window !== null && session !== null && scopes.holds(window, session.workItemId) ? scopes.hostOf(window) : null;
-        const own = session === null ? null : itemWindowFile(session.workItemId);
-        const named = body['workspace'] ?? null;
-
-        if (asker === null && session !== null && named !== null && (own === null || hostKey(named) !== hostKey(own))) {
-          return { status: 409, body: { error: 'The session opens only in its own window.' } };
-        }
-
-        const workspace = asker ?? (session === null ? named : own);
-
-        if (workspace === null) {
-          return { status: 409, body: { error: 'The session has no window to open it in.' } };
-        }
-
-        const id = windowQueue.recordOpen(sessionId, body['cwd'], workspace);
-
-        if (id === null) {
-          return { status: 500, body: { error: 'The hub could not save the open; see its log.' } };
-        }
-
-        deps.log(`session ${sessionId} left for ${workspace}`);
-        askToClaim(workspace);
-
-        // `here`: the destination is the asking window, which then claims at once, since it gains no focus; a folder window cannot tell from the path.
-        const mine = window === null ? null : scopes.hostOf(window);
-
-        return { status: 200, body: { recorded: true, id, workspace, here: mine !== null && hostKey(mine) === hostKey(workspace) } };
-      },
-      '/history': async (body) => {
-        if (!isRecord(body) || !Number.isInteger(body['ticketId']) || typeof body['window'] !== 'string') {
-          return { status: 400, body: { error: 'Expected {window, ticketId, revision?}.' } };
-        }
-
-        const ticketId = body['ticketId'] as number;
-
-        // A window reads only its own work item's History, or one the dock sent it (architecture.md § Window scope).
-        if (!scopes.allowsTicket(body['window'], ticketId, views().snapshot)) {
-          return { status: 403, body: { error: 'Not in this window.' } };
-        }
-
-        // A reader that names the revision it shows gets the full history only when it changed.
-        if (typeof body['revision'] === 'string' && store.ticket(ticketId) !== null && store.historyRevision(ticketId) === body['revision']) {
-          return { status: 200, body: { unchanged: true } };
-        }
-
-        const history = store.ticketHistory(ticketId);
-
-        return history === null ? { status: 409, body: { error: `Unknown ticket ${body['ticketId']}.` } } : { status: 200, body: history };
       },
       '/v1/conversation/send': async (body) => (isRecord(body) ? conversation.send(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, text, command?}.' } }),
       '/v1/conversation/card-draft': async (body) => (isRecord(body) ? conversation.cardCommand('card-draft', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, card, draft}.' } }),
@@ -1333,7 +1219,6 @@ const dockWithRuns = () => {
       '/v1/conversation/history': async (body) => (isRecord(body) ? conversation.history(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, before, limit?}.' } }),
       '/v1/conversation/seen': async (body) => (isRecord(body) ? conversation.seen(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, ids}.' } }),
       '/v1/conversation/select': async (body) => (isRecord(body) ? conversation.select(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId}.' } }),
-      '/v1/conversation/new-conversation': async (body) => (isRecord(body) ? conversation.newConversation(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId}.' } }),
       '/v1/conversation/page-new-session': async (body) => (isRecord(body) ? conversation.newSession(body, true) : { status: 400, body: { error: 'Expected {window, opId, folder, provider, model?, prompt?, run?}.' } }),
       '/v1/conversation/page-folders': async (body) => (isRecord(body) ? conversation.pageFolders(body) : { status: 400, body: { error: 'Expected {window, path?}.' } }),
       '/v1/conversation/statuses': async (body) => (isRecord(body) ? conversation.statuses(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, before, limit?}.' } }),
@@ -1372,10 +1257,8 @@ const dockWithRuns = () => {
       },
       '/v1/conversation/page-holder-restart': async (body) => (isRecord(body) ? conversation.pageHolderRestart(body) : { status: 400, body: { error: 'Expected {window}.' } }),
       '/v1/conversation/page-adhoc': async (body) => (isRecord(body) ? conversation.pageAdhoc(body) : { status: 400, body: { error: 'Expected {window, opId, schedule}.' } }),
-      // A changed file opened at a line in the work item's VS Code window (architecture.md § Web page).
       // A changed file ticked viewed, or its tick cleared, for every device (architecture.md § Web page).
       '/v1/conversation/viewed': async (body) => (isRecord(body) ? pageChanges.viewedCommand(body) : { status: 400, body: { error: VIEWED_REFUSED } }),
-      '/v1/conversation/open-file': async (body) => (isRecord(body) ? pageChanges.openFileCommand(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, path, line}.' } }),
       '/v1/conversation/page-search': async (body) => (isRecord(body) ? conversation.pageSearch(body) : { status: 400, body: { error: 'Expected {window, text, since}.' } }),
       // The page's tabs for its work item, kept for every device (architecture.md § Web page).
       '/v1/conversation/page-tabs': async (body) => (isRecord(body) ? conversation.pageTabs(body) : { status: 400, body: { error: 'Expected {window, workItemId, tab?, close?, reopen?, openOn?}.' } }),
@@ -1385,91 +1268,6 @@ const dockWithRuns = () => {
       '/v1/conversation/mic': async (body) => (isRecord(body) ? conversation.voiceCommand('mic', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, on}.' } }),
       '/v1/conversation/mic-timing': async (body) => (isRecord(body) ? conversation.voiceCommand('mic-timing', body) : { status: 400, body: { error: 'Expected {window, steps, outcome}.' } }),
       '/v1/conversation/composer': async (body) => (isRecord(body) ? conversation.voiceCommand('composer', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, focused, draft}.' } }),
-      '/claim': async (body) => {
-        if (!isRecord(body) || typeof body['folder'] !== 'string' || !optionalString(body['workspace']) || !(body['focused'] === undefined || typeof body['focused'] === 'boolean') || !optionalString(body['window'])) {
-          return { status: 400, body: { error: 'Expected {folder, workspace?, focused?, window?}.' } };
-        }
-
-        const keyed = typeof body['window'] === 'string' && scopes.has(body['window']);
-        // A window claims an open only by its key's binding, never by a workspace or folder it names (architecture.md § Window scope).
-        const bound = keyed ? scopes.hostOf(body['window'] as string) : null;
-        // Commands left for a workspace go only to the window its key binds; a claim with no binding takes only those left for any window.
-        const workspace = bound;
-        const claimed = windowQueue.claimOpen(bound);
-        const attach = claimed === null ? null : codeModeOpen(claimed);
-        const sessionId = attach === null ? claimed : null;
-        // A History command the dock left lets the window that claims it, named by its key, read that ticket's History. A claim with no key a
-        // connected window holds leaves it queued as it was, for the next claim, which has one, since the window could not read that History;
-        // it keeps its ID, so the dock can still withdraw it, its time, so it still expires, and its workspace, so it still goes to its window.
-        const accepts = (command: Record<string, unknown>) => keyed || command['type'] !== 'history';
-        const delivered = [...(attach === null ? [] : [attach]), ...windowQueue.claimCommands(workspace, body['focused'] === true, accepts)].map((command) =>
-          command['type'] === 'terminal' ? { ...command, ...terminalRun(command) } : command,
-        );
-
-        for (const command of delivered.filter((one) => one['type'] === 'history' && Number.isInteger(one['ticketId']))) {
-          scopes.grant(body['window'] as string, command['ticketId'] as number);
-        }
-
-        const claimant = workspace ?? (body['folder'] || 'a window with no folder');
-
-
-        // The log shows whether a window took what the dock left for it (PRD R71).
-        if (claimed !== null) {
-          deps.log(`session ${claimed} claimed by ${claimant}${attach === null ? '' : ' as its attach terminal'}`);
-        }
-
-        if (delivered.length > 0) {
-          deps.log(`window commands claimed by ${claimant}: ${delivered.map((command) => String(command['type'])).join(', ')}`);
-        }
-
-        // The window opens the session in its provider's view; an unknown one, such as a deleted session's, in Claude's.
-        const provider = sessionId === null ? null : (store.sessionByNativeId(sessionId)?.provider ?? 'claude');
-
-        return { status: 200, body: { sessionId, provider, commands: delivered } };
-      },
-      '/window': async (body) => {
-        if (!isRecord(body) || !optionalString(body['workspace']) || !isWindowCommand(body['command'], body['workspace'] ?? null)) {
-          return { status: 400, body: { error: 'Expected {workspace, command} with a changes, terminal, history, log or openUrl command, or openTabs for a workspace.' } };
-        }
-
-        const id = windowQueue.recordCommand(body['command'], body['workspace'] ?? null);
-
-        if (id === null) {
-          return { status: 500, body: { error: 'The hub could not save the command; see its log.' } };
-        }
-
-        deps.log(`window command ${id} ${String(body['command']['type'])} left for ${body['workspace'] ?? 'any window'}`);
-        askToClaim(body['workspace'] ?? null);
-
-        return { status: 200, body: { id } };
-      },
-      // The dock withdraws a session it left for a window its click did not reach, so no window opens it later (architecture.md § Dock).
-      '/open/withdraw': async (body) => {
-        if (!isRecord(body) || !Number.isInteger(body['id'])) {
-          return { status: 400, body: { error: 'Expected {id}.' } };
-        }
-
-        const withdrawn = windowQueue.withdrawOpen(body['id'] as number);
-
-        if (withdrawn) {
-          deps.log(`open ${body['id']} withdrawn`);
-        }
-
-        return { status: 200, body: { withdrawn } };
-      },
-      '/window/withdraw': async (body) => {
-        if (!isRecord(body) || !Number.isInteger(body['id'])) {
-          return { status: 400, body: { error: 'Expected {id}.' } };
-        }
-
-        const withdrawn = windowQueue.withdrawCommand(body['id'] as number);
-
-        if (withdrawn) {
-          deps.log(`window command ${body['id']} withdrawn`);
-        }
-
-        return { status: 200, body: { withdrawn } };
-      },
       '/sources': async (body) => {
         if (!isRecord(body) || typeof body['name'] !== 'string' || typeof body['enabled'] !== 'boolean') {
           return { status: 400, body: { error: 'Expected {name, enabled}.' } };
@@ -1489,23 +1287,6 @@ const dockWithRuns = () => {
 
         return error === null ? { status: 200, body: { done: true } } : { status: 409, body: { error } };
       },
-      /**
-       * Open in Switchboard (PRD R69): the row of a ticket URL, for the window VS Code gave the link, which runs its click itself because the dock
-       * today only calls SetForegroundWindow on an open item window, which Windows refuses a process without the latest input (mechanics M26). The
-       * one exception to the window scope rule: the operator asked for that row.
-       */
-      '/open-url': async (body) => {
-        if (!isRecord(body) || typeof body['url'] !== 'string' || body['url'] === '') {
-          return { status: 400, body: { error: 'Expected {url}.' } };
-        }
-
-        const snapshot = views().snapshot;
-        const target = targetForUrl(snapshot, body['url']);
-        const rowKey = target === null ? null : rowFor(snapshot, target);
-        const row = rowKey === null ? undefined : dockRows().find((one) => one.key === rowKey);
-
-        return row === undefined ? { status: 404, body: { error: `Switchboard has no work item for ${body['url']}` } } : { status: 200, body: { row } };
-      },
       // VS Code forwards the click of a row that opens a terminal or nothing, which only the dock runs (PRD R65, R69, R71).
       '/dock/click': async (body) => {
         if (!isRecord(body) || typeof body['rowKey'] !== 'string') {
@@ -1522,7 +1303,7 @@ const dockWithRuns = () => {
 
         return { status: 200, body: doneSearch.search(store, views().snapshot, runtime.snapshotInputs(), body['text'], body['since'], windows) };
       },
-      // A dock row's click (architecture.md § Dock): a hosted conversation becomes its host binding's selection, shown by the window the click opens.
+      // A dock row's click (architecture.md § Dock), which is also Talk here for its work item's session (architecture.md § Voice).
       '/dock/select': async (body) => {
         if (!isRecord(body) || typeof body['rowKey'] !== 'string') {
           return { status: 400, body: { error: 'Expected {rowKey}.' } };
@@ -1535,15 +1316,9 @@ const dockWithRuns = () => {
           return { status: 404, body: { error: 'No work item has that row.' } };
         }
 
-        const { keys, selected } = scopes.selectFor(item.id, item.ticket.hostWindow ?? null);
-
-        conversation.scopesChanged(keys);
-        conversation.conversationsChanged();
-
-        // From slice 9 a row click is also Talk here for its work item's session, when one of its windows is connected (architecture.md § Voice).
         const voiceRefused = config.settings.voice.enabled ? voice.dockSelect(item.id) : null;
 
-        return { status: 200, body: { selected, ...(voiceRefused === null ? {} : { voice: voiceRefused }) } };
+        return { status: 200, body: voiceRefused === null ? {} : { voice: voiceRefused } };
       },
       // A dock row's click with `dock.openIn: web`, or its Alt-click (architecture.md § Dock): the installed page used last shows the work item and
       // puts the marker in its title, by which the dock brings its window forward; with no installed page open the dock opens the page at it.
@@ -1604,10 +1379,8 @@ const dockWithRuns = () => {
       '/v1/conversation/page-voice-enroll': settingsRoutes.enroll,
       '/v1/conversation/page-settings-check': settingsRoutes.check,
       '/v1/conversation/page-settings-save': settingsRoutes.save,
-      // Brief replies, from a window's view title menu (hub token) or this computer's page's view options menu (page command).
+      // Brief replies, from this computer's page's view options menu.
       '/v1/conversation/brief-replies': settingsRoutes.briefReplies,
-      // Expand replies, its inverse, from the title menu of a VS Code window that still runs an extension build from before Brief replies.
-      '/v1/conversation/expand-replies': async (body) => settingsRoutes.briefReplies(isRecord(body) && typeof body['on'] === 'boolean' ? { ...body, on: !body['on'] } : body),
       '/action': async (body) => {
         const event = parseAction(body);
 
@@ -1621,30 +1394,6 @@ const dockWithRuns = () => {
       },
     },
     snapshot: () => runtime.snapshot(),
-    windowOpened: (workspace, folder = null) => {
-      const key = scopes.open(workspace, builder.latest()?.snapshot ?? null, folder);
-
-      // After the stream registers it, so the voice sees the window.
-      setImmediate(() => voice.update());
-
-      return key;
-    },
-    windowFocused: (key, at) => {
-      // VS Code reports a blur when the browser takes the focus, which may arrive after the page reported it has it.
-      if (key !== null || focusedWindow === null || !scopes.isPage(focusedWindow)) {
-        focusedWindow = key;
-      }
-
-      // A VS Code window in front is no session's terminal, unless the dock reported a terminal since that window's change.
-      if (key !== null) {
-        voice.windowGained(at);
-        // A window coming to the front reads its pull requests again (PRD R92).
-        runtime.refreshPullRequests();
-      }
-
-      voice.update();
-    },
-    windowFolder: (key) => scopes.folderOf(key),
     windowClosed: (key) => {
       if (focusedWindow === key) {
         focusedWindow = null;
@@ -1657,7 +1406,6 @@ const dockWithRuns = () => {
       conversation.windowClosed();
       voice.windowClosed(key);
     },
-    windowState: (key) => scopes.scoped(key, views().snapshot),
     conversation: (key, write) => conversation.open(key, write),
     page: {
       access: new PageAccess(store, deps.now),
@@ -1736,9 +1484,6 @@ const dockWithRuns = () => {
     attachRemote: (changed) => {
       remoteChanged = changed;
     },
-    attachWindows: (send) => {
-      sendWindows = send;
-    },
     snoozedUrls: () => browser.snoozed(),
     cards: () => browser.cards(),
     snoozeUrl: (url, until) => browser.snooze(url, until),
@@ -1785,31 +1530,4 @@ function openPlaybooks(runtime: Runtime): Record<string, number> {
 
 function optionalString(value: unknown): value is string | null | undefined {
   return value === undefined || value === null || typeof value === 'string';
-}
-
-/** A command the dock leaves for a VS Code window, with the fields the window's handler reads (PRD R71). */
-function isWindowCommand(value: unknown, workspace: string | null): value is Record<string, unknown> {
-  if (!isRecord(value)) {
-    return false;
-  }
-
-  const text = (key: string) => typeof value[key] === 'string' && value[key] !== '';
-
-  switch (value['type']) {
-    case 'changes':
-      return text('path') && text('key') && typeof value['title'] === 'string';
-    case 'history':
-      return Number.isInteger(value['ticketId']) && text('key');
-    case 'terminal':
-      return text('sessionId') && text('cwd') && text('name') && (value['shortId'] === null || text('shortId')) && typeof value['active'] === 'boolean';
-    case 'openUrl':
-      return text('url');
-    case 'log':
-      return true;
-    // An item window opens its own tabs (PRD R72), so another window cannot take the command.
-    case 'openTabs':
-      return workspace !== null;
-    default:
-      return false;
-  }
 }

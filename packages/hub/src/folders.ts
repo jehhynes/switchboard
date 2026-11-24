@@ -1,11 +1,25 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
-import { hostKey } from '@switchboard/core';
+import { hostKey, isFolderHost } from '@switchboard/core';
 import type { Store } from '@switchboard/core';
 import { SKIPPED } from './page.js';
-import { canonicalFolder } from './windows.js';
+
+/**
+ * A folder as the hub records it: its real path, which resolves links and, on Windows, the case of each name, so every spelling of one folder
+ * gives one path; null for a path that is not a readable folder, or one whose name ends in `.code-workspace`, which `windowOf` would read as a
+ * workspace file (`isFolderHost`).
+ */
+export function canonicalFolder(path: string): string | null {
+  try {
+    const real = realpathSync.native(path);
+
+    return statSync(real).isDirectory() && isFolderHost(real) ? real : null;
+  } catch {
+    return null;
+  }
+}
 
 /** The most subfolders `listFolder` answers. */
 export const FOLDERS_LISTED = 500;
