@@ -139,7 +139,7 @@ svg.source-logo.forum { color: #57ae57; }
 .folder-field { position: relative; }
 .folder-combo { display: flex; align-items: stretch; }
 .folder-combo .folder-input { flex: 1; min-width: 0; padding: 2px 6px; border-top-right-radius: 0; border-bottom-right-radius: 0; }
-.folder-combo .folder-toggle { flex: none; width: 26px; border: 1px solid var(--vscode-dropdown-border, var(--vscode-input-border, transparent)); border-left: none; border-radius: 0 2px 2px 0; background: var(--vscode-dropdown-background, var(--vscode-input-background)); color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground)); }
+.folder-combo .folder-toggle { flex: none; display: inline-flex; align-items: center; justify-content: center; padding: 0; width: 26px; border: 1px solid var(--vscode-dropdown-border, var(--vscode-input-border, transparent)); border-left: none; border-radius: 0 2px 2px 0; background: var(--vscode-dropdown-background, var(--vscode-input-background)); color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground)); }
 .folder-menu { position: absolute; z-index: 1; background: var(--vscode-dropdown-background, var(--vscode-editorWidget-background)); border: 1px solid var(--vscode-dropdown-border, var(--vscode-widget-border, transparent)); box-shadow: 0 4px 12px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.3)); top: 100%; left: 0; right: 0; max-height: 260px; overflow-y: auto; overscroll-behavior: contain; margin: 2px 0 0; padding: 4px 0; list-style: none; border-radius: 6px; }
 .folder-menu, .folder-browser { list-style: none; }
 .folder-group { padding: 6px 10px 2px; font-size: 11px; color: var(--vscode-descriptionForeground); text-transform: uppercase; letter-spacing: 0.04em; }
