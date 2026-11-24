@@ -15,6 +15,8 @@ import type { ContextResult, CopyRelation, Playbook, PolledTicket, PollResult, P
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Config } from '../src/config.js';
 import type { HolderConnection } from '../src/holder.js';
+import { ConversationService } from '../src/conversation.js';
+import { WindowScopes } from '../src/windows.js';
 import { ATTACH_RESERVATION_MS, INPUT_SETTLE_MS, PULL_REQUESTS_FOCUS_MS, questionCardOpen, REPORT_CHECK_MS, MARKER_MS, RECHECK_MS, MARKER_WATCH_RETRY_MS, repoKeysOf, Runtime, SESSION_ENDED, SESSION_RELAUNCHED, triageText, WAKE_MS } from '../src/runtime.js';
 import type { RuntimeDeps } from '../src/runtime.js';
 import { controlsOf, doneSince } from '../src/rows.js';
@@ -2784,6 +2786,84 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
     expect(store.session(session.id)?.stateDetail).toBeNull();
     expect(store.workItem(1)?.status).toBe('blocked');
     runtime.stop();
+  });
+
+  /** A held session whose transcript the real Claude conversation adapter reads, with each wait between its reads counted. */
+  async function transcriptSession() {
+    const context = setup(config({ codeMode: true }), () => T0, { codeMode: fakeRunner() });
+    const { runtime, store } = context;
+    const sleeps: number[] = [];
+    const service = new ConversationService({
+      store,
+      windows: new WindowScopes({ store, windows: join(home, 'windows'), newKey: () => 'k' }),
+      projectsDir: join(home, 'projects'),
+      claudeConfig: join(home, '.claude.json'),
+      screen: async () => null,
+      input: { reserve: async () => ({ refused: 'unused' }), write: async () => ({ rev: 0 }), cannotType: () => null },
+      hooks: () => true,
+      now: () => T0,
+      sleep: async (ms) => { sleeps.push(ms); await new Promise((resolve) => setImmediate(resolve)); },
+      newId: () => String(sleeps.length),
+      log: () => {},
+    });
+
+    runtime.send({ type: 'adhoc', prompt: 'held', repoRoot: 'D:/git/widgets', start: true });
+    await runtime.settled();
+    runtime.setConversationReader({ read: (ids) => service.readNow(ids), catchUp: (id) => service.catchUp(id) });
+    const session = store.activeSessions()[0]!;
+    const folder = join(home, 'projects', projectSlug(session.cwd));
+    const path = join(folder, `${session.nativeSessionId}.jsonl`);
+    const at = new Date(T0).toISOString();
+    const lines = {
+      prompt: JSON.stringify({ type: 'user', uuid: 'u1', timestamp: at, message: { role: 'user', content: 'Start' } }),
+      question: JSON.stringify({ type: 'assistant', uuid: 'a1', timestamp: at, message: { role: 'assistant', content: [{ type: 'text', text: 'Before I go on:\n\n1. Which port?\n   - A) 8765\n   - B) 8799' }] } }),
+      hooks: JSON.stringify({ type: 'system', subtype: 'stop_hook_summary', uuid: 's1', timestamp: at, isSidechain: false }),
+      duration: JSON.stringify({ type: 'system', subtype: 'turn_duration', uuid: 's2', timestamp: at, durationMs: 4026, isSidechain: false }),
+    };
+    const append = (...more: string[]) => appendFileSync(path, more.map((line) => `${line}\n`).join(''));
+
+    mkdirSync(folder, { recursive: true });
+    append(lines.prompt);
+    return { ...context, service, session, sleeps, lines, append };
+  }
+
+  it("holds a Code Mode turn end until the transcript's turn end is written, so a question card written last keeps its work item running (PRD R103)", async () => {
+    const { runtime, store, service, session, sleeps, lines, append } = await transcriptSession();
+
+    runtime.send({ type: 'marker', sessionId: session.id, state: 'idle', detail: null });
+    expect(store.session(session.id)?.state).toBe('running');
+    append(lines.question, lines.hooks, lines.duration);
+    await runtime.settled();
+
+    expect(sleeps.length).toBeGreaterThan(0);
+    expect(store.session(session.id)).toMatchObject({ state: 'idle', stateDetail: QUESTION_CARD });
+    expect(store.workItem(1)?.status).toBe('running');
+    expect(markOf({ ...store.workItem(1)!, sessions: store.sessionsFor(1), triage: null, approvalSends: false })).toBe('question');
+
+    // The next turn end, its lines already written, is decided at once.
+    append(lines.prompt.replace('u1', 'u2'), lines.question.replace('a1', 'a2'), lines.hooks.replace('s1', 's3'));
+    runtime.send({ type: 'marker', sessionId: session.id, state: 'running', detail: null });
+    const waited = sleeps.length;
+    runtime.send({ type: 'marker', sessionId: session.id, state: 'idle', detail: null });
+    expect(store.session(session.id)).toMatchObject({ state: 'idle', stateDetail: QUESTION_CARD });
+    expect(sleeps.length).toBe(waited);
+    runtime.stop();
+    service.stop();
+  });
+
+  it('applies a Code Mode turn end after about 2 s when the transcript never shows the turn ending (PRD R103)', async () => {
+    const { runtime, store, service, session, sleeps, lines, append } = await transcriptSession();
+
+    runtime.send({ type: 'marker', sessionId: session.id, state: 'idle', detail: null });
+    append(lines.question);
+    expect(store.session(session.id)?.state).toBe('running');
+    await runtime.settled();
+
+    expect(sleeps).toEqual(Array.from({ length: 40 }, () => 50));
+    expect(store.session(session.id)).toMatchObject({ state: 'idle', stateDetail: QUESTION_CARD });
+    expect(store.workItem(1)?.status).toBe('running');
+    runtime.stop();
+    service.stop();
   });
 
   it('gives a Code Mode session the conversation rules after a resume and with its contract after a compaction', async () => {
