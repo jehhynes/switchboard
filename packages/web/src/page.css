@@ -209,13 +209,13 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 .band-rule { flex: 1; height: 1px; margin-left: 8px; background: var(--vscode-descriptionForeground); opacity: 0.3; }
 @media (hover: none), (pointer: coarse) { .band-head { min-height: 44px; } }
 .group-empty { margin: 0; padding: 6px 12px 4px 11px; color: var(--vscode-descriptionForeground); font-style: italic; }
-/* A row: three lines, each 18 px tall with 3 px between them, in its 13 px text (its pills' 12 px); a 3 px stripe on its left
+/* A row: three lines, each 18 px tall with 3 px between them, in its 13 px text (its pills' 12 px); a 1 px stripe on its left
    edge, inset so neighbouring stripes stay apart, in its status colour (--sb-status-* in theme.css). Colours: the foreground for
    texts and marks, its muted grey (--sb-row-muted) for the namespace, time, comment and details, and the same colours on the selected row. */
 .row { position: relative; display: flex; flex-direction: column; gap: 3px; width: 100%; min-height: 44px; padding: 5px 8px 6px 11px; border: none; border-top: 1px solid var(--vscode-sideBar-border, var(--vscode-panel-border)); background: transparent; color: var(--vscode-foreground); line-height: normal; text-align: left; cursor: pointer; }
 /* The first row in its band has no rule and no rule's 1 px. */
 .rows > li:first-child > .row { border-top: none; }
-.row::before { content: ''; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; }
+.row::before { content: ''; position: absolute; left: 0; top: 8px; bottom: 8px; width: 1px; }
 .row.stripe-warning::before { background: var(--sb-status-warning); }
 .row.stripe-error::before { background: var(--sb-status-error); }
 .row.stripe-turn::before { background: var(--sb-status-turn); }
@@ -321,13 +321,13 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 :where(html:not(.phone)) #root.listing > .main, :where(html:not(.phone)) #root:not(.listing) > .side { display: flex; }
 /*
  * The drawer, the unpinned list, as an auto-hide (architecture.md § Web page): hidden, the list keeps its layout off the page's left
- * edge, and a 3 px sliver there shows each row's stripe at its height (fitSliver in main.ts). Shown, it lies over the conversation and its
+ * edge, and a 1 px sliver there shows each row's stripe at its height (fitSliver in main.ts). Shown, it lies over the conversation and its
  * header at the list's width and slides in; it hides at once. Opened by its button, a key or a swipe (#root.drawer-held),
  * a backdrop dims the page under it and takes the press that closes it.
  */
 .header > .list-toggle, .sliver { display: none; }
-.sliver { position: fixed; top: 0; bottom: 0; left: env(safe-area-inset-left); z-index: var(--sb-z-sliver); width: 3px; background: var(--vscode-sideBar-background); }
-.sliver > i { position: absolute; left: 0; width: 3px; }
+.sliver { position: fixed; top: 0; bottom: 0; left: env(safe-area-inset-left); z-index: var(--sb-z-sliver); width: 1px; background: var(--vscode-sideBar-background); }
+.sliver > i { position: absolute; left: 0; width: 1px; }
 .sliver > .stripe-warning { background: var(--sb-status-warning); }
 .sliver > .stripe-error { background: var(--sb-status-error); }
 .sliver > .stripe-turn { background: var(--sb-status-turn); }
