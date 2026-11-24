@@ -287,14 +287,14 @@ describe('drawing', () => {
     view.open.add('more:r1');
     host.innerHTML = html(renderTimeline(pageState(items), view));
     // The text around the passage shows as details.
-    // Show more opened it for good: there is no Show less.
+    // Opening it is for good: there is no Show less.
     expect(kinds('r1')).toEqual(['div', 'primary:Fixed it.', 'div']);
     expect([...host.querySelectorAll('li[data-id="r1"] > .body > .reply-details')].map((details) => details.firstElementChild!.tagName.toLowerCase())).toEqual(['p', 'ul']);
     expect(host.querySelector('li[data-id="r1"] > .body')!.textContent!.match(/Fixed it\./g)).toHaveLength(1);
     expect([...host.querySelector('li[data-id="r1"]')!.children].map((child) => child.className)).toEqual(['dot', 'body', 'meta']);
   });
 
-  it('fades the start of a folded reply\'s details under its primary response, as a control that a click and a screen reader reach as Show more', () => {
+  it('fades the start of a folded reply\'s details under its primary response, as a control with no visible text that a screen reader reaches by name', () => {
     const host = document.createElement('div');
 
     host.innerHTML = html(renderTimeline(pageState([reply('r1', 1, { opening: 'Fixed it, see [the PR](https://example.com/pr).\n\nThe test was flaky.\n\n- one\n- [two](https://example.com/two)', speak: 'Fixed it, see [the PR](https://example.com/pr).' }), reply('r2', 2)]), newView()));
@@ -302,11 +302,18 @@ describe('drawing', () => {
     const fade = li.querySelector('.body > .reply-fade')!;
 
     expect(li.classList.contains('folded')).toBe(true);
-    expect([fade.getAttribute('role'), fade.getAttribute('tabindex'), fade.getAttribute('aria-expanded'), fade.getAttribute('aria-label'), fade.getAttribute('data-action')]).toEqual(['button', '0', 'false', 'Show more', 'more']);
-    // The details show in order after the primary response, hidden from screen readers and inert, so a link in them takes no focus or click.
+    expect([fade.getAttribute('role'), fade.getAttribute('tabindex'), fade.getAttribute('aria-expanded'), fade.getAttribute('aria-label'), fade.getAttribute('data-action')]).toEqual(['button', '0', 'false', 'Show the rest of this reply', 'more']);
+    expect(fade.textContent).not.toMatch(/Show (more|the rest)/);
+    // The details show in order after the primary response, hidden from screen readers; a link in them takes a click but no keyboard focus.
     const glimpse = fade.querySelector('.reply-fade-text')!;
     expect(glimpse.getAttribute('aria-hidden')).toBe('true');
-    expect(glimpse.hasAttribute('inert')).toBe(true);
+    expect(glimpse.hasAttribute('inert')).toBe(false);
+    expect(glimpse.querySelector('ul a')!.getAttribute('tabindex')).toBe('-1');
+    host.innerHTML = html(renderTimeline(pageState([reply('r1', 1, { opening: 'Fixed it.\n\n```\nnpm test\n```\n\n<details><summary>Log</summary>x</details>', speak: 'Fixed it.' }), reply('r2', 2)]), newView()));
+    const controls = [...host.querySelectorAll('li[data-id="r1"] .reply-fade-text :is(a, button, summary, input, select, textarea)')];
+
+    expect(controls.length).toBeGreaterThan(0);
+    expect(controls.filter((one) => one.getAttribute('tabindex') !== '-1')).toEqual([]);
     expect(glimpse.textContent).toContain('The test was flaky.');
     expect(glimpse.querySelector('ul a')?.textContent).toBe('two');
     expect(glimpse.textContent).not.toContain('Fixed it');
@@ -5614,6 +5621,24 @@ describe('the page in use', () => {
     source.emit('reply', { reply: reply('r3', 4, { opening: 'Third.' }) });
     expect(folded('r1')).toBe(false);
     expect(folded('r2')).toBe(true);
+    page.close();
+  });
+
+  it("follows a link in a folded reply's faded lines as a link, and opens the reply on a click on the faded text around it", () => {
+    const { page, source } = start();
+    const folded = () => root.querySelector('li[data-id="r1"]')!.classList.contains('folded');
+
+    hello(source, { items: [reply('r1', 2, { opening: 'Fixed it.\n\nSee [the log](https://example.com/log) for more.', speak: 'Fixed it.' }), reply('n1', 3, { opening: 'Next.' })], settings: { briefReplies: true } });
+    const link = root.querySelector<HTMLAnchorElement>('li[data-id="r1"] .reply-fade a')!;
+    const followed: boolean[] = [];
+
+    link.addEventListener('click', (event) => { followed.push(true); event.preventDefault(); });
+    link.click();
+    expect(followed).toEqual([true]);
+    expect(folded()).toBe(true);
+    click('li[data-id="r1"] .reply-fade p');
+    expect(folded()).toBe(false);
+    expect(root.querySelector('li[data-id="r1"] .reply-more a')!.hasAttribute('tabindex')).toBe(false);
     page.close();
   });
 

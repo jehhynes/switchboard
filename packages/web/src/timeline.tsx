@@ -108,10 +108,11 @@ function Reply({ item, earlier, view, stamped: shown, card, briefReplies, latest
             <div class="reply-more-text">{trusted(more)}</div>
           </div>
         ) : (
-          // The fade is the reply's control; its text is only a glimpse, which neither a screen reader nor a click reaches.
-          <div class="reply-more reply-fade" role="button" tabIndex={0} aria-expanded="false" aria-label="Show more" data-action="more" data-reply={item.id}>
-            <div class="reply-more-text reply-fade-text" aria-hidden="true" inert>
-              {trusted(more)}
+          // The fade is the reply's control, with no visible text: the fade alone says more follows. Its text is a glimpse hidden from screen
+          // readers, whose links and controls a click still reaches but the keyboard skips, since the control opens the reply for them.
+          <div class="reply-more reply-fade" role="button" tabIndex={0} aria-expanded="false" aria-label="Show the rest of this reply" data-action="more" data-reply={item.id}>
+            <div class="reply-more-text reply-fade-text" aria-hidden="true">
+              {trusted(more.replace(/<(a|button|summary|input|select|textarea)(?=[\s>])/g, '<$1 tabindex="-1"'))}
             </div>
           </div>
         )}

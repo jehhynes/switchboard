@@ -113,6 +113,8 @@ const measure = String.raw`(() => {
     return {
       id: li.dataset.id,
       folded: li.classList.contains('folded'),
+      // Text the reply draws besides its own, such as a Show more link: none.
+      label: [...li.querySelectorAll('.reply-fade > :not(.reply-fade-text), .show-more')].map((one) => one.textContent.trim()).join(' '),
       cursor: getComputedStyle(li.querySelector('.body')).cursor,
       fade: box === null ? null : { top: box.top, bottom: box.bottom, solid },
       primary: lines(li.querySelectorAll('.reply-primary')),
@@ -252,6 +254,7 @@ try {
           found.push(expected.id + ' is folded with no fade');
           continue;
         }
+        if (folded.label !== '') found.push(expected.id + "'s fade shows the text " + JSON.stringify(folded.label));
         // At least two whole lines of the details before the fade starts.
         const solid = folded.details.filter((line) => line.top >= folded.fade.top - 0.5 && line.bottom <= folded.fade.top + folded.fade.solid + 0.5);
 

@@ -4124,7 +4124,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         void earlier();
         break;
       case 'more':
-        openReply(button!.dataset['reply']!);
+        // A link in the fade's visible lines opens as a link and leaves the reply folded.
+        if (target.closest('a') === null) {
+          openReply(button!.dataset['reply']!);
+        }
+
         break;
       case 'artifact':
         // A link to another artifact in a Markdown artifact opens it in place, unless asked for a new tab.
