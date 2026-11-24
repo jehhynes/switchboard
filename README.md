@@ -4,6 +4,8 @@
 
 Switchboard picks up the tickets assigned to you, starts a Claude Code or Codex session on each with your own playbooks and skills, and puts everything about every ticket on one page: the ticket, the agent's report, the diff, the live session, and anything the agent made for you. It runs on your machine, and you can use it from your phone or tablet too.
 
+https://github.com/user-attachments/assets/24d122de-751c-4c9d-a75a-6e4003d481f2
+
 ![A feature's plan and clickable mockup open as tabs beside its question card, with every work item on the left](docs/images/feature-mockup-and-question.png)
 
 ## Why
