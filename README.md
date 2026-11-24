@@ -1,45 +1,46 @@
 # Switchboard
 
-**Your assigned tickets, worked by coding agents while you review.**
+**One page for every ticket your coding agents are working on.**
 
-Switchboard watches the tickets assigned to you, decides what each one needs, and starts a Claude Code or Codex session to do it. Its web page shows what needs you: a fix ready to approve, a question to answer, a draft to send. No tracker yet? Type a prompt into it and it runs the same way.
+Switchboard picks up the tickets assigned to you, starts a Claude Code or Codex session on each with your own playbooks and skills, and puts everything about every ticket on one page: the ticket, the agent's report, the diff, the live session, and anything the agent made for you. It runs on your machine, and you can use it from your phone or tablet too.
 
-![Switchboard's web page: a plan's open question as a card, with the work items on the left](docs/images/question-card.png)
+![A feature's plan and clickable mockup open as tabs beside its question card, with every work item on the left](docs/images/feature-mockup-and-question.png)
 
 ## Why
 
-Every assigned issue, support case or review means opening a terminal, finding the right branch, writing the prompt, waiting, and coming back to check. Multiply that by a dozen tickets a day and you spend more time running agents than reading what they did.
+Developers used to work on one item at a time: open it in VS Code, do the work in that window, ship it, move on. Agents changed that. With ten work items in progress, you either open ten editor windows, each taking memory and CPU that the agents could use, or you lose track of which session has finished, which is stuck and which has been waiting an hour for your answer. And for each one you're still hunting through browser tabs and typing issue and PR numbers.
 
-Switchboard does the running. You do the deciding.
+Switchboard started as a way to switch between those VS Code windows, which is where the name comes from. Now it stands on its own: one light page for all of your work, where you move between tickets without losing your place.
 
 ## How it's different
 
-- **A to-do list that fills itself.** Session managers run the sessions you start. Switchboard's sidebar fills itself from your sources, such as the GitHub issues assigned to you, and shows each work item's current status as it passes between the agent and you, until it lands in Done.
-- **Playbooks, chosen by triage.** Each kind of work is a playbook: a prompt, or a single slash command for one of your skills, plus rules such as whether it may start on its own. Triage reads the ticket and picks the playbook, so a bug gets fixed, a question gets a drafted answer and a review request gets a review.
-- **Your skills do the work.** Cloud agents run their own agent in their sandbox on a fixed issue-to-PR path. Switchboard runs your own Claude Code or Codex on your machine, with your skills, hooks and sign-ins, and stays out of the way: it is the control and observability layer that starts sessions, watches them and shows you where they stand.
-- **Your machine is the server.** One developer, one machine: no team server, no vendor sandbox. You can still reach it from your phone or any of your other devices, over Tailscale.
+- **Everything for a ticket, in one place.** Session managers arrange terminal panes. Switchboard puts the ticket, its status, the agent's reports, mockups and other artifacts, the worktree's diff, its history and the live session side by side, so you never type an issue number to find your work.
+- **A to-do list that fills itself.** The list fills itself from your sources, such as the GitHub issues assigned to you, and shows each work item's status as it passes between the agent and you, until it lands in Done.
+- **Your playbooks, your skills.** Each kind of work is a playbook: a prompt, or a single slash command for one of your own skills, plus rules such as whether it may start on its own. Triage reads each ticket and picks the playbook, so a bug gets fixed, a question gets a drafted answer and a review request gets a review. Switchboard only starts the sessions and shows you where they stand.
+- **Your machine, any device.** Sessions run on your machine with your own Claude Code or Codex, skills, hooks and sign-ins. No team server or vendor sandbox, and no remote desktop: the same page works on your phone and tablet, laid out for each.
 
 ## A ticket's day
 
-1. **Assigned.** A bug, *Short links with uppercase letters return 404*, is assigned to you.
-2. **Triaged.** A one-shot classifier reads the ticket and picks a playbook: `dev:fix-bug`.
+1. **Assigned.** A bug, *POST /links with invalid JSON never responds*, is assigned to you.
+2. **Triaged.** A one-shot classifier reads the ticket and picks a playbook: `dev:fix-bug`, which runs your `/fix-bug` skill. In this example, that skill tests and commits the fix, then asks for approval to push.
 3. **Set up.** A setup session creates a worktree and a branch for the ticket.
 4. **Worked.** The task session writes a failing test, fixes the bug, runs the tests and commits. It doesn't push.
 5. **Your turn.** The row moves to **Ready for review**. You read the agent's summary and the diff side by side, then press **Approve**, and Switchboard runs the step the session asked approval for: push the branch and open the pull request.
 
 ![The fix's summary beside its diff, with Approve in the header](docs/images/review-and-changes.png)
 
-Meanwhile a feature request waits for you to press Start, and once its plan is written, the session asks you its product questions as a card you can answer in two taps, even from your phone.
+Meanwhile a feature request waits for you to press Start. Once it has a plan, the session asks only the questions it can't settle on its own, as a card you answer by tapping or speaking, and can keep working on the rest while you decide.
 
 ## Highlights
 
 - **Starts work on its own, when you let it.** You choose which playbooks start right after triage. Let the ones that only read, draft or commit locally start themselves, and have the ones that push, post or comment wait for your Start, or stop for your Approve before that step.
 - **One list of what needs you.** Work items fall into Ready for review, Blocked on you, In progress, Unstarted, Snoozed and Done. A failed or blocked item says why.
 - **Real sessions, never cut off.** Each Claude Code session runs in a terminal Switchboard holds, so it survives a closed browser and a hub restart. Open its console on the page at any time. A session that hits a usage limit waits for the reset and carries on, and says so if it can't.
-- **Questions as cards.** A session asks numbered questions with lettered options, and you answer them one at a time, by tap or by voice.
-- **Artifacts and diffs beside the conversation.** Plans, reports and diagrams open as tabs next to the chat, with the worktree's changes in a Changes tab.
+- **Questions as cards.** A session asks numbered questions with lettered options, and you answer them one at a time, by tap or by voice. The work item shows it's waiting on your answer.
+- **Artifacts and diffs beside the conversation.** Plans, reviews, clickable HTML mockups and demo videos that a session shares as artifacts open as tabs next to the chat, with the worktree's changes in a Changes tab and the session's live terminal in a Console tab.
 - **Your phone is a remote.** After a one-time Tailscale Serve setup and pairing, open the page on your phone and answer, approve or start work from anywhere.
-- **Talk to it.** Optional voice: dictate to a session, hear its replies read aloud, and give sessions personas with their own voices.
+- **Talk to it.** Optional voice: dictate to a session, hear its replies read aloud, answer question cards out loud, and give sessions personas with their own voices.
+- **Start without a ticket.** Start a session from a prompt in a folder you choose, and it joins the same list.
 - **Pick from a queue.** A source can have a pool of unclaimed tickets, each triaged in advance, for you to pick from.
 - **GitHub project boards.** A browser extension marks the cards Switchboard is working on with their status and playbook, and adds Snooze and Open in Switchboard.
 - **Schedules.** Run a playbook every morning, every Monday or on demand, with no ticket at all.
@@ -59,6 +60,8 @@ Meanwhile a feature request waits for you to press Start, and once its plan is w
 - **Local first.** The hub, its database and your settings live on your machine. There is no Switchboard account or hosted service; your agent providers and ticket sources keep their own accounts.
 
 ## Bring your own playbooks
+
+![A playbook in Settings: it starts on its own and runs the /fix-bug skill](docs/images/settings-playbook.png)
 
 Switchboard ships with no playbooks. You describe your work in a `settings.json` that you can keep in git: where tickets come from, how to triage them, and what each kind of work should do. A playbook's template can be a full prompt or a single slash command that runs one of your skills.
 
@@ -103,7 +106,7 @@ A minimal setup for one GitHub project:
         "worktree"
       ],
       "approvalSends": true,
-      "template": "Fix {{ticket.ref}}: {{ticket.title}}\n\n{{ticket.context}}\n\nWrite a failing test, fix it, run the tests and commit. Don't push: report approval with the prompt \"Push the branch and open a pull request.\""
+      "template": "/fix-bug {{ticket.ref}}: {{ticket.title}}\n\n{{ticket.context}}"
     },
     "dev:feature": {
       "description": "New behavior is requested: plan it and ask the open product questions first.",
@@ -114,7 +117,7 @@ A minimal setup for one GitHub project:
         "approval",
         "worktree"
       ],
-      "template": "Plan {{ticket.ref}}: {{ticket.title}}\n\n{{ticket.context}}\n\nWrite a short plan as an artifact and ask the open product questions. After my answers, build it, commit, and report approval with the prompt \"Push the branch and open a pull request.\"",
+      "template": "/plan-feature {{ticket.ref}}: {{ticket.title}}\n\n{{ticket.context}}",
       "approvalSends": true
     },
     "dev:other": {
@@ -130,7 +133,7 @@ A minimal setup for one GitHub project:
 }
 ```
 
-The triage playbook picks among the task playbooks in the source's `namespace` by their descriptions, and `dev:other` catches anything unclear without starting. This source lists the open issues on project 1 that are assigned to `my-login` with status Todo or In Progress; replace the placeholders with your own checkout, login, project and status names. Edit the file by hand or in the web page's Settings; the hub reloads it either way. Sources for GitHub and Zoho Desk are built in, and a plugin module can add any other tracker.
+`/fix-bug` and `/plan-feature` are your own Claude Code skills, such as ones in the repository's `.claude/skills`; Switchboard only sends the command. The triage playbook picks among the task playbooks in the source's `namespace` by their descriptions, and `dev:other` catches anything unclear without starting. This source lists the open issues on project 1 that are assigned to `my-login` with status Todo or In Progress; replace the placeholders with your own checkout, login, project and status names. Edit the file by hand or in the web page's Settings; the hub reloads it either way. Sources for GitHub and Zoho Desk are built in, and a plugin module can add any other tracker.
 
 ## Get started
 
@@ -171,3 +174,7 @@ Voice needs local models and a speech API key; [docs/install-linux.md](docs/inst
 | `npm run install-local` | Rebuild and install; the running hub moves to the new build once it is quiet |
 
 [AGENTS.md](AGENTS.md) holds the workflow, wording and commit rules.
+
+## License
+
+[MIT](LICENSE)
