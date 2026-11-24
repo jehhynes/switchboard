@@ -54,6 +54,58 @@ export function frameLinks(row: PageRow | null): Array<{ url: string; label: str
   return links.filter((link, i) => frameUrl(link.url) && links.findIndex((one) => one.url === link.url) === i).map(({ url, label }) => ({ url, label }));
 }
 
+/** A page layer over the website frame, in viewport pixels, that the extension host cuts out of the frame (extensions/chrome/src/iframeFrames.ts). */
+export interface FrameHole {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  radius: number;
+}
+/** What of the page draws over the website frame: the layers to cut out of it, and a modal backdrop's darkening, 0 to 1. */
+export interface FrameCover {
+  holes: FrameHole[];
+  dim: number;
+  modal: boolean;
+  /** The frame cannot show: an opaque backdrop or more layers than the host takes. */
+  hide: boolean;
+}
+export const FRAME_HOLES_MAX = 16;
+
+const overlaps = (a: DOMRect, b: DOMRect): boolean => a.width > 0 && a.height > 0 && b.width > 0 && b.height > 0 && a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+
+/** A CSS colour's alpha, as getComputedStyle gives it; 1 for one it cannot read, so an unknown backdrop hides the frame. */
+export function colorAlpha(color: string): number {
+  if (color === 'transparent') return 0;
+  const match = /^rgba?\(([^)]*)\)$/.exec(color.trim());
+  if (match === null) return 1;
+  const parts = match[1]!.split(/[\s,/]+/).filter((part) => part !== '');
+  if (parts.length === 3) return 1;
+  const alpha = parts[3]!.endsWith('%') ? parseFloat(parts[3]!) / 100 : parseFloat(parts[3]!);
+  return Number.isFinite(alpha) ? Math.min(1, Math.max(0, alpha)) : 1;
+}
+
+/**
+ * What of the page covers the website frame's `slot`: each of `layers` that overlaps it becomes a hole, and each of `backdrops` that does makes
+ * the frame modal and darkens it by the backdrop's alpha. A nearly opaque backdrop, as the phone's full-screen dialogs have, hides the frame.
+ */
+export function frameCover(slot: DOMRect, layers: Iterable<Element>, backdrops: Iterable<Element>, modal = false): FrameCover {
+  let clear = 1;
+  for (const backdrop of backdrops) {
+    if (!overlaps(backdrop.getBoundingClientRect(), slot)) continue;
+    modal = true;
+    clear *= 1 - colorAlpha(getComputedStyle(backdrop).backgroundColor);
+  }
+  const holes: FrameHole[] = [];
+  for (const layer of new Set(layers)) {
+    const box = layer.getBoundingClientRect();
+    if (!overlaps(box, slot)) continue;
+    holes.push({ left: box.left, top: box.top, width: box.width, height: box.height, radius: parseFloat(getComputedStyle(layer).borderTopLeftRadius) || 0 });
+  }
+  const dim = Math.round((1 - clear) * 1000) / 1000;
+  return { holes: holes.slice(0, FRAME_HOLES_MAX), dim, modal, hide: dim > 0.9 || holes.length > FRAME_HOLES_MAX };
+}
+
 export interface IframeBrowserDeps {
   send(message: Record<string, unknown>): Promise<unknown>;
   changed(becameReady?: boolean): void;
@@ -86,6 +138,7 @@ export class IframeBrowser {
   #reloadPage = false;
   #launchError: string | null = null;
   readonly #hosted = window.parent !== window;
+  #holes = false;
   constructor(private readonly deps: IframeBrowserDeps) {}
   get ready(): boolean {
     return this.#ready;
@@ -93,6 +146,14 @@ export class IframeBrowser {
   get available(): boolean { return this.#available; }
   get tabs(): Array<{ url: string; label: string }> { return this.#links.filter((link) => !this.#closed.has(link.url)); }
   get selected(): string { return this.#url; }
+  /** Whether the extension host cuts the page's layers out of the website frame; an older host does not, so the page hides the frame under them. */
+  get holes(): boolean { return this.#holes; }
+  /** The host said it cuts holes; true the first time it does. */
+  holesAnswered(): boolean {
+    if (this.#holes) return false;
+    this.#holes = true;
+    return true;
+  }
   follow(row: PageRow | null, review = false): void {
     const item = row?.workItemId ?? null;
     if (item !== this.#item) {
@@ -235,13 +296,14 @@ export class IframeBrowser {
     return this.#slot?.isConnected === true ? this.#slot.getBoundingClientRect() : null;
   }
   /** The extension owns a sibling frame so websites have an extension top-level page for its cookie exemptions. */
-  place(visible: boolean): void {
+  place(visible: boolean, cover?: FrameCover): void {
     if (!this.#hosted) return;
-    const rect = visible && this.#ready && this.#slot?.isConnected === true ? this.#slot.getBoundingClientRect() : null;
+    const rect = visible && this.#ready && this.#slot?.isConnected === true && cover?.hide !== true ? this.#slot.getBoundingClientRect() : null;
+    const layers = cover === undefined ? {} : { holes: cover.holes, dim: cover.dim, modal: cover.modal };
     const message =
       rect === null
         ? { type: 'switchboard-iframe', epoch: this.#epoch, seq: ++this.#seq, title: document.title, item: this.#item, tabs: this.tabs.map((link) => link.url) }
-        : { type: 'switchboard-iframe', epoch: this.#epoch, seq: ++this.#seq, title: document.title, item: this.#item, tabs: this.tabs.map((link) => link.url), url: this.#url, left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+        : { type: 'switchboard-iframe', epoch: this.#epoch, seq: ++this.#seq, title: document.title, item: this.#item, tabs: this.tabs.map((link) => link.url), url: this.#url, left: rect.left, top: rect.top, width: rect.width, height: rect.height, ...layers };
     window.parent.postMessage(message, `chrome-extension://${IFRAME_EXTENSION_ID}`);
   }
   dispose(): void {

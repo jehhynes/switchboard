@@ -1,4 +1,13 @@
 import { frameUrl } from './iframeUrl.js';
+/** A page layer over the website frame, in viewport pixels; the frame is cut out under it so the layer shows and takes the pointer. */
+export interface FrameHole {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  radius: number;
+}
+export const FRAME_HOLES_MAX = 16;
 export interface HostPlacement {
   url: string;
   left: number;
@@ -6,6 +15,24 @@ export interface HostPlacement {
   width: number;
   height: number;
   reload: boolean;
+  holes: FrameHole[];
+  /** How much a modal backdrop darkens the frame, 0 to 1. */
+  dim: number;
+  /** A modal layer is open: the frame passes the pointer to the page and cannot take focus. */
+  modal: boolean;
+}
+function frameHoles(value: unknown, width: number, height: number): FrameHole[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > FRAME_HOLES_MAX) return null;
+  const holes: FrameHole[] = [];
+  for (const hole of value) {
+    if (typeof hole !== 'object' || hole === null) return null;
+    const { left, top, width: w, height: h, radius } = hole as Record<string, unknown>;
+    if (![left, top, w, h, radius].every((n) => typeof n === 'number' && Number.isFinite(n))) return null;
+    if ((w as number) <= 0 || (h as number) <= 0 || (w as number) > width + 2 || (h as number) > height + 2 || Math.abs(left as number) > width + 2 || Math.abs(top as number) > height + 2 || (radius as number) < 0 || (radius as number) > 1000) return null;
+    holes.push({ left: left as number, top: top as number, width: w as number, height: h as number, radius: radius as number });
+  }
+  return holes;
 }
 /** Only the verified Switchboard child may send a placement; validate its payload before navigating the sibling website frame. */
 export function hostPlacement(value: unknown, width: number, height: number, origin?: string): HostPlacement | null {
@@ -23,7 +50,11 @@ export function hostPlacement(value: unknown, width: number, height: number, ori
     (top as number) + (h as number) > height + 1
   )
     return null;
-  return { url: data['url'], left: left as number, top: top as number, width: w as number, height: h as number, reload: data['reload'] === true };
+  const holes = frameHoles(data['holes'], width, height);
+  const dim = data['dim'] ?? 0;
+  const modal = data['modal'] ?? false;
+  if (holes === null || typeof dim !== 'number' || !(dim >= 0 && dim <= 1) || typeof modal !== 'boolean') return null;
+  return { url: data['url'], left: left as number, top: top as number, width: w as number, height: h as number, reload: data['reload'] === true, holes, dim, modal };
 }
 
 export interface HostControllerDeps {
@@ -35,6 +66,8 @@ export interface HostControllerDeps {
   reconcile(item: number | null, urls: string[]): void;
   leave(): void;
   viewport(): { width: number; height: number };
+  /** Tells the page this host cuts holes for its layers, so the page stops hiding the frame under them. */
+  ack(): void;
 }
 /** Only the authenticated Switchboard child can control the sibling frame. */
 export class IframeHostController {
@@ -85,6 +118,7 @@ export class IframeHostController {
     this.#reported = this.deps.now();
     if (typeof data['title'] === 'string' && data['title'].length <= 160) this.deps.title(data['title']);
     this.deps.show(placement);
+    this.deps.ack();
     return true;
   }
   tick(): void {

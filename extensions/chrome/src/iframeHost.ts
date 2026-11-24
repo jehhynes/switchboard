@@ -21,6 +21,7 @@ const controller = new IframeHostController({
   leave: () => void startup?.leave(),
   show: (view) => frames.show(view),
   reconcile: (item, urls) => frames.reconcile(item, urls),
+  ack: () => { if (origin !== null) app.contentWindow?.postMessage({ type: 'switchboard-iframe-holes' }, origin); },
 });
 let appLoaded = false;
 function selectFromHash(): void {

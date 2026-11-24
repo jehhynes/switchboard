@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { IframeBrowser, canInstallExtension, frameUrl, frameLinks } from '../src/iframeBrowser.js';
+import { IframeBrowser, canInstallExtension, colorAlpha, frameCover, frameUrl, frameLinks, FRAME_HOLES_MAX } from '../src/iframeBrowser.js';
 import type { PageRow } from '@switchboard/protocol';
 const row = (id = 1): PageRow => ({ workItemId: id, url: `https://github.com/o/r/issues/${id}`, links: [{ label: 'PR', url: 'https://github.com/o/r/pull/3', kind: 'pr' }, { label: 'Duplicate', url: `https://github.com/o/r/issues/${id}` }, { label: 'Other', url: 'https://example.com/' }] }) as PageRow;
 async function rig(answer: unknown = { ok: true }) {
@@ -103,6 +103,66 @@ describe('embedded browser tabs', () => {
     r.browser.requireReload(); r.browser.draw(r.host, row(), false);
     expect(r.host.textContent).toContain('Reload Switchboard');
     r.browser.dispose(); r.host.remove();
+  });
+});
+
+describe('frame cover', () => {
+  const box = (left: number, top: number, width: number, height: number) => ({ left, top, width, height, right: left + width, bottom: top + height }) as DOMRect;
+  const layer = (rect: DOMRect, style = '') => {
+    const element = document.createElement('div');
+    element.setAttribute('style', style);
+    document.body.append(element);
+    vi.spyOn(element, 'getBoundingClientRect').mockReturnValue(rect);
+    return element;
+  };
+  const slot = box(1000, 120, 900, 880);
+  it('reads backdrop alphas, and an unreadable colour as opaque', () => {
+    expect(colorAlpha('rgba(0, 0, 0, 0.45)')).toBe(0.45);
+    expect(colorAlpha('rgb(0 0 0 / 40%)')).toBe(0.4);
+    expect(colorAlpha('rgb(30, 30, 30)')).toBe(1);
+    expect(colorAlpha('transparent')).toBe(0);
+    expect(colorAlpha('color(srgb 0 0 0)')).toBe(1);
+  });
+  it('cuts only the layers over the frame, with their corner radius', () => {
+    const menu = layer(box(1400, 100, 480, 400), 'border-top-left-radius: 6px');
+    const beside = layer(box(300, 60, 400, 540));
+    const hidden = layer(box(0, 0, 0, 0));
+    expect(frameCover(slot, [menu, beside, hidden, menu], [])).toEqual({ holes: [{ left: 1400, top: 100, width: 480, height: 400, radius: 6 }], dim: 0, modal: false, hide: false });
+    document.body.replaceChildren();
+  });
+  it('darkens a modal frame by its backdrops, hides it under an opaque one, and hides it with more layers than the host takes', () => {
+    const sheet = layer(box(0, 0, 1920, 1080), 'background-color: rgba(0, 0, 0, 0.4)');
+    const drawer = layer(box(0, 0, 1920, 1080), 'background-color: rgba(0, 0, 0, 0.25)');
+    const away = layer(box(0, 0, 500, 500), 'background-color: rgba(0, 0, 0, 0.5)');
+    expect(frameCover(slot, [], [sheet, away])).toMatchObject({ dim: 0.4, modal: true, hide: false });
+    expect(frameCover(slot, [], [sheet, drawer])).toMatchObject({ dim: 0.55, modal: true, hide: false });
+    expect(frameCover(slot, [], [], true)).toMatchObject({ dim: 0, modal: true, hide: false });
+    expect(frameCover(slot, [], [layer(box(0, 0, 1920, 1080), 'background-color: rgb(30, 30, 30)')])).toMatchObject({ modal: true, hide: true });
+    const many = Array.from({ length: FRAME_HOLES_MAX + 1 }, (_, i) => layer(box(1000 + i * 10, 200, 5, 5)));
+    expect(frameCover(slot, many.slice(1), [])).toMatchObject({ hide: false });
+    expect(frameCover(slot, many, [])).toMatchObject({ hide: true });
+    document.body.replaceChildren();
+  });
+  it("sends the cover with the frame's place, and no place when the cover hides it", async () => {
+    const postMessage = vi.fn();
+    const parent = vi.spyOn(window, 'parent', 'get').mockReturnValue({ postMessage } as unknown as Window);
+    try {
+      const r = await rig(); r.browser.follow(row()); await r.browser.renew(); await Promise.resolve(); await Promise.resolve(); r.browser.draw(r.host, row(), false);
+      vi.spyOn(r.host.querySelector<HTMLElement>('.iframe-slot')!, 'getBoundingClientRect').mockReturnValue(slot);
+      expect(r.browser.holes).toBe(false);
+      expect(r.browser.holesAnswered()).toBe(true);
+      expect(r.browser.holesAnswered()).toBe(false);
+      expect(r.browser.holes).toBe(true);
+      const holes = [{ left: 1400, top: 100, width: 480, height: 400, radius: 6 }];
+      r.browser.place(true, { holes, dim: 0.4, modal: true, hide: false });
+      expect(postMessage.mock.lastCall?.[0]).toMatchObject({ url: row().url, left: 1000, holes, dim: 0.4, modal: true });
+      r.browser.place(true, { holes, dim: 1, modal: true, hide: true });
+      expect(postMessage.mock.lastCall?.[0]).not.toHaveProperty('url');
+      expect(postMessage.mock.lastCall?.[0]).not.toHaveProperty('holes');
+      r.browser.place(true);
+      expect(postMessage.mock.lastCall?.[0]).not.toHaveProperty('holes');
+      r.browser.dispose(); r.host.remove();
+    } finally { parent.mockRestore(); }
   });
 });
 

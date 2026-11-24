@@ -4521,6 +4521,97 @@ describe('the page in use', () => {
     page.close();
   });
 
+  it('keeps the embedded browser showing under a menu or modal once its host cuts holes, sending the layers over it and the backdrop darkening', async () => {
+    const postMessage = vi.fn();
+    const parentWindow = { postMessage } as unknown as Window;
+    vi.spyOn(window, 'parent', 'get').mockReturnValue(parentWindow);
+    onTestFinished(() => { vi.restoreAllMocks(); });
+    window.innerWidth = 1920;
+    const boxes: Record<string, { left: number; top: number; right: number; bottom: number }> = {
+      'iframe-slot': { left: 1000, top: 120, right: 1900, bottom: 1000 },
+      'artifact-menu': { left: 1400, top: 100, right: 1880, bottom: 500 },
+      'test-backdrop': { left: 0, top: 0, right: 1920, bottom: 1080 },
+      'test-dialog': { left: 700, top: 300, right: 1300, bottom: 700 },
+    };
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      const box = Object.entries(boxes).find(([name]) => this.classList.contains(name))?.[1] ?? { left: 0, top: 0, right: 0, bottom: 0 };
+      return { ...box, x: box.left, y: box.top, width: box.right - box.left, height: box.bottom - box.top, toJSON: () => box } as DOMRect;
+    });
+    const page = startPage(root, {
+      fetch: (async () => ({ status: 200, ok: true, json: async () => ({}) })) as unknown as typeof globalThis.fetch,
+      EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000,
+      toExtension: async () => ({ ok: true }),
+    });
+    const source = FakeSource.last!;
+    hello(source, { settings: { iframeBrowser: true }, groups: [listGroup('progress', [listRow(1, { url: 'https://github.com/o/r/issues/1' })])] });
+    for (let index = 0; index < 8; index++) {
+      source.emit('artifact', { artifact: { path: `chat/a${index}.md`, owner: 'chat', kind: 'note', title: `Note ${index}`, ext: 'md', type: 'markdown', updatedAt: 10_000 + index } });
+    }
+    await flush();
+    click('#detail [data-action="iframe-open"]');
+    await flush();
+    const last = (): Record<string, unknown> | undefined => postMessage.mock.calls.map(([message]) => message as Record<string, unknown>).filter((message) => message['type'] === 'switchboard-iframe').at(-1);
+    const answer = (origin: string): void => { window.dispatchEvent(new MessageEvent('message', { source: parentWindow, origin, data: { type: 'switchboard-iframe-holes' } })); };
+    // Only the extension host's answer counts; another origin's leaves the page hiding the frame under the menu.
+    answer('https://github.com');
+    click('#detail [data-action="artifact-menu"]');
+    await flush();
+    expect(last()).not.toHaveProperty('left');
+    click('#detail [data-action="artifact-menu"]');
+    await new Promise((done) => setTimeout(done, FRAME_SHOW_DELAY_MS + 20)); await flush();
+    answer('chrome-extension://hlbibnhgkgnjkbfledhgjblacloneije');
+    await flush();
+    expect(last()).toMatchObject({ left: 1000, holes: [], dim: 0, modal: false });
+
+    // The Artifacts menu over the Browser tab is cut out of the frame, which stays.
+    click('#detail [data-action="artifact-menu"]');
+    await flush();
+    expect(last()).toMatchObject({ left: 1000, holes: [{ left: 1400, top: 100, width: 480, height: 400 }], modal: false });
+    click('#detail [data-action="artifact-menu"]');
+    await flush();
+    expect(last()).toMatchObject({ left: 1000, holes: [] });
+
+    // A modal dialog over its backdrop: the frame darkens by the backdrop's alpha and the dialog is cut out.
+    const backdrop = document.createElement('div');
+    backdrop.className = 'sheet-backdrop test-backdrop';
+    backdrop.style.backgroundColor = 'rgba(0, 0, 0, 0.4)';
+    const dialog = document.createElement('div');
+    dialog.className = 'test-dialog';
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    backdrop.append(dialog);
+    root.append(backdrop);
+    await flush();
+    expect(last()).toMatchObject({ left: 1000, holes: [{ left: 700, top: 300, width: 600, height: 400 }], dim: 0.4, modal: true });
+    // An opaque backdrop, as the phone's full-screen dialogs have, hides it.
+    backdrop.style.backgroundColor = 'rgb(30, 30, 30)';
+    dialog.classList.add('opaque');
+    await flush();
+    expect(last()).not.toHaveProperty('left');
+    backdrop.remove();
+    await flush();
+    expect(last()).toMatchObject({ left: 1000, holes: [], dim: 0, modal: false });
+
+    // A layer sliding over the frame is followed each frame while its transition runs, not only when it ends.
+    const sliding = document.createElement('div');
+    sliding.className = 'glass sliding';
+    root.append(sliding);
+    await flush();
+    sliding.dispatchEvent(new Event('transitionrun', { bubbles: true }));
+    boxes['sliding'] = { left: 950, top: 200, right: 1200, bottom: 400 };
+    await new Promise((done) => setTimeout(done, 60));
+    expect(last()).toMatchObject({ holes: [{ left: 950, top: 200, width: 250, height: 200 }] });
+    boxes['sliding'] = { left: 1000, top: 200, right: 1300, bottom: 400 };
+    await new Promise((done) => setTimeout(done, 60));
+    expect(last()).toMatchObject({ holes: [{ left: 1000, width: 300 }] });
+    sliding.dispatchEvent(new Event('transitionend', { bubbles: true }));
+    const sent = postMessage.mock.calls.length;
+    await new Promise((done) => setTimeout(done, 60));
+    // Stopped, it is no longer followed.
+    expect(postMessage.mock.calls.length).toBe(sent);
+    page.close();
+  });
+
   it('hides the unpinned list in a drawer while a work item is open, shown by its button or a resting pointer and hidden as an auto-hide', () => {
     vi.useFakeTimers();
     localStorage.setItem('switchboard.listCollapsed', '1');

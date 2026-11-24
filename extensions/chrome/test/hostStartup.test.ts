@@ -33,7 +33,7 @@ describe('host offline shell', () => {
     const source = {};
     let exiting = Promise.resolve();
     const controller = new IframeHostController({ origin: 'https://pc.tail.ts.net', appWindow: () => source,
-      now: () => 0, show: vi.fn(), title: vi.fn(), reconcile: vi.fn(), viewport: () => ({ width: 900, height: 700 }),
+      now: () => 0, show: vi.fn(), title: vi.fn(), reconcile: vi.fn(), viewport: () => ({ width: 900, height: 700 }), ack: vi.fn(),
       leave: () => { exiting = startup.leave(); } });
     const startup = new HostStartup({ probe: async () => 'enabled', remembered: async () => saved,
       remember: async (value) => {

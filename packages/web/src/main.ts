@@ -54,7 +54,8 @@ import { LocalFilesController, localTabs } from './localFiles.js';
 import type { DiffModule } from './diff/types.js';
 import { useFileIcons } from './fileIcons.js';
 import type { NeedsItem } from './alerts.js';
-import { IframeBrowser, canInstallExtension, frameUrl, frameLinks, IFRAME_EXTENSION_ID, IFRAME_RENEW_MS } from './iframeBrowser.js';
+import { IframeBrowser, canInstallExtension, frameCover, frameUrl, frameLinks, IFRAME_EXTENSION_ID, IFRAME_RENEW_MS } from './iframeBrowser.js';
+import type { FrameCover } from './iframeBrowser.js';
 import type { BrowserIdentity } from './iframeBrowser.js';
 
 /** The Actions menu's control that starts VS Code on the work item (`OPEN_IN_VSCODE` in the hub's page.ts); History's folder links run it too. */
@@ -108,6 +109,8 @@ const DRAWER_TICK_MS = 100;
 /** How often an open History reads the hub again, so its times stay current, and how soon after a list change. */
 export const HISTORY_REFRESH_MS = 30_000;
 export const FRAME_SHOW_DELAY_MS = 100;
+/** The longest a page layer's transition or animation is followed frame by frame for the website frame's holes. */
+export const LAYER_MOVE_MS = 1_000;
 /** How long the page waits for the browser extension to say it opened a link before opening a tab itself, within a click's activation. */
 export const LINK_ANSWER_MS = 2_000;
 /** How much sooner the extension stops starting a link the page asked for than the page stops waiting. */
@@ -5164,6 +5167,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   window.addEventListener('message', (event) => {
     if (window.parent === window || event.source !== window.parent || event.origin !== `chrome-extension://${IFRAME_EXTENSION_ID}`) return;
     if (event.data?.type === 'switchboard-iframe-resume') resumeIframe();
+    if (event.data?.type === 'switchboard-iframe-holes' && iframe.holesAnswered()) reportFrames();
     if (event.data?.type === 'switchboard-iframe-focus' && typeof event.data.focused === 'boolean') { hostFocused = event.data.focused; reportFocus(true); }
     if (event.data?.type === 'switchboard-iframe-select') {
       const { workItemId, url } = event.data;
@@ -5176,9 +5180,18 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   window.addEventListener('pagehide', () => iframe.configure(false), { signal: listening.signal });
   window.addEventListener('pageshow', () => { if (iframeAtLoad === (state.iframeBrowser === true)) iframe.configure(state.iframeBrowser === true); }, { signal: listening.signal });
   const iframePlace = setInterval(() => reportFrames(), 5_000);
-  // The sibling frame draws over the page, so it hides under a modal dialog or the list's drawer, and under a menu, popover or toast only
+  // The sibling frame draws over the page. A host that cuts holes (iframeBrowser.holes) cuts each menu, popover, dialog, toast or the drawer
+  // that overlaps the frame out of it, so the layer shows and takes the pointer, and darkens the frame under a modal backdrop, which then takes
+  // the pointer. An older host does not, so the frame hides under a modal dialog or the list's drawer, and under a menu, popover or toast only
   // where that layer's box overlaps the frame's, as the Artifacts menu does when it drops from its strip over the Browser tab. A menu that opens
   // beside the frame, such as the session dropdown, leaves it showing.
+  const frameLayers = (): FrameCover | undefined => {
+    const slot = iframe.slotRect();
+    if (slot === null) return undefined;
+    const layers: Element[] = [...root.querySelectorAll('.glass:not([hidden]), [role="menu"], [role="dialog"], [role="alertdialog"], #toast .toast')];
+    if (view.drawer !== null) layers.push(drawer);
+    return frameCover(slot, layers, root.querySelectorAll('.drawer-backdrop, .sheet-backdrop, .settings-backdrop, .persona-backdrop'), root.querySelector('[aria-modal="true"], [role="alertdialog"]') !== null);
+  };
   const overlaps = (a: DOMRect, b: DOMRect): boolean => a.width > 0 && a.height > 0 && b.width > 0 && b.height > 0 && a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
   const floating = (): boolean => {
     if (view.drawer !== null || root.querySelector('[aria-modal="true"], [role="alertdialog"]') !== null) return true;
@@ -5213,8 +5226,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const reportFrames = (): void => {
     if (listening.signal.aborted) return;
     if (frame !== null) draw();
-    const covered = framesCovered();
-    iframe.place(browserTab() && state.connected && openingShown() === null && showBrowser() && (wide() ? sideTab() : mainTab()) === 'browser' && !covered && !settingsPane.isOpen() && !(isPhone() && root.classList.contains('listing')));
+    const holes = iframe.holes;
+    const covered = !holes && framesCovered();
+    iframe.place(browserTab() && state.connected && openingShown() === null && showBrowser() && (wide() ? sideTab() : mainTab()) === 'browser' && !covered && (holes || !settingsPane.isOpen()) && !(isPhone() && root.classList.contains('listing')), holes ? frameLayers() : undefined);
   };
   const browserResize = typeof ResizeObserver === 'function' ? new ResizeObserver(() => reportFrames()) : null;
 
@@ -5235,6 +5249,37 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   }) : null;
 
   layers?.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden', 'class'] });
+  // A layer that slides or fades in, as the drawer does, moves without a change the observers see, so the holes follow it each frame while it
+  // moves, for at most LAYER_MOVE_MS, and once more when it stops. Moves are counted before the host answers that it cuts holes, so a move
+  // under way when it answers is followed too.
+  let layersMoving = 0;
+  let layersMovingUntil = 0;
+  let layerFrame: number | null = null;
+  const layerEvent = (event: Event): boolean => event.target instanceof Element && event.target.closest('.side, .glass, [role="menu"], [role="dialog"], .toast') !== null;
+  const followLayers = (): void => {
+    layerFrame = null;
+    reportFrames();
+    if (layersMoving > 0 && performance.now() < layersMovingUntil && !listening.signal.aborted) layerFrame = requestAnimationFrame(followLayers);
+  };
+  const layerStarted = (event: Event): void => {
+    if (!layerEvent(event)) return;
+    layersMoving++;
+    layersMovingUntil = performance.now() + LAYER_MOVE_MS;
+    layerFrame ??= requestAnimationFrame(followLayers);
+  };
+  const layerStopped = (event: Event): void => {
+    if (!layerEvent(event)) return;
+    layersMoving = Math.max(0, layersMoving - 1);
+    if (layersMoving === 0 && layerFrame !== null) {
+      cancelAnimationFrame(layerFrame);
+      layerFrame = null;
+    }
+    reportFrames();
+  };
+  root.addEventListener('transitionrun', layerStarted, { signal: listening.signal });
+  root.addEventListener('animationstart', layerStarted, { signal: listening.signal });
+  for (const name of ['transitionend', 'transitioncancel', 'animationend', 'animationcancel']) root.addEventListener(name, layerStopped, { signal: listening.signal });
+  listening.signal.addEventListener('abort', () => { if (layerFrame !== null) cancelAnimationFrame(layerFrame); });
   listening.signal.addEventListener('abort', () => {
     layers?.disconnect();
 
