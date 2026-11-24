@@ -1,6 +1,6 @@
 # Installing the browser extension on another computer
 
-The browser extension shows Switchboard on GitHub project boards ([prd.md](prd.md) R56, R66, R67) and keeps the links the web page opens in a Switchboard tab group, one tab per kind (R123). On the computer that runs Switchboard, load `extensions/chrome/dist` from the repository. On another computer that uses the web page over Tailscale (R115), install it from the page (R121):
+The browser extension shows Switchboard on GitHub project boards ([prd.md](prd.md) R56, R66, R67), opens a card's work item on the web page from Open in Switchboard or its pill (R69), and keeps the links the web page opens in a Switchboard tab group, one tab per kind (R123). On the computer that runs Switchboard, load `extensions/chrome/dist` from the repository. On another computer that uses the web page over Tailscale (R115), install it from the page (R121):
 
 1. Pair the computer's browser with the web page, if it is not paired yet: on the computer that runs Switchboard, open More Actions › Pair a device… and open the link or type the code in that browser.
 2. In the paired page, open More Actions › Get the browser extension… and select Download.
@@ -26,7 +26,7 @@ Select a link tab and **Open with sign-in support** to open the existing Switchb
 
 The extension requests access to HTTP and HTTPS sites, declarative header rules and cleanup alarms. After updating, approve the browser's changed site-access request if prompted. Header exceptions remove a website's entire Content-Security-Policy and framing header only for the current tab list's hosts when opened by the extension or navigated within the same host in a verified, signed-in tab while the setting is enabled, preserving Switchboard's own CSP. Cookies are not copied or rewritten. The host opens as a normal browser tab; desktop notification prompts require the ordinary page. GitHub sign-in evidence and remaining browser limits are in mechanics M138. Nested cross-site frames and cross-site navigation started by a website keep their framing restrictions. Switchboard links open outside. Other sites can have additional sign-in requirements; Ctrl+click its link pill if a flow cannot finish embedded.
 
-A missing extension offers Retry; reload after changing the setting. Turning it off in the host returns to the ordinary page. Firefox and phones without extension support use external links. The native Chrome pane and its pairing menu are retired; an old `web.chromePane` value loads with a warning that it can be removed. Old helper build folders and `pane-helper.json` may be removed after the old hub exits, and an old pane window can be closed normally.
+A missing extension offers Retry; reload after changing the setting. Turning it off in the host returns to the ordinary page. Firefox and phones without extension support use external links. The native Chrome pane, its pane helper and its pairing menu were removed; an old `web.chromePane` value loads with a warning that it can be removed. Old helper build folders and `pane-helper.json` may be removed after the old hub exits, and an old pane window can be closed normally.
 
 ### App shortcut on Windows
 

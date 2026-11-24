@@ -43,7 +43,6 @@ Read the document that covers the decision:
 | [prd.md](docs/prd.md) | Product scope, goals, design rules, terms and requirements (R IDs) |
 | [architecture.md](docs/architecture.md) | Components, their responsibilities, boundaries, data ownership, protocols and the rationale for core decisions |
 | [mechanics.md](docs/mechanics.md) | Dated experiments and source inspections (M IDs) |
-| [parity.md](docs/parity.md) | Each dock list and row behaviour and whether the web page matches it |
 | [testing.md](docs/testing.md) | Required checks, test layers, fixture rules, isolation and live acceptance |
 | [install-linux.md](docs/install-linux.md) | Installing Switchboard on Linux |
 | [install-browser-extension.md](docs/install-browser-extension.md) | Installing the browser extension on another computer from the web page |

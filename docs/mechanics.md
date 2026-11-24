@@ -10,7 +10,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Versions:** VS Code's `Code.exe` with `ELECTRON_RUN_AS_NODE=1` (Electron 43.7.3, Node 24.21.0); system Node 24.14.0.
 - **Experiment:** `require('node:sqlite')`, open `DatabaseSync(':memory:')`, create a table, insert with a prepared statement, select.
 - **Result:** works in both runtimes with no native module. System Node prints `ExperimentalWarning: SQLite is an experimental feature`; the module's API may still change between Node versions.
-- **Current use:** the store (architecture.md § Store). Re-run after a VS Code or Node upgrade.
+- **Current use:** the store (architecture.md § Store). Re-run after a Node upgrade; nothing has started the hub under VS Code's runtime since the VS Code extension was removed on 2026-11-24.
 
 ## M2. GitHub issue search through `gh api graphql`
 
@@ -68,7 +68,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Result:**
   - The resumed session is listed under the same `sessionId` with `kind: interactive`, a pid, `status: busy` and no short `id` until it ends. VS Code tab sessions are listed the same way, as `kind: interactive` with a pid. Matching by session ID prefix therefore sees a resumed session.
   - `claude attach` drew its terminal UI ("Attaching…") and exited 0 when stdin closed. The session stayed listed with its pid. Interactive answering through attach is verified on Linux in M47.
-- **Current use:** the roster read that sees a resumed session (PRD R17), Open in terminal and Open in VS Code (architecture.md § Claude Code runner).
+- **Current use:** the roster read that sees a resumed session (PRD R17) and Open in terminal (architecture.md § Claude Code runner). Open in VS Code no longer resumes a session: it opens a plain VS Code window on the work item's folders.
 
 ## M8. Writing Claude's settings.json on Windows
 
@@ -145,7 +145,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **2. Approval report: pass.** The session wrote `approval.txt` (`draft`) and reported approval with a prompt and a summary. The item showed Awaiting approval with the summary and an Approve control. Approve started a second session with the stored prompt; it appended `approved` and reported done, and the item ended Done.
 - **3. Pool and icebox: pass.** The pool listed Zoho 6 and Forum 7, each triaged into `support:case` with a summary, oldest first by `sortAt`, in the same order as the hub's snapshot. Icebox moved a ticket to a collapsed Icebox group (Pool 12, Icebox 1); Restore returned it to its place by `sortAt` (Pool 13). No pick, approval or start ran on a pool ticket.
 - **Superseded in part:** the Icebox became Snoozed, with an optional wake time (PRD R49).
-- **Current use:** the open and claim path, approval reports, and the pool display (architecture.md § Claude Code runner, § Flow, § Rows).
+- **Current use:** approval reports and the pool display (architecture.md § Flow, § Rows). The open and claim path was removed with the VS Code extension on 2026-11-24.
 
 ## M14. Zoho scope entry from ticket history
 
@@ -174,11 +174,12 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 
 ## M16. Webview anchor clicks open twice
 
+- **Historical:** the VS Code extension and its webviews, the Conversation view among them, were removed on 2026-11-24; the web page's Conversation tab draws the conversation in the page itself, with no webview host to open links.
 - **Date:** 2026-10-04.
 - **Versions:** VS Code 1.140.0 (`07f806f9`), `resources/app/out/vs/workbench/contrib/webview/browser/pre/index.html`.
 - **Inspection:** the webview host adds a `click` listener on the webview's window (`handleInnerClick`). For any trusted click whose composed path holds an `<a>` with an `href` that is not a fragment, it posts `did-click-link` with the resolved `href` and VS Code opens it. It does not check `event.defaultPrevented`, so a panel handler that calls `preventDefault` and opens the link itself opens it twice: two identical browser tabs.
 - **Result:** `event.stopPropagation()` in the panel's root `click` handler keeps the event from the window, so only the panel's `openUrl` message opens the link. The panel keeps its own handler because a local file path in `href` resolves against the webview origin, which the host's open would get wrong.
-- **Current use:** the panel was removed; the Conversation view's links carry `href="#"`, a fragment the host does not open, and post their target themselves (architecture.md § Conversation view).
+- **Used until 2026-11-24:** the panel was removed; the Conversation view's links carry `href="#"`, a fragment the host does not open, and post their target themselves (architecture.md § Conversation view).
 
 ## M17. A missing or mistyped project status field
 
@@ -230,14 +231,16 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 
 ## M21. VS Code Git API and the multi-diff editor
 
+- **Historical:** the VS Code extension, and with it Open Changes in VS Code's multi-diff editor, was removed on 2026-11-24; the web page's Changes tab replaces it.
 - **Date:** 2026-10-07.
 - **Versions:** VS Code 1.141.0 (`2a59476c`), the version installed and the one the integration suite runs. Copied from GC M30 (VS Code 1.136.1).
 - **Source (GC M30):** no built-in command combines a branch's commits with uncommitted work, so the caller combines merge base to HEAD, the index and the working tree. `_workbench.openMultiDiffEditor` takes `{multiDiffSourceUri, title, resources}`, each resource an `originalUri` and `modifiedUri` with a missing side undefined; it is a private command. A revision is a `git:` URI whose query is `JSON.stringify({path, ref})`. `git.openRepository` takes a path string and keeps the repository in Source Control for the window's lifetime, with no matching close. A newly opened repository's resource groups are empty until `await repository.status()`. Repository lookup falls back to a prefix match or the window's only repository. `getBranchBase` writes `branch.<name>.vscode-merge-base` to the git config. `Change.originalUri` differs for copies as well as renames. The editor appends the file count to the title, and `TabInputTextMultiDiff.textDiffs` lists only two-sided rows.
 - **Experiment:** [changes.test.cjs](../extensions/switchboard/test-integration/changes.test.cjs) builds a clone with `origin/main` and a worktree holding a committed edit, addition and deletion, an untracked file, a staged edit deleted on disk, and a staged rename. Show in Source Control added the worktree to the Git API's repositories. Open Changes opened one editor titled `gh 18941 Inbox badge — since <base> (5 files)`, whose one two-sided row ran from `kept.txt` at the base (`git:`) to `renamed.txt` on disk (`file:`), both inside the worktree. A plain folder got the no-repository warning and no editor. A second `_workbench.openMultiDiffEditor` call with the same source URI and more resources kept the open editor's title and resources (a Codex probe on this version), so each open uses a new source URI after closing the ticket's earlier tab; reopening after adding a file and changing the title showed one tab with 6 files, and reopening on a worktree with no changes closed it. Conflicted files are in the repository's `mergeChanges` group, not the working-tree group.
-- **Current use:** Open Changes (architecture.md § VS Code extension). Re-verify after a VS Code upgrade by running the integration suite.
+- **Used until 2026-11-24:** Open Changes (the removed VS Code extension section of architecture.md).
 
 ## M22. Opening a `vscode://` link from Chrome
 
+- **Historical:** the VS Code extension and its `vscode://` handler were removed on 2026-11-24; Open in Switchboard now opens the web page at the work item (`/page/#w=<id>`) on this computer as on a paired device.
 - **Date:** 2026-10-07.
 - **Versions:** VS Code 1.141.0 (`2a59476c`), `resources/app/out/mainImpl.js` and `out/vs/workbench/workbench.desktop.main.js`. Chrome was not inspected.
 - **Inspection, VS Code:**
@@ -247,7 +250,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
   - `URI.parse` percent-decodes each component, so the handler's `uri.query` is decoded once.
 - **Integration suite:** calling the handler through the extension API with an encoded GitHub issue URL in another case and with `/files`, and with a URL holding `?id=5&x=1`, revealed the matching rows and ran their click actions (`open.test.cjs`).
 - **Not verified:** no `vscode://` link was opened from Chrome, because that would open the operator's own VS Code. Chrome's own documentation and behavior, not checked here, describe an "Open Visual Studio Code?" prompt for an external protocol with an "Always allow github.com to open links of this type" checkbox for an https page; whether it appears every time for the operator is unknown. Whether VS Code brings the receiving window to the front was not observed.
-- **Current use:** Open in Switchboard (PRD R69; architecture.md § VS Code extension, § Browser extension).
+- **Used until 2026-11-24:** Open in Switchboard (PRD R69; the removed VS Code extension section of architecture.md, and architecture.md § Browser extension).
 
 ## M23. Requests from an extension service worker and from a web page to the browser endpoint
 
@@ -292,6 +295,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 
 ## M26. Finding, docking beside and switching to VS Code windows
 
+- **Historical:** the dock and the VS Code extension's item windows were removed on 2026-11-24; the web page's list replaces the dock, and nothing switches to VS Code windows. The `window.title` findings still hold for the workspace file the page's Open in VS Code writes.
 - **Date:** 2026-10-09.
 - **Versions:** Windows 11 Pro 10.0.26200, VS Code 1.141.0, Claude Code extension 2.1.295; a C# .NET 10 probe using Win32 (`.wip/spike-switcher/`), first on one 1920×1200 monitor at 96 DPI, then at the console with three monitors.
 - **Experiment:** isolated VS Code windows opened from `.code-workspace` files, a probe that docked itself as an app bar and brought windows forward 20 times per method, with and without a click on the probe and with another app in front.
@@ -305,16 +309,17 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
   - Source inspection: a workspace is trusted only when each folder and the `.code-workspace` file are trusted, each by its own entry or a trusted parent folder. Trusting a window from its prompt adds an entry for each, so a new item window prompts again unless the folders that hold the worktrees and `<Switchboard home>/windows` are trusted. Trusted folders are VS Code application state (`content.trust.model.key`), with no extension API to add one.
   - 2026-10-11, Avalonia 12.1.3, monitors at 96, 120 and 144 DPI: moving the dock with `SetWindowPos` to a monitor at another scale sends `WM_DPICHANGED` after its `WM_SIZE`. Avalonia takes the new scale there and calls `SetWindowPos` with Windows' suggested size, which the dock holds to its strip, so no `WM_SIZE` follows; Avalonia updates its client size only on `WM_SIZE`, so it kept the size computed at the old scale and drew a smaller or clipped list until the next resize. Sending `WM_SIZE` with the current client size after Avalonia handles `WM_DPICHANGED` fixed it: started from the 120 DPI primary, the dock filled its strip at the left edge at 96 DPI (320×1392) and the right edge at 144 DPI (480×1368).
 - **Limits:** display scaling other than 100% (the dock's own resize was seen at 175% in use, where Avalonia sized it one pixel short) is untested beyond the result above, and live docking during a drag of the header has not been observed, as is `vscode.openFolder` focusing a window while another app has the last input, the destroy event when closing the last window ends the VS Code process, and the name change when an open window opens another workspace.
-- **Current use:** the dock and item windows, and the extension's row click for a notification or Open in Switchboard (PRD R65, R69, R71; architecture.md § Dock, § VS Code extension).
+- **Current use:** the `sb:<name>` title and the fullwidth `＄` swap in the workspace file the web page's Open in VS Code writes (architecture.md § Web page). Until 2026-11-24 also the dock and item windows, and the extension's row click for a notification or Open in Switchboard.
 
 ## M27. Opening a URL in VS Code's integrated browser
 
+- **Historical:** item window tabs were removed with the VS Code extension on 2026-11-24; the web page's embedded link tabs (PRD R125) replace them.
 - **Date:** 2026-10-09; the glob matching and the Zoho Desk redirect on 2026-10-20.
 - **Versions:** VS Code 1.141.0 (`2a59476c`), installed and in the integration suite; VS Code 1.142.0 (`6d62b1d5`) on 2026-10-20.
 - **Inspection:** `workbench.desktop.main.js` registers `workbench.action.browser.open` ("Open Integrated Browser"). It takes a URL string or `{url, openToSide, reuseUrlFilter}`. With `reuseUrlFilter`, it looks for an open browser tab whose URL matches the filter's scheme, authority and path, the authority and path as globs, and whose query holds the filter's parameters; the bookmark is not compared; it navigates that tab to `url` and shows it instead of opening another. Otherwise it opens a browser editor in the group the integrated browser prefers (`workbench.browser.newTabPlacement`, `activeGroup` by default). The command is not part of the extension API. `workbench.action.browser.openFile` opens a local `.html` file.
 - **Experiment:** [tabs.test.cjs](../extensions/switchboard/test-integration/tabs.test.cjs) opened two pages of a test-owned loopback server, the first again, then two Markdown files and the first again with `vscode.openWith(uri, 'vscode.markdown.preview.editor', {preview: false})`, and a text file with `showTextDocument` and `preview: false`. VS Code showed two browser tabs, both loaded, neither in preview mode, so the next open did not replace them, one Markdown preview editor tab (`TabInputCustom`, view type `vscode.markdown.preview.editor`) per file, not in preview mode, and the text file in a pinned editor. `markdown.togglePreview` on a preview editor tab turned it into the file's text editor in the same tab, leaving one tab. `markdown.showPreview` opens a separate webview panel instead, so editing the file adds a text editor tab, and an unlocked one is reused for the next Markdown file. Without `reuseUrlFilter` the third open added a third browser tab. A browser tab's `Tab.input` is undefined in the extension API. A loopback page at `/support/acme/ShowHomePage.do#Cases/dv/1019` that replaced itself with `/agent/acme/acme-inc/tickets/details/1019`, as Zoho Desk does, got a second tab when opened again with the link as its own filter, and one tab with the filter `/agent/*/*/tickets/details/1019`. On 2026-10-20 the operator's item windows held Zoho tabs at `desk.zoho.com/agent/acme/acme-inc/tickets/details/<id>`, read from their saved editor state, for tickets whose links are `ShowHomePage.do#Cases/dv/<id>`, with the same ID.
 - **Not verified:** pages that need the operator's sign-in, such as GitHub and Zoho Desk, in the integrated browser's own storage (`workbench.browser.dataStorage`); the first VS Code version with the command.
-- **Current use:** item window tabs (PRD R72; architecture.md § VS Code extension).
+- **Used until 2026-11-24:** item window tabs (PRD R72; the removed VS Code extension section of architecture.md).
 
 ## M28. The Switchboard tab group for links the dock opens
 
@@ -330,16 +335,17 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
   - With the network on and no Zoho sign-in, a marked `desk.zoho.com/agent/acme/acme-inc/tickets/details/<id>` link was redirected to `desk.zoho.com/support/login.sas?serviceurl=…`, so a kind read from the tab's address no longer matched the next Zoho link, and the operator saw a second Zoho tab in their Chrome. With the kind recorded in `chrome.storage.session`, a second link opened after `ServiceWorker.stopAllWorkers` replaced the first tab, and session storage held only the new tab's `placedKind:<id>` key.
   - A link opened in the first moments after the extension was installed, before its worker had started, was not placed.
 - **Not verified:** a link from the dock through Windows' URL handler to Chrome; the operator's branded Chrome, which no longer accepts `--load-extension` (M23); how GitHub, Zoho Desk and Forum treat the marks when the extension is missing; whether Chrome warns before an extension closes a tab with unsaved changes; where Zoho Desk takes a signed-in agent's link; Duplicate, Reopen closed tab or session restore of a tab whose current entry still has the bookmark, as after Back to it, which would be placed again.
-- **Current use:** the kind a tab of the web page's Switchboard tab group keeps through a redirect, in `chrome.storage.session` (PRD R123; architecture.md § Browser extension, M135). The dock no longer marks its links, and no extension places the dock's tabs (PRD R74).
+- **Current use:** the kind a tab of the web page's Switchboard tab group keeps through a redirect, in `chrome.storage.session` (PRD R123; architecture.md § Browser extension, M135). The dock, which had stopped marking its links, was removed on 2026-11-24.
 
 ## M29. Opening a new Claude session in a tab without changing the preferred location
 
+- **Historical:** the VS Code extension, and with it New Claude Session in Editor Tab, was removed on 2026-11-24; the web page's New session replaces it, and Open in VS Code opens no Claude session.
 - **Date:** 2026-10-10.
 - **Versions:** Claude Code extension 2.1.296 (`extension.js`); Ground Control M63 inspected the same argument on 2.1.284.
 - **Inspection:** the extension contributes `claude-vscode.editor.open` and registers it as `(sessionId?, initialPrompt?, viewColumn?, newSessionGroupId?, fullEditor?, {programmatic}?)`. With any `programmatic` value it never writes `claudeCode.preferredLocation` and does not focus the input box; with no session ID, `pin-to-panel` opens an editor tab, and `honor-preferred-location` uses the sidebar when the setting is `sidebar` and no tab holds the session; `createPanel` shows a session the sidebar already holds there. Without `programmatic` it opens a tab, focuses the input, and sets the preference to `panel` unless `fullEditor` is true or the session is shown in the sidebar. With no session ID it starts a new session; an open session's tab is revealed instead. The extension activates `onStartupFinished`, and executing its contributed command activates it earlier.
 - **Experiment:** the operator's Support bridge extension (`D:\git\support\extensions\session-launcher`) made the same `pin-to-panel` call from a title-bar button until it moved here; its README (support commit `e543213`) recorded that on 2.1.286 the call opened a tab and left the setting alone. The operator's `preferredLocation` is `sidebar`.
 - **Not verified:** the call from Switchboard's installed extension; the argument order is undocumented and can change with any Claude Code extension update.
-- **Current use:** New Claude Session in Editor Tab (PRD R75; architecture.md § VS Code extension), and Open in VS Code under a `sidebar` preference (architecture.md § Claude Code runner).
+- **Used until 2026-11-24:** New Claude Session in Editor Tab (PRD R75; the removed VS Code extension section of architecture.md), and Open in VS Code under a `sidebar` preference (architecture.md § Claude Code runner).
 
 ## M30. The report contract in the system prompt, across resume and compaction
 
@@ -391,13 +397,14 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 
 ## M33. Auto-hiding the dock with a window region
 
+- **Historical:** the dock was removed on 2026-11-24; the web page's list and its needs-you notifications replace it, and nothing replaces auto-hide.
 - **Date:** 2026-10-13.
 - **Versions:** Windows 11 Pro 10.0.26200, Avalonia 12.1.3, the published dock on one monitor at 1392 × 996 pixels, left edge.
 - **Experiment:** a dock on a scratch home with `autoHide` on, driven by `SetCursorPos` and `mouse_event` from PowerShell; after each step the work area (`SPI_GETWORKAREA`), the window's rectangle and region (`GetWindowRgnBox`), the foreground window and a screenshot of the corner were read. Also a 2-pixel region set and cleared on a docked window from another process.
 - **Result:** with auto-hide on the work area started at x = 0 and maximized windows filled the strip; the pin reserved it again (x = 320) and released it, over three toggles. With Notepad in front the window kept its 320-pixel rectangle with a 2-pixel region, and the screenshot showed the window behind it. `SetCursorPos` alone did not show it; a `mouse_event` move into the sliver did, and `WindowFromPoint` then returned the dock. It stayed shown with the pointer 150 pixels in, and hid 0.4 to 0.7 seconds after the pointer left. The dock's window has `WS_EX_NOREDIRECTIONBITMAP`. Before the dock called `InvalidateVisual` after clearing its region, two screenshots after a move into the sliver showed the window behind it although its region was cleared; with the call, each showed the dock. A region cleared from another process showed the dock at once, so the call's need is not settled. While the dock was active it stayed shown with the pointer away, as intended. Without a cover, the sliver showed whatever the dock drew at its outer edge: on the left the row stripes, on the right the row rules and group headings. With `SliverView`, the operator's dock on the right edge showed only the background and the focus-blue stripes of its Ready for review rows, 55 pixels each at the rows' heights.
 - **Limits:** one monitor; the input-driven runs were on the left edge only, and the right edge was checked only by reading the sliver's pixels; no second auto-hide bar on the same edge, so the `ABM_SETAUTOHIDEBAREX` refusal was not seen. Showing it with Alt+Tab or a status bar click, and keeping it shown over a dialog or a tooltip, were not run. Once, during a run that also had the operator's own input, the reserved dock drew black and ignored two clicks until the operator closed it; the same toggles, clicks and Search repeated three times did not reproduce it, and the cause is unknown.
 - **Superseded in part by M44:** the 2-pixel region became 3 device-independent pixels.
-- **Current use:** Windows auto-hide (architecture.md § Dock).
+- **Used until 2026-11-24:** Windows auto-hide (the removed Dock section of architecture.md).
 
 ## M34. GitHub issue search lags an unassignment
 
@@ -450,10 +457,11 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Wayland start hang, 2026-10-17.** Later the same afternoon every new VS Code main process started as a Wayland client, the operator's 1.139.1 and the test build alike, even with a fresh profile, `--disable-extensions` and `--disable-gpu`, hung before its first window: its main thread sent `wl_display.sync` to the compositor about 26,000 times a second. The screen was not locked and the display was on. With `--ozone-platform=x11` it started, and the integration suite passed. About an hour later the same launch started its window as a Wayland client, in the same session, without logging out. The cause is unknown.
 - **Checks.** Every workspace's Vitest suite passed, with the Windows-only paste test skipped and a POSIX one run in its place; `npm run test:integration --workspace switchboard` passed 56 tests in VS Code 1.142.0, including the hub outliving its window (PRD R33), with the hub run by VS Code's executable in Node mode. The dock built and its 372 xUnit tests passed with .NET SDK 10.0.112.
 - **Not verified:** a `codex exec` run through a hub, and the hook script's walk from a real Codex hook; Claude's hooks on Linux (`claude --bg`, the roster and `claude attach` on Linux are verified in M47); the installed extension and a hub in the operator's VS Code.
-- **Current use:** the Codex process table on Linux (architecture.md § Codex runner, Legacy exec sessions; § Hub lifecycle) and the dock on Linux (architecture.md § Dock).
+- **Current use:** the Codex process table on Linux (architecture.md § Codex runner, Legacy exec sessions; § Hub lifecycle). Until 2026-11-24 also the dock on Linux, which was removed that day.
 
 ## M39. Docking and raising windows through GNOME Shell
 
+- **Historical:** the dock and the GNOME Shell extension were removed on 2026-11-24; the web page's list and its needs-you notifications replace the dock, and nothing docks or raises windows through GNOME Shell.
 - **Date:** 2026-10-17.
 - **Versions:** GNOME Shell and Mutter 50.1 run with `gnome-shell --headless --wayland --virtual-monitor 1920x1080` in `dbus-run-session`, with `HOME`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME` and `XDG_RUNTIME_DIR` set to scratch folders before the bus starts, so services the private bus starts, such as dconf, stay isolated too; a Wayland socket path over 108 bytes stops Mutter, so the runtime folder needs a short path. The operator's VS Code 1.139.1 with its own `--user-data-dir`, `--password-store=basic` (else GNOME's keyring asks for a new password in a modal dialog that takes every click) and `--ozone-platform=wayland`; the dock built from this tree under XWayland; a test-only extension that runs JS in the shell, and Mutter's virtual pointer for clicks and drags.
 - **Window class.** VS Code as a Wayland client has the class `com.microsoft.VSCode`. VS Code also had a window that is never shown, 0 × 0 and `is_hidden()`, beside its workspace windows. Mutter also marks hidden a minimized window, once its minimize has finished, and a window on another workspace; both keep their size. VS Code under XWayland was not tried; `Code`, its desktop file's `StartupWMClass`, is taken as its class.
@@ -465,16 +473,17 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Operator's desktop, 2026-10-17.** After a new login loaded the extension, a row click brought its open item window forward and maximized it beside the dock, on the first click once the focus change above was fixed.
 - **Two monitors, 2026-10-18.** The same isolated shell with `--virtual-monitor 1920x1080` twice, side by side (connectors `Meta-0`, `Meta-1`, which XWayland and Avalonia's `Screen.DisplayName` also use). Dragging the dock's title with Mutter's virtual pointer moved it to whichever edge of either monitor was under the pointer and kept `monitor: Meta-1` or null; a strut at the right edge of `Meta-1` reserved it (work area 1600 wide), and at the edges the monitors share the dock reserved nothing and the work areas stayed whole. `_NET_WORKAREA` held one rectangle for all monitors (y = 32 from the top bar on `Meta-0`, also applied to `Meta-1`); `_GTK_WORKAREAS_D0` held each monitor's, and with it the dock on `Meta-1` filled 0 to 1080. On the operator's desktop (HDMI-2 5120 × 2880 above HDMI-1 3840 × 2160, scale 2 with `xwayland-native-scaling`, X coordinates in physical pixels) `_NET_WORKAREA` was 0 to 5040 high, while `_GTK_WORKAREAS_D0` gave HDMI-2 a 96-pixel panel at its bottom. A full-screen window on the dock's monitor put the dock in the bottom layer; on the other monitor it stayed in the dock layer. With VS Code 1.139.1 (`--ozone-platform=wayland`, its own `--user-data-dir`) in the shell, `move_to_monitor` then `maximize()` put its window on `Meta-1` at full width, and back on `Meta-0` at x = 320, 1600 wide, beside the dock; `get_monitor_for_connector` returned -1 for an unknown connector.
 - **Not verified:** a scale other than 1 in the isolated shell; monitors stacked vertically in the isolated shell; VS Code under XWayland.
-- **Current use:** the dock on Linux and the GNOME Shell extension (architecture.md § Dock).
+- **Used until 2026-11-24:** the dock on Linux and the GNOME Shell extension (the removed Dock section of architecture.md).
 
 ## M40. Quick clicks on a dock header
 
+- **Historical:** the dock was removed on 2026-11-24; the web page's list replaces it.
 - **Date:** 2026-10-16.
 - **Versions:** Avalonia 12.1.3, headless test platform.
 - **Source inspection:** `Avalonia.Input.Gestures` handles presses and releases after their routes finish. A left press with an even click count, on the element the previous press hit, raises `DoubleTapped`, and the release then raises no `Tapped`. Movement beyond the tap distance during that press clears the suppression, so a release back within the tap distance of the press point raises `Tapped` as well.
 - **Experiment:** four quick clicks on a group header and on a Done date band toggled only on the first and third while the headers handled `Tapped` alone. With `DoubleTapped` also handled, a second press that moved 8 pixels away and back raised `DoubleTapped` and `Tapped` and toggled twice; mouse and touch behaved alike.
 - **Limits:** pen input and a real double-click time on Windows were not run.
-- **Current use:** the dock's group and band headers, which toggle once per press (`MainWindow.OnHeaderPressed` in `apps/dock`).
+- **Used until 2026-11-24:** the dock's group and band headers, which toggled once per press (`MainWindow.OnHeaderPressed` in `apps/dock`).
 
 ## M41. A background session waiting on a prompt before it starts
 
@@ -554,13 +563,14 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 
 ## M44. Windows auto-hide timing and native topmost state
 
+- **Historical:** the dock was removed on 2026-11-24; the web page's list and its needs-you notifications replace it, and nothing replaces auto-hide.
 - **Date:** 2026-10-19.
 - **Environment:** Windows, Avalonia 12.1.3, 200% display scaling. A separate test application constructed the real dock with the recorded dock view, fake actions and no hub connection, on the right edge. A second test window supplied ordinary and full-screen foreground states. Evidence: `.wip/autohide-check/before.txt` and `final.txt`.
 - **Timing:** repeatedly calling `Dock` while expanded restarted the hide countdown and kept the old dock open; it hid after the calls stopped. With `WatchHide` leaving an enabled timer alone, it hid during those calls.
 - **Z-order:** lowering the test dock with `SetWindowPos(HWND_NOTOPMOST)` left Avalonia's `Topmost` true but the native flag false. The old hidden dock did not recover. The new native-state check restored the flag without activation, yielded while the foreground test window was full-screen and restored it after that window returned to normal.
 - **Width:** the old region was 2 physical pixels; the new region was 6 physical pixels at 200%, matching 3 device-independent pixels. After publishing and restarting the installed dock, moving focus and the pointer to a read-only VS Code editor left the dock collapsed with its native topmost flag set and a 3-logical-pixel region in a DPI-unaware read.
 - **Limits:** the initiating event that lowered the operator's dock and the frequency of placement callbacks on their desktop were not captured. The test confirms both failure paths and their repairs, not a Linux commit as their cause. Full-screen behavior was exercised on one monitor with the test window, not with a game or a video player.
-- **Current use:** Windows auto-hide and topmost reconciliation (PRD R71, architecture.md § Dock).
+- **Used until 2026-11-24:** Windows auto-hide and topmost reconciliation (PRD R71, the removed Dock section of architecture.md).
 
 ## M45. Handled assignment registration
 
@@ -607,7 +617,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Windows Terminal, 2026-10-21.** Windows Terminal 1.24.12741.0 on Windows 11 in the operator's session: `wt.exe -w new --title "Switchboard · probe · sb:wt-probe-1" --suppressApplicationTitle -d D:\ -- pwsh -NoExit -Command <set the console title>`, run through PowerShell's `Start-Process` with joined string arguments rather than the dock's `ProcessStartInfo.ArgumentList`, opened one new window whose title stayed the `--title` text after the program set its own. `EnumWindows` found it as a visible, unowned top-level window of process `WindowsTerminal`, as `Win32Windows.FindTerminal` looks for it, and `WM_CLOSE` closed it. `claude` and `codex` resolve to `claude.exe` and `codex.exe` first on the operator's PATH.
 - **Not verified:** Switchboard's `open-question` handoff before `codex resume`: the experiment resumed a `codex exec` turn that had already exited, which is the state the handoff waits for; the dock's own `wt.exe` launch, a session opened in Windows Terminal, and `claude attach` or `codex resume` running in it; Ptyxis under the operator's own GNOME session, as opposed to the isolated compositor; Ptyxis and the extension in the operator's own GNOME session.
 - **Superseded in part by M108:** an app-server Codex thread's terminal joins it with `codex resume --remote <control socket> <thread>`; `codex resume <thread>` remains for exec sessions.
-- **Current use:** the dock's terminal windows (PRD R71, architecture.md § Dock): Ptyxis's `--new-window -T`, Windows Terminal's `--title --suppressApplicationTitle`, the `org.gnome.Ptyxis` class in the GNOME Shell extension, and the terminal's environment without Claude Code's session markers, keeping the operator's other `CLAUDE_CODE_*` settings.
+- **Current use:** the terminal app the hub opens for Open in terminal and Held sessions (`openTerminal` in `packages/hub/src/launch.ts`): Ptyxis's `--new-window -T`, Windows Terminal's `--title --suppressApplicationTitle`, and the terminal's environment without Claude Code's session markers, keeping the operator's other `CLAUDE_CODE_*` settings. The `org.gnome.Ptyxis` class served the GNOME Shell extension, removed on 2026-11-24.
 
 ## M48. GitHub issue search during an outage
 
@@ -620,6 +630,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 
 ## M49. Auto-hiding the dock on Linux with X Shape
 
+- **Historical:** the dock was removed on 2026-11-24; the web page's list and its needs-you notifications replace it, and nothing replaces auto-hide.
 - **Date:** 2026-10-25.
 - **Versions:** GNOME Shell and Mutter 50.1 run headless as in M39 (`--virtual-monitor 1920x1080`, one monitor, scale 1), Xwayland 24.1.10, Avalonia 12.1.3, the dock built from this tree with `autoHide` on, against a test-owned loopback hub that served the recorded dock view and sent a `show` event on request. Input came from Mutter's virtual pointer, through a test-only extension that ran JS in the shell; the window's shape came from `xwininfo -shape`, the focus from `XGetInputFocus`, and screenshots from `Shell.Screenshot`.
 - **Shape.** A bounding and input shape cut to the outer 3 pixels left only that sliver drawn, with the row stripes, and `_GTK_WORKAREAS_D0` stayed 1920 wide with the struts at zeros. Mutter picked the background under the hidden part (`get_actor_at_pos`) and the dock's surface at the sliver. Removing both shapes (`XShapeCombineMask` with `None`) left the X server reporting no shape, the dock receiving pointer moves across its whole width, and Mutter still drawing only the sliver, also after hovering rows; setting the bounding shape to the whole window, or to a 32767-pixel square, drew the whole dock at once.
@@ -627,7 +638,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Ownership.** Avalonia's menus are override-redirect windows that carry the process's `_NET_WM_PID` but no `WM_TRANSIENT_FOR`; its owned dialog ("Add comment", from a row's menu) had `WM_TRANSIENT_FOR` the dock and took the X focus. With the focus moved off the dock (`XSetInputFocus` to `None`), the pointer over the part of a row's menu outside the dock kept it shown; away from both, it hid and the menu stayed open over the sliver. With the dialog focused, the dock stayed shown with the pointer away. A modal dialog blocks the dock's input, so a dock that hid before its dialog opened, from a row's menu that stayed open, did not show on a move into the sliver until the dialog closed. Once the dock showed itself before opening a dialog, the same steps showed it as "Add comment" opened, and it stayed shown with the pointer away while the dialog had the focus. A press on the header gives the dock the focus (M39), which keeps it shown until another window takes the focus.
 - **X errors.** Avalonia 12.1.3 installs a process-wide Xlib error handler that records the error and returns, so a `BadWindow` from the dock's own connection, as when a menu closes during `KeptOpen`, does not end the process; not provoked live.
 - **Not verified:** a second monitor; a scale other than 1; a resize while hidden; the operator's desktop, where IBus changed focus behaviour in M39; a native Wayland window receiving a click through the hidden part.
-- **Current use:** Linux auto-hide (PRD R71, architecture.md § Dock).
+- **Used until 2026-11-24:** Linux auto-hide (PRD R71, the removed Dock section of architecture.md).
 
 ## M50. Extension recommendation prompts in item windows
 
@@ -635,20 +646,22 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Versions:** VS Code 1.143.1 on Linux.
 - **Source inspection of `workbench.desktop.main.js`:** on opening a workspace, VS Code prompts to install the recommended extensions of its folders' `.vscode/extensions.json`. Its "Don't Show Again" stores `extensionsAssistant/workspaceRecommendationsIgnore` in workspace storage, which is per workspace file, so every new item window prompts again. Every recommendation prompt first returns when `extensions.ignoreRecommendations` or `extensions.showRecommendationsOnlyOnDemand` is set; `extensions.ignoreRecommendations` declares no scope, so it is a window setting that a `.code-workspace` file's `settings` applies. It turns off every recommendation notification, such as those for a file type, not only the repository's; the Extensions view's Recommended section depends on `showRecommendationsOnlyOnDemand`, not on it, so it stays.
 - **Not verified:** a live item window with the setting.
-- **Current use:** `extensions.ignoreRecommendations` in item windows' workspace files (PRD R71, architecture.md § Dock).
+- **Current use:** `extensions.ignoreRecommendations` in the workspace file the web page's Open in VS Code writes (architecture.md § Web page).
 
 ## M51. Resizing an X11 dock after auto-hide
 
+- **Historical:** the dock was removed on 2026-11-24; the web page's list and its needs-you notifications replace it, and nothing replaces auto-hide.
 - **Date:** 2026-10-30.
 - **Versions:** GNOME Shell and Mutter 50.1, Xwayland 24.1.10, Avalonia 12.1.3; one isolated headless 1920 × 1080 monitor at scale 1, as in M39.
 - **Reproduction:** a native preview of the production MainWindow served the recorded dock view without a hub. After hiding and showing it, a virtual-pointer drag widened the left dock from 320 to 420 pixels. Avalonia's Width, Bounds and ClientSize and the X11 window reached 420, but a shell screenshot showed only the original 320 pixels of the content.
 - **Shapes:** reapplying the 32767-pixel shape restored the drawing, but the pin in the added area did not respond to clicks. Setting both bounding and input shapes to the current XGetGeometry width and height restored that click, so the shapes must follow the window's size after each resize: the sliver while hidden, the window's rectangle while shown.
 - **Verification:** with the shapes refreshed after each resize, virtual-pointer drags and screenshots checked widening with auto-hide on, pinning and widening again on the left, moving to the right, and widening and narrowing there. Clicking the pin in the added area turned auto-hide off. The window, layout and drawing agreed at 420, 520 and 620 pixels.
 - **Limits:** this run did not cover multiple monitors or scale factors other than 1.
-- **Current use:** Linux dock resize and auto-hide (PRD R71, architecture.md § Dock).
+- **Used until 2026-11-24:** Linux dock resize and auto-hide (PRD R71, the removed Dock section of architecture.md).
 
 ## M54. Bringing the browser forward for a link the dock opens on Linux
 
+- **Historical:** the dock and the GNOME Shell extension were removed on 2026-11-24; the web page opens its links in the browser it runs in.
 - **Date:** 2026-11-03.
 - **Versions:** GNOME Shell and Mutter 50.1 in the isolated headless shell of M39; Firefox 158.0.1 from the Snap, whose desktop file has `StartupNotify=true`.
 - **Problem:** on the operator's desktop a link the dock opened with `xdg-open` loaded in Firefox's existing window, but GNOME showed a "Firefox is ready" notification and left the window behind, because the launch carried no activation token.
@@ -657,10 +670,11 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Through the shell:** the extension's `OpenUrl`, which runs `Gio.AppInfo.launch_default_for_uri_async` with `global.create_app_launch_context(global.display.get_current_time_roundtrip(), -1)`, gave the handler `XDG_ACTIVATION_TOKEN` and `DESKTOP_STARTUP_ID` with the same value, and the app's window took the focus, three times of three, with no notification. Without `StartupNotify=true` in the handler's desktop file, GIO set neither variable and the window stayed behind without a notification.
 - **Operator's desktop, 2026-11-03.** After a new login loaded the extension, a link the dock opened came forward in the running Firefox.
 - **Not verified:** Chrome.
-- **Current use:** the dock's links on Linux with the GNOME Shell extension (PRD R74, architecture.md § Dock).
+- **Used until 2026-11-24:** the dock's links on Linux with the GNOME Shell extension (PRD R74, the removed Dock section of architecture.md).
 
 ## M55. Closing a Claude tab or its VS Code window, and resuming the session in the background
 
+- **Historical:** Continue in Background was removed on 2026-11-23 and the VS Code extension on 2026-11-24; every Claude session Switchboard starts is held in the terminal holder (M148).
 - **Date:** 2026-11-03.
 - **Versions:** Claude Code CLI 2.1.317, Claude Code extension 2.1.317, VS Code 1.144.0, on Linux.
 - **Setup:** an isolated VS Code (`--ozone-platform=headless`, its own `--user-data-dir` and `--extensions-dir` holding the Claude Code extension and a test-only extension that ran commands sent to a loopback port, `--remote-debugging-port` for clicks and screenshots) on the trusted `.wip/mech`, started without the calling session's `CLAUDE_*` variables. A Haiku session started with `claude --bg --permission-mode auto -n <name> --model haiku` and was stopped, then opened with `claude-vscode.editor.open(<session ID>, <prompt>)`. The window was closed with `workbench.action.closeWindow`.
@@ -732,6 +746,8 @@ Checked 2026-11-09 with `gh` against project `acme/3`, through `gh api graphql` 
 
 ## M61. VS Code side bar widths
 
+**Historical:** side bar widths were removed with the VS Code extension on 2026-11-24; nothing replaces them.
+
 Checked 2026-11-14 to 2026-11-17 on Windows 11 with VS Code 1.145.2 and 1.146.0 (the `.vscode-test` archives, own user data folders), by reading the minified `workbench.desktop.main.js` and running commands from a probe extension while reading `offsetWidth` and `getBoundingClientRect` of `#workbench.parts.sidebar`, `#workbench.parts.editor` and `#workbench.parts.auxiliarybar` over the debugging port.
 
 - **Defect:** with the side bars at 410 and 462 pixels in an 1800-pixel window, a resize to 600 pixels and back left them at 170 and 162. The editor gives up width first; the side bars narrow once it is at its minimum and get nothing back. VS Code tracks this as microsoft/vscode#224933, open since 2024-08.
@@ -744,7 +760,7 @@ Checked 2026-11-14 to 2026-11-17 on Windows 11 with VS Code 1.145.2 and 1.146.0 
 - **Other routes that worked, not used:** script run over `remote-debugging-port`, which `argv.json` accepts, set exact widths with synthetic mouse events on the sash; any local process can then control VS Code. `WM_MOUSEMOVE`, `WM_LBUTTONDOWN` and `WM_LBUTTONUP` posted to the window's `Chrome_RenderWidgetHostHWND` dragged the primary sash to an exact width.
 - **Live check, 2026-11-17:** the built extension in VS Code 1.146.0 with its pane in the Explorer and a probe extension's webview in the secondary side bar holding the focus, resized with `SetWindowPos` (`.wip/sidebar-probe/live.mjs`, not committed). Calibration from unfocused polls kept both side bars' widths and returned the focus to the webview. Squeezed to 170 and 241 at 700 pixels, the side bars were set back to their kept widths at 1800, and a primary widened by command was kept. A resize to 1300 and back, and a squeeze while Search was the primary's view, ran nothing; the Explorer's return set the side bars.
 - **Live check after review, 2026-11-17:** eight repeats after the review's fixes gave the same results. A pane report that arrived before the layout caught up with a resize once read as a pane wider than the room, until the check waited for held readings. A drag made at once after a restore became the base and was not kept. At 700 pixels, where the editor leaves no room for the focus test, the focus once stayed out of the webview after the secondary was set. With the fixed offset in place of the measurement, two more runs gave the same widths and ran no `closeAuxiliaryBar`.
-- **Current use:** PRD R91 (architecture.md § VS Code extension), with the frame, activity bar and sashes taken as 14, 44 and 16 pixels instead of measured. In the probe the measured offset was 73.6 pixels against the 74 those give. The command IDs, the 60-pixel step, the 170 and 220-pixel minimums, the layout's sizes and the webview's `outerWidth` are VS Code internals; re-check after an upgrade.
+- **Used until 2026-11-24:** PRD R91 (the removed VS Code extension section of architecture.md), with the frame, activity bar and sashes taken as 14, 44 and 16 pixels instead of measured. In the probe the measured offset was 73.6 pixels against the 74 those give. The command IDs, the 60-pixel step, the 170 and 220-pixel minimums, the layout's sizes and the webview's `outerWidth` are VS Code internals; re-check after an upgrade.
 
 ## M62. Leaked hook entries, and Codex state from the rollout alone
 
@@ -930,6 +946,7 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
 
 ## M76. node-pty from a packaged extension
 
+- **Historical:** the VS Code extension and its VSIX were removed on 2026-11-24; apps/hub's standalone build, installed by `npm run install-local`, now carries the holder with node-pty's files (`apps/hub/carried.cjs`). The results on loading node-pty from a copied folder still hold.
 - **Date:** 2026-11-18.
 - **Versions:** node-pty 1.1.0, @vscode/vsce from the repository; Node.js 24.14.0 and VS Code 1.146.0's Electron 43.8.6 in Node mode; Windows 11 x64.
 - **Experiment:** a probe extension whose `holder/` folder held the holder script, `@xterm/headless`, `@xterm/addon-serialize` and node-pty's `package.json`, `lib/**/*.js` without tests (including `worker/conoutSocketWorker.js` and `conpty_console_list_agent.js`) and `prebuilds/win32-x64` without `.pdb` files (`conpty.node`, `conpty_console_list.node`, `pty.node`, `winpty.dll`, `winpty-agent.exe`, `conpty/conpty.dll`, `conpty/OpenConsole.exe`). `vsce package --no-dependencies` included the nested `node_modules` (42 files, 1.78 MB). The VSIX was unzipped under the temp folder, away from any checkout, and a script spawned a pseudo-terminal from it, resized it from 80×24 to 132×40 and killed it.
@@ -939,7 +956,7 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
   - With `conpty.node` removed, the holder started and listened, and only a spawn failed: `Failed to load native module: conpty.node, checked: build/Release, build/Debug, prebuilds/win32-x64: …`.
   - While a process had `.node` files loaded, Node.js `writeFileSync` and `copyFileSync` over one failed with `EBUSY`, and `rmSync` and `renameSync` over one with `EPERM`. A second copy of the build in another folder ran beside the first.
 - **Pass criteria (plan E11):** spawn, resize and kill from the extracted folder on each platform; a running holder survives a new build installed beside it; a missing binary fails only a Code Mode start. **Partial.** Passed on Windows x64: spawn, resize and kill from the extracted folder under Node.js 24 and Electron 43; a second build in its own folder ran beside a running one, whose loaded `.node` files cannot be replaced; with `conpty.node` missing the holder started and only a spawn failed. Outstanding: Node.js 22, and the hub started with the binary missing. Linux x64 is deferred (plan Q8). Node.js 22 later passed in M81.
-- **Current use:** the holder's artifact with node-pty's helpers and prebuilt binaries in the VSIX, installed per build (architecture.md § Terminal holder).
+- **Current use:** the holder's artifact with node-pty's helpers and prebuilt binaries in apps/hub's standalone build, installed per build (architecture.md § Terminal holder).
 
 ## M77. Claude runs nested in a Code Mode session
 
@@ -1148,6 +1165,7 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
 
 ## M89. Extension terminals across a window reload, an extension host restart and a quit, 2026-11-19
 
+- **Historical:** the VS Code extension and its terminals were removed on 2026-11-24; Open in terminal now always opens the terminal app, and the web page's Console tab attaches in the page.
 - **Versions:** VS Code 1.146.0 on the operator's machine; source read from `microsoft/vscode` `main` on 2026-11-19 (`extHostTerminalService.ts`, `mainThreadTerminalService.ts`, `terminalService.ts`, `terminalInstance.ts`, `terminalProcessManager.ts`, `ptyService.ts`, `terminalConfiguration.ts`).
 - **Experiment:** source inspection only; no window was reloaded. The real-host suite (VS Code 1.147.0) ran Open in terminal against stand-in terminals that report a process ID.
 - **Result:**
@@ -1156,7 +1174,7 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
   - The terminal's `name` is its title, which a title escape sequence from the process can change (`_setTitle` ignores only process-name titles for a terminal named through the API), so it does not identify a session.
   - After VS Code quits (`terminal.integrated.persistentSessionReviveProcess`, default `onExit`), the pty host revives the terminal on next start: `_reviveTerminalProcess` runs the saved `shellLaunchConfig`, the same executable and arguments, as a new process with the old buffer replayed, under a new process ID unless the operating system happens to reuse the old one.
 - **Not verified:** a live reload; how long a reconnected terminal takes to report its process ID (a lookup waits 1 s for each, then opens a new terminal); whether a revived `claude attach <short ID>` still attaches (the short ID can be stale) and whether a revived `claude --resume` starts a copy of a session that is live elsewhere (M18).
-- **Current use:** Open in terminal's reuse of a terminal by its kept process ID (`TerminalKeys`, architecture.md § Claude Code runner). A revived terminal runs a new process, so it is not reused; a process ID the operating system reuses after a quit can be taken by chance.
+- **Used until 2026-11-24:** Open in terminal's reuse of a terminal by its kept process ID (`TerminalKeys`, architecture.md § Claude Code runner). A revived terminal runs a new process, so it is not reused; a process ID the operating system reuses after a quit can be taken by chance.
 
 ## M90. Clearing Claude Code's input box, 2026-11-20
 
@@ -1205,11 +1223,12 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
 
 ## M93. Hosted conversation dock state and folder deployment, 2026-11-20
 
+- **Historical:** the dock and its folder-window switching were removed on 2026-11-24, with the VS Code extension; the row marks still hold, and the web page's Open in VS Code opens a folder-hosted conversation's folder.
 - **Versions:** Codex CLI 0.170.0, VS Code 1.146.0 (`69047191fc427f2f92828279aae1d90d8eeda7ab`), Switchboard VSIX 0.0.0 with hub build `d70cb548c87f6d78`. The old dock binary was dated 2026-11-19 20:45, before folder support in `8f5b910`; the replacement was published from `159b184`, with no dock source changes in this fix.
 - **Evidence:** the operator's AdHoc 22 had an idle Codex app-server session and a `running` work item. The hub's dock stream marked its row Running and on the agent's turn. See architecture.md § Rows for the distinction between an open conversation and a working session.
 - **Folder click:** the hub sent `file: null`, `hosted: true` and the correct canonical folder. The installed dock predated folder-window switching and its assembly lacked `FolderWindow`. Publishing the current dock and restarting it resolved the mismatch. A forwarded `/dock/click` for AdHoc 22 left its session for the folder and that folder window claimed a `conversation` command. The Conversation view's accessibility tree showed the expected conversation and Idle.
 - **Limits:** the dock's tool window was not exposed by the desktop automation inventory, so this was a forwarded click, not a pointer click on its row. The screenshot helper captured another foreground window; the view check rests on its accessibility tree. The first integration run passed 106 tests and failed its theme-focus assertion; the rerun passed all 107 with no desktop automation or dock restart during the run.
-- **Current use:** PRD R27, R102 and R104: the row marks (architecture.md § Rows) and the dock's folder-window switching. Updating the VSIX does not publish the dock.
+- **Current use:** PRD R27, R102 and R104: the row marks (architecture.md § Rows).
 
 ## M94. Dictation: capture, other apps' recording, recognition and turn detection, 2026-11-20
 
@@ -1310,6 +1329,7 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
 
 ## M103. A Chrome window glued over an installed web app's column, 2026-11-21
 
+- **Historical:** the native Chrome pane and its pane helper were removed on 2026-11-24, with the dock; the web page's embedded link tabs (PRD R125) replace them.
 - **Versions:** Chrome 157.0.8103.52 (window tests) and Chrome for Testing 155.0.8059.12 (extension tests), .NET 10, Windows 11 Pro 10.0.26300, three monitors at 125%, 100% and 150%.
 - **Experiment:** a throwaway PerMonitorV2 helper moved a scratch Chrome instance's windows (scratch `--user-data-dir`): an `--app=` window standing in for the installed page, which has the same class, frame and title bar, and a second, normal tabbed window as the pane, found by marker titles. A test MV3 extension opened the pane window and switched its tabs on messages over a WebSocket from the helper. Spike report: `.wip/artifacts/chat/research-chrome-pane.md` in claude-collab; code in the `spike-chrome-pane` worktree's `.wip/chrome-pane/`.
 - **Result:**
