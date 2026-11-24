@@ -1,4 +1,4 @@
-// Brief replies' fade (architecture.md § Web page, Speech): where a folded reply's details are cut, measured from the lines of text the page drew.
+// Collapse details' fade (architecture.md § Web page, Speech): where a folded reply's details are cut, measured from the lines of text the page drew.
 
 /** A line of text, from the top of the box it is drawn in. */
 export interface TextLine {

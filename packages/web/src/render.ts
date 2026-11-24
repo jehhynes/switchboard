@@ -192,7 +192,7 @@ export interface View {
   /** Whether each message's line shows its time and its optional marks (dictated, tone), kept in local storage. */
   details: boolean;
   /**
-   * A paired device's own Brief replies, kept in its local storage, since only this computer's page may change settings.json; null follows
+   * A paired device's own Collapse details, kept in its local storage, since only this computer's page may change settings.json; null follows
    * `voice.briefReplies`, as this computer's page always does.
    */
   briefReplies: boolean | null;

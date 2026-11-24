@@ -297,7 +297,7 @@ describe('drawing', () => {
   it('fades the start of a folded reply\'s details under its primary response, as a control that a click and a screen reader reach as Show more', () => {
     const host = document.createElement('div');
 
-    host.innerHTML = html(renderTimeline(pageState([reply('r1', 1, { opening: 'Fixed it, see [the PR](https://example.com/pr).\n\nThe test was flaky.\n\n- one\n- [two](https://example.com/two)', speak: 'Fixed it, see [the PR](https://example.com/pr).' })]), newView()));
+    host.innerHTML = html(renderTimeline(pageState([reply('r1', 1, { opening: 'Fixed it, see [the PR](https://example.com/pr).\n\nThe test was flaky.\n\n- one\n- [two](https://example.com/two)', speak: 'Fixed it, see [the PR](https://example.com/pr).' }), reply('r2', 2)]), newView()));
     const li = host.querySelector('li[data-id="r1"]')!;
     const fade = li.querySelector('.body > .reply-fade')!;
 
@@ -339,10 +339,55 @@ describe('drawing', () => {
     expect(['role', 'tabindex', 'aria-expanded', 'aria-label', 'data-action'].filter((name) => opened.hasAttribute(name))).toEqual([]);
     expect(['aria-hidden', 'inert'].filter((name) => opened.firstElementChild!.hasAttribute(name))).toEqual([]);
     expect(opened.firstElementChild!.className).toBe('reply-more-text');
-    // Text before the passage shows in its place once opened, as with Brief replies off.
+    // Text before the passage shows in its place once opened, as with Collapse details off.
     expect(shape('r2')).toEqual(['reply-details', 'reply-primary', 'reply-details']);
     host.innerHTML = html(renderTimeline({ ...pageState(items), briefReplies: false }, newView()));
     expect(shape('r1')).toEqual(['reply-primary', 'reply-details']);
+  });
+
+  it('shows the newest reply whole with Collapse details on, in the box it folds into once a newer reply comes, unlike an aside or a note', () => {
+    const host = document.createElement('div');
+    const first = reply('r1', 1, { opening: 'Fixed it.\n\n**The three:**\n\n- one\n- two', speak: 'Fixed it.', spoken: { state: 'interrupted', atMs: 900, saidChars: 3 } });
+    const shape = (id: string) => [...host.querySelector(`li[data-id="${id}"] > .body`)!.children].map((child) => child.className);
+    const draw = (items: ReplyView[], view = newView()) => (host.innerHTML = html(renderTimeline(pageState(items), view)));
+
+    // The newest reply: its details in the plain box an opened reply has, with no fade or control, and its primary response as spoken.
+    draw([first]);
+    expect(host.querySelector('li[data-id="r1"]')!.classList.contains('folded')).toBe(false);
+    expect(shape('r1')).toEqual(['reply-primary', 'reply-more']);
+    expect(host.querySelector('li[data-id="r1"] [data-action="more"]')).toBeNull();
+    expect(host.querySelector('li[data-id="r1"]')!.getAttribute('data-speak')).toBe('1');
+    expect(host.querySelector('li[data-id="r1"] .reply-primary')!.innerHTML).toContain('Fix<span class="unheard">ed it.</span>');
+    const details = host.querySelector('li[data-id="r1"] .reply-more .reply-details')!.outerHTML;
+
+    // An aside or a note after it leaves it the newest reply.
+    draw([first, reply('a1', 2, { kind: 'aside', opening: 'Checking.' }), reply('n1', 3, { kind: 'note', opening: 'Compacted.' })]);
+    expect(shape('r1')).toEqual(['reply-primary', 'reply-more']);
+
+    // A newer reply folds it, the same details in the same box, now the fade.
+    draw([first, reply('r2', 2, { opening: 'Next.' })]);
+    expect(host.querySelector('li[data-id="r1"]')!.classList.contains('folded')).toBe(true);
+    expect(shape('r1')).toEqual(['reply-primary', 'reply-more reply-fade']);
+    expect(host.querySelector('li[data-id="r1"] .reply-fade .reply-details')!.outerHTML).toBe(details);
+    expect(host.querySelector('li[data-id="r1"] .reply-primary')!.innerHTML).toContain('Fix<span class="unheard">ed it.</span>');
+    // One the operator opened stays open.
+    const view = newView();
+
+    view.open.add('more:r1');
+    draw([first, reply('r2', 2, { opening: 'Next.' })], view);
+    expect(shape('r1')).toEqual(['reply-primary', 'reply-more']);
+    // A newest reply with text before its passage, which folding would move, stays open once a newer reply comes.
+    const around = reply('r4', 4, { opening: 'Before.\n\nFixed it.\n\nAfter.', speak: 'Fixed it.' });
+    const kept = newView();
+
+    draw([around], kept);
+    expect(shape('r4')).toEqual(['reply-details', 'reply-primary', 'reply-details']);
+    draw([around, reply('r5', 5, { opening: 'Next.' })], kept);
+    expect(shape('r4')).toEqual(['reply-details', 'reply-primary', 'reply-details']);
+    expect(host.querySelector('li[data-id="r4"]')!.classList.contains('folded')).toBe(false);
+    // A rewrite of the newest reply, drawn in its place, is the newest reply.
+    draw([{ ...first, rewrittenBy: 'r3' }, reply('r3', 3, { opening: 'Fixed it again.\n\nThe details.', speak: 'Fixed it again.' })]);
+    expect(host.querySelector('li[data-id="r3"]')!.classList.contains('folded')).toBe(false);
   });
 
   it('shows a reply with no [details] line whole, with no fade, its ending questions and their markup left to its card', () => {
@@ -362,7 +407,7 @@ describe('drawing', () => {
     const host = document.createElement('div');
     const asked = 'Fixed it.\n\n1. Ship it?\n   - A) Yes\n   - B) No';
 
-    host.innerHTML = html(renderTimeline(pageState([reply('r1', 1, { opening: asked, speak: 'Fixed it.' }), reply('r2', 2, { opening: `${asked}\n\nMore after.`, speak: 'Fixed it.' })]), newView()));
+    host.innerHTML = html(renderTimeline(pageState([reply('r1', 1, { opening: asked, speak: 'Fixed it.' }), reply('r2', 2, { opening: `${asked}\n\nMore after.`, speak: 'Fixed it.' }), reply('r3', 3)]), newView()));
     expect(host.querySelector('li[data-id="r1"] .reply-fade')).toBeNull();
     expect(host.querySelector('li[data-id="r1"] .question-card')).not.toBeNull();
     // Questions written mid-message stay in the text, folded, so the fade still has them and the text after them to show.
@@ -3043,7 +3088,7 @@ describe('the page in use', () => {
     expect(root.querySelector('.view-options-menu')).toBeNull();
     click('.header button.view-options');
     expect(root.querySelector('.header button.view-options')!.getAttribute('title')).toBe('View options');
-    expect([...root.querySelectorAll('.view-options-menu .menu-row')].map((row) => row.textContent!.trim())).toEqual(['Show message details', 'Brief replies']);
+    expect([...root.querySelectorAll('.view-options-menu .menu-row')].map((row) => row.textContent!.trim())).toEqual(['Show message details', 'Collapse details']);
     expect(root.querySelector('.view-options-menu .menu-separator')).toBeNull();
     root.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     expect(root.querySelector('.view-options-menu')).toBeNull();
@@ -5492,7 +5537,8 @@ describe('the page in use', () => {
     const { page, source } = start();
     const paragraphs = (count: number) => Array.from({ length: count }, (_, index) => `Line ${index + 1}.`).join('\n\n');
 
-    hello(source, { items: [reply('r1', 2, { opening: `Short.\n\n${paragraphs(3)}`, speak: 'Short.' }), reply('r2', 3, { opening: `Long.\n\n${paragraphs(6)}`, speak: 'Long.' })], settings: { briefReplies: true } });
+    // The newest reply shows whole, with no fade to fit, until a newer one comes.
+    hello(source, { items: [reply('r1', 2, { opening: `Short.\n\n${paragraphs(3)}`, speak: 'Short.' }), reply('r2', 3, { opening: `Long.\n\n${paragraphs(6)}`, speak: 'Long.' }), reply('n1', 4, { opening: 'Next.' })], settings: { briefReplies: true } });
     expect(observed.map((text) => text.closest<HTMLElement>('li.reply')!.dataset['id'])).toEqual(['r1', 'r2']);
     fit!(observed.map((target) => ({ target })));
 
@@ -5511,7 +5557,9 @@ describe('the page in use', () => {
     expect(observed).toEqual([]);
 
     // A focused fade that a wider page makes too short to fade gives the focus to its reply as it opens.
-    source.emit('reply', { reply: reply('r3', 4, { opening: `Wide.\n\n${paragraphs(5)}`, speak: 'Wide.' }) });
+    source.emit('reply', { reply: reply('r3', 5, { opening: `Wide.\n\n${paragraphs(5)}`, speak: 'Wide.' }) });
+    expect(observed).toEqual([]);
+    source.emit('reply', { reply: reply('n2', 6, { opening: 'Next.' }) });
     const wide = root.querySelector<HTMLElement>('li[data-id="r3"] .reply-fade')!;
     fit!(observed.map((target) => ({ target })));
     expect(root.querySelector('li[data-id="r3"]')!.classList.contains('folded')).toBe(true);
@@ -5523,7 +5571,8 @@ describe('the page in use', () => {
     expect(document.activeElement).toBe(root.querySelector('li.reply[data-id="r3"]'));
 
     // Closing the page lets go of the fades still folded.
-    source.emit('reply', { reply: reply('r4', 5, { opening: `Last.\n\n${paragraphs(6)}`, speak: 'Last.' }) });
+    source.emit('reply', { reply: reply('r4', 7, { opening: `Last.\n\n${paragraphs(6)}`, speak: 'Last.' }) });
+    source.emit('reply', { reply: reply('n3', 8, { opening: 'Next.' }) });
     expect(observed).toHaveLength(1);
     page.close();
     expect(disconnected).toBe(true);
@@ -5533,7 +5582,7 @@ describe('the page in use', () => {
   it('opens a folded reply for good on a click on its fade, with no Show less', () => {
     const { page, source } = start();
 
-    hello(source, { items: [reply('r1', 2, { opening: 'Short.\n\nWhole reply.', speak: 'Short.' })], settings: { briefReplies: true } });
+    hello(source, { items: [reply('r1', 2, { opening: 'Short.\n\nWhole reply.', speak: 'Short.' }), reply('n1', 3, { opening: 'Next.' })], settings: { briefReplies: true } });
     root.querySelector<HTMLElement>('li[data-id="r1"] .reply-fade')!.focus();
     click('li[data-id="r1"] .reply-fade');
     expect(root.querySelector('li[data-id="r1"] .reply-details')!.closest('.reply-fade')).toBeNull();
@@ -5543,8 +5592,28 @@ describe('the page in use', () => {
     expect(document.activeElement).toBe(root.querySelector('li.reply[data-id="r1"]'));
     expect(root.querySelector('#panel')!.textContent).not.toContain('Show less');
     // The reply stays open as the state changes.
-    source.emit('reply', { reply: reply('r2', 3, { opening: 'Next.', speak: 'Next.' }) });
+    source.emit('reply', { reply: reply('r2', 4, { opening: 'Next.', speak: 'Next.' }) });
     expect(root.querySelector('#panel')!.textContent).toContain('Whole reply.');
+    page.close();
+  });
+
+  it('shows the newest reply whole and folds it only once a newer reply comes, leaving a reply opened by a click open', () => {
+    const { page, source } = start();
+    const folded = (id: string) => root.querySelector(`li[data-id="${id}"]`)!.classList.contains('folded');
+
+    hello(source, { items: [reply('r1', 2, { opening: 'First.\n\nDetails of r1.', speak: 'First.' })], settings: { briefReplies: true } });
+    expect(folded('r1')).toBe(false);
+    expect(shownText()).toContain('Details of r1.');
+    source.emit('reply', { reply: reply('r2', 3, { opening: 'Second.\n\nDetails of r2.', speak: 'Second.' }) });
+    expect(folded('r1')).toBe(true);
+    expect(folded('r2')).toBe(false);
+    expect(shownText()).not.toContain('Details of r1.');
+    expect(shownText()).toContain('Details of r2.');
+    // Opened by a click, it stays open as newer replies come, and the one they replace folds.
+    click('li[data-id="r1"] .reply-fade');
+    source.emit('reply', { reply: reply('r3', 4, { opening: 'Third.' }) });
+    expect(folded('r1')).toBe(false);
+    expect(folded('r2')).toBe(true);
     page.close();
   });
 
@@ -5554,7 +5623,7 @@ describe('the page in use', () => {
     const keyOn = (target: Element, init: KeyboardEventInit) => target.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }));
     const items = ['r1', 'r2', 'r3', 'r4'].map((id, index) => reply(id, index + 1, { opening: `See [the PR](https://example.com/${id}).\n\nDetails of ${id}.`, speak: `See [the PR](https://example.com/${id}).` }));
 
-    hello(source, { items, settings: { briefReplies: true } });
+    hello(source, { items: [...items, reply('n1', 5, { opening: 'Next.' })], settings: { briefReplies: true } });
     // A link in the primary response opens as a link and leaves the reply folded.
     const link = root.querySelector<HTMLAnchorElement>('li[data-id="r1"] .reply-primary a')!;
     const opened: boolean[] = [];
@@ -5586,12 +5655,12 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it("sets voice.briefReplies from View options' Brief replies on this computer's page, follows the hub's settings, and keeps a paired device's choice on that device", async () => {
+  it("sets voice.briefReplies from View options' Collapse details on this computer's page, follows the hub's settings, and keeps a paired device's choice on that device", async () => {
     const { page, source } = start();
     const briefRow = () => root.querySelector('[data-action="toggle-brief-replies"]');
 
-    // Brief replies is off by default: a reply shows whole.
-    hello(source, { items: [reply('r1', 2, { opening: 'Whole reply.', speak: 'Short.' })] });
+    // Collapse details is off by default: a reply shows whole.
+    hello(source, { items: [reply('r1', 2, { opening: 'Whole reply.', speak: 'Short.' }), reply('n1', 3, { opening: 'Next.' })] });
     expect(shownText()).toContain('Whole reply.');
     click('.header button.view-options');
     expect(briefRow()!.getAttribute('aria-checked')).toBe('false');
@@ -5636,16 +5705,16 @@ describe('the page in use', () => {
     // This computer's page never reads a paired device's choice.
     expect(localStorage.getItem('switchboard.briefReplies')).toBeNull();
 
-    // A paired device may not change settings.json (architecture.md § Remote access), so its Brief replies starts from voice.briefReplies
+    // A paired device may not change settings.json (architecture.md § Remote access), so its Collapse details starts from voice.briefReplies
     // and, once toggled, is kept on the device and posts nothing.
     const fetch = vi.fn(async () => ({ status: 200, ok: true, json: async () => ({}), text: async () => '' }) as unknown as Response);
     const pairedPage = () => startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, local: false });
     const briefPosts = () => fetch.mock.calls.filter((call) => String((call as unknown[])[0]).endsWith('/brief-replies'));
     let paired = pairedPage();
 
-    hello(FakeSource.last!, { items: [reply('r1', 2, { opening: 'Whole reply.', speak: 'Short.' })], settings: { briefReplies: false } });
+    hello(FakeSource.last!, { items: [reply('r1', 2, { opening: 'Whole reply.', speak: 'Short.' }), reply('n1', 3, { opening: 'Next.' })], settings: { briefReplies: false } });
     click('.header button.view-options');
-    expect([...root.querySelectorAll('.view-options-menu .menu-row')].map((row) => row.textContent!.trim()).slice(0, 2)).toEqual(['Show message details', 'Brief replies']);
+    expect([...root.querySelectorAll('.view-options-menu .menu-row')].map((row) => row.textContent!.trim()).slice(0, 2)).toEqual(['Show message details', 'Collapse details']);
     expect(briefRow()!.getAttribute('aria-checked')).toBe('false');
     expect(shownText()).toContain('Whole reply.');
     click('[data-action="toggle-brief-replies"]');
@@ -5660,7 +5729,7 @@ describe('the page in use', () => {
     expect(briefRow()!.getAttribute('aria-checked')).toBe('true');
     paired.close();
     paired = pairedPage();
-    hello(FakeSource.last!, { items: [reply('r1', 2, { opening: 'Whole reply.', speak: 'Short.' })], settings: { briefReplies: false } });
+    hello(FakeSource.last!, { items: [reply('r1', 2, { opening: 'Whole reply.', speak: 'Short.' }), reply('n1', 3, { opening: 'Next.' })], settings: { briefReplies: false } });
     expect(shownText()).not.toContain('Whole reply.');
     click('.header button.view-options');
     click('[data-action="toggle-brief-replies"]');
@@ -5671,7 +5740,7 @@ describe('the page in use', () => {
     paired.close();
   });
 
-  it("starts a paired device's Brief replies from the Expand replies it kept before, inverted, and drops the old key once toggled", async () => {
+  it("starts a paired device's Collapse details from the Expand replies it kept before, inverted, and drops the old key once toggled", async () => {
     const fetch = vi.fn(async () => ({ status: 200, ok: true, json: async () => ({}), text: async () => '' }) as unknown as Response);
     const pairedPage = () => startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, local: false });
     const briefRow = () => root.querySelector('[data-action="toggle-brief-replies"]');
@@ -5679,7 +5748,7 @@ describe('the page in use', () => {
     localStorage.setItem('switchboard.expandReplies', '0');
     let paired = pairedPage();
 
-    hello(FakeSource.last!, { items: [reply('r1', 2, { opening: 'Whole reply.', speak: 'Short.' })], settings: { briefReplies: false } });
+    hello(FakeSource.last!, { items: [reply('r1', 2, { opening: 'Whole reply.', speak: 'Short.' }), reply('n1', 3, { opening: 'Next.' })], settings: { briefReplies: false } });
     expect(shownText()).not.toContain('Whole reply.');
     click('.header button.view-options');
     expect(briefRow()!.getAttribute('aria-checked')).toBe('true');
@@ -5691,7 +5760,7 @@ describe('the page in use', () => {
     localStorage.removeItem('switchboard.briefReplies');
     localStorage.setItem('switchboard.expandReplies', '1');
     paired = pairedPage();
-    hello(FakeSource.last!, { items: [reply('r1', 2, { opening: 'Whole reply.', speak: 'Short.' })], settings: { briefReplies: true } });
+    hello(FakeSource.last!, { items: [reply('r1', 2, { opening: 'Whole reply.', speak: 'Short.' }), reply('n1', 3, { opening: 'Next.' })], settings: { briefReplies: true } });
     expect(shownText()).toContain('Whole reply.');
     paired.close();
     localStorage.clear();
@@ -5700,7 +5769,7 @@ describe('the page in use', () => {
   it('opens the dropdown, selects another conversation, pages back, and folds a focused reply', async () => {
     const { page, source } = start();
 
-    hello(source, { items: [reply('r1', 2, { opening: 'Whole reply.', speak: 'Short.' })], settings: { briefReplies: true } });
+    hello(source, { items: [reply('r1', 2, { opening: 'Whole reply.', speak: 'Short.' }), reply('n1', 3, { opening: 'Next.' })], settings: { briefReplies: true } });
     expect(root.querySelector('#panel')!.textContent).toContain('Short.');
     click('[data-action="more"]');
     expect(shownText()).toContain('Whole reply.');

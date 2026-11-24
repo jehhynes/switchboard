@@ -1,8 +1,9 @@
-// Checks Brief replies' fade in a real headless Chrome or Edge (testing.md § Test layers): a folded reply's details show at least two whole
-// lines of text before the fade, details that would hide less than 1.5 lines show in full with no fade, and opening a folded reply moves none
-// of the lines it showed. Desktop and phone, light and dark.
+// Checks Collapse details' fade in a real headless Chrome or Edge (testing.md § Test layers): a folded reply's details show at least two whole
+// lines of text before the fade, details that would hide less than 1.5 lines show in full with no fade, opening a folded reply moves none
+// of the lines it showed, and the newest reply shows whole until a newer one comes, when it folds with none of the lines it keeps moving.
+// Desktop and phone, light and dark.
 // Run `npm run build` first; the browser is SWITCHBOARD_CHROME, else Chrome or Edge where they install. --shots <dir> saves each size's
-// conversation folded and opened; --report prints the measurements.
+// conversation folded and opened, and the newest reply before and after a newer one comes; --report prints the measurements.
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -33,16 +34,17 @@ if (browsers.length === 0) {
 }
 
 const PRIMARY = 'The rate-limit fix is now on top of the layout and Approve fixes, so all three are ready to install together, with one hub restart. Shall I install them now?';
-/** Each reply's details after the primary response, and what the check expects of it. */
+/** Each reply's details after the primary response, and what the check expects of it; the last is the newest reply, shown whole. */
 const REPLIES = [
   { id: 'short', details: 'Nothing else changed.', folded: false },
   { id: 'two-lines', details: 'The hub restarts once the sessions are quiet, which takes a minute or two on a busy afternoon, and the page reconnects on its own after it.', folded: false },
   { id: 'label-list', details: '**The three:**\n\n- the rate-limit fix, which waits out a 429 before the next poll\n- the layout fix, which keeps every column in place while a work item opens\n- the Approve fix, which sends the approval once\n\nEach has its tests, and the three pass together.', folded: true },
   { id: 'heading', details: '## What changed\n\nThe poller now reads the Retry-After header and waits that long before it asks again, instead of retrying at once and tripping the limit a second time.\n\n## Why\n\nGitHub counts every request against the hour, so a burst of retries used the whole hour in a few minutes.', folded: true },
   { id: 'paragraphs', details: 'The poller now reads the Retry-After header and waits that long before it asks again, instead of retrying at once and tripping the limit a second time. GitHub counts every request against the hour, so a burst of retries used the whole hour in a few minutes.\n\nThe layout fix keeps every column in place while a work item opens, and the Approve fix sends the approval once, even after a double click.\n\nEach has its tests, and the three pass together.\n\nThe hub restarts once the sessions are quiet, which takes a minute or two on a busy afternoon, and the page reconnects on its own after it.', folded: true },
+  { id: 'newest', details: '**The three:**\n\n- the rate-limit fix, which waits out a 429 before the next poll\n- the layout fix, which keeps every column in place while a work item opens\n- the Approve fix, which sends the approval once\n\nThe hub restarts once the sessions are quiet, which takes a minute or two on a busy afternoon, and the page reconnects on its own after it.', folded: false, newest: true },
 ];
 
-// The page with a fake stream and fetch in place of the hub's: one work item whose conversation is the replies above, with Brief replies on.
+// The page with a fake stream and fetch in place of the hub's: one work item whose conversation is the replies above, with Collapse details on.
 const fake = '<script>' + String.raw`
 localStorage.removeItem('switchboard.route');
 localStorage.removeItem('switchboard.briefReplies');
@@ -60,7 +62,7 @@ const items = replies.flatMap((reply, i) => [
 ]);
 history.replaceState(null, '', location.search + '#w=1');
 class FakeSource {
-  constructor() { this.listeners = {}; setTimeout(() => this.emit('hello', { key: 'pk', groups, scope, sessions: [session], items, more: false, status: null, artifacts: [], unread: 0, settings: { briefReplies: true } }), 20); }
+  constructor() { this.listeners = {}; window.fakeSource = this; setTimeout(() => this.emit('hello', { key: 'pk', groups, scope, sessions: [session], items, more: false, status: null, artifacts: [], unread: 0, settings: { briefReplies: true } }), 20); }
   addEventListener(type, listener) { (this.listeners[type] ??= []).push(listener); }
   removeEventListener() {}
   close() {}
@@ -251,6 +253,38 @@ try {
 
         for (const [part, index, line, now] of shown) {
           if (now === undefined || Math.abs(now.top - line.top) > 0.5 || Math.abs(now.left - line.left) > 0.5) found.push(expected.id + "'s " + part + ' line ' + (index + 1) + ' moved from ' + line.left + ',' + line.top + ' to ' + (now === undefined ? 'nowhere' : now.left + ',' + now.top));
+        }
+      }
+
+      // A newer reply folds the newest, which showed whole: none of the lines it keeps moves, and at least two whole lines of its details show
+      // before the fade.
+      const whole = after.find((one) => one.id === 'newest');
+
+      await evaluate('document.querySelector(\'#panel li.reply[data-id="newest"]\').scrollIntoView({ block: "start" })');
+      await wait(100);
+      await shot(name + '-newest-whole');
+      await evaluate('window.fakeSource.emit("reply", { reply: { type: "reply", id: "newer", sessionId: "s", at: Date.now(), ord: 100, provisional: false, kind: "reply", answers: null, opening: "Installed.", rewrittenBy: null, withdrawn: false, unread: false, speak: "Installed.", tone: null, spoken: { state: "none", atMs: null, saidChars: null } } })');
+      await wait(200);
+      const newer = await evaluate(measure);
+      const folded = newer.find((one) => one.id === 'newest');
+
+      await evaluate('document.querySelector(\'#panel li.reply[data-id="newest"]\').scrollIntoView({ block: "start" })');
+      await wait(100);
+      await shot(name + '-newest-folded');
+      if (whole === undefined || folded === undefined || !newer.some((one) => one.id === 'newer')) {
+        found.push('the newest reply or the newer one was not drawn');
+      } else if (whole.folded || whole.fade !== null) {
+        found.push('the newest reply was folded before a newer one came');
+      } else if (!folded.folded || folded.fade === null) {
+        found.push('the newest reply stayed whole after a newer one came');
+      } else {
+        const solid = folded.details.filter((line) => line.top >= folded.fade.top - 0.5 && line.bottom <= folded.fade.top + folded.fade.solid + 0.5);
+
+        if (solid.length < 2) found.push('the folded newest reply shows ' + solid.length + ' solid lines of details before the fade, not 2');
+        const kept = [...whole.primary.map((line, index) => ['primary', index, line, folded.primary[index]]), ...folded.details.filter((line) => line.top < folded.fade.bottom).map((line, index) => ['details', index, whole.details[index], line])];
+
+        for (const [part, index, line, now] of kept) {
+          if (line === undefined || now === undefined || Math.abs(now.top - line.top) > 0.5 || Math.abs(now.left - line.left) > 0.5) found.push("the newest reply's " + part + ' line ' + (index + 1) + ' moved as it folded');
         }
       }
 

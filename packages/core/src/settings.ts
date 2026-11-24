@@ -115,6 +115,7 @@ export type DiffWrapSetting = (typeof DIFF_WRAPS)[number];
 /** The settings the web page reads, in a stream's `hello` and its `settings` event. */
 export interface ViewSettings {
   iframeBrowser?: boolean;
+  /** Collapse details (`voice.briefReplies`). */
   briefReplies: boolean;
   /** The inverse of `briefReplies`, which builds of the retired VS Code extension from before Brief replies read. */
   expandReplies: boolean;
@@ -193,7 +194,10 @@ export interface VoiceSettings {
   speed: number;
   /** Tag spoken messages `[expressive]`, so Claude writes a tone line, and read with it. */
   expressive: boolean;
-  /** Show a reply's primary response first, its details behind Show more (focused mode); off, every reply shows whole. */
+  /**
+   * Collapse details, the key kept from its earlier name Brief replies: show a reply's primary response first, its details folded behind Show more
+   * (focused mode), but the newest reply whole until a newer one comes; off, every reply shows whole.
+   */
   briefReplies: boolean;
   /** Minutes with the focus outside every scoped window after which the voice drops its target. */
   awayMinutes: number;

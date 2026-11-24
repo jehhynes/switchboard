@@ -89,9 +89,9 @@ const SIDE_WIDTH = 'switchboard.sideWidth';
 const LIST_UNPINNED = 'switchboard.listCollapsed';
 /** Where the page keeps Show message details. */
 const DETAILS = 'switchboard.messageDetails';
-/** A paired device's own Brief replies, '1' or '0'; this computer's page keeps it in settings.json instead. */
+/** A paired device's own Collapse details, '1' or '0'; this computer's page keeps it in settings.json instead. */
 const BRIEF = 'switchboard.briefReplies';
-/** The Expand replies a paired device kept before Brief replies replaced it, read as its inverse until Brief replies is first toggled there. */
+/** The Expand replies a paired device kept before Collapse details replaced it, read as its inverse until Collapse details is first toggled there. */
 const EXPAND = 'switchboard.expandReplies';
 /** Where an earlier page kept the conversation's text size, which is now fixed; removed on load. */
 const OLD_TEXT_SCALE = 'switchboard.textScale';
@@ -680,7 +680,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const local = deps.local ?? ['127.0.0.1', 'localhost'].includes(location.hostname);
 
 
-  // A paired device may not change settings.json (architecture.md § Remote access), so its Brief replies is its own, following
+  // A paired device may not change settings.json (architecture.md § Remote access), so its Collapse details is its own, following
   // voice.briefReplies until it is first toggled there.
   if (!local) {
     try {
@@ -693,7 +693,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
   }
   /**
-   * The value Brief replies was last clicked to, until the hub's `settings` event or a refusal, so a quick second click reverses the
+   * The value Collapse details was last clicked to, until the hub's `settings` event or a refusal, so a quick second click reverses the
    * first, and the value of the save in flight; saves go one at a time, so a later click's value is the one the file keeps.
    */
   let briefAsked: boolean | null = null;
@@ -709,7 +709,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
       if (answer.status !== 200) {
         briefAsked = briefAsked === on ? null : briefAsked;
-        showError(String(answer.body['error'] ?? `Brief replies did not change (status ${answer.status}).`));
+        showError(String(answer.body['error'] ?? `Collapse details did not change (status ${answer.status}).`));
       }
 
       if (briefAsked === null || briefAsked === on) {
@@ -2629,7 +2629,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   };
   // A draw asked for before the next repaint (`drawSoon`), which a draw meanwhile makes unneeded.
   let frame: { cancelled: boolean } | null = null;
-  // Brief replies' fades, fitted to the lines their details draw, before the page paints them, and again as their width changes. Each observes
+  // Collapse details' fades, fitted to the lines their details draw, before the page paints them, and again as their width changes. Each observes
   // its details' box, which the fade's own height does not resize, so fitting one never asks for another. Details that would hide less than 1.5
   // lines open for good instead, with no fade and nothing to click.
   const fadesObserved = new Set<Element>();
@@ -5340,7 +5340,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       }
 
       // settings.json changed on disk: Settings reads it again, keeping unsaved edits under the changed-on-disk warning (PRD R54).
-      // With no save in flight, the hub's settings hold what Brief replies asked for, or a newer change.
+      // With no save in flight, the hub's settings hold what Collapse details asked for, or a newer change.
       if ((type === 'settings' || type === 'hello') && briefSending === null) {
         briefAsked = null;
       }

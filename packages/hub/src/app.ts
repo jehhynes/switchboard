@@ -950,7 +950,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
       return result.errors.length === 0 ? { status: 200, body: { saved: true, version: result.version } } : { status: 409, body: { errors: result.errors } };
     },
-    // The view options menu's Brief replies (architecture.md § Conversation view): sets `voice.briefReplies` in settings.json as a
+    // The view options menu's Collapse details (architecture.md § Conversation view): sets `voice.briefReplies` in settings.json as a
     // Settings save would, leaving the rest of the file as it is but the `voice.expandReplies` it replaced; the reload sends every window and
     // page the new value.
     briefReplies: async (body: unknown) => {
@@ -1190,7 +1190,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       '/v1/conversation/page-voice-enroll': settingsRoutes.enroll,
       '/v1/conversation/page-settings-check': settingsRoutes.check,
       '/v1/conversation/page-settings-save': settingsRoutes.save,
-      // Brief replies, from this computer's page's view options menu.
+      // Collapse details, from this computer's page's view options menu.
       '/v1/conversation/brief-replies': settingsRoutes.briefReplies,
     },
     snapshot: () => runtime.snapshot(),

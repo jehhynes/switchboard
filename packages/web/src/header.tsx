@@ -212,7 +212,7 @@ function PersonaRow({ session }: { session: PageState['session'] }) {
 }
 
 /**
- * The header's view options button and its menu: Show message details, Brief replies, the persona, and the Chrome
+ * The header's view options button and its menu: Show message details, Collapse details, the persona, and the Chrome
  * pane's state and pairing while it is on.
  */
 function ViewOptions({ view, briefReplies, session }: { view: View; briefReplies: boolean; session: PageState['session'] }) {
@@ -229,7 +229,7 @@ function ViewOptions({ view, briefReplies, session }: { view: View; briefReplies
           </button>
           <button type="button" class="menu-row" role="menuitemcheckbox" aria-checked={briefReplies} data-action="toggle-brief-replies">
             <Gutter checked={briefReplies} />
-            <span class="title">Brief replies</span>
+            <span class="title">Collapse details</span>
           </button>
           <PersonaRow session={session} />
         </div>

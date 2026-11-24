@@ -58,7 +58,7 @@ function AnswerReference({ card, lines: answered }: { card: string; lines: Ledge
   );
 }
 
-function Reply({ item, earlier, view, stamped: shown, card, briefReplies }: { item: ReplyView; earlier: ReplyView | null; view: View; stamped: boolean; card: VNode | null; briefReplies: boolean }) {
+function Reply({ item, earlier, view, stamped: shown, card, briefReplies, latest }: { item: ReplyView; earlier: ReplyView | null; view: View; stamped: boolean; card: VNode | null; briefReplies: boolean; latest: boolean }) {
   if (item.kind === 'note') {
     return (
       <li class="note" data-id={item.id}>
@@ -67,8 +67,8 @@ function Reply({ item, earlier, view, stamped: shown, card, briefReplies }: { it
     );
   }
 
-  // Focused mode, with Brief replies on: a reply shows its primary response first, spoken or not, then the first lines of its
-  // details fading out, and a click or a tap on it, or Enter or Space on the fade, opens it. The primary response keeps its place when the whole reply
+  // Focused mode, with Collapse details on: a reply shows its primary response first, spoken or not, then the first lines of its
+  // details fading out, and a click or a tap on it, or Enter or Space on the fade, opens it. The newest reply shows whole until a newer one comes. The primary response keeps its place when the whole reply
   // shows; after the operator spoke over it, the part not heard is dimmed.
   // A reply with no [details] line is all primary response, question markup included, which shows no more than the text does.
   const passage = item.kind === 'reply' && item.speak !== null && item.speak.trim() !== '' ? stripQuestionMarkup(item.speak) : null;
@@ -77,15 +77,21 @@ function Reply({ item, earlier, view, stamped: shown, card, briefReplies }: { it
   // The questions that end a reply show in its card, so they alone leave nothing to fold.
   const unasked = (text: string): string => (card === null ? text : withoutEndingQuestions(text));
   const folded = passage !== null && hasUnspokenText(unasked(opening), unasked(passage));
-  // Opening a reply is for good: an open reply has nothing to fold it again.
-  const expanded = !folded || !briefReplies || view.open.has(`more:${item.id}`);
+  // Opening a reply is for good: an open reply has nothing to fold it again. The newest reply is open until a newer reply makes it fold.
+  const expanded = !folded || !briefReplies || latest || view.open.has(`more:${item.id}`);
   // Only the text that ends the reply can end in the card's questions, which it leaves out; questions before a passage fold into one line.
   const markdownPart = (text: string, last: boolean): string => (card === null ? renderMarkdown(text) : withoutQuestions(text, last ? `reply:${item.id}` : `reply:${item.id}:before`, view.open, last));
   const said = item.spoken.state === 'interrupted' ? item.spoken.saidChars : null;
-  // With Brief replies on, details that follow the whole primary response draw in the fade's box, opened or not, so opening the reply moves none
-  // of its lines; only the box's height and mask change. Details around or before a passage show in their places once opened.
+  // With Collapse details on, details that follow the whole primary response draw in the fade's box, opened or not, so opening the reply, or
+  // folding the newest once a newer reply comes, moves none of its lines; only the box's height and mask change. Details around or before a passage show in their places once opened.
   const parts = folded && briefReplies ? spokenParts(opening, passage) : null;
   const trailing = parts !== null && parts.length === 2 && parts[0]!.spoken && !parts[1]!.spoken;
+
+  // The newest reply shows whole. Folding one whose details come before or around its passage, as an older reply's [speak] passage can have,
+  // would move its primary response above them, so once shown whole it stays open, as if clicked.
+  if (latest && folded && briefReplies && !trailing) {
+    view.open.add(`more:${item.id}`);
+  }
   const body = passage === null ? markdownPart(opening, true) : replyBody(opening, passage, said, !expanded || trailing, replyRender(markdownPart));
   const more = (expanded && !trailing) || passage === null ? '' : detailsPreview(opening, passage, markdownPart);
   const tone = toneMark(item.tone, view.details);
@@ -313,6 +319,9 @@ export function renderTimeline(state: PageState, view: View, now: number = Date.
   const shownPrompt = view.prompt !== null && view.prompt.sessionId === state.session.id ? view.prompt : null;
   const spinner = turnRow(state.session, inTurn(state.session) || awaitingReply(state.items, state.session), shownPrompt?.prompt != null) ?? backgroundRow(state.session);
   let lastDay: number | null = null;
+  // The newest reply, not an aside or a note, which Collapse details leaves open until a newer one comes (PRD R96).
+  const newest = [...entries].reverse().find((entry) => entry.type === 'reply' && entry.item.kind === 'reply');
+  const latest = newest?.type === 'reply' ? newest.item.id : null;
   const rows = entries.flatMap((entry) => {
     if (entry.type === 'artifact') {
       return [<ArtifactRow key={`artifact:${entry.artifact.path}`} artifact={entry.artifact} />];
@@ -337,7 +346,7 @@ export function renderTimeline(state: PageState, view: View, now: number = Date.
       entry.type === 'message' ? (
         <Message key={entry.item.id} item={entry.item} stamped={shown} details={view.details} answered={links.answers.get(entry.item.id) ?? []} />
       ) : (
-        <Reply key={entry.item.id} item={entry.item} earlier={entry.earlier} view={view} stamped={shown} card={entry.item.kind === 'reply' ? cardOf(`reply:${entry.item.id}`, links, view, state, canAnswer) : null} briefReplies={view.briefReplies ?? state.briefReplies} />
+        <Reply key={entry.item.id} item={entry.item} earlier={entry.earlier} view={view} stamped={shown} card={entry.item.kind === 'reply' ? cardOf(`reply:${entry.item.id}`, links, view, state, canAnswer) : null} briefReplies={view.briefReplies ?? state.briefReplies} latest={entry.item.id === latest} />
       );
 
     return divider === null ? [row] : [divider, row];
