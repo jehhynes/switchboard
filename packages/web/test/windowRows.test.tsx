@@ -9,6 +9,10 @@ const row = (id: number, band: string | null = 'Today'): PageRow => ({ workItemI
 describe('Done windowing', () => {
   let host: HTMLDivElement;
   let top: number;
+  let writes: number;
+  /** What scrollTop reads less where the rows lie, as iOS reports while it bounces the list past an end. */
+  let bounce: number;
+  let scrollHeight: number;
   let width: number;
   let height: number;
   let frames: FrameRequestCallback[];
@@ -30,7 +34,7 @@ describe('Done windowing', () => {
     host = document.createElement('div');
     host.id = 'list';
     document.body.append(host);
-    top = 0; width = 320; height = 72; frames = []; observers = [];
+    top = 0; writes = 0; bounce = 0; scrollHeight = 1_000_000; width = 320; height = 72; frames = []; observers = [];
     vi.stubGlobal('requestAnimationFrame', (frame: FrameRequestCallback) => frames.push(frame));
     vi.stubGlobal('cancelAnimationFrame', vi.fn());
     vi.stubGlobal('ResizeObserver', class {
@@ -39,7 +43,8 @@ describe('Done windowing', () => {
       constructor(callback: ResizeObserverCallback) { observers.push({ callback, disconnect: this.disconnect }); }
     });
     vi.spyOn(host, 'clientHeight', 'get').mockReturnValue(600);
-    Object.defineProperty(host, 'scrollTop', { get: () => top, set: (value: number) => { top = value; }, configurable: true });
+    vi.spyOn(host, 'scrollHeight', 'get').mockImplementation(() => scrollHeight);
+    Object.defineProperty(host, 'scrollTop', { get: () => top + bounce, set: (value: number) => { top = value - bounce; writes++; }, configurable: true });
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       let y = this === host ? 0 : -top;
       if (this.hasAttribute('data-window-row')) {
@@ -198,6 +203,39 @@ describe('Done windowing', () => {
     expect(visible.getBoundingClientRect().top).toBe(atResize);
     expect(before).toBe(0);
     expect(host.querySelectorAll('.row').length).toBeLessThan(25);
+  });
+
+  it('writes no scroll offset while scrolling through rows already measured', () => {
+    draw();
+    for (let step = 1; step <= 10; step++) scroll(step * 600);
+    writes = 0;
+    for (let step = 9; step >= 0; step--) scroll(step * 600);
+    expect(writes).toBe(0);
+    expect(top).toBe(0);
+  });
+
+  it('writes no correction while iOS bounces the list past either end, and one at the very end', () => {
+    for (const [reads, wrote] of [[-40, false], [60, false], [0, true]] as const) {
+      act(() => unmount(host));
+      width = 320;
+      height = 100;
+      draw();
+      // Measurements above the visible rows, as scrolling through wrapped rows makes them.
+      for (let step = 1; step <= 10; step++) scroll(step * 600);
+      // -40: scrollTop reads 40 px past the top; 60: 60 px past the end of the scroll range; 0: exactly at its end.
+      bounce = reads < 0 ? reads - top : reads;
+      scrollHeight = reads < 0 ? 1_000_000 : top + 600;
+      writes = 0;
+      // A width change discards them, which moves the visible rows unless the list scrolls to follow.
+      width = 200;
+      height = 140;
+      act(() => {
+        window.dispatchEvent(new Event('resize'));
+        for (const frame of frames.splice(0)) frame(0);
+      });
+      expect(writes > 0, `reads ${reads}`).toBe(wrote);
+      bounce = 0;
+    }
   });
 
   it('opens bands for filtered results and restores their counts and closed state afterward', () => {

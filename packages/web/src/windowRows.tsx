@@ -102,7 +102,12 @@ export function WindowRows({ rows, selected, renderRow }: {
     if (saved === null) return;
     const li = [...ul.querySelectorAll<HTMLElement>(':scope > [data-window-row]')].find((one) => one.dataset['windowRow'] === saved.key);
     const scroller = ul.closest<HTMLElement>('#list');
-    if (li !== undefined && scroller !== null) scroller.scrollTop += li.getBoundingClientRect().top - saved.top;
+    if (li === undefined || scroller === null) return;
+    const shift = li.getBoundingClientRect().top - saved.top;
+    // Only a real shift, inside the scroll range: this runs on every frame of a scroll, and on iOS a write while the list bounces past an end
+    // (a negative offset at the top) clamps it back to the edge, so a fling's bounce stutters.
+    const end = scroller.scrollHeight - scroller.clientHeight;
+    if (Math.abs(shift) >= 0.5 && scroller.scrollTop >= 0 && scroller.scrollTop <= end) scroller.scrollTop += shift;
   });
 
   useLayoutEffect(() => {
