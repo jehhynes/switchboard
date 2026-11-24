@@ -4008,7 +4008,8 @@ describe('the page in use', () => {
     // An empty draft in the same work item, its composer focused, its provider the shown conversation's; nothing is made.
     expect(root.querySelector('.conversation-menu')).toBeNull();
     expect(root.querySelector('#panel .new-draft')!.textContent).toContain('It starts when you send its first message');
-    expect(root.querySelector('button.picker')!.textContent).toContain('New conversation');
+    expect(root.querySelector('button.picker .title')!.textContent).toBe('New conversation');
+    expect(root.querySelector('button.picker')!.textContent).not.toContain('Fix it');
     expect(input.value).toBe('');
     expect(document.activeElement).toBe(input);
     expect([...root.querySelectorAll('.draft-note [data-action="draft-provider"]')].map((one) => [one.textContent, one.getAttribute('aria-pressed')])).toEqual([['Claude', 'true'], ['Codex', 'false']]);

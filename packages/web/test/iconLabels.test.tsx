@@ -94,6 +94,8 @@ describe('the tab strips', () => {
   it('ConversationDropdown_ProviderMark_StandsInOneColumnWithNoBackground', () => {
     // After the state codicon, on the button and every row, an unknown provider's empty mark as wide as a mark.
     expect(css).toContain(':is(.conversation-row, button.picker) > .provider { width: 16px; justify-content: center; }');
+    expect(css).toContain(':is(.conversation-row, button.picker) > .provider { order: 1; }');
+    expect(css).toContain('button.picker > .codicon-chevron-down { order: 2; }');
     // No rule gives the mark a background of its own.
     expect(css).not.toMatch(/\.provider(?![-\w])[^{,]*\{[^}]*background/);
   });

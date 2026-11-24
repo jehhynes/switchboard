@@ -287,8 +287,7 @@ export function renderHeader(state: PageState, view: View, now = Date.now()): VN
           {drafting ? (
             <>
               <span class="codicon codicon-add state-icon tone-muted" aria-hidden="true"></span>
-              <span class="title">{title}</span>
-              <span class="picker-session">New conversation</span>
+              <span class="title">New conversation</span>
             </>
           ) : earlier !== null ? (
             <SessionLabel icon={stateIcon(state.session?.state, state.session?.waitingFor, state.session?.limit)} provider={state.session?.provider ?? earlier.provider} title={earlier.title} />

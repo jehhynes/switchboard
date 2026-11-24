@@ -409,6 +409,9 @@ body.vscode-high-contrast .menu-row:focus, body.vscode-high-contrast-light .menu
 /* Each session's provider mark stands in one column after its state codicon, on the button and every row, an unknown provider's as an empty mark, so
    the titles start at one edge; the mark has no background of its own, on any row. */
 :is(.conversation-row, button.picker) > .provider { width: 16px; justify-content: center; }
+/* The provider's mark sits at the right end of the dropdown's rows and button, before the button's chevron. */
+:is(.conversation-row, button.picker) > .provider { order: 1; }
+button.picker > .codicon-chevron-down { order: 2; }
 /* The session dropdown's icons, on its button and rows (the state codicon, the provider's mark, the chevron, New conversation's +): each in a box 16 px
    tall that centres its glyph, centred on its row by the row's align-items: center as the label's text-box is, so icon and label share one centre
    with no baseline alignment or offsets. The codicons are drawn at 16 px, their own grid, as the provider's marks are; the gutter's + stays at a
