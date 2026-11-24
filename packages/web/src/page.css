@@ -850,6 +850,9 @@ body.artifact-window > .artifact-view { height: 100%; }
   #composer .composer { border-width: 1px 0 0; border-radius: 0; box-shadow: none; }
   #composer .composer-footer { padding-left: max(5px, calc(env(safe-area-inset-bottom) - env(safe-area-inset-left))); padding-right: max(5px, calc(env(safe-area-inset-bottom) - env(safe-area-inset-right))); padding-bottom: max(5px, min(14px, env(safe-area-inset-bottom))); }
   .session-note { border-left: none; border-right: none; border-radius: 0; }
+  /* New conversation's draft note keeps only its mark, the provider switch and Cancel; its sentence stays for a screen reader. */
+  .draft-note .session-note-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .draft-note .session-resume { margin-left: auto; }
   .composer-sent { padding: 0 12px; }
 }
 /* A conversation under 600 px wide, on a phone or in a narrow column, gives its text the width: 8 px at its sides, a 20 px gutter for the
