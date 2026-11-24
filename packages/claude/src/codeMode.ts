@@ -37,9 +37,11 @@ const CODE_MODE_VARIABLE = 'CLAUDE_CODE_EXPERIMENTAL_CODE_MODE';
 /**
  * Removed from the hub's environment: VS Code's runtime, Node.js options, credentials (mechanics M64), and the markers a parent Claude session
  * leaves, which make a child think it is a subprocess: the dock's list and claude-collab's. Other `CLAUDE_CODE_*` settings pass through.
+ * `NO_COLOR` and `FORCE_COLOR` go too: a Claude session's Bash tool sets `NO_COLOR=1`, so a hub started from one passes it on, and Claude Code
+ * without colour draws its suggested prompt as plain text, which typing then reads as a draft (mechanics M149).
  */
 const REMOVED =
-  /^(ELECTRON_.*|VSCODE_.*|NODE_OPTIONS|CLAUDECODE|CLAUDE_PID|CLAUDE_AGENT_SDK_VERSION|CLAUDE_EFFORT|AI_AGENT|CLAUDE_CODE_(CHILD_SESSION|SESSION_ID|ENTRYPOINT|EXECPATH|SSE_PORT|SESSION_ATTENDED|MESSAGING_\w+|EMIT_STARTUP_TIMING|STARTUP_FAILURE_RESULTS|ENABLE_SDK_FILE_CHECKPOINTING|QUESTION_PREVIEW_FORMAT|ENABLE_TASKS|NO_FLICKER)|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_CUSTOM_HEADERS|ANTHROPIC_API_KEY)$/i;
+  /^(ELECTRON_.*|VSCODE_.*|NODE_OPTIONS|CLAUDECODE|CLAUDE_PID|CLAUDE_AGENT_SDK_VERSION|CLAUDE_EFFORT|AI_AGENT|CLAUDE_CODE_(CHILD_SESSION|SESSION_ID|ENTRYPOINT|EXECPATH|SSE_PORT|SESSION_ATTENDED|MESSAGING_\w+|EMIT_STARTUP_TIMING|STARTUP_FAILURE_RESULTS|ENABLE_SDK_FILE_CHECKPOINTING|QUESTION_PREVIEW_FORMAT|ENABLE_TASKS|NO_FLICKER)|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_CUSTOM_HEADERS|ANTHROPIC_API_KEY|NO_COLOR|FORCE_COLOR)$/i;
 
 /**
  * The environment of a Code Mode session's process, from the hub's: Code Mode on, the direct API, the launch, the work item's artifact folder

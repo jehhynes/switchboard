@@ -58,6 +58,9 @@ describe('Code Mode command', () => {
         CLAUDE_CODE_GIT_BASH_PATH: 'C:/git/bin/bash.exe',
         CLAUDE_CODE_MESSAGING_PORT: '9',
         CLAUDE_CODE_NO_FLICKER: '1',
+        // A Claude session's Bash tool sets NO_COLOR, which would draw the suggested prompt as a draft (mechanics M149).
+        NO_COLOR: '1',
+        FORCE_COLOR: '0',
         // The holder's terminal is an xterm, whatever the hub's says.
         TERM: 'dumb',
       },
@@ -80,7 +83,7 @@ describe('Code Mode command', () => {
   });
 
   it('builds a held session without Code Mode with neither Code Mode nor the direct API, even when the hub has them, and keeps the credentials (PRD R81)', () => {
-    const env = codeModeEnvironment({ PATH: 'C:/bin', CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: '1', ANTHROPIC_BASE_URL: 'http://127.0.0.1:8318', ANTHROPIC_API_KEY: 'key' }, LAUNCH, 'claude', ARTIFACTS, false);
+    const env = codeModeEnvironment({ PATH: 'C:/bin', CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: '1', ANTHROPIC_BASE_URL: 'http://127.0.0.1:8318', ANTHROPIC_API_KEY: 'key', NO_COLOR: '1' }, LAUNCH, 'claude', ARTIFACTS, false);
 
     expect(env).toEqual({ PATH: 'C:/bin', ANTHROPIC_BASE_URL: 'http://127.0.0.1:8318', ANTHROPIC_API_KEY: 'key', TERM: 'xterm-256color', SWITCHBOARD_LAUNCH: LAUNCH, CLAUDE_ARTIFACTS_DIR: ARTIFACTS });
     expect(codeModeSettings(false)).toBe('{"viewMode":"focus","tui":"default"}');

@@ -2,7 +2,7 @@ import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CLEAR_LINE, NOT_CLEARED, NOT_TAKEN, NotWritten, SessionInput, UNREADABLE, blockedBy, stepsText, boxHolds, isMessage, leftOfMessage, pasteAndSubmit, pasteText, readInputScreen, sentInTranscript } from '../src/input.js';
+import { CLEAR_LINE, NOT_CLEARED, NOT_TAKEN, NotWritten, SessionInput, UNREADABLE, blockedBy, draftExcerpt, stepsText, boxHolds, isMessage, leftOfMessage, pasteAndSubmit, pasteText, readInputScreen, sentInTranscript } from '../src/input.js';
 import type { InputOutcome, InputSteps, SubmitScreen } from '../src/input.js';
 
 let dir: string;
@@ -79,6 +79,21 @@ describe('readInputScreen', () => {
     expect((await readInputScreen({ data: ['● Steps:', '> 1. Build', '> 2. Test'].join('\r\n'), cols: 40, rows: 6 })).menu).toBe(false);
   });
 
+  it('reads a suggested prompt as an empty box as Claude Code 2.1.331 draws it with colour, and as a draft without it (mechanics M149)', async () => {
+    // Captured from a held-style session (node-pty, TERM=xterm-256color): the rules in grey, the box emptied, then the suggestion written dim
+    // at the cursor, which goes back to its start.
+    const rule = (width: number) => '─'.repeat(width);
+    const shown = (suggestion: string) =>
+      ['\x1b[38;2;255;255;255m●\x1b[m\x1b[1CMochi', '', '\x1b[38;2;153;153;153m✻\x1b[1CBaked for 0s · done 7:48 AM\x1b[m', '', `\x1b[38;2;136;136;136m${rule(40)}\x1b[m❯ \x1b[K`, `\x1b[38;2;136;136;136m${rule(40)}\x1b[38;2;255;193;7m\x1b[8;3H⏵⏵\x1b[1Cauto\x1b[1Cmode\x1b[1Con`].join('\r\n') +
+      `\x1b[6;3H\x1b[?25h\x1b[?25l\x1b[m${suggestion}\x1b[6;3H\x1b[?25h`;
+
+    expect(await readInputScreen({ data: shown('\x1b[2mGoldfish name?\x1b[22m'), cols: 40, rows: 8 })).toMatchObject({ menu: false, draft: '' });
+    // Under NO_COLOR=1 the same suggestion has no attributes at all, so it reads as typed text; held sessions are started without NO_COLOR.
+    expect(await readInputScreen({ data: shown('Name\x1b[1Ca\x1b[1Cdog'), cols: 40, rows: 8 })).toMatchObject({ draft: 'Name a dog' });
+    // Text typed into the box, with colour on, is a draft.
+    expect(await readInputScreen({ data: shown('hello there'), cols: 40, rows: 8 })).toMatchObject({ draft: 'hello there' });
+  });
+
   it('blocks on a menu, a draft and a key typed in a terminal within 1.5 seconds', () => {
     const clear = { menu: false, draft: '', box: '' };
 
@@ -87,6 +102,12 @@ describe('readInputScreen', () => {
     expect(blockedBy(clear, T0 - 1_500, T0)).toBeNull();
     expect(blockedBy({ ...clear, menu: true }, null, T0)).toBe('a menu is open');
     expect(blockedBy({ ...clear, draft: 'x' }, null, T0)).toBe('the input box holds a draft');
+  });
+
+  it('shows a draft in the log on one line, cut to 60 characters', () => {
+    expect(draftExcerpt('one\n  two')).toBe('"one two"');
+    expect(draftExcerpt('x'.repeat(60))).toBe(`"${'x'.repeat(60)}"`);
+    expect(draftExcerpt('y'.repeat(61))).toBe(`"${'y'.repeat(59)}…"`);
   });
 });
 
@@ -499,7 +520,7 @@ describe('SessionInput', () => {
     const waiting = new SessionInput('s1', draftDeps.deps).send('Hello', (outcome) => draftOutcomes.push(outcome));
 
     // The log comes after the first screen read, which replays the screen on a real timer.
-    await vi.waitFor(() => expect(draftDeps.logs).toEqual(['session s1: a message waits, the input box holds a draft']), { timeout: 4_000 });
+    await vi.waitFor(() => expect(draftDeps.logs).toEqual(['session s1: a message waits, the input box holds a draft: "typed by hand"']), { timeout: 4_000 });
     expect(drafted.writes).toEqual([]);
     drafted.box = '';
     await waiting;

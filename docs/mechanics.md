@@ -1791,3 +1791,16 @@ The offline startup limitation below is superseded by M145's verified-origin she
 - **Pass criteria:** a held interactive `claude` without Code Mode starts under the holder, writes markers with its launch through Switchboard's hooks, runs its prompt as the first turn, ends in the holder and resumes there without Code Mode. **Passed.**
 - **Not verified:** the operator's user settings, gateway and own hooks (left out by `--setting-sources`); a start prompt such as folder trust; Linux.
 - **Current use:** held Claude sessions with `sessions.codeMode` off, and their start check, which waits for the launch's first marker rather than the Code Mode line (architecture.md § Code Mode sessions).
+
+## M149. A held session's suggested prompt under NO_COLOR, 2026-11-24
+
+- **Versions:** Claude Code CLI 2.1.331 (native build), Haiku 5.5, on Windows 11 Pro 10.0.26300; Node.js 24.14.0, node-pty 1.1.0, @xterm/headless 6.0.0.
+- **Symptom:** a message sent to an idle held session waited on "the input box holds a draft" until a key was typed in its terminal (hub.log 2026-11-24, session 311b1ad4: guards of 149 s and 255 s); messages sent mid-turn went at once.
+- **Experiment:** `.wip/ghost-probe/` ran `claude --setting-sources project,local --model haiku` in node-pty at 100×30 with `TERM=xterm-256color` and the hub's environment less roughly the variables `codeModeEnvironment` removes, replayed its output in @xterm/headless and read the input box's cells after each reply, once with `NO_COLOR=1` and once without. The environment of the operator's running hub, holder and held `claude.exe` was read from their process blocks, without changing them.
+- **Result:**
+  - With colour, Claude Code writes a suggested prompt such as "Goldfish name?" after "❯ " as `ESC[2m…ESC[22m` and moves the cursor back to its start; the dim cells read as an empty box.
+  - With `NO_COLOR=1`, Claude Code styles nothing (its output has only a reset, `ESC[m`): the suggestion "Name a dog" has the same cells as typed text, so it reads as a draft. The cursor does not tell them apart either: typed text after Home leaves the cursor at the box's start, as a suggestion does.
+  - The operator's hub, holder and held `claude.exe` all had `NO_COLOR=1`; the supervisor that starts the hub did not. A Claude session's Bash tool sets `NO_COLOR=1`, so a hub started from one, and every hub that takes over from it, passes it on.
+  - Until the holder gave held sessions `TERM` (holder started 2026-11-24T02:01Z), Claude Code drew the prompt as ">" and hub.log shows "no input box on the screen" for each message, so the draft guard never saw the box. From then on the box was read, and a suggestion shown after a reply blocked typing.
+- **Not verified:** a session started through the holder with Switchboard's `--settings`; Linux.
+- **Current use:** `codeModeEnvironment` drops `NO_COLOR` and `FORCE_COLOR`, so held sessions draw their placeholder and suggestion dim. The "a message waits, the input box holds a draft" log line carries the draft, cut to 60 characters.

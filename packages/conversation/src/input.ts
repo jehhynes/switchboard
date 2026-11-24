@@ -86,7 +86,8 @@ export const screenState = {
   },
   /**
    * Text typed but not sent: every line of the input box, from the "❯" line right under a rule to the next rule, read with dim cells (the
-   * placeholder, a suggested prompt) blanked, so a draft whose first line is empty still counts.
+   * placeholder, a suggested prompt) blanked, so a draft whose first line is empty still counts. Claude Code draws them dim only with colour on:
+   * under `NO_COLOR` a suggested prompt is plain text, the same cells as a typed draft (mechanics M149).
    */
   draft: (undimmed: string): string => {
     const lines = undimmed.split('\n');
@@ -538,6 +539,13 @@ export interface SessionInputDeps {
   submit?: SubmitOptions;
 }
 
+/** The draft as the log shows it: on one line, cut to about 60 characters. */
+export function draftExcerpt(draft: string): string {
+  const line = draft.replace(/\s+/g, ' ').trim();
+
+  return JSON.stringify(line.length > 60 ? `${line.slice(0, 59)}…` : line);
+}
+
 /** Why typing waits now, or null when nothing on the screen or in the terminal stops it. */
 export function blockedBy(screen: InputScreen, keyAt: number | null, now: number): string | null {
   if (screen.menu) {
@@ -802,7 +810,7 @@ export class SessionInput {
       } else if (blocked !== logged) {
         logged = blocked;
         steps.waited ??= blocked;
-        this.deps.log(`session ${this.sessionId}: a message waits, ${blocked}`);
+        this.deps.log(`session ${this.sessionId}: a message waits, ${blocked}${screen.draft !== '' && !screen.menu ? `: ${draftExcerpt(screen.draft)}` : ''}`);
       }
 
       await this.deps.sleep(GUARD_POLL_MS);
