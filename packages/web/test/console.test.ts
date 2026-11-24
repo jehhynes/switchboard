@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { h } from 'preact';
-import { CONSOLE_FONT_PX, CONSOLE_INPUT_CHARS, CONSOLE_MIN_FONT_PX, fittedFont, fittedSize, keptModes, LIGHT_SCHEME, mountConsole, XTERM_SCROLLBAR_PX } from '../src/console.js';
+import { CONSOLE_FONT_PX, CONSOLE_INPUT_CHARS, CONSOLE_KEYS, CONSOLE_MIN_FONT_PX, fittedFont, fittedSize, keptModes, LIGHT_SCHEME, mountConsole, withCtrl, XTERM_SCROLLBAR_PX } from '../src/console.js';
 import type { ConsoleOptions, ConsoleTerm, MountedConsole, TermOptions } from '../src/console.js';
 import { startPage } from '../src/main.js';
 import type { ConsoleModule } from '../src/main.js';
@@ -44,6 +44,7 @@ class FakeSource {
 class FakeTerm implements ConsoleTerm {
   cols = 80;
   rows = 24;
+  modes = { applicationCursorKeysMode: false };
   element: HTMLElement | undefined;
   textarea: HTMLTextAreaElement | undefined;
   options: { fontSize?: number; theme?: Record<string, string>; minimumContrastRatio?: number };
@@ -302,7 +303,7 @@ describe('the console', () => {
     expect(term.calls).toEqual(['reset', 'resize 120x40']);
     expect(term.written).toEqual(['hello']);
     // No bar and no instruction text: the screen names itself, and only the focus border shows that it types.
-    expect([...host.children].map((child) => child.className)).toEqual(['console-screen', 'console-foot', '']);
+    expect([...host.children].map((child) => child.className)).toEqual(['console-screen', 'console-keys', 'console-foot', '']);
     expect(host.querySelector<HTMLElement>('.console-foot')!.hidden).toBe(true);
     expect(host.querySelector('.console-screen')!.getAttribute('aria-label')).toBe('Session console');
     expect(host.querySelector('.console-screen')!.getAttribute('title')).toBe('Session console');
@@ -602,6 +603,171 @@ function laidOut(box: { width: number; height: number }) {
     spare: () => Math.max(0, cellWidth() - 1 - ((layout().clientWidth - layout().padX - XTERM_SCROLLBAR_PX) % cellWidth())),
   };
 }
+
+describe("the console's keys bar", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /** Taps a key on the bar as a finger does: the press, which must not take the focus, then the click. */
+  const tap = (host: HTMLElement, id: string): { pointer: boolean; mouse: boolean } => {
+    const button = host.querySelector<HTMLButtonElement>(`.console-keys [data-key="${id}"]`)!;
+    const pointer = new Event('pointerdown', { bubbles: true, cancelable: true });
+    const mouse = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+
+    button.dispatchEvent(pointer);
+    button.dispatchEvent(mouse);
+    button.click();
+    return { pointer: pointer.defaultPrevented, mouse: mouse.defaultPrevented };
+  };
+  const sent = (typed: Array<{ data: string }>): string[] => typed.map((one) => one.data).filter((data) => data !== '');
+
+  it('offers Esc, Tab, Shift+Tab, Ctrl and the arrows as buttons that never take the focus, arrows drawn as codicons', () => {
+    const { host } = mounted();
+    const buttons = [...host.querySelectorAll<HTMLButtonElement>('.console-keys > button')];
+
+    expect(host.querySelector('.console-keys')!.getAttribute('role')).toBe('toolbar');
+    expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual(['Escape', 'Tab', 'Shift+Tab', 'Ctrl for the next key', 'Left', 'Up', 'Down', 'Right']);
+    expect(buttons.map((button) => button.textContent)).toEqual(['Esc', 'Tab', '⇧Tab', 'Ctrl', '', '', '', '']);
+    expect(buttons.slice(4).map((button) => button.querySelector('.codicon')!.className)).toEqual(['codicon codicon-arrow-left', 'codicon codicon-arrow-up', 'codicon codicon-arrow-down', 'codicon codicon-arrow-right']);
+    expect(buttons.every((button) => button.type === 'button' && button.tabIndex === -1)).toBe(true);
+    expect(buttons.filter((button) => button.hasAttribute('aria-pressed')).map((button) => button.dataset['key'])).toEqual(['ctrl']);
+    expect(tap(host, 'esc')).toEqual({ pointer: true, mouse: true });
+  });
+
+  it('types each key as its escape sequence while the console types, and nothing while it watches', async () => {
+    const { host, term, typed } = mounted();
+
+    for (const key of CONSOLE_KEYS) {
+      tap(host, key.id);
+    }
+
+    await tick();
+    expect(typed).toEqual([]);
+    term.textarea!.dispatchEvent(new Event('focus'));
+    await tick();
+
+    for (const id of ['esc', 'tab', 'shift-tab', 'left', 'up', 'down', 'right']) {
+      tap(host, id);
+      await tick();
+    }
+
+    expect(sent(typed)).toEqual(['\u001b', '\t', '\u001b[Z', '\u001b[D', '\u001b[A', '\u001b[B', '\u001b[C']);
+  });
+
+  it('sends the arrows in application cursor mode as ESC O, as xterm.js sends a pressed arrow', async () => {
+    const { host, term, typed } = mounted();
+
+    term.modes.applicationCursorKeysMode = true;
+    term.textarea!.dispatchEvent(new Event('focus'));
+    await tick();
+
+    for (const id of ['left', 'up', 'down', 'right', 'shift-tab']) {
+      tap(host, id);
+      await tick();
+    }
+
+    expect(sent(typed)).toEqual(['\u001bOD', '\u001bOA', '\u001bOB', '\u001bOC', '\u001b[Z']);
+  });
+
+  it("holds Ctrl for the next key alone, from the keyboard or the bar, and lets it go at a second tap or a blur", async () => {
+    const { host, term, typed } = mounted();
+    const ctrl = host.querySelector<HTMLButtonElement>('[data-key="ctrl"]')!;
+
+    term.textarea!.dispatchEvent(new Event('focus'));
+    await tick();
+    tap(host, 'ctrl');
+    expect(ctrl.getAttribute('aria-pressed')).toBe('true');
+    term.press('c');
+    await tick();
+    expect(ctrl.getAttribute('aria-pressed')).toBe('false');
+    term.press('c');
+    await tick();
+    tap(host, 'ctrl');
+    tap(host, 'left');
+    await tick();
+    tap(host, 'ctrl');
+    tap(host, 'ctrl');
+    term.press('d');
+    await tick();
+    tap(host, 'ctrl');
+    term.textarea!.dispatchEvent(new Event('blur'));
+    expect(ctrl.getAttribute('aria-pressed')).toBe('false');
+    term.textarea!.dispatchEvent(new Event('focus'));
+    term.press('e');
+    await tick();
+    expect(sent(typed)).toEqual(['\u0003', 'c', '\u001b[1;5D', 'd', 'e']);
+  });
+
+  it('turns a key into what Ctrl with it sends', () => {
+    expect(['a', 'Z', '@', '[', '\\', ']', '^', '_', ' ', '2', '3', '7', '8', '?'].map(withCtrl)).toEqual(['\u0001', '\u001a', '\u0000', '\u001b', '\u001c', '\u001d', '\u001e', '\u001f', '\u0000', '\u0000', '\u001b', '\u001f', '\u007f', '\u007f']);
+    expect(['\u001b[A', '\u001bOD'].map(withCtrl)).toEqual(['\u001b[1;5A', '\u001b[1;5D']);
+    expect(withCtrl('\u007f')).toBe('\u0008');
+    // Only ASCII letters: ß and dotless i, which uppercase to S and I, go as they are, not as Ctrl+S and Tab.
+    expect(['1', 'é', 'ß', 'ı', 'ab', '\u001b', '\u001b[Z'].map(withCtrl)).toEqual(['1', 'é', 'ß', 'ı', 'ab', '\u001b', '\u001b[Z']);
+  });
+
+  it("pads the console by as much as the on-screen keyboard covers the bar while it types, and drops it at blur", async () => {
+    const viewport = Object.assign(new EventTarget(), { offsetTop: 0, height: 800 });
+
+    vi.stubGlobal('visualViewport', viewport);
+
+    const { host, term, console } = mounted();
+    const bar = host.querySelector<HTMLElement>('.console-keys')!;
+    let bottom = 800;
+    const padded = (): string => host.style.getPropertyValue('--sb-keys-lift');
+
+    // The console's box, which its padding does not move, from 100 px down, and a 53 px bar.
+    host.getBoundingClientRect = () => ({ bottom, height: bottom - 100 }) as DOMRect;
+    Object.defineProperty(bar, 'offsetHeight', { value: 53 });
+    viewport.height = 450;
+    viewport.dispatchEvent(new Event('resize'));
+    // It watches: the bar is not shown, so nothing moves.
+    expect(padded()).toBe('');
+    term.textarea!.dispatchEvent(new Event('focus'));
+    await tick();
+    expect(padded()).toBe('350px');
+    // The page panned up 300 px under the keyboard: the bar's own bottom is 50 px below the visible area.
+    viewport.offsetTop = 300;
+    viewport.dispatchEvent(new Event('scroll'));
+    expect(padded()).toBe('50px');
+    viewport.offsetTop = 0;
+    viewport.height = 800;
+    viewport.dispatchEvent(new Event('resize'));
+    expect(padded()).toBe('0px');
+    viewport.height = 450;
+    viewport.dispatchEvent(new Event('resize'));
+    expect(padded()).toBe('350px');
+    // A keyboard taller than the console leaves room for the bar, however often the viewport reports it, and closing it drops the padding.
+    viewport.height = 140;
+
+    for (let report = 0; report < 6; report++) {
+      viewport.dispatchEvent(new Event('resize'));
+    }
+
+    expect(padded()).toBe('647px');
+    viewport.height = 800;
+    viewport.dispatchEvent(new Event('resize'));
+    expect(padded()).toBe('0px');
+    viewport.height = 450;
+    viewport.dispatchEvent(new Event('resize'));
+    term.textarea!.dispatchEvent(new Event('blur'));
+    expect(padded()).toBe('');
+    console.dispose();
+    bottom = 0;
+    viewport.height = 100;
+    viewport.dispatchEvent(new Event('resize'));
+    expect(padded()).toBe('');
+  });
+
+  it('is shown only on a touch screen while the console types, with 44 px keys, scrolling sideways, over the keyboard', () => {
+    const css = PAGE_ASSETS['page.css']!.body;
+
+    expect(css).toMatch(/\.console-keys \{ display: none;[^}]*overflow-x: auto;/);
+    expect(css).toContain('@media (pointer: coarse) {\n  .console.typing { padding-bottom: max(var(--sb-keys-lift, 0px), env(keyboard-inset-height, 0px)); }\n  .console.typing > .console-keys { display: flex; }\n}');
+    expect(css).toMatch(/\.console-key \{[^}]*align-items: center; justify-content: center; min-width: 44px; min-height: 44px;/);
+  });
+});
 
 describe('the console in a laid-out pane', () => {
   beforeEach(() => {

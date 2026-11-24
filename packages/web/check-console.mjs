@@ -70,7 +70,8 @@ async function check({ name, pane: [width, height], from, size: [cols, rows] }) 
   const font = parseFloat(getComputedStyle(host.querySelector('.xterm-rows')).fontSize);
   const scrollers = [...host.querySelectorAll('*')].filter((node) => {
     const css = getComputedStyle(node);
-    return /auto|scroll/.test(css.overflowX + css.overflowY) && !node.closest('.xterm');
+    // The keys bar scrolls its keys sideways, on a touch screen only, and never the screen.
+    return /auto|scroll/.test(css.overflowX + css.overflowY) && !node.closest('.xterm') && !node.classList.contains('console-keys');
   }).map((node) => node.className);
   const failures = [];
   if (screen.scrollWidth > screen.clientWidth || screen.scrollHeight > screen.clientHeight) failures.push('the pane holds more than it shows: ' + screen.scrollWidth + 'x' + screen.scrollHeight + ' in ' + screen.clientWidth + 'x' + screen.clientHeight);

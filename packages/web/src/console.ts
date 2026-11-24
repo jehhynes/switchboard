@@ -11,6 +11,8 @@ import { dimCss, LightColors, MINIMUM_CONTRAST, terminalTheme } from './consoleC
 /** The part of xterm.js's `Terminal` the console uses, so tests can pass a fake. */
 export interface ConsoleTerm {
   readonly cols: number;
+  /** Whether the program set application cursor keys (DECCKM), in which the arrows send `ESC O` rather than `ESC [`. */
+  readonly modes?: { readonly applicationCursorKeysMode: boolean };
   readonly rows: number;
   readonly element: HTMLElement | undefined;
   readonly textarea: HTMLTextAreaElement | undefined;
@@ -98,6 +100,63 @@ export function fittedSize(width: number, height: number, cell: { width: number;
   };
 }
 
+/**
+ * The keys a phone's on-screen keyboard lacks, on the bar over it while the console types on a touch screen: each key's label, its codicon
+ * if it has one, its name for a screen reader, and what it sends. An arrow's `ESC [` becomes `ESC O` in application cursor mode. Ctrl
+ * is no key of its own: it holds Ctrl down for the next key, from the bar or the keyboard.
+ */
+export const CONSOLE_KEYS: ReadonlyArray<{ id: string; label: string; icon?: string; name: string; data?: string }> = [
+  { id: 'esc', label: 'Esc', name: 'Escape', data: '\u001b' },
+  { id: 'tab', label: 'Tab', name: 'Tab', data: '\t' },
+  { id: 'shift-tab', label: '⇧Tab', name: 'Shift+Tab', data: '\u001b[Z' },
+  { id: 'ctrl', label: 'Ctrl', name: 'Ctrl for the next key' },
+  { id: 'left', label: '', icon: 'arrow-left', name: 'Left', data: '\u001b[D' },
+  { id: 'up', label: '', icon: 'arrow-up', name: 'Up', data: '\u001b[A' },
+  { id: 'down', label: '', icon: 'arrow-down', name: 'Down', data: '\u001b[B' },
+  { id: 'right', label: '', icon: 'arrow-right', name: 'Right', data: '\u001b[C' },
+];
+
+/**
+ * What `data`, one key, sends with Ctrl held, as xterm.js sends it: an ASCII letter or one of @[\]^_ as its control character, space and 2
+ * as NUL, 3 to 7 as ESC to US, ? and 8 as DEL, Backspace (DEL) as BS, and an arrow as its CSI form with modifier 5. Anything else, such as
+ * a letter outside ASCII, goes as it is.
+ */
+export function withCtrl(data: string): string {
+  const arrow = /^\u001b[[O]([ABCD])$/.exec(data);
+
+  if (arrow !== null) {
+    return `\u001b[1;5${arrow[1]!}`;
+  }
+
+  if (data.length !== 1) {
+    return data;
+  }
+
+  if (/^[a-z]$/.test(data)) {
+    return String.fromCharCode(data.charCodeAt(0) - 0x60);
+  }
+
+  const code = data.charCodeAt(0);
+
+  if (code >= 0x40 && code <= 0x5f) {
+    return String.fromCharCode(code - 0x40);
+  }
+
+  if (code === 0x7f) {
+    return String.fromCharCode(0x08);
+  }
+
+  if (data === ' ' || data === '2') {
+    return '\u0000';
+  }
+
+  if (data >= '3' && data <= '7') {
+    return String.fromCharCode(data.charCodeAt(0) - '3'.charCodeAt(0) + 0x1b);
+  }
+
+  return data === '?' || data === '8' ? '\u007f' : data;
+}
+
 /** The keyboard and clipboard events that carry the operator's keys into the terminal. */
 const INPUT_EVENTS = ['keydown', 'keypress', 'paste', 'input', 'compositionend'] as const;
 
@@ -116,6 +175,27 @@ export function mountConsole(host: HTMLElement, createTerm: (options: TermOption
   const foot = element('div', 'console-foot');
   const note = element('p', 'console-note', { role: 'alert' });
   const reconnect = element('button', 'console-reconnect', { type: 'button' });
+  // The keys bar: page.css shows it only on a touch screen while the console types. Its buttons never take the focus, so the textarea keeps it
+  // and the on-screen keyboard stays open.
+  const keysBar = element('div', 'console-keys', { role: 'toolbar', 'aria-label': 'Terminal keys' });
+  const keyButtons = new Map<string, HTMLButtonElement>();
+
+  for (const key of CONSOLE_KEYS) {
+    const button = element('button', `console-key key-${key.id}`, { type: 'button', tabindex: '-1', 'aria-label': key.name, title: key.name, 'data-key': key.id });
+
+    if (key.icon !== undefined) {
+      button.append(element('span', `codicon codicon-${key.icon}`, { 'aria-hidden': 'true' }));
+    } else {
+      button.textContent = key.label;
+    }
+
+    if (key.data === undefined) {
+      button.setAttribute('aria-pressed', 'false');
+    }
+
+    keyButtons.set(key.id, button);
+    keysBar.append(button);
+  }
 
   reconnect.hidden = true;
   reconnect.textContent = 'Reconnect';
@@ -125,7 +205,7 @@ export function mountConsole(host: HTMLElement, createTerm: (options: TermOption
   /** The light scheme's dim colours (consoleColors.ts `dimCss`). */
   const dimStyle = element('style', '');
 
-  host.replaceChildren(screen, foot, dimStyle);
+  host.replaceChildren(screen, keysBar, foot, dimStyle);
   const scheme = typeof matchMedia === 'function' ? matchMedia(LIGHT_SCHEME) : null;
   const contrast = (): number => (scheme?.matches === true ? MINIMUM_CONTRAST : 1);
   /** The page's terminal colours for the scheme now, with the light scheme's dim colours. */
@@ -149,6 +229,8 @@ export function mountConsole(host: HTMLElement, createTerm: (options: TermOption
   let sizeWanted = false;
   let sending = false;
   let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Ctrl held from the keys bar for the next key. */
+  let ctrl = false;
   /** A cell's size at `CONSOLE_FONT_PX`, measured from the drawn screen while it is drawn at that size. */
   let cell: { width: number; height: number } | null = null;
   /** The drawing area the console last fitted to, and the size it last gave the session. */
@@ -211,10 +293,71 @@ export function mountConsole(host: HTMLElement, createTerm: (options: TermOption
 
   const keys = term.onData((data) => {
     if (armed > 0 && typing && !ended && !MOUSE_REPORT.test(data)) {
-      pending += data;
-      void flush();
+      send(data);
     }
   });
+
+  /** Types `data`, with Ctrl if the keys bar holds it. */
+  function send(data: string): void {
+    if (ctrl) {
+      data = withCtrl(data);
+      holdCtrl(false);
+    }
+
+    pending += data;
+    void flush();
+  }
+
+  function holdCtrl(held: boolean): void {
+    ctrl = held;
+    keyButtons.get('ctrl')!.setAttribute('aria-pressed', String(held));
+  }
+
+  // Taking no focus: a pointer press on the bar is cancelled, so the textarea keeps the focus and the keyboard stays open.
+  const keepFocus = (event: Event): void => event.preventDefault();
+
+  keysBar.addEventListener('pointerdown', keepFocus);
+  keysBar.addEventListener('mousedown', keepFocus);
+  keysBar.addEventListener('click', (event) => {
+    const id = (event.target as Element).closest<HTMLElement>('[data-key]')?.dataset['key'];
+    const key = CONSOLE_KEYS.find((one) => one.id === id);
+
+    if (key === undefined || !typing || ended) {
+      return;
+    }
+
+    if (key.data === undefined) {
+      holdCtrl(!ctrl);
+    } else {
+      send(term.modes?.applicationCursorKeysMode === true ? key.data.replace(/^\u001b\[([ABCD])$/, '\u001bO$1') : key.data);
+    }
+  });
+
+  /**
+   * Keeps the keys bar and the screen above the on-screen keyboard. A phone's browser keeps the page's layout when its keyboard opens and only
+   * shrinks the visual viewport, which the page can pan, so the console pads its bottom by how far the bar's bottom lies below the visual
+   * viewport's (page.css): the bar rises over the keyboard and the screen above it shrinks, refitting as any pane change does, so the bar
+   * never covers the cursor's line.
+   */
+  let lift = 0;
+  const viewport = typeof visualViewport === 'object' && visualViewport !== null ? visualViewport : null;
+  const placeKeys = (): void => {
+    if (viewport === null || !typing) {
+      return;
+    }
+
+    // Measured from the console's own box, which the padding does not move, and never more than leaves room for the bar.
+    const box = host.getBoundingClientRect();
+    const next = Math.max(0, Math.min(Math.round(box.bottom - (viewport.offsetTop + viewport.height)), Math.floor(box.height - keysBar.offsetHeight)));
+
+    if (next !== lift) {
+      lift = next;
+      host.style.setProperty('--sb-keys-lift', `${lift}px`);
+    }
+  };
+
+  viewport?.addEventListener('resize', placeKeys);
+  viewport?.addEventListener('scroll', placeKeys);
 
   const drawState = (): void => {
     host.classList.toggle('typing', typing && !ended);
@@ -358,12 +501,17 @@ export function mountConsole(host: HTMLElement, createTerm: (options: TermOption
 
     typing = true;
     sizeWanted = true;
-    // The focus border is drawn over the console's box by a pseudo-element, which takes no room, so focusing never changes the pane's size and the session is resized once.
+    // The focus border is drawn over the console's box by a pseudo-element, which takes no room. The keys bar a touch screen shows does take
+    // room, but it shows here, before `flush` reads the pane's size, so the session is still resized once.
     drawState();
+    placeKeys();
     void flush();
   };
   const onBlur = (): void => {
     typing = false;
+    holdCtrl(false);
+    lift = 0;
+    host.style.removeProperty('--sb-keys-lift');
     drawState();
   };
 
@@ -534,6 +682,8 @@ export function mountConsole(host: HTMLElement, createTerm: (options: TermOption
       disposed = true;
       source?.close();
       scheme?.removeEventListener('change', schemeChanged);
+      viewport?.removeEventListener('resize', placeKeys);
+      viewport?.removeEventListener('scroll', placeKeys);
       resized?.disconnect();
       scale?.removeEventListener('change', rescaled);
 
