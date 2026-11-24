@@ -11,7 +11,7 @@ import type { VoiceMessage } from '@switchboard/voice';
 
 /**
  * The Built holder and Built voice process tests (docs/testing.md), on a build folder that `folder` names once it is ready: apps/hub's standalone
- * build or the VS Code extension's packaged `dist`, each copied outside the checkout so no node_modules of the repository can be reached. Homes
+ * build, copied outside the checkout so no node_modules of the repository can be reached. Homes
  * go under `scratch`. The tests take the native binary out of the folder's holder build, so give them a copy.
  */
 export function describeBuiltPrograms(folder: () => string, scratch: () => string): void {

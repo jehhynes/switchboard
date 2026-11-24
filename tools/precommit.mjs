@@ -23,9 +23,8 @@ const workspaces = rootPackage.workspaces.map((dir) => {
 });
 const byName = new Map(workspaces.map((w) => [w.name, w]));
 // Dependencies the manifests do not declare: apps/hub's standalone build carries
-// the browser extension's build, and the extension builds the same from apps/hub's
-// configs (apps/hub/carried.cjs).
-const undeclared = { '@switchboard/hub-app': ['@switchboard/chrome'], switchboard: ['@switchboard/hub-app'] };
+// the browser extension's build (apps/hub/carried.cjs).
+const undeclared = { '@switchboard/hub-app': ['@switchboard/chrome'] };
 for (const w of workspaces) w.deps = [...w.deps, ...(undeclared[w.name] ?? [])].filter((d) => byName.has(d));
 
 // Files another workspace's tests read: the hub's dock contract test compares

@@ -1,4 +1,0 @@
-/* A Mermaid diagram in the Markdown preview: its source as a code block until it is drawn, then the diagram alone, centred. */
-.switchboard-mermaid[data-drawn="yes"] { background: transparent; border: 0; padding: 0; white-space: normal; text-align: center; }
-.switchboard-mermaid[data-drawn="yes"] svg { max-width: 100%; height: auto; }
-.switchboard-mermaid-error { margin: -8px 0 16px; color: var(--vscode-errorForeground); font-size: 0.9em; }

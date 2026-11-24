@@ -5,10 +5,10 @@ const require = createRequire(import.meta.url);
 
 // npm runs workspace scripts one after another and each watcher never exits, so start them side by side. They run
 // under Node directly, without a shell, so stopping one process stops its compiler.
-// `tsc -b` follows apps/hub's references to core and hub; esbuild rebundles the extension when their output changes.
+// `tsc -b` follows apps/hub's references to core and hub; apps/hub/build.cjs rebundles the standalone build when their output changes.
 const watchers = [
   spawn(process.execPath, [require.resolve('typescript/bin/tsc'), '-b', '-w', 'apps/hub'], { stdio: 'inherit' }),
-  spawn(process.execPath, ['esbuild.js', '--watch'], { cwd: 'extensions/switchboard', stdio: 'inherit' }),
+  spawn(process.execPath, ['build.cjs', '--watch'], { cwd: 'apps/hub', stdio: 'inherit' }),
 ];
 
 for (const watcher of watchers) {

@@ -1,6 +1,6 @@
 // The builds hub.js install copies into the Switchboard home (architecture.md § Hub lifecycle): the hub bundle, the terminal holder and the
 // voice process with their native modules, Mermaid, the web page's diff viewer and the browser extension. apps/hub/build.cjs writes them to
-// apps/hub/dist/install for npm run install-local, and the VS Code extension's esbuild.js writes the same builds into its dist.
+// apps/hub/dist/install for npm run install-local.
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -178,7 +178,7 @@ function carriedConfigs(outdir, version) {
 
   return [
     { ...common, entryPoints: { hub: 'src/main.ts' }, define: { __SWITCHBOARD_VERSION__: JSON.stringify(version) }, outdir: out, sourcemap: true },
-    // The terminal holder runs on the operator's Node.js, not VS Code's, because node-pty is a native module (mechanics M76).
+    // The terminal holder runs on the operator's Node.js because node-pty is a native module (mechanics M76).
     // node-pty stays outside the bundle: it loads its binaries, a worker script and a console-list agent from its own folder.
     // After each build, watch mode included, the folder gets node-pty and a new manifest, so it can be installed.
     { ...common, entryPoints: { holder: '../../packages/holder/src/main.ts' }, external: ['node-pty'], outdir: holderDir, plugins: [after('holder-files', () => { copyNodePty(holderDir); writeManifest(holderDir); })] },

@@ -3,8 +3,6 @@ export * from './browserSnooze.js';
 export * from './bundle.js';
 export * from './client.js';
 export * from './discover.js';
-export * from './ensure.js';
-export * from './keeper.js';
 export * from './lock.js';
 export * from './serve.js';
 export * from './server.js';

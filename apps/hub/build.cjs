@@ -11,7 +11,8 @@ fs.rmSync(outdir, { recursive: true, force: true });
 fs.mkdirSync(outdir, { recursive: true });
 // The builds are CommonJS, and apps/hub's package.json makes .js files modules, so npm run install-local could not run hub.js here without this.
 fs.writeFileSync(path.join(outdir, 'package.json'), '{ "type": "commonjs" }\n');
-buildCarried(outdir, { version }).catch((error) => {
+// With --watch (npm run watch), keeps rebuilding the hub, holder and voice builds.
+buildCarried(outdir, { version, watch: process.argv.includes('--watch') }).catch((error) => {
   console.error(error);
   process.exit(1);
 });

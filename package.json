@@ -23,7 +23,6 @@
     "extensions/chrome",
     "extensions/firefox",
     "apps/hub",
-    "extensions/switchboard",
     "extensions/gnome-shell"
   ],
   "scripts": {
@@ -34,8 +33,6 @@
     "test": "npm test --workspaces --if-present",
     "verify": "node tools/verify.mjs",
     "verify:staged": "node tools/precommit.mjs",
-    "test:integration": "npm run build && npm run test:integration --workspace switchboard",
-    "verify:full": "npm run verify && npm run test:integration",
     "prepare": "node -e \"try { require('node:child_process').execSync('git config core.hooksPath .githooks', { stdio: 'ignore' }) } catch {}\""
   },
   "devDependencies": {

@@ -317,9 +317,9 @@ async function web(home: string, rest: readonly string[]): Promise<number> {
 }
 
 /**
- * Installs the builds a build folder carries into the home, as activation does, so a new build takes over without a VS Code window
- * (architecture.md § Hub lifecycle): the running hub restarts onto the hub bundle once quiet, and `--wait` waits for that, as `hub.js restart`
- * does. Run as `apps/hub/dist/install/hub.js install` (`npm run install-local`) or `<extension>/dist/hub.js install`. Exit codes: 0 installed,
+ * Installs the builds a build folder carries into the home (architecture.md § Hub lifecycle): the running hub restarts onto the hub bundle
+ * once quiet, and `--wait` waits for that, as `hub.js restart` does. Run as `apps/hub/dist/install/hub.js install` (`npm run install-local`).
+ * Exit codes: 0 installed,
  * 1 usage or not a build folder, 3 a program that could not be installed, 4 with `--wait`, the hub not restarted within 60 seconds.
  */
 async function install(home: string, rest: readonly string[], bundle: string | undefined): Promise<number> {
@@ -331,7 +331,7 @@ async function install(home: string, rest: readonly string[], bundle: string | u
   }
 
   if (!carriesBuilds(dist) || resolve(dist, 'hub.js') === resolve(hubBundlePath(home))) {
-    process.stderr.write(`Run the hub.js of a Switchboard build folder, apps/hub/dist/install or the VS Code extension's dist; ${dist} carries no terminal holder build.\n`);
+    process.stderr.write(`Run the hub.js of a Switchboard build folder, such as apps/hub/dist/install; ${dist} carries no terminal holder build.\n`);
     return 1;
   }
 
@@ -679,7 +679,7 @@ async function main(argv: readonly string[]): Promise<number> {
   const bundle = process.argv[1];
 
   if (argv[0] === 'report' || argv[0] === 'register' || argv[0] === 'attach' || argv[0] === 'holder' || argv[0] === 'web' || argv[0] === 'restart' || argv[0] === 'install' || argv[0] === 'start' || argv[0] === 'autostart' || argv[0] === 'config' || argv[0] === 'supervise') {
-    // A session runs `<home>/.switchboard/hub.js report …`, so the bundle's location names its home; the extension's own bundle names none.
+    // A session runs `<home>/.switchboard/hub.js report …`, so the bundle's location names its home; a build folder's bundle names none.
     const home = flag(argv, 'home') || bundleHome(bundle, homedir());
     const rest = argv.slice(1).filter((argument) => !argument.startsWith('--home'));
 
