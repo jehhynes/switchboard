@@ -821,6 +821,8 @@ describe('hub entry point', () => {
     } finally {
       await stopSupervisor(home).catch(() => false);
       await start('--stop').exited;
+      // The stopped hub may still hold hub.log for a moment; the home is deleted after the test.
+      await until(() => (record() === null ? true : null));
     }
   }, 60_000);
   it('starts the installed hub detached on hub.js start, with this runtime and the --config folder, and reports a running one', async () => {
@@ -866,6 +868,7 @@ describe('hub entry point', () => {
     } finally {
       await until(() => (record() !== null ? true : null));
       await start('--stop').exited;
+      await until(() => (record() === null ? true : null));
     }
   }, 60_000);
   it('starts the hub again on hub.js supervise when it is killed, not when it restarts onto a new build or is stopped with --stop, runs one supervisor per home, and stops when asked', async () => {
